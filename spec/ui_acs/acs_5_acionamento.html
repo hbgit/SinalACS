@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="pt-BR" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SinalACS - Módulo de Acionamento e Escalonamento</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: { sans: ['Inter', 'sans-serif'] },
+                    colors: {
+                        dark: { 900: '#111827', 800: '#1f2937', 700: '#374151' }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #030712; color: #f9fafb; }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .glass { background: rgba(31, 41, 55, 0.7); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.05); }
+    </style>
+</head>
+<body class="flex justify-center min-h-screen">
+    <div class="w-full max-w-xl md:my-6 md:rounded-3xl bg-dark-900 relative shadow-2xl flex flex-col h-screen md:h-[92vh] border border-dark-800 overflow-hidden">
+        
+        <!-- Header -->
+        <header class="bg-dark-800 p-5 rounded-b-2xl shadow-lg z-10 flex justify-between items-center border-b border-dark-700">
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-full bg-blue-600/20 border border-blue-500 text-blue-400 flex items-center justify-center font-bold text-xs">
+                    ACS
+                </div>
+                <div>
+                    <span class="text-[9px] font-bold text-blue-400 uppercase tracking-widest">url_launcher para SAMU e UBS</span>
+                    <h1 class="text-base font-bold text-white tracking-tight">Módulo de Acionamento e Escalonamento</h1>
+                </div>
+            </div>
+            <div class="flex items-center gap-2 bg-dark-700/60 px-3 py-1 rounded-full border border-dark-600">
+                <span class="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
+                <span class="text-[9px] font-bold text-slate-200 uppercase">Offline Ready</span>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="flex-1 overflow-y-auto no-scrollbar p-5 z-0 bg-dark-900">
+            
+            <div class="glass p-5 rounded-2xl mb-5">
+                <div class="flex items-center gap-3 mb-4">
+                    <div class="p-3 bg-red-500/20 text-red-500 rounded-xl">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z"></path></svg>
+                    </div>
+                    <div>
+                        <h3 class="font-bold text-white text-base">Escalonamento Rápido</h3>
+                        <p class="text-xs text-slate-400">Compila dados para SAMU ou UBS</p>
+                    </div>
+                </div>
+
+                <div class="bg-dark-900 border border-dark-700 p-4 rounded-xl mb-5 space-y-2 text-xs">
+                    <p class="text-white font-bold">Paciente: Maria Oliveira (72a)</p>
+                    <p class="text-slate-300">Risco: Vermelho (Falta de ar aguda)</p>
+                    <p class="text-slate-300">Endereço: Rua das Flores, 120</p>
+                </div>
+
+                <div class="space-y-3">
+                    <button class="w-full bg-red-600 hover:bg-red-700 text-white font-semibold py-3 rounded-xl transition-transform active:scale-[0.98] shadow-md flex items-center justify-center gap-2">
+                        Ligar para o SAMU (192)
+                    </button>
+                    <button class="w-full bg-dark-700 hover:bg-dark-600 text-white font-semibold py-3 rounded-xl border border-dark-600 transition-transform active:scale-[0.98] flex items-center justify-center gap-2">
+                        Encaminhar para Triagem UBS Central
+                    </button>
+                </div>
+            </div>
+        
+        </main>
+
+        <!-- Bottom Navigation Bar (ACS) -->
+        <nav class="absolute bottom-0 w-full bg-dark-800/95 backdrop-blur-md border-t border-dark-700 px-6 py-3.5 flex justify-between items-center z-20 md:rounded-b-3xl">
+            <a href="acs_1_login.html" class="flex flex-col items-center gap-1 text-slate-400 hover:text-blue-400 transition-colors">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1"></path></svg>
+                <span class="text-[9px] font-medium">Login</span>
+            </a>
+            <a href="acs_2_territorializacao.html" class="flex flex-col items-center gap-1 text-slate-400 hover:text-blue-400 transition-colors">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4"></path></svg>
+                <span class="text-[9px] font-medium">Área</span>
+            </a>
+            <a href="acs_3_dashboard_priorizacao.html" class="flex flex-col items-center gap-1 text-slate-400 hover:text-blue-400 transition-colors">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z"></path></svg>
+                <span class="text-[9px] font-medium">Fila</span>
+            </a>
+            <a href="acs_4_mapa_interativo.html" class="flex flex-col items-center gap-1 text-slate-400 hover:text-blue-400 transition-colors">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7"></path></svg>
+                <span class="text-[9px] font-medium">Mapa</span>
+            </a>
+            <a href="acs_5_acionamento.html" class="flex flex-col items-center gap-1 text-slate-400 hover:text-blue-400 transition-colors">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z"></path></svg>
+                <span class="text-[9px] font-medium">SAMU</span>
+            </a>
+            <a href="acs_6_registro_visitas.html" class="flex flex-col items-center gap-1 text-slate-400 hover:text-blue-400 transition-colors">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"></path></svg>
+                <span class="text-[9px] font-medium">Visita</span>
+            </a>
+            <a href="acs_7_geofencing.html" class="flex flex-col items-center gap-1 text-slate-400 hover:text-blue-400 transition-colors">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"></path></svg>
+                <span class="text-[9px] font-medium">GPS</span>
+            </a>
+            <a href="acs_8_avisos_comunidade.html" class="flex flex-col items-center gap-1 text-slate-400 hover:text-blue-400 transition-colors">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"></path></svg>
+                <span class="text-[9px] font-medium">Push</span>
+            </a>
+        </nav>
+    </div>
+</body>
+</html>
