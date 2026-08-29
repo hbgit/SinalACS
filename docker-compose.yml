@@ -1,0 +1,60 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: sinalacs-postgres
+    environment:
+      POSTGRES_USER: sinalacs_user
+      POSTGRES_PASSWORD: strongpassword
+      POSTGRES_DB: sinalacs_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sinalacs_user -d sinalacs_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: sinalacs-mosquitto
+    ports:
+      - "1883:1883"
+      - "9001:9001"
+    volumes:
+      - ./infra/docker/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+
+  serverpod:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: sinalacs-serverpod
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mosquitto:
+        condition: service_started
+    environment:
+      DATABASE_URL: postgresql://sinalacs_user:strongpassword@postgres:5432/sinalacs_db
+      MQTT_BROKER: mosquitto:1883
+    ports:
+      - "8080:8080"
+
+  traefik:
+    image: traefik:v2.10
+    container_name: sinalacs-traefik
+    command:
+      - --api.insecure=true
+      - --providers.docker=true
+      - --entrypoints.web.address=:80
+    ports:
+      - "80:80"
+      - "8081:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
+volumes:
+  pg_data:

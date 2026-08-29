@@ -1,0 +1,23 @@
+# General
+.DS_Store
+*.log
+*.tmp
+
+# Dart / Flutter
+.dart_tool/
+.packages
+.pub-cache/
+.pub-spec.lock
+build/
+coverage/
+
+# IDE
+.vscode/
+.idea/
+
+# Environment
+.env
+.env.*
+
+# Docker / local runtime
+pg_data/
