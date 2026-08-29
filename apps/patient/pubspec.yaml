@@ -13,7 +13,7 @@ dependencies:
   sqflite: ^2.3.0
   sqflite_common_ffi: ^2.3.0
   sqflite_sqlcipher: ^3.4.1
-  connectivity_plus: ^5.0.0
+  connectivity_plus: ^7.3.1
   mqtt_client: ^10.0.0
   geolocator: ^12.0.0
   flutter_local_notifications: ^17.0.0

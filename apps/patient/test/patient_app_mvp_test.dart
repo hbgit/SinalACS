@@ -7,20 +7,29 @@ void main() {
     await tester.pumpWidget(const SinalAcsApp());
 
     expect(find.text('SinalACS'), findsOneWidget);
-    expect(find.text('Acesso do paciente'), findsOneWidget);
+    expect(find.text('Acesso sem senha'), findsOneWidget);
 
     await tester.tap(find.byKey(const Key('enter_button')));
     await tester.pumpAndSettle();
 
     expect(find.text('Triagem rápida'), findsOneWidget);
 
-    await tester.tap(find.byKey(const Key('chest_pain')));
     await tester.tap(find.byKey(const Key('difficulty_breathing')));
-    await tester.scrollUntilVisible(find.byKey(const Key('submit_triage')), 50);
+    await tester.pump();
     await tester.tap(find.byKey(const Key('submit_triage')));
     await tester.pumpAndSettle();
 
-    expect(find.textContaining('Risco'), findsWidgets);
+    await tester.tap(find.byKey(const Key('triage_1_0')));
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('submit_triage')));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('chest_pain')));
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('submit_triage')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Solicitação de visita #4082'), findsOneWidget);
   });
 
   testWidgets('deve expor rótulo semântico e alvo de toque acessível no fluxo do paciente', (tester) async {
