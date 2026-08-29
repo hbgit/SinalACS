@@ -30,10 +30,21 @@ class SyncFsm {
         state = SyncState.localWrite;
         break;
       case SyncEvent.enqueue:
-        state = SyncState.queued;
+        if (state == SyncState.localWrite || state == SyncState.idle) {
+          state = SyncState.queued;
+        }
         break;
       case SyncEvent.networkUp:
-        if (state == SyncState.queued || state == SyncState.localWrite) {
+        if (state == SyncState.queued ||
+            state == SyncState.localWrite ||
+            state == SyncState.error) {
+          state = SyncState.syncing;
+        }
+        break;
+      case SyncEvent.syncStart:
+        if (state == SyncState.queued ||
+            state == SyncState.localWrite ||
+            state == SyncState.idle) {
           state = SyncState.syncing;
         }
         break;
@@ -47,7 +58,9 @@ class SyncFsm {
         state = SyncState.error;
         break;
       case SyncEvent.networkDown:
-      case SyncEvent.syncStart:
+        if (state == SyncState.syncing || state == SyncState.queued) {
+          state = SyncState.queued;
+        }
         break;
     }
   }
