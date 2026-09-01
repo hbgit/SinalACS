@@ -1,0 +1,6 @@
+user backend
+topic readwrite sinalacs/v1/#
+
+user acs-area-12
+topic read sinalacs/v1/microareas/area-12/alerts
+topic write sinalacs/v1/alerts/+/acks

@@ -37,4 +37,30 @@ void main() {
     expect(config.connectionUri, contains('8883'));
     expect(config.connectionUri, contains('broker.sinalacs.local'));
   });
+
+  test('deve montar payload de confirmação do ACS para o alerta vermelho', () {
+    final ack = MqttSecureAcknowledgementPayload(
+      alertId: 'alert-123',
+      acsId: 'acs-456',
+      microAreaId: 'area-12',
+      acknowledgedAt: DateTime.utc(2026, 9, 1, 12, 1),
+    );
+
+    final json = ack.toJson();
+    expect(json['version'], 1);
+    expect(json['alert_id'], 'alert-123');
+    expect(json['acs_id'], 'acs-456');
+    expect(json['micro_area_id'], 'area-12');
+    expect(json['acknowledged_at'], '2026-09-01T12:01:00.000Z');
+  });
+
+  test('decodifica somente o envelope MQTT versionado', () {
+    final alert = ReceivedMqttAlert.tryParse('''
+      {"version":1,"alert_id":"alert-123","patient_id":"patient-42","micro_area_id":"area-12","risk_level":"red","location_hash":"6gyf4bf","triggered_at":"2026-09-01T12:00:00.000Z"}
+    ''');
+
+    expect(alert?.alertId, 'alert-123');
+    expect(alert?.microAreaId, 'area-12');
+    expect(ReceivedMqttAlert.tryParse('{"version":2}'), isNull);
+  });
 }

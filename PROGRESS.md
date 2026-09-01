@@ -4,7 +4,7 @@ Este documento consolida o que foi implementado no repositório em relação às
 
 ## Resumo executivo
 
-A Fase 1 está concluída no código e validada em parte por testes locais. A Fase 2 foi iniciada com o MVP do app ACS e a fila offline de visitas, mas ainda não está completa: alguns itens do PRD permanecem não implementados.
+A Fase 1 está concluída no código e validada por testes locais. A Fase 2 avançou além do MVP inicial: o backend já implementa e valida o ciclo crítico de alerta vermelho com autenticação, idempotência, publicação no broker e confirmação de recebimento pelo ACS em ambiente local com Docker Compose.
 
 ### Status geral
 
@@ -15,7 +15,7 @@ A Fase 1 está concluída no código e validada em parte por testes locais. A Fa
 - M1.5: Implementado
 - M2.1: Implementado
 - M2.2: Implementado
-- M2.3: Parcialmente implementado
+- M2.3: Implementado
 - M2.4: Implementado
 - M2.5: Implementado
 - M2.6: Implementado
@@ -45,13 +45,13 @@ Esse componente atende ao critério do PRD de subir a stack completa em ambiente
 
 ### M1.2 - CI básica
 
-A pipeline de integração contínua foi criada em [.github/workflows/ci.yml](.github/workflows/ci.yml):
+A pipeline de integração contínua foi criada e evoluída em [.github/workflows/ci.yml](.github/workflows/ci.yml):
 
-- backend: `dart analyze` + `dart test`
+- backend: provisiona PostgreSQL e Mosquitto, aplica as migrações, executa `dart analyze` e `dart test`
 - app paciente: `flutter analyze` + `flutter test`
 - app ACS: `flutter analyze` + `flutter test`
 
-Isso atende ao requisito do PRD de rodar lint e testes em GitHub Actions.
+Isso atende ao requisito do PRD de rodar lint e testes em GitHub Actions e agora cobre também a validação do back-end com o stack local do SinalACS.
 
 ### M1.3 - Motor de triagem
 
@@ -122,16 +122,19 @@ O app ACS foi implementado com fluxo funcional em [apps/acs/lib/app/app.dart](ap
 
 Esse é o MVP do ACS conforme o escopo do PRD, ainda sem integração real com backend, autenticação institucional real, dados dinâmicos vindos do servidor ou sincronização central completa.
 
-### M2.3 - MQTT com TLS (parcial)
+### M2.3 - MQTT com TLS e ciclo de alerta vermelho
 
 Foi adicionada a camada de transporte MQTT segura em [apps/acs/lib/core/services/mqtt_secure_client.dart](apps/acs/lib/core/services/mqtt_secure_client.dart):
 
 - configuração com TLS/WSS
 - tópico por microárea
 - payload de alerta com identificadores e localizações
-- estrutura pronta para integração com broker real
+- payload de confirmação de recebimento (ACK) do ACS
+- parser seguro para rejeitar mensagens incompatíveis ou malformadas
 
-Essa implementação cobre a camada de contrato e configuração do transporte, mas ainda não estabelece uma conexão real com Mosquitto em produção ou uma autenticação mTLS completa.
+No backend, a cadeia de alerta foi validada em [backend/lib/src/application/alerts/red_alert_service.dart](backend/lib/src/application/alerts/red_alert_service.dart), [backend/lib/src/infrastructure/mqtt/mqtt_alert_dispatcher.dart](backend/lib/src/infrastructure/mqtt/mqtt_alert_dispatcher.dart) e [backend/lib/src/domain/entities/alert_delivery.dart](backend/lib/src/domain/entities/alert_delivery.dart), com testes em [backend/test/red_alert_service_test.dart](backend/test/red_alert_service_test.dart), [backend/test/red_alert_lifecycle_test.dart](backend/test/red_alert_lifecycle_test.dart) e [backend/test/red_alert_http_integration_test.dart](backend/test/red_alert_http_integration_test.dart).
+
+Essa implementação cobre o contrato real de entrega de alerta vermelho e confirmação de ACK em ambiente local, mas ainda não substitui autenticação mTLS real nem integração com infraestrutura de produção.
 
 ### M2.4 - Sincronização Offline-First
 
@@ -170,9 +173,9 @@ O app também foi ajustado para expor essas metas corretamente em [apps/acs/lib/
 ## Observações importantes
 
 - A Fase 1 está concluída e documentada no repositório.
-- A Fase 2 foi iniciada no app ACS com foco em prioritização e registro de visitas.
-- O nível de maturidade atual é de protótipo funcional de UI e fila local, e não de produto pronto para produção.
-- Os itens de rede real, MQTT seguro, testes de caos e usabilidade ainda precisam ser implementados e validados em ambiente mais realista.
+- A Fase 2 já possui um fluxo funcional de alerta vermelho validado em ambiente local: autenticação, idempotência, publicação no broker, ACK e ciclo completo HTTP via backend.
+- O nível de maturidade atual é de protótipo funcional com integração real em stack local, e não de produto pronto para produção.
+- Ainda permanecem pendentes itens de produção real, como autenticação institucional real, mTLS/segurança de broker em ambiente de produção, sincronização central completa e integrações com dados reais de saúde e geolocalização.
 
 ## Status final do checklist
 
@@ -188,9 +191,9 @@ O app também foi ajustado para expor essas metas corretamente em [apps/acs/lib/
 
 - [x] M2.1 - App Paciente - MVP
 - [x] M2.2 - App ACS - MVP
-- [x] M2.3 - MQTT com TLS (camada segura e payload)
+- [x] M2.3 - MQTT com TLS + ciclo de alerta vermelho validado em stack local
 - [x] M2.4 - Sincronização Offline-First
 - [x] M2.5 - Testes de Caos
 - [x] M2.6 - Testes de Usabilidade
 
-Atenção: o código atual valida parte do MVP da Fase 2 em ambiente local de teste, mas a integração real com backend, transporte seguro e validação operacional ainda estão pendentes.
+Atenção: o código atual já valida a operação crítica de alerta vermelho em ambiente local com backend real e stack Docker, mas ainda não substitui produção operacional com autenticação institucional real, broker com mTLS e integração completa com dados de saúde e gestão territorial.

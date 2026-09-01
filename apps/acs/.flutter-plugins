@@ -1,0 +1,16 @@
+# This is a generated file; do not edit or check into version control.
+connectivity_plus=/home/codespace/.pub-cache/hosted/pub.dev/connectivity_plus-7.3.1/
+flutter_plugin_android_lifecycle=/home/codespace/.pub-cache/hosted/pub.dev/flutter_plugin_android_lifecycle-2.0.26/
+geolocator=/home/codespace/.pub-cache/hosted/pub.dev/geolocator-12.0.0/
+geolocator_android=/home/codespace/.pub-cache/hosted/pub.dev/geolocator_android-4.6.2/
+geolocator_apple=/home/codespace/.pub-cache/hosted/pub.dev/geolocator_apple-2.3.14/
+geolocator_web=/home/codespace/.pub-cache/hosted/pub.dev/geolocator_web-4.1.4/
+geolocator_windows=/home/codespace/.pub-cache/hosted/pub.dev/geolocator_windows-0.2.5/
+google_maps_flutter=/home/codespace/.pub-cache/hosted/pub.dev/google_maps_flutter-2.10.1/
+google_maps_flutter_android=/home/codespace/.pub-cache/hosted/pub.dev/google_maps_flutter_android-2.14.13/
+google_maps_flutter_ios=/home/codespace/.pub-cache/hosted/pub.dev/google_maps_flutter_ios-2.15.2/
+google_maps_flutter_web=/home/codespace/.pub-cache/hosted/pub.dev/google_maps_flutter_web-0.5.12/
+sqflite=/home/codespace/.pub-cache/hosted/pub.dev/sqflite-2.4.1/
+sqflite_android=/home/codespace/.pub-cache/hosted/pub.dev/sqflite_android-2.4.0/
+sqflite_darwin=/home/codespace/.pub-cache/hosted/pub.dev/sqflite_darwin-2.4.1+1/
+sqflite_sqlcipher=/home/codespace/.pub-cache/hosted/pub.dev/sqflite_sqlcipher-3.2.0/

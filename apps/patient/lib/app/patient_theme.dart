@@ -28,7 +28,7 @@ ThemeData buildPatientTheme() {
       elevation: 0,
       centerTitle: false,
     ),
-    cardTheme: CardThemeData(
+    cardTheme: CardTheme(
       color: PatientColors.surfaceRaised,
       elevation: 0,
       margin: EdgeInsets.zero,

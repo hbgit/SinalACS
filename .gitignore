@@ -21,3 +21,4 @@ coverage/
 
 # Docker / local runtime
 pg_data/
+infra/docker/mosquitto/runtime/

@@ -9,6 +9,14 @@ CREATE TABLE users (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE TABLE ubs (
+  id UUID PRIMARY KEY,
+  name TEXT NOT NULL,
+  address TEXT NOT NULL,
+  city TEXT NOT NULL,
+  state TEXT NOT NULL
+);
+
 CREATE TABLE patients (
   user_id UUID PRIMARY KEY REFERENCES users(id),
   emergency_contact TEXT NOT NULL,
@@ -31,12 +39,4 @@ CREATE TABLE micro_areas (
   name TEXT NOT NULL,
   ubs_id UUID NOT NULL,
   geojson_boundary JSONB NOT NULL
-);
-
-CREATE TABLE ubs (
-  id UUID PRIMARY KEY,
-  name TEXT NOT NULL,
-  address TEXT NOT NULL,
-  city TEXT NOT NULL,
-  state TEXT NOT NULL
 );

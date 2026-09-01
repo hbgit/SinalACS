@@ -17,7 +17,7 @@ ThemeData buildAcsTheme() => ThemeData(
   scaffoldBackgroundColor: AcsColors.background,
   colorScheme: ColorScheme.fromSeed(seedColor: AcsColors.accent, brightness: Brightness.dark, surface: AcsColors.surface),
   appBarTheme: const AppBarTheme(backgroundColor: AcsColors.surface, foregroundColor: Colors.white, elevation: 0),
-  cardTheme: CardThemeData(
+  cardTheme: CardTheme(
     color: AcsColors.surfaceRaised,
     elevation: 0,
     margin: EdgeInsets.zero,

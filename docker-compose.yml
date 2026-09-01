@@ -18,14 +18,53 @@ services:
       timeout: 5s
       retries: 5
 
+  database-init:
+    image: postgres:15-alpine
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: strongpassword
+    volumes:
+      - ./backend/lib/src/infrastructure/database/migrations:/migrations:ro
+      - ./backend/lib/src/infrastructure/database/seeds:/seeds:ro
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        if [ "$(psql -h postgres -U sinalacs_user -d sinalacs_db -tAc "SELECT to_regclass('public.users')")" != "users" ]; then
+          psql -v ON_ERROR_STOP=1 -h postgres -U sinalacs_user -d sinalacs_db -f /migrations/v1.0.0/01_initial_schema.sql
+          psql -v ON_ERROR_STOP=1 -h postgres -U sinalacs_user -d sinalacs_db -f /migrations/v1.1.0/01_add_alerts_and_visits.sql
+          psql -v ON_ERROR_STOP=1 -h postgres -U sinalacs_user -d sinalacs_db -f /migrations/v1.2.0/01_add_alert_deliveries.sql
+          psql -v ON_ERROR_STOP=1 -h postgres -U sinalacs_user -d sinalacs_db -f /seeds/development.sql
+        fi
+
   mosquitto:
     image: eclipse-mosquitto:2
     container_name: sinalacs-mosquitto
+    depends_on:
+      mosquitto-init:
+        condition: service_completed_successfully
     ports:
-      - "1883:1883"
-      - "9001:9001"
+      - "8883:8883"
     volumes:
       - ./infra/docker/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./infra/docker/mosquitto/aclfile:/mosquitto/config/aclfile:ro
+      - ./infra/docker/mosquitto/runtime/passwordfile:/mosquitto/config/passwordfile:ro
+      - ./infra/docker/mosquitto/runtime/certs:/mosquitto/certs:ro
+      - ./infra/docker/mosquitto/runtime/data:/mosquitto/data
+
+  mosquitto-init:
+    image: eclipse-mosquitto:2
+    container_name: sinalacs-mosquitto-init
+    user: root
+    environment:
+      MQTT_BACKEND_PASSWORD: ${MQTT_BACKEND_PASSWORD:-development-backend-password}
+      MQTT_ACS_PASSWORD: ${MQTT_ACS_PASSWORD:-development-acs-password}
+    volumes:
+      - ./infra/docker/mosquitto/init.sh:/init.sh:ro
+      - ./infra/docker/mosquitto/runtime:/mosquitto/runtime
+    entrypoint: ["/bin/sh", "-c", "apk add --no-cache openssl && sh /init.sh"]
 
   serverpod:
     build:
@@ -35,13 +74,21 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      database-init:
+        condition: service_completed_successfully
       mosquitto:
         condition: service_started
     environment:
       DATABASE_URL: postgresql://sinalacs_user:strongpassword@postgres:5432/sinalacs_db
-      MQTT_BROKER: mosquitto:1883
+      MQTT_BROKER: mosquitto:8883
+      MQTT_USERNAME: backend
+      MQTT_PASSWORD: ${MQTT_BACKEND_PASSWORD:-development-backend-password}
+      MQTT_USE_TLS: "true"
+      MQTT_CA_CERT_PATH: /app/certs/ca.crt
     ports:
       - "8080:8080"
+    volumes:
+      - ./infra/docker/mosquitto/runtime/certs:/app/certs:ro
 
   traefik:
     image: traefik:v2.10

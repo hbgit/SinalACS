@@ -5,10 +5,11 @@ SinalACS transforma sinais clínicos estruturados em uma fila de trabalho para
 o Agente Comunitário de Saúde (ACS), priorizada por risco e preparada para
 operação em conectividade instável.
 
-> **Estado atual:** protótipo funcional da Fase 2 (Alpha/Beta). Os aplicativos
-> Flutter, as regras de triagem, a fila offline e a infraestrutura de
-> desenvolvimento local estão implementados. Integrações de produção com
-> Serverpod, MQTT autenticado, identidade e deploy ainda não estão concluídas.
+> **Estado atual:** protótipo funcional da Fase 2 validado localmente em stack
+> Docker. O backend já executa autenticação, criação de alerta vermelho,
+> idempotência por microárea, publicação no broker e confirmação de recebimento
+> pelo ACS. Integrações de produção com MQTT autenticado, identidade e deploy
+> operacional ainda não estão concluídas.
 
 ## Funcionalidades atuais
 
@@ -17,7 +18,9 @@ operação em conectividade instável.
 	territorialização e registro local de visitas.
 - Motor de triagem determinístico, com classificação verde, amarela ou vermelha.
 - Fila de visitas offline com sincronização simulada, retry e detecção de conflitos.
-- Contrato de alerta MQTT com configuração TLS/WSS, ainda sem conexão real ao broker.
+- Backend com fluxo real de alerta vermelho, incluindo autenticação, idempotência,
+	publicação em tópico de microárea e ACK do ACS.
+- Contrato de alerta MQTT com configuração TLS/WSS e validação local do ciclo de entrega.
 - Persistência local preparada para SQLCipher.
 
 Consulte [PROGRESS.md](PROGRESS.md) para o status detalhado dos milestones e
@@ -139,10 +142,10 @@ cd apps/acs && flutter pub get && flutter analyze && flutter test
 cd apps/patient && flutter pub get && flutter analyze && flutter test
 ```
 
-A última validação local aprovou 14 testes que cobrem fluxos de login e
-triagem, acessibilidade, fila offline, MQTT seguro, simulação de rede e banco
-criptografado. A CI executa análise e testes para backend, paciente e ACS em
-pushes para `main`/`master` e pull requests.
+A última validação local aprovou a suíte do backend e testes específicos de
+integração HTTP do alerta vermelho, cobrindo autenticação, idempotência,
+publicação no broker e ACK do ACS. A CI executa análise e testes para backend,
+paciente e ACS em pushes para main e pull requests.
 
 ## Deploy
 
