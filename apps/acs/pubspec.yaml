@@ -12,7 +12,7 @@ dependencies:
     sdk: flutter
   sqflite: ^2.3.0
   sqflite_common_ffi: ^2.3.0
-  sqflite_sqlcipher: ^3.4.1
+  sqflite_sqlcipher: ^3.2.0
   connectivity_plus: ^7.3.1
   mqtt_client: ^10.0.0
   geolocator: ^12.0.0
