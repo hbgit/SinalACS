@@ -45,9 +45,17 @@ jobs:
           psql "postgresql://sinalacs_user:strongpassword@localhost:5432/sinalacs_db" -v ON_ERROR_STOP=1 -f lib/src/infrastructure/database/migrations/v1.0.0/01_initial_schema.sql
           psql "postgresql://sinalacs_user:strongpassword@localhost:5432/sinalacs_db" -v ON_ERROR_STOP=1 -f lib/src/infrastructure/database/migrations/v1.1.0/01_add_alerts_and_visits.sql
           psql "postgresql://sinalacs_user:strongpassword@localhost:5432/sinalacs_db" -v ON_ERROR_STOP=1 -f lib/src/infrastructure/database/migrations/v1.2.0/01_add_alert_deliveries.sql
+          psql "postgresql://sinalacs_user:strongpassword@localhost:5432/sinalacs_db" -v ON_ERROR_STOP=1 -f lib/src/infrastructure/database/seeds/development.sql
       - run: dart pub get
       - run: dart analyze
       - run: dart test
+
+  backend-docker-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build backend Docker image
+        run: docker build -f backend/Dockerfile backend
 
   patient-app:
     runs-on: ubuntu-latest

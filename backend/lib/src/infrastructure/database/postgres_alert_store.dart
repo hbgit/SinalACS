@@ -8,14 +8,18 @@ class PostgresAlertStore implements AlertStore {
   final String _databaseUrl;
   PostgreSQLConnection? _connection;
 
+  bool get isOpen => _connection != null && !_connection!.isClosed;
+
   Future<void> open() async {
     final url = Uri.parse(_databaseUrl);
+    final useSSL = url.queryParameters['sslmode'] != 'disable';
     _connection = PostgreSQLConnection(
       url.host,
       url.hasPort ? url.port : 5432,
       url.pathSegments.single,
       username: url.userInfo.split(':').first,
       password: url.userInfo.contains(':') ? url.userInfo.split(':').last : null,
+      useSSL: useSSL,
     );
     await _connection!.open();
   }

@@ -170,6 +170,60 @@ Foi implementada a validação de UX básica em [apps/acs/test/login_flow_test.d
 
 O app também foi ajustado para expor essas metas corretamente em [apps/acs/lib/app/app.dart](apps/acs/lib/app/app.dart) e [apps/patient/lib/app/app.dart](apps/patient/lib/app/app.dart).
 
+## Preparação de deploy — piloto em serviços free-tier (backend)
+
+Este trabalho é complementar às Fases 1 e 2 e **não corresponde ao milestone
+M3.1 do PRD** ("Deploy em Produção (Pulumi)" — infraestrutura imutável
+provisionada em VPS). É um caminho mais leve e gratuito para colocar o
+backend no ar como piloto/demo, resolvendo bloqueadores técnicos que
+impediam qualquer hospedagem free-tier de rodar o backend hoje. Runbook
+completo em [backend/DEPLOY.md](backend/DEPLOY.md).
+
+| Item | Entregável | Status | Evidência |
+|---|---|---|---|
+| Porta configurável | Leitura de `PORT` do ambiente, com fallback 8080 | Implementado | [backend/bin/server.dart](backend/bin/server.dart) |
+| Boot desacoplado do MQTT | Servidor HTTP passa a aceitar requisições mesmo com o broker indisponível no momento do deploy | Implementado | [backend/bin/server.dart](backend/bin/server.dart) |
+| Reconexão MQTT com backoff | Retry exponencial (2s a 60s) e correção do client-id fixo que causava colisão em redeploys | Implementado | [backend/lib/src/infrastructure/mqtt/mqtt_alert_dispatcher.dart](backend/lib/src/infrastructure/mqtt/mqtt_alert_dispatcher.dart) |
+| Resposta controlada quando o MQTT está fora do ar | `POST /v1/alerts/red` retorna 503 em vez de derrubar o processo | Implementado | [backend/bin/server.dart](backend/bin/server.dart) |
+| SSL na conexão PostgreSQL | `useSSL: true` por padrão, com opção `?sslmode=disable` para desenvolvimento local | Implementado | [backend/lib/src/infrastructure/database/postgres_alert_store.dart](backend/lib/src/infrastructure/database/postgres_alert_store.dart) |
+| `/health` com diagnóstico | Corpo da resposta passa a incluir `mqtt_connected` e `db_connected` | Implementado | [backend/bin/server.dart](backend/bin/server.dart) |
+| Dockerfile multi-stage (AOT) | Build com `dart compile exe`, imagem runtime mínima, usuário non-root e `HEALTHCHECK` | Implementado | [backend/Dockerfile](backend/Dockerfile) |
+| Remoção de dependência morta | `serverpod` removido do `pubspec.yaml` (não havia nenhum import real no código) | Implementado | [backend/pubspec.yaml](backend/pubspec.yaml) |
+| `JWT_SECRET` obrigatório em produção | Falha rápida no boot quando `APP_ENV=production` e o segredo não foi definido, em vez do fallback inseguro silencioso | Implementado | [backend/lib/src/config/app_config.dart](backend/lib/src/config/app_config.dart) |
+| Gate do dev-login | `/v1/auth/development/login` responde 404 a menos que `ENABLE_DEV_LOGIN=true` seja definido explicitamente | Implementado | [backend/bin/server.dart](backend/bin/server.dart) |
+| Validação do build Docker na CI | Novo job builda a imagem multi-stage a cada push/PR | Implementado | [.github/workflows/ci.yml](.github/workflows/ci.yml) |
+| Correção de gap na CI | A CI nunca aplicava o seed de dados antes de rodar os testes, o que fazia o teste de integração de alerta vermelho falhar por violação de chave estrangeira; corrigido aplicando o seed no mesmo passo das migrações | Implementado | [.github/workflows/ci.yml](.github/workflows/ci.yml) |
+| Documentação do piloto free-tier | Passo a passo de provisionamento (Render, Neon, HiveMQ Cloud) e limitações conhecidas | Implementado | [backend/DEPLOY.md](backend/DEPLOY.md), seção "Deploy" do [README.md](README.md) |
+
+### Verificação realizada
+
+Como o ambiente de desenvolvimento não tinha o Dart SDK instalado, a
+verificação foi feita via Docker, reproduzindo o setup da CI:
+
+- Build da imagem multi-stage concluído com sucesso (`docker build -f backend/Dockerfile backend`), incluindo a compilação AOT via `dart compile exe`.
+- `dart analyze` sem nenhum problema encontrado.
+- Suíte completa de testes (`dart test`) passando — 18/18, incluindo o teste de integração HTTP real (`red_alert_http_integration_test.dart`) contra PostgreSQL e Mosquitto reais em containers, cobrindo login, criação de alerta vermelho e ACK via HTTP.
+- Container rodando com `PORT` dinâmico e broker MQTT inexistente: `/health` respondeu 200 com `mqtt_connected: false` e `db_connected: true`, sem travar o boot; `POST /v1/alerts/red` retornou 503 corretamente.
+- Boot com `APP_ENV=production` e sem `JWT_SECRET`: processo falhou imediatamente com mensagem clara, como esperado.
+- `/v1/auth/development/login` sem `ENABLE_DEV_LOGIN`: respondeu 404, confirmando o gate.
+
+### O que ainda falta para este piloto ir ao ar
+
+O provisionamento em si (criar as contas/recursos no Render, Neon e HiveMQ
+Cloud e configurar os secrets) é manual e está documentado em
+[backend/DEPLOY.md](backend/DEPLOY.md), mas ainda não foi executado.
+
+### Relação com o PRD
+
+Este trabalho reduz risco técnico e serve de base para o M3.1 real, mas
+**não substitui** nenhum dos requisitos formais de produção: provisionamento
+imutável via Pulumi em VPS, redes privadas, TLS 1.3 ponta a ponta, ACLs MQTT
+dinâmicas por microárea, autenticação institucional real com RBAC,
+observabilidade completa (OpenTelemetry/Prometheus/Grafana — M3.2) e revisão
+de LGPD antes de qualquer piloto com pacientes reais (M3.4). O dev-login
+continua sendo o único mecanismo de autenticação do ambiente piloto e não
+deve ser usado com dados reais de pacientes.
+
 ## Observações importantes
 
 - A Fase 1 está concluída e documentada no repositório.

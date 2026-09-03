@@ -1,5 +1,5 @@
 name: sinalacs_backend
-description: Backend Serverpod do SinalACS.
+description: Backend do SinalACS.
 publish_to: 'none'
 
 version: 1.0.0
@@ -9,7 +9,6 @@ environment:
 
 dependencies:
   crypto: ^3.0.3
-  serverpod: ^1.2.0
   postgres: ^2.6.0
   mqtt_client: ^10.0.0
 

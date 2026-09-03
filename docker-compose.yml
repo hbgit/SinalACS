@@ -79,12 +79,14 @@ services:
       mosquitto:
         condition: service_started
     environment:
-      DATABASE_URL: postgresql://sinalacs_user:strongpassword@postgres:5432/sinalacs_db
+      DATABASE_URL: postgresql://sinalacs_user:strongpassword@postgres:5432/sinalacs_db?sslmode=disable
       MQTT_BROKER: mosquitto:8883
       MQTT_USERNAME: backend
       MQTT_PASSWORD: ${MQTT_BACKEND_PASSWORD:-development-backend-password}
       MQTT_USE_TLS: "true"
       MQTT_CA_CERT_PATH: /app/certs/ca.crt
+      APP_ENV: development
+      ENABLE_DEV_LOGIN: "true"
     ports:
       - "8080:8080"
     volumes:

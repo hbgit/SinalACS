@@ -54,12 +54,13 @@ Future<Process?> _startBackendIfNeeded() async {
 
   final workingDirectory = Directory.current.path;
   final environment = Map<String, String>.from(Platform.environment)
-    ..['DATABASE_URL'] = 'postgresql://sinalacs_user:strongpassword@localhost:5432/sinalacs_db'
+    ..['DATABASE_URL'] = 'postgresql://sinalacs_user:strongpassword@localhost:5432/sinalacs_db?sslmode=disable'
     ..['MQTT_BROKER'] = 'localhost:1883'
     ..['JWT_SECRET'] = 'development-secret'
     ..['MQTT_USERNAME'] = 'backend'
     ..['MQTT_PASSWORD'] = 'development-backend-password'
-    ..['MQTT_USE_TLS'] = 'false';
+    ..['MQTT_USE_TLS'] = 'false'
+    ..['ENABLE_DEV_LOGIN'] = 'true';
 
   final process = await Process.start(
     Platform.resolvedExecutable,

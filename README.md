@@ -154,6 +154,11 @@ paciente e ACS em pushes para main e pull requests.
 ele não oferece TLS público, gestão de segredos, persistência operacional,
 observabilidade, backup ou políticas de acesso compatíveis com produção.
 
+Existe um caminho de **piloto/demo em serviços free-tier** para o backend,
+documentado em [backend/DEPLOY.md](backend/DEPLOY.md). Esse caminho é
+propositalmente barato e simplificado para demonstração — ele não substitui
+nenhum dos requisitos de produção do PRD listados abaixo.
+
 O caminho previsto no PRD para produção inclui:
 
 1. Provisionamento imutável com Pulumi.
