@@ -73,7 +73,7 @@ class OfflineVisitQueue {
       final conflicted = batch.first.copyWith(status: 'CONFLITO');
       _conflicts.add(conflicted);
       _pending.add(conflicted);
-      return SyncOutcome(kind: SyncOutcomeKind.conflict, processed: 1);
+      return const SyncOutcome(kind: SyncOutcomeKind.conflict, processed: 1);
     }
 
     for (final visit in batch) {

@@ -267,7 +267,11 @@ class _TriageScreenState extends State<TriageScreen> {
         FilledButton(
           key: const Key('submit_triage'),
           onPressed: _answers[_step] == null ? null : () {
-            if (_step < 2) setState(() => _step++); else widget.onComplete?.call();
+            if (_step < 2) {
+              setState(() => _step++);
+            } else {
+              widget.onComplete?.call();
+            }
           },
           style: FilledButton.styleFrom(minimumSize: const Size(48, 52)),
           child: Text(_step == 2 ? 'Concluir triagem' : 'Próxima pergunta'),
@@ -367,13 +371,13 @@ class StatusScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return ListView(
       padding: const EdgeInsets.all(20),
-      children: [
+      children: const [
         Card(
           child: Padding(
-            padding: const EdgeInsets.all(20),
+            padding: EdgeInsets.all(20),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
-              children: const [
+              children: [
                 Text('Solicitação de visita #4082', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
                 SizedBox(height: 8),
                 Text('Triagem Amarela • criada hoje às 09:30'),
