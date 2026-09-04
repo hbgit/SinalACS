@@ -1,17 +1,5 @@
-# sinalacs_acs
+# SinalACS — App ACS
 
-A new Flutter project.
+Aplicativo Flutter do Agente Comunitário de Saúde: login institucional (demonstrativo), dashboard de priorização dinâmica, territorialização por microárea e registro de visitas offline-first.
 
-## Getting Started
-
-This project is a starting point for a Flutter application.
-
-A few resources to get you started if this is your first Flutter project:
-
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
-
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+Ver o [README.md](../../README.md) na raiz do repositório para pré-requisitos, comandos de execução/teste e o estado atual do projeto, e [PROGRESS.md](../../PROGRESS.md) para o status detalhado dos milestones. Documentação visual das telas em [docs/telas-acs.md](../../docs/telas-acs.md).

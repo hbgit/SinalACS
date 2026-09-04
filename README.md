@@ -33,7 +33,7 @@ apps/
 	acs/       Aplicativo Flutter do Agente Comunitário de Saúde
 	patient/   Aplicativo Flutter do paciente
 	admin/     Base do aplicativo administrativo
-backend/     Backend Dart/Serverpod e regras de domínio
+backend/     Backend Dart (dart:io, sem framework) e regras de domínio
 infra/       Configuração local de infraestrutura
 spec/        PRD, UX, privacidade e fluxos do produto
 tests/       Testes compartilhados
@@ -144,8 +144,19 @@ cd apps/patient && flutter pub get && flutter analyze && flutter test
 
 A última validação local aprovou a suíte do backend e testes específicos de
 integração HTTP do alerta vermelho, cobrindo autenticação, idempotência,
-publicação no broker e ACK do ACS. A CI executa análise e testes para backend,
-paciente e ACS em pushes para main e pull requests.
+publicação no broker e ACK do ACS. A CI (`.github/workflows/ci.yml`) roda
+quatro jobs em pushes para main e pull requests: `backend` (aplica as três
+migrações e o seed de desenvolvimento antes de `dart analyze`/`dart test`),
+`backend-docker-build` (valida que a imagem multi-stage do backend builda),
+`patient-app` e `acs-app`.
+
+O backend lê configuração via variáveis de ambiente (`backend/lib/src/config/app_config.dart`):
+além de `DATABASE_URL`/`MQTT_*`/`JWT_SECRET`, agora suporta `PORT` (porta
+dinâmica, cai para 8080), `APP_ENV` (`production` exige `JWT_SECRET` definido,
+falhando rápido no boot caso contrário) e `ENABLE_DEV_LOGIN` (por padrão
+desligado — sem ele, `/v1/auth/development/login` responde 404). Veja
+[backend/DEPLOY.md](backend/DEPLOY.md) para o runbook completo do piloto de
+deploy free-tier.
 
 ## Deploy
 

@@ -43,13 +43,16 @@ dart analyze
 dart test
 dart test test/red_alert_service_test.dart   # single test file
 ```
-Backend requires the Postgres schema applied before tests/run — migrations live in `backend/lib/src/infrastructure/database/migrations/` and must be applied **in order**:
+Backend requires the Postgres schema (and seed data) applied before tests/run — migrations live in `backend/lib/src/infrastructure/database/migrations/` and must be applied **in order**, followed by the dev seed:
 ```bash
 psql "$DATABASE_URL" -f backend/lib/src/infrastructure/database/migrations/v1.0.0/01_initial_schema.sql
 psql "$DATABASE_URL" -f backend/lib/src/infrastructure/database/migrations/v1.1.0/01_add_alerts_and_visits.sql
 psql "$DATABASE_URL" -f backend/lib/src/infrastructure/database/migrations/v1.2.0/01_add_alert_deliveries.sql
+psql "$DATABASE_URL" -f backend/lib/src/infrastructure/database/seeds/development.sql
 ```
-Run the server directly: `dart run backend/bin/server.dart` (needs `AppConfig.fromEnvironment()` env vars for DB/MQTT — see `backend/lib/src/config/app_config.dart`).
+The seed is not optional: `red_alert_service.dart` writes alerts against the fixed dev-login UUIDs, and `alerts.patient_id` has a `NOT NULL REFERENCES patients(user_id)` constraint — skipping the seed makes `POST /v1/alerts/red` fail with a foreign-key violation (this was a real CI bug until the seed step was added to `.github/workflows/ci.yml`).
+
+Run the server directly: `dart run backend/bin/server.dart` (needs `AppConfig.fromEnvironment()` env vars — see `backend/lib/src/config/app_config.dart`). Key vars: `DATABASE_URL`, `MQTT_BROKER`/`MQTT_USERNAME`/`MQTT_PASSWORD`/`MQTT_USE_TLS`, `JWT_SECRET`, `PORT` (dynamic port binding, falls back to 8080), `APP_ENV` (`development` by default; when set to `production`, boot fails fast if `JWT_SECRET` is missing instead of using an insecure default), `ENABLE_DEV_LOGIN` (default `false` — gates `/v1/auth/development/login`, returns 404 when unset). See `backend/DEPLOY.md` for a full free-tier pilot deploy runbook (Render + Neon + HiveMQ Cloud).
 
 ### Flutter apps (ACS and patient)
 ```bash
@@ -63,12 +66,12 @@ flutter build apk --debug   # debug APK, validated with compileSdk/targetSdk 36
 ```
 `apps/admin` exists only as a pubspec skeleton (backoffice), no implementation yet.
 
-CI (`.github/workflows/ci.yml`) runs three parallel jobs on push/PR to main: `backend` (spins up real Postgres 15 + Mosquitto services, applies all three migrations, then `dart analyze && dart test`), `patient-app`, `acs-app` (each `flutter analyze && flutter test`, Flutter 3.24.0). Mirror this locally before pushing.
+CI (`.github/workflows/ci.yml`) runs four parallel jobs on push/PR to main: `backend` (spins up real Postgres 15 + Mosquitto services, applies all three migrations **and the dev seed**, then `dart analyze && dart test`), `backend-docker-build` (builds `backend/Dockerfile` to catch build breakage before deploy), `patient-app`, `acs-app` (each `flutter analyze && flutter test`, Flutter 3.24.0). Mirror this locally before pushing.
 
 ## Architecture
 
 ### Backend (`backend/`) — layered, framework-free Dart
-Despite pubspec listing `serverpod` as a dependency and the README describing a Serverpod-based design, the actual running server (`backend/bin/server.dart`) is a **hand-rolled `dart:io` HttpServer** — no Serverpod code generation or routing is in use. Layering under `backend/lib/src/`:
+The running server (`backend/bin/server.dart`) is a **hand-rolled `dart:io` HttpServer** — no framework, no code generation, manual route matching. `serverpod` was the original stack decision recorded in `spec/stack.md`/`spec/PRD_system.md` but was never actually implemented that way, and the unused `serverpod` package dependency has been removed from `backend/pubspec.yaml`. The Dockerfile (`backend/Dockerfile`) is a multi-stage build — `dart compile exe` (AOT) in a `dart:3.3` build stage, copied into a minimal `debian:bookworm-slim` runtime stage with a non-root user and a `HEALTHCHECK` against `/health`. Layering under `backend/lib/src/`:
 - `domain/` — entities (`AlertDelivery`, `AcsEntity`, `PatientEntity`, `TriageSessionEntity`, `VisitEntity`, ...) and enums (`RiskLevel`, `AlertStatus`, `SyncStatus`, `UserRole`). Pure data, no I/O.
 - `application/` — use-case services: `alerts/red_alert_service.dart` (red alert creation/ack, idempotency-key dedup, micro-area/role enforcement), `triage/triage_engine.dart` (deterministic symptom → `RiskLevel` mapping, mirrors Manchester Protocol logic), `sync/sync_fsm.dart` (offline-sync finite state machine: `idle → localWrite → queued → syncing → {synced|conflict|error}`), `auth/development_auth_service.dart` (dev-only token issuance, **not** real institutional auth).
 - `infrastructure/` — `database/postgres_alert_store.dart` (implements `AlertStore` against Postgres), `database/migrations/vX.Y.Z/*.sql` (ordered, additive schema changes — never edit an already-applied migration, add a new versioned one), `database/seeds/development.sql`, `mqtt/mqtt_alert_dispatcher.dart` (implements `AlertPublisher`, publishes/subscribes per micro-area topic, handles ACK payloads).
@@ -76,7 +79,7 @@ Despite pubspec listing `serverpod` as a dependency and the README describing a 
 
 Key pattern: application services depend on abstract interfaces (`AlertPublisher`, `AlertStore`) defined alongside them in `application/`, implemented by `infrastructure/`. Follow this when adding new use cases — keep `application/` testable without real Postgres/MQTT (see how `red_alert_service_test.dart` fakes both).
 
-The HTTP surface in `bin/server.dart` is intentionally minimal and manually routed (`request.uri.path` string/regex matching) — endpoints: `GET /health`, `POST /v1/auth/development/login`, `POST /v1/alerts/red` (idempotency via `Idempotency-Key` header), `POST /v1/alerts/{id}/ack`.
+The HTTP surface in `bin/server.dart` is intentionally minimal and manually routed (`request.uri.path` string/regex matching) — endpoints: `GET /health` (returns `{status, mqtt_connected, db_connected}`; always 200 as soon as the HTTP server is bound, independent of MQTT/DB state), `POST /v1/auth/development/login` (404 unless `ENABLE_DEV_LOGIN=true`), `POST /v1/alerts/red` (idempotency via `Idempotency-Key` header; returns 503 if the MQTT dispatcher isn't connected instead of crashing), `POST /v1/alerts/{id}/ack`. MQTT connects in the background at boot (non-blocking) with exponential-backoff auto-reconnect (`mqtt_alert_dispatcher.dart`), so the server stays responsive even if the broker is temporarily unreachable — see `backend/DEPLOY.md` for why this matters on free-tier hosts that sleep/hibernate.
 
 ### Flutter apps (`apps/acs/`, `apps/patient/`)
 Both follow the same skeleton: `lib/main.dart` → `lib/app/app.dart` (+ `*_theme.dart` for the dark, high-legibility, low-noise visual language — see `spec/ui_design.md`) → `lib/core/`. Shared `core/` concerns:

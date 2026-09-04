@@ -8,6 +8,8 @@ A barra inferior dá acesso a **Área**, **Fila**, **Mapa** e **Visita**. O item
 
 ## Login institucional
 
+![Login institucional do ACS](screenshots/acs/01-login.png)
+
 A tela de entrada contém matrícula/CNS e senha, com indicador de operação offline. A autenticação é demonstrativa e não possui integração Gov.br ou servidor de identidade nesta etapa.
 
 ## Territorialização

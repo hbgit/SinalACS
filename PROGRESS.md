@@ -4,7 +4,7 @@ Este documento consolida o que foi implementado no repositório em relação às
 
 ## Resumo executivo
 
-A Fase 1 está concluída no código e validada por testes locais. A Fase 2 avançou além do MVP inicial: o backend já implementa e valida o ciclo crítico de alerta vermelho com autenticação, idempotência, publicação no broker e confirmação de recebimento pelo ACS em ambiente local com Docker Compose.
+A Fase 1 está concluída no código e validada por testes locais. A Fase 2 avançou além do MVP inicial: o backend já implementa e valida o ciclo crítico de alerta vermelho com autenticação, idempotência, publicação no broker e confirmação de recebimento pelo ACS em ambiente local com Docker Compose. Além das Fases 1 e 2, a seção ["Preparação de deploy — piloto em serviços free-tier (backend)"](#preparação-de-deploy--piloto-em-serviços-free-tier-backend) mais abaixo documenta um trabalho complementar de preparação do backend para hospedagem gratuita (fora da numeração M1.x/M2.x/M3.x do PRD).
 
 ### Status geral
 
@@ -24,8 +24,8 @@ A Fase 1 está concluída no código e validada por testes locais. A Fase 2 avan
 
 | Milestone | Entregável | Status | Evidência |
 |---|---|---|---|
-| M1.1 | Docker-Compose local (Stack completa) | Implementado | [docker-compose.yml](docker-compose.yml) com PostgreSQL, Mosquitto, Serverpod e Traefik |
-| M1.2 | CI Pipeline básica | Implementado | [.github/workflows/ci.yml](.github/workflows/ci.yml) com jobs do backend e dos apps Flutter |
+| M1.1 | Docker-Compose local (Stack completa) | Implementado | [docker-compose.yml](docker-compose.yml) com PostgreSQL, Mosquitto, backend (serviço ainda nomeado `serverpod` no compose por herança do nome original, mas roda o backend Dart puro) e Traefik |
+| M1.2 | CI Pipeline básica | Implementado | [.github/workflows/ci.yml](.github/workflows/ci.yml) com 4 jobs: backend, build da imagem Docker do backend, e os dois apps Flutter |
 | M1.3 | Motor de Triagem (algoritmo) | Implementado | [backend/lib/src/application/triage/triage_engine.dart](backend/lib/src/application/triage/triage_engine.dart) e [backend/test/triage_engine_test.dart](backend/test/triage_engine_test.dart) |
 | M1.4 | FSM de Sincronização | Implementado | [backend/lib/src/application/sync/sync_fsm.dart](backend/lib/src/application/sync/sync_fsm.dart) e [backend/test/sync_fsm_test.dart](backend/test/sync_fsm_test.dart) |
 | M1.5 | SQLCipher (local) | Implementado | [apps/patient/lib/core/database/encrypted_database.dart](apps/patient/lib/core/database/encrypted_database.dart) e [apps/acs/lib/core/database/encrypted_database.dart](apps/acs/lib/core/database/encrypted_database.dart) |
@@ -38,7 +38,7 @@ A infraestrutura local já foi criada em [docker-compose.yml](docker-compose.yml
 
 - PostgreSQL 15
 - Mosquitto
-- Serverpod
+- Backend Dart (serviço nomeado `serverpod` no compose por legado, mas sem o framework em uso)
 - Traefik
 
 Esse componente atende ao critério do PRD de subir a stack completa em ambiente local via Docker Compose.
@@ -47,11 +47,12 @@ Esse componente atende ao critério do PRD de subir a stack completa em ambiente
 
 A pipeline de integração contínua foi criada e evoluída em [.github/workflows/ci.yml](.github/workflows/ci.yml):
 
-- backend: provisiona PostgreSQL e Mosquitto, aplica as migrações, executa `dart analyze` e `dart test`
+- backend: provisiona PostgreSQL e Mosquitto, aplica as migrações e o seed de desenvolvimento, executa `dart analyze` e `dart test`
+- build da imagem Docker do backend: valida que o `Dockerfile` multi-stage builda, sem publicar a imagem
 - app paciente: `flutter analyze` + `flutter test`
 - app ACS: `flutter analyze` + `flutter test`
 
-Isso atende ao requisito do PRD de rodar lint e testes em GitHub Actions e agora cobre também a validação do back-end com o stack local do SinalACS.
+Isso atende ao requisito do PRD de rodar lint e testes em GitHub Actions e agora cobre também a validação do back-end com o stack local do SinalACS. Ver a seção "Preparação de deploy" mais abaixo para o detalhe de quando/por que o passo de seed e o job de build Docker foram adicionados.
 
 ### M1.3 - Motor de triagem
 

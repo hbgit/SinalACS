@@ -1,6 +1,6 @@
 ## 1. Stack Principal & Persistência
 
-* **Frontend & Backend (Isomorfismo Dart):** Flutter no client e **Serverpod** no backend. O Serverpod gera o ORM e os *endpoints* do cliente Dart automaticamente, garantindo que qualquer alteração de esquema no PostgreSQL quebre a compilação do Flutter imediatamente.
+* **Frontend & Backend (Isomorfismo Dart):** Flutter no client e Dart no backend. A decisão original era usar **Serverpod** no backend, com ORM e *endpoints* de cliente Dart gerados automaticamente — essa decisão nunca foi implementada; o backend real (`backend/`) é um servidor `dart:io` puro, sem ORM nem geração de código, roteado manualmente. Ver [CLAUDE.md](../CLAUDE.md) para a arquitetura real.
 
 
 * **Persistência Relacional:** PostgreSQL acoplado ao `sqflite` local. A escolha relacional reflete a necessidade estruturada da matriz de triagem fechada inspirada no Protocolo de Manchester.
@@ -16,7 +16,7 @@
 ## 2. DX, Autenticação & Infraestrutura
 
 * **IaC:** Pulumi (com TypeScript) para provisionar os containers em VPS robustas. Abstrai a infraestrutura como código com forte tipagem, sem o *vendor lock-in* do AWS CDK.
-* **Autenticação na Borda:** Módulo de autenticação nativo do Serverpod acoplado ao **Traefik** como *Reverse Proxy/Edge Gateway*. O Traefik roteia tráfego REST/gRPC e os WebSockets do MQTT.
+* **Autenticação na Borda:** Módulo de autenticação na camada de aplicação do backend acoplado ao **Traefik** como *Reverse Proxy/Edge Gateway*. O Traefik roteia tráfego REST e os WebSockets do MQTT. Ainda não implementado — hoje o backend só tem um endpoint de login de desenvolvimento, sem autenticação institucional real.
 * **Login Fricção Zero:** A entrada *passwordless* por OTP ou QR Code no app do paciente é delegada à camada de aplicação.
 
 
@@ -31,51 +31,4 @@ A **Sincronização Bidirecional Offline-First** é o componente de maior risco 
 
 ## 4. Docker-Compose MVTS
 
-```yaml
-version: '3.8'
-services:
-  postgres:
-    image: postgres:15-alpine
-    environment:
-      POSTGRES_USER: sinalacs_user
-      POSTGRES_PASSWORD: strongpassword
-      POSTGRES_DB: sinalacs_db
-    volumes:
-      - pg_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U sinalacs_user"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-
-  serverpod:
-    build: ./backend
-    depends_on:
-      postgres:
-        condition: service_healthy
-    ports:
-      - "8080:8080"
-
-  mosquitto:
-    image: eclipse-mosquitto:2
-    volumes:
-      - ./mosquitto.conf:/mosquitto/config/mosquitto.conf
-    ports:
-      - "1883:1883"
-
-  traefik:
-    image: traefik:v2.10
-    command:
-      - "--api.insecure=true"
-      - "--providers.docker=true"
-      - "--entrypoints.web.address=:80"
-    ports:
-      - "80:80"
-      - "8080:8080"
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-
-volumes:
-  pg_data:
-
-```
+A decisão arquitetural é usar Postgres + Mosquitto + Traefik como reverse proxy na stack local, orquestrados via Docker Compose. A topologia concreta (serviços de inicialização de banco/broker, TLS no MQTT, variáveis de ambiente de produção, healthchecks) evoluiu bastante desde a concepção inicial deste documento — o [`docker-compose.yml`](../docker-compose.yml) na raiz do repositório é a fonte da verdade operacional atual, não um exemplo espelhado aqui (evita os dois arquivos divergirem silenciosamente ao longo do tempo, como já havia acontecido).

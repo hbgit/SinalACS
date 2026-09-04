@@ -3,7 +3,7 @@
 ## 1. Análise de Requisitos e Domínio
 
 **Resumo Executivo:**
-O SinalACS atua como uma plataforma bidirecional de triagem e otimização para a Atenção Primária à Saúde. A solução resolve a ineficiência do modelo de roteamento geográfico estático, substituindo-o por uma fila de trabalho dinâmica e orientada a risco clínico determinístico (inspirado no Protocolo de Manchester). O diferencial arquitetural (Moat) baseia-se em uma topologia *offline-first* com isomorfismo Dart (Flutter e Serverpod), garantindo resiliência em zonas de sombra de rede.
+O SinalACS atua como uma plataforma bidirecional de triagem e otimização para a Atenção Primária à Saúde. A solução resolve a ineficiência do modelo de roteamento geográfico estático, substituindo-o por uma fila de trabalho dinâmica e orientada a risco clínico determinístico (inspirado no Protocolo de Manchester). O diferencial arquitetural (Moat) baseia-se em uma topologia *offline-first* com Dart no cliente e no backend, garantindo resiliência em zonas de sombra de rede.
 
 ### Matriz de Requisitos (RF e RNF)
 
@@ -23,7 +23,7 @@ O SinalACS atua como uma plataforma bidirecional de triagem e otimização para 
 * **Atores Oativos:** Paciente (App Paciente, *low-literacy UX*), Agente Comunitário de Saúde (App ACS, *dashboard* dinâmico).
 
 
-* **Fronteiras de Sistema:** Cliente Flutter (dispositivo móvel), Edge/Proxy (Traefik), Backend API (Serverpod), Broker IoT (Mosquitto), e Banco de Dados (PostgreSQL).
+* **Fronteiras de Sistema:** Cliente Flutter (dispositivo móvel), Edge/Proxy (Traefik), Backend API (Dart, `dart:io`), Broker IoT (Mosquitto), e Banco de Dados (PostgreSQL).
 
 
 
@@ -82,7 +82,7 @@ classDiagram
 * **Módulo de Triagem (Frontend):** Acoplamento aferente nulo. Motor determinístico sem dependência de IO externo.
 
 
-* **Módulo de Sincronização (Backend/Client):** Alto acoplamento eferente com a base local (`sqflite`) e central (`PostgreSQL`) devido à natureza de um ORM autogerado pelo Serverpod.
+* **Módulo de Sincronização (Backend/Client):** Alto acoplamento eferente com a base local (`sqflite`) e central (`PostgreSQL`). Nota: o backend real acessa o Postgres via driver `postgres` puro (sem ORM); o motor de sincronização em si ainda roda só client-side e não está conectado ao backend real (ver `PROGRESS.md`).
 
 
 
@@ -97,7 +97,7 @@ sequenceDiagram
     participant P as App Paciente (Flutter)
     participant T as Traefik (Edge)
     participant M as Mosquitto (MQTT Broker)
-    participant S as Serverpod (Backend)
+    participant S as Backend (dart:io)
     participant ACS as App ACS (Flutter)
 
     P->>P: triggerAlert()
@@ -145,7 +145,7 @@ Para a máquina de estados do módulo de sincronização (risco crítico), model
 | Estado Atual ($Q_n$) | Evento ($\Sigma$) | Guarda ($G$) | Ação ($A$) | Próximo Estado ($Q_{n+1}$) |
 | --- | --- | --- | --- | --- |
 | $S_{Idle}$ | `Salvar Visita` | `Net == false` | Inserir no `sqflite` | $S_{LocalWrite}$ |
-| $S_{Idle}$ | `Salvar Visita` | `Net == true` | Enviar API Serverpod | $S_{Syncing}$ |
+| $S_{Idle}$ | `Salvar Visita` | `Net == true` | Enviar API HTTP do backend | $S_{Syncing}$ |
 | $S_{LocalWrite}$ | `Rede Detectada` | `Fila > 0` | Iniciar *Background Sync* | $S_{Syncing}$ |
 | $S_{Syncing}$ | `Timeout/Falha` | `Retry < Max` | *Exponential Backoff* | $S_{LocalWrite}$ |
 | $S_{Syncing}$ | `200 OK` | `Hash == Match` | *Commit* Local | $S_{Synced}$ |
@@ -186,7 +186,7 @@ stateDiagram-v2
 * O dispositivo móvel opera sob consistência **BASE** (*Basically Available, Soft state, Eventual consistency*), garantindo a alta disponibilidade exigida para o registro *offline*.
 
 
-* O banco central (`PostgreSQL` via Serverpod) opera sob **ACID** para a verdade absoluta dos dados (SSOT).
+* O banco central (`PostgreSQL`, acessado diretamente pelo backend) opera sob **ACID** para a verdade absoluta dos dados (SSOT).
 
 
 
@@ -196,7 +196,7 @@ stateDiagram-v2
 
 ## 6. Análise de Risco e Robustez (Caos)
 
-* **Ponto Único de Falha (SPOF):** O `Traefik` atua como roteador exclusivo para todos os serviços. Uma falha nesse *container* torna o cluster `Serverpod` e o *broker* `Mosquitto` inalcançáveis simultaneamente.
+* **Ponto Único de Falha (SPOF):** O `Traefik` é o roteador de borda planejado para produção. Na stack de desenvolvimento atual (`docker-compose.yml`), a porta do backend é publicada diretamente no host, sem passar pelo Traefik — ou seja, hoje uma falha do Traefik não derruba o backend, só a topologia de produção alvo (não implementada) teria esse SPOF.
 
 
 * **Mitigação (Circuit Breaker & Retry):** Transações `PostgreSQL` limitadas por *timeouts* estritos. Injeção de *Jitter* nos retentativas de sincronização dos clientes para evitar o *Thundering Herd Problem* (DDoS acidental quando todos os dispositivos ACS restabelecem o sinal de rede ao chegarem à UBS).

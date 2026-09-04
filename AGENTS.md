@@ -11,13 +11,18 @@ A intenção principal do projeto é apoiar dois fluxos centrais:
 ## Documentos fundamentais
 
 Antes de implementar qualquer funcionalidade, consulte primeiro estes arquivos:
-- [README.md](../README.md) – visão geral do produto e contexto de negócio;
-- [spec/idea.md](./idea.md) – conceito e objetivo do produto;
-- [spec/PRD_system.md](./PRD_system.md) – requisitos, JTBD, invariantes e métricas;
-- [spec/stack.md](./stack.md) – arquitetura de stack, infraestrutura e decisões técnicas;
-- [spec/ui_design.md](./ui_design.md) – linguagem visual e comportamento de UX;
-- [spec/ui_acs](./ui_acs) – protótipos das telas do ACS;
-- [spec/ui_paciente](./ui_paciente) – protótipos das telas do paciente.
+- [README.md](README.md) – visão geral do produto e contexto de negócio;
+- [spec/idea.md](spec/idea.md) – conceito e objetivo do produto;
+- [spec/PRD_system.md](spec/PRD_system.md) – requisitos, JTBD, invariantes e métricas;
+- [spec/stack.md](spec/stack.md) – arquitetura de stack, infraestrutura e decisões técnicas;
+- [spec/ui_design.md](spec/ui_design.md) – linguagem visual e comportamento de UX;
+- [spec/ui_acs](spec/ui_acs) – protótipos das telas do ACS;
+- [spec/ui_paciente](spec/ui_paciente) – protótipos das telas do paciente;
+- [CLAUDE.md](CLAUDE.md) – guia de arquitetura e comandos para agentes de IA, mais atualizado que este arquivo quanto ao estado de implementação;
+- [PROGRESS.md](PROGRESS.md) – status real dos milestones já implementados;
+- [backend/](backend) – backend Dart real (não Serverpod, ver nota abaixo);
+- [apps/acs](apps/acs) e [apps/patient](apps/patient) – apps Flutter implementados;
+- [docs/](docs) – documentação visual das telas dos apps.
 
 ## Regras de trabalho para agentes de IA
 
@@ -27,7 +32,7 @@ Antes de implementar qualquer funcionalidade, consulte primeiro estes arquivos:
 - O idioma principal do projeto e da documentação é o português.
 
 ### 2) Respeite a arquitetura definida
-- O produto combina Flutter no cliente, Serverpod no backend e PostgreSQL como persistência central.
+- O produto combina Flutter no cliente, um backend Dart puro (`dart:io`, sem framework — a decisão original de usar Serverpod nunca foi implementada) e PostgreSQL como persistência central.
 - O modelo offline-first é crítico; o ACS deve operar mesmo com rede instável.
 - O MQTT é usado para entrega de alertas de urgência em tempo real.
 - A sincronização local/central deve ser tratada como risco arquitetural principal.
@@ -56,12 +61,15 @@ Antes de implementar qualquer funcionalidade, consulte primeiro estes arquivos:
 
 ## Estrutura relevante do repositório
 
-- [spec/](./) — artefatos de produto, arquitetura, requisitos e protótipos;
-- [spec/ui_acs](./ui_acs) — fluxos do ACS;
-- [spec/ui_paciente](./ui_paciente) — fluxos do paciente.
+- [spec/](spec) — artefatos de produto, arquitetura, requisitos e protótipos;
+- [spec/ui_acs](spec/ui_acs) — fluxos do ACS;
+- [spec/ui_paciente](spec/ui_paciente) — fluxos do paciente;
+- [backend/](backend) — backend Dart real;
+- [apps/acs](apps/acs), [apps/patient](apps/patient) — apps Flutter reais;
+- [docs/](docs) — documentação visual das telas.
 
 ## Observações para agentes
 
-Este repositório ainda está em fase de definição de produto e arquitetura, com foco em especificação e prototipação. Não se assume uma base de código completa de app implementada no momento; qualquer código adicionado deve refletir as decisões capturadas em [spec/stack.md](./stack.md), [spec/PRD_system.md](./PRD_system.md) e [spec/ui_design.md](./ui_design.md).
+Este repositório já tem um protótipo funcional implementado (backend Dart, apps Flutter de paciente e ACS, CI validando os três), validado localmente via Docker Compose — não é mais só especificação/prototipação. Qualquer código adicionado deve refletir as decisões capturadas em [spec/stack.md](spec/stack.md), [spec/PRD_system.md](spec/PRD_system.md) e [spec/ui_design.md](spec/ui_design.md) quando ainda válidas, mas note que alguns detalhes desses documentos (em especial menções a "Serverpod" como framework de backend) descrevem a decisão arquitetural original e não o que foi de fato implementado — consulte [CLAUDE.md](CLAUDE.md) e [PROGRESS.md](PROGRESS.md) para o estado real de implementação antes de assumir que a spec reflete o código atual.
 
 Se a tarefa solicitar implementação, priorize a consistência com os documentos acima e mantenha o comportamento alinhado ao MVP definido no PRD.

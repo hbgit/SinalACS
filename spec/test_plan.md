@@ -1,4 +1,4 @@
-A arquitetura do SinalACS apresenta um desafio de engenharia fascinante: conciliar a latência ultrabaixa de alertas críticos (via MQTT) com a resiliência assíncrona de um sistema *offline-first* distribuído em zonas de sombra de rede. Como o projeto utiliza isomorfismo em Dart (Flutter e Serverpod), a estratégia de DevSecOps e Quality as Code (QaC) deve explorar essa homogeneidade para unificar pipelines, mitigar colisões de estado e garantir a segurança dos dados clínicos na borda (*edge*).
+A arquitetura do SinalACS apresenta um desafio de engenharia fascinante: conciliar a latência ultrabaixa de alertas críticos (via MQTT) com a resiliência assíncrona de um sistema *offline-first* distribuído em zonas de sombra de rede. Como o projeto utiliza Dart tanto no cliente (Flutter) quanto no backend, a estratégia de DevSecOps e Quality as Code (QaC) deve explorar essa homogeneidade para unificar pipelines, mitigar colisões de estado e garantir a segurança dos dados clínicos na borda (*edge*).
 
 ---
 
@@ -15,7 +15,7 @@ Para otimizar o *Lead Time* e erradicar testes *flaky*, a pirâmide de testes tr
 * **Testes E2E (10%):** Focados apenas nos Caminhos Críticos (ex: Disparo do Botão de Alerta e Cache de Territorialização).
 
 
-* **Contratos Orientados a Eventos:** O Serverpod já garante tipagem forte e quebra de compilação em falhas de contrato REST/RPC. O risco real está na mensageria assíncrona. Implementaremos validação de contratos **AsyncAPI** para os *payloads* do *broker* Mosquitto, garantindo que o publicador (Paciente) e o consumidor (ACS) falem a mesma linguagem sem corromper o *buffer* de mensagens.
+* **Contratos Orientados a Eventos:** A ausência de um ORM/codegen no backend (decisão original de usar Serverpod não foi implementada) significa que não há hoje quebra de compilação automática em falhas de contrato REST — isso é um risco a mitigar, não uma garantia existente. O risco real está na mensageria assíncrona. Implementaremos validação de contratos **AsyncAPI** para os *payloads* do *broker* Mosquitto, garantindo que o publicador (Paciente) e o consumidor (ACS) falem a mesma linguagem sem corromper o *buffer* de mensagens.
 
 
 
@@ -57,7 +57,7 @@ O tratamento de dados clínicos e PII (LGPD) em dispositivos de borda (*Edge IoT
 * **SAST e SCA Integrados:** Uso do `dart analyze` com regras customizadas restritas e **Trivy** no CI para escanear vulnerabilidades em dependências de terceiros e nas imagens Docker do Traefik, Mosquitto e PostgreSQL.
 
 
-* **Hardening de Infraestrutura e IoT:** O MQTT deve operar exclusivamente sobre TLS (MQTTS via WebSockets no Traefik). Os *containers* do Serverpod e Postgres não devem expor portas públicas, operando em redes virtuais isoladas no Pulumi.
+* **Hardening de Infraestrutura e IoT:** O MQTT deve operar exclusivamente sobre TLS (MQTTS via WebSockets no Traefik). Os *containers* do backend e Postgres não devem expor portas públicas, operando em redes virtuais isoladas no Pulumi. (Roadmap de produção — na stack de desenvolvimento atual a porta do backend é publicada diretamente, sem isolamento de rede.)
 
 
 
@@ -79,11 +79,13 @@ graph LR
 ```
 
 * **Métricas DORA e Justificativa Econômica:** Automatizar o *Quality Gate* reduz drasticamente a Taxa de Falha em Mudanças (*Change Failure Rate*). O ROI é imediato: falhas de sincronização na atenção primária geram retrabalho clínico em papel, destruindo a adoção do sistema pelos ACS. A automação garante o "custo do erro" próximo a zero em produção.
-* **Observabilidade e Resiliência:** Implementação de **OpenTelemetry** no Serverpod para gerar *traces* distribuídos. No aplicativo Flutter, os *logs* estruturados de falha no MQTT ou colisões de estado serão armazenados localmente e escoados para o servidor assim que houver rede, injetando *Jitter* no *backoff* exponencial para evitar o *Thundering Herd Problem*.
+* **Observabilidade e Resiliência:** Implementação de **OpenTelemetry** no backend para gerar *traces* distribuídos. No aplicativo Flutter, os *logs* estruturados de falha no MQTT ou colisões de estado serão armazenados localmente e escoados para o servidor assim que houver rede, injetando *Jitter* no *backoff* exponencial para evitar o *Thundering Herd Problem*.
 
 
 
-### Exemplo de Automação Híbrida (Testcontainers + Serverpod): `.github/workflows/ci.yml`
+### Exemplo de Automação Híbrida (Testcontainers): `.github/workflows/ci.yml`
+
+> Ilustrativo — não implementado como mostrado abaixo (não existe `docker-compose.test.yml` nem os caminhos de teste citados). Ver [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) para o pipeline real (4 jobs: `backend`, `backend-docker-build`, `patient-app`, `acs-app`) e [`backend/DEPLOY.md`](../backend/DEPLOY.md) para o runbook de deploy real.
 
 ```yaml
 name: SinalACS CI Pipeline
@@ -128,7 +130,7 @@ jobs:
 ### Roadmap de Implementação
 
 * **Semana 1 (Crítico - Fundação DevSecOps):** Implementação da pipeline CI (Mermaid acima), configuração do analisador estático Dart, criptografia SQLCipher no cache local e *Golden Tests* para o *Dark Mode*.
-* **Mês 1 (Estrutural - Testes e Resiliência):** Setup do Testcontainers para validar integração do Serverpod. Implementação de TDD cobrindo 100% das transições da FSM e do algoritmo de Manchester.
+* **Mês 1 (Estrutural - Testes e Resiliência):** Setup do Testcontainers para validar integração do backend. Implementação de TDD cobrindo 100% das transições da FSM e do algoritmo de Manchester.
 * **Trimestre 1 (Otimização - IA e CRDTs):** Pesquisa e prototipação de migração da sincronização customizada para CRDTs (*Conflict-free Replicated Data Types*) em preparação para a v1.5. Deploy de ferramentas DAST (OWASP ZAP) e painéis de observabilidade baseados no OpenTelemetry.
 
 ---
@@ -150,6 +152,8 @@ A configuração do cliente Dart (`mqtt_client`) e do Mosquitto deve ser tratada
 * **Keep-Alive e LWT (Last Will and Testament):** A pipeline deve testar a morte súbita do aplicativo do Paciente. O Mosquitto deve emitir um LWT informando ao backend que o dispositivo parou de reportar telemetria.
 
 ## 2. Engenharia de Caos com Toxiproxy
+
+> Ilustrativo — não implementado. O Toxiproxy e o `docker-compose.test.yml` abaixo não existem no repositório atual; a simulação de caos de rede hoje é feita client-side, em `apps/acs/lib/core/services/network_chaos_simulator.dart` (ver `apps/acs/test/network_chaos_test.dart`), sem integração com a esteira CI.
 
 Não podemos confiar em testes que apenas desligam a interface de rede do emulador. Utilizaremos o **Toxiproxy** (criado pelo Shopify) integrado ao `docker-compose` da esteira CI para manipular o túnel TCP entre o aplicativo Flutter e o Traefik/Mosquitto.
 

@@ -428,7 +428,7 @@ A estratégia de conformidade adota os princípios de **Privacy by Design** e **
 | Propriedade | Descrição |
 |-------------|-----------|
 | **Objetivo** | Proteger dados em repouso e em trânsito contra acesso não autorizado. |
-| **Implementação** | TLS 1.3 para todas as comunicações (Flutter ↔ Serverpod), AES-256 para dados locais no `sqflite`, criptografia de campos sensíveis (CPF, condições crônicas) no banco central PostgreSQL. |
+| **Implementação** | TLS para todas as comunicações (Flutter ↔ backend), AES-256 para dados locais no `sqflite`, criptografia de campos sensíveis (CPF, condições crônicas) no banco central PostgreSQL. |
 | **Riscos Mitigados** | Interceptação de dados (MITM), violação de dados por acesso físico ao dispositivo, vazamento em caso de comprometimento do banco de dados. |
 
 ### 5.2 Controle de Acesso por Perfil (RBAC)
@@ -551,7 +551,7 @@ A estratégia de conformidade adota os princípios de **Privacy by Design** e **
 | Propriedade | Descrição |
 |-------------|-----------|
 | **Descrição** | Todas as APIs devem exigir autenticação (JWT) e implementar controle de acesso (RBAC) para garantir que apenas usuários autorizados acessem dados específicos. |
-| **Implementação** | Serverpod com middleware de autenticação; validação de permissões por endpoint; tokens JWT com expiração curta; refresh token seguro. |
+| **Implementação** | Middleware de autenticação na camada de aplicação do backend; validação de permissões por endpoint; tokens JWT com expiração curta; refresh token seguro. Ainda não implementado no código atual — hoje só existe um endpoint de login de desenvolvimento sem autenticação institucional real (ver `CLAUDE.md`). |
 | **Critério de Aceite** | ✓ Todas as APIs autenticadas<br>✓ Testes de acesso não autorizado<br>✓ RBAC implementado e testado |
 
 ### LGPD-RT02 - Criptografia de Dados Sensíveis no Banco
@@ -559,7 +559,7 @@ A estratégia de conformidade adota os princípios de **Privacy by Design** e **
 | Propriedade | Descrição |
 |-------------|-----------|
 | **Descrição** | Dados sensíveis (CPF, condições crônicas, histórico de saúde) devem ser criptografados em repouso no PostgreSQL. |
-| **Implementação** | Extensão `pgcrypto` para criptografia de colunas; chave de criptografia gerenciada pelo Serverpod; rotação de chaves documentada. |
+| **Implementação** | Extensão `pgcrypto` para criptografia de colunas; chave de criptografia gerenciada pela aplicação; rotação de chaves documentada. Ainda não implementado no código atual (ver GitHub issue de análise LGPD dos dados armazenados). |
 | **Critério de Aceite** | ✓ Dados sensíveis criptografados<br>✓ Chave não exposta em logs<br>✓ Plano de rotação de chaves documentado |
 
 ### LGPD-RT03 - Logs Estruturados e Imutáveis

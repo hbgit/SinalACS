@@ -31,6 +31,8 @@ O SinalACS transforma dados clínicos estruturados em ação imediata através d
 3. **Mensageria IoT de Baixa Latência:** Protocolo MQTT para entrega de alertas críticos mesmo em redes 3G instáveis.
 4. **Isomorfismo Dart:** Type-safety end-to-end entre Flutter e Serverpod, eliminando discrepâncias de contrato.
 
+> **Nota de implementação:** Serverpod foi a decisão de stack original para o backend (ver item 4 acima e as diversas referências a Serverpod ao longo deste documento), mas nunca foi implementada — o backend real (`backend/`) é um `HttpServer` `dart:io` puro, sem ORM, sem geração de código e sem framework. As seções abaixo que mencionam Serverpod refletem o documento de arquitetura original/decisão registrada, não o estado implementado. Ver [`CLAUDE.md`](../CLAUDE.md) e [`backend/README.md`](../backend/README.md) para a arquitetura real.
+
 ### 1.2 Hipóteses e Invariantes de Negócio
 
 **Hipóteses a Validar (MVP):**
@@ -119,7 +121,7 @@ events:
 │  │                    INFRAESTRUTURA (INFRA)                            │  │
 │  ├───────────────────────────────────────────────────────────────────────┤  │
 │  │  MQTT Broker (Mosquitto)  │  Edge Gateway (Traefik)                  │  │
-│  │  PostgreSQL (ACID)        │  Serverpod (Backend ORM)                │  │
+│  │  PostgreSQL (ACID)        │  Backend API (Dart, dart:io)            │  │
 │  │  Pulumi (IaC)             │  OpenTelemetry (Observabilidade)        │  │
 │  └───────────────────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────────────────┘
@@ -133,9 +135,9 @@ events:
 | **RF02** | Onboarding via QR Code (ACS gera, paciente escaneia) | Paciente | M | Médio | Câmera, `qr_code_scanner` |
 | **RF03** | Botão de Alerta de Urgência (MQTT) | Paciente | M | **Crítico** | Mosquitto, GPS |
 | **RF04** | Formulário de Triagem Estruturada (árvore de decisão) | Paciente | S | Médio | Nenhuma (local) |
-| **RF05** | Painel de Status de Solicitação | Paciente | S | Baixo | API Serverpod |
+| **RF05** | Painel de Status de Solicitação | Paciente | S | Baixo | API HTTP do backend |
 | **RF06** | Lembretes de Saúde (Local Notifications) | Paciente | S | Médio | `flutter_local_notifications` |
-| **RF07** | Login Institucional (Matrícula/Senha) | ACS | S | Médio | Serverpod Auth |
+| **RF07** | Login Institucional (Matrícula/Senha) | ACS | S | Médio | Auth própria no backend (hoje só existe login de desenvolvimento) |
 | **RF08** | Territorialização (Download de Microárea para cache) | ACS | M | Médio | `sqflite`, API |
 | **RF09** | Dashboard de Priorização Dinâmica (FSM de fila) | ACS | M | Alto | Motor de Triagem |
 | **RF10** | Mapa Interativo (Google Maps) | ACS | M | Médio | `google_maps_flutter` |
@@ -143,7 +145,7 @@ events:
 | **RF12** | Geofencing (Check-in Passivo) | ACS | M | Médio | GPS em segundo plano |
 | **RF13** | Escalonamento para SAMU/UBS (`url_launcher`) | ACS | S | Baixo | `url_launcher` |
 | **RF14** | Avisos Segmentados à Comunidade (Push) | ACS | M | Médio | FCM/APNs |
-| **RF15** | Sincronização Bidirecional (Local ↔ Central) | Sistema | **L** | **Crítico** | ORM Serverpod |
+| **RF15** | Sincronização Bidirecional (Local ↔ Central) | Sistema | **L** | **Crítico** | Driver `postgres` no backend (sem ORM); ainda não conectado ao cliente |
 | **RF16** | Motor de Triagem Determinístico (Manchester) | Sistema | **L** | **Crítico** | Nenhuma (local) |
 | **RF17** | Logs de Auditoria e Conformidade (LGPD) | Sistema | M | Alto | PostgreSQL |
 | **RF18** | Dark Mode Nativo (Modo Escuro) | UI | S | Baixo | Tema Flutter |
@@ -152,7 +154,7 @@ events:
 | **RNF03** | Criptografia AES-256 em repouso | Sistema | - | **Crítico** | SQLCipher |
 | **RNF04** | TLS 1.3 em todas as comunicações | Sistema | - | **Crítico** | Traefik, cert-manager |
 | **RNF05** | Acessibilidade WCAG 2.1 Nível AA | UI | - | Médio | `accessibility_test` |
-| **RNF06** | RBAC (Role-Based Access Control) | Sistema | - | Alto | Serverpod Auth |
+| **RNF06** | RBAC (Role-Based Access Control) | Sistema | - | Alto | Auth própria no backend (ainda não implementado) |
 
 ### 2.3 Modelagem de Fluxos Críticos como Máquinas de Estados (FSM)
 
@@ -539,7 +541,7 @@ Cada registro possui um campo `version` (inteiro incremental). No momento da sin
 | **Repudiation** | ACS nega ter registrado visita | Logs imutáveis (append-only) com timestamp e assinatura |
 | **Information Disclosure** | Vazamento de PII no dispositivo | SQLCipher (AES-256) para `sqflite` |
 | **Denial of Service** | Ataque de inundação MQTT | Rate limiting no Mosquitto; firewall no Edge Gateway |
-| **Elevation of Privilege** | ACS acessa dados de outra microárea | RBAC rigoroso no Serverpod; verificação em todas as queries |
+| **Elevation of Privilege** | ACS acessa dados de outra microárea | RBAC rigoroso na camada de aplicação do backend; verificação em todas as queries |
 
 #### 4.2.2 Gestão de Identidade (RBAC/ABAC)
 
@@ -557,8 +559,10 @@ Cada registro possui um campo `version` (inteiro incremental). No momento da sin
 
 **Política ABAC (Atribute-Based Access Control):**
 
+Exemplo ilustrativo da decisão original de stack (estilo Serverpod), sem correspondência com o código real do repositório:
+
 ```dart
-// Exemplo de verificação no Serverpod
+// Exemplo ilustrativo — não corresponde ao código real (o backend não usa Serverpod/ORM)
 Future<bool> canAccessPatient(Session session, String patientId) async {
   final user = await session.auth.getUser();
   switch (user.role) {
@@ -586,7 +590,7 @@ Future<bool> canAccessPatient(Session session, String patientId) async {
 | **App Flutter (Local)** | SQLCipher (AES-256-GCM) | Chave derivada do PIN/Biometria (PBKDF2) | Proteção contra acesso físico ao dispositivo |
 | **App Flutter (Cache)** | SQLCipher | Chave rotativa (mudança de dispositivo) | Dados sensíveis em repouso |
 | **Comunicação App ↔ Traefik** | TLS 1.3 | Certificado Let's Encrypt (auto-renovável) | Proteção contra MITM |
-| **Comunicação Traefik ↔ Serverpod** | TLS 1.3 | Certificado interno (mTLS) | Segurança na rede interna |
+| **Comunicação Traefik ↔ Backend** | TLS 1.3 | Certificado interno (mTLS) | Segurança na rede interna |
 | **PostgreSQL (SSOT)** | pgcrypto (AES-256) | Chave gerenciada por Vault/HashiCorp | Proteção contra acesso ao banco |
 | **Logs de Auditoria** | Assinatura Hash Chain | - | Integridade e não-repúdio |
 
@@ -662,6 +666,8 @@ Future<bool> canAccessPatient(Session session, String patientId) async {
 
 **docker-compose.dev.yml (recorte):**
 
+> Ilustrativo, não é o `docker-compose.yml` real do repositório (que já existe e roda um serviço de backend Dart puro, ainda nomeado `serverpod` no arquivo por legado, mas sem o framework em uso — ver [`docker-compose.yml`](../docker-compose.yml)).
+
 ```yaml
 version: '3.8'
 services:
@@ -728,10 +734,10 @@ ollama pull deepseek-coder:6.7b-instruct
 
 | Contexto | Protocolo | Justificativa |
 |----------|-----------|---------------|
-| **App ↔ Serverpod** | REST (JSON) via HTTP/2 | Simplicidade, tipagem forte via Serverpod ORM |
+| **App ↔ Backend** | REST (JSON) via HTTP/1.1 | Simplicidade; sem ORM/tipagem gerada — contrato mantido manualmente |
 | **App ↔ Mosquitto** | MQTT sobre WebSockets (WSS) | Baixa latência, QoS, suporte a redes instáveis |
-| **Serverpod ↔ PostgreSQL** | PostgreSQL Wire Protocol (libpq) | ORM nativo do Serverpod |
-| **Traefik ↔ Services** | gRPC (para Serverpod) + WebSockets (MQTT) | Performance, multiplexação |
+| **Backend ↔ PostgreSQL** | PostgreSQL Wire Protocol (libpq) | Acesso direto via driver `postgres`, sem ORM |
+| **Traefik ↔ Services** | REST (para o backend) + WebSockets (MQTT) | Performance |
 
 **Versionamento de API:**
 
@@ -742,10 +748,12 @@ ollama pull deepseek-coder:6.7b-instruct
 | **Deprecação** | `Deprecation: true` + `Sunset: Fri, 31 Dec 2027` |
 | **Backward Compatibility** | Novos campos são opcionais (nullable) |
 
-**Exemplo de Contrato REST (Serverpod):**
+**Exemplo de Contrato REST (estilo Serverpod, ilustrativo):**
+
+> Exemplo ilustrativo da decisão original de stack — não corresponde ao código real do repositório (`backend/lib/src/domain/entities/visit_entity.dart` é uma classe de dados simples, sem ORM/anotações). Ver `CLAUDE.md` para a estrutura real do backend.
 
 ```dart
-// backend/lib/src/models/visit.dart
+// Exemplo ilustrativo — não é um arquivo real do repositório
 class Visit extends Table {
   @Id()
   int? id;
@@ -833,7 +841,7 @@ channels:
 | Camada | Cobertura Alvo | Foco Principal | Ferramentas |
 |--------|----------------|----------------|-------------|
 | **Unitários** | 70% | Motor de Triagem (MCDC), FSM de Sincronização, Modelos | `flutter_test`, `mockito`, `bloc_test` |
-| **Integração** | 20% | `sqflite` ↔ Serverpod ORM, MQTT Pub/Sub, Concorrência | Testcontainers, Toxiproxy |
+| **Integração** | 20% | `sqflite` ↔ backend (sem ORM), MQTT Pub/Sub, Concorrência | Testcontainers, Toxiproxy |
 | **E2E (Ponta-a-Ponta)** | 10% | Caminho Crítico: Alerta → Dashboard → Visita | `integration_test`, App Actions |
 
 **Testes de Unidade (FSM):**
@@ -873,8 +881,10 @@ void main() {
 
 **Testes de Integração com Testcontainers:**
 
+> Ilustrativo — este teste de sincronização não existe no repositório (o motor de sync ainda não está conectado ao backend real). Os testes de integração reais do backend hoje cobrem o ciclo de alerta vermelho contra Postgres/MQTT reais — ver `backend/test/red_alert_http_integration_test.dart`.
+
 ```dart
-// test/integration/serverpod_sync_test.dart
+// Exemplo ilustrativo — não é um arquivo real do repositório
 void main() {
   late PostgreSQLContainer postgres;
   late MQTTServer mosquitto;
@@ -901,7 +911,7 @@ void main() {
     await SyncEngine.instance.syncAll();
     
     // Verifica no PostgreSQL
-    final syncedVisits = await ServerpodClient.instance.visits.findMany();
+    final syncedVisits = await BackendClient.instance.visits.findMany();
     expect(syncedVisits.length, 1);
     expect(syncedVisits.first.status, 'SCHEDULED');
   });
@@ -966,7 +976,7 @@ void main() {
 | **App ACS** | Dashboard Dinâmico (Priorização) | Lista ordenada: Vermelho → Amarelo → Verde |
 | **App ACS** | Registro Básico de Visitas (Offline) | Registro salvo localmente e sincronizado em background |
 | **Infra** | MQTT Broker (Mosquitto) | 100 dispositivos simultâneos, latência < 500ms |
-| **Infra** | PostgreSQL + Serverpod | Migração automática via ORM, logs estruturados |
+| **Infra** | PostgreSQL + backend Dart | Migrations SQL versionadas aplicadas manualmente/via CI, logs estruturados |
 
 **Fora do Escopo MVP (v1.5+):**
 - Mapa Interativo (Google Maps)
@@ -981,7 +991,7 @@ void main() {
 
 | Milestone | Entregável | Critério de Aceite |
 |-----------|------------|-------------------|
-| M1.1 | Docker-Compose local (Stack completa) | `docker-compose up` sobe PostgreSQL, Mosquitto, Serverpod, Traefik |
+| M1.1 | Docker-Compose local (Stack completa) | `docker-compose up` sobe PostgreSQL, Mosquitto, backend Dart, Traefik |
 | M1.2 | CI Pipeline básica | `flutter test` + `dart analyze` rodam no GitHub Actions |
 | M1.3 | Motor de Triagem (algoritmo) | Cobertura 100% MCDC; classifica 50 cenários de teste |
 | M1.4 | FSM de Sincronização | Testes unitários validam transições, conflitos e erros |
@@ -1059,7 +1069,7 @@ Impacto ↑
 | **Transações ACID** | Suporte completo | Suporte limitado | **A** - Registro de visita é transacional |
 | **Consultas Complexas** | Joins otimizados | Aggregation mais lenta | **A** - Dashboard requer joins |
 | **Escalabilidade** | Vertical (máx 100k pacientes) | Horizontal (sharding) | **B** - MVP não escala horizontalmente |
-| **Isomorfismo Dart** | Serverpod ORM nativo | Driver não oficial | **A** - Menos código boilerplate |
+| **Isomorfismo Dart** | Driver `postgres` oficial (Dart) | Driver não oficial | **A** - Linguagem única no cliente e no backend |
 
 **Decisão:** **PostgreSQL**. A necessidade de integridade referencial e consistência ACID supera a flexibilidade do NoSQL. O volume de dados (5k pacientes, 500 visitas/dia) é perfeitamente atendido por um banco relacional.
 
@@ -1128,6 +1138,8 @@ Impacto ↑
 ## 8. Anexos Técnicos
 
 ### A1. Docker-Compose de Produção (recorte)
+
+> Roadmap — nenhum ambiente de produção com esta topologia (Pulumi/VPS/redes privadas) existe hoje. O serviço abaixo mantém o nome `serverpod` do documento original; a imagem real seria construída a partir do backend Dart puro (ver `backend/Dockerfile`, já multi-stage com `dart compile exe`). Para um caminho de deploy que já existe e funciona hoje (piloto free-tier), ver [`backend/DEPLOY.md`](../backend/DEPLOY.md).
 
 ```yaml
 version: '3.8'
@@ -1278,7 +1290,6 @@ class TestDataSeeder {
 | Componente | Versão | Documentação |
 |------------|--------|--------------|
 | Flutter | 3.24.0 | https://flutter.dev/docs |
-| Serverpod | 1.2.0 | https://docs.serverpod.dev |
 | PostgreSQL | 15 | https://www.postgresql.org/docs/15/ |
 | Mosquitto | 2.0 | https://mosquitto.org/documentation/ |
 | SQLCipher | 4.5.0 | https://www.zetetic.net/sqlcipher/ |
