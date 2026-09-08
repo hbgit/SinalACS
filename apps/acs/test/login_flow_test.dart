@@ -13,7 +13,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Painel de Priorização'), findsOneWidget);
-    expect(find.text('Maria Souza'), findsOneWidget);
+    expect(find.text('Maria Oliveira, 72a'), findsOneWidget);
     expect(find.text('Risco: Vermelho'), findsOneWidget);
   });
 
