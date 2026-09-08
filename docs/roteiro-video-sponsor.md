@@ -156,7 +156,7 @@ Somente dados sintéticos — que é o que os apps já usam. Nenhuma tela com da
 ## Preparação antes de gravar
 
 1. **Card do dashboard do ACS.** `apps/acs/lib/app/app.dart` passava `'Maria Souza'` como segundo nome, sem rótulo, no card de Maria Oliveira — em tela liam-se dois nomes diferentes no mesmo paciente, justamente no plano mais importante do vídeo. Já corrigido; confirmar visualmente antes de filmar.
-2. **Captura da tela de emergência do paciente.** `docs/screenshots/patient/01-emergencia.png` é byte-idêntico a `docs/screenshots/acs/01-login.png` — é o login do ACS salvo no lugar errado. Recapturar no emulador, já que `docs/telas-paciente.md` referencia essa imagem.
+2. **Captura do login do ACS.** `docs/screenshots/acs/01-login.png` e `docs/screenshots/patient/01-emergencia.png` são byte-idênticos, e o conteúdo real das duas é a **tela de alerta de urgência do paciente** ("SINALACS PACIENTE / Alerta de urgência"). Ou seja, `patient/01-emergencia.png` está correto e é `acs/01-login.png` que guarda a imagem errada — não existe captura do login institucional do ACS. Recapturar no emulador e corrigir `docs/telas-acs.md`, que descreve essa imagem como a tela de entrada com matrícula e senha.
 3. **Banco preparado para o bloco 5.** Aplicar as três migrações em ordem e depois `seeds/development.sql` (ver `CLAUDE.md`). Sem o seed, o `POST /v1/alerts/red` falha por violação de chave estrangeira em `alerts.patient_id` e o bloco técnico não grava.
 
 ---
