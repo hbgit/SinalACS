@@ -1,0 +1,5 @@
+### Dados obrigatórios ausentes ou inválidos.
+### Substitui o ArgumentError que o servidor dart:io mapeava para HTTP 400.
+exception: AlertValidationException
+fields:
+  message: String

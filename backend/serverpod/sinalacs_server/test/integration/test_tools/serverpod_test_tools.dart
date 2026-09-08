@@ -16,6 +16,12 @@ import 'package:serverpod/serverpod.dart' as _i2;
 import 'dart:async' as _i3;
 import 'package:serverpod_auth_core_server/serverpod_auth_core_server.dart'
     as _i4;
+import 'package:sinalacs_server/src/generated/api/red_alert_result.dart' as _i5;
+import 'package:sinalacs_server/src/generated/api/alert_ack_result.dart' as _i6;
+import 'package:sinalacs_server/src/generated/api/development_login_result.dart'
+    as _i7;
+import 'package:sinalacs_server/src/generated/api/service_health.dart' as _i8;
+import 'package:sinalacs_server/src/generated/api/triage_result.dart' as _i9;
 import 'package:sinalacs_server/src/generated/protocol.dart';
 import 'package:sinalacs_server/src/generated/endpoints.dart';
 export 'package:serverpod_test/serverpod_test_public_exports.dart';
@@ -133,6 +139,14 @@ class TestEndpoints {
   late final _EmailIdpEndpoint emailIdp;
 
   late final _JwtRefreshEndpoint jwtRefresh;
+
+  late final _AlertsEndpoint alerts;
+
+  late final _AuthEndpoint auth;
+
+  late final _HealthEndpoint health;
+
+  late final _TriageEndpoint triage;
 }
 
 class _InternalTestEndpoints extends TestEndpoints
@@ -147,6 +161,22 @@ class _InternalTestEndpoints extends TestEndpoints
       serializationManager,
     );
     jwtRefresh = _JwtRefreshEndpoint(
+      endpoints,
+      serializationManager,
+    );
+    alerts = _AlertsEndpoint(
+      endpoints,
+      serializationManager,
+    );
+    auth = _AuthEndpoint(
+      endpoints,
+      serializationManager,
+    );
+    health = _HealthEndpoint(
+      endpoints,
+      serializationManager,
+    );
+    triage = _TriageEndpoint(
       endpoints,
       serializationManager,
     );
@@ -463,6 +493,226 @@ class _JwtRefreshEndpoint {
                   _localCallContext.arguments,
                 )
                 as _i3.Future<_i4.AuthSuccess>);
+        return _localReturnValue;
+      } finally {
+        await _localUniqueSession.close();
+      }
+    });
+  }
+}
+
+class _AlertsEndpoint {
+  _AlertsEndpoint(
+    this._endpointDispatch,
+    this._serializationManager,
+  );
+
+  final _i2.EndpointDispatch _endpointDispatch;
+
+  final _i2.SerializationManager _serializationManager;
+
+  _i3.Future<_i5.RedAlertResult> createRedAlert(
+    _i1.TestSessionBuilder sessionBuilder, {
+    required String accessToken,
+    required String idempotencyKey,
+    required String locationHash,
+  }) async {
+    return _i1.callAwaitableFunctionAndHandleExceptions(() async {
+      var _localUniqueSession =
+          (sessionBuilder as _i1.InternalTestSessionBuilder).internalBuild(
+            endpoint: 'alerts',
+            method: 'createRedAlert',
+          );
+      try {
+        var _localCallContext = await _endpointDispatch.getMethodCallContext(
+          createSessionCallback: (_) => _localUniqueSession,
+          endpointPath: 'alerts',
+          methodName: 'createRedAlert',
+          parameters: _i1.testObjectToJson({
+            'accessToken': accessToken,
+            'idempotencyKey': idempotencyKey,
+            'locationHash': locationHash,
+          }),
+          serializationManager: _serializationManager,
+        );
+        var _localReturnValue =
+            await (_localCallContext.method.call(
+                  _localUniqueSession,
+                  _localCallContext.arguments,
+                )
+                as _i3.Future<_i5.RedAlertResult>);
+        return _localReturnValue;
+      } finally {
+        await _localUniqueSession.close();
+      }
+    });
+  }
+
+  _i3.Future<_i6.AlertAckResult> acknowledge(
+    _i1.TestSessionBuilder sessionBuilder, {
+    required String accessToken,
+    required String alertId,
+  }) async {
+    return _i1.callAwaitableFunctionAndHandleExceptions(() async {
+      var _localUniqueSession =
+          (sessionBuilder as _i1.InternalTestSessionBuilder).internalBuild(
+            endpoint: 'alerts',
+            method: 'acknowledge',
+          );
+      try {
+        var _localCallContext = await _endpointDispatch.getMethodCallContext(
+          createSessionCallback: (_) => _localUniqueSession,
+          endpointPath: 'alerts',
+          methodName: 'acknowledge',
+          parameters: _i1.testObjectToJson({
+            'accessToken': accessToken,
+            'alertId': alertId,
+          }),
+          serializationManager: _serializationManager,
+        );
+        var _localReturnValue =
+            await (_localCallContext.method.call(
+                  _localUniqueSession,
+                  _localCallContext.arguments,
+                )
+                as _i3.Future<_i6.AlertAckResult>);
+        return _localReturnValue;
+      } finally {
+        await _localUniqueSession.close();
+      }
+    });
+  }
+}
+
+class _AuthEndpoint {
+  _AuthEndpoint(
+    this._endpointDispatch,
+    this._serializationManager,
+  );
+
+  final _i2.EndpointDispatch _endpointDispatch;
+
+  final _i2.SerializationManager _serializationManager;
+
+  _i3.Future<_i7.DevelopmentLoginResult> developmentLogin(
+    _i1.TestSessionBuilder sessionBuilder, {
+    required String role,
+  }) async {
+    return _i1.callAwaitableFunctionAndHandleExceptions(() async {
+      var _localUniqueSession =
+          (sessionBuilder as _i1.InternalTestSessionBuilder).internalBuild(
+            endpoint: 'auth',
+            method: 'developmentLogin',
+          );
+      try {
+        var _localCallContext = await _endpointDispatch.getMethodCallContext(
+          createSessionCallback: (_) => _localUniqueSession,
+          endpointPath: 'auth',
+          methodName: 'developmentLogin',
+          parameters: _i1.testObjectToJson({'role': role}),
+          serializationManager: _serializationManager,
+        );
+        var _localReturnValue =
+            await (_localCallContext.method.call(
+                  _localUniqueSession,
+                  _localCallContext.arguments,
+                )
+                as _i3.Future<_i7.DevelopmentLoginResult>);
+        return _localReturnValue;
+      } finally {
+        await _localUniqueSession.close();
+      }
+    });
+  }
+}
+
+class _HealthEndpoint {
+  _HealthEndpoint(
+    this._endpointDispatch,
+    this._serializationManager,
+  );
+
+  final _i2.EndpointDispatch _endpointDispatch;
+
+  final _i2.SerializationManager _serializationManager;
+
+  _i3.Future<_i8.ServiceHealth> check(
+    _i1.TestSessionBuilder sessionBuilder,
+  ) async {
+    return _i1.callAwaitableFunctionAndHandleExceptions(() async {
+      var _localUniqueSession =
+          (sessionBuilder as _i1.InternalTestSessionBuilder).internalBuild(
+            endpoint: 'health',
+            method: 'check',
+          );
+      try {
+        var _localCallContext = await _endpointDispatch.getMethodCallContext(
+          createSessionCallback: (_) => _localUniqueSession,
+          endpointPath: 'health',
+          methodName: 'check',
+          parameters: _i1.testObjectToJson({}),
+          serializationManager: _serializationManager,
+        );
+        var _localReturnValue =
+            await (_localCallContext.method.call(
+                  _localUniqueSession,
+                  _localCallContext.arguments,
+                )
+                as _i3.Future<_i8.ServiceHealth>);
+        return _localReturnValue;
+      } finally {
+        await _localUniqueSession.close();
+      }
+    });
+  }
+}
+
+class _TriageEndpoint {
+  _TriageEndpoint(
+    this._endpointDispatch,
+    this._serializationManager,
+  );
+
+  final _i2.EndpointDispatch _endpointDispatch;
+
+  final _i2.SerializationManager _serializationManager;
+
+  _i3.Future<_i9.TriageResult> evaluate(
+    _i1.TestSessionBuilder sessionBuilder, {
+    required bool chestPain,
+    required bool difficultyBreathing,
+    required bool fever,
+    required bool persistentVomiting,
+    required bool bleeding,
+    required bool severeWeakness,
+  }) async {
+    return _i1.callAwaitableFunctionAndHandleExceptions(() async {
+      var _localUniqueSession =
+          (sessionBuilder as _i1.InternalTestSessionBuilder).internalBuild(
+            endpoint: 'triage',
+            method: 'evaluate',
+          );
+      try {
+        var _localCallContext = await _endpointDispatch.getMethodCallContext(
+          createSessionCallback: (_) => _localUniqueSession,
+          endpointPath: 'triage',
+          methodName: 'evaluate',
+          parameters: _i1.testObjectToJson({
+            'chestPain': chestPain,
+            'difficultyBreathing': difficultyBreathing,
+            'fever': fever,
+            'persistentVomiting': persistentVomiting,
+            'bleeding': bleeding,
+            'severeWeakness': severeWeakness,
+          }),
+          serializationManager: _serializationManager,
+        );
+        var _localReturnValue =
+            await (_localCallContext.method.call(
+                  _localUniqueSession,
+                  _localCallContext.arguments,
+                )
+                as _i3.Future<_i9.TriageResult>);
         return _localReturnValue;
       } finally {
         await _localUniqueSession.close();

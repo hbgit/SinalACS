@@ -1,0 +1,10 @@
+### Resultado da confirmação de recebimento.
+###
+### O servidor dart:io distinguia 200 de 404 pelo status HTTP; no RPC essa
+### distinção vira o campo acknowledged: false significa que não havia alerta
+### com esse id na microárea do ACS.
+class: AlertAckResult
+fields:
+  alertId: String
+  acknowledged: bool
+  status: AlertStatus?

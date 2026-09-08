@@ -1,0 +1,5 @@
+### Papel ou território incompatível com a operação (INV-01, INV-02).
+### Substitui o StateError que o servidor dart:io mapeava para HTTP 403.
+exception: AlertPermissionException
+fields:
+  message: String

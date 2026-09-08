@@ -1,0 +1,7 @@
+### O broker MQTT não está conectado, então o alerta não pôde ser publicado.
+### Substitui o MqttUnavailableException que o servidor dart:io mapeava para
+### HTTP 503. Um alerta vermelho nunca é aceito silenciosamente sem entrega
+### (INV-03): o erro é propagado ao chamador.
+exception: AlertDispatchUnavailableException
+fields:
+  message: String

@@ -1,0 +1,6 @@
+### Resultado da criação de um alerta vermelho.
+### Equivale ao corpo {alert_id, status} que o servidor dart:io devolvia com 202.
+class: RedAlertResult
+fields:
+  alertId: String
+  status: AlertStatus

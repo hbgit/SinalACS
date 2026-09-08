@@ -1,0 +1,5 @@
+### Token de desenvolvimento. Não é autenticação institucional.
+class: DevelopmentLoginResult
+fields:
+  accessToken: String
+  tokenType: String

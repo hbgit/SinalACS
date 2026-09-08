@@ -1,0 +1,6 @@
+### Endpoint desabilitado por configuração. Preserva a semântica do
+### ENABLE_DEV_LOGIN, que respondia 404 (e não 403) quando desligado, para não
+### revelar a existência da rota.
+exception: EndpointDisabledException
+fields:
+  message: String

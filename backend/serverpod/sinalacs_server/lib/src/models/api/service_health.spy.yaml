@@ -1,0 +1,10 @@
+### Forma exata do antigo GET /health. O HEALTHCHECK do Dockerfile e o runbook
+### de free-tier dependem destes três campos, então a forma é preservada.
+### Sempre responde ok assim que o servidor sobe, independente do estado do
+### broker e do banco — hosts free-tier hibernam e precisam responder mesmo com
+### dependências fora do ar.
+class: ServiceHealth
+fields:
+  status: String
+  mqttConnected: bool
+  dbConnected: bool

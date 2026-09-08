@@ -9,3 +9,12 @@ emailIdp:
   - hasAccount:
 jwtRefresh:
   - refreshAccessToken:
+alerts:
+  - createRedAlert:
+  - acknowledge:
+auth:
+  - developmentLogin:
+health:
+  - check:
+triage:
+  - evaluate:

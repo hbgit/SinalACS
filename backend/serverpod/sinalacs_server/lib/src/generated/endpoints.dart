@@ -14,10 +14,14 @@
 import 'package:serverpod/serverpod.dart' as _i1;
 import '../auth/email_idp_endpoint.dart' as _i2;
 import '../auth/jwt_refresh_endpoint.dart' as _i3;
+import '../endpoints/alerts_endpoint.dart' as _i4;
+import '../endpoints/auth_endpoint.dart' as _i5;
+import '../endpoints/health_endpoint.dart' as _i6;
+import '../endpoints/triage_endpoint.dart' as _i7;
 import 'package:serverpod_auth_idp_server/serverpod_auth_idp_server.dart'
-    as _i4;
+    as _i8;
 import 'package:serverpod_auth_core_server/serverpod_auth_core_server.dart'
-    as _i5;
+    as _i9;
 
 class Endpoints extends _i1.EndpointDispatch {
   @override
@@ -33,6 +37,30 @@ class Endpoints extends _i1.EndpointDispatch {
         ..initialize(
           server,
           'jwtRefresh',
+          null,
+        ),
+      'alerts': _i4.AlertsEndpoint()
+        ..initialize(
+          server,
+          'alerts',
+          null,
+        ),
+      'auth': _i5.AuthEndpoint()
+        ..initialize(
+          server,
+          'auth',
+          null,
+        ),
+      'health': _i6.HealthEndpoint()
+        ..initialize(
+          server,
+          'health',
+          null,
+        ),
+      'triage': _i7.TriageEndpoint()
+        ..initialize(
+          server,
+          'triage',
           null,
         ),
     };
@@ -240,9 +268,166 @@ class Endpoints extends _i1.EndpointDispatch {
         ),
       },
     );
-    modules['serverpod_auth_idp'] = _i4.Endpoints()
+    connectors['alerts'] = _i1.EndpointConnector(
+      name: 'alerts',
+      endpoint: endpoints['alerts']!,
+      methodConnectors: {
+        'createRedAlert': _i1.MethodConnector(
+          name: 'createRedAlert',
+          params: {
+            'accessToken': _i1.ParameterDescription(
+              name: 'accessToken',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'idempotencyKey': _i1.ParameterDescription(
+              name: 'idempotencyKey',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'locationHash': _i1.ParameterDescription(
+              name: 'locationHash',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async =>
+                  (endpoints['alerts'] as _i4.AlertsEndpoint).createRedAlert(
+                    session,
+                    accessToken: params['accessToken'],
+                    idempotencyKey: params['idempotencyKey'],
+                    locationHash: params['locationHash'],
+                  ),
+        ),
+        'acknowledge': _i1.MethodConnector(
+          name: 'acknowledge',
+          params: {
+            'accessToken': _i1.ParameterDescription(
+              name: 'accessToken',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'alertId': _i1.ParameterDescription(
+              name: 'alertId',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async =>
+                  (endpoints['alerts'] as _i4.AlertsEndpoint).acknowledge(
+                    session,
+                    accessToken: params['accessToken'],
+                    alertId: params['alertId'],
+                  ),
+        ),
+      },
+    );
+    connectors['auth'] = _i1.EndpointConnector(
+      name: 'auth',
+      endpoint: endpoints['auth']!,
+      methodConnectors: {
+        'developmentLogin': _i1.MethodConnector(
+          name: 'developmentLogin',
+          params: {
+            'role': _i1.ParameterDescription(
+              name: 'role',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async =>
+                  (endpoints['auth'] as _i5.AuthEndpoint).developmentLogin(
+                    session,
+                    role: params['role'],
+                  ),
+        ),
+      },
+    );
+    connectors['health'] = _i1.EndpointConnector(
+      name: 'health',
+      endpoint: endpoints['health']!,
+      methodConnectors: {
+        'check': _i1.MethodConnector(
+          name: 'check',
+          params: {},
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async =>
+                  (endpoints['health'] as _i6.HealthEndpoint).check(session),
+        ),
+      },
+    );
+    connectors['triage'] = _i1.EndpointConnector(
+      name: 'triage',
+      endpoint: endpoints['triage']!,
+      methodConnectors: {
+        'evaluate': _i1.MethodConnector(
+          name: 'evaluate',
+          params: {
+            'chestPain': _i1.ParameterDescription(
+              name: 'chestPain',
+              type: _i1.getType<bool>(),
+              nullable: false,
+            ),
+            'difficultyBreathing': _i1.ParameterDescription(
+              name: 'difficultyBreathing',
+              type: _i1.getType<bool>(),
+              nullable: false,
+            ),
+            'fever': _i1.ParameterDescription(
+              name: 'fever',
+              type: _i1.getType<bool>(),
+              nullable: false,
+            ),
+            'persistentVomiting': _i1.ParameterDescription(
+              name: 'persistentVomiting',
+              type: _i1.getType<bool>(),
+              nullable: false,
+            ),
+            'bleeding': _i1.ParameterDescription(
+              name: 'bleeding',
+              type: _i1.getType<bool>(),
+              nullable: false,
+            ),
+            'severeWeakness': _i1.ParameterDescription(
+              name: 'severeWeakness',
+              type: _i1.getType<bool>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async => (endpoints['triage'] as _i7.TriageEndpoint).evaluate(
+                session,
+                chestPain: params['chestPain'],
+                difficultyBreathing: params['difficultyBreathing'],
+                fever: params['fever'],
+                persistentVomiting: params['persistentVomiting'],
+                bleeding: params['bleeding'],
+                severeWeakness: params['severeWeakness'],
+              ),
+        ),
+      },
+    );
+    modules['serverpod_auth_idp'] = _i8.Endpoints()
       ..initializeEndpoints(server);
-    modules['serverpod_auth_core'] = _i5.Endpoints()
+    modules['serverpod_auth_core'] = _i9.Endpoints()
       ..initializeEndpoints(server);
   }
 }

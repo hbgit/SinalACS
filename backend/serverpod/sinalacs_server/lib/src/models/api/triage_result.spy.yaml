@@ -1,0 +1,5 @@
+### Classificação determinística produzida pelo TriageEngine.
+### Nunca é editável pela pessoa usuária nem pelo ACS (INV-02).
+class: TriageResult
+fields:
+  risk: RiskLevel
