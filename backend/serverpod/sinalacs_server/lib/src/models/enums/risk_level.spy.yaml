@@ -1,0 +1,8 @@
+### Classificação de risco clínico. Determinística: nunca alterável
+### manualmente no fluxo de triagem (INV-02 do PRD).
+enum: RiskLevel
+serialized: byName
+values:
+  - red
+  - yellow
+  - green

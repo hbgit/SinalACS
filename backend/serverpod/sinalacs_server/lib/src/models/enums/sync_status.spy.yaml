@@ -1,0 +1,8 @@
+### Estado de sincronização offline-first, espelha a SyncFsm.
+enum: SyncStatus
+serialized: byName
+values:
+  - pending
+  - synced
+  - conflict
+  - error

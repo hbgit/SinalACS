@@ -1,0 +1,9 @@
+### Ciclo de vida de um alerta. Um alerta vermelho nunca pode ser
+### descartado silenciosamente (INV-03 do PRD).
+enum: AlertStatus
+serialized: byName
+values:
+  - pending
+  - acknowledged
+  - resolved
+  - escalated

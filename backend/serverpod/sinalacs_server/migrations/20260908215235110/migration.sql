@@ -32,6 +32,176 @@ volatile;
 --
 -- ACTION CREATE TABLE
 --
+CREATE TABLE "acs" (
+    "id" uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    "enrollmentId" text NOT NULL,
+    "ubsId" uuid NOT NULL,
+    "active" boolean NOT NULL,
+    "lastSyncAt" timestamp without time zone
+);
+
+-- Indexes
+CREATE INDEX "acs_ubs_idx" ON "acs" USING btree ("ubsId");
+
+--
+-- ACTION CREATE TABLE
+--
+CREATE TABLE "alert_deliveries" (
+    "id" uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    "alertId" uuid NOT NULL,
+    "acsId" uuid NOT NULL,
+    "acknowledgedAt" timestamp without time zone NOT NULL
+);
+
+-- Indexes
+CREATE UNIQUE INDEX "alert_deliveries_alert_acs_key" ON "alert_deliveries" USING btree ("alertId", "acsId");
+
+--
+-- ACTION CREATE TABLE
+--
+CREATE TABLE "alerts" (
+    "id" uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    "patientId" uuid NOT NULL,
+    "acsId" uuid,
+    "microAreaId" uuid,
+    "triggeredAt" timestamp without time zone NOT NULL,
+    "receivedAt" timestamp without time zone,
+    "respondedAt" timestamp without time zone,
+    "acknowledgedAt" timestamp without time zone,
+    "riskLevel" text NOT NULL,
+    "locationHash" text NOT NULL,
+    "status" text NOT NULL,
+    "mqttTopic" text NOT NULL,
+    "deviceId" text NOT NULL,
+    "retryCount" bigint NOT NULL,
+    "version" bigint NOT NULL
+);
+
+-- Indexes
+CREATE INDEX "alerts_micro_area_status_idx" ON "alerts" USING btree ("microAreaId", "status", "triggeredAt");
+
+--
+-- ACTION CREATE TABLE
+--
+CREATE TABLE "audit_logs" (
+    "id" uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    "userId" uuid NOT NULL,
+    "actionType" text NOT NULL,
+    "resourceType" text NOT NULL,
+    "resourceId" uuid,
+    "timestamp" timestamp without time zone NOT NULL,
+    "ipHash" text NOT NULL,
+    "result" text NOT NULL
+);
+
+--
+-- ACTION CREATE TABLE
+--
+CREATE TABLE "consent_logs" (
+    "id" uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    "userId" uuid NOT NULL,
+    "purpose" text NOT NULL,
+    "action" text NOT NULL,
+    "version" text NOT NULL,
+    "timestamp" timestamp without time zone NOT NULL,
+    "ipHash" text NOT NULL,
+    "userAgent" text NOT NULL,
+    "signature" text NOT NULL
+);
+
+--
+-- ACTION CREATE TABLE
+--
+CREATE TABLE "micro_areas" (
+    "id" uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    "name" text NOT NULL,
+    "ubsId" uuid NOT NULL,
+    "geoJsonBoundary" text NOT NULL
+);
+
+-- Indexes
+CREATE INDEX "micro_areas_ubs_idx" ON "micro_areas" USING btree ("ubsId");
+
+--
+-- ACTION CREATE TABLE
+--
+CREATE TABLE "patients" (
+    "id" uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    "emergencyContact" text NOT NULL,
+    "isChronic" boolean NOT NULL,
+    "chronicConditions" json NOT NULL,
+    "lastLocationHash" text,
+    "lastTriageAt" timestamp without time zone
+);
+
+--
+-- ACTION CREATE TABLE
+--
+CREATE TABLE "triage_sessions" (
+    "id" uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    "patientId" uuid NOT NULL,
+    "answers" json NOT NULL,
+    "resultRisk" text NOT NULL,
+    "resultDisplay" text NOT NULL,
+    "createdAt" timestamp without time zone NOT NULL,
+    "deviceId" text NOT NULL
+);
+
+--
+-- ACTION CREATE TABLE
+--
+CREATE TABLE "ubs" (
+    "id" uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    "name" text NOT NULL,
+    "address" text NOT NULL,
+    "city" text NOT NULL,
+    "state" text NOT NULL
+);
+
+--
+-- ACTION CREATE TABLE
+--
+CREATE TABLE "users" (
+    "id" uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    "cpfHash" text NOT NULL,
+    "name" text NOT NULL,
+    "birthDate" timestamp without time zone NOT NULL,
+    "role" text NOT NULL,
+    "microAreaId" uuid,
+    "createdAt" timestamp without time zone NOT NULL,
+    "updatedAt" timestamp without time zone NOT NULL
+);
+
+-- Indexes
+CREATE INDEX "users_cpf_hash_idx" ON "users" USING btree ("cpfHash");
+CREATE INDEX "users_micro_area_idx" ON "users" USING btree ("microAreaId");
+
+--
+-- ACTION CREATE TABLE
+--
+CREATE TABLE "visits" (
+    "id" uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    "patientId" uuid NOT NULL,
+    "acsId" uuid NOT NULL,
+    "scheduledAt" timestamp without time zone NOT NULL,
+    "startedAt" timestamp without time zone,
+    "completedAt" timestamp without time zone,
+    "status" text NOT NULL,
+    "riskLevelBefore" text NOT NULL,
+    "riskLevelAfter" text,
+    "notes" json NOT NULL,
+    "syncStatus" text NOT NULL,
+    "localId" uuid NOT NULL,
+    "syncAt" timestamp without time zone,
+    "version" bigint NOT NULL
+);
+
+-- Indexes
+CREATE UNIQUE INDEX "visits_local_id_key" ON "visits" USING btree ("localId");
+
+--
+-- ACTION CREATE TABLE
+--
 CREATE TABLE "serverpod_cloud_storage" (
     "id" bigserial PRIMARY KEY,
     "storageId" text NOT NULL,
@@ -505,6 +675,84 @@ CREATE TABLE "serverpod_auth_core_user" (
 --
 -- ACTION CREATE FOREIGN KEY
 --
+ALTER TABLE ONLY "alert_deliveries"
+    ADD CONSTRAINT "alert_deliveries_fk_0"
+    FOREIGN KEY("alertId")
+    REFERENCES "alerts"("id")
+    ON DELETE NO ACTION
+    ON UPDATE NO ACTION;
+ALTER TABLE ONLY "alert_deliveries"
+    ADD CONSTRAINT "alert_deliveries_fk_1"
+    FOREIGN KEY("acsId")
+    REFERENCES "acs"("id")
+    ON DELETE NO ACTION
+    ON UPDATE NO ACTION;
+
+--
+-- ACTION CREATE FOREIGN KEY
+--
+ALTER TABLE ONLY "alerts"
+    ADD CONSTRAINT "alerts_fk_0"
+    FOREIGN KEY("patientId")
+    REFERENCES "patients"("id")
+    ON DELETE NO ACTION
+    ON UPDATE NO ACTION;
+ALTER TABLE ONLY "alerts"
+    ADD CONSTRAINT "alerts_fk_1"
+    FOREIGN KEY("acsId")
+    REFERENCES "acs"("id")
+    ON DELETE NO ACTION
+    ON UPDATE NO ACTION;
+
+--
+-- ACTION CREATE FOREIGN KEY
+--
+ALTER TABLE ONLY "audit_logs"
+    ADD CONSTRAINT "audit_logs_fk_0"
+    FOREIGN KEY("userId")
+    REFERENCES "users"("id")
+    ON DELETE NO ACTION
+    ON UPDATE NO ACTION;
+
+--
+-- ACTION CREATE FOREIGN KEY
+--
+ALTER TABLE ONLY "consent_logs"
+    ADD CONSTRAINT "consent_logs_fk_0"
+    FOREIGN KEY("userId")
+    REFERENCES "users"("id")
+    ON DELETE NO ACTION
+    ON UPDATE NO ACTION;
+
+--
+-- ACTION CREATE FOREIGN KEY
+--
+ALTER TABLE ONLY "triage_sessions"
+    ADD CONSTRAINT "triage_sessions_fk_0"
+    FOREIGN KEY("patientId")
+    REFERENCES "patients"("id")
+    ON DELETE NO ACTION
+    ON UPDATE NO ACTION;
+
+--
+-- ACTION CREATE FOREIGN KEY
+--
+ALTER TABLE ONLY "visits"
+    ADD CONSTRAINT "visits_fk_0"
+    FOREIGN KEY("patientId")
+    REFERENCES "patients"("id")
+    ON DELETE NO ACTION
+    ON UPDATE NO ACTION;
+ALTER TABLE ONLY "visits"
+    ADD CONSTRAINT "visits_fk_1"
+    FOREIGN KEY("acsId")
+    REFERENCES "acs"("id")
+    ON DELETE NO ACTION
+    ON UPDATE NO ACTION;
+
+--
+-- ACTION CREATE FOREIGN KEY
+--
 ALTER TABLE ONLY "serverpod_log"
     ADD CONSTRAINT "serverpod_log_fk_0"
     FOREIGN KEY("sessionLogId")
@@ -711,9 +959,9 @@ ALTER TABLE ONLY "serverpod_auth_core_session"
 -- MIGRATION VERSION FOR sinalacs
 --
 INSERT INTO "serverpod_migrations" ("module", "version", "timestamp")
-    VALUES ('sinalacs', '20260908203818674', now())
+    VALUES ('sinalacs', '20260908215235110', now())
     ON CONFLICT ("module")
-    DO UPDATE SET "version" = '20260908203818674', "timestamp" = now();
+    DO UPDATE SET "version" = '20260908215235110', "timestamp" = now();
 
 --
 -- MIGRATION VERSION FOR serverpod

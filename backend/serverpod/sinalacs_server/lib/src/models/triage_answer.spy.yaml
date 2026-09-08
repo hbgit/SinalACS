@@ -1,0 +1,6 @@
+### Uma resposta de triagem. Não é tabela: é serializada dentro de
+### TriageSession.answers como JSON.
+class: TriageAnswer
+fields:
+  question: String
+  answer: String

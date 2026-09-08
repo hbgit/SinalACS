@@ -1,0 +1,15 @@
+### Agente Comunitário de Saúde.
+###
+### Mesma decisão de chave aplicada em Patient: o id desta tabela é o UUID do
+### usuário, fornecido na inserção.
+class: Acs
+table: acs
+fields:
+  id: UuidValue?, defaultPersist=random
+  enrollmentId: String
+  ubsId: UuidValue
+  active: bool
+  lastSyncAt: DateTime?
+indexes:
+  acs_ubs_idx:
+    fields: ubsId

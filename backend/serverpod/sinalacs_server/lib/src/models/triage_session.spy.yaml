@@ -1,0 +1,12 @@
+### Sessão de triagem estruturada. resultRisk é produzido pelo TriageEngine
+### de forma determinística e não é editável (INV-02).
+class: TriageSession
+table: triage_sessions
+fields:
+  id: UuidValue?, defaultPersist=random
+  patientId: UuidValue, relation(parent=patients)
+  answers: List<TriageAnswer>
+  resultRisk: RiskLevel
+  resultDisplay: String
+  createdAt: DateTime
+  deviceId: String

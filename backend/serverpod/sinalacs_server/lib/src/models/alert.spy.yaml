@@ -1,0 +1,26 @@
+### Alerta de urgência disparado pelo paciente.
+###
+### Campos microAreaId, acknowledgedAt e version vêm da migração v1.2.0 e
+### estavam ausentes da AlertEntity antiga — o modelo segue o SQL, não a
+### entidade Dart que havia divergido.
+class: Alert
+table: alerts
+fields:
+  id: UuidValue?, defaultPersist=random
+  patientId: UuidValue, relation(parent=patients)
+  acsId: UuidValue?, relation(parent=acs)
+  microAreaId: UuidValue?
+  triggeredAt: DateTime
+  receivedAt: DateTime?
+  respondedAt: DateTime?
+  acknowledgedAt: DateTime?
+  riskLevel: RiskLevel
+  locationHash: String
+  status: AlertStatus
+  mqttTopic: String
+  deviceId: String
+  retryCount: int
+  version: int
+indexes:
+  alerts_micro_area_status_idx:
+    fields: microAreaId, status, triggeredAt

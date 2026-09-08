@@ -1,0 +1,17 @@
+### Dados clínicos do paciente.
+###
+### O schema original usava herança por chave compartilhada: user_id era
+### simultaneamente PK e FK para users. O ORM do Serverpod exige PK de coluna
+### única chamada id e só sabe referenciar o id do pai, então o id desta tabela
+### É o UUID do usuário — não há coluna userId separada. Isso preserva a
+### semântica atual de patient_id e os UUIDs fixos do seed, dos quais o
+### dev-login depende. Consequência: o id é fornecido na inserção, não gerado.
+class: Patient
+table: patients
+fields:
+  id: UuidValue?, defaultPersist=random
+  emergencyContact: String
+  isChronic: bool
+  chronicConditions: List<String>
+  lastLocationHash: String?
+  lastTriageAt: DateTime?

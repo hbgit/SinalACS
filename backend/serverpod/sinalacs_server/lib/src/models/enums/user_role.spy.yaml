@@ -1,0 +1,8 @@
+### Papel institucional do usuário.
+enum: UserRole
+serialized: byName
+values:
+  - patient
+  - acs
+  - coordinator
+  - admin

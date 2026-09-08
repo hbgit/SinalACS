@@ -1,0 +1,11 @@
+### Microárea: a unidade de territorialização que delimita o acesso do ACS.
+class: MicroArea
+table: micro_areas
+fields:
+  id: UuidValue?, defaultPersist=random
+  name: String
+  ubsId: UuidValue
+  geoJsonBoundary: String
+indexes:
+  micro_areas_ubs_idx:
+    fields: ubsId

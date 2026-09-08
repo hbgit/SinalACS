@@ -1,0 +1,9 @@
+### Unidade Básica de Saúde.
+class: Ubs
+table: ubs
+fields:
+  id: UuidValue?, defaultPersist=random
+  name: String
+  address: String
+  city: String
+  state: String

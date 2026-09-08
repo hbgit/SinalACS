@@ -1,0 +1,12 @@
+### Trilha de auditoria de acesso a dados sensíveis. Append-only.
+class: AuditLog
+table: audit_logs
+fields:
+  id: UuidValue?, defaultPersist=random
+  userId: UuidValue, relation(parent=users)
+  actionType: String
+  resourceType: String
+  resourceId: UuidValue?
+  timestamp: DateTime
+  ipHash: String
+  result: String

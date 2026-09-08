@@ -1,0 +1,18 @@
+### Usuário institucional. O CPF nunca é armazenado em claro — só o hash.
+class: User
+table: users
+fields:
+  id: UuidValue?, defaultPersist=random
+  cpfHash: String
+  name: String
+  birthDate: DateTime
+  role: UserRole
+  ### Territorialização: restringe o acesso do ACS ao seu território (INV-01).
+  microAreaId: UuidValue?
+  createdAt: DateTime
+  updatedAt: DateTime
+indexes:
+  users_cpf_hash_idx:
+    fields: cpfHash
+  users_micro_area_idx:
+    fields: microAreaId

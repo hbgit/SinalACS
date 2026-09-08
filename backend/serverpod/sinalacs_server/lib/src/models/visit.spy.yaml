@@ -1,0 +1,23 @@
+### Visita domiciliar. Registrada offline e sincronizada depois.
+class: Visit
+table: visits
+fields:
+  id: UuidValue?, defaultPersist=random
+  patientId: UuidValue, relation(parent=patients)
+  acsId: UuidValue, relation(parent=acs)
+  scheduledAt: DateTime
+  startedAt: DateTime?
+  completedAt: DateTime?
+  status: String
+  riskLevelBefore: RiskLevel
+  riskLevelAfter: RiskLevel?
+  notes: Map<String, String>
+  syncStatus: SyncStatus
+  ### Identificador gerado no dispositivo, usado para deduplicar na sincronização.
+  localId: UuidValue
+  syncAt: DateTime?
+  version: int
+indexes:
+  visits_local_id_key:
+    fields: localId
+    unique: true

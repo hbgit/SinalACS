@@ -1,0 +1,13 @@
+### Registro de consentimento LGPD. Append-only.
+class: ConsentLog
+table: consent_logs
+fields:
+  id: UuidValue?, defaultPersist=random
+  userId: UuidValue, relation(parent=users)
+  purpose: String
+  action: String
+  version: String
+  timestamp: DateTime
+  ipHash: String
+  userAgent: String
+  signature: String

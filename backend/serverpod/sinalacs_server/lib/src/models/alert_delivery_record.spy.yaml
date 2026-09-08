@@ -1,0 +1,18 @@
+### Confirmação de recebimento de um alerta por um ACS.
+###
+### O schema original usava PK composta (alert_id, acs_id), que o ORM do
+### Serverpod não suporta: virou id próprio mais um índice UNIQUE no par,
+### preservando a mesma garantia de unicidade.
+###
+### Distinto de AlertDelivery, que é o DTO de fio MQTT e continua escrito à mão.
+class: AlertDeliveryRecord
+table: alert_deliveries
+fields:
+  id: UuidValue?, defaultPersist=random
+  alertId: UuidValue, relation(parent=alerts)
+  acsId: UuidValue, relation(parent=acs)
+  acknowledgedAt: DateTime
+indexes:
+  alert_deliveries_alert_acs_key:
+    fields: alertId, acsId
+    unique: true
