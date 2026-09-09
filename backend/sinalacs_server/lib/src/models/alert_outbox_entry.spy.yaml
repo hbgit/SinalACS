@@ -1,0 +1,28 @@
+### Outbox transacional de entrega de alertas.
+###
+### A intenção de publicar é gravada na MESMA transação do alerta; a publicação
+### no broker acontece depois do commit. Isso fecha as duas janelas que existiam
+### quando o publish rodava dentro da transação: publicar e falhar o commit
+### entregava um alerta sem linha no banco, deixando o ACK sem o que atualizar.
+###
+### Um alerta vermelho nunca pode ser perdido nem entregue sem registro
+### (INV-03), então a entrada só é marcada como publicada depois da publicação.
+class: AlertOutboxEntry
+table: alert_outbox
+fields:
+  id: UuidValue?, defaultPersist=random
+  alertId: UuidValue, relation(parent=alerts)
+  ### Tópico MQTT de destino, resolvido no momento do enfileiramento.
+  topic: String
+  ### Envelope já serializado por AlertDelivery.toJson().
+  payload: String
+  createdAt: DateTime
+  ### Nulo enquanto pendente; carimbado após a publicação.
+  publishedAt: DateTime?
+  attempts: int
+  ### Quando a próxima tentativa é elegível. Cresce com backoff exponencial.
+  nextAttemptAt: DateTime
+  lastError: String?
+indexes:
+  alert_outbox_pending_idx:
+    fields: publishedAt, nextAttemptAt

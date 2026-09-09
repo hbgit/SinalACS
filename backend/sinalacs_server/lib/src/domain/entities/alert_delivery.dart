@@ -30,6 +30,34 @@ class AlertDelivery {
         'location_hash': locationHash,
         'triggered_at': triggeredAt.toUtc().toIso8601String(),
       });
+
+  /// Reidrata um envelope gravado no outbox.
+  ///
+  /// Devolve `null` para versão incompatível ou payload malformado, mesma
+  /// política de [AlertDeliveryAck.tryParse] — o drenador não deve derrubar a
+  /// varredura inteira por causa de uma entrada corrompida.
+  static AlertDelivery? tryParse(String body) {
+    try {
+      final json = jsonDecode(body) as Map<String, dynamic>;
+      if (json['version'] != 1) return null;
+
+      final triggeredAtRaw = json['triggered_at'] as String?;
+      if (triggeredAtRaw == null) return null;
+
+      return AlertDelivery(
+        alertId: json['alert_id'] as String,
+        patientId: json['patient_id'] as String,
+        microAreaId: json['micro_area_id'] as String,
+        riskLevel: json['risk_level'] as String,
+        locationHash: json['location_hash'] as String,
+        triggeredAt: DateTime.parse(triggeredAtRaw),
+      );
+    } on FormatException {
+      return null;
+    } on TypeError {
+      return null;
+    }
+  }
 }
 
 class AlertDeliveryAck {

@@ -4,3 +4,7 @@ class: RedAlertResult
 fields:
   alertId: String
   status: AlertStatus
+  ### Falso quando o broker estava indisponível e a entrega ficou pendente no
+  ### outbox. O alerta está gravado de qualquer forma e será publicado pela
+  ### varredura assim que o broker voltar.
+  published: bool

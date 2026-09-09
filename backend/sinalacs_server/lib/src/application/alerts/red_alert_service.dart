@@ -25,6 +25,38 @@ abstract interface class AlertStore {
   Future<void> rememberIdempotencyKey(RedAlertRecord record);
 }
 
+/// Fila durável de entregas pendentes.
+///
+/// O enfileiramento participa da transação do alerta; a publicação acontece
+/// depois do commit. É o que impede que um alerta seja entregue sem registro,
+/// ou registrado sem nunca ser entregue.
+abstract interface class AlertOutbox {
+  /// Registra a intenção de publicar. Chamado dentro da transação do alerta.
+  Future<void> enqueue(AlertDelivery alert);
+
+  /// Reclama entregas vencidas para publicação, marcando a tentativa.
+  Future<List<PendingDelivery>> claimDue({int limit});
+
+  Future<void> markPublished(String entryId);
+
+  Future<void> markFailed(String entryId, String error, DateTime nextAttemptAt);
+}
+
+/// Uma entrega reclamada do outbox, pronta para publicação.
+class PendingDelivery {
+  const PendingDelivery({
+    required this.entryId,
+    required this.delivery,
+    required this.attempts,
+  });
+
+  final String entryId;
+  final AlertDelivery delivery;
+
+  /// Tentativas já realizadas, incluindo esta. Alimenta o backoff.
+  final int attempts;
+}
+
 class RedAlertRecord {
   const RedAlertRecord({required this.delivery, required this.idempotencyKey});
 
@@ -34,15 +66,15 @@ class RedAlertRecord {
 
 class RedAlertService {
   RedAlertService({
-    required AlertPublisher publisher,
     required AlertStore store,
+    required AlertOutbox outbox,
     DateTime Function()? clock,
-  })  : _publisher = publisher,
-        _store = store,
+  })  : _store = store,
+        _outbox = outbox,
         _clock = clock ?? DateTime.now;
 
-  final AlertPublisher _publisher;
   final AlertStore _store;
+  final AlertOutbox _outbox;
   final DateTime Function() _clock;
 
   Future<RedAlertRecord> create({
@@ -81,9 +113,11 @@ class RedAlertService {
     // se a publicação falhar, nada fica no banco, e a chave não é consumida —
     // o cliente pode retentar de verdade em vez de receber sucesso por um
     // alerta que nunca foi publicado (INV-03).
+    // As três escritas formam uma unidade. A publicação NÃO acontece aqui: o
+    // outbox guarda a intenção, e a entrega vira consequência do commit.
     await _store.save(alert, deviceId: user.deviceId);
     await _store.rememberIdempotencyKey(record);
-    _publisher.publish(alert);
+    await _outbox.enqueue(alert);
     return record;
   }
 

@@ -70,6 +70,34 @@ void run(List<String> args) async {
   // hosts free-tier hibernam e precisam responder ao healthcheck mesmo sem
   // broker. Era o comportamento do servidor dart:io e é preservado aqui.
   unawaited(_connectAlertDispatcher(pod));
+
+  // Rede de segurança do outbox: publica o que ficou para trás quando o broker
+  // estava fora, ou quando o processo caiu entre o commit e a publicação.
+  _startOutboxSweeper(pod);
+}
+
+/// Intervalo da varredura do outbox.
+///
+/// Curto porque atrasa a entrega de um alerta vermelho apenas no caminho de
+/// exceção — o caminho feliz publica logo após o commit, no próprio endpoint.
+const _outboxSweepInterval = Duration(seconds: 10);
+
+void _startOutboxSweeper(Serverpod pod) {
+  Timer.periodic(_outboxSweepInterval, (_) async {
+    final session = await pod.createSession(enableLogging: false);
+    try {
+      final published =
+          await AlertRuntime.instance.dispatcherFor(session).drainOnce();
+      if (published > 0) {
+        session.log('Outbox: $published entrega(s) publicada(s) na varredura.');
+      }
+    } catch (error, stackTrace) {
+      // A varredura nunca pode morrer: é o que garante a entrega eventual.
+      stderr.writeln('Falha na varredura do outbox: $error\n$stackTrace');
+    } finally {
+      await session.close();
+    }
+  });
 }
 
 /// Liga o dispatcher MQTT e encaminha os ACKs recebidos para o serviço de

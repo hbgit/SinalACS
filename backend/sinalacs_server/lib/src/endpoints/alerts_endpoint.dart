@@ -1,7 +1,6 @@
 import 'package:serverpod/serverpod.dart';
 import 'package:sinalacs_server/src/application/auth/development_auth_service.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
-import 'package:sinalacs_server/src/infrastructure/mqtt/mqtt_alert_dispatcher.dart';
 import 'package:sinalacs_server/src/runtime/alert_runtime.dart';
 
 /// Ciclo do alerta vermelho.
@@ -35,6 +34,9 @@ class AlertsEndpoint extends Endpoint {
       // formam uma unidade só: se a publicação falhar, a transação desfaz as
       // escritas e a chave não é consumida, então o cliente pode retentar de
       // verdade em vez de receber sucesso por um alerta nunca publicado.
+      // Gravar o alerta, registrar a chave de idempotência e enfileirar a
+      // entrega formam uma unidade. A publicação NÃO participa: acontece logo
+      // depois do commit, para que um alerta nunca seja entregue sem registro.
       final record = await session.db.transaction((transaction) async {
         final service =
             AlertRuntime.instance.serviceFor(session, transaction: transaction);
@@ -44,14 +46,21 @@ class AlertsEndpoint extends Endpoint {
           locationHash: locationHash,
         );
       });
+
+      // Tentativa imediata, para não custar latência no caminho feliz. Se o
+      // broker estiver fora, isto devolve false sem lançar e a varredura
+      // periódica assume a entrega.
+      final published = await AlertRuntime.instance
+          .dispatcherFor(session)
+          .publishNow(record.delivery.alertId);
+
       return RedAlertResult(
         alertId: record.delivery.alertId,
         status: AlertStatus.pending,
+        published: published,
       );
     } on ArgumentError catch (error) {
       throw AlertValidationException(message: '${error.message}');
-    } on MqttUnavailableException catch (error) {
-      throw AlertDispatchUnavailableException(message: error.message);
     } on StateError catch (error) {
       throw AlertPermissionException(message: error.message);
     }

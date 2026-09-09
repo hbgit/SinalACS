@@ -18,8 +18,14 @@ import 'test_tools/serverpod_test_tools.dart';
 class _RecordingPublisher implements AlertPublisher {
   final List<AlertDelivery> published = [];
 
+  /// Quando verdadeiro, simula o broker fora do ar.
+  bool offline = false;
+
   @override
-  void publish(AlertDelivery alert) => published.add(alert);
+  void publish(AlertDelivery alert) {
+    if (offline) throw Exception('broker indisponível');
+    published.add(alert);
+  }
 }
 
 /// Mesmos UUIDs sintéticos do seed de desenvolvimento, dos quais o dev-login
@@ -193,6 +199,8 @@ void main() {
       );
 
       expect(criado.status, AlertStatus.pending);
+      // A publicação acontece depois do commit, ainda dentro da chamada.
+      expect(criado.published, isTrue);
       expect(publisher.published, hasLength(1));
       expect(
         publisher.published.single.topic,
@@ -222,6 +230,58 @@ void main() {
       expect(confirmado.acknowledged, isTrue);
       expect(confirmado.status, AlertStatus.acknowledged);
       expect(await AlertDeliveryRecord.db.find(session), hasLength(1));
+    });
+
+    test('com o broker fora, o alerta é gravado e a entrega fica pendente',
+        () async {
+      final session = sessionBuilder.build();
+      await _seed(session);
+      publisher.offline = true;
+
+      final token = await endpoints.auth
+          .developmentLogin(sessionBuilder, role: 'patient');
+
+      final criado = await endpoints.alerts.createRedAlert(
+        sessionBuilder,
+        accessToken: token.accessToken,
+        idempotencyKey: 'outbox-1',
+        locationHash: 'hash-outbox',
+      );
+
+      // O contrato mudou: o alerta é aceito e enfileirado em vez de recusado.
+      expect(criado.published, isFalse);
+      expect(publisher.published, isEmpty);
+
+      // Mas está gravado — é isso que o risco invertido quebrava.
+      expect(await Alert.db.find(session), hasLength(1));
+      final pendentes = await AlertOutboxEntry.db.find(session);
+      expect(pendentes, hasLength(1));
+      expect(pendentes.single.publishedAt, isNull);
+
+      // A tentativa imediata falhou e adiou a entrada pelo backoff, então a
+      // varredura só a reclama depois da janela — daí o relógio adiantado.
+      publisher.offline = false;
+      final publicadas = await AlertRuntime.instance
+          .dispatcherFor(session,
+              clock: () => DateTime.now().toUtc().add(const Duration(minutes: 5)))
+          .drainOnce();
+
+      expect(publicadas, 1);
+      expect(publisher.published, hasLength(1));
+      expect(publisher.published.single.alertId, criado.alertId);
+
+      final depois = await AlertOutboxEntry.db.find(session);
+      expect(depois.single.publishedAt, isNotNull);
+
+      // E o ACK encontra a linha, que era o que se perdia antes.
+      final tokenAcs =
+          await endpoints.auth.developmentLogin(sessionBuilder, role: 'acs');
+      final confirmado = await endpoints.alerts.acknowledge(
+        sessionBuilder,
+        accessToken: tokenAcs.accessToken,
+        alertId: criado.alertId,
+      );
+      expect(confirmado.acknowledged, isTrue);
     });
 
     test('a mesma chave com outra localização é rejeitada', () async {

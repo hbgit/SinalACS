@@ -19,8 +19,9 @@ import 'package:serverpod/serverpod.dart' as _i1;
 /// entre instâncias, de modo que um reenvio após queda gerava alerta duplicado.
 /// Persistir a chave torna a garantia durável e válida em qualquer réplica.
 ///
-/// A linha é gravada na mesma transação do alerta: se a publicação falhar,
-/// ambas desaparecem e o cliente pode retentar de verdade.
+/// A linha é gravada na mesma transação do alerta e da entrada de outbox. As
+/// três escritas são atômicas; a publicação no broker acontece depois do
+/// commit, para que um alerta nunca seja entregue sem registro.
 abstract class AlertIdempotencyKey
     implements _i1.TableRow<_i1.UuidValue?>, _i1.ProtocolSerialization {
   AlertIdempotencyKey._({

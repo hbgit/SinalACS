@@ -1,8 +1,10 @@
 import 'package:meta/meta.dart';
 import 'package:serverpod/serverpod.dart';
+import 'package:sinalacs_server/src/application/alerts/alert_outbox_dispatcher.dart';
 import 'package:sinalacs_server/src/application/alerts/red_alert_service.dart';
 import 'package:sinalacs_server/src/application/auth/development_auth_service.dart';
 import 'package:sinalacs_server/src/config/app_config.dart';
+import 'package:sinalacs_server/src/infrastructure/database/orm_alert_outbox.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_alert_store.dart';
 import 'package:sinalacs_server/src/infrastructure/mqtt/mqtt_alert_dispatcher.dart';
 
@@ -67,7 +69,26 @@ class AlertRuntime {
   /// publicação no broker falhar.
   RedAlertService serviceFor(Session session, {Transaction? transaction}) =>
       RedAlertService(
-        publisher: _publisher,
         store: OrmAlertStore(session: () => session, transaction: transaction),
+        outbox: OrmAlertOutbox(session: () => session, transaction: transaction),
+      );
+
+  /// Drenador do outbox.
+  ///
+  /// Construído sem transação: a publicação acontece **depois** do commit, e
+  /// marcar a entrada como publicada não deve ficar presa à transação que a
+  /// criou — se ficasse, um rollback desfaria a marcação de algo já entregue.
+  ///
+  /// [clock] existe para os testes exercitarem o backoff sem esperar em tempo
+  /// real — uma entrada adiada só volta a ser elegível quando o relógio passa
+  /// de `nextAttemptAt`.
+  AlertOutboxDispatcher dispatcherFor(
+    Session session, {
+    DateTime Function()? clock,
+  }) =>
+      AlertOutboxDispatcher(
+        outbox: OrmAlertOutbox(session: () => session, clock: clock),
+        publisher: _publisher,
+        clock: clock,
       );
 }

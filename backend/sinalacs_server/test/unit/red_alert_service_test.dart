@@ -33,6 +33,49 @@ class FakeAlertStore implements AlertStore {
       keys[record.idempotencyKey] = record;
 }
 
+
+/// Outbox em memória. Substitui o antigo FakeAlertPublisher no papel de
+/// "onde a entrega foi parar": o serviço agora enfileira em vez de publicar.
+class FakeAlertOutbox implements AlertOutbox {
+  final List<AlertDelivery> enqueued = [];
+  final List<PendingDelivery> claimed = [];
+  final Set<String> published = {};
+  final Map<String, String> failures = {};
+  var _nextId = 0;
+
+  @override
+  Future<void> enqueue(AlertDelivery alert) async => enqueued.add(alert);
+
+  @override
+  Future<List<PendingDelivery>> claimDue({int limit = 32}) async {
+    final due = enqueued
+        .where((a) => !published.contains(a.alertId))
+        .take(limit)
+        .map((a) => PendingDelivery(
+              entryId: 'entry-${_nextId++}',
+              delivery: a,
+              attempts: 1,
+            ))
+        .toList();
+    claimed.addAll(due);
+    return due;
+  }
+
+  @override
+  Future<void> markPublished(String entryId) async {
+    final entry = claimed.firstWhere((e) => e.entryId == entryId);
+    published.add(entry.delivery.alertId);
+  }
+
+  @override
+  Future<void> markFailed(
+    String entryId,
+    String error,
+    DateTime nextAttemptAt,
+  ) async =>
+      failures[entryId] = error;
+}
+
 void main() {
   final patient = AuthenticatedUser(
     id: 'patient-001',
@@ -42,10 +85,10 @@ void main() {
   );
 
   test('publica alerta vermelho uma única vez para a microárea do paciente', () async {
-    final publisher = FakeAlertPublisher();
+    final outbox = FakeAlertOutbox();
     final store = FakeAlertStore();
     final service = RedAlertService(
-      publisher: publisher,
+      outbox: outbox,
       store: store,
       clock: () => DateTime.utc(2026, 9, 1, 12),
     );
@@ -57,12 +100,14 @@ void main() {
     expect(first.delivery.riskLevel, 'red');
     expect(duplicate.delivery.alertId, first.delivery.alertId);
     expect(store.saved, hasLength(1));
-    expect(publisher.published, hasLength(1));
+    // O serviço enfileira em vez de publicar: uma entrada por alerta, e a
+    // segunda chamada com a mesma chave não gera outra.
+    expect(outbox.enqueued, hasLength(1));
   });
 
   test('rejeita usuários que não sejam pacientes territorializados', () async {
-    final publisher = FakeAlertPublisher();
-    final service = RedAlertService(publisher: publisher, store: FakeAlertStore());
+    final service =
+        RedAlertService(store: FakeAlertStore(), outbox: FakeAlertOutbox());
     final acs = AuthenticatedUser(id: 'acs-001', role: UserRole.acs, microAreaId: 'area-12', deviceId: 'device-001');
 
     expect(
@@ -72,9 +117,9 @@ void main() {
   });
 
   test('rejeita reutilização de idempotência com localização diferente', () async {
-    final publisher = FakeAlertPublisher();
+    final outbox = FakeAlertOutbox();
     final service = RedAlertService(
-      publisher: publisher,
+      outbox: outbox,
       store: FakeAlertStore(),
       clock: () => DateTime.utc(2026, 9, 1, 12),
     );
@@ -88,8 +133,8 @@ void main() {
   });
 
   test('rejeita confirmação com identificador de alerta vazio', () async {
-    final publisher = FakeAlertPublisher();
-    final service = RedAlertService(publisher: publisher, store: FakeAlertStore());
+    final service =
+        RedAlertService(store: FakeAlertStore(), outbox: FakeAlertOutbox());
     final acs = AuthenticatedUser(id: 'acs-001', role: UserRole.acs, microAreaId: 'area-12', deviceId: 'device-001');
 
     expect(

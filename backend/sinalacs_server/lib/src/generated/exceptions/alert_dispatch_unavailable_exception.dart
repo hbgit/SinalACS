@@ -15,8 +15,14 @@ import 'package:serverpod/serverpod.dart' as _i1;
 
 /// O broker MQTT não está conectado, então o alerta não pôde ser publicado.
 /// Substitui o MqttUnavailableException que o servidor dart:io mapeava para
-/// HTTP 503. Um alerta vermelho nunca é aceito silenciosamente sem entrega
-/// (INV-03): o erro é propagado ao chamador.
+/// HTTP 503.
+///
+/// NÃO é mais lançada por alerts.createRedAlert: com o outbox transacional, um
+/// broker indisponível deixou de recusar o alerta — ele é gravado, a entrega
+/// fica pendente, e o campo `published` do RedAlertResult volta falso. Um
+/// alerta vermelho não é descartado por indisponibilidade do broker (INV-03).
+///
+/// Mantida no protocolo por ora; nenhum endpoint a lança hoje.
 abstract class AlertDispatchUnavailableException
     implements
         _i1.SerializableException,
