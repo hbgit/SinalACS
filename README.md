@@ -137,24 +137,36 @@ segredos por variáveis de ambiente ou um cofre de segredos.
 Execute cada conjunto a partir do respectivo diretório:
 
 ```bash
-cd backend && dart pub get && dart analyze && dart test
+cd backend && dart pub get && dart analyze
+cd backend/sinalacs_server && dart test
 cd apps/acs && flutter pub get && flutter analyze && flutter test
 cd apps/patient && flutter pub get && flutter analyze && flutter test
 ```
 
-A última validação local aprovou a suíte do backend e testes específicos de
-integração HTTP do alerta vermelho, cobrindo autenticação, idempotência,
-publicação no broker e ACK do ACS. A CI (`.github/workflows/ci.yml`) roda
-quatro jobs em pushes para main e pull requests: `backend` (aplica as três
-migrações e o seed de desenvolvimento antes de `dart analyze`/`dart test`),
-`backend-docker-build` (valida que a imagem multi-stage do backend builda),
+O backend é um workspace Dart com dois pacotes: `sinalacs_server` (servidor
+Serverpod) e `sinalacs_client` (cliente tipado gerado). A suíte tem 25 testes —
+16 unitários herméticos, que não precisam de banco, e 9 de integração sobre o
+harness do Serverpod, que exigem um Postgres em `localhost:9090` conforme
+`sinalacs_server/config/test.yaml`. Para rodar só os herméticos:
+`dart test test/unit`.
+
+A última validação local cobriu o ciclo crítico ponta a ponta em stack Docker —
+autenticação, idempotência, publicação no broker e ACK do ACS. A CI
+(`.github/workflows/ci.yml`) roda quatro jobs em pushes para main e pull
+requests: `serverpod-backend` (sobe o Postgres de teste e roda `dart analyze`
+mais a suíte completa), `backend-docker-build` (valida que a imagem builda),
 `patient-app` e `acs-app`.
 
-O backend lê configuração via variáveis de ambiente (`backend/lib/src/config/app_config.dart`):
-além de `DATABASE_URL`/`MQTT_*`/`JWT_SECRET`, agora suporta `PORT` (porta
-dinâmica, cai para 8080), `APP_ENV` (`production` exige `JWT_SECRET` definido,
-falhando rápido no boot caso contrário) e `ENABLE_DEV_LOGIN` (por padrão
-desligado — sem ele, `/v1/auth/development/login` responde 404). Veja
+Configuração de servidor e banco vem dos arquivos `sinalacs_server/config/*.yaml`
+e pode ser sobrescrita por variáveis de ambiente: `SERVERPOD_DATABASE_HOST` e
+companhia, `SERVERPOD_APPLY_MIGRATIONS` (aplica as migrações no boot),
+`SERVERPOD_REDIS_ENABLED` (Redis é opcional e fica desligado) e
+`SERVERPOD_INSIGHTS_SERVER_PORT`. O MQTT não faz parte do Serverpod e mantém as
+próprias variáveis, lidas por `sinalacs_server/lib/src/config/app_config.dart`:
+`MQTT_BROKER`/`MQTT_USERNAME`/`MQTT_PASSWORD`/`MQTT_USE_TLS`, mais `JWT_SECRET`,
+`APP_ENV` (`production` exige `JWT_SECRET`, falhando rápido no boot) e
+`ENABLE_DEV_LOGIN` (por padrão desligado — sem ele, `auth.developmentLogin`
+falha como se o endpoint não existisse). Veja
 [backend/DEPLOY.md](backend/DEPLOY.md) para o runbook completo do piloto de
 deploy free-tier.
 

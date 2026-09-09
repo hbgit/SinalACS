@@ -85,7 +85,7 @@ graph LR
 
 ### Exemplo de Automação Híbrida (Testcontainers): `.github/workflows/ci.yml`
 
-> Ilustrativo — não implementado como mostrado abaixo (não existe `docker-compose.test.yml` nem os caminhos de teste citados). Ver [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) para o pipeline real (4 jobs: `backend`, `backend-docker-build`, `patient-app`, `acs-app`) e [`backend/DEPLOY.md`](../backend/DEPLOY.md) para o runbook de deploy real.
+> Ilustrativo — não implementado como mostrado abaixo (não existe `docker-compose.test.yml` nem os caminhos de teste citados). Ver [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) para o pipeline real (4 jobs: `serverpod-backend`, `backend-docker-build`, `patient-app`, `acs-app`) e [`backend/DEPLOY.md`](../backend/DEPLOY.md) para o runbook de deploy real.
 
 ```yaml
 name: SinalACS CI Pipeline

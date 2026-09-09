@@ -1,6 +1,6 @@
 ## 1. Stack Principal & Persistência
 
-* **Frontend & Backend (Isomorfismo Dart):** Flutter no client e Dart no backend. A decisão original era usar **Serverpod** no backend, com ORM e *endpoints* de cliente Dart gerados automaticamente — essa decisão nunca foi implementada; o backend real (`backend/`) é um servidor `dart:io` puro, sem ORM nem geração de código, roteado manualmente. Ver [CLAUDE.md](../CLAUDE.md) para a arquitetura real.
+* **Frontend & Backend (Isomorfismo Dart):** Flutter no client e Dart no backend. A decisão original era usar **Serverpod** no backend, com ORM e *endpoints* de cliente Dart gerados automaticamente. Essa decisão ficou por um tempo não implementada — o backend era um servidor `dart:io` puro, roteado manualmente — e foi executada depois: o backend real (`backend/`) é hoje um workspace Serverpod 3.4.13, com ORM, migrações geradas e o cliente Dart tipado em `sinalacs_client`. Ver [CLAUDE.md](../CLAUDE.md) para a arquitetura atual e a seção "Migração para Serverpod" do [PROGRESS.md](../PROGRESS.md) para o histórico.
 
 
 * **Persistência Relacional:** PostgreSQL acoplado ao `sqflite` local. A escolha relacional reflete a necessidade estruturada da matriz de triagem fechada inspirada no Protocolo de Manchester.

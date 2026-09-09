@@ -31,7 +31,7 @@ O SinalACS transforma dados clínicos estruturados em ação imediata através d
 3. **Mensageria IoT de Baixa Latência:** Protocolo MQTT para entrega de alertas críticos mesmo em redes 3G instáveis.
 4. **Isomorfismo Dart:** Type-safety end-to-end entre Flutter e Serverpod, eliminando discrepâncias de contrato.
 
-> **Nota de implementação:** Serverpod foi a decisão de stack original para o backend (ver item 4 acima e as diversas referências a Serverpod ao longo deste documento), mas nunca foi implementada — o backend real (`backend/`) é um `HttpServer` `dart:io` puro, sem ORM, sem geração de código e sem framework. As seções abaixo que mencionam Serverpod refletem o documento de arquitetura original/decisão registrada, não o estado implementado. Ver [`CLAUDE.md`](../CLAUDE.md) e [`backend/README.md`](../backend/README.md) para a arquitetura real.
+> **Nota de implementação:** Serverpod foi a decisão de stack original para o backend (ver item 4 acima) e, após um período em que não estava implementada — o backend era um `HttpServer` `dart:io` puro, roteado à mão —, foi de fato executada. O backend real (`backend/`) é hoje um workspace Serverpod 3.4.13, com ORM, migrações geradas e cliente Dart tipado. As referências a Serverpod ao longo deste documento voltaram a descrever o estado implementado, com uma ressalva: os endpoints são **RPC, não REST**, então rotas como `POST /v1/alerts/red` citadas adiante correspondem hoje a chamadas de método (`alerts.createRedAlert`). Ver [`CLAUDE.md`](../CLAUDE.md) para a arquitetura atual.
 
 ### 1.2 Hipóteses e Invariantes de Negócio
 
@@ -666,7 +666,7 @@ Future<bool> canAccessPatient(Session session, String patientId) async {
 
 **docker-compose.dev.yml (recorte):**
 
-> Ilustrativo, não é o `docker-compose.yml` real do repositório (que já existe e roda um serviço de backend Dart puro, ainda nomeado `serverpod` no arquivo por legado, mas sem o framework em uso — ver [`docker-compose.yml`](../docker-compose.yml)).
+> Ilustrativo, não é o `docker-compose.yml` real do repositório — ver [`docker-compose.yml`](../docker-compose.yml), cujo serviço `serverpod` roda de fato o servidor Serverpod, aplica as migrações no boot e é seguido por um serviço `database-seed`.
 
 ```yaml
 version: '3.8'
@@ -750,7 +750,7 @@ ollama pull deepseek-coder:6.7b-instruct
 
 **Exemplo de Contrato REST (estilo Serverpod, ilustrativo):**
 
-> Exemplo ilustrativo da decisão original de stack — não corresponde ao código real do repositório (`backend/lib/src/domain/entities/visit_entity.dart` é uma classe de dados simples, sem ORM/anotações). Ver `CLAUDE.md` para a estrutura real do backend.
+> Exemplo ilustrativo. O modelo real hoje é declarado em `backend/sinalacs_server/lib/src/models/visit.spy.yaml` e gerado pelo `serverpod generate`, com a classe Dart em `lib/src/generated/`. Ver `CLAUDE.md` para a estrutura do backend.
 
 ```dart
 // Exemplo ilustrativo — não é um arquivo real do repositório
@@ -881,7 +881,7 @@ void main() {
 
 **Testes de Integração com Testcontainers:**
 
-> Ilustrativo — este teste de sincronização não existe no repositório (o motor de sync ainda não está conectado ao backend real). Os testes de integração reais do backend hoje cobrem o ciclo de alerta vermelho contra Postgres/MQTT reais — ver `backend/test/red_alert_http_integration_test.dart`.
+> Ilustrativo — este teste de sincronização não existe no repositório (o motor de sync ainda não está conectado ao backend real). Os testes de integração reais cobrem o ciclo de alerta vermelho sobre o harness do Serverpod — ver `backend/sinalacs_server/test/integration/red_alert_cycle_test.dart`.
 
 ```dart
 // Exemplo ilustrativo — não é um arquivo real do repositório
@@ -1139,7 +1139,7 @@ Impacto ↑
 
 ### A1. Docker-Compose de Produção (recorte)
 
-> Roadmap — nenhum ambiente de produção com esta topologia (Pulumi/VPS/redes privadas) existe hoje. O serviço abaixo mantém o nome `serverpod` do documento original; a imagem real seria construída a partir do backend Dart puro (ver `backend/Dockerfile`, já multi-stage com `dart compile exe`). Para um caminho de deploy que já existe e funciona hoje (piloto free-tier), ver [`backend/DEPLOY.md`](../backend/DEPLOY.md).
+> Roadmap — nenhum ambiente de produção com esta topologia (Pulumi/VPS/redes privadas) existe hoje. O serviço abaixo chamado `serverpod` corresponde agora ao que de fato roda; a imagem é construída a partir de `backend/sinalacs_server/Dockerfile`, multi-stage com `dart compile exe`. Para um caminho de deploy documentado (piloto free-tier), ver [`backend/DEPLOY.md`](../backend/DEPLOY.md).
 
 ```yaml
 version: '3.8'

@@ -9,56 +9,52 @@ institucional real, RBAC por microárea, observabilidade e revisão de LGPD).
 
 ## Por que este caminho existe
 
-O backend (Dart puro sobre `dart:io`, sem Serverpod em uso real) pode rodar em
-qualquer host que suporte um container Docker sempre ativo com uma conexão
-TCP de saída de longa duração (necessária para o MQTT). As mudanças de código
-que tornam isso possível em hosts free-tier já estão no repositório:
+O backend é um servidor [Serverpod](https://serverpod.dev) 3.4.13 em Dart, e
+roda em qualquer host que suporte um container Docker sempre ativo com uma
+conexão TCP de saída de longa duração (necessária para o MQTT). As
+características que tornam isso viável em hosts free-tier:
 
-- `PORT` lido do ambiente (`backend/bin/server.dart`), em vez de fixo em 8080.
-- Boot do servidor HTTP desacoplado da conexão MQTT — `/health` responde
-  mesmo que o broker esteja indisponível no momento do deploy; a conexão MQTT
-  reconecta sozinha com backoff exponencial se cair (útil em hosts que
-  hibernam por inatividade).
-- Conexão com o PostgreSQL usa SSL por padrão
-  (`backend/lib/src/infrastructure/database/postgres_alert_store.dart`) —
-  pode ser desligado localmente com `?sslmode=disable` na `DATABASE_URL`.
-- `Dockerfile` multi-stage com `dart compile exe` (AOT) sobre uma imagem
-  runtime mínima, com `HEALTHCHECK` apontando para `/health`.
-- `JWT_SECRET` obrigatório quando `APP_ENV=production` (falha rápida no boot
-  em vez de usar um segredo previsível).
-- `/v1/auth/development/login` (login sem senha, único mecanismo de auth do
-  piloto) fica atrás da flag `ENABLE_DEV_LOGIN` — se não setada, responde 404.
+- **O Serverpod aplica as próprias migrations no boot** quando
+  `SERVERPOD_APPLY_MIGRATIONS=true`, então não há passo manual de schema.
+- **Boot desacoplado do MQTT** — a sonda de saúde responde mesmo com o broker
+  indisponível, e a conexão MQTT reconecta sozinha com backoff exponencial se
+  cair. Isso importa em hosts que hibernam por inatividade.
+- **Redis é opcional** e fica desligado (`SERVERPOD_REDIS_ENABLED=false`), o
+  que elimina um serviço do piloto.
+- **`Dockerfile` multi-stage** com `dart compile exe` (AOT) sobre `alpine`, com
+  usuário não-root e `HEALTHCHECK` que faz `POST /health/check`.
+- **`JWT_SECRET` obrigatório quando `APP_ENV=production`** — falha rápida no
+  boot em vez de usar um segredo previsível.
+- **`auth.developmentLogin`** (acesso sem senha, único mecanismo de auth do
+  piloto) fica atrás da flag `ENABLE_DEV_LOGIN`; sem ela, falha como se o
+  endpoint não existisse.
+
+> **Serverpod é RPC, não REST.** Não há rotas como `GET /health` ou
+> `POST /v1/alerts/red`: o cliente gerado chama métodos, que trafegam como
+> `POST /<endpoint>/<método>` com corpo JSON. Isso muda como se valida o
+> serviço — ver a seção 5.
 
 ## Serviços recomendados
 
 | Componente | Serviço | Por quê | Fallback |
 |---|---|---|---|
-| Compute (backend) | [Render](https://render.com) — Free Web Service | Deploy direto do `Dockerfile`, HTTPS automático, healthcheck configurável para `/health`. Hiberna após ~15 min sem tráfego HTTP — a conexão MQTT cai junto e volta sozinha ao acordar (reconexão com backoff já implementada) | [Koyeb](https://koyeb.com) free tier |
-| Banco de dados | [Neon](https://neon.tech) — Free tier Postgres | SSL obrigatório (compatível com o código), sem extensões especiais exigidas pelas migrations, `DATABASE_URL` no formato padrão. Autosuspend de compute é transparente no protocolo Postgres | [Supabase](https://supabase.com) free tier (pausa o projeto inteiro após ~1 semana sem uso) |
-| Broker MQTT | [HiveMQ Cloud](https://www.hivemq.com/mqtt-cloud-broker/) — Serverless free tier | TLS com CA pública padrão, autenticação usuário/senha compatível com `MQTT_USERNAME`/`MQTT_PASSWORD` já existentes | [EMQX Cloud](https://www.emqx.com/en/cloud) Serverless free tier |
+| Compute (backend) | [Render](https://render.com) — Free Web Service | Deploy direto do `Dockerfile`, HTTPS automático, healthcheck configurável. Hiberna após ~15 min sem tráfego HTTP — a conexão MQTT cai junto e volta sozinha ao acordar | [Koyeb](https://koyeb.com) free tier |
+| Banco de dados | [Neon](https://neon.tech) — Free tier Postgres | SSL obrigatório, sem extensões especiais exigidas pelas migrations, autosuspend transparente no protocolo Postgres | [Supabase](https://supabase.com) free tier (pausa o projeto inteiro após ~1 semana sem uso) |
+| Broker MQTT | [HiveMQ Cloud](https://www.hivemq.com/mqtt-cloud-broker/) — Serverless free tier | TLS com CA pública padrão, autenticação usuário/senha compatível com `MQTT_USERNAME`/`MQTT_PASSWORD` | [EMQX Cloud](https://www.emqx.com/en/cloud) Serverless free tier |
 
 ## Passo a passo
 
 ### 1. Provisionar o Postgres (Neon)
 
-Criar um projeto no Neon e copiar a connection string (`DATABASE_URL`, já vem
-com `sslmode=require`).
+Criar um projeto no Neon e anotar host, porta, nome do banco, usuário e senha
+**separadamente** — o Serverpod não usa uma `DATABASE_URL` única, e sim as
+variáveis `SERVERPOD_DATABASE_*` da tabela abaixo.
 
-### 2. Aplicar as migrations e o seed
+### 2. Migrations
 
-O backend não aplica migrations automaticamente no boot — são 3 arquivos SQL
-planos, aplicados manualmente (mesmos comandos usados na CI):
-
-```bash
-psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f lib/src/infrastructure/database/migrations/v1.0.0/01_initial_schema.sql
-psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f lib/src/infrastructure/database/migrations/v1.1.0/01_add_alerts_and_visits.sql
-psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f lib/src/infrastructure/database/migrations/v1.2.0/01_add_alert_deliveries.sql
-psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f lib/src/infrastructure/database/seeds/development.sql
-```
-
-O seed é obrigatório: o login de desenvolvimento sempre emite os mesmos UUIDs
-fixos de paciente/ACS, e `alerts.patient_id` referencia `patients(user_id)` —
-sem o seed, `POST /v1/alerts/red` falha com violação de chave estrangeira.
+**Não há passo manual.** O servidor aplica as migrations de `migrations/` no
+boot quando `SERVERPOD_APPLY_MIGRATIONS=true`, e registra o que já aplicou na
+tabela `serverpod_migrations`.
 
 ### 3. Provisionar o broker MQTT (HiveMQ Cloud)
 
@@ -67,12 +63,24 @@ Criar um cluster serverless gratuito, um usuário/senha, e anotar o host
 
 ### 4. Criar o serviço no Render
 
-Apontar um Web Service para este repositório, `backend/Dockerfile` como
-Dockerfile. Configurar como variáveis de ambiente secretas (nunca commitadas):
+Apontar um Web Service para este repositório, com
+`backend/sinalacs_server/Dockerfile` como Dockerfile e **`backend` como
+contexto de build** — o build precisa do `pubspec.lock` compartilhado entre
+`sinalacs_server` e `sinalacs_client`.
+
+Configurar como variáveis de ambiente secretas (nunca commitadas):
 
 | Variável | Valor |
 |---|---|
-| `DATABASE_URL` | connection string do Neon (já com `sslmode=require`) |
+| `SERVERPOD_DATABASE_HOST` | host do Neon |
+| `SERVERPOD_DATABASE_PORT` | `5432` |
+| `SERVERPOD_DATABASE_NAME` | nome do banco |
+| `SERVERPOD_DATABASE_USER` | usuário do Neon |
+| `SERVERPOD_DATABASE_PASSWORD` | senha do Neon |
+| `SERVERPOD_DATABASE_REQUIRE_SSL` | `true` |
+| `SERVERPOD_APPLY_MIGRATIONS` | `true` |
+| `SERVERPOD_REDIS_ENABLED` | `false` |
+| `SERVERPOD_API_SERVER_PORT` | a porta que o Render injeta em `PORT` |
 | `MQTT_BROKER` | `host:8883` do HiveMQ Cloud |
 | `MQTT_USERNAME` / `MQTT_PASSWORD` | credenciais criadas no HiveMQ Cloud |
 | `MQTT_USE_TLS` | `true` |
@@ -80,31 +88,69 @@ Dockerfile. Configurar como variáveis de ambiente secretas (nunca commitadas):
 | `APP_ENV` | `production` |
 | `ENABLE_DEV_LOGIN` | `true` (decisão consciente — é o único mecanismo de auth do piloto) |
 
-Não setar `MQTT_CA_CERT_PATH` — o HiveMQ Cloud usa certificado de CA pública,
-e o cliente MQTT já confia nas CAs padrão do sistema quando essa variável não
-é definida. `PORT` é injetado automaticamente pelo Render.
+Não setar `MQTT_CA_CERT_PATH` — o HiveMQ Cloud usa certificado de CA pública, e
+o cliente MQTT confia nas CAs padrão do sistema quando essa variável não é
+definida.
+
+O Serverpod abre três portas: API (8080), Insights (8081) e web (8082). Num Web
+Service do Render só a porta da API fica pública, o que é o desejado — **o
+Insights não deve ser exposto**.
 
 ### 5. Validar
 
+A sonda de saúde é RPC, então precisa de `POST` com corpo JSON:
+
 ```bash
-curl https://<seu-app>.onrender.com/health
-# {"status":"ok","mqtt_connected":true,"db_connected":true}
+curl -X POST https://<seu-app>.onrender.com/health/check \
+  -H 'Content-Type: application/json' -d '{}'
+# {"__className__":"ServiceHealth","status":"ok","mqttConnected":true,"dbConnected":true}
 ```
 
-Em seguida, repetir o fluxo de login + alerta vermelho + ACK descrito em
-`backend/test/red_alert_http_integration_test.dart`, agora contra a URL
-pública.
+**O seed não é opcional para um piloto utilizável.** As migrations criam o
+schema, mas não inserem dados. O `auth.developmentLogin` emite tokens para
+UUIDs fixos, e `alerts.patientId` tem chave estrangeira para `patients` — sem
+o seed, `alerts.createRedAlert` falha com violação de FK:
+
+```bash
+psql "postgresql://<user>:<senha>@<host>/<banco>?sslmode=require" \
+  -v ON_ERROR_STOP=1 \
+  -f sinalacs_server/lib/src/infrastructure/database/seeds/development.sql
+```
+
+Em seguida, o ciclo completo — login, alerta e confirmação:
+
+```bash
+U=https://<seu-app>.onrender.com
+H='Content-Type: application/json'
+
+TOKEN=$(curl -s -X POST $U/auth/developmentLogin -H "$H" -d '{"role":"patient"}' \
+  | sed 's/.*"accessToken":"\([^"]*\)".*/\1/')
+
+curl -X POST $U/alerts/createRedAlert -H "$H" \
+  -d "{\"accessToken\":\"$TOKEN\",\"idempotencyKey\":\"piloto-1\",\"locationHash\":\"hash\"}"
+```
+
+Repetir a mesma chamada com a mesma `idempotencyKey` deve devolver o **mesmo**
+`alertId`, sem gravar nem publicar de novo. Depois, autenticar como `acs` e
+chamar `alerts.acknowledge` com esse `alertId`.
+
+O mesmo ciclo está automatizado em
+[`sinalacs_server/test/integration/red_alert_cycle_test.dart`](sinalacs_server/test/integration/red_alert_cycle_test.dart),
+que roda contra o harness local.
 
 ## Limitações conhecidas deste piloto
 
 - Render free hiberna após inatividade — o primeiro request após acordar tem
   latência alta (cold start); considere um ping externo periódico em
-  `/health` durante janelas de demonstração.
-- Sem pool de conexões PostgreSQL — uma única conexão é aberta no boot; picos
-  de tráfego concorrente não são um cenário suportado neste estágio.
-- Sem ACL dinâmica por microárea no MQTT — o modelo de autenticação do
-  broker gerenciado free-tier é usuário/senha único, mesma limitação já
-  presente no Mosquitto local (`infra/docker/mosquitto/aclfile`).
-- Dev-login continua sendo a única forma de autenticação — qualquer pessoa
-  com a URL pode se autenticar como paciente ou ACS. Não é adequado para uso
-  com dados reais.
+  `/health/check` durante janelas de demonstração.
+- Sem ACL dinâmica por microárea no MQTT — o modelo de autenticação do broker
+  gerenciado free-tier é usuário/senha único, mesma limitação já presente no
+  Mosquitto local (`infra/docker/mosquitto/aclfile`).
+- Dev-login continua sendo a única forma de autenticação — qualquer pessoa com
+  a URL pode se autenticar como paciente ou ACS. Não é adequado para uso com
+  dados reais.
+- A publicação MQTT não participa da transação do banco. Se a publicação tiver
+  êxito e o commit falhar, o alerta chega ao ACS sem linha no banco, e o ACK
+  não encontra o que atualizar. É raro e erra para o lado seguro quanto à
+  INV-03 (o alerta não se perde, a auditoria sim); fechar isso por completo
+  exigiria outbox pattern.

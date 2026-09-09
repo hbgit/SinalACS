@@ -2,6 +2,18 @@
 
 Este documento consolida o que foi implementado no repositório em relação às fases 1 e 2 da Seção 6.2, "Milestones Técnicos", do PRD.
 
+> **Nota de leitura — o backend migrou para Serverpod.** As entradas M1.x e M2.x
+> abaixo registram o que era verdade quando foram escritas, e por isso não foram
+> reescritas: elas descrevem o servidor `dart:io` roteado à mão, e seus links
+> para `backend/bin/`, `backend/lib/` e `backend/test/` apontam para código que
+> **não existe mais na árvore atual** — só no histórico do git. O mesmo vale para
+> a seção de preparação de deploy, escrita para aquele servidor.
+>
+> O estado atual está descrito na seção
+> ["Migração para Serverpod"](#migração-para-serverpod) ao final deste documento,
+> e em [CLAUDE.md](CLAUDE.md), que é a referência atualizada de arquitetura e
+> comandos.
+
 ## Resumo executivo
 
 A Fase 1 está concluída no código e validada por testes locais. A Fase 2 avançou além do MVP inicial: o backend já implementa e valida o ciclo crítico de alerta vermelho com autenticação, idempotência, publicação no broker e confirmação de recebimento pelo ACS em ambiente local com Docker Compose. Além das Fases 1 e 2, a seção ["Preparação de deploy — piloto em serviços free-tier (backend)"](#preparação-de-deploy--piloto-em-serviços-free-tier-backend) mais abaixo documenta um trabalho complementar de preparação do backend para hospedagem gratuita (fora da numeração M1.x/M2.x/M3.x do PRD).
@@ -252,3 +264,102 @@ deve ser usado com dados reais de pacientes.
 - [x] M2.6 - Testes de Usabilidade
 
 Atenção: o código atual já valida a operação crítica de alerta vermelho em ambiente local com backend real e stack Docker, mas ainda não substitui produção operacional com autenticação institucional real, broker com mTLS e integração completa com dados de saúde e gestão territorial.
+
+---
+
+## Migração para Serverpod
+
+Trabalho posterior às Fases 1 e 2, fora da numeração M1.x/M2.x/M3.x do PRD. O
+[PRD](spec/PRD_system.md) e o [spec/stack.md](spec/stack.md) registravam
+Serverpod como decisão original de stack, justificada por "isomorfismo Dart:
+type-safety end-to-end entre Flutter e o backend". A decisão não havia sido
+implementada — o servidor era um `HttpServer` do `dart:io` com roteamento
+manual. Esta migração a executou.
+
+### O que motivou
+
+O custo da dívida era mensurável. `RiskLevel` é o nó de maior betweenness do
+sistema, ligando as entidades Paciente, Alerta, Sessão de Triagem e Visita — mas
+o tipo não sobrevivia à fronteira. Existiam quatro grafias independentes do mesmo
+conceito de três valores (`red` no enum do backend, `'VERMELHO'` na fila offline
+do ACS, `'Risco: Vermelho'` na interface do paciente, e o valor no fio MQTT),
+sustentadas só por convenção. O cliente gerado pelo Serverpod é o mecanismo que
+fecha esse buraco.
+
+### Estado atual
+
+| Item | Situação |
+|---|---|
+| Servidor | Serverpod 3.4.13, workspace Dart em `backend/` com `sinalacs_server` e `sinalacs_client` |
+| Schema | 11 tabelas como modelos `.spy.yaml`, mais `alert_idempotency_keys`; migrações geradas e aplicadas pelo servidor no boot |
+| Endpoints | RPC: `alerts.createRedAlert`, `alerts.acknowledge`, `auth.developmentLogin`, `health.check`, `triage.evaluate` |
+| Testes | 25 verdes — 16 unitários herméticos e 9 de integração sobre o harness `withServerpod` |
+| Cliente gerado | Publicado em `backend/sinalacs_client`, **ainda não consumido pelos apps Flutter** |
+
+### Decisões de schema que valem registro
+
+O ORM do Serverpod exige chave primária de coluna única chamada `id`, e só sabe
+referenciar o `id` do pai. Isso obrigou duas mudanças:
+
+- `patients` e `acs` usavam herança por chave compartilhada, com `user_id` sendo
+  PK e FK ao mesmo tempo. O `id` dessas tabelas passou a ser **o próprio UUID do
+  usuário**, o que preservou a semântica de `patient_id`, manteve os UUIDs fixos
+  do seed e recuperou 9 das 11 foreign keys. As duas que não voltam são
+  `patients.id → users.id` e `acs.id → users.id`: o Serverpod não expressa "meu
+  id também é chave estrangeira".
+- `alert_deliveries` tinha PK composta `(alert_id, acs_id)`, não suportada.
+  Ganhou `id` próprio, com o par virando índice UNIQUE — mesma garantia de
+  unicidade.
+
+Divergências aceitas e registradas: 17 colunas passaram de `TIMESTAMPTZ` para
+`timestamp without time zone`, 3 de `jsonb` para `json`, e as PKs usam
+`gen_random_uuid()` v4.
+
+### Defeitos corrigidos no caminho
+
+- **Identificador de alerta que colidia.** O gerador derivava o id do relógio
+  (`'00000000-0000-4000-8000-' + microssegundos % 1e12`), colidindo a cada ~11,6
+  dias e entre requisições no mesmo microssegundo. Passou a UUID v4. Colisão de
+  identificador é uma forma silenciosa de perder um alerta vermelho (INV-03).
+- **Idempotência volátil.** Era um `Map` em memória: sumia no restart e não valia
+  entre instâncias. Passou à tabela `alert_idempotency_keys`, verificada com
+  reinício de servidor entre as duas chamadas.
+- **Linha órfã.** Uma falha de publicação deixava no banco um alerta `pending`
+  nunca publicado, e ainda consumia a chave de idempotência. `createRedAlert`
+  passou a rodar em transação: se a publicação falha, nada fica gravado e o
+  cliente pode retentar de verdade.
+- **Vazamento na reconexão MQTT.** Cada reconexão deixava um listener vivo no
+  cliente anterior, e uma tempestade de reconexão disparava o callback de ACK em
+  duplicata. A subscription anterior passou a ser cancelada antes de assumir a
+  nova.
+- **ACK assíncrono não aguardado.** O callback era invocado sem `await`, então
+  falha ao registrar um ACK virava erro assíncrono não tratado — um ACK perdido
+  em silêncio deixa um alerta eternamente pendente.
+
+### Infraestrutura
+
+O serviço one-shot `database-init` foi removido: seu guard era tudo-ou-nada
+sobre a existência de `public.users` e pulava em silêncio um banco parcialmente
+migrado. As migrações passaram a ser aplicadas pelo servidor no boot, via
+`SERVERPOD_APPLY_MIGRATIONS`. A configuração de banco deixou de ser
+`DATABASE_URL` e passou às variáveis `SERVERPOD_DATABASE_*`.
+
+O módulo `serverpod_auth_idp_server`, que veio no template e nenhum endpoint
+usava, foi removido — a migração-base caiu de 86 para 50 tabelas.
+
+O backend `dart:io` foi removido da árvore; o histórico do git o preserva.
+
+### O que continua em aberto
+
+- **Autenticação institucional.** O acesso segue sendo o token HMAC de
+  desenvolvimento, gated por `ENABLE_DEV_LOGIN`. Gov.br e matrícula da
+  Secretaria continuam não implementados.
+- **Apps Flutter não consomem o cliente gerado.** `sinalacs_client` existe e é
+  publicado, mas `apps/acs` e `apps/patient` seguem com dados locais — e por isso
+  o `RiskLevel` ainda não atravessa a fronteira na prática.
+- **Risco residual de entrega.** MQTT não participa da transação: se a publicação
+  tem êxito e o commit falha, o alerta chega ao ACS sem linha no banco. Raro e
+  erra para o lado seguro quanto à INV-03; fechar por completo exigiria outbox
+  pattern.
+- **Deploy não executado.** O runbook em [backend/DEPLOY.md](backend/DEPLOY.md)
+  foi reescrito para Serverpod, mas continua sem ter sido rodado.
