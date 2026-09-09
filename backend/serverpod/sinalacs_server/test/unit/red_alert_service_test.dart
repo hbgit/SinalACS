@@ -19,6 +19,18 @@ class FakeAlertStore implements AlertStore {
 
   @override
   Future<bool> acknowledge({required String alertId, required String acsId, required String microAreaId}) async => true;
+
+  // Deduplicação agora vive no armazenamento, então o fake a implementa em
+  // memória — mesma semântica, sem Postgres.
+  final Map<String, RedAlertRecord> keys = {};
+
+  @override
+  Future<RedAlertRecord?> findByIdempotencyKey(String idempotencyKey) async =>
+      keys[idempotencyKey];
+
+  @override
+  Future<void> rememberIdempotencyKey(RedAlertRecord record) async =>
+      keys[record.idempotencyKey] = record;
 }
 
 void main() {

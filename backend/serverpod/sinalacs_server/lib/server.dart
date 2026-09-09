@@ -1,11 +1,12 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:serverpod/serverpod.dart';
-import 'package:serverpod_auth_idp_server/core.dart';
-import 'package:serverpod_auth_idp_server/providers/email.dart';
 
+import 'src/application/auth/development_auth_service.dart';
 import 'src/generated/endpoints.dart';
 import 'src/generated/protocol.dart';
+import 'src/runtime/alert_runtime.dart';
 import 'src/web/routes/app_config_route.dart';
 import 'src/web/routes/root.dart';
 
@@ -14,22 +15,10 @@ void run(List<String> args) async {
   // Initialize Serverpod and connect it with your generated code.
   final pod = Serverpod(args, Protocol(), Endpoints());
 
-  // Initialize authentication services for the server.
-  // Token managers will be used to validate and issue authentication keys,
-  // and the identity providers will be the authentication options available for users.
-  pod.initializeAuthServices(
-    tokenManagerBuilders: [
-      // Use JWT for authentication keys towards the server.
-      JwtConfigFromPasswords(),
-    ],
-    identityProviderBuilders: [
-      // Configure the email identity provider for email/password authentication.
-      EmailIdpConfigFromPasswords(
-        sendRegistrationVerificationCode: _sendRegistrationCode,
-        sendPasswordResetVerificationCode: _sendPasswordResetCode,
-      ),
-    ],
-  );
+  // O módulo serverpod_auth_idp não é inicializado: o acesso hoje é o token
+  // HMAC de DevelopmentAuthService, e o módulo trazia ~70 tabelas de identidade
+  // que nenhum endpoint deste servidor usava. A autenticação institucional
+  // (Gov.br / matrícula da Secretaria) é uma decisão separada, ainda em aberto.
 
   // Setup a default page at the web root.
   // These are used by the default page.
@@ -75,28 +64,42 @@ void run(List<String> args) async {
 
   // Start the server.
   await pod.start();
+
+  // A conexão MQTT sobe depois do servidor e em segundo plano, com retry e
+  // backoff próprios, para não travar o boot caso o broker esteja fora do ar —
+  // hosts free-tier hibernam e precisam responder ao healthcheck mesmo sem
+  // broker. Era o comportamento do servidor dart:io e é preservado aqui.
+  unawaited(_connectAlertDispatcher(pod));
 }
 
-void _sendRegistrationCode(
-  Session session, {
-  required String email,
-  required UuidValue accountRequestId,
-  required String verificationCode,
-  required Transaction? transaction,
-}) {
-  // NOTE: Here you call your mail service to send the verification code to
-  // the user. For testing, we will just log the verification code.
-  session.log('[EmailIdp] Registration code ($email): $verificationCode');
-}
+/// Liga o dispatcher MQTT e encaminha os ACKs recebidos para o serviço de
+/// alerta.
+///
+/// O ACK chega por MQTT, sem passar por endpoint nenhum, então precisa da sua
+/// própria `Session`: os endpoints não participam deste caminho.
+Future<void> _connectAlertDispatcher(Serverpod pod) async {
+  final runtime = AlertRuntime.instance;
 
-void _sendPasswordResetCode(
-  Session session, {
-  required String email,
-  required UuidValue passwordResetRequestId,
-  required String verificationCode,
-  required Transaction? transaction,
-}) {
-  // NOTE: Here you call your mail service to send the verification code to
-  // the user. For testing, we will just log the verification code.
-  session.log('[EmailIdp] Password reset code ($email): $verificationCode');
+  await runtime.dispatcher.connect(
+    onAcknowledgement: (ack) async {
+      final session = await pod.createSession(enableLogging: false);
+      try {
+        final acknowledged = await runtime.serviceFor(session).acknowledge(
+              user: AuthenticatedUser(
+                id: ack.acsId,
+                role: UserRole.acs,
+                microAreaId: ack.microAreaId,
+                deviceId: 'mqtt',
+              ),
+              alertId: ack.alertId,
+            );
+        session.log(
+          'ACK do alerta ${ack.alertId} pelo ACS ${ack.acsId}: '
+          '${acknowledged ? 'registrado' : 'sem correspondência na microárea'}',
+        );
+      } finally {
+        await session.close();
+      }
+    },
+  );
 }

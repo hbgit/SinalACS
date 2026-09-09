@@ -185,6 +185,98 @@
     },
     {
       "__className__": "serverpod.TableDefinition",
+      "name": "alert_idempotency_keys",
+      "dartName": "AlertIdempotencyKey",
+      "module": "sinalacs",
+      "schema": "public",
+      "columns": [
+        {
+          "__className__": "serverpod.ColumnDefinition",
+          "name": "id",
+          "columnType": 7,
+          "isNullable": false,
+          "columnDefault": "gen_random_uuid()",
+          "dartType": "UuidValue?"
+        },
+        {
+          "__className__": "serverpod.ColumnDefinition",
+          "name": "key",
+          "columnType": 0,
+          "isNullable": false,
+          "dartType": "String"
+        },
+        {
+          "__className__": "serverpod.ColumnDefinition",
+          "name": "alertId",
+          "columnType": 7,
+          "isNullable": false,
+          "dartType": "UuidValue"
+        },
+        {
+          "__className__": "serverpod.ColumnDefinition",
+          "name": "locationHash",
+          "columnType": 0,
+          "isNullable": false,
+          "dartType": "String"
+        },
+        {
+          "__className__": "serverpod.ColumnDefinition",
+          "name": "createdAt",
+          "columnType": 4,
+          "isNullable": false,
+          "dartType": "DateTime"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "__className__": "serverpod.ForeignKeyDefinition",
+          "constraintName": "alert_idempotency_keys_fk_0",
+          "columns": [
+            "alertId"
+          ],
+          "referenceTable": "alerts",
+          "referenceTableSchema": "public",
+          "referenceColumns": [
+            "id"
+          ],
+          "onUpdate": 3,
+          "onDelete": 3
+        }
+      ],
+      "indexes": [
+        {
+          "__className__": "serverpod.IndexDefinition",
+          "indexName": "alert_idempotency_keys_pkey",
+          "elements": [
+            {
+              "__className__": "serverpod.IndexElementDefinition",
+              "type": 0,
+              "definition": "id"
+            }
+          ],
+          "type": "btree",
+          "isUnique": true,
+          "isPrimary": true
+        },
+        {
+          "__className__": "serverpod.IndexDefinition",
+          "indexName": "alert_idempotency_keys_key_key",
+          "elements": [
+            {
+              "__className__": "serverpod.IndexElementDefinition",
+              "type": 0,
+              "definition": "key"
+            }
+          ],
+          "type": "btree",
+          "isUnique": true,
+          "isPrimary": false
+        }
+      ],
+      "managed": true
+    },
+    {
+      "__className__": "serverpod.TableDefinition",
       "name": "alerts",
       "dartName": "Alert",
       "module": "sinalacs",
@@ -1156,16 +1248,6 @@
       "__className__": "serverpod.DatabaseMigrationVersion",
       "module": "serverpod",
       "version": "20260129180959368"
-    },
-    {
-      "__className__": "serverpod.DatabaseMigrationVersion",
-      "module": "serverpod_auth_idp",
-      "version": "20260213194423028"
-    },
-    {
-      "__className__": "serverpod.DatabaseMigrationVersion",
-      "module": "serverpod_auth_core",
-      "version": "20260129181112269"
     }
   ],
   "migrationApiVersion": 1

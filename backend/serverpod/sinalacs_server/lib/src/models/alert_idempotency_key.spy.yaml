@@ -1,0 +1,23 @@
+### Deduplicação durável de alertas por chave de idempotência.
+###
+### Antes a deduplicação era um Map em memória: sumia no restart e não valia
+### entre instâncias, de modo que um reenvio após queda gerava alerta duplicado.
+### Persistir a chave torna a garantia durável e válida em qualquer réplica.
+###
+### A linha é gravada na mesma transação do alerta: se a publicação falhar,
+### ambas desaparecem e o cliente pode retentar de verdade.
+class: AlertIdempotencyKey
+table: alert_idempotency_keys
+fields:
+  id: UuidValue?, defaultPersist=random
+  ### Chave fornecida pelo cliente.
+  key: String
+  ### Alerta que esta chave produziu.
+  alertId: UuidValue, relation(parent=alerts)
+  ### Guardado para rejeitar reuso da mesma chave com outra localização.
+  locationHash: String
+  createdAt: DateTime
+indexes:
+  alert_idempotency_keys_key_key:
+    fields: key
+    unique: true

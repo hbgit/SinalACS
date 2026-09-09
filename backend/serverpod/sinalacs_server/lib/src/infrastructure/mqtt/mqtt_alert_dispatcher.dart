@@ -26,14 +26,16 @@ class MqttAlertDispatcher implements AlertPublisher {
   final AppConfig _config;
   MqttServerClient? _client;
   StreamSubscription<List<MqttReceivedMessage<MqttMessage>>>? _subscription;
-  void Function(AlertDeliveryAck ack)? _onAcknowledgement;
+  Future<void> Function(AlertDeliveryAck ack)? _onAcknowledgement;
   Duration _backoff = _initialBackoff;
   bool _reconnecting = false;
   bool _closed = false;
 
   bool get isConnected => _client?.connectionStatus?.state == MqttConnectionState.connected;
 
-  Future<void> connect({void Function(AlertDeliveryAck ack)? onAcknowledgement}) async {
+  Future<void> connect({
+    Future<void> Function(AlertDeliveryAck ack)? onAcknowledgement,
+  }) async {
     _onAcknowledgement = onAcknowledgement;
     try {
       await _connectOnce();
@@ -66,16 +68,52 @@ class MqttAlertDispatcher implements AlertPublisher {
     }
 
     client.subscribe('sinalacs/v1/alerts/+/acks', MqttQos.atLeastOnce);
-    _subscription = client.updates?.listen((messages) {
-      for (final message in messages) {
-        final payload = message.payload as MqttPublishMessage;
-        final body = MqttPublishPayload.bytesToStringAsString(payload.payload.message);
-        final ack = _decodeAck(body);
-        if (ack != null) _onAcknowledgement?.call(ack);
-      }
-    });
+
+    // A subscription e o cliente anteriores precisam ser descartados antes de
+    // assumir os novos: sem isso, cada reconexão deixava um listener vivo no
+    // cliente antigo, e uma tempestade de reconexão passava a disparar o
+    // callback de ACK em duplicata para a mesma mensagem.
+    await _teardownCurrentConnection();
+
+    _subscription = client.updates?.listen(_handleMessages);
     _client = client;
     _backoff = _initialBackoff;
+  }
+
+  Future<void> _handleMessages(
+    List<MqttReceivedMessage<MqttMessage>> messages,
+  ) async {
+    final handler = _onAcknowledgement;
+    if (handler == null) return;
+
+    for (final message in messages) {
+      final payload = message.payload as MqttPublishMessage;
+      final body =
+          MqttPublishPayload.bytesToStringAsString(payload.payload.message);
+      final ack = _decodeAck(body);
+      if (ack == null) continue;
+
+      // O callback é assíncrono e antes era invocado sem await, então qualquer
+      // falha ao registrar o ACK virava erro assíncrono não tratado. Um ACK
+      // perdido em silêncio deixa um alerta vermelho eternamente pendente
+      // (INV-03), por isso a falha é aguardada e registrada.
+      try {
+        await handler(ack);
+      } catch (error, stackTrace) {
+        stderr.writeln(
+          'Falha ao processar ACK do alerta ${ack.alertId}: $error\n$stackTrace',
+        );
+      }
+    }
+  }
+
+  Future<void> _teardownCurrentConnection() async {
+    final previousSubscription = _subscription;
+    final previousClient = _client;
+    _subscription = null;
+    _client = null;
+    await previousSubscription?.cancel();
+    previousClient?.disconnect();
   }
 
   void _handleDisconnected() {
@@ -111,8 +149,7 @@ class MqttAlertDispatcher implements AlertPublisher {
 
   Future<void> close() async {
     _closed = true;
-    await _subscription?.cancel();
-    _client?.disconnect();
+    await _teardownCurrentConnection();
   }
 
   AlertDeliveryAck? _decodeAck(String body) => AlertDeliveryAck.tryParse(body);

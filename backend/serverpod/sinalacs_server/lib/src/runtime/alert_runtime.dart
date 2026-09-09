@@ -34,8 +34,13 @@ class AlertRuntime {
 
   /// Constrói o serviço de alerta para uma requisição, ligando o publisher de
   /// processo ao store amarrado à sessão desta chamada.
-  RedAlertService serviceFor(Session session) => RedAlertService(
+  ///
+  /// Passando [transaction], a gravação do alerta e o registro da chave de
+  /// idempotência participam dela — o que permite desfazer as duas se a
+  /// publicação no broker falhar.
+  RedAlertService serviceFor(Session session, {Transaction? transaction}) =>
+      RedAlertService(
         publisher: dispatcher,
-        store: OrmAlertStore(session: () => session),
+        store: OrmAlertStore(session: () => session, transaction: transaction),
       );
 }

@@ -29,14 +29,21 @@ class AlertsEndpoint extends Endpoint {
     required String locationHash,
   }) async {
     final user = _authenticate(accessToken);
-    final service = AlertRuntime.instance.serviceFor(session);
 
     try {
-      final record = await service.create(
-        user: user,
-        idempotencyKey: idempotencyKey,
-        locationHash: locationHash,
-      );
+      // Gravar o alerta, registrar a chave de idempotência e publicar no broker
+      // formam uma unidade só: se a publicação falhar, a transação desfaz as
+      // escritas e a chave não é consumida, então o cliente pode retentar de
+      // verdade em vez de receber sucesso por um alerta nunca publicado.
+      final record = await session.db.transaction((transaction) async {
+        final service =
+            AlertRuntime.instance.serviceFor(session, transaction: transaction);
+        return service.create(
+          user: user,
+          idempotencyKey: idempotencyKey,
+          locationHash: locationHash,
+        );
+      });
       return RedAlertResult(
         alertId: record.delivery.alertId,
         status: AlertStatus.pending,

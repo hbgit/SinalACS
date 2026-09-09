@@ -24,6 +24,18 @@ class RecordingStore implements AlertStore {
     acknowledgedAlertIds.add(alertId);
     return true;
   }
+
+  // Deduplicação agora vive no armazenamento, então o fake a implementa em
+  // memória — mesma semântica, sem Postgres.
+  final Map<String, RedAlertRecord> keys = {};
+
+  @override
+  Future<RedAlertRecord?> findByIdempotencyKey(String idempotencyKey) async =>
+      keys[idempotencyKey];
+
+  @override
+  Future<void> rememberIdempotencyKey(RedAlertRecord record) async =>
+      keys[record.idempotencyKey] = record;
 }
 
 void main() {

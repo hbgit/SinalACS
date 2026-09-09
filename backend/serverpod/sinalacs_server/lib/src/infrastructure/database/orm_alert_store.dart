@@ -10,10 +10,19 @@ import 'package:sinalacs_server/src/generated/protocol.dart';
 ///
 /// A sessão é obtida por chamada, e não guardada no construtor, porque o
 /// Serverpod amarra o ciclo de vida da conexão à `Session` da requisição.
+///
+/// Quando [transaction] é fornecida, todas as escritas participam dela: é o que
+/// torna atômico o trio gravar alerta, registrar chave de idempotência e
+/// publicar no broker.
 class OrmAlertStore implements AlertStore {
-  OrmAlertStore({required Session Function() session}) : _session = session;
+  OrmAlertStore({
+    required Session Function() session,
+    Transaction? transaction,
+  })  : _session = session,
+        _transaction = transaction;
 
   final Session Function() _session;
+  final Transaction? _transaction;
 
   @override
   Future<void> save(AlertDelivery alert, {required String deviceId}) async {
@@ -32,6 +41,51 @@ class OrmAlertStore implements AlertStore {
         retryCount: 0,
         version: 1,
       ),
+      transaction: _transaction,
+    );
+  }
+
+  @override
+  Future<RedAlertRecord?> findByIdempotencyKey(String idempotencyKey) async {
+    final session = _session();
+    final stored = await AlertIdempotencyKey.db.findFirstRow(
+      session,
+      where: (t) => t.key.equals(idempotencyKey),
+      transaction: _transaction,
+    );
+    if (stored == null) return null;
+
+    final alert = await Alert.db.findById(
+      session,
+      stored.alertId,
+      transaction: _transaction,
+    );
+    if (alert == null) return null;
+
+    return RedAlertRecord(
+      delivery: AlertDelivery(
+        alertId: alert.id!.uuid,
+        patientId: alert.patientId.uuid,
+        microAreaId: alert.microAreaId!.uuid,
+        riskLevel: alert.riskLevel.name,
+        locationHash: alert.locationHash,
+        triggeredAt: alert.triggeredAt,
+      ),
+      idempotencyKey: idempotencyKey,
+    );
+  }
+
+  @override
+  Future<void> rememberIdempotencyKey(RedAlertRecord record) async {
+    await AlertIdempotencyKey.db.insertRow(
+      _session(),
+      AlertIdempotencyKey(
+        key: record.idempotencyKey,
+        alertId: UuidValue.fromString(record.delivery.alertId),
+        locationHash: record.delivery.locationHash,
+        createdAt: DateTime.now().toUtc(),
+      ),
+      transaction: _transaction,
     );
   }
 
@@ -46,7 +100,7 @@ class OrmAlertStore implements AlertStore {
     final acsUuid = UuidValue.fromString(acsId);
     final microAreaUuid = UuidValue.fromString(microAreaId);
 
-    return session.db.transaction((transaction) async {
+    Future<bool> run(Transaction transaction) async {
       // O predicado de microárea é a barreira de territorialização: um ACS
       // nunca confirma alerta fora do seu território (INV-01).
       final alert = await Alert.db.findFirstRow(
@@ -73,8 +127,7 @@ class OrmAlertStore implements AlertStore {
       // (alertId, acsId) tem índice UNIQUE.
       final already = await AlertDeliveryRecord.db.findFirstRow(
         session,
-        where: (t) =>
-            t.alertId.equals(alertUuid) & t.acsId.equals(acsUuid),
+        where: (t) => t.alertId.equals(alertUuid) & t.acsId.equals(acsUuid),
         transaction: transaction,
       );
       if (already == null) {
@@ -90,6 +143,9 @@ class OrmAlertStore implements AlertStore {
       }
 
       return true;
-    });
+    }
+
+    final existing = _transaction;
+    return existing != null ? run(existing) : session.db.transaction(run);
   }
 }
