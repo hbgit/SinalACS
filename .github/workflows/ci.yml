@@ -55,6 +55,24 @@ jobs:
     defaults:
       run:
         working-directory: backend/serverpod
+    services:
+      # Banco que o harness de teste do Serverpod espera, conforme
+      # sinalacs_server/config/test.yaml. O harness aplica as migrações sozinho
+      # e reverte o banco a cada caso, então não há passo de schema nem de seed —
+      # é o que substitui os quatro psql enumerados à mão do job backend.
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ZGib82sxRnAaTto3iglbPkARA1qZUv0W
+          POSTGRES_DB: sinalacs_test
+        ports:
+          - 9090:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres -d sinalacs_test"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
     steps:
       - uses: actions/checkout@v4
       - uses: dart-lang/setup-dart@v1
@@ -62,12 +80,10 @@ jobs:
           sdk: 3.8.0
       - run: dart pub get
       - run: dart analyze
-      # Os testes do pacote Serverpod são herméticos: usam fakes das interfaces
-      # AlertPublisher e AlertStore, com relógio injetado, e não precisam de
-      # Postgres nem de broker. As migrações passaram a ser aplicadas pelo
-      # próprio servidor no boot (SERVERPOD_APPLY_MIGRATIONS), em vez dos quatro
-      # psql enumerados à mão que o job backend ainda usa.
-      - run: dart test test/unit
+      # Suíte completa: 16 testes herméticos em test/unit, que usam fakes das
+      # interfaces AlertPublisher e AlertStore, mais 9 de integração que sobem o
+      # servidor em processo pelo harness e exercitam os endpoints tipados.
+      - run: dart test
         working-directory: backend/serverpod/sinalacs_server
 
   backend-docker-build:

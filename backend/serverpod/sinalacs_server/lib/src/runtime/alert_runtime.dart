@@ -1,3 +1,4 @@
+import 'package:meta/meta.dart';
 import 'package:serverpod/serverpod.dart';
 import 'package:sinalacs_server/src/application/alerts/red_alert_service.dart';
 import 'package:sinalacs_server/src/application/auth/development_auth_service.dart';
@@ -32,6 +33,32 @@ class AlertRuntime {
 
   bool get isMqttConnected => _dispatcher?.isConnected ?? false;
 
+  /// Substitui a configuração lida do ambiente.
+  ///
+  /// Existe para os testes de integração, que precisam exercitar o caminho com
+  /// dev-login habilitado sem depender de variáveis de ambiente do processo de
+  /// teste. Passar `null` volta a ler do ambiente.
+  @visibleForTesting
+  void overrideConfig(AppConfig? value) {
+    _config = value;
+    // O serviço de auth deriva do segredo, então precisa ser reconstruído.
+    _auth = null;
+  }
+
+  AlertPublisher? _publisherOverride;
+
+  /// Substitui o publisher usado pelos endpoints.
+  ///
+  /// Existe para os testes de integração: o harness do Serverpod sobe o
+  /// servidor sem broker, e sem esta costura todo `createRedAlert` falharia
+  /// antes de exercitar o que se quer testar. Passar `null` restaura o
+  /// dispatcher real.
+  @visibleForTesting
+  void overridePublisher(AlertPublisher? publisher) =>
+      _publisherOverride = publisher;
+
+  AlertPublisher get _publisher => _publisherOverride ?? dispatcher;
+
   /// Constrói o serviço de alerta para uma requisição, ligando o publisher de
   /// processo ao store amarrado à sessão desta chamada.
   ///
@@ -40,7 +67,7 @@ class AlertRuntime {
   /// publicação no broker falhar.
   RedAlertService serviceFor(Session session, {Transaction? transaction}) =>
       RedAlertService(
-        publisher: dispatcher,
+        publisher: _publisher,
         store: OrmAlertStore(session: () => session, transaction: transaction),
       );
 }
