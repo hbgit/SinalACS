@@ -1,5 +1,5 @@
 # Build a partir da raiz do workspace:
-#   docker build -f sinalacs_server/Dockerfile backend/serverpod
+#   docker build -f sinalacs_server/Dockerfile backend
 
 # Estágio de build
 FROM dart:3.8.0 AS build

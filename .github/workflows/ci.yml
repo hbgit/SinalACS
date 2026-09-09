@@ -6,55 +6,11 @@ on:
   pull_request:
 
 jobs:
-  backend:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: backend
-    services:
-      postgres:
-        image: postgres:15-alpine
-        env:
-          POSTGRES_USER: sinalacs_user
-          POSTGRES_PASSWORD: strongpassword
-          POSTGRES_DB: sinalacs_db
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd="pg_isready -U sinalacs_user -d sinalacs_db"
-          --health-interval=10s
-          --health-timeout=5s
-          --health-retries=5
-      mosquitto:
-        image: eclipse-mosquitto:2
-        ports:
-          - 1883:1883
-          - 8883:8883
-        options: >-
-          --health-cmd="mosquitto_sub -h localhost -p 1883 -t '$SYS/#' -C 1 -W 3"
-          --health-interval=10s
-          --health-timeout=5s
-          --health-retries=5
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dart-lang/setup-dart@v1
-      - name: Install PostgreSQL client
-        run: sudo apt-get update && sudo apt-get install -y postgresql-client
-      - name: Apply database schema
-        run: |
-          psql "postgresql://sinalacs_user:strongpassword@localhost:5432/sinalacs_db" -v ON_ERROR_STOP=1 -f lib/src/infrastructure/database/migrations/v1.0.0/01_initial_schema.sql
-          psql "postgresql://sinalacs_user:strongpassword@localhost:5432/sinalacs_db" -v ON_ERROR_STOP=1 -f lib/src/infrastructure/database/migrations/v1.1.0/01_add_alerts_and_visits.sql
-          psql "postgresql://sinalacs_user:strongpassword@localhost:5432/sinalacs_db" -v ON_ERROR_STOP=1 -f lib/src/infrastructure/database/migrations/v1.2.0/01_add_alert_deliveries.sql
-          psql "postgresql://sinalacs_user:strongpassword@localhost:5432/sinalacs_db" -v ON_ERROR_STOP=1 -f lib/src/infrastructure/database/seeds/development.sql
-      - run: dart pub get
-      - run: dart analyze
-      - run: dart test
-
   serverpod-backend:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: backend/serverpod
+        working-directory: backend
     services:
       # Banco que o harness de teste do Serverpod espera, conforme
       # sinalacs_server/config/test.yaml. O harness aplica as migrações sozinho
@@ -84,20 +40,17 @@ jobs:
       # interfaces AlertPublisher e AlertStore, mais 9 de integração que sobem o
       # servidor em processo pelo harness e exercitam os endpoints tipados.
       - run: dart test
-        working-directory: backend/serverpod/sinalacs_server
+        working-directory: backend/sinalacs_server
 
   backend-docker-build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # Imagem do backend legado (dart:io), ainda servida pelo job backend.
-      - name: Build legacy backend Docker image
-        run: docker build -f backend/Dockerfile backend
-      # Imagem do servidor Serverpod, que é a construída pelo docker-compose.
+      # Imagem do servidor Serverpod, a mesma que o docker-compose constrói.
       # O contexto é a raiz do workspace, porque o build precisa do pubspec.lock
       # compartilhado entre sinalacs_server e sinalacs_client.
       - name: Build Serverpod Docker image
-        run: docker build -f backend/serverpod/sinalacs_server/Dockerfile backend/serverpod
+        run: docker build -f backend/sinalacs_server/Dockerfile backend
 
   patient-app:
     runs-on: ubuntu-latest

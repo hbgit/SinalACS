@@ -47,7 +47,7 @@ services:
 
   serverpod:
     build:
-      context: ./backend/serverpod
+      context: ./backend
       dockerfile: sinalacs_server/Dockerfile
     container_name: sinalacs-serverpod
     depends_on:
@@ -93,7 +93,7 @@ services:
     environment:
       PGPASSWORD: strongpassword
     volumes:
-      - ./backend/serverpod/sinalacs_server/lib/src/infrastructure/database/seeds:/seeds:ro
+      - ./backend/sinalacs_server/lib/src/infrastructure/database/seeds:/seeds:ro
     entrypoint:
       - /bin/sh
       - -c
