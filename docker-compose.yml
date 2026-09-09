@@ -18,27 +18,6 @@ services:
       timeout: 5s
       retries: 5
 
-  database-init:
-    image: postgres:15-alpine
-    depends_on:
-      postgres:
-        condition: service_healthy
-    environment:
-      PGPASSWORD: strongpassword
-    volumes:
-      - ./backend/lib/src/infrastructure/database/migrations:/migrations:ro
-      - ./backend/lib/src/infrastructure/database/seeds:/seeds:ro
-    entrypoint:
-      - /bin/sh
-      - -c
-      - |
-        if [ "$(psql -h postgres -U sinalacs_user -d sinalacs_db -tAc "SELECT to_regclass('public.users')")" != "users" ]; then
-          psql -v ON_ERROR_STOP=1 -h postgres -U sinalacs_user -d sinalacs_db -f /migrations/v1.0.0/01_initial_schema.sql
-          psql -v ON_ERROR_STOP=1 -h postgres -U sinalacs_user -d sinalacs_db -f /migrations/v1.1.0/01_add_alerts_and_visits.sql
-          psql -v ON_ERROR_STOP=1 -h postgres -U sinalacs_user -d sinalacs_db -f /migrations/v1.2.0/01_add_alert_deliveries.sql
-          psql -v ON_ERROR_STOP=1 -h postgres -U sinalacs_user -d sinalacs_db -f /seeds/development.sql
-        fi
-
   mosquitto:
     image: eclipse-mosquitto:2
     container_name: sinalacs-mosquitto
@@ -68,18 +47,29 @@ services:
 
   serverpod:
     build:
-      context: ./backend
-      dockerfile: Dockerfile
+      context: ./backend/serverpod
+      dockerfile: sinalacs_server/Dockerfile
     container_name: sinalacs-serverpod
     depends_on:
       postgres:
         condition: service_healthy
-      database-init:
-        condition: service_completed_successfully
       mosquitto:
         condition: service_started
     environment:
-      DATABASE_URL: postgresql://sinalacs_user:strongpassword@postgres:5432/sinalacs_db?sslmode=disable
+      # O Serverpod aplica as próprias migrações no boot, o que substitui o
+      # serviço one-shot database-init: o guard anterior era tudo-ou-nada sobre
+      # a existência de public.users e pulava em silêncio um banco parcialmente
+      # migrado.
+      SERVERPOD_APPLY_MIGRATIONS: "true"
+      SERVERPOD_DATABASE_HOST: postgres
+      SERVERPOD_DATABASE_PORT: "5432"
+      SERVERPOD_DATABASE_NAME: sinalacs_db
+      SERVERPOD_DATABASE_USER: sinalacs_user
+      SERVERPOD_DATABASE_PASSWORD: strongpassword
+      SERVERPOD_DATABASE_REQUIRE_SSL: "false"
+      SERVERPOD_REDIS_ENABLED: "false"
+      # O Insights escuta 8081 por padrão, que aqui é o dashboard do Traefik.
+      SERVERPOD_INSIGHTS_SERVER_PORT: "8083"
       MQTT_BROKER: mosquitto:8883
       MQTT_USERNAME: backend
       MQTT_PASSWORD: ${MQTT_BACKEND_PASSWORD:-development-backend-password}
@@ -91,6 +81,23 @@ services:
       - "8080:8080"
     volumes:
       - ./infra/docker/mosquitto/runtime/certs:/app/certs:ro
+
+  # Dados sintéticos de desenvolvimento. Roda depois que o servidor sobe, porque
+  # é ele quem aplica as migrações. O seed não é opcional: o dev-login referencia
+  # UUIDs fixos e alerts.patientId tem FK para patients.
+  database-seed:
+    image: postgres:15-alpine
+    depends_on:
+      serverpod:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: strongpassword
+    volumes:
+      - ./backend/serverpod/sinalacs_server/lib/src/infrastructure/database/seeds:/seeds:ro
+    entrypoint:
+      - /bin/sh
+      - -c
+      - psql -v ON_ERROR_STOP=1 -h postgres -U sinalacs_user -d sinalacs_db -f /seeds/development.sql
 
   traefik:
     image: traefik:v2.10

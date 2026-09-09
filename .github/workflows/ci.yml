@@ -50,12 +50,38 @@ jobs:
       - run: dart analyze
       - run: dart test
 
+  serverpod-backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend/serverpod
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: 3.8.0
+      - run: dart pub get
+      - run: dart analyze
+      # Os testes do pacote Serverpod são herméticos: usam fakes das interfaces
+      # AlertPublisher e AlertStore, com relógio injetado, e não precisam de
+      # Postgres nem de broker. As migrações passaram a ser aplicadas pelo
+      # próprio servidor no boot (SERVERPOD_APPLY_MIGRATIONS), em vez dos quatro
+      # psql enumerados à mão que o job backend ainda usa.
+      - run: dart test test/unit
+        working-directory: backend/serverpod/sinalacs_server
+
   backend-docker-build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Build backend Docker image
+      # Imagem do backend legado (dart:io), ainda servida pelo job backend.
+      - name: Build legacy backend Docker image
         run: docker build -f backend/Dockerfile backend
+      # Imagem do servidor Serverpod, que é a construída pelo docker-compose.
+      # O contexto é a raiz do workspace, porque o build precisa do pubspec.lock
+      # compartilhado entre sinalacs_server e sinalacs_client.
+      - name: Build Serverpod Docker image
+        run: docker build -f backend/serverpod/sinalacs_server/Dockerfile backend/serverpod
 
   patient-app:
     runs-on: ubuntu-latest

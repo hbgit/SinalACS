@@ -1,10 +1,10 @@
-# Build from the project root with:
-# docker build -f sinalacs_server/Dockerfile .
+# Build a partir da raiz do workspace:
+#   docker build -f sinalacs_server/Dockerfile backend/serverpod
 
-# Build stage
+# Estágio de build
 FROM dart:3.8.0 AS build
 
-# Create a minimal workspace that preserves locked server dependency versions.
+# Workspace mínimo, preservando as versões travadas do pubspec.lock.
 WORKDIR /app
 COPY pubspec.lock .
 COPY sinalacs_server sinalacs_server
@@ -17,41 +17,49 @@ RUN printf '%s\n' \
   > pubspec.yaml
 RUN dart pub get
 
-# Compile the server executable.
+# Compila o executável AOT.
 WORKDIR /app/sinalacs_server
 RUN dart compile exe bin/main.dart -o bin/server
 
-# Add a fallback for the copy of possibly missing directories.
+# Fallback para diretórios possivelmente ausentes.
 RUN mkdir -p config web migrations
 
-# Final stage
+# Estágio final
 FROM alpine:latest
 WORKDIR /app
 
-# Environment variables
+# curl é necessário para o HEALTHCHECK, que hosts free-tier usam para acordar o
+# serviço; ca-certificates para o TLS do broker e do Postgres gerenciado.
+RUN apk add --no-cache curl ca-certificates \
+    && adduser -D -h /app app
+
 ENV runmode=production
 ENV serverid=default
 ENV logging=normal
 ENV role=monolith
 
-# Copy runtime dependencies
 COPY --from=build /runtime/ /
-
-# Copy compiled server executable
 COPY --from=build /app/sinalacs_server/bin/server server
-
-# Copy configuration files and resources
 COPY --from=build /app/sinalacs_server/config/ config/
 COPY --from=build /app/sinalacs_server/web/ web/
 COPY --from=build /app/sinalacs_server/migrations/ migrations/
 
-# This file is required to enable the endpoint log filter in Insights.
+# Necessário para o filtro de log de endpoints no Insights.
 COPY --from=build /app/sinalacs_server/lib/src/generated/protocol.yaml lib/src/generated/protocol.yaml
 
-# Expose ports
-EXPOSE 8080
-EXPOSE 8081
-EXPOSE 8082
+USER app
 
-# Define the entrypoint command
+# 8080 API, 8081 Insights, 8082 web. A porta do Insights colide com o dashboard
+# do Traefik no docker-compose deste repositório, e lá é remapeada via
+# SERVERPOD_INSIGHTS_SERVER_PORT.
+EXPOSE 8080 8081 8082
+
+# O endpoint de saúde agora é RPC (POST /health/check), e não mais GET /health:
+# o Serverpod não expõe rotas REST. A forma da resposta foi preservada —
+# {status, mqttConnected, dbConnected} — e responde ok assim que o servidor sobe,
+# independentemente do estado do broker e do banco.
+HEALTHCHECK --interval=30s --timeout=3s --start-period=20s \
+  CMD curl -fsS -X POST -H 'Content-Type: application/json' -d '{}' \
+      http://localhost:${SERVERPOD_API_SERVER_PORT:-8080}/health/check || exit 1
+
 ENTRYPOINT ./server --mode=$runmode --server-id=$serverid --logging=$logging --role=$role
