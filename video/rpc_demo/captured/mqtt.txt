@@ -1,0 +1,1 @@
+sinalacs/v1/microareas/00000000-0000-4000-8000-000000000003/alerts {"version":1,"alert_id":"d532ec44-2739-43f9-9811-b95e33dfa071","patient_id":"00000000-0000-4000-8000-000000000001","micro_area_id":"00000000-0000-4000-8000-000000000003","risk_level":"red","location_hash":"hash-sintetico-microarea-12","triggered_at":"2026-09-10T19:39:45.769049Z"}

@@ -1,0 +1,347 @@
+{
+  "$comment": "Fonte única de verdade de tempo do vídeo do sponsor. Derivado de docs/roteiro-video-sponsor.md. Lido por video/remotion (cartelas e legendas) e por video/build/assemble.sh (montagem). Texto condensado para LEGENDA, não para locução: ver a 'Nota de adaptação para a versão sem locução' no roteiro. Só dados sintéticos.",
+  "fps": 30,
+  "width": 1920,
+  "height": 1080,
+  "totalFrames": 5400,
+  "theme": {
+    "background": "#030712",
+    "foreground": "#e5e7eb",
+    "muted": "#94a3b8",
+    "accent": "#38bdf8",
+    "risk": {
+      "$comment": "INVARIANTE: vermelho/amarelo/verde SÓ como sinal clínico, nunca decorativo. Proibidos no bloco 1.",
+      "red": "#ef4444",
+      "yellow": "#f59e0b",
+      "green": "#22c55e"
+    }
+  },
+  "subtitleRules": {
+    "maxLines": 2,
+    "maxCharsPerLine": 42,
+    "minFramesOnScreen": 75,
+    "placement": "ao lado do aparelho nos blocos device; centralizado abaixo nos blocos card e terminal"
+  },
+  "blocks": [
+    {
+      "id": 1,
+      "title": "O problema",
+      "timecode": "0:00-0:20",
+      "startFrame": 0,
+      "endFrame": 600,
+      "kind": "card",
+      "notes": "Abre em silêncio; primeira legenda entra em 0:02. Vermelho PROIBIDO neste bloco — a cor só passa a significar gravidade no bloco 3.",
+      "hero": {
+        "text": "A doença não segue o mapa.",
+        "inFrame": 330,
+        "outFrame": 600
+      },
+      "subtitles": [
+        {
+          "text": "Hoje o Agente Comunitário de Saúde\nvisita as casas na ordem do mapa.",
+          "inFrame": 60,
+          "outFrame": 210
+        },
+        {
+          "text": "Rua por rua, sempre igual.",
+          "inFrame": 210,
+          "outFrame": 330
+        },
+        {
+          "text": "O idoso com falta de ar pode ser a última\nvisita do dia — porque mora no fim da rua.",
+          "inFrame": 450,
+          "outFrame": 600
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "A solução e o moat",
+      "timecode": "0:20-0:35",
+      "startFrame": 600,
+      "endFrame": 1050,
+      "kind": "card",
+      "notes": "Três colunas entram uma a uma; a terceira fica destacada. 'Sem inteligência artificial' sustentado 2 s antes do corte — é argumento de venda para edital, não limitação.",
+      "columns": [
+        {
+          "label": "e-SUS APS",
+          "verb": "registra",
+          "inFrame": 720,
+          "highlight": false
+        },
+        {
+          "label": "WhatsApp",
+          "verb": "desorganiza",
+          "inFrame": 780,
+          "highlight": false
+        },
+        {
+          "label": "SinalACS",
+          "verb": "prioriza",
+          "inFrame": 840,
+          "highlight": true
+        }
+      ],
+      "subtitles": [
+        {
+          "text": "O SinalACS troca o roteiro geográfico\npor uma fila ordenada por risco clínico.",
+          "inFrame": 600,
+          "outFrame": 720
+        },
+        {
+          "text": "Regra determinística.\nSem inteligência artificial.",
+          "inFrame": 900,
+          "outFrame": 1050
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Demo — paciente",
+      "timecode": "0:35-1:15",
+      "startFrame": 1050,
+      "endFrame": 2250,
+      "kind": "device",
+      "source": "video/out/takes/patient.mp4",
+      "notes": "Beat central em 1680-1830: 'Risco: Vermelho' já está em tela ao ENTRAR no passo 3 (app.dart:279) e SOME ao tocar 'Concluir triagem' (app.dart:273). Congelar 1,5 s + zoom suave a partir de 1680.",
+      "hold": {
+        "$comment": "congelamento do beat",
+        "atFrame": 1680,
+        "freezeFrames": 45,
+        "zoom": 1.18
+      },
+      "subtitles": [
+        {
+          "text": "Acesso sem senha:\nCPF e data de nascimento.",
+          "inFrame": 1050,
+          "outFrame": 1200
+        },
+        {
+          "text": "Maria, 72 anos. Três perguntas,\numa resposta por vez.",
+          "inFrame": 1260,
+          "outFrame": 1440
+        },
+        {
+          "text": "Ela marca \"falta de ar\nou cansaço intenso\".",
+          "inFrame": 1500,
+          "outFrame": 1650
+        },
+        {
+          "text": "A classificação sai pronta.\nRisco vermelho.",
+          "inFrame": 1680,
+          "outFrame": 1830
+        },
+        {
+          "text": "Não existe campo para editar —\nnem para o paciente, nem para o agente.",
+          "inFrame": 1830,
+          "outFrame": 1950
+        },
+        {
+          "text": "Regra fechada e auditável, inspirada\nno Protocolo de Manchester.",
+          "inFrame": 1950,
+          "outFrame": 2100
+        },
+        {
+          "text": "O paciente acompanha o chamado: enviado,\nvisualizado, em análise, agendado.",
+          "inFrame": 2100,
+          "outFrame": 2250
+        }
+      ],
+      "trimStartSeconds": 0.0,
+      "trimNote": "A tomada começa na tela de login, que é exatamente o que o bloco pede em 0:35."
+    },
+    {
+      "id": 4,
+      "title": "Demo — ACS",
+      "timecode": "1:15-2:05",
+      "startFrame": 2250,
+      "endFrame": 3750,
+      "kind": "device",
+      "source": "video/out/takes/acs.mp4",
+      "notes": "Entrada por CORTE SECO a partir do 'Risco: Vermelho' do bloco 3 para o card vermelho da fila. Sem transição elaborada. Modo avião ligado antes da cena de registro (3210+), com o indicador de 'sem rede' visível.",
+      "subtitles": [
+        {
+          "text": "O agente carrega só a própria microárea:\n142 pacientes, em cache local.",
+          "inFrame": 2250,
+          "outFrame": 2400
+        },
+        {
+          "text": "Nenhum agente vê o território de outro.\nÉ uma invariante, não uma configuração.",
+          "inFrame": 2430,
+          "outFrame": 2580
+        },
+        {
+          "text": "E a fila já vem ordenada por risco.",
+          "inFrame": 2580,
+          "outFrame": 2700
+        },
+        {
+          "text": "Maria Oliveira no topo, em vermelho.",
+          "inFrame": 2700,
+          "outFrame": 2820
+        },
+        {
+          "text": "João Pereira, glicemia descompensada,\nem amarelo.",
+          "inFrame": 2820,
+          "outFrame": 2940
+        },
+        {
+          "text": "Ana Costa, dúvida de rotina, em verde.",
+          "inFrame": 2940,
+          "outFrame": 3060
+        },
+        {
+          "text": "A cor aqui nunca é decoração:\nela significa gravidade.",
+          "inFrame": 3060,
+          "outFrame": 3030
+        },
+        {
+          "text": "O registro é feito na porta da casa,\ncom ou sem sinal.",
+          "inFrame": 3030,
+          "outFrame": 3390
+        },
+        {
+          "text": "O agente salva e o app enfileira\na visita localmente.",
+          "inFrame": 3390,
+          "outFrame": 3570
+        },
+        {
+          "text": "Em zona rural, é a diferença entre\nter o dado e perder o dia.",
+          "inFrame": 3570,
+          "outFrame": 3750
+        }
+      ],
+      "trimStartSeconds": 4.0,
+      "trimNote": "A tomada começa no login do ACS, mas o bloco abre na Territorialização (1:15) e a legenda já fala da microárea. Descarta os ~4 s de login."
+    },
+    {
+      "id": 5,
+      "title": "A prova técnica",
+      "timecode": "2:05-2:25",
+      "startFrame": 3750,
+      "endFrame": 4350,
+      "kind": "terminal",
+      "source": "video/out/takes/backend.mp4",
+      "notes": "Serverpod é RPC, não REST: alerts.createRedAlert / alerts.acknowledge. Destacar em amarelo, na edição, apenas 'published: true', o alertId repetido na reexecução idempotente, e a linha de ACK. Nenhum token inteiro em quadro.",
+      "highlights": [
+        "published: true",
+        "acknowledged: true"
+      ],
+      "subtitles": [
+        {
+          "text": "Isto não é maquete. O ciclo crítico\njá roda ponta a ponta.",
+          "inFrame": 3750,
+          "outFrame": 3900
+        },
+        {
+          "text": "O alerta vermelho é gravado em transação\ne publicado no tópico MQTT da microárea.",
+          "inFrame": 3900,
+          "outFrame": 4050
+        },
+        {
+          "text": "E volta com confirmação de recebimento.\nAlerta vermelho não se perde em silêncio.",
+          "inFrame": 4050,
+          "outFrame": 4200
+        },
+        {
+          "text": "Integração contínua verde\nnos quatro trilhos.",
+          "inFrame": 4200,
+          "outFrame": 4350
+        }
+      ],
+      "trimStartSeconds": 0.0
+    },
+    {
+      "id": 6,
+      "title": "Escala e roadmap",
+      "timecode": "2:25-2:45",
+      "startFrame": 4350,
+      "endFrame": 4950,
+      "kind": "card",
+      "notes": "Rotular como 'Capacidade projetada por 2 UBS' — são números de dimensionamento do PRD, NÃO base instalada.",
+      "capacityLabel": "Capacidade projetada por 2 UBS",
+      "capacity": [
+        "5.000 pacientes",
+        "100 ACS",
+        "2 UBS"
+      ],
+      "phases": [
+        {
+          "label": "Fase 1 — Prova de conceito",
+          "done": true
+        },
+        {
+          "label": "Fase 2 — Alfa/Beta",
+          "done": true
+        },
+        {
+          "label": "Fase 3 — Disponibilidade geral",
+          "done": false
+        }
+      ],
+      "subtitles": [
+        {
+          "text": "Cada duas Unidades Básicas comportam\ncinco mil pacientes e cem agentes.",
+          "inFrame": 4350,
+          "outFrame": 4530
+        },
+        {
+          "text": "Prova de conceito e alfa\nestão concluídas e versionadas.",
+          "inFrame": 4530,
+          "outFrame": 4710
+        },
+        {
+          "text": "Falta a fase três: deploy monitorado,\nteste de carga e auditoria LGPD.",
+          "inFrame": 4710,
+          "outFrame": 4950
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "O pedido",
+      "timecode": "2:45-3:00",
+      "startFrame": 4950,
+      "endFrame": 5400,
+      "kind": "card",
+      "notes": "Corresponde ao critério de aceite M3.5 do PRD. Termina em SILÊNCIO: a última legenda sai em 5340 e a cartela fica sozinha no ar por 2 s.",
+      "ask": [
+        "1 UBS",
+        "2 microáreas",
+        "50 pacientes"
+      ],
+      "subtitles": [
+        {
+          "text": "O pedido é um piloto: uma UBS,\nduas microáreas, cinquenta pacientes.",
+          "inFrame": 4950,
+          "outFrame": 5130
+        },
+        {
+          "text": "É o que precisamos para medir\na única métrica que importa:",
+          "inFrame": 5130,
+          "outFrame": 5250
+        },
+        {
+          "text": "quanto tempo leva, hoje, até alguém\nchegar em quem está pior.",
+          "inFrame": 5250,
+          "outFrame": 5340
+        }
+      ]
+    }
+  ],
+  "audio": {
+    "$comment": "Sem locução (decisão de 2026-09-10). Leito musical CC0 só nos blocos 2-6; blocos 1 e 7 em silêncio, como o roteiro exige. O offset pula a abertura lenta da faixa e entra num trecho já formado.",
+    "musicStartFrame": 600,
+    "musicEndFrame": 4950,
+    "fadeInFrames": 45,
+    "fadeOutFrames": 90,
+    "track": "assets/holiznacc0-cosmic-waves.mp3",
+    "licenseFile": "video/assets/LICENSES.md",
+    "trackOffsetSeconds": 180,
+    "trackTitle": "Cosmic Waves",
+    "trackArtist": "HoliznaCC0",
+    "trackLicense": "CC0 1.0 Universal",
+    "trackLicenseUrl": "https://creativecommons.org/publicdomain/zero/1.0/",
+    "trackSourceUrl": "https://archive.org/details/holizna-cc-0-cosmic-waves"
+  }
+}

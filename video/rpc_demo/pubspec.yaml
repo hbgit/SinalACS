@@ -1,0 +1,18 @@
+name: sinalacs_rpc_demo
+description: >-
+  Roteiro executável do bloco 5 do vídeo do sponsor: o ciclo do alerta vermelho
+  ponta a ponta contra o backend Serverpod, usando o cliente gerado.
+publish_to: none
+version: 1.0.0
+
+environment:
+  sdk: ">=3.8.0 <4.0.0"
+
+dependencies:
+  # O mesmo cliente tipado que os apps Flutter vão consumir — filmar a chamada
+  # real, não um curl equivalente.
+  sinalacs_client:
+    path: ../../backend/sinalacs_client
+  # Fixado na mesma versão que sinalacs_client declara (3.4.13); divergir aqui
+  # quebra a resolução.
+  serverpod_client: 3.4.13

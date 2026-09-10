@@ -1,0 +1,29 @@
+SinalACS — ciclo do alerta vermelho
+servidor: http://localhost:8080/   (Serverpod RPC)
+
+[1/5] Saúde da stack
+    ✓ status: ok
+      banco: true
+      broker MQTT: true
+
+[2/5] Autenticação de desenvolvimento (paciente)
+    ✓ token: Bearer eyJhbGci…mC1k
+      (truncado de propósito — nunca exibir o token inteiro)
+
+[3/5] alerts.createRedAlert
+      idempotencyKey: video-demo-1789069185765
+    ✓ alertId: d532ec44-2739-43f9-9811-b95e33dfa071
+    ✓ status: pending
+    ✓ published: true
+      gravado em transação e publicado no tópico MQTT da microárea
+
+[4/5] Reenvio com a MESMA chave — prova de idempotência
+    ✓ alertId: d532ec44-2739-43f9-9811-b95e33dfa071
+      mesmo alertId — nenhum alerta duplicado
+
+[5/5] alerts.acknowledge (pelo ACS)
+    ✓ acknowledged: true
+    ✓ status: acknowledged
+
+  Alerta vermelho não se perde em silêncio.
+

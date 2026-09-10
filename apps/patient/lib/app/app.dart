@@ -380,7 +380,7 @@ class StatusScreen extends StatelessWidget {
               children: [
                 Text('Solicitação de visita #4082', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
                 SizedBox(height: 8),
-                Text('Triagem Amarela • criada hoje às 09:30'),
+                Text('Triagem Vermelha • criada hoje às 09:30'),
                 SizedBox(height: 28),
                 Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [_StatusStep('Enviado', true), _StatusStep('Visualizado', true), _StatusStep('Em análise', true), _StatusStep('Agendado', false)]),
                 SizedBox(height: 28),

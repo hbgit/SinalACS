@@ -1,0 +1,10 @@
+# Binários de vídeo: pesados e reprodutíveis a partir dos scripts versionados.
+out/
+
+# Dependências do projeto Remotion.
+remotion/node_modules/
+
+# Faixas musicais baixadas. A PROCEDÊNCIA fica versionada em assets/LICENSES.md
+# — necessária se o vídeo for anexado a edital público.
+assets/*
+!assets/LICENSES.md
