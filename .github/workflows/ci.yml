@@ -57,7 +57,37 @@ jobs:
       # (ubuntu-22.04 vs ubuntu-latest) como causa — todos reproduzem a mesma
       # assinatura exata. Precisa de investigação com acesso ao runner
       # (ex.: debug via tmate) para ir além disso.
-      - run: dart test test/integration -r expanded --chain-stack-traces
+      # Diagnóstico temporário: habilita core dump e, se o dart test morrer,
+      # investiga a causa sem precisar de acesso interativo ao runner —
+      # checa OOM killer (dmesg), limites de memória do cgroup (que não
+      # aparecem em `free -h`, só memória do host) e, se houver core file,
+      # extrai um backtrace nativo via gdb. Remover assim que a causa for
+      # encontrada — não deve ficar em CI permanente.
+      - run: |
+          sudo sysctl -w kernel.core_pattern=/tmp/core.%e.%p || true
+          ulimit -c unlimited
+          set +e
+          dart test test/integration -r expanded --chain-stack-traces
+          DART_EXIT=$?
+          set -e
+          echo "=== dart test exit code: $DART_EXIT ==="
+          if [ "$DART_EXIT" -ne 0 ]; then
+            echo "=== dmesg (procurando OOM killer) ==="
+            sudo dmesg --ctime 2>/dev/null | tail -80 || dmesg --ctime 2>/dev/null | tail -80 || echo "dmesg indisponível"
+            echo "=== limites de memória do cgroup ==="
+            cat /sys/fs/cgroup/memory.max 2>/dev/null || cat /sys/fs/cgroup/memory/memory.limit_in_bytes 2>/dev/null || echo "cgroup memory.max indisponível"
+            cat /sys/fs/cgroup/memory.current 2>/dev/null || cat /sys/fs/cgroup/memory/memory.usage_in_bytes 2>/dev/null || echo "cgroup memory.current indisponível"
+            echo "=== procurando core dump ==="
+            ls -la /tmp/core.* 2>/dev/null || echo "nenhum core file em /tmp"
+            CORE_FILE=$(ls /tmp/core.* 2>/dev/null | head -1)
+            if [ -n "$CORE_FILE" ]; then
+              echo "=== backtrace do core dump ($CORE_FILE) ==="
+              sudo apt-get install -y gdb >/dev/null 2>&1 || true
+              DART_BIN=$(which dart)
+              gdb -batch -ex "thread apply all bt" "$DART_BIN" "$CORE_FILE" 2>&1 || echo "gdb falhou"
+            fi
+          fi
+          exit $DART_EXIT
         working-directory: backend/sinalacs_server
 
   backend-docker-build:
