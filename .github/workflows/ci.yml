@@ -36,111 +36,21 @@ jobs:
           sdk: 3.12.2
       - run: dart pub get
       - run: dart analyze
-      # Suíte dividida em duas etapas (em vez de um único `dart test`) para
-      # isolar onde o job trava. test/unit passa limpo; test/integration
-      # falha de forma consistente só no runner real do GitHub Actions,
-      # nunca localmente em nenhuma reprodução com o mesmo SDK/Postgres/
-      # estrutura de workflow. Investigação até aqui (ver histórico do git
-      # para o rastro completo de cada tentativa):
-      #   - Descartado por medição direta no próprio job: exaustão de CPU/
-      #     memória (nproc=4, 14Gi livres), limite de memória de cgroup (nem
-      #     existe — é VM, não container), OOM killer (nada no dmesg), crash
-      #     nativo com sinal capturável (nenhum core file mesmo com
-      #     ulimit -c unlimited), imagem do runner (ubuntu-22.04 reproduz
-      #     igual), SDK do Dart (3.8.0 e 3.12.2 reproduzem igual),
-      #     concorrência do dart test, tamanho de stack, e as env vars
-      #     GITHUB_ACTIONS/CI que a ferramenta detecta (dart test --help
-      #     documenta um reporter "github" condicional a isso).
-      #   - Confirmado via strace -f (artifact baixado numa rodada de
-      #     diagnóstico): quem morre é uma thread interna do próprio
-      #     dart test ("DartWorker", mesmo PID/processo da suíte) chamando
-      #     exit_group(1) ela mesma — sem sinal do SO, sem mensagem em
-      #     stdout/stderr — momentos depois de ficar ~3.5s bloqueada num
-      #     futex e então gerar código JIT ("dart-code"). Ou seja, é o
-      #     próprio dart test/VM do Dart decidindo sair, silenciosamente,
-      #     só nesse ambiente.
-      # Bateria de diagnóstico temporária. Remover assim que a causa for
-      # encontrada — não deve ficar em CI permanente.
-      - name: Diagnóstico do crash de integração
-        continue-on-error: true
+      # config/passwords.yaml é gitignored (guarda segredos de dev), então não
+      # existe num checkout limpo — inclusive o do runner. Sem ele o harness do
+      # Serverpod não carrega a senha do banco, falha ainda no carregamento de
+      # config e chama exit(1); como o exit() do Dart não dá flush no stdout, a
+      # mensagem de erro se perde e a falha fica totalmente silenciosa (exit 1,
+      # zero linhas de log). A senha tem que ser a mesma do serviço postgres
+      # acima: se as duas divergirem, o harness volta a falhar sem log nenhum.
+      - name: Cria config/passwords.yaml para o harness de teste
         run: |
-          set +e
-          sudo apt-get install -y strace postgresql-client >/dev/null 2>&1
-
-          echo "########## A) withServerpod SEM migrations ##########"
-          cat > test/integration/zz_nomig.dart <<'DART'
-          import 'package:test/test.dart';
-          import 'test_tools/serverpod_test_tools.dart';
-          void main() {
-            withServerpod('sem migrations', (sessionBuilder, endpoints) {
-              test('noop', () => expect(1, 1));
-            }, applyMigrations: false);
-          }
-          DART
-          sed -i 's/^          //' test/integration/zz_nomig.dart
-          timeout 180 dart run test/integration/zz_nomig.dart > /tmp/a.log 2>&1
-          echo "EXIT_A=$?"; cat /tmp/a.log; echo "--- fim A ---"
-          rm -f test/integration/zz_nomig.dart
-
-          echo "########## B) strace do harness mínimo, procurando a mensagem perdida ##########"
-          cat > test/integration/zz_min.dart <<'DART'
-          import 'package:test/test.dart';
-          import 'test_tools/serverpod_test_tools.dart';
-          void main() {
-            withServerpod('harness minimo', (sessionBuilder, endpoints) {
-              test('noop', () => expect(1, 1));
-            });
-          }
-          DART
-          sed -i 's/^          //' test/integration/zz_min.dart
-          timeout 180 strace -f -tt -s 4000 -e trace=write,writev -o /tmp/w.strace \
-            dart run test/integration/zz_min.dart > /tmp/b.log 2>&1
-          echo "EXIT_B=$?"; cat /tmp/b.log; echo "--- fim B ---"
-          echo "--- writes com texto legivel ---"
-          grep -aE 'write(v)?\([12],' /tmp/w.strace | tail -30
-          rm -f test/integration/zz_min.dart
-
-          echo "########## C) estado do banco sinalacs_test ##########"
-          PGPASSWORD=ZGib82sxRnAaTto3iglbPkARA1qZUv0W psql -h localhost -p 9090 -U postgres -d sinalacs_test \
-            -c '\dt' -c "select count(*) as migracoes from serverpod_migrations;" 2>&1 | head -40
-
-          echo "########## 1) COMPILA o arquivo de teste sem executar o main dele ##########"
-          # Importar o arquivo obriga a compilação de todo o grafo dele, mas o
-          # main() do teste não roda. Se imprimir OK, a compilação está sã e o
-          # crash é em tempo de execução (no withServerpod), não de compilação.
-          printf "import 'red_alert_cycle_test.dart' as alvo;\nvoid main() => print('COMPILOU OK (main do teste nao executado): \${alvo.main}');\n" > test/integration/zz_compile.dart
-          timeout 180 dart run test/integration/zz_compile.dart > /tmp/1.log 2>&1
-          echo "EXIT_1=$?"; echo "--- saida ---"; cat /tmp/1.log; echo "--- fim ---"
-          rm -f test/integration/zz_compile.dart
-
-          echo "########## 2) withServerpod MÍNIMO (sobe o harness, sem o resto) ##########"
-          cat > test/integration/zz_minimo.dart <<'DART'
-          import 'package:test/test.dart';
-          import 'test_tools/serverpod_test_tools.dart';
-
-          void main() {
-            print('antes do withServerpod');
-            withServerpod('harness minimo', (sessionBuilder, endpoints) {
-              test('noop', () => expect(1, 1));
-            });
-            print('depois do withServerpod');
-          }
-          DART
-          sed -i 's/^          //' test/integration/zz_minimo.dart
-          timeout 180 dart run test/integration/zz_minimo.dart > /tmp/2.log 2>&1
-          echo "EXIT_2=$?"; echo "--- saida ---"; cat /tmp/2.log; echo "--- fim ---"
-          rm -f test/integration/zz_minimo.dart
-
-          echo "########## 3) arquivo real, saída para ARQUIVO (descarta perda por pipe) ##########"
-          timeout 180 dart run test/integration/red_alert_cycle_test.dart > /tmp/3.log 2>&1
-          echo "EXIT_3=$?"; echo "--- saida ($(wc -c < /tmp/3.log) bytes) ---"; cat /tmp/3.log; echo "--- fim ---"
-
-          echo "########## 4) conectividade com o Postgres do serviço ##########"
-          timeout 30 bash -c 'cat < /dev/null > /dev/tcp/localhost/9090' && echo "porta 9090 OK" || echo "porta 9090 FALHOU"
-        working-directory: backend/sinalacs_server
-      - run: dart test test/unit -r expanded
-        working-directory: backend/sinalacs_server
-      - run: dart test test/integration -r expanded --chain-stack-traces
+          printf "test:\n  database: '%s'\n" 'ZGib82sxRnAaTto3iglbPkARA1qZUv0W' \
+            > sinalacs_server/config/passwords.yaml
+      # Suíte completa: 16 testes herméticos em test/unit, que usam fakes das
+      # interfaces AlertPublisher e AlertStore, mais 9 de integração que sobem o
+      # servidor em processo pelo harness e exercitam os endpoints tipados.
+      - run: dart test
         working-directory: backend/sinalacs_server
 
   backend-docker-build:

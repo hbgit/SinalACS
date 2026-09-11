@@ -48,6 +48,8 @@ dart test test/unit/red_alert_service_test.dart    # single test file
 ```
 Integration tests use Serverpod's `withServerpod` harness, which needs the test database from `sinalacs_server/config/test.yaml` — Postgres on `localhost:9090`, database `sinalacs_test`, user `postgres`, password from the `test:` block of `config/passwords.yaml` (gitignored). The harness applies migrations itself and rolls the database back after each case, so there is **no** manual schema or seed step.
 
+Because `config/passwords.yaml` is gitignored, it is missing from any fresh checkout — including CI, where the workflow generates it before running the suite. Without it, Serverpod fails while loading config and calls `exit(1)`; since Dart's `exit()` does not flush stdout, the error message is lost and the whole suite dies with exit code 1 and **zero** output. If you ever see that signature, check this file first.
+
 After changing any `.spy.yaml` model or adding an endpoint, regenerate and create a migration (from `backend/sinalacs_server`):
 ```bash
 dart pub global activate serverpod_cli   # once
