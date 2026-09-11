@@ -57,24 +57,31 @@ jobs:
       # (ubuntu-22.04 vs ubuntu-latest) como causa — todos reproduzem a mesma
       # assinatura exata. Precisa de investigação com acesso ao runner
       # (ex.: debug via tmate) para ir além disso.
-      # O strace (baixado como artifact numa rodada anterior de diagnóstico)
-      # mostrou que quem morre é uma thread interna do dart test
-      # ("DartWorker", mesmo processo/PID da suíte) chamando exit_group(1)
-      # ela mesma — sem sinal do SO, sem OOM killer, sem core dump, sem
-      # nenhuma mensagem escrita em stdout/stderr — logo depois de gerar
-      # código JIT ("dart-code") e depois de ~3.5s bloqueada num futex. Ou
-      # seja, é o próprio `dart test`/VM do Dart decidindo sair, não um
-      # crash nativo nem falta de recursos (já descartados: SDK, memória,
-      # CPU, concorrência, stack size, imagem do runner). `dart test --help`
-      # mostra que a ferramenta tem um reporter "github" que vira o padrão
-      # quando detecta a env var GITHUB_ACTIONS — ou seja, o `dart test` já
-      # tem um comportamento especial só para esse ambiente, o que é um
-      # candidato natural pra um bug que nunca reproduz localmente. Testa
-      # removendo GITHUB_ACTIONS/CI antes de rodar, pra ver se isso muda
-      # esse comportamento.
-      - run: |
-          unset GITHUB_ACTIONS CI
-          dart test test/integration -r expanded --chain-stack-traces
+      # test/integration falha de forma consistente só no runner real do
+      # GitHub Actions (nunca localmente, em nenhuma reprodução com o mesmo
+      # SDK/Postgres/estrutura de workflow). Investigação até aqui (ver
+      # histórico do git para o rastro completo de tentativas):
+      #   - Descartado por medição direta no próprio job: exaustão de CPU/
+      #     memória (nproc=4, 14Gi livres), limite de memória de cgroup (nem
+      #     existe — é VM, não container), OOM killer (nada no dmesg), crash
+      #     nativo com sinal capturável (nenhum core file mesmo com
+      #     ulimit -c unlimited), imagem do runner (ubuntu-22.04 reproduz
+      #     igual), SDK do Dart (3.8.0 e 3.12.2 reproduzem igual),
+      #     concorrência do dart test, tamanho de stack, e as env vars
+      #     GITHUB_ACTIONS/CI que a ferramenta detecta (dart test --help
+      #     documenta um reporter "github" condicional a isso).
+      #   - Confirmado via strace -f (artifact baixado numa rodada de
+      #     diagnóstico): quem morre é uma thread interna do próprio
+      #     dart test ("DartWorker", mesmo PID/processo da suíte) chamando
+      #     exit_group(1) ela mesma — sem sinal do SO, sem mensagem em
+      #     stdout/stderr — momentos depois de ficar ~3.5s bloqueada num
+      #     futex e então gerar código JIT ("dart-code"). Ou seja, é o
+      #     próprio dart test/VM do Dart decidindo sair, silenciosamente,
+      #     só nesse ambiente.
+      # Próximo passo real exige acesso interativo ao runner no momento do
+      # crash (ex.: tmate com limit-access-to-actor: true, já que o repo é
+      # público).
+      - run: dart test test/integration -r expanded --chain-stack-traces
         working-directory: backend/sinalacs_server
 
   backend-docker-build:
