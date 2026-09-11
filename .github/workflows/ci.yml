@@ -57,30 +57,25 @@ jobs:
       # (ubuntu-22.04 vs ubuntu-latest) como causa — todos reproduzem a mesma
       # assinatura exata. Precisa de investigação com acesso ao runner
       # (ex.: debug via tmate) para ir além disso.
-      # Diagnóstico temporário (3ª rodada): descartadas OOM killer, limite de
-      # cgroup (nem existe — é VM, não container) e crash nativo com sinal
-      # capturável (sem core file mesmo com ulimit -c unlimited). O strace
-      # da rodada anterior mostrou que é o processo do próprio `dart test`
-      # (não um filho) que sai com "exited with 1" — mas o log do CI corta
-      # em 200 linhas e a árvore de processos do dart test é grande demais
-      # para caber ali. Sobe o strace completo como artifact para dar uma
-      # olhada nele inteiro. Remover assim que a causa for encontrada — não
-      # deve ficar em CI permanente.
-      - id: integration_test
-        continue-on-error: true
-        run: |
-          sudo apt-get install -y strace >/dev/null 2>&1 || true
-          strace -f -tt -o /tmp/dart_test.strace dart test test/integration -r expanded --chain-stack-traces
+      # O strace (baixado como artifact numa rodada anterior de diagnóstico)
+      # mostrou que quem morre é uma thread interna do dart test
+      # ("DartWorker", mesmo processo/PID da suíte) chamando exit_group(1)
+      # ela mesma — sem sinal do SO, sem OOM killer, sem core dump, sem
+      # nenhuma mensagem escrita em stdout/stderr — logo depois de gerar
+      # código JIT ("dart-code") e depois de ~3.5s bloqueada num futex. Ou
+      # seja, é o próprio `dart test`/VM do Dart decidindo sair, não um
+      # crash nativo nem falta de recursos (já descartados: SDK, memória,
+      # CPU, concorrência, stack size, imagem do runner). `dart test --help`
+      # mostra que a ferramenta tem um reporter "github" que vira o padrão
+      # quando detecta a env var GITHUB_ACTIONS — ou seja, o `dart test` já
+      # tem um comportamento especial só para esse ambiente, o que é um
+      # candidato natural pra um bug que nunca reproduz localmente. Testa
+      # removendo GITHUB_ACTIONS/CI antes de rodar, pra ver se isso muda
+      # esse comportamento.
+      - run: |
+          unset GITHUB_ACTIONS CI
+          dart test test/integration -r expanded --chain-stack-traces
         working-directory: backend/sinalacs_server
-      - name: Upload strace do teste de integração
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: dart-test-strace
-          path: /tmp/dart_test.strace
-          retention-days: 3
-      - if: steps.integration_test.outcome == 'failure'
-        run: exit 1
 
   backend-docker-build:
     runs-on: ubuntu-latest
