@@ -1,0 +1,84 @@
+name: Relato de defeito
+description: Informe um comportamento diferente do esperado no SinalACS.
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Issues são públicas. Não inclua dados reais de pacientes, dados pessoais,
+        localização, credenciais, chaves, tokens ou informações clínicas.
+
+        Para vulnerabilidades, siga a [Política de Segurança](../SECURITY.md).
+        Este formulário não é canal para urgência médica, suporte clínico ou
+        atendimento a pacientes.
+  - type: checkboxes
+    id: duplicate_check
+    attributes:
+      label: Verificação prévia
+      options:
+        - label: Procurei por issues existentes antes de abrir este relato.
+          required: true
+        - label: Confirmo que este relato não contém dados pessoais, clínicos ou segredos.
+          required: true
+  - type: textarea
+    id: summary
+    attributes:
+      label: Resumo do problema
+      description: Descreva objetivamente o defeito e seu impacto.
+    validations:
+      required: true
+  - type: dropdown
+    id: component
+    attributes:
+      label: Componente afetado
+      options:
+        - Aplicativo do paciente
+        - Aplicativo ACS
+        - Backend Serverpod
+        - MQTT e alertas
+        - Sincronização offline
+        - Infraestrutura ou CI
+        - Documentação
+        - Outro
+    validations:
+      required: true
+  - type: textarea
+    id: current_behavior
+    attributes:
+      label: Comportamento atual
+    validations:
+      required: true
+  - type: textarea
+    id: expected_behavior
+    attributes:
+      label: Comportamento esperado
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Passos para reprodução
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Ambiente
+      description: Informe dispositivo, sistema, branch/commit e estado de rede quando aplicável.
+      placeholder: |
+        - Dispositivo e sistema:
+        - Versão, branch ou commit:
+        - Estado de rede (online, offline, instável):
+    validations:
+      required: false
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Logs, capturas ou contexto adicional
+      description: Remova previamente dados pessoais, clínicos, localização, credenciais e segredos.
+    validations:
+      required: false

@@ -1,0 +1,60 @@
+name: Proposta de funcionalidade
+description: Sugira uma melhoria ou nova capacidade para o SinalACS.
+title: "[Proposta]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Issues são públicas. Não inclua dados reais de pacientes, dados pessoais,
+        localização, credenciais, chaves, tokens ou informações clínicas.
+
+        Para vulnerabilidades, siga a [Política de Segurança](../SECURITY.md).
+        Este formulário não é canal para urgência médica, suporte clínico ou
+        atendimento a pacientes.
+  - type: checkboxes
+    id: safeguards
+    attributes:
+      label: Confirmações
+      options:
+        - label: Procurei por issues existentes antes de abrir esta proposta.
+          required: true
+        - label: Confirmo que esta issue não contém dados pessoais, clínicos ou segredos.
+          required: true
+        - label: A proposta não permite alterar manualmente a classificação de risco.
+          required: true
+        - label: A proposta não expõe dados fora da microárea autorizada nem enfraquece a entrega de alertas vermelhos.
+          required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problema a resolver
+      description: Qual necessidade de usuário ou operação esta proposta atende?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposta
+      description: Descreva o resultado esperado, sem necessidade de detalhar a implementação.
+    validations:
+      required: true
+  - type: textarea
+    id: affected_users
+    attributes:
+      label: Usuários impactados
+      description: Indique perfis como paciente, ACS, administração ou mantenedores.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternativas consideradas
+    validations:
+      required: false
+  - type: textarea
+    id: constraints
+    attributes:
+      label: Impacto em privacidade, segurança ou operação offline
+      description: Informe riscos, dependências ou deixe claro quando não houver impacto conhecido.
+    validations:
+      required: false

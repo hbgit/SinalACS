@@ -1,0 +1,47 @@
+name: Correção de documentação
+description: Informe documentação ausente, incorreta ou difícil de compreender.
+title: "[Docs]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Issues são públicas. Não inclua dados reais de pacientes, dados pessoais,
+        localização, credenciais, chaves, tokens ou informações clínicas.
+
+        Para vulnerabilidades, siga a [Política de Segurança](../SECURITY.md).
+        Este formulário não é canal para urgência médica, suporte clínico ou
+        atendimento a pacientes.
+  - type: checkboxes
+    id: privacy_check
+    attributes:
+      label: Verificação prévia
+      options:
+        - label: Procurei por issues existentes antes de abrir este relato.
+          required: true
+        - label: Confirmo que este relato não contém dados pessoais, clínicos ou segredos.
+          required: true
+  - type: input
+    id: location
+    attributes:
+      label: Localização afetada
+      description: Informe arquivo, seção, link ou tela.
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problema encontrado
+    validations:
+      required: true
+  - type: textarea
+    id: suggestion
+    attributes:
+      label: Sugestão de melhoria
+    validations:
+      required: false
+  - type: textarea
+    id: context
+    attributes:
+      label: Contexto adicional
+    validations:
+      required: false
