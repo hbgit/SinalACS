@@ -36,19 +36,19 @@ jobs:
           sdk: 3.12.2
       - run: dart pub get
       - run: dart analyze
-      # Suíte completa: 16 testes herméticos em test/unit, que usam fakes das
-      # interfaces AlertPublisher e AlertStore, mais 9 de integração que sobem o
-      # servidor em processo pelo harness e exercitam os endpoints tipados.
-      #
-      # concurrency=1 e chain-stack-traces são temporários: o job vinha morrendo
-      # em ~7s sem nenhuma saída (nem "loading ...", nem stack trace), o que não
-      # foi reproduzível localmente com a mesma versão do SDK/Postgres — a
-      # suspeita é o concurrency padrão (= nº de CPUs) estourando memória no
-      # runner. nproc/free ajudam a confirmar isso no log real.
-      - run: |
-          nproc || true
-          free -h || true
-          dart test --concurrency=1 -r expanded --chain-stack-traces
+      # Suíte dividida em duas etapas (em vez de um único `dart test`) para
+      # isolar onde o job trava: `dart test` completo estava morrendo em ~7s
+      # sem nenhuma saída (exit 1, sem "loading ...", sem stack trace) só no
+      # runner real do GitHub — nproc (4) e free -h (15Gi, 14Gi disponível)
+      # descartaram exaustão de CPU/memória como causa, e o SDK do Dart
+      # (3.8.0 e 3.12.2) não fez diferença. O log com --concurrency=1 mostrou
+      # que a suíte tentou carregar test/integration/red_alert_cycle_test.dart
+      # (o único arquivo pesado, que sobe o Serverpod completo via
+      # serverpod_test) antes de morrer. Rodar as duas suítes em passos
+      # separados isola definitivamente se o problema é essa carga pesada.
+      - run: dart test test/unit -r expanded
+        working-directory: backend/sinalacs_server
+      - run: dart test test/integration -r expanded --chain-stack-traces
         working-directory: backend/sinalacs_server
 
   backend-docker-build:
