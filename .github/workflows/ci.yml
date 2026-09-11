@@ -65,40 +65,33 @@ jobs:
         continue-on-error: true
         run: |
           set +e
-          sudo apt-get install -y strace gdb >/dev/null 2>&1
-          sudo sysctl -w kernel.yama.ptrace_scope=0 >/dev/null 2>&1
+          echo "########## 0) espaço em disco ##########"
+          df -h / /tmp
 
-          echo "########## 1) dart run direto (sem o runner do package:test) ##########"
-          timeout 300 dart run test/integration/red_alert_cycle_test.dart 2>&1 | tail -60
+          echo "########## 1) dart --verbose run (para o VM dizer o que houve) ##########"
+          timeout 300 dart --verbose run test/integration/red_alert_cycle_test.dart 2>&1 | tail -80
           echo "EXIT_1=${PIPESTATUS[0]}"
 
-          echo "########## 2) strace completo do dart test ##########"
-          timeout 300 strace -f -tt -s 1000 -o /tmp/full.strace \
-            dart test test/integration -r expanded 2>&1 | tail -15
-          echo "EXIT_2=${PIPESTATUS[0]}"
+          echo "########## 2) bisseção por import ##########"
+          mkdir -p /tmp/bisect
+          printf "import 'package:sinalacs_server/src/generated/protocol.dart';\nvoid main() => print('protocol OK: \${Protocol()}');\n" > /tmp/bisect/a_protocol.dart
+          printf "import 'package:serverpod/serverpod.dart';\nvoid main() => print('serverpod OK');\n" > /tmp/bisect/b_serverpod.dart
+          printf "import 'package:serverpod_test/serverpod_test.dart';\nvoid main() => print('serverpod_test OK');\n" > /tmp/bisect/c_serverpod_test.dart
+          printf "import 'package:sinalacs_server/src/generated/endpoints.dart';\nvoid main() => print('endpoints OK');\n" > /tmp/bisect/d_endpoints.dart
+          printf "void main() => print('baseline OK');\n" > /tmp/bisect/e_baseline.dart
+          for f in e_baseline a_protocol b_serverpod c_serverpod_test d_endpoints; do
+            cp "/tmp/bisect/$f.dart" "test/integration/zz_$f.dart"
+            OUT=$(timeout 180 dart run "test/integration/zz_$f.dart" 2>&1)
+            echo "[$f] exit=$? output=${OUT:-<VAZIO>}"
+            rm -f "test/integration/zz_$f.dart"
+          done
 
-          echo "########## 3) todos os write() do strace ##########"
-          grep -n "write(" /tmp/full.strace | tail -40
-
-          echo "########## 4) backtrace ao vivo durante a janela do crash ##########"
-          dart test test/integration -r expanded > /tmp/bg.log 2>&1 &
-          sleep 1.5
-          MAIN_PID=$(pgrep -f "dart.*test/integration" | head -1)
-          echo "PID alvo: ${MAIN_PID:-<nenhum>}"
-          if [ -n "$MAIN_PID" ]; then
-            sudo gdb -p "$MAIN_PID" -batch -ex "thread apply all bt" -ex detach 2>&1 | tail -80
-          fi
-          wait
-          echo "--- saída do teste em background ---"
-          tail -20 /tmp/bg.log
+          echo "########## 3) o próprio test_tools gerado ##########"
+          printf "import 'test_tools/serverpod_test_tools.dart';\nvoid main() => print('test_tools OK');\n" > test/integration/zz_tools.dart
+          OUT=$(timeout 180 dart run test/integration/zz_tools.dart 2>&1)
+          echo "[test_tools] exit=$? output=${OUT:-<VAZIO>}"
+          rm -f test/integration/zz_tools.dart
         working-directory: backend/sinalacs_server
-      - name: Upload strace completo
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: dart-test-strace-full
-          path: /tmp/full.strace
-          retention-days: 3
       - run: dart test test/unit -r expanded
         working-directory: backend/sinalacs_server
       - run: dart test test/integration -r expanded --chain-stack-traces
