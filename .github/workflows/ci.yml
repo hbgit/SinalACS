@@ -65,32 +65,39 @@ jobs:
         continue-on-error: true
         run: |
           set +e
-          echo "########## 0) espaço em disco ##########"
-          df -h / /tmp
+          echo "########## 1) COMPILA o arquivo de teste sem executar o main dele ##########"
+          # Importar o arquivo obriga a compilação de todo o grafo dele, mas o
+          # main() do teste não roda. Se imprimir OK, a compilação está sã e o
+          # crash é em tempo de execução (no withServerpod), não de compilação.
+          printf "import 'red_alert_cycle_test.dart' as alvo;\nvoid main() => print('COMPILOU OK (main do teste nao executado): \${alvo.main}');\n" > test/integration/zz_compile.dart
+          timeout 180 dart run test/integration/zz_compile.dart > /tmp/1.log 2>&1
+          echo "EXIT_1=$?"; echo "--- saida ---"; cat /tmp/1.log; echo "--- fim ---"
+          rm -f test/integration/zz_compile.dart
 
-          echo "########## 1) dart --verbose run (para o VM dizer o que houve) ##########"
-          timeout 300 dart --verbose run test/integration/red_alert_cycle_test.dart 2>&1 | tail -80
-          echo "EXIT_1=${PIPESTATUS[0]}"
+          echo "########## 2) withServerpod MÍNIMO (sobe o harness, sem o resto) ##########"
+          cat > test/integration/zz_minimo.dart <<'DART'
+          import 'package:test/test.dart';
+          import 'test_tools/serverpod_test_tools.dart';
 
-          echo "########## 2) bisseção por import ##########"
-          mkdir -p /tmp/bisect
-          printf "import 'package:sinalacs_server/src/generated/protocol.dart';\nvoid main() => print('protocol OK: \${Protocol()}');\n" > /tmp/bisect/a_protocol.dart
-          printf "import 'package:serverpod/serverpod.dart';\nvoid main() => print('serverpod OK');\n" > /tmp/bisect/b_serverpod.dart
-          printf "import 'package:serverpod_test/serverpod_test.dart';\nvoid main() => print('serverpod_test OK');\n" > /tmp/bisect/c_serverpod_test.dart
-          printf "import 'package:sinalacs_server/src/generated/endpoints.dart';\nvoid main() => print('endpoints OK');\n" > /tmp/bisect/d_endpoints.dart
-          printf "void main() => print('baseline OK');\n" > /tmp/bisect/e_baseline.dart
-          for f in e_baseline a_protocol b_serverpod c_serverpod_test d_endpoints; do
-            cp "/tmp/bisect/$f.dart" "test/integration/zz_$f.dart"
-            OUT=$(timeout 180 dart run "test/integration/zz_$f.dart" 2>&1)
-            echo "[$f] exit=$? output=${OUT:-<VAZIO>}"
-            rm -f "test/integration/zz_$f.dart"
-          done
+          void main() {
+            print('antes do withServerpod');
+            withServerpod('harness minimo', (sessionBuilder, endpoints) {
+              test('noop', () => expect(1, 1));
+            });
+            print('depois do withServerpod');
+          }
+          DART
+          sed -i 's/^          //' test/integration/zz_minimo.dart
+          timeout 180 dart run test/integration/zz_minimo.dart > /tmp/2.log 2>&1
+          echo "EXIT_2=$?"; echo "--- saida ---"; cat /tmp/2.log; echo "--- fim ---"
+          rm -f test/integration/zz_minimo.dart
 
-          echo "########## 3) o próprio test_tools gerado ##########"
-          printf "import 'test_tools/serverpod_test_tools.dart';\nvoid main() => print('test_tools OK');\n" > test/integration/zz_tools.dart
-          OUT=$(timeout 180 dart run test/integration/zz_tools.dart 2>&1)
-          echo "[test_tools] exit=$? output=${OUT:-<VAZIO>}"
-          rm -f test/integration/zz_tools.dart
+          echo "########## 3) arquivo real, saída para ARQUIVO (descarta perda por pipe) ##########"
+          timeout 180 dart run test/integration/red_alert_cycle_test.dart > /tmp/3.log 2>&1
+          echo "EXIT_3=$?"; echo "--- saida ($(wc -c < /tmp/3.log) bytes) ---"; cat /tmp/3.log; echo "--- fim ---"
+
+          echo "########## 4) conectividade com o Postgres do serviço ##########"
+          timeout 30 bash -c 'cat < /dev/null > /dev/tcp/localhost/9090' && echo "porta 9090 OK" || echo "porta 9090 FALHOU"
         working-directory: backend/sinalacs_server
       - run: dart test test/unit -r expanded
         working-directory: backend/sinalacs_server
