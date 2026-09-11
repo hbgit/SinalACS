@@ -65,6 +65,45 @@ jobs:
         continue-on-error: true
         run: |
           set +e
+          sudo apt-get install -y strace postgresql-client >/dev/null 2>&1
+
+          echo "########## A) withServerpod SEM migrations ##########"
+          cat > test/integration/zz_nomig.dart <<'DART'
+          import 'package:test/test.dart';
+          import 'test_tools/serverpod_test_tools.dart';
+          void main() {
+            withServerpod('sem migrations', (sessionBuilder, endpoints) {
+              test('noop', () => expect(1, 1));
+            }, applyMigrations: false);
+          }
+          DART
+          sed -i 's/^          //' test/integration/zz_nomig.dart
+          timeout 180 dart run test/integration/zz_nomig.dart > /tmp/a.log 2>&1
+          echo "EXIT_A=$?"; cat /tmp/a.log; echo "--- fim A ---"
+          rm -f test/integration/zz_nomig.dart
+
+          echo "########## B) strace do harness mínimo, procurando a mensagem perdida ##########"
+          cat > test/integration/zz_min.dart <<'DART'
+          import 'package:test/test.dart';
+          import 'test_tools/serverpod_test_tools.dart';
+          void main() {
+            withServerpod('harness minimo', (sessionBuilder, endpoints) {
+              test('noop', () => expect(1, 1));
+            });
+          }
+          DART
+          sed -i 's/^          //' test/integration/zz_min.dart
+          timeout 180 strace -f -tt -s 4000 -e trace=write,writev -o /tmp/w.strace \
+            dart run test/integration/zz_min.dart > /tmp/b.log 2>&1
+          echo "EXIT_B=$?"; cat /tmp/b.log; echo "--- fim B ---"
+          echo "--- writes com texto legivel ---"
+          grep -aE 'write(v)?\([12],' /tmp/w.strace | tail -30
+          rm -f test/integration/zz_min.dart
+
+          echo "########## C) estado do banco sinalacs_test ##########"
+          PGPASSWORD=ZGib82sxRnAaTto3iglbPkARA1qZUv0W psql -h localhost -p 9090 -U postgres -d sinalacs_test \
+            -c '\dt' -c "select count(*) as migracoes from serverpod_migrations;" 2>&1 | head -40
+
           echo "########## 1) COMPILA o arquivo de teste sem executar o main dele ##########"
           # Importar o arquivo obriga a compilação de todo o grafo dele, mas o
           # main() do teste não roda. Se imprimir OK, a compilação está sã e o
