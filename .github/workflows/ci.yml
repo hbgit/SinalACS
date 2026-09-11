@@ -37,30 +37,11 @@ jobs:
       - run: dart pub get
       - run: dart analyze
       # Suíte dividida em duas etapas (em vez de um único `dart test`) para
-      # isolar onde o job trava: `dart test` completo estava morrendo em ~7s
-      # sem nenhuma saída (exit 1, sem "loading ...", sem stack trace) só no
-      # runner real do GitHub — nproc (4) e free -h (15Gi, 14Gi disponível)
-      # descartaram exaustão de CPU/memória como causa, e o SDK do Dart
-      # (3.8.0 e 3.12.2) não fez diferença. O log com --concurrency=1 mostrou
-      # que a suíte tentou carregar test/integration/red_alert_cycle_test.dart
-      # (o único arquivo pesado, que sobe o Serverpod completo via
-      # serverpod_test) antes de morrer. Rodar as duas suítes em passos
-      # separados isola definitivamente se o problema é essa carga pesada.
-      - run: dart test test/unit -r expanded
-        working-directory: backend/sinalacs_server
-      # test/integration trava sem nenhuma saída sempre durante o "loading"
-      # (compilação) de red_alert_cycle_test.dart, nunca chegando a executar
-      # um teste — só no runner do GitHub Actions, nunca localmente (Dart
-      # 3.8.0/3.12.2 + Postgres 15-alpine, mesma estrutura do workflow, 30/30
-      # testes passando sempre). Já descartei SDK do Dart, memória (14Gi
-      # livres), CPU (4 cores), concorrência, stack size e a imagem do runner
-      # (ubuntu-22.04 vs ubuntu-latest) como causa — todos reproduzem a mesma
-      # assinatura exata. Precisa de investigação com acesso ao runner
-      # (ex.: debug via tmate) para ir além disso.
-      # test/integration falha de forma consistente só no runner real do
-      # GitHub Actions (nunca localmente, em nenhuma reprodução com o mesmo
-      # SDK/Postgres/estrutura de workflow). Investigação até aqui (ver
-      # histórico do git para o rastro completo de tentativas):
+      # isolar onde o job trava. test/unit passa limpo; test/integration
+      # falha de forma consistente só no runner real do GitHub Actions,
+      # nunca localmente em nenhuma reprodução com o mesmo SDK/Postgres/
+      # estrutura de workflow. Investigação até aqui (ver histórico do git
+      # para o rastro completo de cada tentativa):
       #   - Descartado por medição direta no próprio job: exaustão de CPU/
       #     memória (nproc=4, 14Gi livres), limite de memória de cgroup (nem
       #     existe — é VM, não container), OOM killer (nada no dmesg), crash
@@ -78,9 +59,16 @@ jobs:
       #     futex e então gerar código JIT ("dart-code"). Ou seja, é o
       #     próprio dart test/VM do Dart decidindo sair, silenciosamente,
       #     só nesse ambiente.
-      # Próximo passo real exige acesso interativo ao runner no momento do
-      # crash (ex.: tmate com limit-access-to-actor: true, já que o repo é
-      # público).
+      # tmate temporário para debug interativo (limit-access-to-actor: true
+      # porque o repo é público — só a conta que disparou o workflow
+      # consegue conectar). Remover assim que a causa for encontrada.
+      - name: Debug via tmate (temporário)
+        uses: mxschmitt/action-tmate@v3
+        with:
+          limit-access-to-actor: true
+        timeout-minutes: 25
+      - run: dart test test/unit -r expanded
+        working-directory: backend/sinalacs_server
       - run: dart test test/integration -r expanded --chain-stack-traces
         working-directory: backend/sinalacs_server
 
