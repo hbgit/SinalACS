@@ -57,30 +57,30 @@ jobs:
       # (ubuntu-22.04 vs ubuntu-latest) como causa — todos reproduzem a mesma
       # assinatura exata. Precisa de investigação com acesso ao runner
       # (ex.: debug via tmate) para ir além disso.
-      # Diagnóstico temporário (2ª rodada): a 1ª rodada (dmesg + cgroup +
-      # core dump) descartou OOM killer (nada no dmesg), limite de cgroup
-      # (nem sequer existe nesse runner — é VM, não container) e crash nativo
-      # com sinal capturável (nenhum core file foi gerado mesmo com
-      # ulimit -c unlimited). Ou seja, o processo morre com exit(1) "limpo",
-      # sem sinal, sem OOM — o que sobra é `strace -f` para capturar a árvore
-      # de processos que o `dart test` cria e ver a última syscall/sinal
-      # antes de morrer. Remover assim que a causa for encontrada — não deve
-      # ficar em CI permanente.
-      - run: |
+      # Diagnóstico temporário (3ª rodada): descartadas OOM killer, limite de
+      # cgroup (nem existe — é VM, não container) e crash nativo com sinal
+      # capturável (sem core file mesmo com ulimit -c unlimited). O strace
+      # da rodada anterior mostrou que é o processo do próprio `dart test`
+      # (não um filho) que sai com "exited with 1" — mas o log do CI corta
+      # em 200 linhas e a árvore de processos do dart test é grande demais
+      # para caber ali. Sobe o strace completo como artifact para dar uma
+      # olhada nele inteiro. Remover assim que a causa for encontrada — não
+      # deve ficar em CI permanente.
+      - id: integration_test
+        continue-on-error: true
+        run: |
           sudo apt-get install -y strace >/dev/null 2>&1 || true
-          set +e
           strace -f -tt -o /tmp/dart_test.strace dart test test/integration -r expanded --chain-stack-traces
-          DART_EXIT=$?
-          set -e
-          echo "=== dart test exit code: $DART_EXIT ==="
-          if [ "$DART_EXIT" -ne 0 ]; then
-            echo "=== últimas 200 linhas do strace ==="
-            tail -200 /tmp/dart_test.strace || echo "strace indisponível"
-            echo "=== linhas com sinais/exit/erros no strace ==="
-            grep -E "\-\-\- SIG|\+\+\+ exited|killed by|SIGSEGV|SIGABRT|SIGILL|SIGBUS|SIGKILL|ENOMEM" /tmp/dart_test.strace | tail -50 || echo "nenhum sinal encontrado"
-          fi
-          exit $DART_EXIT
         working-directory: backend/sinalacs_server
+      - name: Upload strace do teste de integração
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dart-test-strace
+          path: /tmp/dart_test.strace
+          retention-days: 3
+      - if: steps.integration_test.outcome == 'failure'
+        run: exit 1
 
   backend-docker-build:
     runs-on: ubuntu-latest
