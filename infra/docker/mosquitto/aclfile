@@ -1,6 +1,12 @@
 user backend
 topic readwrite sinalacs/v1/#
 
+# O nome do usuário é histórico ("area-12"), mas o tópico precisa ser o UUID da
+# microárea do seed de desenvolvimento: o backend publica em
+# sinalacs/v1/microareas/<microAreaId>/alerts, e o microAreaId vem do token
+# emitido por auth.developmentLogin, que usa o UUID fixo do seed
+# (development.sql / auth_endpoint.dart). Com "area-12" aqui, o app do ACS era
+# negado pelo broker exatamente no tópico onde o alerta vermelho chega.
 user acs-area-12
-topic read sinalacs/v1/microareas/area-12/alerts
+topic read sinalacs/v1/microareas/00000000-0000-4000-8000-000000000003/alerts
 topic write sinalacs/v1/alerts/+/acks

@@ -3,9 +3,11 @@ import 'package:serverpod/serverpod.dart';
 import 'package:sinalacs_server/src/application/alerts/alert_outbox_dispatcher.dart';
 import 'package:sinalacs_server/src/application/alerts/red_alert_service.dart';
 import 'package:sinalacs_server/src/application/auth/development_auth_service.dart';
+import 'package:sinalacs_server/src/application/visits/visit_sync_service.dart';
 import 'package:sinalacs_server/src/config/app_config.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_alert_outbox.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_alert_store.dart';
+import 'package:sinalacs_server/src/infrastructure/database/orm_visit_store.dart';
 import 'package:sinalacs_server/src/infrastructure/mqtt/mqtt_alert_dispatcher.dart';
 
 /// Estado de processo compartilhado pelos endpoints.
@@ -71,6 +73,18 @@ class AlertRuntime {
       RedAlertService(
         store: OrmAlertStore(session: () => session, transaction: transaction),
         outbox: OrmAlertOutbox(session: () => session, transaction: transaction),
+      );
+
+  /// Constrói o serviço de sincronização de visitas para uma requisição.
+  ///
+  /// Mesmo arranjo de [serviceFor]: o store é amarrado à sessão da chamada e, se
+  /// houver [transaction], o lote inteiro participa dela.
+  VisitSyncService visitSyncServiceFor(
+    Session session, {
+    Transaction? transaction,
+  }) =>
+      VisitSyncService(
+        store: OrmVisitStore(session: () => session, transaction: transaction),
       );
 
   /// Drenador do outbox.

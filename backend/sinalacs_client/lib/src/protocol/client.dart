@@ -19,7 +19,9 @@ import 'package:sinalacs_client/src/protocol/api/development_login_result.dart'
     as _i5;
 import 'package:sinalacs_client/src/protocol/api/service_health.dart' as _i6;
 import 'package:sinalacs_client/src/protocol/api/triage_result.dart' as _i7;
-import 'protocol.dart' as _i8;
+import 'package:sinalacs_client/src/protocol/api/visit_sync_result.dart' as _i8;
+import 'package:sinalacs_client/src/protocol/api/visit_sync_entry.dart' as _i9;
+import 'protocol.dart' as _i10;
 
 /// Ciclo do alerta vermelho.
 ///
@@ -152,6 +154,35 @@ class EndpointTriage extends _i1.EndpointRef {
   );
 }
 
+/// Sincronização das visitas domiciliares registradas offline.
+///
+/// É a contraparte da fila offline do app do ACS: o dispositivo grava a visita
+/// localmente durante a visita (onde normalmente não há rede) e envia o lote
+/// quando a conexão volta.
+///
+/// O lote inteiro roda em uma transação: ou todas as visitas são aplicadas, ou
+/// nenhuma. Um resultado parcial deixaria o dispositivo sem saber o que
+/// reenviar.
+/// {@category Endpoint}
+class EndpointVisits extends _i1.EndpointRef {
+  EndpointVisits(_i1.EndpointCaller caller) : super(caller);
+
+  @override
+  String get name => 'visits';
+
+  _i2.Future<List<_i8.VisitSyncResult>> sync({
+    required String accessToken,
+    required List<_i9.VisitSyncEntry> visits,
+  }) => caller.callServerEndpoint<List<_i8.VisitSyncResult>>(
+    'visits',
+    'sync',
+    {
+      'accessToken': accessToken,
+      'visits': visits,
+    },
+  );
+}
+
 class Client extends _i1.ServerpodClientShared {
   Client(
     String host, {
@@ -172,7 +203,7 @@ class Client extends _i1.ServerpodClientShared {
     bool? disconnectStreamsOnLostInternetConnection,
   }) : super(
          host,
-         _i8.Protocol(),
+         _i10.Protocol(),
          securityContext: securityContext,
          streamingConnectionTimeout: streamingConnectionTimeout,
          connectionTimeout: connectionTimeout,
@@ -185,6 +216,7 @@ class Client extends _i1.ServerpodClientShared {
     auth = EndpointAuth(this);
     health = EndpointHealth(this);
     triage = EndpointTriage(this);
+    visits = EndpointVisits(this);
   }
 
   late final EndpointAlerts alerts;
@@ -195,12 +227,15 @@ class Client extends _i1.ServerpodClientShared {
 
   late final EndpointTriage triage;
 
+  late final EndpointVisits visits;
+
   @override
   Map<String, _i1.EndpointRef> get endpointRefLookup => {
     'alerts': alerts,
     'auth': auth,
     'health': health,
     'triage': triage,
+    'visits': visits,
   };
 
   @override

@@ -4,4 +4,9 @@
          to allow setting breakpoints, to provide hot reload, etc.
     -->
     <uses-permission android:name="android.permission.INTERNET"/>
+
+    <!-- Exceção de cleartext restrita ao backend local de desenvolvimento.
+         Ver res/xml/network_security_config.xml. Só existe em debug. -->
+    <application
+        android:networkSecurityConfig="@xml/network_security_config" />
 </manifest>

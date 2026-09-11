@@ -16,6 +16,8 @@ import '../endpoints/alerts_endpoint.dart' as _i2;
 import '../endpoints/auth_endpoint.dart' as _i3;
 import '../endpoints/health_endpoint.dart' as _i4;
 import '../endpoints/triage_endpoint.dart' as _i5;
+import '../endpoints/visits_endpoint.dart' as _i6;
+import 'package:sinalacs_server/src/generated/api/visit_sync_entry.dart' as _i7;
 
 class Endpoints extends _i1.EndpointDispatch {
   @override
@@ -43,6 +45,12 @@ class Endpoints extends _i1.EndpointDispatch {
         ..initialize(
           server,
           'triage',
+          null,
+        ),
+      'visits': _i6.VisitsEndpoint()
+        ..initialize(
+          server,
+          'visits',
           null,
         ),
     };
@@ -199,6 +207,36 @@ class Endpoints extends _i1.EndpointDispatch {
                 persistentVomiting: params['persistentVomiting'],
                 bleeding: params['bleeding'],
                 severeWeakness: params['severeWeakness'],
+              ),
+        ),
+      },
+    );
+    connectors['visits'] = _i1.EndpointConnector(
+      name: 'visits',
+      endpoint: endpoints['visits']!,
+      methodConnectors: {
+        'sync': _i1.MethodConnector(
+          name: 'sync',
+          params: {
+            'accessToken': _i1.ParameterDescription(
+              name: 'accessToken',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'visits': _i1.ParameterDescription(
+              name: 'visits',
+              type: _i1.getType<List<_i7.VisitSyncEntry>>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async => (endpoints['visits'] as _i6.VisitsEndpoint).sync(
+                session,
+                accessToken: params['accessToken'],
+                visits: params['visits'],
               ),
         ),
       },

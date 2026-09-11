@@ -20,6 +20,10 @@ import 'package:sinalacs_server/src/generated/api/development_login_result.dart'
     as _i6;
 import 'package:sinalacs_server/src/generated/api/service_health.dart' as _i7;
 import 'package:sinalacs_server/src/generated/api/triage_result.dart' as _i8;
+import 'package:sinalacs_server/src/generated/api/visit_sync_result.dart'
+    as _i9;
+import 'package:sinalacs_server/src/generated/api/visit_sync_entry.dart'
+    as _i10;
 import 'package:sinalacs_server/src/generated/protocol.dart';
 import 'package:sinalacs_server/src/generated/endpoints.dart';
 export 'package:serverpod_test/serverpod_test_public_exports.dart';
@@ -141,6 +145,8 @@ class TestEndpoints {
   late final _HealthEndpoint health;
 
   late final _TriageEndpoint triage;
+
+  late final _VisitsEndpoint visits;
 }
 
 class _InternalTestEndpoints extends TestEndpoints
@@ -163,6 +169,10 @@ class _InternalTestEndpoints extends TestEndpoints
       serializationManager,
     );
     triage = _TriageEndpoint(
+      endpoints,
+      serializationManager,
+    );
+    visits = _VisitsEndpoint(
       endpoints,
       serializationManager,
     );
@@ -381,6 +391,52 @@ class _TriageEndpoint {
                   _localCallContext.arguments,
                 )
                 as _i3.Future<_i8.TriageResult>);
+        return _localReturnValue;
+      } finally {
+        await _localUniqueSession.close();
+      }
+    });
+  }
+}
+
+class _VisitsEndpoint {
+  _VisitsEndpoint(
+    this._endpointDispatch,
+    this._serializationManager,
+  );
+
+  final _i2.EndpointDispatch _endpointDispatch;
+
+  final _i2.SerializationManager _serializationManager;
+
+  _i3.Future<List<_i9.VisitSyncResult>> sync(
+    _i1.TestSessionBuilder sessionBuilder, {
+    required String accessToken,
+    required List<_i10.VisitSyncEntry> visits,
+  }) async {
+    return _i1.callAwaitableFunctionAndHandleExceptions(() async {
+      var _localUniqueSession =
+          (sessionBuilder as _i1.InternalTestSessionBuilder).internalBuild(
+            endpoint: 'visits',
+            method: 'sync',
+          );
+      try {
+        var _localCallContext = await _endpointDispatch.getMethodCallContext(
+          createSessionCallback: (_) => _localUniqueSession,
+          endpointPath: 'visits',
+          methodName: 'sync',
+          parameters: _i1.testObjectToJson({
+            'accessToken': accessToken,
+            'visits': visits,
+          }),
+          serializationManager: _serializationManager,
+        );
+        var _localReturnValue =
+            await (_localCallContext.method.call(
+                  _localUniqueSession,
+                  _localCallContext.arguments,
+                )
+                as _i3.Future<List<_i9.VisitSyncResult>>);
         return _localReturnValue;
       } finally {
         await _localUniqueSession.close();

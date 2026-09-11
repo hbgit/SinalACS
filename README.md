@@ -157,16 +157,40 @@ requests: `serverpod-backend` (sobe o Postgres de teste e roda `dart analyze`
 mais a suíte completa), `backend-docker-build` (valida que a imagem builda),
 `patient-app` e `acs-app`.
 
+### Configuração
+
+**Antes do primeiro `docker compose up`, gere a configuração local:**
+
+```bash
+./scripts/dev/bootstrap_env.sh
+```
+
+O script cria `.env` com segredos aleatórios desta máquina (senha do Postgres,
+as duas do broker MQTT e o `JWT_SECRET`) e gera
+`backend/sinalacs_server/config/passwords.yaml`, que é gitignored e por isso não
+existe num clone limpo — sem ele a suíte de testes do Serverpod morre sem
+imprimir nada. Nenhum dos dois entra no git.
+
+[.env.example](.env.example) é a referência completa de todas as variáveis, com
+um comentário por bloco dizendo quem consome cada uma. O `docker-compose.yml`
+declara cada segredo como `${VAR:?...}`: se faltar, o Compose falha dizendo qual
+variável está ausente, em vez de subir com uma senha embutida no arquivo
+versionado.
+
 Configuração de servidor e banco vem dos arquivos `sinalacs_server/config/*.yaml`
 e pode ser sobrescrita por variáveis de ambiente: `SERVERPOD_DATABASE_HOST` e
 companhia, `SERVERPOD_APPLY_MIGRATIONS` (aplica as migrações no boot),
 `SERVERPOD_REDIS_ENABLED` (Redis é opcional e fica desligado) e
 `SERVERPOD_INSIGHTS_SERVER_PORT`. O MQTT não faz parte do Serverpod e mantém as
 próprias variáveis, lidas por `sinalacs_server/lib/src/config/app_config.dart`:
-`MQTT_BROKER`/`MQTT_USERNAME`/`MQTT_PASSWORD`/`MQTT_USE_TLS`, mais `JWT_SECRET`,
-`APP_ENV` (`production` exige `JWT_SECRET`, falhando rápido no boot) e
-`ENABLE_DEV_LOGIN` (por padrão desligado — sem ele, `auth.developmentLogin`
-falha como se o endpoint não existisse). Veja
+`MQTT_BROKER`/`MQTT_USERNAME`/`MQTT_PASSWORD`/`MQTT_USE_TLS`/`MQTT_CA_CERT_PATH`,
+mais `JWT_SECRET`, `APP_ENV` e `ENABLE_DEV_LOGIN` (por padrão desligado — sem
+ele, `auth.developmentLogin` falha como se o endpoint não existisse).
+
+Fora de `development`, o servidor **recusa subir** se `JWT_SECRET` estiver
+ausente, vazio ou igual ao valor de desenvolvimento (que é público, por estar no
+código versionado). O token carrega o papel e a microárea, então assinar com uma
+chave conhecida permitiria forjar um acesso de ACS a qualquer território. Veja
 [backend/DEPLOY.md](backend/DEPLOY.md) para o runbook completo do piloto de
 deploy free-tier.
 

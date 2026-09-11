@@ -36,7 +36,6 @@ const _microAreaId = '00000000-0000-4000-8000-000000000003';
 const _ubsId = '00000000-0000-4000-8000-000000000004';
 
 AppConfig _config({required bool enableDevLogin}) => AppConfig(
-      databaseUrl: 'postgresql://localhost/sinalacs_test',
       mqttBroker: 'localhost:1883',
       jwtSecret: 'test-secret',
       mqttUsername: null,

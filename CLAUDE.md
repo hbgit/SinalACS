@@ -28,6 +28,31 @@ Read these before making product/architecture decisions — when project docs co
 
 ## Commands
 
+### Configuration — run this first
+
+```bash
+./scripts/dev/bootstrap_env.sh      # cria .env e config/passwords.yaml
+```
+
+There is no committed `.env`, and the stack will not start without one: every
+secret in `docker-compose.yml` is declared as `${VAR:?...}`, so a missing value
+fails the Compose interpolation by name instead of falling back to a password
+baked into the versioned file. [.env.example](.env.example) is the full
+reference for every variable.
+
+The script generates random per-machine values for `POSTGRES_PASSWORD`,
+`TEST_DATABASE_PASSWORD`, `MQTT_BACKEND_PASSWORD`, `MQTT_ACS_PASSWORD` and
+`JWT_SECRET`, writes `backend/sinalacs_server/config/passwords.yaml` with the
+same test-database password, and `chmod 600` on both. It never overwrites
+existing files without `--force`, and warns when `pg_data/` predates a rotation
+(`POSTGRES_PASSWORD` only takes effect on the volume's first init — to adopt a
+new one, `docker compose down && rm -rf pg_data/`).
+
+Rotating the MQTT passwords is enough on its own: `infra/docker/mosquitto/init.sh`
+rewrites the broker's `passwordfile` on every boot. It used to only create it
+when absent, so a changed password silently did nothing and the broker kept
+rejecting the new one.
+
 ### Local stack (Postgres + Mosquitto + backend + Traefik)
 ```bash
 docker compose up --build
@@ -42,13 +67,23 @@ cd backend
 dart pub get
 dart analyze
 cd sinalacs_server
-dart test                                          # 25 tests: 16 unit + 9 integration
+dart test                                          # 48 tests: 37 unit + 11 integration
 dart test test/unit                                # hermetic only, no database needed
 dart test test/unit/red_alert_service_test.dart    # single test file
 ```
 Integration tests use Serverpod's `withServerpod` harness, which needs the test database from `sinalacs_server/config/test.yaml` — Postgres on `localhost:9090`, database `sinalacs_test`, user `postgres`, password from the `test:` block of `config/passwords.yaml` (gitignored). The harness applies migrations itself and rolls the database back after each case, so there is **no** manual schema or seed step.
 
-Because `config/passwords.yaml` is gitignored, it is missing from any fresh checkout — including CI, where the workflow generates it before running the suite. Without it, Serverpod fails while loading config and calls `exit(1)`; since Dart's `exit()` does not flush stdout, the error message is lost and the whole suite dies with exit code 1 and **zero** output. If you ever see that signature, check this file first.
+Start that database with the `test` profile of the root compose:
+
+```bash
+docker compose --profile test up -d postgres-test
+```
+
+It replaced `backend/sinalacs_server/docker-compose.yaml`, the Serverpod template
+compose that carried four passwords in cleartext in git and was referenced by
+nothing.
+
+Because `config/passwords.yaml` is gitignored, it is missing from any fresh checkout. Locally `scripts/dev/bootstrap_env.sh` generates it; CI generates it in the job. Without it, Serverpod fails while loading config and calls `exit(1)`; since Dart's `exit()` does not flush stdout, the error message is lost and the whole suite dies with exit code 1 and **zero** output. If you ever see that signature, check this file first. The password in it **must** match `TEST_DATABASE_PASSWORD` in `.env` — the bootstrap script keeps them aligned and warns when they drift.
 
 After changing any `.spy.yaml` model or adding an endpoint, regenerate and create a migration (from `backend/sinalacs_server`):
 ```bash
@@ -59,7 +94,9 @@ serverpod create-migration
 
 Run the server directly: `dart run backend/sinalacs_server/bin/main.dart`. Serverpod reads `config/*.yaml` plus `config/passwords.yaml`, and every setting can be overridden by environment variable: `SERVERPOD_DATABASE_HOST`/`_PORT`/`_NAME`/`_USER`/`_PASSWORD`/`_REQUIRE_SSL`, `SERVERPOD_APPLY_MIGRATIONS` (applies migrations at boot — this is what replaced the manual `psql` steps), `SERVERPOD_REDIS_ENABLED` (Redis is optional and off), and `SERVERPOD_INSIGHTS_SERVER_PORT` (remapped to 8083 in `docker-compose.yml`, because Serverpod's default 8081 is the Traefik dashboard here).
 
-MQTT is not part of Serverpod and keeps its own env vars, read by `AppConfig.fromEnvironment()` in `backend/sinalacs_server/lib/src/config/app_config.dart`: `MQTT_BROKER`/`MQTT_USERNAME`/`MQTT_PASSWORD`/`MQTT_USE_TLS`/`MQTT_CA_CERT_PATH`, plus `JWT_SECRET`, `APP_ENV` (when `production`, boot fails fast if `JWT_SECRET` is missing) and `ENABLE_DEV_LOGIN` (default `false` — gates `auth.developmentLogin`, which fails as if the route did not exist when off).
+MQTT is not part of Serverpod and keeps its own env vars, read by `AppConfig.fromEnvironment()` in `backend/sinalacs_server/lib/src/config/app_config.dart`: `MQTT_BROKER`/`MQTT_USERNAME`/`MQTT_PASSWORD`/`MQTT_USE_TLS`/`MQTT_CA_CERT_PATH`, plus `JWT_SECRET`, `APP_ENV` and `ENABLE_DEV_LOGIN` (default `false` — gates `auth.developmentLogin`, which fails as if the route did not exist when off).
+
+Outside `development`, boot fails fast when `JWT_SECRET` is absent, empty, blank, or equal to `AppConfig.developmentJwtSecret` — that fallback lives in versioned code, so it is public, and the token it signs carries the role and micro-area. The rules are in `_resolveJwtSecret` and covered by `test/unit/app_config_test.dart`; `AppConfig.fromMap()` exists so they are testable without touching `Platform.environment`.
 
 The dev seed (`sinalacs_server/lib/src/infrastructure/database/seeds/development.sql`) is not optional for a running stack: `auth.developmentLogin` issues tokens for fixed UUIDs, and `alerts.patientId` has a foreign key to `patients` — without the seed, `alerts.createRedAlert` fails with a foreign-key violation. In `docker-compose.yml` the `database-seed` service applies it after the server is healthy.
 
@@ -74,6 +111,22 @@ flutter run
 flutter build apk --debug   # debug APK, validated with compileSdk/targetSdk 36
 ```
 `apps/admin` exists only as a pubspec skeleton (backoffice), no implementation yet.
+
+### Validating the real connection to the backend
+
+`flutter test` stays hermetic (it only runs `test/`, where the backend is a fake). Anything that needs the live stack lives outside it:
+
+```bash
+./scripts/qa/e2e.sh              # sobe a stack, valida na VM, derruba
+./scripts/qa/e2e.sh --keep       # mantém a stack de pé
+./scripts/qa/e2e.sh --emulator   # inclui integration_test em um emulador já aberto
+```
+
+The script brings up Docker Compose, waits for the healthcheck, applies the seed, runs `scripts/dev/sync_dev_ca.sh` (copies the broker CA into `apps/acs/assets/certs/`, which is gitignored and regenerated), and then runs each app's `tool/live_check.dart`. Those scripts run on the plain Dart VM — no emulator — using the apps' own network code: the patient one covers health/login/triage/alert/idempotency, and the ACS one covers the full cycle including the MQTT/TLS subscription and `visits.sync`.
+
+`integration_test/` in each app holds the on-device version, excluded from `flutter test` by construction. Run it against an already-running emulator with `--dart-define=SINALACS_HOST=http://10.0.2.2:8080/` (and `SINALACS_MQTT_HOST=10.0.2.2` for the ACS). CI's four jobs are unchanged and never need a backend.
+
+Debug builds of both apps carry `android/app/src/debug/res/xml/network_security_config.xml`, which permits cleartext only to `10.0.2.2` and loopback; release manifests are untouched.
 
 CI (`.github/workflows/ci.yml`) runs four parallel jobs on push/PR to main: `serverpod-backend` (spins up the Postgres the test harness expects on port 9090, then `dart analyze` and the full 25-test suite), `backend-docker-build` (builds `backend/sinalacs_server/Dockerfile` to catch build breakage before deploy), `patient-app`, `acs-app` (each `flutter analyze && flutter test`, Flutter 3.44.8). Mirror this locally before pushing.
 
@@ -93,14 +146,18 @@ Never hand-edit anything under `lib/src/generated/` or `migrations/` — run `se
 
 Key pattern: application services depend on abstract interfaces (`AlertPublisher`, `AlertStore`) defined alongside them in `application/`, implemented by `infrastructure/`. Follow this when adding new use cases — keep `application/` testable without real Postgres/MQTT (see how `test/unit/red_alert_service_test.dart` fakes both).
 
-**Serverpod is RPC, not REST**, so there are no URL routes to match: the generated client calls methods. Endpoints: `health.check` (returns `{status, mqttConnected, dbConnected}`; answers as soon as the server is up, independent of MQTT/DB state), `auth.developmentLogin` (throws `EndpointDisabledException` unless `ENABLE_DEV_LOGIN=true`, preserving the old 404-not-403 semantics), `alerts.createRedAlert` (idempotency key is a method parameter, not a header; throws `AlertDispatchUnavailableException` if the MQTT dispatcher isn't connected), `alerts.acknowledge`, and `triage.evaluate`. Errors are typed exceptions declared in `.spy.yaml` and serialized to the client, replacing HTTP status codes. MQTT connects in the background after boot (non-blocking) with exponential-backoff auto-reconnect, so the server stays responsive even if the broker is unreachable — this matters on free-tier hosts that sleep/hibernate.
+**Serverpod is RPC, not REST**, so there are no URL routes to match: the generated client calls methods. Endpoints: `health.check` (returns `{status, mqttConnected, dbConnected}`; answers as soon as the server is up, independent of MQTT/DB state), `auth.developmentLogin` (throws `EndpointDisabledException` unless `ENABLE_DEV_LOGIN=true`, preserving the old 404-not-403 semantics), `alerts.createRedAlert` (idempotency key is a method parameter, not a header; throws `AlertDispatchUnavailableException` if the MQTT dispatcher isn't connected), `alerts.acknowledge`, `triage.evaluate`, and `visits.sync` (batch upload of visits registered offline by the ACS; deduplicated by the device-generated `localId`, which has a unique index on `visits`, and version-checked — a mismatched `version` returns `SyncStatus.conflict` and never overwrites). Errors are typed exceptions declared in `.spy.yaml` and serialized to the client, replacing HTTP status codes. MQTT connects in the background after boot (non-blocking) with exponential-backoff auto-reconnect, so the server stays responsive even if the broker is unreachable — this matters on free-tier hosts that sleep/hibernate.
 
 ### Flutter apps (`apps/acs/`, `apps/patient/`)
 Both follow the same skeleton: `lib/main.dart` → `lib/app/app.dart` (+ `*_theme.dart` for the dark, high-legibility, low-noise visual language — see `spec/ui_design.md`) → `lib/core/`. Shared `core/` concerns:
 - `database/encrypted_database.dart` — local persistence via `sqflite_sqlcipher`, with an FFI fallback for test/VM environments where SQLCipher isn't available.
-- ACS-only, in `apps/acs/lib/core/services/`: `mqtt_secure_client.dart` (TLS/WSS MQTT client, per-micro-area topics, alert + ACK payload parsing with malformed-message rejection), `offline_visit_queue.dart` (offline-first visit queue: pending → sync batch → retry/conflict detection, drives the same state shape as the backend's `SyncFsm`), `network_chaos_simulator.dart` (injects latency/jitter/packet loss/partition for testing offline resilience — see `apps/acs/test/network_chaos_test.dart`).
+- ACS-only, in `apps/acs/lib/core/services/`: `mqtt_secure_client.dart` (TCP/TLS MQTT client on 8883 — the broker's only published listener; trusts the dev CA from an asset via `setTrustedCertificatesBytes`, keeps hostname verification on, uses a persistent session with a stable client id so the broker re-delivers alerts that arrived while the device was offline), `alert_feed.dart` (builds the MQTT config from the session and feeds `alert_queue.dart`), `offline_visit_queue.dart` (offline-first visit queue backed by a `VisitStore`, pushed to `visits.sync` through `backend_visit_synchronizer.dart`; a conflict returns to the queue instead of being discarded, and a network failure keeps the batch pending), `network_chaos_simulator.dart` (injects latency/jitter/packet loss/partition for testing offline resilience — see `apps/acs/test/network_chaos_test.dart`).
 
-Neither app is yet wired to the real backend HTTP/MQTT endpoints end-to-end (per `PROGRESS.md`) — triage/risk logic in the patient app and prioritization in the ACS app currently run client-side against local/mock data, mirroring the backend's `triage_engine.dart` logic but not yet calling it over the network.
+Topic namespace must agree in three places: the server's `AlertDelivery.topicPrefix`, the broker ACL (`infra/docker/mosquitto/aclfile`), and `alertTopicFor()` in `mqtt_secure_client.dart` — all `sinalacs/v1/microareas/<microAreaId>/alerts`, where `<microAreaId>` is the seed UUID, not `area-12`.
+
+Both apps consume the generated `sinalacs_client` by path dependency and talk to the real backend. The network layer lives in `lib/core/network/` in each app: `backend_config.dart` (host via `--dart-define`, defaulting to `http://10.0.2.2:8080/`, the machine as seen from the Android emulator), `backend_client.dart` (a `PatientBackend`/`AcsBackend` interface plus the real `BackendClient`, which translates the typed backend exceptions into `BackendFailure` messages in Portuguese), `auth_session.dart` (reads the dev token's payload — **without** verifying the signature, which is the server's job — only to learn the micro-area and the 15-minute expiry) and `backend_scope.dart`. The UI depends on the interface, never on the generated `Client`, which is what keeps the widget tests hermetic; the live path is checked by `tool/live_check.dart` in each app and by `integration_test/`.
+
+Risk classification now comes **only** from `triage.evaluate`: the patient app's client-side string-matching rule is gone, and its triage form asks the six symptoms the server's engine actually takes. The ACS dashboard is fed by `AlertQueue`, which receives alerts over MQTT and orders them deterministically by risk and then by age; it rejects alerts from another micro-area and de-duplicates re-deliveries (QoS 1 is at-least-once).
 
 Color is a clinical signal only in these apps: red/yellow/green map strictly to `RiskLevel`, never used decoratively.
 

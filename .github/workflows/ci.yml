@@ -11,6 +11,21 @@ jobs:
     defaults:
       run:
         working-directory: backend
+    env:
+      # Senha do Postgres efêmero deste job. NÃO é um segredo: o banco existe só
+      # dentro do runner, some ao fim do job e nunca é alcançável de fora.
+      #
+      # O que importa é que este valor não seja compartilhado com mais nada.
+      # Antes era a MESMA senha do config/passwords.yaml local — que o
+      # .gitignore protege e que é idêntica nos blocos development, test,
+      # staging e production. O segredo protegido pelo .gitignore estava, na
+      # prática, publicado aqui.
+      #
+      # Declarado uma vez e referenciado nos dois lugares: o serviço abaixo e a
+      # geração do passwords.yaml. Eram dois literais mantidos iguais à mão, e
+      # divergir fazia a suíte morrer sem log nenhum.
+      CI_POSTGRES_PASSWORD: ci-ephemeral-not-a-secret
+
     services:
       # Banco que o harness de teste do Serverpod espera, conforme
       # sinalacs_server/config/test.yaml. O harness aplica as migrações sozinho
@@ -20,7 +35,7 @@ jobs:
         image: postgres:15-alpine
         env:
           POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: ZGib82sxRnAaTto3iglbPkARA1qZUv0W
+          POSTGRES_PASSWORD: ${{ env.CI_POSTGRES_PASSWORD }}
           POSTGRES_DB: sinalacs_test
         ports:
           - 9090:5432
@@ -41,11 +56,12 @@ jobs:
       # Serverpod não carrega a senha do banco, falha ainda no carregamento de
       # config e chama exit(1); como o exit() do Dart não dá flush no stdout, a
       # mensagem de erro se perde e a falha fica totalmente silenciosa (exit 1,
-      # zero linhas de log). A senha tem que ser a mesma do serviço postgres
-      # acima: se as duas divergirem, o harness volta a falhar sem log nenhum.
+      # zero linhas de log).
+      #
+      # Localmente, quem gera este arquivo é scripts/dev/bootstrap_env.sh.
       - name: Cria config/passwords.yaml para o harness de teste
         run: |
-          printf "test:\n  database: '%s'\n" 'ZGib82sxRnAaTto3iglbPkARA1qZUv0W' \
+          printf "test:\n  database: '%s'\n" "$CI_POSTGRES_PASSWORD" \
             > sinalacs_server/config/passwords.yaml
       # Suíte completa: 16 testes herméticos em test/unit, que usam fakes das
       # interfaces AlertPublisher e AlertStore, mais 9 de integração que sobem o

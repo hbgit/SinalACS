@@ -1,22 +1,83 @@
 import 'package:flutter/material.dart';
+import 'package:sinalacs_client/sinalacs_client.dart' show RiskLevel;
 import 'package:sinalacs_patient/app/patient_theme.dart';
+import 'package:sinalacs_patient/core/network/backend_client.dart';
+import 'package:sinalacs_patient/core/network/backend_scope.dart';
+import 'package:sinalacs_patient/core/network/idempotency.dart';
+import 'package:sinalacs_patient/core/privacy/location_hash.dart';
 
-class SinalAcsApp extends StatelessWidget {
-  const SinalAcsApp({super.key});
+class SinalAcsApp extends StatefulWidget {
+  const SinalAcsApp({super.key, this.backend});
+
+  /// Injetável para teste. Em execução normal é o [BackendClient] real.
+  final PatientBackend? backend;
+
+  @override
+  State<SinalAcsApp> createState() => _SinalAcsAppState();
+}
+
+class _SinalAcsAppState extends State<SinalAcsApp> {
+  late final PatientBackend _backend = widget.backend ?? BackendClient();
+
+  @override
+  void dispose() {
+    // Só fecha o que este widget criou; um backend injetado é de quem injetou.
+    if (widget.backend == null) _backend.close();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'SinalACS Paciente',
-      debugShowCheckedModeBanner: false,
-      theme: buildPatientTheme(),
-      home: const PatientLoginScreen(),
+    return BackendScope(
+      backend: _backend,
+      child: MaterialApp(
+        title: 'SinalACS Paciente',
+        debugShowCheckedModeBanner: false,
+        theme: buildPatientTheme(),
+        home: const PatientLoginScreen(),
+      ),
     );
   }
 }
 
-class PatientLoginScreen extends StatelessWidget {
+class PatientLoginScreen extends StatefulWidget {
   const PatientLoginScreen({super.key});
+
+  @override
+  State<PatientLoginScreen> createState() => _PatientLoginScreenState();
+}
+
+class _PatientLoginScreenState extends State<PatientLoginScreen> {
+  bool _busy = false;
+  String? _error;
+
+  /// Autentica de verdade contra `auth.developmentLogin` e só navega em caso de
+  /// sucesso. Antes a tela navegava incondicionalmente, ignorando o que era
+  /// digitado — não havia como saber se o backend estava sequer alcançável.
+  Future<void> _enter() async {
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+
+    try {
+      await BackendScope.of(context).login();
+      if (!mounted) return;
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(
+          builder: (_) => const PatientHomeShell(
+            initialDestination: PatientDestination.triage,
+          ),
+        ),
+      );
+    } on BackendFailure catch (failure) {
+      if (!mounted) return;
+      setState(() {
+        _busy = false;
+        _error = failure.message;
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -71,14 +132,31 @@ class PatientLoginScreen extends StatelessWidget {
                             width: double.infinity,
                             child: FilledButton(
                               key: const Key('enter_button'),
-                              onPressed: () => Navigator.of(context).pushReplacement(
-                                MaterialPageRoute(builder: (_) => const PatientHomeShell(initialDestination: PatientDestination.triage)),
-                              ),
+                              onPressed: _busy ? null : _enter,
                               style: FilledButton.styleFrom(minimumSize: const Size(48, 52)),
-                              child: const Text('Entrar sem senha'),
+                              child: _busy
+                                  ? const SizedBox(
+                                      height: 22,
+                                      width: 22,
+                                      child: CircularProgressIndicator(strokeWidth: 2),
+                                    )
+                                  : const Text('Entrar sem senha'),
                             ),
                           ),
                         ),
+                        if (_error != null)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 16),
+                            child: Text(
+                              key: const Key('login_error'),
+                              _error!,
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(
+                                color: PatientColors.danger,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
                         const SizedBox(height: 12),
                         SizedBox(
                           width: double.infinity,
@@ -181,6 +259,15 @@ class EmergencyScreen extends StatefulWidget {
 
 class _EmergencyScreenState extends State<EmergencyScreen> {
   String _state = 'Pronto para enviar';
+  bool _busy = false;
+
+  /// Chave da tentativa corrente.
+  ///
+  /// Gerada uma única vez por confirmação e mantida enquanto o envio não
+  /// conclui: se a pessoa tocar de novo depois de uma falha de rede, o servidor
+  /// reconhece a mesma chave e devolve o mesmo alerta em vez de criar um
+  /// segundo. Só é descartada quando o alerta é aceito.
+  String? _attemptKey;
 
   Future<void> _sendAlert() async {
     final confirmed = await showDialog<bool>(
@@ -195,7 +282,38 @@ class _EmergencyScreenState extends State<EmergencyScreen> {
       ),
     );
     if (confirmed != true || !mounted) return;
-    setState(() => _state = 'Alerta enfileirado localmente');
+
+    final backend = BackendScope.of(context);
+    final key = _attemptKey ??= newIdempotencyKey();
+
+    setState(() {
+      _busy = true;
+      _state = 'Enviando alerta...';
+    });
+
+    try {
+      final result = await backend.createRedAlert(
+        idempotencyKey: key,
+        // A localização real entra aqui quando o permissionamento de GPS for
+        // integrado; o contrato só aceita o hash, então a coordenada crua nunca
+        // sai do dispositivo (LGPD).
+        locationHash: unknownLocationHash,
+      );
+      if (!mounted) return;
+      setState(() {
+        _busy = false;
+        _attemptKey = null;
+        _state = 'Alerta recebido pela equipe'
+            '${result.published ? '' : ' — aguardando a rede para notificar'}';
+      });
+    } on BackendFailure catch (failure) {
+      if (!mounted) return;
+      // A chave NÃO é limpa aqui: o retry precisa reusar a mesma tentativa.
+      setState(() {
+        _busy = false;
+        _state = failure.message;
+      });
+    }
   }
 
   @override
@@ -214,7 +332,7 @@ class _EmergencyScreenState extends State<EmergencyScreen> {
               height: 208,
               child: FilledButton(
                 key: const Key('panic_button'),
-                onPressed: _sendAlert,
+                onPressed: _busy ? null : _sendAlert,
                 style: FilledButton.styleFrom(
                   backgroundColor: PatientColors.danger,
                   shape: const CircleBorder(),
@@ -239,44 +357,210 @@ class TriageScreen extends StatefulWidget {
   State<TriageScreen> createState() => _TriageScreenState();
 }
 
-class _TriageScreenState extends State<TriageScreen> {
-  int _step = 0;
-  final List<String?> _answers = List<String?>.filled(3, null);
-  final _questions = const [
-    ('Qual o sintoma principal?', ['Falta de ar ou cansaço intenso', 'Tontura ou pressão alterada', 'Dor localizada ou febre moderada', 'Dúvida de rotina ou medicação']),
-    ('O sintoma começou de forma súbita?', ['Sim, começou de repente', 'Não, começou aos poucos']),
-    ('Há algum sinal de agravamento?', ['Dor no peito ou sangramento', 'Sem sinal de agravamento']),
-  ];
+/// Um sintoma do formulário, ligado ao parâmetro correspondente de
+/// `triage.evaluate`.
+///
+/// As perguntas são exatamente as seis que o motor do servidor conhece. Antes
+/// eram três perguntas de múltipla escolha que **não** mapeavam para o contrato,
+/// e o risco era calculado no cliente por comparação de string — duas regras de
+/// risco no mesmo produto, o que viola o determinismo exigido pelo PRD (INV-02).
+enum TriageSymptom {
+  chestPain('chest_pain', 'Você está com dor no peito?'),
+  difficultyBreathing('difficulty_breathing', 'Você está com falta de ar?'),
+  bleeding('bleeding', 'Você está com algum sangramento?'),
+  severeWeakness('severe_weakness', 'Você está com fraqueza intensa ou desmaio?'),
+  fever('fever', 'Você está com febre?'),
+  persistentVomiting('persistent_vomiting', 'Você está com vômitos que não param?');
 
-  String get _risk => _answers.any((answer) => answer == 'Dor no peito ou sangramento' || answer == 'Falta de ar ou cansaço intenso') ? 'Risco: Vermelho' : _answers.any((answer) => answer != null) ? 'Risco: Amarelo' : 'Risco: Verde';
+  const TriageSymptom(this.key, this.question);
+
+  final String key;
+  final String question;
+}
+
+class _TriageScreenState extends State<TriageScreen> {
+  static const _symptoms = TriageSymptom.values;
+
+  int _step = 0;
+  final Map<TriageSymptom, bool> _answers = <TriageSymptom, bool>{};
+  bool _busy = false;
+  String? _error;
+
+  /// Risco devolvido pelo servidor. `null` enquanto a triagem não foi concluída.
+  ///
+  /// Não existe cálculo de risco neste arquivo, e não deve passar a existir.
+  RiskLevel? _risk;
+
+  bool get _isLastStep => _step == _symptoms.length - 1;
+
+  Future<void> _submit() async {
+    final answer = _answers[_symptoms[_step]];
+    if (answer == null) return;
+
+    if (!_isLastStep) {
+      setState(() => _step++);
+      return;
+    }
+
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+
+    try {
+      final risk = await BackendScope.of(context).evaluateTriage(
+        chestPain: _answers[TriageSymptom.chestPain] ?? false,
+        difficultyBreathing: _answers[TriageSymptom.difficultyBreathing] ?? false,
+        fever: _answers[TriageSymptom.fever] ?? false,
+        persistentVomiting: _answers[TriageSymptom.persistentVomiting] ?? false,
+        bleeding: _answers[TriageSymptom.bleeding] ?? false,
+        severeWeakness: _answers[TriageSymptom.severeWeakness] ?? false,
+      );
+      if (!mounted) return;
+      setState(() {
+        _busy = false;
+        _risk = risk;
+      });
+    } on BackendFailure catch (failure) {
+      if (!mounted) return;
+      setState(() {
+        _busy = false;
+        _error = failure.message;
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    final question = _questions[_step];
+    final risk = _risk;
+    if (risk != null) return _TriageResult(risk: risk, onContinue: widget.onComplete);
+
+    final symptom = _symptoms[_step];
+    final answer = _answers[symptom];
+
     return ListView(
       padding: const EdgeInsets.all(20),
       children: [
-        Text('Passo ${_step + 1} de 3', style: const TextStyle(color: PatientColors.accent, fontWeight: FontWeight.bold)),
+        Text(
+          'Passo ${_step + 1} de ${_symptoms.length}',
+          style: const TextStyle(color: PatientColors.accent, fontWeight: FontWeight.bold),
+        ),
         const SizedBox(height: 8),
-        LinearProgressIndicator(value: (_step + 1) / 3),
+        LinearProgressIndicator(value: (_step + 1) / _symptoms.length),
         const SizedBox(height: 24),
-        Text(question.$1, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+        Text(symptom.question, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
         const SizedBox(height: 16),
-        RadioGroup<String>(groupValue: _answers[_step], onChanged: (value) => setState(() => _answers[_step] = value), child: Column(children: question.$2.map((answer) => Card(child: RadioListTile<String>(key: Key(_step == 0 && answer.startsWith('Falta') ? 'difficulty_breathing' : _step == 2 && answer.startsWith('Dor') ? 'chest_pain' : 'triage_${_step}_${question.$2.indexOf(answer)}'), value: answer, title: Text(answer)))).toList())),
+        RadioGroup<bool>(
+          groupValue: answer,
+          onChanged: (value) => setState(() => _answers[symptom] = value ?? false),
+          child: Column(
+            children: [
+              Card(
+                child: RadioListTile<bool>(
+                  key: Key(symptom.key),
+                  value: true,
+                  title: const Text('Sim'),
+                ),
+              ),
+              Card(
+                child: RadioListTile<bool>(
+                  key: Key('${symptom.key}_no'),
+                  value: false,
+                  title: const Text('Não'),
+                ),
+              ),
+            ],
+          ),
+        ),
         const SizedBox(height: 20),
         FilledButton(
           key: const Key('submit_triage'),
-          onPressed: _answers[_step] == null ? null : () {
-            if (_step < 2) {
-              setState(() => _step++);
-            } else {
-              widget.onComplete?.call();
-            }
-          },
+          onPressed: answer == null || _busy ? null : _submit,
           style: FilledButton.styleFrom(minimumSize: const Size(48, 52)),
-          child: Text(_step == 2 ? 'Concluir triagem' : 'Próxima pergunta'),
+          child: _busy
+              ? const SizedBox(height: 22, width: 22, child: CircularProgressIndicator(strokeWidth: 2))
+              : Text(_isLastStep ? 'Concluir triagem' : 'Próxima pergunta'),
         ),
-        if (_step == 2) Padding(padding: const EdgeInsets.only(top: 16), child: Text(_risk, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold))),
+        if (_error != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 16),
+            child: Text(
+              key: const Key('triage_error'),
+              _error!,
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: PatientColors.danger, fontWeight: FontWeight.bold),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+/// Exibe a classificação que veio do servidor.
+///
+/// A cor é sinal clínico, nunca decoração: vermelho/amarelo/verde mapeiam
+/// estritamente o [RiskLevel].
+class _TriageResult extends StatelessWidget {
+  const _TriageResult({required this.risk, this.onContinue});
+
+  final RiskLevel risk;
+  final VoidCallback? onContinue;
+
+  @override
+  Widget build(BuildContext context) {
+    final (label, color, guidance) = switch (risk) {
+      RiskLevel.red => (
+          'Risco: Vermelho',
+          PatientColors.danger,
+          'Sua equipe de saúde foi avisada com prioridade máxima. '
+              'Se piorar, ligue para o SAMU (192).',
+        ),
+      RiskLevel.yellow => (
+          'Risco: Amarelo',
+          const Color(0xFFE0A800),
+          'Sua solicitação foi priorizada. O agente de saúde entrará em contato.',
+        ),
+      RiskLevel.green => (
+          'Risco: Verde',
+          PatientColors.accent,
+          'Sem sinais de urgência. Sua solicitação entrou na fila de rotina.',
+        ),
+    };
+
+    return ListView(
+      padding: const EdgeInsets.all(20),
+      children: [
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              children: [
+                Icon(Icons.verified_outlined, size: 44, color: color),
+                const SizedBox(height: 16),
+                Text(
+                  key: const Key('triage_risk'),
+                  label,
+                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: color),
+                ),
+                const SizedBox(height: 12),
+                Text(guidance, textAlign: TextAlign.center),
+                const SizedBox(height: 8),
+                const Text(
+                  'Classificação feita pelo protocolo da equipe de saúde.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 12, color: Colors.white54),
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 20),
+        FilledButton(
+          key: const Key('triage_continue'),
+          onPressed: onContinue,
+          style: FilledButton.styleFrom(minimumSize: const Size(48, 52)),
+          child: const Text('Acompanhar solicitação'),
+        ),
       ],
     );
   }

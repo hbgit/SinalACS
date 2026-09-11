@@ -5,21 +5,31 @@ publish_to: 'none'
 version: 1.0.0
 
 environment:
-  sdk: '>=3.3.0 <4.0.0'
+  # ^3.8.0 é exigido por sinalacs_client; era '>=3.3.0 <4.0.0'.
+  sdk: '^3.8.0'
 
 dependencies:
   flutter:
     sdk: flutter
+  # Cliente RPC tipado gerado por `serverpod generate`. É membro do workspace
+  # backend/, e a dependência por path a partir de fora resolve — ver
+  # video/rpc_demo, que usa exatamente este arranjo.
+  sinalacs_client:
+    path: ../../backend/sinalacs_client
+  # Fixado na mesma versão que sinalacs_client declara; divergir quebra a resolução.
+  serverpod_client: 3.4.13
+  crypto: ^3.0.0
   sqflite: ^2.3.0
   sqflite_common_ffi: ^2.3.0
   sqflite_sqlcipher: ^3.2.0
   connectivity_plus: ^7.3.1
-  mqtt_client: ^10.0.0
   geolocator: ^12.0.0
   flutter_local_notifications: ^17.0.0
 
 dev_dependencies:
   flutter_test:
+    sdk: flutter
+  integration_test:
     sdk: flutter
   flutter_lints: ^3.0.0
 

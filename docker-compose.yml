@@ -5,15 +5,47 @@ services:
     image: postgres:15-alpine
     container_name: sinalacs-postgres
     environment:
-      POSTGRES_USER: sinalacs_user
-      POSTGRES_PASSWORD: strongpassword
-      POSTGRES_DB: sinalacs_db
+      POSTGRES_USER: ${POSTGRES_USER:-sinalacs_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?defina em .env — rode ./scripts/dev/bootstrap_env.sh}
+      POSTGRES_DB: ${POSTGRES_DB:-sinalacs_db}
     ports:
       - "5432:5432"
     volumes:
       - ./pg_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U sinalacs_user -d sinalacs_db"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-sinalacs_user} -d ${POSTGRES_DB:-sinalacs_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Banco do harness de teste do Serverpod. Fica atrás de um profile porque não
+  # faz parte da stack da aplicação:
+  #
+  #     docker compose --profile test up -d postgres-test
+  #     cd backend/sinalacs_server && dart test
+  #
+  # Porta, nome e usuário seguem backend/sinalacs_server/config/test.yaml, e a
+  # senha é a mesma que scripts/dev/bootstrap_env.sh grava em
+  # config/passwords.yaml — se divergirem, o Serverpod falha ao carregar a
+  # config e chama exit(1), que não dá flush no stdout: a suíte morre com exit 1
+  # e nenhuma linha de log.
+  #
+  # Substitui backend/sinalacs_server/docker-compose.yaml, o template do
+  # Serverpod que carregava quatro senhas em texto claro no git.
+  postgres-test:
+    image: postgres:15-alpine
+    container_name: sinalacs-postgres-test
+    profiles: [test]
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${TEST_DATABASE_PASSWORD:?defina em .env — rode ./scripts/dev/bootstrap_env.sh}
+      POSTGRES_DB: sinalacs_test
+    ports:
+      - "9090:5432"
+    # Sem volume: o banco de teste é descartável, e o harness aplica as
+    # migrações e reverte a cada caso.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d sinalacs_test"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -38,8 +70,11 @@ services:
     container_name: sinalacs-mosquitto-init
     user: root
     environment:
-      MQTT_BACKEND_PASSWORD: ${MQTT_BACKEND_PASSWORD:-development-backend-password}
-      MQTT_ACS_PASSWORD: ${MQTT_ACS_PASSWORD:-development-acs-password}
+      MQTT_BACKEND_PASSWORD: ${MQTT_BACKEND_PASSWORD:?defina em .env — rode ./scripts/dev/bootstrap_env.sh}
+      MQTT_ACS_PASSWORD: ${MQTT_ACS_PASSWORD:?defina em .env — rode ./scripts/dev/bootstrap_env.sh}
+      # SANs adicionais no certificado do broker, para validar em aparelho
+      # físico na LAN: MQTT_CERT_SAN_EXTRA='IP:192.168.0.10' docker compose up
+      MQTT_CERT_SAN_EXTRA: ${MQTT_CERT_SAN_EXTRA:-}
     volumes:
       - ./infra/docker/mosquitto/init.sh:/init.sh:ro
       - ./infra/docker/mosquitto/runtime:/mosquitto/runtime
@@ -63,20 +98,23 @@ services:
       SERVERPOD_APPLY_MIGRATIONS: "true"
       SERVERPOD_DATABASE_HOST: postgres
       SERVERPOD_DATABASE_PORT: "5432"
-      SERVERPOD_DATABASE_NAME: sinalacs_db
-      SERVERPOD_DATABASE_USER: sinalacs_user
-      SERVERPOD_DATABASE_PASSWORD: strongpassword
+      SERVERPOD_DATABASE_NAME: ${POSTGRES_DB:-sinalacs_db}
+      SERVERPOD_DATABASE_USER: ${POSTGRES_USER:-sinalacs_user}
+      SERVERPOD_DATABASE_PASSWORD: ${POSTGRES_PASSWORD:?defina em .env — rode ./scripts/dev/bootstrap_env.sh}
       SERVERPOD_DATABASE_REQUIRE_SSL: "false"
       SERVERPOD_REDIS_ENABLED: "false"
       # O Insights escuta 8081 por padrão, que aqui é o dashboard do Traefik.
       SERVERPOD_INSIGHTS_SERVER_PORT: "8083"
       MQTT_BROKER: mosquitto:8883
       MQTT_USERNAME: backend
-      MQTT_PASSWORD: ${MQTT_BACKEND_PASSWORD:-development-backend-password}
+      MQTT_PASSWORD: ${MQTT_BACKEND_PASSWORD:?defina em .env — rode ./scripts/dev/bootstrap_env.sh}
       MQTT_USE_TLS: "true"
       MQTT_CA_CERT_PATH: /app/certs/ca.crt
-      APP_ENV: development
-      ENABLE_DEV_LOGIN: "true"
+      # Sem esta variável o servidor caía num segredo de desenvolvimento fixo e
+      # público, com o qual qualquer pessoa forjaria um token de ACS.
+      JWT_SECRET: ${JWT_SECRET:?defina em .env — rode ./scripts/dev/bootstrap_env.sh}
+      APP_ENV: ${APP_ENV:-development}
+      ENABLE_DEV_LOGIN: "${ENABLE_DEV_LOGIN:-true}"
     ports:
       - "8080:8080"
     volumes:
@@ -91,13 +129,13 @@ services:
       serverpod:
         condition: service_healthy
     environment:
-      PGPASSWORD: strongpassword
+      PGPASSWORD: ${POSTGRES_PASSWORD:?defina em .env — rode ./scripts/dev/bootstrap_env.sh}
     volumes:
       - ./backend/sinalacs_server/lib/src/infrastructure/database/seeds:/seeds:ro
     entrypoint:
       - /bin/sh
       - -c
-      - psql -v ON_ERROR_STOP=1 -h postgres -U sinalacs_user -d sinalacs_db -f /seeds/development.sql
+      - psql -v ON_ERROR_STOP=1 -h postgres -U ${POSTGRES_USER:-sinalacs_user} -d ${POSTGRES_DB:-sinalacs_db} -f /seeds/development.sql
 
   traefik:
     image: traefik:v2.10

@@ -7,3 +7,5 @@ health:
   - check:
 triage:
   - evaluate:
+visits:
+  - sync:
