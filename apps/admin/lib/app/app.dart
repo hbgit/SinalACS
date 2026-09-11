@@ -59,11 +59,11 @@ class _LoginScreenState extends State<LoginScreen> {
                   decoration: BoxDecoration(
                     color: AdminColors.surfaceRaised,
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: AdminColors.yellow),
+                    border: Border.all(color: AdminColors.accent),
                   ),
                   child: const Row(
                     children: [
-                      Icon(Icons.science_outlined, color: AdminColors.yellow),
+                      Icon(Icons.science_outlined, color: AdminColors.accent),
                       SizedBox(width: 12),
                       Expanded(
                         child: Text(
@@ -331,8 +331,9 @@ class _MicroAreasScreenState extends State<MicroAreasScreen> {
                     title: Text(area.name),
                     subtitle: Text('ACS: ${area.acsName} (${area.acsEnrollmentId})'),
                     trailing: Chip(
+                      avatar: Icon(area.acsActive ? Icons.check_circle_outline : Icons.remove_circle_outline, size: 18),
                       label: Text(area.acsActive ? 'Ativo' : 'Sem ACS ativo'),
-                      backgroundColor: area.acsActive ? AdminColors.green.withValues(alpha: 0.2) : AdminColors.surface,
+                      backgroundColor: AdminColors.surface,
                     ),
                   ),
                 ),
