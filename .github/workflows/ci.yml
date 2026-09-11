@@ -7,13 +7,7 @@ on:
 
 jobs:
   serverpod-backend:
-    # Pinado em 22.04 (em vez de ubuntu-latest) como teste: o job trava sem
-    # nenhuma saída só neste runner, nunca localmente, mesmo com SDK, memória,
-    # CPU e stack size descartados como causa (ver comentário no passo de
-    # integração abaixo) — e todo log recente traz o aviso de que a frota
-    # ubuntu-latest está em transição para Node 24, o que sugere uma imagem
-    # de runner em mudança/potencialmente instável nesta data.
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: backend
@@ -56,10 +50,13 @@ jobs:
         working-directory: backend/sinalacs_server
       # test/integration trava sem nenhuma saída sempre durante o "loading"
       # (compilação) de red_alert_cycle_test.dart, nunca chegando a executar
-      # um teste — só no runner ubuntu-latest, nunca localmente. Já descartei
-      # SDK do Dart, memória, CPU, concorrência e stack size como causa (ver
-      # runs-on acima); resta testar se é uma regressão específica da imagem
-      # de runner mais recente.
+      # um teste — só no runner do GitHub Actions, nunca localmente (Dart
+      # 3.8.0/3.12.2 + Postgres 15-alpine, mesma estrutura do workflow, 30/30
+      # testes passando sempre). Já descartei SDK do Dart, memória (14Gi
+      # livres), CPU (4 cores), concorrência, stack size e a imagem do runner
+      # (ubuntu-22.04 vs ubuntu-latest) como causa — todos reproduzem a mesma
+      # assinatura exata. Precisa de investigação com acesso ao runner
+      # (ex.: debug via tmate) para ir além disso.
       - run: dart test test/integration -r expanded --chain-stack-traces
         working-directory: backend/sinalacs_server
 
