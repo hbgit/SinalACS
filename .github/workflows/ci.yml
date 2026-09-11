@@ -59,21 +59,46 @@ jobs:
       #     futex e então gerar código JIT ("dart-code"). Ou seja, é o
       #     próprio dart test/VM do Dart decidindo sair, silenciosamente,
       #     só nesse ambiente.
-      # tmate temporário para debug interativo (limit-access-to-actor: true
-      # porque o repo é público — só a conta que disparou o workflow
-      # consegue conectar). Remover assim que a causa for encontrada.
-      #
-      # A imagem do runner já vem com ~/.ssh/id_rsa, e o action roda
-      # ssh-keygen sem -f/-y: ele trava no prompt "Overwrite (y/n)?" e a
-      # sessão nunca chega a ser criada (o step fica 25 min parado sem
-      # imprimir a string de conexão). Remover a chave antes evita o prompt.
-      - name: Remove chave SSH pré-existente (destrava o ssh-keygen do tmate)
-        run: rm -f ~/.ssh/id_rsa ~/.ssh/id_rsa.pub
-      - name: Debug via tmate (temporário)
-        uses: mxschmitt/action-tmate@v3
+      # Bateria de diagnóstico temporária. Remover assim que a causa for
+      # encontrada — não deve ficar em CI permanente.
+      - name: Diagnóstico do crash de integração
+        continue-on-error: true
+        run: |
+          set +e
+          sudo apt-get install -y strace gdb >/dev/null 2>&1
+          sudo sysctl -w kernel.yama.ptrace_scope=0 >/dev/null 2>&1
+
+          echo "########## 1) dart run direto (sem o runner do package:test) ##########"
+          timeout 300 dart run test/integration/red_alert_cycle_test.dart 2>&1 | tail -60
+          echo "EXIT_1=${PIPESTATUS[0]}"
+
+          echo "########## 2) strace completo do dart test ##########"
+          timeout 300 strace -f -tt -s 1000 -o /tmp/full.strace \
+            dart test test/integration -r expanded 2>&1 | tail -15
+          echo "EXIT_2=${PIPESTATUS[0]}"
+
+          echo "########## 3) todos os write() do strace ##########"
+          grep -n "write(" /tmp/full.strace | tail -40
+
+          echo "########## 4) backtrace ao vivo durante a janela do crash ##########"
+          dart test test/integration -r expanded > /tmp/bg.log 2>&1 &
+          sleep 1.5
+          MAIN_PID=$(pgrep -f "dart.*test/integration" | head -1)
+          echo "PID alvo: ${MAIN_PID:-<nenhum>}"
+          if [ -n "$MAIN_PID" ]; then
+            sudo gdb -p "$MAIN_PID" -batch -ex "thread apply all bt" -ex detach 2>&1 | tail -80
+          fi
+          wait
+          echo "--- saída do teste em background ---"
+          tail -20 /tmp/bg.log
+        working-directory: backend/sinalacs_server
+      - name: Upload strace completo
+        if: always()
+        uses: actions/upload-artifact@v4
         with:
-          limit-access-to-actor: true
-        timeout-minutes: 25
+          name: dart-test-strace-full
+          path: /tmp/full.strace
+          retention-days: 3
       - run: dart test test/unit -r expanded
         working-directory: backend/sinalacs_server
       - run: dart test test/integration -r expanded --chain-stack-traces
