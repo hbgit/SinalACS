@@ -39,7 +39,16 @@ jobs:
       # Suíte completa: 16 testes herméticos em test/unit, que usam fakes das
       # interfaces AlertPublisher e AlertStore, mais 9 de integração que sobem o
       # servidor em processo pelo harness e exercitam os endpoints tipados.
-      - run: dart test
+      #
+      # concurrency=1 e chain-stack-traces são temporários: o job vinha morrendo
+      # em ~7s sem nenhuma saída (nem "loading ...", nem stack trace), o que não
+      # foi reproduzível localmente com a mesma versão do SDK/Postgres — a
+      # suspeita é o concurrency padrão (= nº de CPUs) estourando memória no
+      # runner. nproc/free ajudam a confirmar isso no log real.
+      - run: |
+          nproc || true
+          free -h || true
+          dart test --concurrency=1 -r expanded --chain-stack-traces
         working-directory: backend/sinalacs_server
 
   backend-docker-build:
