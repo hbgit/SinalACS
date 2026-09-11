@@ -7,7 +7,13 @@ on:
 
 jobs:
   serverpod-backend:
-    runs-on: ubuntu-latest
+    # Pinado em 22.04 (em vez de ubuntu-latest) como teste: o job trava sem
+    # nenhuma saída só neste runner, nunca localmente, mesmo com SDK, memória,
+    # CPU e stack size descartados como causa (ver comentário no passo de
+    # integração abaixo) — e todo log recente traz o aviso de que a frota
+    # ubuntu-latest está em transição para Node 24, o que sugere uma imagem
+    # de runner em mudança/potencialmente instável nesta data.
+    runs-on: ubuntu-22.04
     defaults:
       run:
         working-directory: backend
@@ -48,16 +54,13 @@ jobs:
       # separados isola definitivamente se o problema é essa carga pesada.
       - run: dart test test/unit -r expanded
         working-directory: backend/sinalacs_server
-      # test/integration ainda trava só no runner do GitHub, sem nenhuma saída,
-      # sempre durante o "loading" (compilação) de red_alert_cycle_test.dart —
-      # nunca chega a executar um teste. Isso é a assinatura de um crash nativo
-      # do compilador (CFE) durante a compilação, não de uma falha de teste em
-      # si. Levantar o limite de stack testa a hipótese de um stack overflow
-      # nativo do compilador ao processar o protocol.dart gerado (11k linhas).
-      - run: |
-          ulimit -s unlimited || ulimit -s 65536 || true
-          ulimit -s
-          dart test test/integration -r expanded --chain-stack-traces
+      # test/integration trava sem nenhuma saída sempre durante o "loading"
+      # (compilação) de red_alert_cycle_test.dart, nunca chegando a executar
+      # um teste — só no runner ubuntu-latest, nunca localmente. Já descartei
+      # SDK do Dart, memória, CPU, concorrência e stack size como causa (ver
+      # runs-on acima); resta testar se é uma regressão específica da imagem
+      # de runner mais recente.
+      - run: dart test test/integration -r expanded --chain-stack-traces
         working-directory: backend/sinalacs_server
 
   backend-docker-build:
