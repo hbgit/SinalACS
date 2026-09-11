@@ -15,7 +15,7 @@ Para otimizar o *Lead Time* e erradicar testes *flaky*, a pirâmide de testes tr
 * **Testes E2E (10%):** Focados apenas nos Caminhos Críticos (ex: Disparo do Botão de Alerta e Cache de Territorialização).
 
 
-* **Contratos Orientados a Eventos:** A ausência de um ORM/codegen no backend (decisão original de usar Serverpod não foi implementada) significa que não há hoje quebra de compilação automática em falhas de contrato REST — isso é um risco a mitigar, não uma garantia existente. O risco real está na mensageria assíncrona. Implementaremos validação de contratos **AsyncAPI** para os *payloads* do *broker* Mosquitto, garantindo que o publicador (Paciente) e o consumidor (ACS) falem a mesma linguagem sem corromper o *buffer* de mensagens.
+* **Contratos Orientados a Eventos:** Os contratos **síncronos** já têm garantia de compilação: o backend é um workspace Serverpod com ORM e codegen, e o `serverpod generate` produz o cliente Dart tipado em `sinalacs_client` a partir dos modelos `.spy.yaml` — uma quebra de contrato nos endpoints RPC falha na compilação. Essa garantia **não** se estende à mensageria assíncrona, onde está o risco real: os *payloads* do *broker* Mosquitto não passam por codegen. Implementaremos validação de contratos **AsyncAPI** para esses *payloads*, garantindo que o publicador (Paciente) e o consumidor (ACS) falem a mesma linguagem sem corromper o *buffer* de mensagens.
 
 
 
