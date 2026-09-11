@@ -73,7 +73,7 @@ flutter build apk --debug   # debug APK, validated with compileSdk/targetSdk 36
 ```
 `apps/admin` exists only as a pubspec skeleton (backoffice), no implementation yet.
 
-CI (`.github/workflows/ci.yml`) runs four parallel jobs on push/PR to main: `serverpod-backend` (spins up the Postgres the test harness expects on port 9090, then `dart analyze` and the full 25-test suite), `backend-docker-build` (builds `backend/sinalacs_server/Dockerfile` to catch build breakage before deploy), `patient-app`, `acs-app` (each `flutter analyze && flutter test`, Flutter 3.24.0). Mirror this locally before pushing.
+CI (`.github/workflows/ci.yml`) runs four parallel jobs on push/PR to main: `serverpod-backend` (spins up the Postgres the test harness expects on port 9090, then `dart analyze` and the full 25-test suite), `backend-docker-build` (builds `backend/sinalacs_server/Dockerfile` to catch build breakage before deploy), `patient-app`, `acs-app` (each `flutter analyze && flutter test`, Flutter 3.44.8). Mirror this locally before pushing.
 
 ## Architecture
 

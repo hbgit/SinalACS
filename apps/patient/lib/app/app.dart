@@ -262,7 +262,7 @@ class _TriageScreenState extends State<TriageScreen> {
         const SizedBox(height: 24),
         Text(question.$1, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
         const SizedBox(height: 16),
-        ...question.$2.map((answer) => Card(child: RadioListTile<String>(key: Key(_step == 0 && answer.startsWith('Falta') ? 'difficulty_breathing' : _step == 2 && answer.startsWith('Dor') ? 'chest_pain' : 'triage_${_step}_${question.$2.indexOf(answer)}'), value: answer, groupValue: _answers[_step], onChanged: (value) => setState(() => _answers[_step] = value), title: Text(answer)))),
+        RadioGroup<String>(groupValue: _answers[_step], onChanged: (value) => setState(() => _answers[_step] = value), child: Column(children: question.$2.map((answer) => Card(child: RadioListTile<String>(key: Key(_step == 0 && answer.startsWith('Falta') ? 'difficulty_breathing' : _step == 2 && answer.startsWith('Dor') ? 'chest_pain' : 'triage_${_step}_${question.$2.indexOf(answer)}'), value: answer, title: Text(answer)))).toList())),
         const SizedBox(height: 20),
         FilledButton(
           key: const Key('submit_triage'),
