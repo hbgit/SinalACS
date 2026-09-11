@@ -379,12 +379,22 @@ class _AlertsScreenState extends State<AlertsScreen> {
                     child: DropdownButtonFormField<String?>(
                       key: const Key('alerts_micro_area_filter'),
                       initialValue: _microAreaFilter,
+                      isExpanded: true,
                       decoration: const InputDecoration(labelText: 'Microárea'),
                       items: const [
                         DropdownMenuItem(value: null, child: Text('Todas')),
-                        DropdownMenuItem(value: 'Microárea 12 — Zona Rural', child: Text('Microárea 12 — Zona Rural')),
-                        DropdownMenuItem(value: 'Microárea 07 — Centro', child: Text('Microárea 07 — Centro')),
-                        DropdownMenuItem(value: 'Microárea 03 — Vila Esperança', child: Text('Microárea 03 — Vila Esperança')),
+                        DropdownMenuItem(
+                          value: 'Microárea 12 — Zona Rural',
+                          child: Text('Microárea 12 — Zona Rural', overflow: TextOverflow.ellipsis),
+                        ),
+                        DropdownMenuItem(
+                          value: 'Microárea 07 — Centro',
+                          child: Text('Microárea 07 — Centro', overflow: TextOverflow.ellipsis),
+                        ),
+                        DropdownMenuItem(
+                          value: 'Microárea 03 — Vila Esperança',
+                          child: Text('Microárea 03 — Vila Esperança', overflow: TextOverflow.ellipsis),
+                        ),
                       ],
                       onChanged: (value) => setState(() => _microAreaFilter = value),
                     ),
@@ -394,11 +404,12 @@ class _AlertsScreenState extends State<AlertsScreen> {
                     child: DropdownButtonFormField<AlertStatus?>(
                       key: const Key('alerts_status_filter'),
                       initialValue: _statusFilter,
+                      isExpanded: true,
                       decoration: const InputDecoration(labelText: 'Status'),
                       items: [
                         const DropdownMenuItem(value: null, child: Text('Todos')),
                         for (final status in AlertStatus.values)
-                          DropdownMenuItem(value: status, child: Text(statusLabel(status))),
+                          DropdownMenuItem(value: status, child: Text(statusLabel(status), overflow: TextOverflow.ellipsis)),
                       ],
                       onChanged: (value) => setState(() => _statusFilter = value),
                     ),
@@ -517,10 +528,11 @@ class _InfoRow extends StatelessWidget {
   Widget build(BuildContext context) => Padding(
         padding: const EdgeInsets.symmetric(vertical: 5),
         child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(label),
-            Flexible(child: Text(value, textAlign: TextAlign.end, style: const TextStyle(fontWeight: FontWeight.bold))),
+            Expanded(child: Text(label)),
+            const SizedBox(width: 12),
+            Text(value, textAlign: TextAlign.end, style: const TextStyle(fontWeight: FontWeight.bold)),
           ],
         ),
       );
