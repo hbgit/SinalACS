@@ -110,7 +110,7 @@ flutter test test/login_flow_test.dart   # single test file
 flutter run                 # patient only
 flutter build apk --debug   # debug APK, validated with compileSdk/targetSdk 36
 ```
-For the ACS app, run `./scripts/dev/run_acs.sh` (or `--build` for the APK) instead of bare `flutter run`: `SINALACS_MQTT_PASSWORD` is a compile-time constant with **no default**, and the broker's password is generated per machine by `bootstrap_env.sh`, so a bare `flutter run` produces an app that never receives an alert. The script reads `.env`, runs `sync_dev_ca.sh` (the CA is a gitignored asset the build requires) and fills in all four `--dart-define`s.
+For the ACS app, run `./scripts/dev/run_acs.sh` (or `--build` for the APK) instead of bare `flutter run`: `SINALACS_MQTT_PASSWORD` is a compile-time constant with **no default**, and the broker's password is generated per machine by `bootstrap_env.sh`. The script reads `.env`, runs `sync_dev_ca.sh` (the CA is a gitignored asset the build requires) and passes all four defines via `--dart-define-from-file` (a temp file it creates and deletes, so the password never sits in `flutter`'s argv). `apps/acs/android/app/build.gradle.kts` makes a bare `flutter build apk` **fail** with the right command instead of silently producing an APK that never connects; the escape hatch for a deliberately-passwordless build (e.g. to see the "compiled without the password" banner) is `-Psinalacs.allowMissingMqttPassword=true`.
 
 `apps/admin` exists only as a pubspec skeleton (backoffice), no implementation yet.
 

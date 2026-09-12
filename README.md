@@ -90,9 +90,12 @@ cd apps/acs && flutter pub get && cd -
 
 Use o script, não `flutter run` direto. A senha do broker é resolvida em tempo
 de compilação e não tem valor padrão: ela é gerada por máquina pelo
-`bootstrap_env.sh`, então um `flutter run` sem `--dart-define` produz um app que
-nunca recebe alerta. O script lê o `.env`, copia a CA do broker para os assets e
-preenche os quatro `--dart-define`.
+`bootstrap_env.sh`. O script lê o `.env`, copia a CA do broker para os assets e
+passa os quatro `--dart-define` por um arquivo temporário (`--dart-define-from-file`,
+apagado ao sair), para a senha não trafegar na linha de comando do `flutter`. Um
+`flutter build apk` sem essas variáveis **falha** — a guarda vive em
+`apps/acs/android/app/build.gradle.kts` — em vez de compilar em silêncio um APK
+que nunca recebe alerta.
 
 Para escolher o dispositivo, ou gerar o APK:
 

@@ -14,16 +14,19 @@
 #     default. O broker cria o usuário acs-area-12 com MQTT_ACS_PASSWORD, um
 #     segredo aleatório POR MÁQUINA gerado por scripts/dev/bootstrap_env.sh:
 #     nenhum valor embutido no código poderia acertá-lo. Sem este wrapper,
-#     `flutter run` produz um app que nunca recebe alerta nenhum.
+#     `flutter run` produz um app que nunca recebe alerta nenhum — e desde
+#     que apps/acs/android/app/build.gradle.kts ganhou a guarda, um
+#     `flutter build apk` puro nem chega a compilar.
 #   · A CA do broker é asset do APK (apps/acs/assets/certs/), regerada pelo
 #     mosquitto-init e não versionada. Sem ela o build falha antes do TLS —
 #     apps/acs/pubspec.yaml declara o diretório — e não haveria em quem confiar.
 #
-# A senha nunca é impressa. Ela viaja na linha de comando do flutter e fica
-# visível em `ps` para outros usuários da MESMA máquina: aceitável em
-# desenvolvimento, e é o que scripts/qa/e2e.sh já faz. Para endurecer, o
-# caminho é --dart-define-from-file, que exige um arquivo temporário com trap
-# de limpeza.
+# A senha nunca é impressa e não trafega na linha de comando do flutter: vai
+# num arquivo temporário lido por --dart-define-from-file, criado com 0600
+# (mktemp) fora da árvore do repositório e apagado pelo trap abaixo — inclusive
+# se o script for interrompido. scripts/qa/e2e.sh ainda passa a senha por
+# --dart-define porque aquele caminho roda `flutter test`/`dart run`, não
+# `flutter build`, e não passa pela guarda do Gradle.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -43,7 +46,7 @@ while [[ $# -gt 0 ]]; do
     --mqtt-host) mqtt_host="${2:?--mqtt-host exige um valor}"; shift 2 ;;
     --build)     action='build'; shift ;;
     --skip-ca)   skip_ca=1; shift ;;
-    -h|--help)   sed -n '3,25p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help)   sed -n '3,26p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     --)          shift; flutter_args+=("$@"); break ;;
     *)           flutter_args+=("$1"); shift ;;
   esac
@@ -86,18 +89,36 @@ if [[ "$skip_ca" -eq 0 ]]; then
   fi
 fi
 
-defines=(
-  "--dart-define=SINALACS_HOST=$host"
-  "--dart-define=SINALACS_MQTT_HOST=$mqtt_host"
-  "--dart-define=SINALACS_MQTT_USER=$mqtt_user"
-  "--dart-define=SINALACS_MQTT_PASSWORD=$mqtt_password"
-)
+# json_escape: escapa \ e " para o valor caber dentro de uma string JSON.
+# Os valores hoje são hex (senha, gerada por bootstrap_env.sh) e host/URL sem
+# aspas — não deveria haver o que escapar na prática, mas a função existe para
+# não produzir um JSON inválido silenciosamente se isso mudar.
+json_escape() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
+
+# --dart-define-from-file em vez de --dart-define: a senha não pode aparecer
+# no argv do flutter, visível em `ps` para outros usuários da mesma máquina.
+# mktemp já cria com 0600 e fora da árvore do repositório. SEM `exec` nas
+# chamadas de flutter abaixo: `exec` substitui o processo do shell e o trap
+# nunca rodaria, deixando o arquivo com a senha esquecido em /tmp — trocaria
+# uma exposição temporária por uma persistente, o oposto do que este passo
+# quer.
+defines_file="$(mktemp)"
+trap 'rm -f "$defines_file"' EXIT INT TERM
+cat > "$defines_file" <<JSON
+{
+  "SINALACS_HOST": "$(json_escape "$host")",
+  "SINALACS_MQTT_HOST": "$(json_escape "$mqtt_host")",
+  "SINALACS_MQTT_USER": "$(json_escape "$mqtt_user")",
+  "SINALACS_MQTT_PASSWORD": "$(json_escape "$mqtt_password")"
+}
+JSON
 
 echo "ACS → $host   broker → $mqtt_host:8883 (usuário $mqtt_user)"
 echo 'senha do broker .... lida do .env, não exibida'
 
 cd "$app_dir"
 if [[ "$action" == 'build' ]]; then
-  exec flutter build apk --debug "${defines[@]}" "${flutter_args[@]}"
+  flutter build apk --debug --dart-define-from-file="$defines_file" "${flutter_args[@]}"
+else
+  flutter run --dart-define-from-file="$defines_file" "${flutter_args[@]}"
 fi
-exec flutter run "${defines[@]}" "${flutter_args[@]}"

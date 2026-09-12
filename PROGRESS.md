@@ -277,6 +277,32 @@ nunca chegava a ele, que continuava dizendo "em linha" para sempre enquanto o
 subiu para a interface como campo mutável para o shell poder assinar mudanças
 de estado a qualquer momento, não só no retorno do `start()`.
 
+#### `flutter build apk` puro ainda entregava um APK que nunca conectava
+
+Os dois defeitos acima foram fechados, mas sobrava uma lacuna: mesmo sem
+`SINALACS_MQTT_PASSWORD`, `flutter build apk` compilava normalmente. O defeito
+só se denunciava em tempo de execução, pelo banner "compilado sem a senha" —
+tarde demais para quem já distribuiu o APK.
+
+[apps/acs/android/app/build.gradle.kts](apps/acs/android/app/build.gradle.kts)
+ganhou uma guarda em `doFirst` das tarefas `compileFlutterBuild*`: decodifica a
+propriedade `dart-defines` (o Flutter Gradle Plugin já lê essa mesma
+propriedade) e falha, com o comando certo, se `SINALACS_MQTT_PASSWORD` não
+estiver lá. Precisou ser `doFirst` de tarefa, e não bloco de configuração —
+senão dispararia em todo `gradlew`, inclusive o sync do Android Studio, que não
+passa define nenhum. Escotilha explícita para quem quer de propósito um APK
+sem senha (por exemplo, para reproduzir o banner):
+`-Psinalacs.allowMissingMqttPassword=true`, no molde constrangedor-de-digitar
+de `allowUnencryptedForTesting`.
+
+Aproveitado para tirar a senha do `argv`: `run_acs.sh` passou de `--dart-define`
+para `--dart-define-from-file`, com um arquivo temporário (`mktemp`, 0600) que
+um `trap` apaga ao sair. A troca exigiu remover o `exec` das duas chamadas ao
+`flutter` — `exec` substitui o processo do shell, e o `trap` nunca rodaria,
+deixando o arquivo com a senha esquecido em `/tmp` depois de cada execução.
+`scripts/qa/e2e.sh` continua passando a senha por `argv`: aquele caminho roda
+`flutter test`/`dart run`, não `flutter build`, e não passa pela guarda.
+
 ### M2.5 - Testes de Caos
 
 Foi adicionada a simulação de degradação de rede em [apps/acs/lib/core/services/network_chaos_simulator.dart](apps/acs/lib/core/services/network_chaos_simulator.dart):
