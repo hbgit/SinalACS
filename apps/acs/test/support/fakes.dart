@@ -102,10 +102,16 @@ class FakeAcsBackend implements AcsBackend {
 /// Expõe a [AlertQueue] para que o teste empurre alertas como se tivessem
 /// chegado pelo broker, sem precisar de rede nem de emulador.
 class FakeAlertFeed implements AlertFeed {
-  FakeAlertFeed(this.queue, {this.failOnStart = false});
+  FakeAlertFeed(this.queue, {this.failOnStart = false, this.failure});
 
   final AlertQueue queue;
   final bool failOnStart;
+
+  /// Falha já classificada, para exercitar cada banner do painel.
+  ///
+  /// `failOnStart` continua lançando um erro genérico de propósito: é o ramo de
+  /// defesa do shell, o que nenhum `AlertFeedFailure` cobre.
+  final AlertFeedFailure? failure;
 
   bool started = false;
   bool stopped = false;
@@ -116,6 +122,8 @@ class FakeAlertFeed implements AlertFeed {
 
   @override
   Future<void> start({required String microAreaId, required String acsId}) async {
+    final classified = failure;
+    if (classified != null) throw classified;
     if (failOnStart) throw StateError('broker indisponível');
     started = true;
     startedTopicMicroArea = microAreaId;
@@ -129,6 +137,32 @@ class FakeAlertFeed implements AlertFeed {
 
   /// Simula a chegada de um alerta pelo tópico assinado.
   void deliver(PrioritizedAlert alert) => queue.upsert(alert);
+}
+
+/// Armazenamento que recusa gravar, para acender `persistenceFailed`.
+///
+/// Separar `load` de `save` importa: um banco que abre e depois falha ao gravar
+/// é o caso em que o sinalizador precisa acender **depois** do `initState` —
+/// exatamente o que um campo congelado ali não enxergava.
+class FailingVisitStore implements VisitStore {
+  FailingVisitStore({this.failOnLoad = true, this.failOnSave = true});
+
+  final bool failOnLoad;
+  final bool failOnSave;
+
+  List<OfflineVisitRecord> _visits = <OfflineVisitRecord>[];
+
+  @override
+  Future<List<OfflineVisitRecord>> load() async {
+    if (failOnLoad) throw StateError('sem banco');
+    return List.of(_visits);
+  }
+
+  @override
+  Future<void> save(List<OfflineVisitRecord> visits) async {
+    if (failOnSave) throw StateError('sem banco');
+    _visits = List.of(visits);
+  }
 }
 
 /// Sincronizador que devolve o resultado programado pelo teste.

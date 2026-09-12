@@ -19,6 +19,42 @@ String alertTopicFor(String microAreaId) =>
 /// Tópico onde o ACS confirma o recebimento de um alerta.
 String ackTopicFor(String alertId) => 'sinalacs/v1/alerts/$alertId/acks';
 
+/// O broker respondeu, e recusou.
+///
+/// Distinguir isso de "não deu para chegar ao broker" é o que separa uma senha
+/// errada de uma central fora do ar — que antes chegavam à tela como a mesma
+/// frase.
+class MqttConnectionRefused implements Exception {
+  const MqttConnectionRefused(this.message);
+
+  /// Já em português e pronta para a tela. **Nunca** contém credencial.
+  final String message;
+
+  @override
+  String toString() => message;
+}
+
+/// Traduz o código de recusa do CONNACK.
+///
+/// O `mqtt_client` grava o motivo em `connectionStatus.returnCode` antes de
+/// derrubar a conexão; o código antigo lançava um `StateError` genérico e
+/// jogava fora a única informação que separava os casos. Devolve `null` quando
+/// não houve recusa — aí a falha foi de transporte, não de autorização.
+///
+/// Nunca cita usuário nem senha: a mensagem vai para a tela do ACS.
+String? mqttRefusalReason(MqttConnectReturnCode? code) => switch (code) {
+      MqttConnectReturnCode.badUsernameOrPassword ||
+      MqttConnectReturnCode.notAuthorized =>
+        'A central recusou as credenciais deste aplicativo.',
+      MqttConnectReturnCode.identifierRejected =>
+        'A central recusou o identificador deste aplicativo.',
+      MqttConnectReturnCode.brokerUnavailable =>
+        'A central de alertas está indisponível.',
+      MqttConnectReturnCode.unacceptedProtocolVersion =>
+        'A central não aceita a versão de protocolo deste aplicativo.',
+      _ => null,
+    };
+
 class SecureMqttConfig {
   const SecureMqttConfig({
     required this.brokerHost,
@@ -236,14 +272,20 @@ class MqttSecureClient {
 
     try {
       await client.connect(config.username, config.password);
-    } catch (_) {
+    } catch (error) {
+      // Lido ANTES do disconnect, que zera o connectionStatus.
+      final refusal = mqttRefusalReason(client.connectionStatus?.returnCode);
       disconnect();
+      if (refusal != null) throw MqttConnectionRefused(refusal);
       rethrow;
     }
 
     if (client.connectionStatus?.state != MqttConnectionState.connected) {
+      final refusal = mqttRefusalReason(client.connectionStatus?.returnCode);
       disconnect();
-      throw StateError('Não foi possível conectar ao broker MQTT.');
+      throw MqttConnectionRefused(
+        refusal ?? 'Não foi possível conectar ao broker MQTT.',
+      );
     }
 
     client.subscribe(config.topic, MqttQos.atLeastOnce);

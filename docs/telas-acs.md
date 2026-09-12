@@ -22,7 +22,7 @@ Exibe a microárea, quantidade de pacientes e status do cache. A ação de atual
 
 ![Fila ordenada por risco clínico](screenshots/acs/02-dashboard.png)
 
-A fila apresenta os riscos vermelho, amarelo e verde com borda e ação contextual. A ordem mantém a prioridade clínica e a cor é reservada para a gravidade.
+A fila apresenta os riscos vermelho, amarelo e verde com borda e ação contextual. A ordem mantém a prioridade clínica e a cor é reservada para a gravidade. Por isso avisos de infraestrutura — sem conexão com a central, visitas não sendo salvas — usam o azul de destaque, e não vermelho ou amarelo: um card vermelho de falha técnica competiria com o alerta vermelho de um paciente na mesma lista.
 
 ## Mapa de pacientes
 

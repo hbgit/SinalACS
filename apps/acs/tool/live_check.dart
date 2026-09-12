@@ -13,6 +13,8 @@
 ///   dart run tool/live_check.dart
 ///   dart run tool/live_check.dart --host http://10.0.2.2:8080/ --broker 10.0.2.2
 ///   dart run tool/live_check.dart --mqtt-password "$MQTT_ACS_PASSWORD"
+///
+/// `--mqtt-password` é obrigatório: a senha do broker não tem default.
 library;
 
 import 'dart:async';
@@ -34,6 +36,18 @@ Future<void> main(List<String> args) async {
   final host = _arg(args, 'host', 'http://localhost:8080/');
   final brokerHost = _arg(args, 'broker', 'localhost');
   final caPath = _arg(args, 'ca', '../../infra/docker/mosquitto/runtime/certs/ca.crt');
+
+  // A senha do broker não tem default no BackendConfig: é um segredo por
+  // máquina. Sem esta guarda, quem rodasse à mão ganharia um timeout mudo em
+  // vez de saber o que faltou.
+  final mqttPassword = _arg(args, 'mqtt-password', BackendConfig.mqttPassword);
+  if (mqttPassword.isEmpty) {
+    stderr.writeln('erro: a senha do broker não foi informada.');
+    stderr.writeln(r'Use: dart run tool/live_check.dart --mqtt-password "$MQTT_ACS_PASSWORD"');
+    stderr.writeln('O valor vem do .env; scripts/qa/e2e.sh já faz isso por você.');
+    exitCode = 2;
+    return;
+  }
 
   final backend = BackendClient(host: host);
   // O paciente usa o cliente gerado diretamente: aqui ele só encena o disparo
@@ -65,12 +79,11 @@ Future<void> main(List<String> args) async {
         port: 8883,
         clientId: 'sinalacs-acs-livecheck-${session.userId}',
         topic: alertTopicFor(microAreaId),
-        // Default vem do BackendConfig (não de literais soltos aqui), mas a
-        // senha do broker local é gerada por scripts/dev/bootstrap_env.sh e é
-        // diferente a cada máquina — por isso o --mqtt-password, que
-        // scripts/qa/e2e.sh preenche a partir do .env.
+        // A senha do broker local é gerada por scripts/dev/bootstrap_env.sh e
+        // é diferente a cada máquina — por isso o --mqtt-password obrigatório,
+        // que scripts/qa/e2e.sh preenche a partir do .env.
         username: _arg(args, 'mqtt-user', BackendConfig.mqttUsername),
-        password: _arg(args, 'mqtt-password', BackendConfig.mqttPassword),
+        password: mqttPassword,
         caCertificate: File(caPath).readAsBytesSync(),
       ),
     );

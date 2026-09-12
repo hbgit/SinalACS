@@ -1,3 +1,5 @@
+import 'dart:developer' as developer;
+
 import 'package:flutter/material.dart';
 import 'package:sinalacs_acs/app/acs_theme.dart';
 import 'package:sinalacs_acs/core/network/backend_client.dart';
@@ -148,6 +150,13 @@ class _LoginScreenState extends State<LoginScreen> {
 
 enum AcsDestination { area, queue, map, visit, escalation, geofencing, notices }
 
+/// Aviso de infraestrutura: o que quebrou e a consequência prática.
+///
+/// O subtítulo era fixo no [DashboardScreen] e passou a mentir quando o banner
+/// exibido era o de armazenamento — "Novos alertas podem não estar chegando"
+/// sobre uma falha de disco.
+typedef InfraNotice = ({String title, String detail});
+
 class AcsHomeShell extends StatefulWidget {
   const AcsHomeShell({
     required this.microAreaId,
@@ -178,8 +187,7 @@ class _AcsHomeShellState extends State<AcsHomeShell> {
       (widget.feedBuilder ?? (queue) => MqttAlertFeed(queue: queue))(_queue);
 
   bool _brokerConnected = false;
-  String? _feedError;
-  String? _storageError;
+  InfraNotice? _feedError;
   PrioritizedAlert? _selected;
 
   @override
@@ -201,12 +209,30 @@ class _AcsHomeShellState extends State<AcsHomeShell> {
   /// *persistir* em texto plano.
   Future<void> _restoreVisits() async {
     await widget.visitQueue.restore();
-    if (!mounted) return;
-    setState(() => _storageError = widget.visitQueue.persistenceFailed
-        ? 'As visitas não estão sendo salvas neste aparelho. '
-            'Sincronize antes de fechar o aplicativo.'
-        : null);
+    // `setState` sem estado próprio: o que mudou está DENTRO da fila, e o aviso
+    // é lido de lá a cada build. Guardar a resposta num campo era o defeito —
+    // o sinalizador congelava aqui e toda falha posterior de `add()`/`sync()`
+    // ficava invisível.
+    if (mounted) setState(() {});
   }
+
+  /// Aviso de persistência, lido do estado corrente da fila.
+  ///
+  /// [OfflineVisitQueue] continua sendo um serviço puro (`import 'dart:math'`
+  /// apenas): transformá-la em `ChangeNotifier` traria `package:flutter` para
+  /// dentro dela, o que este repositório já recusou. Ler no `build` basta
+  /// **enquanto** toda escrita na fila partir da tela de Visita — voltar para a
+  /// Fila passa obrigatoriamente pelo `setState` da `NavigationBar`. Se um dia
+  /// existir sincronização automática em segundo plano, o próximo passo é um
+  /// `void Function(bool)? onPersistenceChanged` na fila, no molde de
+  /// `MqttAlertFeed.onConnectionChanged` — não um `ChangeNotifier`.
+  InfraNotice? get _storageNotice => widget.visitQueue.persistenceFailed
+      ? (
+          title: 'As visitas não estão sendo salvas neste aparelho.',
+          detail: 'O que está na fila só existe na memória. '
+              'Sincronize antes de fechar o aplicativo.',
+        )
+      : null;
 
   /// Assina o tópico da microárea da sessão.
   ///
@@ -220,11 +246,34 @@ class _AcsHomeShellState extends State<AcsHomeShell> {
         _brokerConnected = _feed.isConnected;
         _feedError = null;
       });
-    } catch (error) {
+    } on AlertFeedFailure catch (failure, stackTrace) {
+      developer.log(
+        'não foi possível assinar o tópico de alertas',
+        name: 'sinalacs.acs.alert_feed',
+        error: failure.cause ?? failure,
+        stackTrace: stackTrace,
+      );
       if (!mounted) return;
       setState(() {
         _brokerConnected = false;
-        _feedError = 'Sem conexão com a central de alertas.';
+        _feedError = (title: failure.title, detail: failure.detail);
+      });
+    } catch (error, stackTrace) {
+      // Defesa: hoje só um AlertFeed de teste chega aqui. Logar em vez de
+      // descartar — antes o erro era engolido e a tela dizia sempre o mesmo.
+      developer.log(
+        'falha não classificada ao assinar o tópico de alertas',
+        name: 'sinalacs.acs.alert_feed',
+        error: error,
+        stackTrace: stackTrace,
+      );
+      if (!mounted) return;
+      setState(() {
+        _brokerConnected = false;
+        _feedError = (
+          title: 'Sem conexão com a central de alertas.',
+          detail: 'Novos alertas podem não estar chegando.',
+        );
       });
     }
   }
@@ -257,7 +306,8 @@ class _AcsHomeShellState extends State<AcsHomeShell> {
       AcsDestination.area => const TerritorializationScreen(),
       AcsDestination.queue => DashboardScreen(
           queue: _queue,
-          feedError: _feedError ?? _storageError,
+          feedError: _feedError,
+          storageError: _storageNotice,
           onAcknowledge: _acknowledge,
           onEscalate: (alert) => setState(() { _selected = alert; destination = AcsDestination.escalation; }),
           onVisit: (alert) => setState(() { _selected = alert; destination = AcsDestination.visit; }),
@@ -296,13 +346,21 @@ class DashboardScreen extends StatelessWidget {
     required this.queue,
     super.key,
     this.feedError,
+    this.storageError,
     this.onAcknowledge,
     this.onEscalate,
     this.onVisit,
   });
 
   final AlertQueue queue;
-  final String? feedError;
+  final InfraNotice? feedError;
+
+  /// Armazenamento local recusando gravação.
+  ///
+  /// Coexiste com [feedError] em vez de disputar o mesmo espaço: em campo os
+  /// dois caem juntos, e um `??` entre eles escondia justamente o que ninguém
+  /// descobre sozinho — que as visitas do dia não estão sendo salvas.
+  final InfraNotice? storageError;
   final void Function(PrioritizedAlert alert)? onAcknowledge;
   final void Function(PrioritizedAlert alert)? onEscalate;
   final void Function(PrioritizedAlert alert)? onVisit;
@@ -316,17 +374,16 @@ class DashboardScreen extends StatelessWidget {
             const Text('Painel de Priorização', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
             const SizedBox(height: 4),
             const Text('Fila ordenada por risco clínico'),
-            if (feedError != null) Padding(
-              padding: const EdgeInsets.only(top: 12),
-              child: Card(
-                color: AcsColors.red.withValues(alpha: 0.15),
-                child: ListTile(
-                  key: const Key('feed_error'),
-                  leading: const Icon(Icons.cloud_off_outlined, color: AcsColors.red),
-                  title: Text(feedError!, style: const TextStyle(fontWeight: FontWeight.bold)),
-                  subtitle: const Text('Novos alertas podem não estar chegando.'),
-                ),
-              ),
+            // Alertas primeiro: é o aviso com risco de vida atrás.
+            if (feedError != null) _InfraBanner(
+              key: const Key('feed_error'),
+              icon: Icons.cloud_off_outlined,
+              notice: feedError!,
+            ),
+            if (storageError != null) _InfraBanner(
+              key: const Key('storage_error'),
+              icon: Icons.sd_card_alert_outlined,
+              notice: storageError!,
             ),
             const SizedBox(height: 16),
             if (alerts.isEmpty) const Card(
@@ -350,6 +407,34 @@ class DashboardScreen extends StatelessWidget {
             ),
           ]);
         },
+      );
+}
+
+/// Aviso de infraestrutura no painel.
+///
+/// Azul, e não vermelho: `docs/telas-acs.md` reserva a cor para a gravidade
+/// clínica, e um card vermelho de "sem conexão" competia visualmente com o
+/// alerta vermelho de um paciente logo abaixo, na mesma lista.
+///
+/// A `Key` vem de fora e é o único identificador do aviso — pô-la também no
+/// `ListTile` faria `find.byKey` achar dois widgets.
+class _InfraBanner extends StatelessWidget {
+  const _InfraBanner({required this.icon, required this.notice, super.key});
+
+  final IconData icon;
+  final InfraNotice notice;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.only(top: 12),
+        child: Card(
+          color: AcsColors.accent.withValues(alpha: 0.15),
+          child: ListTile(
+            leading: Icon(icon, color: AcsColors.accent),
+            title: Text(notice.title, style: const TextStyle(fontWeight: FontWeight.bold)),
+            subtitle: Text(notice.detail),
+          ),
+        ),
       );
 }
 
@@ -496,7 +581,9 @@ class _VisitRegistrationScreenState extends State<VisitRegistrationScreen> {
       SyncOutcomeKind.conflict => '${result.processed} visita(s) em conflito. Continuam na fila para resolução.',
       SyncOutcomeKind.empty => 'Não há visitas pendentes.',
       SyncOutcomeKind.error => result.message ??
-          'Não foi possível sincronizar. As visitas continuam salvas no aparelho.',
+          (widget.queue.persistenceFailed
+              ? 'Não foi possível sincronizar. As visitas estão apenas na memória deste aparelho.'
+              : 'Não foi possível sincronizar. As visitas continuam salvas no aparelho.'),
     });
   }
 
@@ -512,7 +599,19 @@ class _VisitRegistrationScreenState extends State<VisitRegistrationScreen> {
         child: Text(
           key: Key('visit_needs_alert'),
           'Selecione um alerta na fila para registrar a visita.',
-          style: TextStyle(color: AcsColors.yellow),
+          style: TextStyle(color: AcsColors.accent),
+        ),
+      ),
+      // Aqui, e não só no painel: é nesta tela que a pessoa acabou de gravar.
+      // Obrigá-la a voltar para a Fila para descobrir que não salvou seria o
+      // mesmo defeito de outra forma.
+      if (queue.persistenceFailed) const Padding(
+        padding: EdgeInsets.only(top: 8),
+        child: Text(
+          key: Key('visit_storage_error'),
+          'As visitas não estão sendo salvas neste aparelho — elas só existem '
+          'na memória até sincronizar.',
+          style: TextStyle(color: AcsColors.accent, fontWeight: FontWeight.bold),
         ),
       ),
       const SizedBox(height: 16),
@@ -533,13 +632,18 @@ class _VisitRegistrationScreenState extends State<VisitRegistrationScreen> {
       const SizedBox(height: 20),
       FilledButton.icon(key: const Key('save_visit'), onPressed: semAlerta ? null : _save, icon: const Icon(Icons.save_outlined), label: const Text('Salvar e enfileirar sincronização')),
       const Divider(height: 32),
-      Text(key: const Key('pending_visits_count'), 'Pendentes de sincronização: ${queue.pendingCount}'),
+      Text(
+        key: const Key('pending_visits_count'),
+        'Pendentes de sincronização: ${queue.pendingCount}'
+        '${queue.persistenceFailed ? ' (em memória)' : ''}',
+      ),
       if (queue.conflictCount > 0) Padding(
         padding: const EdgeInsets.only(top: 4),
         child: Text(
           key: const Key('conflict_visits_count'),
           'Em conflito: ${queue.conflictCount}',
-          style: const TextStyle(color: AcsColors.yellow, fontWeight: FontWeight.bold),
+          // Conflito de sincronização é operacional, não gravidade clínica.
+          style: const TextStyle(color: AcsColors.accent, fontWeight: FontWeight.bold),
         ),
       ),
       const SizedBox(height: 12),

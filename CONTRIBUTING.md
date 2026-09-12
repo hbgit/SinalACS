@@ -115,8 +115,12 @@ flutter test
 Para executar um aplicativo em dispositivo ou emulador:
 
 ```bash
-flutter run
+./scripts/dev/run_acs.sh      # ACS: preenche os dart-defines a partir do .env
+cd apps/patient && flutter run
 ```
+
+O ACS precisa do script: a senha do broker é constante de compilação, sem valor
+padrão, e é gerada por máquina.
 
 ## Alterações no backend
 

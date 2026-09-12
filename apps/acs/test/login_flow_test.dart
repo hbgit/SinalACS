@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sinalacs_acs/app/app.dart';
 import 'package:sinalacs_acs/core/network/backend_client.dart';
+import 'package:sinalacs_acs/core/services/alert_feed.dart';
 import 'package:sinalacs_acs/core/services/alert_queue.dart';
 import 'package:sinalacs_acs/core/services/backend_visit_synchronizer.dart';
 import 'package:sinalacs_acs/core/services/offline_visit_queue.dart';
@@ -429,6 +430,124 @@ void main() {
 
       expect(find.text('Sem conexão com o servidor.'), findsOneWidget);
       expect(visitQueue.pendingCount, 1);
+    });
+  });
+
+  group('avisos de infraestrutura', () {
+    /// Leva até o painel, com o feed e a fila que o teste quiser.
+    Future<void> abrirPainel(
+      WidgetTester tester, {
+      required OfflineVisitQueue visitQueue,
+      AlertFeed Function(AlertQueue queue)? feedBuilder,
+    }) async {
+      await tester.pumpWidget(SinalAcsApp(
+        backend: FakeAcsBackend(),
+        feedBuilder: feedBuilder ?? (queue) => FakeAlertFeed(queue),
+        visitQueue: visitQueue,
+      ));
+      await tester.tap(find.byKey(const Key('login_button')));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('os dois avisos coexistem quando broker e armazenamento caem juntos', (tester) async {
+      // Em campo os dois caem juntos, e o `??` de antes mostrava só o do
+      // broker: o ACS nunca descobria que as visitas do dia não eram salvas.
+      await abrirPainel(
+        tester,
+        visitQueue: OfflineVisitQueue(store: FailingVisitStore()),
+        feedBuilder: (queue) => FakeAlertFeed(queue, failOnStart: true),
+      );
+
+      expect(find.byKey(const Key('feed_error')), findsOneWidget);
+      expect(find.byKey(const Key('storage_error')), findsOneWidget);
+      // Cada um com o seu subtítulo: o texto sobre alertas era fixo e passava a
+      // mentir quando o aviso exibido era o de disco.
+      expect(find.text('Novos alertas podem não estar chegando.'), findsOneWidget);
+      expect(
+        find.textContaining('só existe na memória'),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('o aviso de armazenamento aparece sozinho, com o feed saudável', (tester) async {
+      await abrirPainel(
+        tester,
+        visitQueue: OfflineVisitQueue(store: FailingVisitStore()),
+      );
+
+      expect(find.byKey(const Key('feed_error')), findsNothing);
+      expect(find.byKey(const Key('storage_error')), findsOneWidget);
+    });
+
+    testWidgets('o aviso de armazenamento acende depois de uma gravação que falha', (tester) async {
+      // O banco abre e só falha ao gravar. Um campo calculado no initState
+      // nunca veria isto — era o segundo defeito.
+      final visitQueue = OfflineVisitQueue(
+        store: FailingVisitStore(failOnLoad: false, failOnSave: true),
+      );
+      late FakeAlertFeed feed;
+
+      await abrirPainel(
+        tester,
+        visitQueue: visitQueue,
+        feedBuilder: (queue) => feed = FakeAlertFeed(queue),
+      );
+      expect(find.byKey(const Key('storage_error')), findsNothing);
+
+      feed.deliver(testAlert(alertId: 'alerta-1', riskLevel: 'yellow'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Iniciar rota de visita'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('save_visit')));
+      await tester.pumpAndSettle();
+
+      // Na própria tela de visita, onde a pessoa acabou de gravar.
+      expect(find.byKey(const Key('visit_storage_error')), findsOneWidget);
+      expect(find.textContaining('(em memória)'), findsOneWidget);
+
+      await tester.tap(find.text('Fila'));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('storage_error')), findsOneWidget);
+    });
+
+    testWidgets('sem senha compilada o painel diz que falta a senha, não que falta conexão', (tester) async {
+      await abrirPainel(
+        tester,
+        visitQueue: OfflineVisitQueue(),
+        feedBuilder: (queue) => FakeAlertFeed(
+          queue,
+          failure: const AlertFeedFailure(
+            AlertFeedFailureKind.missingPassword,
+            title: 'Este aplicativo foi compilado sem a senha do broker de alertas.',
+            detail: 'Nenhum alerta será recebido até o aplicativo ser recompilado.',
+          ),
+        ),
+      );
+
+      expect(
+        find.text('Este aplicativo foi compilado sem a senha do broker de alertas.'),
+        findsOneWidget,
+      );
+      expect(find.text('Sem conexão com a central de alertas.'), findsNothing);
+    });
+
+    testWidgets('credencial recusada não vira "sem conexão"', (tester) async {
+      await abrirPainel(
+        tester,
+        visitQueue: OfflineVisitQueue(),
+        feedBuilder: (queue) => FakeAlertFeed(
+          queue,
+          failure: const AlertFeedFailure(
+            AlertFeedFailureKind.refused,
+            title: 'A central recusou as credenciais deste aplicativo.',
+            detail: 'Novos alertas não estão chegando.',
+          ),
+        ),
+      );
+
+      expect(find.text('A central recusou as credenciais deste aplicativo.'), findsOneWidget);
+      expect(find.text('Sem conexão com a central de alertas.'), findsNothing);
     });
   });
 

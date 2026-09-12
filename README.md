@@ -76,31 +76,42 @@ Para encerrar a stack:
 docker compose down
 ```
 
-O Compose atual usa credenciais de desenvolvimento declaradas no
-[docker-compose.yml](docker-compose.yml). Não reutilize essas credenciais nem
-habilite o dashboard inseguro do Traefik em ambientes públicos.
+O Compose lê todas as credenciais do `.env` gerado por
+[scripts/dev/bootstrap_env.sh](scripts/dev/bootstrap_env.sh) — cada máquina tem
+as suas. Não reutilize credenciais de desenvolvimento nem habilite o dashboard
+inseguro do Traefik em ambientes públicos.
 
 ### Aplicativo ACS
 
 ```bash
-cd apps/acs
-flutter pub get
-flutter run
+cd apps/acs && flutter pub get && cd -
+./scripts/dev/run_acs.sh
 ```
 
-Para selecionar explicitamente um emulador Android disponível:
+Use o script, não `flutter run` direto. A senha do broker é resolvida em tempo
+de compilação e não tem valor padrão: ela é gerada por máquina pelo
+`bootstrap_env.sh`, então um `flutter run` sem `--dart-define` produz um app que
+nunca recebe alerta. O script lê o `.env`, copia a CA do broker para os assets e
+preenche os quatro `--dart-define`.
+
+Para escolher o dispositivo, ou gerar o APK:
 
 ```bash
 flutter devices
-flutter run -d <device-id>
+./scripts/dev/run_acs.sh -d <device-id>
+./scripts/dev/run_acs.sh --build
 ```
 
 ### Aplicativo do paciente
+
+O paciente não usa MQTT: o default de `SINALACS_HOST` já serve no emulador.
 
 ```bash
 cd apps/patient
 flutter pub get
 flutter run
+# em aparelho físico, apontando para a máquina da stack:
+flutter run --dart-define=SINALACS_HOST=http://<ip-da-máquina>:8080/
 ```
 
 ## Build
@@ -110,10 +121,8 @@ flutter run
 O app ACS foi validado com `compileSdk` e `targetSdk` 36. Para gerar o APK:
 
 ```bash
-cd apps/acs
-flutter clean
-flutter pub get
-flutter build apk --debug
+cd apps/acs && flutter clean && flutter pub get && cd -
+./scripts/dev/run_acs.sh --build
 ```
 
 O artefato é criado em:

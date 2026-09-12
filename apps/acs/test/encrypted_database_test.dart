@@ -313,7 +313,7 @@ CREATE TABLE IF NOT EXISTS offline_visits (
     test('armazenamento indisponível não derruba o registro em campo', () async {
       // Travar o registro de visita seria pior do que não persistir. A fila
       // segue em memória e acende o sinalizador para a UI avisar.
-      final queue = OfflineVisitQueue(store: _BrokenVisitStore());
+      final queue = OfflineVisitQueue(store: FailingVisitStore());
 
       await queue.restore();
       await queue.add(OfflineVisitRecord(
@@ -344,10 +344,4 @@ class _ConflictSynchronizer implements VisitSynchronizer {
       ];
 }
 
-class _BrokenVisitStore implements VisitStore {
-  @override
-  Future<List<OfflineVisitRecord>> load() async => throw StateError('sem banco');
 
-  @override
-  Future<void> save(List<OfflineVisitRecord> visits) async => throw StateError('sem banco');
-}

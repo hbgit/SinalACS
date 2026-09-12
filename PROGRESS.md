@@ -211,6 +211,42 @@ devolvia `synced` quando o servidor recusava uma visita (o status `error` caía 
 ramo `default`), o que a prendia na fila em silêncio; e `visits.sync` reportava
 "este alerta não pertence à sua microárea" para erro de sessão.
 
+#### O app passou a dizer o que está errado
+
+Dois defeitos vizinhos, com a mesma forma: o app sabia e não contava.
+
+O painel tinha **um slot de banner para dois estados** (`_feedError ?? _storageError`).
+Em campo o broker e o armazenamento caem juntos, e o `??` sempre mostrava o do
+broker: o ACS via "sem conexão com a central" e nunca descobria que as visitas
+do dia não estavam sendo salvas. O subtítulo era fixo, então quando o banner
+exibido era o de disco ele ainda afirmava algo sobre alertas. E o aviso de
+persistência era calculado uma vez, no `initState` — falhas posteriores de
+gravação ficavam invisíveis. Agora são dois banners independentes, cada um com
+seu texto, e o de persistência é lido do estado corrente da fila a cada build.
+A tela de visita ganhou o mesmo aviso inline: é onde a pessoa acabou de gravar.
+
+Os avisos de infraestrutura passaram a usar o azul de destaque. `docs/telas-acs.md`
+reserva a cor para a gravidade clínica, e um card vermelho de falha técnica
+competia com o alerta vermelho de um paciente na mesma lista.
+
+O segundo defeito: **`SINALACS_MQTT_PASSWORD` tinha um default que nunca
+funcionou**. O broker cria `acs-area-12` com `MQTT_ACS_PASSWORD`, segredo
+aleatório por máquina, então nenhum valor embutido no código poderia acertá-lo —
+e toda a documentação mandava rodar `flutter run` sem `--dart-define` nenhum. O
+resultado era um app que nunca recebia alerta e dizia apenas "sem conexão".
+
+- O default saiu. Vazio virou estado detectável, e a tela diz que o aplicativo
+  foi compilado sem a senha.
+- `scripts/dev/run_acs.sh` lê o `.env`, roda o `sync_dev_ca.sh` (a CA é asset
+  gitignored que o build exige) e preenche os quatro dart-defines.
+- As falhas do feed viraram `AlertFeedFailure` classificada. Senha ausente, CA
+  ausente, credencial recusada e broker inalcançável eram a mesma frase; o
+  `mqtt_client` já trazia o motivo no CONNACK e o código o descartava, junto com
+  o próprio erro, que agora vai para `dart:developer`.
+
+Verificado no emulador, os quatro caminhos: compilado sem senha, compilado pelo
+script, senha errada e broker parado — cada um com sua mensagem.
+
 ### M2.5 - Testes de Caos
 
 Foi adicionada a simulação de degradação de rede em [apps/acs/lib/core/services/network_chaos_simulator.dart](apps/acs/lib/core/services/network_chaos_simulator.dart):

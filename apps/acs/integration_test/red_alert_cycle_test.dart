@@ -8,9 +8,15 @@
 ///   · `./scripts/dev/sync_dev_ca.sh` — a CA do broker é asset do app e é
 ///     regerada, não versionada.
 ///
+/// O caminho pronto é `./scripts/qa/e2e.sh --emulator`, que sobe a stack e
+/// preenche os dart-defines a partir do `.env`. À mão:
+///
 ///   flutter test integration_test \
 ///     --dart-define=SINALACS_HOST=http://10.0.2.2:8080/ \
-///     --dart-define=SINALACS_MQTT_HOST=10.0.2.2
+///     --dart-define=SINALACS_MQTT_HOST=10.0.2.2 \
+///     --dart-define=SINALACS_MQTT_PASSWORD="$MQTT_ACS_PASSWORD"
+///
+/// A senha é obrigatória: ela não tem default no `BackendConfig`.
 ///
 /// PRIVACIDADE: só os UUIDs sintéticos do seed.
 library;
@@ -22,6 +28,7 @@ import 'package:integration_test/integration_test.dart';
 import 'package:sinalacs_acs/core/database/encrypted_database.dart';
 import 'package:sinalacs_acs/core/database/sqlcipher_visit_store.dart';
 import 'package:sinalacs_acs/core/network/backend_client.dart';
+import 'package:sinalacs_acs/core/network/backend_config.dart';
 import 'package:sinalacs_acs/core/security/database_key_store.dart';
 import 'package:sinalacs_acs/core/services/alert_feed.dart';
 import 'package:sinalacs_acs/core/services/alert_queue.dart';
@@ -35,6 +42,18 @@ const otherMicroAreaId = '00000000-0000-4000-8000-000000000099';
 
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
+
+  setUpAll(() {
+    // Sem a senha, a assinatura do tópico falha depois do timeout do broker e
+    // o motivo real — o comando de compilação — não aparece em lugar nenhum.
+    if (BackendConfig.mqttPasswordMissing) {
+      fail(
+        'Compile com --dart-define=SINALACS_MQTT_PASSWORD (o valor está em '
+        'MQTT_ACS_PASSWORD no .env). O caminho pronto é '
+        './scripts/qa/e2e.sh --emulator.',
+      );
+    }
+  });
 
   late BackendClient backend;
   late api.Client patientClient;

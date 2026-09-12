@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mqtt_client/mqtt_client.dart';
 import 'package:sinalacs_acs/core/services/mqtt_secure_client.dart';
 
 void main() {
@@ -83,5 +84,33 @@ void main() {
     expect(alert?.alertId, 'alert-123');
     expect(alert?.microAreaId, 'area-12');
     expect(ReceivedMqttAlert.tryParse('{"version":2}'), isNull);
+  });
+
+  group('recusa do broker', () {
+    test('traduz cada código de CONNACK sem citar credencial', () {
+      expect(
+        mqttRefusalReason(MqttConnectReturnCode.badUsernameOrPassword),
+        'A central recusou as credenciais deste aplicativo.',
+      );
+      expect(
+        mqttRefusalReason(MqttConnectReturnCode.notAuthorized),
+        'A central recusou as credenciais deste aplicativo.',
+      );
+      expect(
+        mqttRefusalReason(MqttConnectReturnCode.identifierRejected),
+        'A central recusou o identificador deste aplicativo.',
+      );
+      expect(
+        mqttRefusalReason(MqttConnectReturnCode.brokerUnavailable),
+        'A central de alertas está indisponível.',
+      );
+    });
+
+    test('devolve null quando não houve recusa', () {
+      // Aí a falha foi de transporte, não de autorização — e a mensagem da tela
+      // precisa ser outra: "sem conexão" em vez de "credenciais recusadas".
+      expect(mqttRefusalReason(null), isNull);
+      expect(mqttRefusalReason(MqttConnectReturnCode.connectionAccepted), isNull);
+    });
   });
 }
