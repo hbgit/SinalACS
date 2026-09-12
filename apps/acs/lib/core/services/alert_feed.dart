@@ -14,6 +14,15 @@ abstract class AlertFeed {
   void stop();
 
   bool get isConnected;
+
+  /// Notificado a cada mudança de estado da conexão, inclusive depois de
+  /// [start] já ter retornado — é o que mantém o chip do cabeçalho honesto
+  /// quando a conexão cai e volta sozinha (`autoReconnect`).
+  ///
+  /// Campo mutável, não parâmetro de construtor: quem monta o [AlertFeed]
+  /// (os `feedBuilder` de teste) não precisa mudar para o dono do widget
+  /// poder assinar depois.
+  abstract void Function(bool connected)? onConnectionChanged;
 }
 
 /// Por que o ACS não está recebendo alertas.
@@ -45,12 +54,20 @@ class AlertFeedFailure implements Exception {
     required this.title,
     required this.detail,
     this.cause,
+    this.transient = false,
   });
 
   final AlertFeedFailureKind kind;
   final String title;
   final String detail;
   final Object? cause;
+
+  /// Se vale a pena tentar de novo sozinho, sem intervenção humana.
+  ///
+  /// `missingPassword`/`missingCaAsset` exigem recompilar; `refused` herda o
+  /// veredito do CONNACK; `unreachable` é sempre transitória — falta de rede
+  /// é o caso comum de um ACS em campo.
+  final bool transient;
 
   @override
   String toString() => '${kind.name}: $title';
@@ -63,7 +80,9 @@ class MqttAlertFeed implements AlertFeed {
   });
 
   final AlertQueue queue;
-  final void Function(bool connected)? onConnectionChanged;
+
+  @override
+  void Function(bool connected)? onConnectionChanged;
 
   MqttSecureClient? _client;
   bool _connected = false;
@@ -76,6 +95,11 @@ class MqttAlertFeed implements AlertFeed {
     required String microAreaId,
     required String acsId,
   }) async {
+    // Desliga qualquer conexão anterior antes de abrir outra. Sem isto, uma
+    // segunda chamada a start() (a nova retentativa) sobrescreveria _client e
+    // deixaria o cliente antigo órfão, fora do alcance de stop()/dispose().
+    stop();
+
     // Antes de abrir qualquer socket: este binário tem senha? Sem isto, um app
     // compilado sem `--dart-define` gastava o timeout do broker para depois
     // dizer "sem conexão", escondendo que o problema estava na compilação.
@@ -129,6 +153,7 @@ class MqttAlertFeed implements AlertFeed {
         title: error.message,
         detail: 'Novos alertas não estão chegando.',
         cause: error,
+        transient: error.transient,
       );
     } catch (error) {
       throw AlertFeedFailure(
@@ -136,6 +161,7 @@ class MqttAlertFeed implements AlertFeed {
         title: 'Sem conexão com a central de alertas.',
         detail: 'Novos alertas podem não estar chegando.',
         cause: error,
+        transient: true,
       );
     }
 

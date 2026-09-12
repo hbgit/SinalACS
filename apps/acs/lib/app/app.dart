@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:developer' as developer;
 
 import 'package:flutter/material.dart';
@@ -7,6 +8,7 @@ import 'package:sinalacs_acs/core/network/backend_scope.dart';
 import 'package:sinalacs_acs/core/services/alert_feed.dart';
 import 'package:sinalacs_acs/core/services/alert_queue.dart';
 import 'package:sinalacs_acs/core/services/offline_visit_queue.dart';
+import 'package:sinalacs_acs/core/services/reconnect_schedule.dart';
 import 'package:sinalacs_acs/core/services/visit_queue_factory.dart';
 
 class SinalAcsApp extends StatefulWidget {
@@ -179,7 +181,7 @@ class AcsHomeShell extends StatefulWidget {
   State<AcsHomeShell> createState() => _AcsHomeShellState();
 }
 
-class _AcsHomeShellState extends State<AcsHomeShell> {
+class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver {
   AcsDestination destination = AcsDestination.queue;
 
   late final AlertQueue _queue = AlertQueue(microAreaId: widget.microAreaId);
@@ -188,11 +190,23 @@ class _AcsHomeShellState extends State<AcsHomeShell> {
 
   bool _brokerConnected = false;
   InfraNotice? _feedError;
+  bool _feedErrorIsTransient = false;
   PrioritizedAlert? _selected;
+
+  /// Só existe enquanto uma falha transitória está sendo retentada. `null`
+  /// quer dizer "nada agendado" — nem depois de um sucesso, nem depois de uma
+  /// falha permanente.
+  Timer? _reconnectTimer;
+  final ReconnectSchedule _reconnectDelay = ReconnectSchedule();
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    // Assinado antes de start(): uma queda depois de conectar chega aqui
+    // sozinha, via autoReconnect do mqtt_client — é o que mantém o chip do
+    // cabeçalho honesto sem o shell abrir um segundo laço de retentativa.
+    _feed.onConnectionChanged = _onBrokerConnectionChanged;
     _connectFeed();
     _restoreVisits();
   }
@@ -238,13 +252,24 @@ class _AcsHomeShellState extends State<AcsHomeShell> {
   ///
   /// Falhar aqui não derruba o painel, mas **precisa ficar visível**: um ACS que
   /// não sabe que parou de receber alertas é o pior modo de falha do produto.
+  ///
+  /// Antes rodava só uma vez, no `initState`: se falhasse, o app nunca mais
+  /// tentava, e reabrir era o único jeito de recuperar um alerta que o broker
+  /// já estava guardando com QoS 1. Falhas transitórias agora são retentadas
+  /// sozinhas por [_scheduleReconnect]; falhas permanentes (senha ausente, CA
+  /// ausente, credencial recusada) não são — insistir nelas não muda nada e só
+  /// gastaria bateria.
   Future<void> _connectFeed() async {
     try {
       await _feed.start(microAreaId: widget.microAreaId, acsId: widget.acsId);
+      _reconnectTimer?.cancel();
+      _reconnectTimer = null;
+      _reconnectDelay.reset();
       if (!mounted) return;
       setState(() {
         _brokerConnected = _feed.isConnected;
         _feedError = null;
+        _feedErrorIsTransient = false;
       });
     } on AlertFeedFailure catch (failure, stackTrace) {
       developer.log(
@@ -256,11 +281,20 @@ class _AcsHomeShellState extends State<AcsHomeShell> {
       if (!mounted) return;
       setState(() {
         _brokerConnected = false;
-        _feedError = (title: failure.title, detail: failure.detail);
+        _feedErrorIsTransient = failure.transient;
+        _feedError = (
+          title: failure.title,
+          detail: failure.transient
+              ? '${failure.detail} Tentando reconectar automaticamente.'
+              : failure.detail,
+        );
       });
+      if (failure.transient) _scheduleReconnect();
     } catch (error, stackTrace) {
       // Defesa: hoje só um AlertFeed de teste chega aqui. Logar em vez de
       // descartar — antes o erro era engolido e a tela dizia sempre o mesmo.
+      // Na dúvida sobre a natureza da falha, tratar como transitória: silêncio
+      // de alertas é o pior modo de falha do produto.
       developer.log(
         'falha não classificada ao assinar o tópico de alertas',
         name: 'sinalacs.acs.alert_feed',
@@ -270,11 +304,58 @@ class _AcsHomeShellState extends State<AcsHomeShell> {
       if (!mounted) return;
       setState(() {
         _brokerConnected = false;
+        _feedErrorIsTransient = true;
         _feedError = (
           title: 'Sem conexão com a central de alertas.',
-          detail: 'Novos alertas podem não estar chegando.',
+          detail: 'Novos alertas podem não estar chegando. '
+              'Tentando reconectar automaticamente.',
         );
       });
+      _scheduleReconnect();
+    }
+  }
+
+  /// Agenda a próxima tentativa, cancelando qualquer uma já pendente.
+  ///
+  /// O cancelamento prévio é o que impede "Tentar agora" durante a espera de
+  /// deixar dois timers vivos.
+  void _scheduleReconnect() {
+    _reconnectTimer?.cancel();
+    _reconnectTimer = Timer(_reconnectDelay.next(), () {
+      if (mounted) _connectFeed();
+    });
+  }
+
+  /// O botão "Tentar agora" do banner: pula a fila do backoff.
+  void _retryFeedNow() {
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
+    _reconnectDelay.reset();
+    _connectFeed();
+  }
+
+  /// Notificado pelo [AlertFeed] a cada mudança de conexão — inclusive depois
+  /// do `start()` já ter retornado. Sem isto, uma queda que acontecesse depois
+  /// de uma conexão bem-sucedida nunca chegaria ao cabeçalho, que continuaria
+  /// dizendo "em linha" indefinidamente enquanto o `autoReconnect` do
+  /// `mqtt_client` trabalhava por baixo em silêncio.
+  void _onBrokerConnectionChanged(bool connected) {
+    if (!mounted) return;
+    setState(() => _brokerConnected = connected);
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused) {
+      // Um Timer em segundo plano no Android não é confiável e só gastaria
+      // bateria; a tentativa volta ao primeiro plano.
+      _reconnectTimer?.cancel();
+      _reconnectTimer = null;
+    } else if (state == AppLifecycleState.resumed && _feedErrorIsTransient) {
+      // O gatilho que mais importa na prática: o sinal costuma voltar com a
+      // tela apagada, e o ACS tira o aparelho do bolso já esperando o alerta.
+      _reconnectDelay.reset();
+      _connectFeed();
     }
   }
 
@@ -294,6 +375,8 @@ class _AcsHomeShellState extends State<AcsHomeShell> {
 
   @override
   void dispose() {
+    _reconnectTimer?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
     _feed.stop();
     _queue.dispose();
     super.dispose();
@@ -307,6 +390,7 @@ class _AcsHomeShellState extends State<AcsHomeShell> {
       AcsDestination.queue => DashboardScreen(
           queue: _queue,
           feedError: _feedError,
+          onRetryFeed: _feedErrorIsTransient ? _retryFeedNow : null,
           storageError: _storageNotice,
           onAcknowledge: _acknowledge,
           onEscalate: (alert) => setState(() { _selected = alert; destination = AcsDestination.escalation; }),
@@ -346,6 +430,7 @@ class DashboardScreen extends StatelessWidget {
     required this.queue,
     super.key,
     this.feedError,
+    this.onRetryFeed,
     this.storageError,
     this.onAcknowledge,
     this.onEscalate,
@@ -354,6 +439,12 @@ class DashboardScreen extends StatelessWidget {
 
   final AlertQueue queue;
   final InfraNotice? feedError;
+
+  /// Presente só quando [feedError] é uma falha transitória — dá ao ACS que já
+  /// vê o sinal voltar a chance de não esperar o backoff automático. `null`
+  /// numa falha permanente (senha ausente, CA ausente) evita oferecer um botão
+  /// que nunca vai funcionar.
+  final VoidCallback? onRetryFeed;
 
   /// Armazenamento local recusando gravação.
   ///
@@ -379,6 +470,7 @@ class DashboardScreen extends StatelessWidget {
               key: const Key('feed_error'),
               icon: Icons.cloud_off_outlined,
               notice: feedError!,
+              onRetry: onRetryFeed,
             ),
             if (storageError != null) _InfraBanner(
               key: const Key('storage_error'),
@@ -419,10 +511,13 @@ class DashboardScreen extends StatelessWidget {
 /// A `Key` vem de fora e é o único identificador do aviso — pô-la também no
 /// `ListTile` faria `find.byKey` achar dois widgets.
 class _InfraBanner extends StatelessWidget {
-  const _InfraBanner({required this.icon, required this.notice, super.key});
+  const _InfraBanner({required this.icon, required this.notice, super.key, this.onRetry});
 
   final IconData icon;
   final InfraNotice notice;
+
+  /// Presente só nas falhas transitórias — ver [DashboardScreen.onRetryFeed].
+  final VoidCallback? onRetry;
 
   @override
   Widget build(BuildContext context) => Padding(
@@ -433,6 +528,11 @@ class _InfraBanner extends StatelessWidget {
             leading: Icon(icon, color: AcsColors.accent),
             title: Text(notice.title, style: const TextStyle(fontWeight: FontWeight.bold)),
             subtitle: Text(notice.detail),
+            trailing: onRetry == null ? null : TextButton(
+              key: const Key('retry_feed'),
+              onPressed: onRetry,
+              child: const Text('Tentar agora'),
+            ),
           ),
         ),
       );

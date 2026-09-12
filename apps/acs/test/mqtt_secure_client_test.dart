@@ -112,5 +112,17 @@ void main() {
       expect(mqttRefusalReason(null), isNull);
       expect(mqttRefusalReason(MqttConnectReturnCode.connectionAccepted), isNull);
     });
+
+    test('só brokerUnavailable vale retentar sozinho', () {
+      // Credencial e identificador recusados não mudam sozinhos — insistir
+      // neles só gastaria bateria sem chance de sucesso. É justamente o erro
+      // que mais tentaria induzir a retentar, por isso o teste explícito.
+      expect(mqttRefusalIsTransient(MqttConnectReturnCode.brokerUnavailable), isTrue);
+      expect(mqttRefusalIsTransient(MqttConnectReturnCode.badUsernameOrPassword), isFalse);
+      expect(mqttRefusalIsTransient(MqttConnectReturnCode.notAuthorized), isFalse);
+      expect(mqttRefusalIsTransient(MqttConnectReturnCode.identifierRejected), isFalse);
+      expect(mqttRefusalIsTransient(MqttConnectReturnCode.unacceptedProtocolVersion), isFalse);
+      expect(mqttRefusalIsTransient(null), isFalse);
+    });
   });
 }

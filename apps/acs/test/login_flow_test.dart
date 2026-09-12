@@ -461,8 +461,12 @@ void main() {
       expect(find.byKey(const Key('feed_error')), findsOneWidget);
       expect(find.byKey(const Key('storage_error')), findsOneWidget);
       // Cada um com o seu subtítulo: o texto sobre alertas era fixo e passava a
-      // mentir quando o aviso exibido era o de disco.
-      expect(find.text('Novos alertas podem não estar chegando.'), findsOneWidget);
+      // mentir quando o aviso exibido era o de disco. A falha é transitória
+      // (StateError genérico), por isso o aviso de tentativa automática.
+      expect(
+        find.text('Novos alertas podem não estar chegando. Tentando reconectar automaticamente.'),
+        findsOneWidget,
+      );
       expect(
         find.textContaining('só existe na memória'),
         findsOneWidget,
@@ -548,6 +552,158 @@ void main() {
 
       expect(find.text('A central recusou as credenciais deste aplicativo.'), findsOneWidget);
       expect(find.text('Sem conexão com a central de alertas.'), findsNothing);
+    });
+  });
+
+  group('reconexão do feed', () {
+    /// Leva até o painel, com o feed e a fila que o teste quiser.
+    ///
+    /// Cópia local de propósito: o helper do grupo `avisos de infraestrutura`
+    /// é privado ao seu próprio corpo.
+    Future<void> abrirPainel(
+      WidgetTester tester, {
+      required OfflineVisitQueue visitQueue,
+      AlertFeed Function(AlertQueue queue)? feedBuilder,
+    }) async {
+      await tester.pumpWidget(SinalAcsApp(
+        backend: FakeAcsBackend(),
+        feedBuilder: feedBuilder ?? (queue) => FakeAlertFeed(queue),
+        visitQueue: visitQueue,
+      ));
+      await tester.tap(find.byKey(const Key('login_button')));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('o painel volta a receber alertas quando a conexão dá certo na segunda tentativa', (tester) async {
+      // O defeito literal: antes disto, uma falha na primeira conexão exigia
+      // fechar e reabrir o app. O broker guarda os alertas com QoS 1 — basta
+      // conectar para recebê-los.
+      late FakeAlertFeed feed;
+
+      await abrirPainel(
+        tester,
+        visitQueue: OfflineVisitQueue(),
+        feedBuilder: (queue) => feed = FakeAlertFeed(queue, failuresBeforeSuccess: 1),
+      );
+
+      expect(feed.startCount, 1);
+      expect(find.byKey(const Key('feed_error')), findsOneWidget);
+      expect(find.text('Sem central'), findsOneWidget);
+
+      // O atraso inicial do ReconnectSchedule é de 2s.
+      await tester.pump(const Duration(seconds: 2));
+      await tester.pumpAndSettle();
+
+      expect(feed.startCount, 2);
+      expect(find.byKey(const Key('feed_error')), findsNothing);
+      expect(find.text('Alertas em tempo real'), findsOneWidget);
+
+      feed.deliver(testAlert(alertId: 'alerta-pos-reconexao'));
+      await tester.pumpAndSettle();
+      // A fila cresceu: o cartão de "nenhum alerta" precisa ter sumido.
+      expect(find.text('Nenhum alerta na sua microárea agora.'), findsNothing);
+    });
+
+    testWidgets('o atraso entre tentativas dobra a cada falha', (tester) async {
+      late FakeAlertFeed feed;
+
+      await abrirPainel(
+        tester,
+        visitQueue: OfflineVisitQueue(),
+        feedBuilder: (queue) => feed = FakeAlertFeed(queue, failOnStart: true),
+      );
+      expect(feed.startCount, 1);
+
+      await tester.pump(const Duration(seconds: 2));
+      expect(feed.startCount, 2, reason: 'primeiro atraso: 2s');
+
+      await tester.pump(const Duration(seconds: 2));
+      expect(feed.startCount, 2, reason: 'segundo atraso é 4s, ainda não decorreu');
+
+      await tester.pump(const Duration(seconds: 2));
+      expect(feed.startCount, 3, reason: 'agora os 4s completaram');
+    });
+
+    testWidgets('"Tentar agora" reconecta sem esperar o backoff', (tester) async {
+      late FakeAlertFeed feed;
+
+      await abrirPainel(
+        tester,
+        visitQueue: OfflineVisitQueue(),
+        feedBuilder: (queue) => feed = FakeAlertFeed(queue, failuresBeforeSuccess: 1),
+      );
+      expect(feed.startCount, 1);
+
+      await tester.tap(find.byKey(const Key('retry_feed')));
+      await tester.pumpAndSettle();
+
+      expect(feed.startCount, 2);
+      expect(find.byKey(const Key('feed_error')), findsNothing);
+      expect(find.text('Alertas em tempo real'), findsOneWidget);
+    });
+
+    testWidgets('falta de senha não oferece nem agenda nova tentativa', (tester) async {
+      late FakeAlertFeed feed;
+
+      await abrirPainel(
+        tester,
+        visitQueue: OfflineVisitQueue(),
+        feedBuilder: (queue) => feed = FakeAlertFeed(
+          queue,
+          failure: const AlertFeedFailure(
+            AlertFeedFailureKind.missingPassword,
+            title: 'Este aplicativo foi compilado sem a senha do broker de alertas.',
+            detail: 'Nenhum alerta será recebido até o aplicativo ser recompilado.',
+          ),
+        ),
+      );
+
+      expect(find.byKey(const Key('retry_feed')), findsNothing);
+
+      // Bem além de qualquer atraso possível (teto de 60s) — se algo estivesse
+      // agendado, teria disparado.
+      await tester.pump(const Duration(seconds: 70));
+      expect(feed.startCount, 1);
+    });
+
+    testWidgets('voltar do segundo plano tenta reconectar na hora', (tester) async {
+      late FakeAlertFeed feed;
+
+      await abrirPainel(
+        tester,
+        visitQueue: OfflineVisitQueue(),
+        feedBuilder: (queue) => feed = FakeAlertFeed(queue, failuresBeforeSuccess: 1),
+      );
+      expect(feed.startCount, 1);
+
+      // Sem avançar o relógio: o sinal costuma voltar com a tela apagada, e o
+      // ACS reabre o app já esperando o alerta.
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pumpAndSettle();
+
+      expect(feed.startCount, 2);
+      expect(find.byKey(const Key('feed_error')), findsNothing);
+    });
+
+    testWidgets('o cabeçalho para de dizer "em linha" quando a conexão cai depois de conectar', (tester) async {
+      late FakeAlertFeed feed;
+
+      await abrirPainel(
+        tester,
+        visitQueue: OfflineVisitQueue(),
+        feedBuilder: (queue) => feed = FakeAlertFeed(queue),
+      );
+      expect(find.text('Alertas em tempo real'), findsOneWidget);
+
+      // Simula o autoReconnect do mqtt_client notificando uma queda depois de
+      // já ter conectado — o caso que o campo escrito uma única vez não via.
+      feed.onConnectionChanged?.call(false);
+      await tester.pump();
+
+      expect(find.text('Sem central'), findsOneWidget);
+      // Nenhum banner novo: quem trata essa reconexão é o autoReconnect do
+      // mqtt_client, não o shell.
+      expect(find.byKey(const Key('feed_error')), findsNothing);
     });
   });
 

@@ -102,7 +102,7 @@ class FakeAcsBackend implements AcsBackend {
 /// Expõe a [AlertQueue] para que o teste empurre alertas como se tivessem
 /// chegado pelo broker, sem precisar de rede nem de emulador.
 class FakeAlertFeed implements AlertFeed {
-  FakeAlertFeed(this.queue, {this.failOnStart = false, this.failure});
+  FakeAlertFeed(this.queue, {this.failOnStart = false, this.failure, this.failuresBeforeSuccess = 0});
 
   final AlertQueue queue;
   final bool failOnStart;
@@ -113,20 +113,43 @@ class FakeAlertFeed implements AlertFeed {
   /// defesa do shell, o que nenhum `AlertFeedFailure` cobre.
   final AlertFeedFailure? failure;
 
+  /// Quantas chamadas a [start] devem falhar antes de uma que conecta.
+  ///
+  /// É o que prova que a retentativa do shell não só acontece, mas **dá
+  /// certo**: sem isto, todo teste de reconexão ficaria preso numa falha para
+  /// sempre.
+  final int failuresBeforeSuccess;
+
   bool started = false;
   bool stopped = false;
   String? startedTopicMicroArea;
+
+  /// Quantas vezes [start] foi chamado — inclusive as que falharam.
+  int startCount = 0;
 
   @override
   bool get isConnected => started;
 
   @override
+  void Function(bool connected)? onConnectionChanged;
+
+  @override
   Future<void> start({required String microAreaId, required String acsId}) async {
+    startCount++;
+    if (startCount <= failuresBeforeSuccess) {
+      throw failure ?? const AlertFeedFailure(
+        AlertFeedFailureKind.unreachable,
+        title: 'Sem conexão com a central de alertas.',
+        detail: 'Novos alertas podem não estar chegando.',
+        transient: true,
+      );
+    }
     final classified = failure;
     if (classified != null) throw classified;
     if (failOnStart) throw StateError('broker indisponível');
     started = true;
     startedTopicMicroArea = microAreaId;
+    onConnectionChanged?.call(true);
   }
 
   @override

@@ -247,6 +247,36 @@ resultado era um app que nunca recebia alerta e dizia apenas "sem conexão".
 Verificado no emulador, os quatro caminhos: compilado sem senha, compilado pelo
 script, senha errada e broker parado — cada um com sua mensagem.
 
+#### O app desistia do broker na primeira tentativa
+
+`_connectFeed()` rodava **uma vez**, no `initState`. Se falhasse, o app nunca
+mais tentava — o banner ficava na tela até alguém fechar e reabrir o
+aplicativo. O `autoReconnect` do `mqtt_client` não cobria isso: ele só age
+**depois** de uma conexão bem-sucedida, e as duas rotas de erro do cliente
+chamam `disconnect()`, que o desliga de propósito para o cliente não ficar
+órfão tentando para sempre.
+
+Em campo isso significava um ACS que abre o app na zona rural sem sinal ficar
+sem alerta pelo resto do turno, mesmo com o sinal voltando cinco minutos
+depois — e como a sessão MQTT é persistente, o broker estava guardando esses
+alertas com QoS 1 o tempo todo, só esperando uma conexão que nunca vinha.
+
+`AcsHomeShell` passou a retentar sozinho quando a falha é **transitória**
+(broker inalcançável, ou `brokerUnavailable` do CONNACK — nunca senha ausente,
+CA ausente, ou credencial/identificador recusado, que não mudam sozinhos):
+backoff de 2s a 60s em [reconnect_schedule.dart](apps/acs/lib/core/services/reconnect_schedule.dart),
+os mesmos valores do `MqttAlertDispatcher` do backend. O banner ganhou "Tentar
+agora" para quem já vê o sinal voltar, e voltar do segundo plano dispara uma
+tentativa imediata — é o gatilho que mais importa, porque o sinal costuma
+voltar com a tela apagada.
+
+Defeito vizinho, a outra metade do mesmo problema: o chip do cabeçalho também
+era escrito uma única vez. Uma queda **depois** de uma conexão bem-sucedida
+nunca chegava a ele, que continuava dizendo "em linha" para sempre enquanto o
+`autoReconnect` trabalhava por baixo em silêncio. `AlertFeed.onConnectionChanged`
+subiu para a interface como campo mutável para o shell poder assinar mudanças
+de estado a qualquer momento, não só no retorno do `start()`.
+
 ### M2.5 - Testes de Caos
 
 Foi adicionada a simulação de degradação de rede em [apps/acs/lib/core/services/network_chaos_simulator.dart](apps/acs/lib/core/services/network_chaos_simulator.dart):

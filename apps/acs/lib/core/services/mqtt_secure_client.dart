@@ -25,10 +25,15 @@ String ackTopicFor(String alertId) => 'sinalacs/v1/alerts/$alertId/acks';
 /// errada de uma central fora do ar — que antes chegavam à tela como a mesma
 /// frase.
 class MqttConnectionRefused implements Exception {
-  const MqttConnectionRefused(this.message);
+  const MqttConnectionRefused(this.message, {this.transient = false});
 
   /// Já em português e pronta para a tela. **Nunca** contém credencial.
   final String message;
+
+  /// Se vale a pena tentar de novo sem intervenção humana.
+  ///
+  /// Ver [mqttRefusalIsTransient] para o critério.
+  final bool transient;
 
   @override
   String toString() => message;
@@ -54,6 +59,14 @@ String? mqttRefusalReason(MqttConnectReturnCode? code) => switch (code) {
         'A central não aceita a versão de protocolo deste aplicativo.',
       _ => null,
     };
+
+/// Se vale tentar de novo depois de uma recusa.
+///
+/// Só `brokerUnavailable`: a central pode estar reiniciando ou sobrecarregada.
+/// Credencial e identificador recusados não mudam sozinhos — insistir neles
+/// só gastaria bateria sem chance de sucesso.
+bool mqttRefusalIsTransient(MqttConnectReturnCode? code) =>
+    code == MqttConnectReturnCode.brokerUnavailable;
 
 class SecureMqttConfig {
   const SecureMqttConfig({
@@ -273,18 +286,23 @@ class MqttSecureClient {
     try {
       await client.connect(config.username, config.password);
     } catch (error) {
-      // Lido ANTES do disconnect, que zera o connectionStatus.
-      final refusal = mqttRefusalReason(client.connectionStatus?.returnCode);
+      // Lidos ANTES do disconnect, que zera o connectionStatus.
+      final returnCode = client.connectionStatus?.returnCode;
+      final refusal = mqttRefusalReason(returnCode);
       disconnect();
-      if (refusal != null) throw MqttConnectionRefused(refusal);
+      if (refusal != null) {
+        throw MqttConnectionRefused(refusal, transient: mqttRefusalIsTransient(returnCode));
+      }
       rethrow;
     }
 
     if (client.connectionStatus?.state != MqttConnectionState.connected) {
-      final refusal = mqttRefusalReason(client.connectionStatus?.returnCode);
+      final returnCode = client.connectionStatus?.returnCode;
+      final refusal = mqttRefusalReason(returnCode);
       disconnect();
       throw MqttConnectionRefused(
         refusal ?? 'Não foi possível conectar ao broker MQTT.',
+        transient: mqttRefusalIsTransient(returnCode),
       );
     }
 
