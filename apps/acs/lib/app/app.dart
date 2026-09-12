@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:developer' as developer;
 
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:sinalacs_acs/app/acs_theme.dart';
 import 'package:sinalacs_acs/core/network/backend_client.dart';
 import 'package:sinalacs_acs/core/network/backend_scope.dart';
@@ -192,6 +194,7 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
   InfraNotice? _feedError;
   bool _feedErrorIsTransient = false;
   PrioritizedAlert? _selected;
+  LatLng? _currentPosition;
 
   /// Só existe enquanto uma falha transitória está sendo retentada. `null`
   /// quer dizer "nada agendado" — nem depois de um sucesso, nem depois de uma
@@ -209,6 +212,7 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
     _feed.onConnectionChanged = _onBrokerConnectionChanged;
     _connectFeed();
     _restoreVisits();
+    _loadCurrentPosition();
   }
 
   /// Recarrega as visitas gravadas em execuções anteriores.
@@ -228,6 +232,27 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
     // o sinalizador congelava aqui e toda falha posterior de `add()`/`sync()`
     // ficava invisível.
     if (mounted) setState(() {});
+  }
+
+  Future<void> _loadCurrentPosition() async {
+    try {
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
+        permission = await Geolocator.requestPermission();
+        if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
+          return;
+        }
+      }
+
+      final position = await Geolocator.getCurrentPosition();
+      if (!mounted) return;
+      setState(() {
+        _currentPosition = LatLng(position.latitude, position.longitude);
+      });
+    } catch (_) {
+      // Localização não é crítica para a fila; sem GPS ou permissão, o mapa
+      // continua funcional com o centro do território em vez de quebrar.
+    }
   }
 
   /// Aviso de persistência, lido do estado corrente da fila.
@@ -396,7 +421,11 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
           onEscalate: (alert) => setState(() { _selected = alert; destination = AcsDestination.escalation; }),
           onVisit: (alert) => setState(() { _selected = alert; destination = AcsDestination.visit; }),
         ),
-      AcsDestination.map => const MapScreen(),
+      AcsDestination.map => MapScreen(
+          queue: _queue,
+          currentPosition: _currentPosition,
+          apiKey: const String.fromEnvironment('GOOGLE_MAPS_API_KEY', defaultValue: ''),
+        ),
       AcsDestination.visit => VisitRegistrationScreen(
           alert: _selected,
           queue: widget.visitQueue,
@@ -613,7 +642,253 @@ class _AlertCard extends StatelessWidget {
   }
 }
 
-class MapScreen extends StatelessWidget { const MapScreen({super.key}); @override Widget build(BuildContext context) => _page([Container(height: 220, decoration: BoxDecoration(color: AcsColors.surface, borderRadius: BorderRadius.circular(8)), child: const Stack(children: [Align(alignment: Alignment(-.55, -.4), child: Icon(Icons.location_on, color: AcsColors.red, size: 38)), Align(alignment: Alignment(.55, .1), child: Icon(Icons.location_on, color: AcsColors.yellow, size: 38)), Align(alignment: Alignment(-.1, .65), child: Icon(Icons.location_on, color: AcsColors.green, size: 38)), Center(child: Text('Mapa demonstrativo'))])), const SizedBox(height: 16), const Text('Pinos representam a prioridade clínica no território.', textAlign: TextAlign.center), const SizedBox(height: 16), FilledButton(onPressed: () => _message(context, 'Traçado de rota depende da integração de mapas.'), child: const Text('Traçar rota eficiente'))]); }
+class MapScreen extends StatefulWidget {
+  const MapScreen({
+    required this.queue,
+    this.currentPosition,
+    this.apiKey = '',
+    super.key,
+  });
+
+  final AlertQueue queue;
+  final LatLng? currentPosition;
+  final String apiKey;
+
+  static const LatLng _fallbackCenter = LatLng(-15.7942, -47.8828);
+
+  @override
+  State<MapScreen> createState() => _MapScreenState();
+}
+
+class _MapScreenState extends State<MapScreen> {
+  PrioritizedAlert? _selectedAlert;
+
+  @override
+  Widget build(BuildContext context) => AnimatedBuilder(
+        animation: widget.queue,
+        builder: (context, _) {
+          final hasApiKey = widget.apiKey.trim().isNotEmpty;
+          final center = widget.currentPosition ?? MapScreen._fallbackCenter;
+          final markers = <Marker>{
+            if (widget.currentPosition != null)
+              Marker(
+                markerId: const MarkerId('acs_location'),
+                position: widget.currentPosition!,
+                icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
+                infoWindow: const InfoWindow(title: 'Localização atual'),
+              ),
+            for (final alert in widget.queue.alerts)
+              Marker(
+                markerId: MarkerId('alert_${alert.alertId}'),
+                position: _markerPosition(alert),
+                icon: _markerColor(alert.riskLevel),
+                consumeTapEvents: true,
+                onTap: () {
+                  setState(() => _selectedAlert = alert);
+                  _showAlertDetail(context, alert);
+                },
+                infoWindow: InfoWindow(
+                  title: 'Paciente ${alert.patientId.substring(0, 8)}',
+                  snippet: '${_riskLabel(alert.riskLevel)} • ${_time(alert.triggeredAt)}',
+                ),
+              ),
+          };
+
+          final map = hasApiKey
+              ? GoogleMap(
+                  initialCameraPosition: CameraPosition(target: center, zoom: 13),
+                  markers: markers,
+                  myLocationEnabled: widget.currentPosition != null,
+                  myLocationButtonEnabled: false,
+                  mapToolbarEnabled: false,
+                  onTap: (_) => setState(() => _selectedAlert = null),
+                )
+              : Container(
+                  height: 260,
+                  decoration: const BoxDecoration(
+                    color: AcsColors.surface,
+                    borderRadius: BorderRadius.all(Radius.circular(12)),
+                  ),
+                  child: const Center(
+                    child: Padding(
+                      padding: EdgeInsets.all(24),
+                      child: Text(
+                        'Mapa operacional indisponível sem chave de API do Google Maps.',
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                  ),
+                );
+
+          return _page([
+            const Text('Mapa operacional', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            Text(
+              widget.currentPosition == null
+                  ? 'Localização atual indisponível. Exibindo centro do território.'
+                  : 'Localização atual',
+            ),
+            if (_selectedAlert != null) ...[
+              const SizedBox(height: 12),
+              _AlertMapSummary(alert: _selectedAlert!),
+            ],
+            const SizedBox(height: 12),
+            SizedBox(height: 260, child: map),
+            const SizedBox(height: 12),
+            const Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                _LegendChip(color: AcsColors.red, label: 'Vermelho'),
+                _LegendChip(color: AcsColors.yellow, label: 'Amarelo'),
+                _LegendChip(color: AcsColors.green, label: 'Verde'),
+              ],
+            ),
+            const SizedBox(height: 16),
+            FilledButton(
+              onPressed: () => _message(context, 'Rota e geofencing serão integrados ao mapa real.'),
+              child: const Text('Traçar rota eficiente'),
+            ),
+          ]);
+        },
+      );
+
+  void _showAlertDetail(BuildContext context, PrioritizedAlert alert) {
+    final riskLabel = _riskLabel(alert.riskLevel);
+    showModalBottomSheet<void>(
+      context: context,
+      builder: (sheetContext) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Paciente ${alert.patientId.substring(0, 8)}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+              const SizedBox(height: 8),
+              Text('$riskLabel • ${_time(alert.triggeredAt)}', style: TextStyle(color: _riskColor(alert.riskLevel))),
+              const SizedBox(height: 8),
+              Text('Microárea: ${alert.microAreaId.substring(0, 8)}'),
+              const SizedBox(height: 16),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton(
+                  onPressed: () => Navigator.pop(sheetContext),
+                  child: const Text('Fechar'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  BitmapDescriptor _markerColor(String riskLevel) {
+    final normalized = riskLevel.toLowerCase();
+    switch (normalized) {
+      case 'red':
+      case 'vermelho':
+        return BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed);
+      case 'yellow':
+      case 'amarelo':
+        return BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueYellow);
+      case 'green':
+      case 'verde':
+        return BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen);
+      default:
+        return BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure);
+    }
+  }
+
+  Color _riskColor(String riskLevel) => switch (riskLevel.toLowerCase()) {
+        'red' || 'vermelho' => AcsColors.red,
+        'yellow' || 'amarelo' => AcsColors.yellow,
+        'green' || 'verde' => AcsColors.green,
+        _ => AcsColors.accent,
+      };
+
+  String _riskLabel(String riskLevel) => switch (riskLevel.toLowerCase()) {
+        'red' || 'vermelho' => 'Vermelho',
+        'yellow' || 'amarelo' => 'Amarelo',
+        'green' || 'verde' => 'Verde',
+        _ => 'Não classificado',
+      };
+
+  LatLng _markerPosition(PrioritizedAlert alert) {
+    final hash = alert.locationHash;
+    final seed = hash.codeUnits.fold<int>(0, (sum, code) => sum + code) % 1000;
+    final lat = -15.7942 + ((seed % 7) * 0.0025);
+    final lng = -47.8828 + (((seed / 7).floor() % 9) * 0.0035);
+    return LatLng(lat, lng);
+  }
+
+  String _time(DateTime value) {
+    final local = value.toLocal();
+    return '${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}';
+  }
+}
+
+class _AlertMapSummary extends StatelessWidget {
+  const _AlertMapSummary({required this.alert});
+
+  final PrioritizedAlert alert;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = switch (alert.riskLevel.toLowerCase()) {
+      'red' || 'vermelho' => AcsColors.red,
+      'yellow' || 'amarelo' => AcsColors.yellow,
+      'green' || 'verde' => AcsColors.green,
+      _ => AcsColors.accent,
+    };
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withValues(alpha: 0.6)),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.location_on, color: color),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'Alerta selecionado: ${alert.patientId.substring(0, 8)} • ${switch (alert.riskLevel.toLowerCase()) { 'red' || 'vermelho' => 'Vermelho', 'yellow' || 'amarelo' => 'Amarelo', 'green' || 'verde' => 'Verde', _ => 'Não classificado' }}',
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _LegendChip extends StatelessWidget {
+  const _LegendChip({required this.color, required this.label});
+
+  final Color color;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.15),
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(color: color.withValues(alpha: 0.6)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(width: 10, height: 10, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
+            const SizedBox(width: 6),
+            Text(label),
+          ],
+        ),
+      );
+}
 
 class VisitRegistrationScreen extends StatefulWidget {
   const VisitRegistrationScreen({required this.queue, super.key, this.alert});
