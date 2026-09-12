@@ -431,6 +431,17 @@ A estratégia de conformidade adota os princípios de **Privacy by Design** e **
 | **Implementação** | TLS para todas as comunicações (Flutter ↔ backend), AES-256 para dados locais no `sqflite`, criptografia de campos sensíveis (CPF, condições crônicas) no banco central PostgreSQL. |
 | **Riscos Mitigados** | Interceptação de dados (MITM), violação de dados por acesso físico ao dispositivo, vazamento em caso de comprometimento do banco de dados. |
 
+#### Decisão de custódia da chave (app do ACS)
+
+| Propriedade | Descrição |
+|-------------|-----------|
+| **Decisão** | A chave do SQLCipher é aleatória (256 bits) e fica no Android Keystore / iOS Keychain, via `flutter_secure_storage`. Não é derivada de PIN nem de biometria. |
+| **Contexto** | `spec/PRD_system.md` (4.2.3) prescreve "chave derivada do PIN/Biometria (PBKDF2)"; `spec/test_plan.md` (item 1 da matriz de risco) fala em "chave gerada pelo TEE do hardware". Adotamos a segunda leitura. |
+| **Motivo** | Não existe nenhum fluxo de PIN nos apps — a autenticação é `auth.developmentLogin`, sem credencial. Derivar de PIN exigiria projetar definição, desbloqueio, política de tentativas e recuperação; e um PIN esquecido significaria perder visitas ainda não sincronizadas. O keystore protege contra o risco que esta seção nomeia (acesso físico ao dispositivo) sem inventar produto. |
+| **Reversibilidade** | A interface `DatabaseKeyStore` aceita um segundo fator depois, envelopando a chave, **sem migrar dados**. O caminho do PRD segue aberto. |
+| **Limite conhecido** | Num aparelho comprometido (root) com o usuário autenticado, a chave é alcançável. Proteger contra isso exigiria o fator de posse do PIN. |
+| **Verificação** | `apps/acs/integration_test/encrypted_storage_test.dart` lê o arquivo do banco e afirma que ele não contém o conteúdo em texto plano. Roda em dispositivo — no CI (Linux) o caminho é o FFI, que não criptografa, e por isso a abertura fora de Android/iOS lança por padrão. |
+
 ### 5.2 Controle de Acesso por Perfil (RBAC)
 
 | Propriedade | Descrição |
@@ -470,6 +481,17 @@ A estratégia de conformidade adota os princípios de **Privacy by Design** e **
 | **Objetivo** | Garantir que dados sejam mantidos apenas pelo tempo necessário e eliminados de forma segura. |
 | **Implementação** | Tabela com política de retenção por categoria de dado: alertas (2 anos), visitas (5 anos conforme legislação), logs de acesso (1 ano), dados de consentimento (indeterminado). Processo automatizado de expurgo com anonimização. |
 | **Riscos Mitigados** | Acumulação excessiva de dados, violação do princípio da necessidade, armazenamento desnecessário de dados sensíveis. |
+
+#### Retenção no aparelho do ACS (implementada)
+
+| Propriedade | Descrição |
+|-------------|-----------|
+| **Decisão** | O banco local guarda **apenas** visitas ainda não sincronizadas. `SqlCipherVisitStore.save()` reescreve a tabela inteira a partir da lista de pendentes, então a visita confirmada pelo servidor deixa o dispositivo na gravação seguinte. |
+| **Estado** | Passou a valer de fato quando o `BackendVisitSynchronizer` foi ligado em produção. Antes, o app montava a fila sem sincronizador: `sync()` devolvia erro, nada era confirmado e nada era apagado — a retenção estava implementada e testada, mas nunca disparava. |
+| **O que é gravado** | `patient_id` (UUID), risco, status, desfecho, data e versão. **Não** é gravado nome, rótulo legível nem endereço. As observações de campo digitadas na tela ainda não são persistidas nem enviadas. |
+| **Por que o identificador, e não o rótulo** | A tela antes gravava `'Paciente ' + 8 dos 32 dígitos hex` e descartava o UUID. Era pior nos dois sentidos: texto legível sobre a pessoa no disco, e um identificador irrecuperável — `visits.sync` só aceita UUID, então a visita nunca poderia sair do aparelho e a retenção nunca a alcançaria. Guardar o identificador e montar o rótulo na tela é o desenho de minimização correto (LGPD-RF01). |
+| **Consequência de produto** | Sem alerta vinculado não há paciente, logo a tela de visita não grava. Um seletor de pacientes da microárea exigiria um endpoint de listagem que não existe. |
+| **Verificação** | `apps/acs/integration_test/encrypted_storage_test.dart` afirma que nem o conteúdo da visita nem o `patient_id` aparecem legíveis no arquivo do banco; `apps/acs/integration_test/red_alert_cycle_test.dart` ("a visita confirmada SAI do disco criptografado") prova a retenção contra o servidor real, em dispositivo. |
 
 ### 5.7 Anonimização/Pseudonimização
 

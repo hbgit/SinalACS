@@ -92,12 +92,28 @@ Os cenários de transição e conflito foram validados em [backend/test/sync_fsm
 
 ### M1.5 - Criptografia local com SQLCipher
 
-A camada de banco local criptografado foi adicionada em:
+> **Correção de registro.** Esta entrada afirmava que o milestone estava
+> concluído porque a classe `EncryptedLocalDatabase` existia. Ela existia, mas
+> **nenhum código de produção a chamava**: o único chamador em todo o
+> repositório era o teste unitário, com uma passphrase literal. Pior, o
+> "fallback FFI para ambientes de teste/VM" abria o banco **sem criptografia
+> nenhuma**, e era justamente o caminho que o CI (Linux) exercitava — o teste
+> chamado "deve abrir banco criptografado" não provava nada do que o nome
+> prometia. O repositório declarava uma propriedade de segurança que não tinha.
 
-- [apps/patient/lib/core/database/encrypted_database.dart](apps/patient/lib/core/database/encrypted_database.dart)
-- [apps/acs/lib/core/database/encrypted_database.dart](apps/acs/lib/core/database/encrypted_database.dart)
+O milestone passou a ser real:
 
-A implementação usa SQLCipher para plataformas móveis e fallback FFI para ambientes de teste/VM, preservando a exigência de proteção de dados sensíveis em repouso.
+- [apps/acs/lib/core/security/database_key_store.dart](apps/acs/lib/core/security/database_key_store.dart) — a chave de 256 bits vive no Android Keystore / iOS Keychain, nunca no código.
+- [apps/acs/lib/core/database/encrypted_database.dart](apps/acs/lib/core/database/encrypted_database.dart) — fora de Android/iOS a abertura **lança**, a menos que se passe `allowUnencryptedForTesting`, flag de nome deliberadamente constrangedor que só os testes de VM usam.
+- [apps/acs/lib/core/database/sqlcipher_visit_store.dart](apps/acs/lib/core/database/sqlcipher_visit_store.dart) — o consumidor real: a fila de visitas offline, que antes vivia só em memória e perdia o trabalho de campo ao fechar o app.
+- [apps/acs/integration_test/encrypted_storage_test.dart](apps/acs/integration_test/encrypted_storage_test.dart) — a prova, **em dispositivo**: lê o arquivo cru e afirma que ele não começa com `SQLite format 3` nem contém o conteúdo da visita. Verificado em emulador, inclusive por falsificação (removendo o SQLCipher, o teste falha).
+
+A cópia do app do paciente foi removida: era código morto, sem chamador, que
+afirmava uma garantia que não entregava.
+
+Permanece fora: chave derivada de PIN/biometria (PRD 4.2.3) — não há fluxo de PIN
+nos apps, e a interface de custódia aceita esse segundo fator depois sem migrar
+dados.
 
 ## Milestones Técnicos - Fase 2
 
@@ -160,6 +176,40 @@ A fila local de visitas foi evoluída em [apps/acs/lib/core/services/offline_vis
 - contagem de pendentes, sincronizados e conflitos
 
 A validação foi incluída em [apps/acs/test/login_flow_test.dart](apps/acs/test/login_flow_test.dart), cobrindo o fluxo de sucesso e o caso de conflito com reprocessamento.
+
+#### A fila passou a sair do aparelho
+
+O `BackendVisitSynchronizer` existia e era testado, mas **não era injetado**: o app
+montava a fila sem ele, `sync()` caía no ramo sem remetente e devolvia erro. Na
+prática as visitas nunca subiam, e a retenção — `SqlCipherVisitStore.save()` apaga
+do disco tudo que saiu da lista de pendentes — nunca disparava em produção.
+
+Nenhum teste podia ver isso: a UI só é testável com a fila injetada, então a
+montagem real nunca era exercitada. A fiação foi extraída para
+[apps/acs/lib/core/services/visit_queue_factory.dart](apps/acs/lib/core/services/visit_queue_factory.dart)
+e ganhou teste próprio.
+
+Para ligar o sincronizador, o registro passou a guardar `patientId` em vez de
+`patientName`. O rótulo antigo era `'Paciente ' + 8 dos 32 dígitos do UUID`:
+irreversível, então o servidor recusaria a visita por identificador inválido — e
+era texto legível sobre a pessoa num disco que não precisava dele. Agora o
+identificador vai ao banco e o rótulo é montado na tela (minimização,
+LGPD-RF01). Consequência de produto: a aba "Visita" sem alerta selecionado não
+grava mais, porque sem alerta não há paciente.
+
+O schema local subiu para v2 (`patient_id`), com `onUpgrade` que **recria** a
+tabela — nem `local_queue` nem a `offline_visits` v1 guardavam o UUID. Isso perde
+visitas pendentes gravadas antes da atualização, que de qualquer forma o servidor
+recusaria. **A partir do primeiro release real, essa migração precisa preservar
+dados.**
+
+A tela ganhou contador de pendentes/conflitos e o botão "Sincronizar agora" — o
+gatilho é manual, para o ACS decidir quando gastar dados em campo.
+
+Dois defeitos vizinhos apareceram no caminho e foram corrigidos: `sync()`
+devolvia `synced` quando o servidor recusava uma visita (o status `error` caía no
+ramo `default`), o que a prendia na fila em silêncio; e `visits.sync` reportava
+"este alerta não pertence à sua microárea" para erro de sessão.
 
 ### M2.5 - Testes de Caos
 
@@ -252,7 +302,7 @@ deve ser usado com dados reais de pacientes.
 - [x] M1.2 - CI básica
 - [x] M1.3 - Motor de triagem
 - [x] M1.4 - FSM de sincronização
-- [x] M1.5 - SQLCipher local
+- [x] M1.5 - SQLCipher local (ver a correção de registro na seção M1.5)
 
 ### Fase 2
 

@@ -116,6 +116,11 @@ class BackendClient implements AcsBackend {
     final token = await _requireToken();
     return _guard(
       () => _client.visits.sync(accessToken: token, visits: visits),
+      // `visits.sync` reaproveita AlertPermissionException para token inválido
+      // e para ACS sem microárea. Dizer "este alerta não pertence à sua
+      // microárea" aqui manda o ACS procurar um problema que não existe.
+      permissionMessage:
+          'Sua sessão não autoriza sincronizar visitas. Entre novamente.',
     );
   }
 
@@ -123,7 +128,13 @@ class BackendClient implements AcsBackend {
   void close() => _client.close();
 
   /// Traduz as exceções tipadas do backend para [BackendFailure].
-  Future<T> _guard<T>(Future<T> Function() call) async {
+  ///
+  /// [permissionMessage] troca o texto de `AlertPermissionException`, que
+  /// significa coisas diferentes conforme o endpoint que a lançou.
+  Future<T> _guard<T>(
+    Future<T> Function() call, {
+    String? permissionMessage,
+  }) async {
     try {
       return await call();
     } on EndpointDisabledException {
@@ -134,8 +145,8 @@ class BackendClient implements AcsBackend {
     } on AlertPermissionException {
       // Acontece quando o alerta é de outra microárea. A territorialização é
       // invariante: o servidor recusa, e o app não deve tentar contornar.
-      throw const BackendFailure(
-        'Este alerta não pertence à sua microárea.',
+      throw BackendFailure(
+        permissionMessage ?? 'Este alerta não pertence à sua microárea.',
         isRecoverable: false,
       );
     } on AlertValidationException catch (error) {

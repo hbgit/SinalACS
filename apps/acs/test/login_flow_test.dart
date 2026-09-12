@@ -3,7 +3,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:sinalacs_acs/app/app.dart';
 import 'package:sinalacs_acs/core/network/backend_client.dart';
 import 'package:sinalacs_acs/core/services/alert_queue.dart';
+import 'package:sinalacs_acs/core/services/backend_visit_synchronizer.dart';
 import 'package:sinalacs_acs/core/services/offline_visit_queue.dart';
+import 'package:sinalacs_acs/core/services/visit_queue_factory.dart';
 
 import 'support/fakes.dart';
 
@@ -173,8 +175,8 @@ void main() {
   });
 
   group('fila offline de visitas', () {
-    OfflineVisitRecord visit(String name) => OfflineVisitRecord(
-          patientName: name,
+    OfflineVisitRecord visit(String patientId) => OfflineVisitRecord(
+          patientId: patientId,
           risk: 'red',
           status: 'PENDENTE',
         );
@@ -183,7 +185,7 @@ void main() {
       final sender = FakeVisitSynchronizer();
       final queue = OfflineVisitQueue(synchronizer: sender);
 
-      await queue.add(visit('Maria Souza'));
+      await queue.add(visit(seedPatientId));
       expect(queue.pendingCount, 1);
 
       final result = await queue.sync();
@@ -201,7 +203,7 @@ void main() {
       );
       final queue = OfflineVisitQueue(synchronizer: sender);
 
-      await queue.add(visit('João Souza'));
+      await queue.add(visit(syntheticPatientId(2)));
 
       final conflict = await queue.sync();
       expect(conflict.kind, SyncOutcomeKind.conflict);
@@ -222,7 +224,7 @@ void main() {
       final sender = FakeVisitSynchronizer(throwOnPush: true);
       final queue = OfflineVisitQueue(synchronizer: sender);
 
-      await queue.add(visit('Ana Costa'));
+      await queue.add(visit(syntheticPatientId(3)));
       final result = await queue.sync();
 
       expect(result.kind, SyncOutcomeKind.error);
@@ -234,20 +236,58 @@ void main() {
       // Fechar o app não pode perder a fila.
       final store = InMemoryVisitStore();
       final first = OfflineVisitQueue(store: store);
-      await first.add(visit('Maria Souza'));
+      await first.add(visit(seedPatientId));
 
       final second = OfflineVisitQueue(store: store);
       await second.restore();
 
       expect(second.pendingCount, 1);
-      expect(second.pendingVisits.single.patientName, 'Maria Souza');
+      expect(second.pendingVisits.single.patientId, seedPatientId);
+    });
+
+    test('erro por visita devolve o motivo e a visita permanece pendente', () async {
+      // Antes o status 'error' caía no ramo default e a chamada devolvia
+      // `synced`: a visita recusada ficava presa na fila para sempre, sem que
+      // ninguém pudesse descobrir por quê.
+      final sender = FakeVisitSynchronizer(
+        statusFor: (_) => 'error',
+        messageFor: (_) => 'identificadores devem ser UUID',
+      );
+      final queue = OfflineVisitQueue(synchronizer: sender);
+
+      await queue.add(visit(seedPatientId));
+      final result = await queue.sync();
+
+      expect(result.kind, SyncOutcomeKind.error);
+      expect(result.message, 'identificadores devem ser UUID');
+      expect(queue.pendingCount, 1);
+      expect(queue.syncedCount, 0);
+    });
+
+    test('conflito tem precedência sobre erro no mesmo lote', () async {
+      // Conflito exige decisão de quem registrou; erro, no máximo, uma nova
+      // tentativa. Quem chama precisa ver o que pede ação.
+      final conflitante = visit(seedPatientId);
+      final sender = FakeVisitSynchronizer(
+        statusFor: (v) => v.localId == conflitante.localId ? 'conflict' : 'error',
+      );
+      final queue = OfflineVisitQueue(synchronizer: sender);
+
+      await queue.add(conflitante);
+      await queue.add(visit(syntheticPatientId(2)));
+
+      final result = await queue.sync();
+
+      expect(result.kind, SyncOutcomeKind.conflict);
+      // Nada saiu: as duas continuam no aparelho.
+      expect(queue.pendingCount, 2);
     });
 
     test('não deve declarar sincronizado sem sincronizador configurado', () async {
       // O comportamento antigo carimbava 'SINCRONIZADO' sem nada sair do
       // dispositivo, o que escondia a ausência de integração.
       final queue = OfflineVisitQueue();
-      await queue.add(visit('Maria Souza'));
+      await queue.add(visit(seedPatientId));
 
       final result = await queue.sync();
 
@@ -283,6 +323,126 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(visitQueue.pendingCount, 1);
+    });
+
+    testWidgets('deve enviar o UUID do alerta ao servidor, não o rótulo da tela', (tester) async {
+      // O caminho inteiro: alerta pelo broker → gravação → visits.sync. Antes a
+      // tela gravava 'Paciente 00000000' e descartava o UUID, então o servidor
+      // recusaria a visita por identificador inválido.
+      final backend = FakeAcsBackend();
+      final visitQueue = OfflineVisitQueue(
+        synchronizer: BackendVisitSynchronizer(backend: backend),
+      );
+      late FakeAlertFeed feed;
+
+      await tester.pumpWidget(SinalAcsApp(
+        backend: backend,
+        feedBuilder: (queue) => feed = FakeAlertFeed(queue),
+        visitQueue: visitQueue,
+      ));
+
+      await tester.tap(find.byKey(const Key('login_button')));
+      await tester.pumpAndSettle();
+
+      feed.deliver(testAlert(alertId: 'alerta-1', riskLevel: 'yellow'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Iniciar rota de visita'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('save_visit')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('pending_visits_count')), findsOneWidget);
+      expect(find.text('Pendentes de sincronização: 1'), findsOneWidget);
+
+      // O SnackBar de confirmação ocupa o rodapé por 4 s e o botão fica abaixo
+      // da dobra nesta viewport: sem avançar o relógio e rolar, o toque bate no
+      // SnackBar. `pumpAndSettle` sozinho não resolve — ele só roda enquanto há
+      // quadros agendados, e um SnackBar parado não agenda nenhum.
+      await tester.pump(const Duration(seconds: 5));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.byKey(const Key('sync_visits')));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('sync_visits')));
+      await tester.pumpAndSettle();
+
+      expect(backend.syncedVisitBatches.single.single.patientId, seedPatientId);
+      expect(visitQueue.pendingCount, 0);
+      expect(find.text('Pendentes de sincronização: 0'), findsOneWidget);
+    });
+
+    testWidgets('sem alerta vinculado não deixa gravar', (tester) async {
+      // `visits.sync` exige UUID de paciente: gravar aqui criaria um registro
+      // que nunca sobe e, por isso, nunca sai do aparelho.
+      final visitQueue = OfflineVisitQueue();
+
+      await tester.pumpWidget(SinalAcsApp(
+        backend: FakeAcsBackend(),
+        feedBuilder: (queue) => FakeAlertFeed(queue),
+        visitQueue: visitQueue,
+      ));
+
+      await tester.tap(find.byKey(const Key('login_button')));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Visita'));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('visit_needs_alert')), findsOneWidget);
+      final botao = tester.widget<FilledButton>(find.byKey(const Key('save_visit')));
+      expect(botao.onPressed, isNull);
+    });
+
+    testWidgets('falha de rede mostra o motivo e mantém a visita no aparelho', (tester) async {
+      final backend = FakeAcsBackend()
+        ..syncFailure = const BackendFailure('Sem conexão com o servidor.');
+      final visitQueue = OfflineVisitQueue(
+        synchronizer: BackendVisitSynchronizer(backend: backend),
+      );
+      late FakeAlertFeed feed;
+
+      await tester.pumpWidget(SinalAcsApp(
+        backend: backend,
+        feedBuilder: (queue) => feed = FakeAlertFeed(queue),
+        visitQueue: visitQueue,
+      ));
+
+      await tester.tap(find.byKey(const Key('login_button')));
+      await tester.pumpAndSettle();
+
+      feed.deliver(testAlert(alertId: 'alerta-1', riskLevel: 'yellow'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Iniciar rota de visita'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('save_visit')));
+      await tester.pumpAndSettle();
+      await tester.pump(const Duration(seconds: 5));
+      await tester.pumpAndSettle();
+
+      await tester.ensureVisible(find.byKey(const Key('sync_visits')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('sync_visits')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Sem conexão com o servidor.'), findsOneWidget);
+      expect(visitQueue.pendingCount, 1);
+    });
+  });
+
+  group('fiação de produção', () {
+    test('a fila do app sai com o sincronizador do backend ligado', () {
+      // A regressão que motivou tudo: o app montava a fila sem sincronizador,
+      // `sync()` devolvia erro, e nenhum teste podia ver — a UI só é testável
+      // com a fila injetada, então a montagem real nunca era exercitada.
+      final queue = buildVisitQueue(
+        backend: FakeAcsBackend(),
+        store: InMemoryVisitStore(),
+      );
+
+      expect(queue.synchronizer, isA<BackendVisitSynchronizer>());
     });
   });
 }

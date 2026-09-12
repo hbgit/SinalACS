@@ -8,15 +8,9 @@ import 'package:sinalacs_client/sinalacs_client.dart';
 /// [AcsBackend] (que não conhece a fila) — é a tradução entre os dois, no mesmo
 /// espírito das implementações de `infrastructure/` no backend.
 class BackendVisitSynchronizer implements VisitSynchronizer {
-  BackendVisitSynchronizer({required this.backend, required this.patientIdFor});
+  BackendVisitSynchronizer({required this.backend});
 
   final AcsBackend backend;
-
-  /// Resolve o UUID do paciente de uma visita.
-  ///
-  /// A fila guarda um rótulo de exibição, não o identificador; quem registrou a
-  /// visita sabe a qual alerta ela pertence.
-  final String Function(OfflineVisitRecord visit) patientIdFor;
 
   @override
   Future<List<VisitSyncOutcome>> push(List<OfflineVisitRecord> visits) async {
@@ -24,7 +18,7 @@ class BackendVisitSynchronizer implements VisitSynchronizer {
       for (final visit in visits)
         VisitSyncEntry(
           localId: visit.localId,
-          patientId: patientIdFor(visit),
+          patientId: visit.patientId,
           scheduledAt: visit.createdAt.toUtc(),
           completedAt: visit.createdAt.toUtc(),
           status: visit.outcome.isEmpty ? visit.status : visit.outcome,
@@ -40,6 +34,7 @@ class BackendVisitSynchronizer implements VisitSynchronizer {
           localId: result.localId,
           status: result.syncStatus.name,
           serverVersion: result.serverVersion,
+          message: result.message,
         ),
     ];
   }

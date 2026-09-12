@@ -7,8 +7,14 @@ import 'package:sinalacs_client/sinalacs_client.dart';
 
 /// UUIDs do seed de desenvolvimento. Dados sintéticos.
 const seedAcsId = '00000000-0000-4000-8000-000000000002';
+const seedPatientId = '00000000-0000-4000-8000-000000000001';
 const seedMicroAreaId = '00000000-0000-4000-8000-000000000003';
 const otherMicroAreaId = '00000000-0000-4000-8000-000000000099';
+
+/// UUIDs sintéticos distintos, para os testes que precisam de mais de um
+/// paciente. Nome próprio não entra em teste de repositório de saúde.
+String syntheticPatientId(int n) =>
+    '00000000-0000-4000-8000-${n.toString().padLeft(12, '0')}';
 
 class FakeAcsBackend implements AcsBackend {
   FakeAcsBackend({this.loginFailure, this.acknowledged = true, this.microAreaId = seedMicroAreaId});
@@ -62,9 +68,21 @@ class FakeAcsBackend implements AcsBackend {
 
   final List<List<VisitSyncEntry>> syncedVisitBatches = <List<VisitSyncEntry>>[];
 
+  /// Falha da chamada inteira, como uma queda de rede.
+  BackendFailure? syncFailure;
+
+  /// Resultado por visita; ausente significa `synced`.
+  VisitSyncResult Function(VisitSyncEntry entry)? syncResultFor;
+
   @override
   Future<List<VisitSyncResult>> syncVisits(List<VisitSyncEntry> visits) async {
     syncedVisitBatches.add(List.of(visits));
+    final failure = syncFailure;
+    if (failure != null) throw failure;
+
+    final custom = syncResultFor;
+    if (custom != null) return [for (final visit in visits) custom(visit)];
+
     return [
       for (final visit in visits)
         VisitSyncResult(
@@ -115,10 +133,13 @@ class FakeAlertFeed implements AlertFeed {
 
 /// Sincronizador que devolve o resultado programado pelo teste.
 class FakeVisitSynchronizer implements VisitSynchronizer {
-  FakeVisitSynchronizer({this.statusFor, this.throwOnPush = false});
+  FakeVisitSynchronizer({this.statusFor, this.messageFor, this.throwOnPush = false});
 
   /// Status por localId; ausente significa `synced`.
   String Function(OfflineVisitRecord visit)? statusFor;
+
+  /// Motivo devolvido pelo servidor, como em `VisitSyncResult.message`.
+  String? Function(OfflineVisitRecord visit)? messageFor;
   bool throwOnPush;
 
   final List<List<OfflineVisitRecord>> batches = <List<OfflineVisitRecord>>[];
@@ -134,6 +155,7 @@ class FakeVisitSynchronizer implements VisitSynchronizer {
           localId: visit.localId,
           status: statusFor?.call(visit) ?? 'synced',
           serverVersion: visit.version + 1,
+          message: messageFor?.call(visit),
         ),
     ];
   }
@@ -147,7 +169,7 @@ PrioritizedAlert testAlert({
 }) {
   return PrioritizedAlert(
     alertId: alertId,
-    patientId: '00000000-0000-4000-8000-000000000001',
+    patientId: seedPatientId,
     microAreaId: microAreaId,
     riskLevel: riskLevel,
     locationHash: 'sem-local-00',

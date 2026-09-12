@@ -19,7 +19,10 @@ import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
+import 'package:sinalacs_acs/core/database/encrypted_database.dart';
+import 'package:sinalacs_acs/core/database/sqlcipher_visit_store.dart';
 import 'package:sinalacs_acs/core/network/backend_client.dart';
+import 'package:sinalacs_acs/core/security/database_key_store.dart';
 import 'package:sinalacs_acs/core/services/alert_feed.dart';
 import 'package:sinalacs_acs/core/services/alert_queue.dart';
 import 'package:sinalacs_acs/core/services/backend_visit_synchronizer.dart';
@@ -145,18 +148,14 @@ void main() {
     await backend.login();
 
     final queue = OfflineVisitQueue(
-      synchronizer: BackendVisitSynchronizer(
-        backend: backend,
-        patientIdFor: (_) => seedPatientId,
-      ),
+      synchronizer: BackendVisitSynchronizer(backend: backend),
     );
 
     await queue.add(OfflineVisitRecord(
-      patientName: 'Paciente do seed',
+      patientId: seedPatientId,
       risk: 'red',
       status: 'PENDENTE',
       outcome: 'realizada',
-      version: 0,
     ));
 
     final result = await queue.sync();
@@ -166,21 +165,59 @@ void main() {
     expect(queue.syncedCount, 1);
   });
 
-  test('reenviar a mesma visita não a duplica no servidor', () async {
+  test('a visita confirmada SAI do disco criptografado', () async {
+    // O único lugar onde retenção, criptografia real e servidor real se
+    // encontram: o teste hermético não tem SQLCipher, e o de criptografia não
+    // tem servidor. Minimização (LGPD-RF07 / seção 5.6 de spec/lgpd_design.md):
+    // o que já chegou ao servidor não continua num aparelho que pode ser
+    // perdido ou roubado.
+    const nome = 'sinalacs_retencao_probe.db';
+    await EncryptedLocalDatabase.deleteDatabaseFile(nome);
+
     await backend.login();
 
-    final visit = OfflineVisitRecord(
-      patientName: 'Paciente do seed',
+    final store = SqlCipherVisitStore(
+      keyStore: InMemoryDatabaseKeyStore(),
+      databaseName: nome,
+    );
+    final queue = OfflineVisitQueue(
+      store: store,
+      synchronizer: BackendVisitSynchronizer(backend: backend),
+    );
+
+    await queue.add(OfflineVisitRecord(
+      patientId: seedPatientId,
       risk: 'red',
       status: 'PENDENTE',
       outcome: 'realizada',
-      version: 0,
+    ));
+    expect(await store.load(), hasLength(1), reason: 'a visita não foi gravada');
+
+    final result = await queue.sync();
+
+    expect(result.kind, SyncOutcomeKind.synced, reason: result.message);
+    expect(queue.syncedCount, 1);
+    expect(await store.load(), isEmpty, reason: 'a visita continua no aparelho');
+
+    await store.close();
+    await EncryptedLocalDatabase.deleteDatabaseFile(nome);
+  });
+
+  test('reenviar a mesma visita não a duplica no servidor', () async {
+    await backend.login();
+
+    // `version` fica no padrão 1, que é a versão com que o servidor grava todo
+    // insert. Enviar 0 fazia o reenvio cair na regra de atualização
+    // (`entry.version == existing.version - 1`) e subir para 2 — o oposto da
+    // idempotência que este teste existe para provar.
+    final visit = OfflineVisitRecord(
+      patientId: seedPatientId,
+      risk: 'red',
+      status: 'PENDENTE',
+      outcome: 'realizada',
     );
 
-    final synchronizer = BackendVisitSynchronizer(
-      backend: backend,
-      patientIdFor: (_) => seedPatientId,
-    );
+    final synchronizer = BackendVisitSynchronizer(backend: backend);
 
     final first = await synchronizer.push([visit]);
     // Mesmo localId, mesma versão: é o retry de quem não viu a resposta.

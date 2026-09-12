@@ -20,7 +20,9 @@ import 'dart:io';
 
 import 'package:sinalacs_acs/core/network/backend_client.dart';
 import 'package:sinalacs_acs/core/network/backend_config.dart';
+import 'package:sinalacs_acs/core/services/backend_visit_synchronizer.dart';
 import 'package:sinalacs_acs/core/services/mqtt_secure_client.dart';
+import 'package:sinalacs_acs/core/services/offline_visit_queue.dart';
 import 'package:sinalacs_client/sinalacs_client.dart' as api;
 
 String _arg(List<String> args, String name, String fallback) {
@@ -106,23 +108,26 @@ Future<void> main(List<String> args) async {
       exitCode = 1;
     }
 
-    // Sincronização de visita, pelo endpoint novo.
-    final localId = '00000000-0000-4000-8000-${DateTime.now().millisecondsSinceEpoch % 1000000000000}';
-    final synced = await backend.syncVisits([
-      api.VisitSyncEntry(
-        localId: localId.padRight(36, '0').substring(0, 36),
-        patientId: alert.patientId,
-        scheduledAt: DateTime.now().toUtc(),
-        status: 'realizada',
-        riskLevelBefore: api.RiskLevel.red,
-        notes: const {},
-        version: 0,
-      ),
-    ]);
-    stdout.writeln('  visita sincronizada  ${synced.single.syncStatus.name} '
-        'versão=${synced.single.serverVersion}');
-    if (synced.single.syncStatus != api.SyncStatus.synced) {
-      stderr.writeln('  ERRO: a visita não sincronizou (${synced.single.message}).');
+    // Sincronização de visita pela FILA de produção, não por um VisitSyncEntry
+    // montado à mão: é isto que pega uma fila sem sincronizador ligado, um
+    // patientId errado ou um localId malformado — tudo o que o app faz sozinho.
+    // O único pedaço fora do caminho real é o store: SQLCipher não abre na VM.
+    final queue = OfflineVisitQueue(
+      store: InMemoryVisitStore(),
+      synchronizer: BackendVisitSynchronizer(backend: backend),
+    );
+    await queue.add(OfflineVisitRecord(
+      patientId: alert.patientId,
+      risk: alert.riskLevel,
+      status: 'PENDENTE',
+      outcome: 'realizada',
+    ));
+
+    final synced = await queue.sync();
+    stdout.writeln('  visita sincronizada  ${synced.kind.name} '
+        'processadas=${synced.processed} pendentes=${queue.pendingCount}');
+    if (synced.kind != SyncOutcomeKind.synced || queue.pendingCount != 0) {
+      stderr.writeln('  ERRO: a visita não sincronizou (${synced.message}).');
       exitCode = 1;
     }
 

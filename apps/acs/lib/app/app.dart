@@ -5,6 +5,7 @@ import 'package:sinalacs_acs/core/network/backend_scope.dart';
 import 'package:sinalacs_acs/core/services/alert_feed.dart';
 import 'package:sinalacs_acs/core/services/alert_queue.dart';
 import 'package:sinalacs_acs/core/services/offline_visit_queue.dart';
+import 'package:sinalacs_acs/core/services/visit_queue_factory.dart';
 
 class SinalAcsApp extends StatefulWidget {
   const SinalAcsApp({super.key, this.backend, this.feedBuilder, this.visitQueue});
@@ -26,7 +27,15 @@ class _SinalAcsAppState extends State<SinalAcsApp> {
   /// A tela de visita antes fazia `OfflineVisitQueue()` a cada gravação — uma
   /// instância nova por visita, descartada no retorno do callback. A visita
   /// simplesmente sumia.
-  late final OfflineVisitQueue _visitQueue = widget.visitQueue ?? OfflineVisitQueue();
+  late final OfflineVisitQueue _visitQueue = widget.visitQueue ?? _persistentQueue();
+
+  /// Fila respaldada pelo banco criptografado, com o sincronizador ligado.
+  ///
+  /// A chave vive no Keystore/Keychain, nunca no código. Deixou de ser `static`
+  /// para enxergar [_backend]: sem sincronizador, `sync()` caía no ramo sem
+  /// remetente e devolvia erro — as visitas nunca subiam ao servidor e o que já
+  /// estava confirmado nunca era apagado do disco.
+  OfflineVisitQueue _persistentQueue() => buildVisitQueue(backend: _backend);
 
   @override
   void dispose() {
@@ -50,10 +59,10 @@ class _SinalAcsAppState extends State<SinalAcsApp> {
 }
 
 class LoginScreen extends StatefulWidget {
-  const LoginScreen({super.key, this.feedBuilder, this.visitQueue});
+  const LoginScreen({required this.visitQueue, super.key, this.feedBuilder});
 
   final AlertFeed Function(AlertQueue queue)? feedBuilder;
-  final OfflineVisitQueue? visitQueue;
+  final OfflineVisitQueue visitQueue;
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
@@ -143,15 +152,19 @@ class AcsHomeShell extends StatefulWidget {
   const AcsHomeShell({
     required this.microAreaId,
     required this.acsId,
+    required this.visitQueue,
     super.key,
     this.feedBuilder,
-    this.visitQueue,
   });
 
   final String microAreaId;
   final String acsId;
   final AlertFeed Function(AlertQueue queue)? feedBuilder;
-  final OfflineVisitQueue? visitQueue;
+
+  /// Obrigatória: a tela de visita usava `widget.visitQueue ?? OfflineVisitQueue()`,
+  /// e um dia em que o shell fosse construído sem fila voltaria a descartar a
+  /// visita em silêncio.
+  final OfflineVisitQueue visitQueue;
 
   @override
   State<AcsHomeShell> createState() => _AcsHomeShellState();
@@ -166,12 +179,33 @@ class _AcsHomeShellState extends State<AcsHomeShell> {
 
   bool _brokerConnected = false;
   String? _feedError;
+  String? _storageError;
   PrioritizedAlert? _selected;
 
   @override
   void initState() {
     super.initState();
     _connectFeed();
+    _restoreVisits();
+  }
+
+  /// Recarrega as visitas gravadas em execuções anteriores.
+  ///
+  /// Sem esta chamada, persistir não serviria para nada — `restore()` existia e
+  /// só era exercitado por teste.
+  ///
+  /// Falhar aqui **não** pode ser silencioso nem fatal: o ACS segue registrando
+  /// visitas em memória, para não travar o trabalho em campo, mas precisa saber
+  /// que elas não estão sendo salvas. Cair para memória sem avisar perderia
+  /// visitas sem ninguém perceber. Manter em RAM não viola o INV-04, que proíbe
+  /// *persistir* em texto plano.
+  Future<void> _restoreVisits() async {
+    await widget.visitQueue.restore();
+    if (!mounted) return;
+    setState(() => _storageError = widget.visitQueue.persistenceFailed
+        ? 'As visitas não estão sendo salvas neste aparelho. '
+            'Sincronize antes de fechar o aplicativo.'
+        : null);
   }
 
   /// Assina o tópico da microárea da sessão.
@@ -223,7 +257,7 @@ class _AcsHomeShellState extends State<AcsHomeShell> {
       AcsDestination.area => const TerritorializationScreen(),
       AcsDestination.queue => DashboardScreen(
           queue: _queue,
-          feedError: _feedError,
+          feedError: _feedError ?? _storageError,
           onAcknowledge: _acknowledge,
           onEscalate: (alert) => setState(() { _selected = alert; destination = AcsDestination.escalation; }),
           onVisit: (alert) => setState(() { _selected = alert; destination = AcsDestination.visit; }),
@@ -231,7 +265,7 @@ class _AcsHomeShellState extends State<AcsHomeShell> {
       AcsDestination.map => const MapScreen(),
       AcsDestination.visit => VisitRegistrationScreen(
           alert: _selected,
-          queue: widget.visitQueue ?? OfflineVisitQueue(),
+          queue: widget.visitQueue,
         ),
       AcsDestination.escalation => EscalationScreen(alert: _selected),
       AcsDestination.geofencing => const GeofencingScreen(),
@@ -411,36 +445,115 @@ class VisitRegistrationScreen extends StatefulWidget {
 class _VisitRegistrationScreenState extends State<VisitRegistrationScreen> {
   String outcome = 'Realizada com sucesso';
   final notes = TextEditingController();
+  bool _syncing = false;
 
   @override
   void dispose() { notes.dispose(); super.dispose(); }
 
+  /// Rótulo montado a cada build a partir do alerta que está em memória.
+  ///
+  /// Nunca é gravado: o que vai para a fila é `alert.patientId` inteiro. Antes
+  /// persistia-se este texto e o UUID era descartado, então o servidor recusava
+  /// a visita por identificador inválido — e o disco guardava, sem precisar,
+  /// uma linha legível sobre a pessoa.
   String get _patientLabel {
     final alert = widget.alert;
     return alert == null ? 'Visita sem alerta vinculado' : 'Paciente ${alert.patientId.substring(0, 8)}';
   }
 
   Future<void> _save() async {
+    final alert = widget.alert;
+    // Sem alerta não há paciente, e `visits.sync` exige UUID: gravar aqui
+    // criaria um registro que nunca sobe e nunca sai do aparelho.
+    if (alert == null) return;
+
     await widget.queue.add(OfflineVisitRecord(
-      patientName: _patientLabel,
-      risk: widget.alert?.riskLevel ?? 'desconhecido',
+      patientId: alert.patientId,
+      risk: alert.riskLevel,
       status: 'PENDENTE',
       outcome: outcome,
     ));
     if (!mounted) return;
+    setState(() {});
     _message(context, 'Visita salva e enfileirada localmente para sincronização.');
   }
 
+  Future<void> _sync() async {
+    setState(() => _syncing = true);
+
+    final SyncOutcome result;
+    try {
+      result = await widget.queue.sync();
+    } finally {
+      // A fila já captura falha de rede, mas um erro inesperado aqui deixaria
+      // o botão desabilitado para o resto da sessão.
+      if (mounted) setState(() => _syncing = false);
+    }
+    if (!mounted) return;
+
+    _message(context, switch (result.kind) {
+      SyncOutcomeKind.synced => '${result.processed} visita(s) enviada(s) ao servidor.',
+      SyncOutcomeKind.conflict => '${result.processed} visita(s) em conflito. Continuam na fila para resolução.',
+      SyncOutcomeKind.empty => 'Não há visitas pendentes.',
+      SyncOutcomeKind.error => result.message ??
+          'Não foi possível sincronizar. As visitas continuam salvas no aparelho.',
+    });
+  }
+
   @override
-  Widget build(BuildContext context) => _page([
-    Text(_patientLabel, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-    const SizedBox(height: 16),
-    DropdownButtonFormField<String>(initialValue: outcome, decoration: const InputDecoration(labelText: 'Status do atendimento'), items: const ['Realizada com sucesso', 'Paciente ausente', 'Recusou atendimento'].map((v) => DropdownMenuItem(value: v, child: Text(v))).toList(), onChanged: (v) => setState(() => outcome = v!)),
-    const SizedBox(height: 16),
-    TextField(controller: notes, maxLines: 4, decoration: const InputDecoration(labelText: 'Observações de campo')),
-    const SizedBox(height: 20),
-    FilledButton.icon(key: const Key('save_visit'), onPressed: _save, icon: const Icon(Icons.save_outlined), label: const Text('Salvar e enfileirar sincronização')),
-  ]);
+  Widget build(BuildContext context) {
+    final queue = widget.queue;
+    final semAlerta = widget.alert == null;
+
+    return _page([
+      Text(_patientLabel, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+      if (semAlerta) const Padding(
+        padding: EdgeInsets.only(top: 8),
+        child: Text(
+          key: Key('visit_needs_alert'),
+          'Selecione um alerta na fila para registrar a visita.',
+          style: TextStyle(color: AcsColors.yellow),
+        ),
+      ),
+      const SizedBox(height: 16),
+      DropdownButtonFormField<String>(initialValue: outcome, decoration: const InputDecoration(labelText: 'Status do atendimento'), items: const ['Realizada com sucesso', 'Paciente ausente', 'Recusou atendimento'].map((v) => DropdownMenuItem(value: v, child: Text(v))).toList(), onChanged: semAlerta ? null : (v) => setState(() => outcome = v!)),
+      const SizedBox(height: 16),
+      TextField(
+        controller: notes,
+        maxLines: 4,
+        enabled: !semAlerta,
+        decoration: const InputDecoration(
+          labelText: 'Observações de campo',
+          // A tela coleta o texto e o descarta. Dizer isso é o mínimo enquanto
+          // o envio não existe; persistir texto livre num aparelho que pode ser
+          // roubado é decisão de LGPD que merece o próprio PR.
+          helperText: 'Ainda não é enviado ao servidor.',
+        ),
+      ),
+      const SizedBox(height: 20),
+      FilledButton.icon(key: const Key('save_visit'), onPressed: semAlerta ? null : _save, icon: const Icon(Icons.save_outlined), label: const Text('Salvar e enfileirar sincronização')),
+      const Divider(height: 32),
+      Text(key: const Key('pending_visits_count'), 'Pendentes de sincronização: ${queue.pendingCount}'),
+      if (queue.conflictCount > 0) Padding(
+        padding: const EdgeInsets.only(top: 4),
+        child: Text(
+          key: const Key('conflict_visits_count'),
+          'Em conflito: ${queue.conflictCount}',
+          style: const TextStyle(color: AcsColors.yellow, fontWeight: FontWeight.bold),
+        ),
+      ),
+      const SizedBox(height: 12),
+      OutlinedButton.icon(
+        key: const Key('sync_visits'),
+        onPressed: _syncing || queue.pendingCount == 0 ? null : _sync,
+        style: OutlinedButton.styleFrom(minimumSize: const Size(48, 52)),
+        icon: _syncing
+            ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2))
+            : const Icon(Icons.cloud_upload_outlined),
+        label: const Text('Sincronizar agora'),
+      ),
+    ]);
+  }
 }
 
 class EscalationScreen extends StatelessWidget {
@@ -512,4 +625,12 @@ class _Header extends StatelessWidget implements PreferredSizeWidget {
     ],
   );
 }
-void _message(BuildContext context, String message) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+/// Mostra uma mensagem, substituindo a anterior em vez de enfileirar.
+///
+/// Sem `hideCurrentSnackBar`, a confirmação da gravação ficava 4 s na tela e o
+/// resultado da sincronização entrava na fila atrás dela: a pessoa tocava em
+/// "Sincronizar agora" e continuava lendo "visita salva".
+void _message(BuildContext context, String message) =>
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
