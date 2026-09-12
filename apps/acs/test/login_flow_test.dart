@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:sinalacs_acs/app/app.dart';
 import 'package:sinalacs_acs/core/network/backend_client.dart';
 import 'package:sinalacs_acs/core/services/alert_feed.dart';
@@ -339,6 +340,8 @@ void main() {
       await tester.tap(find.text('Iniciar rota de visita'));
       await tester.pumpAndSettle();
 
+      await tester.tap(find.byKey(const Key('arrival_confirmation')));
+      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('save_visit')));
       await tester.pumpAndSettle();
 
@@ -370,6 +373,8 @@ void main() {
       await tester.tap(find.text('Iniciar rota de visita'));
       await tester.pumpAndSettle();
 
+      await tester.tap(find.byKey(const Key('arrival_confirmation')));
+      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('save_visit')));
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('pending_visits_count')), findsOneWidget);
@@ -390,6 +395,53 @@ void main() {
       expect(backend.syncedVisitBatches.single.single.patientId, seedPatientId);
       expect(visitQueue.pendingCount, 0);
       expect(find.text('Pendentes de sincronização: 0'), findsOneWidget);
+    });
+
+    testWidgets('deve exigir confirmação de chegada antes de salvar a visita', (tester) async {
+      final visitQueue = OfflineVisitQueue();
+      late FakeAlertFeed feed;
+
+      await tester.pumpWidget(SinalAcsApp(
+        backend: FakeAcsBackend(),
+        feedBuilder: (queue) => feed = FakeAlertFeed(queue),
+        visitQueue: visitQueue,
+      ));
+
+      await tester.tap(find.byKey(const Key('login_button')));
+      await tester.pumpAndSettle();
+
+      feed.deliver(testAlert(alertId: 'alerta-chegada', riskLevel: 'yellow'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Iniciar rota de visita'));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('arrival_confirmation')), findsOneWidget);
+      final botao = tester.widget<FilledButton>(find.byKey(const Key('save_visit')));
+      expect(botao.onPressed, isNull);
+    });
+
+    testWidgets('deve informar explicitamente quando o ACS alcançou o local do paciente', (tester) async {
+      final visitQueue = OfflineVisitQueue();
+      final alert = testAlert(alertId: 'alerta-geofence', riskLevel: 'yellow');
+      final hash = alert.locationHash;
+      final seed = hash.codeUnits.fold<int>(0, (sum, code) => sum + code) % 1000;
+      final destination = LatLng(
+        -15.7942 + ((seed % 7) * 0.0025),
+        -47.8828 + (((seed ~/ 7) % 9) * 0.0035),
+      );
+
+      await tester.pumpWidget(MaterialApp(
+        home: VisitRegistrationScreen(
+          queue: visitQueue,
+          alert: alert,
+          currentPosition: destination,
+        ),
+      ));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Local alcançado. Você pode registrar a visita agora.'), findsOneWidget);
+      expect(find.byKey(const Key('arrival_confirmation')), findsOneWidget);
     });
 
     testWidgets('sem alerta vinculado não deixa gravar', (tester) async {
@@ -437,6 +489,8 @@ void main() {
       await tester.tap(find.text('Iniciar rota de visita'));
       await tester.pumpAndSettle();
 
+      await tester.tap(find.byKey(const Key('arrival_confirmation')));
+      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('save_visit')));
       await tester.pumpAndSettle();
       await tester.pump(const Duration(seconds: 5));
@@ -520,6 +574,8 @@ void main() {
       feed.deliver(testAlert(alertId: 'alerta-1', riskLevel: 'yellow'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Iniciar rota de visita'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('arrival_confirmation')));
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('save_visit')));
       await tester.pumpAndSettle();

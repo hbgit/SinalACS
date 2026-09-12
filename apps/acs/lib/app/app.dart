@@ -11,15 +11,25 @@ import 'package:sinalacs_acs/core/services/alert_feed.dart';
 import 'package:sinalacs_acs/core/services/alert_queue.dart';
 import 'package:sinalacs_acs/core/services/offline_visit_queue.dart';
 import 'package:sinalacs_acs/core/services/reconnect_schedule.dart';
+import 'package:sinalacs_acs/core/services/route_service.dart';
 import 'package:sinalacs_acs/core/services/visit_queue_factory.dart';
 
 class SinalAcsApp extends StatefulWidget {
-  const SinalAcsApp({super.key, this.backend, this.feedBuilder, this.visitQueue});
+  const SinalAcsApp({
+    super.key,
+    this.backend,
+    this.feedBuilder,
+    this.visitQueue,
+    this.initialAlert,
+    this.currentPosition,
+  });
 
   /// Injetáveis para teste. Em execução normal são as implementações reais.
   final AcsBackend? backend;
   final AlertFeed Function(AlertQueue queue)? feedBuilder;
   final OfflineVisitQueue? visitQueue;
+  final PrioritizedAlert? initialAlert;
+  final LatLng? currentPosition;
 
   @override
   State<SinalAcsApp> createState() => _SinalAcsAppState();
@@ -59,16 +69,26 @@ class _SinalAcsAppState extends State<SinalAcsApp> {
           home: LoginScreen(
             feedBuilder: widget.feedBuilder,
             visitQueue: _visitQueue,
+            initialAlert: widget.initialAlert,
+            initialPosition: widget.currentPosition,
           ),
         ),
       );
 }
 
 class LoginScreen extends StatefulWidget {
-  const LoginScreen({required this.visitQueue, super.key, this.feedBuilder});
+  const LoginScreen({
+    required this.visitQueue,
+    super.key,
+    this.feedBuilder,
+    this.initialAlert,
+    this.initialPosition,
+  });
 
   final AlertFeed Function(AlertQueue queue)? feedBuilder;
   final OfflineVisitQueue visitQueue;
+  final PrioritizedAlert? initialAlert;
+  final LatLng? initialPosition;
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
@@ -109,6 +129,8 @@ class _LoginScreenState extends State<LoginScreen> {
           acsId: session.userId,
           feedBuilder: widget.feedBuilder,
           visitQueue: widget.visitQueue,
+          initialAlert: widget.initialAlert,
+          initialPosition: widget.initialPosition,
         ),
       ));
     } on BackendFailure catch (failure) {
@@ -168,11 +190,15 @@ class AcsHomeShell extends StatefulWidget {
     required this.visitQueue,
     super.key,
     this.feedBuilder,
+    this.initialAlert,
+    this.initialPosition,
   });
 
   final String microAreaId;
   final String acsId;
   final AlertFeed Function(AlertQueue queue)? feedBuilder;
+  final PrioritizedAlert? initialAlert;
+  final LatLng? initialPosition;
 
   /// Obrigatória: a tela de visita usava `widget.visitQueue ?? OfflineVisitQueue()`,
   /// e um dia em que o shell fosse construído sem fila voltaria a descartar a
@@ -205,6 +231,8 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
   @override
   void initState() {
     super.initState();
+    _selected = widget.initialAlert;
+    _currentPosition ??= widget.initialPosition;
     WidgetsBinding.instance.addObserver(this);
     // Assinado antes de start(): uma queda depois de conectar chega aqui
     // sozinha, via autoReconnect do mqtt_client — é o que mantém o chip do
@@ -425,13 +453,25 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
           queue: _queue,
           currentPosition: _currentPosition,
           apiKey: const String.fromEnvironment('GOOGLE_MAPS_API_KEY', defaultValue: ''),
+          onVisit: (alert) => setState(() {
+            _selected = alert;
+            destination = AcsDestination.visit;
+          }),
         ),
       AcsDestination.visit => VisitRegistrationScreen(
           alert: _selected,
           queue: widget.visitQueue,
+          currentPosition: _currentPosition,
         ),
       AcsDestination.escalation => EscalationScreen(alert: _selected),
-      AcsDestination.geofencing => const GeofencingScreen(),
+      AcsDestination.geofencing => GeofencingScreen(
+          queue: _queue,
+          currentPosition: _currentPosition,
+          onVisit: (alert) => setState(() {
+            _selected = alert;
+            destination = AcsDestination.visit;
+          }),
+        ),
       AcsDestination.notices => const NoticesScreen(),
     }),
     bottomNavigationBar: NavigationBar(
@@ -647,14 +687,24 @@ class MapScreen extends StatefulWidget {
     required this.queue,
     this.currentPosition,
     this.apiKey = '',
+    this.onVisit,
     super.key,
   });
 
   final AlertQueue queue;
   final LatLng? currentPosition;
   final String apiKey;
+  final void Function(PrioritizedAlert alert)? onVisit;
 
   static const LatLng _fallbackCenter = LatLng(-15.7942, -47.8828);
+
+  static LatLng alertPositionFor(PrioritizedAlert alert) {
+    final hash = alert.locationHash;
+    final seed = hash.codeUnits.fold<int>(0, (sum, code) => sum + code) % 1000;
+    final lat = -15.7942 + ((seed % 7) * 0.0025);
+    final lng = -47.8828 + (((seed ~/ 7) % 9) * 0.0035);
+    return LatLng(lat, lng);
+  }
 
   @override
   State<MapScreen> createState() => _MapScreenState();
@@ -662,6 +712,30 @@ class MapScreen extends StatefulWidget {
 
 class _MapScreenState extends State<MapScreen> {
   PrioritizedAlert? _selectedAlert;
+  List<LatLng> _routePoints = const <LatLng>[];
+  RoutePlan? _routePlan;
+  final RouteService _routeService = const RouteService(speedKmh: 20);
+
+  void _buildRouteFor([PrioritizedAlert? alert]) {
+    final target = alert ?? _selectedAlert ?? (widget.queue.alerts.isEmpty ? null : widget.queue.alerts.first);
+    final origin = widget.currentPosition;
+    if (target == null || origin == null) {
+      setState(() {
+        _routePoints = const <LatLng>[];
+        _routePlan = null;
+      });
+      _message(context, 'Sem posição atual ou alerta disponível para traçar a rota.');
+      return;
+    }
+
+    final destination = _markerPosition(target);
+    final plan = _routeService.plan(origin: origin, destination: destination);
+    setState(() {
+      _selectedAlert = target;
+      _routePoints = plan.points;
+      _routePlan = plan;
+    });
+  }
 
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
@@ -684,7 +758,7 @@ class _MapScreenState extends State<MapScreen> {
                 icon: _markerColor(alert.riskLevel),
                 consumeTapEvents: true,
                 onTap: () {
-                  setState(() => _selectedAlert = alert);
+                  _buildRouteFor(alert);
                   _showAlertDetail(context, alert);
                 },
                 infoWindow: InfoWindow(
@@ -694,10 +768,21 @@ class _MapScreenState extends State<MapScreen> {
               ),
           };
 
+          final polylines = <Polyline>{
+            if (_routePoints.length >= 2)
+              Polyline(
+                polylineId: const PolylineId('route_active'),
+                points: _routePoints,
+                color: AcsColors.accent,
+                width: 6,
+              ),
+          };
+
           final map = hasApiKey
               ? GoogleMap(
                   initialCameraPosition: CameraPosition(target: center, zoom: 13),
                   markers: markers,
+                  polylines: polylines,
                   myLocationEnabled: widget.currentPosition != null,
                   myLocationButtonEnabled: false,
                   mapToolbarEnabled: false,
@@ -732,9 +817,35 @@ class _MapScreenState extends State<MapScreen> {
               const SizedBox(height: 12),
               _AlertMapSummary(alert: _selectedAlert!),
             ],
+            if (_routePlan != null) ...[
+              const SizedBox(height: 8),
+              Text(
+                switch (_routePlan!.status) {
+                  RouteStatus.complete => 'Rota concluída • ${_routePlan!.distanceKm.toStringAsFixed(1)} km • ETA ${_routePlan!.etaMinutes} min',
+                  _ => 'Rota ativa • ${_routePlan!.distanceKm.toStringAsFixed(1)} km • ETA ${_routePlan!.etaMinutes} min',
+                },
+                style: const TextStyle(color: AcsColors.accent, fontWeight: FontWeight.bold),
+              ),
+              if (_routePlan!.status == RouteStatus.complete && _selectedAlert != null) ...[
+                const SizedBox(height: 8),
+                const Text(
+                  'Local alcançado. Você pode abrir o registro de visita agora.',
+                  style: TextStyle(color: AcsColors.green, fontWeight: FontWeight.bold),
+                ),
+              ],
+            ],
             const SizedBox(height: 12),
             SizedBox(height: 260, child: map),
             const SizedBox(height: 12),
+            if (_routePlan != null && _routePlan!.status == RouteStatus.complete && _selectedAlert != null) ...[
+              FilledButton.icon(
+                key: const Key('visit_at_destination'),
+                onPressed: () => widget.onVisit?.call(_selectedAlert!),
+                icon: const Icon(Icons.assignment_turned_in_outlined),
+                label: const Text('Registrar visita no local'),
+              ),
+              const SizedBox(height: 12),
+            ],
             const Wrap(
               spacing: 8,
               runSpacing: 8,
@@ -746,7 +857,7 @@ class _MapScreenState extends State<MapScreen> {
             ),
             const SizedBox(height: 16),
             FilledButton(
-              onPressed: () => _message(context, 'Rota e geofencing serão integrados ao mapa real.'),
+              onPressed: () => _buildRouteFor(),
               child: const Text('Traçar rota eficiente'),
             ),
           ]);
@@ -770,9 +881,33 @@ class _MapScreenState extends State<MapScreen> {
               const SizedBox(height: 8),
               Text('Microárea: ${alert.microAreaId.substring(0, 8)}'),
               const SizedBox(height: 16),
+              Row(
+                children: [
+                  Expanded(
+                    child: FilledButton(
+                      onPressed: () {
+                        Navigator.pop(sheetContext);
+                        _buildRouteFor(alert);
+                      },
+                      child: const Text('Traçar rota'),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () {
+                        Navigator.pop(sheetContext);
+                        widget.onVisit?.call(alert);
+                      },
+                      child: const Text('Ir para visita'),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
               SizedBox(
                 width: double.infinity,
-                child: FilledButton(
+                child: TextButton(
                   onPressed: () => Navigator.pop(sheetContext),
                   child: const Text('Fechar'),
                 ),
@@ -815,13 +950,7 @@ class _MapScreenState extends State<MapScreen> {
         _ => 'Não classificado',
       };
 
-  LatLng _markerPosition(PrioritizedAlert alert) {
-    final hash = alert.locationHash;
-    final seed = hash.codeUnits.fold<int>(0, (sum, code) => sum + code) % 1000;
-    final lat = -15.7942 + ((seed % 7) * 0.0025);
-    final lng = -47.8828 + (((seed / 7).floor() % 9) * 0.0035);
-    return LatLng(lat, lng);
-  }
+  LatLng _markerPosition(PrioritizedAlert alert) => MapScreen.alertPositionFor(alert);
 
   String _time(DateTime value) {
     final local = value.toLocal();
@@ -891,12 +1020,13 @@ class _LegendChip extends StatelessWidget {
 }
 
 class VisitRegistrationScreen extends StatefulWidget {
-  const VisitRegistrationScreen({required this.queue, super.key, this.alert});
+  const VisitRegistrationScreen({required this.queue, super.key, this.alert, this.currentPosition});
 
   /// A fila é recebida pronta, não construída aqui: uma instância por gravação
   /// descartava a visita assim que o callback retornava.
   final OfflineVisitQueue queue;
   final PrioritizedAlert? alert;
+  final LatLng? currentPosition;
 
   @override
   State<VisitRegistrationScreen> createState() => _VisitRegistrationScreenState();
@@ -906,9 +1036,34 @@ class _VisitRegistrationScreenState extends State<VisitRegistrationScreen> {
   String outcome = 'Realizada com sucesso';
   final notes = TextEditingController();
   bool _syncing = false;
+  bool _arrivalConfirmed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _arrivalConfirmed = _gpsArrivalMatches();
+  }
+
+  @override
+  void didUpdateWidget(covariant VisitRegistrationScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.currentPosition != widget.currentPosition || oldWidget.alert != widget.alert) {
+      _arrivalConfirmed = _gpsArrivalMatches();
+    }
+  }
 
   @override
   void dispose() { notes.dispose(); super.dispose(); }
+
+  bool _gpsArrivalMatches() {
+    final alert = widget.alert;
+    final position = widget.currentPosition;
+    if (alert == null || position == null) return false;
+
+    final destination = MapScreen.alertPositionFor(alert);
+    const routeService = RouteService();
+    return routeService.arrivalStatus(origin: position, destination: destination) == ArrivalStatus.arrived;
+  }
 
   /// Rótulo montado a cada build a partir do alerta que está em memória.
   ///
@@ -991,19 +1146,34 @@ class _VisitRegistrationScreenState extends State<VisitRegistrationScreen> {
         ),
       ),
       const SizedBox(height: 16),
-      DropdownButtonFormField<String>(initialValue: outcome, decoration: const InputDecoration(labelText: 'Status do atendimento'), items: const ['Realizada com sucesso', 'Paciente ausente', 'Recusou atendimento'].map((v) => DropdownMenuItem(value: v, child: Text(v))).toList(), onChanged: semAlerta ? null : (v) => setState(() => outcome = v!)),
+      if (!semAlerta) CheckboxListTile(
+        key: const Key('arrival_confirmation'),
+        value: _arrivalConfirmed,
+        onChanged: (value) => setState(() => _arrivalConfirmed = value ?? false),
+        title: const Text('Cheguei ao local e confirmei a presença do paciente.'),
+        contentPadding: EdgeInsets.zero,
+      ),
+      const SizedBox(height: 8),
+      DropdownButtonFormField<String>(initialValue: outcome, decoration: const InputDecoration(labelText: 'Status do atendimento'), items: const ['Realizada com sucesso', 'Paciente ausente', 'Recusou atendimento'].map((v) => DropdownMenuItem(value: v, child: Text(v))).toList(), onChanged: semAlerta || !_arrivalConfirmed ? null : (v) => setState(() => outcome = v!)),
       const SizedBox(height: 16),
       TextField(
         controller: notes,
         maxLines: 4,
-        enabled: !semAlerta,
+        enabled: !semAlerta && _arrivalConfirmed,
         decoration: const InputDecoration(
           labelText: 'Observações de campo',
           helperText: 'São salvas localmente e enviadas com a visita quando sincronizar.',
         ),
       ),
       const SizedBox(height: 20),
-      FilledButton.icon(key: const Key('save_visit'), onPressed: semAlerta ? null : _save, icon: const Icon(Icons.save_outlined), label: const Text('Salvar e enfileirar sincronização')),
+      FilledButton.icon(key: const Key('save_visit'), onPressed: semAlerta || !_arrivalConfirmed ? null : _save, icon: const Icon(Icons.save_outlined), label: const Text('Salvar e enfileirar sincronização')),
+      if (!semAlerta && _arrivalConfirmed) ...[
+        const SizedBox(height: 12),
+        const Text(
+          'Local alcançado. Você pode registrar a visita agora.',
+          style: TextStyle(color: AcsColors.green, fontWeight: FontWeight.bold),
+        ),
+      ],
       const Divider(height: 32),
       Text(
         key: const Key('pending_visits_count'),
@@ -1055,7 +1225,72 @@ class EscalationScreen extends StatelessWidget {
     ]);
   }
 }
-class GeofencingScreen extends StatelessWidget { const GeofencingScreen({super.key}); @override Widget build(BuildContext context) => _page([const Icon(Icons.location_searching, size: 44), const SizedBox(height: 16), const Text('Check-in passivo', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)), const SizedBox(height: 8), const Text('Proximidade demonstrativa: residência de Maria Oliveira, a 18 metros.'), const SizedBox(height: 20), FilledButton(onPressed: () => _message(context, 'Use a tela Visita para registrar o atendimento.'), child: const Text('Abrir formulário da visita'))]); }
+class GeofencingScreen extends StatelessWidget {
+  const GeofencingScreen({
+    required this.queue,
+    this.currentPosition,
+    this.onVisit,
+    super.key,
+  });
+
+  final AlertQueue queue;
+  final LatLng? currentPosition;
+  final void Function(PrioritizedAlert alert)? onVisit;
+
+  @override
+  Widget build(BuildContext context) => AnimatedBuilder(
+        animation: queue,
+        builder: (context, _) {
+          final alert = queue.alerts.firstOrNull;
+          if (alert == null) {
+            return _page([
+              const Icon(Icons.location_searching, size: 44),
+              const SizedBox(height: 16),
+              const Text('Check-in passivo', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 8),
+              const Text('Nenhum alerta disponível para monitorar proximidade.'),
+            ]);
+          }
+
+          final destination = MapScreen.alertPositionFor(alert);
+          const routeService = RouteService();
+          final status = routeService.arrivalStatus(origin: currentPosition, destination: destination);
+          final distance = currentPosition == null
+              ? null
+              : routeService.distanceToDestination(origin: currentPosition!, destination: destination);
+
+          return _page([
+            const Icon(Icons.location_searching, size: 44),
+            const SizedBox(height: 16),
+            const Text('Check-in passivo', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 12),
+            _InfoRow('Paciente', 'Paciente ${alert.patientId.substring(0, 8)}'),
+            _InfoRow('Risco', alert.riskLevel),
+            _InfoRow('Raio de chegada', '${(routeService.arrivalThresholdKm * 1000).round()} m'),
+            const SizedBox(height: 12),
+            Text(
+              switch (status) {
+                ArrivalStatus.unavailable => 'Localização atual indisponível. O check-in não pode ser confirmado.',
+                ArrivalStatus.approaching => 'A caminho do local${distance == null ? '' : ' • ${(distance * 1000).round()} m restantes'}.',
+                ArrivalStatus.arrived => 'Local alcançado. O registro da visita está liberado.',
+              },
+              key: const Key('geofence_status'),
+              style: TextStyle(
+                color: status == ArrivalStatus.arrived ? AcsColors.green : AcsColors.accent,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 20),
+            FilledButton.icon(
+              key: const Key('geofence_visit'),
+              onPressed: status == ArrivalStatus.arrived ? () => onVisit?.call(alert) : null,
+              icon: const Icon(Icons.assignment_turned_in_outlined),
+              label: const Text('Abrir registro da visita'),
+            ),
+          ]);
+        },
+      );
+}
 class NoticesScreen extends StatefulWidget { const NoticesScreen({super.key}); @override State<NoticesScreen> createState() => _NoticesScreenState(); }
 class _NoticesScreenState extends State<NoticesScreen> { final notice = TextEditingController(); @override void dispose() { notice.dispose(); super.dispose(); } @override Widget build(BuildContext context) => _page([const Text('Aviso comunitário', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)), const SizedBox(height: 16), const TextField(decoration: InputDecoration(labelText: 'Público-alvo', hintText: 'Pacientes com condições crônicas')), const SizedBox(height: 16), TextField(controller: notice, maxLines: 4, decoration: const InputDecoration(labelText: 'Mensagem')), const SizedBox(height: 20), FilledButton(onPressed: () => _message(context, 'Envio depende da integração de notificações push.'), child: const Text('Preparar aviso'))]); }
 
@@ -1107,7 +1342,11 @@ class _Header extends StatelessWidget implements PreferredSizeWidget {
 /// Sem `hideCurrentSnackBar`, a confirmação da gravação ficava 4 s na tela e o
 /// resultado da sincronização entrava na fila atrás dela: a pessoa tocava em
 /// "Sincronizar agora" e continuava lendo "visita salva".
-void _message(BuildContext context, String message) =>
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(content: Text(message)));
+void _message(BuildContext context, String message) {
+  final messenger = ScaffoldMessenger.maybeOf(context);
+  if (messenger == null) return;
+
+  messenger
+    ..hideCurrentSnackBar()
+    ..showSnackBar(SnackBar(content: Text(message)));
+}
