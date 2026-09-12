@@ -2,74 +2,149 @@
 
 ## Visão geral do projeto
 
-Este repositório contém a definição do produto, arquitetura e protótipos do SinalACS, uma plataforma para priorização de atendimentos em Atenção Primária à Saúde.
+O SinalACS é uma plataforma para priorização de atendimentos na Atenção Primária à Saúde, transformando sinais clínicos estruturados em uma fila de trabalho para o ACS (Agente Comunitário de Saúde), ordenada por risco e preparada para operar em conectividade instável.
 
-A intenção principal do projeto é apoiar dois fluxos centrais:
+O repositório já contém um protótipo funcional com:
+- backend em Dart/Serverpod;
+- apps Flutter para paciente e ACS;
+- PostgreSQL como persistência central;
+- broker MQTT para entrega de alertas em tempo real;
+- fluxo de sincronização offline para visitas do ACS.
+
+Os dois fluxos centrais continuam sendo:
 - paciente: autenticação simples, alerta de urgência, triagem estruturada e acompanhamento de status;
-- ACS: priorização dinâmica, territorialização, registro offline e acompanhamento de microárea.
+- ACS: priorização dinâmica, territorialização por microárea, registro offline e acompanhamento do território.
 
-## Documentos fundamentais
+## Leitura obrigatória antes de implementar
 
-Antes de implementar qualquer funcionalidade, consulte primeiro estes arquivos:
-- [README.md](README.md) – visão geral do produto e contexto de negócio;
-- [spec/idea.md](spec/idea.md) – conceito e objetivo do produto;
-- [spec/PRD_system.md](spec/PRD_system.md) – requisitos, JTBD, invariantes e métricas;
-- [spec/stack.md](spec/stack.md) – arquitetura de stack, infraestrutura e decisões técnicas;
-- [spec/ui_design.md](spec/ui_design.md) – linguagem visual e comportamento de UX;
-- [spec/ui_acs](spec/ui_acs) – protótipos das telas do ACS;
-- [spec/ui_paciente](spec/ui_paciente) – protótipos das telas do paciente;
-- [CLAUDE.md](CLAUDE.md) – guia de arquitetura e comandos para agentes de IA, mais atualizado que este arquivo quanto ao estado de implementação;
-- [PROGRESS.md](PROGRESS.md) – status real dos milestones já implementados;
-- [backend/](backend) – backend Serverpod (workspace Dart com `sinalacs_server` e o cliente gerado `sinalacs_client`);
-- [apps/acs](apps/acs) e [apps/patient](apps/patient) – apps Flutter implementados;
-- [docs/](docs) – documentação visual das telas dos apps.
+Antes de mexer em produto, arquitetura ou comportamento, consulte primeiro:
+- [README.md](README.md) — visão geral do produto e estado atual;
+- [spec/PRD_system.md](spec/PRD_system.md) — requisitos, JTBD, invariantes e métricas;
+- [spec/stack.md](spec/stack.md) — decisões de stack e infraestrutura;
+- [spec/ui_design.md](spec/ui_design.md) — linguagem visual e UX;
+- [spec/lgpd_design.md](spec/lgpd_design.md) — privacidade e LGPD;
+- [CLAUDE.md](CLAUDE.md) — guia técnico e comandos para IA; é a referência mais atualizada do repositório;
+- [PROGRESS.md](PROGRESS.md) — status dos milestones e histórico de migração;
+- [backend/](backend) — workspace Dart com `sinalacs_server` e `sinalacs_client`;
+- [apps/acs](apps/acs) e [apps/patient](apps/patient) — aplicativos Flutter reais;
+- [spec/ui_acs](spec/ui_acs) e [spec/ui_paciente](spec/ui_paciente) — protótipos visuais e fluxos do produto.
 
-## Regras de trabalho para agentes de IA
+Quando houver conflito entre convenções gerais e documentação do projeto, a documentação do projeto vence.
+
+## Invariantes de negócio e segurança
+
+Não violar estes pontos sob qualquer hipótese:
+- a microárea do ACS restringe o acesso apenas ao território correspondente;
+- a classificação de risco é determinística e não pode ser alterada por intervenção manual no fluxo de triagem;
+- alertas vermelhos nunca podem ser descartados silenciosamente;
+- dados de saúde devem seguir os padrões de privacidade e LGPD;
+- o cliente ACS deve operar mesmo com rede instável;
+- a sincronização local/central é uma área crítica de risco arquitetural.
+
+## Arquitetura atual do repositório
+
+### Backend
+- O backend está em um workspace Dart em [backend/](backend), com os pacotes `sinalacs_server` e `sinalacs_client`.
+- A stack atual é Serverpod, não um servidor hand-rolled em `dart:io`.
+- O servidor usa PostgreSQL e MQTT; a autenticação de desenvolvimento é opcional e não substitui autenticação institucional real.
+- A camada de domínio fica em `backend/sinalacs_server/lib/src/application/` e a infraestrutura em `.../infrastructure/`.
+- Os modelos e endpoints são definidos com Serverpod; não se deve editar manualmente arquivos gerados em `lib/src/generated/` ou migrações sem regenerar via `serverpod generate` e `serverpod create-migration`.
+- O fluxo principal inclui: `auth.developmentLogin`, `triage.evaluate`, `alerts.createRedAlert`, `alerts.acknowledge` e `visits.sync`.
+- MQTT conecta em background após boot, com reconexão exponencial e sem bloquear a API.
+
+### Apps Flutter
+- A app do paciente e a app do ACS vivem em [apps/patient](apps/patient) e [apps/acs](apps/acs).
+- Ambos usam o cliente gerado `sinalacs_client` por dependência local e não devem depender diretamente de detalhes de implementação do servidor em widgets.
+- O app ACS é o mais crítico em termos de offline-first e sincronização: guarda visitas locais, tenta sincronizar em fila e trata conflitos sem perder registros.
+- O tema visual é dark mode, com foco em legibilidade e uso de cor restrito a sinal clínico (vermelho, amarelo, verde).
+- O app do paciente não deve reintroduzir regras de risco no cliente; a classificação deve vir do backend via `triage.evaluate`.
+
+### Infraestrutura local
+- O ambiente de desenvolvimento usa Docker Compose com PostgreSQL, Mosquitto, backend e Traefik.
+- Há geração local de segredos via [scripts/dev/bootstrap_env.sh](scripts/dev/bootstrap_env.sh); o projeto não possui `.env` versionado.
+- O servidor e o broker exigem valores configurados por ambiente; não reaproveitar credenciais do ambiente local em produção.
+
+## Regras de desenvolvimento
 
 ### 1) Preserve o contexto do produto
-- A solução é orientada por risco clínico, não por roteiros geográficos fixos.
+- A solução é orientada por risco clínico e não por roteiros geográficos fixos.
 - O foco do MVP é priorização e resposta rápida a urgências.
-- O idioma principal do projeto e da documentação é o português.
+- O idioma principal da documentação, comentários e textos de UI é o português.
 
-### 2) Respeite a arquitetura definida
-- O produto combina Flutter no cliente, um backend Serverpod em Dart e PostgreSQL como persistência central. O Serverpod era a decisão original de stack, ficou por um tempo não implementado — o servidor era um `dart:io` roteado à mão — e foi adotado depois, substituindo-o.
-- O modelo offline-first é crítico; o ACS deve operar mesmo com rede instável.
-- O MQTT é usado para entrega de alertas de urgência em tempo real.
-- A sincronização local/central deve ser tratada como risco arquitetural principal.
+### 2) Respeite a arquitetura escolhida
+- Prefira soluções simples e previsíveis alinhadas ao stack já decidido: Flutter + Dart + PostgreSQL + MQTT.
+- Não introduzir frameworks ou serviços novos sem justificativa no PRD, stack ou arquitetura do projeto.
+- Ao alterar sincronização ou fila offline, preservar retry, deduplicação, conflito e persistência local.
 
 ### 3) Preserve invariantes de negócio e segurança
-- A microárea da pessoa ACS deve restringir o acesso somente ao seu território.
-- A classificação de risco deve ser determinística e não alterável por intervenção humana na triagem.
-- Alertas vermelhos não podem ser descartados silenciosamente.
-- Dados sensíveis de saúde devem seguir o padrão de privacidade e LGPD.
+- Microárea deve restringir dados ao território do ACS.
+- Red alert não pode ser perdido em silêncio.
+- Triagem precisa ser determinística e consistente com o modelo do Protocolo de Manchester.
+- Nenhum dado sensível de paciente deve entrar em logs, screenshots, testes, seeds ou configurações compartilhadas.
 
 ### 4) Ao criar ou alterar código
-- Prefira soluções simples, previsíveis e alinhadas com a arquitetura já definida.
-- Evite inventar recursos que não estejam no PRD ou no stack do projeto.
-- Quando houver conflito entre convenções gerais e documentação do projeto, a documentação do projeto vence.
-- Mantenha a lógica de priorização e triagem consistente com o modelo do Protocolo de Manchester e regras determinísticas.
+- Manter a lógica de domínio separada da infraestrutura.
+- Preferir interfaces e casos de uso testáveis, como no padrão de `application/` + `infrastructure/`.
+- Evitar acoplamento de widgets e UI com o cliente gerado do backend.
+- Quando houver mudança em modelos ou endpoints, gerar a migração correspondente em vez de editar arquivos gerados manualmente.
 
 ### 5) Quando o trabalho for de UI
-- Siga a linguagem visual do dark mode, alta legibilidade e baixo ruído visual.
-- Use a lógica de cores somente para sinalizar gravidade: vermelho, amarelo e verde são sinais clínicos, não elementos decorativos.
-- Mantenha foco em mobile-first e acessibilidade.
+- Manter dark mode, alta legibilidade e baixo ruído visual.
+- Usar cores apenas para sinal clínico; não decorar interfaces com vermelho/amarelo/verde sem relação com risco.
+- Manter foco em mobile-first e acessibilidade.
 
 ### 6) Quando o trabalho for de backend ou dados
-- Considere cache local em SQLite/sqflite para uso offline.
-- Planeje sincronização com retry, fila e resolução de conflitos.
-- Preserve auditabilidade e rastreabilidade dos eventos de triagem e sincronização.
+- Considerar uso de SQLite/SQLCipher e filas locais para operação offline.
+- Planejar retry, reconciliação de conflitos e rastreabilidade de eventos.
+- Manter a lógica de sincronização e persistência consistentes com o fluxo de visitas do ACS.
 
-## Estrutura relevante do repositório
+## Comandos e validações importantes
 
-- [spec/](spec) — artefatos de produto, arquitetura, requisitos e protótipos;
-- [spec/ui_acs](spec/ui_acs) — fluxos do ACS;
-- [spec/ui_paciente](spec/ui_paciente) — fluxos do paciente;
-- [backend/](backend) — backend Serverpod;
-- [apps/acs](apps/acs), [apps/patient](apps/patient) — apps Flutter reais;
-- [docs/](docs) — documentação visual das telas.
+Antes do primeiro ambiente local:
+```bash
+./scripts/dev/bootstrap_env.sh
+```
 
-## Observações para agentes
+Subir a stack local:
+```bash
+docker compose up --build
+```
 
-Este repositório já tem um protótipo funcional implementado (backend Serverpod, apps Flutter de paciente e ACS, CI validando os três), validado localmente via Docker Compose — não é mais só especificação/prototipação. Qualquer código adicionado deve refletir as decisões capturadas em [spec/stack.md](spec/stack.md), [spec/PRD_system.md](spec/PRD_system.md) e [spec/ui_design.md](spec/ui_design.md) quando ainda válidas. Atenção ao ler o [PROGRESS.md](PROGRESS.md): suas entradas M1.x e M2.x descrevem o servidor `dart:io` que existiu antes da migração para Serverpod, e seus links apontam para código que só existe no histórico do git — a seção "Migração para Serverpod", ao final daquele documento, registra o estado atual. O [CLAUDE.md](CLAUDE.md) é a referência de arquitetura e comandos.
+Rodar testes do backend:
+```bash
+cd backend
+dart pub get
+cd sinalacs_server
+dart test
+```
 
-Se a tarefa solicitar implementação, priorize a consistência com os documentos acima e mantenha o comportamento alinhado ao MVP definido no PRD.
+Rodar análise do Flutter nos apps:
+```bash
+cd apps/patient && flutter pub get && flutter analyze && flutter test
+cd apps/acs && flutter pub get && flutter analyze && flutter test
+```
+
+Importante:
+- `flutter test` é hermético e não substitui validações com stack local real;
+- os testes de integração e validação de conexão vivem fora do `flutter test` e utilizam a stack Docker/VM;
+- o CI do projeto valida jobs separados para backend e apps.
+
+## Observações finais
+
+Este repositório já não é apenas um conjunto de especificações. Ele contém um protótipo funcional validado localmente em stack Docker, com backend, apps reais e infraestrutura mínima operável para desenvolvimento.
+
+O estado atual não é produção: não há autenticação institucional real, não há mTLS no broker, e não existe deploy de produção concluído. Mesmo assim, qualquer mudança deve preservar a direção arquitetural do projeto e os invariantes de negócio definidos no PRD.
+
+A documentação do produto, a arquitetura e os comandos de execução já estão no repositório; a implementação deve seguir o que está ali registrado e não inventar novos padrões sem alinhamento técnico e funcional.
+
+## Graphify
+
+Este projeto possui um grafo de conhecimento em [graphify-out](graphify-out), com nós e relações entre arquivos e conceitos.
+
+Quando estiver explorando o código e precisar entender ligações entre módulos, prefira:
+- `graphify query "<pergunta>"` quando o grafo existir;
+- `graphify path "<A>" "<B>"` para traçar relações;
+- `graphify explain "<conceito>"` para foco em um tema específico;
+- `graphify update .` após alterações de código para manter o grafo atualizado.
+
+Se o diretório [graphify-out/wiki](graphify-out/wiki) existir, use-o para navegação ampla antes de navegar por arquivos isolados.
