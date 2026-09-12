@@ -23,7 +23,9 @@ class BackendVisitSynchronizer implements VisitSynchronizer {
           completedAt: visit.createdAt.toUtc(),
           status: visit.outcome.isEmpty ? visit.status : visit.outcome,
           riskLevelBefore: _riskLevel(visit.risk),
-          notes: const <String, String>{},
+          notes: visit.notes.trim().isEmpty
+              ? const <String, String>{}
+              : <String, String>{'campo': visit.notes.trim()},
           version: visit.version,
         ),
     ]);

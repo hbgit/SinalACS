@@ -74,6 +74,7 @@ class SqlCipherVisitStore implements VisitStore {
           risk: row['risk']! as String,
           status: row['status']! as String,
           outcome: row['outcome']! as String,
+          notes: (row['notes'] as String?) ?? '',
           localId: row['local_id']! as String,
           createdAt: DateTime.parse(row['created_at']! as String),
           version: row['version']! as int,
@@ -99,6 +100,7 @@ class SqlCipherVisitStore implements VisitStore {
           'risk': visit.risk,
           'status': visit.status,
           'outcome': visit.outcome,
+          'notes': visit.notes,
           'created_at': visit.createdAt.toIso8601String(),
           'version': visit.version,
         });

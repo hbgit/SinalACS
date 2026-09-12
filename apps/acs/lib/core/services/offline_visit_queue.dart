@@ -30,6 +30,7 @@ class OfflineVisitRecord {
     required this.risk,
     required this.status,
     this.outcome = '',
+    this.notes = '',
     String? localId,
     DateTime? createdAt,
     this.version = 1,
@@ -49,6 +50,9 @@ class OfflineVisitRecord {
   final String status;
   final String outcome;
 
+  /// Observações de campo registradas na visita antes da sincronização.
+  final String notes;
+
   /// Identificador gerado no dispositivo.
   ///
   /// É a chave de deduplicação da sincronização: a tabela `visits` do servidor
@@ -66,6 +70,7 @@ class OfflineVisitRecord {
     String? risk,
     String? status,
     String? outcome,
+    String? notes,
     String? localId,
     DateTime? createdAt,
     int? version,
@@ -75,6 +80,7 @@ class OfflineVisitRecord {
       risk: risk ?? this.risk,
       status: status ?? this.status,
       outcome: outcome ?? this.outcome,
+      notes: notes ?? this.notes,
       localId: localId ?? this.localId,
       createdAt: createdAt ?? this.createdAt,
       version: version ?? this.version,

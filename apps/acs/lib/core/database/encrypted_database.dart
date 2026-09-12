@@ -18,7 +18,7 @@ class EncryptedLocalDatabase {
   /// v1 existiu em duas formas em campo: `local_queue(id)` — o que um aparelho
   /// com a versão anterior instalada tem — e uma `offline_visits` com
   /// `patient_name`. v2 grava `patient_id`.
-  static const schemaVersion = 2;
+  static const schemaVersion = 3;
 
   /// Visitas registradas offline, aguardando sincronização.
   ///
@@ -32,11 +32,12 @@ CREATE TABLE IF NOT EXISTS offline_visits (
   risk TEXT NOT NULL,
   status TEXT NOT NULL,
   outcome TEXT NOT NULL,
+  notes TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL,
   version INTEGER NOT NULL
 )''';
 
-  /// Migração v1 → v2.
+  /// Migração v1 → v2 e v2 → v3.
   ///
   /// Nenhuma das duas formas de v1 guarda o UUID do paciente: `patient_name`
   /// era `'Paciente ' + 8 dos 32 dígitos hex`, irreversível. Sem UUID,
@@ -52,6 +53,19 @@ CREATE TABLE IF NOT EXISTS offline_visits (
       await db.execute('DROP TABLE IF EXISTS local_queue');
       await db.execute('DROP TABLE IF EXISTS offline_visits');
       await db.execute(createOfflineVisits);
+      return;
+    }
+
+    if (from < 3) {
+      final columns = await db.rawQuery(
+        "PRAGMA table_info('offline_visits')",
+      );
+      final hasNotes = columns.any((column) => column['name'] == 'notes');
+      if (!hasNotes) {
+        await db.execute(
+          "ALTER TABLE offline_visits ADD COLUMN notes TEXT NOT NULL DEFAULT '';",
+        );
+      }
     }
   }
 

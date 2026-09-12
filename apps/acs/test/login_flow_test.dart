@@ -233,6 +233,25 @@ void main() {
       expect(queue.syncedCount, 0);
     });
 
+    test('deve preservar observações no ciclo offline e ao sincronizar', () async {
+      final sender = FakeVisitSynchronizer();
+      final queue = OfflineVisitQueue(synchronizer: sender);
+
+      await queue.add(OfflineVisitRecord(
+        patientId: seedPatientId,
+        risk: 'yellow',
+        status: 'PENDENTE',
+        notes: 'Paciente com febre e náusea na última consulta.',
+      ));
+
+      expect(queue.pendingVisits.single.notes, contains('febre'));
+
+      final result = await queue.sync();
+
+      expect(result.kind, SyncOutcomeKind.synced);
+      expect(sender.batches.single.single.notes, contains('febre'));
+    });
+
     test('deve restaurar as visitas gravadas de uma execução anterior', () async {
       // Fechar o app não pode perder a fila.
       final store = InMemoryVisitStore();

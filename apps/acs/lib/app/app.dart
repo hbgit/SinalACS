@@ -657,6 +657,7 @@ class _VisitRegistrationScreenState extends State<VisitRegistrationScreen> {
       risk: alert.riskLevel,
       status: 'PENDENTE',
       outcome: outcome,
+      notes: notes.text.trim(),
     ));
     if (!mounted) return;
     setState(() {});
@@ -723,10 +724,7 @@ class _VisitRegistrationScreenState extends State<VisitRegistrationScreen> {
         enabled: !semAlerta,
         decoration: const InputDecoration(
           labelText: 'Observações de campo',
-          // A tela coleta o texto e o descarta. Dizer isso é o mínimo enquanto
-          // o envio não existe; persistir texto livre num aparelho que pode ser
-          // roubado é decisão de LGPD que merece o próprio PR.
-          helperText: 'Ainda não é enviado ao servidor.',
+          helperText: 'São salvas localmente e enviadas com a visita quando sincronizar.',
         ),
       ),
       const SizedBox(height: 20),
