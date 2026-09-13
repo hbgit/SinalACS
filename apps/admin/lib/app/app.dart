@@ -17,6 +17,13 @@ class SinalAdminApp extends StatelessWidget {
       );
 }
 
+/// Login local (não chama `auth.developmentLogin`).
+///
+/// Investigado antes de decidir: `backend/sinalacs_server/lib/src/endpoints/auth_endpoint.dart`
+/// só aceita `role: 'patient'` ou `role: 'acs'` — não existe usuário fixo de
+/// desenvolvimento para `admin`, então a chamada real falharia com
+/// AlertValidationException. Ligar isso de verdade exige uma mudança no
+/// backend (fora do escopo desta issue); ver descrição do PR.
 class LoginScreen extends StatefulWidget {
   const LoginScreen({required this.dataSource, super.key});
 
