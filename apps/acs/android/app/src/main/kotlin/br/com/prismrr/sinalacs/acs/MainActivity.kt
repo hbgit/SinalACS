@@ -1,4 +1,4 @@
-package com.example.sinalacs_acs
+package br.com.prismrr.sinalacs.acs
 
 import io.flutter.embedding.android.FlutterActivity
 
