@@ -17,6 +17,15 @@ PrioritizedAlert _alert(String id) => PrioritizedAlert(
       triggeredAt: DateTime.utc(2026, 9, 12, 8),
     );
 
+PrioritizedAlert _redAlert(String id) => PrioritizedAlert(
+      alertId: id,
+      patientId: _patientId,
+      microAreaId: _microAreaId,
+      riskLevel: 'red',
+      locationHash: 'sem-local-$id',
+      triggeredAt: DateTime.utc(2026, 9, 12, 8),
+    );
+
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
@@ -77,5 +86,25 @@ void main() {
     await tester.tap(find.byKey(const Key('geofence_visit')));
     expect(selected?.alertId, alert.alertId);
     queue.dispose();
+  });
+
+  testWidgets('escalonamento mantém SAMU primário e encaminha alerta vermelho para visita', (tester) async {
+    final alert = _redAlert('red-escalation-visit');
+    PrioritizedAlert? selected;
+
+    await tester.pumpWidget(MaterialApp(
+      home: EscalationScreen(
+        alert: alert,
+        onVisit: (value) => selected = value,
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Ligar para o SAMU (192)'), findsOneWidget);
+    expect(find.text('Iniciar rota de visita'), findsOneWidget);
+    expect(find.textContaining('não substitui o acionamento do SAMU'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('escalation_visit')));
+    expect(selected?.alertId, alert.alertId);
   });
 }

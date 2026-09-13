@@ -421,6 +421,29 @@ void main() {
       expect(botao.onPressed, isNull);
     });
 
+    testWidgets('deve iniciar a rota de visita do alerta vermelho após o escalonamento', (tester) async {
+      final alert = testAlert(alertId: 'alerta-vermelho-visita', riskLevel: 'red');
+      PrioritizedAlert? selected;
+
+      await tester.pumpWidget(MaterialApp(
+        home: EscalationScreen(
+          alert: alert,
+          onVisit: (value) => selected = value,
+        ),
+      ));
+
+      expect(find.text('Ligar para o SAMU (192)'), findsOneWidget);
+      expect(find.text('Iniciar rota de visita'), findsOneWidget);
+      expect(
+        find.text('A visita é acompanhamento do caso e não substitui o acionamento do SAMU.'),
+        findsOneWidget,
+      );
+
+      await tester.tap(find.byKey(const Key('escalation_visit')));
+
+      expect(selected?.alertId, alert.alertId);
+    });
+
     testWidgets('deve informar explicitamente quando o ACS alcançou o local do paciente', (tester) async {
       final visitQueue = OfflineVisitQueue();
       final alert = testAlert(alertId: 'alerta-geofence', riskLevel: 'yellow');

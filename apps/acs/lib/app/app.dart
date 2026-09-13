@@ -463,7 +463,13 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
           queue: widget.visitQueue,
           currentPosition: _currentPosition,
         ),
-      AcsDestination.escalation => EscalationScreen(alert: _selected),
+      AcsDestination.escalation => EscalationScreen(
+          alert: _selected,
+          onVisit: (alert) => setState(() {
+            _selected = alert;
+            destination = AcsDestination.visit;
+          }),
+        ),
       AcsDestination.geofencing => GeofencingScreen(
           queue: _queue,
           currentPosition: _currentPosition,
@@ -1204,9 +1210,10 @@ class _VisitRegistrationScreenState extends State<VisitRegistrationScreen> {
 }
 
 class EscalationScreen extends StatelessWidget {
-  const EscalationScreen({super.key, this.alert});
+  const EscalationScreen({super.key, this.alert, this.onVisit});
 
   final PrioritizedAlert? alert;
+  final void Function(PrioritizedAlert alert)? onVisit;
 
   @override
   Widget build(BuildContext context) {
@@ -1222,6 +1229,20 @@ class EscalationScreen extends StatelessWidget {
       FilledButton.icon(onPressed: () => _message(context, 'Discagem não está integrada neste protótipo.'), style: FilledButton.styleFrom(backgroundColor: AcsColors.red), icon: const Icon(Icons.call), label: const Text('Ligar para o SAMU (192)')),
       const SizedBox(height: 12),
       OutlinedButton(onPressed: () => _message(context, 'Encaminhamento será integrado à UBS.'), child: const Text('Encaminhar para UBS Central')),
+      if (current != null) ...[
+        const SizedBox(height: 12),
+        OutlinedButton.icon(
+          key: const Key('escalation_visit'),
+          onPressed: onVisit == null ? null : () => onVisit!(current),
+          icon: const Icon(Icons.alt_route_outlined),
+          label: const Text('Iniciar rota de visita'),
+        ),
+        const SizedBox(height: 8),
+        const Text(
+          'A visita é acompanhamento do caso e não substitui o acionamento do SAMU.',
+          style: TextStyle(color: AcsColors.accent),
+        ),
+      ],
     ]);
   }
 }
