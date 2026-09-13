@@ -1,6 +1,6 @@
 # Telas do Backoffice Admin
 
-Documentação visual do protótipo Flutter do backoffice administrativo (`apps/admin`). Assim como `docs/telas-acs.md` e `docs/telas-paciente.md`, as imagens abaixo devem ser capturadas rodando o app (`flutter run -d chrome`, já que o alvo é Flutter Web) com dados sintéticos — **pendente nesta entrega**, ver observação no final.
+Documentação visual do protótipo Flutter do backoffice administrativo (`apps/admin`). Assim como `docs/telas-acs.md` e `docs/telas-paciente.md`, as imagens abaixo foram capturadas rodando o app (`flutter run -d web-server`, já que o alvo é Flutter Web) com dados sintéticos.
 
 ## Navegação
 
@@ -37,10 +37,6 @@ Lista de alertas filtrável por microárea e status. Não há nenhum controle de
 ![Logs de auditoria somente leitura](screenshots/admin/05-auditoria.png)
 
 Log somente leitura. Toda visita às telas de Microáreas, Alertas e Auditoria registra uma entrada própria via `AdminDataSource.recordAccess`, simulando o requisito do PRD §4.2.2 de que o acesso do Administrador também é auditado.
-
-## Pendência desta entrega
-
-As screenshots reais ainda não foram capturadas nesta máquina de desenvolvimento — ver descrição do PR para o motivo e o plano de captura.
 
 ## Referências
 
