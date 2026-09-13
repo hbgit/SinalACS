@@ -2,11 +2,15 @@ import 'package:meta/meta.dart';
 import 'package:serverpod/serverpod.dart';
 import 'package:sinalacs_server/src/application/alerts/alert_outbox_dispatcher.dart';
 import 'package:sinalacs_server/src/application/alerts/red_alert_service.dart';
+import 'package:sinalacs_server/src/application/audit/audit_trail.dart';
 import 'package:sinalacs_server/src/application/auth/development_auth_service.dart';
+import 'package:sinalacs_server/src/application/patients/patient_directory_service.dart';
 import 'package:sinalacs_server/src/application/visits/visit_sync_service.dart';
 import 'package:sinalacs_server/src/config/app_config.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_alert_outbox.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_alert_store.dart';
+import 'package:sinalacs_server/src/infrastructure/database/orm_audit_trail.dart';
+import 'package:sinalacs_server/src/infrastructure/database/orm_patient_directory_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_visit_store.dart';
 import 'package:sinalacs_server/src/infrastructure/mqtt/mqtt_alert_dispatcher.dart';
 
@@ -85,7 +89,18 @@ class AlertRuntime {
   }) =>
       VisitSyncService(
         store: OrmVisitStore(session: () => session, transaction: transaction),
+        audit: auditTrailFor(session),
       );
+
+  /// Constrói o diretório de pacientes da microárea para uma requisição.
+  PatientDirectoryService patientDirectoryServiceFor(Session session) =>
+      PatientDirectoryService(
+        store: OrmPatientDirectoryStore(session: () => session),
+        audit: auditTrailFor(session),
+      );
+
+  /// Trilha de auditoria amarrada à sessão da chamada.
+  AuditTrail auditTrailFor(Session session) => OrmAuditTrail(session: () => session);
 
   /// Drenador do outbox.
   ///

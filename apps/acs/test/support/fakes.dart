@@ -23,6 +23,15 @@ class FakeAcsBackend implements AcsBackend {
   bool acknowledged;
   String? microAreaId;
 
+  /// Pacientes que `listPatients()` devolve. Vazio por padrão: um teste que
+  /// não configurar isto exercita o caminho "sem paciente na microárea".
+  List<MicroAreaPatient> patients = const [];
+
+  /// Falha da chamada, como uma queda de rede ao carregar a lista.
+  BackendFailure? listPatientsFailure;
+
+  int listPatientsCount = 0;
+
   final List<String> acknowledgedAlertIds = <String>[];
   int loginCount = 0;
 
@@ -91,6 +100,14 @@ class FakeAcsBackend implements AcsBackend {
           serverVersion: visit.version + 1,
         ),
     ];
+  }
+
+  @override
+  Future<List<MicroAreaPatient>> listPatients() async {
+    listPatientsCount++;
+    final failure = listPatientsFailure;
+    if (failure != null) throw failure;
+    return patients;
   }
 
   @override

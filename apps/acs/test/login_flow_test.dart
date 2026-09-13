@@ -8,6 +8,7 @@ import 'package:sinalacs_acs/core/services/alert_queue.dart';
 import 'package:sinalacs_acs/core/services/backend_visit_synchronizer.dart';
 import 'package:sinalacs_acs/core/services/offline_visit_queue.dart';
 import 'package:sinalacs_acs/core/services/visit_queue_factory.dart';
+import 'package:sinalacs_client/sinalacs_client.dart' show MicroAreaPatient;
 
 import 'support/fakes.dart';
 
@@ -487,6 +488,144 @@ void main() {
       expect(find.byKey(const Key('visit_needs_alert')), findsOneWidget);
       final botao = tester.widget<FilledButton>(find.byKey(const Key('save_visit')));
       expect(botao.onPressed, isNull);
+    });
+
+    testWidgets('sem alerta, escolher um paciente da microárea libera o formulário', (tester) async {
+      // Sem isto, o único jeito de chegar à tela de visita era um alerta — e o
+      // backend só publica risco vermelho (emergência, SAMU). A visita de
+      // rotina do PRD (≥ 8/dia por ACS) não tinha de onde partir.
+      final backend = FakeAcsBackend()
+        ..patients = [
+          MicroAreaPatient(
+            patientId: syntheticPatientId(5),
+            name: 'Fulano de Tal',
+            isChronic: true,
+            chronicConditions: const ['hipertensão'],
+          ),
+          MicroAreaPatient(
+            patientId: syntheticPatientId(6),
+            name: 'Ciclana da Silva',
+            isChronic: false,
+            chronicConditions: const [],
+          ),
+        ];
+      final visitQueue = OfflineVisitQueue();
+
+      await tester.pumpWidget(SinalAcsApp(
+        backend: backend,
+        feedBuilder: (queue) => FakeAlertFeed(queue),
+        visitQueue: visitQueue,
+      ));
+
+      await tester.tap(find.byKey(const Key('login_button')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Visita'));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('patient_picker')), findsOneWidget);
+      expect(find.text('Fulano de Tal'), findsOneWidget);
+      expect(find.text('Ciclana da Silva'), findsOneWidget);
+      expect(
+        tester.widget<FilledButton>(find.byKey(const Key('save_visit'))).onPressed,
+        isNull,
+      );
+
+      await tester.tap(find.text('Ciclana da Silva'));
+      await tester.pumpAndSettle();
+
+      // O rótulo da tela passa a ser o NOME — é exatamente o que
+      // spec/lgpd_design.md:364 autoriza para a visita de rotina — mas o
+      // seletor de pacientes some, porque a escolha já foi feita.
+      expect(find.text('Ciclana da Silva'), findsOneWidget);
+      expect(find.byKey(const Key('patient_picker')), findsNothing);
+
+      await tester.ensureVisible(find.byKey(const Key('arrival_confirmation')));
+      await tester.tap(find.byKey(const Key('arrival_confirmation')));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.byKey(const Key('save_visit')));
+      await tester.tap(find.byKey(const Key('save_visit')));
+      await tester.pumpAndSettle();
+
+      expect(visitQueue.pendingCount, 1);
+    });
+
+    testWidgets('falha ao carregar a lista de pacientes mostra o motivo e permite tentar de novo',
+        (tester) async {
+      final backend = FakeAcsBackend()
+        ..listPatientsFailure = const BackendFailure('Sem conexão com o servidor.');
+      final visitQueue = OfflineVisitQueue();
+
+      await tester.pumpWidget(SinalAcsApp(
+        backend: backend,
+        feedBuilder: (queue) => FakeAlertFeed(queue),
+        visitQueue: visitQueue,
+      ));
+
+      await tester.tap(find.byKey(const Key('login_button')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Visita'));
+      await tester.pumpAndSettle();
+
+      // Falha ao carregar a lista não pode travar a tela: o app é
+      // offline-first, e o caminho por alerta continua funcionando mesmo sem
+      // rede nenhuma.
+      expect(find.byKey(const Key('patient_directory_error')), findsOneWidget);
+      expect(find.text('Sem conexão com o servidor.'), findsOneWidget);
+
+      backend.listPatientsFailure = null;
+      backend.patients = [
+        MicroAreaPatient(
+          patientId: syntheticPatientId(5),
+          name: 'Fulano de Tal',
+          isChronic: false,
+          chronicConditions: const [],
+        ),
+      ];
+      await tester.tap(find.text('Tentar de novo'));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('patient_picker')), findsOneWidget);
+      expect(find.text('Fulano de Tal'), findsOneWidget);
+    });
+
+    testWidgets('a visita gravada pelo seletor carrega o UUID do paciente, nunca o nome', (tester) async {
+      // Minimização (LGPD-RF01): o nome do seletor vive só em memória, para
+      // render. O que sai para a fila — e para o servidor — é sempre o UUID.
+      final backend = FakeAcsBackend()
+        ..patients = [
+          MicroAreaPatient(
+            patientId: syntheticPatientId(7),
+            name: 'Beltrano de Souza',
+            isChronic: false,
+            chronicConditions: const [],
+          ),
+        ];
+      final visitQueue = OfflineVisitQueue();
+
+      await tester.pumpWidget(SinalAcsApp(
+        backend: backend,
+        feedBuilder: (queue) => FakeAlertFeed(queue),
+        visitQueue: visitQueue,
+      ));
+
+      await tester.tap(find.byKey(const Key('login_button')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Visita'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Beltrano de Souza'));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.byKey(const Key('arrival_confirmation')));
+      await tester.tap(find.byKey(const Key('arrival_confirmation')));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.byKey(const Key('save_visit')));
+      await tester.tap(find.byKey(const Key('save_visit')));
+      await tester.pumpAndSettle();
+
+      expect(visitQueue.pendingCount, 1);
+      expect(visitQueue.pendingVisits.single.patientId, syntheticPatientId(7));
+      // A prova de minimização: o UUID vai para a fila, o nome nunca vai.
+      expect(visitQueue.pendingVisits.single.patientId, isNot(contains('Beltrano')));
     });
 
     testWidgets('falha de rede mostra o motivo e mantém a visita no aparelho', (tester) async {

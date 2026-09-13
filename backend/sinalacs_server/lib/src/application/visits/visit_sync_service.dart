@@ -1,4 +1,5 @@
 import 'package:serverpod/serverpod.dart' show UuidValue;
+import 'package:sinalacs_server/src/application/audit/audit_trail.dart';
 import 'package:sinalacs_server/src/application/auth/development_auth_service.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
 
@@ -15,6 +16,13 @@ abstract interface class VisitStore {
 
   /// Atualiza uma visita existente, incrementando a versão.
   Future<Visit> update(Visit visit);
+
+  /// Microárea do paciente, ou `null` se ele não existir.
+  ///
+  /// Sem isto, o serviço validava que o ACS é territorializado mas nunca que o
+  /// PACIENTE pertence ao mesmo território — qualquer UUID de paciente
+  /// existente era aceito, de qualquer microárea (furo do INV-01).
+  Future<UuidValue?> microAreaOfPatient(UuidValue patientId);
 }
 
 /// Sincronização das visitas registradas offline pelo ACS.
@@ -23,11 +31,16 @@ abstract interface class VisitStore {
 /// `synced`, `conflict` ou `error`, e conflito **nunca** sobrescreve o que está
 /// no servidor — devolve a versão atual para o dispositivo reconciliar.
 class VisitSyncService {
-  VisitSyncService({required VisitStore store, DateTime Function()? clock})
-      : _store = store,
+  VisitSyncService({
+    required VisitStore store,
+    required AuditTrail audit,
+    DateTime Function()? clock,
+  })  : _store = store,
+        _audit = audit,
         _clock = clock ?? DateTime.now;
 
   final VisitStore _store;
+  final AuditTrail _audit;
   final DateTime Function() _clock;
 
   Future<List<VisitSyncResult>> sync({
@@ -71,6 +84,37 @@ class VisitSyncService {
         localId: entry.localId,
         syncStatus: SyncStatus.error,
         message: 'identificadores devem ser UUID',
+      );
+    }
+
+    // Território ANTES de tocar em `existing`: um reenvio para o mesmo
+    // `localId` também precisa ser barrado, não só a primeira gravação.
+    final patientMicroAreaId = await _store.microAreaOfPatient(patientId);
+    if (patientMicroAreaId == null) {
+      return VisitSyncResult(
+        localId: entry.localId,
+        syncStatus: SyncStatus.error,
+        message: 'paciente não encontrado',
+      );
+    }
+
+    final acsMicroAreaId = UuidValue.fromString(user.microAreaId!);
+    if (patientMicroAreaId != acsMicroAreaId) {
+      // A mensagem não cita a microárea alheia nem o nome do paciente — só que
+      // o vínculo não existe. §404 de spec/lgpd_design.md: "o sistema monitora
+      // se um ACS consulta dados de um paciente fora de sua microárea sem
+      // justificativa, gerando alerta para auditoria".
+      await _audit.recordSafely(AuditEvent(
+        userId: user.id,
+        actionType: 'write',
+        resourceType: 'visit',
+        resourceId: patientId.uuid,
+        result: 'denied_territory',
+      ));
+      return VisitSyncResult(
+        localId: entry.localId,
+        syncStatus: SyncStatus.error,
+        message: 'paciente fora da sua microárea',
       );
     }
 

@@ -1,4 +1,5 @@
 import 'package:serverpod/serverpod.dart' show UuidValue;
+import 'package:sinalacs_server/src/application/audit/audit_trail.dart';
 import 'package:sinalacs_server/src/application/auth/development_auth_service.dart';
 import 'package:sinalacs_server/src/application/visits/visit_sync_service.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
@@ -8,11 +9,18 @@ import 'package:test/test.dart';
 const _acsId = '00000000-0000-4000-8000-000000000002';
 const _otherAcsId = '00000000-0000-4000-8000-000000000012';
 const _microAreaId = '00000000-0000-4000-8000-000000000003';
+const _otherMicroAreaId = '00000000-0000-4000-8000-000000000099';
 const _patientId = '00000000-0000-4000-8000-000000000001';
+const _outroTerritorioPatientId = '00000000-0000-4000-8000-000000000009';
 const _localId = '00000000-0000-4000-8000-0000000000a1';
 
 /// Store em memória, com a mesma unicidade de `localId` que o índice do banco.
 class FakeVisitStore implements VisitStore {
+  FakeVisitStore({
+    Map<String, String?> microAreaByPatient = const {_patientId: _microAreaId},
+  }) : _microAreaByPatient = microAreaByPatient;
+
+  final Map<String, String?> _microAreaByPatient;
   final Map<String, Visit> rows = <String, Visit>{};
 
   @override
@@ -28,6 +36,28 @@ class FakeVisitStore implements VisitStore {
   Future<Visit> update(Visit visit) async {
     rows[visit.localId.uuid] = visit;
     return visit;
+  }
+
+  @override
+  Future<UuidValue?> microAreaOfPatient(UuidValue patientId) async {
+    final microAreaId = _microAreaByPatient[patientId.uuid];
+    return microAreaId == null ? null : UuidValue.fromString(microAreaId);
+  }
+}
+
+/// Trilha de auditoria em memória. `failOnRecord` simula uma trilha fora do
+/// ar, para provar que `recordSafely` (herdado, não reescrito aqui) não
+/// derruba a sincronização.
+class FakeAuditTrail extends AuditTrail {
+  FakeAuditTrail({this.failOnRecord = false});
+
+  final bool failOnRecord;
+  final List<AuditEvent> events = <AuditEvent>[];
+
+  @override
+  Future<void> record(AuditEvent event) async {
+    if (failOnRecord) throw StateError('trilha de auditoria fora do ar');
+    events.add(event);
   }
 }
 
@@ -45,10 +75,14 @@ const _patient = AuthenticatedUser(
   deviceId: 'patient-device-001',
 );
 
-VisitSyncEntry entry({int version = 0, String status = 'realizada'}) {
+VisitSyncEntry entry({
+  int version = 0,
+  String status = 'realizada',
+  String patientId = _patientId,
+}) {
   return VisitSyncEntry(
     localId: _localId,
-    patientId: _patientId,
+    patientId: patientId,
     scheduledAt: DateTime.utc(2026, 9, 11, 9),
     completedAt: DateTime.utc(2026, 9, 11, 10),
     status: status,
@@ -61,12 +95,15 @@ VisitSyncEntry entry({int version = 0, String status = 'realizada'}) {
 
 void main() {
   late FakeVisitStore store;
+  late FakeAuditTrail audit;
   late VisitSyncService service;
 
   setUp(() {
     store = FakeVisitStore();
+    audit = FakeAuditTrail();
     service = VisitSyncService(
       store: store,
+      audit: audit,
       clock: () => DateTime.utc(2026, 9, 11, 12),
     );
   });
@@ -168,5 +205,80 @@ void main() {
     expect(results.first.syncStatus, SyncStatus.error);
     // A visita válida do mesmo lote segue adiante.
     expect(results.last.syncStatus, SyncStatus.synced);
+  });
+
+  group('territorialização (INV-01)', () {
+    setUp(() {
+      // Este grupo precisa de um segundo paciente, fora da microárea do ACS —
+      // o `store` padrão do `setUp` externo só conhece `_patientId`.
+      store = FakeVisitStore(microAreaByPatient: {
+        _patientId: _microAreaId,
+        _outroTerritorioPatientId: _otherMicroAreaId,
+      });
+      audit = FakeAuditTrail();
+      service = VisitSyncService(
+        store: store,
+        audit: audit,
+        clock: () => DateTime.utc(2026, 9, 11, 12),
+      );
+    });
+
+    test('recusa visita para paciente de outra microárea, sem gravar nada', () async {
+      final results = await service.sync(
+        user: _acs,
+        entries: [entry(patientId: _outroTerritorioPatientId)],
+      );
+
+      expect(results.single.syncStatus, SyncStatus.error);
+      expect(store.rows, isEmpty);
+      // A mensagem não pode citar a microárea alheia nem o nome do paciente.
+      expect(results.single.message, isNot(contains(_otherMicroAreaId)));
+    });
+
+    test('recusa por território grava auditoria com o paciente envolvido', () async {
+      await service.sync(user: _acs, entries: [entry(patientId: _outroTerritorioPatientId)]);
+
+      expect(audit.events, hasLength(1));
+      final event = audit.events.single;
+      expect(event.result, 'denied_territory');
+      expect(event.resourceType, 'visit');
+      expect(event.resourceId, UuidValue.fromString(_outroTerritorioPatientId).uuid);
+      expect(event.userId, _acsId);
+    });
+
+    test('uma recusa por território não descarta as demais visitas do lote', () async {
+      final results = await service.sync(user: _acs, entries: [
+        entry(patientId: _outroTerritorioPatientId),
+        entry(),
+      ]);
+
+      expect(results.first.syncStatus, SyncStatus.error);
+      expect(results.last.syncStatus, SyncStatus.synced);
+    });
+
+    test('paciente inexistente vira error sem gerar auditoria de território', () async {
+      final results = await service.sync(
+        user: _acs,
+        entries: [entry(patientId: '00000000-0000-4000-8000-00000000dead')],
+      );
+
+      expect(results.single.syncStatus, SyncStatus.error);
+      // Não é necessariamente espionagem territorial — pode ser um localId
+      // órfão de um seed antigo. Só a recusa POR TERRITÓRIO é auditada.
+      expect(audit.events, isEmpty);
+    });
+
+    test('uma trilha de auditoria fora do ar não impede a recusa territorial', () async {
+      audit = FakeAuditTrail(failOnRecord: true);
+      service = VisitSyncService(store: store, audit: audit, clock: () => DateTime.utc(2026, 9, 11, 12));
+
+      final results = await service.sync(
+        user: _acs,
+        entries: [entry(patientId: _outroTerritorioPatientId)],
+      );
+
+      // A operação clínica (recusar a visita) não pode depender da auditoria.
+      expect(results.single.syncStatus, SyncStatus.error);
+    });
   });
 }

@@ -589,8 +589,8 @@ A estratégia de conformidade adota os princípios de **Privacy by Design** e **
 | Propriedade | Descrição |
 |-------------|-----------|
 | **Descrição** | Todos os acessos e operações devem ser registrados em logs estruturados (JSON), imutáveis, e auditáveis. |
-| **Implementação** | Tabela `audit_logs` no PostgreSQL; assinatura criptográfica dos logs (hash chain); armazenamento em tabela imutável (append-only). |
-| **Critério de Aceite** | ✓ Todos os endpoints geram logs<br>✓ Logs são imutáveis (append-only)<br>✓ Logs incluem data, usuário, ação, IP (anonimizado) |
+| **Implementação** | Tabela `audit_logs` no PostgreSQL; assinatura criptográfica dos logs (hash chain); armazenamento em tabela imutável (append-only). A tabela existia desde a migração-base sem escritor nenhum; os dois primeiros — `patients.listMicroArea` e a recusa por território em `visits.sync` (`AuditTrail`, `backend/sinalacs_server/lib/src/application/audit/`) — foram ligados, sempre com `ipHash` (nunca IP em claro) e best-effort (uma falha na trilha não derruba a operação clínica). **A assinatura em hash chain ainda não está implementada** — os demais endpoints que tocam dado sensível (alertas, ack, triagem) também não escrevem na trilha ainda. |
+| **Critério de Aceite** | ✓ Todos os endpoints geram logs (parcial: só `patients.listMicroArea` e a recusa territorial de `visits.sync`)<br>✓ Logs são imutáveis (append-only)<br>✓ Logs incluem data, usuário, ação, IP (anonimizado) |
 
 ### LGPD-RT04 - Consentimento Versionado
 
