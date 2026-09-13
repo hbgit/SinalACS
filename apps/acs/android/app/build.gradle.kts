@@ -1,5 +1,14 @@
 import java.util.Base64
 
+fun dartDefineValue(name: String): String? {
+    val encoded = project.findProperty("dart-defines")?.toString() ?: return null
+    return encoded.split(",").firstNotNullOfOrNull { item ->
+        runCatching {
+            String(Base64.getDecoder().decode(item), Charsets.UTF_8)
+        }.getOrNull()?.takeIf { it.startsWith("$name=") }?.substringAfter('=')
+    }
+}
+
 plugins {
     id("com.android.application")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
@@ -25,6 +34,7 @@ android {
         targetSdk = 36
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        manifestPlaceholders["GOOGLE_MAPS_API_KEY"] = dartDefineValue("GOOGLE_MAPS_API_KEY") ?: ""
     }
 
     buildTypes {

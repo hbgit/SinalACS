@@ -70,6 +70,7 @@ fi
 mqtt_password="${MQTT_ACS_PASSWORD:-$(grep -E '^MQTT_ACS_PASSWORD=' "$env_file" | head -1 | cut -d= -f2-)}"
 # Usuário criado por infra/docker/mosquitto/init.sh.
 mqtt_user="${MQTT_ACS_USER:-acs-area-12}"
+google_maps_api_key="${GOOGLE_MAPS_API_KEY:-$(grep -E '^GOOGLE_MAPS_API_KEY=' "$env_file" | head -1 | cut -d= -f2-)}"
 
 if [[ -z "$mqtt_password" ]]; then
   echo 'erro: MQTT_ACS_PASSWORD está vazio no .env.' >&2
@@ -109,7 +110,8 @@ cat > "$defines_file" <<JSON
   "SINALACS_HOST": "$(json_escape "$host")",
   "SINALACS_MQTT_HOST": "$(json_escape "$mqtt_host")",
   "SINALACS_MQTT_USER": "$(json_escape "$mqtt_user")",
-  "SINALACS_MQTT_PASSWORD": "$(json_escape "$mqtt_password")"
+  "SINALACS_MQTT_PASSWORD": "$(json_escape "$mqtt_password")",
+  "GOOGLE_MAPS_API_KEY": "$(json_escape "$google_maps_api_key")"
 }
 JSON
 
