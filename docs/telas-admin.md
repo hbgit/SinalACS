@@ -10,7 +10,9 @@ O backoffice é desktop-first (`spec/PRD_system.md` §2.1): em telas ≥640px de
 
 ![Login do backoffice](screenshots/admin/01-login.png)
 
-Formulário local com matrícula/CNS e senha, no mesmo padrão visual do login do ACS. Um banner fixo deixa explícito que não há autenticação institucional real (SSO/gov.br) nesta etapa — mesmo padrão dos apps de paciente e ACS, que também não chamam o backend hoje.
+Formulário local (matrícula/CNS e senha pré-preenchidos, não validados — o botão avança independente do que está digitado) no mesmo padrão visual do login do ACS. Um banner fixo deixa explícito que não há autenticação institucional real (SSO/gov.br) nesta etapa.
+
+Paciente e ACS já autenticam de verdade contra `auth.developmentLogin`; o admin não, porque esse endpoint hoje só aceita `role: patient` ou `role: acs` — não existe usuário fixo de desenvolvimento para `admin` (ver `backend/sinalacs_server/lib/src/endpoints/auth_endpoint.dart`). Ligar isso de verdade exige uma mudança no backend, fora do escopo desta issue.
 
 ## Painel de indicadores
 
