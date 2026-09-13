@@ -7,6 +7,7 @@ import 'package:sinalacs_acs/core/services/alert_queue.dart';
 
 const _microAreaId = '00000000-0000-4000-8000-000000000003';
 const _patientId = '00000000-0000-4000-8000-000000000001';
+const _googleMapsApiKey = String.fromEnvironment('GOOGLE_MAPS_API_KEY');
 
 PrioritizedAlert _alert(String id) => PrioritizedAlert(
       alertId: id,
@@ -37,13 +38,17 @@ void main() {
       home: MapScreen(
         queue: queue,
         currentPosition: const LatLng(-15.79, -47.88),
-        apiKey: '',
+        apiKey: _googleMapsApiKey,
       ),
     ));
     await tester.pumpAndSettle();
 
     expect(find.text('Mapa operacional'), findsOneWidget);
-    expect(find.textContaining('Mapa operacional indisponível sem chave'), findsOneWidget);
+    if (_googleMapsApiKey.isEmpty) {
+      expect(find.textContaining('Mapa operacional indisponível sem chave'), findsOneWidget);
+    } else {
+      expect(find.byType(GoogleMap), findsOneWidget);
+    }
 
     await tester.tap(find.text('Traçar rota eficiente'));
     await tester.pumpAndSettle();
@@ -63,7 +68,7 @@ void main() {
       home: MapScreen(
         queue: queue,
         currentPosition: destination,
-        apiKey: '',
+        apiKey: _googleMapsApiKey,
       ),
     ));
     await tester.pumpAndSettle();
