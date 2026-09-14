@@ -1,4 +1,14 @@
 ### Trilha de auditoria de acesso a dados sensíveis. Append-only.
+###
+### `sequence`/`previousHash`/`entryHash` formam uma cadeia de hash (LGPD-RT03):
+### cada linha encadeia à anterior via `previousHash == entryHash` da linha de
+### `sequence - 1`, e `entryHash` é um HMAC-SHA256 sobre o conteúdo da própria
+### linha (ver `application/audit/audit_chain.dart`). Isso torna qualquer
+### edição, remoção ou reordenação de linha detectável — inclusive por quem tem
+### acesso de escrita direto ao Postgres, que é o adversário que a §458 de
+### spec/lgpd_design.md descreve. O índice único em `sequence` é o segundo
+### cinto: uma bifurcação da cadeia por concorrência estoura na hora em vez de
+### corromper em silêncio.
 class: AuditLog
 table: audit_logs
 fields:
@@ -10,3 +20,16 @@ fields:
   timestamp: DateTime
   ipHash: String
   result: String
+  ### Posição na cadeia, começando em 1. Contígua por construção — um buraco
+  ### aqui é uma linha apagada.
+  sequence: int
+  ### `entryHash` da linha anterior, ou `AuditChain.genesisHash` (64 zeros) na
+  ### primeira linha. Nunca nulo: gênese e "escrito antes da cadeia existir"
+  ### não podem ter a mesma representação.
+  previousHash: String
+  ### HMAC-SHA256(AUDIT_CHAIN_SECRET, conteúdo da linha). Ver AuditChain.compute.
+  entryHash: String
+indexes:
+  audit_logs_sequence_idx:
+    fields: sequence
+    unique: true

@@ -38,6 +38,7 @@ const _ubsId = '00000000-0000-4000-8000-000000000004';
 AppConfig _config({required bool enableDevLogin}) => AppConfig(
       mqttBroker: 'localhost:1883',
       jwtSecret: 'test-secret',
+      auditChainSecret: 'test-audit-chain-secret',
       mqttUsername: null,
       mqttPassword: null,
       mqttUseTls: false,

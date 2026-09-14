@@ -381,7 +381,10 @@ erDiagram
         uuid resource_id
         timestamp timestamp
         string ip_hash
-        string result "SUCCESS | FAILURE | DENIED"
+        string result "granted | denied_territory, etc."
+        bigint sequence "posição na cadeia de hash, única"
+        string previous_hash "entryHash da linha anterior"
+        string entry_hash "HMAC-SHA256 do conteúdo da linha"
     }
     
     USER ||--o{ PATIENT : is
@@ -593,7 +596,7 @@ Future<bool> canAccessPatient(Session session, String patientId) async {
 | **Comunicação App ↔ Traefik** | TLS 1.3 | Certificado Let's Encrypt (auto-renovável) | Proteção contra MITM |
 | **Comunicação Traefik ↔ Backend** | TLS 1.3 | Certificado interno (mTLS) | Segurança na rede interna |
 | **PostgreSQL (SSOT)** | pgcrypto (AES-256) | Chave gerenciada por Vault/HashiCorp | Proteção contra acesso ao banco |
-| **Logs de Auditoria** | Assinatura Hash Chain | - | Integridade e não-repúdio |
+| **Logs de Auditoria** | Assinatura Hash Chain (HMAC-SHA256) | `AUDIT_CHAIN_SECRET`, próprio, fora do Postgres | Integridade e não-repúdio |
 
 #### 4.2.4 Conformidade LGPD (Resumo)
 

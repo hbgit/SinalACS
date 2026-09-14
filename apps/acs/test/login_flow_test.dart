@@ -8,7 +8,8 @@ import 'package:sinalacs_acs/core/services/alert_queue.dart';
 import 'package:sinalacs_acs/core/services/backend_visit_synchronizer.dart';
 import 'package:sinalacs_acs/core/services/offline_visit_queue.dart';
 import 'package:sinalacs_acs/core/services/visit_queue_factory.dart';
-import 'package:sinalacs_client/sinalacs_client.dart' show MicroAreaPatient;
+import 'package:sinalacs_client/sinalacs_client.dart'
+    show MicroAreaPatient, SyncStatus, VisitSyncResult;
 
 import 'support/fakes.dart';
 
@@ -303,6 +304,70 @@ void main() {
       expect(result.kind, SyncOutcomeKind.conflict);
       // Nada saiu: as duas continuam no aparelho.
       expect(queue.pendingCount, 2);
+    });
+
+    test('visita recusada em definitivo sai da fila e não é reenviada', () async {
+      // É o teste que reprova o comportamento antigo: `case 'error'`
+      // reenfileirava incondicionalmente, então uma recusa territorial (que
+      // nunca vai dar certo numa próxima tentativa) retentava para sempre.
+      final sender = FakeVisitSynchronizer(
+        statusFor: (_) => 'rejected',
+        messageFor: (_) => 'paciente fora da sua microárea',
+      );
+      final queue = OfflineVisitQueue(synchronizer: sender);
+
+      await queue.add(visit(seedPatientId));
+      final result = await queue.sync();
+
+      expect(result.kind, SyncOutcomeKind.rejected);
+      expect(result.message, 'paciente fora da sua microárea');
+      expect(queue.pendingCount, 0);
+      expect(queue.rejectedCount, 1);
+      expect(queue.rejectedVisits.single.rejectionReason, 'paciente fora da sua microárea');
+
+      // Um segundo sync não reenvia a recusada: nada de novo sai pela rede.
+      final secondSync = await queue.sync();
+      expect(secondSync.kind, SyncOutcomeKind.empty);
+      expect(sender.batches, hasLength(1));
+    });
+
+    test('recusa tem precedência sobre conflito no mesmo lote', () async {
+      final rejeitada = visit(seedPatientId);
+      final sender = FakeVisitSynchronizer(
+        statusFor: (v) => v.localId == rejeitada.localId ? 'rejected' : 'conflict',
+      );
+      final queue = OfflineVisitQueue(synchronizer: sender);
+
+      await queue.add(rejeitada);
+      await queue.add(visit(syntheticPatientId(2)));
+
+      final result = await queue.sync();
+
+      expect(result.kind, SyncOutcomeKind.rejected);
+      expect(queue.rejectedCount, 1);
+      // O conflito continua pendente para resolução — só a recusada saiu.
+      expect(queue.pendingCount, 1);
+      expect(queue.conflictCount, 1);
+    });
+
+    test('discardRejected esvazia as recusadas e persiste', () async {
+      final sender = FakeVisitSynchronizer(statusFor: (_) => 'rejected');
+      final store = InMemoryVisitStore();
+      final queue = OfflineVisitQueue(store: store, synchronizer: sender);
+
+      await queue.add(visit(seedPatientId));
+      await queue.sync();
+      expect(queue.rejectedCount, 1);
+
+      await queue.discardRejected();
+      expect(queue.rejectedCount, 0);
+
+      // A fila nova, lendo do mesmo store, não vê a recusada: ela saiu do
+      // disco quando foi descartada.
+      final reloaded = OfflineVisitQueue(store: store);
+      await reloaded.restore();
+      expect(reloaded.rejectedCount, 0);
+      expect(reloaded.pendingCount, 0);
     });
 
     test('não deve declarar sincronizado sem sincronizador configurado', () async {
@@ -665,6 +730,78 @@ void main() {
 
       expect(find.text('Sem conexão com o servidor.'), findsOneWidget);
       expect(visitQueue.pendingCount, 1);
+    });
+
+    testWidgets('visita recusada mostra o motivo, some da fila e sai só com confirmação',
+        (tester) async {
+      final backend = FakeAcsBackend()
+        ..syncResultFor = (entry) => VisitSyncResult(
+              localId: entry.localId,
+              syncStatus: SyncStatus.rejected,
+              message: 'paciente fora da sua microárea',
+            );
+      final visitQueue = OfflineVisitQueue(
+        synchronizer: BackendVisitSynchronizer(backend: backend),
+      );
+      late FakeAlertFeed feed;
+
+      await tester.pumpWidget(SinalAcsApp(
+        backend: backend,
+        feedBuilder: (queue) => feed = FakeAlertFeed(queue),
+        visitQueue: visitQueue,
+      ));
+
+      await tester.tap(find.byKey(const Key('login_button')));
+      await tester.pumpAndSettle();
+
+      feed.deliver(testAlert(alertId: 'alerta-1', riskLevel: 'yellow'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Iniciar rota de visita'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('arrival_confirmation')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('save_visit')));
+      await tester.pumpAndSettle();
+      await tester.pump(const Duration(seconds: 5));
+      await tester.pumpAndSettle();
+
+      await tester.ensureVisible(find.byKey(const Key('sync_visits')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('sync_visits')));
+      await tester.pumpAndSettle();
+
+      // Saiu da retentativa: o contador de pendentes zera, e o botão de
+      // sincronizar desabilita sozinho — sem isso o ACS ficaria tocando
+      // "Sincronizar agora" para sempre, à toa.
+      expect(find.text('Pendentes de sincronização: 0'), findsOneWidget);
+      expect(visitQueue.pendingCount, 0);
+      expect(visitQueue.rejectedCount, 1);
+      await tester.ensureVisible(find.byKey(const Key('rejected_visits_count')));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('paciente fora da sua microárea'), findsWidgets);
+
+      final syncButton = tester.widget<OutlinedButton>(find.byKey(const Key('sync_visits')));
+      expect(syncButton.onPressed, isNull);
+
+      // Cancelar a confirmação não descarta nada.
+      await tester.ensureVisible(find.byKey(const Key('discard_rejected')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('discard_rejected')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Cancelar'));
+      await tester.pumpAndSettle();
+      expect(visitQueue.rejectedCount, 1);
+
+      // Confirmar descarta — e some do aparelho para sempre.
+      await tester.tap(find.byKey(const Key('discard_rejected')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Descartar'));
+      await tester.pumpAndSettle();
+
+      expect(visitQueue.rejectedCount, 0);
+      expect(find.byKey(const Key('rejected_visits_count')), findsNothing);
     });
   });
 

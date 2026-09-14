@@ -166,7 +166,8 @@ void main() {
     );
     final results = await service.sync(user: otherAcs, entries: [entry(version: 1)]);
 
-    expect(results.single.syncStatus, SyncStatus.error);
+    // Terminal: o dono do registro não muda com uma próxima tentativa.
+    expect(results.single.syncStatus, SyncStatus.rejected);
     expect(store.rows[_localId]?.acsId, UuidValue.fromString(_acsId));
   });
 
@@ -188,7 +189,7 @@ void main() {
     );
   });
 
-  test('identificador inválido vira error, não derruba o lote', () async {
+  test('identificador inválido vira rejected, não derruba o lote', () async {
     final results = await service.sync(user: _acs, entries: [
       VisitSyncEntry(
         localId: 'nao-e-uuid',
@@ -202,7 +203,8 @@ void main() {
       entry(),
     ]);
 
-    expect(results.first.syncStatus, SyncStatus.error);
+    // Terminal: um UUID malformado na origem não vira válido reenviando.
+    expect(results.first.syncStatus, SyncStatus.rejected);
     // A visita válida do mesmo lote segue adiante.
     expect(results.last.syncStatus, SyncStatus.synced);
   });
@@ -229,7 +231,8 @@ void main() {
         entries: [entry(patientId: _outroTerritorioPatientId)],
       );
 
-      expect(results.single.syncStatus, SyncStatus.error);
+      // Terminal: o território não muda com uma próxima tentativa.
+      expect(results.single.syncStatus, SyncStatus.rejected);
       expect(store.rows, isEmpty);
       // A mensagem não pode citar a microárea alheia nem o nome do paciente.
       expect(results.single.message, isNot(contains(_otherMicroAreaId)));
@@ -252,7 +255,7 @@ void main() {
         entry(),
       ]);
 
-      expect(results.first.syncStatus, SyncStatus.error);
+      expect(results.first.syncStatus, SyncStatus.rejected);
       expect(results.last.syncStatus, SyncStatus.synced);
     });
 
@@ -278,7 +281,7 @@ void main() {
       );
 
       // A operação clínica (recusar a visita) não pode depender da auditoria.
-      expect(results.single.syncStatus, SyncStatus.error);
+      expect(results.single.syncStatus, SyncStatus.rejected);
     });
   });
 }

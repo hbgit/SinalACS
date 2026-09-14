@@ -341,7 +341,8 @@ Dois furos adjacentes fechados no caminho, achados ao implementar o diretório:
   que o ACS é territorializado, mas nunca que o PACIENTE pertence ao mesmo
   território — qualquer UUID de paciente existente era aceito, de qualquer
   microárea. `VisitStore.microAreaOfPatient` fecha isso; a recusa é por visita
-  (`SyncStatus.error`), não descarta o resto do lote.
+  (na época, `SyncStatus.error` — virou `SyncStatus.rejected`, terminal, numa
+  mudança posterior, ver abaixo), não descarta o resto do lote.
 - **`audit_logs` era tabela morta.** Existia desde a migração-base,
   documentada como "trilha de auditoria de acesso a dados sensíveis
   append-only", e nenhuma linha de código escrevia nela — este PR introduzia a
@@ -368,9 +369,65 @@ lista os pacientes reais do Postgres; escolher um e sincronizar grava
 `syncStatus: synced` no servidor; o arquivo do banco cifrado, puxado do
 aparelho depois de gravar e sincronizar pelo seletor, não contém o nome em
 nenhum ponto (nem o logcat); uma visita para paciente de outra microárea volta
-como `error` e grava a linha `denied_territory` em `audit_logs`, sem tocar
-`visits`; o caminho por alerta (vermelho → SAMU → escalonamento → visita)
-continua idêntico ao de antes desta mudança.
+como `error` (na época — ver abaixo) e grava a linha `denied_territory` em
+`audit_logs`, sem tocar `visits`; o caminho por alerta (vermelho → SAMU →
+escalonamento → visita) continua idêntico ao de antes desta mudança.
+
+#### A cadeia de hash da trilha de auditoria, e a recusa que ficava presa na fila para sempre
+
+Duas dívidas registradas explicitamente no PR anterior, fechadas nesta mudança.
+
+**A cadeia de hash de `audit_logs` (LGPD-RT03).** A trilha ganhara escritores
+no PR anterior, mas só fazia `insertRow` — qualquer um com acesso de escrita ao
+Postgres editava ou apagava uma linha sem deixar rastro, o que não serve ao
+não-repúdio que a spec promete. `audit_logs` ganhou três colunas: `sequence`
+(posição, contígua, índice único), `previousHash` (o `entryHash` da linha
+anterior, ou `AuditChain.genesisHash` — 64 zeros — na primeira) e `entryHash`
+(HMAC-SHA256 do conteúdo da linha). A chave é um segredo PRÓPRIO
+(`AUDIT_CHAIN_SECRET`), nunca derivado do `JWT_SECRET`: os dois precisam poder
+rotacionar de forma independente, e SHA-256 sem chave não detectaria uma
+reescrita completa por quem tem acesso de escrita ao banco — exatamente o
+adversário que a §458 de `spec/lgpd_design.md` descreve.
+`OrmAuditTrail.record` agora lê a última linha e insere a próxima dentro da
+MESMA transação, sob `pg_advisory_xact_lock`, para duas gravações concorrentes
+não lerem a mesma linha anterior e bifurcarem a cadeia. `AuditChainVerifier` (e
+o `bin/audit_chain_check.dart` que o expõe como script) reconstrói a cadeia
+inteira e detecta edição, remoção ou reordenação de qualquer linha — verificado
+ao vivo: adulterar uma linha por `UPDATE` direto no Postgres faz o verificador
+falhar exatamente na `sequence` afetada. Fora de escopo, registrado na spec: o
+append-only em si não é imposto pelo banco (sem trigger/`REVOKE`) — a cadeia
+*detecta* a violação, não a impede.
+
+**Recusa definitiva presa na fila para sempre.** `VisitSyncService._syncOne`
+colapsava seis motivos de falha distintos no mesmo `SyncStatus.error`, e
+`OfflineVisitQueue._applyOutcomes` reenfileirava `error` incondicionalmente.
+Para a recusa territorial isso era retentativa eterna garantida: a checagem de
+território roda antes do lookup por `localId`, então o reenvio falha de forma
+idêntica para sempre, e nada no aparelho explicava por quê. `SyncStatus` ganhou
+`rejected`, terminal: localId vazio, UUID malformado, território incompatível e
+visita de outro agente agora retornam `rejected` (só "paciente não encontrado"
+continua `error` — pode ser cadastrado depois, é legitimamente retentável).
+`SyncFsm` ganhou o estado espelhado, sem transição de saída. No aparelho,
+`OfflineVisitRecord` ganhou `rejectionReason`; a fila ganhou uma quarta lista
+(`_rejected`, ao lado de pendente/sincronizada/conflito) que sai da retentativa
+mas continua no disco — `VisitStore.save` passou a persistir pendentes MAIS
+recusadas, não só pendentes, senão a recusada sumiria do aparelho no instante
+da recusa, antes de o ACS decidir. A tela ganhou o contador
+(`Key('rejected_visits_count')`) e um botão de descarte com confirmação
+(`Key('discard_rejected')`) — nada remove a recusada do aparelho sem essa
+confirmação explícita. `encrypted_database.dart` foi de v3 a v4 com
+`ALTER TABLE ... ADD COLUMN rejection_reason` — a primeira migração aditiva
+desde que o schema existe; as anteriores (v1 → v2) recriavam a tabela porque o
+app ainda não tinha tido release.
+
+Verificação: 83 testes no backend (69 unit + 14 integração, incluindo a
+gravação real de duas linhas encadeadas contra Postgres e a checagem do
+`pg_advisory_xact_lock` — a cadeia de hash tem cobertura própria em
+`test/unit/audit_chain_test.dart`, incluindo detecção de edição, remoção,
+renumeração e segredo errado), 89 testes herméticos no app ACS (6 novos:
+recusa saindo da fila sem reenviar, precedência sobre conflito, `discardRejected`,
+persistência da recusada em disco, migração v3 → v4 preservando linhas, e o
+fluxo completo de descarte com confirmação na tela).
 
 ### M2.5 - Testes de Caos
 

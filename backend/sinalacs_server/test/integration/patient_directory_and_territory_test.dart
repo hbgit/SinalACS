@@ -1,6 +1,8 @@
 import 'package:serverpod/serverpod.dart';
+import 'package:sinalacs_server/src/application/audit/audit_chain_verifier.dart';
 import 'package:sinalacs_server/src/config/app_config.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
+import 'package:sinalacs_server/src/infrastructure/database/orm_audit_chain_reader.dart';
 import 'package:sinalacs_server/src/runtime/alert_runtime.dart';
 import 'package:test/test.dart';
 
@@ -22,6 +24,7 @@ const _patientOutsideAreaId = '00000000-0000-4000-8000-000000000009';
 AppConfig _config() => AppConfig(
       mqttBroker: 'localhost:1883',
       jwtSecret: 'test-secret',
+      auditChainSecret: 'test-audit-chain-secret',
       mqttUsername: null,
       mqttPassword: null,
       mqttUseTls: false,
@@ -155,6 +158,47 @@ void main() {
       expect(rows.single.ipHash, isNotEmpty);
     });
 
+    test('duas escritas reais na trilha ficam encadeadas e passam na verificação',
+        () async {
+      final session = sessionBuilder.build();
+      await _seed(session);
+
+      final login = await endpoints.auth.developmentLogin(sessionBuilder, role: 'acs');
+      // Primeira escrita: leitura do diretório (granted).
+      await endpoints.patients.listMicroArea(sessionBuilder, accessToken: login.accessToken);
+      // Segunda escrita: recusa territorial no sync.
+      await endpoints.visits.sync(
+        sessionBuilder,
+        accessToken: login.accessToken,
+        visits: [
+          VisitSyncEntry(
+            localId: '00000000-0000-4000-8000-0000000000b2',
+            patientId: _patientOutsideAreaId,
+            scheduledAt: DateTime.utc(2026, 9, 12, 9),
+            status: 'realizada',
+            riskLevelBefore: RiskLevel.green,
+            notes: const {},
+            version: 0,
+          ),
+        ],
+      );
+
+      final rows = await AuditLog.db.find(session, orderBy: (t) => t.sequence);
+      expect(rows, hasLength(2));
+      expect(rows[0].sequence, 1);
+      expect(rows[1].sequence, 2);
+      expect(rows[1].previousHash, rows[0].entryHash);
+
+      final verifier = AuditChainVerifier(
+        reader: OrmAuditChainReader(session: () => session),
+        secret: 'test-audit-chain-secret',
+      );
+      final result = await verifier.verify();
+
+      expect(result.ok, isTrue);
+      expect(result.checked, 2);
+    });
+
     test('visits.sync recusa e audita visita para paciente de outra microárea, contra Postgres real',
         () async {
       final session = sessionBuilder.build();
@@ -177,7 +221,7 @@ void main() {
         ],
       );
 
-      expect(results.single.syncStatus, SyncStatus.error);
+      expect(results.single.syncStatus, SyncStatus.rejected);
 
       final rows = await Visit.db.find(session);
       expect(rows, isEmpty, reason: 'nada deveria ser gravado para paciente fora do território');

@@ -1,16 +1,23 @@
 import 'package:sinalacs_server/src/config/app_config.dart';
 import 'package:test/test.dart';
 
-/// Regras de aceitação do segredo de assinatura.
+/// Regras de aceitação dos segredos de assinatura.
 ///
 /// A validação anterior cobria apenas `APP_ENV=production` e testava só
 /// `== null`, então `JWT_SECRET=""` e `APP_ENV=staging` subiam assinando com um
 /// valor público — e o `docker-compose.yml` sequer passava a variável.
+/// `AUDIT_CHAIN_SECRET` segue exatamente a mesma regra, para a cadeia de hash
+/// de `audit_logs`.
 void main() {
-  AppConfig build({required String appEnv, String? jwtSecret}) =>
+  AppConfig build({
+    required String appEnv,
+    String? jwtSecret,
+    String? auditChainSecret,
+  }) =>
       AppConfig.fromMap({
         'APP_ENV': appEnv,
         'JWT_SECRET': ?jwtSecret,
+        'AUDIT_CHAIN_SECRET': ?auditChainSecret,
       });
 
   group('JWT_SECRET', () {
@@ -75,7 +82,11 @@ void main() {
     });
 
     test('production com segredo próprio sobe', () {
-      final config = build(appEnv: 'production', jwtSecret: 'b' * 64);
+      final config = build(
+        appEnv: 'production',
+        jwtSecret: 'b' * 64,
+        auditChainSecret: 'd' * 64,
+      );
 
       expect(config.jwtSecret, 'b' * 64);
       expect(config.isProduction, isTrue);
@@ -83,9 +94,82 @@ void main() {
 
     test('espaços em volta do segredo são aparados', () {
       expect(
-        build(appEnv: 'production', jwtSecret: '  ${'c' * 64}  ').jwtSecret,
+        build(
+          appEnv: 'production',
+          jwtSecret: '  ${'c' * 64}  ',
+          auditChainSecret: 'd' * 64,
+        ).jwtSecret,
         'c' * 64,
       );
+    });
+  });
+
+  group('AUDIT_CHAIN_SECRET', () {
+    // Mesmas regras de JWT_SECRET, testadas de novo porque cada segredo é
+    // resolvido de forma independente: um poderia estar certo e o outro
+    // esquecido sem que os testes de JWT_SECRET percebessem.
+    test('development sem a variável usa o fallback conhecido', () {
+      expect(
+        build(appEnv: 'development').auditChainSecret,
+        AppConfig.developmentAuditChainSecret,
+      );
+    });
+
+    test('development aceita um segredo próprio', () {
+      expect(
+        build(appEnv: 'development', auditChainSecret: 'a' * 64)
+            .auditChainSecret,
+        'a' * 64,
+      );
+    });
+
+    test('production sem a variável não sobe', () {
+      expect(
+        () => build(appEnv: 'production', jwtSecret: 'b' * 64),
+        throwsA(isA<StateError>().having(
+          (error) => error.message,
+          'message',
+          contains('AUDIT_CHAIN_SECRET é obrigatório'),
+        )),
+      );
+    });
+
+    test('string vazia conta como ausente', () {
+      expect(
+        () => build(
+          appEnv: 'production',
+          jwtSecret: 'b' * 64,
+          auditChainSecret: '',
+        ),
+        throwsA(isA<StateError>()),
+      );
+    });
+
+    test('o segredo de desenvolvimento não pode ser promovido', () {
+      expect(
+        () => build(
+          appEnv: 'production',
+          jwtSecret: 'b' * 64,
+          auditChainSecret: AppConfig.developmentAuditChainSecret,
+        ),
+        throwsA(isA<StateError>().having(
+          (error) => error.message,
+          'message',
+          contains('valor de desenvolvimento'),
+        )),
+      );
+    });
+
+    test('production com segredo próprio sobe, independente do JWT_SECRET',
+        () {
+      final config = build(
+        appEnv: 'production',
+        jwtSecret: 'b' * 64,
+        auditChainSecret: 'd' * 64,
+      );
+
+      expect(config.auditChainSecret, 'd' * 64);
+      expect(config.jwtSecret, 'b' * 64);
     });
   });
 

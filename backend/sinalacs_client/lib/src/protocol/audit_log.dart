@@ -14,6 +14,16 @@
 import 'package:serverpod_client/serverpod_client.dart' as _i1;
 
 /// Trilha de auditoria de acesso a dados sensíveis. Append-only.
+///
+/// `sequence`/`previousHash`/`entryHash` formam uma cadeia de hash (LGPD-RT03):
+/// cada linha encadeia à anterior via `previousHash == entryHash` da linha de
+/// `sequence - 1`, e `entryHash` é um HMAC-SHA256 sobre o conteúdo da própria
+/// linha (ver `application/audit/audit_chain.dart`). Isso torna qualquer
+/// edição, remoção ou reordenação de linha detectável — inclusive por quem tem
+/// acesso de escrita direto ao Postgres, que é o adversário que a §458 de
+/// spec/lgpd_design.md descreve. O índice único em `sequence` é o segundo
+/// cinto: uma bifurcação da cadeia por concorrência estoura na hora em vez de
+/// corromper em silêncio.
 abstract class AuditLog implements _i1.SerializableModel {
   AuditLog._({
     this.id,
@@ -24,6 +34,9 @@ abstract class AuditLog implements _i1.SerializableModel {
     required this.timestamp,
     required this.ipHash,
     required this.result,
+    required this.sequence,
+    required this.previousHash,
+    required this.entryHash,
   });
 
   factory AuditLog({
@@ -35,6 +48,9 @@ abstract class AuditLog implements _i1.SerializableModel {
     required DateTime timestamp,
     required String ipHash,
     required String result,
+    required int sequence,
+    required String previousHash,
+    required String entryHash,
   }) = _AuditLogImpl;
 
   factory AuditLog.fromJson(Map<String, dynamic> jsonSerialization) {
@@ -55,6 +71,9 @@ abstract class AuditLog implements _i1.SerializableModel {
       ),
       ipHash: jsonSerialization['ipHash'] as String,
       result: jsonSerialization['result'] as String,
+      sequence: jsonSerialization['sequence'] as int,
+      previousHash: jsonSerialization['previousHash'] as String,
+      entryHash: jsonSerialization['entryHash'] as String,
     );
   }
 
@@ -77,6 +96,18 @@ abstract class AuditLog implements _i1.SerializableModel {
 
   String result;
 
+  /// Posição na cadeia, começando em 1. Contígua por construção — um buraco
+  /// aqui é uma linha apagada.
+  int sequence;
+
+  /// `entryHash` da linha anterior, ou `AuditChain.genesisHash` (64 zeros) na
+  /// primeira linha. Nunca nulo: gênese e "escrito antes da cadeia existir"
+  /// não podem ter a mesma representação.
+  String previousHash;
+
+  /// HMAC-SHA256(AUDIT_CHAIN_SECRET, conteúdo da linha). Ver AuditChain.compute.
+  String entryHash;
+
   /// Returns a shallow copy of this [AuditLog]
   /// with some or all fields replaced by the given arguments.
   @_i1.useResult
@@ -89,6 +120,9 @@ abstract class AuditLog implements _i1.SerializableModel {
     DateTime? timestamp,
     String? ipHash,
     String? result,
+    int? sequence,
+    String? previousHash,
+    String? entryHash,
   });
   @override
   Map<String, dynamic> toJson() {
@@ -102,6 +136,9 @@ abstract class AuditLog implements _i1.SerializableModel {
       'timestamp': timestamp.toJson(),
       'ipHash': ipHash,
       'result': result,
+      'sequence': sequence,
+      'previousHash': previousHash,
+      'entryHash': entryHash,
     };
   }
 
@@ -123,6 +160,9 @@ class _AuditLogImpl extends AuditLog {
     required DateTime timestamp,
     required String ipHash,
     required String result,
+    required int sequence,
+    required String previousHash,
+    required String entryHash,
   }) : super._(
          id: id,
          userId: userId,
@@ -132,6 +172,9 @@ class _AuditLogImpl extends AuditLog {
          timestamp: timestamp,
          ipHash: ipHash,
          result: result,
+         sequence: sequence,
+         previousHash: previousHash,
+         entryHash: entryHash,
        );
 
   /// Returns a shallow copy of this [AuditLog]
@@ -147,6 +190,9 @@ class _AuditLogImpl extends AuditLog {
     DateTime? timestamp,
     String? ipHash,
     String? result,
+    int? sequence,
+    String? previousHash,
+    String? entryHash,
   }) {
     return AuditLog(
       id: id is _i1.UuidValue? ? id : this.id,
@@ -157,6 +203,9 @@ class _AuditLogImpl extends AuditLog {
       timestamp: timestamp ?? this.timestamp,
       ipHash: ipHash ?? this.ipHash,
       result: result ?? this.result,
+      sequence: sequence ?? this.sequence,
+      previousHash: previousHash ?? this.previousHash,
+      entryHash: entryHash ?? this.entryHash,
     );
   }
 }

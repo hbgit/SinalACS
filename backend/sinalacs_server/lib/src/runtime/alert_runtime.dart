@@ -100,7 +100,10 @@ class AlertRuntime {
       );
 
   /// Trilha de auditoria amarrada à sessão da chamada.
-  AuditTrail auditTrailFor(Session session) => OrmAuditTrail(session: () => session);
+  AuditTrail auditTrailFor(Session session) => OrmAuditTrail(
+        session: () => session,
+        chainSecret: config.auditChainSecret,
+      );
 
   /// Drenador do outbox.
   ///

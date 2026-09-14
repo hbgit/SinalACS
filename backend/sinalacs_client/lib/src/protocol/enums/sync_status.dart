@@ -14,11 +14,18 @@
 import 'package:serverpod_client/serverpod_client.dart' as _i1;
 
 /// Estado de sincronização offline-first, espelha a SyncFsm.
+///
+/// `rejected` é TERMINAL: ao contrário de `error`, que é retentável (o
+/// dispositivo tenta de novo mais tarde), uma visita `rejected` nunca vai dar
+/// certo numa próxima tentativa — o motivo não muda com o tempo (ex.: paciente
+/// fora da microárea do ACS, identificador malformado). `SyncFsm.rejected` não
+/// tem transição de saída; `networkUp`/`syncStart` não o alcançam.
 enum SyncStatus implements _i1.SerializableModel {
   pending,
   synced,
   conflict,
-  error;
+  error,
+  rejected;
 
   static SyncStatus fromJson(String name) {
     switch (name) {
@@ -30,6 +37,8 @@ enum SyncStatus implements _i1.SerializableModel {
         return SyncStatus.conflict;
       case 'error':
         return SyncStatus.error;
+      case 'rejected':
+        return SyncStatus.rejected;
       default:
         throw ArgumentError(
           'Value "$name" cannot be converted to "SyncStatus"',

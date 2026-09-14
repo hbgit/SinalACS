@@ -28,8 +28,14 @@ abstract interface class VisitStore {
 /// Sincronização das visitas registradas offline pelo ACS.
 ///
 /// Espelha a `SyncFsm` do lado do dispositivo: cada visita termina em
-/// `synced`, `conflict` ou `error`, e conflito **nunca** sobrescreve o que está
-/// no servidor — devolve a versão atual para o dispositivo reconciliar.
+/// `synced`, `conflict`, `error` ou `rejected`, e conflito **nunca**
+/// sobrescreve o que está no servidor — devolve a versão atual para o
+/// dispositivo reconciliar.
+///
+/// `error` é retentável (rede, paciente ainda não cadastrado); `rejected` é
+/// terminal — o motivo não muda com uma próxima tentativa (identificador
+/// malformado, território, dono do registro) — e o dispositivo não deve
+/// reenviar.
 class VisitSyncService {
   VisitSyncService({
     required VisitStore store,
@@ -63,9 +69,10 @@ class VisitSyncService {
     required VisitSyncEntry entry,
   }) async {
     if (entry.localId.trim().isEmpty) {
+      // Terminal: um localId vazio não vira válido reenviando o mesmo lote.
       return VisitSyncResult(
         localId: entry.localId,
-        syncStatus: SyncStatus.error,
+        syncStatus: SyncStatus.rejected,
         message: 'localId é obrigatório',
       );
     }
@@ -80,9 +87,11 @@ class VisitSyncService {
       localId = UuidValue.withValidation(entry.localId);
       patientId = UuidValue.withValidation(entry.patientId);
     } on FormatException {
+      // Terminal: um identificador malformado na origem não vira válido
+      // reenviando.
       return VisitSyncResult(
         localId: entry.localId,
-        syncStatus: SyncStatus.error,
+        syncStatus: SyncStatus.rejected,
         message: 'identificadores devem ser UUID',
       );
     }
@@ -111,9 +120,10 @@ class VisitSyncService {
         resourceId: patientId.uuid,
         result: 'denied_territory',
       ));
+      // Terminal: o território não muda por retentar.
       return VisitSyncResult(
         localId: entry.localId,
-        syncStatus: SyncStatus.error,
+        syncStatus: SyncStatus.rejected,
         message: 'paciente fora da sua microárea',
       );
     }
@@ -146,9 +156,10 @@ class VisitSyncService {
     // A visita pertence ao ACS que a registrou. Um ACS não sincroniza a visita
     // de outro, mesmo conhecendo o localId.
     if (existing.acsId != acsId) {
+      // Terminal: o dono do registro não muda por retentar.
       return VisitSyncResult(
         localId: entry.localId,
-        syncStatus: SyncStatus.error,
+        syncStatus: SyncStatus.rejected,
         message: 'visita registrada por outro agente',
       );
     }

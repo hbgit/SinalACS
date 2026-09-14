@@ -1177,7 +1177,37 @@ class _VisitRegistrationScreenState extends State<VisitRegistrationScreen> {
           (widget.queue.persistenceFailed
               ? 'Não foi possível sincronizar. As visitas estão apenas na memória deste aparelho.'
               : 'Não foi possível sincronizar. As visitas continuam salvas no aparelho.'),
+      // Terminal: ao contrário de error, não vai retentar sozinha — dizer isso
+      // aqui é o que evita o ACS ficar tocando "Sincronizar agora" à toa.
+      SyncOutcomeKind.rejected => '${result.processed} visita(s) recusada(s) pelo '
+          'servidor e não serão reenviadas. '
+          '${result.message ?? 'Veja o motivo na lista abaixo.'}',
     });
+  }
+
+  /// Descarta as visitas recusadas, com confirmação — o registro sai do
+  /// aparelho para sempre, e ele nunca chegou ao servidor.
+  Future<void> _discardRejected() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Descartar visita(s) recusada(s)?'),
+        content: const Text(
+          'O servidor recusou esta visita em definitivo e ela nunca chegou a '
+          'ser sincronizada. Descartar apaga o registro deste aparelho — não '
+          'há como recuperá-lo depois.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancelar')),
+          FilledButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('Descartar')),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    await widget.queue.discardRejected();
+    if (!mounted) return;
+    setState(() {});
   }
 
   /// Seletor de pacientes da microárea, para quando a visita não vem de um
@@ -1340,6 +1370,26 @@ class _VisitRegistrationScreenState extends State<VisitRegistrationScreen> {
           style: const TextStyle(color: AcsColors.accent, fontWeight: FontWeight.bold),
         ),
       ),
+      if (queue.rejectedCount > 0) ...[
+        Padding(
+          padding: const EdgeInsets.only(top: 4),
+          child: Text(
+            key: const Key('rejected_visits_count'),
+            'Recusada(s) pelo servidor, não serão reenviadas: ${queue.rejectedCount}\n'
+            '${queue.rejectedVisits.map((v) => v.rejectionReason).whereType<String>().toSet().join('; ')}',
+            // Recusa de sync é operacional, não gravidade clínica — mesma cor
+            // do contador de conflito.
+            style: const TextStyle(color: AcsColors.accent, fontWeight: FontWeight.bold),
+          ),
+        ),
+        const SizedBox(height: 8),
+        OutlinedButton.icon(
+          key: const Key('discard_rejected'),
+          onPressed: _discardRejected,
+          icon: const Icon(Icons.delete_outline),
+          label: const Text('Descartar recusada(s)'),
+        ),
+      ],
       const SizedBox(height: 12),
       OutlinedButton.icon(
         key: const Key('sync_visits'),

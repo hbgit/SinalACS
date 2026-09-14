@@ -75,6 +75,7 @@ class SqlCipherVisitStore implements VisitStore {
           status: row['status']! as String,
           outcome: row['outcome']! as String,
           notes: (row['notes'] as String?) ?? '',
+          rejectionReason: row['rejection_reason'] as String?,
           localId: row['local_id']! as String,
           createdAt: DateTime.parse(row['created_at']! as String),
           version: row['version']! as int,
@@ -84,9 +85,12 @@ class SqlCipherVisitStore implements VisitStore {
 
   /// Substitui o conjunto inteiro, em transação.
   ///
-  /// A fila chama `save(_pending)`, então o que sai da lista sai do disco: uma
-  /// visita confirmada pelo servidor deixa o dispositivo aqui. É a minimização
-  /// de dados acontecendo, e há teste que trava essa propriedade.
+  /// A fila chama `save([..._pending, ..._rejected])`, então o que sai da
+  /// lista sai do disco: uma visita confirmada pelo servidor deixa o
+  /// dispositivo aqui. É a minimização de dados acontecendo, e há teste que
+  /// trava essa propriedade. Uma visita recusada em definitivo continua no
+  /// disco — com `rejection_reason` preenchido — até o ACS descartá-la
+  /// explicitamente; só então ela deixa de fazer parte do que é gravado.
   @override
   Future<void> save(List<OfflineVisitRecord> visits) async {
     final database = await _open();
@@ -103,6 +107,7 @@ class SqlCipherVisitStore implements VisitStore {
           'notes': visit.notes,
           'created_at': visit.createdAt.toIso8601String(),
           'version': visit.version,
+          'rejection_reason': visit.rejectionReason,
         });
       }
     });

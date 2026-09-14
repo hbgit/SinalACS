@@ -65,6 +65,7 @@ else
   MQTT_BACKEND_PASSWORD="$(secret)" \
   MQTT_ACS_PASSWORD="$(secret)" \
   JWT_SECRET="$(secret)" \
+  AUDIT_CHAIN_SECRET="$(secret)" \
   awk '
     {
       split($0, kv, "=")
@@ -80,7 +81,8 @@ else
 
   chmod 600 "$env_file"
   echo "  .env gerado (POSTGRES_PASSWORD, TEST_DATABASE_PASSWORD,"
-  echo "               MQTT_BACKEND_PASSWORD, MQTT_ACS_PASSWORD, JWT_SECRET)"
+  echo "               MQTT_BACKEND_PASSWORD, MQTT_ACS_PASSWORD, JWT_SECRET,"
+  echo "               AUDIT_CHAIN_SECRET)"
 fi
 
 # --- config/passwords.yaml -------------------------------------------------
