@@ -1,3 +1,4 @@
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
@@ -94,9 +95,42 @@ void main() {
       expect(find.text('Recebimento confirmado'), findsOneWidget);
     });
 
+    testWidgets('o cartão de alerta é lido como uma frase única pelo leitor de tela', (tester) async {
+      // Antes, um leitor de tela lia o cartão como quatro nós soltos
+      // ("Paciente 3f2a..." / "Risco: Vermelho" / "Recebido às..." / botão),
+      // sem ligar a informação entre si.
+      final handle = tester.ensureSemantics();
+      final backend = FakeAcsBackend();
+      late FakeAlertFeed feed;
+
+      await tester.pumpWidget(SinalAcsApp(
+        backend: backend,
+        feedBuilder: (queue) => feed = FakeAlertFeed(queue),
+      ));
+      await tester.tap(find.byKey(const Key('login_button')));
+      await tester.pumpAndSettle();
+
+      feed.deliver(testAlert(alertId: 'alerta-frase'));
+      await tester.pumpAndSettle();
+
+      // Sem hora fixa no rótulo esperado: `_time` converte para o fuso local
+      // da máquina que roda o teste, e o que importa aqui é que as quatro
+      // informações — paciente, risco, confirmação e horário — cheguem como
+      // UMA frase, não a hora exata.
+      expect(
+        find.bySemanticsLabel(RegExp(r'Paciente .*, Risco: Vermelho, recebido às \d{2}:\d{2}')),
+        findsOneWidget,
+      );
+      // Os botões continuam como nós próprios, não somem dentro do bloco
+      // mesclado.
+      expect(find.bySemanticsLabel('Confirmar recebimento'), findsOneWidget);
+      handle.dispose();
+    });
+
     testWidgets('deve avisar quando a central de alertas está inacessível', (tester) async {
       // Um ACS que não sabe que parou de receber alertas é o pior modo de falha
       // do produto: a falha precisa ser visível, não silenciosa.
+      final handle = tester.ensureSemantics();
       await tester.pumpWidget(SinalAcsApp(
         backend: FakeAcsBackend(),
         feedBuilder: (queue) => FakeAlertFeed(queue, failOnStart: true),
@@ -106,6 +140,12 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.byKey(const Key('feed_error')), findsOneWidget);
+      // SC 4.1.3: o banner troca de estado sem tirar o foco de onde a
+      // pessoa estava — só é percebido por um leitor de tela se a
+      // `SemanticsNode` estiver marcada como região viva.
+      final semantics = tester.getSemantics(find.byKey(const Key('feed_error')));
+      expect(semantics.flagsCollection.isLiveRegion, isTrue);
+      handle.dispose();
     });
 
     testWidgets('deve expor rótulo semântico e alvo de toque acessível no login do ACS', (tester) async {
@@ -120,6 +160,21 @@ void main() {
       expect(find.bySemanticsLabel('Entrar no painel de priorização'), findsOneWidget);
       expect(minimumSize.height, greaterThanOrEqualTo(48));
       expect(minimumSize.width, greaterThanOrEqualTo(48));
+    });
+
+    testWidgets('a tela de login atende às diretrizes de contraste e alvo de toque do Flutter', (tester) async {
+      // Substitui a auditoria manual no WebAIM/TalkBack do relatório anterior
+      // por uma verificação determinística que o CI roda sozinho.
+      final handle = tester.ensureSemantics();
+      await tester.pumpWidget(SinalAcsApp(
+        backend: FakeAcsBackend(),
+        feedBuilder: (queue) => FakeAlertFeed(queue),
+      ));
+
+      await expectLater(tester, meetsGuideline(textContrastGuideline));
+      await expectLater(tester, meetsGuideline(androidTapTargetGuideline));
+      await expectLater(tester, meetsGuideline(labeledTapTargetGuideline));
+      handle.dispose();
     });
 
     testWidgets('não deve pré-preencher credenciais no formulário', (tester) async {

@@ -1,3 +1,4 @@
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sinalacs_client/sinalacs_client.dart' show RiskLevel;
@@ -40,6 +41,7 @@ void main() {
   });
 
   testWidgets('não deve avançar quando a autenticação falha', (tester) async {
+    final handle = tester.ensureSemantics();
     final backend = FakePatientBackend(
       loginFailure: const BackendFailure('Sem conexão com o servidor.'),
     );
@@ -52,6 +54,11 @@ void main() {
     expect(find.text('Triagem rápida'), findsNothing);
     expect(find.byKey(const Key('login_error')), findsOneWidget);
     expect(find.text('Sem conexão com o servidor.'), findsOneWidget);
+    // SC 4.1.3: o erro aparece sem mover o foco — sem `liveRegion` um leitor
+    // de tela nunca saberia que o login falhou.
+    final semantics = tester.getSemantics(find.byKey(const Key('login_error')));
+    expect(semantics.flagsCollection.isLiveRegion, isTrue);
+    handle.dispose();
   });
 
   testWidgets('deve enviar os sintomas ao servidor e exibir o risco recebido', (tester) async {
@@ -112,6 +119,26 @@ void main() {
     expect(backend.idempotencyKeys.first, backend.idempotencyKeys.last);
   });
 
+  testWidgets('o estado do alerta de emergência é anunciado ao leitor de tela', (tester) async {
+    // É a confirmação de que o alerta chegou à equipe — o ponto mais crítico
+    // do app para um leitor de tela anunciar sem depender de a pessoa
+    // varrer a tela de novo.
+    final handle = tester.ensureSemantics();
+    await tester.pumpWidget(SinalAcsApp(backend: FakePatientBackend()));
+
+    await login(tester);
+    await tester.tap(find.text('Urgência'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('panic_button')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Confirmar alerta'));
+    await tester.pumpAndSettle();
+
+    final semantics = tester.getSemantics(find.text('Alerta recebido pela equipe'));
+    expect(semantics.flagsCollection.isLiveRegion, isTrue);
+    handle.dispose();
+  });
+
   testWidgets('deve expor rótulo semântico e alvo de toque acessível no fluxo do paciente', (tester) async {
     await tester.pumpWidget(SinalAcsApp(backend: FakePatientBackend()));
 
@@ -121,5 +148,17 @@ void main() {
     expect(find.bySemanticsLabel('Entrar na triagem do paciente'), findsOneWidget);
     expect(minimumSize.height, greaterThanOrEqualTo(48));
     expect(minimumSize.width, greaterThanOrEqualTo(48));
+  });
+
+  testWidgets('a tela de login atende às diretrizes de contraste e alvo de toque do Flutter', (tester) async {
+    // Substitui a auditoria manual no WebAIM/TalkBack do relatório anterior
+    // por uma verificação determinística que o CI roda sozinho.
+    final handle = tester.ensureSemantics();
+    await tester.pumpWidget(SinalAcsApp(backend: FakePatientBackend()));
+
+    await expectLater(tester, meetsGuideline(textContrastGuideline));
+    await expectLater(tester, meetsGuideline(androidTapTargetGuideline));
+    await expectLater(tester, meetsGuideline(labeledTapTargetGuideline));
+    handle.dispose();
   });
 }

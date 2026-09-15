@@ -147,13 +147,19 @@ class _PatientLoginScreenState extends State<PatientLoginScreen> {
                         if (_error != null)
                           Padding(
                             padding: const EdgeInsets.only(top: 16),
-                            child: Text(
-                              key: const Key('login_error'),
-                              _error!,
-                              textAlign: TextAlign.center,
-                              style: const TextStyle(
-                                color: PatientColors.danger,
-                                fontWeight: FontWeight.bold,
+                            // SC 4.1.3: o erro aparece sem mover o foco — sem
+                            // `liveRegion` o leitor de tela nunca saberia que
+                            // o login falhou.
+                            child: Semantics(
+                              liveRegion: true,
+                              child: Text(
+                                key: const Key('login_error'),
+                                _error!,
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(
+                                  color: PatientColors.dangerOnSurface,
+                                  fontWeight: FontWeight.bold,
+                                ),
                               ),
                             ),
                           ),
@@ -343,7 +349,19 @@ class _EmergencyScreenState extends State<EmergencyScreen> {
           ),
         ),
         const SizedBox(height: 28),
-        Card(child: Padding(padding: const EdgeInsets.all(16), child: Column(children: [const Icon(Icons.location_on_outlined), const SizedBox(height: 8), const Text('A localização disponível será anexada ao alerta.', textAlign: TextAlign.center), const SizedBox(height: 8), Text(_state, style: const TextStyle(color: PatientColors.accent, fontWeight: FontWeight.bold))]))),
+        Card(child: Padding(padding: const EdgeInsets.all(16), child: Column(children: [
+          const Icon(Icons.location_on_outlined),
+          const SizedBox(height: 8),
+          const Text('A localização disponível será anexada ao alerta.', textAlign: TextAlign.center),
+          const SizedBox(height: 8),
+          // SC 4.1.3: é a confirmação de que o alerta de emergência chegou à
+          // equipe — o ponto mais crítico do app para um leitor de tela
+          // anunciar sem depender de a pessoa varrer a tela de novo.
+          Semantics(
+            liveRegion: true,
+            child: Text(_state, style: const TextStyle(color: PatientColors.accentOnSurface, fontWeight: FontWeight.bold)),
+          ),
+        ]))),
       ],
     );
   }
@@ -484,11 +502,14 @@ class _TriageScreenState extends State<TriageScreen> {
         if (_error != null)
           Padding(
             padding: const EdgeInsets.only(top: 16),
-            child: Text(
-              key: const Key('triage_error'),
-              _error!,
-              textAlign: TextAlign.center,
-              style: const TextStyle(color: PatientColors.danger, fontWeight: FontWeight.bold),
+            child: Semantics(
+              liveRegion: true,
+              child: Text(
+                key: const Key('triage_error'),
+                _error!,
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: PatientColors.dangerOnSurface, fontWeight: FontWeight.bold),
+              ),
             ),
           ),
       ],
@@ -508,10 +529,14 @@ class _TriageResult extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // `color` só é usada como texto/ícone sobre o card (nenhum botão herda
+    // este tom), por isso a variante `OnSurface` entra direto na tupla —
+    // `PatientColors.danger` e `PatientColors.accent` caem para 3.03:1 e
+    // 3.91:1 sobre `surfaceRaised`, abaixo de 4.5:1 (WCAG 1.4.3).
     final (label, color, guidance) = switch (risk) {
       RiskLevel.red => (
           'Risco: Vermelho',
-          PatientColors.danger,
+          PatientColors.dangerOnSurface,
           'Sua equipe de saúde foi avisada com prioridade máxima. '
               'Se piorar, ligue para o SAMU (192).',
         ),
@@ -522,7 +547,7 @@ class _TriageResult extends StatelessWidget {
         ),
       RiskLevel.green => (
           'Risco: Verde',
-          PatientColors.accent,
+          PatientColors.accentOnSurface,
           'Sem sinais de urgência. Sua solicitação entrou na fila de rotina.',
         ),
     };

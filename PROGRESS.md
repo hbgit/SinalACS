@@ -124,7 +124,7 @@ dados.
 | M2.3 | MQTT com TLS | Parcialmente implementado | [apps/acs/lib/core/services/mqtt_secure_client.dart](apps/acs/lib/core/services/mqtt_secure_client.dart) adiciona configuração segura e payload de alerta com TLS/WSS e teste em [apps/acs/test/mqtt_secure_client_test.dart](apps/acs/test/mqtt_secure_client_test.dart) |
 | M2.4 | Sincronização Offline-First | Implementado | [apps/acs/lib/core/services/offline_visit_queue.dart](apps/acs/lib/core/services/offline_visit_queue.dart) com lote, retry e conflito, validado em [apps/acs/test/login_flow_test.dart](apps/acs/test/login_flow_test.dart) |
 | M2.5 | Testes de Caos (Toxiproxy) | Implementado | [apps/acs/lib/core/services/network_chaos_simulator.dart](apps/acs/lib/core/services/network_chaos_simulator.dart) e [apps/acs/test/network_chaos_test.dart](apps/acs/test/network_chaos_test.dart) simulam latência, jitter e retry em cenários de falha |
-| M2.6 | Testes de Usabilidade | Implementado | [apps/acs/test/login_flow_test.dart](apps/acs/test/login_flow_test.dart) e [apps/patient/test/patient_app_mvp_test.dart](apps/patient/test/patient_app_mvp_test.dart) validam labels semânticas e área mínima de toque para os principais botões |
+| M2.6 | Testes de Usabilidade e Acessibilidade | Implementado | [spec/ux_accessibility_assessment.md](spec/ux_accessibility_assessment.md) — matriz de contraste WCAG 1.4.3 determinística (`contrast_tokens_test.dart`), `meetsGuideline` de contraste/alvo de toque e `liveRegion` (SC 4.1.3) em [apps/acs/test/login_flow_test.dart](apps/acs/test/login_flow_test.dart) e [apps/patient/test/patient_app_mvp_test.dart](apps/patient/test/patient_app_mvp_test.dart), validado ponta a ponta no emulador contra o backend e o broker reais |
 
 ## O que já está pronto - Fase 2
 
@@ -443,13 +443,33 @@ Os cenários de falha foram validados em [apps/acs/test/network_chaos_test.dart]
 
 ### M2.6 - Testes de Usabilidade e Acessibilidade
 
-Foi implementada a validação de UX básica em [apps/acs/test/login_flow_test.dart](apps/acs/test/login_flow_test.dart) e [apps/patient/test/patient_app_mvp_test.dart](apps/patient/test/patient_app_mvp_test.dart):
+[spec/ux_accessibility_assessment.md](spec/ux_accessibility_assessment.md) documenta a auditoria
+completa contra a baseline WCAG 2.1 AA do PRD (§4.3). A primeira versão do relatório media
+contraste manualmente contra o fundo do `Scaffold`, mas texto de risco/status é renderizado
+dentro de `Card` — produziu um falso positivo e deixou passar duas falhas piores (vermelho e azul
+de preenchimento usados como cor de texto, abaixo de 4.5:1 sobre o card). A revisão trocou a
+medição manual por uma matriz determinística
+(`apps/{acs,patient}/test/contrast_tokens_test.dart`), corrigiu os tokens separando cor de
+PREENCHIMENTO de cor de TEXTO (`redOnSurface`/`accentOnSurface` no ACS,
+`dangerOnSurface`/`accentOnSurface` no paciente, em
+[apps/acs/lib/app/acs_theme.dart](apps/acs/lib/app/acs_theme.dart) e
+[apps/patient/lib/app/patient_theme.dart](apps/patient/lib/app/patient_theme.dart)), e adicionou:
 
-- rótulos semânticos para leitores de tela
-- mínimo de 48x48 dp nos principais botões de ação
-- manutenção do fluxo principal logo após a validação de acessibilidade
+- `meetsGuideline(textContrastGuideline/androidTapTargetGuideline/labeledTapTargetGuideline)` em
+  [apps/acs/test/login_flow_test.dart](apps/acs/test/login_flow_test.dart) e
+  [apps/patient/test/patient_app_mvp_test.dart](apps/patient/test/patient_app_mvp_test.dart)
+- alvo de toque de 60x60 dp no botão "Ligar para o SAMU (192)", que não tinha `minimumSize`
+  (default de 40dp de altura visual — a medição anterior de "48x52 dp" estava incorreta)
+- `Semantics(liveRegion: true)` em sete pontos de status dinâmico (WCAG 4.1.3, critério ausente
+  da avaliação original), incluindo a confirmação do alerta de emergência do paciente
+- o cartão de alerta da fila do ACS passou a ser lido como uma frase única pelo leitor de tela,
+  em vez de nós soltos
 
-O app também foi ajustado para expor essas metas corretamente em [apps/acs/lib/app/app.dart](apps/acs/lib/app/app.dart) e [apps/patient/lib/app/app.dart](apps/patient/lib/app/app.dart).
+Validado ponta a ponta no emulador Android (`emulator-5554`): o app Paciente disparou um alerta de
+emergência real contra o backend em Docker Compose, e o app ACS recebeu pelo broker MQTT/TLS real,
+exibindo o novo contraste, o botão do SAMU no novo tamanho e o risco traduzido corretamente. Os 14
+testes de integração em dispositivo de `apps/acs/integration_test/` (inclusive o que lê o arquivo
+do banco criptografado) passam sobre o código revisado.
 
 ## Preparação de deploy — piloto em serviços free-tier (backend)
 

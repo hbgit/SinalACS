@@ -167,7 +167,10 @@ class _LoginScreenState extends State<LoginScreen> {
           ))),
           if (_error != null) Padding(
             padding: const EdgeInsets.only(top: 16),
-            child: Text(key: const Key('login_error'), _error!, textAlign: TextAlign.center, style: const TextStyle(color: AcsColors.red, fontWeight: FontWeight.bold)),
+            child: Semantics(
+              liveRegion: true,
+              child: Text(key: const Key('login_error'), _error!, textAlign: TextAlign.center, style: const TextStyle(color: AcsColors.redOnSurface, fontWeight: FontWeight.bold)),
+            ),
           ),
         ]))),
       ]),
@@ -598,16 +601,23 @@ class _InfraBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Padding(
         padding: const EdgeInsets.only(top: 12),
-        child: Card(
-          color: AcsColors.accent.withValues(alpha: 0.15),
-          child: ListTile(
-            leading: Icon(icon, color: AcsColors.accent),
-            title: Text(notice.title, style: const TextStyle(fontWeight: FontWeight.bold)),
-            subtitle: Text(notice.detail),
-            trailing: onRetry == null ? null : TextButton(
-              key: const Key('retry_feed'),
-              onPressed: onRetry,
-              child: const Text('Tentar agora'),
+        // SC 4.1.3 (Status Messages): o banner aparece sem tirar o foco de
+        // onde a pessoa estava — sem `liveRegion`, um leitor de tela nunca
+        // saberia que o broker ou o armazenamento caíram, a não ser que
+        // varresse a tela de novo por conta própria.
+        child: Semantics(
+          liveRegion: true,
+          child: Card(
+            color: AcsColors.accent.withValues(alpha: 0.15),
+            child: ListTile(
+              leading: Icon(icon, color: AcsColors.accentOnSurface),
+              title: Text(notice.title, style: const TextStyle(fontWeight: FontWeight.bold)),
+              subtitle: Text(notice.detail),
+              trailing: onRetry == null ? null : TextButton(
+                key: const Key('retry_feed'),
+                onPressed: onRetry,
+                child: const Text('Tentar agora'),
+              ),
             ),
           ),
         ),
@@ -624,16 +634,21 @@ class _AlertCard extends StatelessWidget {
 
   /// Cor é sinal clínico, nunca decoração: mapeia estritamente o risco vindo do
   /// servidor.
-  (Color, String) get _risk => switch (alert.riskLevel.toLowerCase()) {
-        'red' || 'vermelho' => (AcsColors.red, 'Risco: Vermelho'),
-        'yellow' || 'amarelo' => (AcsColors.yellow, 'Risco: Amarelo'),
-        'green' || 'verde' => (AcsColors.green, 'Risco: Verde'),
-        _ => (AcsColors.accent, 'Risco: não classificado'),
+  ///
+  /// `color` é o preenchimento (borda esquerda, fundo do botão de
+  /// confirmação); `textColor` é a variante ajustada para ≥4.5:1 como texto
+  /// sobre o card (`AcsColors.surfaceRaised`) — `color` sozinho falha nisso
+  /// para vermelho (3.04:1) e para o fallback azul (2.84:1).
+  (Color, Color, String) get _risk => switch (alert.riskLevel.toLowerCase()) {
+        'red' || 'vermelho' => (AcsColors.red, AcsColors.redOnSurface, 'Risco: Vermelho'),
+        'yellow' || 'amarelo' => (AcsColors.yellow, AcsColors.yellow, 'Risco: Amarelo'),
+        'green' || 'verde' => (AcsColors.green, AcsColors.green, 'Risco: Verde'),
+        _ => (AcsColors.accent, AcsColors.accentOnSurface, 'Risco: não classificado'),
       };
 
   @override
   Widget build(BuildContext context) {
-    final (color, label) = _risk;
+    final (color, textColor, label) = _risk;
     final isRed = alert.riskLevel.toLowerCase() == 'red' || alert.riskLevel.toLowerCase() == 'vermelho';
 
     return Card(
@@ -642,19 +657,33 @@ class _AlertCard extends StatelessWidget {
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(border: Border(left: BorderSide(color: color, width: 4))),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          // Identificação direta do paciente não trafega no envelope MQTT
-          // (LGPD): o alerta carrega identificadores, não nome nem endereço.
-          Text('Paciente ${alert.patientId.substring(0, 8)}', style: const TextStyle(fontWeight: FontWeight.bold)),
-          const SizedBox(height: 6),
-          Text(label, style: TextStyle(color: color, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 6),
-          Text('Recebido às ${_time(alert.triggeredAt)} • local ${alert.locationHash}'),
-          if (alert.acknowledged) const Padding(
-            padding: EdgeInsets.only(top: 8),
-            child: Row(children: [
-              Icon(Icons.check_circle, size: 16, color: AcsColors.green),
-              SizedBox(width: 6),
-              Text('Recebimento confirmado', style: TextStyle(color: AcsColors.green)),
+          // Um leitor de tela lia isto como quatro nós soltos ("Paciente
+          // 3f2a..." / "Risco: Vermelho" / "Recebido às..." / botão), sem
+          // ligar a informação entre si. `excludeSemantics` some com a
+          // leitura nó a nó dos `Text` abaixo em favor da frase única do
+          // `label`; os botões continuam fora deste bloco, como nós próprios.
+          Semantics(
+            container: true,
+            label: 'Paciente ${alert.patientId.substring(0, 8)}, $label'
+                '${alert.acknowledged ? ', recebimento confirmado' : ''}, '
+                'recebido às ${_time(alert.triggeredAt)}',
+            excludeSemantics: true,
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              // Identificação direta do paciente não trafega no envelope MQTT
+              // (LGPD): o alerta carrega identificadores, não nome nem endereço.
+              Text('Paciente ${alert.patientId.substring(0, 8)}', style: const TextStyle(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 6),
+              Text(label, style: TextStyle(color: textColor, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 6),
+              Text('Recebido às ${_time(alert.triggeredAt)} • local ${alert.locationHash}'),
+              if (alert.acknowledged) const Padding(
+                padding: EdgeInsets.only(top: 8),
+                child: Row(children: [
+                  Icon(Icons.check_circle, size: 16, color: AcsColors.green),
+                  SizedBox(width: 6),
+                  Text('Recebimento confirmado', style: TextStyle(color: AcsColors.green)),
+                ]),
+              ),
             ]),
           ),
           const SizedBox(height: 12),
@@ -831,7 +860,7 @@ class _MapScreenState extends State<MapScreen> {
                   RouteStatus.complete => 'Rota concluída • ${_routePlan!.distanceKm.toStringAsFixed(1)} km • ETA ${_routePlan!.etaMinutes} min',
                   _ => 'Rota ativa • ${_routePlan!.distanceKm.toStringAsFixed(1)} km • ETA ${_routePlan!.etaMinutes} min',
                 },
-                style: const TextStyle(color: AcsColors.accent, fontWeight: FontWeight.bold),
+                style: const TextStyle(color: AcsColors.accentOnSurface, fontWeight: FontWeight.bold),
               ),
               if (_routePlan!.status == RouteStatus.complete && _selectedAlert != null) ...[
                 const SizedBox(height: 8),
@@ -988,7 +1017,7 @@ class _AlertMapSummary extends StatelessWidget {
       ),
       child: Row(
         children: [
-          Icon(Icons.location_on, color: color),
+          Icon(Icons.location_on, color: acsOnSurface(color)),
           const SizedBox(width: 8),
           Expanded(
             child: Text(
@@ -1230,10 +1259,13 @@ class _VisitRegistrationScreenState extends State<VisitRegistrationScreen> {
       return [
         Padding(
           padding: const EdgeInsets.only(top: 8),
-          child: Text(
-            key: const Key('patient_directory_error'),
-            error.message,
-            style: const TextStyle(color: AcsColors.accent, fontWeight: FontWeight.bold),
+          child: Semantics(
+            liveRegion: true,
+            child: Text(
+              key: const Key('patient_directory_error'),
+              error.message,
+              style: const TextStyle(color: AcsColors.accentOnSurface, fontWeight: FontWeight.bold),
+            ),
           ),
         ),
         const SizedBox(height: 8),
@@ -1250,7 +1282,7 @@ class _VisitRegistrationScreenState extends State<VisitRegistrationScreen> {
             key: Key('visit_needs_alert'),
             'Nenhum paciente cadastrado na sua microárea ainda. Selecione um '
             'alerta na fila para registrar a visita.',
-            style: TextStyle(color: AcsColors.accent),
+            style: TextStyle(color: AcsColors.accentOnSurface),
           ),
         ),
       ];
@@ -1317,13 +1349,16 @@ class _VisitRegistrationScreenState extends State<VisitRegistrationScreen> {
       // Aqui, e não só no painel: é nesta tela que a pessoa acabou de gravar.
       // Obrigá-la a voltar para a Fila para descobrir que não salvou seria o
       // mesmo defeito de outra forma.
-      if (queue.persistenceFailed) const Padding(
-        padding: EdgeInsets.only(top: 8),
-        child: Text(
-          key: Key('visit_storage_error'),
-          'As visitas não estão sendo salvas neste aparelho — elas só existem '
-          'na memória até sincronizar.',
-          style: TextStyle(color: AcsColors.accent, fontWeight: FontWeight.bold),
+      if (queue.persistenceFailed) Padding(
+        padding: const EdgeInsets.only(top: 8),
+        child: Semantics(
+          liveRegion: true,
+          child: const Text(
+            key: Key('visit_storage_error'),
+            'As visitas não estão sendo salvas neste aparelho — elas só existem '
+            'na memória até sincronizar.',
+            style: TextStyle(color: AcsColors.accentOnSurface, fontWeight: FontWeight.bold),
+          ),
         ),
       ),
       const SizedBox(height: 16),
@@ -1347,7 +1382,13 @@ class _VisitRegistrationScreenState extends State<VisitRegistrationScreen> {
         ),
       ),
       const SizedBox(height: 20),
-      FilledButton.icon(key: const Key('save_visit'), onPressed: !hasPatient || !_arrivalConfirmed ? null : _save, icon: const Icon(Icons.save_outlined), label: const Text('Salvar e enfileirar sincronização')),
+      FilledButton.icon(
+        key: const Key('save_visit'),
+        onPressed: !hasPatient || !_arrivalConfirmed ? null : _save,
+        style: FilledButton.styleFrom(minimumSize: const Size(48, 52)),
+        icon: const Icon(Icons.save_outlined),
+        label: const Text('Salvar e enfileirar sincronização'),
+      ),
       if (hasPatient && _arrivalConfirmed) ...[
         const SizedBox(height: 12),
         const Text(
@@ -1367,25 +1408,29 @@ class _VisitRegistrationScreenState extends State<VisitRegistrationScreen> {
           key: const Key('conflict_visits_count'),
           'Em conflito: ${queue.conflictCount}',
           // Conflito de sincronização é operacional, não gravidade clínica.
-          style: const TextStyle(color: AcsColors.accent, fontWeight: FontWeight.bold),
+          style: const TextStyle(color: AcsColors.accentOnSurface, fontWeight: FontWeight.bold),
         ),
       ),
       if (queue.rejectedCount > 0) ...[
         Padding(
           padding: const EdgeInsets.only(top: 4),
-          child: Text(
-            key: const Key('rejected_visits_count'),
-            'Recusada(s) pelo servidor, não serão reenviadas: ${queue.rejectedCount}\n'
-            '${queue.rejectedVisits.map((v) => v.rejectionReason).whereType<String>().toSet().join('; ')}',
-            // Recusa de sync é operacional, não gravidade clínica — mesma cor
-            // do contador de conflito.
-            style: const TextStyle(color: AcsColors.accent, fontWeight: FontWeight.bold),
+          child: Semantics(
+            liveRegion: true,
+            child: Text(
+              key: const Key('rejected_visits_count'),
+              'Recusada(s) pelo servidor, não serão reenviadas: ${queue.rejectedCount}\n'
+              '${queue.rejectedVisits.map((v) => v.rejectionReason).whereType<String>().toSet().join('; ')}',
+              // Recusa de sync é operacional, não gravidade clínica — mesma cor
+              // do contador de conflito.
+              style: const TextStyle(color: AcsColors.accentOnSurface, fontWeight: FontWeight.bold),
+            ),
           ),
         ),
         const SizedBox(height: 8),
         OutlinedButton.icon(
           key: const Key('discard_rejected'),
           onPressed: _discardRejected,
+          style: OutlinedButton.styleFrom(minimumSize: const Size(48, 52)),
           icon: const Icon(Icons.delete_outline),
           label: const Text('Descartar recusada(s)'),
         ),
@@ -1417,25 +1462,38 @@ class EscalationScreen extends StatelessWidget {
       const Text('Escalonamento rápido', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
       const SizedBox(height: 16),
       _InfoRow('Paciente', current == null ? '—' : current.patientId.substring(0, 8)),
-      _InfoRow('Risco', current?.riskLevel ?? '—'),
+      _InfoRow('Risco', current == null ? '—' : _riskLabelPt(current.riskLevel)),
       // O envelope MQTT não carrega endereço: só o hash da localização (LGPD).
       _InfoRow('Local (hash)', current?.locationHash ?? '—'),
       const SizedBox(height: 20),
-      FilledButton.icon(onPressed: () => _message(context, 'Discagem não está integrada neste protótipo.'), style: FilledButton.styleFrom(backgroundColor: AcsColors.red), icon: const Icon(Icons.call), label: const Text('Ligar para o SAMU (192)')),
+      FilledButton.icon(
+        onPressed: () => _message(context, 'Discagem não está integrada neste protótipo.'),
+        // Alvo de toque de 60x60 (padrão de emergência do PRD): o default do
+        // Material 3 para `FilledButton.icon` fica em 40dp de altura visual,
+        // abaixo do exigido para uma ação de acionar o SAMU.
+        style: FilledButton.styleFrom(backgroundColor: AcsColors.red, minimumSize: const Size(64, 60)),
+        icon: const Icon(Icons.call),
+        label: const Text('Ligar para o SAMU (192)'),
+      ),
       const SizedBox(height: 12),
-      OutlinedButton(onPressed: () => _message(context, 'Encaminhamento será integrado à UBS.'), child: const Text('Encaminhar para UBS Central')),
+      OutlinedButton(
+        onPressed: () => _message(context, 'Encaminhamento será integrado à UBS.'),
+        style: OutlinedButton.styleFrom(minimumSize: const Size(48, 52)),
+        child: const Text('Encaminhar para UBS Central'),
+      ),
       if (current != null) ...[
         const SizedBox(height: 12),
         OutlinedButton.icon(
           key: const Key('escalation_visit'),
           onPressed: onVisit == null ? null : () => onVisit!(current),
+          style: OutlinedButton.styleFrom(minimumSize: const Size(48, 52)),
           icon: const Icon(Icons.alt_route_outlined),
           label: const Text('Iniciar rota de visita'),
         ),
         const SizedBox(height: 8),
         const Text(
           'A visita é acompanhamento do caso e não substitui o acionamento do SAMU.',
-          style: TextStyle(color: AcsColors.accent),
+          style: TextStyle(color: AcsColors.accentOnSurface),
         ),
       ],
     ]);
@@ -1481,7 +1539,7 @@ class GeofencingScreen extends StatelessWidget {
             const Text('Check-in passivo', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
             const SizedBox(height: 12),
             _InfoRow('Paciente', 'Paciente ${alert.patientId.substring(0, 8)}'),
-            _InfoRow('Risco', alert.riskLevel),
+            _InfoRow('Risco', _riskLabelPt(alert.riskLevel)),
             _InfoRow('Raio de chegada', '${(routeService.arrivalThresholdKm * 1000).round()} m'),
             const SizedBox(height: 12),
             Text(
@@ -1492,7 +1550,7 @@ class GeofencingScreen extends StatelessWidget {
               },
               key: const Key('geofence_status'),
               style: TextStyle(
-                color: status == ArrivalStatus.arrived ? AcsColors.green : AcsColors.accent,
+                color: status == ArrivalStatus.arrived ? AcsColors.green : AcsColors.accentOnSurface,
                 fontWeight: FontWeight.bold,
               ),
             ),
@@ -1511,6 +1569,16 @@ class NoticesScreen extends StatefulWidget { const NoticesScreen({super.key}); @
 class _NoticesScreenState extends State<NoticesScreen> { final notice = TextEditingController(); @override void dispose() { notice.dispose(); super.dispose(); } @override Widget build(BuildContext context) => _page([const Text('Aviso comunitário', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)), const SizedBox(height: 16), const TextField(decoration: InputDecoration(labelText: 'Público-alvo', hintText: 'Pacientes com condições crônicas')), const SizedBox(height: 16), TextField(controller: notice, maxLines: 4, decoration: const InputDecoration(labelText: 'Mensagem')), const SizedBox(height: 20), FilledButton(onPressed: () => _message(context, 'Envio depende da integração de notificações push.'), child: const Text('Preparar aviso'))]); }
 
 Widget _page(List<Widget> children) => ListView(padding: const EdgeInsets.all(20), children: [Card(child: Padding(padding: const EdgeInsets.all(20), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: children)))]);
+
+/// Traduz o `riskLevel` cru do servidor (`"red"`) para o rótulo já usado no
+/// resto da tela (`"Vermelho"`) — [GeofencingScreen] exibia a string crua do
+/// backend, único ponto do app que não passava pelo mapeamento.
+String _riskLabelPt(String riskLevel) => switch (riskLevel.toLowerCase()) {
+      'red' || 'vermelho' => 'Vermelho',
+      'yellow' || 'amarelo' => 'Amarelo',
+      'green' || 'verde' => 'Verde',
+      _ => 'Não classificado',
+    };
 class _InfoRow extends StatelessWidget { const _InfoRow(this.label, this.value); final String label; final String value; @override Widget build(BuildContext context) => Padding(padding: const EdgeInsets.symmetric(vertical: 5), child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text(label), Flexible(child: Text(value, textAlign: TextAlign.end, style: const TextStyle(fontWeight: FontWeight.bold)))])); }
 class _Header extends StatelessWidget implements PreferredSizeWidget {
   const _Header(this.eyebrow, this.title, {this.connected});
@@ -1530,7 +1598,7 @@ class _Header extends StatelessWidget implements PreferredSizeWidget {
   @override
   Widget build(BuildContext context) => AppBar(
     title: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Text(eyebrow.toUpperCase(), style: const TextStyle(fontSize: 10, color: AcsColors.accent, fontWeight: FontWeight.bold)),
+      Text(eyebrow.toUpperCase(), style: const TextStyle(fontSize: 10, color: AcsColors.accentOnSurface, fontWeight: FontWeight.bold)),
       Text(title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
     ]),
     actions: [
