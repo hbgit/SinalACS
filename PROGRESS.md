@@ -303,6 +303,132 @@ deixando o arquivo com a senha esquecido em `/tmp` depois de cada execução.
 `scripts/qa/e2e.sh` continua passando a senha por `argv`: aquele caminho roda
 `flutter test`/`dart run`, não `flutter build`, e não passa pela guarda.
 
+#### O registro de visitas não tinha caminho algum na operação real
+
+`alerts.createRedAlert` é o único produtor de alertas, e crava sempre
+`riskLevel: 'red'` — emergência, com SAMU. O cartão do painel tinha **um**
+botão, mutuamente exclusivo entre "Acionar SAMU / Atender" e "Iniciar rota de
+visita" conforme o risco; como só chega vermelho, o segundo era código morto em
+produção — só alcançável injetando um alerta amarelo à mão no broker. Com
+`patientId` obrigatório desde a fiação da sincronização, e sem nenhum alerta
+não-vermelho para habilitar o formulário, a aba "Visita" ficou inalcançável: o
+PRD mede engajamento do ACS em **≥ 8 visitas/dia**, e visita de rotina — o
+padrão de uso real — não tinha de onde partir.
+
+Dois caminhos, não um. O reativo já tinha meio-caminho andado: a tela de
+escalonamento ganhara, numa mudança anterior não documentada aqui, um segundo
+botão "Iniciar rota de visita" (`Key('escalation_visit')`) com o aviso "a
+visita é acompanhamento do caso e não substitui o acionamento do SAMU" — o ACS
+aciona o SAMU primeiro, visita depois. Verificado que já funciona ponta a
+ponta; nada mexido ali.
+
+O que faltava era o de rotina: `patients.listMicroArea` (backend, novo) lista
+os pacientes da microárea do ACS — a microárea vem do token, nunca de um
+parâmetro, e a consulta é um JOIN em duas etapas
+(`OrmPatientDirectoryStore`, `backend/sinalacs_server/lib/src/infrastructure/database/`)
+porque `Patient` não guarda microárea: ela vive em `users`, e `Patient.id` É o
+UUID do usuário. O payload é só nome e condições crônicas — o que
+`spec/lgpd_design.md` autoriza para visita de rotina, nada além.
+`VisitRegistrationScreen` ganhou o seletor (`Key('patient_picker')`): sem
+alerta selecionado, busca por nome e uma lista; escolher libera o formulário
+exatamente como um alerta faria. O nome vive só em memória, para o rótulo —
+`OfflineVisitRecord` continua carregando apenas o UUID, mesma disciplina já
+estabelecida para o caminho por alerta.
+
+Dois furos adjacentes fechados no caminho, achados ao implementar o diretório:
+
+- **Territorialização do sync, furo do INV-01.** `VisitSyncService` validava
+  que o ACS é territorializado, mas nunca que o PACIENTE pertence ao mesmo
+  território — qualquer UUID de paciente existente era aceito, de qualquer
+  microárea. `VisitStore.microAreaOfPatient` fecha isso; a recusa é por visita
+  (na época, `SyncStatus.error` — virou `SyncStatus.rejected`, terminal, numa
+  mudança posterior, ver abaixo), não descarta o resto do lote.
+- **`audit_logs` era tabela morta.** Existia desde a migração-base,
+  documentada como "trilha de auditoria de acesso a dados sensíveis
+  append-only", e nenhuma linha de código escrevia nela — este PR introduzia a
+  primeira leitura em massa de PHI do sistema. `AuditTrail`
+  (`backend/sinalacs_server/lib/src/application/audit/`) liga os dois pontos
+  que este PR cria: a leitura da lista de pacientes (evento, sem enumerar quem
+  foi lido — listar recriaria o prontuário dentro do próprio log) e a recusa
+  por território (com o UUID do paciente envolvido). `ipHash` nunca é IP em
+  claro — SHA-256 sobre `request.remoteInfo`, que o próprio Serverpod já
+  resolve corretamente atrás do Traefik (prefere `Forwarded`/`X-Forwarded-For`
+  antes do endereço da conexão). A escrita é best-effort: uma trilha fora do ar
+  não pode impedir o ACS de trabalhar, só faz o processo logar a falha. A
+  assinatura em hash chain que `spec/lgpd_design.md` (LGPD-RT03) descreve
+  continua não implementada, e os demais endpoints sensíveis (alertas, ack,
+  triagem) ainda não escrevem na trilha.
+
+Seed de desenvolvimento ganhou cinco pacientes sintéticos (nomes obviamente
+fictícios) na microárea do ACS, mais um sexto fora dela — para o seletor ser
+demonstrável e para provar territorialização sem precisar de outra stack de
+teste.
+
+Verificado no emulador, contra a stack local rodando de verdade: o seletor
+lista os pacientes reais do Postgres; escolher um e sincronizar grava
+`syncStatus: synced` no servidor; o arquivo do banco cifrado, puxado do
+aparelho depois de gravar e sincronizar pelo seletor, não contém o nome em
+nenhum ponto (nem o logcat); uma visita para paciente de outra microárea volta
+como `error` (na época — ver abaixo) e grava a linha `denied_territory` em
+`audit_logs`, sem tocar `visits`; o caminho por alerta (vermelho → SAMU →
+escalonamento → visita) continua idêntico ao de antes desta mudança.
+
+#### A cadeia de hash da trilha de auditoria, e a recusa que ficava presa na fila para sempre
+
+Duas dívidas registradas explicitamente no PR anterior, fechadas nesta mudança.
+
+**A cadeia de hash de `audit_logs` (LGPD-RT03).** A trilha ganhara escritores
+no PR anterior, mas só fazia `insertRow` — qualquer um com acesso de escrita ao
+Postgres editava ou apagava uma linha sem deixar rastro, o que não serve ao
+não-repúdio que a spec promete. `audit_logs` ganhou três colunas: `sequence`
+(posição, contígua, índice único), `previousHash` (o `entryHash` da linha
+anterior, ou `AuditChain.genesisHash` — 64 zeros — na primeira) e `entryHash`
+(HMAC-SHA256 do conteúdo da linha). A chave é um segredo PRÓPRIO
+(`AUDIT_CHAIN_SECRET`), nunca derivado do `JWT_SECRET`: os dois precisam poder
+rotacionar de forma independente, e SHA-256 sem chave não detectaria uma
+reescrita completa por quem tem acesso de escrita ao banco — exatamente o
+adversário que a §458 de `spec/lgpd_design.md` descreve.
+`OrmAuditTrail.record` agora lê a última linha e insere a próxima dentro da
+MESMA transação, sob `pg_advisory_xact_lock`, para duas gravações concorrentes
+não lerem a mesma linha anterior e bifurcarem a cadeia. `AuditChainVerifier` (e
+o `bin/audit_chain_check.dart` que o expõe como script) reconstrói a cadeia
+inteira e detecta edição, remoção ou reordenação de qualquer linha — verificado
+ao vivo: adulterar uma linha por `UPDATE` direto no Postgres faz o verificador
+falhar exatamente na `sequence` afetada. Fora de escopo, registrado na spec: o
+append-only em si não é imposto pelo banco (sem trigger/`REVOKE`) — a cadeia
+*detecta* a violação, não a impede.
+
+**Recusa definitiva presa na fila para sempre.** `VisitSyncService._syncOne`
+colapsava seis motivos de falha distintos no mesmo `SyncStatus.error`, e
+`OfflineVisitQueue._applyOutcomes` reenfileirava `error` incondicionalmente.
+Para a recusa territorial isso era retentativa eterna garantida: a checagem de
+território roda antes do lookup por `localId`, então o reenvio falha de forma
+idêntica para sempre, e nada no aparelho explicava por quê. `SyncStatus` ganhou
+`rejected`, terminal: localId vazio, UUID malformado, território incompatível e
+visita de outro agente agora retornam `rejected` (só "paciente não encontrado"
+continua `error` — pode ser cadastrado depois, é legitimamente retentável).
+`SyncFsm` ganhou o estado espelhado, sem transição de saída. No aparelho,
+`OfflineVisitRecord` ganhou `rejectionReason`; a fila ganhou uma quarta lista
+(`_rejected`, ao lado de pendente/sincronizada/conflito) que sai da retentativa
+mas continua no disco — `VisitStore.save` passou a persistir pendentes MAIS
+recusadas, não só pendentes, senão a recusada sumiria do aparelho no instante
+da recusa, antes de o ACS decidir. A tela ganhou o contador
+(`Key('rejected_visits_count')`) e um botão de descarte com confirmação
+(`Key('discard_rejected')`) — nada remove a recusada do aparelho sem essa
+confirmação explícita. `encrypted_database.dart` foi de v3 a v4 com
+`ALTER TABLE ... ADD COLUMN rejection_reason` — a primeira migração aditiva
+desde que o schema existe; as anteriores (v1 → v2) recriavam a tabela porque o
+app ainda não tinha tido release.
+
+Verificação: 83 testes no backend (69 unit + 14 integração, incluindo a
+gravação real de duas linhas encadeadas contra Postgres e a checagem do
+`pg_advisory_xact_lock` — a cadeia de hash tem cobertura própria em
+`test/unit/audit_chain_test.dart`, incluindo detecção de edição, remoção,
+renumeração e segredo errado), 89 testes herméticos no app ACS (6 novos:
+recusa saindo da fila sem reenviar, precedência sobre conflito, `discardRejected`,
+persistência da recusada em disco, migração v3 → v4 preservando linhas, e o
+fluxo completo de descarte com confirmação na tela).
+
 ### M2.5 - Testes de Caos
 
 Foi adicionada a simulação de degradação de rede em [apps/acs/lib/core/services/network_chaos_simulator.dart](apps/acs/lib/core/services/network_chaos_simulator.dart):
@@ -496,9 +622,10 @@ O backend `dart:io` foi removido da árvore; o histórico do git o preserva.
 - **Autenticação institucional.** O acesso segue sendo o token HMAC de
   desenvolvimento, gated por `ENABLE_DEV_LOGIN`. Gov.br e matrícula da
   Secretaria continuam não implementados.
-- **Apps Flutter não consomem o cliente gerado.** `sinalacs_client` existe e é
-  publicado, mas `apps/acs` e `apps/patient` seguem com dados locais — e por isso
-  o `RiskLevel` ainda não atravessa a fronteira na prática.
+- ~~**Apps Flutter não consomem o cliente gerado.**~~ Desatualizado: os dois
+  apps já consomem `sinalacs_client` por dependência de caminho e falam com o
+  backend real (ver M2.4 acima) — `RiskLevel` atravessa a fronteira desde a
+  triagem.
 - **Risco residual de entrega.** MQTT não participa da transação: se a publicação
   tem êxito e o commit falha, o alerta chega ao ACS sem linha no banco. Raro e
   erra para o lado seguro quanto à INV-03; fechar por completo exigiria outbox

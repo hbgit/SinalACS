@@ -5,6 +5,10 @@ enum SyncOutcomeKind {
   conflict,
   empty,
   error,
+
+  /// O servidor recusou em definitivo — ver [OfflineVisitRecord.rejectionReason].
+  /// Ao contrário de [error], que é retentável, nada muda tentando de novo.
+  rejected,
 }
 
 class SyncOutcome {
@@ -17,7 +21,8 @@ class SyncOutcome {
   final SyncOutcomeKind kind;
   final int processed;
 
-  /// Motivo, já em português, quando [kind] é [SyncOutcomeKind.error].
+  /// Motivo, já em português, quando [kind] é [SyncOutcomeKind.error] ou
+  /// [SyncOutcomeKind.rejected].
   ///
   /// Sem isto a tela só conseguia dizer "não deu certo": a mensagem real do
   /// servidor (identificador inválido, sessão expirada) ficava presa aqui.
@@ -31,6 +36,7 @@ class OfflineVisitRecord {
     required this.status,
     this.outcome = '',
     this.notes = '',
+    this.rejectionReason,
     String? localId,
     DateTime? createdAt,
     this.version = 1,
@@ -65,12 +71,24 @@ class OfflineVisitRecord {
   /// Versão conhecida no servidor, para detecção de conflito.
   final int version;
 
+  /// Não-nulo significa: o servidor recusou esta visita EM DEFINITIVO — o
+  /// texto é o motivo, em português, vindo de `VisitSyncResult.message`.
+  ///
+  /// Nunca cita nome de paciente nem microárea alheia — a mesma mensagem que
+  /// já chegava do servidor para o caso retentável (`error`), agora também
+  /// para o terminal (`rejected`). Uma vez definido, nada nesta classe o
+  /// desfaz: sair do estado de recusa é uma decisão explícita do ACS
+  /// (`OfflineVisitQueue.discardRejected`), não um efeito colateral de
+  /// `copyWith`.
+  final String? rejectionReason;
+
   OfflineVisitRecord copyWith({
     String? patientId,
     String? risk,
     String? status,
     String? outcome,
     String? notes,
+    String? rejectionReason,
     String? localId,
     DateTime? createdAt,
     int? version,
@@ -81,6 +99,7 @@ class OfflineVisitRecord {
       status: status ?? this.status,
       outcome: outcome ?? this.outcome,
       notes: notes ?? this.notes,
+      rejectionReason: rejectionReason ?? this.rejectionReason,
       localId: localId ?? this.localId,
       createdAt: createdAt ?? this.createdAt,
       version: version ?? this.version,
@@ -109,12 +128,13 @@ class VisitSyncOutcome {
 
   final String localId;
 
-  /// `synced`, `conflict` ou `error`, como devolvido por `visits.sync`.
+  /// `synced`, `conflict`, `error` ou `rejected`, como devolvido por
+  /// `visits.sync` (`SyncStatus.name`).
   final String status;
 
   final int? serverVersion;
 
-  /// Motivo devolvido pelo servidor quando [status] é `error`.
+  /// Motivo devolvido pelo servidor quando [status] é `error` ou `rejected`.
   ///
   /// Ele já vinha no contrato (`VisitSyncResult.message`) e era descartado no
   /// caminho até aqui, o que deixava um `patientId` inválido parecendo silêncio.
@@ -130,6 +150,12 @@ abstract class VisitSynchronizer {
 }
 
 /// Onde as visitas ficam enquanto não sincronizam.
+///
+/// Desde que existe [OfflineVisitRecord.rejectionReason], o que [save] recebe
+/// não é mais só "a fila" — é a fila MAIS as visitas recusadas em definitivo
+/// que o ACS ainda não descartou (ver `OfflineVisitQueue._persist`). Sem isso,
+/// uma visita recusada sumiria do disco no instante em que saísse de
+/// `_pending`, silenciosamente — o oposto do que a recusa terminal pede.
 abstract class VisitStore {
   Future<List<OfflineVisitRecord>> load();
 
@@ -152,9 +178,11 @@ class InMemoryVisitStore implements VisitStore {
 /// Fila offline-first de visitas domiciliares.
 ///
 /// Preserva a semântica da `SyncFsm` do backend
-/// (`idle → localWrite → queued → syncing → {synced|conflict|error}`): uma
-/// visita em conflito **volta para a fila** em vez de ser descartada, e uma
-/// falha de rede não perde o lote.
+/// (`idle → localWrite → queued → syncing → {synced|conflict|error|rejected}`):
+/// uma visita em conflito **volta para a fila** em vez de ser descartada, uma
+/// falha de rede não perde o lote, e uma recusa definitiva (`rejected`) SAI da
+/// fila de retentativa mas fica visível no aparelho até o ACS descartá-la —
+/// diferente de `error`, que continua pendente e retenta.
 class OfflineVisitQueue {
   OfflineVisitQueue({VisitStore? store, this.synchronizer})
       : _store = store ?? InMemoryVisitStore();
@@ -167,6 +195,7 @@ class OfflineVisitQueue {
   final List<OfflineVisitRecord> _pending = <OfflineVisitRecord>[];
   final List<OfflineVisitRecord> _synced = <OfflineVisitRecord>[];
   final List<OfflineVisitRecord> _conflicts = <OfflineVisitRecord>[];
+  final List<OfflineVisitRecord> _rejected = <OfflineVisitRecord>[];
 
   bool _restored = false;
   bool _persistenceFailed = false;
@@ -182,23 +211,29 @@ class OfflineVisitQueue {
   int get pendingCount => _pending.length;
   int get syncedCount => _synced.length;
   int get conflictCount => _conflicts.length;
+  int get rejectedCount => _rejected.length;
 
   List<OfflineVisitRecord> get pendingVisits => List.unmodifiable(_pending);
   List<OfflineVisitRecord> get syncedVisits => List.unmodifiable(_synced);
   List<OfflineVisitRecord> get conflictVisits => List.unmodifiable(_conflicts);
+  List<OfflineVisitRecord> get rejectedVisits => List.unmodifiable(_rejected);
 
   /// Recarrega o que ficou gravado de execuções anteriores.
   ///
-  /// Sem isso, fechar o app perde a fila — o oposto de offline-first.
+  /// Sem isso, fechar o app perde a fila — o oposto de offline-first. O que
+  /// veio do disco é separado entre pendente e recusado pelo próprio
+  /// [OfflineVisitRecord.rejectionReason] — não há uma segunda tabela.
   Future<void> restore() async {
     if (_restored) return;
     _restored = true;
 
     try {
       final stored = await _store.load();
-      _pending
-        ..clear()
-        ..addAll(stored);
+      _pending.clear();
+      _rejected.clear();
+      for (final visit in stored) {
+        (visit.rejectionReason == null ? _pending : _rejected).add(visit);
+      }
       _persistenceFailed = false;
     } catch (_) {
       // Banco indisponível (chave perdida, plataforma sem SQLCipher). A fila
@@ -212,10 +247,26 @@ class OfflineVisitQueue {
     await _persist();
   }
 
+  /// Descarta as visitas recusadas em definitivo.
+  ///
+  /// Ação explícita do ACS, nunca automática: a recusa terminal já tirou a
+  /// visita da retentativa, mas apagar o registro do trabalho de campo sem
+  /// confirmação apagaria evidência de uma visita feita que nunca chegou ao
+  /// servidor.
+  Future<void> discardRejected() async {
+    if (_rejected.isEmpty) return;
+    _rejected.clear();
+    await _persist();
+  }
+
   /// Grava o estado corrente, sem deixar a falha derrubar quem chamou.
+  ///
+  /// Persiste pendentes E recusadas: uma recusada que saísse do disco junto
+  /// com a fila desapareceria do aparelho no instante em que fosse recusada,
+  /// silenciosamente — antes mesmo de o ACS decidir descartá-la.
   Future<void> _persist() async {
     try {
-      await _store.save(_pending);
+      await _store.save([..._pending, ..._rejected]);
       _persistenceFailed = false;
     } catch (_) {
       _persistenceFailed = true;
@@ -280,7 +331,9 @@ class OfflineVisitQueue {
     var conflicts = 0;
     var synced = 0;
     var errors = 0;
+    var rejected = 0;
     String? firstError;
+    String? firstRejection;
     final stillPending = <OfflineVisitRecord>[];
 
     for (final visit in batch) {
@@ -298,6 +351,14 @@ class OfflineVisitQueue {
           // Volta para a fila: conflito precisa de resolução, não de descarte.
           stillPending.add(conflicted);
           conflicts++;
+        case 'rejected':
+          // Terminal: SAI da retentativa, mas fica visível até o ACS
+          // descartar — não some, e não volta para `stillPending`.
+          final reason = outcome?.message ??
+              'O servidor recusou esta visita em definitivo.';
+          _rejected.add(visit.copyWith(rejectionReason: reason));
+          rejected++;
+          firstRejection ??= reason;
         case 'error':
           // O servidor recusou ESTA visita. Continua pendente — descartar
           // perderia o registro feito em campo —, mas precisa ser contada:
@@ -318,8 +379,17 @@ class OfflineVisitQueue {
       ..addAll(stillPending);
     await _persist();
 
-    // Precedência: conflito > erro > sincronizado. O conflito é o que exige
-    // decisão de quem registrou; o erro, no máximo, uma nova tentativa.
+    // Precedência: recusado > conflito > erro > sincronizado. Recusado é
+    // trabalho de campo que NUNCA vai ao servidor — o que mais precisa
+    // chegar aos olhos do ACS. Conflito exige decisão de quem registrou; erro,
+    // no máximo, uma nova tentativa.
+    if (rejected > 0) {
+      return SyncOutcome(
+        kind: SyncOutcomeKind.rejected,
+        processed: rejected,
+        message: firstRejection,
+      );
+    }
     if (conflicts > 0) {
       return SyncOutcome(kind: SyncOutcomeKind.conflict, processed: conflicts);
     }

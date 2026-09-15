@@ -3,11 +3,13 @@ import 'dart:io';
 /// Configuração que **não** vem do Serverpod.
 ///
 /// Banco e servidor são configurados por `config/*.yaml` mais as variáveis
-/// `SERVERPOD_*`. O que sobra — MQTT e o segredo de autenticação — é lido aqui.
+/// `SERVERPOD_*`. O que sobra — MQTT e os segredos de autenticação/auditoria —
+/// é lido aqui.
 class AppConfig {
   const AppConfig({
     required this.mqttBroker,
     required this.jwtSecret,
+    required this.auditChainSecret,
     required this.mqttUsername,
     required this.mqttPassword,
     required this.mqttUseTls,
@@ -24,6 +26,14 @@ class AppConfig {
   /// um acesso de ACS para qualquer território. Ver [_resolveJwtSecret].
   final String jwtSecret;
 
+  /// Chave HMAC da cadeia de hash de `audit_logs` (ver `application/audit/`).
+  ///
+  /// Deliberadamente um segredo PRÓPRIO, não derivado de [jwtSecret]: rotacionar
+  /// o JWT é rotina esperada, mas rotacionar este invalida silenciosamente a
+  /// verificação de tudo que já foi gravado na trilha. Ver
+  /// [_resolveAuditChainSecret].
+  final String auditChainSecret;
+
   final String? mqttUsername;
   final String? mqttPassword;
   final bool mqttUseTls;
@@ -39,6 +49,11 @@ class AppConfig {
   /// `development`. [_resolveJwtSecret] recusa promovê-lo a outro ambiente.
   static const developmentJwtSecret = 'development-secret';
 
+  /// Segredo usado quando `AUDIT_CHAIN_SECRET` não é informado em
+  /// desenvolvimento. Mesma regra de [developmentJwtSecret]: público, e por
+  /// isso restrito a `development` por [_resolveAuditChainSecret].
+  static const developmentAuditChainSecret = 'development-audit-chain-secret';
+
   factory AppConfig.fromEnvironment() =>
       AppConfig.fromMap(Platform.environment);
 
@@ -52,7 +67,18 @@ class AppConfig {
 
     return AppConfig(
       mqttBroker: environment['MQTT_BROKER'] ?? 'localhost:1883',
-      jwtSecret: _resolveJwtSecret(environment['JWT_SECRET'], appEnv),
+      jwtSecret: _resolveSecret(
+        value: environment['JWT_SECRET'],
+        appEnv: appEnv,
+        envVarName: 'JWT_SECRET',
+        developmentFallback: developmentJwtSecret,
+      ),
+      auditChainSecret: _resolveSecret(
+        value: environment['AUDIT_CHAIN_SECRET'],
+        appEnv: appEnv,
+        envVarName: 'AUDIT_CHAIN_SECRET',
+        developmentFallback: developmentAuditChainSecret,
+      ),
       mqttUsername: environment['MQTT_USERNAME'],
       mqttPassword: environment['MQTT_PASSWORD'],
       mqttUseTls: environment['MQTT_USE_TLS'] == 'true',
@@ -62,29 +88,36 @@ class AppConfig {
     );
   }
 
-  /// Decide o segredo de assinatura, recusando subir com um segredo fraco.
+  /// Decide um segredo de assinatura, recusando subir com um valor fraco.
   ///
-  /// Só `development` aceita ausência de `JWT_SECRET`. Fora dele a falha é no
-  /// boot, e não na primeira requisição: um servidor que sobe assinando com um
-  /// segredo público é pior do que um servidor que não sobe.
+  /// Regra comum a `JWT_SECRET` e `AUDIT_CHAIN_SECRET`: só `development` aceita
+  /// ausência da variável. Fora dele a falha é no boot, e não na primeira
+  /// requisição — um servidor que sobe assinando com um segredo público é pior
+  /// do que um servidor que não sobe.
   ///
-  /// A checagem anterior cobria apenas `appEnv == 'production'` e testava só
-  /// `== null`, então `JWT_SECRET=""` e `APP_ENV=staging` passavam direto.
-  static String _resolveJwtSecret(String? value, String appEnv) {
+  /// A checagem anterior (antes de existir mais de um segredo) cobria apenas
+  /// `appEnv == 'production'` e testava só `== null`, então `JWT_SECRET=""` e
+  /// `APP_ENV=staging` passavam direto.
+  static String _resolveSecret({
+    required String? value,
+    required String appEnv,
+    required String envVarName,
+    required String developmentFallback,
+  }) {
     final secret = value?.trim();
     final isDevelopment = appEnv == 'development';
 
     if (secret == null || secret.isEmpty) {
-      if (isDevelopment) return developmentJwtSecret;
+      if (isDevelopment) return developmentFallback;
       throw StateError(
-        'JWT_SECRET é obrigatório quando APP_ENV=$appEnv. '
+        '$envVarName é obrigatório quando APP_ENV=$appEnv. '
         'Gere um com: openssl rand -hex 32',
       );
     }
 
-    if (secret == developmentJwtSecret && !isDevelopment) {
+    if (secret == developmentFallback && !isDevelopment) {
       throw StateError(
-        'JWT_SECRET está usando o valor de desenvolvimento, que é público, '
+        '$envVarName está usando o valor de desenvolvimento, que é público, '
         'com APP_ENV=$appEnv. Gere um próprio com: openssl rand -hex 32',
       );
     }

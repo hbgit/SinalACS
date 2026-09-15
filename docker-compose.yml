@@ -113,6 +113,9 @@ services:
       # Sem esta variável o servidor caía num segredo de desenvolvimento fixo e
       # público, com o qual qualquer pessoa forjaria um token de ACS.
       JWT_SECRET: ${JWT_SECRET:?defina em .env — rode ./scripts/dev/bootstrap_env.sh}
+      # Chave da cadeia de hash de audit_logs — segredo próprio, nunca derivado
+      # do JWT_SECRET (rotacionar um não pode invalidar o outro em silêncio).
+      AUDIT_CHAIN_SECRET: ${AUDIT_CHAIN_SECRET:?defina em .env — rode ./scripts/dev/bootstrap_env.sh}
       APP_ENV: ${APP_ENV:-development}
       ENABLE_DEV_LOGIN: "${ENABLE_DEV_LOGIN:-true}"
     ports:

@@ -10,6 +10,7 @@ import 'package:sinalacs_acs/core/network/backend_scope.dart';
 import 'package:sinalacs_acs/core/services/alert_feed.dart';
 import 'package:sinalacs_acs/core/services/alert_queue.dart';
 import 'package:sinalacs_acs/core/services/offline_visit_queue.dart';
+import 'package:sinalacs_client/sinalacs_client.dart' show MicroAreaPatient;
 import 'package:sinalacs_acs/core/services/reconnect_schedule.dart';
 import 'package:sinalacs_acs/core/services/route_service.dart';
 import 'package:sinalacs_acs/core/services/visit_queue_factory.dart';
@@ -1041,13 +1042,38 @@ class VisitRegistrationScreen extends StatefulWidget {
 class _VisitRegistrationScreenState extends State<VisitRegistrationScreen> {
   String outcome = 'Realizada com sucesso';
   final notes = TextEditingController();
+  final _patientQuery = TextEditingController();
   bool _syncing = false;
   bool _arrivalConfirmed = false;
+
+  /// Paciente escolhido no seletor, quando a visita não parte de um alerta.
+  ///
+  /// O nome vive só aqui, em memória, para o rótulo da tela — nunca é
+  /// gravado. O que sai para a fila é sempre `MicroAreaPatient.patientId`,
+  /// mesma disciplina do `alert.patientId` (LGPD-RF01).
+  MicroAreaPatient? _selectedPatient;
+
+  /// `null` = ainda não carregou. Buscado uma vez, em [didChangeDependencies],
+  /// só quando a tela abre sem alerta — o caminho por alerta não precisa da
+  /// lista.
+  List<MicroAreaPatient>? _patients;
+  BackendFailure? _patientsError;
+  bool _loadingPatients = false;
+  bool _patientsRequested = false;
 
   @override
   void initState() {
     super.initState();
     _arrivalConfirmed = _gpsArrivalMatches();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (widget.alert == null && !_patientsRequested) {
+      _patientsRequested = true;
+      _loadPatients();
+    }
   }
 
   @override
@@ -1059,7 +1085,7 @@ class _VisitRegistrationScreenState extends State<VisitRegistrationScreen> {
   }
 
   @override
-  void dispose() { notes.dispose(); super.dispose(); }
+  void dispose() { notes.dispose(); _patientQuery.dispose(); super.dispose(); }
 
   bool _gpsArrivalMatches() {
     final alert = widget.alert;
@@ -1071,26 +1097,56 @@ class _VisitRegistrationScreenState extends State<VisitRegistrationScreen> {
     return routeService.arrivalStatus(origin: position, destination: destination) == ArrivalStatus.arrived;
   }
 
-  /// Rótulo montado a cada build a partir do alerta que está em memória.
+  /// Diretório de pacientes da microárea, para a visita de rotina.
   ///
-  /// Nunca é gravado: o que vai para a fila é `alert.patientId` inteiro. Antes
-  /// persistia-se este texto e o UUID era descartado, então o servidor recusava
-  /// a visita por identificador inválido — e o disco guardava, sem precisar,
-  /// uma linha legível sobre a pessoa.
+  /// Falhar aqui NÃO pode travar a tela: o caminho por alerta continua
+  /// funcionando mesmo sem rede (o app é offline-first), então o erro vira
+  /// aviso com um jeito de tentar de novo, nunca uma tela presa.
+  Future<void> _loadPatients() async {
+    setState(() { _loadingPatients = true; _patientsError = null; });
+    try {
+      final result = await BackendScope.of(context).listPatients();
+      if (!mounted) return;
+      setState(() { _patients = result; _loadingPatients = false; });
+    } on BackendFailure catch (failure) {
+      if (!mounted) return;
+      setState(() { _patientsError = failure; _loadingPatients = false; });
+    }
+  }
+
+  /// Identificador efetivo: do alerta, ou do paciente escolhido no seletor.
+  String? get _effectivePatientId => widget.alert?.patientId ?? _selectedPatient?.patientId;
+
+  bool get _hasPatient => _effectivePatientId != null;
+
+  /// Rótulo montado a cada build.
+  ///
+  /// Nunca é gravado: o que vai para a fila é sempre o UUID. Antes persistia-se
+  /// este texto e o UUID era descartado, então o servidor recusava a visita
+  /// por identificador inválido — e o disco guardava, sem precisar, uma linha
+  /// legível sobre a pessoa.
   String get _patientLabel {
     final alert = widget.alert;
-    return alert == null ? 'Visita sem alerta vinculado' : 'Paciente ${alert.patientId.substring(0, 8)}';
+    if (alert != null) return 'Paciente ${alert.patientId.substring(0, 8)}';
+    final selected = _selectedPatient;
+    // Nome, e não UUID, aqui é minimização correta, não violação dela: é
+    // exatamente o dado que spec/lgpd_design.md:364 autoriza para a visita de
+    // rotina — "o ACS vê apenas o nome... cadastrado".
+    if (selected != null) return selected.name;
+    return 'Visita sem alerta vinculado';
   }
 
   Future<void> _save() async {
-    final alert = widget.alert;
-    // Sem alerta não há paciente, e `visits.sync` exige UUID: gravar aqui
+    final patientId = _effectivePatientId;
+    // Sem paciente não há UUID, e `visits.sync` exige UUID: gravar aqui
     // criaria um registro que nunca sobe e nunca sai do aparelho.
-    if (alert == null) return;
+    if (patientId == null) return;
 
     await widget.queue.add(OfflineVisitRecord(
-      patientId: alert.patientId,
-      risk: alert.riskLevel,
+      patientId: patientId,
+      // Visita de rotina não tem risco: `BackendVisitSynchronizer` já trata
+      // qualquer valor não reconhecido como RiskLevel.green, o piso seguro.
+      risk: widget.alert?.riskLevel ?? 'rotina',
       status: 'PENDENTE',
       outcome: outcome,
       notes: notes.text.trim(),
@@ -1121,22 +1177,141 @@ class _VisitRegistrationScreenState extends State<VisitRegistrationScreen> {
           (widget.queue.persistenceFailed
               ? 'Não foi possível sincronizar. As visitas estão apenas na memória deste aparelho.'
               : 'Não foi possível sincronizar. As visitas continuam salvas no aparelho.'),
+      // Terminal: ao contrário de error, não vai retentar sozinha — dizer isso
+      // aqui é o que evita o ACS ficar tocando "Sincronizar agora" à toa.
+      SyncOutcomeKind.rejected => '${result.processed} visita(s) recusada(s) pelo '
+          'servidor e não serão reenviadas. '
+          '${result.message ?? 'Veja o motivo na lista abaixo.'}',
     });
+  }
+
+  /// Descarta as visitas recusadas, com confirmação — o registro sai do
+  /// aparelho para sempre, e ele nunca chegou ao servidor.
+  Future<void> _discardRejected() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Descartar visita(s) recusada(s)?'),
+        content: const Text(
+          'O servidor recusou esta visita em definitivo e ela nunca chegou a '
+          'ser sincronizada. Descartar apaga o registro deste aparelho — não '
+          'há como recuperá-lo depois.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancelar')),
+          FilledButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('Descartar')),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    await widget.queue.discardRejected();
+    if (!mounted) return;
+    setState(() {});
+  }
+
+  /// Seletor de pacientes da microárea, para quando a visita não vem de um
+  /// alerta. Substitui o antigo aviso estático `visit_needs_alert`: antes a
+  /// aba simplesmente dizia "selecione um alerta" e não havia outro caminho —
+  /// e como o único produtor de alertas publica só risco vermelho (emergência,
+  /// SAMU), a visita de rotina do PRD (≥ 8/dia) nunca tinha de onde partir.
+  List<Widget> _buildPatientPicker() {
+    if (_loadingPatients) {
+      return const [
+        Padding(
+          padding: EdgeInsets.symmetric(vertical: 16),
+          child: Center(child: CircularProgressIndicator()),
+        ),
+      ];
+    }
+
+    final error = _patientsError;
+    if (error != null) {
+      return [
+        Padding(
+          padding: const EdgeInsets.only(top: 8),
+          child: Text(
+            key: const Key('patient_directory_error'),
+            error.message,
+            style: const TextStyle(color: AcsColors.accent, fontWeight: FontWeight.bold),
+          ),
+        ),
+        const SizedBox(height: 8),
+        OutlinedButton(onPressed: _loadPatients, child: const Text('Tentar de novo')),
+      ];
+    }
+
+    final all = _patients ?? const [];
+    if (all.isEmpty) {
+      return const [
+        Padding(
+          padding: EdgeInsets.only(top: 8),
+          child: Text(
+            key: Key('visit_needs_alert'),
+            'Nenhum paciente cadastrado na sua microárea ainda. Selecione um '
+            'alerta na fila para registrar a visita.',
+            style: TextStyle(color: AcsColors.accent),
+          ),
+        ),
+      ];
+    }
+
+    final query = _patientQuery.text.trim().toLowerCase();
+    final filtered = query.isEmpty
+        ? all
+        : all.where((p) => p.name.toLowerCase().contains(query)).toList();
+
+    return [
+      const SizedBox(height: 8),
+      TextField(
+        key: const Key('patient_search'),
+        controller: _patientQuery,
+        decoration: const InputDecoration(labelText: 'Buscar paciente pelo nome'),
+        onChanged: (_) => setState(() {}),
+      ),
+      const SizedBox(height: 8),
+      ConstrainedBox(
+        constraints: const BoxConstraints(maxHeight: 240),
+        child: ListView(
+          key: const Key('patient_picker'),
+          shrinkWrap: true,
+          children: [
+            for (final patient in filtered)
+              ListTile(
+                key: Key('patient_${patient.patientId}'),
+                title: Text(patient.name),
+                subtitle: patient.isChronic
+                    ? Text(patient.chronicConditions.join(', '))
+                    : null,
+                onTap: () => setState(() => _selectedPatient = patient),
+              ),
+            if (filtered.isEmpty)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 8),
+                child: Text('Nenhum paciente encontrado com esse nome.'),
+              ),
+          ],
+        ),
+      ),
+    ];
   }
 
   @override
   Widget build(BuildContext context) {
     final queue = widget.queue;
     final semAlerta = widget.alert == null;
+    final selected = _selectedPatient;
+    final hasPatient = _hasPatient;
 
     return _page([
       Text(_patientLabel, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-      if (semAlerta) const Padding(
-        padding: EdgeInsets.only(top: 8),
-        child: Text(
-          key: Key('visit_needs_alert'),
-          'Selecione um alerta na fila para registrar a visita.',
-          style: TextStyle(color: AcsColors.accent),
+      if (semAlerta && selected == null) ..._buildPatientPicker(),
+      if (semAlerta && selected != null) Padding(
+        padding: const EdgeInsets.only(top: 8),
+        child: TextButton.icon(
+          onPressed: () => setState(() => _selectedPatient = null),
+          icon: const Icon(Icons.swap_horiz),
+          label: const Text('Trocar paciente'),
         ),
       ),
       // Aqui, e não só no painel: é nesta tela que a pessoa acabou de gravar.
@@ -1152,7 +1327,7 @@ class _VisitRegistrationScreenState extends State<VisitRegistrationScreen> {
         ),
       ),
       const SizedBox(height: 16),
-      if (!semAlerta) CheckboxListTile(
+      if (hasPatient) CheckboxListTile(
         key: const Key('arrival_confirmation'),
         value: _arrivalConfirmed,
         onChanged: (value) => setState(() => _arrivalConfirmed = value ?? false),
@@ -1160,20 +1335,20 @@ class _VisitRegistrationScreenState extends State<VisitRegistrationScreen> {
         contentPadding: EdgeInsets.zero,
       ),
       const SizedBox(height: 8),
-      DropdownButtonFormField<String>(initialValue: outcome, decoration: const InputDecoration(labelText: 'Status do atendimento'), items: const ['Realizada com sucesso', 'Paciente ausente', 'Recusou atendimento'].map((v) => DropdownMenuItem(value: v, child: Text(v))).toList(), onChanged: semAlerta || !_arrivalConfirmed ? null : (v) => setState(() => outcome = v!)),
+      DropdownButtonFormField<String>(initialValue: outcome, decoration: const InputDecoration(labelText: 'Status do atendimento'), items: const ['Realizada com sucesso', 'Paciente ausente', 'Recusou atendimento'].map((v) => DropdownMenuItem(value: v, child: Text(v))).toList(), onChanged: !hasPatient || !_arrivalConfirmed ? null : (v) => setState(() => outcome = v!)),
       const SizedBox(height: 16),
       TextField(
         controller: notes,
         maxLines: 4,
-        enabled: !semAlerta && _arrivalConfirmed,
+        enabled: hasPatient && _arrivalConfirmed,
         decoration: const InputDecoration(
           labelText: 'Observações de campo',
           helperText: 'São salvas localmente e enviadas com a visita quando sincronizar.',
         ),
       ),
       const SizedBox(height: 20),
-      FilledButton.icon(key: const Key('save_visit'), onPressed: semAlerta || !_arrivalConfirmed ? null : _save, icon: const Icon(Icons.save_outlined), label: const Text('Salvar e enfileirar sincronização')),
-      if (!semAlerta && _arrivalConfirmed) ...[
+      FilledButton.icon(key: const Key('save_visit'), onPressed: !hasPatient || !_arrivalConfirmed ? null : _save, icon: const Icon(Icons.save_outlined), label: const Text('Salvar e enfileirar sincronização')),
+      if (hasPatient && _arrivalConfirmed) ...[
         const SizedBox(height: 12),
         const Text(
           'Local alcançado. Você pode registrar a visita agora.',
@@ -1195,6 +1370,26 @@ class _VisitRegistrationScreenState extends State<VisitRegistrationScreen> {
           style: const TextStyle(color: AcsColors.accent, fontWeight: FontWeight.bold),
         ),
       ),
+      if (queue.rejectedCount > 0) ...[
+        Padding(
+          padding: const EdgeInsets.only(top: 4),
+          child: Text(
+            key: const Key('rejected_visits_count'),
+            'Recusada(s) pelo servidor, não serão reenviadas: ${queue.rejectedCount}\n'
+            '${queue.rejectedVisits.map((v) => v.rejectionReason).whereType<String>().toSet().join('; ')}',
+            // Recusa de sync é operacional, não gravidade clínica — mesma cor
+            // do contador de conflito.
+            style: const TextStyle(color: AcsColors.accent, fontWeight: FontWeight.bold),
+          ),
+        ),
+        const SizedBox(height: 8),
+        OutlinedButton.icon(
+          key: const Key('discard_rejected'),
+          onPressed: _discardRejected,
+          icon: const Icon(Icons.delete_outline),
+          label: const Text('Descartar recusada(s)'),
+        ),
+      ],
       const SizedBox(height: 12),
       OutlinedButton.icon(
         key: const Key('sync_visits'),

@@ -109,6 +109,17 @@ void main() {
       return {for (final row in rows) row['name']! as String};
     }
 
+    Future<Database> abrirV3(String create) async {
+      sqfliteFfiInit();
+      return databaseFactoryFfi.openDatabase(
+        await EncryptedLocalDatabase.pathFor(nome),
+        options: OpenDatabaseOptions(
+          version: 3,
+          onCreate: (db, version) => db.execute(create),
+        ),
+      );
+    }
+
     setUp(() => EncryptedLocalDatabase.deleteDatabaseFile(nome));
     tearDown(() => EncryptedLocalDatabase.deleteDatabaseFile(nome));
 
@@ -187,6 +198,52 @@ CREATE TABLE IF NOT EXISTS offline_visits (
 
       expect((await store.load()).single.patientId, seedPatientId);
       await store.close();
+    });
+
+    test('a offline_visits v3 ganha rejection_reason sem perder linhas', () async {
+      // Diferente da migração v1 → v2 (que recria e perde dados, aceitável só
+      // porque o app não tinha tido release ainda), esta é aditiva: uma visita
+      // pendente gravada antes desta versão precisa sobreviver à abertura v4.
+      final legado = await abrirV3('''
+CREATE TABLE IF NOT EXISTS offline_visits (
+  local_id TEXT PRIMARY KEY,
+  patient_id TEXT NOT NULL,
+  risk TEXT NOT NULL,
+  status TEXT NOT NULL,
+  outcome TEXT NOT NULL,
+  notes TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL,
+  version INTEGER NOT NULL
+)''');
+      await legado.insert('offline_visits', {
+        'local_id': '00000000-0000-4000-8000-00000000000b',
+        'patient_id': seedPatientId,
+        'risk': 'red',
+        'status': 'PENDENTE',
+        'outcome': '',
+        'notes': '',
+        'created_at': DateTime.utc(2026).toIso8601String(),
+        'version': 1,
+      });
+      await legado.close();
+
+      final atual = await EncryptedLocalDatabase.open(
+        databaseName: nome,
+        passphrase: chave,
+        allowUnencryptedForTesting: true,
+      );
+
+      final colunas = [
+        for (final row in await atual.rawQuery('PRAGMA table_info(offline_visits)'))
+          row['name']! as String,
+      ];
+      expect(colunas, contains('rejection_reason'));
+
+      final linhas = await atual.query('offline_visits');
+      expect(linhas, hasLength(1));
+      expect(linhas.single['patient_id'], seedPatientId);
+      expect(linhas.single['rejection_reason'], isNull);
+      await atual.close();
     });
   });
 
@@ -310,6 +367,35 @@ CREATE TABLE IF NOT EXISTS offline_visits (
       expect(await store.load(), hasLength(1));
     });
 
+    test('a visita recusada em definitivo PERMANECE no disco, com o motivo', () async {
+      // Descartar do disco no instante da recusa apagaria trabalho de campo
+      // sem o ACS decidir isso — a saída do disco só acontece com
+      // `discardRejected()` explícito.
+      final queue = queueOn(store, sender: _RejectedSynchronizer());
+      await queue.add(OfflineVisitRecord(
+        patientId: syntheticPatientId(9),
+        risk: 'rotina',
+        status: 'PENDENTE',
+      ));
+
+      final result = await queue.sync();
+
+      expect(result.kind, SyncOutcomeKind.rejected);
+      final onDisk = await store.load();
+      expect(onDisk, hasLength(1));
+      expect(onDisk.single.rejectionReason, 'paciente fora da sua microárea');
+
+      // Reabrir a fila do zero também vê a recusada — ela não é perdida ao
+      // fechar o app.
+      final reopened = queueOn(store);
+      await reopened.restore();
+      expect(reopened.rejectedCount, 1);
+      expect(reopened.pendingCount, 0);
+
+      await reopened.discardRejected();
+      expect(await store.load(), isEmpty);
+    });
+
     test('armazenamento indisponível não derruba o registro em campo', () async {
       // Travar o registro de visita seria pior do que não persistir. A fila
       // segue em memória e acende o sinalizador para a UI avisar.
@@ -341,6 +427,18 @@ class _ConflictSynchronizer implements VisitSynchronizer {
   Future<List<VisitSyncOutcome>> push(List<OfflineVisitRecord> visits) async => [
         for (final visit in visits)
           VisitSyncOutcome(localId: visit.localId, status: 'conflict', serverVersion: 9),
+      ];
+}
+
+class _RejectedSynchronizer implements VisitSynchronizer {
+  @override
+  Future<List<VisitSyncOutcome>> push(List<OfflineVisitRecord> visits) async => [
+        for (final visit in visits)
+          VisitSyncOutcome(
+            localId: visit.localId,
+            status: 'rejected',
+            message: 'paciente fora da sua microárea',
+          ),
       ];
 }
 

@@ -35,6 +35,13 @@ abstract class AcsBackend {
 
   Future<List<VisitSyncResult>> syncVisits(List<VisitSyncEntry> visits);
 
+  /// Pacientes da microárea do ACS, para a visita de rotina.
+  ///
+  /// Existe porque o único produtor de alertas publica só `riskLevel: 'red'`
+  /// (emergência, com SAMU): sem esta lista, a aba "Visita" não tinha de onde
+  /// partir fora do caminho reativo.
+  Future<List<MicroAreaPatient>> listPatients();
+
   void close();
 }
 
@@ -121,6 +128,14 @@ class BackendClient implements AcsBackend {
       // microárea" aqui manda o ACS procurar um problema que não existe.
       permissionMessage:
           'Sua sessão não autoriza sincronizar visitas. Entre novamente.',
+    );
+  }
+
+  @override
+  Future<List<MicroAreaPatient>> listPatients() async {
+    final token = await _requireToken();
+    return _guard(
+      () => _client.patients.listMicroArea(accessToken: token),
     );
   }
 

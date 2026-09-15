@@ -35,4 +35,16 @@ class OrmVisitStore implements VisitStore {
   @override
   Future<Visit> update(Visit visit) =>
       Visit.db.updateRow(_session(), visit, transaction: _transaction);
+
+  @override
+  Future<UuidValue?> microAreaOfPatient(UuidValue patientId) async {
+    // `Patient.id` É o UUID do usuário (mesma decisão de `patient.spy.yaml`),
+    // então a microárea vem de `users`, não de `patients`.
+    final user = await User.db.findFirstRow(
+      _session(),
+      where: (t) => t.id.equals(patientId),
+      transaction: _transaction,
+    );
+    return user?.microAreaId;
+  }
 }

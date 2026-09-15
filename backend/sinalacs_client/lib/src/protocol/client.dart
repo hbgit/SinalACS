@@ -18,10 +18,12 @@ import 'package:sinalacs_client/src/protocol/api/alert_ack_result.dart' as _i4;
 import 'package:sinalacs_client/src/protocol/api/development_login_result.dart'
     as _i5;
 import 'package:sinalacs_client/src/protocol/api/service_health.dart' as _i6;
-import 'package:sinalacs_client/src/protocol/api/triage_result.dart' as _i7;
-import 'package:sinalacs_client/src/protocol/api/visit_sync_result.dart' as _i8;
-import 'package:sinalacs_client/src/protocol/api/visit_sync_entry.dart' as _i9;
-import 'protocol.dart' as _i10;
+import 'package:sinalacs_client/src/protocol/api/micro_area_patient.dart'
+    as _i7;
+import 'package:sinalacs_client/src/protocol/api/triage_result.dart' as _i8;
+import 'package:sinalacs_client/src/protocol/api/visit_sync_result.dart' as _i9;
+import 'package:sinalacs_client/src/protocol/api/visit_sync_entry.dart' as _i10;
+import 'protocol.dart' as _i11;
 
 /// Ciclo do alerta vermelho.
 ///
@@ -117,6 +119,28 @@ class EndpointHealth extends _i1.EndpointRef {
       );
 }
 
+/// Diretório de pacientes da microárea do ACS.
+///
+/// Existe para a visita de rotina: o único produtor de alertas
+/// (`alerts.createRedAlert`) publica só `riskLevel: 'red'` — emergência com
+/// SAMU —, e sem esta lista não havia como o ACS escolher um paciente para
+/// visitar fora do caminho reativo.
+/// {@category Endpoint}
+class EndpointPatients extends _i1.EndpointRef {
+  EndpointPatients(_i1.EndpointCaller caller) : super(caller);
+
+  @override
+  String get name => 'patients';
+
+  _i2.Future<List<_i7.MicroAreaPatient>> listMicroArea({
+    required String accessToken,
+  }) => caller.callServerEndpoint<List<_i7.MicroAreaPatient>>(
+    'patients',
+    'listMicroArea',
+    {'accessToken': accessToken},
+  );
+}
+
 /// Motor de triagem determinístico, inspirado no Protocolo de Manchester.
 ///
 /// Endpoint novo: o [TriageEngine] já existia e era testado, mas nunca esteve
@@ -133,14 +157,14 @@ class EndpointTriage extends _i1.EndpointRef {
   @override
   String get name => 'triage';
 
-  _i2.Future<_i7.TriageResult> evaluate({
+  _i2.Future<_i8.TriageResult> evaluate({
     required bool chestPain,
     required bool difficultyBreathing,
     required bool fever,
     required bool persistentVomiting,
     required bool bleeding,
     required bool severeWeakness,
-  }) => caller.callServerEndpoint<_i7.TriageResult>(
+  }) => caller.callServerEndpoint<_i8.TriageResult>(
     'triage',
     'evaluate',
     {
@@ -170,10 +194,10 @@ class EndpointVisits extends _i1.EndpointRef {
   @override
   String get name => 'visits';
 
-  _i2.Future<List<_i8.VisitSyncResult>> sync({
+  _i2.Future<List<_i9.VisitSyncResult>> sync({
     required String accessToken,
-    required List<_i9.VisitSyncEntry> visits,
-  }) => caller.callServerEndpoint<List<_i8.VisitSyncResult>>(
+    required List<_i10.VisitSyncEntry> visits,
+  }) => caller.callServerEndpoint<List<_i9.VisitSyncResult>>(
     'visits',
     'sync',
     {
@@ -203,7 +227,7 @@ class Client extends _i1.ServerpodClientShared {
     bool? disconnectStreamsOnLostInternetConnection,
   }) : super(
          host,
-         _i10.Protocol(),
+         _i11.Protocol(),
          securityContext: securityContext,
          streamingConnectionTimeout: streamingConnectionTimeout,
          connectionTimeout: connectionTimeout,
@@ -215,6 +239,7 @@ class Client extends _i1.ServerpodClientShared {
     alerts = EndpointAlerts(this);
     auth = EndpointAuth(this);
     health = EndpointHealth(this);
+    patients = EndpointPatients(this);
     triage = EndpointTriage(this);
     visits = EndpointVisits(this);
   }
@@ -225,6 +250,8 @@ class Client extends _i1.ServerpodClientShared {
 
   late final EndpointHealth health;
 
+  late final EndpointPatients patients;
+
   late final EndpointTriage triage;
 
   late final EndpointVisits visits;
@@ -234,6 +261,7 @@ class Client extends _i1.ServerpodClientShared {
     'alerts': alerts,
     'auth': auth,
     'health': health,
+    'patients': patients,
     'triage': triage,
     'visits': visits,
   };

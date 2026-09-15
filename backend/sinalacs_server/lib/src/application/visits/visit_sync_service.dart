@@ -1,4 +1,5 @@
 import 'package:serverpod/serverpod.dart' show UuidValue;
+import 'package:sinalacs_server/src/application/audit/audit_trail.dart';
 import 'package:sinalacs_server/src/application/auth/development_auth_service.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
 
@@ -15,19 +16,37 @@ abstract interface class VisitStore {
 
   /// Atualiza uma visita existente, incrementando a versão.
   Future<Visit> update(Visit visit);
+
+  /// Microárea do paciente, ou `null` se ele não existir.
+  ///
+  /// Sem isto, o serviço validava que o ACS é territorializado mas nunca que o
+  /// PACIENTE pertence ao mesmo território — qualquer UUID de paciente
+  /// existente era aceito, de qualquer microárea (furo do INV-01).
+  Future<UuidValue?> microAreaOfPatient(UuidValue patientId);
 }
 
 /// Sincronização das visitas registradas offline pelo ACS.
 ///
 /// Espelha a `SyncFsm` do lado do dispositivo: cada visita termina em
-/// `synced`, `conflict` ou `error`, e conflito **nunca** sobrescreve o que está
-/// no servidor — devolve a versão atual para o dispositivo reconciliar.
+/// `synced`, `conflict`, `error` ou `rejected`, e conflito **nunca**
+/// sobrescreve o que está no servidor — devolve a versão atual para o
+/// dispositivo reconciliar.
+///
+/// `error` é retentável (rede, paciente ainda não cadastrado); `rejected` é
+/// terminal — o motivo não muda com uma próxima tentativa (identificador
+/// malformado, território, dono do registro) — e o dispositivo não deve
+/// reenviar.
 class VisitSyncService {
-  VisitSyncService({required VisitStore store, DateTime Function()? clock})
-      : _store = store,
+  VisitSyncService({
+    required VisitStore store,
+    required AuditTrail audit,
+    DateTime Function()? clock,
+  })  : _store = store,
+        _audit = audit,
         _clock = clock ?? DateTime.now;
 
   final VisitStore _store;
+  final AuditTrail _audit;
   final DateTime Function() _clock;
 
   Future<List<VisitSyncResult>> sync({
@@ -50,9 +69,10 @@ class VisitSyncService {
     required VisitSyncEntry entry,
   }) async {
     if (entry.localId.trim().isEmpty) {
+      // Terminal: um localId vazio não vira válido reenviando o mesmo lote.
       return VisitSyncResult(
         localId: entry.localId,
-        syncStatus: SyncStatus.error,
+        syncStatus: SyncStatus.rejected,
         message: 'localId é obrigatório',
       );
     }
@@ -67,10 +87,44 @@ class VisitSyncService {
       localId = UuidValue.withValidation(entry.localId);
       patientId = UuidValue.withValidation(entry.patientId);
     } on FormatException {
+      // Terminal: um identificador malformado na origem não vira válido
+      // reenviando.
+      return VisitSyncResult(
+        localId: entry.localId,
+        syncStatus: SyncStatus.rejected,
+        message: 'identificadores devem ser UUID',
+      );
+    }
+
+    // Território ANTES de tocar em `existing`: um reenvio para o mesmo
+    // `localId` também precisa ser barrado, não só a primeira gravação.
+    final patientMicroAreaId = await _store.microAreaOfPatient(patientId);
+    if (patientMicroAreaId == null) {
       return VisitSyncResult(
         localId: entry.localId,
         syncStatus: SyncStatus.error,
-        message: 'identificadores devem ser UUID',
+        message: 'paciente não encontrado',
+      );
+    }
+
+    final acsMicroAreaId = UuidValue.fromString(user.microAreaId!);
+    if (patientMicroAreaId != acsMicroAreaId) {
+      // A mensagem não cita a microárea alheia nem o nome do paciente — só que
+      // o vínculo não existe. §404 de spec/lgpd_design.md: "o sistema monitora
+      // se um ACS consulta dados de um paciente fora de sua microárea sem
+      // justificativa, gerando alerta para auditoria".
+      await _audit.recordSafely(AuditEvent(
+        userId: user.id,
+        actionType: 'write',
+        resourceType: 'visit',
+        resourceId: patientId.uuid,
+        result: 'denied_territory',
+      ));
+      // Terminal: o território não muda por retentar.
+      return VisitSyncResult(
+        localId: entry.localId,
+        syncStatus: SyncStatus.rejected,
+        message: 'paciente fora da sua microárea',
       );
     }
 
@@ -102,9 +156,10 @@ class VisitSyncService {
     // A visita pertence ao ACS que a registrou. Um ACS não sincroniza a visita
     // de outro, mesmo conhecendo o localId.
     if (existing.acsId != acsId) {
+      // Terminal: o dono do registro não muda por retentar.
       return VisitSyncResult(
         localId: entry.localId,
-        syncStatus: SyncStatus.error,
+        syncStatus: SyncStatus.rejected,
         message: 'visita registrada por outro agente',
       );
     }

@@ -17,14 +17,18 @@ class EncryptedLocalDatabase {
   ///
   /// v1 existiu em duas formas em campo: `local_queue(id)` — o que um aparelho
   /// com a versão anterior instalada tem — e uma `offline_visits` com
-  /// `patient_name`. v2 grava `patient_id`.
-  static const schemaVersion = 3;
+  /// `patient_name`. v2 grava `patient_id`. v4 acrescenta `rejection_reason`,
+  /// para a visita recusada em definitivo pelo servidor (`SyncStatus.rejected`)
+  /// ficar visível no aparelho em vez de retentar para sempre.
+  static const schemaVersion = 4;
 
   /// Visitas registradas offline, aguardando sincronização.
   ///
   /// Só o que ainda precisa sair do dispositivo é gravado: a visita confirmada
   /// pelo servidor é removida no `save` seguinte, o que atende o princípio da
-  /// minimização (LGPD-RF07 / seção 5.6 de spec/lgpd_design.md).
+  /// minimização (LGPD-RF07 / seção 5.6 de spec/lgpd_design.md). Desde a v4,
+  /// isso inclui a visita recusada em definitivo — ela fica no disco, com o
+  /// motivo, até o ACS descartá-la explicitamente (ver `OfflineVisitQueue`).
   static const createOfflineVisits = '''
 CREATE TABLE IF NOT EXISTS offline_visits (
   local_id TEXT PRIMARY KEY,
@@ -34,10 +38,11 @@ CREATE TABLE IF NOT EXISTS offline_visits (
   outcome TEXT NOT NULL,
   notes TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL,
-  version INTEGER NOT NULL
+  version INTEGER NOT NULL,
+  rejection_reason TEXT
 )''';
 
-  /// Migração v1 → v2 e v2 → v3.
+  /// Migração v1 → v2, v2 → v3 e v3 → v4.
   ///
   /// Nenhuma das duas formas de v1 guarda o UUID do paciente: `patient_name`
   /// era `'Paciente ' + 8 dos 32 dígitos hex`, irreversível. Sem UUID,
@@ -45,9 +50,11 @@ CREATE TABLE IF NOT EXISTS offline_visits (
   /// preservar essas linhas só encheria a fila de pendências que nunca sobem e,
   /// por isso mesmo, nunca saem do disco.
   ///
-  /// Recriar perde as visitas pendentes gravadas antes desta versão. É
-  /// aceitável **apenas** porque o app ainda não teve release; a partir do
-  /// primeiro, esta migração precisa preservar os dados.
+  /// Recriar (v1 → v2) perde as visitas pendentes gravadas antes desta versão.
+  /// Era aceitável **apenas** porque o app ainda não tinha tido release. A
+  /// partir da v3 → v4, a migração passa a ser só `ALTER TABLE ... ADD COLUMN`
+  /// — aditiva, preserva as linhas existentes, que é o que uma migração depois
+  /// do primeiro release precisa fazer.
   static Future<void> _upgrade(Database db, int from, int to) async {
     if (from < 2) {
       await db.execute('DROP TABLE IF EXISTS local_queue');
@@ -64,6 +71,19 @@ CREATE TABLE IF NOT EXISTS offline_visits (
       if (!hasNotes) {
         await db.execute(
           "ALTER TABLE offline_visits ADD COLUMN notes TEXT NOT NULL DEFAULT '';",
+        );
+      }
+    }
+
+    if (from < 4) {
+      final columns = await db.rawQuery(
+        "PRAGMA table_info('offline_visits')",
+      );
+      final hasRejectionReason =
+          columns.any((column) => column['name'] == 'rejection_reason');
+      if (!hasRejectionReason) {
+        await db.execute(
+          'ALTER TABLE offline_visits ADD COLUMN rejection_reason TEXT;',
         );
       }
     }
