@@ -34,8 +34,8 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  final _matricula = TextEditingController(text: 'admin.dev');
-  final _senha = TextEditingController(text: '123456');
+  final _matricula = TextEditingController();
+  final _senha = TextEditingController();
 
   @override
   void dispose() {
@@ -232,15 +232,59 @@ String statusLabel(AlertStatus status) => switch (status) {
       AlertStatus.escalated => 'Escalonado',
     };
 
-class IndicatorsScreen extends StatelessWidget {
+/// Estado de erro compartilhado pelas telas assíncronas, com retry.
+///
+/// Sem isso, um `FutureBuilder` que falha fica com `hasData == false` para
+/// sempre (spinner infinito) ou, pior, cai no mesmo ramo de "vazio" que os
+/// dados realmente vazios — escondendo uma falha de rede/backend como se
+/// não houvesse nada para mostrar (achado da revisão do Copilot no PR).
+class _AsyncError extends StatelessWidget {
+  const _AsyncError({required this.message, required this.onRetry});
+
+  final String message;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) => Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.cloud_off_outlined, size: 32, color: Colors.white70),
+              const SizedBox(height: 12),
+              Text(message, textAlign: TextAlign.center),
+              const SizedBox(height: 16),
+              OutlinedButton.icon(onPressed: onRetry, icon: const Icon(Icons.refresh), label: const Text('Tentar novamente')),
+            ],
+          ),
+        ),
+      );
+}
+
+class IndicatorsScreen extends StatefulWidget {
   const IndicatorsScreen({required this.dataSource, super.key});
 
   final AdminDataSource dataSource;
 
   @override
+  State<IndicatorsScreen> createState() => _IndicatorsScreenState();
+}
+
+class _IndicatorsScreenState extends State<IndicatorsScreen> {
+  late Future<DashboardIndicators> _future = widget.dataSource.fetchDashboardIndicators();
+
+  void _retry() => setState(() {
+        _future = widget.dataSource.fetchDashboardIndicators();
+      });
+
+  @override
   Widget build(BuildContext context) => FutureBuilder<DashboardIndicators>(
-        future: dataSource.fetchDashboardIndicators(),
+        future: _future,
         builder: (context, snapshot) {
+          if (snapshot.hasError) {
+            return _AsyncError(message: 'Não foi possível carregar os indicadores.', onRetry: _retry);
+          }
           if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
           final data = snapshot.data!;
           return _page([
@@ -311,18 +355,29 @@ class MicroAreasScreen extends StatefulWidget {
 }
 
 class _MicroAreasScreenState extends State<MicroAreasScreen> {
-  @override
-  void initState() {
-    super.initState();
-    widget.dataSource.recordAccess(actionType: 'view', resourceType: 'micro_areas');
+  late Future<List<MicroAreaSummary>> _future = _load();
+
+  /// Registra o acesso *antes* de expor os dados — se o registro falhar, a
+  /// tela cai no estado de erro em vez de mostrar dado sensível sem auditoria
+  /// (PRD §4.2.2: acesso do Administrador precisa ser auditado).
+  Future<List<MicroAreaSummary>> _load() async {
+    await widget.dataSource.recordAccess(actionType: 'view', resourceType: 'micro_areas');
+    return widget.dataSource.fetchMicroAreas();
   }
+
+  void _retry() => setState(() {
+        _future = _load();
+      });
 
   @override
   Widget build(BuildContext context) => FutureBuilder<List<MicroAreaSummary>>(
-        future: widget.dataSource.fetchMicroAreas(),
+        future: _future,
         builder: (context, snapshot) {
-          final areas = snapshot.data ?? const [];
+          if (snapshot.hasError) {
+            return _AsyncError(message: 'Não foi possível carregar as microáreas.', onRetry: _retry);
+          }
           if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+          final areas = snapshot.data!;
           return ListView(
             padding: const EdgeInsets.all(20),
             children: [
@@ -362,17 +417,51 @@ class AlertsScreen extends StatefulWidget {
 class _AlertsScreenState extends State<AlertsScreen> {
   String? _microAreaFilter;
   AlertStatus? _statusFilter;
+  late Future<void> _accessRecorded = widget.dataSource.recordAccess(actionType: 'view', resourceType: 'alerts');
 
   @override
-  void initState() {
-    super.initState();
-    widget.dataSource.recordAccess(actionType: 'view', resourceType: 'alerts');
-  }
+  Widget build(BuildContext context) => FutureBuilder<void>(
+        future: _accessRecorded,
+        builder: (context, accessSnapshot) {
+          if (accessSnapshot.hasError) {
+            return _AsyncError(
+              message: 'Não foi possível registrar o acesso a esta tela.',
+              onRetry: () => setState(() {
+                _accessRecorded = widget.dataSource.recordAccess(actionType: 'view', resourceType: 'alerts');
+              }),
+            );
+          }
+          if (accessSnapshot.connectionState != ConnectionState.done) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          return _AlertsList(dataSource: widget.dataSource, microAreaFilter: _microAreaFilter, statusFilter: _statusFilter, onFilterChanged: (microArea, status) => setState(() {
+            _microAreaFilter = microArea;
+            _statusFilter = status;
+          }));
+        },
+      );
+}
+
+class _AlertsList extends StatelessWidget {
+  const _AlertsList({
+    required this.dataSource,
+    required this.microAreaFilter,
+    required this.statusFilter,
+    required this.onFilterChanged,
+  });
+
+  final AdminDataSource dataSource;
+  final String? microAreaFilter;
+  final AlertStatus? statusFilter;
+  final void Function(String? microArea, AlertStatus? status) onFilterChanged;
 
   @override
   Widget build(BuildContext context) => FutureBuilder<List<AlertSummary>>(
-        future: widget.dataSource.fetchAlerts(microAreaName: _microAreaFilter, status: _statusFilter),
+        future: dataSource.fetchAlerts(microAreaName: microAreaFilter, status: statusFilter),
         builder: (context, snapshot) {
+          if (snapshot.hasError) {
+            return _AsyncError(message: 'Não foi possível carregar os alertas.', onRetry: () => onFilterChanged(microAreaFilter, statusFilter));
+          }
           final alerts = snapshot.data ?? const [];
           return ListView(
             padding: const EdgeInsets.all(20),
@@ -386,8 +475,12 @@ class _AlertsScreenState extends State<AlertsScreen> {
                   Expanded(
                     child: DropdownButtonFormField<String?>(
                       key: const Key('alerts_micro_area_filter'),
-                      initialValue: _microAreaFilter,
+                      initialValue: microAreaFilter,
                       isExpanded: true,
+                      // DropdownButton exibe o hint (não o child do item) quando o
+                      // valor selecionado é null — sem isso, "Todas" some do campo
+                      // fechado assim que selecionado (achado da revisão do PR).
+                      hint: const Text('Todas'),
                       decoration: const InputDecoration(labelText: 'Microárea'),
                       items: const [
                         DropdownMenuItem(value: null, child: Text('Todas')),
@@ -404,22 +497,23 @@ class _AlertsScreenState extends State<AlertsScreen> {
                           child: Text('Microárea 03 — Vila Esperança', overflow: TextOverflow.ellipsis),
                         ),
                       ],
-                      onChanged: (value) => setState(() => _microAreaFilter = value),
+                      onChanged: (value) => onFilterChanged(value, statusFilter),
                     ),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
                     child: DropdownButtonFormField<AlertStatus?>(
                       key: const Key('alerts_status_filter'),
-                      initialValue: _statusFilter,
+                      initialValue: statusFilter,
                       isExpanded: true,
+                      hint: const Text('Todos'),
                       decoration: const InputDecoration(labelText: 'Status'),
                       items: [
                         const DropdownMenuItem(value: null, child: Text('Todos')),
                         for (final status in AlertStatus.values)
                           DropdownMenuItem(value: status, child: Text(statusLabel(status), overflow: TextOverflow.ellipsis)),
                       ],
-                      onChanged: (value) => setState(() => _statusFilter = value),
+                      onChanged: (value) => onFilterChanged(microAreaFilter, value),
                     ),
                   ),
                 ],
@@ -466,24 +560,29 @@ class AuditLogScreen extends StatefulWidget {
 }
 
 class _AuditLogScreenState extends State<AuditLogScreen> {
-  late final Future<void> _selfAuditRecorded;
-
-  @override
-  void initState() {
-    super.initState();
-    _selfAuditRecorded = widget.dataSource.recordAccess(actionType: 'view', resourceType: 'audit_logs');
-  }
+  late Future<void> _selfAuditRecorded = widget.dataSource.recordAccess(actionType: 'view', resourceType: 'audit_logs');
 
   @override
   Widget build(BuildContext context) => FutureBuilder<void>(
         future: _selfAuditRecorded,
         builder: (context, recordSnapshot) {
+          if (recordSnapshot.hasError) {
+            return _AsyncError(
+              message: 'Não foi possível registrar o acesso a esta tela.',
+              onRetry: () => setState(() {
+                _selfAuditRecorded = widget.dataSource.recordAccess(actionType: 'view', resourceType: 'audit_logs');
+              }),
+            );
+          }
           if (recordSnapshot.connectionState != ConnectionState.done) {
             return const Center(child: CircularProgressIndicator());
           }
           return FutureBuilder<List<AuditLogEntry>>(
             future: widget.dataSource.fetchAuditLogs(),
             builder: (context, snapshot) {
+              if (snapshot.hasError) {
+                return _AsyncError(message: 'Não foi possível carregar os logs de auditoria.', onRetry: () => setState(() {}));
+              }
               final entries = snapshot.data ?? const [];
               return ListView(
                 padding: const EdgeInsets.all(20),

@@ -3,10 +3,10 @@
     "short_name": "sinalacs_admin",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
-    "orientation": "portrait-primary",
+    "background_color": "#030712",
+    "theme_color": "#4F46E5",
+    "description": "Backoffice administrativo do SinalACS.",
+    "orientation": "any",
     "prefer_related_applications": false,
     "icons": [
         {
