@@ -1,0 +1,18 @@
+### Uma visita registrada offline, enviada pelo app do ACS para sincronização.
+###
+### `localId` é gerado no dispositivo e tem índice único em `visits`: é o que
+### permite reenviar o mesmo lote depois de uma falha de rede sem duplicar a
+### visita. `version` é a versão que o dispositivo conhece — divergir da versão
+### do servidor significa que alguém alterou a visita no meio, e o resultado é
+### conflito, não sobrescrita.
+class: VisitSyncEntry
+fields:
+  localId: String
+  patientId: String
+  scheduledAt: DateTime
+  completedAt: DateTime?
+  status: String
+  riskLevelBefore: RiskLevel
+  riskLevelAfter: RiskLevel?
+  notes: Map<String, String>
+  version: int

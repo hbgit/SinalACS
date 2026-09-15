@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mqtt_client/mqtt_client.dart';
 import 'package:sinalacs_acs/core/services/mqtt_secure_client.dart';
 
 void main() {
@@ -18,24 +19,45 @@ void main() {
     expect(json['patient_id'], 'patient-42');
     expect(json['risk_level'], 'VERMELHO');
     expect(json['micro_area_id'], 'microarea-01');
-    expect(json['mqtt_topic'], '/alerts/microarea-01');
+    // Precisa ser o MESMO namespace de AlertDelivery.topicPrefix no servidor e
+    // da ACL do broker. Este teste antes afirmava '/alerts/microarea-01', um
+    // namespace que não existe em nenhum dos dois lados.
+    expect(json['mqtt_topic'], 'sinalacs/v1/microareas/microarea-01/alerts');
   });
 
-  test('deve criar configuração MQTT segura com TLS e WSS', () {
+  test('deve montar os tópicos no namespace acordado com o backend', () {
+    expect(
+      alertTopicFor('00000000-0000-4000-8000-000000000003'),
+      'sinalacs/v1/microareas/00000000-0000-4000-8000-000000000003/alerts',
+    );
+    expect(ackTopicFor('alert-123'), 'sinalacs/v1/alerts/alert-123/acks');
+  });
+
+  test('deve usar TCP/TLS por padrão, que é o único listener do broker', () {
     const config = SecureMqttConfig(
       brokerHost: 'broker.sinalacs.local',
       port: 8883,
       clientId: 'acs-client-01',
-      topic: '/alerts/microarea-01',
-      useTls: true,
-      useWebSocket: true,
+      topic: 'sinalacs/v1/microareas/microarea-01/alerts',
     );
 
     expect(config.useTls, isTrue);
-    expect(config.useWebSocket, isTrue);
+    // O default era WebSocket, o que fazia connect() lançar UnsupportedError na
+    // configuração padrão — o cliente se autodesabilitava.
+    expect(config.useWebSocket, isFalse);
+    expect(config.connectionUri, 'ssl://broker.sinalacs.local:8883');
+  });
+
+  test('deve montar URI WebSocket quando explicitamente pedido', () {
+    const config = SecureMqttConfig(
+      brokerHost: 'broker.sinalacs.local',
+      port: 8883,
+      clientId: 'acs-client-01',
+      topic: 'sinalacs/v1/microareas/microarea-01/alerts',
+      useWebSocket: true,
+    );
+
     expect(config.connectionUri, contains('wss://'));
-    expect(config.connectionUri, contains('8883'));
-    expect(config.connectionUri, contains('broker.sinalacs.local'));
   });
 
   test('deve montar payload de confirmação do ACS para o alerta vermelho', () {
@@ -62,5 +84,45 @@ void main() {
     expect(alert?.alertId, 'alert-123');
     expect(alert?.microAreaId, 'area-12');
     expect(ReceivedMqttAlert.tryParse('{"version":2}'), isNull);
+  });
+
+  group('recusa do broker', () {
+    test('traduz cada código de CONNACK sem citar credencial', () {
+      expect(
+        mqttRefusalReason(MqttConnectReturnCode.badUsernameOrPassword),
+        'A central recusou as credenciais deste aplicativo.',
+      );
+      expect(
+        mqttRefusalReason(MqttConnectReturnCode.notAuthorized),
+        'A central recusou as credenciais deste aplicativo.',
+      );
+      expect(
+        mqttRefusalReason(MqttConnectReturnCode.identifierRejected),
+        'A central recusou o identificador deste aplicativo.',
+      );
+      expect(
+        mqttRefusalReason(MqttConnectReturnCode.brokerUnavailable),
+        'A central de alertas está indisponível.',
+      );
+    });
+
+    test('devolve null quando não houve recusa', () {
+      // Aí a falha foi de transporte, não de autorização — e a mensagem da tela
+      // precisa ser outra: "sem conexão" em vez de "credenciais recusadas".
+      expect(mqttRefusalReason(null), isNull);
+      expect(mqttRefusalReason(MqttConnectReturnCode.connectionAccepted), isNull);
+    });
+
+    test('só brokerUnavailable vale retentar sozinho', () {
+      // Credencial e identificador recusados não mudam sozinhos — insistir
+      // neles só gastaria bateria sem chance de sucesso. É justamente o erro
+      // que mais tentaria induzir a retentar, por isso o teste explícito.
+      expect(mqttRefusalIsTransient(MqttConnectReturnCode.brokerUnavailable), isTrue);
+      expect(mqttRefusalIsTransient(MqttConnectReturnCode.badUsernameOrPassword), isFalse);
+      expect(mqttRefusalIsTransient(MqttConnectReturnCode.notAuthorized), isFalse);
+      expect(mqttRefusalIsTransient(MqttConnectReturnCode.identifierRejected), isFalse);
+      expect(mqttRefusalIsTransient(MqttConnectReturnCode.unacceptedProtocolVersion), isFalse);
+      expect(mqttRefusalIsTransient(null), isFalse);
+    });
   });
 }
