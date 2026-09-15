@@ -1,19 +1,23 @@
+import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
 import 'package:sinalacs_admin/app/admin_theme.dart';
 import 'package:sinalacs_admin/core/data/admin_data_source.dart';
 import 'package:sinalacs_admin/core/data/mock_admin_data_source.dart';
 
 class SinalAdminApp extends StatelessWidget {
-  SinalAdminApp({super.key, AdminDataSource? dataSource}) : dataSource = dataSource ?? MockAdminDataSource();
+  SinalAdminApp({super.key, AdminDataSource? dataSource, this.devLoginEnabled}) : dataSource = dataSource ?? MockAdminDataSource();
 
   final AdminDataSource dataSource;
+
+  /// Repassado para [LoginScreen]; `null` mantém o default (`kDebugMode`).
+  final bool? devLoginEnabled;
 
   @override
   Widget build(BuildContext context) => MaterialApp(
         title: 'SinalACS Admin',
         debugShowCheckedModeBanner: false,
         theme: buildAdminTheme(),
-        home: LoginScreen(dataSource: dataSource),
+        home: LoginScreen(dataSource: dataSource, devLoginEnabled: devLoginEnabled),
       );
 }
 
@@ -25,9 +29,15 @@ class SinalAdminApp extends StatelessWidget {
 /// AlertValidationException. Ligar isso de verdade exige uma mudança no
 /// backend (fora do escopo desta issue); ver descrição do PR.
 class LoginScreen extends StatefulWidget {
-  const LoginScreen({required this.dataSource, super.key});
+  /// O banner "ambiente de desenvolvimento" não é um controle de acesso — só
+  /// avisa. Sem isso, `_login` deixaria qualquer pessoa entrar em produção
+  /// sem senha (achado da revisão do PR). O default (`kDebugMode`, `false`
+  /// em builds profile/release) desativa de verdade o bypass fora de dev;
+  /// o parâmetro existe para os testes poderem exercitar os dois estados.
+  const LoginScreen({required this.dataSource, super.key, bool? devLoginEnabled}) : devLoginEnabled = devLoginEnabled ?? kDebugMode;
 
   final AdminDataSource dataSource;
+  final bool devLoginEnabled;
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
@@ -114,11 +124,20 @@ class _LoginScreenState extends State<LoginScreen> {
                             child: FilledButton(
                               key: const Key('login_button'),
                               style: FilledButton.styleFrom(minimumSize: const Size(48, 52)),
-                              onPressed: _login,
+                              onPressed: widget.devLoginEnabled ? _login : null,
                               child: const Text('Entrar'),
                             ),
                           ),
                         ),
+                        if (!widget.devLoginEnabled) ...[
+                          const SizedBox(height: 12),
+                          const Text(
+                            'Login de desenvolvimento desativado nesta build (fora do modo debug).',
+                            key: Key('dev_login_disabled_notice'),
+                            textAlign: TextAlign.center,
+                            style: TextStyle(color: Colors.white70, fontSize: 12),
+                          ),
+                        ],
                       ],
                     ),
                   ),
@@ -455,14 +474,25 @@ class _AlertsList extends StatelessWidget {
   final AlertStatus? statusFilter;
   final void Function(String? microArea, AlertStatus? status) onFilterChanged;
 
+  /// Busca alertas e microáreas juntos. As opções do filtro vêm daqui, não de
+  /// uma lista fixa no código — senão uma microárea nova (ou uma fonte real,
+  /// no lugar do mock) devolveria alertas para um valor que não existe mais
+  /// como opção selecionável (achado da revisão do PR).
+  Future<({List<AlertSummary> alerts, List<MicroAreaSummary> microAreas})> _load() async {
+    final alerts = await dataSource.fetchAlerts(microAreaName: microAreaFilter, status: statusFilter);
+    final microAreas = await dataSource.fetchMicroAreas();
+    return (alerts: alerts, microAreas: microAreas);
+  }
+
   @override
-  Widget build(BuildContext context) => FutureBuilder<List<AlertSummary>>(
-        future: dataSource.fetchAlerts(microAreaName: microAreaFilter, status: statusFilter),
+  Widget build(BuildContext context) => FutureBuilder(
+        future: _load(),
         builder: (context, snapshot) {
           if (snapshot.hasError) {
             return _AsyncError(message: 'Não foi possível carregar os alertas.', onRetry: () => onFilterChanged(microAreaFilter, statusFilter));
           }
-          final alerts = snapshot.data ?? const [];
+          final alerts = snapshot.data?.alerts ?? const [];
+          final microAreas = snapshot.data?.microAreas ?? const [];
           return ListView(
             padding: const EdgeInsets.all(20),
             children: [
@@ -482,20 +512,10 @@ class _AlertsList extends StatelessWidget {
                       // fechado assim que selecionado (achado da revisão do PR).
                       hint: const Text('Todas'),
                       decoration: const InputDecoration(labelText: 'Microárea'),
-                      items: const [
-                        DropdownMenuItem(value: null, child: Text('Todas')),
-                        DropdownMenuItem(
-                          value: 'Microárea 12 — Zona Rural',
-                          child: Text('Microárea 12 — Zona Rural', overflow: TextOverflow.ellipsis),
-                        ),
-                        DropdownMenuItem(
-                          value: 'Microárea 07 — Centro',
-                          child: Text('Microárea 07 — Centro', overflow: TextOverflow.ellipsis),
-                        ),
-                        DropdownMenuItem(
-                          value: 'Microárea 03 — Vila Esperança',
-                          child: Text('Microárea 03 — Vila Esperança', overflow: TextOverflow.ellipsis),
-                        ),
+                      items: [
+                        const DropdownMenuItem(value: null, child: Text('Todas')),
+                        for (final area in microAreas)
+                          DropdownMenuItem(value: area.name, child: Text(area.name, overflow: TextOverflow.ellipsis)),
                       ],
                       onChanged: (value) => onFilterChanged(value, statusFilter),
                     ),
