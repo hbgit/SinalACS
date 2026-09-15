@@ -4,6 +4,8 @@
 > complementado por controles do NIST SP 800-53 Rev. 5 onde fez sentido
 > detalhar. Ver [issue #1](../../../issues/1).
 
+**Relatório Baseado no código disponível no dia 15/09/2026**
+
 ## 1. Contexto e metodologia
 
 Esta análise é uma revisão estática (leitura de código, configuração e
