@@ -106,3 +106,17 @@ jobs:
       - run: flutter pub get
       - run: flutter analyze
       - run: flutter test
+
+  admin-app:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/admin
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.44.8'
+      - run: flutter pub get
+      - run: flutter analyze
+      - run: flutter test
