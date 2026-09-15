@@ -23,6 +23,9 @@ Antes de mexer em produto, arquitetura ou comportamento, consulte primeiro:
 - [spec/stack.md](spec/stack.md) — decisões de stack e infraestrutura;
 - [spec/ui_design.md](spec/ui_design.md) — linguagem visual e UX;
 - [spec/lgpd_design.md](spec/lgpd_design.md) — privacidade e LGPD;
+- [spec/lgpd_data_audit.md](spec/lgpd_data_audit.md) — classificação de sensibilidade LGPD, campo a campo, de todas as tabelas persistidas;
+- [spec/ux_accessibility_assessment.md](spec/ux_accessibility_assessment.md) — auditoria WCAG 2.2 AA (contraste, alvo de toque, semântica) dos apps ACS e paciente;
+- [spec/ux_ui_test_plan.md](spec/ux_ui_test_plan.md) — plano de testes de UX/UI derivado de `spec/ui_design.md`;
 - [CLAUDE.md](CLAUDE.md) — guia técnico e comandos para IA; é a referência mais atualizada do repositório;
 - [PROGRESS.md](PROGRESS.md) — status dos milestones e histórico de migração;
 - [backend/](backend) — workspace Dart com `sinalacs_server` e `sinalacs_client`;
@@ -58,6 +61,7 @@ Não violar estes pontos sob qualquer hipótese:
 - O app ACS é o mais crítico em termos de offline-first e sincronização: guarda visitas locais, tenta sincronizar em fila e trata conflitos sem perder registros.
 - O tema visual é dark mode, com foco em legibilidade e uso de cor restrito a sinal clínico (vermelho, amarelo, verde).
 - O app do paciente não deve reintroduzir regras de risco no cliente; a classificação deve vir do backend via `triage.evaluate`.
+- [apps/admin](apps/admin) (`sinalacs_admin`) é o backoffice administrativo — deixou de ser um esqueleto de pubspec e hoje é um app navegável real, com 4 telas somente leitura (Indicadores, Microáreas, Alertas, Auditoria) atrás de `AdminHomeShell`. Ainda não consome `sinalacs_client`: usa a interface `AdminDataSource`, hoje implementada só por `MockAdminDataSource`, seguindo o mesmo padrão de DI de `PatientBackend`/`AcsBackend`. O login é local e não chama `auth.developmentLogin` (o backend só aceita `role: 'patient'`/`role: 'acs'` hoje). Toda tela que exibe dado sensível registra o próprio acesso via `recordAccess()` antes de renderizar, por exigência de auditoria do PRD §4.2.2. É o único dos três apps com suporte a Flutter Web.
 
 ### Infraestrutura local
 - O ambiente de desenvolvimento usa Docker Compose com PostgreSQL, Mosquitto, backend e Traefik.
@@ -92,6 +96,7 @@ Não violar estes pontos sob qualquer hipótese:
 - Manter dark mode, alta legibilidade e baixo ruído visual.
 - Usar cores apenas para sinal clínico; não decorar interfaces com vermelho/amarelo/verde sem relação com risco.
 - Manter foco em mobile-first e acessibilidade.
+- Ao reaproveitar uma cor clínica de preenchimento (`red`/`accent`/`danger`) como cor de texto/ícone, usar a variante `*OnSurface` (`acs_theme.dart`/`patient_theme.dart`) e medir contraste contra a superfície real (`Card`/`surfaceRaised`), não contra o fundo do Scaffold — ver `spec/ux_accessibility_assessment.md` e os testes em `test/contrast_tokens_test.dart` de cada app.
 
 ### 6) Quando o trabalho for de backend ou dados
 - Considerar uso de SQLite/SQLCipher e filas locais para operação offline.
@@ -122,12 +127,13 @@ Rodar análise do Flutter nos apps:
 ```bash
 cd apps/patient && flutter pub get && flutter analyze && flutter test
 cd apps/acs && flutter pub get && flutter analyze && flutter test
+cd apps/admin && flutter pub get && flutter analyze && flutter test
 ```
 
 Importante:
 - `flutter test` é hermético e não substitui validações com stack local real;
 - os testes de integração e validação de conexão vivem fora do `flutter test` e utilizam a stack Docker/VM;
-- o CI do projeto valida jobs separados para backend e apps.
+- o CI do projeto valida cinco jobs separados: `serverpod-backend`, `backend-docker-build`, `patient-app`, `acs-app` e `admin-app`.
 
 ## Observações finais
 

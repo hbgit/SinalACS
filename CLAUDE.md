@@ -17,6 +17,9 @@ Read these before making product/architecture decisions — when project docs co
 - [spec/stack.md](spec/stack.md) — stack/infra architecture decisions.
 - [spec/ui_design.md](spec/ui_design.md) — visual language and UX behavior.
 - [spec/lgpd_design.md](spec/lgpd_design.md) — privacy/LGPD design.
+- [spec/lgpd_data_audit.md](spec/lgpd_data_audit.md) — field-by-field LGPD sensitivity classification for every persisted table (11 domain tables plus Serverpod's own).
+- [spec/ux_accessibility_assessment.md](spec/ux_accessibility_assessment.md) — WCAG 2.2 AA audit (contrast, touch targets, semantics) for the ACS/patient apps; read before touching any color used as text/icon, not just fill.
+- [spec/ux_ui_test_plan.md](spec/ux_ui_test_plan.md) — UX/UI test plan derived from `spec/ui_design.md` (visual/interaction behavior, complementary to the accessibility assessment).
 - [AGENTS.md](AGENTS.md) — full agent working rules (Portuguese), summarized below.
 
 ## Business/security invariants (do not violate)
@@ -112,7 +115,7 @@ flutter build apk --debug   # debug APK, validated with compileSdk/targetSdk 36
 ```
 For the ACS app, run `./scripts/dev/run_acs.sh` (or `--build` for the APK) instead of bare `flutter run`: `SINALACS_MQTT_PASSWORD` is a compile-time constant with **no default**, and the broker's password is generated per machine by `bootstrap_env.sh`. The script reads `.env`, runs `sync_dev_ca.sh` (the CA is a gitignored asset the build requires) and passes all four defines via `--dart-define-from-file` (a temp file it creates and deletes, so the password never sits in `flutter`'s argv). `apps/acs/android/app/build.gradle.kts` makes a bare `flutter build apk` **fail** with the right command instead of silently producing an APK that never connects; the escape hatch for a deliberately-passwordless build (e.g. to see the "compiled without the password" banner) is `-Psinalacs.allowMissingMqttPassword=true`.
 
-`apps/admin` exists only as a pubspec skeleton (backoffice), no implementation yet.
+`apps/admin` (package `sinalacs_admin`) is a real backoffice app now, not a skeleton — see Architecture below. Same commands apply (`cd apps/admin && flutter pub get && flutter analyze && flutter test`); it's also the only one of the three with Flutter Web enabled (`flutter build web` works).
 
 ### Validating the real connection to the backend
 
@@ -130,7 +133,7 @@ The script brings up Docker Compose, waits for the healthcheck, applies the seed
 
 Debug builds of both apps carry `android/app/src/debug/res/xml/network_security_config.xml`, which permits cleartext only to `10.0.2.2` and loopback; release manifests are untouched.
 
-CI (`.github/workflows/ci.yml`) runs four parallel jobs on push/PR to main: `serverpod-backend` (spins up the Postgres the test harness expects on port 9090, then `dart analyze` and the full 25-test suite), `backend-docker-build` (builds `backend/sinalacs_server/Dockerfile` to catch build breakage before deploy), `patient-app`, `acs-app` (each `flutter analyze && flutter test`, Flutter 3.44.8). Mirror this locally before pushing.
+CI (`.github/workflows/ci.yml`) runs five parallel jobs on push/PR to main: `serverpod-backend` (spins up the Postgres the test harness expects on port 9090, then `dart analyze` and the full 25-test suite), `backend-docker-build` (builds `backend/sinalacs_server/Dockerfile` to catch build breakage before deploy), `patient-app`, `acs-app`, `admin-app` (each `flutter analyze && flutter test`, Flutter 3.44.8). Mirror this locally before pushing.
 
 ## Architecture
 
@@ -165,6 +168,11 @@ Risk classification now comes **only** from `triage.evaluate`: the patient app's
 
 Color is a clinical signal only in these apps: red/yellow/green map strictly to `RiskLevel`, never used decoratively.
 
+**WCAG contrast tokens**: `app/acs_theme.dart` and `app/patient_theme.dart` each carry a text-safe variant of every clinical fill color — `redOnSurface`/`accentOnSurface` (ACS) and `dangerOnSurface`/`accentOnSurface` (patient). `red`/`accent`/`danger` only clear WCAG 1.4.3's 4.5:1 as a *fill* (e.g. white text on a red button); reused as *text* color on `surfaceRaised`/`Card` — where risk/status text is actually rendered — they drop to ~3:1. `acsOnSurface()` (and its patient-app equivalent) converts fill → text color at the single point where a `switch (riskLevel)` used to feed both, instead of at every call site. `test/contrast_tokens_test.dart` in each app checks the full token×surface matrix by computing relative luminance directly (`test/support/contrast.dart`) rather than by eyeballing a contrast checker against the wrong surface — which is exactly the false positive/negative `spec/ux_accessibility_assessment.md` documents from the original manual audit. The same pass added `minimumSize` (48×52dp, 64×60dp for the SAMU emergency call) per WCAG 2.5.5 and `Semantics(liveRegion: true)` on dynamic status messages (login errors, feed/storage errors, rejected-visit counts) per WCAG 4.1.3.
+
+### Admin app (`apps/admin/`)
+Package `sinalacs_admin`, read-only backoffice. Same skeleton as ACS/patient: `lib/main.dart` → `lib/app/app.dart` (+ `admin_theme.dart`) → `lib/core/data/`. Unlike ACS/patient it does not consume `sinalacs_client` yet: `AdminDataSource` (`lib/core/data/admin_data_source.dart`) is an abstract interface whose models (`RiskLevel`, `AlertStatus`, `DashboardIndicators`, `MicroAreaSummary`, `AlertSummary`, `AuditLogEntry`) mirror the backend's `.spy.yaml` models field-for-field, backed today only by `MockAdminDataSource` — swapping in a real implementation over `sinalacs_client` shouldn't require reshaping the screens, the same DI pattern as `PatientBackend`/`AcsBackend`. `AdminHomeShell` exposes four read-only sections: **Indicadores** (risk counters + TMRAV, the PRD's North Star metric), **Microáreas** (ACS↔microarea binding), **Alertas** (filterable by micro-area/status, with filter options sourced from the fetched data itself rather than a hardcoded list — a hardcoded list would silently drop a real micro-area as a selectable option) and **Auditoria** (an `audit_logs` viewer). Every screen touching sensitive data calls `dataSource.recordAccess(actionType: 'view', resourceType: ...)` *before* rendering it, per `spec/PRD_system.md` §4.2.2 (admin access must itself be audited) — the audit log screen audits its own access too, and a failed `recordAccess` blocks the data from rendering rather than failing open. Login is intentionally local-only, **not** wired to `auth.developmentLogin`: the backend's `auth_endpoint.dart` only accepts `role: 'patient'`/`role: 'acs'`, there is no fixed dev user for `admin`, so real auth is out of scope until the backend supports it (see the `LoginScreen` doc comment in `app.dart`). The "ambiente de desenvolvimento" banner is informational, not access control — the actual gate is `devLoginEnabled`, which defaults to `kDebugMode` and disables the login bypass outside debug builds. Layout is desktop-first per `spec/PRD_system.md` §2.1: `NavigationRail` at ≥640px width, `NavigationBar` below, same `ThemeData` either way. `apps/admin` is the only one of the three apps with Flutter Web enabled and the only one versioning `pubspec.lock` from the start (the other two adopted that convention later). `docs/telas-admin.md` documents its five screens with real screenshots, mirroring `docs/telas-acs.md`. CI covers it in the `admin-app` job, identical in shape to `acs-app`/`patient-app`.
+
 ### `spec/`
 Product/architecture source of truth (PRD, UX flows, LGPD design, stack decisions) plus static HTML prototypes under `spec/ui_acs/` and `spec/ui_paciente/` — these are the visual reference for building out the real Flutter screens, not live code.
 
@@ -173,6 +181,7 @@ Product/architecture source of truth (PRD, UX flows, LGPD design, stack decision
 - Prefer simple, predictable solutions aligned with the stack already chosen (Flutter + Dart backend + Postgres + MQTT) over introducing new frameworks/services not in `spec/stack.md`.
 - Keep triage/prioritization logic deterministic and consistent with the Manchester Protocol model referenced in the PRD — do not make risk classification probabilistic or user-overridable.
 - When touching sync behavior (backend `SyncFsm` or the ACS `offline_visit_queue.dart`), preserve retry/queue/conflict semantics — offline-first correctness is the primary architectural risk called out in `AGENTS.md`.
+- When reusing a clinical fill color (`red`/`accent`/`danger`/`yellow`/`green`) as text or icon color in the Flutter apps, use the `*OnSurface` token and measure contrast against the surface it actually renders on (commonly `Card`/`surfaceRaised`), not the Scaffold background — see the WCAG contrast tokens note above and `spec/ux_accessibility_assessment.md`.
 - Never commit real patient data, credentials, or the dev Docker Compose secrets into anything beyond local development.
 
 ## graphify
