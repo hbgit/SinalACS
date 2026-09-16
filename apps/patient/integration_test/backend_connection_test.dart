@@ -50,6 +50,8 @@ void main() {
   });
 
   test('a triagem é classificada pelo motor do servidor', () async {
+    await backend.login();
+
     final red = await backend.evaluateTriage(
       chestPain: true,
       difficultyBreathing: false,
@@ -81,6 +83,8 @@ void main() {
   });
 
   test('a mesma resposta produz sempre o mesmo risco', () async {
+    await backend.login();
+
     // Determinismo é invariante (INV-02): a classificação não pode variar entre
     // chamadas idênticas.
     final results = <RiskLevel>[];

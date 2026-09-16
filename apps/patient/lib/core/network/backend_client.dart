@@ -124,8 +124,10 @@ class BackendClient implements PatientBackend {
     required bool bleeding,
     required bool severeWeakness,
   }) async {
+    final token = await _requireToken();
     final result = await _guard(
       () => _client.triage.evaluate(
+        accessToken: token,
         chestPain: chestPain,
         difficultyBreathing: difficultyBreathing,
         fever: fever,

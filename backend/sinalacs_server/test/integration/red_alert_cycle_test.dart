@@ -143,8 +143,14 @@ void main() {
     });
 
     test('a triagem classifica de forma determinística', () async {
+      final session = sessionBuilder.build();
+      await _seed(session);
+
+      final login = await endpoints.auth.developmentLogin(sessionBuilder, role: 'patient');
+
       final vermelho = await endpoints.triage.evaluate(
         sessionBuilder,
+        accessToken: login.accessToken,
         chestPain: true,
         difficultyBreathing: false,
         fever: false,
@@ -152,8 +158,11 @@ void main() {
         bleeding: false,
         severeWeakness: false,
       );
+      expect(vermelho.risk, RiskLevel.red);
+
       final verde = await endpoints.triage.evaluate(
         sessionBuilder,
+        accessToken: login.accessToken,
         chestPain: false,
         difficultyBreathing: false,
         fever: false,
@@ -161,8 +170,6 @@ void main() {
         bleeding: false,
         severeWeakness: false,
       );
-
-      expect(vermelho.risk, RiskLevel.red);
       expect(verde.risk, RiskLevel.green);
     });
 
