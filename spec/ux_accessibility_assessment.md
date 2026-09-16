@@ -1,6 +1,6 @@
 # Relatório de Avaliação de UI/UX e Acessibilidade
 
-**Aplicativos Avaliados:** `apps/patient` e `apps/acs`
+**Aplicativos Avaliados:** `apps/patient`, `apps/acs` e `apps/admin`
 **Referência Baseline:** PRD de Sistemas (Seção 4.3 — WCAG 2.1 Nível AA), `spec/ui_design.md`
 **Metodologia e Ferramentas:** Matriz de contraste determinística (`apps/*/test/contrast_tokens_test.dart`,
 implementando a fórmula de luminância relativa WCAG 1.4.3 contra a superfície REAL de
@@ -26,7 +26,7 @@ pelo MQTT/TLS real).
 | Critério WCAG 2.1 | Descrição do Critério | Requisito do PRD / Issue | Status | Resumo do Diagnóstico |
 | :--- | :--- | :--- | :---: | :--- |
 | **1.4.1 Color Use** | A cor não deve ser o único indicador visual de estado/risco | Duplo canal (Texto/Ícone + Cor) em sinais clínicos de risco | **Conforme** | Rótulos explícitos `'Risco: Vermelho'`, `'Risco: Amarelo'`, `'Risco: Verde'` acompanhados de ícone, nos dois apps. |
-| **1.4.3 Contrast (Minimum)** | Razão de contraste min. de 4.5:1 (texto normal) e 3:1 (texto grande/UI) | ≥ 4.5:1 para texto sobre fundo escuro nos temas | **Conforme (corrigido)** | Cinco pares de token/superfície falhavam quando medidos corretamente (§2.1); corrigidos separando token de PREENCHIMENTO de token de TEXTO (`redOnSurface`/`accentOnSurface` no ACS, `dangerOnSurface`/`accentOnSurface` no paciente). Guardado por teste determinístico. |
+| **1.4.3 Contrast (Minimum)** | Razão de contraste min. de 4.5:1 (texto normal) e 3:1 (texto grande/UI) | ≥ 4.5:1 para texto sobre fundo escuro nos temas | **Conforme (corrigido)** | Cinco pares de token/superfície falhavam quando medidos corretamente (§2.1); corrigidos separando token de PREENCHIMENTO de token de TEXTO (`redOnSurface`/`accentOnSurface` no ACS, `dangerOnSurface`/`accentOnSurface` no paciente, `redOnSurface`/`accentOnSurface` no admin). Guardado por teste determinístico. |
 | **2.4.7 Focus Visible** | Indicador claro de foco visual ao navegar por campos interativos | Foco visível em todos os elementos selecionáveis | **Conforme** | Indicador de foco nativo do Android acompanha todos os alvos tocáveis, sem truncamento. |
 | **2.5.5 Target Size** | Alvo de toque adequado para interatividade | ≥ 48x48 dp (padrão), ≥ 60x60 dp (botão de emergência/pânico) | **Conforme (corrigido)** | Botão de pânico do paciente: `208x208 dp`. "Ligar para o SAMU (192)" no ACS não tinha `minimumSize` (default M3 de 40dp de altura visual) — corrigido para `64x60 dp`. Quatro outros botões de ação primária no ACS também não tinham `minimumSize` explícito; padronizados em `48x52 dp`. |
 | **4.1.2 Name, Role, Value** | Árvore semântica exposta para leitores de tela nativos | Rótulos e papeis em 100% dos fluxos críticos | **Conforme** | Árvore semântica nativa do Flutter expõe abas (**Área, Fila, Mapa, Visita, Mais**) e formulários com clareza; o cartão de alerta da fila passou a ser lido como uma frase única (§3, achado antigo de prioridade Baixa). |
@@ -56,6 +56,13 @@ superfície onde ele é **de fato** renderizado, com composição de alfa quando
 | ACS | `AcsColors.red #DC2626` | **texto** | Card `#1F2937` | **3.04:1** | 4.5:1 | **Falha** (achado B) |
 | ACS | `AcsColors.accent #2563EB` | **texto** | Card `#1F2937` | **2.84:1** | 4.5:1 | **Falha** (achado C, não detectado antes) |
 | ACS | branco | texto do botão | fill `AcsColors.red` | 4.83:1 | 3:1 (UI) | Conforme — fill não muda |
+| Admin | `AdminColors.yellow #F59E0B` | texto | Card `#1F2937` | 6.83:1 | 4.5:1 | Conforme |
+| Admin | `AdminColors.green #10B981` | texto | Card `#1F2937` | 5.79:1 | 4.5:1 | Conforme |
+| Admin | `AdminColors.red #DC2626` | **texto** | Card `#1F2937` | **3.04:1** | 4.5:1 | **Falha** (mesmo achado do ACS — `red` é idêntico nos dois apps) |
+| Admin | `AdminColors.accent #4F46E5` | **texto** | Card `#1F2937` | **2.33:1** | 4.5:1 | **Falha** |
+| Admin | `AdminColors.accent #4F46E5` | **ícone** | Card `#1F2937` | **2.33:1** | 3:1 (1.4.11) | **Falha** (ícone do banner "Ambiente de desenvolvimento") |
+| Admin | `AdminColors.accent #4F46E5` | **texto** | AppBar `#111827` | **2.82:1** | 4.5:1 | **Falha** (eyebrow do cabeçalho) |
+| Admin | branco | texto do botão | fill `AdminColors.red` | 4.83:1 | 3:1 (UI) | Conforme — fill não muda |
 | Paciente | `Colors.white54` | texto | Card `#1E293B` | **5.36:1** | 4.5:1 | **Conforme** — achado A do relatório anterior era falso positivo (media 3.2:1 contra o Scaffold) |
 | Paciente | amarelo `#E0A800` | texto | Card `#1E293B` | 6.81:1 | 4.5:1 | Conforme |
 | Paciente | `PatientColors.accent #0D9488` | **texto** | Card `#1E293B` | **3.91:1** | 4.5:1 | **Falha** (achado D, relatado antes como conforme por medir no Scaffold) |
@@ -64,7 +71,7 @@ superfície onde ele é **de fato** renderizado, com composição de alfa quando
 | Paciente | branco | texto do botão | fill `PatientColors.danger` | 4.83:1 | 3:1 (UI) | Conforme — fill não muda |
 | — | `#EF4444` (correção sugerida pelo relatório anterior) | texto | Card `#1F2937` | **3.90:1** | 4.5:1 | **Ainda falha** — não adotada |
 
-Reprodução: `flutter test test/contrast_tokens_test.dart` em cada app.
+Reprodução: `flutter test test/contrast_tokens_test.dart` em cada um dos três apps.
 
 #### Correção aplicada: separar token de preenchimento de token de texto
 
@@ -77,15 +84,24 @@ original intacto (ele já cumpre 3:1 com texto branco por cima):
 | :--- | :--- | :--- | :---: | :--- |
 | ACS | `AcsColors.redOnSurface` | `#F87171` | 5.31:1 | `AcsColors.red` |
 | ACS | `AcsColors.accentOnSurface` | `#60A5FA` | 5.77:1 | `AcsColors.accent` |
+| Admin | `AdminColors.redOnSurface` | `#F87171` | 5.31:1 | `AdminColors.red` |
+| Admin | `AdminColors.accentOnSurface` | `#818CF8` | 4.92:1 | `AdminColors.accent` |
 | Paciente | `PatientColors.dangerOnSurface` | `#F87171` | 5.29:1 | `PatientColors.danger` |
 | Paciente | `PatientColors.accentOnSurface` | `#2DD4BF` | 7.86:1 | `PatientColors.accent` |
 
-`AcsColors.red`/`AcsColors.accent` e `PatientColors.danger`/`PatientColors.accent` continuam
-sendo a cor de PREENCHIMENTO do botão de pânico, do botão "Ligar para o SAMU" e do botão
-"Confirmar recebimento" — nenhum desses mudou de cor. Um helper único (`acsOnSurface()` no ACS)
-converte a cor de preenchimento na variante de texto no ponto em que um `switch` de risco
-alimenta tanto um `backgroundColor` quanto um `TextStyle`, para nunca haver dois pontos de
-verdade sobre qual vermelho usar onde.
+O admin não reaproveita o `#60A5FA` do ACS para `accentOnSurface`: o accent do backoffice é
+indigo `#4F46E5`, não o azul `#2563EB` do ACS — copiar o valor literal passaria no contraste
+(4.5:1+) mas trocaria o matiz, deixando indigo e azul lado a lado no mesmo banner, onde
+`AdminColors.accent` continua como borda. `#818CF8` é o passo -400 da mesma cor do fill -600,
+a mesma relação usada pelos outros dois apps.
+
+`AcsColors.red`/`AcsColors.accent`, `PatientColors.danger`/`PatientColors.accent` e
+`AdminColors.red`/`AdminColors.accent` continuam sendo a cor de PREENCHIMENTO do botão de
+pânico, do botão "Ligar para o SAMU", do botão "Confirmar recebimento" e da faixa lateral de
+risco do admin — nenhum desses mudou de cor. Um helper único (`acsOnSurface()` no ACS,
+`adminOnSurface()` no admin) converte a cor de preenchimento na variante de texto no ponto em
+que um `switch` de risco alimenta tanto um `backgroundColor`/borda quanto um `TextStyle`, para
+nunca haver dois pontos de verdade sobre qual vermelho usar onde.
 
 #### Validação de Duplo Canal (WCAG 1.4.1)
 

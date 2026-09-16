@@ -81,7 +81,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   child: const Row(
                     children: [
-                      Icon(Icons.science_outlined, color: AdminColors.accent),
+                      Icon(Icons.science_outlined, color: AdminColors.accentOnSurface),
                       SizedBox(width: 12),
                       Expanded(
                         child: Text(
@@ -402,7 +402,7 @@ class _CounterCard extends StatelessWidget {
           children: [
             Text(value, style: Theme.of(context).textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.bold)),
             const SizedBox(height: 4),
-            Text(label, style: TextStyle(color: color, fontWeight: FontWeight.bold)),
+            Text(label, style: TextStyle(color: adminOnSurface(color), fontWeight: FontWeight.bold)),
           ],
         ),
       );
@@ -595,7 +595,7 @@ class _AlertsList extends StatelessWidget {
                           const SizedBox(height: 4),
                           Text(alert.microAreaName),
                           const SizedBox(height: 6),
-                          Text('Risco: ${riskLabel(alert.riskLevel)}', style: TextStyle(color: riskColor(alert.riskLevel), fontWeight: FontWeight.bold)),
+                          Text('Risco: ${riskLabel(alert.riskLevel)}', style: TextStyle(color: adminOnSurface(riskColor(alert.riskLevel)), fontWeight: FontWeight.bold)),
                           Text('Status: ${statusLabel(alert.status)}'),
                         ],
                       ),
@@ -813,7 +813,7 @@ class _Header extends StatelessWidget implements PreferredSizeWidget {
             eyebrow.toUpperCase(),
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontSize: 10, color: AdminColors.accent, fontWeight: FontWeight.bold),
+            style: const TextStyle(fontSize: 10, color: AdminColors.accentOnSurface, fontWeight: FontWeight.bold),
           ),
           Text(
             title,

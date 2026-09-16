@@ -24,7 +24,7 @@ Antes de mexer em produto, arquitetura ou comportamento, consulte primeiro:
 - [spec/ui_design.md](spec/ui_design.md) — linguagem visual e UX;
 - [spec/lgpd_design.md](spec/lgpd_design.md) — privacidade e LGPD;
 - [spec/lgpd_data_audit.md](spec/lgpd_data_audit.md) — classificação de sensibilidade LGPD, campo a campo, de todas as tabelas persistidas;
-- [spec/ux_accessibility_assessment.md](spec/ux_accessibility_assessment.md) — auditoria WCAG 2.2 AA (contraste, alvo de toque, semântica) dos apps ACS e paciente;
+- [spec/ux_accessibility_assessment.md](spec/ux_accessibility_assessment.md) — auditoria WCAG 2.2 AA (contraste, alvo de toque, semântica) dos apps ACS, paciente e admin;
 - [spec/ux_ui_test_plan.md](spec/ux_ui_test_plan.md) — plano de testes de UX/UI derivado de `spec/ui_design.md`;
 - [CLAUDE.md](CLAUDE.md) — guia técnico e comandos para IA; é a referência mais atualizada do repositório;
 - [PROGRESS.md](PROGRESS.md) — status dos milestones e histórico de migração;
@@ -96,7 +96,7 @@ Não violar estes pontos sob qualquer hipótese:
 - Manter dark mode, alta legibilidade e baixo ruído visual.
 - Usar cores apenas para sinal clínico; não decorar interfaces com vermelho/amarelo/verde sem relação com risco.
 - Manter foco em mobile-first e acessibilidade.
-- Ao reaproveitar uma cor clínica de preenchimento (`red`/`accent`/`danger`) como cor de texto/ícone, usar a variante `*OnSurface` (`acs_theme.dart`/`patient_theme.dart`) e medir contraste contra a superfície real (`Card`/`surfaceRaised`), não contra o fundo do Scaffold — ver `spec/ux_accessibility_assessment.md` e os testes em `test/contrast_tokens_test.dart` de cada app.
+- Ao reaproveitar uma cor clínica de preenchimento (`red`/`accent`/`danger`) como cor de texto/ícone, usar a variante `*OnSurface` (`acs_theme.dart`/`patient_theme.dart`/`admin_theme.dart`) e medir contraste contra a superfície real (`Card`/`surfaceRaised`), não contra o fundo do Scaffold — ver `spec/ux_accessibility_assessment.md` e os testes em `test/contrast_tokens_test.dart` de cada app.
 
 ### 6) Quando o trabalho for de backend ou dados
 - Considerar uso de SQLite/SQLCipher e filas locais para operação offline.
