@@ -32,7 +32,7 @@ Consulte [PROGRESS.md](PROGRESS.md) para o status detalhado dos milestones e
 apps/
 	acs/       Aplicativo Flutter do Agente Comunitário de Saúde
 	patient/   Aplicativo Flutter do paciente
-	admin/     Base do aplicativo administrativo
+	admin/     Backoffice administrativo (Flutter Web e Android)
 backend/     Backend Dart (dart:io, sem framework) e regras de domínio
 infra/       Configuração local de infraestrutura
 spec/        PRD, UX, privacidade e fluxos do produto
@@ -42,7 +42,7 @@ tests/       Testes compartilhados
 ## Pré-requisitos
 
 - Flutter SDK compatível com Dart `>=3.3.0 <4.0.0`.
-- Android SDK com API 36 e JDK 17 para gerar ou executar o app ACS no Android.
+- Android SDK com API 36 e JDK 17 para gerar ou executar os apps ACS, paciente e admin no Android.
 - Docker Engine com Docker Compose v2 para subir a stack local.
 - Um emulador Android ou dispositivo físico, opcional para execução mobile.
 

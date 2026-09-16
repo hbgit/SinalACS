@@ -61,7 +61,7 @@ Não violar estes pontos sob qualquer hipótese:
 - O app ACS é o mais crítico em termos de offline-first e sincronização: guarda visitas locais, tenta sincronizar em fila e trata conflitos sem perder registros.
 - O tema visual é dark mode, com foco em legibilidade e uso de cor restrito a sinal clínico (vermelho, amarelo, verde).
 - O app do paciente não deve reintroduzir regras de risco no cliente; a classificação deve vir do backend via `triage.evaluate`.
-- [apps/admin](apps/admin) (`sinalacs_admin`) é o backoffice administrativo — deixou de ser um esqueleto de pubspec e hoje é um app navegável real, com 4 telas somente leitura (Indicadores, Microáreas, Alertas, Auditoria) atrás de `AdminHomeShell`. Ainda não consome `sinalacs_client`: usa a interface `AdminDataSource`, hoje implementada só por `MockAdminDataSource`, seguindo o mesmo padrão de DI de `PatientBackend`/`AcsBackend`. O login é local e não chama `auth.developmentLogin` (o backend só aceita `role: 'patient'`/`role: 'acs'` hoje). Toda tela que exibe dado sensível registra o próprio acesso via `recordAccess()` antes de renderizar, por exigência de auditoria do PRD §4.2.2. É o único dos três apps com suporte a Flutter Web.
+- [apps/admin](apps/admin) (`sinalacs_admin`) é o backoffice administrativo — deixou de ser um esqueleto de pubspec e hoje é um app navegável real, com 4 telas somente leitura (Indicadores, Microáreas, Alertas, Auditoria) atrás de `AdminHomeShell`. Ainda não consome `sinalacs_client`: usa a interface `AdminDataSource`, hoje implementada só por `MockAdminDataSource`, seguindo o mesmo padrão de DI de `PatientBackend`/`AcsBackend`. O login é local e não chama `auth.developmentLogin` (o backend só aceita `role: 'patient'`/`role: 'acs'` hoje). Toda tela que exibe dado sensível registra o próprio acesso via `recordAccess()` antes de renderizar, por exigência de auditoria do PRD §4.2.2. É o único dos três apps com suporte a Flutter Web, e desde a adição da plataforma Android também roda em celular e tablet (`flutter run -d emulator-5554`). O layout segue desktop-first: os pontos de quebra ficam em `lib/app/admin_layout.dart` e o layout compacto é complemento, nunca substituição — os dez testes de widget originais continuam passando sem edição, o que é o que prova isso.
 
 ### Infraestrutura local
 - O ambiente de desenvolvimento usa Docker Compose com PostgreSQL, Mosquitto, backend e Traefik.
@@ -128,12 +128,14 @@ Rodar análise do Flutter nos apps:
 cd apps/patient && flutter pub get && flutter analyze && flutter test
 cd apps/acs && flutter pub get && flutter analyze && flutter test
 cd apps/admin && flutter pub get && flutter analyze && flutter test
+cd apps/admin && flutter run -d emulator-5554          # no emulador Android
+cd apps/admin && flutter test integration_test -d emulator-5554   # hermético: não precisa da stack
 ```
 
 Importante:
 - `flutter test` é hermético e não substitui validações com stack local real;
 - os testes de integração e validação de conexão vivem fora do `flutter test` e utilizam a stack Docker/VM;
-- o CI do projeto valida cinco jobs separados: `serverpod-backend`, `backend-docker-build`, `patient-app`, `acs-app` e `admin-app`.
+- o CI do projeto valida seis jobs separados: `serverpod-backend`, `backend-docker-build`, `patient-app`, `acs-app`, `admin-app` e `admin-android-build` (único que executa Gradle, compilando o APK do admin).
 
 ## Observações finais
 

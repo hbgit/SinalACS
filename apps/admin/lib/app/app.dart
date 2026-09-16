@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
+import 'package:sinalacs_admin/app/admin_layout.dart';
 import 'package:sinalacs_admin/app/admin_theme.dart';
 import 'package:sinalacs_admin/core/data/admin_data_source.dart';
 import 'package:sinalacs_admin/core/data/mock_admin_data_source.dart';
@@ -62,7 +63,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-        appBar: const _Header('Backoffice SinalACS', 'Acesso administrativo'),
+        appBar: _Header('Backoffice SinalACS', 'Acesso administrativo', height: adminHeaderHeight(context)),
         body: Center(
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 600),
@@ -191,19 +192,31 @@ class _AdminHomeShellState extends State<AdminHomeShell> {
   @override
   Widget build(BuildContext context) => LayoutBuilder(
         builder: (context, constraints) {
-          final content = SafeArea(child: _content());
+          final content = _content();
+          final header = _Header('Backoffice • admin.dev', 'Painel administrativo', height: adminHeaderHeight(context));
           // Backoffice é desktop-first (spec/PRD_system.md §2.1): NavigationRail
-          // acima de 640px, NavigationBar abaixo — mesmo ThemeData nos dois.
-          if (constraints.maxWidth >= 640) {
+          // acima de AdminBreakpoints.rail, NavigationBar abaixo — mesmo
+          // ThemeData nos dois.
+          if (constraints.maxWidth >= AdminBreakpoints.rail) {
             return Scaffold(
-              appBar: const _Header('Backoffice • admin.dev', 'Painel administrativo'),
-              body: Row(
+              appBar: header,
+              // SafeArea envolve a linha inteira, e não só o conteúdo: num
+              // celular em paisagem é o rail que encosta no recorte da câmera.
+              // `top: false` porque a AppBar já trata o inset de cima.
+              body: SafeArea(
+                top: false,
+                child: Row(
                 children: [
                   NavigationRail(
                     key: const Key('admin_navigation_rail'),
                     selectedIndex: destination.index,
                     onDestinationSelected: _select,
                     labelType: NavigationRailLabelType.all,
+                    // Em paisagem de celular sobram ~288dp de altura para
+                    // quatro destinos rotulados: cabe por poucos pixels com
+                    // fonte padrão e estoura com fonte ampliada. `scrollable`
+                    // troca o estouro por rolagem em vez de cortar destino.
+                    scrollable: true,
                     destinations: [
                       for (final value in AdminDestination.values)
                         NavigationRailDestination(icon: Icon(value.icon), label: Text(value.label)),
@@ -212,12 +225,15 @@ class _AdminHomeShellState extends State<AdminHomeShell> {
                   const VerticalDivider(width: 1),
                   Expanded(child: content),
                 ],
+                ),
               ),
             );
           }
           return Scaffold(
-            appBar: const _Header('Backoffice • admin.dev', 'Painel administrativo'),
-            body: content,
+            appBar: header,
+            // `bottom: false`: o NavigationBar do Scaffold já trata o inset
+            // inferior; duplicar aqui abriria uma faixa morta acima dele.
+            body: SafeArea(top: false, bottom: false, child: content),
             bottomNavigationBar: NavigationBar(
               key: const Key('admin_navigation_bar'),
               selectedIndex: destination.index,
@@ -243,6 +259,19 @@ Color riskColor(RiskLevel level) => switch (level) {
       RiskLevel.yellow => AdminColors.yellow,
       RiskLevel.green => AdminColors.green,
     };
+
+/// Timestamp de auditoria em `dd/MM/aaaa HH:mm`, hora local.
+///
+/// A tela imprimia `DateTime.toString()` cru — `2026-09-15 08:32:11.000Z` —
+/// que é largo e cheio de ruído (milissegundos, sufixo Z) sem valor nenhum
+/// para quem audita. Sem `intl` de propósito: o backoffice não tem nenhuma
+/// dependência externa hoje e um formato pt-BR fixo basta; internacionalização
+/// não está no escopo.
+String formatAuditTimestamp(DateTime timestamp) {
+  final local = timestamp.toLocal();
+  String dois(int valor) => valor.toString().padLeft(2, '0');
+  return '${dois(local.day)}/${dois(local.month)}/${local.year} ${dois(local.hour)}:${dois(local.minute)}';
+}
 
 String statusLabel(AlertStatus status) => switch (status) {
       AlertStatus.pending => 'Pendente',
@@ -311,18 +340,32 @@ class _IndicatorsScreenState extends State<IndicatorsScreen> {
             const SizedBox(height: 4),
             const Text('Contadores por risco clínico da UBS'),
             const SizedBox(height: 16),
-            Wrap(
-              spacing: 12,
-              runSpacing: 12,
-              children: [
-                for (final level in RiskLevel.values)
-                  _CounterCard(
-                    key: Key('risk_counter_${level.name}'),
-                    label: riskLabel(level),
-                    value: '${data.countsByRisk[level] ?? 0}',
-                    color: riskColor(level),
-                  ),
-              ],
+            LayoutBuilder(
+              builder: (context, constraints) {
+                // Os cartões tinham 160dp fixos dentro de um Wrap: cabiam, mas
+                // deixavam um vão à direita no desktop e não se adaptavam a
+                // nada. A grade calculada distribui a largura disponível e cai
+                // para uma coluna quando não há espaço para duas.
+                const espaco = 12.0;
+                final colunas = ((constraints.maxWidth + espaco) / (AdminBreakpoints.counterCardMin + espaco))
+                    .floor()
+                    .clamp(1, RiskLevel.values.length);
+                final largura = (constraints.maxWidth - espaco * (colunas - 1)) / colunas;
+                return Wrap(
+                  spacing: espaco,
+                  runSpacing: espaco,
+                  children: [
+                    for (final level in RiskLevel.values)
+                      _CounterCard(
+                        key: Key('risk_counter_${level.name}'),
+                        label: riskLabel(level),
+                        value: '${data.countsByRisk[level] ?? 0}',
+                        color: riskColor(level),
+                        width: largura,
+                      ),
+                  ],
+                );
+              },
             ),
             const SizedBox(height: 20),
             const Divider(),
@@ -338,15 +381,16 @@ class _IndicatorsScreenState extends State<IndicatorsScreen> {
 }
 
 class _CounterCard extends StatelessWidget {
-  const _CounterCard({required this.label, required this.value, required this.color, super.key});
+  const _CounterCard({required this.label, required this.value, required this.color, required this.width, super.key});
 
   final String label;
   final String value;
   final Color color;
+  final double width;
 
   @override
   Widget build(BuildContext context) => Container(
-        width: 160,
+        width: width,
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
           color: AdminColors.surfaceRaised,
@@ -356,7 +400,7 @@ class _CounterCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(value, style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold)),
+            Text(value, style: Theme.of(context).textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.bold)),
             const SizedBox(height: 4),
             Text(label, style: TextStyle(color: color, fontWeight: FontWeight.bold)),
           ],
@@ -408,10 +452,10 @@ class _MicroAreasScreenState extends State<MicroAreasScreen> {
                 Card(
                   key: Key('micro_area_${area.id}'),
                   margin: const EdgeInsets.only(bottom: 12),
-                  child: ListTile(
-                    title: Text(area.name),
-                    subtitle: Text('ACS: ${area.acsName} (${area.acsEnrollmentId})'),
-                    trailing: Chip(
+                  child: _LinhaComSelo(
+                    titulo: Text(area.name),
+                    descricao: Text('ACS: ${area.acsName} (${area.acsEnrollmentId})'),
+                    selo: Chip(
                       avatar: Icon(area.acsActive ? Icons.check_circle_outline : Icons.remove_circle_outline, size: 18),
                       label: Text(area.acsActive ? 'Ativo' : 'Sem ACS ativo'),
                       backgroundColor: AdminColors.surface,
@@ -500,10 +544,8 @@ class _AlertsList extends StatelessWidget {
               const SizedBox(height: 4),
               const Text('Consulta somente leitura — nenhuma reclassificação de risco é permitida aqui.'),
               const SizedBox(height: 16),
-              Row(
-                children: [
-                  Expanded(
-                    child: DropdownButtonFormField<String?>(
+              _FiltrosDeAlertas(
+                microArea: DropdownButtonFormField<String?>(
                       key: const Key('alerts_micro_area_filter'),
                       initialValue: microAreaFilter,
                       isExpanded: true,
@@ -519,10 +561,7 @@ class _AlertsList extends StatelessWidget {
                       ],
                       onChanged: (value) => onFilterChanged(value, statusFilter),
                     ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: DropdownButtonFormField<AlertStatus?>(
+                status: DropdownButtonFormField<AlertStatus?>(
                       key: const Key('alerts_status_filter'),
                       initialValue: statusFilter,
                       isExpanded: true,
@@ -535,8 +574,6 @@ class _AlertsList extends StatelessWidget {
                       ],
                       onChanged: (value) => onFilterChanged(microAreaFilter, value),
                     ),
-                  ),
-                ],
               ),
               const SizedBox(height: 16),
               if (snapshot.connectionState == ConnectionState.waiting)
@@ -564,6 +601,35 @@ class _AlertsList extends StatelessWidget {
                       ),
                     ),
                   ),
+            ],
+          );
+        },
+      );
+}
+
+/// Os dois filtros de Alertas, lado a lado ou empilhados.
+///
+/// Lado a lado num celular cada campo recebia ~170dp: `isExpanded` e a elipse
+/// dos itens evitavam o estouro, mas o rótulo do campo e o valor selecionado
+/// passavam a disputar a mesma linha e "Microárea 12 — Zona Rural" virava
+/// reticências. Não era um bug de layout — era um campo ilegível.
+class _FiltrosDeAlertas extends StatelessWidget {
+  const _FiltrosDeAlertas({required this.microArea, required this.status});
+
+  final Widget microArea;
+  final Widget status;
+
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(
+        builder: (context, constraints) {
+          if (constraints.maxWidth < AdminBreakpoints.stacked) {
+            return Column(children: [microArea, const SizedBox(height: 12), status]);
+          }
+          return Row(
+            children: [
+              Expanded(child: microArea),
+              const SizedBox(width: 12),
+              Expanded(child: status),
             ],
           );
         },
@@ -618,11 +684,11 @@ class _AuditLogScreenState extends State<AuditLogScreen> {
                       Card(
                         key: Key('audit_${entry.id}'),
                         margin: const EdgeInsets.only(bottom: 8),
-                        child: ListTile(
-                          leading: const Icon(Icons.verified_user_outlined),
-                          title: Text('${entry.actionType} • ${entry.resourceType}'),
-                          subtitle: Text('${entry.userLabel} — ${entry.timestamp}'),
-                          trailing: Text(entry.result),
+                        child: _LinhaComSelo(
+                          icone: const Icon(Icons.verified_user_outlined),
+                          titulo: Text('${entry.actionType} • ${entry.resourceType}'),
+                          descricao: Text('${entry.userLabel} — ${formatAuditTimestamp(entry.timestamp)}'),
+                          selo: Text(entry.result),
                         ),
                       ),
                 ],
@@ -645,6 +711,46 @@ Widget _page(List<Widget> children) => ListView(
       ],
     );
 
+/// `ListTile` cujo `trailing` desce para baixo da descrição em tela estreita.
+///
+/// Um `trailing` largo ("Sem ACS ativo") comia ~140dp dos ~320dp úteis de um
+/// celular e espremia o título contra a borda. Abaixo do ponto de quebra o selo
+/// vira mais uma linha do conteúdo, em vez de competir por largura.
+///
+/// Usado pelas telas de Microáreas e de Auditoria, que tinham exatamente o
+/// mesmo formato e o mesmo problema.
+class _LinhaComSelo extends StatelessWidget {
+  const _LinhaComSelo({required this.titulo, required this.descricao, required this.selo, this.icone});
+
+  final Widget titulo;
+  final Widget descricao;
+  final Widget selo;
+  final Widget? icone;
+
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(
+        builder: (context, constraints) {
+          final compacto = constraints.maxWidth < AdminBreakpoints.stacked;
+          return ListTile(
+            leading: icone,
+            title: titulo,
+            isThreeLine: compacto,
+            subtitle: compacto
+                ? Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      descricao,
+                      const SizedBox(height: 8),
+                      Align(alignment: Alignment.centerLeft, child: selo),
+                    ],
+                  )
+                : descricao,
+            trailing: compacto ? null : selo,
+          );
+        },
+      );
+}
+
 class _InfoRow extends StatelessWidget {
   const _InfoRow(this.label, this.value);
 
@@ -654,35 +760,83 @@ class _InfoRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Padding(
         padding: const EdgeInsets.symmetric(vertical: 5),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(child: Text(label)),
-            const SizedBox(width: 12),
-            Text(value, textAlign: TextAlign.end, style: const TextStyle(fontWeight: FontWeight.bold)),
-          ],
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final valor = Text(value, style: const TextStyle(fontWeight: FontWeight.bold));
+            // Rótulos como "TMRAV (tempo médio de resposta)" quebram em três
+            // linhas ao lado do valor num celular. Empilhados, o rótulo usa a
+            // largura toda e lê como uma frase.
+            if (constraints.maxWidth < AdminBreakpoints.stacked) {
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [Text(label), valor],
+              );
+            }
+            return Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(child: Text(label)),
+                const SizedBox(width: 12),
+                Text(value, textAlign: TextAlign.end, style: const TextStyle(fontWeight: FontWeight.bold)),
+              ],
+            );
+          },
         ),
       );
 }
 
 class _Header extends StatelessWidget implements PreferredSizeWidget {
-  const _Header(this.eyebrow, this.title);
+  const _Header(this.eyebrow, this.title, {required this.height});
 
   final String eyebrow;
   final String title;
 
-  @override
-  Size get preferredSize => const Size.fromHeight(72);
+  /// Calculada por quem monta o Scaffold, via [adminHeaderHeight] — ver o
+  /// porquê lá: `preferredSize` não tem acesso ao `BuildContext`.
+  final double height;
 
   @override
-  Widget build(BuildContext context) => AppBar(
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(eyebrow.toUpperCase(), style: const TextStyle(fontSize: 10, color: AdminColors.accent, fontWeight: FontWeight.bold)),
-            Text(title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-          ],
+  Size get preferredSize => Size.fromHeight(height);
+
+  @override
+  Widget build(BuildContext context) {
+    // O selo é informação, não controle. Em tela estreita ele disputa espaço
+    // com duas linhas de título num AppBar, então vira ícone — mantendo o
+    // rótulo para leitores de tela, que é o que de fato carrega o significado.
+    final estreito = MediaQuery.sizeOf(context).width < AdminBreakpoints.stacked;
+    return AppBar(
+      title: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            eyebrow.toUpperCase(),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontSize: 10, color: AdminColors.accent, fontWeight: FontWeight.bold),
+          ),
+          Text(
+            title,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+          ),
+        ],
+      ),
+      actions: [
+        Padding(
+          padding: const EdgeInsets.only(right: 12),
+          child: estreito
+              ? Tooltip(
+                  message: 'Acesso auditado',
+                  child: Semantics(
+                    label: 'Acesso auditado',
+                    child: const Icon(key: Key('admin_audit_badge'), Icons.verified_user_outlined),
+                  ),
+                )
+              : const Chip(key: Key('admin_audit_badge'), label: Text('Acesso auditado')),
         ),
-        actions: const [Padding(padding: EdgeInsets.only(right: 12), child: Chip(label: Text('Acesso auditado')))],
-      );
+      ],
+    );
+  }
 }
