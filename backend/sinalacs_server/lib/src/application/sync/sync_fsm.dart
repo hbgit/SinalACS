@@ -6,6 +6,12 @@ enum SyncState {
   conflict,
   synced,
   error,
+
+  /// Terminal: o servidor recusou em definitivo (ver `VisitSyncService`,
+  /// `SyncStatus.rejected`). Ao contrário de `error`, nenhum evento de rede
+  /// tira uma visita deste estado — `networkUp`/`syncStart` não o alcançam,
+  /// porque o motivo da recusa não muda com uma próxima tentativa.
+  rejected,
 }
 
 enum SyncEvent {
@@ -17,6 +23,7 @@ enum SyncEvent {
   syncAck,
   syncConflict,
   syncError,
+  syncRejected,
 }
 
 class SyncFsm {
@@ -56,6 +63,9 @@ class SyncFsm {
         break;
       case SyncEvent.syncError:
         state = SyncState.error;
+        break;
+      case SyncEvent.syncRejected:
+        state = SyncState.rejected;
         break;
       case SyncEvent.networkDown:
         if (state == SyncState.syncing || state == SyncState.queued) {

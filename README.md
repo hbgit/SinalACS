@@ -32,7 +32,7 @@ Consulte [PROGRESS.md](PROGRESS.md) para o status detalhado dos milestones e
 apps/
 	acs/       Aplicativo Flutter do Agente Comunitário de Saúde
 	patient/   Aplicativo Flutter do paciente
-	admin/     Base do aplicativo administrativo
+	admin/     Backoffice administrativo (Flutter Web e Android)
 backend/     Backend Dart (dart:io, sem framework) e regras de domínio
 infra/       Configuração local de infraestrutura
 spec/        PRD, UX, privacidade e fluxos do produto
@@ -42,7 +42,7 @@ tests/       Testes compartilhados
 ## Pré-requisitos
 
 - Flutter SDK compatível com Dart `>=3.3.0 <4.0.0`.
-- Android SDK com API 36 e JDK 17 para gerar ou executar o app ACS no Android.
+- Android SDK com API 36 e JDK 17 para gerar ou executar os apps ACS, paciente e admin no Android.
 - Docker Engine com Docker Compose v2 para subir a stack local.
 - Um emulador Android ou dispositivo físico, opcional para execução mobile.
 
@@ -76,31 +76,45 @@ Para encerrar a stack:
 docker compose down
 ```
 
-O Compose atual usa credenciais de desenvolvimento declaradas no
-[docker-compose.yml](docker-compose.yml). Não reutilize essas credenciais nem
-habilite o dashboard inseguro do Traefik em ambientes públicos.
+O Compose lê todas as credenciais do `.env` gerado por
+[scripts/dev/bootstrap_env.sh](scripts/dev/bootstrap_env.sh) — cada máquina tem
+as suas. Não reutilize credenciais de desenvolvimento nem habilite o dashboard
+inseguro do Traefik em ambientes públicos.
 
 ### Aplicativo ACS
 
 ```bash
-cd apps/acs
-flutter pub get
-flutter run
+cd apps/acs && flutter pub get && cd -
+./scripts/dev/run_acs.sh
 ```
 
-Para selecionar explicitamente um emulador Android disponível:
+Use o script, não `flutter run` direto. A senha do broker é resolvida em tempo
+de compilação e não tem valor padrão: ela é gerada por máquina pelo
+`bootstrap_env.sh`. O script lê o `.env`, copia a CA do broker para os assets e
+passa os quatro `--dart-define` por um arquivo temporário (`--dart-define-from-file`,
+apagado ao sair), para a senha não trafegar na linha de comando do `flutter`. Um
+`flutter build apk` sem essas variáveis **falha** — a guarda vive em
+`apps/acs/android/app/build.gradle.kts` — em vez de compilar em silêncio um APK
+que nunca recebe alerta.
+
+Para escolher o dispositivo, ou gerar o APK:
 
 ```bash
 flutter devices
-flutter run -d <device-id>
+./scripts/dev/run_acs.sh -d <device-id>
+./scripts/dev/run_acs.sh --build
 ```
 
 ### Aplicativo do paciente
+
+O paciente não usa MQTT: o default de `SINALACS_HOST` já serve no emulador.
 
 ```bash
 cd apps/patient
 flutter pub get
 flutter run
+# em aparelho físico, apontando para a máquina da stack:
+flutter run --dart-define=SINALACS_HOST=http://<ip-da-máquina>:8080/
 ```
 
 ## Build
@@ -110,10 +124,8 @@ flutter run
 O app ACS foi validado com `compileSdk` e `targetSdk` 36. Para gerar o APK:
 
 ```bash
-cd apps/acs
-flutter clean
-flutter pub get
-flutter build apk --debug
+cd apps/acs && flutter clean && flutter pub get && cd -
+./scripts/dev/run_acs.sh --build
 ```
 
 O artefato é criado em:
@@ -157,16 +169,40 @@ requests: `serverpod-backend` (sobe o Postgres de teste e roda `dart analyze`
 mais a suíte completa), `backend-docker-build` (valida que a imagem builda),
 `patient-app` e `acs-app`.
 
+### Configuração
+
+**Antes do primeiro `docker compose up`, gere a configuração local:**
+
+```bash
+./scripts/dev/bootstrap_env.sh
+```
+
+O script cria `.env` com segredos aleatórios desta máquina (senha do Postgres,
+as duas do broker MQTT e o `JWT_SECRET`) e gera
+`backend/sinalacs_server/config/passwords.yaml`, que é gitignored e por isso não
+existe num clone limpo — sem ele a suíte de testes do Serverpod morre sem
+imprimir nada. Nenhum dos dois entra no git.
+
+[.env.example](.env.example) é a referência completa de todas as variáveis, com
+um comentário por bloco dizendo quem consome cada uma. O `docker-compose.yml`
+declara cada segredo como `${VAR:?...}`: se faltar, o Compose falha dizendo qual
+variável está ausente, em vez de subir com uma senha embutida no arquivo
+versionado.
+
 Configuração de servidor e banco vem dos arquivos `sinalacs_server/config/*.yaml`
 e pode ser sobrescrita por variáveis de ambiente: `SERVERPOD_DATABASE_HOST` e
 companhia, `SERVERPOD_APPLY_MIGRATIONS` (aplica as migrações no boot),
 `SERVERPOD_REDIS_ENABLED` (Redis é opcional e fica desligado) e
 `SERVERPOD_INSIGHTS_SERVER_PORT`. O MQTT não faz parte do Serverpod e mantém as
 próprias variáveis, lidas por `sinalacs_server/lib/src/config/app_config.dart`:
-`MQTT_BROKER`/`MQTT_USERNAME`/`MQTT_PASSWORD`/`MQTT_USE_TLS`, mais `JWT_SECRET`,
-`APP_ENV` (`production` exige `JWT_SECRET`, falhando rápido no boot) e
-`ENABLE_DEV_LOGIN` (por padrão desligado — sem ele, `auth.developmentLogin`
-falha como se o endpoint não existisse). Veja
+`MQTT_BROKER`/`MQTT_USERNAME`/`MQTT_PASSWORD`/`MQTT_USE_TLS`/`MQTT_CA_CERT_PATH`,
+mais `JWT_SECRET`, `APP_ENV` e `ENABLE_DEV_LOGIN` (por padrão desligado — sem
+ele, `auth.developmentLogin` falha como se o endpoint não existisse).
+
+Fora de `development`, o servidor **recusa subir** se `JWT_SECRET` estiver
+ausente, vazio ou igual ao valor de desenvolvimento (que é público, por estar no
+código versionado). O token carrega o papel e a microárea, então assinar com uma
+chave conhecida permitiria forjar um acesso de ACS a qualquer território. Veja
 [backend/DEPLOY.md](backend/DEPLOY.md) para o runbook completo do piloto de
 deploy free-tier.
 

@@ -5,5 +5,9 @@ auth:
   - developmentLogin:
 health:
   - check:
+patients:
+  - listMicroArea:
 triage:
   - evaluate:
+visits:
+  - sync:

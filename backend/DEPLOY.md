@@ -88,6 +88,17 @@ Configurar como variáveis de ambiente secretas (nunca commitadas):
 | `APP_ENV` | `production` |
 | `ENABLE_DEV_LOGIN` | `true` (decisão consciente — é o único mecanismo de auth do piloto) |
 
+> **Sobre os valores de desenvolvimento.** As senhas de desenvolvimento do
+> repositório foram rotacionadas: `.env` passou a ser gerado por máquina com
+> `scripts/dev/bootstrap_env.sh`, e os literais que antes estavam no
+> `docker-compose.yml`, no `ci.yml` e no compose do Serverpod foram removidos.
+> Os valores antigos continuam visíveis no histórico do git (que não foi
+> reescrito) e **não valem mais** em lugar nenhum — não os reaproveite.
+>
+> `JWT_SECRET` agora é obrigatório fora de `development`: o servidor recusa subir
+> com o valor ausente, vazio ou igual ao fallback de desenvolvimento, em vez de
+> assinar tokens com uma chave pública.
+
 Não setar `MQTT_CA_CERT_PATH` — o HiveMQ Cloud usa certificado de CA pública, e
 o cliente MQTT confia nas CAs padrão do sistema quando essa variável não é
 definida.

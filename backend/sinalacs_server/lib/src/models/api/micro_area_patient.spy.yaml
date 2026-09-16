@@ -1,0 +1,13 @@
+### Um paciente da microárea do ACS, para escolher em quem registrar uma visita
+### de rotina.
+###
+### Minimização (LGPD §5.6, spec/lgpd_design.md:364): só o que uma visita de
+### rotina precisa para escolher o paciente certo — nome e condições crônicas.
+### `emergencyContact` fica de fora de propósito: não ajuda a escolher quem
+### visitar. Não existe campo de endereço porque `Patient` não tem essa coluna.
+class: MicroAreaPatient
+fields:
+  patientId: String
+  name: String
+  isChronic: bool
+  chronicConditions: List<String>

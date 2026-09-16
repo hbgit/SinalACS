@@ -1,0 +1,14 @@
+### Resultado da sincronização de UMA visita.
+###
+### O app casa pelo `localId`, não pela posição na lista: um resultado ausente
+### deixa a visita pendente para a próxima tentativa, em vez de dá-la por
+### sincronizada.
+class: VisitSyncResult
+fields:
+  localId: String
+  syncStatus: SyncStatus
+  ### Versão gravada no servidor. Em conflito, é a versão que o dispositivo
+  ### precisa reconciliar antes de reenviar.
+  serverVersion: int?
+  ### Preenchido apenas quando syncStatus é error.
+  message: String?

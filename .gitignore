@@ -18,6 +18,9 @@ coverage/
 # Environment
 .env
 .env.*
+# ...menos o modelo, que é documentação e precisa ser versionado. Sem esta
+# exceção o padrão .env.* acima o engoliria.
+!.env.example
 
 # Docker / local runtime
 pg_data/
@@ -25,3 +28,7 @@ infra/docker/mosquitto/runtime/
 
 # Grafo de conhecimento (saída regenerável do graphify)
 graphify-out/
+
+# Asset de desenvolvimento: CA do broker MQTT, copiada por
+# scripts/dev/sync_dev_ca.sh a partir do runtime regerável do Mosquitto.
+apps/acs/assets/certs/

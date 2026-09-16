@@ -381,7 +381,10 @@ erDiagram
         uuid resource_id
         timestamp timestamp
         string ip_hash
-        string result "SUCCESS | FAILURE | DENIED"
+        string result "granted | denied_territory, etc."
+        bigint sequence "posição na cadeia de hash, única"
+        string previous_hash "entryHash da linha anterior"
+        string entry_hash "HMAC-SHA256 do conteúdo da linha"
     }
     
     USER ||--o{ PATIENT : is
@@ -559,10 +562,11 @@ Cada registro possui um campo `version` (inteiro incremental). No momento da sin
 
 **Política ABAC (Atribute-Based Access Control):**
 
-Exemplo ilustrativo da decisão original de stack (estilo Serverpod), sem correspondência com o código real do repositório:
+Exemplo ilustrativo: não existe hoje uma camada de política ABAC genérica como esta. A checagem de papel e microárea é feita inline no caso de uso — ver `backend/sinalacs_server/lib/src/application/alerts/red_alert_service.dart` — e o RBAC institucional segue não implementado (ver RNF06 na seção 2.2). A API usada abaixo também é ilustrativa, não é a do ORM do Serverpod.
 
 ```dart
-// Exemplo ilustrativo — não corresponde ao código real (o backend não usa Serverpod/ORM)
+// Exemplo ilustrativo — não há camada ABAC genérica no código real;
+// a regra equivalente vive inline em red_alert_service.dart
 Future<bool> canAccessPatient(Session session, String patientId) async {
   final user = await session.auth.getUser();
   switch (user.role) {
@@ -592,7 +596,7 @@ Future<bool> canAccessPatient(Session session, String patientId) async {
 | **Comunicação App ↔ Traefik** | TLS 1.3 | Certificado Let's Encrypt (auto-renovável) | Proteção contra MITM |
 | **Comunicação Traefik ↔ Backend** | TLS 1.3 | Certificado interno (mTLS) | Segurança na rede interna |
 | **PostgreSQL (SSOT)** | pgcrypto (AES-256) | Chave gerenciada por Vault/HashiCorp | Proteção contra acesso ao banco |
-| **Logs de Auditoria** | Assinatura Hash Chain | - | Integridade e não-repúdio |
+| **Logs de Auditoria** | Assinatura Hash Chain (HMAC-SHA256) | `AUDIT_CHAIN_SECRET`, próprio, fora do Postgres | Integridade e não-repúdio |
 
 #### 4.2.4 Conformidade LGPD (Resumo)
 
