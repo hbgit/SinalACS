@@ -69,7 +69,7 @@ cliente · **`parcial`** = existe, mas alimentado por dado fabricado ·
 | RF01 | Autenticação passwordless (CPF + nasc. + OTP) | **ausente** | Campos de CPF/data existem na UI mas são decorativos; o login chama `auth.developmentLogin(role)` ignorando a entrada. Sem gateway SMS. |
 | RF02 | Onboarding via QR Code | **ausente** | Botão presente; `app.dart:170` emite snackbar "será disponibilizada". |
 | RF03 | Botão de alerta de urgência (MQTT) | **parcial** | Endpoint e entrega funcionam (validado em dispositivo). **Mas a geolocalização nunca é lida** — ver L-02. |
-| RF04 | Formulário de triagem estruturada | **parcial** | `triage.evaluate` funciona e a UI pergunta os 6 sintomas do motor. **Nada é persistido** — ver L-04. |
+| RF04 | Formulário de triagem estruturada | **backend** | `triage.evaluate` exige token, classifica pelo motor determinístico e grava em `triage_sessions` com auditoria. |
 | RF05 | Painel de status da solicitação | **ausente** | A tela existe e é 100% `const`. Não há endpoint de leitura para o paciente. Ver L-03. |
 | RF06 | Lembretes de saúde | **ausente** | `RemindersScreen` tem lista fixa; salvar descarta. Sem `flutter_local_notifications`. |
 | RF07 | Login institucional (matrícula/senha) | **ausente** | Só o token HMAC de desenvolvimento, sob `ENABLE_DEV_LOGIN`. |
@@ -96,7 +96,7 @@ cliente · **`parcial`** = existe, mas alimentado por dado fabricado ·
 | RNF03 | Criptografia AES-256 em repouso | **backend/app** | SQLCipher provado em dispositivo (o arquivo não contém o conteúdo em texto claro e não abre com chave errada). **No PostgreSQL não há criptografia de coluna** — `pgcrypto` previsto no PRD não foi adotado. |
 | RNF04 | TLS 1.3 em todas as comunicações | **parcial** | Broker em TLS com verificação de hostname. **O RPC do backend é HTTP puro** na 8080, sem TLS, inclusive do emulador. |
 | RNF05 | Acessibilidade WCAG AA | **app-only** | Matrizes de contraste, alvos de toque e `liveRegion` testados nos três apps. |
-| RNF06 | RBAC | **ausente** | Todo endpoint é `requireLogin => false`; só há checagem ad-hoc de `user.role`. **`triage.evaluate` responde sem token algum** (verificado por chamada direta). |
+| RNF06 | RBAC | **ausente** | Todo endpoint é `requireLogin => false`; só há checagem ad-hoc de `user.role`. `triage.evaluate` deixou de ser público (exige token e papel `patient`), mas não existe camada formal de RBAC. |
 
 ### Invariantes de negócio
 
@@ -171,6 +171,10 @@ populadas pelo seed. Duas ficam de fora inteiramente:
 | `triage_sessions` | **nenhuma** | A triagem calcula o risco e **descarta**. Não há histórico clínico, nem vínculo entre triagem e paciente — `triage.evaluate` sequer recebe `accessToken`. RF17 não cobre a triagem. |
 | `consent_logs` | **nenhuma** | LGPD-RF02 (consentimento granular) tem tabela, migração e modelo, mas nenhum escritor. |
 
+**Atualização (L-04 fechada):** `triage_sessions` passou a ter escritor —
+`TriageSessionService`, gravado por `triage.evaluate`, que agora exige token e
+identifica o paciente. `consent_logs` continua sem escritor.
+
 Consequência mensurável: a tabela `alerts` só recebe risco `red` (é o único
 caminho de escrita). Portanto **os contadores "Amarelo" e "Verde" do backoffice
 não têm fonte possível hoje** — nem se o admin fosse ligado ao backend real. O
@@ -208,8 +212,9 @@ mesmo vale para a TMRAV segmentada por risco, que é a métrica *North Star* do 
 - **L-03 · Tela de Status mente para o paciente.** Árvore `const` anunciando
   triagem vermelha em análise. Um paciente pode acreditar que um pedido de
   socorro está sendo tratado quando nada foi registrado.
-- **L-04 · A triagem não deixa registro.** `triage_sessions` nunca é escrita e
-  `triage.evaluate` não identifica o paciente nem exige token.
+- **L-04 · ~~A triagem não deixa registro.~~** RESOLVIDO — `triage.evaluate`
+  exige `accessToken`, grava em `triage_sessions` e audita. Ver
+  `docs/superpowers/plans/2026-09-16-triagem-persistida.md`.
 
 ### P1 — comprometem a operação de campo
 
