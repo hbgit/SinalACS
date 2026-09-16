@@ -230,8 +230,10 @@ mesmo vale para a TMRAV segmentada por risco, que é a métrica *North Star* do 
 
 ### P2 — dívida de qualidade e processo
 
-- **L-09 · RNF06 (RBAC) ausente**; `triage.evaluate` é publicamente acessível
-  sem autenticação.
+- **L-09 · RNF06 (RBAC) ausente.** Todo endpoint continua `requireLogin => false`,
+  com checagem de papel ad-hoc dentro de cada serviço. `triage.evaluate` deixou de
+  ser público (ver L-04), mas isso foi um caso isolado, não uma camada de
+  autorização.
 - **L-10 · CI não executa nenhum `integration_test`.** O do admin é hermético
   (sem stack, sem seed, sem `--dart-define`) — é ganho imediato.
 - **L-11 · `scripts/qa/e2e.sh` ignora o admin** e não passa `-d emulator-5554`
