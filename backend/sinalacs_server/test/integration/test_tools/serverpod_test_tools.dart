@@ -407,6 +407,7 @@ class _TriageEndpoint {
 
   _i3.Future<_i9.TriageResult> evaluate(
     _i1.TestSessionBuilder sessionBuilder, {
+    required String accessToken,
     required bool chestPain,
     required bool difficultyBreathing,
     required bool fever,
@@ -426,6 +427,7 @@ class _TriageEndpoint {
           endpointPath: 'triage',
           methodName: 'evaluate',
           parameters: _i1.testObjectToJson({
+            'accessToken': accessToken,
             'chestPain': chestPain,
             'difficultyBreathing': difficultyBreathing,
             'fever': fever,

@@ -153,5 +153,69 @@ void main() {
       expect(logs.single.result, 'granted');
       expect(logs.single.resourceId, isNotNull);
     });
+
+    test('o endpoint recusa token inválido', () async {
+      final session = sessionBuilder.build();
+      await _seed(session);
+
+      await expectLater(
+        endpoints.triage.evaluate(
+          sessionBuilder,
+          accessToken: 'token-que-nao-vale',
+          chestPain: true,
+          difficultyBreathing: false,
+          fever: false,
+          persistentVomiting: false,
+          bleeding: false,
+          severeWeakness: false,
+        ),
+        throwsA(isA<AlertPermissionException>()),
+      );
+    });
+
+    test('o endpoint recusa quem não é paciente', () async {
+      final session = sessionBuilder.build();
+      await _seed(session);
+
+      final login = await endpoints.auth.developmentLogin(sessionBuilder, role: 'acs');
+
+      await expectLater(
+        endpoints.triage.evaluate(
+          sessionBuilder,
+          accessToken: login.accessToken,
+          chestPain: true,
+          difficultyBreathing: false,
+          fever: false,
+          persistentVomiting: false,
+          bleeding: false,
+          severeWeakness: false,
+        ),
+        throwsA(isA<AlertPermissionException>()),
+      );
+    });
+
+    test('o endpoint classifica e grava a triagem do paciente autenticado', () async {
+      final session = sessionBuilder.build();
+      await _seed(session);
+
+      final login = await endpoints.auth.developmentLogin(sessionBuilder, role: 'patient');
+
+      final resultado = await endpoints.triage.evaluate(
+        sessionBuilder,
+        accessToken: login.accessToken,
+        chestPain: false,
+        difficultyBreathing: false,
+        fever: false,
+        persistentVomiting: false,
+        bleeding: false,
+        severeWeakness: false,
+      );
+
+      expect(resultado.risk, RiskLevel.green);
+
+      final gravadas = await TriageSession.db.find(session);
+      expect(gravadas, hasLength(1));
+      expect(gravadas.single.resultRisk, RiskLevel.green);
+    });
   });
 }

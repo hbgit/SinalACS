@@ -196,6 +196,11 @@ class Endpoints extends _i1.EndpointDispatch {
         'evaluate': _i1.MethodConnector(
           name: 'evaluate',
           params: {
+            'accessToken': _i1.ParameterDescription(
+              name: 'accessToken',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
             'chestPain': _i1.ParameterDescription(
               name: 'chestPain',
               type: _i1.getType<bool>(),
@@ -233,6 +238,7 @@ class Endpoints extends _i1.EndpointDispatch {
                 Map<String, dynamic> params,
               ) async => (endpoints['triage'] as _i6.TriageEndpoint).evaluate(
                 session,
+                accessToken: params['accessToken'],
                 chestPain: params['chestPain'],
                 difficultyBreathing: params['difficultyBreathing'],
                 fever: params['fever'],
