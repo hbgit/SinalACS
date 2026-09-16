@@ -37,6 +37,14 @@ class FakeTriageSessionStore implements TriageSessionStore {
   }
 }
 
+/// Simula um Postgres fora do ar: usado pelo teste do FIX 2.
+class ThrowingTriageSessionStore implements TriageSessionStore {
+  @override
+  Future<TriageSession> insert(TriageSession session) {
+    throw Exception('conexão com o banco esgotada');
+  }
+}
+
 /// Mesmo molde de `patient_directory_service_test.dart`.
 class FakeAuditTrail extends AuditTrail {
   FakeAuditTrail({this.failOnRecord = false});
@@ -130,15 +138,53 @@ void main() {
     expect(respostas.map((r) => r.answer), ['sim', 'não', 'sim', 'não', 'não', 'não']);
   });
 
+  test('não confunde um sintoma com a posição vizinha ao ligar chave e valor', () async {
+    // Diferente do teste acima, aqui só UM dos três sintomas antes
+    // indistinguíveis (fever/persistentVomiting/bleeding/severeWeakness com
+    // 'não') está marcado — se a chave e o valor fossem pareados por índice
+    // em listas separadas, uma reordenada sem a outra gravaria 'sim' sob um
+    // nome vizinho, e este teste pegaria isso.
+    await avaliar(bleeding: true);
+
+    final respostas = store.saved.single.answers;
+    final porChave = {for (final r in respostas) r.question: r.answer};
+
+    expect(porChave['bleeding'], 'sim');
+    expect(porChave['chestPain'], 'não');
+    expect(porChave['difficultyBreathing'], 'não');
+    expect(porChave['fever'], 'não');
+    expect(porChave['persistentVomiting'], 'não');
+    expect(porChave['severeWeakness'], 'não');
+  });
+
+  test('uma falha ao gravar a sessão não custa ao paciente a classificação de risco', () async {
+    service = TriageSessionService(
+      store: ThrowingTriageSessionStore(),
+      audit: audit,
+      clock: () => relogio,
+    );
+
+    final risco = await avaliar(chestPain: true);
+
+    expect(risco, RiskLevel.red);
+    // O evento de auditoria ainda deve ser gravado, mas sem resourceId — não
+    // existe id de sessão quando a gravação falhou.
+    expect(audit.events, hasLength(1));
+    expect(audit.events.single.resourceId, isNull);
+  });
+
   test('recusa quem não é paciente', () async {
     expect(
       () => avaliar(user: _acs),
-      throwsA(isA<StateError>()),
+      throwsA(isA<TriageAuthorizationException>()),
     );
   });
 
   test('não grava nada quando o papel é recusado', () async {
-    await expectLater(() => avaliar(user: _acs), throwsA(isA<StateError>()));
+    await expectLater(
+      () => avaliar(user: _acs),
+      throwsA(isA<TriageAuthorizationException>()),
+    );
 
     expect(store.saved, isEmpty);
     expect(audit.events, isEmpty);

@@ -1,4 +1,5 @@
 import 'package:serverpod/serverpod.dart';
+import 'package:sinalacs_server/src/application/triage/triage_session_service.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
 import 'package:sinalacs_server/src/runtime/alert_runtime.dart';
 
@@ -44,7 +45,7 @@ class TriageEndpoint extends Endpoint {
             severeWeakness: severeWeakness,
           );
       return TriageResult(risk: risk);
-    } on StateError catch (error) {
+    } on TriageAuthorizationException catch (error) {
       throw AlertPermissionException(message: error.message);
     }
   }

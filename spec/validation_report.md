@@ -103,7 +103,7 @@ cliente · **`parcial`** = existe, mas alimentado por dado fabricado ·
 | ID | Invariante | Veredicto | Evidência desta validação |
 |---|---|---|---|
 | INV-01 | ACS não vê paciente de outra microárea | **aplicado** | `patients.listMicroArea` devolveu exatamente 5 pacientes e excluiu `…0009` (outra microárea). Token de paciente foi recusado com `AlertPermissionException`. `visits.sync` recusa por território e audita `denied_territory`. |
-| INV-02 | Risco não alterável por humano na triagem | **aplicado** | `TriageEndpoint` é função pura sem campo editável; app do paciente não recalcula risco no cliente. |
+| INV-02 | Risco não alterável por humano na triagem | **aplicado** | O risco vem de `TriageEngine.evaluate`, determinístico, e é o mesmo valor gravado em `TriageSession.resultRisk`; `triage.evaluate` não aceita nenhum campo de risco vindo do cliente, e o app do paciente não recalcula risco. |
 | INV-03 | Alerta vermelho nunca descartado | **aplicado** | Outbox transacional (`alert_outbox`, 70 linhas) + QoS 1 com sessão persistente; 5 alertas de backlog reentregues na reconexão. |
 | INV-04 | Dado de saúde nunca em texto plano | **aplicado no dispositivo** | Provado por `encrypted_storage_test.dart` em hardware. **Não aplicado no servidor** — as colunas do PostgreSQL são texto claro. |
 | INV-05 | Paciente não acessa dado de outro paciente | **vacuamente verdadeiro** | Não existe endpoint de leitura voltado ao paciente. Vira risco real no momento em que RF05 for implementado. |
@@ -162,13 +162,13 @@ de alertas — se o broker cair, não há caminho alternativo de leitura.
 
 ## 6. Esquema morto: tabelas modeladas que ninguém escreve
 
-Apenas **6 tabelas** recebem escrita do servidor (`visits`, `audit_logs`,
-`alerts`, `alert_idempotency_keys`, `alert_deliveries`, `alert_outbox`) e 5 são
-populadas pelo seed. Duas ficam de fora inteiramente:
+Agora **7 tabelas** recebem escrita do servidor (`visits`, `audit_logs`,
+`alerts`, `alert_idempotency_keys`, `alert_deliveries`, `alert_outbox`,
+`triage_sessions`) e 5 são populadas pelo seed. Uma fica de fora inteiramente:
 
 | Tabela | Referências fora de `generated/` | Consequência |
 |---|---|---|
-| `triage_sessions` | **nenhuma** | A triagem calcula o risco e **descarta**. Não há histórico clínico, nem vínculo entre triagem e paciente — `triage.evaluate` sequer recebe `accessToken`. RF17 não cobre a triagem. |
+| `triage_sessions` | `TriageSessionService.evaluateAndRecord`, chamado por `triage.evaluate` | Grava a sessão com o `patientId` do token e audita (RF17); o risco continua vindo só do `TriageEngine` (INV-02). |
 | `consent_logs` | **nenhuma** | LGPD-RF02 (consentimento granular) tem tabela, migração e modelo, mas nenhum escritor. |
 
 **Atualização (L-04 fechada):** `triage_sessions` passou a ter escritor —
