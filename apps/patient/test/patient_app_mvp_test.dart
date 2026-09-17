@@ -61,6 +61,36 @@ class _RecordingReminderScheduler implements ReminderScheduler {
   }
 }
 
+/// Duplo de [ReminderScheduler] que sempre lança — simula uma falha real do
+/// plugin de notificações (`flutter_local_notifications` fala com código
+/// nativo; pode falhar em dispositivo por motivos fora do controle da tela),
+/// para provar que `RemindersScreen` trata o erro em vez de deixá-lo subir.
+class _ThrowingReminderScheduler implements ReminderScheduler {
+  @override
+  Future<void> schedule(Reminder reminder) => throw StateError('falha simulada do agendador');
+
+  @override
+  Future<void> cancel(int reminderId) => throw StateError('falha simulada do agendador');
+}
+
+/// Duplo de [ReminderStore] que lê normalmente (delega a um
+/// [_InMemoryReminderStore] real) mas lança em toda escrita — simula, por
+/// exemplo, o disco cheio ou uma falha do SQLite em dispositivo real.
+class _ThrowingReminderStore implements ReminderStore {
+  _ThrowingReminderStore(this._delegate);
+
+  final ReminderStore _delegate;
+
+  @override
+  Future<List<Reminder>> list() => _delegate.list();
+
+  @override
+  Future<Reminder> save(Reminder reminder) => throw StateError('falha simulada do store');
+
+  @override
+  Future<void> delete(int id) => throw StateError('falha simulada do store');
+}
+
 /// Duplo de [LocationReader] com leitura fixa, para testar como a tela reage
 /// a cada estado sem depender de canal de plataforma (GPS real).
 class _FixedLocationReader implements LocationReader {
@@ -383,6 +413,66 @@ void main() {
       expect(find.byKey(const Key('reminders_empty_state')), findsOneWidget);
       expect(await store.list(), isEmpty);
       expect(scheduler.cancelled, [seeded.id]);
+    });
+
+    group('tratamento de erro nas escritas', () {
+      testWidgets('falha do store ao salvar (toggle) mostra erro inline e não corrompe a lista', (tester) async {
+        final inner = _InMemoryReminderStore();
+        final seeded = await inner.save(
+          const Reminder(id: 0, label: 'Metformina 850 mg', hour: 7, minute: 0, active: false),
+        );
+        final store = _ThrowingReminderStore(inner);
+        await tester.pumpWidget(buildRemindersScreen(store, _RecordingReminderScheduler()));
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.byKey(Key('reminder_switch_${seeded.id}')));
+        await tester.pumpAndSettle();
+
+        expect(find.byKey(const Key('reminders_error')), findsOneWidget);
+        // A escrita falhou antes de qualquer `setState`: a tela continua
+        // mostrando o estado anterior (persistido), não uma mudança fantasma.
+        expect(find.text('Pausado'), findsOneWidget);
+        expect(find.text('Ativo'), findsNothing);
+      });
+
+      testWidgets('falha do agendador ao agendar (criar) mostra erro inline e não insere na lista', (tester) async {
+        final store = _InMemoryReminderStore();
+        await tester.pumpWidget(buildRemindersScreen(store, _ThrowingReminderScheduler()));
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.byKey(const Key('reminders_add_button')));
+        await tester.pumpAndSettle();
+        await tester.enterText(find.byKey(const Key('reminder_label_field')), 'Losartana 50 mg');
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const Key('reminder_save_button')));
+        await tester.pumpAndSettle();
+
+        expect(find.byKey(const Key('reminders_error')), findsOneWidget);
+        // O store já gravou (a exceção veio do agendador, chamado depois),
+        // mas a tela não atualizou a lista local — sem exceção não tratada,
+        // sem lista incoerente exibida.
+        expect(find.textContaining('Losartana 50 mg'), findsNothing);
+        expect(find.byKey(const Key('reminders_empty_state')), findsOneWidget);
+      });
+
+      testWidgets('falha do agendador ao cancelar (excluir) mostra erro inline e mantém o lembrete visível', (tester) async {
+        final store = _InMemoryReminderStore();
+        final seeded = await store.save(
+          const Reminder(id: 0, label: 'Pesagem de rotina', hour: 9, minute: 0, active: true),
+        );
+        await tester.pumpWidget(buildRemindersScreen(store, _ThrowingReminderScheduler()));
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.byKey(Key('reminder_delete_${seeded.id}')));
+        await tester.pumpAndSettle();
+
+        expect(find.byKey(const Key('reminders_error')), findsOneWidget);
+        // O cancelamento no agendador falhou depois de o store já ter
+        // apagado o registro; a tela não removeu o item da lista exibida
+        // (evita a pessoa achar que o lembrete sumiu quando a notificação
+        // agendada pode continuar ativa no aparelho).
+        expect(find.byKey(Key('reminder_tile_${seeded.id}')), findsOneWidget);
+      });
     });
   });
 }

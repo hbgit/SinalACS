@@ -1037,7 +1037,7 @@ class RemindersScreen extends StatefulWidget {
 
 class _RemindersScreenState extends State<RemindersScreen> {
   List<Reminder>? _reminders;
-  String? _loadError;
+  String? _error;
   bool _requestedLoad = false;
 
   @override
@@ -1058,41 +1058,58 @@ class _RemindersScreenState extends State<RemindersScreen> {
       if (!mounted) return;
       setState(() {
         _reminders = reminders;
-        _loadError = null;
+        _error = null;
       });
     } catch (_) {
       if (!mounted) return;
-      setState(() => _loadError = 'Não foi possível carregar os lembretes.');
+      setState(() => _error = 'Não foi possível carregar os lembretes.');
     }
   }
 
-  void _replace(Reminder updated) {
-    setState(() {
-      _reminders = [for (final r in _reminders ?? const <Reminder>[]) if (r.id == updated.id) updated else r];
-    });
-  }
+  // As três escritas abaixo (`_toggleActive`/`_delete`/`_createOrEdit`)
+  // seguem o mesmo formato de `_PatientLoginScreenState._enter()`/
+  // `_EmergencyScreenState._sendAlert()`/`_OnboardingScreenState._complete()`:
+  // `try`/`catch` ao redor da escrita, `setState` limpando o erro em caso de
+  // sucesso ou gravando uma mensagem em português em caso de falha, sem
+  // deixar a exceção subir sem tratamento — `scheduler.schedule`/`cancel`
+  // fala com um plugin de plataforma real (`flutter_local_notifications`),
+  // que pode falhar em dispositivo por motivos fora do controle da tela.
 
   Future<void> _toggleActive(Reminder reminder, bool active) async {
     final scope = RemindersScope.of(context);
     final updated = reminder.copyWith(active: active);
-    await scope.store.save(updated);
-    if (active) {
-      await scope.scheduler.schedule(updated);
-    } else {
-      await scope.scheduler.cancel(updated.id);
+    try {
+      await scope.store.save(updated);
+      if (active) {
+        await scope.scheduler.schedule(updated);
+      } else {
+        await scope.scheduler.cancel(updated.id);
+      }
+      if (!mounted) return;
+      setState(() {
+        _error = null;
+        _reminders = [for (final r in _reminders ?? const <Reminder>[]) if (r.id == updated.id) updated else r];
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _error = 'Não foi possível atualizar o lembrete.');
     }
-    if (!mounted) return;
-    _replace(updated);
   }
 
   Future<void> _delete(Reminder reminder) async {
     final scope = RemindersScope.of(context);
-    await scope.store.delete(reminder.id);
-    await scope.scheduler.cancel(reminder.id);
-    if (!mounted) return;
-    setState(() {
-      _reminders = [for (final r in _reminders ?? const <Reminder>[]) if (r.id != reminder.id) r];
-    });
+    try {
+      await scope.store.delete(reminder.id);
+      await scope.scheduler.cancel(reminder.id);
+      if (!mounted) return;
+      setState(() {
+        _error = null;
+        _reminders = [for (final r in _reminders ?? const <Reminder>[]) if (r.id != reminder.id) r];
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _error = 'Não foi possível excluir o lembrete.');
+    }
   }
 
   Future<void> _createOrEdit({Reminder? existing}) async {
@@ -1105,20 +1122,25 @@ class _RemindersScreenState extends State<RemindersScreen> {
 
     final scope = RemindersScope.of(context);
     final base = existing ?? const Reminder(id: 0, label: '', hour: 0, minute: 0, active: true);
-    final saved = await scope.store.save(base.copyWith(label: label, hour: hour, minute: minute));
-
-    if (saved.active) {
-      await scope.scheduler.schedule(saved);
-    } else {
-      await scope.scheduler.cancel(saved.id);
+    try {
+      final saved = await scope.store.save(base.copyWith(label: label, hour: hour, minute: minute));
+      if (saved.active) {
+        await scope.scheduler.schedule(saved);
+      } else {
+        await scope.scheduler.cancel(saved.id);
+      }
+      if (!mounted) return;
+      setState(() {
+        _error = null;
+        final withoutSaved = [for (final r in _reminders ?? const <Reminder>[]) if (r.id != saved.id) r];
+        _reminders = [...withoutSaved, saved]..sort(
+            (a, b) => a.hour != b.hour ? a.hour - b.hour : a.minute - b.minute,
+          );
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _error = 'Não foi possível salvar o lembrete.');
     }
-    if (!mounted) return;
-    setState(() {
-      final withoutSaved = [for (final r in _reminders ?? const <Reminder>[]) if (r.id != saved.id) r];
-      _reminders = [...withoutSaved, saved]..sort(
-          (a, b) => a.hour != b.hour ? a.hour - b.hour : a.minute - b.minute,
-        );
-    });
   }
 
   @override
@@ -1140,24 +1162,33 @@ class _RemindersScreenState extends State<RemindersScreen> {
           ],
         ),
         const SizedBox(height: 16),
-        if (_loadError != null)
+        if (_error != null)
           // SC 4.1.3: mesmo padrão do erro de login/onboarding — sem
-          // `liveRegion` um leitor de tela não saberia que o carregamento
-          // falhou.
-          Semantics(
-            liveRegion: true,
-            child: Text(
-              _loadError!,
-              key: const Key('reminders_load_error'),
-              style: const TextStyle(color: PatientColors.dangerOnSurface, fontWeight: FontWeight.bold),
+          // `liveRegion` um leitor de tela não saberia que a operação (carregar,
+          // salvar, alternar ou excluir um lembrete) falhou.
+          Padding(
+            padding: const EdgeInsets.only(bottom: 16),
+            child: Semantics(
+              liveRegion: true,
+              child: Text(
+                _error!,
+                key: const Key('reminders_error'),
+                style: const TextStyle(color: PatientColors.dangerOnSurface, fontWeight: FontWeight.bold),
+              ),
             ),
-          )
-        else if (reminders == null)
+          ),
+        // As três ramificações abaixo são mutuamente exclusivas e, juntas,
+        // não cobrem "reminders == null && _error != null" (carregamento
+        // falhou): nesse caso só o banner de erro acima aparece, sem spinner
+        // por baixo. Uma falha ao salvar/alternar/excluir, ao contrário, faz
+        // `_error` e `_reminders` (já carregado antes) conviverem — o banner
+        // aparece por cima da lista existente, não no lugar dela.
+        if (reminders == null && _error == null)
           const Padding(
             padding: EdgeInsets.only(top: 40),
             child: Center(child: CircularProgressIndicator()),
           )
-        else if (reminders.isEmpty)
+        else if (reminders != null && reminders.isEmpty)
           const Padding(
             key: Key('reminders_empty_state'),
             padding: EdgeInsets.only(top: 40),
@@ -1169,7 +1200,7 @@ class _RemindersScreenState extends State<RemindersScreen> {
               ),
             ),
           )
-        else
+        else if (reminders != null)
           ...reminders.map(
             (reminder) => Card(
               child: Column(
