@@ -68,7 +68,7 @@ cliente · **`parcial`** = existe, mas alimentado por dado fabricado ·
 |---|---|---|---|
 | RF01 | Autenticação passwordless (CPF + nasc. + OTP) | **ausente** | Campos de CPF/data existem na UI mas são decorativos; o login chama `auth.developmentLogin(role)` ignorando a entrada. Sem gateway SMS. |
 | RF02 | Onboarding via QR Code | **ausente** | Botão presente; `app.dart:170` emite snackbar "será disponibilizada". |
-| RF03 | Botão de alerta de urgência (MQTT) | **parcial** | Endpoint e entrega funcionam (validado em dispositivo). **Mas a geolocalização nunca é lida** — ver L-02. |
+| RF03 | Botão de alerta de urgência (MQTT) | **parcial** | Endpoint e entrega funcionam (validado em dispositivo). O app agora tenta ler a localização e envia somente um hash truncado; sem permissão/GPS usa `unknownLocationHash` e informa a pessoa. A precisão e o risco de reidentificação ainda exigem decisão de produto — ver L-02/L-05. |
 | RF04 | Formulário de triagem estruturada | **backend** | `triage.evaluate` exige token, classifica pelo motor determinístico e grava em `triage_sessions` com auditoria. |
 | RF05 | Painel de status da solicitação | **ausente** | A tela existe e é 100% `const`. Não há endpoint de leitura para o paciente. Ver L-03. |
 | RF06 | Lembretes de saúde | **ausente** | `RemindersScreen` tem lista fixa; salvar descarta. Sem `flutter_local_notifications`. |
@@ -140,7 +140,7 @@ de alertas — se o broker cair, não há caminho alternativo de leitura.
 |---|---|---|---|
 | Paciente | Login | **real** | Autentica de verdade; campos CPF/nascimento são decorativos. |
 | Paciente | Triagem | **real** | 6 sintomas, risco vem do servidor. |
-| Paciente | Urgência | **real (parcial)** | Cria alerta real, mas sempre com `unknownLocationHash`. |
+| Paciente | Urgência | **real (parcial)** | Lê localização em primeiro plano, envia somente `locationHash` e explicita o fallback quando GPS/permissão falham; ainda não há validação E2E em dispositivo nesta revisão. |
 | Paciente | **Status** | **hardcoded** | "Solicitação #4082 · Triagem Vermelha · hoje às 09:30" — **confirmado em tela**. |
 | Paciente | Perguntas | **hardcoded** | Resposta automática fixa sobre vacinação. |
 | Paciente | Perfil clínico | **hardcoded** | Condições fixas; salvar descarta. |
@@ -204,11 +204,13 @@ mesmo vale para a TMRAV segmentada por risco, que é a métrica *North Star* do 
   nem consta do `pubspec.yaml`; login é `pushReplacement` puro, gated só por
   `kDebugMode`; a trilha de auditoria exigida pelo PRD §4.2.2 é uma `List` em
   memória. O app exibe números que contradizem o banco.
-- **L-02 · Todo alerta vermelho sai sem localização.**
-  `apps/patient/lib/app/app.dart:306` envia `unknownLocationHash`
-  incondicionalmente. `geolocator: ^12.0.0` está no `pubspec` e tem **zero** uso
-  em `lib/`. RF03 exige geolocalização; o ACS recebe um alerta de emergência que
-  não diz onde é.
+- **L-02 · ~~Todo alerta vermelho sai sem localização.~~** PARCIALMENTE RESOLVIDO —
+  `GeolocatorLocationReader` tenta ler a posição em primeiro plano, normaliza a
+  coordenada e envia somente `locationHash`; permissão negada, serviço desligado
+  ou timeout usam `unknownLocationHash` com aviso explícito na tela. Ainda falta
+  validar o fluxo em emulador/dispositivo e aprovar a precisão de localização
+  perante LGPD; o risco de reidentificação espacial está ligado à recomendação
+  #9 de `spec/lgpd_data_audit.md`.
 - **L-03 · Tela de Status mente para o paciente.** Árvore `const` anunciando
   triagem vermelha em análise. Um paciente pode acreditar que um pedido de
   socorro está sendo tratado quando nada foi registrado.

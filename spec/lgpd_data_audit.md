@@ -131,12 +131,12 @@ A inspeção estática demonstrou que o backend não calcula hashes criptográfi
 
 ---
 
-### 2.2. Risco de Reidentificação Espacial via Geohash (`locationHash`)
+### 2.2. Risco de Reidentificação Espacial via `locationHash`
 
-Os campos `patients.lastLocationHash`, `alerts.locationHash` e `alert_idempotency_keys.locationHash` são descritos formalmente como "hash de localização", porém a análise dos testes de unidade (`red_alert_service_test.dart`) revela que o sistema utiliza a codificação alfanumérica **Geohash base32** (ex: `'6gyf4bf'`).
+Os campos `patients.lastLocationHash`, `alerts.locationHash` e `alert_idempotency_keys.locationHash` são descritos formalmente como "hash de localização". O app do paciente atualmente calcula um digest SHA-256 sobre latitude/longitude normalizadas em seis casas e armazena apenas os primeiros 12 caracteres; outros fluxos históricos/testes ainda usam valores no formato de geohash. Em ambos os casos, o valor deve ser tratado como pseudonimização, não anonimização.
 
-* **Natureza Algorítmica:** Geohash não é uma função criptográfica unidirecional (irreversível); trata-se de uma partição hierárquica do espaço espacial que decodifica diretamente para intervalos exatos de latitude e longitude.
-* **Resolução Geométrica:** Uma cadeia Geohash com precisão de 7 caracteres especifica uma área aproximada de $\approx 153\text{ m} \times 153\text{ m}$. Em áreas urbanas de alta densidade, esse raio isola um quarteirão; em zonas rurais, aponta com frequência para uma única propriedade rural ou domicílio isolado.
+* **Natureza Algorítmica:** Geohash não é uma função criptográfica unidirecional; o digest SHA-256 também não torna o local anônimo quando o domínio de busca é limitado e o atacante conhece a microárea ou dispõe de pontos candidatos.
+* **Resolução Geométrica:** A implementação do paciente usa seis casas decimais antes do digest, aproximadamente na ordem de centímetros; o digest truncado não revela a coordenada por decodificação direta, mas mantém risco de correlação/força bruta. Em áreas rurais, poucos pontos candidatos podem tornar o risco especialmente relevante.
 * **Consequência LGPD:** A precisão atual de 7 caracteres permite identificar indiretamente a residência do titular quando combinada com a delimitação de microárea sanitária (`microAreaId`), contrariando a premissa de desidentificação do dado em repouso.
 
 ---
@@ -184,7 +184,7 @@ As tabelas `alerts` e `triage_sessions` retêm a coluna `deviceId text NOT NULL`
 | `patients.chronicConditions` | Comorbidades e diagnósticos de saúde persistidos em texto plano (violação INV-04). | Criptografia em repouso no nível de aplicação (AES-256-GCM) antes do insert, ou adoção da extensão `pgcrypto` (`pgp_sym_encrypt`) no PostgreSQL, conforme previsto em LGPD-RT02. |
 | `triage_sessions.answers` | Respostas clínicas e relatos de sintomas persistidos em JSON aberto. | Serializar e cifrar o payload de respostas com chave simétrica derivada ou chave mestra mantida fora do banco de dados (Envelope Encryption). |
 | `visits.notes` | Texto livre do ACS sem higienização, contendo dados clínicos sensíveis. | Criptografia simétrica compulsória em repouso e implementação de máscara ou sanitização preventiva na sincronização. |
-| `alerts.locationHash` | Geohash de 7 caracteres especifica área de ~150 metros, viabilizando reidentificação domiciliar. | Truncar o Geohash para 5 caracteres ($\approx 4,9\text{ km} \times 4,9\text{ km}$) ou 6 caracteres ($\approx 1,2\text{ km} \times 0,6\text{ km}$) para roteamento de microárea, isolando as coordenadas exatas apenas no canal de despacho imediato. |
+| `alerts.locationHash` | Digest truncado de localização precisa, correlacionável por força bruta em um domínio espacial pequeno; formatos geohash históricos têm risco adicional de decodificação direta. | Aprovar uma resolução espacial deliberadamente reduzida ou uma célula espacial não reversível para roteamento, limitar retenção e impedir que a coordenada crua saia do dispositivo. Validar a escolha com ameaça de reidentificação antes de produção. |
 | `alerts.deviceId` e `triage_sessions.deviceId` | Rastreamento persistente de hardware do titular. | Substituir por identificador de instalação efêmero (UUID gerado no onboarding do app e descartado na limpeza de dados). |
 
 ## 3. Matriz de Pontos de Vazamento e Riscos Identificados

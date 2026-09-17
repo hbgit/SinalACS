@@ -10,6 +10,23 @@ A estratégia de conformidade adota os princípios de **Privacy by Design** e **
 
 ## 1. Requisitos de Conformidade LGPD para o Sistema
 
+### Implementação atual do hash de localização
+
+O app do paciente lê a localização somente em primeiro plano, quando a pessoa
+confirma um alerta. Latitude e longitude não são enviadas ao backend nem ao
+MQTT: são normalizadas em seis casas decimais e transformadas em um digest
+SHA-256 truncado para `locationHash`. Quando a permissão, o serviço ou o GPS
+falham, o alerta continua sendo enviado com `unknownLocationHash`, e a tela
+informa que a localização não foi anexada.
+
+Esse hash é pseudonimização, não anonimização. A precisão atualmente adotada
+pode permitir reidentificação por força bruta ou correlação com a microárea,
+especialmente em áreas rurais. Antes de uso com pacientes reais, a resolução
+deve ser aprovada pelo produto e pela privacidade, conforme a recomendação #9
+de `spec/lgpd_data_audit.md`; alternativas incluem reduzir a resolução,
+usar uma célula espacial aprovada ou limitar a retenção do valor bruto no
+servidor. A validação em dispositivo ainda é obrigatória para fechar L-02.
+
 ### LGPD-RF01 - Coleta Mínima e Transparente
 
 | Propriedade | Descrição |
