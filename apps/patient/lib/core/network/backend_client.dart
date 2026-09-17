@@ -46,6 +46,7 @@ abstract class PatientBackend {
   Future<RedAlertResult> createRedAlert({
     required String idempotencyKey,
     required String locationHash,
+    String? locationCell,
   });
 
   void close();
@@ -144,10 +145,14 @@ class BackendClient implements PatientBackend {
   /// [idempotencyKey] precisa ser **estável para a mesma tentativa do usuário**:
   /// é o que impede que um retry vire um segundo alerta. [locationHash] é o
   /// hash da localização — coordenada crua nunca sai do dispositivo (LGPD).
+  /// [locationCell] é a célula de baixa resolução (~1,1 km) que o mapa do ACS
+  /// usa para desenhar uma área de incerteza; opcional porque a localização
+  /// pode não estar disponível.
   @override
   Future<RedAlertResult> createRedAlert({
     required String idempotencyKey,
     required String locationHash,
+    String? locationCell,
   }) async {
     final token = await _requireToken();
     return _guard(
@@ -155,6 +160,7 @@ class BackendClient implements PatientBackend {
         accessToken: token,
         idempotencyKey: idempotencyKey,
         locationHash: locationHash,
+        locationCell: locationCell,
       ),
     );
   }

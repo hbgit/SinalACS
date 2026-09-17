@@ -4,6 +4,8 @@ import 'dart:convert';
 import 'package:crypto/crypto.dart';
 import 'package:geolocator/geolocator.dart';
 
+import 'location_cell.dart';
+
 /// Hash de localização enviado ao backend no lugar da coordenada.
 ///
 /// **LGPD:** latitude e longitude cruas não saem do dispositivo e não vão para
@@ -11,12 +13,15 @@ import 'package:geolocator/geolocator.dart';
 /// isso `alerts.createRedAlert` recebe `locationHash`, nunca o par de
 /// coordenadas.
 ///
-/// O esquema (sha256 sobre a coordenada com 6 casas, truncado em 12) é o mesmo
-/// já usado no app do ACS, para que os dois lados produzam o mesmo hash para o
-/// mesmo ponto.
+/// O esquema (sha256 sobre a coordenada com 3 casas, truncado em 12) é o
+/// mesmo usado no app do ACS — ambos devem mudar juntos se a precisão for
+/// revista. Precisão de 3 casas (~111 m) por decisão de produto
+/// (docs/superpowers/specs/2026-09-16-decisoes-produto-pos-validacao.md §1.1):
+/// aumenta o conjunto de anonimato de qualquer hash sem adicionar dado novo
+/// ao payload. Era 6 casas (~11 cm) antes desta decisão.
 String locationHashFrom(double latitude, double longitude) {
   final normalized =
-      '${latitude.toStringAsFixed(6)}:${longitude.toStringAsFixed(6)}';
+      '${latitude.toStringAsFixed(3)}:${longitude.toStringAsFixed(3)}';
   return sha256.convert(utf8.encode(normalized)).toString().substring(0, 12);
 }
 
@@ -40,13 +45,14 @@ sealed class LocationReading {
   const LocationReading();
 }
 
-/// Leitura bem-sucedida. Note que só o [hash] existe aqui — a coordenada
-/// crua morre dentro de [GeolocatorLocationReader.read] e nunca chega a este
-/// tipo, então não há como um chamador desavisado vazá-la adiante.
+/// Leitura bem-sucedida: hash (para idempotência/dedupe) e célula (para o
+/// mapa). A coordenada crua morre dentro de
+/// [GeolocatorLocationReader.read] e nunca chega a este tipo.
 class LocationAvailable extends LocationReading {
-  const LocationAvailable(this.hash);
+  const LocationAvailable(this.hash, this.cell);
 
   final String hash;
+  final String cell;
 }
 
 /// Localização não pôde ser lida. O chamador deve tratar isso como estado
@@ -101,6 +107,7 @@ class GeolocatorLocationReader implements LocationReader {
       final position = await Geolocator.getCurrentPosition(timeLimit: timeout);
       return LocationAvailable(
         locationHashFrom(position.latitude, position.longitude),
+        locationCellFrom(position.latitude, position.longitude),
       );
     } on TimeoutException {
       return const LocationUnavailable(LocationUnavailableReason.timeout);

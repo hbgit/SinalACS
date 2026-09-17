@@ -145,9 +145,10 @@ void main() {
     expect(backend.idempotencyKeys.first, backend.idempotencyKeys.last);
   });
 
-  testWidgets('deve anexar o hash de localização quando a permissão é concedida', (tester) async {
+  testWidgets('deve anexar o hash e a célula de localização quando a permissão é concedida', (tester) async {
     final backend = FakePatientBackend();
-    final locationReader = _FixedLocationReader(const LocationAvailable('abc123456789'));
+    final locationReader =
+        _FixedLocationReader(const LocationAvailable('abc123456789', '-2356:-4664'));
     await tester.pumpWidget(SinalAcsApp(backend: backend, locationReader: locationReader));
 
     await login(tester);
@@ -160,6 +161,7 @@ void main() {
 
     expect(locationReader.calls, 1);
     expect(backend.locationHashes.single, 'abc123456789');
+    expect(backend.locationCells.single, '-2356:-4664');
     expect(find.text('Localização anexada ao alerta.'), findsOneWidget);
   });
 
@@ -183,6 +185,8 @@ void main() {
         // Alerta vermelho nunca pode ser perdido em silêncio por falta de
         // GPS: precisa ter sido enviado mesmo assim.
         expect(backend.locationHashes.single, unknownLocationHash);
+        // Sem leitura de GPS não há célula para desenhar no mapa do ACS.
+        expect(backend.locationCells.single, isNull);
         expect(find.text('Alerta recebido pela equipe'), findsOneWidget);
         // A UI precisa dizer isso explicitamente — nunca mascarar como se
         // uma coordenada válida tivesse sido usada.

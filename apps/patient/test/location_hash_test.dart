@@ -70,11 +70,10 @@ void main() {
       expect(a, b);
     });
 
-    test('trunca a precisão em 6 casas decimais', () {
-      // Diferença na 7ª casa decimal (~1cm) não deve mudar o hash — a
-      // normalização documentada em locationHashFrom é de 6 casas.
-      final a = locationHashFrom(-23.5505200, -46.6333080);
-      final b = locationHashFrom(-23.5505201, -46.6333081);
+    test('trunca a precisão em 3 casas decimais', () {
+      // Diferença na 4ª casa decimal (~11m) não deve mudar o hash.
+      final a = locationHashFrom(-23.550, -46.633);
+      final b = locationHashFrom(-23.5504, -46.6334);
       expect(a, b);
     });
 

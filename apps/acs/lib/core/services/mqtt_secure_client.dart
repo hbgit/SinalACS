@@ -197,7 +197,7 @@ class MqttSecureAlertPayload {
   String toJsonString() => jsonEncode(toJson());
 
   static String _defaultLocationHash(double latitude, double longitude) {
-    final normalized = '${latitude.toStringAsFixed(6)}:${longitude.toStringAsFixed(6)}';
+    final normalized = '${latitude.toStringAsFixed(3)}:${longitude.toStringAsFixed(3)}';
     final bytes = utf8.encode(normalized);
     final digest = sha256.convert(bytes).toString();
     return digest.substring(0, 12);

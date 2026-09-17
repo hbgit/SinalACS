@@ -24,6 +24,7 @@ class FakePatientBackend implements PatientBackend {
   final List<Map<String, bool>> triageCalls = <Map<String, bool>>[];
   final List<String> idempotencyKeys = <String>[];
   final List<String> locationHashes = <String>[];
+  final List<String?> locationCells = <String?>[];
   int loginCount = 0;
   bool closed = false;
 
@@ -84,9 +85,11 @@ class FakePatientBackend implements PatientBackend {
   Future<RedAlertResult> createRedAlert({
     required String idempotencyKey,
     required String locationHash,
+    String? locationCell,
   }) async {
     idempotencyKeys.add(idempotencyKey);
     locationHashes.add(locationHash);
+    locationCells.add(locationCell);
     final failure = alertFailure;
     if (failure != null) throw failure;
 

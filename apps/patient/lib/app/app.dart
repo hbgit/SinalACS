@@ -343,15 +343,18 @@ class _EmergencyScreenState extends State<EmergencyScreen> {
     if (!mounted) return;
 
     final String locationHash;
+    final String? locationCell;
     final String locationStatus;
     switch (reading) {
-      case LocationAvailable(:final hash):
+      case LocationAvailable(:final hash, :final cell):
         locationHash = hash;
+        locationCell = cell;
         locationStatus = 'Localização anexada ao alerta.';
       case LocationUnavailable():
         // Alerta vermelho nunca pode ser perdido em silêncio por falta de
         // GPS — segue com o hash de fallback, mas avisa a pessoa disso.
         locationHash = unknownLocationHash;
+        locationCell = null;
         locationStatus =
             'Localização indisponível — o alerta será enviado mesmo assim.';
     }
@@ -361,6 +364,7 @@ class _EmergencyScreenState extends State<EmergencyScreen> {
       final result = await backend.createRedAlert(
         idempotencyKey: key,
         locationHash: locationHash,
+        locationCell: locationCell,
       );
       if (!mounted) return;
       setState(() {
