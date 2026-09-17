@@ -1,13 +1,24 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:sinalacs_client/sinalacs_client.dart' show RiskLevel;
 import 'package:sinalacs_patient/app/patient_theme.dart';
 import 'package:sinalacs_patient/core/network/backend_client.dart';
 import 'package:sinalacs_patient/core/network/backend_scope.dart';
 import 'package:sinalacs_patient/core/network/idempotency.dart';
 import 'package:sinalacs_patient/core/privacy/location_hash.dart';
+import 'package:sinalacs_patient/core/reminders/reminder.dart';
+import 'package:sinalacs_patient/core/reminders/reminder_scheduler.dart';
+import 'package:sinalacs_patient/core/reminders/reminder_store.dart';
+import 'package:sinalacs_patient/core/reminders/sqflite_reminder_store.dart';
 
 class SinalAcsApp extends StatefulWidget {
-  const SinalAcsApp({super.key, this.backend, this.locationReader});
+  const SinalAcsApp({
+    super.key,
+    this.backend,
+    this.locationReader,
+    this.reminderStore,
+    this.reminderScheduler,
+  });
 
   /// Injetável para teste. Em execução normal é o [BackendClient] real.
   final PatientBackend? backend;
@@ -15,6 +26,15 @@ class SinalAcsApp extends StatefulWidget {
   /// Injetável para teste. Em execução normal é o [GeolocatorLocationReader]
   /// real, que fala com o GPS do aparelho.
   final LocationReader? locationReader;
+
+  /// Injetável para teste. Em execução normal é o [SqfliteReminderStore]
+  /// real.
+  final ReminderStore? reminderStore;
+
+  /// Injetável para teste. Em execução normal é o
+  /// [LocalNotificationsReminderScheduler] real — o plugin precisa já ter
+  /// sido inicializado em `main.dart` antes de `runApp`.
+  final ReminderScheduler? reminderScheduler;
 
   @override
   State<SinalAcsApp> createState() => _SinalAcsAppState();
@@ -24,6 +44,9 @@ class _SinalAcsAppState extends State<SinalAcsApp> {
   late final PatientBackend _backend = widget.backend ?? BackendClient();
   late final LocationReader _locationReader =
       widget.locationReader ?? const GeolocatorLocationReader();
+  late final ReminderStore _reminderStore = widget.reminderStore ?? SqfliteReminderStore();
+  late final ReminderScheduler _reminderScheduler =
+      widget.reminderScheduler ?? LocalNotificationsReminderScheduler(FlutterLocalNotificationsPlugin());
 
   @override
   void dispose() {
@@ -38,11 +61,15 @@ class _SinalAcsAppState extends State<SinalAcsApp> {
       backend: _backend,
       child: LocationScope(
         reader: _locationReader,
-        child: MaterialApp(
-          title: 'SinalACS Paciente',
-          debugShowCheckedModeBanner: false,
-          theme: buildPatientTheme(),
-          home: const PatientLoginScreen(),
+        child: RemindersScope(
+          store: _reminderStore,
+          scheduler: _reminderScheduler,
+          child: MaterialApp(
+            title: 'SinalACS Paciente',
+            debugShowCheckedModeBanner: false,
+            theme: buildPatientTheme(),
+            home: const PatientLoginScreen(),
+          ),
         ),
       ),
     );
@@ -71,6 +98,34 @@ class LocationScope extends InheritedWidget {
 
   @override
   bool updateShouldNotify(LocationScope oldWidget) => reader != oldWidget.reader;
+}
+
+/// Disponibiliza [ReminderStore] e [ReminderScheduler] para a árvore de
+/// widgets.
+///
+/// Mesmo padrão de `BackendScope`/`LocationScope`: a tela não constrói o
+/// próprio armazenamento nem o próprio agendador, o que permite injetar
+/// duplos em teste hermético sem tocar SQLite real nem canal de plataforma.
+class RemindersScope extends InheritedWidget {
+  const RemindersScope({
+    required this.store,
+    required this.scheduler,
+    required super.child,
+    super.key,
+  });
+
+  final ReminderStore store;
+  final ReminderScheduler scheduler;
+
+  static RemindersScope of(BuildContext context) {
+    final scope = context.dependOnInheritedWidgetOfExactType<RemindersScope>();
+    assert(scope != null, 'Nenhum RemindersScope acima deste widget.');
+    return scope!;
+  }
+
+  @override
+  bool updateShouldNotify(RemindersScope oldWidget) =>
+      store != oldWidget.store || scheduler != oldWidget.scheduler;
 }
 
 class PatientLoginScreen extends StatefulWidget {
@@ -967,18 +1022,261 @@ class StatusScreen extends StatelessWidget {
 
 class _StatusStep extends StatelessWidget { const _StatusStep(this.label, this.done); final String label; final bool done; @override Widget build(BuildContext context) => Column(children: [Icon(done ? Icons.check_circle : Icons.calendar_today_outlined, color: done ? PatientColors.accent : Colors.white54), const SizedBox(height: 6), SizedBox(width: 65, child: Text(label, textAlign: TextAlign.center, style: const TextStyle(fontSize: 11)))]); }
 
-class RemindersScreen extends StatefulWidget { const RemindersScreen({super.key}); @override State<RemindersScreen> createState() => _RemindersScreenState(); }
+/// Lembretes locais de saúde (medicamento, pesagem, etc.), RF06 §3.1.
+///
+/// Carrega do [ReminderStore] injetado via [RemindersScope]; abre vazia
+/// quando não há nenhum lembrete cadastrado ainda (sem lista fixa de
+/// exemplo). Criar/editar grava no store e agenda via [ReminderScheduler];
+/// alternar o switch ou excluir grava a mudança e agenda/cancela a
+/// notificação correspondente.
+class RemindersScreen extends StatefulWidget {
+  const RemindersScreen({super.key});
+  @override
+  State<RemindersScreen> createState() => _RemindersScreenState();
+}
+
 class _RemindersScreenState extends State<RemindersScreen> {
-  final reminders = <String, bool>{'08:00 - Losartana 50 mg': true, '14:00 - Metformina 850 mg': false, 'Quarta-feira - Pesagem de rotina': false};
+  List<Reminder>? _reminders;
+  String? _loadError;
+  bool _requestedLoad = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // `RemindersScope.of` depende do `InheritedWidget` acima na árvore, que
+    // só está disponível a partir daqui (não em `initState`); a flag evita
+    // recarregar a cada rebuild.
+    if (!_requestedLoad) {
+      _requestedLoad = true;
+      _load();
+    }
+  }
+
+  Future<void> _load() async {
+    try {
+      final reminders = await RemindersScope.of(context).store.list();
+      if (!mounted) return;
+      setState(() {
+        _reminders = reminders;
+        _loadError = null;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _loadError = 'Não foi possível carregar os lembretes.');
+    }
+  }
+
+  void _replace(Reminder updated) {
+    setState(() {
+      _reminders = [for (final r in _reminders ?? const <Reminder>[]) if (r.id == updated.id) updated else r];
+    });
+  }
+
+  Future<void> _toggleActive(Reminder reminder, bool active) async {
+    final scope = RemindersScope.of(context);
+    final updated = reminder.copyWith(active: active);
+    await scope.store.save(updated);
+    if (active) {
+      await scope.scheduler.schedule(updated);
+    } else {
+      await scope.scheduler.cancel(updated.id);
+    }
+    if (!mounted) return;
+    _replace(updated);
+  }
+
+  Future<void> _delete(Reminder reminder) async {
+    final scope = RemindersScope.of(context);
+    await scope.store.delete(reminder.id);
+    await scope.scheduler.cancel(reminder.id);
+    if (!mounted) return;
+    setState(() {
+      _reminders = [for (final r in _reminders ?? const <Reminder>[]) if (r.id != reminder.id) r];
+    });
+  }
+
+  Future<void> _createOrEdit({Reminder? existing}) async {
+    final result = await showDialog<(String, int, int)>(
+      context: context,
+      builder: (context) => _ReminderFormDialog(existing: existing),
+    );
+    if (result == null || !mounted) return;
+    final (label, hour, minute) = result;
+
+    final scope = RemindersScope.of(context);
+    final base = existing ?? const Reminder(id: 0, label: '', hour: 0, minute: 0, active: true);
+    final saved = await scope.store.save(base.copyWith(label: label, hour: hour, minute: minute));
+
+    if (saved.active) {
+      await scope.scheduler.schedule(saved);
+    } else {
+      await scope.scheduler.cancel(saved.id);
+    }
+    if (!mounted) return;
+    setState(() {
+      final withoutSaved = [for (final r in _reminders ?? const <Reminder>[]) if (r.id != saved.id) r];
+      _reminders = [...withoutSaved, saved]..sort(
+          (a, b) => a.hour != b.hour ? a.hour - b.hour : a.minute - b.minute,
+        );
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
+    final reminders = _reminders;
     return ListView(
       padding: const EdgeInsets.all(20),
       children: [
-        Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [const Text('Alarmes e medicamentos', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)), IconButton(tooltip: 'Novo alarme', onPressed: () => _showPrototypeMessage(context, 'Criação de lembrete será persistida quando as notificações locais forem integradas.'), icon: const Icon(Icons.add_alarm_outlined))]),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            const Text('Alarmes e medicamentos', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+            IconButton(
+              key: const Key('reminders_add_button'),
+              tooltip: 'Novo alarme',
+              onPressed: () => _createOrEdit(),
+              icon: const Icon(Icons.add_alarm_outlined),
+            ),
+          ],
+        ),
         const SizedBox(height: 16),
-        ...reminders.entries.map((entry) => Card(child: SwitchListTile(value: entry.value, onChanged: (value) => setState(() => reminders[entry.key] = value), title: Text(entry.key), subtitle: Text(entry.value ? 'Ativo' : 'Pausado')))),
+        if (_loadError != null)
+          // SC 4.1.3: mesmo padrão do erro de login/onboarding — sem
+          // `liveRegion` um leitor de tela não saberia que o carregamento
+          // falhou.
+          Semantics(
+            liveRegion: true,
+            child: Text(
+              _loadError!,
+              key: const Key('reminders_load_error'),
+              style: const TextStyle(color: PatientColors.dangerOnSurface, fontWeight: FontWeight.bold),
+            ),
+          )
+        else if (reminders == null)
+          const Padding(
+            padding: EdgeInsets.only(top: 40),
+            child: Center(child: CircularProgressIndicator()),
+          )
+        else if (reminders.isEmpty)
+          const Padding(
+            key: Key('reminders_empty_state'),
+            padding: EdgeInsets.only(top: 40),
+            child: Center(
+              child: Text(
+                'Você ainda não tem lembretes. Toque em "+" para criar o primeiro.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.white54),
+              ),
+            ),
+          )
+        else
+          ...reminders.map(
+            (reminder) => Card(
+              child: Column(
+                children: [
+                  ListTile(
+                    key: Key('reminder_tile_${reminder.id}'),
+                    title: Text(_reminderLabel(reminder)),
+                    subtitle: Text(reminder.active ? 'Ativo' : 'Pausado'),
+                    trailing: Wrap(
+                      spacing: 4,
+                      children: [
+                        IconButton(
+                          key: Key('reminder_edit_${reminder.id}'),
+                          tooltip: 'Editar lembrete',
+                          icon: const Icon(Icons.edit_outlined),
+                          onPressed: () => _createOrEdit(existing: reminder),
+                        ),
+                        IconButton(
+                          key: Key('reminder_delete_${reminder.id}'),
+                          tooltip: 'Excluir lembrete',
+                          icon: const Icon(Icons.delete_outline),
+                          onPressed: () => _delete(reminder),
+                        ),
+                      ],
+                    ),
+                  ),
+                  SwitchListTile(
+                    key: Key('reminder_switch_${reminder.id}'),
+                    value: reminder.active,
+                    onChanged: (value) => _toggleActive(reminder, value),
+                    title: const Text('Notificação ativa'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+String _reminderLabel(Reminder reminder) {
+  final hour = reminder.hour.toString().padLeft(2, '0');
+  final minute = reminder.minute.toString().padLeft(2, '0');
+  return '$hour:$minute - ${reminder.label}';
+}
+
+/// Formulário de criação/edição de um [Reminder]: descrição livre + horário.
+/// Devolve `(label, hour, minute)` ao confirmar, ou `null` se cancelado.
+class _ReminderFormDialog extends StatefulWidget {
+  const _ReminderFormDialog({this.existing});
+
+  final Reminder? existing;
+
+  @override
+  State<_ReminderFormDialog> createState() => _ReminderFormDialogState();
+}
+
+class _ReminderFormDialogState extends State<_ReminderFormDialog> {
+  late final _labelController = TextEditingController(text: widget.existing?.label ?? '');
+  late TimeOfDay _time = widget.existing != null
+      ? TimeOfDay(hour: widget.existing!.hour, minute: widget.existing!.minute)
+      : TimeOfDay.now();
+
+  @override
+  void dispose() {
+    _labelController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _pickTime() async {
+    final picked = await showTimePicker(context: context, initialTime: _time);
+    if (picked != null) setState(() => _time = picked);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final label = _labelController.text.trim();
+    return AlertDialog(
+      title: Text(widget.existing == null ? 'Novo lembrete' : 'Editar lembrete'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          TextField(
+            key: const Key('reminder_label_field'),
+            controller: _labelController,
+            autofocus: true,
+            onChanged: (_) => setState(() {}),
+            decoration: const InputDecoration(labelText: 'Descrição (ex.: Losartana 50 mg)'),
+          ),
+          const SizedBox(height: 16),
+          OutlinedButton.icon(
+            key: const Key('reminder_time_button'),
+            onPressed: _pickTime,
+            icon: const Icon(Icons.access_time),
+            label: Text(_time.format(context)),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')),
+        FilledButton(
+          key: const Key('reminder_save_button'),
+          onPressed: label.isEmpty ? null : () => Navigator.pop(context, (label, _time.hour, _time.minute)),
+          child: const Text('Salvar'),
+        ),
       ],
     );
   }

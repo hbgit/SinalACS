@@ -5,8 +5,61 @@ import 'package:sinalacs_client/sinalacs_client.dart' show RiskLevel;
 import 'package:sinalacs_patient/app/app.dart';
 import 'package:sinalacs_patient/core/network/backend_client.dart';
 import 'package:sinalacs_patient/core/privacy/location_hash.dart';
+import 'package:sinalacs_patient/core/reminders/reminder.dart';
+import 'package:sinalacs_patient/core/reminders/reminder_scheduler.dart';
+import 'package:sinalacs_patient/core/reminders/reminder_store.dart';
 
 import 'support/fake_patient_backend.dart';
+
+/// Duplo de [ReminderStore] em memória — evita SQLite real no teste de
+/// widget, mesmo padrão de `_FixedLocationReader`/`FakePatientBackend`.
+class _InMemoryReminderStore implements ReminderStore {
+  final _items = <int, Reminder>{};
+  int _nextId = 1;
+
+  @override
+  Future<List<Reminder>> list() async => _items.values.toList()
+    ..sort((a, b) => a.hour != b.hour ? a.hour - b.hour : a.minute - b.minute);
+
+  @override
+  Future<Reminder> save(Reminder reminder) async {
+    if (reminder.id == 0) {
+      final created = Reminder(
+        id: _nextId++,
+        label: reminder.label,
+        hour: reminder.hour,
+        minute: reminder.minute,
+        active: reminder.active,
+      );
+      _items[created.id] = created;
+      return created;
+    }
+    _items[reminder.id] = reminder;
+    return reminder;
+  }
+
+  @override
+  Future<void> delete(int id) async {
+    _items.remove(id);
+  }
+}
+
+/// Duplo de [ReminderScheduler] que só registra as chamadas recebidas —
+/// nunca fala com `flutter_local_notifications`/canal de plataforma.
+class _RecordingReminderScheduler implements ReminderScheduler {
+  final scheduled = <int>[];
+  final cancelled = <int>[];
+
+  @override
+  Future<void> schedule(Reminder reminder) async {
+    scheduled.add(reminder.id);
+  }
+
+  @override
+  Future<void> cancel(int reminderId) async {
+    cancelled.add(reminderId);
+  }
+}
 
 /// Duplo de [LocationReader] com leitura fixa, para testar como a tela reage
 /// a cada estado sem depender de canal de plataforma (GPS real).
@@ -244,5 +297,92 @@ void main() {
     await expectLater(tester, meetsGuideline(androidTapTargetGuideline));
     await expectLater(tester, meetsGuideline(labeledTapTargetGuideline));
     handle.dispose();
+  });
+
+  group('Lembretes locais (RF06)', () {
+    Widget buildRemindersScreen(ReminderStore store, ReminderScheduler scheduler) {
+      return MaterialApp(
+        home: RemindersScope(
+          store: store,
+          scheduler: scheduler,
+          child: const PatientHomeShell(initialDestination: PatientDestination.reminders),
+        ),
+      );
+    }
+
+    testWidgets('abre vazia quando não há lembretes cadastrados (sem lista fixa de exemplo)', (tester) async {
+      await tester.pumpWidget(buildRemindersScreen(_InMemoryReminderStore(), _RecordingReminderScheduler()));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('reminders_empty_state')), findsOneWidget);
+      expect(find.byType(SwitchListTile), findsNothing);
+    });
+
+    testWidgets('criar um lembrete grava no store e agenda a notificação', (tester) async {
+      final store = _InMemoryReminderStore();
+      final scheduler = _RecordingReminderScheduler();
+      await tester.pumpWidget(buildRemindersScreen(store, scheduler));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('reminders_add_button')));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const Key('reminder_label_field')), 'Losartana 50 mg');
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('reminder_save_button')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('reminders_empty_state')), findsNothing);
+      expect(find.textContaining('Losartana 50 mg'), findsOneWidget);
+
+      final saved = await store.list();
+      expect(saved, hasLength(1));
+      expect(scheduler.scheduled, [saved.single.id]);
+    });
+
+    testWidgets('alternar o switch active grava a mudança e agenda/cancela de acordo', (tester) async {
+      final store = _InMemoryReminderStore();
+      final seeded = await store.save(
+        const Reminder(id: 0, label: 'Metformina 850 mg', hour: 7, minute: 0, active: true),
+      );
+      final scheduler = _RecordingReminderScheduler();
+      await tester.pumpWidget(buildRemindersScreen(store, scheduler));
+      await tester.pumpAndSettle();
+
+      final switchKey = Key('reminder_switch_${seeded.id}');
+      expect(find.text('Ativo'), findsOneWidget);
+
+      await tester.tap(find.byKey(switchKey));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Pausado'), findsOneWidget);
+      expect(scheduler.cancelled, [seeded.id]);
+      final afterToggleOff = await store.list();
+      expect(afterToggleOff.single.active, isFalse);
+
+      await tester.tap(find.byKey(switchKey));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Ativo'), findsOneWidget);
+      expect(scheduler.scheduled, [seeded.id]);
+      final afterToggleOn = await store.list();
+      expect(afterToggleOn.single.active, isTrue);
+    });
+
+    testWidgets('excluir um lembrete remove do store e cancela a notificação', (tester) async {
+      final store = _InMemoryReminderStore();
+      final seeded = await store.save(
+        const Reminder(id: 0, label: 'Pesagem de rotina', hour: 9, minute: 0, active: true),
+      );
+      final scheduler = _RecordingReminderScheduler();
+      await tester.pumpWidget(buildRemindersScreen(store, scheduler));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(Key('reminder_delete_${seeded.id}')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('reminders_empty_state')), findsOneWidget);
+      expect(await store.list(), isEmpty);
+      expect(scheduler.cancelled, [seeded.id]);
+    });
   });
 }
