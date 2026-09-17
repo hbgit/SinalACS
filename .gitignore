@@ -32,3 +32,4 @@ graphify-out/
 # Asset de desenvolvimento: CA do broker MQTT, copiada por
 # scripts/dev/sync_dev_ca.sh a partir do runtime regerável do Mosquitto.
 apps/acs/assets/certs/
+.worktrees/
