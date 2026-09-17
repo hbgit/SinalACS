@@ -16,6 +16,11 @@ const otherMicroAreaId = '00000000-0000-4000-8000-000000000099';
 String syntheticPatientId(int n) =>
     '00000000-0000-4000-8000-${n.toString().padLeft(12, '0')}';
 
+/// Célula de teste com centro determinístico (ver
+/// `apps/acs/test/location_cell_test.dart`), para exercitar o caminho do
+/// mapa com posição sem depender de GPS real de paciente algum.
+const testLocationCell = '-1580:-4783';
+
 class FakeAcsBackend implements AcsBackend {
   FakeAcsBackend({this.loginFailure, this.acknowledged = true, this.microAreaId = seedMicroAreaId});
 
@@ -237,6 +242,10 @@ PrioritizedAlert testAlert({
   String riskLevel = 'red',
   String microAreaId = seedMicroAreaId,
   DateTime? triggeredAt,
+  // Ausente por padrão: um teste que não passar isto exercita o caminho
+  // "sem GPS no paciente", que é o estado mais comum e não deve fabricar
+  // marcador nenhum no mapa.
+  String? locationCell,
 }) {
   return PrioritizedAlert(
     alertId: alertId,
@@ -244,6 +253,7 @@ PrioritizedAlert testAlert({
     microAreaId: microAreaId,
     riskLevel: riskLevel,
     locationHash: 'sem-local-00',
+    locationCell: locationCell,
     triggeredAt: triggeredAt ?? DateTime.utc(2026, 9, 11, 12),
   );
 }

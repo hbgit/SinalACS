@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:sinalacs_acs/app/acs_theme.dart';
+import 'package:sinalacs_acs/core/geo/location_cell.dart';
 import 'package:sinalacs_acs/core/network/backend_client.dart';
 import 'package:sinalacs_acs/core/network/backend_scope.dart';
 import 'package:sinalacs_acs/core/services/alert_feed.dart';
@@ -734,14 +735,6 @@ class MapScreen extends StatefulWidget {
 
   static const LatLng _fallbackCenter = LatLng(-15.7942, -47.8828);
 
-  static LatLng alertPositionFor(PrioritizedAlert alert) {
-    final hash = alert.locationHash;
-    final seed = hash.codeUnits.fold<int>(0, (sum, code) => sum + code) % 1000;
-    final lat = -15.7942 + ((seed % 7) * 0.0025);
-    final lng = -47.8828 + (((seed ~/ 7) % 9) * 0.0035);
-    return LatLng(lat, lng);
-  }
-
   @override
   State<MapScreen> createState() => _MapScreenState();
 }
@@ -755,7 +748,8 @@ class _MapScreenState extends State<MapScreen> {
   void _buildRouteFor([PrioritizedAlert? alert]) {
     final target = alert ?? _selectedAlert ?? (widget.queue.alerts.isEmpty ? null : widget.queue.alerts.first);
     final origin = widget.currentPosition;
-    if (target == null || origin == null) {
+    final destination = target == null ? null : _cellCenter(target);
+    if (target == null || origin == null || destination == null) {
       setState(() {
         _routePoints = const <LatLng>[];
         _routePlan = null;
@@ -764,7 +758,6 @@ class _MapScreenState extends State<MapScreen> {
       return;
     }
 
-    final destination = _markerPosition(target);
     final plan = _routeService.plan(origin: origin, destination: destination);
     setState(() {
       _selectedAlert = target;
@@ -788,20 +781,38 @@ class _MapScreenState extends State<MapScreen> {
                 infoWindow: const InfoWindow(title: 'Localização atual'),
               ),
             for (final alert in widget.queue.alerts)
-              Marker(
-                markerId: MarkerId('alert_${alert.alertId}'),
-                position: _markerPosition(alert),
-                icon: _markerColor(alert.riskLevel),
-                consumeTapEvents: true,
-                onTap: () {
-                  _buildRouteFor(alert);
-                  _showAlertDetail(context, alert);
-                },
-                infoWindow: InfoWindow(
-                  title: 'Paciente ${alert.patientId.substring(0, 8)}',
-                  snippet: '${_riskLabel(alert.riskLevel)} • ${_time(alert.triggeredAt)}',
+              if (_cellCenter(alert) case final center?)
+                Marker(
+                  markerId: MarkerId('alert_${alert.alertId}'),
+                  position: center,
+                  icon: _markerColor(alert.riskLevel),
+                  consumeTapEvents: true,
+                  onTap: () {
+                    _buildRouteFor(alert);
+                    _showAlertDetail(context, alert);
+                  },
+                  infoWindow: InfoWindow(
+                    title: 'Paciente ${alert.patientId.substring(0, 8)}',
+                    snippet: '${_riskLabel(alert.riskLevel)} • ${_time(alert.triggeredAt)} • área aproximada',
+                  ),
                 ),
-              ),
+          };
+
+          // Círculo de incerteza no centro da célula — nunca um ponto exato.
+          // Alertas sem célula (GPS indisponível no paciente) não ganham
+          // marcador nem círculo: `null` é estado explícito, não é
+          // arredondado para uma posição inventada.
+          final circles = <Circle>{
+            for (final alert in widget.queue.alerts)
+              if (_cellCenter(alert) case final center?)
+                Circle(
+                  circleId: CircleId('cell_${alert.alertId}'),
+                  center: center,
+                  radius: cellRadiusMeters,
+                  fillColor: _cellFillColor(alert.riskLevel),
+                  strokeColor: AcsColors.accent,
+                  strokeWidth: 1,
+                ),
           };
 
           final polylines = <Polyline>{
@@ -818,6 +829,7 @@ class _MapScreenState extends State<MapScreen> {
               ? GoogleMap(
                   initialCameraPosition: CameraPosition(target: center, zoom: 13),
                   markers: markers,
+                  circles: circles,
                   polylines: polylines,
                   myLocationEnabled: widget.currentPosition != null,
                   myLocationButtonEnabled: false,
@@ -979,6 +991,16 @@ class _MapScreenState extends State<MapScreen> {
         _ => AcsColors.accent,
       };
 
+  /// Preenchimento do círculo de incerteza — deriva de [riskLevel], não do
+  /// `BitmapDescriptor` do marcador (aquele é opaco, não dá para extrair cor
+  /// nem alpha dele).
+  Color _cellFillColor(String riskLevel) => switch (riskLevel.toLowerCase()) {
+        'red' || 'vermelho' => AcsColors.red.withValues(alpha: 0.15),
+        'yellow' || 'amarelo' => AcsColors.yellow.withValues(alpha: 0.15),
+        'green' || 'verde' => AcsColors.green.withValues(alpha: 0.15),
+        _ => AcsColors.accent.withValues(alpha: 0.15),
+      };
+
   String _riskLabel(String riskLevel) => switch (riskLevel.toLowerCase()) {
         'red' || 'vermelho' => 'Vermelho',
         'yellow' || 'amarelo' => 'Amarelo',
@@ -986,7 +1008,11 @@ class _MapScreenState extends State<MapScreen> {
         _ => 'Não classificado',
       };
 
-  LatLng _markerPosition(PrioritizedAlert alert) => MapScreen.alertPositionFor(alert);
+  /// Centro da célula do alerta, ou `null` se o dispositivo do paciente não
+  /// conseguiu GPS. `null` é um estado explícito — o mapa não deve inventar
+  /// posição (débito técnico L-05 fechado: nada aqui deriva coordenada do
+  /// hash).
+  LatLng? _cellCenter(PrioritizedAlert alert) => parseLocationCell(alert.locationCell);
 
   String _time(DateTime value) {
     final local = value.toLocal();
@@ -1121,7 +1147,9 @@ class _VisitRegistrationScreenState extends State<VisitRegistrationScreen> {
     final position = widget.currentPosition;
     if (alert == null || position == null) return false;
 
-    final destination = MapScreen.alertPositionFor(alert);
+    // Sem célula (GPS indisponível no paciente), não há destino contra o qual
+    // comparar — `arrivalStatus` já trata destino nulo como indisponível.
+    final destination = parseLocationCell(alert.locationCell);
     const routeService = RouteService();
     return routeService.arrivalStatus(origin: position, destination: destination) == ArrivalStatus.arrived;
   }
@@ -1526,12 +1554,18 @@ class GeofencingScreen extends StatelessWidget {
             ]);
           }
 
-          final destination = MapScreen.alertPositionFor(alert);
+          // Sem célula (GPS indisponível no paciente), não há destino para
+          // medir proximidade — `arrivalStatus` trata isso como indisponível,
+          // igual à falta de posição atual do ACS.
+          final destination = parseLocationCell(alert.locationCell);
           const routeService = RouteService();
           final status = routeService.arrivalStatus(origin: currentPosition, destination: destination);
-          final distance = currentPosition == null
+          final distance = currentPosition == null || destination == null
               ? null
               : routeService.distanceToDestination(origin: currentPosition!, destination: destination);
+          final unavailableMessage = currentPosition == null
+              ? 'Localização atual indisponível. O check-in não pode ser confirmado.'
+              : 'Localização do paciente indisponível. O check-in não pode ser confirmado.';
 
           return _page([
             const Icon(Icons.location_searching, size: 44),
@@ -1544,7 +1578,7 @@ class GeofencingScreen extends StatelessWidget {
             const SizedBox(height: 12),
             Text(
               switch (status) {
-                ArrivalStatus.unavailable => 'Localização atual indisponível. O check-in não pode ser confirmado.',
+                ArrivalStatus.unavailable => unavailableMessage,
                 ArrivalStatus.approaching => 'A caminho do local${distance == null ? '' : ' • ${(distance * 1000).round()} m restantes'}.',
                 ArrivalStatus.arrived => 'Local alcançado. O registro da visita está liberado.',
               },

@@ -3,11 +3,16 @@ import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:sinalacs_acs/app/app.dart';
+import 'package:sinalacs_acs/core/geo/location_cell.dart';
 import 'package:sinalacs_acs/core/services/alert_queue.dart';
 
 const _microAreaId = '00000000-0000-4000-8000-000000000003';
 const _patientId = '00000000-0000-4000-8000-000000000001';
 const _googleMapsApiKey = String.fromEnvironment('GOOGLE_MAPS_API_KEY');
+
+/// Célula de teste com centro determinístico (ver
+/// `apps/acs/test/location_cell_test.dart`).
+const _testLocationCell = '-1580:-4783';
 
 PrioritizedAlert _alert(String id) => PrioritizedAlert(
       alertId: id,
@@ -15,6 +20,7 @@ PrioritizedAlert _alert(String id) => PrioritizedAlert(
       microAreaId: _microAreaId,
       riskLevel: 'yellow',
       locationHash: 'sem-local-$id',
+      locationCell: _testLocationCell,
       triggeredAt: DateTime.utc(2026, 9, 12, 8),
     );
 
@@ -61,7 +67,7 @@ void main() {
     final queue = AlertQueue(microAreaId: _microAreaId);
     final alert = _alert('map-arrived');
     queue.upsert(alert);
-    final destination = MapScreen.alertPositionFor(alert);
+    final destination = parseLocationCell(_testLocationCell)!;
     PrioritizedAlert? selected;
 
     await tester.pumpWidget(MaterialApp(

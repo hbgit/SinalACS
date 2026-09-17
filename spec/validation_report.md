@@ -226,6 +226,24 @@ mesmo vale para a TMRAV segmentada por risco, que é a métrica *North Star* do 
   o envelope MQTT carrega apenas o hash, por minimização LGPD. RF10 e o desenho
   de privacidade estão em conflito direto — resolver exige decisão de produto,
   não só código.
+  **Atualização (Task 3, `docs/superpowers/plans/2026-09-17-decisoes-produto-pos-validacao-implementacao.md`):**
+  a decisão de produto foi tomada (célula de baixa resolução, não coordenada
+  exata) e está implementada de ponta a ponta — paciente calcula
+  `locationCell` (`apps/patient/lib/core/privacy/location_cell.dart`), o
+  backend propaga `locationCell`/`location_cell` opcional
+  (`Alert`/`AlertDelivery`/`createRedAlert`), e o mapa do ACS
+  (`apps/acs/lib/app/app.dart`) desenha um círculo de incerteza no centro da
+  célula via `parseLocationCell`
+  (`apps/acs/lib/core/geo/location_cell.dart`), sem marcador para alertas sem
+  célula. `alertPositionFor` (a fabricação por hash) foi removida. Provado por
+  `apps/acs/test/location_cell_test.dart`,
+  `apps/acs/test/mqtt_secure_client_test.dart` e
+  `apps/acs/test/map_screen_test.dart` — suíte completa do ACS roda verde
+  (`flutter analyze && flutter test`, falhas restantes são só
+  `encrypted_database_test.dart` por `libsqlite3.so` ausente neste ambiente,
+  pré-existente e não relacionado). O veredito de RF10/L-05 permanece
+  `parcial` nesta tabela porque reclassificar a matriz inteira é decisão de
+  produto separada, fora do escopo desta task.
 - **L-06 · Tela "Área" com números falsos** que contradizem o backend (142 vs 5).
 - **L-07 · Escalonamento SAMU não funciona.** O botão mais crítico da UI de
   emergência é um snackbar.

@@ -1,8 +1,8 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:sinalacs_acs/app/app.dart';
+import 'package:sinalacs_acs/core/geo/location_cell.dart';
 import 'package:sinalacs_acs/core/network/backend_client.dart';
 import 'package:sinalacs_acs/core/services/alert_feed.dart';
 import 'package:sinalacs_acs/core/services/alert_queue.dart';
@@ -567,13 +567,8 @@ void main() {
 
     testWidgets('deve informar explicitamente quando o ACS alcançou o local do paciente', (tester) async {
       final visitQueue = OfflineVisitQueue();
-      final alert = testAlert(alertId: 'alerta-geofence', riskLevel: 'yellow');
-      final hash = alert.locationHash;
-      final seed = hash.codeUnits.fold<int>(0, (sum, code) => sum + code) % 1000;
-      final destination = LatLng(
-        -15.7942 + ((seed % 7) * 0.0025),
-        -47.8828 + (((seed ~/ 7) % 9) * 0.0035),
-      );
+      final alert = testAlert(alertId: 'alerta-geofence', riskLevel: 'yellow', locationCell: testLocationCell);
+      final destination = parseLocationCell(testLocationCell)!;
 
       await tester.pumpWidget(MaterialApp(
         home: VisitRegistrationScreen(

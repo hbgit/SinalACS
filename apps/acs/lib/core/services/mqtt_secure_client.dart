@@ -120,6 +120,7 @@ class ReceivedMqttAlert {
     required this.microAreaId,
     required this.riskLevel,
     required this.locationHash,
+    this.locationCell,
     required this.triggeredAt,
   });
 
@@ -128,6 +129,12 @@ class ReceivedMqttAlert {
   final String microAreaId;
   final String riskLevel;
   final String locationHash;
+
+  /// Célula de baixa resolução (`"latCell:lngCell"`) calculada no dispositivo
+  /// do paciente — `null` quando o GPS do paciente não estava disponível.
+  /// O ACS só desenha um círculo de incerteza quando isto existe; nunca
+  /// fabrica posição a partir de [locationHash].
+  final String? locationCell;
   final DateTime triggeredAt;
 
   static ReceivedMqttAlert? tryParse(String body) {
@@ -144,6 +151,7 @@ class ReceivedMqttAlert {
         microAreaId: json['micro_area_id'] as String,
         riskLevel: json['risk_level'] as String,
         locationHash: (json['location_hash'] as String?) ?? (json['location_hash'] ?? 'unknown') as String,
+        locationCell: json['location_cell'] as String?,
         triggeredAt: DateTime.parse(triggeredAtRaw),
       );
     } on FormatException {
@@ -163,6 +171,7 @@ class MqttSecureAlertPayload {
     required this.longitude,
     required this.microAreaId,
     String? locationHash,
+    this.locationCell,
     String? timestampOverride,
   })  : locationHash = locationHash ?? _defaultLocationHash(latitude, longitude),
         timestamp = timestampOverride ?? DateTime.now().toUtc().toIso8601String();
@@ -174,6 +183,11 @@ class MqttSecureAlertPayload {
   final double longitude;
   final String microAreaId;
   final String locationHash;
+
+  /// Só preenchido quando o teste passa um valor explícito — nada aqui
+  /// fabrica uma célula a partir de latitude/longitude, esse cálculo é do
+  /// dispositivo do paciente (`apps/patient/lib/core/privacy/location_cell.dart`).
+  final String? locationCell;
   final String timestamp;
 
   Map<String, dynamic> toJson() {
@@ -186,6 +200,7 @@ class MqttSecureAlertPayload {
       'longitude': longitude,
       'micro_area_id': microAreaId,
       'location_hash': locationHash,
+      if (locationCell != null) 'location_cell': locationCell,
       'triggered_at': timestamp,
       'timestamp': timestamp,
       // Namespace do backend (AlertDelivery.topicPrefix) e da ACL do broker.
