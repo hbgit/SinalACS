@@ -12,6 +12,7 @@ class FakePatientBackend implements PatientBackend {
     this.risk = RiskLevel.green,
     this.loginFailure,
     this.alertFailure,
+    this.enrollmentFailure,
   });
 
   /// Risco que o "servidor" devolve. A tela não pode derivá-lo por conta própria.
@@ -19,12 +20,14 @@ class FakePatientBackend implements PatientBackend {
 
   BackendFailure? loginFailure;
   BackendFailure? alertFailure;
+  BackendFailure? enrollmentFailure;
 
   /// Argumentos recebidos, para as asserções.
   final List<Map<String, bool>> triageCalls = <Map<String, bool>>[];
   final List<String> idempotencyKeys = <String>[];
   final List<String> locationHashes = <String>[];
   final List<String?> locationCells = <String?>[];
+  final List<Map<String, Object>> enrollmentCalls = <Map<String, Object>>[];
   int loginCount = 0;
   bool closed = false;
 
@@ -98,6 +101,34 @@ class FakePatientBackend implements PatientBackend {
       status: AlertStatus.pending,
       published: true,
     );
+  }
+
+  @override
+  Future<AuthSession> completeEnrollment({
+    required String token,
+    required bool healthDataConsent,
+    required bool remindersConsent,
+    required bool pushConsent,
+  }) async {
+    enrollmentCalls.add(<String, Object>{
+      'token': token,
+      'healthDataConsent': healthDataConsent,
+      'remindersConsent': remindersConsent,
+      'pushConsent': pushConsent,
+    });
+    final failure = enrollmentFailure;
+    if (failure != null) throw failure;
+
+    final session = AuthSession(
+      accessToken: 'token-de-onboarding',
+      tokenType: 'Bearer',
+      userId: '00000000-0000-4000-8000-000000000002',
+      role: 'patient',
+      microAreaId: '00000000-0000-4000-8000-000000000003',
+      expiresAt: DateTime.now().toUtc().add(const Duration(minutes: 15)),
+    );
+    _session = session;
+    return session;
   }
 
   @override

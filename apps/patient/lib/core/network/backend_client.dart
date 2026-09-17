@@ -49,6 +49,15 @@ abstract class PatientBackend {
     String? locationCell,
   });
 
+  /// Conclui o onboarding a partir de um convite do ACS, gravando os 3
+  /// consentimentos por finalidade (LGPD-RF02) e ativando a sessão.
+  Future<AuthSession> completeEnrollment({
+    required String token,
+    required bool healthDataConsent,
+    required bool remindersConsent,
+    required bool pushConsent,
+  });
+
   void close();
 }
 
@@ -165,6 +174,34 @@ class BackendClient implements PatientBackend {
     );
   }
 
+  /// Conclui o onboarding a partir de um convite do ACS. Ver ressalvas em
+  /// [AuthSession] — a sessão emitida aqui é a mesma forma de [login].
+  @override
+  Future<AuthSession> completeEnrollment({
+    required String token,
+    required bool healthDataConsent,
+    required bool remindersConsent,
+    required bool pushConsent,
+  }) async {
+    final result = await _guard(
+      () => _client.onboarding.completeEnrollment(
+        token: token,
+        healthDataConsent: healthDataConsent,
+        remindersConsent: remindersConsent,
+        pushConsent: pushConsent,
+      ),
+    );
+    final session = AuthSession.tryParse(result.accessToken, result.tokenType);
+    if (session == null) {
+      throw const BackendFailure(
+        'O servidor devolveu um token que o aplicativo não entendeu.',
+        isRecoverable: false,
+      );
+    }
+    _session = session;
+    return session;
+  }
+
   @override
   void close() => _client.close();
 
@@ -185,6 +222,10 @@ class BackendClient implements PatientBackend {
         isRecoverable: false,
       );
     } on AlertValidationException catch (error) {
+      throw BackendFailure(error.message, isRecoverable: false);
+    } on EnrollmentException catch (error) {
+      // Token inválido/expirado/consumido ou consentimento obrigatório
+      // recusado — nenhum caso é resolvido tentando de novo sem mudar nada.
       throw BackendFailure(error.message, isRecoverable: false);
     } on AlertDispatchUnavailableException {
       // O alerta FOI gravado; só a publicação imediata falhou. Dizer que

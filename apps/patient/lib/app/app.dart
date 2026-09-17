@@ -200,11 +200,208 @@ class _PatientLoginScreenState extends State<PatientLoginScreen> {
                         SizedBox(
                           width: double.infinity,
                           child: OutlinedButton.icon(
-                            onPressed: () => _showPrototypeMessage(context, 'Leitura de QR Code será disponibilizada com o onboarding integrado.'),
+                            key: const Key('start_onboarding_button'),
+                            onPressed: () => Navigator.of(context).push(
+                              MaterialPageRoute(builder: (_) => const OnboardingScreen()),
+                            ),
                             icon: const Icon(Icons.qr_code_scanner_outlined),
                             label: const Text('Escanear QR Code do ACS'),
                           ),
                         ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Tela de onboarding: consome o convite de uso único gerado pelo ACS e
+/// grava os 3 consentimentos por finalidade (LGPD-RF02) antes de ativar a
+/// sessão do paciente (RF02).
+///
+/// O campo de texto recebe o valor do token do QR Code — a leitura por
+/// câmera é apenas um jeito alternativo de preencher o mesmo campo, não uma
+/// dependência nova desta tela (fora de escopo aqui).
+class OnboardingScreen extends StatefulWidget {
+  const OnboardingScreen({super.key});
+
+  @override
+  State<OnboardingScreen> createState() => _OnboardingScreenState();
+}
+
+class _OnboardingScreenState extends State<OnboardingScreen> {
+  final _tokenController = TextEditingController();
+
+  // Nenhum consentimento vem pré-marcado: a decisão de produto (§2.2) exige
+  // aceite ou recusa explícitos para cada finalidade, inclusive a obrigatória.
+  bool _healthDataConsent = false;
+  bool _remindersConsent = false;
+  bool _pushConsent = false;
+
+  bool _busy = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _tokenController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _complete() async {
+    final token = _tokenController.text.trim();
+    if (token.isEmpty) return;
+
+    // Verificação client-side do consentimento obrigatório: evita uma
+    // chamada de rede que o backend rejeitaria de qualquer forma, com a
+    // mesma mensagem que `OnboardingService.completeEnrollment` usa.
+    if (!_healthDataConsent) {
+      setState(() {
+        _error = 'O consentimento para processamento de dados de saúde é obrigatório.';
+      });
+      return;
+    }
+
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+
+    try {
+      await BackendScope.of(context).completeEnrollment(
+        token: token,
+        healthDataConsent: _healthDataConsent,
+        remindersConsent: _remindersConsent,
+        pushConsent: _pushConsent,
+      );
+      if (!mounted) return;
+      // Mesmo caminho que `_PatientLoginScreenState._enter()` já usa para
+      // entrar na navegação principal — a sessão já está em `BackendScope`,
+      // não há estado novo para duplicar aqui.
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(
+          builder: (_) => const PatientHomeShell(
+            initialDestination: PatientDestination.triage,
+          ),
+        ),
+      );
+    } on BackendFailure catch (failure) {
+      if (!mounted) return;
+      setState(() {
+        _busy = false;
+        _error = failure.message;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final tokenEmpty = _tokenController.text.trim().isEmpty;
+    return Scaffold(
+      appBar: const _PatientHeader(
+        eyebrow: 'Convite do ACS',
+        title: 'Concluir cadastro',
+      ),
+      body: SafeArea(
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 420),
+            child: ListView(
+              padding: const EdgeInsets.all(24),
+              children: [
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        const Text(
+                          'Cole ou digite o código do convite recebido do agente '
+                          'comunitário de saúde. A leitura do QR Code preenche o '
+                          'mesmo campo.',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(color: Colors.white70),
+                        ),
+                        const SizedBox(height: 20),
+                        TextField(
+                          key: const Key('onboarding_token_field'),
+                          controller: _tokenController,
+                          onChanged: (_) => setState(() {}),
+                          decoration: const InputDecoration(labelText: 'Código do convite'),
+                        ),
+                        const SizedBox(height: 20),
+                        const Align(
+                          alignment: Alignment.centerLeft,
+                          child: Text('Consentimentos', style: TextStyle(fontWeight: FontWeight.bold)),
+                        ),
+                        CheckboxListTile(
+                          key: const Key('onboarding_consent_health'),
+                          value: _healthDataConsent,
+                          onChanged: (value) => setState(() => _healthDataConsent = value ?? false),
+                          controlAffinity: ListTileControlAffinity.leading,
+                          title: const Text(
+                            'Processamento de dados de saúde para triagem/alerta (obrigatório)',
+                          ),
+                        ),
+                        CheckboxListTile(
+                          key: const Key('onboarding_consent_reminders'),
+                          value: _remindersConsent,
+                          onChanged: (value) => setState(() => _remindersConsent = value ?? false),
+                          controlAffinity: ListTileControlAffinity.leading,
+                          title: const Text('Envio de lembretes locais'),
+                        ),
+                        CheckboxListTile(
+                          key: const Key('onboarding_consent_push'),
+                          value: _pushConsent,
+                          onChanged: (value) => setState(() => _pushConsent = value ?? false),
+                          controlAffinity: ListTileControlAffinity.leading,
+                          title: const Text('Recebimento de avisos segmentados por push'),
+                        ),
+                        const SizedBox(height: 20),
+                        Semantics(
+                          label: 'Concluir cadastro',
+                          button: true,
+                          container: true,
+                          child: SizedBox(
+                            width: double.infinity,
+                            child: FilledButton(
+                              key: const Key('complete_enrollment_button'),
+                              onPressed: (_busy || tokenEmpty) ? null : _complete,
+                              style: FilledButton.styleFrom(minimumSize: const Size(48, 52)),
+                              child: _busy
+                                  ? const SizedBox(
+                                      height: 22,
+                                      width: 22,
+                                      child: CircularProgressIndicator(strokeWidth: 2),
+                                    )
+                                  : const Text('Concluir cadastro'),
+                            ),
+                          ),
+                        ),
+                        if (_error != null)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 16),
+                            // SC 4.1.3: mesmo padrão do erro de login — sem
+                            // `liveRegion` um leitor de tela não saberia que o
+                            // onboarding falhou.
+                            child: Semantics(
+                              liveRegion: true,
+                              child: Text(
+                                key: const Key('onboarding_error'),
+                                _error!,
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(
+                                  color: PatientColors.dangerOnSurface,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                          ),
                       ],
                     ),
                   ),
