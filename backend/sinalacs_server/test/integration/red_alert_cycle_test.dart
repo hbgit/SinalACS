@@ -2,6 +2,7 @@ import 'package:serverpod/serverpod.dart';
 import 'package:sinalacs_server/src/application/alerts/red_alert_service.dart';
 import 'package:sinalacs_server/src/config/app_config.dart';
 import 'package:sinalacs_server/src/domain/entities/alert_delivery.dart';
+import 'package:sinalacs_server/src/endpoints/health_endpoint.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
 import 'package:sinalacs_server/src/runtime/alert_runtime.dart';
 import 'package:test/test.dart';
@@ -142,6 +143,18 @@ void main() {
       expect(health.mqttConnected, isFalse);
     });
 
+    test('a sonda de saúde segue respondendo ok quando a verificação do banco falha',
+        () async {
+      final endpoint = HealthEndpoint(
+        databaseProbe: (_) async => throw Exception('db indisponível'),
+      );
+
+      final health = await endpoint.check(sessionBuilder.build());
+
+      expect(health.status, 'ok');
+      expect(health.dbConnected, isFalse);
+    });
+
     test('a triagem classifica de forma determinística', () async {
       final session = sessionBuilder.build();
       await _seed(session);
@@ -237,6 +250,38 @@ void main() {
       expect(confirmado.acknowledged, isTrue);
       expect(confirmado.status, AlertStatus.acknowledged);
       expect(await AlertDeliveryRecord.db.find(session), hasLength(1));
+    });
+
+    test('confirmar um alerta inexistente devolve acknowledged false, sem erro',
+        () async {
+      await _seed(sessionBuilder.build());
+      final tokenAcs =
+          await endpoints.auth.developmentLogin(sessionBuilder, role: 'acs');
+
+      final ack = await endpoints.alerts.acknowledge(
+        sessionBuilder,
+        accessToken: tokenAcs.accessToken,
+        alertId: '00000000-0000-4000-8000-0000000000ff',
+      );
+
+      expect(ack.alertId, '00000000-0000-4000-8000-0000000000ff');
+      expect(ack.acknowledged, isFalse);
+      expect(ack.status, isNull);
+    });
+
+    test('confirmar com alertId vazio é rejeitado pelo endpoint', () async {
+      await _seed(sessionBuilder.build());
+      final tokenAcs =
+          await endpoints.auth.developmentLogin(sessionBuilder, role: 'acs');
+
+      await expectLater(
+        endpoints.alerts.acknowledge(
+          sessionBuilder,
+          accessToken: tokenAcs.accessToken,
+          alertId: '   ',
+        ),
+        throwsA(isA<AlertValidationException>()),
+      );
     });
 
     test('com o broker fora, o alerta é gravado e a entrega fica pendente',

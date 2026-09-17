@@ -44,10 +44,14 @@ fi
 
 # As senhas do broker são geradas por máquina, então os apps não podem contar
 # com o default compilado: o live_check recebe a senha real por argumento.
+existing_google_maps_api_key="${GOOGLE_MAPS_API_KEY:-}"
 set -a
 # shellcheck disable=SC1091
 source "$repo_root/.env"
 set +a
+if [[ -n "$existing_google_maps_api_key" ]]; then
+  GOOGLE_MAPS_API_KEY="$existing_google_maps_api_key"
+fi
 
 echo '== subindo a stack =='
 docker compose up --build -d
@@ -83,13 +87,21 @@ echo '== ACS: ciclo completo (RPC + MQTT/TLS + sincronização de visita) =='
 if [[ "$run_emulator" -eq 1 ]]; then
   echo
   echo '== testes de integração no dispositivo =='
+  (cd apps/patient && flutter pub get >/dev/null)
+  (cd apps/acs && flutter pub get >/dev/null)
+  (cd apps/admin && flutter pub get >/dev/null)
   # O emulador alcança o host da máquina por 10.0.2.2.
-  (cd apps/patient && flutter test integration_test \
+  (cd apps/patient && flutter test integration_test -d emulator-5554 \
       --dart-define=SINALACS_HOST=http://10.0.2.2:8080/)
-  (cd apps/acs && flutter test integration_test \
-      --dart-define=SINALACS_HOST=http://10.0.2.2:8080/ \
-      --dart-define=SINALACS_MQTT_HOST=10.0.2.2 \
-      --dart-define=SINALACS_MQTT_PASSWORD="$MQTT_ACS_PASSWORD")
+  acs_cmd=(flutter test integration_test -d emulator-5554
+    --dart-define=SINALACS_HOST=http://10.0.2.2:8080/
+    --dart-define=SINALACS_MQTT_HOST=10.0.2.2
+    --dart-define=SINALACS_MQTT_PASSWORD="$MQTT_ACS_PASSWORD")
+  if [[ -n "${GOOGLE_MAPS_API_KEY:-}" ]]; then
+    acs_cmd+=(--dart-define=GOOGLE_MAPS_API_KEY="$GOOGLE_MAPS_API_KEY")
+  fi
+  (cd apps/acs && "${acs_cmd[@]}")
+  (cd apps/admin && flutter test integration_test -d emulator-5554)
 fi
 
 echo

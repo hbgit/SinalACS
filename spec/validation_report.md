@@ -232,6 +232,15 @@ mesmo vale para a TMRAV segmentada por risco, que é a métrica *North Star* do 
 
 ### P2 — dívida de qualidade e processo
 
+**Atualização (Task 7, 2026-09-16):** L-10, L-11, L-12 e L-13 passaram a ter
+endereçamento de código. A CI ganhou um job de E2E Android com
+`./scripts/qa/e2e.sh --emulator`, o harness passou a incluir o admin e a fixar
+`-d emulator-5554`, a cobertura ganhou script/artifacts dedicados e os ramos de
+backend listados em L-13 receberam testes focados. As métricas RNF01/RNF02
+agora têm coleta automatizada em `scripts/qa/measure_latency.dart`, mas os
+valores continuam dependentes de stack/broker disponíveis no ambiente em que o
+script rodar.
+
 - **L-09 · RNF06 (RBAC) ausente.** Todo endpoint continua `requireLogin => false`,
   com checagem de papel ad-hoc dentro de cada serviço. `triage.evaluate` deixou de
   ser público (ver L-04), mas isso foi um caso isolado, não uma camada de

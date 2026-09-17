@@ -121,6 +121,76 @@ jobs:
       - run: flutter analyze
       - run: flutter test
 
+  coverage-report:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: 3.12.2
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.44.8'
+      - name: Dependência nativa do SQLCipher/SQLite no Linux
+        run: sudo apt-get update && sudo apt-get install -y libsqlite3-0
+      - name: Bootstrap do ambiente local de testes
+        run: ./scripts/dev/bootstrap_env.sh
+      - name: Banco de teste do backend
+        run: docker compose --profile test up -d postgres-test
+      - name: Mede cobertura dos quatro pacotes
+        run: ./scripts/qa/measure_coverage.sh
+      - name: Derruba banco de teste
+        if: always()
+        run: docker compose --profile test down
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-reports
+          path: build/qa/coverage
+
+  android-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.44.8'
+      - name: Bootstrap da stack local
+        run: ./scripts/dev/bootstrap_env.sh
+      - name: E2E no emulador Android
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 36
+          arch: x86_64
+          profile: pixel_7
+          disable-animations: true
+          emulator-options: -no-window -no-audio -gpu swiftshader_indirect -no-snapshot -no-boot-anim
+          script: |
+            trap 'docker compose down' EXIT
+            if [[ -z "${GOOGLE_MAPS_API_KEY:-}" ]]; then
+              echo 'erro: GOOGLE_MAPS_API_KEY é obrigatória para o E2E Android.' >&2
+              exit 1
+            fi
+            set -a
+            source .env
+            set +a
+            ./scripts/qa/e2e.sh --emulator --keep
+            dart run scripts/qa/measure_latency.dart \
+              --mqtt-password "$MQTT_ACS_PASSWORD" \
+              --output build/qa/latency/metrics.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: android-e2e-metrics
+          path: build/qa/latency
+
   # Único job do repositório que executa o Gradle. `flutter analyze` e
   # `flutter test` não enxergam namespace inconsistente, AGP/Kotlin
   # incompatíveis, MainActivity em pacote errado nem merge de manifest

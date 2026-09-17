@@ -20,6 +20,7 @@ const _ubsId = '00000000-0000-4000-8000-000000000004';
 
 const _patientInAreaId = '00000000-0000-4000-8000-000000000005';
 const _patientOutsideAreaId = '00000000-0000-4000-8000-000000000009';
+const _unknownPatientId = '00000000-0000-4000-8000-0000000000ee';
 
 AppConfig _config() => AppConfig(
       mqttBroker: 'localhost:1883',
@@ -118,6 +119,21 @@ Future<void> _seed(Session session) async {
   ]);
 }
 
+VisitSyncEntry _visitEntry({
+  required String localId,
+  required String patientId,
+  required int version,
+}) =>
+    VisitSyncEntry(
+      localId: localId,
+      patientId: patientId,
+      scheduledAt: DateTime.utc(2026, 9, 12, 9),
+      status: 'realizada',
+      riskLevelBefore: RiskLevel.green,
+      notes: const {},
+      version: version,
+    );
+
 void main() {
   withServerpod('Dado o diretório de pacientes e a territorialização do sync',
       (sessionBuilder, endpoints) {
@@ -156,6 +172,18 @@ void main() {
       expect(rows.single.userId, UuidValue.fromString(_acsId));
       // A trilha não guarda IP em claro — nem que seja o do harness de teste.
       expect(rows.single.ipHash, isNotEmpty);
+    });
+
+    test('patients.listMicroArea rejeita token inválido', () async {
+      await _seed(sessionBuilder.build());
+
+      await expectLater(
+        endpoints.patients.listMicroArea(
+          sessionBuilder,
+          accessToken: 'token-invalido',
+        ),
+        throwsA(isA<AlertPermissionException>()),
+      );
     });
 
     test('duas escritas reais na trilha ficam encadeadas e passam na verificação',
@@ -232,6 +260,86 @@ void main() {
       );
       expect(audited, hasLength(1));
       expect(audited.single.resourceId, UuidValue.fromString(_patientOutsideAreaId));
+    });
+
+    test('visits.sync devolve lista vazia quando não há visitas', () async {
+      await _seed(sessionBuilder.build());
+      final login =
+          await endpoints.auth.developmentLogin(sessionBuilder, role: 'acs');
+
+      final results = await endpoints.visits.sync(
+        sessionBuilder,
+        accessToken: login.accessToken,
+        visits: const [],
+      );
+
+      expect(results, isEmpty);
+    });
+
+    test('visits.sync expõe synced, conflict e error pelo endpoint', () async {
+      final session = sessionBuilder.build();
+      await _seed(session);
+      final login =
+          await endpoints.auth.developmentLogin(sessionBuilder, role: 'acs');
+
+      final synced = await endpoints.visits.sync(
+        sessionBuilder,
+        accessToken: login.accessToken,
+        visits: [
+          _visitEntry(
+            localId: '00000000-0000-4000-8000-0000000000c1',
+            patientId: _patientInAreaId,
+            version: 0,
+          ),
+        ],
+      );
+      expect(synced.single.syncStatus, SyncStatus.synced);
+      expect(synced.single.serverVersion, 1);
+
+      final update = await endpoints.visits.sync(
+        sessionBuilder,
+        accessToken: login.accessToken,
+        visits: [
+          _visitEntry(
+            localId: '00000000-0000-4000-8000-0000000000c1',
+            patientId: _patientInAreaId,
+            version: 0,
+          ),
+        ],
+      );
+      expect(update.single.syncStatus, SyncStatus.synced);
+      expect(update.single.serverVersion, 2);
+
+      final conflict = await endpoints.visits.sync(
+        sessionBuilder,
+        accessToken: login.accessToken,
+        visits: [
+          _visitEntry(
+            localId: '00000000-0000-4000-8000-0000000000c1',
+            patientId: _patientInAreaId,
+            version: 0,
+          ),
+        ],
+      );
+      expect(conflict.single.syncStatus, SyncStatus.conflict);
+      expect(conflict.single.serverVersion, 2);
+
+      final error = await endpoints.visits.sync(
+        sessionBuilder,
+        accessToken: login.accessToken,
+        visits: [
+          _visitEntry(
+            localId: '00000000-0000-4000-8000-0000000000c2',
+            patientId: _unknownPatientId,
+            version: 0,
+          ),
+        ],
+      );
+      expect(error.single.syncStatus, SyncStatus.error);
+      expect(error.single.message, contains('paciente não encontrado'));
+
+      final rows = await Visit.db.find(session);
+      expect(rows, hasLength(1), reason: 'somente a visita válida deve persistir');
     });
   });
 }

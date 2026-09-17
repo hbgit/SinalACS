@@ -18,6 +18,7 @@
 library;
 
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:sinalacs_acs/core/network/backend_client.dart';
@@ -32,10 +33,30 @@ String _arg(List<String> args, String name, String fallback) {
   return index >= 0 && index + 1 < args.length ? args[index + 1] : fallback;
 }
 
+int _intArg(List<String> args, String name, int fallback) {
+  final value = _arg(args, name, '$fallback');
+  return int.tryParse(value) ?? fallback;
+}
+
+void _emitMetric(
+  bool enabled,
+  String event, {
+  Map<String, Object?> extra = const {},
+}) {
+  if (!enabled) return;
+  stdout.writeln('METRIC ${jsonEncode(<String, Object?>{
+    'event': event,
+    'at': DateTime.now().toUtc().toIso8601String(),
+    ...extra,
+  })}');
+}
+
 Future<void> main(List<String> args) async {
   final host = _arg(args, 'host', 'http://localhost:8080/');
   final brokerHost = _arg(args, 'broker', 'localhost');
   final caPath = _arg(args, 'ca', '../../infra/docker/mosquitto/runtime/certs/ca.crt');
+  final emitMetrics = args.contains('--emit-metrics');
+  final visitCount = _intArg(args, 'visit-count', 1).clamp(1, 1000);
 
   // A senha do broker não tem default no BackendConfig: é um segredo por
   // máquina. Sem esta guarda, quem rodasse à mão ganharia um timeout mudo em
@@ -93,6 +114,11 @@ Future<void> main(List<String> args) async {
 
     // Dispara pelo lado do paciente.
     final patientLogin = await patientClient.auth.developmentLogin(role: 'patient');
+    _emitMetric(
+      emitMetrics,
+      'alert_triggered',
+      extra: <String, Object?>{'visit_count': visitCount},
+    );
     final created = await patientClient.alerts.createRedAlert(
       accessToken: patientLogin.accessToken,
       idempotencyKey: 'acs-live-check-${DateTime.now().millisecondsSinceEpoch}',
@@ -108,6 +134,11 @@ Future<void> main(List<String> args) async {
     if (alert == null) {
       throw TimeoutException('o alerta ${created.alertId} não chegou pelo broker');
     }
+    _emitMetric(
+      emitMetrics,
+      'alert_received_acs',
+      extra: <String, Object?>{'visit_count': visitCount},
+    );
     stdout.writeln('  recebido pelo MQTT . ${alert.alertId} risco=${alert.riskLevel}');
     final backlog = inbox.length - 1;
     if (backlog > 0) {
@@ -129,14 +160,32 @@ Future<void> main(List<String> args) async {
       store: InMemoryVisitStore(),
       synchronizer: BackendVisitSynchronizer(backend: backend),
     );
-    await queue.add(OfflineVisitRecord(
-      patientId: alert.patientId,
-      risk: alert.riskLevel,
-      status: 'PENDENTE',
-      outcome: 'realizada',
-    ));
+    for (var index = 0; index < visitCount; index++) {
+      await queue.add(OfflineVisitRecord(
+        patientId: alert.patientId,
+        risk: alert.riskLevel,
+        status: 'PENDENTE',
+        outcome: 'realizada',
+        notes: visitCount == 1 ? '' : 'lote ${index + 1}/$visitCount',
+      ));
+    }
 
+    _emitMetric(
+      emitMetrics,
+      'sync_attempt',
+      extra: <String, Object?>{'visit_count': visitCount},
+    );
     final synced = await queue.sync();
+    _emitMetric(
+      emitMetrics,
+      'sync_result',
+      extra: <String, Object?>{
+        'visit_count': visitCount,
+        'kind': synced.kind.name,
+        'processed': synced.processed,
+        'pending_count': queue.pendingCount,
+      },
+    );
     stdout.writeln('  visita sincronizada  ${synced.kind.name} '
         'processadas=${synced.processed} pendentes=${queue.pendingCount}');
     if (synced.kind != SyncOutcomeKind.synced || queue.pendingCount != 0) {
