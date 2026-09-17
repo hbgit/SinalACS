@@ -1,5 +1,15 @@
 # Especificação Técnica de Arquitetura (SinalACS)
 
+> **Nota de leitura — documento de design original, anterior à migração para
+> Serverpod.** Este documento descreve a arquitetura como planejada antes da
+> implementação (backend `dart:io` roteado à mão, sincronização client-side
+> isolada). O backend real hoje é Serverpod (workspace `backend/`), já
+> conectado aos dois apps Flutter via `sinalacs_client`, com a fila de
+> sincronização integrada ao servidor (ver `visits.sync` e M2.4 em
+> [PROGRESS.md](../PROGRESS.md)). Para o estado atual de arquitetura e
+> comandos, use [CLAUDE.md](../CLAUDE.md), [backend/CLAUDE.md](../backend/CLAUDE.md)
+> e [apps/CLAUDE.md](../apps/CLAUDE.md).
+
 ## 1. Análise de Requisitos e Domínio
 
 **Resumo Executivo:**
@@ -82,7 +92,7 @@ classDiagram
 * **Módulo de Triagem (Frontend):** Acoplamento aferente nulo. Motor determinístico sem dependência de IO externo.
 
 
-* **Módulo de Sincronização (Backend/Client):** Alto acoplamento eferente com a base local (`sqflite`) e central (`PostgreSQL`). Nota: o backend real acessa o Postgres via driver `postgres` puro (sem ORM); o motor de sincronização em si ainda roda só client-side e não está conectado ao backend real (ver `PROGRESS.md`).
+* **Módulo de Sincronização (Backend/Client):** Alto acoplamento eferente com a base local (`sqflite`) e central (`PostgreSQL`). Nota: desatualizado desde a migração para Serverpod — o backend acessa o Postgres via ORM do Serverpod (não driver `postgres` puro), e o motor de sincronização do ACS está conectado ao backend real via `visits.sync` (ver [PROGRESS.md](../PROGRESS.md), M2.4).
 
 
 

@@ -7,7 +7,10 @@ Este documento consolida o que foi implementado no repositório em relação às
 > reescritas: elas descrevem o servidor `dart:io` roteado à mão, e seus links
 > para `backend/bin/`, `backend/lib/` e `backend/test/` apontam para código que
 > **não existe mais na árvore atual** — só no histórico do git. O mesmo vale para
-> a seção de preparação de deploy, escrita para aquele servidor.
+> a seção de preparação de deploy, escrita para aquele servidor. Pela mesma
+> razão, contagens pontuais citadas nessas entradas (jobs de CI, número de
+> testes) refletem o momento em que cada trecho foi escrito, não o estado atual
+> do [.github/workflows/ci.yml](.github/workflows/ci.yml) ou da suíte de testes.
 >
 > O estado atual está descrito na seção
 > ["Migração para Serverpod"](#migração-para-serverpod) ao final deste documento,
@@ -579,10 +582,10 @@ fecha esse buraco.
 | Item | Situação |
 |---|---|
 | Servidor | Serverpod 3.4.13, workspace Dart em `backend/` com `sinalacs_server` e `sinalacs_client` |
-| Schema | 11 tabelas como modelos `.spy.yaml`, mais `alert_idempotency_keys`; migrações geradas e aplicadas pelo servidor no boot |
-| Endpoints | RPC: `alerts.createRedAlert`, `alerts.acknowledge`, `auth.developmentLogin`, `health.check`, `triage.evaluate` |
-| Testes | 25 verdes — 16 unitários herméticos e 9 de integração sobre o harness `withServerpod` |
-| Cliente gerado | Publicado em `backend/sinalacs_client`, **ainda não consumido pelos apps Flutter** |
+| Schema | 13 tabelas como modelos `.spy.yaml` (as 11 originais mais `alert_idempotency_keys` e `alert_outbox` — ver "cadeia de hash" e "outbox pattern" abaixo); migrações geradas e aplicadas pelo servidor no boot |
+| Endpoints | RPC: `alerts.createRedAlert`, `alerts.acknowledge`, `auth.developmentLogin`, `health.check`, `triage.evaluate`, `patients.listMicroArea`, `visits.sync` |
+| Testes | 16 arquivos (12 unitários herméticos, 4 de integração) sobre o harness `withServerpod`; contagem estática de `test(` no código-fonte, não uma execução nesta revisão — rodar `cd backend/sinalacs_server && dart test` contra a stack local para o número de casos passando |
+| Cliente gerado | Publicado em `backend/sinalacs_client`; **paciente e ACS já o consomem** por dependência local (ver M2.4 acima); `apps/admin` ainda não |
 
 ### Decisões de schema que valem registro
 
@@ -646,9 +649,12 @@ O backend `dart:io` foi removido da árvore; o histórico do git o preserva.
   apps já consomem `sinalacs_client` por dependência de caminho e falam com o
   backend real (ver M2.4 acima) — `RiskLevel` atravessa a fronteira desde a
   triagem.
-- **Risco residual de entrega.** MQTT não participa da transação: se a publicação
-  tem êxito e o commit falha, o alerta chega ao ACS sem linha no banco. Raro e
-  erra para o lado seguro quanto à INV-03; fechar por completo exigiria outbox
-  pattern.
+- ~~**Risco residual de entrega.** MQTT não participa da transação: se a
+  publicação tem êxito e o commit falha, o alerta chega ao ACS sem linha no
+  banco... fechar por completo exigiria outbox pattern.~~ Desatualizado: a
+  tabela `alert_outbox` e `AlertOutboxDispatcher`
+  (`backend/sinalacs_server/lib/src/application/alerts/alert_outbox_dispatcher.dart`)
+  implementam o outbox pattern, com teste próprio em
+  `test/unit/alert_outbox_dispatcher_test.dart`.
 - **Deploy não executado.** O runbook em [backend/DEPLOY.md](backend/DEPLOY.md)
   foi reescrito para Serverpod, mas continua sem ter sido rodado.

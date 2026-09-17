@@ -64,6 +64,9 @@ class BackendClient implements AcsBackend {
     return current != null && !current.isExpired();
   }
 
+  @override
+  Future<ServiceHealth> health() => _guard(() => _client.health.check());
+
   /// Token válido para as chamadas autenticadas.
   ///
   /// Reautentica sozinho quando o token de 15 minutos expirou — sem isso, um
@@ -77,9 +80,6 @@ class BackendClient implements AcsBackend {
     }
     return current.accessToken;
   }
-
-  @override
-  Future<ServiceHealth> health() => _guard(() => _client.health.check());
 
   /// Autentica como ACS. Ver ressalvas em [AuthSession].
   @override
