@@ -37,16 +37,20 @@ A decisão arquitetural é usar Postgres + Mosquitto + Traefik como reverse prox
 
 `spec/validation_report.md` identificou lacunas que exigiam decisão de
 arquitetura antes de qualquer código novo. As decisões abaixo estão
-detalhadas em `docs/superpowers/specs/2026-09-16-decisoes-produto-pos-validacao.md`
-e ainda **não foram implementadas**:
+detalhadas em `docs/superpowers/specs/2026-09-16-decisoes-produto-pos-validacao.md`.
+A de criptografia de colunas (§6) já foi implementada; as demais ainda
+**não foram**:
 
-* **Criptografia de colunas no PostgreSQL (RNF03/INV-04):** decidido usar
-  criptografia de aplicação (AES-256-GCM em Dart, na camada de repositório),
+* **Criptografia de colunas no PostgreSQL (RNF03/INV-04, §6 — implementada):**
+  decidido usar criptografia de aplicação (AES-256-GCM em Dart, na camada de
+  repositório, via `package:cryptography` ^2.7.0 — `backend/sinalacs_server/lib/src/infrastructure/crypto/health_data_cipher.dart`),
   não `pgcrypto` em SQL — evita que o dado de saúde em texto claro passe pelo
-  `serverpod_query_log` antes de virar ciphertext. A chave segue o mesmo
-  padrão de segredo por variável de ambiente já usado para `JWT_SECRET`/
-  `AUDIT_CHAIN_SECRET` (gerado por `scripts/dev/bootstrap_env.sh`), sem
-  introduzir um KMS externo nesta fase.
+  `serverpod_query_log` antes de virar ciphertext. A chave (`HEALTH_DATA_ENCRYPTION_KEY`,
+  hex de 64 caracteres) segue o mesmo padrão de segredo por variável de
+  ambiente já usado para `JWT_SECRET`/`AUDIT_CHAIN_SECRET` — gerada por
+  `scripts/dev/bootstrap_env.sh`, opcional em `development` (cai num valor
+  público conhecido) e obrigatória fora dele —, sem introduzir um KMS externo
+  nesta fase.
 * **Push segmentado (RF14):** Firebase Cloud Messaging é o provedor
   escolhido, mas a decisão está **bloqueada externamente** — não existe
   projeto Firebase provisionado neste repositório.

@@ -45,11 +45,14 @@ reference for every variable.
 
 The script generates random per-machine values for `POSTGRES_PASSWORD`,
 `TEST_DATABASE_PASSWORD`, `MQTT_BACKEND_PASSWORD`, `MQTT_ACS_PASSWORD`,
-`JWT_SECRET` and `AUDIT_CHAIN_SECRET`, writes `backend/sinalacs_server/config/passwords.yaml` with the
-same test-database password, and `chmod 600` on both. It never overwrites
-existing files without `--force`, and warns when `pg_data/` predates a rotation
-(`POSTGRES_PASSWORD` only takes effect on the volume's first init — to adopt a
-new one, `docker compose down && rm -rf pg_data/`).
+`JWT_SECRET`, `AUDIT_CHAIN_SECRET` and `HEALTH_DATA_ENCRYPTION_KEY`, writes
+`backend/sinalacs_server/config/passwords.yaml` with the same test-database
+password, and `chmod 600` on both. It never overwrites existing files without
+`--force`, and warns when `pg_data/` predates a rotation: `POSTGRES_PASSWORD`
+only takes effect on the volume's first init (old password keeps being
+required, backend won't connect), and a rotated `HEALTH_DATA_ENCRYPTION_KEY`
+doesn't block boot but makes already-encrypted clinical columns unreadable —
+to adopt a new value of either, `docker compose down && rm -rf pg_data/`.
 
 Rotating the MQTT passwords is enough on its own: `infra/docker/mosquitto/init.sh`
 rewrites the broker's `passwordfile` on every boot. It used to only create it

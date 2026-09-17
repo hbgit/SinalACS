@@ -66,6 +66,7 @@ else
   MQTT_ACS_PASSWORD="$(secret)" \
   JWT_SECRET="$(secret)" \
   AUDIT_CHAIN_SECRET="$(secret)" \
+  HEALTH_DATA_ENCRYPTION_KEY="$(secret)" \
   awk '
     {
       split($0, kv, "=")
@@ -82,7 +83,7 @@ else
   chmod 600 "$env_file"
   echo "  .env gerado (POSTGRES_PASSWORD, TEST_DATABASE_PASSWORD,"
   echo "               MQTT_BACKEND_PASSWORD, MQTT_ACS_PASSWORD, JWT_SECRET,"
-  echo "               AUDIT_CHAIN_SECRET)"
+  echo "               AUDIT_CHAIN_SECRET, HEALTH_DATA_ENCRYPTION_KEY)"
 fi
 
 # --- config/passwords.yaml -------------------------------------------------
@@ -124,6 +125,14 @@ if [[ -d "$repo_root/pg_data" ]]; then
   echo '  POSTGRES_PASSWORD só vale na PRIMEIRA inicialização do volume, então o'
   echo '  banco continuará exigindo a senha antiga e o backend não vai conectar.'
   echo '  Para adotar a senha nova:  docker compose down && rm -rf pg_data/'
+  echo
+  echo '  HEALTH_DATA_ENCRYPTION_KEY é diferente: a chave nova NÃO impede o Postgres'
+  echo '  nem o backend de subir, mas torna ILEGÍVEL qualquer dado clínico já cifrado'
+  echo '  com a chave anterior (patients.chronicConditions, triage_sessions.answers,'
+  echo '  visits.notes) — falha silenciosa na leitura, não um erro de boot.'
+  echo '  Para adotar a chave nova sem perder dados legíveis, restaure a chave antiga'
+  echo '  no .env; para começar do zero, a mesma limpeza acima resolve os dois:'
+  echo '  docker compose down && rm -rf pg_data/'
 fi
 
 echo
