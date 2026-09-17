@@ -39,6 +39,9 @@ class AppConfig {
   /// `triage_sessions.answers` e `visits.notes` (RNF03, INV-04). Segredo
   /// PRÓPRIO — nunca derivado de `jwtSecret`/`auditChainSecret`: rotacionar
   /// um não pode invalidar o outro.
+  ///
+  /// Hexadecimal de exatamente 64 caracteres, validado no boot por
+  /// [_resolveHealthDataEncryptionKey].
   final String healthDataEncryptionKey;
 
   final String? mqttUsername;
@@ -101,11 +104,9 @@ class AppConfig {
         envVarName: 'AUDIT_CHAIN_SECRET',
         developmentFallback: developmentAuditChainSecret,
       ),
-      healthDataEncryptionKey: _resolveSecret(
+      healthDataEncryptionKey: _resolveHealthDataEncryptionKey(
         value: environment['HEALTH_DATA_ENCRYPTION_KEY'],
         appEnv: appEnv,
-        envVarName: 'HEALTH_DATA_ENCRYPTION_KEY',
-        developmentFallback: developmentHealthDataEncryptionKey,
       ),
       mqttUsername: environment['MQTT_USERNAME'],
       mqttPassword: environment['MQTT_PASSWORD'],
@@ -118,7 +119,10 @@ class AppConfig {
 
   /// Decide um segredo de assinatura, recusando subir com um valor fraco.
   ///
-  /// Regra comum a `JWT_SECRET` e `AUDIT_CHAIN_SECRET`: só `development` aceita
+  /// Regra comum aos três segredos (`JWT_SECRET`, `AUDIT_CHAIN_SECRET` e
+  /// `HEALTH_DATA_ENCRYPTION_KEY`, este por
+  /// [_resolveHealthDataEncryptionKey], que acrescenta a checagem de
+  /// formato): só `development` aceita
   /// ausência da variável. Fora dele a falha é no boot, e não na primeira
   /// requisição — um servidor que sobe assinando com um segredo público é pior
   /// do que um servidor que não sobe.
@@ -151,5 +155,47 @@ class AppConfig {
     }
 
     return secret;
+  }
+
+  /// Hexadecimal de exatamente 64 caracteres — 32 bytes, o tamanho de uma
+  /// chave AES-256.
+  static final _hex32Bytes = RegExp(r'^[0-9a-fA-F]{64}$');
+
+  /// [_resolveSecret] mais a validação de FORMATO, que só esta chave exige.
+  ///
+  /// `JWT_SECRET`/`AUDIT_CHAIN_SECRET` são chaves HMAC de tamanho livre: uma
+  /// string qualquer serve, e por isso a regra genérica basta para elas. Esta
+  /// aqui é decodificada byte a byte por `HealthDataCipher` para virar a chave
+  /// AES-256, então um valor de 63 ou de 32 caracteres não é "um segredo mais
+  /// fraco", é uma chave inválida.
+  ///
+  /// Sem esta checagem a falha era silenciosa e tardia, na pior combinação
+  /// possível: o servidor subia normalmente, e só a PRIMEIRA GRAVAÇÃO quebrava
+  /// — e em `TriageSessionService` essa quebra é capturada de propósito
+  /// (classificar o risco não pode depender do disco), então o paciente recebia
+  /// o resultado da triagem, ninguém via erro nenhum na tela, e o prontuário
+  /// simplesmente não era persistido. Aqui vale o mesmo raciocínio já
+  /// documentado em [_resolveSecret]: um servidor que sobe com uma chave de
+  /// criptografia malformada é pior do que um servidor que não sobe.
+  static String _resolveHealthDataEncryptionKey({
+    required String? value,
+    required String appEnv,
+  }) {
+    final key = _resolveSecret(
+      value: value,
+      appEnv: appEnv,
+      envVarName: 'HEALTH_DATA_ENCRYPTION_KEY',
+      developmentFallback: developmentHealthDataEncryptionKey,
+    );
+
+    if (!_hex32Bytes.hasMatch(key)) {
+      throw StateError(
+        'HEALTH_DATA_ENCRYPTION_KEY precisa ser hexadecimal de exatamente 64 '
+        'caracteres (32 bytes, chave AES-256); veio com ${key.length}. '
+        'Gere uma com: openssl rand -hex 32',
+      );
+    }
+
+    return key;
   }
 }

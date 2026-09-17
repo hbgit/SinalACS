@@ -49,4 +49,63 @@ void main() {
     final cifrado = await cipher.encrypt('');
     expect(await cipher.decrypt(cifrado), '');
   });
+
+  group('keyVersion é gravado, não consultado', () {
+    // Fixa o comportamento REAL, para que a documentação não volte a prometer
+    // uma rotação que não existe: `decrypt` ignora `value.keyVersion` e usa
+    // sempre a única chave configurada no processo.
+    test('a versão declarada pelo valor não escolhe chave nenhuma', () async {
+      final cifrado = await cipher.encrypt('texto secreto');
+
+      // Mesma chave, versão declarada diferente: decifra do mesmo jeito.
+      final versaoOutra = EncryptedValue(
+        ciphertextBase64: cifrado.ciphertextBase64,
+        keyVersion: 99,
+      );
+      expect(await cipher.decrypt(versaoOutra), 'texto secreto');
+
+      // Chave trocada, versão declarada preservada: NÃO decifra. É o custo de
+      // trocar HEALTH_DATA_ENCRYPTION_KEY sem rotina de reescrita.
+      final chaveNova = HealthDataCipher(keyHex: 'b' * 64, keyVersion: 2);
+      expect(() => chaveNova.decrypt(cifrado), throwsA(anything));
+    });
+  });
+
+  group('formato da chave', () {
+    // Antes, `hex.length ~/ 2` truncava em silêncio e a chave malformada só
+    // aparecia na primeira gravação. A validação primária é
+    // `AppConfig._resolveHealthDataEncryptionKey`; esta é a rede de baixo.
+    test('recusa comprimento ímpar em vez de truncar', () {
+      expect(
+        () => HealthDataCipher(keyHex: 'a' * 63, keyVersion: 1),
+        throwsA(isA<ArgumentError>()),
+      );
+    });
+
+    test('recusa comprimento par porém errado', () {
+      expect(
+        () => HealthDataCipher(keyHex: 'a' * 32, keyVersion: 1),
+        throwsA(isA<ArgumentError>()),
+      );
+    });
+
+    test('recusa caractere não-hexadecimal', () {
+      expect(
+        () => HealthDataCipher(keyHex: '${'a' * 63}z', keyVersion: 1),
+        throwsA(isA<ArgumentError>()),
+      );
+    });
+
+    test('aceita 64 hexadecimais em maiúsculas', () async {
+      final maiusculas =
+          HealthDataCipher(keyHex: '0123456789ABCDEF' * 4, keyVersion: 1);
+      final minusculas =
+          HealthDataCipher(keyHex: '0123456789abcdef' * 4, keyVersion: 1);
+      // Mesma chave: o hex é case-insensitive, então uma decifra a outra.
+      expect(
+        await minusculas.decrypt(await maiusculas.encrypt('texto')),
+        'texto',
+      );
+    });
+  });
 }

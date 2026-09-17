@@ -45,10 +45,13 @@ class AlertRuntime {
   /// Cifra dos 3 campos clínicos em repouso (RNF03, INV-04), compartilhada
   /// pelos stores ORM de paciente, triagem e visita.
   ///
-  /// `keyVersion: 1` é a versão corrente. A coluna guarda a versão junto com o
-  /// ciphertext, então uma rotação futura só precisa passar a cifrar com a
-  /// versão nova — as linhas antigas continuam decifráveis pela versão que
-  /// elas próprias declaram.
+  /// `keyVersion: 1` é a versão corrente, e é o que vai gravado em cada linha
+  /// — um marcador para uma rotina de rotação futura (que reescreveria as
+  /// linhas antigas) saber o que já foi convertido. Hoje **não** existe essa
+  /// rotina, e a decifragem não consulta a versão declarada pela linha: o
+  /// processo conhece uma única chave, a de `HEALTH_DATA_ENCRYPTION_KEY`.
+  /// Trocar essa chave torna ilegível tudo que foi cifrado com a anterior.
+  /// Ver `HealthDataCipher` e o aviso no `.env.example`.
   HealthDataCipher get healthDataCipher => _healthDataCipher ??= HealthDataCipher(
         keyHex: config.healthDataEncryptionKey,
         keyVersion: 1,

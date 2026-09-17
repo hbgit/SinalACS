@@ -204,6 +204,107 @@ void main() {
         throwsA(isA<StateError>()),
       );
     });
+
+    // Formato: diferente de JWT_SECRET/AUDIT_CHAIN_SECRET, que são chaves HMAC
+    // de tamanho livre, esta vira uma chave AES-256 byte a byte. Sem validação
+    // no boot, uma chave malformada subia o servidor e só quebrava na primeira
+    // gravação — falha que TriageSessionService captura de propósito, devolvendo
+    // o risco ao paciente e deixando o prontuário sem registro, em silêncio.
+    test('chave mais curta que 64 caracteres não sobe', () {
+      expect(
+        () => build(
+          appEnv: 'production',
+          jwtSecret: 'a' * 64,
+          auditChainSecret: 'b' * 64,
+          healthDataEncryptionKey: 'c' * 32,
+        ),
+        throwsA(isA<StateError>().having(
+          (error) => error.message,
+          'message',
+          allOf(
+            contains('HEALTH_DATA_ENCRYPTION_KEY'),
+            contains('64'),
+          ),
+        )),
+      );
+    });
+
+    test('comprimento ímpar não sobe (truncava em silêncio)', () {
+      // 63 caracteres: o `hex.length ~/ 2` de HealthDataCipher descartava o
+      // último e produzia uma chave de 31 bytes sem reclamar.
+      expect(
+        () => build(
+          appEnv: 'production',
+          jwtSecret: 'a' * 64,
+          auditChainSecret: 'b' * 64,
+          healthDataEncryptionKey: 'c' * 63,
+        ),
+        throwsA(isA<StateError>()),
+      );
+    });
+
+    test('caractere não-hexadecimal não sobe, mesmo com 64 caracteres', () {
+      expect(
+        () => build(
+          appEnv: 'production',
+          jwtSecret: 'a' * 64,
+          auditChainSecret: 'b' * 64,
+          healthDataEncryptionKey: '${'a' * 63}z',
+        ),
+        throwsA(isA<StateError>().having(
+          (error) => error.message,
+          'message',
+          contains('hexadecimal'),
+        )),
+      );
+    });
+
+    test('64 hexadecimais sobem, em maiúsculas ou minúsculas', () {
+      final minusculas = build(
+        appEnv: 'production',
+        jwtSecret: 'a' * 64,
+        auditChainSecret: 'b' * 64,
+        healthDataEncryptionKey: '0123456789abcdef' * 4,
+      );
+      expect(minusculas.healthDataEncryptionKey, '0123456789abcdef' * 4);
+
+      final maiusculas = build(
+        appEnv: 'production',
+        jwtSecret: 'a' * 64,
+        auditChainSecret: 'b' * 64,
+        healthDataEncryptionKey: '0123456789ABCDEF' * 4,
+      );
+      expect(maiusculas.healthDataEncryptionKey, '0123456789ABCDEF' * 4);
+    });
+
+    test('a mensagem de erro não vaza a chave', () {
+      // Segredo malformado continua sendo segredo: só o comprimento aparece.
+      try {
+        build(
+          appEnv: 'production',
+          jwtSecret: 'a' * 64,
+          auditChainSecret: 'b' * 64,
+          healthDataEncryptionKey: 'segredo-que-nao-deveria-aparecer',
+        );
+        fail('deveria ter lançado StateError');
+      } on StateError catch (error) {
+        expect(error.message, isNot(contains('segredo-que-nao-deveria')));
+        expect(error.message, contains('32')); // o comprimento recebido
+      }
+    });
+
+    test('o fallback de desenvolvimento é hexadecimal válido', () {
+      // Se deixar de ser, `development` volta a morrer com FormatException na
+      // primeira cifragem — foi exatamente o que aconteceu antes.
+      expect(
+        AppConfig.developmentHealthDataEncryptionKey,
+        matches(RegExp(r'^[0-9a-fA-F]{64}$')),
+      );
+      expect(
+        build(appEnv: 'development').healthDataEncryptionKey,
+        AppConfig.developmentHealthDataEncryptionKey,
+      );
+    });
   });
 
   group('defaults', () {
