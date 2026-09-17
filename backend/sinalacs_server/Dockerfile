@@ -2,7 +2,14 @@
 #   docker build -f sinalacs_server/Dockerfile backend
 
 # Estágio de build
-FROM dart:3.8.0 AS build
+#
+# Pinado na mesma versão exata usada por dart-lang/setup-dart no CI
+# (.github/workflows/ci.yml), para reprodutibilidade e paridade entre o que
+# é testado e o que vira imagem. dart:3.8.0 (a versão anterior aqui) ficou
+# incompatível quando a Task 11 (package:cryptography, HealthDataCipher)
+# trouxe transitivamente `postgres` >=3.5.8, que exige SDK ^3.9.0 — o build
+# falhava em `dart pub get` com "version solving failed".
+FROM dart:3.12.2 AS build
 
 # Workspace mínimo, preservando as versões travadas do pubspec.lock.
 WORKDIR /app
