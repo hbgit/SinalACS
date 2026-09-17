@@ -10,6 +10,7 @@ class AppConfig {
     required this.mqttBroker,
     required this.jwtSecret,
     required this.auditChainSecret,
+    required this.healthDataEncryptionKey,
     required this.mqttUsername,
     required this.mqttPassword,
     required this.mqttUseTls,
@@ -34,6 +35,12 @@ class AppConfig {
   /// [_resolveAuditChainSecret].
   final String auditChainSecret;
 
+  /// Chave AES-256-GCM que cifra `patients.chronicConditions`,
+  /// `triage_sessions.answers` e `visits.notes` (RNF03, INV-04). Segredo
+  /// PRÓPRIO — nunca derivado de `jwtSecret`/`auditChainSecret`: rotacionar
+  /// um não pode invalidar o outro.
+  final String healthDataEncryptionKey;
+
   final String? mqttUsername;
   final String? mqttPassword;
   final bool mqttUseTls;
@@ -53,6 +60,12 @@ class AppConfig {
   /// desenvolvimento. Mesma regra de [developmentJwtSecret]: público, e por
   /// isso restrito a `development` por [_resolveAuditChainSecret].
   static const developmentAuditChainSecret = 'development-audit-chain-secret';
+
+  /// Segredo usado quando `HEALTH_DATA_ENCRYPTION_KEY` não é informado em
+  /// desenvolvimento. Mesma regra de [developmentJwtSecret]: público, e por
+  /// isso restrito a `development` por [_resolveSecret].
+  static const developmentHealthDataEncryptionKey =
+      'development-health-data-key';
 
   factory AppConfig.fromEnvironment() =>
       AppConfig.fromMap(Platform.environment);
@@ -78,6 +91,12 @@ class AppConfig {
         appEnv: appEnv,
         envVarName: 'AUDIT_CHAIN_SECRET',
         developmentFallback: developmentAuditChainSecret,
+      ),
+      healthDataEncryptionKey: _resolveSecret(
+        value: environment['HEALTH_DATA_ENCRYPTION_KEY'],
+        appEnv: appEnv,
+        envVarName: 'HEALTH_DATA_ENCRYPTION_KEY',
+        developmentFallback: developmentHealthDataEncryptionKey,
       ),
       mqttUsername: environment['MQTT_USERNAME'],
       mqttPassword: environment['MQTT_PASSWORD'],

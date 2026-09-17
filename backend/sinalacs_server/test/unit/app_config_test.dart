@@ -13,11 +13,13 @@ void main() {
     required String appEnv,
     String? jwtSecret,
     String? auditChainSecret,
+    String? healthDataEncryptionKey,
   }) =>
       AppConfig.fromMap({
         'APP_ENV': appEnv,
         'JWT_SECRET': ?jwtSecret,
         'AUDIT_CHAIN_SECRET': ?auditChainSecret,
+        'HEALTH_DATA_ENCRYPTION_KEY': ?healthDataEncryptionKey,
       });
 
   group('JWT_SECRET', () {
@@ -86,6 +88,7 @@ void main() {
         appEnv: 'production',
         jwtSecret: 'b' * 64,
         auditChainSecret: 'd' * 64,
+        healthDataEncryptionKey: 'e' * 64,
       );
 
       expect(config.jwtSecret, 'b' * 64);
@@ -98,6 +101,7 @@ void main() {
           appEnv: 'production',
           jwtSecret: '  ${'c' * 64}  ',
           auditChainSecret: 'd' * 64,
+          healthDataEncryptionKey: 'e' * 64,
         ).jwtSecret,
         'c' * 64,
       );
@@ -166,10 +170,39 @@ void main() {
         appEnv: 'production',
         jwtSecret: 'b' * 64,
         auditChainSecret: 'd' * 64,
+        healthDataEncryptionKey: 'e' * 64,
       );
 
       expect(config.auditChainSecret, 'd' * 64);
       expect(config.jwtSecret, 'b' * 64);
+    });
+  });
+
+  group('HEALTH_DATA_ENCRYPTION_KEY', () {
+    test('development sem a variável usa o fallback conhecido', () {
+      expect(
+        build(appEnv: 'development').healthDataEncryptionKey,
+        AppConfig.developmentHealthDataEncryptionKey,
+      );
+    });
+
+    test('production sem a variável não sobe', () {
+      expect(
+        () => build(appEnv: 'production'),
+        throwsA(isA<StateError>()),
+      );
+    });
+
+    test('production com o valor de desenvolvimento não sobe', () {
+      expect(
+        () => build(
+          appEnv: 'production',
+          jwtSecret: 'a' * 64,
+          auditChainSecret: 'b' * 64,
+          healthDataEncryptionKey: AppConfig.developmentHealthDataEncryptionKey,
+        ),
+        throwsA(isA<StateError>()),
+      );
     });
   });
 
