@@ -112,6 +112,24 @@ class FakeAcsBackend implements AcsBackend {
     return patients;
   }
 
+  /// Entradas que `pullVisits` devolve. Vazio por padrão.
+  List<VisitSyncEntry> pullEntries = const [];
+
+  /// Falha da chamada, como uma queda de rede ou sessão expirada.
+  BackendFailure? pullFailure;
+
+  /// `since` recebido em cada chamada, na ordem em que ocorreram — prova que
+  /// o cursor lido é exatamente o que chega ao backend.
+  final List<DateTime> pullSinceCalls = <DateTime>[];
+
+  @override
+  Future<List<VisitSyncEntry>> pullVisits({required DateTime since}) async {
+    pullSinceCalls.add(since);
+    final failure = pullFailure;
+    if (failure != null) throw failure;
+    return pullEntries;
+  }
+
   @override
   void close() {}
 }
