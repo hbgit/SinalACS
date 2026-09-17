@@ -1,0 +1,24 @@
+### Convite de uso único gerado pelo ACS para um paciente já cadastrado em
+### sua microárea concluir o onboarding no próprio aparelho. Não cria
+### identidade nova (RF01/RF07 — autenticação institucional — segue sem
+### decisão própria); ativa o acesso de um paciente que já existe em
+### `patients`, na microárea de quem gerou o convite.
+class: EnrollmentToken
+table: enrollment_tokens
+fields:
+  id: UuidValue?, defaultPersist=random
+  ### sha256 do token real. O valor em claro só existe no momento da geração
+  ### (devolvido ao ACS para virar QR Code) e nunca é persistido — mesmo
+  ### padrão de `users.cpfHash`.
+  tokenHash: String
+  patientId: UuidValue, relation(parent=patients)
+  microAreaId: UuidValue
+  createdByAcsId: UuidValue, relation(parent=acs)
+  createdAt: DateTime
+  expiresAt: DateTime
+  ### Marca o consumo atômico. `null` = ainda válido para uso.
+  consumedAt: DateTime?
+indexes:
+  enrollment_tokens_token_hash_key:
+    fields: tokenHash
+    unique: true

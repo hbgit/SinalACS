@@ -1,0 +1,10 @@
+### As três finalidades de consentimento do onboarding (decisão §2.2 de
+### docs/superpowers/specs/2026-09-16-decisoes-produto-pos-validacao.md).
+### `healthDataProcessing` é obrigatória para usar o app; as outras duas
+### podem ser recusadas sem impedir o restante do fluxo.
+enum: ConsentPurpose
+serialized: byName
+values:
+  - healthDataProcessing
+  - localReminders
+  - segmentedPush
