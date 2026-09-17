@@ -33,6 +33,7 @@ abstract class VisitSyncEntry implements _i1.SerializableModel {
     this.riskLevelAfter,
     required this.notes,
     required this.version,
+    this.syncAt,
   });
 
   factory VisitSyncEntry({
@@ -45,6 +46,7 @@ abstract class VisitSyncEntry implements _i1.SerializableModel {
     _i2.RiskLevel? riskLevelAfter,
     required Map<String, String> notes,
     required int version,
+    DateTime? syncAt,
   }) = _VisitSyncEntryImpl;
 
   factory VisitSyncEntry.fromJson(Map<String, dynamic> jsonSerialization) {
@@ -72,6 +74,9 @@ abstract class VisitSyncEntry implements _i1.SerializableModel {
         jsonSerialization['notes'],
       ),
       version: jsonSerialization['version'] as int,
+      syncAt: jsonSerialization['syncAt'] == null
+          ? null
+          : _i1.DateTimeJsonExtension.fromJson(jsonSerialization['syncAt']),
     );
   }
 
@@ -93,6 +98,14 @@ abstract class VisitSyncEntry implements _i1.SerializableModel {
 
   int version;
 
+  /// Momento (relógio do SERVIDOR) em que esta visita foi sincronizada pela
+  /// última vez. Só populado no sentido servidor→dispositivo (`visits.pull`);
+  /// `visits.sync` (dispositivo→servidor) ignora este campo quando presente
+  /// na entrada recebida — o servidor sempre atribui seu próprio relógio, nunca
+  /// confia no do cliente. Opcional para não quebrar o sentido de envio, onde
+  /// o dispositivo nunca o preenche.
+  DateTime? syncAt;
+
   /// Returns a shallow copy of this [VisitSyncEntry]
   /// with some or all fields replaced by the given arguments.
   @_i1.useResult
@@ -106,6 +119,7 @@ abstract class VisitSyncEntry implements _i1.SerializableModel {
     _i2.RiskLevel? riskLevelAfter,
     Map<String, String>? notes,
     int? version,
+    DateTime? syncAt,
   });
   @override
   Map<String, dynamic> toJson() {
@@ -120,6 +134,7 @@ abstract class VisitSyncEntry implements _i1.SerializableModel {
       if (riskLevelAfter != null) 'riskLevelAfter': riskLevelAfter?.toJson(),
       'notes': notes.toJson(),
       'version': version,
+      if (syncAt != null) 'syncAt': syncAt?.toJson(),
     };
   }
 
@@ -142,6 +157,7 @@ class _VisitSyncEntryImpl extends VisitSyncEntry {
     _i2.RiskLevel? riskLevelAfter,
     required Map<String, String> notes,
     required int version,
+    DateTime? syncAt,
   }) : super._(
          localId: localId,
          patientId: patientId,
@@ -152,6 +168,7 @@ class _VisitSyncEntryImpl extends VisitSyncEntry {
          riskLevelAfter: riskLevelAfter,
          notes: notes,
          version: version,
+         syncAt: syncAt,
        );
 
   /// Returns a shallow copy of this [VisitSyncEntry]
@@ -168,6 +185,7 @@ class _VisitSyncEntryImpl extends VisitSyncEntry {
     Object? riskLevelAfter = _Undefined,
     Map<String, String>? notes,
     int? version,
+    Object? syncAt = _Undefined,
   }) {
     return VisitSyncEntry(
       localId: localId ?? this.localId,
@@ -191,6 +209,7 @@ class _VisitSyncEntryImpl extends VisitSyncEntry {
             ),
           ),
       version: version ?? this.version,
+      syncAt: syncAt is DateTime? ? syncAt : this.syncAt,
     );
   }
 }

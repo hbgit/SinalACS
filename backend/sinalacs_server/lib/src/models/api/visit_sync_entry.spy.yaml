@@ -16,3 +16,10 @@ fields:
   riskLevelAfter: RiskLevel?
   notes: Map<String, String>
   version: int
+  ### Momento (relógio do SERVIDOR) em que esta visita foi sincronizada pela
+  ### última vez. Só populado no sentido servidor→dispositivo (`visits.pull`);
+  ### `visits.sync` (dispositivo→servidor) ignora este campo quando presente
+  ### na entrada recebida — o servidor sempre atribui seu próprio relógio, nunca
+  ### confia no do cliente. Opcional para não quebrar o sentido de envio, onde
+  ### o dispositivo nunca o preenche.
+  syncAt: DateTime?

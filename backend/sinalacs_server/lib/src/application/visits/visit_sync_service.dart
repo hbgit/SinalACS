@@ -80,6 +80,10 @@ class VisitSyncService {
           riskLevelAfter: visit.riskLevelAfter,
           notes: visit.notes,
           version: visit.version,
+          // Relógio do SERVIDOR (gravado em `_syncOne` via `_clock()`), nunca
+          // o do dispositivo. É o que o cursor do app usa para avançar sem
+          // depender do relógio do aparelho — ver `VisitPullService` no ACS.
+          syncAt: visit.syncAt,
         ),
     ];
   }

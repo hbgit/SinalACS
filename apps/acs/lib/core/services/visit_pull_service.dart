@@ -47,7 +47,23 @@ class VisitPullService {
   List<VisitSyncEntry> get lastPulled => List.unmodifiable(_lastPulled);
 
   /// Lê o cursor, busca as visitas alteradas desde ele, remove as que já
-  /// existem localmente por `localId` e avança o cursor para agora.
+  /// existem localmente por `localId` e avança o cursor.
+  ///
+  /// O cursor avança para o MAIOR `syncAt` entre as entradas recebidas nesta
+  /// chamada — **não** para `DateTime.now()` do relógio do dispositivo (fix
+  /// round 1, achado de revisão da Task 10). `visits.pull` filtra no servidor
+  /// por `syncAt > since`, onde `syncAt` é sempre gravado pelo relógio do
+  /// SERVIDOR; se o relógio do aparelho estiver adiantado, um cursor local
+  /// gravado com "agora" pularia visitas de OUTROS dispositivos/ACS da mesma
+  /// microárea sincronizadas entre este pull e o próximo — perda silenciosa,
+  /// permanente (diferente de reinstalar, que reseta o cursor), proibida pela
+  /// decisão §5.4. Usar o `syncAt` que o próprio servidor devolveu elimina a
+  /// dependência do relógio do dispositivo.
+  ///
+  /// Se a lista vier vazia (nada mudou desde `since`), o cursor **não**
+  /// avança: a próxima chamada reconsulta o mesmo `since`, o que é idempotente
+  /// e não arrisca pular nada — diferente de gravar "agora" sem ter recebido
+  /// confirmação nenhuma do servidor sobre até onde a microárea foi varrida.
   Future<void> pullAndMerge() async {
     final since = await _cursorStore.read() ?? epoch;
     final entries = await _backend.pullVisits(since: since);
@@ -60,6 +76,16 @@ class VisitPullService {
         if (!existingLocalIds.contains(entry.localId)) entry,
     ];
 
-    await _cursorStore.write(DateTime.now().toUtc());
+    final latestSyncAt = entries
+        .map((entry) => entry.syncAt)
+        .whereType<DateTime>()
+        .fold<DateTime?>(
+          null,
+          (latest, syncAt) =>
+              latest == null || syncAt.isAfter(latest) ? syncAt : latest,
+        );
+    if (latestSyncAt != null) {
+      await _cursorStore.write(latestSyncAt);
+    }
   }
 }

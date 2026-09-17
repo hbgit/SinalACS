@@ -372,6 +372,23 @@ void main() {
       );
     });
 
+    test('cada entrada devolve o syncAt do SERVIDOR, não o relógio do cliente', () async {
+      // O app do ACS usa este campo para avançar o cursor local sem depender
+      // do próprio relógio (fix round 1, achado da revisão da Task 10):
+      // `VisitPullService` avança para o maior `syncAt` recebido, nunca para
+      // `DateTime.now()` do dispositivo.
+      final visitaRecente = visita(
+        localId: '00000000-0000-4000-8000-0000000000d4',
+        patientId: _patientId,
+        syncAt: referencia.add(const Duration(hours: 2)),
+      );
+      await store.insert(visitaRecente);
+
+      final result = await service.pull(user: _acs, since: referencia);
+
+      expect(result.single.syncAt, visitaRecente.syncAt);
+    });
+
     test('recusa quando quem chama não é ACS territorializado', () async {
       expect(
         () => service.pull(user: _patient, since: referencia),
