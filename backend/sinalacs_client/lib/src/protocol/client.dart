@@ -256,6 +256,21 @@ class EndpointVisits extends _i1.EndpointRef {
       'visits': visits,
     },
   );
+
+  /// Sincronização central→dispositivo: visitas da microárea do ACS
+  /// autenticado alteradas após `since`, para reconciliar um device que
+  /// ficou offline ou foi reinstalado.
+  _i2.Future<List<_i12.VisitSyncEntry>> pull({
+    required String accessToken,
+    required DateTime since,
+  }) => caller.callServerEndpoint<List<_i12.VisitSyncEntry>>(
+    'visits',
+    'pull',
+    {
+      'accessToken': accessToken,
+      'since': since,
+    },
+  );
 }
 
 class Client extends _i1.ServerpodClientShared {

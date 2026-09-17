@@ -23,6 +23,10 @@ abstract interface class VisitStore {
   /// PACIENTE pertence ao mesmo território — qualquer UUID de paciente
   /// existente era aceito, de qualquer microárea (furo do INV-01).
   Future<UuidValue?> microAreaOfPatient(UuidValue patientId);
+
+  /// Visitas da microárea cujo `syncAt` é posterior a `since` — o cursor
+  /// incremental de `visits.pull` (RF15, decisão §5).
+  Future<List<Visit>> listChangedInMicroArea(UuidValue microAreaId, DateTime since);
 }
 
 /// Sincronização das visitas registradas offline pelo ACS.
@@ -48,6 +52,37 @@ class VisitSyncService {
   final VisitStore _store;
   final AuditTrail _audit;
   final DateTime Function() _clock;
+
+  /// Sincronização central→dispositivo: visitas da microárea do ACS
+  /// alteradas desde `since`, para reconciliar um device que ficou offline ou
+  /// foi reinstalado. Território vem sempre do token (INV-01), nunca de
+  /// parâmetro — mesma regra de `PatientDirectoryService.listForAcs`.
+  Future<List<VisitSyncEntry>> pull({
+    required AuthenticatedUser user,
+    required DateTime since,
+  }) async {
+    if (user.role != UserRole.acs || user.microAreaId == null) {
+      throw StateError('Somente ACS territorializados podem sincronizar visitas.');
+    }
+
+    final microAreaId = UuidValue.fromString(user.microAreaId!);
+    final visits = await _store.listChangedInMicroArea(microAreaId, since);
+
+    return [
+      for (final visit in visits)
+        VisitSyncEntry(
+          localId: visit.localId.uuid,
+          patientId: visit.patientId.uuid,
+          scheduledAt: visit.scheduledAt,
+          completedAt: visit.completedAt,
+          status: visit.status,
+          riskLevelBefore: visit.riskLevelBefore,
+          riskLevelAfter: visit.riskLevelAfter,
+          notes: visit.notes,
+          version: visit.version,
+        ),
+    ];
+  }
 
   Future<List<VisitSyncResult>> sync({
     required AuthenticatedUser user,

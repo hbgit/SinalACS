@@ -47,4 +47,29 @@ class OrmVisitStore implements VisitStore {
     );
     return user?.microAreaId;
   }
+
+  @override
+  Future<List<Visit>> listChangedInMicroArea(UuidValue microAreaId, DateTime since) async {
+    final session = _session();
+
+    // Mesmo arranjo em duas etapas de `OrmPatientDirectoryStore`: `visits` só
+    // guarda `patientId`, e a microárea do paciente vive em `users`, não em
+    // `patients` — não há relação declarada entre as tabelas para um JOIN
+    // automático do ORM.
+    final users = await User.db.find(
+      session,
+      where: (t) => t.microAreaId.equals(microAreaId) & t.role.equals(UserRole.patient),
+      transaction: _transaction,
+    );
+    if (users.isEmpty) return const [];
+
+    final patientIds = {for (final user in users) user.id!}.cast<UuidValue>();
+
+    return Visit.db.find(
+      session,
+      where: (t) => t.patientId.inSet(patientIds) & (t.syncAt > since),
+      orderBy: (t) => t.syncAt,
+      transaction: _transaction,
+    );
+  }
 }

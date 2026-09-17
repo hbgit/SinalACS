@@ -43,6 +43,20 @@ class FakeVisitStore implements VisitStore {
     final microAreaId = _microAreaByPatient[patientId.uuid];
     return microAreaId == null ? null : UuidValue.fromString(microAreaId);
   }
+
+  /// Fatia em memória do mesmo filtro que `OrmVisitStore.listChangedInMicroArea`
+  /// faz no Postgres: visitas cujo dono mora na microárea pedida e cujo
+  /// `syncAt` é posterior a `since`.
+  @override
+  Future<List<Visit>> listChangedInMicroArea(UuidValue microAreaId, DateTime since) async {
+    return rows.values.where((visit) {
+      final patientMicroAreaId = _microAreaByPatient[visit.patientId.uuid];
+      if (patientMicroAreaId != microAreaId.uuid) return false;
+      final syncAt = visit.syncAt;
+      if (syncAt == null) return false;
+      return syncAt.isAfter(since);
+    }).toList();
+  }
 }
 
 /// Trilha de auditoria em memória. `failOnRecord` simula uma trilha fora do
@@ -282,6 +296,87 @@ void main() {
 
       // A operação clínica (recusar a visita) não pode depender da auditoria.
       expect(results.single.syncStatus, SyncStatus.rejected);
+    });
+  });
+
+  group('pull', () {
+    final referencia = DateTime.utc(2026, 9, 15, 12);
+
+    Visit visita({
+      required String localId,
+      required String patientId,
+      required DateTime syncAt,
+    }) {
+      return Visit(
+        patientId: UuidValue.fromString(patientId),
+        acsId: UuidValue.fromString(_acsId),
+        scheduledAt: DateTime.utc(2026, 9, 11, 9),
+        completedAt: DateTime.utc(2026, 9, 11, 10),
+        status: 'realizada',
+        riskLevelBefore: RiskLevel.red,
+        riskLevelAfter: RiskLevel.yellow,
+        notes: const {'campo': 'sem intercorrências'},
+        syncStatus: SyncStatus.synced,
+        localId: UuidValue.fromString(localId),
+        syncAt: syncAt,
+        version: 1,
+      );
+    }
+
+    setUp(() {
+      store = FakeVisitStore(microAreaByPatient: {
+        _patientId: _microAreaId,
+        _outroTerritorioPatientId: _otherMicroAreaId,
+      });
+      audit = FakeAuditTrail();
+      service = VisitSyncService(
+        store: store,
+        audit: audit,
+        clock: () => DateTime.utc(2026, 9, 16, 12),
+      );
+    });
+
+    test('devolve só visitas da microárea do ACS, alteradas após since', () async {
+      final visitaRecenteMesmaArea = visita(
+        localId: '00000000-0000-4000-8000-0000000000d1',
+        patientId: _patientId,
+        syncAt: referencia.add(const Duration(hours: 1)),
+      );
+      final visitaAntigaDemais = visita(
+        localId: '00000000-0000-4000-8000-0000000000d2',
+        patientId: _patientId,
+        syncAt: referencia.subtract(const Duration(hours: 1)),
+      );
+      final visitaDeOutraArea = visita(
+        localId: '00000000-0000-4000-8000-0000000000d3',
+        patientId: _outroTerritorioPatientId,
+        syncAt: referencia.add(const Duration(hours: 1)),
+      );
+      await store.insert(visitaRecenteMesmaArea);
+      await store.insert(visitaAntigaDemais);
+      await store.insert(visitaDeOutraArea);
+
+      final result = await service.pull(user: _acs, since: referencia);
+
+      expect(
+        result.map((e) => e.localId),
+        containsAll([visitaRecenteMesmaArea.localId.uuid]),
+      );
+      expect(
+        result.map((e) => e.localId),
+        isNot(contains(visitaDeOutraArea.localId.uuid)),
+      );
+      expect(
+        result.map((e) => e.localId),
+        isNot(contains(visitaAntigaDemais.localId.uuid)),
+      );
+    });
+
+    test('recusa quando quem chama não é ACS territorializado', () async {
+      expect(
+        () => service.pull(user: _patient, since: referencia),
+        throwsA(isA<StateError>()),
+      );
     });
   });
 }

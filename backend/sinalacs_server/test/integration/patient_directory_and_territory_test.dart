@@ -341,5 +341,84 @@ void main() {
       final rows = await Visit.db.find(session);
       expect(rows, hasLength(1), reason: 'somente a visita válida deve persistir');
     });
+
+    test(
+        'visits.pull devolve só visitas da própria microárea, alteradas após '
+        'since, contra Postgres real', () async {
+      final session = sessionBuilder.build();
+      await _seed(session);
+
+      final referencia = DateTime.utc(2026, 9, 16, 12);
+
+      Visit visita({
+        required String localId,
+        required String patientId,
+        required DateTime syncAt,
+      }) =>
+          Visit(
+            patientId: UuidValue.fromString(patientId),
+            acsId: UuidValue.fromString(_acsId),
+            scheduledAt: DateTime.utc(2026, 9, 12, 9),
+            completedAt: DateTime.utc(2026, 9, 12, 10),
+            status: 'realizada',
+            riskLevelBefore: RiskLevel.green,
+            riskLevelAfter: RiskLevel.green,
+            notes: const {},
+            syncStatus: SyncStatus.synced,
+            localId: UuidValue.fromString(localId),
+            syncAt: syncAt,
+            version: 1,
+          );
+
+      // Grava direto no banco (via seed), não via `visits.sync` — o objetivo
+      // aqui é provar o filtro de leitura, não o fluxo de gravação.
+      final visitaRecenteMesmaArea = await Visit.db.insertRow(
+        session,
+        visita(
+          localId: '00000000-0000-4000-8000-0000000000f1',
+          patientId: _patientInAreaId,
+          syncAt: referencia.add(const Duration(hours: 1)),
+        ),
+      );
+      await Visit.db.insertRow(
+        session,
+        visita(
+          localId: '00000000-0000-4000-8000-0000000000f2',
+          patientId: _patientInAreaId,
+          syncAt: referencia.subtract(const Duration(hours: 1)),
+        ),
+      );
+      await Visit.db.insertRow(
+        session,
+        visita(
+          localId: '00000000-0000-4000-8000-0000000000f3',
+          patientId: _patientOutsideAreaId,
+          syncAt: referencia.add(const Duration(hours: 1)),
+        ),
+      );
+
+      final login = await endpoints.auth.developmentLogin(sessionBuilder, role: 'acs');
+      final result = await endpoints.visits.pull(
+        sessionBuilder,
+        accessToken: login.accessToken,
+        since: referencia,
+      );
+
+      expect(result.map((e) => e.localId), [visitaRecenteMesmaArea.localId.uuid]);
+    });
+
+    test('visits.pull rejeita quem não é ACS territorializado', () async {
+      await _seed(sessionBuilder.build());
+      final login = await endpoints.auth.developmentLogin(sessionBuilder, role: 'patient');
+
+      await expectLater(
+        endpoints.visits.pull(
+          sessionBuilder,
+          accessToken: login.accessToken,
+          since: DateTime.utc(2026, 9, 16, 12),
+        ),
+        throwsA(isA<AlertPermissionException>()),
+      );
+    });
   });
 }

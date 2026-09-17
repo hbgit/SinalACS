@@ -38,6 +38,24 @@ class VisitsEndpoint extends Endpoint {
     }
   }
 
+  /// Sincronização central→dispositivo: visitas da microárea do ACS
+  /// autenticado alteradas após `since`, para reconciliar um device que
+  /// ficou offline ou foi reinstalado.
+  Future<List<VisitSyncEntry>> pull(
+    Session session, {
+    required String accessToken,
+    required DateTime since,
+  }) async {
+    final user = _authenticate(accessToken);
+    try {
+      return await AlertRuntime.instance
+          .visitSyncServiceFor(session)
+          .pull(user: user, since: since);
+    } on StateError catch (error) {
+      throw AlertPermissionException(message: error.message);
+    }
+  }
+
   AuthenticatedUser _authenticate(String accessToken) {
     final user = AlertRuntime.instance.auth.verifyToken(accessToken);
     if (user == null) {
