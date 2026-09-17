@@ -5,6 +5,9 @@ auth:
   - developmentLogin:
 health:
   - check:
+onboarding:
+  - generateEnrollmentToken:
+  - completeEnrollment:
 patients:
   - listMicroArea:
 triage:

@@ -15,10 +15,11 @@ import 'package:serverpod/serverpod.dart' as _i1;
 import '../endpoints/alerts_endpoint.dart' as _i2;
 import '../endpoints/auth_endpoint.dart' as _i3;
 import '../endpoints/health_endpoint.dart' as _i4;
-import '../endpoints/patients_endpoint.dart' as _i5;
-import '../endpoints/triage_endpoint.dart' as _i6;
-import '../endpoints/visits_endpoint.dart' as _i7;
-import 'package:sinalacs_server/src/generated/api/visit_sync_entry.dart' as _i8;
+import '../endpoints/onboarding_endpoint.dart' as _i5;
+import '../endpoints/patients_endpoint.dart' as _i6;
+import '../endpoints/triage_endpoint.dart' as _i7;
+import '../endpoints/visits_endpoint.dart' as _i8;
+import 'package:sinalacs_server/src/generated/api/visit_sync_entry.dart' as _i9;
 
 class Endpoints extends _i1.EndpointDispatch {
   @override
@@ -42,19 +43,25 @@ class Endpoints extends _i1.EndpointDispatch {
           'health',
           null,
         ),
-      'patients': _i5.PatientsEndpoint()
+      'onboarding': _i5.OnboardingEndpoint()
+        ..initialize(
+          server,
+          'onboarding',
+          null,
+        ),
+      'patients': _i6.PatientsEndpoint()
         ..initialize(
           server,
           'patients',
           null,
         ),
-      'triage': _i6.TriageEndpoint()
+      'triage': _i7.TriageEndpoint()
         ..initialize(
           server,
           'triage',
           null,
         ),
-      'visits': _i7.VisitsEndpoint()
+      'visits': _i8.VisitsEndpoint()
         ..initialize(
           server,
           'visits',
@@ -170,6 +177,74 @@ class Endpoints extends _i1.EndpointDispatch {
         ),
       },
     );
+    connectors['onboarding'] = _i1.EndpointConnector(
+      name: 'onboarding',
+      endpoint: endpoints['onboarding']!,
+      methodConnectors: {
+        'generateEnrollmentToken': _i1.MethodConnector(
+          name: 'generateEnrollmentToken',
+          params: {
+            'accessToken': _i1.ParameterDescription(
+              name: 'accessToken',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'patientId': _i1.ParameterDescription(
+              name: 'patientId',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async => (endpoints['onboarding'] as _i5.OnboardingEndpoint)
+                  .generateEnrollmentToken(
+                    session,
+                    accessToken: params['accessToken'],
+                    patientId: params['patientId'],
+                  ),
+        ),
+        'completeEnrollment': _i1.MethodConnector(
+          name: 'completeEnrollment',
+          params: {
+            'token': _i1.ParameterDescription(
+              name: 'token',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'healthDataConsent': _i1.ParameterDescription(
+              name: 'healthDataConsent',
+              type: _i1.getType<bool>(),
+              nullable: false,
+            ),
+            'remindersConsent': _i1.ParameterDescription(
+              name: 'remindersConsent',
+              type: _i1.getType<bool>(),
+              nullable: false,
+            ),
+            'pushConsent': _i1.ParameterDescription(
+              name: 'pushConsent',
+              type: _i1.getType<bool>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async => (endpoints['onboarding'] as _i5.OnboardingEndpoint)
+                  .completeEnrollment(
+                    session,
+                    token: params['token'],
+                    healthDataConsent: params['healthDataConsent'],
+                    remindersConsent: params['remindersConsent'],
+                    pushConsent: params['pushConsent'],
+                  ),
+        ),
+      },
+    );
     connectors['patients'] = _i1.EndpointConnector(
       name: 'patients',
       endpoint: endpoints['patients']!,
@@ -188,7 +263,7 @@ class Endpoints extends _i1.EndpointDispatch {
                 _i1.Session session,
                 Map<String, dynamic> params,
               ) async =>
-                  (endpoints['patients'] as _i5.PatientsEndpoint).listMicroArea(
+                  (endpoints['patients'] as _i6.PatientsEndpoint).listMicroArea(
                     session,
                     accessToken: params['accessToken'],
                   ),
@@ -242,7 +317,7 @@ class Endpoints extends _i1.EndpointDispatch {
               (
                 _i1.Session session,
                 Map<String, dynamic> params,
-              ) async => (endpoints['triage'] as _i6.TriageEndpoint).evaluate(
+              ) async => (endpoints['triage'] as _i7.TriageEndpoint).evaluate(
                 session,
                 accessToken: params['accessToken'],
                 chestPain: params['chestPain'],
@@ -269,7 +344,7 @@ class Endpoints extends _i1.EndpointDispatch {
             ),
             'visits': _i1.ParameterDescription(
               name: 'visits',
-              type: _i1.getType<List<_i8.VisitSyncEntry>>(),
+              type: _i1.getType<List<_i9.VisitSyncEntry>>(),
               nullable: false,
             ),
           },
@@ -277,7 +352,7 @@ class Endpoints extends _i1.EndpointDispatch {
               (
                 _i1.Session session,
                 Map<String, dynamic> params,
-              ) async => (endpoints['visits'] as _i7.VisitsEndpoint).sync(
+              ) async => (endpoints['visits'] as _i8.VisitsEndpoint).sync(
                 session,
                 accessToken: params['accessToken'],
                 visits: params['visits'],

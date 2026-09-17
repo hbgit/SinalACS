@@ -18,12 +18,16 @@ import 'package:sinalacs_client/src/protocol/api/alert_ack_result.dart' as _i4;
 import 'package:sinalacs_client/src/protocol/api/development_login_result.dart'
     as _i5;
 import 'package:sinalacs_client/src/protocol/api/service_health.dart' as _i6;
-import 'package:sinalacs_client/src/protocol/api/micro_area_patient.dart'
+import 'package:sinalacs_client/src/protocol/api/enrollment_token_result.dart'
     as _i7;
-import 'package:sinalacs_client/src/protocol/api/triage_result.dart' as _i8;
-import 'package:sinalacs_client/src/protocol/api/visit_sync_result.dart' as _i9;
-import 'package:sinalacs_client/src/protocol/api/visit_sync_entry.dart' as _i10;
-import 'protocol.dart' as _i11;
+import 'package:sinalacs_client/src/protocol/api/enrollment_result.dart' as _i8;
+import 'package:sinalacs_client/src/protocol/api/micro_area_patient.dart'
+    as _i9;
+import 'package:sinalacs_client/src/protocol/api/triage_result.dart' as _i10;
+import 'package:sinalacs_client/src/protocol/api/visit_sync_result.dart'
+    as _i11;
+import 'package:sinalacs_client/src/protocol/api/visit_sync_entry.dart' as _i12;
+import 'protocol.dart' as _i13;
 
 /// Ciclo do alerta vermelho.
 ///
@@ -121,6 +125,48 @@ class EndpointHealth extends _i1.EndpointRef {
       );
 }
 
+/// Onboarding do paciente por convite do ACS (RF02) e captura de
+/// consentimento por finalidade (LGPD-RF02). Ver decisão §2 de
+/// docs/superpowers/specs/2026-09-16-decisoes-produto-pos-validacao.md.
+/// {@category Endpoint}
+class EndpointOnboarding extends _i1.EndpointRef {
+  EndpointOnboarding(_i1.EndpointCaller caller) : super(caller);
+
+  @override
+  String get name => 'onboarding';
+
+  /// Chamado pelo app do ACS. Exige sessão de ACS.
+  _i2.Future<_i7.EnrollmentTokenResult> generateEnrollmentToken({
+    required String accessToken,
+    required String patientId,
+  }) => caller.callServerEndpoint<_i7.EnrollmentTokenResult>(
+    'onboarding',
+    'generateEnrollmentToken',
+    {
+      'accessToken': accessToken,
+      'patientId': patientId,
+    },
+  );
+
+  /// Chamado pelo app do paciente. Não exige sessão prévia — é a própria
+  /// conclusão do onboarding que emite a primeira sessão.
+  _i2.Future<_i8.EnrollmentResult> completeEnrollment({
+    required String token,
+    required bool healthDataConsent,
+    required bool remindersConsent,
+    required bool pushConsent,
+  }) => caller.callServerEndpoint<_i8.EnrollmentResult>(
+    'onboarding',
+    'completeEnrollment',
+    {
+      'token': token,
+      'healthDataConsent': healthDataConsent,
+      'remindersConsent': remindersConsent,
+      'pushConsent': pushConsent,
+    },
+  );
+}
+
 /// Diretório de pacientes da microárea do ACS.
 ///
 /// Existe para a visita de rotina: o único produtor de alertas
@@ -134,9 +180,9 @@ class EndpointPatients extends _i1.EndpointRef {
   @override
   String get name => 'patients';
 
-  _i2.Future<List<_i7.MicroAreaPatient>> listMicroArea({
+  _i2.Future<List<_i9.MicroAreaPatient>> listMicroArea({
     required String accessToken,
-  }) => caller.callServerEndpoint<List<_i7.MicroAreaPatient>>(
+  }) => caller.callServerEndpoint<List<_i9.MicroAreaPatient>>(
     'patients',
     'listMicroArea',
     {'accessToken': accessToken},
@@ -160,7 +206,7 @@ class EndpointTriage extends _i1.EndpointRef {
   @override
   String get name => 'triage';
 
-  _i2.Future<_i8.TriageResult> evaluate({
+  _i2.Future<_i10.TriageResult> evaluate({
     required String accessToken,
     required bool chestPain,
     required bool difficultyBreathing,
@@ -168,7 +214,7 @@ class EndpointTriage extends _i1.EndpointRef {
     required bool persistentVomiting,
     required bool bleeding,
     required bool severeWeakness,
-  }) => caller.callServerEndpoint<_i8.TriageResult>(
+  }) => caller.callServerEndpoint<_i10.TriageResult>(
     'triage',
     'evaluate',
     {
@@ -199,10 +245,10 @@ class EndpointVisits extends _i1.EndpointRef {
   @override
   String get name => 'visits';
 
-  _i2.Future<List<_i9.VisitSyncResult>> sync({
+  _i2.Future<List<_i11.VisitSyncResult>> sync({
     required String accessToken,
-    required List<_i10.VisitSyncEntry> visits,
-  }) => caller.callServerEndpoint<List<_i9.VisitSyncResult>>(
+    required List<_i12.VisitSyncEntry> visits,
+  }) => caller.callServerEndpoint<List<_i11.VisitSyncResult>>(
     'visits',
     'sync',
     {
@@ -232,7 +278,7 @@ class Client extends _i1.ServerpodClientShared {
     bool? disconnectStreamsOnLostInternetConnection,
   }) : super(
          host,
-         _i11.Protocol(),
+         _i13.Protocol(),
          securityContext: securityContext,
          streamingConnectionTimeout: streamingConnectionTimeout,
          connectionTimeout: connectionTimeout,
@@ -244,6 +290,7 @@ class Client extends _i1.ServerpodClientShared {
     alerts = EndpointAlerts(this);
     auth = EndpointAuth(this);
     health = EndpointHealth(this);
+    onboarding = EndpointOnboarding(this);
     patients = EndpointPatients(this);
     triage = EndpointTriage(this);
     visits = EndpointVisits(this);
@@ -254,6 +301,8 @@ class Client extends _i1.ServerpodClientShared {
   late final EndpointAuth auth;
 
   late final EndpointHealth health;
+
+  late final EndpointOnboarding onboarding;
 
   late final EndpointPatients patients;
 
@@ -266,6 +315,7 @@ class Client extends _i1.ServerpodClientShared {
     'alerts': alerts,
     'auth': auth,
     'health': health,
+    'onboarding': onboarding,
     'patients': patients,
     'triage': triage,
     'visits': visits,

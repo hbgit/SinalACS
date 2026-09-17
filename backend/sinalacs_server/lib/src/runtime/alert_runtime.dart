@@ -4,6 +4,7 @@ import 'package:sinalacs_server/src/application/alerts/alert_outbox_dispatcher.d
 import 'package:sinalacs_server/src/application/alerts/red_alert_service.dart';
 import 'package:sinalacs_server/src/application/audit/audit_trail.dart';
 import 'package:sinalacs_server/src/application/auth/development_auth_service.dart';
+import 'package:sinalacs_server/src/application/onboarding/onboarding_service.dart';
 import 'package:sinalacs_server/src/application/patients/patient_directory_service.dart';
 import 'package:sinalacs_server/src/application/triage/triage_session_service.dart';
 import 'package:sinalacs_server/src/application/visits/visit_sync_service.dart';
@@ -11,6 +12,7 @@ import 'package:sinalacs_server/src/config/app_config.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_alert_outbox.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_alert_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_audit_trail.dart';
+import 'package:sinalacs_server/src/infrastructure/database/orm_onboarding_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_patient_directory_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_triage_session_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_visit_store.dart';
@@ -106,6 +108,12 @@ class AlertRuntime {
       TriageSessionService(
         store: OrmTriageSessionStore(session: () => session),
         audit: auditTrailFor(session),
+      );
+
+  /// Constrói o serviço de onboarding para uma requisição.
+  OnboardingService onboardingServiceFor(Session session) => OnboardingService(
+        store: OrmOnboardingStore(session: () => session),
+        auth: auth,
       );
 
   /// Trilha de auditoria amarrada à sessão da chamada.
