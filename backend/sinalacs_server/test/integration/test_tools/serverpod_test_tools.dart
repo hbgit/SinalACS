@@ -202,6 +202,7 @@ class _AlertsEndpoint {
     required String accessToken,
     required String idempotencyKey,
     required String locationHash,
+    String? locationCell,
   }) async {
     return _i1.callAwaitableFunctionAndHandleExceptions(() async {
       var _localUniqueSession =
@@ -218,6 +219,7 @@ class _AlertsEndpoint {
             'accessToken': accessToken,
             'idempotencyKey': idempotencyKey,
             'locationHash': locationHash,
+            'locationCell': locationCell,
           }),
           serializationManager: _serializationManager,
         );

@@ -50,6 +50,7 @@ class EndpointAlerts extends _i1.EndpointRef {
     required String accessToken,
     required String idempotencyKey,
     required String locationHash,
+    String? locationCell,
   }) => caller.callServerEndpoint<_i3.RedAlertResult>(
     'alerts',
     'createRedAlert',
@@ -57,6 +58,7 @@ class EndpointAlerts extends _i1.EndpointRef {
       'accessToken': accessToken,
       'idempotencyKey': idempotencyKey,
       'locationHash': locationHash,
+      'locationCell': locationCell,
     },
   );
 

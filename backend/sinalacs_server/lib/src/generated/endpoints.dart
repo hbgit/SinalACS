@@ -83,6 +83,11 @@ class Endpoints extends _i1.EndpointDispatch {
               type: _i1.getType<String>(),
               nullable: false,
             ),
+            'locationCell': _i1.ParameterDescription(
+              name: 'locationCell',
+              type: _i1.getType<String?>(),
+              nullable: true,
+            ),
           },
           call:
               (
@@ -94,6 +99,7 @@ class Endpoints extends _i1.EndpointDispatch {
                     accessToken: params['accessToken'],
                     idempotencyKey: params['idempotencyKey'],
                     locationHash: params['locationHash'],
+                    locationCell: params['locationCell'],
                   ),
         ),
         'acknowledge': _i1.MethodConnector(

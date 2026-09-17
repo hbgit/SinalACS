@@ -81,6 +81,7 @@ class RedAlertService {
     required AuthenticatedUser user,
     required String idempotencyKey,
     required String locationHash,
+    String? locationCell,
   }) async {
     if (user.role != UserRole.patient || user.microAreaId == null) {
       throw StateError('Somente pacientes territorializados podem criar alertas.');
@@ -104,6 +105,7 @@ class RedAlertService {
       microAreaId: user.microAreaId!,
       riskLevel: 'red',
       locationHash: locationHash,
+      locationCell: locationCell,
       triggeredAt: triggeredAt,
     );
     final record = RedAlertRecord(delivery: alert, idempotencyKey: idempotencyKey);

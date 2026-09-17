@@ -26,6 +26,7 @@ class AlertsEndpoint extends Endpoint {
     required String accessToken,
     required String idempotencyKey,
     required String locationHash,
+    String? locationCell,
   }) async {
     final user = _authenticate(accessToken);
 
@@ -44,6 +45,7 @@ class AlertsEndpoint extends Endpoint {
           user: user,
           idempotencyKey: idempotencyKey,
           locationHash: locationHash,
+          locationCell: locationCell,
         );
       });
 

@@ -105,6 +105,27 @@ void main() {
     expect(outbox.enqueued, hasLength(1));
   });
 
+  test('propaga locationCell quando informado', () async {
+    final service = RedAlertService(store: FakeAlertStore(), outbox: FakeAlertOutbox());
+    final record = await service.create(
+      user: patient,
+      idempotencyKey: 'key-1',
+      locationHash: 'hash-1',
+      locationCell: '-1580:-4783',
+    );
+    expect(record.delivery.locationCell, '-1580:-4783');
+  });
+
+  test('locationCell ausente não impede o alerta (GPS indisponível)', () async {
+    final service = RedAlertService(store: FakeAlertStore(), outbox: FakeAlertOutbox());
+    final record = await service.create(
+      user: patient,
+      idempotencyKey: 'key-2',
+      locationHash: 'sem-local-00',
+    );
+    expect(record.delivery.locationCell, isNull);
+  });
+
   test('rejeita usuários que não sejam pacientes territorializados', () async {
     final service =
         RedAlertService(store: FakeAlertStore(), outbox: FakeAlertOutbox());

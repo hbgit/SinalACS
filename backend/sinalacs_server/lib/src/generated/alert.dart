@@ -33,6 +33,7 @@ abstract class Alert
     this.acknowledgedAt,
     required this.riskLevel,
     required this.locationHash,
+    this.locationCell,
     required this.status,
     required this.mqttTopic,
     required this.deviceId,
@@ -51,6 +52,7 @@ abstract class Alert
     DateTime? acknowledgedAt,
     required _i2.RiskLevel riskLevel,
     required String locationHash,
+    String? locationCell,
     required _i3.AlertStatus status,
     required String mqttTopic,
     required String deviceId,
@@ -94,6 +96,7 @@ abstract class Alert
         (jsonSerialization['riskLevel'] as String),
       ),
       locationHash: jsonSerialization['locationHash'] as String,
+      locationCell: jsonSerialization['locationCell'] as String?,
       status: _i3.AlertStatus.fromJson((jsonSerialization['status'] as String)),
       mqttTopic: jsonSerialization['mqttTopic'] as String,
       deviceId: jsonSerialization['deviceId'] as String,
@@ -127,6 +130,10 @@ abstract class Alert
 
   String locationHash;
 
+  /// Célula geográfica de baixa resolução para o mapa do ACS (~1,1 km).
+  /// Nunca a coordenada exata — ver docs/superpowers/specs/2026-09-16-decisoes-produto-pos-validacao.md §1.
+  String? locationCell;
+
   _i3.AlertStatus status;
 
   String mqttTopic;
@@ -154,6 +161,7 @@ abstract class Alert
     DateTime? acknowledgedAt,
     _i2.RiskLevel? riskLevel,
     String? locationHash,
+    String? locationCell,
     _i3.AlertStatus? status,
     String? mqttTopic,
     String? deviceId,
@@ -174,6 +182,7 @@ abstract class Alert
       if (acknowledgedAt != null) 'acknowledgedAt': acknowledgedAt?.toJson(),
       'riskLevel': riskLevel.toJson(),
       'locationHash': locationHash,
+      if (locationCell != null) 'locationCell': locationCell,
       'status': status.toJson(),
       'mqttTopic': mqttTopic,
       'deviceId': deviceId,
@@ -196,6 +205,7 @@ abstract class Alert
       if (acknowledgedAt != null) 'acknowledgedAt': acknowledgedAt?.toJson(),
       'riskLevel': riskLevel.toJson(),
       'locationHash': locationHash,
+      if (locationCell != null) 'locationCell': locationCell,
       'status': status.toJson(),
       'mqttTopic': mqttTopic,
       'deviceId': deviceId,
@@ -248,6 +258,7 @@ class _AlertImpl extends Alert {
     DateTime? acknowledgedAt,
     required _i2.RiskLevel riskLevel,
     required String locationHash,
+    String? locationCell,
     required _i3.AlertStatus status,
     required String mqttTopic,
     required String deviceId,
@@ -264,6 +275,7 @@ class _AlertImpl extends Alert {
          acknowledgedAt: acknowledgedAt,
          riskLevel: riskLevel,
          locationHash: locationHash,
+         locationCell: locationCell,
          status: status,
          mqttTopic: mqttTopic,
          deviceId: deviceId,
@@ -286,6 +298,7 @@ class _AlertImpl extends Alert {
     Object? acknowledgedAt = _Undefined,
     _i2.RiskLevel? riskLevel,
     String? locationHash,
+    Object? locationCell = _Undefined,
     _i3.AlertStatus? status,
     String? mqttTopic,
     String? deviceId,
@@ -307,6 +320,7 @@ class _AlertImpl extends Alert {
           : this.acknowledgedAt,
       riskLevel: riskLevel ?? this.riskLevel,
       locationHash: locationHash ?? this.locationHash,
+      locationCell: locationCell is String? ? locationCell : this.locationCell,
       status: status ?? this.status,
       mqttTopic: mqttTopic ?? this.mqttTopic,
       deviceId: deviceId ?? this.deviceId,
@@ -374,6 +388,12 @@ class AlertUpdateTable extends _i1.UpdateTable<AlertTable> {
     table.locationHash,
     value,
   );
+
+  _i1.ColumnValue<String, String> locationCell(String? value) =>
+      _i1.ColumnValue(
+        table.locationCell,
+        value,
+      );
 
   _i1.ColumnValue<_i3.AlertStatus, _i3.AlertStatus> status(
     _i3.AlertStatus value,
@@ -443,6 +463,10 @@ class AlertTable extends _i1.Table<_i1.UuidValue?> {
       'locationHash',
       this,
     );
+    locationCell = _i1.ColumnString(
+      'locationCell',
+      this,
+    );
     status = _i1.ColumnEnum(
       'status',
       this,
@@ -486,6 +510,10 @@ class AlertTable extends _i1.Table<_i1.UuidValue?> {
 
   late final _i1.ColumnString locationHash;
 
+  /// Célula geográfica de baixa resolução para o mapa do ACS (~1,1 km).
+  /// Nunca a coordenada exata — ver docs/superpowers/specs/2026-09-16-decisoes-produto-pos-validacao.md §1.
+  late final _i1.ColumnString locationCell;
+
   late final _i1.ColumnEnum<_i3.AlertStatus> status;
 
   late final _i1.ColumnString mqttTopic;
@@ -508,6 +536,7 @@ class AlertTable extends _i1.Table<_i1.UuidValue?> {
     acknowledgedAt,
     riskLevel,
     locationHash,
+    locationCell,
     status,
     mqttTopic,
     deviceId,
