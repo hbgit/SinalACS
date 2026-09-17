@@ -3,7 +3,7 @@
 Carregado ao trabalhar em `backend/`. Regras gerais do repositório ficam no `CLAUDE.md` da raiz.
 
 ### Backend (Serverpod 3.4.13 — Dart workspace)
-`backend/` is a Dart workspace with two packages: `sinalacs_server` (the Serverpod server) and `sinalacs_client` (the generated, typed Dart client — published but not yet consumed by the Flutter apps).
+`backend/` is a Dart workspace with two packages: `sinalacs_server` (the Serverpod server) and `sinalacs_client` (the generated, typed Dart client consumed by the patient and ACS Flutter apps).
 ```bash
 cd backend
 dart pub get
@@ -47,7 +47,7 @@ The dev seed (`sinalacs_server/lib/src/infrastructure/database/seeds/development
 `backend/` is a Dart workspace with `sinalacs_server` (the server) and `sinalacs_client` (the generated typed client). Serverpod was the original stack decision recorded in `spec/stack.md`/`spec/PRD_system.md`; it was not implemented at first — the server was a hand-rolled `dart:io` HttpServer — and was adopted later, replacing it. The Dockerfile (`backend/sinalacs_server/Dockerfile`) is a multi-stage build: `dart compile exe` (AOT) on `dart:3.8.0`, copied into `alpine` with a non-root user, `curl` for the healthcheck, and a `HEALTHCHECK` that does `POST /health/check`.
 
 Layering under `backend/sinalacs_server/lib/src/`:
-- `models/` — the schema as `.spy.yaml` model files: 11 tables, 4 enums (`RiskLevel`, `AlertStatus`, `SyncStatus`, `UserRole`), typed exceptions, and endpoint result types. `serverpod generate` turns these into Dart classes shared by server and client; `serverpod create-migration` turns them into SQL under `migrations/`.
+- `models/` — the schema as `.spy.yaml` model files: 14 tables, 4 enums (`RiskLevel`, `AlertStatus`, `SyncStatus`, `UserRole`), typed exceptions, and endpoint result types. `serverpod generate` turns these into Dart classes shared by server and client; `serverpod create-migration` turns them into SQL under `migrations/`.
 - `application/` — use-case services, unchanged by the migration: `alerts/red_alert_service.dart` (red alert creation/ack, idempotency, micro-area/role enforcement), `triage/triage_engine.dart` (deterministic symptom → `RiskLevel`, mirrors Manchester Protocol logic), `sync/sync_fsm.dart` (`idle → localWrite → queued → syncing → {synced|conflict|error}`), `auth/development_auth_service.dart` (dev-only HMAC tokens, **not** real institutional auth).
 - `infrastructure/` — `database/orm_alert_store.dart` (implements `AlertStore` over the Serverpod ORM), `database/seeds/development.sql`, `mqtt/mqtt_alert_dispatcher.dart` (implements `AlertPublisher`, publishes/subscribes per micro-area topic, handles ACK payloads).
 - `endpoints/` — the RPC surface. `runtime/alert_runtime.dart` holds process-scoped state (MQTT dispatcher, config), because endpoints are constructed per request.

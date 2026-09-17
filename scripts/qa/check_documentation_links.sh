@@ -9,9 +9,13 @@ while IFS= read -r file; do
   while IFS= read -r target; do
     target="${target%%#*}"
     [[ -z "$target" || "$target" == http://* || "$target" == https://* ]] && continue
-    [[ "$target" == mailto:* || "$target" == *issues* || "$target" == graphify-out/wiki ]] && continue
+    [[ "$target" == mailto:* || "$target" == graphify-out/wiki || "$target" == ../../../issues/* ]] && continue
     [[ "$target" == /* ]] && continue
-    [[ "$file" == "$repo_root/PROGRESS.md" ]] && continue
+    if [[ "$file" == "$repo_root/PROGRESS.md" ]]; then
+      case "$target" in
+        backend/lib/*|backend/bin/*|backend/test/*) continue ;;
+      esac
+    fi
     link_path="$source_dir/$target"
     case "$target" in
       apps/*|backend/*|docs/*|spec/*|scripts/*|video/*|.github/*|README.md|CLAUDE.md|AGENTS.md|PROGRESS.md|CONTRIBUTING.md|docker-compose.yml)

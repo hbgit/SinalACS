@@ -125,8 +125,10 @@ cliente · **`parcial`** = existe, mas alimentado por dado fabricado ·
 
 **União paciente+ACS: 7/7.** Nenhum endpoint do backend está sem consumidor.
 
-Dois métodos de interface mortos: `PatientBackend.health()` só é chamado por
-ferramenta de teste, e `AcsBackend.health()` não é chamado em lugar nenhum.
+Um método de interface permanece voltado somente à ferramenta de validação:
+`PatientBackend.health()` é usado por `tool/live_check.dart`; o ACS não mantém
+uma cópia desse método, pois seu `health.check` não é usado pelo app nem pelas
+ferramentas atuais.
 
 **Canal não-RPC:** alertas chegam ao ACS exclusivamente por MQTT/TLS no tópico
 `sinalacs/v1/microareas/<microAreaId>/alerts`. Não existe endpoint de listagem
@@ -257,7 +259,9 @@ script rodar.
   endpoint; `patients.listMicroArea` com token inválido.
   `mqtt_alert_dispatcher.dart` (161 linhas) tem **zero** referências em `test/`.
 - **L-14 · Código morto:** `AlertDispatchUnavailableException` é declarado e
-  nunca lançado; `health()` está morto nas duas interfaces de app.
+  nunca lançado; o método `health()` foi removido da interface do ACS por não
+  ter consumidores. `PatientBackend.health()` permanece somente na ferramenta
+  de validação do paciente.
 - **L-15 · `applicationId` do paciente é `com.example.sinalacs_patient`**,
   o default do template — impublicável. ACS e admin já usam `br.com.prismrr.*`.
 - **L-16 · Criação da AVD não é documentada** em lugar nenhum, embora

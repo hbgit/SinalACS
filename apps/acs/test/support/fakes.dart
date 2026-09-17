@@ -43,9 +43,6 @@ class FakeAcsBackend implements AcsBackend {
   @override
   bool get isAuthenticated => _session != null;
 
-  @override
-  Future<ServiceHealth> health() async =>
-      ServiceHealth(status: 'ok', mqttConnected: true, dbConnected: true);
 
   @override
   Future<AuthSession> login() async {

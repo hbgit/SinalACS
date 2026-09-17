@@ -27,8 +27,6 @@ abstract class AcsBackend {
 
   bool get isAuthenticated;
 
-  Future<ServiceHealth> health();
-
   Future<AuthSession> login();
 
   Future<AlertAckResult> acknowledge({required String alertId});
@@ -64,8 +62,6 @@ class BackendClient implements AcsBackend {
     return current != null && !current.isExpired();
   }
 
-  @override
-  Future<ServiceHealth> health() => _guard(() => _client.health.check());
 
   /// Token válido para as chamadas autenticadas.
   ///
