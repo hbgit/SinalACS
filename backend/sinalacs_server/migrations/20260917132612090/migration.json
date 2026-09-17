@@ -14,16 +14,14 @@
           {
             "__className__": "serverpod.ColumnDefinition",
             "name": "id",
-            "fieldName": "id",
             "columnType": 7,
             "isNullable": false,
-            "columnDefault": "random",
+            "columnDefault": "gen_random_uuid()",
             "dartType": "UuidValue?"
           },
           {
             "__className__": "serverpod.ColumnDefinition",
             "name": "tokenHash",
-            "fieldName": "tokenHash",
             "columnType": 0,
             "isNullable": false,
             "dartType": "String"
@@ -31,7 +29,6 @@
           {
             "__className__": "serverpod.ColumnDefinition",
             "name": "patientId",
-            "fieldName": "patientId",
             "columnType": 7,
             "isNullable": false,
             "dartType": "UuidValue"
@@ -39,7 +36,6 @@
           {
             "__className__": "serverpod.ColumnDefinition",
             "name": "microAreaId",
-            "fieldName": "microAreaId",
             "columnType": 7,
             "isNullable": false,
             "dartType": "UuidValue"
@@ -47,7 +43,6 @@
           {
             "__className__": "serverpod.ColumnDefinition",
             "name": "createdByAcsId",
-            "fieldName": "createdByAcsId",
             "columnType": 7,
             "isNullable": false,
             "dartType": "UuidValue"
@@ -55,7 +50,6 @@
           {
             "__className__": "serverpod.ColumnDefinition",
             "name": "createdAt",
-            "fieldName": "createdAt",
             "columnType": 4,
             "isNullable": false,
             "dartType": "DateTime"
@@ -63,7 +57,6 @@
           {
             "__className__": "serverpod.ColumnDefinition",
             "name": "expiresAt",
-            "fieldName": "expiresAt",
             "columnType": 4,
             "isNullable": false,
             "dartType": "DateTime"
@@ -71,7 +64,6 @@
           {
             "__className__": "serverpod.ColumnDefinition",
             "name": "consumedAt",
-            "fieldName": "consumedAt",
             "columnType": 4,
             "isNullable": true,
             "dartType": "DateTime?"
@@ -108,6 +100,20 @@
           }
         ],
         "indexes": [
+          {
+            "__className__": "serverpod.IndexDefinition",
+            "indexName": "enrollment_tokens_pkey",
+            "elements": [
+              {
+                "__className__": "serverpod.IndexElementDefinition",
+                "type": 0,
+                "definition": "id"
+              }
+            ],
+            "type": "btree",
+            "isUnique": true,
+            "isPrimary": true
+          },
           {
             "__className__": "serverpod.IndexDefinition",
             "indexName": "enrollment_tokens_token_hash_key",

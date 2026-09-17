@@ -1,6 +1,5 @@
 {
   "__className__": "serverpod.DatabaseDefinition",
-  "schemaVersion": 2,
   "moduleName": "sinalacs",
   "tables": [
     {
@@ -13,16 +12,14 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "id",
-          "fieldName": "id",
           "columnType": 7,
           "isNullable": false,
-          "columnDefault": "random",
+          "columnDefault": "gen_random_uuid()",
           "dartType": "UuidValue?"
         },
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "enrollmentId",
-          "fieldName": "enrollmentId",
           "columnType": 0,
           "isNullable": false,
           "dartType": "String"
@@ -30,7 +27,6 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "ubsId",
-          "fieldName": "ubsId",
           "columnType": 7,
           "isNullable": false,
           "dartType": "UuidValue"
@@ -38,7 +34,6 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "active",
-          "fieldName": "active",
           "columnType": 1,
           "isNullable": false,
           "dartType": "bool"
@@ -46,7 +41,6 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "lastSyncAt",
-          "fieldName": "lastSyncAt",
           "columnType": 4,
           "isNullable": true,
           "dartType": "DateTime?"
@@ -54,6 +48,20 @@
       ],
       "foreignKeys": [],
       "indexes": [
+        {
+          "__className__": "serverpod.IndexDefinition",
+          "indexName": "acs_pkey",
+          "elements": [
+            {
+              "__className__": "serverpod.IndexElementDefinition",
+              "type": 0,
+              "definition": "id"
+            }
+          ],
+          "type": "btree",
+          "isUnique": true,
+          "isPrimary": true
+        },
         {
           "__className__": "serverpod.IndexDefinition",
           "indexName": "acs_ubs_idx",
@@ -81,16 +89,14 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "id",
-          "fieldName": "id",
           "columnType": 7,
           "isNullable": false,
-          "columnDefault": "random",
+          "columnDefault": "gen_random_uuid()",
           "dartType": "UuidValue?"
         },
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "alertId",
-          "fieldName": "alertId",
           "columnType": 7,
           "isNullable": false,
           "dartType": "UuidValue"
@@ -98,7 +104,6 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "acsId",
-          "fieldName": "acsId",
           "columnType": 7,
           "isNullable": false,
           "dartType": "UuidValue"
@@ -106,7 +111,6 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "acknowledgedAt",
-          "fieldName": "acknowledgedAt",
           "columnType": 4,
           "isNullable": false,
           "dartType": "DateTime"
@@ -145,6 +149,20 @@
       "indexes": [
         {
           "__className__": "serverpod.IndexDefinition",
+          "indexName": "alert_deliveries_pkey",
+          "elements": [
+            {
+              "__className__": "serverpod.IndexElementDefinition",
+              "type": 0,
+              "definition": "id"
+            }
+          ],
+          "type": "btree",
+          "isUnique": true,
+          "isPrimary": true
+        },
+        {
+          "__className__": "serverpod.IndexDefinition",
           "indexName": "alert_deliveries_alert_acs_key",
           "elements": [
             {
@@ -175,16 +193,14 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "id",
-          "fieldName": "id",
           "columnType": 7,
           "isNullable": false,
-          "columnDefault": "random",
+          "columnDefault": "gen_random_uuid()",
           "dartType": "UuidValue?"
         },
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "key",
-          "fieldName": "key",
           "columnType": 0,
           "isNullable": false,
           "dartType": "String"
@@ -192,7 +208,6 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "alertId",
-          "fieldName": "alertId",
           "columnType": 7,
           "isNullable": false,
           "dartType": "UuidValue"
@@ -200,7 +215,6 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "locationHash",
-          "fieldName": "locationHash",
           "columnType": 0,
           "isNullable": false,
           "dartType": "String"
@@ -208,7 +222,6 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "createdAt",
-          "fieldName": "createdAt",
           "columnType": 4,
           "isNullable": false,
           "dartType": "DateTime"
@@ -231,6 +244,20 @@
         }
       ],
       "indexes": [
+        {
+          "__className__": "serverpod.IndexDefinition",
+          "indexName": "alert_idempotency_keys_pkey",
+          "elements": [
+            {
+              "__className__": "serverpod.IndexElementDefinition",
+              "type": 0,
+              "definition": "id"
+            }
+          ],
+          "type": "btree",
+          "isUnique": true,
+          "isPrimary": true
+        },
         {
           "__className__": "serverpod.IndexDefinition",
           "indexName": "alert_idempotency_keys_key_key",
@@ -258,16 +285,14 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "id",
-          "fieldName": "id",
           "columnType": 7,
           "isNullable": false,
-          "columnDefault": "random",
+          "columnDefault": "gen_random_uuid()",
           "dartType": "UuidValue?"
         },
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "alertId",
-          "fieldName": "alertId",
           "columnType": 7,
           "isNullable": false,
           "dartType": "UuidValue"
@@ -275,7 +300,6 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "topic",
-          "fieldName": "topic",
           "columnType": 0,
           "isNullable": false,
           "dartType": "String"
@@ -283,7 +307,6 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "payload",
-          "fieldName": "payload",
           "columnType": 0,
           "isNullable": false,
           "dartType": "String"
@@ -291,7 +314,6 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "createdAt",
-          "fieldName": "createdAt",
           "columnType": 4,
           "isNullable": false,
           "dartType": "DateTime"
@@ -299,7 +321,6 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "publishedAt",
-          "fieldName": "publishedAt",
           "columnType": 4,
           "isNullable": true,
           "dartType": "DateTime?"
@@ -307,7 +328,6 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "attempts",
-          "fieldName": "attempts",
           "columnType": 6,
           "isNullable": false,
           "dartType": "int"
@@ -315,7 +335,6 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "nextAttemptAt",
-          "fieldName": "nextAttemptAt",
           "columnType": 4,
           "isNullable": false,
           "dartType": "DateTime"
@@ -323,7 +342,6 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "lastError",
-          "fieldName": "lastError",
           "columnType": 0,
           "isNullable": true,
           "dartType": "String?"
@@ -346,6 +364,20 @@
         }
       ],
       "indexes": [
+        {
+          "__className__": "serverpod.IndexDefinition",
+          "indexName": "alert_outbox_pkey",
+          "elements": [
+            {
+              "__className__": "serverpod.IndexElementDefinition",
+              "type": 0,
+              "definition": "id"
+            }
+          ],
+          "type": "btree",
+          "isUnique": true,
+          "isPrimary": true
+        },
         {
           "__className__": "serverpod.IndexDefinition",
           "indexName": "alert_outbox_pending_idx",
@@ -378,16 +410,14 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "id",
-          "fieldName": "id",
           "columnType": 7,
           "isNullable": false,
-          "columnDefault": "random",
+          "columnDefault": "gen_random_uuid()",
           "dartType": "UuidValue?"
         },
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "patientId",
-          "fieldName": "patientId",
           "columnType": 7,
           "isNullable": false,
           "dartType": "UuidValue"
@@ -395,7 +425,6 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "acsId",
-          "fieldName": "acsId",
           "columnType": 7,
           "isNullable": true,
           "dartType": "UuidValue?"
@@ -403,7 +432,6 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "microAreaId",
-          "fieldName": "microAreaId",
           "columnType": 7,
           "isNullable": true,
           "dartType": "UuidValue?"
@@ -411,7 +439,6 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "triggeredAt",
-          "fieldName": "triggeredAt",
           "columnType": 4,
           "isNullable": false,
           "dartType": "DateTime"
@@ -419,7 +446,6 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "receivedAt",
-          "fieldName": "receivedAt",
           "columnType": 4,
           "isNullable": true,
           "dartType": "DateTime?"
@@ -427,7 +453,6 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "respondedAt",
-          "fieldName": "respondedAt",
           "columnType": 4,
           "isNullable": true,
           "dartType": "DateTime?"
@@ -435,7 +460,6 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "acknowledgedAt",
-          "fieldName": "acknowledgedAt",
           "columnType": 4,
           "isNullable": true,
           "dartType": "DateTime?"
@@ -443,7 +467,6 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "riskLevel",
-          "fieldName": "riskLevel",
           "columnType": 0,
           "isNullable": false,
           "dartType": "protocol:RiskLevel"
@@ -451,7 +474,6 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "locationHash",
-          "fieldName": "locationHash",
           "columnType": 0,
           "isNullable": false,
           "dartType": "String"
@@ -459,7 +481,6 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "locationCell",
-          "fieldName": "locationCell",
           "columnType": 0,
           "isNullable": true,
           "dartType": "String?"
@@ -467,7 +488,6 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "status",
-          "fieldName": "status",
           "columnType": 0,
           "isNullable": false,
           "dartType": "protocol:AlertStatus"
@@ -475,7 +495,6 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "mqttTopic",
-          "fieldName": "mqttTopic",
           "columnType": 0,
           "isNullable": false,
           "dartType": "String"
@@ -483,7 +502,6 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "deviceId",
-          "fieldName": "deviceId",
           "columnType": 0,
           "isNullable": false,
           "dartType": "String"
@@ -491,7 +509,6 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "retryCount",
-          "fieldName": "retryCount",
           "columnType": 6,
           "isNullable": false,
           "dartType": "int"
@@ -499,7 +516,6 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "version",
-          "fieldName": "version",
           "columnType": 6,
           "isNullable": false,
           "dartType": "int"
@@ -538,6 +554,20 @@
       "indexes": [
         {
           "__className__": "serverpod.IndexDefinition",
+          "indexName": "alerts_pkey",
+          "elements": [
+            {
+              "__className__": "serverpod.IndexElementDefinition",
+              "type": 0,
+              "definition": "id"
+            }
+          ],
+          "type": "btree",
+          "isUnique": true,
+          "isPrimary": true
+        },
+        {
+          "__className__": "serverpod.IndexDefinition",
           "indexName": "alerts_micro_area_status_idx",
           "elements": [
             {
@@ -573,16 +603,14 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "id",
-          "fieldName": "id",
           "columnType": 7,
           "isNullable": false,
-          "columnDefault": "random",
+          "columnDefault": "gen_random_uuid()",
           "dartType": "UuidValue?"
         },
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "userId",
-          "fieldName": "userId",
           "columnType": 7,
           "isNullable": false,
           "dartType": "UuidValue"
@@ -590,7 +618,6 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "actionType",
-          "fieldName": "actionType",
           "columnType": 0,
           "isNullable": false,
           "dartType": "String"
@@ -598,7 +625,6 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "resourceType",
-          "fieldName": "resourceType",
           "columnType": 0,
           "isNullable": false,
           "dartType": "String"
@@ -606,7 +632,6 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "resourceId",
-          "fieldName": "resourceId",
           "columnType": 7,
           "isNullable": true,
           "dartType": "UuidValue?"
@@ -614,7 +639,6 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "timestamp",
-          "fieldName": "timestamp",
           "columnType": 4,
           "isNullable": false,
           "dartType": "DateTime"
@@ -622,7 +646,6 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "ipHash",
-          "fieldName": "ipHash",
           "columnType": 0,
           "isNullable": false,
           "dartType": "String"
@@ -630,7 +653,6 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "result",
-          "fieldName": "result",
           "columnType": 0,
           "isNullable": false,
           "dartType": "String"
@@ -638,7 +660,6 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "sequence",
-          "fieldName": "sequence",
           "columnType": 6,
           "isNullable": false,
           "dartType": "int"
@@ -646,7 +667,6 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "previousHash",
-          "fieldName": "previousHash",
           "columnType": 0,
           "isNullable": false,
           "dartType": "String"
@@ -654,7 +674,6 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "entryHash",
-          "fieldName": "entryHash",
           "columnType": 0,
           "isNullable": false,
           "dartType": "String"
@@ -677,6 +696,20 @@
         }
       ],
       "indexes": [
+        {
+          "__className__": "serverpod.IndexDefinition",
+          "indexName": "audit_logs_pkey",
+          "elements": [
+            {
+              "__className__": "serverpod.IndexElementDefinition",
+              "type": 0,
+              "definition": "id"
+            }
+          ],
+          "type": "btree",
+          "isUnique": true,
+          "isPrimary": true
+        },
         {
           "__className__": "serverpod.IndexDefinition",
           "indexName": "audit_logs_sequence_idx",
@@ -704,16 +737,14 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "id",
-          "fieldName": "id",
           "columnType": 7,
           "isNullable": false,
-          "columnDefault": "random",
+          "columnDefault": "gen_random_uuid()",
           "dartType": "UuidValue?"
         },
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "userId",
-          "fieldName": "userId",
           "columnType": 7,
           "isNullable": false,
           "dartType": "UuidValue"
@@ -721,7 +752,6 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "purpose",
-          "fieldName": "purpose",
           "columnType": 0,
           "isNullable": false,
           "dartType": "String"
@@ -729,7 +759,6 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "action",
-          "fieldName": "action",
           "columnType": 0,
           "isNullable": false,
           "dartType": "String"
@@ -737,7 +766,6 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "version",
-          "fieldName": "version",
           "columnType": 0,
           "isNullable": false,
           "dartType": "String"
@@ -745,7 +773,6 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "timestamp",
-          "fieldName": "timestamp",
           "columnType": 4,
           "isNullable": false,
           "dartType": "DateTime"
@@ -753,7 +780,6 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "ipHash",
-          "fieldName": "ipHash",
           "columnType": 0,
           "isNullable": false,
           "dartType": "String"
@@ -761,7 +787,6 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "userAgent",
-          "fieldName": "userAgent",
           "columnType": 0,
           "isNullable": false,
           "dartType": "String"
@@ -769,7 +794,6 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "signature",
-          "fieldName": "signature",
           "columnType": 0,
           "isNullable": false,
           "dartType": "String"
@@ -791,7 +815,22 @@
           "onDelete": 3
         }
       ],
-      "indexes": [],
+      "indexes": [
+        {
+          "__className__": "serverpod.IndexDefinition",
+          "indexName": "consent_logs_pkey",
+          "elements": [
+            {
+              "__className__": "serverpod.IndexElementDefinition",
+              "type": 0,
+              "definition": "id"
+            }
+          ],
+          "type": "btree",
+          "isUnique": true,
+          "isPrimary": true
+        }
+      ],
       "managed": true
     },
     {
@@ -804,16 +843,14 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "id",
-          "fieldName": "id",
           "columnType": 7,
           "isNullable": false,
-          "columnDefault": "random",
+          "columnDefault": "gen_random_uuid()",
           "dartType": "UuidValue?"
         },
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "tokenHash",
-          "fieldName": "tokenHash",
           "columnType": 0,
           "isNullable": false,
           "dartType": "String"
@@ -821,7 +858,6 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "patientId",
-          "fieldName": "patientId",
           "columnType": 7,
           "isNullable": false,
           "dartType": "UuidValue"
@@ -829,7 +865,6 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "microAreaId",
-          "fieldName": "microAreaId",
           "columnType": 7,
           "isNullable": false,
           "dartType": "UuidValue"
@@ -837,7 +872,6 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "createdByAcsId",
-          "fieldName": "createdByAcsId",
           "columnType": 7,
           "isNullable": false,
           "dartType": "UuidValue"
@@ -845,7 +879,6 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "createdAt",
-          "fieldName": "createdAt",
           "columnType": 4,
           "isNullable": false,
           "dartType": "DateTime"
@@ -853,7 +886,6 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "expiresAt",
-          "fieldName": "expiresAt",
           "columnType": 4,
           "isNullable": false,
           "dartType": "DateTime"
@@ -861,7 +893,6 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "consumedAt",
-          "fieldName": "consumedAt",
           "columnType": 4,
           "isNullable": true,
           "dartType": "DateTime?"
@@ -900,6 +931,20 @@
       "indexes": [
         {
           "__className__": "serverpod.IndexDefinition",
+          "indexName": "enrollment_tokens_pkey",
+          "elements": [
+            {
+              "__className__": "serverpod.IndexElementDefinition",
+              "type": 0,
+              "definition": "id"
+            }
+          ],
+          "type": "btree",
+          "isUnique": true,
+          "isPrimary": true
+        },
+        {
+          "__className__": "serverpod.IndexDefinition",
           "indexName": "enrollment_tokens_token_hash_key",
           "elements": [
             {
@@ -925,16 +970,14 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "id",
-          "fieldName": "id",
           "columnType": 7,
           "isNullable": false,
-          "columnDefault": "random",
+          "columnDefault": "gen_random_uuid()",
           "dartType": "UuidValue?"
         },
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "name",
-          "fieldName": "name",
           "columnType": 0,
           "isNullable": false,
           "dartType": "String"
@@ -942,7 +985,6 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "ubsId",
-          "fieldName": "ubsId",
           "columnType": 7,
           "isNullable": false,
           "dartType": "UuidValue"
@@ -950,7 +992,6 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "geoJsonBoundary",
-          "fieldName": "geoJsonBoundary",
           "columnType": 0,
           "isNullable": false,
           "dartType": "String"
@@ -958,6 +999,20 @@
       ],
       "foreignKeys": [],
       "indexes": [
+        {
+          "__className__": "serverpod.IndexDefinition",
+          "indexName": "micro_areas_pkey",
+          "elements": [
+            {
+              "__className__": "serverpod.IndexElementDefinition",
+              "type": 0,
+              "definition": "id"
+            }
+          ],
+          "type": "btree",
+          "isUnique": true,
+          "isPrimary": true
+        },
         {
           "__className__": "serverpod.IndexDefinition",
           "indexName": "micro_areas_ubs_idx",
@@ -985,16 +1040,14 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "id",
-          "fieldName": "id",
           "columnType": 7,
           "isNullable": false,
-          "columnDefault": "random",
+          "columnDefault": "gen_random_uuid()",
           "dartType": "UuidValue?"
         },
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "emergencyContact",
-          "fieldName": "emergencyContact",
           "columnType": 0,
           "isNullable": false,
           "dartType": "String"
@@ -1002,7 +1055,6 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "isChronic",
-          "fieldName": "isChronic",
           "columnType": 1,
           "isNullable": false,
           "dartType": "bool"
@@ -1010,7 +1062,6 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "chronicConditions",
-          "fieldName": "chronicConditions",
           "columnType": 8,
           "isNullable": false,
           "dartType": "List<String>"
@@ -1018,7 +1069,6 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "lastLocationHash",
-          "fieldName": "lastLocationHash",
           "columnType": 0,
           "isNullable": true,
           "dartType": "String?"
@@ -1026,14 +1076,28 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "lastTriageAt",
-          "fieldName": "lastTriageAt",
           "columnType": 4,
           "isNullable": true,
           "dartType": "DateTime?"
         }
       ],
       "foreignKeys": [],
-      "indexes": [],
+      "indexes": [
+        {
+          "__className__": "serverpod.IndexDefinition",
+          "indexName": "patients_pkey",
+          "elements": [
+            {
+              "__className__": "serverpod.IndexElementDefinition",
+              "type": 0,
+              "definition": "id"
+            }
+          ],
+          "type": "btree",
+          "isUnique": true,
+          "isPrimary": true
+        }
+      ],
       "managed": true
     },
     {
@@ -1046,16 +1110,14 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "id",
-          "fieldName": "id",
           "columnType": 7,
           "isNullable": false,
-          "columnDefault": "random",
+          "columnDefault": "gen_random_uuid()",
           "dartType": "UuidValue?"
         },
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "patientId",
-          "fieldName": "patientId",
           "columnType": 7,
           "isNullable": false,
           "dartType": "UuidValue"
@@ -1063,7 +1125,6 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "answers",
-          "fieldName": "answers",
           "columnType": 8,
           "isNullable": false,
           "dartType": "List<protocol:TriageAnswer>"
@@ -1071,7 +1132,6 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "resultRisk",
-          "fieldName": "resultRisk",
           "columnType": 0,
           "isNullable": false,
           "dartType": "protocol:RiskLevel"
@@ -1079,7 +1139,6 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "resultDisplay",
-          "fieldName": "resultDisplay",
           "columnType": 0,
           "isNullable": false,
           "dartType": "String"
@@ -1087,7 +1146,6 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "createdAt",
-          "fieldName": "createdAt",
           "columnType": 4,
           "isNullable": false,
           "dartType": "DateTime"
@@ -1095,7 +1153,6 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "deviceId",
-          "fieldName": "deviceId",
           "columnType": 0,
           "isNullable": false,
           "dartType": "String"
@@ -1117,7 +1174,22 @@
           "onDelete": 3
         }
       ],
-      "indexes": [],
+      "indexes": [
+        {
+          "__className__": "serverpod.IndexDefinition",
+          "indexName": "triage_sessions_pkey",
+          "elements": [
+            {
+              "__className__": "serverpod.IndexElementDefinition",
+              "type": 0,
+              "definition": "id"
+            }
+          ],
+          "type": "btree",
+          "isUnique": true,
+          "isPrimary": true
+        }
+      ],
       "managed": true
     },
     {
@@ -1130,16 +1202,14 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "id",
-          "fieldName": "id",
           "columnType": 7,
           "isNullable": false,
-          "columnDefault": "random",
+          "columnDefault": "gen_random_uuid()",
           "dartType": "UuidValue?"
         },
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "name",
-          "fieldName": "name",
           "columnType": 0,
           "isNullable": false,
           "dartType": "String"
@@ -1147,7 +1217,6 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "address",
-          "fieldName": "address",
           "columnType": 0,
           "isNullable": false,
           "dartType": "String"
@@ -1155,7 +1224,6 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "city",
-          "fieldName": "city",
           "columnType": 0,
           "isNullable": false,
           "dartType": "String"
@@ -1163,14 +1231,28 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "state",
-          "fieldName": "state",
           "columnType": 0,
           "isNullable": false,
           "dartType": "String"
         }
       ],
       "foreignKeys": [],
-      "indexes": [],
+      "indexes": [
+        {
+          "__className__": "serverpod.IndexDefinition",
+          "indexName": "ubs_pkey",
+          "elements": [
+            {
+              "__className__": "serverpod.IndexElementDefinition",
+              "type": 0,
+              "definition": "id"
+            }
+          ],
+          "type": "btree",
+          "isUnique": true,
+          "isPrimary": true
+        }
+      ],
       "managed": true
     },
     {
@@ -1183,16 +1265,14 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "id",
-          "fieldName": "id",
           "columnType": 7,
           "isNullable": false,
-          "columnDefault": "random",
+          "columnDefault": "gen_random_uuid()",
           "dartType": "UuidValue?"
         },
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "cpfHash",
-          "fieldName": "cpfHash",
           "columnType": 0,
           "isNullable": false,
           "dartType": "String"
@@ -1200,7 +1280,6 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "name",
-          "fieldName": "name",
           "columnType": 0,
           "isNullable": false,
           "dartType": "String"
@@ -1208,7 +1287,6 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "birthDate",
-          "fieldName": "birthDate",
           "columnType": 4,
           "isNullable": false,
           "dartType": "DateTime"
@@ -1216,7 +1294,6 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "role",
-          "fieldName": "role",
           "columnType": 0,
           "isNullable": false,
           "dartType": "protocol:UserRole"
@@ -1224,7 +1301,6 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "microAreaId",
-          "fieldName": "microAreaId",
           "columnType": 7,
           "isNullable": true,
           "dartType": "UuidValue?"
@@ -1232,7 +1308,6 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "createdAt",
-          "fieldName": "createdAt",
           "columnType": 4,
           "isNullable": false,
           "dartType": "DateTime"
@@ -1240,7 +1315,6 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "updatedAt",
-          "fieldName": "updatedAt",
           "columnType": 4,
           "isNullable": false,
           "dartType": "DateTime"
@@ -1248,6 +1322,20 @@
       ],
       "foreignKeys": [],
       "indexes": [
+        {
+          "__className__": "serverpod.IndexDefinition",
+          "indexName": "users_pkey",
+          "elements": [
+            {
+              "__className__": "serverpod.IndexElementDefinition",
+              "type": 0,
+              "definition": "id"
+            }
+          ],
+          "type": "btree",
+          "isUnique": true,
+          "isPrimary": true
+        },
         {
           "__className__": "serverpod.IndexDefinition",
           "indexName": "users_cpf_hash_idx",
@@ -1289,16 +1377,14 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "id",
-          "fieldName": "id",
           "columnType": 7,
           "isNullable": false,
-          "columnDefault": "random",
+          "columnDefault": "gen_random_uuid()",
           "dartType": "UuidValue?"
         },
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "patientId",
-          "fieldName": "patientId",
           "columnType": 7,
           "isNullable": false,
           "dartType": "UuidValue"
@@ -1306,7 +1392,6 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "acsId",
-          "fieldName": "acsId",
           "columnType": 7,
           "isNullable": false,
           "dartType": "UuidValue"
@@ -1314,7 +1399,6 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "scheduledAt",
-          "fieldName": "scheduledAt",
           "columnType": 4,
           "isNullable": false,
           "dartType": "DateTime"
@@ -1322,7 +1406,6 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "startedAt",
-          "fieldName": "startedAt",
           "columnType": 4,
           "isNullable": true,
           "dartType": "DateTime?"
@@ -1330,7 +1413,6 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "completedAt",
-          "fieldName": "completedAt",
           "columnType": 4,
           "isNullable": true,
           "dartType": "DateTime?"
@@ -1338,7 +1420,6 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "status",
-          "fieldName": "status",
           "columnType": 0,
           "isNullable": false,
           "dartType": "String"
@@ -1346,7 +1427,6 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "riskLevelBefore",
-          "fieldName": "riskLevelBefore",
           "columnType": 0,
           "isNullable": false,
           "dartType": "protocol:RiskLevel"
@@ -1354,7 +1434,6 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "riskLevelAfter",
-          "fieldName": "riskLevelAfter",
           "columnType": 0,
           "isNullable": true,
           "dartType": "protocol:RiskLevel?"
@@ -1362,7 +1441,6 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "notes",
-          "fieldName": "notes",
           "columnType": 8,
           "isNullable": false,
           "dartType": "Map<String,String>"
@@ -1370,7 +1448,6 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "syncStatus",
-          "fieldName": "syncStatus",
           "columnType": 0,
           "isNullable": false,
           "dartType": "protocol:SyncStatus"
@@ -1378,7 +1455,6 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "localId",
-          "fieldName": "localId",
           "columnType": 7,
           "isNullable": false,
           "dartType": "UuidValue"
@@ -1386,7 +1462,6 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "syncAt",
-          "fieldName": "syncAt",
           "columnType": 4,
           "isNullable": true,
           "dartType": "DateTime?"
@@ -1394,7 +1469,6 @@
         {
           "__className__": "serverpod.ColumnDefinition",
           "name": "version",
-          "fieldName": "version",
           "columnType": 6,
           "isNullable": false,
           "dartType": "int"
@@ -1433,6 +1507,20 @@
       "indexes": [
         {
           "__className__": "serverpod.IndexDefinition",
+          "indexName": "visits_pkey",
+          "elements": [
+            {
+              "__className__": "serverpod.IndexElementDefinition",
+              "type": 0,
+              "definition": "id"
+            }
+          ],
+          "type": "btree",
+          "isUnique": true,
+          "isPrimary": true
+        },
+        {
+          "__className__": "serverpod.IndexDefinition",
           "indexName": "visits_local_id_key",
           "elements": [
             {
@@ -1460,7 +1548,7 @@
           "name": "id",
           "columnType": 6,
           "isNullable": false,
-          "columnDefault": "serial",
+          "columnDefault": "nextval('serverpod_cloud_storage_id_seq'::regclass)",
           "dartType": "int?"
         },
         {
@@ -1510,6 +1598,20 @@
       "indexes": [
         {
           "__className__": "serverpod.IndexDefinition",
+          "indexName": "serverpod_cloud_storage_pkey",
+          "elements": [
+            {
+              "__className__": "serverpod.IndexElementDefinition",
+              "type": 0,
+              "definition": "id"
+            }
+          ],
+          "type": "btree",
+          "isUnique": true,
+          "isPrimary": true
+        },
+        {
+          "__className__": "serverpod.IndexDefinition",
           "indexName": "serverpod_cloud_storage_path_idx",
           "elements": [
             {
@@ -1556,7 +1658,7 @@
           "name": "id",
           "columnType": 6,
           "isNullable": false,
-          "columnDefault": "serial",
+          "columnDefault": "nextval('serverpod_cloud_storage_direct_upload_id_seq'::regclass)",
           "dartType": "int?"
         },
         {
@@ -1592,6 +1694,20 @@
       "indexes": [
         {
           "__className__": "serverpod.IndexDefinition",
+          "indexName": "serverpod_cloud_storage_direct_upload_pkey",
+          "elements": [
+            {
+              "__className__": "serverpod.IndexElementDefinition",
+              "type": 0,
+              "definition": "id"
+            }
+          ],
+          "type": "btree",
+          "isUnique": true,
+          "isPrimary": true
+        },
+        {
+          "__className__": "serverpod.IndexDefinition",
           "indexName": "serverpod_cloud_storage_direct_upload_storage_path",
           "elements": [
             {
@@ -1624,7 +1740,7 @@
           "name": "id",
           "columnType": 6,
           "isNullable": false,
-          "columnDefault": "serial",
+          "columnDefault": "nextval('serverpod_future_call_id_seq'::regclass)",
           "dartType": "int?"
         },
         {
@@ -1665,6 +1781,20 @@
       ],
       "foreignKeys": [],
       "indexes": [
+        {
+          "__className__": "serverpod.IndexDefinition",
+          "indexName": "serverpod_future_call_pkey",
+          "elements": [
+            {
+              "__className__": "serverpod.IndexElementDefinition",
+              "type": 0,
+              "definition": "id"
+            }
+          ],
+          "type": "btree",
+          "isUnique": true,
+          "isPrimary": true
+        },
         {
           "__className__": "serverpod.IndexDefinition",
           "indexName": "serverpod_future_call_time_idx",
@@ -1722,7 +1852,7 @@
           "name": "id",
           "columnType": 6,
           "isNullable": false,
-          "columnDefault": "serial",
+          "columnDefault": "nextval('serverpod_health_connection_info_id_seq'::regclass)",
           "dartType": "int?"
         },
         {
@@ -1772,6 +1902,20 @@
       "indexes": [
         {
           "__className__": "serverpod.IndexDefinition",
+          "indexName": "serverpod_health_connection_info_pkey",
+          "elements": [
+            {
+              "__className__": "serverpod.IndexElementDefinition",
+              "type": 0,
+              "definition": "id"
+            }
+          ],
+          "type": "btree",
+          "isUnique": true,
+          "isPrimary": true
+        },
+        {
+          "__className__": "serverpod.IndexDefinition",
           "indexName": "serverpod_health_connection_info_timestamp_idx",
           "elements": [
             {
@@ -1809,7 +1953,7 @@
           "name": "id",
           "columnType": 6,
           "isNullable": false,
-          "columnDefault": "serial",
+          "columnDefault": "nextval('serverpod_health_metric_id_seq'::regclass)",
           "dartType": "int?"
         },
         {
@@ -1859,6 +2003,20 @@
       "indexes": [
         {
           "__className__": "serverpod.IndexDefinition",
+          "indexName": "serverpod_health_metric_pkey",
+          "elements": [
+            {
+              "__className__": "serverpod.IndexElementDefinition",
+              "type": 0,
+              "definition": "id"
+            }
+          ],
+          "type": "btree",
+          "isUnique": true,
+          "isPrimary": true
+        },
+        {
+          "__className__": "serverpod.IndexDefinition",
           "indexName": "serverpod_health_metric_timestamp_idx",
           "elements": [
             {
@@ -1901,7 +2059,7 @@
           "name": "id",
           "columnType": 6,
           "isNullable": false,
-          "columnDefault": "serial",
+          "columnDefault": "nextval('serverpod_log_id_seq'::regclass)",
           "dartType": "int?"
         },
         {
@@ -1994,6 +2152,20 @@
       "indexes": [
         {
           "__className__": "serverpod.IndexDefinition",
+          "indexName": "serverpod_log_pkey",
+          "elements": [
+            {
+              "__className__": "serverpod.IndexElementDefinition",
+              "type": 0,
+              "definition": "id"
+            }
+          ],
+          "type": "btree",
+          "isUnique": true,
+          "isPrimary": true
+        },
+        {
+          "__className__": "serverpod.IndexDefinition",
           "indexName": "serverpod_log_sessionLogId_idx",
           "elements": [
             {
@@ -2021,7 +2193,7 @@
           "name": "id",
           "columnType": 6,
           "isNullable": false,
-          "columnDefault": "serial",
+          "columnDefault": "nextval('serverpod_message_log_id_seq'::regclass)",
           "dartType": "int?"
         },
         {
@@ -2111,7 +2283,22 @@
           "onDelete": 4
         }
       ],
-      "indexes": [],
+      "indexes": [
+        {
+          "__className__": "serverpod.IndexDefinition",
+          "indexName": "serverpod_message_log_pkey",
+          "elements": [
+            {
+              "__className__": "serverpod.IndexElementDefinition",
+              "type": 0,
+              "definition": "id"
+            }
+          ],
+          "type": "btree",
+          "isUnique": true,
+          "isPrimary": true
+        }
+      ],
       "managed": true
     },
     {
@@ -2126,7 +2313,7 @@
           "name": "id",
           "columnType": 6,
           "isNullable": false,
-          "columnDefault": "serial",
+          "columnDefault": "nextval('serverpod_method_id_seq'::regclass)",
           "dartType": "int?"
         },
         {
@@ -2146,6 +2333,20 @@
       ],
       "foreignKeys": [],
       "indexes": [
+        {
+          "__className__": "serverpod.IndexDefinition",
+          "indexName": "serverpod_method_pkey",
+          "elements": [
+            {
+              "__className__": "serverpod.IndexElementDefinition",
+              "type": 0,
+              "definition": "id"
+            }
+          ],
+          "type": "btree",
+          "isUnique": true,
+          "isPrimary": true
+        },
         {
           "__className__": "serverpod.IndexDefinition",
           "indexName": "serverpod_method_endpoint_method_idx",
@@ -2180,7 +2381,7 @@
           "name": "id",
           "columnType": 6,
           "isNullable": false,
-          "columnDefault": "serial",
+          "columnDefault": "nextval('serverpod_migrations_id_seq'::regclass)",
           "dartType": "int?"
         },
         {
@@ -2207,6 +2408,20 @@
       ],
       "foreignKeys": [],
       "indexes": [
+        {
+          "__className__": "serverpod.IndexDefinition",
+          "indexName": "serverpod_migrations_pkey",
+          "elements": [
+            {
+              "__className__": "serverpod.IndexElementDefinition",
+              "type": 0,
+              "definition": "id"
+            }
+          ],
+          "type": "btree",
+          "isUnique": true,
+          "isPrimary": true
+        },
         {
           "__className__": "serverpod.IndexDefinition",
           "indexName": "serverpod_migrations_ids",
@@ -2236,7 +2451,7 @@
           "name": "id",
           "columnType": 6,
           "isNullable": false,
-          "columnDefault": "serial",
+          "columnDefault": "nextval('serverpod_query_log_id_seq'::regclass)",
           "dartType": "int?"
         },
         {
@@ -2329,6 +2544,20 @@
       "indexes": [
         {
           "__className__": "serverpod.IndexDefinition",
+          "indexName": "serverpod_query_log_pkey",
+          "elements": [
+            {
+              "__className__": "serverpod.IndexElementDefinition",
+              "type": 0,
+              "definition": "id"
+            }
+          ],
+          "type": "btree",
+          "isUnique": true,
+          "isPrimary": true
+        },
+        {
+          "__className__": "serverpod.IndexDefinition",
           "indexName": "serverpod_query_log_sessionLogId_idx",
           "elements": [
             {
@@ -2356,7 +2585,7 @@
           "name": "id",
           "columnType": 6,
           "isNullable": false,
-          "columnDefault": "serial",
+          "columnDefault": "nextval('serverpod_readwrite_test_id_seq'::regclass)",
           "dartType": "int?"
         },
         {
@@ -2368,7 +2597,22 @@
         }
       ],
       "foreignKeys": [],
-      "indexes": [],
+      "indexes": [
+        {
+          "__className__": "serverpod.IndexDefinition",
+          "indexName": "serverpod_readwrite_test_pkey",
+          "elements": [
+            {
+              "__className__": "serverpod.IndexElementDefinition",
+              "type": 0,
+              "definition": "id"
+            }
+          ],
+          "type": "btree",
+          "isUnique": true,
+          "isPrimary": true
+        }
+      ],
       "managed": true
     },
     {
@@ -2383,7 +2627,7 @@
           "name": "id",
           "columnType": 6,
           "isNullable": false,
-          "columnDefault": "serial",
+          "columnDefault": "nextval('serverpod_runtime_settings_id_seq'::regclass)",
           "dartType": "int?"
         },
         {
@@ -2416,7 +2660,22 @@
         }
       ],
       "foreignKeys": [],
-      "indexes": [],
+      "indexes": [
+        {
+          "__className__": "serverpod.IndexDefinition",
+          "indexName": "serverpod_runtime_settings_pkey",
+          "elements": [
+            {
+              "__className__": "serverpod.IndexElementDefinition",
+              "type": 0,
+              "definition": "id"
+            }
+          ],
+          "type": "btree",
+          "isUnique": true,
+          "isPrimary": true
+        }
+      ],
       "managed": true
     },
     {
@@ -2431,7 +2690,7 @@
           "name": "id",
           "columnType": 6,
           "isNullable": false,
-          "columnDefault": "serial",
+          "columnDefault": "nextval('serverpod_session_log_id_seq'::regclass)",
           "dartType": "int?"
         },
         {
@@ -2537,6 +2796,20 @@
       "indexes": [
         {
           "__className__": "serverpod.IndexDefinition",
+          "indexName": "serverpod_session_log_pkey",
+          "elements": [
+            {
+              "__className__": "serverpod.IndexElementDefinition",
+              "type": 0,
+              "definition": "id"
+            }
+          ],
+          "type": "btree",
+          "isUnique": true,
+          "isPrimary": true
+        },
+        {
+          "__className__": "serverpod.IndexDefinition",
           "indexName": "serverpod_session_log_serverid_idx",
           "elements": [
             {
@@ -2597,7 +2870,7 @@
   ],
   "installedModules": [
     {
-      "__className__": "serverpod.DatabaseMigrationVersionModel",
+      "__className__": "serverpod.DatabaseMigrationVersion",
       "module": "sinalacs",
       "version": "20260917132612090"
     },
