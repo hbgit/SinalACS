@@ -14,6 +14,10 @@ dependencies:
   cryptography: ^2.7.0
   meta: ^1.15.0
   mqtt_client: ^10.0.0
+  # Dependência DIRETA por causa de bin/seed_health_data.dart: o seed cifrado
+  # roda fora do processo do Serverpod e abre a própria conexão. Já vinha
+  # resolvido como transitiva do serverpod, então não move o pubspec.lock.
+  postgres: ^3.5.12
   uuid: ^4.5.0
 
 dev_dependencies:

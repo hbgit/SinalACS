@@ -14,7 +14,6 @@
 import 'package:serverpod_client/serverpod_client.dart' as _i1;
 import 'enums/risk_level.dart' as _i2;
 import 'enums/sync_status.dart' as _i3;
-import 'package:sinalacs_client/src/protocol/protocol.dart' as _i4;
 
 /// Visita domiciliar. Registrada offline e sincronizada depois.
 abstract class Visit implements _i1.SerializableModel {
@@ -28,12 +27,14 @@ abstract class Visit implements _i1.SerializableModel {
     required this.status,
     required this.riskLevelBefore,
     this.riskLevelAfter,
-    required this.notes,
+    String? notesEncrypted,
+    int? notesKeyVersion,
     required this.syncStatus,
     required this.localId,
     this.syncAt,
     required this.version,
-  });
+  }) : notesEncrypted = notesEncrypted ?? '',
+       notesKeyVersion = notesKeyVersion ?? 1;
 
   factory Visit({
     _i1.UuidValue? id,
@@ -45,7 +46,8 @@ abstract class Visit implements _i1.SerializableModel {
     required String status,
     required _i2.RiskLevel riskLevelBefore,
     _i2.RiskLevel? riskLevelAfter,
-    required Map<String, String> notes,
+    String? notesEncrypted,
+    int? notesKeyVersion,
     required _i3.SyncStatus syncStatus,
     required _i1.UuidValue localId,
     DateTime? syncAt,
@@ -81,9 +83,8 @@ abstract class Visit implements _i1.SerializableModel {
           : _i2.RiskLevel.fromJson(
               (jsonSerialization['riskLevelAfter'] as String),
             ),
-      notes: _i4.Protocol().deserialize<Map<String, String>>(
-        jsonSerialization['notes'],
-      ),
+      notesEncrypted: jsonSerialization['notesEncrypted'] as String?,
+      notesKeyVersion: jsonSerialization['notesKeyVersion'] as int?,
       syncStatus: _i3.SyncStatus.fromJson(
         (jsonSerialization['syncStatus'] as String),
       ),
@@ -118,7 +119,10 @@ abstract class Visit implements _i1.SerializableModel {
 
   _i2.RiskLevel? riskLevelAfter;
 
-  Map<String, String> notes;
+  /// JSON de Map<String, String>, cifrado. Ver patient.spy.yaml para o padrão.
+  String notesEncrypted;
+
+  int notesKeyVersion;
 
   _i3.SyncStatus syncStatus;
 
@@ -142,7 +146,8 @@ abstract class Visit implements _i1.SerializableModel {
     String? status,
     _i2.RiskLevel? riskLevelBefore,
     _i2.RiskLevel? riskLevelAfter,
-    Map<String, String>? notes,
+    String? notesEncrypted,
+    int? notesKeyVersion,
     _i3.SyncStatus? syncStatus,
     _i1.UuidValue? localId,
     DateTime? syncAt,
@@ -161,7 +166,8 @@ abstract class Visit implements _i1.SerializableModel {
       'status': status,
       'riskLevelBefore': riskLevelBefore.toJson(),
       if (riskLevelAfter != null) 'riskLevelAfter': riskLevelAfter?.toJson(),
-      'notes': notes.toJson(),
+      'notesEncrypted': notesEncrypted,
+      'notesKeyVersion': notesKeyVersion,
       'syncStatus': syncStatus.toJson(),
       'localId': localId.toJson(),
       if (syncAt != null) 'syncAt': syncAt?.toJson(),
@@ -188,7 +194,8 @@ class _VisitImpl extends Visit {
     required String status,
     required _i2.RiskLevel riskLevelBefore,
     _i2.RiskLevel? riskLevelAfter,
-    required Map<String, String> notes,
+    String? notesEncrypted,
+    int? notesKeyVersion,
     required _i3.SyncStatus syncStatus,
     required _i1.UuidValue localId,
     DateTime? syncAt,
@@ -203,7 +210,8 @@ class _VisitImpl extends Visit {
          status: status,
          riskLevelBefore: riskLevelBefore,
          riskLevelAfter: riskLevelAfter,
-         notes: notes,
+         notesEncrypted: notesEncrypted,
+         notesKeyVersion: notesKeyVersion,
          syncStatus: syncStatus,
          localId: localId,
          syncAt: syncAt,
@@ -224,7 +232,8 @@ class _VisitImpl extends Visit {
     String? status,
     _i2.RiskLevel? riskLevelBefore,
     Object? riskLevelAfter = _Undefined,
-    Map<String, String>? notes,
+    String? notesEncrypted,
+    int? notesKeyVersion,
     _i3.SyncStatus? syncStatus,
     _i1.UuidValue? localId,
     Object? syncAt = _Undefined,
@@ -242,17 +251,8 @@ class _VisitImpl extends Visit {
       riskLevelAfter: riskLevelAfter is _i2.RiskLevel?
           ? riskLevelAfter
           : this.riskLevelAfter,
-      notes:
-          notes ??
-          this.notes.map(
-            (
-              key0,
-              value0,
-            ) => MapEntry(
-              key0,
-              value0,
-            ),
-          ),
+      notesEncrypted: notesEncrypted ?? this.notesEncrypted,
+      notesKeyVersion: notesKeyVersion ?? this.notesKeyVersion,
       syncStatus: syncStatus ?? this.syncStatus,
       localId: localId ?? this.localId,
       syncAt: syncAt is DateTime? ? syncAt : this.syncAt,

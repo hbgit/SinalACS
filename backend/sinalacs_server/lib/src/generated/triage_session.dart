@@ -12,9 +12,7 @@
 // ignore_for_file: no_leading_underscores_for_library_prefixes
 
 import 'package:serverpod/serverpod.dart' as _i1;
-import 'triage_answer.dart' as _i2;
-import 'enums/risk_level.dart' as _i3;
-import 'package:sinalacs_server/src/generated/protocol.dart' as _i4;
+import 'enums/risk_level.dart' as _i2;
 
 /// Sessão de triagem estruturada. resultRisk é produzido pelo TriageEngine
 /// de forma determinística e não é editável (INV-02).
@@ -23,18 +21,21 @@ abstract class TriageSession
   TriageSession._({
     this.id,
     required this.patientId,
-    required this.answers,
+    String? answersEncrypted,
+    int? answersKeyVersion,
     required this.resultRisk,
     required this.resultDisplay,
     required this.createdAt,
     required this.deviceId,
-  });
+  }) : answersEncrypted = answersEncrypted ?? '',
+       answersKeyVersion = answersKeyVersion ?? 1;
 
   factory TriageSession({
     _i1.UuidValue? id,
     required _i1.UuidValue patientId,
-    required List<_i2.TriageAnswer> answers,
-    required _i3.RiskLevel resultRisk,
+    String? answersEncrypted,
+    int? answersKeyVersion,
+    required _i2.RiskLevel resultRisk,
     required String resultDisplay,
     required DateTime createdAt,
     required String deviceId,
@@ -48,10 +49,9 @@ abstract class TriageSession
       patientId: _i1.UuidValueJsonExtension.fromJson(
         jsonSerialization['patientId'],
       ),
-      answers: _i4.Protocol().deserialize<List<_i2.TriageAnswer>>(
-        jsonSerialization['answers'],
-      ),
-      resultRisk: _i3.RiskLevel.fromJson(
+      answersEncrypted: jsonSerialization['answersEncrypted'] as String?,
+      answersKeyVersion: jsonSerialization['answersKeyVersion'] as int?,
+      resultRisk: _i2.RiskLevel.fromJson(
         (jsonSerialization['resultRisk'] as String),
       ),
       resultDisplay: jsonSerialization['resultDisplay'] as String,
@@ -71,9 +71,12 @@ abstract class TriageSession
 
   _i1.UuidValue patientId;
 
-  List<_i2.TriageAnswer> answers;
+  /// JSON de List<TriageAnswer>, cifrado. Ver patient.spy.yaml para o padrão.
+  String answersEncrypted;
 
-  _i3.RiskLevel resultRisk;
+  int answersKeyVersion;
+
+  _i2.RiskLevel resultRisk;
 
   String resultDisplay;
 
@@ -90,8 +93,9 @@ abstract class TriageSession
   TriageSession copyWith({
     _i1.UuidValue? id,
     _i1.UuidValue? patientId,
-    List<_i2.TriageAnswer>? answers,
-    _i3.RiskLevel? resultRisk,
+    String? answersEncrypted,
+    int? answersKeyVersion,
+    _i2.RiskLevel? resultRisk,
     String? resultDisplay,
     DateTime? createdAt,
     String? deviceId,
@@ -102,7 +106,8 @@ abstract class TriageSession
       '__className__': 'TriageSession',
       if (id != null) 'id': id?.toJson(),
       'patientId': patientId.toJson(),
-      'answers': answers.toJson(valueToJson: (v) => v.toJson()),
+      'answersEncrypted': answersEncrypted,
+      'answersKeyVersion': answersKeyVersion,
       'resultRisk': resultRisk.toJson(),
       'resultDisplay': resultDisplay,
       'createdAt': createdAt.toJson(),
@@ -116,7 +121,8 @@ abstract class TriageSession
       '__className__': 'TriageSession',
       if (id != null) 'id': id?.toJson(),
       'patientId': patientId.toJson(),
-      'answers': answers.toJson(valueToJson: (v) => v.toJsonForProtocol()),
+      'answersEncrypted': answersEncrypted,
+      'answersKeyVersion': answersKeyVersion,
       'resultRisk': resultRisk.toJson(),
       'resultDisplay': resultDisplay,
       'createdAt': createdAt.toJson(),
@@ -160,15 +166,17 @@ class _TriageSessionImpl extends TriageSession {
   _TriageSessionImpl({
     _i1.UuidValue? id,
     required _i1.UuidValue patientId,
-    required List<_i2.TriageAnswer> answers,
-    required _i3.RiskLevel resultRisk,
+    String? answersEncrypted,
+    int? answersKeyVersion,
+    required _i2.RiskLevel resultRisk,
     required String resultDisplay,
     required DateTime createdAt,
     required String deviceId,
   }) : super._(
          id: id,
          patientId: patientId,
-         answers: answers,
+         answersEncrypted: answersEncrypted,
+         answersKeyVersion: answersKeyVersion,
          resultRisk: resultRisk,
          resultDisplay: resultDisplay,
          createdAt: createdAt,
@@ -182,8 +190,9 @@ class _TriageSessionImpl extends TriageSession {
   TriageSession copyWith({
     Object? id = _Undefined,
     _i1.UuidValue? patientId,
-    List<_i2.TriageAnswer>? answers,
-    _i3.RiskLevel? resultRisk,
+    String? answersEncrypted,
+    int? answersKeyVersion,
+    _i2.RiskLevel? resultRisk,
     String? resultDisplay,
     DateTime? createdAt,
     String? deviceId,
@@ -191,7 +200,8 @@ class _TriageSessionImpl extends TriageSession {
     return TriageSession(
       id: id is _i1.UuidValue? ? id : this.id,
       patientId: patientId ?? this.patientId,
-      answers: answers ?? this.answers.map((e0) => e0.copyWith()).toList(),
+      answersEncrypted: answersEncrypted ?? this.answersEncrypted,
+      answersKeyVersion: answersKeyVersion ?? this.answersKeyVersion,
       resultRisk: resultRisk ?? this.resultRisk,
       resultDisplay: resultDisplay ?? this.resultDisplay,
       createdAt: createdAt ?? this.createdAt,
@@ -210,15 +220,19 @@ class TriageSessionUpdateTable extends _i1.UpdateTable<TriageSessionTable> {
     value,
   );
 
-  _i1.ColumnValue<List<_i2.TriageAnswer>, List<_i2.TriageAnswer>> answers(
-    List<_i2.TriageAnswer> value,
-  ) => _i1.ColumnValue(
-    table.answers,
+  _i1.ColumnValue<String, String> answersEncrypted(String value) =>
+      _i1.ColumnValue(
+        table.answersEncrypted,
+        value,
+      );
+
+  _i1.ColumnValue<int, int> answersKeyVersion(int value) => _i1.ColumnValue(
+    table.answersKeyVersion,
     value,
   );
 
-  _i1.ColumnValue<_i3.RiskLevel, _i3.RiskLevel> resultRisk(
-    _i3.RiskLevel value,
+  _i1.ColumnValue<_i2.RiskLevel, _i2.RiskLevel> resultRisk(
+    _i2.RiskLevel value,
   ) => _i1.ColumnValue(
     table.resultRisk,
     value,
@@ -250,9 +264,15 @@ class TriageSessionTable extends _i1.Table<_i1.UuidValue?> {
       'patientId',
       this,
     );
-    answers = _i1.ColumnSerializable<List<_i2.TriageAnswer>>(
-      'answers',
+    answersEncrypted = _i1.ColumnString(
+      'answersEncrypted',
       this,
+      hasDefault: true,
+    );
+    answersKeyVersion = _i1.ColumnInt(
+      'answersKeyVersion',
+      this,
+      hasDefault: true,
     );
     resultRisk = _i1.ColumnEnum(
       'resultRisk',
@@ -277,9 +297,12 @@ class TriageSessionTable extends _i1.Table<_i1.UuidValue?> {
 
   late final _i1.ColumnUuid patientId;
 
-  late final _i1.ColumnSerializable<List<_i2.TriageAnswer>> answers;
+  /// JSON de List<TriageAnswer>, cifrado. Ver patient.spy.yaml para o padrão.
+  late final _i1.ColumnString answersEncrypted;
 
-  late final _i1.ColumnEnum<_i3.RiskLevel> resultRisk;
+  late final _i1.ColumnInt answersKeyVersion;
+
+  late final _i1.ColumnEnum<_i2.RiskLevel> resultRisk;
 
   late final _i1.ColumnString resultDisplay;
 
@@ -291,7 +314,8 @@ class TriageSessionTable extends _i1.Table<_i1.UuidValue?> {
   List<_i1.Column> get columns => [
     id,
     patientId,
-    answers,
+    answersEncrypted,
+    answersKeyVersion,
     resultRisk,
     resultDisplay,
     createdAt,

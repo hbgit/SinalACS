@@ -21,19 +21,19 @@ class FakeVisitStore implements VisitStore {
   }) : _microAreaByPatient = microAreaByPatient;
 
   final Map<String, String?> _microAreaByPatient;
-  final Map<String, Visit> rows = <String, Visit>{};
+  final Map<String, VisitRecord> rows = <String, VisitRecord>{};
 
   @override
-  Future<Visit?> findByLocalId(String localId) async => rows[localId];
+  Future<VisitRecord?> findByLocalId(String localId) async => rows[localId];
 
   @override
-  Future<Visit> insert(Visit visit) async {
+  Future<VisitRecord> insert(VisitRecord visit) async {
     rows[visit.localId.uuid] = visit;
     return visit;
   }
 
   @override
-  Future<Visit> update(Visit visit) async {
+  Future<VisitRecord> update(VisitRecord visit) async {
     rows[visit.localId.uuid] = visit;
     return visit;
   }
@@ -48,7 +48,7 @@ class FakeVisitStore implements VisitStore {
   /// faz no Postgres: visitas cujo dono mora na microárea pedida e cujo
   /// `syncAt` é posterior a `since`.
   @override
-  Future<List<Visit>> listChangedInMicroArea(UuidValue microAreaId, DateTime since) async {
+  Future<List<VisitRecord>> listChangedInMicroArea(UuidValue microAreaId, DateTime since) async {
     return rows.values.where((visit) {
       final patientMicroAreaId = _microAreaByPatient[visit.patientId.uuid];
       if (patientMicroAreaId != microAreaId.uuid) return false;
@@ -302,12 +302,12 @@ void main() {
   group('pull', () {
     final referencia = DateTime.utc(2026, 9, 15, 12);
 
-    Visit visita({
+    VisitRecord visita({
       required String localId,
       required String patientId,
       required DateTime syncAt,
     }) {
-      return Visit(
+      return VisitRecord(
         patientId: UuidValue.fromString(patientId),
         acsId: UuidValue.fromString(_acsId),
         scheduledAt: DateTime.utc(2026, 9, 11, 9),

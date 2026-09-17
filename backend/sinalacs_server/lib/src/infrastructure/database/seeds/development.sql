@@ -33,14 +33,22 @@ VALUES
 ON CONFLICT ("id") DO NOTHING;
 
 -- id = UUID do usuário paciente.
-INSERT INTO "patients" ("id", "emergencyContact", "isChronic", "chronicConditions")
+--
+-- `chronicConditions` virou `chronicConditionsEncrypted` (AES-256-GCM, RNF03 /
+-- INV-04). Este arquivo roda por `psql`, FORA do processo Dart, então não tem
+-- como chamar HealthDataCipher — as linhas entram com ciphertext vazio (que o
+-- store lê como "sem condições") e `bin/seed_health_data.dart` as completa
+-- logo depois, no serviço `health-data-seed` do docker-compose.yml. Colar um
+-- ciphertext literal aqui seria a alternativa, mas duplicaria a lógica de
+-- cifragem fora do Dart e quebraria em silêncio a cada troca de chave.
+INSERT INTO "patients" ("id", "emergencyContact", "isChronic", "chronicConditionsEncrypted", "chronicConditionsKeyVersion")
 VALUES
-  ('00000000-0000-4000-8000-000000000001', 'Contato de desenvolvimento', false, '[]'),
-  ('00000000-0000-4000-8000-000000000005', 'Contato de desenvolvimento', true, '["hipertensão"]'),
-  ('00000000-0000-4000-8000-000000000006', 'Contato de desenvolvimento', false, '[]'),
-  ('00000000-0000-4000-8000-000000000007', 'Contato de desenvolvimento', true, '["diabetes", "hipertensão"]'),
-  ('00000000-0000-4000-8000-000000000008', 'Contato de desenvolvimento', false, '[]'),
-  ('00000000-0000-4000-8000-000000000009', 'Contato de desenvolvimento', false, '[]')
+  ('00000000-0000-4000-8000-000000000001', 'Contato de desenvolvimento', false, '', 1),
+  ('00000000-0000-4000-8000-000000000005', 'Contato de desenvolvimento', true, '', 1),
+  ('00000000-0000-4000-8000-000000000006', 'Contato de desenvolvimento', false, '', 1),
+  ('00000000-0000-4000-8000-000000000007', 'Contato de desenvolvimento', true, '', 1),
+  ('00000000-0000-4000-8000-000000000008', 'Contato de desenvolvimento', false, '', 1),
+  ('00000000-0000-4000-8000-000000000009', 'Contato de desenvolvimento', false, '', 1)
 ON CONFLICT ("id") DO NOTHING;
 
 -- id = UUID do usuário ACS.

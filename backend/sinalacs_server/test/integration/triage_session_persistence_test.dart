@@ -8,6 +8,7 @@ import 'package:sinalacs_server/src/infrastructure/database/orm_triage_session_s
 import 'package:sinalacs_server/src/runtime/alert_runtime.dart';
 import 'package:test/test.dart';
 
+import '../support/health_data_fixtures.dart';
 import 'test_tools/serverpod_test_tools.dart';
 
 /// UUIDs sintéticos do seed de desenvolvimento.
@@ -26,6 +27,9 @@ AppConfig _config() => AppConfig(
       mqttBroker: 'localhost:1883',
       jwtSecret: 'test-secret',
       auditChainSecret: 'test-audit-chain-secret',
+      // Hex de 64 caracteres: HealthDataCipher decodifica byte a byte
+      // para montar a chave AES-256 (ver AppConfig).
+      healthDataEncryptionKey: AppConfig.developmentHealthDataEncryptionKey,
       mqttUsername: null,
       mqttPassword: null,
       mqttUseTls: false,
@@ -69,11 +73,10 @@ Future<void> _seed(Session session) async {
   );
   await Patient.db.insertRow(
     session,
-    Patient(
-      id: UuidValue.fromString(_patientId),
+    await encryptedPatient(
+      id: _patientId,
       emergencyContact: 'Contato de desenvolvimento',
       isChronic: false,
-      chronicConditions: const [],
     ),
   );
 }
@@ -93,7 +96,10 @@ void main() {
       await _seed(session);
 
       final service = TriageSessionService(
-        store: OrmTriageSessionStore(session: () => session),
+        store: OrmTriageSessionStore(
+          session: () => session,
+          cipher: testHealthDataCipher(),
+        ),
         audit: OrmAuditTrail(
           session: () => session,
           chainSecret: 'test-audit-chain-secret',
@@ -118,10 +124,14 @@ void main() {
       expect(gravadas.single.patientId, UuidValue.fromString(_patientId));
       expect(gravadas.single.resultRisk, RiskLevel.red);
       expect(gravadas.single.resultDisplay, 'Vermelho');
-      // As seis respostas sobrevivem à ida e volta do JSON da coluna.
-      expect(gravadas.single.answers, hasLength(6));
-      expect(gravadas.single.answers.first.question, 'chestPain');
-      expect(gravadas.single.answers.first.answer, 'sim');
+      // A coluna guarda ciphertext (RNF03): as respostas só voltam a ser
+      // legíveis passando pela cifra, e é isso que este bloco prova — que a
+      // ida e volta pelo store preserva as seis respostas.
+      final respostas = await decryptedTriageAnswers(gravadas.single);
+      expect(respostas, hasLength(6));
+      expect(respostas.first.question, 'chestPain');
+      expect(respostas.first.answer, 'sim');
+      expect(gravadas.single.answersKeyVersion, 1);
     });
 
     test('a gravação deixa linha real em audit_logs', () async {
@@ -129,7 +139,10 @@ void main() {
       await _seed(session);
 
       final service = TriageSessionService(
-        store: OrmTriageSessionStore(session: () => session),
+        store: OrmTriageSessionStore(
+          session: () => session,
+          cipher: testHealthDataCipher(),
+        ),
         audit: OrmAuditTrail(
           session: () => session,
           chainSecret: 'test-audit-chain-secret',

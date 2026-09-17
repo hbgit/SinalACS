@@ -84,6 +84,9 @@ services:
     build:
       context: ./backend
       dockerfile: sinalacs_server/Dockerfile
+    # Nome fixo para que o health-data-seed reaproveite ESTA imagem em vez de
+    # declarar o mesmo `build:` e reconstruí-la.
+    image: sinalacs/server:local
     container_name: sinalacs-serverpod
     depends_on:
       postgres:
@@ -116,6 +119,11 @@ services:
       # Chave da cadeia de hash de audit_logs — segredo próprio, nunca derivado
       # do JWT_SECRET (rotacionar um não pode invalidar o outro em silêncio).
       AUDIT_CHAIN_SECRET: ${AUDIT_CHAIN_SECRET:?defina em .env — rode ./scripts/dev/bootstrap_env.sh}
+      # Chave AES-256-GCM das colunas clínicas (RNF03/INV-04). Opcional em
+      # development — AppConfig cai num hex público conhecido —, obrigatória
+      # fora dele. PRECISA ser a mesma do health-data-seed abaixo, ou o
+      # diretório de pacientes não decifra o que o seed gravou.
+      HEALTH_DATA_ENCRYPTION_KEY: ${HEALTH_DATA_ENCRYPTION_KEY:-}
       APP_ENV: ${APP_ENV:-development}
       ENABLE_DEV_LOGIN: "${ENABLE_DEV_LOGIN:-true}"
     ports:
@@ -139,6 +147,27 @@ services:
       - /bin/sh
       - -c
       - psql -v ON_ERROR_STOP=1 -h postgres -U ${POSTGRES_USER:-sinalacs_user} -d ${POSTGRES_DB:-sinalacs_db} -f /seeds/development.sql
+
+  # Segunda metade do seed: as colunas clínicas CIFRADAS, que o SQL acima não
+  # consegue montar (AES-256-GCM não é expressão de Postgres aqui — a decisão
+  # §6 é cifrar na aplicação, para o texto claro nunca passar pelo log de query
+  # do Serverpod). Reaproveita a imagem do servidor, então usa a MESMA
+  # HealthDataCipher e a MESMA chave do processo que vai ler esses dados.
+  health-data-seed:
+    image: sinalacs/server:local
+    depends_on:
+      database-seed:
+        condition: service_completed_successfully
+    environment:
+      SERVERPOD_DATABASE_HOST: postgres
+      SERVERPOD_DATABASE_PORT: "5432"
+      SERVERPOD_DATABASE_NAME: ${POSTGRES_DB:-sinalacs_db}
+      SERVERPOD_DATABASE_USER: ${POSTGRES_USER:-sinalacs_user}
+      SERVERPOD_DATABASE_PASSWORD: ${POSTGRES_PASSWORD:?defina em .env — rode ./scripts/dev/bootstrap_env.sh}
+      SERVERPOD_DATABASE_REQUIRE_SSL: "false"
+      HEALTH_DATA_ENCRYPTION_KEY: ${HEALTH_DATA_ENCRYPTION_KEY:-}
+      APP_ENV: ${APP_ENV:-development}
+    entrypoint: ["./seed_health_data"]
 
   traefik:
     image: traefik:v2.10

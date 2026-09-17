@@ -3,19 +3,103 @@ import 'package:sinalacs_server/src/application/audit/audit_trail.dart';
 import 'package:sinalacs_server/src/application/auth/development_auth_service.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
 
+/// Uma visita EM CLARO, do jeito que o serviço a manipula.
+///
+/// Espelha o modelo persistido `Visit` campo a campo, com uma diferença: aqui
+/// `notes` é `Map<String, String>` legível, enquanto na coluna é ciphertext
+/// (`notesEncrypted`/`notesKeyVersion`). A tradução acontece só em
+/// `OrmVisitStore` — `application/` não sabe que as notas são cifradas
+/// (RNF03, INV-04). Mesma fronteira de [PatientDirectoryEntry] e
+/// [TriageSessionRecord].
+class VisitRecord {
+  const VisitRecord({
+    this.id,
+    required this.patientId,
+    required this.acsId,
+    required this.scheduledAt,
+    this.startedAt,
+    this.completedAt,
+    required this.status,
+    required this.riskLevelBefore,
+    this.riskLevelAfter,
+    required this.notes,
+    required this.syncStatus,
+    required this.localId,
+    this.syncAt,
+    required this.version,
+  });
+
+  final UuidValue? id;
+  final UuidValue patientId;
+  final UuidValue acsId;
+  final DateTime scheduledAt;
+  final DateTime? startedAt;
+  final DateTime? completedAt;
+  final String status;
+  final RiskLevel riskLevelBefore;
+  final RiskLevel? riskLevelAfter;
+  final Map<String, String> notes;
+  final SyncStatus syncStatus;
+  final UuidValue localId;
+  final DateTime? syncAt;
+  final int version;
+
+  /// Mesma semântica de sentinela do `copyWith` gerado pelo Serverpod: passar
+  /// `null` explicitamente ZERA o campo, e omitir o argumento preserva o valor
+  /// atual. Sem a sentinela, `completedAt: null` (uma visita reaberta) seria
+  /// indistinguível de "não mexa neste campo".
+  VisitRecord copyWith({
+    Object? id = _keep,
+    UuidValue? patientId,
+    UuidValue? acsId,
+    DateTime? scheduledAt,
+    Object? startedAt = _keep,
+    Object? completedAt = _keep,
+    String? status,
+    RiskLevel? riskLevelBefore,
+    Object? riskLevelAfter = _keep,
+    Map<String, String>? notes,
+    SyncStatus? syncStatus,
+    UuidValue? localId,
+    Object? syncAt = _keep,
+    int? version,
+  }) =>
+      VisitRecord(
+        id: id == _keep ? this.id : id as UuidValue?,
+        patientId: patientId ?? this.patientId,
+        acsId: acsId ?? this.acsId,
+        scheduledAt: scheduledAt ?? this.scheduledAt,
+        startedAt: startedAt == _keep ? this.startedAt : startedAt as DateTime?,
+        completedAt: completedAt == _keep ? this.completedAt : completedAt as DateTime?,
+        status: status ?? this.status,
+        riskLevelBefore: riskLevelBefore ?? this.riskLevelBefore,
+        riskLevelAfter:
+            riskLevelAfter == _keep ? this.riskLevelAfter : riskLevelAfter as RiskLevel?,
+        notes: notes ?? this.notes,
+        syncStatus: syncStatus ?? this.syncStatus,
+        localId: localId ?? this.localId,
+        syncAt: syncAt == _keep ? this.syncAt : syncAt as DateTime?,
+        version: version ?? this.version,
+      );
+}
+
+/// Sentinela de [VisitRecord.copyWith] — equivalente ao `_Undefined` que o
+/// Serverpod gera para os seus próprios modelos.
+const Object _keep = Object();
+
 /// Persistência das visitas sincronizadas.
 ///
 /// Interface no mesmo padrão de `AlertStore`: mantém o serviço testável sem
 /// Postgres real.
 abstract interface class VisitStore {
   /// Visita já gravada com este `localId`, se houver.
-  Future<Visit?> findByLocalId(String localId);
+  Future<VisitRecord?> findByLocalId(String localId);
 
   /// Grava uma visita nova, já com `version` inicial.
-  Future<Visit> insert(Visit visit);
+  Future<VisitRecord> insert(VisitRecord visit);
 
   /// Atualiza uma visita existente, incrementando a versão.
-  Future<Visit> update(Visit visit);
+  Future<VisitRecord> update(VisitRecord visit);
 
   /// Microárea do paciente, ou `null` se ele não existir.
   ///
@@ -26,7 +110,7 @@ abstract interface class VisitStore {
 
   /// Visitas da microárea cujo `syncAt` é posterior a `since` — o cursor
   /// incremental de `visits.pull` (RF15, decisão §5).
-  Future<List<Visit>> listChangedInMicroArea(UuidValue microAreaId, DateTime since);
+  Future<List<VisitRecord>> listChangedInMicroArea(UuidValue microAreaId, DateTime since);
 }
 
 /// Sincronização das visitas registradas offline pelo ACS.
@@ -171,7 +255,7 @@ class VisitSyncService {
     final existing = await _store.findByLocalId(entry.localId);
 
     if (existing == null) {
-      final inserted = await _store.insert(Visit(
+      final inserted = await _store.insert(VisitRecord(
         patientId: patientId,
         acsId: acsId,
         scheduledAt: entry.scheduledAt,

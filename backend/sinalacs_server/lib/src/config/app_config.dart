@@ -64,8 +64,17 @@ class AppConfig {
   /// Segredo usado quando `HEALTH_DATA_ENCRYPTION_KEY` não é informado em
   /// desenvolvimento. Mesma regra de [developmentJwtSecret]: público, e por
   /// isso restrito a `development` por [_resolveSecret].
+  ///
+  /// Diferente dos outros dois fallbacks, este PRECISA ser hexadecimal de 64
+  /// caracteres (32 bytes): ao contrário de [jwtSecret]/[auditChainSecret],
+  /// que são chaves HMAC de tamanho livre, este valor é decodificado byte a
+  /// byte por `HealthDataCipher` para virar uma chave AES-256. O literal
+  /// anterior era a frase `development-health-data-key`, que não é hex — o
+  /// primeiro `encrypt()` em desenvolvimento morria com `FormatException` no
+  /// `int.parse(..., radix: 16)`. Ver `.env.example`: produção continua
+  /// exigindo `openssl rand -hex 32`, exatamente o mesmo formato.
   static const developmentHealthDataEncryptionKey =
-      'development-health-data-key';
+      'deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef';
 
   factory AppConfig.fromEnvironment() =>
       AppConfig.fromMap(Platform.environment);

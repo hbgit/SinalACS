@@ -6,6 +6,7 @@ import 'package:sinalacs_server/src/infrastructure/database/orm_audit_chain_read
 import 'package:sinalacs_server/src/runtime/alert_runtime.dart';
 import 'package:test/test.dart';
 
+import '../support/health_data_fixtures.dart';
 import 'test_tools/serverpod_test_tools.dart';
 
 /// Prova, contra Postgres real, o que `patient_directory_service_test.dart` e
@@ -26,6 +27,9 @@ AppConfig _config() => AppConfig(
       mqttBroker: 'localhost:1883',
       jwtSecret: 'test-secret',
       auditChainSecret: 'test-audit-chain-secret',
+      // Hex de 64 caracteres: HealthDataCipher decodifica byte a byte
+      // para montar a chave AES-256 (ver AppConfig).
+      healthDataEncryptionKey: AppConfig.developmentHealthDataEncryptionKey,
       mqttUsername: null,
       mqttPassword: null,
       mqttUseTls: false,
@@ -104,17 +108,16 @@ Future<void> _seed(Session session) async {
     ),
   );
   await Patient.db.insert(session, [
-    Patient(
-      id: UuidValue.fromString(_patientInAreaId),
+    await encryptedPatient(
+      id: _patientInAreaId,
       emergencyContact: 'Contato de desenvolvimento',
       isChronic: true,
-      chronicConditions: ['hipertensão'],
+      chronicConditions: const ['hipertensão'],
     ),
-    Patient(
-      id: UuidValue.fromString(_patientOutsideAreaId),
+    await encryptedPatient(
+      id: _patientOutsideAreaId,
       emergencyContact: 'Contato de desenvolvimento',
       isChronic: false,
-      chronicConditions: [],
     ),
   ]);
 }
@@ -350,6 +353,11 @@ void main() {
 
       final referencia = DateTime.utc(2026, 9, 16, 12);
 
+      // As notas viajam cifradas na coluna (RNF03): o fixture monta o par
+      // `notesEncrypted`/`notesKeyVersion` com a mesma chave de
+      // desenvolvimento que o `AlertRuntime` usa aqui.
+      final notasVazias = await encryptedVisitNotes(const {});
+
       Visit visita({
         required String localId,
         required String patientId,
@@ -363,7 +371,8 @@ void main() {
             status: 'realizada',
             riskLevelBefore: RiskLevel.green,
             riskLevelAfter: RiskLevel.green,
-            notes: const {},
+            notesEncrypted: notasVazias.ciphertextBase64,
+            notesKeyVersion: notasVazias.keyVersion,
             syncStatus: SyncStatus.synced,
             localId: UuidValue.fromString(localId),
             syncAt: syncAt,

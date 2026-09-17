@@ -1,40 +1,67 @@
 import 'package:serverpod/serverpod.dart';
 import 'package:sinalacs_server/src/application/visits/visit_sync_service.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
+import 'package:sinalacs_server/src/infrastructure/crypto/encrypted_json.dart';
+import 'package:sinalacs_server/src/infrastructure/crypto/health_data_cipher.dart';
 
 /// Implementação de [VisitStore] sobre o ORM do Serverpod.
 ///
 /// Segue o mesmo arranjo de [OrmAlertStore]: a sessão é obtida por chamada, e
 /// não guardada no construtor, porque o Serverpod amarra o ciclo de vida da
 /// conexão à `Session` da requisição.
+///
+/// É também a única fronteira que conhece a cifragem de `visits.notes`
+/// (RNF03, INV-04): [VisitSyncService] trafega [VisitRecord] com `notes` em
+/// claro nos dois sentidos — inclusive no `pull`, porque o ACS do território é
+/// justamente quem tem legitimidade para lê-las — e este store converte de e
+/// para o par `notesEncrypted`/`notesKeyVersion`.
 class OrmVisitStore implements VisitStore {
   OrmVisitStore({
     required Session Function() session,
+    required HealthDataCipher cipher,
     Transaction? transaction,
   })  : _session = session,
+        _cipher = cipher,
         _transaction = transaction;
 
   final Session Function() _session;
+  final HealthDataCipher _cipher;
   final Transaction? _transaction;
 
   @override
-  Future<Visit?> findByLocalId(String localId) async {
+  Future<VisitRecord?> findByLocalId(String localId) async {
     // `visits.localId` tem índice único (visits_local_id_key), então esta busca
     // é o ponto de deduplicação do reenvio de um lote.
-    return Visit.db.findFirstRow(
+    final visit = await Visit.db.findFirstRow(
       _session(),
       where: (visit) => visit.localId.equals(UuidValue.fromString(localId)),
       transaction: _transaction,
     );
+    if (visit == null) return null;
+    return _toRecord(visit);
   }
 
   @override
-  Future<Visit> insert(Visit visit) =>
-      Visit.db.insertRow(_session(), visit, transaction: _transaction);
+  Future<VisitRecord> insert(VisitRecord visit) async {
+    final row = await Visit.db.insertRow(
+      _session(),
+      await _toRow(visit),
+      transaction: _transaction,
+    );
+    // Reaproveita as notas em claro que o chamador já tem: decifrar de volta o
+    // que acabamos de cifrar seria trabalho puro de ida e volta.
+    return _toRecord(row, notes: visit.notes);
+  }
 
   @override
-  Future<Visit> update(Visit visit) =>
-      Visit.db.updateRow(_session(), visit, transaction: _transaction);
+  Future<VisitRecord> update(VisitRecord visit) async {
+    final row = await Visit.db.updateRow(
+      _session(),
+      await _toRow(visit),
+      transaction: _transaction,
+    );
+    return _toRecord(row, notes: visit.notes);
+  }
 
   @override
   Future<UuidValue?> microAreaOfPatient(UuidValue patientId) async {
@@ -49,7 +76,10 @@ class OrmVisitStore implements VisitStore {
   }
 
   @override
-  Future<List<Visit>> listChangedInMicroArea(UuidValue microAreaId, DateTime since) async {
+  Future<List<VisitRecord>> listChangedInMicroArea(
+    UuidValue microAreaId,
+    DateTime since,
+  ) async {
     final session = _session();
 
     // Mesmo arranjo em duas etapas de `OrmPatientDirectoryStore`: `visits` só
@@ -65,11 +95,62 @@ class OrmVisitStore implements VisitStore {
 
     final patientIds = {for (final user in users) user.id!}.cast<UuidValue>();
 
-    return Visit.db.find(
+    final visits = await Visit.db.find(
       session,
       where: (t) => t.patientId.inSet(patientIds) & (t.syncAt > since),
       orderBy: (t) => t.syncAt,
       transaction: _transaction,
+    );
+
+    // Laço, e não list literal: decifrar é assíncrono.
+    final records = <VisitRecord>[];
+    for (final visit in visits) {
+      records.add(await _toRecord(visit));
+    }
+    return records;
+  }
+
+  Future<Visit> _toRow(VisitRecord record) async {
+    final encrypted = await _cipher.encryptJson(record.notes);
+    return Visit(
+      id: record.id,
+      patientId: record.patientId,
+      acsId: record.acsId,
+      scheduledAt: record.scheduledAt,
+      startedAt: record.startedAt,
+      completedAt: record.completedAt,
+      status: record.status,
+      riskLevelBefore: record.riskLevelBefore,
+      riskLevelAfter: record.riskLevelAfter,
+      notesEncrypted: encrypted.ciphertextBase64,
+      notesKeyVersion: encrypted.keyVersion,
+      syncStatus: record.syncStatus,
+      localId: record.localId,
+      syncAt: record.syncAt,
+      version: record.version,
+    );
+  }
+
+  Future<VisitRecord> _toRecord(Visit row, {Map<String, String>? notes}) async {
+    final decoded = notes ??
+        ((await _cipher.decryptJson(row.notesEncrypted, row.notesKeyVersion))
+                as Map<String, dynamic>?)
+            ?.cast<String, String>();
+    return VisitRecord(
+      id: row.id,
+      patientId: row.patientId,
+      acsId: row.acsId,
+      scheduledAt: row.scheduledAt,
+      startedAt: row.startedAt,
+      completedAt: row.completedAt,
+      status: row.status,
+      riskLevelBefore: row.riskLevelBefore,
+      riskLevelAfter: row.riskLevelAfter,
+      notes: decoded ?? const {},
+      syncStatus: row.syncStatus,
+      localId: row.localId,
+      syncAt: row.syncAt,
+      version: row.version,
     );
   }
 }

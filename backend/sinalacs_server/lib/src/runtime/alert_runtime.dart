@@ -9,6 +9,7 @@ import 'package:sinalacs_server/src/application/patients/patient_directory_servi
 import 'package:sinalacs_server/src/application/triage/triage_session_service.dart';
 import 'package:sinalacs_server/src/application/visits/visit_sync_service.dart';
 import 'package:sinalacs_server/src/config/app_config.dart';
+import 'package:sinalacs_server/src/infrastructure/crypto/health_data_cipher.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_alert_outbox.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_alert_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_audit_trail.dart';
@@ -34,11 +35,24 @@ class AlertRuntime {
   AppConfig? _config;
   MqttAlertDispatcher? _dispatcher;
   DevelopmentAuthService? _auth;
+  HealthDataCipher? _healthDataCipher;
 
   AppConfig get config => _config ??= AppConfig.fromEnvironment();
 
   DevelopmentAuthService get auth =>
       _auth ??= DevelopmentAuthService(secret: config.jwtSecret);
+
+  /// Cifra dos 3 campos clínicos em repouso (RNF03, INV-04), compartilhada
+  /// pelos stores ORM de paciente, triagem e visita.
+  ///
+  /// `keyVersion: 1` é a versão corrente. A coluna guarda a versão junto com o
+  /// ciphertext, então uma rotação futura só precisa passar a cifrar com a
+  /// versão nova — as linhas antigas continuam decifráveis pela versão que
+  /// elas próprias declaram.
+  HealthDataCipher get healthDataCipher => _healthDataCipher ??= HealthDataCipher(
+        keyHex: config.healthDataEncryptionKey,
+        keyVersion: 1,
+      );
 
   MqttAlertDispatcher get dispatcher =>
       _dispatcher ??= MqttAlertDispatcher(config: config);
@@ -55,6 +69,10 @@ class AlertRuntime {
     _config = value;
     // O serviço de auth deriva do segredo, então precisa ser reconstruído.
     _auth = null;
+    // Idem para a cifra: ela guarda a chave AES derivada de
+    // `healthDataEncryptionKey`, e manter a antiga faria os stores cifrarem
+    // com uma chave que a config atual não conhece mais.
+    _healthDataCipher = null;
   }
 
   AlertPublisher? _publisherOverride;
@@ -92,21 +110,31 @@ class AlertRuntime {
     Transaction? transaction,
   }) =>
       VisitSyncService(
-        store: OrmVisitStore(session: () => session, transaction: transaction),
+        store: OrmVisitStore(
+          session: () => session,
+          cipher: healthDataCipher,
+          transaction: transaction,
+        ),
         audit: auditTrailFor(session),
       );
 
   /// Constrói o diretório de pacientes da microárea para uma requisição.
   PatientDirectoryService patientDirectoryServiceFor(Session session) =>
       PatientDirectoryService(
-        store: OrmPatientDirectoryStore(session: () => session),
+        store: OrmPatientDirectoryStore(
+          session: () => session,
+          cipher: healthDataCipher,
+        ),
         audit: auditTrailFor(session),
       );
 
   /// Constrói o serviço de triagem persistida para uma requisição.
   TriageSessionService triageSessionServiceFor(Session session) =>
       TriageSessionService(
-        store: OrmTriageSessionStore(session: () => session),
+        store: OrmTriageSessionStore(
+          session: () => session,
+          cipher: healthDataCipher,
+        ),
         audit: auditTrailFor(session),
       );
 

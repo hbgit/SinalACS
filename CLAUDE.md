@@ -61,7 +61,7 @@ rejecting the new one.
 docker compose up --build
 docker compose down
 ```
-Services: Traefik `http://localhost`, Traefik dashboard `http://localhost:8081` (dev only, insecure), backend `http://localhost:8080`, Postgres `localhost:5432`, Mosquitto MQTT over TLS `localhost:8883` (the only port the broker exposes — anonymous 1883 and WebSockets 9001 are not published). The `database-seed` service applies the dev seed once the server is healthy.
+Services: Traefik `http://localhost`, Traefik dashboard `http://localhost:8081` (dev only, insecure), backend `http://localhost:8080`, Postgres `localhost:5432`, Mosquitto MQTT over TLS `localhost:8883` (the only port the broker exposes — anonymous 1883 and WebSockets 9001 are not published). The `database-seed` service applies the dev seed once the server is healthy, and `health-data-seed` then fills the encrypted clinical columns (which plain SQL cannot produce) — see [backend/CLAUDE.md](backend/CLAUDE.md).
 
 ### Backend, apps e validação E2E
 

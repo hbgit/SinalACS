@@ -359,12 +359,6 @@ class Protocol extends _i1.SerializationManager {
           )
           as T;
     }
-    if (t == List<_i32.TriageAnswer>) {
-      return (data as List)
-              .map((e) => deserialize<_i32.TriageAnswer>(e))
-              .toList()
-          as T;
-    }
     if (t == List<_i37.MicroAreaPatient>) {
       return (data as List)
               .map((e) => deserialize<_i37.MicroAreaPatient>(e))

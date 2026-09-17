@@ -7,6 +7,9 @@ AppConfig _config() => AppConfig(
       mqttBroker: 'localhost:1883',
       jwtSecret: 'test-secret',
       auditChainSecret: 'test-audit-chain-secret',
+      // Hex de 64 caracteres: HealthDataCipher decodifica byte a byte
+      // para montar a chave AES-256 (ver AppConfig).
+      healthDataEncryptionKey: AppConfig.developmentHealthDataEncryptionKey,
       mqttUsername: null,
       mqttPassword: null,
       mqttUseTls: false,
@@ -41,6 +44,9 @@ void main() {
           mqttBroker: 'localhost:1',
           jwtSecret: 'test-secret',
           auditChainSecret: 'test-audit-chain-secret',
+          // Hex de 64 caracteres: HealthDataCipher decodifica byte a byte
+          // para montar a chave AES-256 (ver AppConfig).
+          healthDataEncryptionKey: AppConfig.developmentHealthDataEncryptionKey,
           mqttUsername: null,
           mqttPassword: null,
           mqttUseTls: false,

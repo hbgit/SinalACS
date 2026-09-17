@@ -5,6 +5,7 @@ import 'package:sinalacs_server/src/generated/protocol.dart';
 import 'package:sinalacs_server/src/runtime/alert_runtime.dart';
 import 'package:test/test.dart';
 
+import '../support/health_data_fixtures.dart';
 import 'test_tools/serverpod_test_tools.dart';
 
 /// Prova, contra Postgres real, o primeiro escritor de `consent_logs` e o
@@ -40,6 +41,9 @@ AppConfig _config() => AppConfig(
       mqttBroker: 'localhost:1883',
       jwtSecret: 'test-secret',
       auditChainSecret: 'test-audit-chain-secret',
+      // Hex de 64 caracteres: HealthDataCipher decodifica byte a byte
+      // para montar a chave AES-256 (ver AppConfig).
+      healthDataEncryptionKey: AppConfig.developmentHealthDataEncryptionKey,
       mqttUsername: null,
       mqttPassword: null,
       mqttUseTls: false,
@@ -109,11 +113,10 @@ Future<void> _seed(Session session) async {
   );
   await Patient.db.insertRow(
     session,
-    Patient(
-      id: UuidValue.fromString(_patientId),
+    await encryptedPatient(
+      id: _patientId,
       emergencyContact: 'Contato de desenvolvimento',
       isChronic: false,
-      chronicConditions: [],
     ),
   );
 }
@@ -176,11 +179,10 @@ Future<void> _seedRace(Session session) async {
   );
   await Patient.db.insertRow(
     session,
-    Patient(
-      id: UuidValue.fromString(_racePatientId),
+    await encryptedPatient(
+      id: _racePatientId,
       emergencyContact: 'Contato de desenvolvimento',
       isChronic: false,
-      chronicConditions: [],
     ),
   );
 }

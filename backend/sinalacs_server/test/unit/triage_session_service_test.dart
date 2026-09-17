@@ -25,22 +25,22 @@ const _acs = AuthenticatedUser(
 );
 
 class FakeTriageSessionStore implements TriageSessionStore {
-  final List<TriageSession> saved = <TriageSession>[];
+  /// As sessões chegam aqui EM CLARO: quem cifra é `OrmTriageSessionStore`,
+  /// não o serviço. Este fake é justamente a prova de que
+  /// `TriageSessionService` nunca vê ciphertext.
+  final List<TriageSessionRecord> saved = <TriageSessionRecord>[];
 
   @override
-  Future<TriageSession> insert(TriageSession session) async {
-    final stored = session.copyWith(
-      id: UuidValue.fromString('00000000-0000-4000-8000-0000000000aa'),
-    );
-    saved.add(stored);
-    return stored;
+  Future<UuidValue?> insert(TriageSessionRecord session) async {
+    saved.add(session);
+    return UuidValue.fromString('00000000-0000-4000-8000-0000000000aa');
   }
 }
 
 /// Simula um Postgres fora do ar: usado pelo teste do FIX 2.
 class ThrowingTriageSessionStore implements TriageSessionStore {
   @override
-  Future<TriageSession> insert(TriageSession session) {
+  Future<UuidValue?> insert(TriageSessionRecord session) {
     throw Exception('conexão com o banco esgotada');
   }
 }

@@ -21,14 +21,39 @@ class TriageAuthorizationException implements Exception {
   String toString() => message;
 }
 
+/// Uma sessão de triagem EM CLARO, do jeito que o serviço a produz.
+///
+/// Existe porque o modelo persistido (`TriageSession`) guarda as respostas
+/// como ciphertext (`answersEncrypted`), e `application/` não pode saber
+/// disso: o serviço entrega `List<TriageAnswer>` legível e a store decide
+/// como isso vira coluna. Mesma fronteira que [PatientDirectoryEntry] já
+/// desenhava para o diretório de pacientes.
+class TriageSessionRecord {
+  const TriageSessionRecord({
+    required this.patientId,
+    required this.answers,
+    required this.resultRisk,
+    required this.resultDisplay,
+    required this.createdAt,
+    required this.deviceId,
+  });
+
+  final UuidValue patientId;
+  final List<TriageAnswer> answers;
+  final RiskLevel resultRisk;
+  final String resultDisplay;
+  final DateTime createdAt;
+  final String deviceId;
+}
+
 /// Persistência da sessão de triagem.
 ///
 /// Mesmo padrão de `AlertStore`/`VisitStore`/`PatientDirectoryStore`: interface
 /// aqui, implementação ORM em `infrastructure/`, para o serviço ser testável
 /// sem Postgres.
 abstract interface class TriageSessionStore {
-  /// Devolve a sessão gravada, já com o `id` atribuído pelo banco.
-  Future<TriageSession> insert(TriageSession session);
+  /// Grava a sessão e devolve o `id` atribuído pelo banco.
+  Future<UuidValue?> insert(TriageSessionRecord session);
 }
 
 /// Registra a triagem estruturada do paciente.
@@ -112,7 +137,7 @@ class TriageSessionService {
 
     UuidValue? sessionId;
     try {
-      final gravada = await _store.insert(TriageSession(
+      sessionId = await _store.insert(TriageSessionRecord(
         patientId: UuidValue.fromString(user.id),
         answers: [
           for (final resposta in respostas.entries)
@@ -126,7 +151,6 @@ class TriageSessionService {
         createdAt: _clock(),
         deviceId: user.deviceId,
       ));
-      sessionId = gravada.id;
     } catch (error) {
       stderr.writeln(
         'Falha ao gravar a sessão de triagem do paciente ${user.id}: $error.',

@@ -20,6 +20,9 @@ RUN dart pub get
 # Compila o executável AOT.
 WORKDIR /app/sinalacs_server
 RUN dart compile exe bin/main.dart -o bin/server
+# Segunda metade do seed de desenvolvimento: preenche os campos clínicos
+# cifrados, que o seed SQL não consegue montar (ver bin/seed_health_data.dart).
+RUN dart compile exe bin/seed_health_data.dart -o bin/seed_health_data
 
 # Fallback para diretórios possivelmente ausentes.
 RUN mkdir -p config web migrations
@@ -40,6 +43,7 @@ ENV role=monolith
 
 COPY --from=build /runtime/ /
 COPY --from=build /app/sinalacs_server/bin/server server
+COPY --from=build /app/sinalacs_server/bin/seed_health_data seed_health_data
 COPY --from=build /app/sinalacs_server/config/ config/
 COPY --from=build /app/sinalacs_server/web/ web/
 COPY --from=build /app/sinalacs_server/migrations/ migrations/

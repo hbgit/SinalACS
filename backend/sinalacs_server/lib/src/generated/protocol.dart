@@ -1011,10 +1011,18 @@ class Protocol extends _i1.SerializationManagerServer {
           dartType: 'bool',
         ),
         _i2.ColumnDefinition(
-          name: 'chronicConditions',
-          columnType: _i2.ColumnType.json,
+          name: 'chronicConditionsEncrypted',
+          columnType: _i2.ColumnType.text,
           isNullable: false,
-          dartType: 'List<String>',
+          dartType: 'String',
+          columnDefault: '\'\'::text',
+        ),
+        _i2.ColumnDefinition(
+          name: 'chronicConditionsKeyVersion',
+          columnType: _i2.ColumnType.bigint,
+          isNullable: false,
+          dartType: 'int',
+          columnDefault: '1',
         ),
         _i2.ColumnDefinition(
           name: 'lastLocationHash',
@@ -1067,10 +1075,18 @@ class Protocol extends _i1.SerializationManagerServer {
           dartType: 'UuidValue',
         ),
         _i2.ColumnDefinition(
-          name: 'answers',
-          columnType: _i2.ColumnType.json,
+          name: 'answersEncrypted',
+          columnType: _i2.ColumnType.text,
           isNullable: false,
-          dartType: 'List<protocol:TriageAnswer>',
+          dartType: 'String',
+          columnDefault: '\'\'::text',
+        ),
+        _i2.ColumnDefinition(
+          name: 'answersKeyVersion',
+          columnType: _i2.ColumnType.bigint,
+          isNullable: false,
+          dartType: 'int',
+          columnDefault: '1',
         ),
         _i2.ColumnDefinition(
           name: 'resultRisk',
@@ -1344,10 +1360,18 @@ class Protocol extends _i1.SerializationManagerServer {
           dartType: 'protocol:RiskLevel?',
         ),
         _i2.ColumnDefinition(
-          name: 'notes',
-          columnType: _i2.ColumnType.json,
+          name: 'notesEncrypted',
+          columnType: _i2.ColumnType.text,
           isNullable: false,
-          dartType: 'Map<String,String>',
+          dartType: 'String',
+          columnDefault: '\'\'::text',
+        ),
+        _i2.ColumnDefinition(
+          name: 'notesKeyVersion',
+          columnType: _i2.ColumnType.bigint,
+          isNullable: false,
+          dartType: 'int',
+          columnDefault: '1',
         ),
         _i2.ColumnDefinition(
           name: 'syncStatus',
@@ -1690,12 +1714,6 @@ class Protocol extends _i1.SerializationManagerServer {
       return (data as Map).map(
             (k, v) => MapEntry(deserialize<String>(k), deserialize<String>(v)),
           )
-          as T;
-    }
-    if (t == List<_i33.TriageAnswer>) {
-      return (data as List)
-              .map((e) => deserialize<_i33.TriageAnswer>(e))
-              .toList()
           as T;
     }
     if (t == List<_i38.MicroAreaPatient>) {

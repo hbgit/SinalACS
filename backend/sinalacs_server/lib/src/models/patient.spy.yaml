@@ -12,6 +12,18 @@ fields:
   id: UuidValue?, defaultPersist=random
   emergencyContact: String
   isChronic: bool
-  chronicConditions: List<String>
+  ### JSON de List<String>, cifrado em AES-256-GCM (RNF03, INV-04). Decifrado
+  ### e cifrado na borda do repositório (OrmPatientDirectoryStore), nunca em
+  ### application/ — ver docs/superpowers/specs/2026-09-16-decisoes-produto-pos-validacao.md §6.
+  ###
+  ### O tipo é String e não List<String> porque o Serverpod persiste
+  ### exatamente os campos do modelo: não existe "coluna cifrada com tipo
+  ### estruturado". A tradução JSON↔List<String> deixou de ser automática e
+  ### passou a ser explícita no store ORM, que já é a fronteira entre o mundo
+  ### tipado de application/ e o mundo persistido.
+  chronicConditionsEncrypted: String, default=''
+  ### Versão da chave que cifrou o campo acima, para permitir rotação futura
+  ### sem reescrever todas as linhas de uma vez.
+  chronicConditionsKeyVersion: int, default=1
   lastLocationHash: String?
   lastTriageAt: DateTime?
