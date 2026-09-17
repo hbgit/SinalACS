@@ -4,8 +4,24 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:sinalacs_client/sinalacs_client.dart' show RiskLevel;
 import 'package:sinalacs_patient/app/app.dart';
 import 'package:sinalacs_patient/core/network/backend_client.dart';
+import 'package:sinalacs_patient/core/privacy/location_hash.dart';
 
 import 'support/fake_patient_backend.dart';
+
+/// Duplo de [LocationReader] com leitura fixa, para testar como a tela reage
+/// a cada estado sem depender de canal de plataforma (GPS real).
+class _FixedLocationReader implements LocationReader {
+  _FixedLocationReader(this.reading);
+
+  final LocationReading reading;
+  int calls = 0;
+
+  @override
+  Future<LocationReading> read({Duration timeout = const Duration(seconds: 8)}) async {
+    calls++;
+    return reading;
+  }
+}
 
 /// Responde "não" a todos os sintomas menos [yesTo], e conclui a triagem.
 Future<void> answerTriage(
@@ -29,7 +45,12 @@ Future<void> login(WidgetTester tester) async {
 void main() {
   testWidgets('deve autenticar no backend antes de abrir a triagem', (tester) async {
     final backend = FakePatientBackend();
-    await tester.pumpWidget(SinalAcsApp(backend: backend));
+    await tester.pumpWidget(SinalAcsApp(
+      backend: backend,
+      locationReader: _FixedLocationReader(
+        const LocationUnavailable(LocationUnavailableReason.unknown),
+      ),
+    ));
 
     expect(find.text('SinalACS'), findsOneWidget);
     expect(find.text('Acesso sem senha'), findsOneWidget);
@@ -98,7 +119,12 @@ void main() {
     final backend = FakePatientBackend(
       alertFailure: const BackendFailure('Sem conexão com o servidor.'),
     );
-    await tester.pumpWidget(SinalAcsApp(backend: backend));
+    await tester.pumpWidget(SinalAcsApp(
+      backend: backend,
+      locationReader: _FixedLocationReader(
+        const LocationUnavailable(LocationUnavailableReason.unknown),
+      ),
+    ));
 
     await login(tester);
 
@@ -119,12 +145,66 @@ void main() {
     expect(backend.idempotencyKeys.first, backend.idempotencyKeys.last);
   });
 
+  testWidgets('deve anexar o hash de localização quando a permissão é concedida', (tester) async {
+    final backend = FakePatientBackend();
+    final locationReader = _FixedLocationReader(const LocationAvailable('abc123456789'));
+    await tester.pumpWidget(SinalAcsApp(backend: backend, locationReader: locationReader));
+
+    await login(tester);
+    await tester.tap(find.text('Urgência'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('panic_button')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Confirmar alerta'));
+    await tester.pumpAndSettle();
+
+    expect(locationReader.calls, 1);
+    expect(backend.locationHashes.single, 'abc123456789');
+    expect(find.text('Localização anexada ao alerta.'), findsOneWidget);
+  });
+
+  for (final reason in LocationUnavailableReason.values) {
+    testWidgets(
+      'deve enviar o alerta com hash desconhecido e avisar a pessoa quando a localização está indisponível '
+      '(${reason.name})',
+      (tester) async {
+        final backend = FakePatientBackend();
+        final locationReader = _FixedLocationReader(LocationUnavailable(reason));
+        await tester.pumpWidget(SinalAcsApp(backend: backend, locationReader: locationReader));
+
+        await login(tester);
+        await tester.tap(find.text('Urgência'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const Key('panic_button')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Confirmar alerta'));
+        await tester.pumpAndSettle();
+
+        // Alerta vermelho nunca pode ser perdido em silêncio por falta de
+        // GPS: precisa ter sido enviado mesmo assim.
+        expect(backend.locationHashes.single, unknownLocationHash);
+        expect(find.text('Alerta recebido pela equipe'), findsOneWidget);
+        // A UI precisa dizer isso explicitamente — nunca mascarar como se
+        // uma coordenada válida tivesse sido usada.
+        expect(
+          find.text('Localização indisponível — o alerta será enviado mesmo assim.'),
+          findsOneWidget,
+        );
+      },
+    );
+  }
+
   testWidgets('o estado do alerta de emergência é anunciado ao leitor de tela', (tester) async {
     // É a confirmação de que o alerta chegou à equipe — o ponto mais crítico
     // do app para um leitor de tela anunciar sem depender de a pessoa
     // varrer a tela de novo.
     final handle = tester.ensureSemantics();
-    await tester.pumpWidget(SinalAcsApp(backend: FakePatientBackend()));
+    await tester.pumpWidget(SinalAcsApp(
+      backend: FakePatientBackend(),
+      locationReader: _FixedLocationReader(
+        const LocationUnavailable(LocationUnavailableReason.unknown),
+      ),
+    ));
 
     await login(tester);
     await tester.tap(find.text('Urgência'));

@@ -7,10 +7,14 @@ import 'package:sinalacs_patient/core/network/idempotency.dart';
 import 'package:sinalacs_patient/core/privacy/location_hash.dart';
 
 class SinalAcsApp extends StatefulWidget {
-  const SinalAcsApp({super.key, this.backend});
+  const SinalAcsApp({super.key, this.backend, this.locationReader});
 
   /// Injetável para teste. Em execução normal é o [BackendClient] real.
   final PatientBackend? backend;
+
+  /// Injetável para teste. Em execução normal é o [GeolocatorLocationReader]
+  /// real, que fala com o GPS do aparelho.
+  final LocationReader? locationReader;
 
   @override
   State<SinalAcsApp> createState() => _SinalAcsAppState();
@@ -18,6 +22,8 @@ class SinalAcsApp extends StatefulWidget {
 
 class _SinalAcsAppState extends State<SinalAcsApp> {
   late final PatientBackend _backend = widget.backend ?? BackendClient();
+  late final LocationReader _locationReader =
+      widget.locationReader ?? const GeolocatorLocationReader();
 
   @override
   void dispose() {
@@ -30,14 +36,41 @@ class _SinalAcsAppState extends State<SinalAcsApp> {
   Widget build(BuildContext context) {
     return BackendScope(
       backend: _backend,
-      child: MaterialApp(
-        title: 'SinalACS Paciente',
-        debugShowCheckedModeBanner: false,
-        theme: buildPatientTheme(),
-        home: const PatientLoginScreen(),
+      child: LocationScope(
+        reader: _locationReader,
+        child: MaterialApp(
+          title: 'SinalACS Paciente',
+          debugShowCheckedModeBanner: false,
+          theme: buildPatientTheme(),
+          home: const PatientLoginScreen(),
+        ),
       ),
     );
   }
+}
+
+/// Disponibiliza o [LocationReader] para a árvore de widgets.
+///
+/// Mesmo padrão de `BackendScope`: a tela não constrói o próprio leitor de
+/// GPS, o que permite injetar um duplo em teste hermético sem tocar canal de
+/// plataforma.
+class LocationScope extends InheritedWidget {
+  const LocationScope({
+    required this.reader,
+    required super.child,
+    super.key,
+  });
+
+  final LocationReader reader;
+
+  static LocationReader of(BuildContext context) {
+    final scope = context.dependOnInheritedWidgetOfExactType<LocationScope>();
+    assert(scope != null, 'Nenhum LocationScope acima deste widget.');
+    return scope!.reader;
+  }
+
+  @override
+  bool updateShouldNotify(LocationScope oldWidget) => reader != oldWidget.reader;
 }
 
 class PatientLoginScreen extends StatefulWidget {
@@ -267,6 +300,12 @@ class _EmergencyScreenState extends State<EmergencyScreen> {
   String _state = 'Pronto para enviar';
   bool _busy = false;
 
+  /// Texto exibido no cartão de localização.
+  ///
+  /// Precisa dizer explicitamente quando a localização não pôde ser lida —
+  /// nunca mascarar isso silenciosamente atrás de um hash inventado (L-02).
+  String _locationStatus = 'A localização disponível será anexada ao alerta.';
+
   /// Chave da tentativa corrente.
   ///
   /// Gerada uma única vez por confirmação e mantida enquanto o envio não
@@ -290,6 +329,7 @@ class _EmergencyScreenState extends State<EmergencyScreen> {
     if (confirmed != true || !mounted) return;
 
     final backend = BackendScope.of(context);
+    final locationReader = LocationScope.of(context);
     final key = _attemptKey ??= newIdempotencyKey();
 
     setState(() {
@@ -297,13 +337,30 @@ class _EmergencyScreenState extends State<EmergencyScreen> {
       _state = 'Enviando alerta...';
     });
 
+    // Lida com o GPS antes de falar com o servidor: se demorar, é o timeout
+    // do próprio leitor que limita a espera, não o alerta inteiro.
+    final reading = await locationReader.read();
+    if (!mounted) return;
+
+    final String locationHash;
+    final String locationStatus;
+    switch (reading) {
+      case LocationAvailable(:final hash):
+        locationHash = hash;
+        locationStatus = 'Localização anexada ao alerta.';
+      case LocationUnavailable():
+        // Alerta vermelho nunca pode ser perdido em silêncio por falta de
+        // GPS — segue com o hash de fallback, mas avisa a pessoa disso.
+        locationHash = unknownLocationHash;
+        locationStatus =
+            'Localização indisponível — o alerta será enviado mesmo assim.';
+    }
+    setState(() => _locationStatus = locationStatus);
+
     try {
       final result = await backend.createRedAlert(
         idempotencyKey: key,
-        // A localização real entra aqui quando o permissionamento de GPS for
-        // integrado; o contrato só aceita o hash, então a coordenada crua nunca
-        // sai do dispositivo (LGPD).
-        locationHash: unknownLocationHash,
+        locationHash: locationHash,
       );
       if (!mounted) return;
       setState(() {
@@ -352,7 +409,7 @@ class _EmergencyScreenState extends State<EmergencyScreen> {
         Card(child: Padding(padding: const EdgeInsets.all(16), child: Column(children: [
           const Icon(Icons.location_on_outlined),
           const SizedBox(height: 8),
-          const Text('A localização disponível será anexada ao alerta.', textAlign: TextAlign.center),
+          Text(_locationStatus, key: const Key('location_status'), textAlign: TextAlign.center),
           const SizedBox(height: 8),
           // SC 4.1.3: é a confirmação de que o alerta de emergência chegou à
           // equipe — o ponto mais crítico do app para um leitor de tela

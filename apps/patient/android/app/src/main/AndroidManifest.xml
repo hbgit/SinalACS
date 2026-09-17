@@ -1,4 +1,10 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Usadas por `GeolocatorLocationReader` (ver lib/core/privacy/location_hash.dart)
+         para anexar o hash de localização ao alerta de emergência. Sem
+         "background", pois a leitura só acontece no fluxo de envio do alerta,
+         iniciado pela própria pessoa. -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <application
         android:label="sinalacs_patient"
         android:name="${applicationName}"

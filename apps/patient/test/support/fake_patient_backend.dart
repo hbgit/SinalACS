@@ -23,6 +23,7 @@ class FakePatientBackend implements PatientBackend {
   /// Argumentos recebidos, para as asserções.
   final List<Map<String, bool>> triageCalls = <Map<String, bool>>[];
   final List<String> idempotencyKeys = <String>[];
+  final List<String> locationHashes = <String>[];
   int loginCount = 0;
   bool closed = false;
 
@@ -85,6 +86,7 @@ class FakePatientBackend implements PatientBackend {
     required String locationHash,
   }) async {
     idempotencyKeys.add(idempotencyKey);
+    locationHashes.add(locationHash);
     final failure = alertFailure;
     if (failure != null) throw failure;
 
