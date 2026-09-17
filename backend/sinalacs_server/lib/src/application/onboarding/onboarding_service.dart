@@ -2,7 +2,8 @@ import 'dart:convert';
 import 'dart:math';
 
 import 'package:crypto/crypto.dart';
-import 'package:sinalacs_server/src/application/auth/development_auth_service.dart';
+import 'package:sinalacs_server/src/application/auth/development_auth_service.dart'
+    show AuthenticatedUser;
 import 'package:sinalacs_server/src/generated/protocol.dart';
 
 /// Um convite de onboarding, do jeito que a store enxerga.
@@ -58,12 +59,16 @@ class ConsentLogEntry {
 abstract interface class OnboardingStore {
   Future<void> saveToken(StoredEnrollmentToken token);
 
+  /// Consome o convite atomicamente: uma única operação que só têm efeito se
+  /// o token ainda não tiver sido consumido e não estiver expirado — duas
+  /// chamadas concorrentes com o mesmo token nunca podem ambas "vencer"
+  /// (fix round 1: `findValidToken`+`consumeToken` como dois passos
+  /// separados abria essa janela de corrida).
+  ///
   /// `null` se o token não existir, já expirou ou já foi consumido — o
   /// serviço não distingue os três casos na mensagem ao cliente, para não
   /// ajudar a enumerar convites válidos por tentativa e erro.
-  Future<StoredEnrollmentToken?> findValidToken(String tokenHash, DateTime now);
-
-  Future<void> consumeToken(String tokenHash, DateTime consumedAt);
+  Future<StoredEnrollmentToken?> consumeIfValid(String tokenHash, DateTime now);
 
   Future<String?> microAreaOfPatient(String patientId);
 
@@ -82,22 +87,11 @@ final _tokenRandom = Random.secure();
 class OnboardingService {
   OnboardingService({
     required OnboardingStore store,
-    required DevelopmentAuthService auth,
     DateTime Function()? clock,
   })  : _store = store,
-        _auth = auth,
         _clock = clock ?? DateTime.now;
 
   final OnboardingStore _store;
-  // Recebido por simetria com o padrão de outros serviços (ex.:
-  // `PatientDirectoryService`) e porque `AlertRuntime.onboardingServiceFor`
-  // já tem `auth` disponível — mas a emissão da sessão do paciente usa
-  // `AlertRuntime.instance.auth.issueToken` no endpoint, não este campo, e
-  // token/segredo aqui hoje só validam via `_hash`/`_newToken`. Mantido para
-  // não divergir da assinatura combinada nem exigir reconstrução do serviço
-  // se `completeEnrollment` vier a precisar emitir token diretamente.
-  // ignore: unused_field
-  final DevelopmentAuthService _auth;
   final DateTime Function() _clock;
 
   /// Gera um convite de uso único para um paciente já cadastrado na
@@ -151,14 +145,15 @@ class OnboardingService {
 
     final now = _clock();
     final tokenHash = _hash(token);
-    final stored = await _store.findValidToken(tokenHash, now);
+    // Consumo atômico: `consumeIfValid` é uma única operação que só afeta o
+    // token se ele ainda estiver válido, então duas chamadas concorrentes
+    // com o mesmo token nunca conseguem as duas passar daqui — a store
+    // (implementação ORM) garante isso com um UPDATE condicional, não o
+    // serviço com duas chamadas separadas.
+    final stored = await _store.consumeIfValid(tokenHash, now);
     if (stored == null) {
       throw EnrollmentException(message: 'Convite inválido, expirado ou já utilizado.');
     }
-
-    // Consumir ANTES de gravar consentimento: uma falha ao gravar o
-    // consentimento não deve deixar o token reutilizável indefinidamente.
-    await _store.consumeToken(tokenHash, now);
 
     for (final purpose in ConsentPurpose.values) {
       final granted = consents[purpose] ?? false;

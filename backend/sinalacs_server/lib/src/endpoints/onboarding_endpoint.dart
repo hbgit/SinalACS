@@ -37,14 +37,22 @@ class OnboardingEndpoint extends Endpoint {
     required bool remindersConsent,
     required bool pushConsent,
   }) async {
-    final user = await AlertRuntime.instance.onboardingServiceFor(session).completeEnrollment(
-          token: token,
-          consents: {
-            ConsentPurpose.healthDataProcessing: healthDataConsent,
-            ConsentPurpose.localReminders: remindersConsent,
-            ConsentPurpose.segmentedPush: pushConsent,
-          },
-        );
+    // Consumir o convite e gravar os 3 `consent_logs` formam uma unidade só —
+    // mesmo arranjo de `AlertsEndpoint.createRedAlert`. A emissão do token de
+    // sessão NÃO participa: acontece depois do commit, sobre o usuário já
+    // resolvido, e não depende de nenhuma escrita adicional.
+    final user = await session.db.transaction((transaction) async {
+      return AlertRuntime.instance
+          .onboardingServiceFor(session, transaction: transaction)
+          .completeEnrollment(
+            token: token,
+            consents: {
+              ConsentPurpose.healthDataProcessing: healthDataConsent,
+              ConsentPurpose.localReminders: remindersConsent,
+              ConsentPurpose.segmentedPush: pushConsent,
+            },
+          );
+    });
 
     return EnrollmentResult(
       accessToken: AlertRuntime.instance.auth.issueToken(user),

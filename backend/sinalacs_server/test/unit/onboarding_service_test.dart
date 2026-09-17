@@ -3,6 +3,12 @@ import 'package:sinalacs_server/src/application/onboarding/onboarding_service.da
 import 'package:sinalacs_server/src/generated/protocol.dart';
 import 'package:test/test.dart';
 
+// `AuthenticatedUser`/`UserRole` vêm de `development_auth_service.dart` e
+// `generated/protocol.dart` — o import acima de `development_auth_service`
+// segue necessário só por `AuthenticatedUser`, não por `DevelopmentAuthService`
+// (removido de `OnboardingService` no fix round 1: era uma dependência morta,
+// nunca lida dentro da classe).
+
 class FakeOnboardingStore implements OnboardingStore {
   FakeOnboardingStore();
 
@@ -17,18 +23,14 @@ class FakeOnboardingStore implements OnboardingStore {
   Future<void> saveToken(StoredEnrollmentToken token) async => tokens[token.tokenHash] = token;
 
   @override
-  Future<StoredEnrollmentToken?> findValidToken(String tokenHash, DateTime now) async {
+  Future<StoredEnrollmentToken?> consumeIfValid(String tokenHash, DateTime now) async {
     final stored = tokens[tokenHash];
     if (stored == null) return null;
     if (stored.consumedAt != null) return null;
     if (!stored.expiresAt.isAfter(now)) return null;
-    return stored;
-  }
-
-  @override
-  Future<void> consumeToken(String tokenHash, DateTime consumedAt) async {
-    final stored = tokens[tokenHash]!;
-    tokens[tokenHash] = stored.copyWith(consumedAt: consumedAt);
+    final consumed = stored.copyWith(consumedAt: now);
+    tokens[tokenHash] = consumed;
+    return consumed;
   }
 
   @override
@@ -59,7 +61,6 @@ void main() {
     store = FakeOnboardingStore()..seedPatient('patient-1', 'area-1');
     service = OnboardingService(
       store: store,
-      auth: DevelopmentAuthService(secret: 'test-secret'),
       clock: () => DateTime.utc(2026, 9, 17, 10),
     );
   });
@@ -149,14 +150,12 @@ void main() {
     test('token expirado falha', () async {
       final expiredClockService = OnboardingService(
         store: store,
-        auth: DevelopmentAuthService(secret: 'test-secret'),
         clock: () => DateTime.utc(2026, 9, 17, 10),
       );
       final generated = await expiredClockService.generateToken(acs, patientId: 'patient-1');
 
       final laterService = OnboardingService(
         store: store,
-        auth: DevelopmentAuthService(secret: 'test-secret'),
         clock: () => DateTime.utc(2026, 9, 17, 10, 20), // 20 min depois, expira em 15
       );
 

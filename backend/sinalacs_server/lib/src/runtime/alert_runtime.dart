@@ -111,9 +111,14 @@ class AlertRuntime {
       );
 
   /// Constrói o serviço de onboarding para uma requisição.
-  OnboardingService onboardingServiceFor(Session session) => OnboardingService(
-        store: OrmOnboardingStore(session: () => session),
-        auth: auth,
+  ///
+  /// Passando [transaction], o consumo do convite e a gravação dos 3
+  /// `consent_logs` participam dela — mesmo arranjo de [serviceFor] para o
+  /// alerta vermelho, e o que fecha a janela de corrida de um segundo uso
+  /// concorrente do mesmo token (fix round 1).
+  OnboardingService onboardingServiceFor(Session session, {Transaction? transaction}) =>
+      OnboardingService(
+        store: OrmOnboardingStore(session: () => session, transaction: transaction),
       );
 
   /// Trilha de auditoria amarrada à sessão da chamada.
