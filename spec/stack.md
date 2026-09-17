@@ -32,3 +32,25 @@ A **Sincronização Bidirecional Offline-First** é o componente de maior risco 
 ## 4. Docker-Compose MVTS
 
 A decisão arquitetural é usar Postgres + Mosquitto + Traefik como reverse proxy na stack local, orquestrados via Docker Compose. A topologia concreta (serviços de inicialização de banco/broker, TLS no MQTT, variáveis de ambiente de produção, healthchecks) evoluiu bastante desde a concepção inicial deste documento — o [`docker-compose.yml`](../docker-compose.yml) na raiz do repositório é a fonte da verdade operacional atual, não um exemplo espelhado aqui (evita os dois arquivos divergirem silenciosamente ao longo do tempo, como já havia acontecido).
+
+## 5. Decisões de stack pendentes de implementação (2026-09-16)
+
+`spec/validation_report.md` identificou lacunas que exigiam decisão de
+arquitetura antes de qualquer código novo. As decisões abaixo estão
+detalhadas em `docs/superpowers/specs/2026-09-16-decisoes-produto-pos-validacao.md`
+e ainda **não foram implementadas**:
+
+* **Criptografia de colunas no PostgreSQL (RNF03/INV-04):** decidido usar
+  criptografia de aplicação (AES-256-GCM em Dart, na camada de repositório),
+  não `pgcrypto` em SQL — evita que o dado de saúde em texto claro passe pelo
+  `serverpod_query_log` antes de virar ciphertext. A chave segue o mesmo
+  padrão de segredo por variável de ambiente já usado para `JWT_SECRET`/
+  `AUDIT_CHAIN_SECRET` (gerado por `scripts/dev/bootstrap_env.sh`), sem
+  introduzir um KMS externo nesta fase.
+* **Push segmentado (RF14):** Firebase Cloud Messaging é o provedor
+  escolhido, mas a decisão está **bloqueada externamente** — não existe
+  projeto Firebase provisionado neste repositório.
+* **Geofencing (RF12):** rejeitado rastreamento contínuo em segundo plano do
+  ACS; adotado geofence único atrelado a uma visita ativa, com serviço em
+  primeiro plano e notificação persistente, para evitar a política mais
+  restritiva de "background location" da Play Store.

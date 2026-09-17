@@ -21,11 +21,20 @@ informa que a localização não foi anexada.
 
 Esse hash é pseudonimização, não anonimização. A precisão atualmente adotada
 pode permitir reidentificação por força bruta ou correlação com a microárea,
-especialmente em áreas rurais. Antes de uso com pacientes reais, a resolução
-deve ser aprovada pelo produto e pela privacidade, conforme a recomendação #9
-de `spec/lgpd_data_audit.md`; alternativas incluem reduzir a resolução,
-usar uma célula espacial aprovada ou limitar a retenção do valor bruto no
-servidor. A validação em dispositivo ainda é obrigatória para fechar L-02.
+especialmente em áreas rurais. A validação em dispositivo ainda é obrigatória
+para fechar L-02.
+
+**Decisão de produto (2026-09-16):** a alternativa aprovada para o mapa do
+ACS (RF10, achado L-05) é a **geocélula arredondada** — reduzir a precisão da
+normalização antes do hash (de seis para três casas decimais por padrão) e
+transmitir, além do `locationHash` já existente, uma célula espacial de baixa
+resolução (`locationCell`) só para desenho do mapa, nunca a coordenada crua.
+Essa decisão ainda não foi implementada — nenhuma migração, endpoint ou app
+foi alterado por ela. Ver
+`docs/superpowers/specs/2026-09-16-decisoes-produto-pos-validacao.md` §1 para
+o desenho completo (quem lê cada dado, retenção e o que muda no envelope
+MQTT). `spec/validation_report.md` continua classificando L-05/RF10 como
+bloqueador até essa implementação existir com teste.
 
 ### LGPD-RF01 - Coleta Mínima e Transparente
 
@@ -48,6 +57,14 @@ servidor. A validação em dispositivo ainda é obrigatória para fechar L-02.
 | **Base Legal** | Art. 5º, XII e XIII; Art. 7º, I; Art. 8º |
 | **Artigos LGPD** | 5º, XII; 7º, I; 8º, §1º, §2º, §3º, §4º, §5º, §6º |
 | **Critério de Aceite** | ✓ Consentimento é requerido para cada finalidade distinta<br>✓ Opções de consentimento são independentes (não agrupadas)<br>✓ Registro de consentimento com timestamp e versão<br>✓ Possibilidade de revogação por finalidade específica |
+
+**Estado atual (verificado 2026-09-16):** a tabela `consent_logs` existe
+migrada, mas nenhum código do repositório grava uma linha nela — não há
+escritor. A decisão de produto que liga LGPD-RF02 ao onboarding via QR Code
+(RF02) está registrada em
+`docs/superpowers/specs/2026-09-16-decisoes-produto-pos-validacao.md` §2
+(três finalidades mínimas, token de convite de uso único, gravação no
+backend no fechamento do onboarding). Ainda não implementada.
 
 ### LGPD-RF03 - Gerenciamento de Preferências de Privacidade
 

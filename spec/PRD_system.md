@@ -156,6 +156,29 @@ events:
 | **RNF05** | Acessibilidade WCAG 2.1 Nível AA | UI | - | Médio | `accessibility_test` |
 | **RNF06** | RBAC (Role-Based Access Control) | Sistema | - | Alto | Auth própria no backend (ainda não implementado) |
 
+### 2.2.1 Decisões de produto pós-validação (2026-09-16)
+
+`spec/validation_report.md` classificou RF02, RF06, RF10 (L-05), RF12, RF14 e
+metade de RF15 como ausentes/parciais, e apontou consentimento granular
+(LGPD-RF02) sem escritor. Antes de implementar qualquer um, foram tomadas as
+decisões de produto/arquitetura registradas em
+`docs/superpowers/specs/2026-09-16-decisoes-produto-pos-validacao.md` —
+documento de decisão, não implementação:
+
+| Requisito | Decisão | Bloqueio externo |
+|---|---|---|
+| RF10 (mapa) | Geocélula arredondada, não posição exata (§1) | Não |
+| RF02 + LGPD-RF02 (onboarding/consentimento) | Token de convite de uso único + consentimento por finalidade (§2) | Não |
+| RF06 (lembretes) | Local ao dispositivo, sem endpoint (§3.1) | Não |
+| RF14 (avisos push) | Contrato FCM definido (§3.2) | **Sim** — sem projeto Firebase provisionado |
+| RF12 (geofencing) | Geofence atrelado a visita ativa, sem rastreamento contínuo (§4) | Parcial — submissão à loja pendente |
+| RF15 (sync central→dispositivo) | Pull incremental por cursor (§5) | Não |
+| RNF03 (criptografia Postgres) | AES-256-GCM em nível de aplicação (§6) | Não |
+
+Cada linha é um plano independente, não uma tarefa transversal. Nenhuma foi
+implementada por esta decisão; a matriz acima e `spec/validation_report.md`
+continuam refletindo o estado de código real.
+
 ### 2.3 Modelagem de Fluxos Críticos como Máquinas de Estados (FSM)
 
 #### 2.3.1 FSM - Fluxo de Alerta de Urgência
