@@ -284,6 +284,7 @@ void main() {
             riskLevelAfter: RiskLevel.green,
             notes: const {_notaChave: _notaValor},
             version: 1,
+            arrivalMethod: ArrivalMethod.manual,
           ),
         ],
       );

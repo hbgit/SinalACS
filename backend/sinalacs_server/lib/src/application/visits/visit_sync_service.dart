@@ -24,6 +24,7 @@ class VisitRecord {
     this.riskLevelAfter,
     required this.notes,
     required this.syncStatus,
+    required this.arrivalMethod,
     required this.localId,
     this.syncAt,
     required this.version,
@@ -40,6 +41,11 @@ class VisitRecord {
   final RiskLevel? riskLevelAfter;
   final Map<String, String> notes;
   final SyncStatus syncStatus;
+
+  /// Como o check-in desta visita foi registrado (RF12, decisão §4). Definido
+  /// na criação da visita, como [scheduledAt]/[riskLevelBefore] — não muda na
+  /// atualização feita ao concluir (ver `VisitSyncService._syncOne`).
+  final ArrivalMethod arrivalMethod;
   final UuidValue localId;
   final DateTime? syncAt;
   final int version;
@@ -60,6 +66,7 @@ class VisitRecord {
     Object? riskLevelAfter = _keep,
     Map<String, String>? notes,
     SyncStatus? syncStatus,
+    ArrivalMethod? arrivalMethod,
     UuidValue? localId,
     Object? syncAt = _keep,
     int? version,
@@ -77,6 +84,7 @@ class VisitRecord {
             riskLevelAfter == _keep ? this.riskLevelAfter : riskLevelAfter as RiskLevel?,
         notes: notes ?? this.notes,
         syncStatus: syncStatus ?? this.syncStatus,
+        arrivalMethod: arrivalMethod ?? this.arrivalMethod,
         localId: localId ?? this.localId,
         syncAt: syncAt == _keep ? this.syncAt : syncAt as DateTime?,
         version: version ?? this.version,
@@ -164,6 +172,7 @@ class VisitSyncService {
           riskLevelAfter: visit.riskLevelAfter,
           notes: visit.notes,
           version: visit.version,
+          arrivalMethod: visit.arrivalMethod,
           // Relógio do SERVIDOR (gravado em `_syncOne` via `_clock()`), nunca
           // o do dispositivo. É o que o cursor do app usa para avançar sem
           // depender do relógio do aparelho — ver `VisitPullService` no ACS.
@@ -265,6 +274,7 @@ class VisitSyncService {
         riskLevelAfter: entry.riskLevelAfter,
         notes: entry.notes,
         syncStatus: SyncStatus.synced,
+        arrivalMethod: entry.arrivalMethod,
         localId: localId,
         syncAt: _clock().toUtc(),
         version: 1,
@@ -309,6 +319,10 @@ class VisitSyncService {
       );
     }
 
+    // `arrivalMethod` fica de fora deliberadamente: é definido na criação da
+    // visita (como `scheduledAt`/`riskLevelBefore`), não numa atualização de
+    // conclusão — `copyWith` sem o argumento preserva o valor gravado no
+    // insert.
     final updated = await _store.update(existing.copyWith(
       completedAt: entry.completedAt,
       status: entry.status,

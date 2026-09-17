@@ -15,6 +15,10 @@ fields:
   notesEncrypted: String, default=''
   notesKeyVersion: int, default=1
   syncStatus: SyncStatus
+  ### Como o check-in desta visita foi registrado (RF12, decisão §4). Default
+  ### `manual` até a integração nativa de geofencing existir — hoje nenhum
+  ### código produz `geofence`.
+  arrivalMethod: ArrivalMethod, default=manual
   ### Identificador gerado no dispositivo, usado para deduplicar na sincronização.
   localId: UuidValue
   syncAt: DateTime?

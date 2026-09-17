@@ -104,6 +104,7 @@ VisitSyncEntry entry({
     riskLevelAfter: RiskLevel.yellow,
     notes: const {'campo': 'sem intercorrências'},
     version: version,
+    arrivalMethod: ArrivalMethod.manual,
   );
 }
 
@@ -128,6 +129,17 @@ void main() {
     expect(results.single.syncStatus, SyncStatus.synced);
     expect(results.single.serverVersion, 1);
     expect(store.rows[_localId]?.status, 'realizada');
+  });
+
+  test('grava arrivalMethod manual quando a entrada não especifica geofence', () async {
+    // `entry()` monta a entrada com `arrivalMethod: ArrivalMethod.manual` —
+    // hoje o único valor que qualquer app realmente envia (nenhum integra
+    // geofencing nativo). Este teste prova que o valor chega intacto até o
+    // registro gravado, não só que o campo existe no contrato.
+    final results = await service.sync(user: _acs, entries: [entry()]);
+
+    expect(results.single.syncStatus, SyncStatus.synced);
+    expect(store.rows[_localId]?.arrivalMethod, ArrivalMethod.manual);
   });
 
   test('reenvio do mesmo estado não duplica a visita', () async {
@@ -213,6 +225,7 @@ void main() {
         riskLevelBefore: RiskLevel.green,
         notes: const {},
         version: 0,
+        arrivalMethod: ArrivalMethod.manual,
       ),
       entry(),
     ]);
@@ -317,6 +330,7 @@ void main() {
         riskLevelAfter: RiskLevel.yellow,
         notes: const {'campo': 'sem intercorrências'},
         syncStatus: SyncStatus.synced,
+        arrivalMethod: ArrivalMethod.manual,
         localId: UuidValue.fromString(localId),
         syncAt: syncAt,
         version: 1,

@@ -27,6 +27,13 @@ class BackendVisitSynchronizer implements VisitSynchronizer {
               ? const <String, String>{}
               : <String, String>{'campo': visit.notes.trim()},
           version: visit.version,
+          // Contrato para geofencing futuro (RF12, decisão §4) — desenho
+          // apenas. Nenhuma API nativa de geofence foi integrada nesta task,
+          // nenhuma permissão de localização em primeiro/segundo plano foi
+          // adicionada ao AndroidManifest.xml, e a escolha de plugin/texto de
+          // divulgação seguem bloqueados por revisão de produto/jurídico. Todo
+          // check-in registrado por este app hoje é manual.
+          arrivalMethod: ArrivalMethod.manual,
         ),
     ]);
 

@@ -16,6 +16,11 @@ fields:
   riskLevelAfter: RiskLevel?
   notes: Map<String, String>
   version: int
+  ### Como o check-in desta visita foi registrado (RF12, decisão §4). Hoje
+  ### `visits.sync` só recebe `manual` — nenhum app integra geofencing nativo
+  ### nesta task; o campo existe para não exigir mais uma migração quando essa
+  ### integração for implementada.
+  arrivalMethod: ArrivalMethod
   ### Momento (relógio do SERVIDOR) em que esta visita foi sincronizada pela
   ### última vez. Só populado no sentido servidor→dispositivo (`visits.pull`);
   ### `visits.sync` (dispositivo→servidor) ignora este campo quando presente

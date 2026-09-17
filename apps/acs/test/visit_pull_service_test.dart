@@ -23,6 +23,7 @@ VisitSyncEntry entry({
     notes: const {},
     version: version,
     syncAt: syncAt,
+    arrivalMethod: ArrivalMethod.manual,
   );
 }
 

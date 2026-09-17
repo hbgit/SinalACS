@@ -135,6 +135,7 @@ VisitSyncEntry _visitEntry({
       riskLevelBefore: RiskLevel.green,
       notes: const {},
       version: version,
+      arrivalMethod: ArrivalMethod.manual,
     );
 
 void main() {
@@ -210,6 +211,7 @@ void main() {
             riskLevelBefore: RiskLevel.green,
             notes: const {},
             version: 0,
+            arrivalMethod: ArrivalMethod.manual,
           ),
         ],
       );
@@ -248,6 +250,7 @@ void main() {
             riskLevelBefore: RiskLevel.green,
             notes: const {},
             version: 0,
+            arrivalMethod: ArrivalMethod.manual,
           ),
         ],
       );
