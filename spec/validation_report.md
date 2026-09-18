@@ -150,7 +150,7 @@ de alertas — se o broker cair, não há caminho alternativo de leitura.
 | ACS | Login | **real** | |
 | ACS | **Fila** | **real** | Alerta criado via RPC apareceu ao vivo no emulador. |
 | ACS | **Área** | **hardcoded** | Diz "142 cadastrados"; o backend tem **5** nessa microárea. |
-| ACS | Mapa | **sintético** | `alertPositionFor()` deriva lat/lng do hash em torno de Brasília. |
+| ACS | Mapa | **sintético** | `alertPositionFor()` (a fabricação de lat/lng por hash em torno de Brasília) foi removida; o mapa agora desenha a geocélula real (`locationCell`, ~1,1 km), não mais uma posição fabricada — ver §6 abaixo. |
 | ACS | Visita | **real** | Seletor vem de `patients.listMicroArea`; fila vai a `visits.sync`. |
 | ACS | Escalonamento | **stub** | SAMU e UBS são snackbars. |
 | ACS | Avisos | **stub** | Entrada descartada. |

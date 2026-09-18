@@ -54,6 +54,18 @@ required, backend won't connect), and a rotated `HEALTH_DATA_ENCRYPTION_KEY`
 doesn't block boot but makes already-encrypted clinical columns unreadable —
 to adopt a new value of either, `docker compose down && rm -rf pg_data/`.
 
+**Updating an existing `pg_data/` to this branch loses dev clinical data
+silently.** Migration `20260917191250458` (Track E, RNF03/INV-04) does
+`DROP COLUMN` — no backfill — on `patients.chronicConditions`,
+`triage_sessions.answers` and `visits.notes`, replacing each with an
+encrypted column pair (`*Encrypted`/`*KeyVersion`, see
+[backend/CLAUDE.md](backend/CLAUDE.md)). Acceptable at this project's stage
+(prototype, no real data anywhere), but a `pg_data/` volume from before this
+branch will apply that migration on next boot and drop those three columns'
+existing content with no warning. Either `docker compose down && rm -rf
+pg_data/` before starting on the new schema, or accept the loss of synthetic
+dev data in those three fields.
+
 Rotating the MQTT passwords is enough on its own: `infra/docker/mosquitto/init.sh`
 rewrites the broker's `passwordfile` on every boot. It used to only create it
 when absent, so a changed password silently did nothing and the broker kept

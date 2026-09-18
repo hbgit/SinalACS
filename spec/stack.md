@@ -38,8 +38,15 @@ A decisão arquitetural é usar Postgres + Mosquitto + Traefik como reverse prox
 `spec/validation_report.md` identificou lacunas que exigiam decisão de
 arquitetura antes de qualquer código novo. As decisões abaixo estão
 detalhadas em `docs/superpowers/specs/2026-09-16-decisoes-produto-pos-validacao.md`.
-A de criptografia de colunas (§6) já foi implementada; as demais ainda
-**não foram**:
+Desse documento, já têm implementação (mesmo que parcial, com limitações
+conhecidas): criptografia de colunas (§6), geocélula do mapa (§1, RF10),
+onboarding e consentimento (§2, RF02) e a metade central→dispositivo da
+sincronização (§5, RF15 — pull incremental; a leitura fica do lado do ACS,
+não há geração de mudança do lado do paciente ainda). Lembretes locais
+(§3.1, RF06) também têm implementação no app do paciente. Ainda **não**
+implementados: push segmentado (§3.2, RF14 — bloqueado externamente, sem
+projeto Firebase) e geofencing (§4, RF12 — só o contrato de dados
+`arrivalMethod` foi desenhado, sem o serviço de geofence em primeiro plano):
 
 * **Criptografia de colunas no PostgreSQL (RNF03/INV-04, §6 — implementada):**
   decidido usar criptografia de aplicação (AES-256-GCM em Dart, na camada de

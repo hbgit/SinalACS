@@ -52,7 +52,7 @@ The three clinical columns are encrypted at the ORM boundary only: `OrmPatientDi
 
 
 ### Backend (`backend/`) — Serverpod workspace
-`backend/` is a Dart workspace with `sinalacs_server` (the server) and `sinalacs_client` (the generated typed client). Serverpod was the original stack decision recorded in `spec/stack.md`/`spec/PRD_system.md`; it was not implemented at first — the server was a hand-rolled `dart:io` HttpServer — and was adopted later, replacing it. The Dockerfile (`backend/sinalacs_server/Dockerfile`) is a multi-stage build: `dart compile exe` (AOT) on `dart:3.8.0`, copied into `alpine` with a non-root user, `curl` for the healthcheck, and a `HEALTHCHECK` that does `POST /health/check`.
+`backend/` is a Dart workspace with `sinalacs_server` (the server) and `sinalacs_client` (the generated typed client). Serverpod was the original stack decision recorded in `spec/stack.md`/`spec/PRD_system.md`; it was not implemented at first — the server was a hand-rolled `dart:io` HttpServer — and was adopted later, replacing it. The Dockerfile (`backend/sinalacs_server/Dockerfile`) is a multi-stage build: `dart compile exe` (AOT) on `dart:3.12.2` (bumped from `3.8.0` because the `postgres` package, a transitive/direct dependency, requires `sdk: '^3.9.0'`), copied into `alpine` with a non-root user, `curl` for the healthcheck, and a `HEALTHCHECK` that does `POST /health/check`.
 
 Layering under `backend/sinalacs_server/lib/src/`:
 - `models/` — the schema as `.spy.yaml` model files: 14 tables, 4 enums (`RiskLevel`, `AlertStatus`, `SyncStatus`, `UserRole`), typed exceptions, and endpoint result types. `serverpod generate` turns these into Dart classes shared by server and client; `serverpod create-migration` turns them into SQL under `migrations/`.

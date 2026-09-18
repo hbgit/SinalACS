@@ -17,12 +17,12 @@ A tabela abaixo consolida o mapeamento exaustivo de dados persistidos pelo backe
 | **patients** | `id` | `uuid` | Pseudonimizado | UUID (vínculo 1:1 com `users.id`) | Identificador do paciente no domínio clínico; sem risco direto de identificação sem junção com a tabela `users`. |
 | | `emergencyContact` | `text` | Identificável (PII de Terceiro) | Texto claro (telefone/nome) | **Alto:** Armazena dados de contato de pessoa externa sem gestão documentada de consentimento desse terceiro titular. |
 | | `isChronic` | `boolean` | Sensível (Saúde - Art. 5º, II) | Flag booleana | Sinaliza formalmente a existência de condição médica crônica. |
-| | `chronicConditions` | `json` | Sensível (Saúde - Art. 5º, II) | JSON estruturado em texto claro | **Crítico:** Lista de comorbidades (ex: diabetes, hipertensão) exposta sem proteção criptográfica; viola a invariante INV-04 e LGPD-RF09 (ausência de `pgcrypto`/AES-256). |
+| | `chronicConditions` | `text` (ciphertext) + `chronicConditionsKeyVersion` (`bigint`) | Sensível (Saúde - Art. 5º, II) | **Cifrado em repouso (AES-256-GCM, aplicação)** — ver §2.3 | Lista de comorbidades (ex: diabetes, hipertensão) cifrada na borda do repositório ORM antes do INSERT (`HealthDataCipher`); atende INV-04/LGPD-RF09. Decifrado apenas em memória do processo do servidor ao ler. |
 | | `lastLocationHash` | `text` | Pseudonimizado | Geohash (ex: 7 caracteres base32) | Não é irreversível: codifica latitude e longitude com resolução de ~150m; pode revelar o endereço residencial exato do paciente. |
 | | `lastTriageAt` | `timestamp without time zone` | Sensível (Metadado Clínico) | Timestamp | Indica data/hora de eventos de triagem clínica recente. |
 | **triage_sessions** | `id` | `uuid` | Pseudonimizado | UUID v4 (`gen_random_uuid()`) | Identificador sintético da sessão de triagem. |
 | | `patientId` | `uuid` | Pseudonimizado | Chave estrangeira (`patients.id`) | Liga o histórico clínico diretamente ao perfil do paciente no território. |
-| | `answers` | `json` | Sensível (Saúde - Art. 5º, II) | JSON contendo lista de `TriageAnswer` | **Crítico:** Contém sintomas declarados e relatos de dor; viola a invariante INV-04 enquanto persistido sem criptografia de repouso. |
+| | `answers` | `text` (ciphertext) + `answersKeyVersion` (`bigint`) | Sensível (Saúde - Art. 5º, II) | **Cifrado em repouso (AES-256-GCM, aplicação)** — ver §2.3 | Contém sintomas declarados e relatos de dor, cifrados na borda do repositório ORM antes do INSERT; atende INV-04. |
 | | `resultRisk` | `text` | Sensível (Saúde - Art. 5º, II) | Enum textual (`VERMELHO`, `AMARELO`, etc.) | Classificação determinística calculada no frontend/backend; uso restrito à priorização da fila de atendimento do ACS. |
 | | `resultDisplay` | `text` | Sensível (Saúde - Art. 5º, II) | Texto descritivo | Descrição textual com diretivas clínicas associadas aos sintomas avaliados. |
 | | `createdAt` | `timestamp without time zone` | Metadado Técnico | Timestamp | Marco temporal para aplicação da política de retenção legal de 5 anos (LGPD-RF07). |
@@ -37,7 +37,7 @@ A tabela abaixo consolida o mapeamento exaustivo de dados persistidos pelo backe
 | | `status` | `text` | Metadado Operacional | Enum textual (`SCHEDULED`, `IN_PROGRESS`, etc.) | Estado operacional do ciclo de vida da visita. |
 | | `riskLevelBefore` | `text` | Sensível (Saúde - Art. 5º, II) | Enum textual | Avaliação clínica de gravidade anterior à intervenção. |
 | | `riskLevelAfter` | `text` | Sensível (Saúde - Art. 5º, II) | Enum textual | Reavaliação clínica executada pelo ACS após o atendimento presencial. |
-| | `notes` | `json` | Sensível (Saúde - Art. 5º, II) | JSON em texto claro | **Crítico:** Campo de anotações não estruturadas do ACS; elevado risco de conter diagnósticos, prescrições e relatos sobre terceiros sem anonimização. |
+| | `notes` | `text` (ciphertext) + `notesKeyVersion` (`bigint`) | Sensível (Saúde - Art. 5º, II) | **Cifrado em repouso (AES-256-GCM, aplicação)** — ver §2.3 | Campo de anotações não estruturadas do ACS, cifrado na borda do repositório ORM antes do INSERT; risco de conter diagnósticos/relatos sobre terceiros permanece (é conteúdo livre), mas não mais como texto claro em repouso. |
 | | `syncStatus` | `text` | Metadado Técnico | Enum textual (`PENDING`, `SYNCED`, `CONFLICT`) | Controle da máquina de estados (FSM) de sincronização offline-first. |
 | | `localId` | `uuid` | Pseudonimizado | UUID gerado no SQLite do cliente | Chave de controle de concorrência e idempotência offline. |
 | | `syncAt` | `timestamp without time zone` | Metadado Técnico | Timestamp de sincronização | Momento da persistência no banco central. |
@@ -99,7 +99,7 @@ A tabela abaixo consolida o mapeamento exaustivo de dados persistidos pelo backe
 | | `address` | `text` | Dado Institucional Público | String de endereço | Endereço físico do equipamento de saúde pública. |
 | | `city` | `text` | Dado Territorial Público | String de município | Município de lotação da UBS. |
 | | `state` | `text` | Dado Territorial Público | String UF | Estado da federação de lotação da UBS. |
-| **serverpod_query_log** | `query` | `text` | **Risco Crítico de Fuga Indireta** | Texto SQL completo de queries lentas/falhas | **Crítico:** Se comandos `INSERT`/`UPDATE` com `name`, `emergencyContact`, `chronicConditions` ou `notes` falharem ou forem lentos, o comando SQL completo com dados sensíveis em texto claro será gravado nesta tabela técnica. |
+| **serverpod_query_log** | `query` | `text` | **Risco Crítico de Fuga Indireta** | Texto SQL completo de queries lentas/falhas | **Atualizado:** ainda crítico para `name`/`emergencyContact` (texto claro). Para `chronicConditions`/`answers`/`notes`, a cifragem acontece na aplicação **antes** de a query ser montada (§2.3), então o valor que chegaria a esta tabela — se o log for reativado — já é ciphertext, não texto claro; risco rebaixado para esses três campos especificamente (ver §3.2.2). |
 | | Demais colunas | Vários | Metadados de Sistema | Timestamps, durações e IDs numéricos | Métricas de telemetria e depuração de queries do banco de dados. |
 | **serverpod_message_log** | `error` / `stackTrace` | `text` | Risco Moderado de Vazamento | Dump de exceções não tratadas | Risco de exposição de payloads RPC contendo dados clínicos sensíveis ou identificadores em stacktraces não sanitizados. |
 | | Demais colunas | Vários | Metadados Operacionais | Nomes de métodos RPC, durações e flags | Rastreabilidade de chamadas da API interna. |
@@ -141,17 +141,33 @@ Os campos `patients.lastLocationHash`, `alerts.locationHash` e `alert_idempotenc
 
 ---
 
-### 2.3. Armazenamento em Texto Claro de Dados Sensíveis de Saúde (Violação INV-04)
+### 2.3. Criptografia em Repouso de Dados Sensíveis de Saúde (INV-04) — Atualizado
 
-A invariante de negócio **INV-04** estabelece categoricamente: *"Dados de saúde sensíveis nunca podem ser persistidos em texto plano. Criptografia AES-256 em sqflite e PostgreSQL"*. Adicionalmente, os requisitos **LGPD-RF09** e **LGPD-RT02** determinam o uso de criptografia em repouso para mitigar o risco de vazamento em caso de comprometimento do banco.
+**Estado atual (implementado):** os três campos abaixo são cifrados em
+repouso com **AES-256-GCM na camada de aplicação** (Dart, na borda do
+repositório ORM — `orm_patient_directory_store.dart`,
+`orm_triage_session_store.dart`, `orm_visit_store.dart`), não via `pgcrypto`
+em SQL. A decisão e seus motivos (evitar que o texto claro passe pelo
+`serverpod_query_log` antes de virar ciphertext — ver §3.2.2 — e reaproveitar
+o mesmo padrão de segredo por variável de ambiente já usado para
+`JWT_SECRET`/`AUDIT_CHAIN_SECRET`) estão registrados em
+`docs/superpowers/specs/2026-09-16-decisoes-produto-pos-validacao.md` §6. A
+implementação é `backend/sinalacs_server/lib/src/infrastructure/crypto/health_data_cipher.dart`
+(`HealthDataCipher`, `EncryptedValue`) e `encrypted_json.dart`; a chave vem de
+`HEALTH_DATA_ENCRYPTION_KEY` (hex de 64 caracteres, gerada por
+`scripts/dev/bootstrap_env.sh`, mesmo mecanismo das demais). A migração
+`20260917191250458` substituiu as três colunas originais por um par
+`*Encrypted` (ciphertext) + `*KeyVersion` (marcador para rotação futura,
+ainda não implementada — `HealthDataCipher.decrypt` sempre usa a única chave
+com que o processo foi configurado).
 
-A inspeção do schema físico (`definition.sql` e modelos `.spy.yaml`) revelou que três colunas contêm dados sensíveis (Art. 5º, II da LGPD) persistidos como tipos `json` ou `text` nativos, sem qualquer camada de cifra criptográfica:
+A invariante de negócio **INV-04** estabelece categoricamente: *"Dados de saúde sensíveis nunca podem ser persistidos em texto plano. Criptografia AES-256 em sqflite e PostgreSQL"*. Os requisitos **LGPD-RF09** e **LGPD-RT02** determinam o uso de criptografia em repouso para mitigar o risco de vazamento em caso de comprometimento do banco. As três colunas abaixo atendiam a essas exigências:
 
-1. **`patients.chronicConditions` (`json`):** Persiste diretamente diagnósticos clínicos estruturados (ex: `['diabetes', 'hipertensao']`).
-2. **`triage_sessions.answers` (`json`):** Armazena a listagem de respostas de triagem com a descrição de sintomas, localização corporal e intensidade de dores.
-3. **`visits.notes` (`json`):** Armazena anotações livres e não estruturadas realizadas pelo ACS durante o atendimento domiciliar, com alto risco de retenção de dados clínicos circunstanciais e menções a terceiros.
+1. **`patients.chronicConditions` → `chronicConditionsEncrypted` (`text`, ciphertext) + `chronicConditionsKeyVersion`:** diagnósticos clínicos estruturados (ex: `['diabetes', 'hipertensao']`), agora cifrados.
+2. **`triage_sessions.answers` → `answersEncrypted` (`text`, ciphertext) + `answersKeyVersion`:** listagem de respostas de triagem com descrição de sintomas, localização corporal e intensidade de dores, agora cifrada.
+3. **`visits.notes` → `notesEncrypted` (`text`, ciphertext) + `notesKeyVersion`:** anotações livres do ACS durante o atendimento domiciliar, com risco de conter relatos sobre terceiros (conteúdo livre, não estruturado) — o texto em si continua sensível, mas agora cifrado em repouso.
 
-A exposição desses campos em repouso gera vulnerabilidade crítica: qualquer leitura indevida decorrente de dump de banco, backup comprometido ou injeção de logs expõe de imediato o histórico clínico completo do paciente.
+Uma leitura indevida decorrente de dump de banco ou backup comprometido já não expõe texto claro diretamente: exige também a chave `HEALTH_DATA_ENCRYPTION_KEY`, que fica fora do Postgres. Isso reduz, mas não elimina, o risco — a chave é um segredo único por ambiente (sem KMS/HSM/rotação automática nesta fase, ver `backend/CLAUDE.md`), e comprometer o processo do servidor (não só o banco) ainda expõe o texto claro em memória durante o uso normal.
 
 ---
 
@@ -181,9 +197,9 @@ As tabelas `alerts` e `triage_sessions` retêm a coluna `deviceId text NOT NULL`
 | `users.birthDate` | Tipo com precisão excessiva de horário (`timestamp`) em credencial sensível. | Alterar a coluna para o tipo SQL `date`, preservando o valor exato para o login passwordless (RF01) e eliminando horas/minutos/segundos. |
 | `patients.emergencyContact` | PII de terceiro exposto em texto claro sem consentimento formal direto. | Criptografar a coluna com chave simétrica da aplicação ou proteger o acesso via endpoint dedicado liberado apenas durante o ciclo de vida de um alerta ativo. |
 | `consent_logs.ipHash` e `audit_logs.ipHash` | Espaço amostral de IPv4 ($2^{32}$) facilmente mapeável via rainbow table. | Utilizar **HMAC-SHA-256 com rotação periódica de salt** (chave de rotação diária/semanal), preservando a correlação de incidentes daquela janela sem permitir persistência do rastro de rede do titular. |
-| `patients.chronicConditions` | Comorbidades e diagnósticos de saúde persistidos em texto plano (violação INV-04). | Criptografia em repouso no nível de aplicação (AES-256-GCM) antes do insert, ou adoção da extensão `pgcrypto` (`pgp_sym_encrypt`) no PostgreSQL, conforme previsto em LGPD-RT02. |
-| `triage_sessions.answers` | Respostas clínicas e relatos de sintomas persistidos em JSON aberto. | Serializar e cifrar o payload de respostas com chave simétrica derivada ou chave mestra mantida fora do banco de dados (Envelope Encryption). |
-| `visits.notes` | Texto livre do ACS sem higienização, contendo dados clínicos sensíveis. | Criptografia simétrica compulsória em repouso e implementação de máscara ou sanitização preventiva na sincronização. |
+| `patients.chronicConditions` | ~~Comorbidades e diagnósticos de saúde persistidos em texto plano (violação INV-04).~~ **Remediado:** cifrado em repouso (AES-256-GCM, aplicação) desde a migração `20260917191250458` — ver §2.3. | ~~Criptografia em repouso no nível de aplicação (AES-256-GCM) antes do insert, ou adoção da extensão `pgcrypto` (`pgp_sym_encrypt`) no PostgreSQL, conforme previsto em LGPD-RT02.~~ Feito: criptografia de aplicação, não `pgcrypto` (ver §2.3 para o porquê). Pendente: rotina de rotação de chave (`keyVersion` gravado, mas não lido de volta). |
+| `triage_sessions.answers` | ~~Respostas clínicas e relatos de sintomas persistidos em JSON aberto.~~ **Remediado:** cifrado em repouso — ver §2.3. | ~~Serializar e cifrar o payload de respostas com chave simétrica derivada ou chave mestra mantida fora do banco de dados (Envelope Encryption).~~ Feito, sem envelope encryption: chave única de processo (`HEALTH_DATA_ENCRYPTION_KEY`), fora do banco. |
+| `visits.notes` | ~~Texto livre do ACS sem higienização, contendo dados clínicos sensíveis.~~ **Remediado (cifra):** cifrado em repouso — ver §2.3. A ausência de máscara/sanitização de conteúdo livre permanece. | ~~Criptografia simétrica compulsória em repouso e implementação de máscara ou sanitização preventiva na sincronização.~~ Cifra feita. Máscara/sanitização de conteúdo livre segue pendente (fora do escopo desta remediação). |
 | `alerts.locationHash` | Digest truncado de localização precisa, correlacionável por força bruta em um domínio espacial pequeno; formatos geohash históricos têm risco adicional de decodificação direta. | Aprovar uma resolução espacial deliberadamente reduzida ou uma célula espacial não reversível para roteamento, limitar retenção e impedir que a coordenada crua saia do dispositivo. Validar a escolha com ameaça de reidentificação antes de produção. |
 | `alerts.deviceId` e `triage_sessions.deviceId` | Rastreamento persistente de hardware do titular. | Substituir por identificador de instalação efêmero (UUID gerado no onboarding do app e descartado na limpeza de dados). |
 
@@ -198,7 +214,7 @@ A auditoria estática do fluxo de dados, pontos de entrada RPC, rotinas em segun
 | ID | Componente / Arquivo | Severidade | Descrição do Risco | Mitigação Recomendada |
 | :--- | :--- | :--- | :--- | :--- |
 | **VAZ-01** | `lib/src/infrastructure/mqtt/mqtt_alert_dispatcher.dart` (linhas 43, 103, 132), `lib/src/application/alerts/alert_outbox_dispatcher.dart` (linha 69) e `lib/server.dart` (linha 96) | **Média** | Despejo de exceções brutas via `stderr.writeln` em falhas de mensageria MQTT e varredura de outbox. Caso o `$error` interceptado contenha instâncias serializadas de `AlertOutboxEntry` ou `AlertDeliveryRecord`, dados sensíveis como `locationHash` e identificadores clínicos são despejados nos logs do console da hospedagem. | Sanitizar a mensagem antes de gravar em `stderr`, registrando apenas o tipo do erro e identificadores sintéticos (ex.: `alertId`), sem imprimir o objeto de domínio bruto ou payloads MQTT. |
-| **VAZ-02** | `serverpod_query_log` (Tabela interna do Serverpod) | **Alta** | Persistência indireta de PII e dados sensíveis de saúde em texto claro. Caso transações com o ORM (como em `AlertsEndpoint.createRedAlert` ou sincronização de visitas) falhem ou sofram lentidão, o framework grava a instrução SQL completa na coluna `query`, expondo valores literais de inserções em `users`, `patients`, `triage_sessions` e `visits`. | Configurar `logSettings` em `serverpod_runtime_settings` para desativar o registro textual de queries SQL completas em ambientes com dados reais, assegurando o uso exclusivo de prepared statements parametrizados. |
+| **VAZ-02** | `serverpod_query_log` (Tabela interna do Serverpod) | **Média** (rebaixado de Alta para os 3 campos clínicos cifrados; permanece Alta para `users.name`/`patients.emergencyContact`, ainda em texto claro) | Persistência indireta de PII e dados sensíveis de saúde em texto claro. Caso transações com o ORM (como em `AlertsEndpoint.createRedAlert` ou sincronização de visitas) falhem ou sofram lentidão, o framework grava a instrução SQL completa na coluna `query`. **Atualizado:** `patients.chronicConditions`, `triage_sessions.answers` e `visits.notes` agora são cifrados (AES-256-GCM) na camada de repositório antes de a query ser montada (§2.3, decisão registrada em `docs/superpowers/specs/2026-09-16-decisoes-produto-pos-validacao.md` §6) — o valor que chegaria a este log para esses três campos já seria ciphertext. `users.name` e `patients.emergencyContact` continuam em texto claro e continuam expostos por este vetor. | Configurar `logSettings` em `serverpod_runtime_settings` para desativar o registro textual de queries SQL completas em ambientes com dados reais, assegurando o uso exclusivo de prepared statements parametrizados — ainda recomendado para os campos que seguem em texto claro. |
 | **VAZ-03** | `serverpod_message_log` e `serverpod_log` | **Média** | Vazamento de argumentos RPC e sessões em stacktraces. Exceções não tratadas durante chamadas de endpoint podem despejar argumentos serializados de requisições nas colunas `error` e `stackTrace` das tabelas de telemetria do Serverpod. | Implementar filtro global de exceções para expurgar cargas úteis e PII antes da gravação de stacktraces no banco de dados. |
 | **VAZ-04** | Broker MQTT Gerenciado (HiveMQ Cloud / Piloto Free-Tier) | **Alta** | Ausência de ACLs dinâmicas por microárea e chaveamento compartilhado (`backend/DEPLOY.md`). O piloto adota credenciais globais estáticas (`MQTT_USERNAME`/`MQTT_PASSWORD`) sem segregação estrita por tópico, permitindo que qualquer nó autenticado assine `/alerts/#` e intercepte alertas de terceiros. | O ambiente free-tier deve permanecer restrito a dados sintéticos. Para produção, adotar broker corporativo (ex.: Mosquitto/EMQX) com autenticação mTLS e arquivos de ACL dinâmicos vinculados à microárea (garantia da INV-01). |
 | **VAZ-05** | Topologia Neon / Render (Armazenamento e Computação em Nuvem Pública) | **Média** | Custódia e processamento de dados por operadores terceirizados sem salvaguardas contratuais formais (DPA - *Data Processing Agreement*). Viola o princípio da responsabilização e LGPD-RF17 caso dados reais trafeguem antes da celebração dos instrumentos legais. | Manter a infraestrutura gratuita estritamente restrita a seeds e testes sintéticos. Em ambiente assistencial, formalizar instâncias isoladas (VPC/on-premise institucional) ou contratos corporativos com DPA ativo. |
@@ -216,7 +232,7 @@ Contudo, a inspeção de fluxos de erro revelou 5 ocorrências de `stderr.writel
 #### 3.2.2. Efeito Colateral do Logging Técnico do Serverpod
 O Serverpod gera nativamente tabelas de diagnóstico operacional (`serverpod_query_log`, `serverpod_session_log`, `serverpod_message_log`, `serverpod_log`). 
 * Embora métodos como `AlertsEndpoint.createRedAlert` realizem validações seguras e encapsulem transações via `session.db.transaction`, uma falha de banco aciona a persistência do comando SQL textual em `serverpod_query_log.query`.
-* Se dados sensíveis de saúde (`chronicConditions`, `answers`, `notes`) estiverem em texto claro no momento da inserção, a tabela de log passa a atuar como vetor secundário de retenção desprotegida de PII e dados clínicos.
+* **Atualizado:** `chronicConditions`, `answers` e `notes` são cifrados (AES-256-GCM) na camada de repositório ORM **antes** de a query ser montada — este foi justamente um dos motivos para a decisão de cifrar em Dart em vez de via `pgcrypto`/SQL (`docs/superpowers/specs/2026-09-16-decisoes-produto-pos-validacao.md` §6, motivo 1): se a cifragem fosse feita por função SQL, o texto claro passaria por esta camada de log antes de virar ciphertext. Com a cifragem na aplicação, o valor que chegaria a `serverpod_query_log.query` para esses três campos — se o log for reativado ou mal configurado — já é ciphertext, não texto claro. O vetor segue válido para os campos que continuam em texto claro (`users.name`, `patients.emergencyContact`).
 
 #### 3.2.3. Superfície de Mensageria no Piloto Gratuito (HiveMQ Cloud)
 Conforme detalhado no documento `backend/DEPLOY.md`, o piloto gratuito utiliza o HiveMQ Cloud em plano compartilhado, onde não há segregação de permissões de leitura por tópico baseada em território sanitário. Clientes que utilizarem as credenciais do piloto podem monitorar livremente as publicações da raiz `/alerts/*`, permitindo que um agente escute alertas emitidos em microáreas para as quais não possui atribuição assistencial, quebrando a garantia da invariante INV-01.
@@ -255,7 +271,7 @@ Com base nas vulnerabilidades e desvios de conformidade mapeados neste relatóri
 4. **Isolar o Ambiente Free-Tier:** Reforçar bloqueios ou avisos na UI do piloto garantindo que ele seja alimentado estritamente pelo seed sintético de desenvolvimento.
 
 ### Prioridade Média (Médio Prazo - Criptografia em Repouso e Telemetria)
-5. **Criptografar Campos de Saúde (Violação INV-04):** Implementar criptografia de coluna (via `pgcrypto` ou criptografia simétrica na aplicação) para proteger `patients.chronicConditions`, `triage_sessions.answers` e `visits.notes` contra leituras indevidas no banco.
+5. ~~**Criptografar Campos de Saúde (Violação INV-04):** Implementar criptografia de coluna (via `pgcrypto` ou criptografia simétrica na aplicação) para proteger `patients.chronicConditions`, `triage_sessions.answers` e `visits.notes` contra leituras indevidas no banco.~~ **Feito:** criptografia de aplicação (AES-256-GCM, Dart, camada de repositório ORM), migração `20260917191250458` — ver §2.3. Pendente como melhoria futura, não bloqueante para o estágio atual: rotina de rotação de `HEALTH_DATA_ENCRYPTION_KEY`/`keyVersion` e um KMS gerenciado para produção real.
 6. **Mascarar Logs do Serverpod:** Desativar ou configurar máscaras para o `serverpod_query_log` em produção, impedindo que transações SQL lentas deixem rastros em texto claro de diagnósticos ou dados de anamnese.
 7. **Anonimizar Origens de Rede:** Implementar salt rotativo no cálculo de `ipHash` para os registros de `consent_logs` e `audit_logs`.
 
