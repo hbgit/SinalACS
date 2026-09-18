@@ -6,7 +6,8 @@ import 'package:sinalacs_server/src/runtime/alert_runtime.dart';
 
 /// Verifica o token de acesso e devolve o usuário, ou recusa.
 ///
-/// Era o corpo idêntico de cinco métodos privados `_authenticate`, um por
+/// Era o corpo idêntico de cinco cópias, uma por endpoint — duas como método
+/// privado `_authenticate` nomeado e três inline dentro do próprio método do
 /// endpoint. Fica numa função só para que exista **um** lugar onde a
 /// verificação pode ser lida — e para que um endpoint novo tenha de onde
 /// herdá-la em vez de reescrevê-la.
