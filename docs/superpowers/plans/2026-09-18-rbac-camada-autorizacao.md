@@ -811,7 +811,7 @@ O `CLAUDE.md` da raiz pede manter o grafo em dia depois de mexer no código:
 
 ```bash
 graphify update .
-git add spec/security_assessment.md spec/validation_report.md backend/CLAUDE.md graphify-out/
+git add spec/security_assessment.md spec/validation_report.md backend/CLAUDE.md
 git commit -m "docs: registrar a camada de autorização (RNF06/L-09) como parcial
 
 Co-Authored-By: Claude Code <noreply@anthropic.com>"

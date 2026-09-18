@@ -1767,7 +1767,7 @@ Acrescente uma seção curta, com data, listando o que este plano **não** fez e
 
 ```bash
 graphify update .
-git add spec/ apps/CLAUDE.md backend/CLAUDE.md PROGRESS.md graphify-out/
+git add spec/ apps/CLAUDE.md backend/CLAUDE.md PROGRESS.md
 git commit -m "docs: registrar RF07 implementado e as lacunas de MFA/refresh token
 
 Co-Authored-By: Claude Code <noreply@anthropic.com>"

@@ -1902,7 +1902,7 @@ No primeiro, a seção do paciente: login por CPF+nascimento+OTP, sessão de 1 h
 
 ```bash
 graphify update .
-git add spec/ apps/CLAUDE.md backend/CLAUDE.md PROGRESS.md graphify-out/
+git add spec/ apps/CLAUDE.md backend/CLAUDE.md PROGRESS.md
 git commit -m "docs: registrar RF01 implementado e as lacunas de SMS, telefone e refresh token
 
 Co-Authored-By: Claude Code <noreply@anthropic.com>"
