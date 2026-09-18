@@ -32,14 +32,14 @@ CREATE TABLE $_table (
   }
 
   @override
-  Future<bool> localRemindersGranted() async {
+  Future<bool?> localRemindersGranted() async {
     final db = await _open();
     final rows = await db.query(
       _table,
       where: 'purpose = ?',
       whereArgs: [ConsentPurpose.localReminders.name],
     );
-    if (rows.isEmpty) return false;
+    if (rows.isEmpty) return null;
     return (rows.first['granted'] as int) == 1;
   }
 

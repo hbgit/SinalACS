@@ -1068,10 +1068,11 @@ class _RemindersScreenState extends State<RemindersScreen> {
   List<Reminder>? _reminders;
   String? _error;
   bool _requestedLoad = false;
-  // Fail closed até o carregamento terminar: enquanto `_reminders` é `null`
-  // a tela mostra o spinner, então o valor inicial aqui não chega a ser
-  // exibido, mas ainda assim não deve ser `true` por padrão.
-  bool _remindersConsentGranted = false;
+  // `null` até o primeiro carregamento terminar, e continua `null` se não
+  // houver registro local de consentimento (aparelho que nunca passou pelo
+  // onboarding) — distinto de `false` (recusa explícita), embora ambos
+  // bloqueiem o agendamento do mesmo jeito (ver `ConsentPreferences`).
+  bool? _remindersConsentGranted;
 
   @override
   void didChangeDependencies() {
@@ -1088,8 +1089,22 @@ class _RemindersScreenState extends State<RemindersScreen> {
   Future<void> _load() async {
     try {
       final scope = RemindersScope.of(context);
-      final reminders = await scope.store.list();
+      var reminders = await scope.store.list();
       final consentGranted = await scope.consentPreferences.localRemindersGranted();
+      if (consentGranted != true) {
+        // Recusa (ou estado desconhecido, tratado como recusa por padrão de
+        // segurança): nenhum lembrete pode continuar agendado no sistema
+        // operacional depois disso — sem isso, um lembrete criado antes da
+        // recusa continuaria disparando mesmo depois dela (LGPD-RF05).
+        final stillActive = reminders.where((r) => r.active).toList();
+        for (final r in stillActive) {
+          await scope.scheduler.cancel(r.id);
+          await scope.store.save(r.copyWith(active: false));
+        }
+        if (stillActive.isNotEmpty) {
+          reminders = await scope.store.list();
+        }
+      }
       if (!mounted) return;
       setState(() {
         _reminders = reminders;
@@ -1111,12 +1126,18 @@ class _RemindersScreenState extends State<RemindersScreen> {
   // fala com um plugin de plataforma real (`flutter_local_notifications`),
   // que pode falhar em dispositivo por motivos fora do controle da tela.
 
-  static const _consentDeniedMessage =
-      'Você recusou o consentimento para lembretes locais no cadastro — não é possível agendar notificações.';
+  String _consentDeniedMessage(bool? granted) {
+    if (granted == false) {
+      return 'Você recusou o consentimento para lembretes locais no cadastro — '
+          'não é possível agendar notificações.';
+    }
+    return 'Não encontramos seu consentimento para lembretes locais neste '
+        'aparelho — conclua o cadastro para ativar notificações.';
+  }
 
   Future<void> _toggleActive(Reminder reminder, bool active) async {
-    if (active && !_remindersConsentGranted) {
-      setState(() => _error = _consentDeniedMessage);
+    if (active && _remindersConsentGranted != true) {
+      setState(() => _error = _consentDeniedMessage(_remindersConsentGranted));
       return;
     }
     final scope = RemindersScope.of(context);
@@ -1156,8 +1177,8 @@ class _RemindersScreenState extends State<RemindersScreen> {
   }
 
   Future<void> _createOrEdit({Reminder? existing}) async {
-    if (!_remindersConsentGranted) {
-      setState(() => _error = _consentDeniedMessage);
+    if (_remindersConsentGranted != true) {
+      setState(() => _error = _consentDeniedMessage(_remindersConsentGranted));
       return;
     }
     final result = await showDialog<(String, int, int)>(
@@ -1203,13 +1224,13 @@ class _RemindersScreenState extends State<RemindersScreen> {
             IconButton(
               key: const Key('reminders_add_button'),
               tooltip: 'Novo alarme',
-              onPressed: _remindersConsentGranted ? () => _createOrEdit() : null,
+              onPressed: _remindersConsentGranted == true ? () => _createOrEdit() : null,
               icon: const Icon(Icons.add_alarm_outlined),
             ),
           ],
         ),
         const SizedBox(height: 16),
-        if (!_remindersConsentGranted)
+        if (reminders != null && _remindersConsentGranted != true)
           // SC 4.1.3, mesmo padrão do banner de erro logo abaixo: quem usa
           // leitor de tela precisa saber por que o botão "+" está desabilitado.
           Padding(
@@ -1223,10 +1244,9 @@ class _RemindersScreenState extends State<RemindersScreen> {
                   border: Border.all(color: Colors.white24),
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: const Text(
-                  'Você recusou o consentimento para lembretes locais no cadastro. '
-                  'Nenhuma notificação será agendada.',
-                  style: TextStyle(color: Colors.white70),
+                child: Text(
+                  _consentDeniedMessage(_remindersConsentGranted),
+                  style: const TextStyle(color: Colors.white70),
                 ),
               ),
             ),

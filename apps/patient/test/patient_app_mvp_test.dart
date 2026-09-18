@@ -99,10 +99,10 @@ class _ThrowingReminderStore implements ReminderStore {
 class _FixedConsentPreferences implements ConsentPreferences {
   _FixedConsentPreferences({this.granted = true});
 
-  bool granted;
+  bool? granted;
 
   @override
-  Future<bool> localRemindersGranted() async => granted;
+  Future<bool?> localRemindersGranted() async => granted;
 
   @override
   Future<void> saveLocalRemindersConsent(bool value) async => granted = value;
@@ -560,6 +560,42 @@ void main() {
         final saved = await store.list();
         expect(saved, hasLength(1));
         expect(scheduler.scheduled, [saved.single.id]);
+      });
+
+      testWidgets('sem registro local de consentimento, trata como recusa mas avisa para concluir o cadastro', (tester) async {
+        final store = _InMemoryReminderStore();
+        final scheduler = _RecordingReminderScheduler();
+        await tester.pumpWidget(buildRemindersScreen(
+          store,
+          scheduler,
+          consentPreferences: _FixedConsentPreferences(granted: null),
+        ));
+        await tester.pumpAndSettle();
+
+        final addButton = tester.widget<IconButton>(find.byKey(const Key('reminders_add_button')));
+        expect(addButton.onPressed, isNull);
+        expect(find.textContaining('Não encontramos seu consentimento'), findsOneWidget);
+        expect(find.textContaining('Você recusou'), findsNothing);
+        expect(scheduler.scheduled, isEmpty);
+      });
+
+      testWidgets('carregar a tela sem consentimento cancela lembretes já ativos (revogação efetiva)', (tester) async {
+        final store = _InMemoryReminderStore();
+        final seeded = await store.save(
+          const Reminder(id: 0, label: 'Metformina 850 mg', hour: 7, minute: 0, active: true),
+        );
+        final scheduler = _RecordingReminderScheduler();
+        await tester.pumpWidget(buildRemindersScreen(
+          store,
+          scheduler,
+          consentPreferences: _FixedConsentPreferences(granted: false),
+        ));
+        await tester.pumpAndSettle();
+
+        expect(scheduler.cancelled, [seeded.id]);
+        final after = await store.list();
+        expect(after.single.active, isFalse);
+        expect(find.text('Pausado'), findsOneWidget);
       });
     });
   });

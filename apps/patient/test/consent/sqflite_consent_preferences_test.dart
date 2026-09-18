@@ -17,8 +17,8 @@ void main() {
 
   tearDown(() => store.close());
 
-  test('sem registro local, trata como recusado (fail closed)', () async {
-    expect(await store.localRemindersGranted(), isFalse);
+  test('sem registro local, retorna null (nem aceite nem recusa)', () async {
+    expect(await store.localRemindersGranted(), isNull);
   });
 
   test('grava aceite e recupera', () async {

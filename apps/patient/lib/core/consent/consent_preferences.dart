@@ -7,11 +7,17 @@
 /// portanto o único jeito de `RemindersScreen` saber a resposta é guardar
 /// uma cópia no momento em que ela é conhecida (conclusão do onboarding).
 abstract interface class ConsentPreferences {
-  /// `false` — inclusive quando não há nenhum registro local ainda — nunca
-  /// `true` por omissão. Ausência de dado é tratada como recusa, não como
-  /// aceite: o risco de agendar uma notificação sem consentimento é maior
-  /// que o de deixar de agendar uma que teria sido permitida.
-  Future<bool> localRemindersGranted();
+  /// `true` só quando há um registro local explícito de aceite. `false`
+  /// quando há um registro local explícito de recusa. `null` quando não há
+  /// nenhum registro local ainda — por exemplo, um aparelho cuja entrada
+  /// principal (`PatientLoginScreen`) nunca passou pelo onboarding. As duas
+  /// últimas situações são tratadas de forma idêntica por quem chama este
+  /// método para efeito de bloquear o agendamento (nunca `true` por
+  /// omissão: o risco de agendar uma notificação sem consentimento é maior
+  /// que o de deixar de agendar uma que teria sido permitida) — mas são
+  /// distinguidas para que a interface possa explicar à pessoa qual das
+  /// duas é o caso, em vez de afirmar uma recusa que nunca aconteceu.
+  Future<bool?> localRemindersGranted();
 
   Future<void> saveLocalRemindersConsent(bool granted);
 }
