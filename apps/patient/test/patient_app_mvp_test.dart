@@ -1,7 +1,8 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:sinalacs_client/sinalacs_client.dart' show RiskLevel;
+import 'package:sinalacs_client/sinalacs_client.dart'
+    show AlertStatus, AlertStatusResult, RiskLevel;
 import 'package:sinalacs_patient/app/app.dart';
 import 'package:sinalacs_patient/core/consent/consent_preferences.dart';
 import 'package:sinalacs_patient/core/network/backend_client.dart';
@@ -597,6 +598,72 @@ void main() {
         expect(after.single.active, isFalse);
         expect(find.text('Pausado'), findsOneWidget);
       });
+    });
+  });
+
+  group('Status da solicitação (RF05)', () {
+    testWidgets('sem alerta disparado, mostra que não há solicitação — não mais o ticket falso', (tester) async {
+      final backend = FakePatientBackend();
+      await tester.pumpWidget(SinalAcsApp(backend: backend));
+      await login(tester);
+
+      await tester.tap(find.text('Status'));
+      await tester.pumpAndSettle();
+
+      expect(backend.statusForCallCount, 1);
+      expect(find.byKey(const Key('status_empty')), findsOneWidget);
+      expect(find.text('Nenhuma solicitação registrada ainda.'), findsOneWidget);
+      expect(find.textContaining('Solicitação de visita #4082'), findsNothing);
+    });
+
+    testWidgets('mostra o status real devolvido pelo servidor', (tester) async {
+      final backend = FakePatientBackend()
+        ..statusResult = AlertStatusResult(
+          found: true,
+          alertId: 'alerta-1',
+          riskLevel: RiskLevel.red,
+          status: AlertStatus.acknowledged,
+          triggeredAt: DateTime.utc(2026, 9, 18, 9),
+          acknowledgedAt: DateTime.utc(2026, 9, 18, 9, 5),
+        );
+      await tester.pumpWidget(SinalAcsApp(backend: backend));
+      await login(tester);
+
+      await tester.tap(find.text('Status'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Risco: Vermelho'), findsOneWidget);
+      expect(find.text('Recebido pela equipe de saúde'), findsOneWidget);
+    });
+
+    testWidgets('uma falha ao consultar mostra o aviso, sem travar o botão de tentar de novo', (tester) async {
+      final backend = FakePatientBackend()
+        ..statusFailure = const BackendFailure('Sem conexão com o servidor.');
+      await tester.pumpWidget(SinalAcsApp(backend: backend));
+      await login(tester);
+
+      await tester.tap(find.text('Status'));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('status_error')), findsOneWidget);
+      expect(find.text('Sem conexão com o servidor.'), findsOneWidget);
+      expect(
+        tester.widget<FilledButton>(find.byKey(const Key('refresh_status'))).onPressed,
+        isNotNull,
+      );
+    });
+
+    testWidgets('"Verificar status agora" repete a consulta manualmente', (tester) async {
+      final backend = FakePatientBackend();
+      await tester.pumpWidget(SinalAcsApp(backend: backend));
+      await login(tester);
+      await tester.tap(find.text('Status'));
+      await tester.pumpAndSettle();
+      expect(backend.statusForCallCount, 1);
+
+      await tester.tap(find.byKey(const Key('refresh_status')));
+      await tester.pumpAndSettle();
+      expect(backend.statusForCallCount, 2);
     });
   });
 }

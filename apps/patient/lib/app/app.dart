@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
-import 'package:sinalacs_client/sinalacs_client.dart' show RiskLevel;
+import 'package:sinalacs_client/sinalacs_client.dart'
+    show AlertStatus, AlertStatusResult, RiskLevel;
 import 'package:sinalacs_patient/app/patient_theme.dart';
 import 'package:sinalacs_patient/core/consent/consent_preferences.dart';
 import 'package:sinalacs_patient/core/consent/sqflite_consent_preferences.dart';
@@ -1015,41 +1016,192 @@ class _ClinicalProfileScreenState extends State<ClinicalProfileScreen> {
   }
 }
 
+/// Acompanhamento da solicitação do paciente (RF05, decisão §5) — consome
+/// `alerts.statusFor`, escopado ao próprio paciente pelo token.
+///
+/// Antes mostrava sempre "Solicitação de visita #4082" com passos fixos,
+/// inclusive para quem nunca disparou um alerta (L-03, "Tela de Status
+/// mente para o paciente" em spec/validation_report.md). Estado próprio
+/// (não no shell): um teste existente constrói `PatientHomeShell` só sob
+/// `RemindersScope`, sem `BackendScope` — buscar o status no shell quebraria
+/// esse teste mesmo quando a aba aberta é outra.
 class StatusScreen extends StatelessWidget {
   const StatusScreen({super.key});
 
   @override
+  Widget build(BuildContext context) => const _StatusScreenBody();
+}
+
+class _StatusScreenBody extends StatefulWidget {
+  const _StatusScreenBody();
+
+  @override
+  State<_StatusScreenBody> createState() => _StatusScreenBodyState();
+}
+
+class _StatusScreenBodyState extends State<_StatusScreenBody> {
+  bool _loading = false;
+  AlertStatusResult? _status;
+  String? _error;
+  DateTime? _checkedAt;
+  bool _requestedLoad = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // BackendScope.of(context) só é seguro a partir daqui, não em
+    // initState — mesmo padrão de RemindersScreen._requestedLoad.
+    if (!_requestedLoad) {
+      _requestedLoad = true;
+      _load();
+    }
+  }
+
+  Future<void> _load() async {
+    setState(() { _loading = true; _error = null; });
+    try {
+      final status = await BackendScope.of(context).statusFor();
+      if (!mounted) return;
+      setState(() {
+        _status = status;
+        _checkedAt = DateTime.now();
+      });
+    } on BackendFailure catch (failure) {
+      if (!mounted) return;
+      setState(() => _error = failure.message);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _error = 'Não foi possível verificar o status da solicitação.');
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final current = _status;
     return ListView(
       padding: const EdgeInsets.all(20),
-      children: const [
-        Card(
-          child: Padding(
-            padding: EdgeInsets.all(20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Solicitação de visita #4082', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-                SizedBox(height: 8),
-                Text('Triagem Vermelha • criada hoje às 09:30'),
-                SizedBox(height: 28),
-                Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [_StatusStep('Enviado', true), _StatusStep('Visualizado', true), _StatusStep('Em análise', true), _StatusStep('Agendado', false)]),
-                SizedBox(height: 28),
-                Divider(),
-                SizedBox(height: 12),
-                Text('Última atualização pelo ACS', style: TextStyle(fontWeight: FontWeight.bold)),
-                SizedBox(height: 4),
-                Text('Chamado recebido e priorizado na fila da microárea.'),
-              ],
+      children: [
+        if (_error != null)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 16),
+            // SC 4.1.3, mesmo padrão do erro de login/onboarding/lembretes.
+            child: Semantics(
+              liveRegion: true,
+              child: Text(
+                key: const Key('status_error'),
+                _error!,
+                style: const TextStyle(color: PatientColors.dangerOnSurface, fontWeight: FontWeight.bold),
+              ),
             ),
           ),
+        if (current == null || !current.found)
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    key: const Key('status_empty'),
+                    _loading ? 'Verificando...' : 'Nenhuma solicitação registrada ainda.',
+                    style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Um alerta de urgência ou uma triagem concluída aparece aqui assim que a equipe recebe.',
+                    style: TextStyle(color: Colors.white70),
+                  ),
+                ],
+              ),
+            ),
+          )
+        else
+          _StatusCard(status: current),
+        const SizedBox(height: 20),
+        FilledButton(
+          key: const Key('refresh_status'),
+          onPressed: _loading ? null : _load,
+          style: FilledButton.styleFrom(minimumSize: const Size(48, 52)),
+          child: _loading
+              ? const SizedBox(height: 22, width: 22, child: CircularProgressIndicator(strokeWidth: 2))
+              : const Text('Verificar status agora'),
         ),
+        if (_checkedAt != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text(
+              'Verificado às ${_formatTime(_checkedAt!)}',
+              style: const TextStyle(fontSize: 12, color: Colors.white54),
+            ),
+          ),
       ],
     );
   }
 }
 
-class _StatusStep extends StatelessWidget { const _StatusStep(this.label, this.done); final String label; final bool done; @override Widget build(BuildContext context) => Column(children: [Icon(done ? Icons.check_circle : Icons.calendar_today_outlined, color: done ? PatientColors.accent : Colors.white54), const SizedBox(height: 6), SizedBox(width: 65, child: Text(label, textAlign: TextAlign.center, style: const TextStyle(fontSize: 11)))]); }
+class _StatusCard extends StatelessWidget {
+  const _StatusCard({required this.status});
+
+  final AlertStatusResult status;
+
+  @override
+  Widget build(BuildContext context) {
+    // Mesma disciplina de cor de `_TriageResult`: `OnSurface` porque o tom
+    // aparece como texto sobre `Card`, não como preenchimento.
+    final (riskLabel, riskColor) = switch (status.riskLevel) {
+      RiskLevel.red => ('Vermelho', PatientColors.dangerOnSurface),
+      RiskLevel.yellow => ('Amarelo', const Color(0xFFE0A800)),
+      RiskLevel.green => ('Verde', PatientColors.accentOnSurface),
+      null => ('Não classificado', Colors.white70),
+    };
+    final statusLabel = switch (status.status) {
+      AlertStatus.pending => 'Enviado — aguardando confirmação da equipe',
+      AlertStatus.acknowledged => 'Recebido pela equipe de saúde',
+      AlertStatus.resolved => 'Atendimento concluído',
+      AlertStatus.escalated => 'Encaminhado para o SAMU',
+      null => 'Sem status',
+    };
+    final triggeredAt = status.triggeredAt;
+    final acknowledgedAt = status.acknowledgedAt;
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              key: const Key('status_risk'),
+              'Risco: $riskLabel',
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: riskColor),
+            ),
+            if (triggeredAt != null) ...[
+              const SizedBox(height: 8),
+              Text('Disparado às ${_formatTime(triggeredAt)}'),
+            ],
+            const SizedBox(height: 16),
+            Text(
+              key: const Key('status_label'),
+              statusLabel,
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
+            if (acknowledgedAt != null) ...[
+              const SizedBox(height: 4),
+              Text('Confirmado pela equipe às ${_formatTime(acknowledgedAt)}'),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+String _formatTime(DateTime value) {
+  final local = value.toLocal();
+  return '${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}';
+}
 
 /// Lembretes locais de saúde (medicamento, pesagem, etc.), RF06 §3.1.
 ///

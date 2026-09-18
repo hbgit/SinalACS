@@ -21,6 +21,9 @@ class FakePatientBackend implements PatientBackend {
   BackendFailure? loginFailure;
   BackendFailure? alertFailure;
   BackendFailure? enrollmentFailure;
+  AlertStatusResult statusResult = AlertStatusResult(found: false);
+  BackendFailure? statusFailure;
+  int statusForCallCount = 0;
 
   /// Argumentos recebidos, para as asserções.
   final List<Map<String, bool>> triageCalls = <Map<String, bool>>[];
@@ -82,6 +85,14 @@ class FakePatientBackend implements PatientBackend {
       'severeWeakness': severeWeakness,
     });
     return risk;
+  }
+
+  @override
+  Future<AlertStatusResult> statusFor() async {
+    statusForCallCount++;
+    final failure = statusFailure;
+    if (failure != null) throw failure;
+    return statusResult;
   }
 
   @override

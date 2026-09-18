@@ -43,6 +43,10 @@ abstract class PatientBackend {
     required bool severeWeakness,
   });
 
+  /// Status do alerta mais recente do paciente autenticado (RF05, decisão
+  /// §5). `found: false` quando o paciente nunca disparou um alerta.
+  Future<AlertStatusResult> statusFor();
+
   Future<RedAlertResult> createRedAlert({
     required String idempotencyKey,
     required String locationHash,
@@ -147,6 +151,14 @@ class BackendClient implements PatientBackend {
       ),
     );
     return result.risk;
+  }
+
+  /// Ver ressalva de [PatientBackend.statusFor]. `patientId` nunca é
+  /// argumento — o servidor deriva do token (INV-05).
+  @override
+  Future<AlertStatusResult> statusFor() async {
+    final token = await _requireToken();
+    return _guard(() => _client.alerts.statusFor(accessToken: token));
   }
 
   /// Dispara o alerta vermelho.
