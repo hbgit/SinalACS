@@ -179,6 +179,11 @@ Cada linha é um plano independente, não uma tarefa transversal. Nenhuma foi
 implementada por esta decisão; a matriz acima e `spec/validation_report.md`
 continuam refletindo o estado de código real.
 
+RF15 teve sua metade ACS (contrato + tela consumidora) implementada em
+`docs/superpowers/plans/2026-09-17-decisoes-produto-pos-validacao-implementacao.md`
+(Task 10) e `docs/superpowers/plans/2026-09-18-rf15-consumo-acs-pull-visitas.md`;
+a metade paciente (RF05) segue pendente.
+
 ### 2.3 Modelagem de Fluxos Críticos como Máquinas de Estados (FSM)
 
 #### 2.3.1 FSM - Fluxo de Alerta de Urgência

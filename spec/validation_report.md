@@ -80,7 +80,7 @@ cliente · **`parcial`** = existe, mas alimentado por dado fabricado ·
 | RF12 | Geofencing (check-in passivo) | **ausente** | `RouteService` calcula chegada localmente, mas não há GPS em segundo plano. |
 | RF13 | Escalonamento para SAMU/UBS | **ausente** | Ambos os botões são snackbars — ver L-07. |
 | RF14 | Avisos segmentados (push) | **ausente** | `NoticesScreen` descarta a entrada. Sem FCM/APNs. |
-| RF15 | Sincronização bidirecional | **parcial** | Dispositivo → central funciona e é testado. O sentido central → dispositivo **não existe**: não há endpoint de leitura de visitas/alertas. |
+| RF15 | Sincronização bidirecional | **parcial** | Dispositivo → central e central → dispositivo (`visits.pull`, cursor por dispositivo) funcionam e são testados, incluindo a tela do ACS que consome o pull. Falta só o lado do paciente (RF05, `alerts.statusFor`) — ver §5 de `docs/superpowers/specs/2026-09-16-decisoes-produto-pos-validacao.md`. |
 | RF16 | Motor de triagem determinístico | **backend** | `TriageEngine`, determinismo verificado em teste de integração. INV-02 preservado. |
 | RF17 | Logs de auditoria e conformidade | **backend** | `audit_logs` encadeado por HMAC; gravou `granted` e `denied_territory` nesta validação; cadeia verificada íntegra. |
 | RF18 | Dark mode nativo | **app-only** | Tema único dark nos três apps, com matriz de contraste testada. |

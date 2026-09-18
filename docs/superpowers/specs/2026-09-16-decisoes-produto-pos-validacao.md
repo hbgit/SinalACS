@@ -363,8 +363,14 @@ Nenhum. É extensão do mesmo padrão de RPC/territorialização já implementad
   não por ausência de endpoint).
 - Tela de Status do paciente deixa de ser `const` (fecha L-03 do relatório de
   validação, hoje classificada como "Tela de Status mente para o paciente").
-- Consumo do cursor pelo app ACS (fila) e app paciente (status), com teste de
-  device reinstalado sem duplicar nem perder itens.
+- ~~Consumo do cursor pelo app ACS (fila)~~ — feito: `VisitPullService` (Task
+  10 do plano de implementação) mais a tela "Área" que o aciona e mostra o
+  resultado (`docs/superpowers/plans/2026-09-18-rf15-consumo-acs-pull-visitas.md`).
+  Falta ainda o consumo pelo app paciente (status) — mesma garantia de
+  device reinstalado sem duplicar nem perder itens já vale para o ACS
+  (coberta em `apps/acs/test/visit_pull_service_test.dart` e
+  `apps/acs/test/sync_cursor_store_test.dart`); falta provar o equivalente
+  do lado paciente quando esse trabalho for feito.
 
 ---
 
