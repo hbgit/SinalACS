@@ -150,4 +150,10 @@ class OrmAlertStore implements AlertStore {
     final existing = _transaction;
     return existing != null ? run(existing) : session.db.transaction(run);
   }
+
+  @override
+  Future<AlertStatusSnapshot?> latestForPatient(String patientId) async {
+    // Implementado na próxima task deste plano (endpoint alerts.statusFor).
+    throw UnimplementedError('latestForPatient ainda não implementado em OrmAlertStore');
+  }
 }
