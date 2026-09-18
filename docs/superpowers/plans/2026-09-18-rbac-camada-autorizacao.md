@@ -568,7 +568,7 @@ Co-Authored-By: Claude Code <noreply@anthropic.com>"
 - Test: `backend/sinalacs_server/test/unit/endpoint_auth_posture_test.dart`
 
 **Interfaces:**
-- Consumes: a string `extends AuthenticatedEndpoint` que a Task 3 introduziu nos quatro endpoints autenticados.
+- Consumes: a declaração `class <Nome> extends AuthenticatedEndpoint` que a Task 3 introduziu nos quatro endpoints autenticados (casada por `_extendsBasePattern`, e ignorando `authenticated_endpoint.dart`, que é a definição da base).
 - Produces: nada de runtime — é um guard de regressão.
 
 O teste lê o texto-fonte de `lib/src/endpoints/`. Não importa as classes: importá-las puxaria o runtime do Serverpod e o teste deixaria de ser hermético. `dart test` roda com o diretório de trabalho na raiz do pacote (`backend/sinalacs_server`), então o caminho relativo resolve.
@@ -596,6 +596,23 @@ const _publicByDesign = <String, String>{
       'uso único é a credencial), generateEnrollmentToken exige token de ACS',
 };
 
+/// A classe que o teste protege — e cujo arquivo ele precisa ignorar.
+///
+/// `authenticated_endpoint.dart` casa com o mesmo glob `*_endpoint.dart` dos
+/// endpoints, mas é a DEFINIÇÃO da base, não um usuário dela: a sua declaração
+/// é `abstract class AuthenticatedEndpoint extends Endpoint`, que não contém
+/// `extends AuthenticatedEndpoint`.
+const _baseClassName = 'AuthenticatedEndpoint';
+
+/// Casamento por DECLARAÇÃO, não por texto solto.
+///
+/// `source.contains('extends AuthenticatedEndpoint')` seria satisfeito por uma
+/// frase em qualquer comentário — inclusive em português se alguém escrevesse
+/// `extends AuthenticatedEndpoint` citando o nome da classe. O padrão exige
+/// `class <Nome> extends AuthenticatedEndpoint`, que é o que a regra quer
+/// dizer.
+final _extendsBasePattern = RegExp(r'class \w+ extends AuthenticatedEndpoint\b');
+
 void main() {
   test('todo endpoint é autenticado por padrão ou explicitamente isento', () {
     final directory = Directory('lib/src/endpoints');
@@ -622,7 +639,14 @@ void main() {
         continue;
       }
 
-      final isGuarded = source.contains('extends AuthenticatedEndpoint');
+      // O arquivo que DEFINE a base não é um endpoint e não estende a si
+      // mesmo: `authenticated_endpoint.dart` casa com o glob `*_endpoint.dart`
+      // e a sua declaração (`abstract class AuthenticatedEndpoint extends
+      // Endpoint`) não contém o literal procurado — sem esta linha de guarda,
+      // a suíte acusaria o próprio arquivo correto que ela deveria proteger.
+      if (name == _baseClassName) continue;
+
+      final isGuarded = _extendsBasePattern.hasMatch(source);
       final isAllowlisted = _publicByDesign.containsKey(name);
       if (!isGuarded && !isAllowlisted) {
         offenders.add(
@@ -643,7 +667,7 @@ void main() {
       final file = File(path);
       expect(file.existsSync(), isTrue, reason: '$name não existe mais em $path');
       expect(
-        file.readAsStringSync().contains('extends AuthenticatedEndpoint'),
+        _extendsBasePattern.hasMatch(file.readAsStringSync()),
         isFalse,
         reason: '$name já é autenticado — remova-o da allowlist',
       );
