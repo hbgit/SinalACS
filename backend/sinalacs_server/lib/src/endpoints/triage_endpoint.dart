@@ -1,5 +1,6 @@
 import 'package:serverpod/serverpod.dart';
 import 'package:sinalacs_server/src/application/triage/triage_session_service.dart';
+import 'package:sinalacs_server/src/endpoints/authenticated_endpoint.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
 import 'package:sinalacs_server/src/runtime/alert_runtime.dart';
 
@@ -13,10 +14,7 @@ import 'package:sinalacs_server/src/runtime/alert_runtime.dart';
 /// endpoint era uma função pura, respondia sem autenticação alguma, e o
 /// resultado clínico era descartado — não havia prontuário, nem vínculo com o
 /// paciente, nem auditoria da triagem (RF17).
-class TriageEndpoint extends Endpoint {
-  @override
-  bool get requireLogin => false;
-
+class TriageEndpoint extends AuthenticatedEndpoint {
   Future<TriageResult> evaluate(
     Session session, {
     required String accessToken,
@@ -27,10 +25,7 @@ class TriageEndpoint extends Endpoint {
     required bool bleeding,
     required bool severeWeakness,
   }) async {
-    final user = AlertRuntime.instance.auth.verifyToken(accessToken);
-    if (user == null) {
-      throw AlertPermissionException(message: 'token inválido ou expirado');
-    }
+    final user = authenticate(accessToken);
 
     try {
       final risk = await AlertRuntime.instance

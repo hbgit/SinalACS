@@ -1,5 +1,5 @@
 import 'package:serverpod/serverpod.dart';
-import 'package:sinalacs_server/src/application/auth/development_auth_service.dart';
+import 'package:sinalacs_server/src/endpoints/authenticated_endpoint.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
 import 'package:sinalacs_server/src/runtime/alert_runtime.dart';
 
@@ -17,10 +17,7 @@ import 'package:sinalacs_server/src/runtime/alert_runtime.dart';
 ///
 /// A autenticação continua sendo o token HMAC de desenvolvimento, verificado
 /// aqui em vez de no laço de requisições do servidor `dart:io`.
-class AlertsEndpoint extends Endpoint {
-  @override
-  bool get requireLogin => false;
-
+class AlertsEndpoint extends AuthenticatedEndpoint {
   Future<RedAlertResult> createRedAlert(
     Session session, {
     required String accessToken,
@@ -28,7 +25,7 @@ class AlertsEndpoint extends Endpoint {
     required String locationHash,
     String? locationCell,
   }) async {
-    final user = _authenticate(accessToken);
+    final user = authenticate(accessToken);
 
     try {
       // Gravar o alerta, registrar a chave de idempotência e publicar no broker
@@ -73,7 +70,7 @@ class AlertsEndpoint extends Endpoint {
     required String accessToken,
     required String alertId,
   }) async {
-    final user = _authenticate(accessToken);
+    final user = authenticate(accessToken);
     final service = AlertRuntime.instance.serviceFor(session);
 
     try {
@@ -97,7 +94,7 @@ class AlertsEndpoint extends Endpoint {
     Session session, {
     required String accessToken,
   }) async {
-    final user = _authenticate(accessToken);
+    final user = authenticate(accessToken);
     final service = AlertRuntime.instance.serviceFor(session);
 
     try {
@@ -115,13 +112,5 @@ class AlertsEndpoint extends Endpoint {
     } on StateError catch (error) {
       throw AlertPermissionException(message: error.message);
     }
-  }
-
-  AuthenticatedUser _authenticate(String accessToken) {
-    final user = AlertRuntime.instance.auth.verifyToken(accessToken);
-    if (user == null) {
-      throw AlertPermissionException(message: 'token inválido ou expirado');
-    }
-    return user;
   }
 }

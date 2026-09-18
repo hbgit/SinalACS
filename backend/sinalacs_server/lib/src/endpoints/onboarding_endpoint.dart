@@ -1,10 +1,17 @@
 import 'package:serverpod/serverpod.dart';
+import 'package:sinalacs_server/src/endpoints/authenticated_endpoint.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
 import 'package:sinalacs_server/src/runtime/alert_runtime.dart';
 
 /// Onboarding do paciente por convite do ACS (RF02) e captura de
 /// consentimento por finalidade (LGPD-RF02). Ver decisão §2 de
 /// docs/superpowers/specs/2026-09-16-decisoes-produto-pos-validacao.md.
+///
+/// Postura de autenticação **mista**, e é por isso que este endpoint não
+/// estende `AuthenticatedEndpoint`: `generateEnrollmentToken` exige token de
+/// ACS, mas `completeEnrollment` é público por desenho — quem o chama ainda
+/// não tem sessão, e o convite de uso único é a credencial. Ver a allowlist
+/// em `test/unit/endpoint_auth_posture_test.dart`.
 class OnboardingEndpoint extends Endpoint {
   @override
   bool get requireLogin => false;
@@ -15,10 +22,7 @@ class OnboardingEndpoint extends Endpoint {
     required String accessToken,
     required String patientId,
   }) async {
-    final user = AlertRuntime.instance.auth.verifyToken(accessToken);
-    if (user == null) {
-      throw AlertPermissionException(message: 'token inválido ou expirado');
-    }
+    final user = authenticateToken(accessToken);
     try {
       return await AlertRuntime.instance
           .onboardingServiceFor(session)
