@@ -744,7 +744,7 @@ class TerritorializationScreen extends StatelessWidget {
           label: pulling ? 'Sincronizando com a central' : null,
           child: FilledButton(
             key: const Key('pull_visits'),
-            onPressed: pulling ? null : onRefresh,
+            onPressed: (pulling || loadingPatients) ? null : onRefresh,
             // O texto do botão fica sempre visível: substituí-lo só pelo
             // spinner deixava um botão desabilitado sem nome para leitor de
             // tela, além de encolher e reposicionar o botão na tela.

@@ -1409,5 +1409,20 @@ void main() {
       expect(backend.listPatientsCount, 2);
       expect(find.text('1 cadastrado'), findsOneWidget);
     });
+
+    testWidgets('botão de sincronizar fica desabilitado enquanto os pacientes estão carregando', (tester) async {
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: TerritorializationScreen(
+            pulling: false,
+            loadingPatients: true,
+            onRefresh: () {},
+          ),
+        ),
+      ));
+
+      final button = tester.widget<FilledButton>(find.byKey(const Key('pull_visits')));
+      expect(button.onPressed, isNull);
+    });
   });
 }
