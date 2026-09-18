@@ -1472,12 +1472,34 @@ Em `auth_endpoint.dart`:
 
 Se ao final da Task 5 o `dart analyze` reclamar de `patientSessionLifetime` indefinido, é sinal de que a Task 7 ainda não rodou — mantenha o `issueToken(user)` sem a constante até lá.
 
-- [ ] **Step 5: Rodar os testes de integração**
+- [ ] **Step 5: Regenerar o cliente**
+
+Adicionar métodos a um endpoint **não** basta para o app enxergá-los: o cliente
+tipado carrega um stub por método (`backend/sinalacs_client/lib/src/protocol/client.dart:100`
+é a classe `EndpointAuth`), e o stub só passa a existir depois do gerador rodar. Sem
+este passo a Task 7 falha ao compilar em `_client.auth.requestOtp(...)`, com um erro
+que aponta para o app e não para a causa.
+
+```bash
+cd backend/sinalacs_server
+serverpod generate
+```
+
+Expected: `client.dart` ganha `requestOtp` e `verifyOtp` na classe `EndpointAuth`.
+Confirme com:
+
+```bash
+grep -n "requestOtp\|verifyOtp" ../sinalacs_client/lib/src/protocol/client.dart
+```
+
+Expected: duas ocorrências, dentro de `EndpointAuth`.
+
+- [ ] **Step 6: Rodar os testes de integração**
 
 Run: `cd backend/sinalacs_server && dart test test/integration/passwordless_login_test.dart`
 Expected: PASS — os 4 testes do esqueleto mais o do caminho feliz.
 
-- [ ] **Step 6: Rodar a suíte inteira e commitar**
+- [ ] **Step 7: Rodar a suíte inteira e commitar**
 
 Run: `cd backend/sinalacs_server && dart test`
 Expected: PASS.
@@ -1486,6 +1508,8 @@ Expected: PASS.
 git add backend/sinalacs_server/lib/src/infrastructure/database/orm_otp_challenge_store.dart \
         backend/sinalacs_server/lib/src/runtime/alert_runtime.dart \
         backend/sinalacs_server/lib/src/endpoints/auth_endpoint.dart \
+        backend/sinalacs_server/lib/src/generated/ \
+        backend/sinalacs_client/ \
         backend/sinalacs_server/test/integration/passwordless_login_test.dart
 git commit -m "feat(backend): endpoints auth.requestOtp/verifyOtp com store ORM (RF01)
 
