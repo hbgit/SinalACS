@@ -597,7 +597,7 @@ Exemplo ilustrativo: não existe hoje uma camada de política ABAC genérica com
 
 ```dart
 // Exemplo ilustrativo — não há camada ABAC genérica no código real;
-// a regra equivalente vive inline em red_alert_service.dart
+// a regra equivalente vive em Authorization.require (application/auth/authorization.dart)
 Future<bool> canAccessPatient(Session session, String patientId) async {
   final user = await session.auth.getUser();
   switch (user.role) {
