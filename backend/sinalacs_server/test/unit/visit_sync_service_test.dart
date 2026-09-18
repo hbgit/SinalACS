@@ -409,5 +409,26 @@ void main() {
         throwsA(isA<StateError>()),
       );
     });
+
+    test(
+        'grava uma linha de auditoria read/visit_pull, mesmo padrão de '
+        'PatientDirectoryService.listForAcs', () async {
+      await service.pull(user: _acs, since: referencia);
+
+      expect(audit.events, hasLength(1));
+      expect(audit.events.single.userId, _acsId);
+      expect(audit.events.single.actionType, 'read');
+      expect(audit.events.single.resourceType, 'visit_pull');
+      expect(audit.events.single.result, 'granted');
+    });
+
+    test('uma trilha de auditoria fora do ar não impede o pull', () async {
+      final audit = FakeAuditTrail(failOnRecord: true);
+      final service = VisitSyncService(store: store, audit: audit);
+
+      final result = await service.pull(user: _acs, since: referencia);
+
+      expect(result, isNotNull);
+    });
   });
 }

@@ -64,6 +64,11 @@ class RedAlertRecord {
   final String idempotencyKey;
 }
 
+/// Formato produzido por `locationCellFrom()` (apps/patient/lib/core/privacy/location_cell.dart):
+/// `"<latCell>:<lngCell>"`, dois inteiros (a célula é `(coordenada /
+/// cellSizeDegrees).floor()`, então pode ser negativa) separados por `:`.
+final _locationCellFormat = RegExp(r'^-?\d{1,6}:-?\d{1,6}$');
+
 class RedAlertService {
   RedAlertService({
     required AlertStore store,
@@ -88,6 +93,16 @@ class RedAlertService {
     }
     if (idempotencyKey.isEmpty || locationHash.isEmpty) {
       throw ArgumentError('A chave de idempotência e a localização são obrigatórias.');
+    }
+    if (locationCell != null && locationCell.isNotEmpty && !_locationCellFormat.hasMatch(locationCell)) {
+      // `locationCell` é opcional (GPS pode estar indisponível no
+      // dispositivo), mas quando presente precisa ser exatamente o formato
+      // que `locationCellFrom()` produz (apps/patient/lib/core/privacy/location_cell.dart):
+      // dois inteiros, possivelmente negativos, separados por `:`. Sem esta
+      // checagem, um valor malformado (coordenada decimal, texto arbitrário)
+      // entraria direto em `AlertDelivery.locationCell` e quebraria o mapa do
+      // ACS, que espera célula, não ponto.
+      throw ArgumentError('locationCell inválido — formato esperado "<latCell>:<lngCell>".');
     }
 
     final existing = await _store.findByIdempotencyKey(idempotencyKey);

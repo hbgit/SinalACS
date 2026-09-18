@@ -1,4 +1,5 @@
 import 'package:serverpod/serverpod.dart';
+import 'package:sinalacs_server/src/application/onboarding/consent_signature.dart';
 import 'package:sinalacs_server/src/application/onboarding/onboarding_service.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
 
@@ -8,14 +9,21 @@ import 'package:sinalacs_server/src/generated/protocol.dart';
 /// obtida por chamada, e uma [Transaction] opcional permite que o consumo do
 /// convite e a gravação dos 3 `consent_logs` participem de uma única
 /// transação aberta pelo endpoint — mesmo padrão de `AlertsEndpoint.createRedAlert`.
+///
+/// [chainSecret] é o mesmo `AUDIT_CHAIN_SECRET` que assina `audit_logs`
+/// (`OrmAuditTrail`) — reaproveitado aqui para assinar `consent_logs` via
+/// [ConsentSignature], sem introduzir um segredo novo.
 class OrmOnboardingStore implements OnboardingStore {
   OrmOnboardingStore({
     required Session Function() session,
+    required String chainSecret,
     Transaction? transaction,
   })  : _session = session,
+        _signature = ConsentSignature(secret: chainSecret),
         _transaction = transaction;
 
   final Session Function() _session;
+  final ConsentSignature _signature;
   final Transaction? _transaction;
 
   @override
@@ -85,6 +93,13 @@ class OrmOnboardingStore implements OnboardingStore {
 
   @override
   Future<void> recordConsent(ConsentLogEntry entry) async {
+    final signature = _signature.compute(
+      userId: entry.userId,
+      purpose: entry.purpose.name,
+      action: entry.action,
+      version: entry.version,
+      timestamp: entry.timestamp,
+    );
     await ConsentLog.db.insertRow(
       _session(),
       ConsentLog(
@@ -99,7 +114,7 @@ class OrmOnboardingStore implements OnboardingStore {
         // marcador explícito de ausência, não um valor fabricado.
         ipHash: 'nao-aplicavel-onboarding',
         userAgent: 'nao-aplicavel-onboarding',
-        signature: '',
+        signature: signature,
       ),
       transaction: _transaction,
     );

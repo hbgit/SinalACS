@@ -126,6 +126,34 @@ void main() {
     expect(record.delivery.locationCell, isNull);
   });
 
+  test('rejeita locationCell com coordenada decimal em vez de célula inteira', () async {
+    final service = RedAlertService(store: FakeAlertStore(), outbox: FakeAlertOutbox());
+
+    expect(
+      () async => service.create(
+        user: patient,
+        idempotencyKey: 'key-cell-decimal',
+        locationHash: 'hash-decimal',
+        locationCell: '-23.55:-46.63',
+      ),
+      throwsA(isA<ArgumentError>()),
+    );
+  });
+
+  test('rejeita locationCell com lixo arbitrário', () async {
+    final service = RedAlertService(store: FakeAlertStore(), outbox: FakeAlertOutbox());
+
+    expect(
+      () async => service.create(
+        user: patient,
+        idempotencyKey: 'key-cell-lixo',
+        locationHash: 'hash-lixo',
+        locationCell: 'nao-e-uma-celula',
+      ),
+      throwsA(isA<ArgumentError>()),
+    );
+  });
+
   test('rejeita usuários que não sejam pacientes territorializados', () async {
     final service =
         RedAlertService(store: FakeAlertStore(), outbox: FakeAlertOutbox());

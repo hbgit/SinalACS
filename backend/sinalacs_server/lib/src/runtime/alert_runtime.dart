@@ -149,7 +149,11 @@ class AlertRuntime {
   /// concorrente do mesmo token (fix round 1).
   OnboardingService onboardingServiceFor(Session session, {Transaction? transaction}) =>
       OnboardingService(
-        store: OrmOnboardingStore(session: () => session, transaction: transaction),
+        store: OrmOnboardingStore(
+          session: () => session,
+          chainSecret: config.auditChainSecret,
+          transaction: transaction,
+        ),
       );
 
   /// Trilha de auditoria amarrada à sessão da chamada.

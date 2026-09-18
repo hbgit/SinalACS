@@ -160,6 +160,18 @@ class VisitSyncService {
     final microAreaId = UuidValue.fromString(user.microAreaId!);
     final visits = await _store.listChangedInMicroArea(microAreaId, since);
 
+    // Best-effort, mesmo padrão de `PatientDirectoryService.listForAcs`: uma
+    // trilha de auditoria que falha não pode impedir o ACS de sincronizar. A
+    // leitura audita o EVENTO — `notes` é texto clínico decifrado na volta —,
+    // não as visitas retornadas, para não recriar o prontuário dentro do
+    // próprio log de auditoria.
+    await _audit.recordSafely(AuditEvent(
+      userId: user.id,
+      actionType: 'read',
+      resourceType: 'visit_pull',
+      result: 'granted',
+    ));
+
     return [
       for (final visit in visits)
         VisitSyncEntry(
