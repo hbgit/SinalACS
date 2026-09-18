@@ -650,14 +650,30 @@ class TerritorializationScreen extends StatelessWidget {
         if (pullError != null)
           _InfraBanner(key: const Key('pull_error'), icon: Icons.sync_problem_outlined, notice: pullError!)
         else
-          Text(key: const Key('pull_status'), _pullStatusText()),
+          // SC 4.1.3 (Status Messages): sem `liveRegion`, um leitor de tela só
+          // saberia que a sincronização terminou se varresse a tela de novo por
+          // conta própria — igual ao que `_InfraBanner` já garante para o erro.
+          Semantics(
+            liveRegion: true,
+            child: Text(key: const Key('pull_status'), _pullStatusText()),
+          ),
         const SizedBox(height: 16),
-        FilledButton(
-          key: const Key('pull_visits'),
-          onPressed: pulling ? null : onRefresh,
-          child: pulling
-              ? const SizedBox(height: 22, width: 22, child: CircularProgressIndicator(strokeWidth: 2))
-              : const Text('Atualizar dados da microárea'),
+        Semantics(
+          label: pulling ? 'Sincronizando com a central' : null,
+          child: FilledButton(
+            key: const Key('pull_visits'),
+            onPressed: pulling ? null : onRefresh,
+            // O texto do botão fica sempre visível: substituí-lo só pelo
+            // spinner deixava um botão desabilitado sem nome para leitor de
+            // tela, além de encolher e reposicionar o botão na tela.
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              if (pulling) ...[
+                const SizedBox(height: 22, width: 22, child: CircularProgressIndicator(strokeWidth: 2)),
+                const SizedBox(width: 8),
+              ],
+              const Text('Atualizar dados da microárea'),
+            ]),
+          ),
         ),
       ]);
 

@@ -1250,6 +1250,26 @@ void main() {
       );
     });
 
+    testWidgets('uma falha não classificada ao sincronizar mostra o aviso genérico', (tester) async {
+      // `StateError` não é `BackendFailure` de propósito: cobre o ramo
+      // `catch (error, stackTrace)` de `_pullVisits` em app.dart, que hoje só
+      // é exercitado pela lógica do app, nunca por um teste direto.
+      final backend = FakeAcsBackend()..pullUnclassifiedFailure = StateError('queda inesperada');
+
+      await tester.pumpWidget(SinalAcsApp(
+        backend: backend,
+        feedBuilder: (queue) => FakeAlertFeed(queue),
+        visitPullService: pullService(backend),
+      ));
+      await tester.tap(find.byKey(const Key('login_button')));
+      await settleRealAsync(tester);
+      await tester.tap(find.text('Área'));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('pull_error')), findsOneWidget);
+      expect(find.text('Verifique a conexão e tente de novo.'), findsOneWidget);
+    });
+
     testWidgets('"Atualizar dados da microárea" repete a sincronização manualmente', (tester) async {
       final backend = FakeAcsBackend()..pullEntries = [visitaRemota('remota-1')];
 

@@ -118,6 +118,11 @@ class FakeAcsBackend implements AcsBackend {
   /// Falha da chamada, como uma queda de rede ou sessão expirada.
   BackendFailure? pullFailure;
 
+  /// Falha não classificada (não é `BackendFailure`), para exercitar o ramo
+  /// `catch (error, ...)` genérico de `_pullVisits` em `app.dart` — algo que
+  /// nenhum `BackendFailure` simula. Checada antes de [pullFailure].
+  Object? pullUnclassifiedFailure;
+
   /// `since` recebido em cada chamada, na ordem em que ocorreram — prova que
   /// o cursor lido é exatamente o que chega ao backend.
   final List<DateTime> pullSinceCalls = <DateTime>[];
@@ -125,6 +130,8 @@ class FakeAcsBackend implements AcsBackend {
   @override
   Future<List<VisitSyncEntry>> pullVisits({required DateTime since}) async {
     pullSinceCalls.add(since);
+    final unclassified = pullUnclassifiedFailure;
+    if (unclassified != null) throw unclassified;
     final failure = pullFailure;
     if (failure != null) throw failure;
     return pullEntries;
