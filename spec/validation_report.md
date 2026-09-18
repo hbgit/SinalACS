@@ -143,13 +143,13 @@ de alertas — se o broker cair, não há caminho alternativo de leitura.
 | Paciente | Login | **real** | Autentica de verdade; campos CPF/nascimento são decorativos. |
 | Paciente | Triagem | **real** | 6 sintomas, risco vem do servidor. |
 | Paciente | Urgência | **real (parcial)** | Lê localização em primeiro plano, envia somente `locationHash` e explicita o fallback quando GPS/permissão falham; ainda não há validação E2E em dispositivo nesta revisão. |
-| Paciente | **Status** | **hardcoded** | "Solicitação #4082 · Triagem Vermelha · hoje às 09:30" — **confirmado em tela**. |
+| Paciente | **Status** | **real** | Consome `alerts.statusFor` (RF05); mostra o status real do alerta mais recente do paciente, não mais o texto fixo "Solicitação #4082 · Triagem Vermelha". Fechado por `docs/superpowers/plans/2026-09-18-sync-periodica-rf05-l06.md` (L-03). |
 | Paciente | Perguntas | **hardcoded** | Resposta automática fixa sobre vacinação. |
 | Paciente | Perfil clínico | **hardcoded** | Condições fixas; salvar descarta. |
 | Paciente | Lembretes | **hardcoded** | Medicações fixas. |
 | ACS | Login | **real** | |
 | ACS | **Fila** | **real** | Alerta criado via RPC apareceu ao vivo no emulador. |
-| ACS | **Área** | **hardcoded** | Diz "142 cadastrados"; o backend tem **5** nessa microárea. |
+| ACS | **Área** | **real** | Consome `patients.listMicroArea` ao vivo; mostra a contagem real de pacientes da microárea, não mais "142 cadastrados" fixo. Fechado por `docs/superpowers/plans/2026-09-18-sync-periodica-rf05-l06.md` (L-06). |
 | ACS | Mapa | **sintético** | `alertPositionFor()` (a fabricação de lat/lng por hash em torno de Brasília) foi removida; o mapa agora desenha a geocélula real (`locationCell`, ~1,1 km), não mais uma posição fabricada — ver §6 abaixo. |
 | ACS | Visita | **real** | Seletor vem de `patients.listMicroArea`; fila vai a `visits.sync`. |
 | ACS | Escalonamento | **stub** | SAMU e UBS são snackbars. |
