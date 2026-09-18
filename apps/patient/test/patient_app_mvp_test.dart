@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sinalacs_client/sinalacs_client.dart' show RiskLevel;
 import 'package:sinalacs_patient/app/app.dart';
+import 'package:sinalacs_patient/core/consent/consent_preferences.dart';
 import 'package:sinalacs_patient/core/network/backend_client.dart';
 import 'package:sinalacs_patient/core/privacy/location_hash.dart';
 import 'package:sinalacs_patient/core/reminders/reminder.dart';
@@ -89,6 +90,22 @@ class _ThrowingReminderStore implements ReminderStore {
 
   @override
   Future<void> delete(int id) => throw StateError('falha simulada do store');
+}
+
+/// Duplo de [ConsentPreferences] com resposta fixa — por padrão simula
+/// consentimento concedido, o cenário que os testes existentes de
+/// `RemindersScreen` (criados antes deste consentimento existir) já
+/// assumem implicitamente.
+class _FixedConsentPreferences implements ConsentPreferences {
+  _FixedConsentPreferences({this.granted = true});
+
+  bool granted;
+
+  @override
+  Future<bool> localRemindersGranted() async => granted;
+
+  @override
+  Future<void> saveLocalRemindersConsent(bool value) async => granted = value;
 }
 
 /// Duplo de [LocationReader] com leitura fixa, para testar como a tela reage
@@ -330,11 +347,16 @@ void main() {
   });
 
   group('Lembretes locais (RF06)', () {
-    Widget buildRemindersScreen(ReminderStore store, ReminderScheduler scheduler) {
+    Widget buildRemindersScreen(
+      ReminderStore store,
+      ReminderScheduler scheduler, {
+      ConsentPreferences? consentPreferences,
+    }) {
       return MaterialApp(
         home: RemindersScope(
           store: store,
           scheduler: scheduler,
+          consentPreferences: consentPreferences ?? _FixedConsentPreferences(),
           child: const PatientHomeShell(initialDestination: PatientDestination.reminders),
         ),
       );

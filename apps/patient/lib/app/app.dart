@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:sinalacs_client/sinalacs_client.dart' show RiskLevel;
 import 'package:sinalacs_patient/app/patient_theme.dart';
+import 'package:sinalacs_patient/core/consent/consent_preferences.dart';
+import 'package:sinalacs_patient/core/consent/sqflite_consent_preferences.dart';
 import 'package:sinalacs_patient/core/network/backend_client.dart';
 import 'package:sinalacs_patient/core/network/backend_scope.dart';
 import 'package:sinalacs_patient/core/network/idempotency.dart';
@@ -18,6 +20,7 @@ class SinalAcsApp extends StatefulWidget {
     this.locationReader,
     this.reminderStore,
     this.reminderScheduler,
+    this.consentPreferences,
   });
 
   /// Injetável para teste. Em execução normal é o [BackendClient] real.
@@ -36,6 +39,10 @@ class SinalAcsApp extends StatefulWidget {
   /// sido inicializado em `main.dart` antes de `runApp`.
   final ReminderScheduler? reminderScheduler;
 
+  /// Injetável para teste. Em execução normal é o [SqfliteConsentPreferences]
+  /// real.
+  final ConsentPreferences? consentPreferences;
+
   @override
   State<SinalAcsApp> createState() => _SinalAcsAppState();
 }
@@ -47,6 +54,8 @@ class _SinalAcsAppState extends State<SinalAcsApp> {
   late final ReminderStore _reminderStore = widget.reminderStore ?? SqfliteReminderStore();
   late final ReminderScheduler _reminderScheduler =
       widget.reminderScheduler ?? LocalNotificationsReminderScheduler(FlutterLocalNotificationsPlugin());
+  late final ConsentPreferences _consentPreferences =
+      widget.consentPreferences ?? SqfliteConsentPreferences();
 
   @override
   void dispose() {
@@ -64,6 +73,7 @@ class _SinalAcsAppState extends State<SinalAcsApp> {
         child: RemindersScope(
           store: _reminderStore,
           scheduler: _reminderScheduler,
+          consentPreferences: _consentPreferences,
           child: MaterialApp(
             title: 'SinalACS Paciente',
             debugShowCheckedModeBanner: false,
@@ -110,12 +120,14 @@ class RemindersScope extends InheritedWidget {
   const RemindersScope({
     required this.store,
     required this.scheduler,
+    required this.consentPreferences,
     required super.child,
     super.key,
   });
 
   final ReminderStore store;
   final ReminderScheduler scheduler;
+  final ConsentPreferences consentPreferences;
 
   static RemindersScope of(BuildContext context) {
     final scope = context.dependOnInheritedWidgetOfExactType<RemindersScope>();
@@ -125,7 +137,9 @@ class RemindersScope extends InheritedWidget {
 
   @override
   bool updateShouldNotify(RemindersScope oldWidget) =>
-      store != oldWidget.store || scheduler != oldWidget.scheduler;
+      store != oldWidget.store ||
+      scheduler != oldWidget.scheduler ||
+      consentPreferences != oldWidget.consentPreferences;
 }
 
 class PatientLoginScreen extends StatefulWidget {
