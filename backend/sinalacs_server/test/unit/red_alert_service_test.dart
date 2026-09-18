@@ -31,6 +31,12 @@ class FakeAlertStore implements AlertStore {
   @override
   Future<void> rememberIdempotencyKey(RedAlertRecord record) async =>
       keys[record.idempotencyKey] = record;
+
+  final Map<String, AlertStatusSnapshot> statusByPatient = {};
+
+  @override
+  Future<AlertStatusSnapshot?> latestForPatient(String patientId) async =>
+      statusByPatient[patientId];
 }
 
 
@@ -190,5 +196,61 @@ void main() {
       () async => service.acknowledge(user: acs, alertId: ''),
       throwsA(isA<ArgumentError>()),
     );
+  });
+
+  group('statusFor (RF05)', () {
+    test('devolve o status guardado para o paciente do token, não por parâmetro', () async {
+      final store = FakeAlertStore()
+        ..statusByPatient['paciente-1'] = AlertStatusSnapshot(
+          alertId: 'alerta-1',
+          riskLevel: RiskLevel.red,
+          status: AlertStatus.pending,
+          triggeredAt: DateTime.utc(2026, 9, 18, 9),
+        );
+      final service = RedAlertService(store: store, outbox: FakeAlertOutbox());
+
+      final status = await service.statusFor(
+        user: const AuthenticatedUser(
+          id: 'paciente-1',
+          role: UserRole.patient,
+          microAreaId: 'area-1',
+          deviceId: 'device-1',
+        ),
+      );
+
+      expect(status?.alertId, 'alerta-1');
+      expect(status?.status, AlertStatus.pending);
+    });
+
+    test('paciente que nunca disparou alerta recebe null, não erro', () async {
+      final service = RedAlertService(store: FakeAlertStore(), outbox: FakeAlertOutbox());
+
+      final status = await service.statusFor(
+        user: const AuthenticatedUser(
+          id: 'paciente-sem-alerta',
+          role: UserRole.patient,
+          microAreaId: 'area-1',
+          deviceId: 'device-1',
+        ),
+      );
+
+      expect(status, isNull);
+    });
+
+    test('um ACS não pode consultar status de paciente', () async {
+      final service = RedAlertService(store: FakeAlertStore(), outbox: FakeAlertOutbox());
+
+      expect(
+        () => service.statusFor(
+          user: const AuthenticatedUser(
+            id: 'acs-1',
+            role: UserRole.acs,
+            microAreaId: 'area-1',
+            deviceId: 'device-1',
+          ),
+        ),
+        throwsA(isA<StateError>()),
+      );
+    });
   });
 }

@@ -23,6 +23,10 @@ abstract interface class AlertStore {
 
   /// Registra a chave na mesma unidade de trabalho do alerta.
   Future<void> rememberIdempotencyKey(RedAlertRecord record);
+
+  /// Alerta mais recente do paciente, para RF05 (`alerts.statusFor`). `null`
+  /// quando o paciente nunca disparou um alerta.
+  Future<AlertStatusSnapshot?> latestForPatient(String patientId);
 }
 
 /// Fila durável de entregas pendentes.
@@ -62,6 +66,26 @@ class RedAlertRecord {
 
   final AlertDelivery delivery;
   final String idempotencyKey;
+}
+
+/// Status do alerta mais recente de um paciente, para RF05.
+///
+/// Espelha os campos que `Alert` guarda além de [AlertDelivery] — `status` e
+/// `acknowledgedAt` não existem no envelope MQTT, só na linha persistida.
+class AlertStatusSnapshot {
+  const AlertStatusSnapshot({
+    required this.alertId,
+    required this.riskLevel,
+    required this.status,
+    required this.triggeredAt,
+    this.acknowledgedAt,
+  });
+
+  final String alertId;
+  final RiskLevel riskLevel;
+  final AlertStatus status;
+  final DateTime triggeredAt;
+  final DateTime? acknowledgedAt;
 }
 
 /// Formato produzido por `locationCellFrom()` (apps/patient/lib/core/privacy/location_cell.dart):
@@ -152,5 +176,15 @@ class RedAlertService {
       throw ArgumentError('O identificador do alerta é obrigatório.');
     }
     return _store.acknowledge(alertId: alertId, acsId: user.id, microAreaId: user.microAreaId!);
+  }
+
+  /// Status do alerta mais recente do próprio paciente autenticado (RF05,
+  /// decisão §5). O paciente nunca informa `patientId` — vem sempre do token
+  /// (INV-05), mesma disciplina de `TriageSessionService`/`VisitSyncService`.
+  Future<AlertStatusSnapshot?> statusFor({required AuthenticatedUser user}) async {
+    if (user.role != UserRole.patient) {
+      throw StateError('Somente pacientes podem consultar o status do próprio alerta.');
+    }
+    return _store.latestForPatient(user.id);
   }
 }
