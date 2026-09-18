@@ -5,15 +5,19 @@ import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:sinalacs_acs/app/acs_theme.dart';
+import 'package:sinalacs_acs/core/database/sqlcipher_visit_store.dart';
 import 'package:sinalacs_acs/core/geo/location_cell.dart';
 import 'package:sinalacs_acs/core/network/backend_client.dart';
 import 'package:sinalacs_acs/core/network/backend_scope.dart';
+import 'package:sinalacs_acs/core/security/database_key_store.dart';
 import 'package:sinalacs_acs/core/services/alert_feed.dart';
 import 'package:sinalacs_acs/core/services/alert_queue.dart';
 import 'package:sinalacs_acs/core/services/offline_visit_queue.dart';
 import 'package:sinalacs_client/sinalacs_client.dart' show MicroAreaPatient;
 import 'package:sinalacs_acs/core/services/reconnect_schedule.dart';
 import 'package:sinalacs_acs/core/services/route_service.dart';
+import 'package:sinalacs_acs/core/services/visit_pull_service.dart';
+import 'package:sinalacs_acs/core/services/visit_pull_service_factory.dart';
 import 'package:sinalacs_acs/core/services/visit_queue_factory.dart';
 
 class SinalAcsApp extends StatefulWidget {
@@ -22,6 +26,7 @@ class SinalAcsApp extends StatefulWidget {
     this.backend,
     this.feedBuilder,
     this.visitQueue,
+    this.visitPullService,
     this.initialAlert,
     this.currentPosition,
   });
@@ -30,6 +35,7 @@ class SinalAcsApp extends StatefulWidget {
   final AcsBackend? backend;
   final AlertFeed Function(AlertQueue queue)? feedBuilder;
   final OfflineVisitQueue? visitQueue;
+  final VisitPullService? visitPullService;
   final PrioritizedAlert? initialAlert;
   final LatLng? currentPosition;
 
@@ -39,6 +45,16 @@ class SinalAcsApp extends StatefulWidget {
 
 class _SinalAcsAppState extends State<SinalAcsApp> {
   late final AcsBackend _backend = widget.backend ?? BackendClient();
+
+  /// Compartilhado entre a fila offline e o serviço de pull (RF15).
+  ///
+  /// `VisitPullService` lê deste MESMO store para nunca reintroduzir
+  /// localmente uma visita que já está na fila offline (dedupe por
+  /// `localId`, ver `visit_pull_service.dart`). Duas instâncias separadas de
+  /// `SqlCipherVisitStore` apontando para o mesmo arquivo até funcionariam,
+  /// mas por acaso — uma só instância é o que garante que o pull enxerga
+  /// exatamente o que a fila gravou por último.
+  late final VisitStore _visitStore = SqlCipherVisitStore(keyStore: SecureStorageDatabaseKeyStore());
 
   /// Uma única fila por execução do app.
   ///
@@ -53,7 +69,13 @@ class _SinalAcsAppState extends State<SinalAcsApp> {
   /// para enxergar [_backend]: sem sincronizador, `sync()` caía no ramo sem
   /// remetente e devolvia erro — as visitas nunca subiam ao servidor e o que já
   /// estava confirmado nunca era apagado do disco.
-  OfflineVisitQueue _persistentQueue() => buildVisitQueue(backend: _backend);
+  OfflineVisitQueue _persistentQueue() => buildVisitQueue(backend: _backend, store: _visitStore);
+
+  /// Serviço de pull central→dispositivo (RF15, decisão §5).
+  ///
+  /// Usa o MESMO `_visitStore` da fila — ver o comentário acima.
+  late final VisitPullService _visitPullService =
+      widget.visitPullService ?? buildVisitPullService(backend: _backend, localVisits: _visitStore);
 
   @override
   void dispose() {
@@ -71,6 +93,7 @@ class _SinalAcsAppState extends State<SinalAcsApp> {
           home: LoginScreen(
             feedBuilder: widget.feedBuilder,
             visitQueue: _visitQueue,
+            visitPullService: _visitPullService,
             initialAlert: widget.initialAlert,
             initialPosition: widget.currentPosition,
           ),
@@ -81,6 +104,7 @@ class _SinalAcsAppState extends State<SinalAcsApp> {
 class LoginScreen extends StatefulWidget {
   const LoginScreen({
     required this.visitQueue,
+    required this.visitPullService,
     super.key,
     this.feedBuilder,
     this.initialAlert,
@@ -89,6 +113,7 @@ class LoginScreen extends StatefulWidget {
 
   final AlertFeed Function(AlertQueue queue)? feedBuilder;
   final OfflineVisitQueue visitQueue;
+  final VisitPullService visitPullService;
   final PrioritizedAlert? initialAlert;
   final LatLng? initialPosition;
 
@@ -131,6 +156,7 @@ class _LoginScreenState extends State<LoginScreen> {
           acsId: session.userId,
           feedBuilder: widget.feedBuilder,
           visitQueue: widget.visitQueue,
+          visitPullService: widget.visitPullService,
           initialAlert: widget.initialAlert,
           initialPosition: widget.initialPosition,
         ),
@@ -193,6 +219,7 @@ class AcsHomeShell extends StatefulWidget {
     required this.microAreaId,
     required this.acsId,
     required this.visitQueue,
+    required this.visitPullService,
     super.key,
     this.feedBuilder,
     this.initialAlert,
@@ -209,6 +236,11 @@ class AcsHomeShell extends StatefulWidget {
   /// e um dia em que o shell fosse construído sem fila voltaria a descartar a
   /// visita em silêncio.
   final OfflineVisitQueue visitQueue;
+
+  /// Serviço de pull central→dispositivo (RF15). Obrigatório pelo mesmo
+  /// motivo de [visitQueue]: construir um substituto aqui dentro, silencioso,
+  /// já foi o defeito de outra fila neste mesmo arquivo.
+  final VisitPullService visitPullService;
 
   @override
   State<AcsHomeShell> createState() => _AcsHomeShellState();
@@ -233,6 +265,24 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
   Timer? _reconnectTimer;
   final ReconnectSchedule _reconnectDelay = ReconnectSchedule();
 
+  /// `true` enquanto uma chamada a `visits.pull` está em andamento.
+  bool _pullingVisits = false;
+
+  /// Quantas entradas a última sincronização bem-sucedida trouxe que ainda
+  /// não estavam na fila offline local. `null` antes da primeira tentativa
+  /// desta sessão.
+  int? _lastPulledCount;
+
+  /// Quando a última sincronização bem-sucedida terminou. `null` antes da
+  /// primeira tentativa desta sessão.
+  DateTime? _lastPulledAt;
+
+  /// Presente quando a última tentativa falhou. Não trava a tela: sem
+  /// confirmação do servidor, o cursor local não avança
+  /// (`VisitPullService.pullAndMerge`), então tentar de novo reconsulta o
+  /// mesmo ponto sem risco de perder nada.
+  InfraNotice? _pullError;
+
   @override
   void initState() {
     super.initState();
@@ -245,6 +295,7 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
     _feed.onConnectionChanged = _onBrokerConnectionChanged;
     _connectFeed();
     _restoreVisits();
+    _pullVisits();
     _loadCurrentPosition();
   }
 
@@ -265,6 +316,54 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
     // o sinalizador congelava aqui e toda falha posterior de `add()`/`sync()`
     // ficava invisível.
     if (mounted) setState(() {});
+  }
+
+  /// Sincronização central→dispositivo (RF15, decisão §5): busca no servidor
+  /// as visitas da microárea alteradas desde o cursor deste aparelho.
+  ///
+  /// Só leitura, de propósito — `VisitPullService` nunca escreve na
+  /// [OfflineVisitQueue] (ver a documentação da própria classe). O que muda
+  /// aqui é só o que a tela "Área" mostra sobre o resultado, nunca a fila de
+  /// visitas pendentes.
+  ///
+  /// Disparado automaticamente ao abrir o painel, mais um botão manual na
+  /// própria tela — não um timer de sincronização em segundo plano, decisão
+  /// de produto separada e fora do escopo desta task.
+  Future<void> _pullVisits() async {
+    setState(() { _pullingVisits = true; _pullError = null; });
+
+    try {
+      await widget.visitPullService.pullAndMerge();
+      if (!mounted) return;
+      setState(() {
+        _lastPulledCount = widget.visitPullService.lastPulled.length;
+        _lastPulledAt = DateTime.now();
+      });
+    } on BackendFailure catch (failure) {
+      if (!mounted) return;
+      setState(() {
+        _pullError = (
+          title: 'Não foi possível sincronizar com a central.',
+          detail: failure.message,
+        );
+      });
+    } catch (error, stackTrace) {
+      developer.log(
+        'falha não classificada ao sincronizar visitas da central',
+        name: 'sinalacs.acs.visit_pull',
+        error: error,
+        stackTrace: stackTrace,
+      );
+      if (!mounted) return;
+      setState(() {
+        _pullError = (
+          title: 'Não foi possível sincronizar com a central.',
+          detail: 'Verifique a conexão e tente de novo.',
+        );
+      });
+    } finally {
+      if (mounted) setState(() => _pullingVisits = false);
+    }
   }
 
   Future<void> _loadCurrentPosition() async {
@@ -444,7 +543,13 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
   Widget build(BuildContext context) => Scaffold(
     appBar: _Header('ACS • ${_brokerConnected ? 'em linha' : 'sem conexão'}', 'Painel operacional', connected: _brokerConnected),
     body: SafeArea(child: switch (destination) {
-      AcsDestination.area => const TerritorializationScreen(),
+      AcsDestination.area => TerritorializationScreen(
+          pulling: _pullingVisits,
+          lastPulledCount: _lastPulledCount,
+          lastPulledAt: _lastPulledAt,
+          pullError: _pullError,
+          onRefresh: _pullVisits,
+        ),
       AcsDestination.queue => DashboardScreen(
           queue: _queue,
           feedError: _feedError,
@@ -499,7 +604,80 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
   Widget _moreItem(BuildContext sheet, IconData icon, String label, AcsDestination value) => ListTile(leading: Icon(icon), title: Text(label), onTap: () { Navigator.pop(sheet); setState(() => destination = value); });
 }
 
-class TerritorializationScreen extends StatelessWidget { const TerritorializationScreen({super.key}); @override Widget build(BuildContext context) => _page([const Text('Microárea 12 - Zona Rural', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)), const SizedBox(height: 12), const _InfoRow('Pacientes sincronizados', '142 cadastrados'), const _InfoRow('Cache local', 'Atualizado há 10 min'), const SizedBox(height: 20), FilledButton(onPressed: () => _message(context, 'Atualização será integrada à API central.'), child: const Text('Atualizar dados da microárea'))]); }
+/// Painel territorial da microárea, incluindo o status da sincronização
+/// central→dispositivo (RF15, decisão §5).
+///
+/// "Pacientes sincronizados" e "Cache local" continuam literais fixos — é o
+/// débito técnico L-06 (RF08), fora do escopo desta task: aqui só o bloco de
+/// sincronização abaixo reflete dado real, vindo do `VisitPullService` via
+/// [AcsHomeShell._pullVisits].
+class TerritorializationScreen extends StatelessWidget {
+  const TerritorializationScreen({
+    super.key,
+    this.pulling = false,
+    this.lastPulledCount,
+    this.lastPulledAt,
+    this.pullError,
+    this.onRefresh,
+  });
+
+  /// `true` enquanto uma chamada a `visits.pull` está em andamento.
+  final bool pulling;
+
+  /// Quantas entradas a última sincronização bem-sucedida trouxe que ainda
+  /// não estavam na fila offline local. `null` antes da primeira tentativa
+  /// desta sessão.
+  final int? lastPulledCount;
+
+  /// Quando a última sincronização bem-sucedida terminou. `null` antes da
+  /// primeira tentativa desta sessão.
+  final DateTime? lastPulledAt;
+
+  /// Presente quando a última tentativa falhou.
+  final InfraNotice? pullError;
+
+  final VoidCallback? onRefresh;
+
+  @override
+  Widget build(BuildContext context) => _page([
+        const Text('Microárea 12 - Zona Rural', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 12),
+        const _InfoRow('Pacientes sincronizados', '142 cadastrados'),
+        const _InfoRow('Cache local', 'Atualizado há 10 min'),
+        const Divider(height: 32),
+        const Text('Sincronização com a central', style: TextStyle(fontWeight: FontWeight.bold)),
+        const SizedBox(height: 8),
+        if (pullError != null)
+          _InfraBanner(key: const Key('pull_error'), icon: Icons.sync_problem_outlined, notice: pullError!)
+        else
+          Text(key: const Key('pull_status'), _pullStatusText()),
+        const SizedBox(height: 16),
+        FilledButton(
+          key: const Key('pull_visits'),
+          onPressed: pulling ? null : onRefresh,
+          child: pulling
+              ? const SizedBox(height: 22, width: 22, child: CircularProgressIndicator(strokeWidth: 2))
+              : const Text('Atualizar dados da microárea'),
+        ),
+      ]);
+
+  String _pullStatusText() {
+    final at = lastPulledAt;
+    if (at == null) return 'Ainda não sincronizado nesta sessão.';
+
+    final novidade = switch (lastPulledCount ?? 0) {
+      0 => 'Nenhuma novidade da central',
+      1 => '1 atualização recebida da central',
+      final count => '$count atualizações recebidas da central',
+    };
+    return '$novidade • ${_time(at)}';
+  }
+
+  String _time(DateTime value) {
+    final local = value.toLocal();
+    return '${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}';
+  }
+}
 
 /// Painel de priorização alimentado pelos alertas que chegam do broker.
 ///

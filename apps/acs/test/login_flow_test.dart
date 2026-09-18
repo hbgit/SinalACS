@@ -10,7 +10,11 @@ import 'package:sinalacs_acs/core/services/backend_visit_synchronizer.dart';
 import 'package:sinalacs_acs/core/services/offline_visit_queue.dart';
 import 'package:sinalacs_acs/core/services/visit_queue_factory.dart';
 import 'package:sinalacs_client/sinalacs_client.dart'
-    show MicroAreaPatient, SyncStatus, VisitSyncResult;
+    show ArrivalMethod, MicroAreaPatient, RiskLevel, SyncStatus, VisitSyncEntry, VisitSyncResult;
+import 'package:sinalacs_acs/core/database/encrypted_database.dart';
+import 'package:sinalacs_acs/core/database/sync_cursor_store.dart';
+import 'package:sinalacs_acs/core/security/database_key_store.dart';
+import 'package:sinalacs_acs/core/services/visit_pull_service.dart';
 
 import 'support/fakes.dart';
 
@@ -1142,6 +1146,150 @@ void main() {
       );
 
       expect(queue.synchronizer, isA<BackendVisitSynchronizer>());
+    });
+  });
+
+  group('sincronização central→dispositivo (RF15)', () {
+    const dbName = 'login_flow_test_visit_pull.db';
+
+    setUp(() => EncryptedLocalDatabase.deleteDatabaseFile(dbName));
+    tearDown(() => EncryptedLocalDatabase.deleteDatabaseFile(dbName));
+
+    /// Bombeia frames finitos, intercalados com esperas REAIS (fora do
+    /// relógio falso de `testWidgets`), até o pull terminar — nunca com
+    /// `pumpAndSettle`.
+    ///
+    /// Dois problemas juntos, dos quais qualquer um sozinho já derrubaria
+    /// `pumpAndSettle`:
+    /// 1. `VisitPullService` usa um banco de verdade
+    ///    (`allowUnencryptedForTesting: true`) e `sqflite_common_ffi` sempre
+    ///    passa pelo isolate próprio dele, mesmo sem criptografia — o
+    ///    round-trip é REAL, não fake. Sem ceder tempo de relógio de
+    ///    verdade (via `runAsync`), o teste segue adiante achando que já
+    ///    sincronizou, e o `tearDown` desta suíte apaga o arquivo do banco
+    ///    por baixo de uma consulta ainda em voo (`SqfliteFfiException`
+    ///    "database has already been closed").
+    /// 2. Enquanto `_pullingVisits` é `true`, o `CircularProgressIndicator`
+    ///    indeterminado do botão "Atualizar dados da microárea" agenda
+    ///    frame atrás de frame para sempre — `pumpAndSettle` nunca decide
+    ///    que "assentou" com esse spinner na tela, mesmo depois do pull
+    ///    terminar de verdade.
+    Future<void> settleRealAsync(WidgetTester tester) async {
+      for (var i = 0; i < 30; i++) {
+        await tester.pump(const Duration(milliseconds: 16));
+        await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+      }
+      await tester.pump();
+    }
+
+    VisitPullService pullService(FakeAcsBackend backend, {VisitStore? localVisits}) =>
+        VisitPullService(
+          backend: backend,
+          cursorStore: SyncCursorStore(
+            keyStore: InMemoryDatabaseKeyStore(),
+            databaseName: dbName,
+            allowUnencryptedForTesting: true,
+          ),
+          localVisits: localVisits ?? InMemoryVisitStore(),
+        );
+
+    VisitSyncEntry visitaRemota(String localId) => VisitSyncEntry(
+          localId: localId,
+          patientId: seedPatientId,
+          scheduledAt: DateTime.utc(2026, 9, 12, 9),
+          status: 'realizada',
+          riskLevelBefore: RiskLevel.green,
+          notes: const {},
+          version: 1,
+          syncAt: DateTime.utc(2026, 9, 12, 10),
+          arrivalMethod: ArrivalMethod.manual,
+        );
+
+    testWidgets('ao abrir o painel, a aba Área mostra as visitas recebidas da central', (tester) async {
+      final backend = FakeAcsBackend()
+        ..pullEntries = [visitaRemota('remota-1'), visitaRemota('remota-2')];
+
+      await tester.pumpWidget(SinalAcsApp(
+        backend: backend,
+        feedBuilder: (queue) => FakeAlertFeed(queue),
+        visitPullService: pullService(backend),
+      ));
+      await tester.tap(find.byKey(const Key('login_button')));
+      await settleRealAsync(tester);
+
+      expect(backend.pullSinceCalls, hasLength(1));
+
+      await tester.tap(find.text('Área'));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('pull_status')), findsOneWidget);
+      expect(find.textContaining('2 atualizações recebidas da central'), findsOneWidget);
+    });
+
+    testWidgets('uma falha ao sincronizar mostra o aviso, sem travar a tela', (tester) async {
+      final backend = FakeAcsBackend()
+        ..pullFailure = const BackendFailure('Sem conexão com o servidor.');
+
+      await tester.pumpWidget(SinalAcsApp(
+        backend: backend,
+        feedBuilder: (queue) => FakeAlertFeed(queue),
+        visitPullService: pullService(backend),
+      ));
+      await tester.tap(find.byKey(const Key('login_button')));
+      await settleRealAsync(tester);
+      await tester.tap(find.text('Área'));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('pull_error')), findsOneWidget);
+      expect(find.text('Sem conexão com o servidor.'), findsOneWidget);
+      // O botão continua ativo: a falha não pode travar a única forma de
+      // tentar de novo.
+      expect(
+        tester.widget<FilledButton>(find.byKey(const Key('pull_visits'))).onPressed,
+        isNotNull,
+      );
+    });
+
+    testWidgets('"Atualizar dados da microárea" repete a sincronização manualmente', (tester) async {
+      final backend = FakeAcsBackend()..pullEntries = [visitaRemota('remota-1')];
+
+      await tester.pumpWidget(SinalAcsApp(
+        backend: backend,
+        feedBuilder: (queue) => FakeAlertFeed(queue),
+        visitPullService: pullService(backend),
+      ));
+      await tester.tap(find.byKey(const Key('login_button')));
+      await settleRealAsync(tester);
+      await tester.tap(find.text('Área'));
+      await tester.pumpAndSettle();
+
+      expect(backend.pullSinceCalls, hasLength(1));
+
+      await tester.tap(find.byKey(const Key('pull_visits')));
+      await settleRealAsync(tester);
+
+      expect(backend.pullSinceCalls, hasLength(2));
+    });
+
+    testWidgets('entradas já presentes na fila offline local não contam como novidade', (tester) async {
+      final localVisits = InMemoryVisitStore();
+      await localVisits.save([
+        OfflineVisitRecord(localId: 'ja-existe', patientId: seedPatientId, risk: 'green', status: 'PENDENTE'),
+      ]);
+      final backend = FakeAcsBackend()
+        ..pullEntries = [visitaRemota('ja-existe'), visitaRemota('nova')];
+
+      await tester.pumpWidget(SinalAcsApp(
+        backend: backend,
+        feedBuilder: (queue) => FakeAlertFeed(queue),
+        visitPullService: pullService(backend, localVisits: localVisits),
+      ));
+      await tester.tap(find.byKey(const Key('login_button')));
+      await settleRealAsync(tester);
+      await tester.tap(find.text('Área'));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('1 atualização recebida da central'), findsOneWidget);
     });
   });
 }
