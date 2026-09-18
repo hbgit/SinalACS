@@ -1,5 +1,6 @@
 import 'package:uuid/uuid.dart';
 
+import 'package:sinalacs_server/src/application/auth/authorization.dart';
 import 'package:sinalacs_server/src/application/auth/development_auth_service.dart';
 import 'package:sinalacs_server/src/domain/entities/alert_delivery.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
@@ -112,9 +113,12 @@ class RedAlertService {
     required String locationHash,
     String? locationCell,
   }) async {
-    if (user.role != UserRole.patient || user.microAreaId == null) {
-      throw StateError('Somente pacientes territorializados podem criar alertas.');
-    }
+    Authorization.require(
+      user,
+      roles: {UserRole.patient},
+      onDenied: () =>
+          StateError('Somente pacientes territorializados podem criar alertas.'),
+    );
     if (idempotencyKey.isEmpty || locationHash.isEmpty) {
       throw ArgumentError('A chave de idempotência e a localização são obrigatórias.');
     }
@@ -169,9 +173,12 @@ class RedAlertService {
   String _newAlertId() => _uuid.v4();
 
   Future<bool> acknowledge({required AuthenticatedUser user, required String alertId}) {
-    if (user.role != UserRole.acs || user.microAreaId == null) {
-      throw StateError('Somente ACS territorializados podem confirmar alertas.');
-    }
+    Authorization.require(
+      user,
+      roles: {UserRole.acs},
+      onDenied: () =>
+          StateError('Somente ACS territorializados podem confirmar alertas.'),
+    );
     if (alertId.trim().isEmpty) {
       throw ArgumentError('O identificador do alerta é obrigatório.');
     }
@@ -182,9 +189,16 @@ class RedAlertService {
   /// decisão §5). O paciente nunca informa `patientId` — vem sempre do token
   /// (INV-05), mesma disciplina de `TriageSessionService`/`VisitSyncService`.
   Future<AlertStatusSnapshot?> statusFor({required AuthenticatedUser user}) async {
-    if (user.role != UserRole.patient) {
-      throw StateError('Somente pacientes podem consultar o status do próprio alerta.');
-    }
+    // `requireMicroArea: false` preserva a regra de hoje: `statusFor` é
+    // escopado ao próprio titular pelo `user.id` do token (INV-05), então um
+    // paciente sem microárea continua podendo ver o próprio status.
+    Authorization.require(
+      user,
+      roles: {UserRole.patient},
+      onDenied: () =>
+          StateError('Somente pacientes podem consultar o status do próprio alerta.'),
+      requireMicroArea: false,
+    );
     return _store.latestForPatient(user.id);
   }
 }

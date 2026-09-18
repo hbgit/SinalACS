@@ -1,5 +1,6 @@
 import 'package:serverpod/serverpod.dart' show UuidValue;
 import 'package:sinalacs_server/src/application/audit/audit_trail.dart';
+import 'package:sinalacs_server/src/application/auth/authorization.dart';
 import 'package:sinalacs_server/src/application/auth/development_auth_service.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
 
@@ -153,9 +154,12 @@ class VisitSyncService {
     required AuthenticatedUser user,
     required DateTime since,
   }) async {
-    if (user.role != UserRole.acs || user.microAreaId == null) {
-      throw StateError('Somente ACS territorializados podem sincronizar visitas.');
-    }
+    Authorization.require(
+      user,
+      roles: {UserRole.acs},
+      onDenied: () =>
+          StateError('Somente ACS territorializados podem sincronizar visitas.'),
+    );
 
     final microAreaId = UuidValue.fromString(user.microAreaId!);
     final visits = await _store.listChangedInMicroArea(microAreaId, since);
@@ -197,9 +201,12 @@ class VisitSyncService {
     required AuthenticatedUser user,
     required List<VisitSyncEntry> entries,
   }) async {
-    if (user.role != UserRole.acs || user.microAreaId == null) {
-      throw StateError('Somente ACS territorializados podem sincronizar visitas.');
-    }
+    Authorization.require(
+      user,
+      roles: {UserRole.acs},
+      onDenied: () =>
+          StateError('Somente ACS territorializados podem sincronizar visitas.'),
+    );
 
     final results = <VisitSyncResult>[];
     for (final entry in entries) {

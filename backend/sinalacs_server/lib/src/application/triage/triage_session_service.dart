@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:serverpod/serverpod.dart' show UuidValue;
 import 'package:sinalacs_server/src/application/audit/audit_trail.dart';
+import 'package:sinalacs_server/src/application/auth/authorization.dart';
 import 'package:sinalacs_server/src/application/auth/development_auth_service.dart';
 import 'package:sinalacs_server/src/application/triage/triage_engine.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
@@ -102,11 +103,17 @@ class TriageSessionService {
     required bool bleeding,
     required bool severeWeakness,
   }) async {
-    if (user.role != UserRole.patient) {
-      throw const TriageAuthorizationException(
+    // O tipo aqui é `TriageAuthorizationException` (declarada em .spy.yaml e
+    // serializada ao cliente), não `StateError` — a guarda só decide, o
+    // chamador escolhe o que lançar.
+    Authorization.require(
+      user,
+      roles: {UserRole.patient},
+      onDenied: () => const TriageAuthorizationException(
         'Somente o paciente pode registrar a própria triagem.',
-      );
-    }
+      ),
+      requireMicroArea: false,
+    );
 
     final risk = _engine.evaluate(
       chestPain: chestPain,

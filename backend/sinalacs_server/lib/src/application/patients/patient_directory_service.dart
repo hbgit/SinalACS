@@ -1,4 +1,5 @@
 import 'package:sinalacs_server/src/application/audit/audit_trail.dart';
+import 'package:sinalacs_server/src/application/auth/authorization.dart';
 import 'package:sinalacs_server/src/application/auth/development_auth_service.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
 
@@ -46,9 +47,12 @@ class PatientDirectoryService {
   /// um `microAreaId` do cliente seria oferecer ao dispositivo a chance de
   /// pedir outro território (INV-01).
   Future<List<MicroAreaPatient>> listForAcs(AuthenticatedUser user) async {
-    if (user.role != UserRole.acs || user.microAreaId == null) {
-      throw StateError('Somente ACS territorializados podem listar pacientes.');
-    }
+    Authorization.require(
+      user,
+      roles: {UserRole.acs},
+      onDenied: () =>
+          StateError('Somente ACS territorializados podem listar pacientes.'),
+    );
 
     final entries = await _store.listByMicroArea(user.microAreaId!);
 

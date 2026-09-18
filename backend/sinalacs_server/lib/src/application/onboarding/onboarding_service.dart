@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:math';
 
 import 'package:crypto/crypto.dart';
+import 'package:sinalacs_server/src/application/auth/authorization.dart';
 import 'package:sinalacs_server/src/application/auth/development_auth_service.dart'
     show AuthenticatedUser;
 import 'package:sinalacs_server/src/generated/protocol.dart';
@@ -101,9 +102,12 @@ class OnboardingService {
     AuthenticatedUser acs, {
     required String patientId,
   }) async {
-    if (acs.role != UserRole.acs || acs.microAreaId == null) {
-      throw StateError('Somente ACS territorializados podem gerar convites.');
-    }
+    Authorization.require(
+      acs,
+      roles: {UserRole.acs},
+      onDenied: () =>
+          StateError('Somente ACS territorializados podem gerar convites.'),
+    );
 
     final patientArea = await _store.microAreaOfPatient(patientId);
     if (patientArea == null || patientArea != acs.microAreaId) {
