@@ -1312,4 +1312,71 @@ void main() {
       expect(find.textContaining('1 atualização recebida da central'), findsOneWidget);
     });
   });
+
+  group('território real na tela Área (L-06/RF08)', () {
+    const dbName = 'territorializacao_test.db';
+
+    setUp(() => EncryptedLocalDatabase.deleteDatabaseFile(dbName));
+    tearDown(() => EncryptedLocalDatabase.deleteDatabaseFile(dbName));
+
+    VisitPullService pullService(FakeAcsBackend backend) =>
+        VisitPullService(
+          backend: backend,
+          cursorStore: SyncCursorStore(
+            keyStore: InMemoryDatabaseKeyStore(),
+            databaseName: dbName,
+            allowUnencryptedForTesting: true,
+          ),
+          localVisits: InMemoryVisitStore(),
+        );
+
+    Future<void> settleRealAsync(WidgetTester tester) async {
+      for (var i = 0; i < 30; i++) {
+        await tester.pump(const Duration(milliseconds: 16));
+        await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+      }
+      await tester.pump();
+    }
+
+    testWidgets('mostra o número real de pacientes da microárea, não o literal fixo', (tester) async {
+      final backend = FakeAcsBackend()
+        ..patients = [
+          MicroAreaPatient(patientId: seedPatientId, name: 'Paciente 1', isChronic: false, chronicConditions: []),
+          MicroAreaPatient(patientId: 'p2', name: 'Paciente 2', isChronic: true, chronicConditions: ['Hipertensão']),
+        ];
+
+      await tester.pumpWidget(SinalAcsApp(
+        backend: backend,
+        feedBuilder: (queue) => FakeAlertFeed(queue),
+        visitPullService: pullService(backend),
+      ));
+      await tester.tap(find.byKey(const Key('login_button')));
+      await settleRealAsync(tester);
+
+      expect(backend.listPatientsCount, 1);
+
+      await tester.tap(find.text('Área'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('2 cadastrados'), findsOneWidget);
+      expect(find.text('142 cadastrados'), findsNothing);
+    });
+
+    testWidgets('uma falha ao carregar os pacientes mostra o motivo, sem travar a tela', (tester) async {
+      final backend = FakeAcsBackend()
+        ..listPatientsFailure = const BackendFailure('Sem conexão com o servidor.');
+
+      await tester.pumpWidget(SinalAcsApp(
+        backend: backend,
+        feedBuilder: (queue) => FakeAlertFeed(queue),
+        visitPullService: pullService(backend),
+      ));
+      await tester.tap(find.byKey(const Key('login_button')));
+      await settleRealAsync(tester);
+      await tester.tap(find.text('Área'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Não foi possível carregar'), findsOneWidget);
+    });
+  });
 }

@@ -283,6 +283,27 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
   /// mesmo ponto sem risco de perder nada.
   InfraNotice? _pullError;
 
+  /// `true` enquanto `patients.listMicroArea` está em andamento.
+  bool _loadingMicroAreaPatients = false;
+
+  /// Pacientes cadastrados na microárea, segundo o servidor. `null` antes da
+  /// primeira carga desta sessão.
+  ///
+  /// Corrige L-06: a tela "Área" mostrava "142 cadastrados" fixo,
+  /// contradizendo o servidor — a microárea semeada em desenvolvimento tem 5
+  /// pacientes (spec/validation_report.md). `patients.listMicroArea` já
+  /// territorializa pelo token do ACS (INV-01), mesma chamada que alimenta o
+  /// seletor de paciente da visita de rotina.
+  List<MicroAreaPatient>? _microAreaPatients;
+
+  /// Quando a última carga bem-sucedida terminou.
+  DateTime? _microAreaPatientsLoadedAt;
+
+  /// Presente quando a última tentativa falhou.
+  InfraNotice? _microAreaPatientsError;
+
+  bool _patientsRequested = false;
+
   @override
   void initState() {
     super.initState();
@@ -297,6 +318,41 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
     _restoreVisits();
     _pullVisits();
     _loadCurrentPosition();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // BackendScope.of(context) só é seguro a partir daqui, não em initState —
+    // mesmo motivo de VisitRegistrationScreen._patientsRequested.
+    if (!_patientsRequested) {
+      _patientsRequested = true;
+      _loadMicroAreaPatients();
+    }
+  }
+
+  Future<void> _loadMicroAreaPatients() async {
+    final backend = BackendScope.of(context);
+    setState(() { _loadingMicroAreaPatients = true; _microAreaPatientsError = null; });
+
+    try {
+      final patients = await backend.listPatients();
+      if (!mounted) return;
+      setState(() {
+        _microAreaPatients = patients;
+        _microAreaPatientsLoadedAt = DateTime.now();
+      });
+    } on BackendFailure catch (failure) {
+      if (!mounted) return;
+      setState(() {
+        _microAreaPatientsError = (
+          title: 'Não foi possível carregar os pacientes da microárea.',
+          detail: failure.message,
+        );
+      });
+    } finally {
+      if (mounted) setState(() => _loadingMicroAreaPatients = false);
+    }
   }
 
   /// Recarrega as visitas gravadas em execuções anteriores.
@@ -549,6 +605,10 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
           lastPulledAt: _lastPulledAt,
           pullError: _pullError,
           onRefresh: _pullVisits,
+          loadingPatients: _loadingMicroAreaPatients,
+          patientCount: _microAreaPatients?.length,
+          patientsLoadedAt: _microAreaPatientsLoadedAt,
+          patientsError: _microAreaPatientsError,
         ),
       AcsDestination.queue => DashboardScreen(
           queue: _queue,
@@ -605,12 +665,9 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
 }
 
 /// Painel territorial da microárea, incluindo o status da sincronização
-/// central→dispositivo (RF15, decisão §5).
-///
-/// "Pacientes sincronizados" e "Cache local" continuam literais fixos — é o
-/// débito técnico L-06 (RF08), fora do escopo desta task: aqui só o bloco de
-/// sincronização abaixo reflete dado real, vindo do `VisitPullService` via
-/// [AcsHomeShell._pullVisits].
+/// central→dispositivo (RF15, decisão §5) e o número real de pacientes da
+/// microárea (L-06/RF08, fechado nesta task: antes mostrava "142
+/// cadastrados" fixo, contradizendo o servidor).
 class TerritorializationScreen extends StatelessWidget {
   const TerritorializationScreen({
     super.key,
@@ -619,6 +676,10 @@ class TerritorializationScreen extends StatelessWidget {
     this.lastPulledAt,
     this.pullError,
     this.onRefresh,
+    this.loadingPatients = false,
+    this.patientCount,
+    this.patientsLoadedAt,
+    this.patientsError,
   });
 
   /// `true` enquanto uma chamada a `visits.pull` está em andamento.
@@ -638,12 +699,24 @@ class TerritorializationScreen extends StatelessWidget {
 
   final VoidCallback? onRefresh;
 
+  /// `true` enquanto `patients.listMicroArea` está em andamento.
+  final bool loadingPatients;
+
+  /// Pacientes cadastrados na microárea. `null` antes da primeira carga.
+  final int? patientCount;
+
+  /// Quando a última carga bem-sucedida terminou.
+  final DateTime? patientsLoadedAt;
+
+  /// Presente quando a última tentativa falhou.
+  final InfraNotice? patientsError;
+
   @override
   Widget build(BuildContext context) => _page([
         const Text('Microárea 12 - Zona Rural', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
         const SizedBox(height: 12),
-        const _InfoRow('Pacientes sincronizados', '142 cadastrados'),
-        const _InfoRow('Cache local', 'Atualizado há 10 min'),
+        _InfoRow('Pacientes sincronizados', _patientCountText()),
+        _InfoRow('Cache local', _cacheFreshnessText()),
         const Divider(height: 32),
         const Text('Sincronização com a central', style: TextStyle(fontWeight: FontWeight.bold)),
         const SizedBox(height: 8),
@@ -692,6 +765,18 @@ class TerritorializationScreen extends StatelessWidget {
   String _time(DateTime value) {
     final local = value.toLocal();
     return '${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}';
+  }
+
+  String _patientCountText() {
+    if (patientsError != null) return 'Não foi possível carregar';
+    final count = patientCount;
+    if (count == null) return loadingPatients ? 'Carregando...' : 'Ainda não carregado';
+    return count == 1 ? '1 cadastrado' : '$count cadastrados';
+  }
+
+  String _cacheFreshnessText() {
+    final at = patientsLoadedAt;
+    return at == null ? 'Ainda não sincronizado' : 'Atualizado às ${_time(at)}';
   }
 }
 
