@@ -1425,4 +1425,53 @@ void main() {
       expect(button.onPressed, isNull);
     });
   });
+
+  group('sincronização periódica em segundo plano', () {
+    testWidgets('repete a sincronização com a central em intervalos, sem toque manual', (tester) async {
+      final backend = FakeAcsBackend();
+
+      await tester.pumpWidget(SinalAcsApp(
+        backend: backend,
+        feedBuilder: (queue) => FakeAlertFeed(queue),
+        syncInterval: const Duration(seconds: 10),
+      ));
+      await tester.tap(find.byKey(const Key('login_button')));
+      await tester.pumpAndSettle();
+
+      expect(backend.listPatientsCount, 1);
+
+      await tester.pump(const Duration(seconds: 10));
+      expect(backend.listPatientsCount, 2);
+
+      await tester.pump(const Duration(seconds: 10));
+      expect(backend.listPatientsCount, 3);
+    });
+
+    testWidgets('sair do primeiro plano cancela o ciclo; voltar sincroniza na hora e recomeça', (tester) async {
+      final backend = FakeAcsBackend();
+
+      await tester.pumpWidget(SinalAcsApp(
+        backend: backend,
+        feedBuilder: (queue) => FakeAlertFeed(queue),
+        syncInterval: const Duration(seconds: 10),
+      ));
+      await tester.tap(find.byKey(const Key('login_button')));
+      await tester.pumpAndSettle();
+      expect(backend.listPatientsCount, 1);
+
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      await tester.pump(const Duration(seconds: 30));
+      // Em segundo plano, nenhum ciclo novo dispara.
+      expect(backend.listPatientsCount, 1);
+
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pumpAndSettle();
+      // Retomar sincroniza imediatamente...
+      expect(backend.listPatientsCount, 2);
+
+      // ...e o ciclo periódico recomeça do zero a partir daqui.
+      await tester.pump(const Duration(seconds: 10));
+      expect(backend.listPatientsCount, 3);
+    });
+  });
 }

@@ -29,6 +29,7 @@ class SinalAcsApp extends StatefulWidget {
     this.visitPullService,
     this.initialAlert,
     this.currentPosition,
+    this.syncInterval,
   });
 
   /// Injetáveis para teste. Em execução normal são as implementações reais.
@@ -38,6 +39,11 @@ class SinalAcsApp extends StatefulWidget {
   final VisitPullService? visitPullService;
   final PrioritizedAlert? initialAlert;
   final LatLng? currentPosition;
+
+  /// Intervalo da sincronização periódica em segundo plano (visitas +
+  /// pacientes da microárea). `null` usa `AcsHomeShell.defaultSyncInterval`
+  /// — testes passam um valor curto para não esperar 5 minutos reais.
+  final Duration? syncInterval;
 
   @override
   State<SinalAcsApp> createState() => _SinalAcsAppState();
@@ -96,6 +102,7 @@ class _SinalAcsAppState extends State<SinalAcsApp> {
             visitPullService: _visitPullService,
             initialAlert: widget.initialAlert,
             initialPosition: widget.currentPosition,
+            syncInterval: widget.syncInterval,
           ),
         ),
       );
@@ -109,6 +116,7 @@ class LoginScreen extends StatefulWidget {
     this.feedBuilder,
     this.initialAlert,
     this.initialPosition,
+    this.syncInterval,
   });
 
   final AlertFeed Function(AlertQueue queue)? feedBuilder;
@@ -116,6 +124,7 @@ class LoginScreen extends StatefulWidget {
   final VisitPullService visitPullService;
   final PrioritizedAlert? initialAlert;
   final LatLng? initialPosition;
+  final Duration? syncInterval;
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
@@ -159,6 +168,7 @@ class _LoginScreenState extends State<LoginScreen> {
           visitPullService: widget.visitPullService,
           initialAlert: widget.initialAlert,
           initialPosition: widget.initialPosition,
+          syncInterval: widget.syncInterval,
         ),
       ));
     } on BackendFailure catch (failure) {
@@ -224,6 +234,7 @@ class AcsHomeShell extends StatefulWidget {
     this.feedBuilder,
     this.initialAlert,
     this.initialPosition,
+    this.syncInterval,
   });
 
   final String microAreaId;
@@ -231,6 +242,16 @@ class AcsHomeShell extends StatefulWidget {
   final AlertFeed Function(AlertQueue queue)? feedBuilder;
   final PrioritizedAlert? initialAlert;
   final LatLng? initialPosition;
+
+  /// Intervalo entre sincronizações automáticas com a central (visitas +
+  /// pacientes da microárea), além do disparo ao abrir o painel e do botão
+  /// manual. `null` usa [defaultSyncInterval].
+  final Duration? syncInterval;
+
+  /// Produção: 5 minutos é frequente o bastante para um ACS ver, sem apertar
+  /// botão, uma visita registrada por outro colega — sem virar polling
+  /// agressivo que gasta bateria/dados em campo.
+  static const defaultSyncInterval = Duration(minutes: 5);
 
   /// Obrigatória: a tela de visita usava `widget.visitQueue ?? OfflineVisitQueue()`,
   /// e um dia em que o shell fosse construído sem fila voltaria a descartar a
@@ -264,6 +285,12 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
   /// falha permanente.
   Timer? _reconnectTimer;
   final ReconnectSchedule _reconnectDelay = ReconnectSchedule();
+
+  /// `null` quando nenhum ciclo periódico está agendado (app em segundo
+  /// plano, ou ainda não iniciado).
+  Timer? _periodicSyncTimer;
+
+  Duration get _syncInterval => widget.syncInterval ?? AcsHomeShell.defaultSyncInterval;
 
   /// `true` enquanto uma chamada a `visits.pull` está em andamento.
   bool _pullingVisits = false;
@@ -318,6 +345,18 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
     _restoreVisits();
     _pullVisits();
     _loadCurrentPosition();
+    _startPeriodicSync();
+  }
+
+  /// Sincronização periódica em segundo plano: repete `_refreshAreaData()`
+  /// (visitas + pacientes da microárea) a cada [_syncInterval] enquanto o
+  /// painel está aberto e o app em primeiro plano — sem isso, um ACS só via
+  /// dado novo ao reabrir a aba "Área" ou apertar "Atualizar dados da
+  /// microárea" (decisão de produto adiada em
+  /// docs/superpowers/plans/2026-09-18-rf15-consumo-acs-pull-visitas.md).
+  void _startPeriodicSync() {
+    _periodicSyncTimer?.cancel();
+    _periodicSyncTimer = Timer.periodic(_syncInterval, (_) => _refreshAreaData());
   }
 
   @override
@@ -573,11 +612,21 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
       // bateria; a tentativa volta ao primeiro plano.
       _reconnectTimer?.cancel();
       _reconnectTimer = null;
-    } else if (state == AppLifecycleState.resumed && _feedErrorIsTransient) {
-      // O gatilho que mais importa na prática: o sinal costuma voltar com a
-      // tela apagada, e o ACS tira o aparelho do bolso já esperando o alerta.
-      _reconnectDelay.reset();
-      _connectFeed();
+      _periodicSyncTimer?.cancel();
+      _periodicSyncTimer = null;
+    } else if (state == AppLifecycleState.resumed) {
+      if (_feedErrorIsTransient) {
+        // O gatilho que mais importa na prática: o sinal costuma voltar com
+        // a tela apagada, e o ACS tira o aparelho do bolso já esperando o
+        // alerta.
+        _reconnectDelay.reset();
+        _connectFeed();
+      }
+      // Retomar sincroniza na hora — sem isto, um app que passou minutos em
+      // segundo plano só voltaria a sincronizar no próximo toque manual ou
+      // na próxima virada do ciclo, que pode estar longe.
+      _refreshAreaData();
+      _startPeriodicSync();
     }
   }
 
@@ -598,6 +647,7 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
   @override
   void dispose() {
     _reconnectTimer?.cancel();
+    _periodicSyncTimer?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     _feed.stop();
     _queue.dispose();
