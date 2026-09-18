@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:sinalacs_client/sinalacs_client.dart'
@@ -1026,25 +1028,42 @@ class _ClinicalProfileScreenState extends State<ClinicalProfileScreen> {
 /// `RemindersScope`, sem `BackendScope` — buscar o status no shell quebraria
 /// esse teste mesmo quando a aba aberta é outra.
 class StatusScreen extends StatelessWidget {
-  const StatusScreen({super.key});
+  const StatusScreen({super.key, this.syncInterval = const Duration(minutes: 5)});
+
+  /// Intervalo da sincronização periódica em segundo plano, além da busca ao
+  /// abrir a aba e do botão manual. Produção usa o default (5 minutos);
+  /// testes passam um valor curto para não esperar tempo real.
+  final Duration syncInterval;
 
   @override
-  Widget build(BuildContext context) => const _StatusScreenBody();
+  Widget build(BuildContext context) => _StatusScreenBody(syncInterval: syncInterval);
 }
 
 class _StatusScreenBody extends StatefulWidget {
-  const _StatusScreenBody();
+  const _StatusScreenBody({required this.syncInterval});
+
+  final Duration syncInterval;
 
   @override
   State<_StatusScreenBody> createState() => _StatusScreenBodyState();
 }
 
-class _StatusScreenBodyState extends State<_StatusScreenBody> {
+class _StatusScreenBodyState extends State<_StatusScreenBody> with WidgetsBindingObserver {
   bool _loading = false;
   AlertStatusResult? _status;
   String? _error;
   DateTime? _checkedAt;
   bool _requestedLoad = false;
+
+  /// `null` quando nenhum ciclo periódico está agendado (app em segundo
+  /// plano, ou ainda não iniciado).
+  Timer? _syncTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
 
   @override
   void didChangeDependencies() {
@@ -1054,7 +1073,38 @@ class _StatusScreenBodyState extends State<_StatusScreenBody> {
     if (!_requestedLoad) {
       _requestedLoad = true;
       _load();
+      _startPeriodicSync();
     }
+  }
+
+  /// Sincronização periódica em segundo plano: repete `_load()` a cada
+  /// `widget.syncInterval` enquanto a aba Status está montada e o app em
+  /// primeiro plano — sem isto, o paciente só via um status novo reabrindo
+  /// a aba ou apertando "Verificar status agora".
+  void _startPeriodicSync() {
+    _syncTimer?.cancel();
+    _syncTimer = Timer.periodic(widget.syncInterval, (_) => _load());
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused) {
+      // Um Timer em segundo plano no Android não é confiável e só gastaria
+      // bateria; a tentativa volta ao primeiro plano — mesmo padrão do ACS
+      // (`_AcsHomeShellState._periodicSyncTimer`).
+      _syncTimer?.cancel();
+      _syncTimer = null;
+    } else if (state == AppLifecycleState.resumed) {
+      _load();
+      _startPeriodicSync();
+    }
+  }
+
+  @override
+  void dispose() {
+    _syncTimer?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
   }
 
   Future<void> _load() async {

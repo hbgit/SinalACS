@@ -6,6 +6,7 @@ import 'package:sinalacs_client/sinalacs_client.dart'
 import 'package:sinalacs_patient/app/app.dart';
 import 'package:sinalacs_patient/core/consent/consent_preferences.dart';
 import 'package:sinalacs_patient/core/network/backend_client.dart';
+import 'package:sinalacs_patient/core/network/backend_scope.dart';
 import 'package:sinalacs_patient/core/privacy/location_hash.dart';
 import 'package:sinalacs_patient/core/reminders/reminder.dart';
 import 'package:sinalacs_patient/core/reminders/reminder_scheduler.dart';
@@ -664,6 +665,49 @@ void main() {
       await tester.tap(find.byKey(const Key('refresh_status')));
       await tester.pumpAndSettle();
       expect(backend.statusForCallCount, 2);
+    });
+  });
+
+  group('sincronização periódica em segundo plano (RF05)', () {
+    Widget buildStatusScreen(FakePatientBackend backend, {required Duration syncInterval}) {
+      return MaterialApp(
+        home: BackendScope(
+          backend: backend,
+          child: StatusScreen(syncInterval: syncInterval),
+        ),
+      );
+    }
+
+    testWidgets('repete a consulta de status em intervalos, sem toque manual', (tester) async {
+      final backend = FakePatientBackend();
+      await tester.pumpWidget(buildStatusScreen(backend, syncInterval: const Duration(seconds: 10)));
+      await tester.pumpAndSettle();
+
+      expect(backend.statusForCallCount, 1);
+
+      await tester.pump(const Duration(seconds: 10));
+      expect(backend.statusForCallCount, 2);
+
+      await tester.pump(const Duration(seconds: 10));
+      expect(backend.statusForCallCount, 3);
+    });
+
+    testWidgets('sair do primeiro plano cancela o ciclo; voltar consulta na hora e recomeça', (tester) async {
+      final backend = FakePatientBackend();
+      await tester.pumpWidget(buildStatusScreen(backend, syncInterval: const Duration(seconds: 10)));
+      await tester.pumpAndSettle();
+      expect(backend.statusForCallCount, 1);
+
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      await tester.pump(const Duration(seconds: 30));
+      expect(backend.statusForCallCount, 1);
+
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pumpAndSettle();
+      expect(backend.statusForCallCount, 2);
+
+      await tester.pump(const Duration(seconds: 10));
+      expect(backend.statusForCallCount, 3);
     });
   });
 }
