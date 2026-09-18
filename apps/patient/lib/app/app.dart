@@ -349,6 +349,21 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         pushConsent: _pushConsent,
       );
       if (!mounted) return;
+      // Espelha localmente a resposta já enviada ao backend — é o único
+      // momento em que o app conhece essa decisão; `RemindersScreen` não
+      // tem outro jeito de saber se pode agendar notificações (RF06 é local
+      // ao aparelho, sem endpoint de consulta de consentimento no backend).
+      // Best-effort: o backend já gravou a decisão (fonte de verdade); se a
+      // cópia local falhar, o app não pode travar a conclusão do cadastro
+      // por causa disso — e `localRemindersGranted()` já degrada para
+      // recusado (fail closed) quando não há linha local, então uma falha
+      // aqui nunca resulta em agendar sem consentimento.
+      try {
+        await RemindersScope.of(context).consentPreferences.saveLocalRemindersConsent(_remindersConsent);
+      } catch (_) {
+        // Intencionalmente silencioso — ver comentário acima.
+      }
+      if (!mounted) return;
       // Mesmo caminho que `_PatientLoginScreenState._enter()` já usa para
       // entrar na navegação principal — a sessão já está em `BackendScope`,
       // não há estado novo para duplicar aqui.

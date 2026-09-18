@@ -1,9 +1,24 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sinalacs_patient/app/app.dart';
+import 'package:sinalacs_patient/core/consent/consent_preferences.dart';
 import 'package:sinalacs_patient/core/network/backend_client.dart';
 
 import 'support/fake_patient_backend.dart';
+
+/// Fake local para os testes deste arquivo — mesma forma de
+/// `_FixedConsentPreferences` (Task 2, em `patient_app_mvp_test.dart`), mas
+/// duplicada aqui porque essa classe privada não é importável entre arquivos
+/// de teste.
+class _RecordingConsentPreferences implements ConsentPreferences {
+  bool? saved;
+
+  @override
+  Future<bool> localRemindersGranted() async => saved ?? false;
+
+  @override
+  Future<void> saveLocalRemindersConsent(bool granted) async => saved = granted;
+}
 
 /// Abre a tela de onboarding a partir da tela de login, mesmo ponto de
 /// entrada que hoje mostra o snackbar placeholder do QR Code.
@@ -110,5 +125,33 @@ void main() {
     expect(find.text('Convite inválido, expirado ou já utilizado.'), findsOneWidget);
     expect(find.text('Triagem rápida'), findsNothing);
     expect(find.byKey(const Key('onboarding_token_field')), findsOneWidget);
+  });
+
+  testWidgets('concluir o cadastro com o consentimento de lembretes marcado grava isso localmente', (tester) async {
+    final backend = FakePatientBackend();
+    final consentPreferences = _RecordingConsentPreferences();
+    await tester.pumpWidget(SinalAcsApp(backend: backend, consentPreferences: consentPreferences));
+    await openOnboarding(tester);
+
+    await tester.enterText(find.byKey(const Key('onboarding_token_field')), 'convite-123');
+    await tapKey(tester, 'onboarding_consent_health');
+    await tapKey(tester, 'onboarding_consent_reminders');
+    await tapKey(tester, 'complete_enrollment_button');
+
+    expect(consentPreferences.saved, isTrue);
+  });
+
+  testWidgets('concluir o cadastro com o consentimento de lembretes desmarcado grava a recusa localmente', (tester) async {
+    final backend = FakePatientBackend();
+    final consentPreferences = _RecordingConsentPreferences();
+    await tester.pumpWidget(SinalAcsApp(backend: backend, consentPreferences: consentPreferences));
+    await openOnboarding(tester);
+
+    await tester.enterText(find.byKey(const Key('onboarding_token_field')), 'convite-123');
+    await tapKey(tester, 'onboarding_consent_health');
+    // onboarding_consent_reminders permanece desmarcado.
+    await tapKey(tester, 'complete_enrollment_button');
+
+    expect(consentPreferences.saved, isFalse);
   });
 }
