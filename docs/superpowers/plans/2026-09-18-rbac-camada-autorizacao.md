@@ -12,12 +12,12 @@
 
 ## Global Constraints
 
-- **Zero mudança de comportamento observável.** Toda mensagem de erro, todo tipo de exceção e todo texto em português permanecem idênticos aos de hoje. Este plano é um refactor de estrutura, não de regra: os 171 testes existentes (`cd backend/sinalacs_server && dart test`) devem continuar passando sem serem editados — **com uma única exceção declarada**, o novo teste de postura. Se algum teste existente precisar mudar, a refatoração saiu dos trilhos.
+- **Zero mudança de comportamento observável.** Toda mensagem de erro, todo tipo de exceção e todo texto em português permanecem idênticos aos de hoje. Este plano é um refactor de estrutura, não de regra: os testes existentes (`cd backend/sinalacs_server && dart test`, 179 no momento em que este plano foi escrito) devem continuar passando sem serem editados — **com uma única exceção declarada**, o novo teste de postura. Se algum teste existente precisar mudar, a refatoração saiu dos trilhos.
 - **`Authorization.require` lança `StateError`?** Não por conta própria: quem decide é o `onDenied` de cada chamador. Isso é deliberado — `triage_session_service.dart` lança `TriageAuthorizationException` (tipada) e os outros sete sítios lançam `StateError`. Unificar o tipo quebraria a tradução dos endpoints e os testes que a verificam.
 - **Não ligar `requireLogin => true`.** O stack de autenticação do próprio Serverpod (`AuthenticationHandler`) não está conectado neste projeto — a autenticação é feita à mão, com `verifyToken`. Trocar a flag sem conectar o handler rejeitaria *todas* as chamadas. A postura de cada endpoint passa a ser verificada por teste (Task 4), que é o que o F4 pede; a flag continua `false` com o motivo documentado.
 - **Papéis `admin` e `coordinator` continuam inalcançáveis de propósito.** O enum `UserRole` tem 4 valores (`patient`, `acs`, `coordinator`, `admin`), mas nenhum caminho emite `coordinator`/`admin` hoje e este plano não cria um — o backend do backoffice é escopo de outro plano, deliberadamente excluído. O teste unitário da guarda exercita esses papéis construindo `AuthenticatedUser` direto (sem emitir token), que é o suficiente para provar que a barreira os recusa.
 - Comentários e mensagens em português, seguindo o repositório.
-- Nunca editar `lib/src/generated/` — nada aqui toca modelo gerado, então `serverpod generate` não é necessário em nenhuma task.
+- Nunca editar `lib/src/generated/` nem `migrations/` à mão. **`serverpod generate` É necessário na Task 3**, ao contrário do que uma versão anterior deste plano afirmava: embora nada aqui toque `.spy.yaml`, a classe-base abstrata muda o **cliente gerado** — o Serverpod emite um `EndpointAuthenticated` e reparenta `EndpointAlerts`/`EndpointPatients`/`EndpointTriage`/`EndpointVisits` para ele (`backend/sinalacs_client/lib/src/protocol/client.dart`). Rodar o gerador e versionar `sinalacs_client/` faz parte do commit daquela task; deixar o cliente defasado faria a divergência cair dentro do commit de um dos planos irmãos, com mensagem alheia.
 - Antes de qualquer `dart test` de integração: `docker compose --profile test up -d postgres-test` (o banco de teste já está de pé neste ambiente, verificado).
 
 ---
@@ -195,7 +195,7 @@ abstract final class Authorization {
   /// exatamente dois**: `alerts.statusFor` (RF05, leitura escopada ao próprio
   /// titular pelo `user.id` do token) e
   /// `TriageSessionService.evaluateAndRecord`
-  /// (`triage_session_service.dart:96`, que também só testa o papel — o
+  /// (`TriageSessionService.evaluateAndRecord`, que também só testa o papel — o
   /// `evaluate` sem o `AndRecord` é do `TriageEngine` e não checa papel
   /// nenhum). Passar `true` em qualquer um deles acrescenta uma recusa
   /// territorial que não existe hoje — mudança de comportamento observável,
@@ -460,7 +460,8 @@ import 'package:sinalacs_server/src/runtime/alert_runtime.dart';
 
 /// Verifica o token de acesso e devolve o usuário, ou recusa.
 ///
-/// Era o corpo idêntico de cinco métodos privados `_authenticate`, um por
+/// Era o corpo idêntico de cinco cópias, uma por endpoint — duas como método
+/// privado `_authenticate` nomeado e três inline dentro do próprio método do
 /// endpoint. Fica numa função só para que exista **um** lugar onde a
 /// verificação pode ser lida — e para que um endpoint novo tenha de onde
 /// herdá-la em vez de reescrevê-la.
