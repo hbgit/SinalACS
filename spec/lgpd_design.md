@@ -58,13 +58,24 @@ bloqueador até essa implementação existir com teste.
 | **Artigos LGPD** | 5º, XII; 7º, I; 8º, §1º, §2º, §3º, §4º, §5º, §6º |
 | **Critério de Aceite** | ✓ Consentimento é requerido para cada finalidade distinta<br>✓ Opções de consentimento são independentes (não agrupadas)<br>✓ Registro de consentimento com timestamp e versão<br>✓ Possibilidade de revogação por finalidade específica |
 
-**Estado atual (verificado 2026-09-16):** a tabela `consent_logs` existe
-migrada, mas nenhum código do repositório grava uma linha nela — não há
-escritor. A decisão de produto que liga LGPD-RF02 ao onboarding via QR Code
-(RF02) está registrada em
-`docs/superpowers/specs/2026-09-16-decisoes-produto-pos-validacao.md` §2
-(três finalidades mínimas, token de convite de uso único, gravação no
-backend no fechamento do onboarding). Ainda não implementada.
+**Estado atual (verificado 2026-09-18):** `consent_logs` é gravada por
+`OnboardingService.completeEnrollment` para as três finalidades (§2 de
+`docs/superpowers/specs/2026-09-16-decisoes-produto-pos-validacao.md`).
+Do lado da leitura: `ConsentPurpose.localReminders` agora é respeitada —
+`RemindersScreen` (`apps/patient/lib/app/app.dart`) só agenda notificações
+locais quando o consentimento espelhado no aparelho
+(`core/consent/consent_preferences.dart`) é `true`, com padrão de recusa
+(`false`) quando não há registro local.
+
+**Aviso — `ConsentPurpose.segmentedPush` continua sem leitor.** RF14 (avisos
+segmentados por push) não tem nenhum código de envio no repositório ainda —
+está bloqueado externamente na provisão de um projeto Firebase (§3.2 do
+mesmo documento de decisões), não apenas pendente de implementação. Não há
+o que "respeitar" hoje porque nada envia. Quando `notices.sendSegmented` for
+implementado, ele **deve** consultar o consentimento de `segmentedPush`
+antes de enviar, com o mesmo padrão de recusa por omissão adotado aqui para
+`localReminders` — tratar isso como parte da implementação de RF14, não
+como um item separado a lembrar depois.
 
 ### LGPD-RF03 - Gerenciamento de Preferências de Privacidade
 
