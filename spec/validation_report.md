@@ -80,12 +80,12 @@ cliente · **`parcial`** = existe, mas alimentado por dado fabricado ·
 | RF12 | Geofencing (check-in passivo) | **ausente** | `RouteService` calcula chegada localmente, mas não há GPS em segundo plano. |
 | RF13 | Escalonamento para SAMU/UBS | **ausente** | Ambos os botões são snackbars — ver L-07. |
 | RF14 | Avisos segmentados (push) | **ausente** | `NoticesScreen` descarta a entrada. Sem FCM/APNs. |
-| RF15 | Sincronização bidirecional | **sim** | Dispositivo → central e central → dispositivo funcionam e são testados dos dois lados: ACS (`visits.pull`) e paciente (`alerts.statusFor`, RF05). Ambos rodam automaticamente ao abrir a tela, em ciclo periódico enquanto o app está em primeiro plano, e por botão manual. Do lado ACS, o pull continua sendo só referência somente leitura (contagem exibida na tela), sem gravar as visitas puxadas na fila offline local — persistir esse resultado como registro local segue como trabalho futuro (ver nota em `VisitPullService`), fora do escopo deste plano. |
+| RF15 | Sincronização bidirecional | **backend** | Dispositivo → central e central → dispositivo funcionam e são testados dos dois lados: ACS (`visits.pull`) e paciente (`alerts.statusFor`, RF05). Ambos rodam automaticamente ao abrir a tela, em ciclo periódico enquanto o app está em primeiro plano (ACS, em qualquer aba) ou enquanto a tela de Status está aberta (paciente), e por botão manual. Do lado ACS, o pull continua sendo só referência somente leitura (contagem exibida na tela), sem gravar as visitas puxadas na fila offline local — persistir esse resultado como registro local segue como trabalho futuro (ver nota em `VisitPullService`), fora do escopo deste plano. |
 | RF16 | Motor de triagem determinístico | **backend** | `TriageEngine`, determinismo verificado em teste de integração. INV-02 preservado. |
 | RF17 | Logs de auditoria e conformidade | **backend** | `audit_logs` encadeado por HMAC; gravou `granted` e `denied_territory` nesta validação; cadeia verificada íntegra. |
 | RF18 | Dark mode nativo | **app-only** | Tema único dark nos três apps, com matriz de contraste testada. |
 
-**Contagem:** 4 `backend` · 1 `app-only` · 6 `parcial` · 7 `ausente`.
+**Contagem:** 7 `backend` · 1 `app-only` · 3 `parcial` · 7 `ausente`.
 
 ### Requisitos não funcionais
 
@@ -106,7 +106,7 @@ cliente · **`parcial`** = existe, mas alimentado por dado fabricado ·
 | INV-02 | Risco não alterável por humano na triagem | **aplicado** | O risco vem de `TriageEngine.evaluate`, determinístico, e é o mesmo valor gravado em `TriageSession.resultRisk`; `triage.evaluate` não aceita nenhum campo de risco vindo do cliente, e o app do paciente não recalcula risco. |
 | INV-03 | Alerta vermelho nunca descartado | **aplicado** | Outbox transacional (`alert_outbox`, 70 linhas) + QoS 1 com sessão persistente; 5 alertas de backlog reentregues na reconexão. |
 | INV-04 | Dado de saúde nunca em texto plano | **aplicado no dispositivo** | Provado por `encrypted_storage_test.dart` em hardware. **Não aplicado no servidor** — as colunas do PostgreSQL são texto claro. |
-| INV-05 | Paciente não acessa dado de outro paciente | **vacuamente verdadeiro** | Não existe endpoint de leitura voltado ao paciente. Vira risco real no momento em que RF05 for implementado. |
+| INV-05 | Paciente não acessa dado de outro paciente | **aplicado** | `alerts.statusFor` lê o status do alerta mais recente do próprio paciente: `patientId` nunca é parâmetro, vem sempre de `user.id` do token — mesma disciplina de `triage.evaluate`/`visits.pull`, então um token só alcança o próprio status por construção. Token de ACS é recusado com `AlertPermissionException`. Provado em `red_alert_service_test.dart` (grupo `statusFor (RF05)`) e `red_alert_cycle_test.dart`. Fechado por `docs/superpowers/plans/2026-09-18-sync-periodica-rf05-l06.md` (L-03). |
 
 ---
 
@@ -114,16 +114,24 @@ cliente · **`parcial`** = existe, mas alimentado por dado fabricado ·
 
 | Método RPC | Paciente | ACS | Admin |
 |---|---|---|---|
-| `auth.developmentLogin` | ✅ `backend_client.dart:99` | ✅ `backend_client.dart:88` | ❌ |
-| `health.check` | ⚠️ só em `live_check`/teste | ⚠️ declarado, **nunca chamado** | ❌ |
-| `triage.evaluate` | ✅ `backend_client.dart:128` | — | ❌ |
-| `alerts.createRedAlert` | ✅ `backend_client.dart:152` | — | ❌ |
+| `auth.developmentLogin` | ✅ `backend_client.dart:113` | ✅ `backend_client.dart:88` | ❌ |
+| `health.check` | ⚠️ só em `live_check`/teste | ❌ saiu da interface (L-14) | ❌ |
+| `onboarding.generateEnrollmentToken` | ❌ | ❌ | ❌ |
+| `onboarding.completeEnrollment` | ✅ `backend_client.dart:199` | — | ❌ |
+| `triage.evaluate` | ✅ `backend_client.dart:143` | — | ❌ |
+| `alerts.createRedAlert` | ✅ `backend_client.dart:180` | — | ❌ |
+| `alerts.statusFor` | ✅ `backend_client.dart:161` | — | ❌ |
 | `alerts.acknowledge` | — | ✅ `backend_client.dart:113` | ❌ |
 | `visits.sync` | — | ✅ `backend_client.dart:125` | ❌ |
-| `patients.listMicroArea` | — | ✅ `backend_client.dart:138` | ❌ |
-| **Cobertura** | **4/7** | **5/7** | **0/7** |
+| `visits.pull` | — | ✅ `backend_client.dart:140` | ❌ |
+| `patients.listMicroArea` | — | ✅ `backend_client.dart:148` | ❌ |
+| **Cobertura** | **6/11** | **5/11** | **0/11** |
 
-**União paciente+ACS: 7/7.** Nenhum endpoint do backend está sem consumidor.
+**União paciente+ACS: 10/11.** Com uma exceção, nenhum endpoint do backend
+está sem consumidor: `onboarding.generateEnrollmentToken` é o gerador de
+token de convite do lado da unidade de saúde (RF02) e só tem consumidor em
+teste (`onboarding_endpoint_test.dart`) — nasceu para o backoffice/posto,
+que ainda não existe (L-01).
 
 Um método de interface permanece voltado somente à ferramenta de validação:
 `PatientBackend.health()` é usado por `tool/live_check.dart`; o ACS não mantém
@@ -202,7 +210,7 @@ mesmo vale para a TMRAV segmentada por risco, que é a métrica *North Star* do 
 
 ### P0 — impedem uso com paciente real
 
-- **L-01 · Backoffice sem integração alguma.** 0/7 métodos; `sinalacs_client`
+- **L-01 · Backoffice sem integração alguma.** 0/11 métodos; `sinalacs_client`
   nem consta do `pubspec.yaml`; login é `pushReplacement` puro, gated só por
   `kDebugMode`; a trilha de auditoria exigida pelo PRD §4.2.2 é uma `List` em
   memória. O app exibe números que contradizem o banco.
