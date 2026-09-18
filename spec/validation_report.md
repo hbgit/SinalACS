@@ -96,7 +96,7 @@ cliente · **`parcial`** = existe, mas alimentado por dado fabricado ·
 | RNF03 | Criptografia AES-256 em repouso | **backend/app** | SQLCipher provado em dispositivo (o arquivo não contém o conteúdo em texto claro e não abre com chave errada). **No PostgreSQL não há criptografia de coluna** — `pgcrypto` previsto no PRD não foi adotado. |
 | RNF04 | TLS 1.3 em todas as comunicações | **parcial** | Broker em TLS com verificação de hostname. **O RPC do backend é HTTP puro** na 8080, sem TLS, inclusive do emulador. |
 | RNF05 | Acessibilidade WCAG AA | **app-only** | Matrizes de contraste, alvos de toque e `liveRegion` testados nos três apps. |
-| RNF06 | RBAC | **ausente** | Todo endpoint é `requireLogin => false`; só há checagem ad-hoc de `user.role`. `triage.evaluate` deixou de ser público (exige token e papel `patient`), mas não existe camada formal de RBAC. |
+| RNF06 | RBAC | **parcial** | `Authorization.require` é a única regra de papel/território e um teste de postura cobre os 7 endpoints, mas `requireLogin` segue `false` (o `AuthenticationHandler` do Serverpod não está conectado) e os papéis `coordinator`/`admin` não têm caminho de emissão. |
 
 ### Invariantes de negócio
 
@@ -277,10 +277,15 @@ agora têm coleta automatizada em `scripts/qa/measure_latency.dart`, mas os
 valores continuam dependentes de stack/broker disponíveis no ambiente em que o
 script rodar.
 
-- **L-09 · RNF06 (RBAC) ausente.** Todo endpoint continua `requireLogin => false`,
-  com checagem de papel ad-hoc dentro de cada serviço. `triage.evaluate` deixou de
-  ser público (ver L-04), mas isso foi um caso isolado, não uma camada de
-  autorização.
+- **L-09 · RNF06 (RBAC) — camada de autorização implementada, papéis
+  institucionais ainda ausentes.** `Authorization.require` centraliza a decisão
+  de papel/território e substituiu as 8 checagens ad-hoc; os 4 endpoints
+  integralmente autenticados estendem `AuthenticatedEndpoint` e um teste de
+  postura impede um endpoint novo de nascer público. O que **não** mudou: os
+  papéis `coordinator` e `admin` continuam sem caminho de emissão e sem
+  endpoint que os exercite — isso é o backend do backoffice (L-01), fora do
+  escopo desta rodada. Ver
+  `docs/superpowers/plans/2026-09-18-rbac-camada-autorizacao.md`.
 - **L-10 · CI não executa nenhum `integration_test`.** O do admin é hermético
   (sem stack, sem seed, sem `--dart-define`) — é ganho imediato.
 - **L-11 · `scripts/qa/e2e.sh` ignora o admin** e não passa `-d emulator-5554`

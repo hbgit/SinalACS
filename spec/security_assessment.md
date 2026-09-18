@@ -197,6 +197,16 @@ compilação/design óbvio, não uma omissão silenciosa. Adicionar um teste que
 enumere os endpoints e falhe se um novo endpoint com acesso a
 `Session.db`/dados de paciente não herdar dessa base.
 
+**Estado atual (verificado 2026-09-18):** a extração recomendada foi implementada —
+`Authorization.require` (`backend/sinalacs_server/lib/src/application/auth/authorization.dart`)
+é a única regra de papel/território, os quatro endpoints com postura
+integralmente autenticada estendem `AuthenticatedEndpoint`
+(`.../endpoints/authenticated_endpoint.dart`) e
+`test/unit/endpoint_auth_posture_test.dart` falha se um endpoint novo não
+estender a base nem constar da allowlist explícita. `requireLogin` continua
+`false` em todos eles **de propósito**: o `AuthenticationHandler` do Serverpod
+não está conectado, e ligar a flag sem conectá-lo rejeitaria todas as chamadas.
+
 **F5 — Ausência de MFA para ACS (Média)**
 *Categoria:* PR.AA-01 · *SP 800-53:* IA-2(1)
 
