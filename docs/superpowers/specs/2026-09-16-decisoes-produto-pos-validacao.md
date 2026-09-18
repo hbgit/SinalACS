@@ -356,21 +356,24 @@ Nenhum. É extensão do mesmo padrão de RPC/territorialização já implementad
 
 ### Plano derivado (não executado nesta tarefa)
 
-- `visits.pull` e/ou `alerts.pull` no backend, com teste de território
-  (reaproveitando os casos de `patients.listMicroArea`).
-- `alerts.statusFor` escopado ao token do paciente, com teste de que um
-  token não pode ler o status de outro paciente (fecha INV-05 com evidência,
-  não por ausência de endpoint).
-- Tela de Status do paciente deixa de ser `const` (fecha L-03 do relatório de
-  validação, hoje classificada como "Tela de Status mente para o paciente").
+- ~~`visits.pull` no backend, com teste de território~~ — feito (plano de
+  2026-09-17/18, Task 10 + consumo pelo ACS).
+- ~~`alerts.statusFor` escopado ao token do paciente~~ — feito
+  (`docs/superpowers/plans/2026-09-18-sync-periodica-rf05-l06.md`, Tasks
+  2-3): sem `patientId` como parâmetro, então um token só pode ler o
+  próprio status por construção (INV-05).
+- ~~Tela de Status do paciente deixa de ser `const`~~ — feito (mesmo plano,
+  Task 4): fecha L-03 do relatório de validação.
 - ~~Consumo do cursor pelo app ACS (fila)~~ — feito: `VisitPullService` (Task
   10 do plano de implementação) mais a tela "Área" que o aciona e mostra o
   resultado (`docs/superpowers/plans/2026-09-18-rf15-consumo-acs-pull-visitas.md`).
-  Falta ainda o consumo pelo app paciente (status) — mesma garantia de
-  device reinstalado sem duplicar nem perder itens já vale para o ACS
-  (coberta em `apps/acs/test/visit_pull_service_test.dart` e
-  `apps/acs/test/sync_cursor_store_test.dart`); falta provar o equivalente
-  do lado paciente quando esse trabalho for feito.
+- ~~Sincronização periódica em segundo plano~~ — feito (mesmo plano, Tasks 5
+  e 6): `Timer.periodic` no shell do ACS e na tela Status do paciente, além
+  do disparo ao abrir e do botão manual, pausado fora do primeiro plano.
+
+RF15 está completo dos dois lados (ACS e paciente). O que falta para RF08
+completo — cache `sqflite` persistido, não só a chamada ao vivo — é
+trabalho novo, não coberto aqui.
 
 ---
 

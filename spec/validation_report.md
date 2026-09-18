@@ -70,17 +70,17 @@ cliente · **`parcial`** = existe, mas alimentado por dado fabricado ·
 | RF02 | Onboarding via QR Code | **ausente** | Botão presente; `app.dart:170` emite snackbar "será disponibilizada". |
 | RF03 | Botão de alerta de urgência (MQTT) | **parcial** | Endpoint e entrega funcionam (validado em dispositivo). O app agora tenta ler a localização e envia somente um hash truncado; sem permissão/GPS usa `unknownLocationHash` e informa a pessoa. A precisão e o risco de reidentificação ainda exigem decisão de produto — ver L-02/L-05. |
 | RF04 | Formulário de triagem estruturada | **backend** | `triage.evaluate` exige token, classifica pelo motor determinístico e grava em `triage_sessions` com auditoria. |
-| RF05 | Painel de status da solicitação | **ausente** | A tela existe e é 100% `const`. Não há endpoint de leitura para o paciente. Ver L-03. |
+| RF05 | Painel de status da solicitação | **backend** | `alerts.statusFor` lê o status do alerta mais recente do paciente autenticado pelo próprio token — sem `patientId` como parâmetro, então um token só pode ler o próprio status (INV-05). A tela deixou de ser `const` e consome o endpoint (fecha L-03). |
 | RF06 | Lembretes de saúde | **ausente** | `RemindersScreen` tem lista fixa; salvar descarta. Sem `flutter_local_notifications`. |
 | RF07 | Login institucional (matrícula/senha) | **ausente** | Só o token HMAC de desenvolvimento, sob `ENABLE_DEV_LOGIN`. |
-| RF08 | Territorialização (cache da microárea) | **parcial** | `patients.listMicroArea` é real e territorializado. A tela "Área" mostra literais — ver L-06. |
+| RF08 | Territorialização (cache da microárea) | **parcial** | `patients.listMicroArea` é real, territorializado, e a tela "Área" agora mostra o número real de pacientes (L-06 fechado). Continua parcial: a chamada é ao vivo a cada abertura/ciclo periódico, não um cache `sqflite` persistido em disco que sobrevive offline — esse é o trabalho que falta para RF08 completo. |
 | RF09 | Dashboard de priorização dinâmica | **backend** | Fila real alimentada por MQTT, ordenada por risco e idade; valida rejeição de alerta de outra microárea. |
 | RF10 | Mapa interativo | **parcial** | Coordenadas são **fabricadas** a partir do hash — ver L-05. |
 | RF11 | Registro rápido de visitas offline-first | **backend** | `visits.sync` com dedupe por `localId`, versionamento, conflito e território. Fila SQLCipher no dispositivo. |
 | RF12 | Geofencing (check-in passivo) | **ausente** | `RouteService` calcula chegada localmente, mas não há GPS em segundo plano. |
 | RF13 | Escalonamento para SAMU/UBS | **ausente** | Ambos os botões são snackbars — ver L-07. |
 | RF14 | Avisos segmentados (push) | **ausente** | `NoticesScreen` descarta a entrada. Sem FCM/APNs. |
-| RF15 | Sincronização bidirecional | **parcial** | Dispositivo → central e central → dispositivo (`visits.pull`, cursor por dispositivo) funcionam e são testados, incluindo a tela do ACS que consome o pull — hoje só como contagem exibida na tela (referência somente leitura), sem gravar as visitas puxadas na fila offline local; persistir esse resultado como registro local é trabalho futuro. Falta só o lado do paciente (RF05, `alerts.statusFor`) — ver §5 de `docs/superpowers/specs/2026-09-16-decisoes-produto-pos-validacao.md`. |
+| RF15 | Sincronização bidirecional | **sim** | Dispositivo → central e central → dispositivo funcionam e são testados dos dois lados: ACS (`visits.pull`) e paciente (`alerts.statusFor`, RF05). Ambos rodam automaticamente ao abrir a tela, em ciclo periódico enquanto o app está em primeiro plano, e por botão manual. Do lado ACS, o pull continua sendo só referência somente leitura (contagem exibida na tela), sem gravar as visitas puxadas na fila offline local — persistir esse resultado como registro local segue como trabalho futuro (ver nota em `VisitPullService`), fora do escopo deste plano. |
 | RF16 | Motor de triagem determinístico | **backend** | `TriageEngine`, determinismo verificado em teste de integração. INV-02 preservado. |
 | RF17 | Logs de auditoria e conformidade | **backend** | `audit_logs` encadeado por HMAC; gravou `granted` e `denied_territory` nesta validação; cadeia verificada íntegra. |
 | RF18 | Dark mode nativo | **app-only** | Tema único dark nos três apps, com matriz de contraste testada. |
@@ -213,9 +213,11 @@ mesmo vale para a TMRAV segmentada por risco, que é a métrica *North Star* do 
   validar o fluxo em emulador/dispositivo e aprovar a precisão de localização
   perante LGPD; o risco de reidentificação espacial está ligado à recomendação
   #9 de `spec/lgpd_data_audit.md`.
-- **L-03 · Tela de Status mente para o paciente.** Árvore `const` anunciando
-  triagem vermelha em análise. Um paciente pode acreditar que um pedido de
-  socorro está sendo tratado quando nada foi registrado.
+- **L-03 · ~~Tela de Status mente para o paciente.~~** RESOLVIDO — a tela
+  deixou de ser `const` e consome `alerts.statusFor` (RF05), mostrando o
+  status real do alerta mais recente do paciente autenticado em vez de uma
+  árvore fixa anunciando triagem vermelha em análise. Ver
+  `docs/superpowers/plans/2026-09-18-sync-periodica-rf05-l06.md`.
 - **L-04 · ~~A triagem não deixa registro.~~** RESOLVIDO — `triage.evaluate`
   exige `accessToken`, grava em `triage_sessions` e audita. Ver
   `docs/superpowers/plans/2026-09-16-triagem-persistida.md`.
@@ -244,7 +246,13 @@ mesmo vale para a TMRAV segmentada por risco, que é a métrica *North Star* do 
   pré-existente e não relacionado). O veredito de RF10/L-05 permanece
   `parcial` nesta tabela porque reclassificar a matriz inteira é decisão de
   produto separada, fora do escopo desta task.
-- **L-06 · Tela "Área" com números falsos** que contradizem o backend (142 vs 5).
+- **L-06 · ~~Tela "Área" com números falsos que contradizem o backend (142 vs
+  5).~~** RESOLVIDO — a tela agora consome `patients.listMicroArea` ao vivo
+  (mesma chamada real que já territorializava a fila/visita) e mostra a
+  contagem real de pacientes da microárea, atualizada ao abrir a tela e em
+  ciclo periódico. Ver
+  `docs/superpowers/plans/2026-09-18-sync-periodica-rf05-l06.md`. RF08
+  continua `parcial` — ver linha RF08 acima.
 - **L-07 · Escalonamento SAMU não funciona.** O botão mais crítico da UI de
   emergência é um snackbar.
 - **L-08 · RPC sem TLS.** O backend fala HTTP puro na 8080; só o broker usa TLS.

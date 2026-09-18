@@ -182,7 +182,10 @@ continuam refletindo o estado de código real.
 RF15 teve sua metade ACS (contrato + tela consumidora) implementada em
 `docs/superpowers/plans/2026-09-17-decisoes-produto-pos-validacao-implementacao.md`
 (Task 10) e `docs/superpowers/plans/2026-09-18-rf15-consumo-acs-pull-visitas.md`;
-a metade paciente (RF05) segue pendente.
+a metade paciente (RF05, `alerts.statusFor`) e a sincronização periódica em
+segundo plano nos dois apps foram implementadas em
+`docs/superpowers/plans/2026-09-18-sync-periodica-rf05-l06.md`, que também
+fechou o débito L-06/RF08 (números reais na tela "Área" do ACS).
 
 ### 2.3 Modelagem de Fluxos Críticos como Máquinas de Estados (FSM)
 
