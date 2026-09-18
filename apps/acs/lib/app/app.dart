@@ -355,6 +355,15 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
     }
   }
 
+  /// O botão "Atualizar dados da microárea" repete os dois carregamentos da
+  /// aba "Área" — visitas (RF15) e pacientes da microárea (L-06/RF08) — para
+  /// que uma falha em qualquer um dos dois tenha um jeito de tentar de novo,
+  /// não só o pull de visitas.
+  void _refreshAreaData() {
+    _pullVisits();
+    _loadMicroAreaPatients();
+  }
+
   /// Recarrega as visitas gravadas em execuções anteriores.
   ///
   /// Sem esta chamada, persistir não serviria para nada — `restore()` existia e
@@ -604,7 +613,7 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
           lastPulledCount: _lastPulledCount,
           lastPulledAt: _lastPulledAt,
           pullError: _pullError,
-          onRefresh: _pullVisits,
+          onRefresh: _refreshAreaData,
           loadingPatients: _loadingMicroAreaPatients,
           patientCount: _microAreaPatients?.length,
           patientsLoadedAt: _microAreaPatientsLoadedAt,

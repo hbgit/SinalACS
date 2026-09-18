@@ -1319,6 +1319,7 @@ void main() {
     setUp(() => EncryptedLocalDatabase.deleteDatabaseFile(dbName));
     tearDown(() => EncryptedLocalDatabase.deleteDatabaseFile(dbName));
 
+    /// Constrói um `VisitPullService` com banco em memória para testes.
     VisitPullService pullService(FakeAcsBackend backend) =>
         VisitPullService(
           backend: backend,
@@ -1330,6 +1331,9 @@ void main() {
           localVisits: InMemoryVisitStore(),
         );
 
+    /// Bombeia frames finitos intercalados com esperas REAIS até o pull
+    /// terminar, porque `VisitPullService` usa um banco de verdade (sqflite
+    /// com round-trip real, não fake) — `pumpAndSettle` sozinho não converge.
     Future<void> settleRealAsync(WidgetTester tester) async {
       for (var i = 0; i < 30; i++) {
         await tester.pump(const Duration(milliseconds: 16));
@@ -1377,6 +1381,33 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Não foi possível carregar'), findsOneWidget);
+    });
+
+    testWidgets('"Atualizar dados da microárea" também repete o carregamento de pacientes após uma falha', (tester) async {
+      final backend = FakeAcsBackend()..listPatientsFailure = const BackendFailure('Sem conexão com o servidor.');
+
+      await tester.pumpWidget(SinalAcsApp(
+        backend: backend,
+        feedBuilder: (queue) => FakeAlertFeed(queue),
+        visitPullService: pullService(backend),
+      ));
+      await tester.tap(find.byKey(const Key('login_button')));
+      await settleRealAsync(tester);
+      await tester.tap(find.text('Área'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Não foi possível carregar'), findsOneWidget);
+      expect(backend.listPatientsCount, 1);
+
+      backend.listPatientsFailure = null;
+      backend.patients = [
+        MicroAreaPatient(patientId: seedPatientId, name: 'Paciente 1', isChronic: false, chronicConditions: []),
+      ];
+      await tester.tap(find.byKey(const Key('pull_visits')));
+      await settleRealAsync(tester);
+
+      expect(backend.listPatientsCount, 2);
+      expect(find.text('1 cadastrado'), findsOneWidget);
     });
   });
 }
