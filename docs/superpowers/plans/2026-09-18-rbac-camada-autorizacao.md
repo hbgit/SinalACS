@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Fechar RNF06/L-09 substituindo as sete checagens de papel escritas à mão por uma camada única de autorização, e garantir por teste que nenhum endpoint novo nasça público por omissão.
+**Goal:** Fechar RNF06/L-09 substituindo as oito checagens de papel escritas à mão por uma camada única de autorização, e garantir por teste que nenhum endpoint novo nasça público por omissão.
 
-**Architecture:** Duas peças, sem canal novo e sem dependência nova. (1) `Authorization.require` em `application/auth/authorization.dart` — um único ponto que decide "este papel, neste território, pode?". Ele **não** lança exceção própria: recebe `onDenied` e deixa cada chamador lançar exatamente a exceção que já lançava hoje (`StateError` nos seis serviços territoriais, `TriageAuthorizationException` na triagem), então a tradução `StateError → AlertPermissionException` que os endpoints já fazem continua funcionando sem tocar em endpoint nenhum. (2) `AuthenticatedEndpoint` em `endpoints/authenticated_endpoint.dart` — a classe-base que centraliza a verificação do token (hoje duplicada em cinco endpoints) e marca, de forma legível por um teste, quais endpoints exigem credencial. Um teste de postura lê os arquivos de `lib/src/endpoints/` e falha se um endpoint novo não estender a base nem constar de uma allowlist explícita com justificativa.
+**Architecture:** Duas peças, sem canal novo e sem dependência nova. (1) `Authorization.require` em `application/auth/authorization.dart` — um único ponto que decide "este papel, neste território, pode?". Ele **não** lança exceção própria: recebe `onDenied` e deixa cada chamador lançar exatamente a exceção que já lançava hoje (`StateError` nos quatro serviços territoriais — sete sítios —, `TriageAuthorizationException` na triagem), então a tradução `StateError → AlertPermissionException` que os endpoints já fazem continua funcionando sem tocar em endpoint nenhum. (2) `AuthenticatedEndpoint` em `endpoints/authenticated_endpoint.dart` — a classe-base que centraliza a verificação do token (hoje duplicada em cinco endpoints) e marca, de forma legível por um teste, quais endpoints exigem credencial. Um teste de postura lê os arquivos de `lib/src/endpoints/` e falha se um endpoint novo não estender a base nem constar de uma allowlist explícita com justificativa.
 
 **Tech Stack:** Dart/Serverpod (`backend/sinalacs_server`). Nenhum pacote novo, nenhum modelo `.spy.yaml` novo, nenhuma migração.
 
@@ -13,7 +13,7 @@
 ## Global Constraints
 
 - **Zero mudança de comportamento observável.** Toda mensagem de erro, todo tipo de exceção e todo texto em português permanecem idênticos aos de hoje. Este plano é um refactor de estrutura, não de regra: os 171 testes existentes (`cd backend/sinalacs_server && dart test`) devem continuar passando sem serem editados — **com uma única exceção declarada**, o novo teste de postura. Se algum teste existente precisar mudar, a refatoração saiu dos trilhos.
-- **`Authorization.require` lança `StateError`?** Não por conta própria: quem decide é o `onDenied` de cada chamador. Isso é deliberado — `triage_session_service.dart` lança `TriageAuthorizationException` (tipada) e os outros seis lançam `StateError`. Unificar o tipo quebraria a tradução dos endpoints e os testes que a verificam.
+- **`Authorization.require` lança `StateError`?** Não por conta própria: quem decide é o `onDenied` de cada chamador. Isso é deliberado — `triage_session_service.dart` lança `TriageAuthorizationException` (tipada) e os outros sete sítios lançam `StateError`. Unificar o tipo quebraria a tradução dos endpoints e os testes que a verificam.
 - **Não ligar `requireLogin => true`.** O stack de autenticação do próprio Serverpod (`AuthenticationHandler`) não está conectado neste projeto — a autenticação é feita à mão, com `verifyToken`. Trocar a flag sem conectar o handler rejeitaria *todas* as chamadas. A postura de cada endpoint passa a ser verificada por teste (Task 4), que é o que o F4 pede; a flag continua `false` com o motivo documentado.
 - **Papéis `admin` e `coordinator` continuam inalcançáveis de propósito.** O enum `UserRole` tem 4 valores (`patient`, `acs`, `coordinator`, `admin`), mas nenhum caminho emite `coordinator`/`admin` hoje e este plano não cria um — o backend do backoffice é escopo de outro plano, deliberadamente excluído. O teste unitário da guarda exercita esses papéis construindo `AuthenticatedUser` direto (sem emitir token), que é o suficiente para provar que a barreira os recusa.
 - Comentários e mensagens em português, seguindo o repositório.
@@ -29,7 +29,7 @@
 - **Create** `backend/sinalacs_server/test/unit/authorization_test.dart` — testes herméticos da guarda.
 - **Create** `backend/sinalacs_server/test/unit/endpoint_auth_posture_test.dart` — o guard de F4.
 - **Modify** os 4 endpoints que só têm métodos autenticados: `alerts_endpoint.dart`, `visits_endpoint.dart`, `triage_endpoint.dart`, `patients_endpoint.dart` — passam a estender `AuthenticatedEndpoint` e perdem o `_authenticate` próprio.
-- **Modify** os 6 serviços com checagem ad-hoc: `application/alerts/red_alert_service.dart` (3 sítios), `application/visits/visit_sync_service.dart` (2), `application/patients/patient_directory_service.dart` (1), `application/onboarding/onboarding_service.dart` (1), `application/triage/triage_session_service.dart` (1).
+- **Modify** os 5 serviços com checagem ad-hoc: `application/alerts/red_alert_service.dart` (3 sítios), `application/visits/visit_sync_service.dart` (2), `application/patients/patient_directory_service.dart` (1), `application/onboarding/onboarding_service.dart` (1), `application/triage/triage_session_service.dart` (1).
 - **Modify** `endpoints/onboarding_endpoint.dart` — postura mista (um método público, um autenticado): continua `Endpoint` puro, mas passa a usar `authenticateToken` e entra na allowlist do teste de postura.
 - **Modify** `spec/security_assessment.md`, `spec/validation_report.md` (L-09), `backend/CLAUDE.md` — sincronizar o que deixou de ser verdade.
 
@@ -171,8 +171,8 @@ import 'package:sinalacs_server/src/generated/protocol.dart';
 /// A única decisão de "este papel, neste território, pode?" do backend
 /// (RNF06, achado F4 de spec/security_assessment.md).
 ///
-/// Antes desta classe a mesma pergunta era respondida sete vezes, à mão, uma
-/// por serviço — seis com `StateError` e uma com `TriageAuthorizationException`.
+/// Antes desta classe a mesma pergunta era respondida oito vezes, à mão, uma
+/// por sítio — sete com `StateError` e uma com `TriageAuthorizationException`.
 /// Nada obrigava um serviço novo a ter a sua: um caso de uso nascia público por
 /// omissão e só uma revisão humana pegava.
 ///
@@ -189,9 +189,16 @@ abstract final class Authorization {
   /// `requireMicroArea` é `true` por omissão porque a territorialização é
   /// invariante (INV-01): quem lê ou escreve dado de paciente o faz *dentro* de
   /// uma microárea, e um token sem território não tem barreira nenhuma para
-  /// aplicar. O caso `false` existe para leitura escopada ao próprio titular
-  /// (`alerts.statusFor`, RF05), que não passa por território — ali quem
-  /// restringe é o `user.id` vindo do token, não a microárea.
+  /// aplicar.
+  ///
+  /// O caso `false` existe para os sítios que hoje só checam papel, **e são
+  /// exatamente dois**: `alerts.statusFor` (RF05, leitura escopada ao próprio
+  /// titular pelo `user.id` do token) e `TriageSessionService.evaluate`
+  /// (`triage_session_service.dart:105`, que também só testa o papel). Passar
+  /// `true` em qualquer um deles acrescenta uma recusa territorial que não
+  /// existe hoje — mudança de comportamento observável, proibida pelas Global
+  /// Constraints deste plano. Os outros seis sítios já checam
+  /// `|| microAreaId == null` e usam o default.
   static void require(
     AuthenticatedUser user, {
     required Set<UserRole> roles,
@@ -221,7 +228,7 @@ Co-Authored-By: Claude Code <noreply@anthropic.com>"
 
 ---
 
-## Task 2: Migrar as sete checagens ad-hoc para a guarda
+## Task 2: Migrar as oito checagens ad-hoc para a guarda
 
 **Files:**
 - Modify: `backend/sinalacs_server/lib/src/application/alerts/red_alert_service.dart:115`, `:172`, `:185`
@@ -415,7 +422,7 @@ Expected: **nenhuma saída** (o comando não imprime nada e retorna 1; isso é o
 
 ```bash
 git add backend/sinalacs_server/lib/src/application/
-git commit -m "refactor(backend): unificar as 7 checagens de papel em Authorization.require (RNF06)
+git commit -m "refactor(backend): unificar as 8 checagens de papel em Authorization.require (RNF06)
 
 Co-Authored-By: Claude Code <noreply@anthropic.com>"
 ```
@@ -737,7 +744,7 @@ Em `spec/validation_report.md`, substitua o texto atual de L-09 (linhas 280-283)
 ```markdown
 - **L-09 · RNF06 (RBAC) — camada de autorização implementada, papéis
   institucionais ainda ausentes.** `Authorization.require` centraliza a decisão
-  de papel/território e substituiu as 7 checagens ad-hoc; os 4 endpoints
+  de papel/território e substituiu as 8 checagens ad-hoc; os 4 endpoints
   integralmente autenticados estendem `AuthenticatedEndpoint` e um teste de
   postura impede um endpoint novo de nascer público. O que **não** mudou: os
   papéis `coordinator` e `admin` continuam sem caminho de emissão e sem
