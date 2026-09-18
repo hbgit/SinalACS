@@ -193,12 +193,14 @@ abstract final class Authorization {
   ///
   /// O caso `false` existe para os sítios que hoje só checam papel, **e são
   /// exatamente dois**: `alerts.statusFor` (RF05, leitura escopada ao próprio
-  /// titular pelo `user.id` do token) e `TriageSessionService.evaluate`
-  /// (`triage_session_service.dart:105`, que também só testa o papel). Passar
-  /// `true` em qualquer um deles acrescenta uma recusa territorial que não
-  /// existe hoje — mudança de comportamento observável, proibida pelas Global
-  /// Constraints deste plano. Os outros seis sítios já checam
-  /// `|| microAreaId == null` e usam o default.
+  /// titular pelo `user.id` do token) e
+  /// `TriageSessionService.evaluateAndRecord`
+  /// (`triage_session_service.dart:96`, que também só testa o papel — o
+  /// `evaluate` sem o `AndRecord` é do `TriageEngine` e não checa papel
+  /// nenhum). Passar `true` em qualquer um deles acrescenta uma recusa
+  /// territorial que não existe hoje — mudança de comportamento observável,
+  /// proibida pelas Global Constraints deste plano. Os outros seis sítios já
+  /// checam `|| microAreaId == null` e usam o default.
   static void require(
     AuthenticatedUser user, {
     required Set<UserRole> roles,
