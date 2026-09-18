@@ -1276,22 +1276,47 @@ Não esqueça de atualizar o comentário de classe de `AuthEndpoint`, que hoje d
 /// autenticação institucional; `loginInstitutional` é o caminho real (RF07).
 ```
 
-- [ ] **Step 6: Rodar os testes de integração e confirmar que passam**
+- [ ] **Step 6: Regenerar o cliente**
+
+Adicionar um método a um endpoint **não** basta para o app enxergá-lo: o cliente
+tipado carrega um stub por método (`backend/sinalacs_client/lib/src/protocol/client.dart:100`
+é a classe `EndpointAuth`, com `developmentLogin` em `:106`), e ele só passa a existir
+depois do gerador rodar. Sem este passo a Task 6 falha ao compilar em
+`_client.auth.loginInstitutional(...)`, com um erro que aponta para o app e não para a
+causa.
+
+```bash
+cd backend/sinalacs_server
+serverpod generate
+```
+
+Expected: `sinalacs_client/lib/src/protocol/client.dart` ganha `loginInstitutional` na
+classe `EndpointAuth`. Confirme com:
+
+```bash
+grep -n "loginInstitutional" ../sinalacs_client/lib/src/protocol/client.dart
+```
+
+Expected: uma ocorrência, dentro de `EndpointAuth`.
+
+- [ ] **Step 7: Rodar os testes de integração e confirmar que passam**
 
 Run: `cd backend/sinalacs_server && dart test test/integration/institutional_login_test.dart`
 Expected: PASS — 3 testes.
 
-- [ ] **Step 7: Rodar a suíte inteira**
+- [ ] **Step 8: Rodar a suíte inteira**
 
 Run: `cd backend/sinalacs_server && dart test`
 Expected: PASS — contagem da Task 3 + 3.
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
 git add backend/sinalacs_server/lib/src/infrastructure/database/orm_acs_credential_store.dart \
         backend/sinalacs_server/lib/src/runtime/alert_runtime.dart \
         backend/sinalacs_server/lib/src/endpoints/auth_endpoint.dart \
+        backend/sinalacs_server/lib/src/generated/ \
+        backend/sinalacs_client/ \
         backend/sinalacs_server/test/integration/
 git commit -m "feat(backend): endpoint auth.loginInstitutional com store ORM (RF07)
 

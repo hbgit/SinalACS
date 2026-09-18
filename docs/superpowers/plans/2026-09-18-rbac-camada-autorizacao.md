@@ -24,7 +24,7 @@
 
 ## File Structure
 
-- **Create** `backend/sinalacs_server/lib/src/application/auth/authorization.dart` — `Authorization.require`, a única regra de papel/território do backend.
+- **Create** `backend/sinalacs_server/lib/src/application/auth/authorization.dart` — `Authorization.require`, a única regra de papel e de presença de território no token (a comparação paciente-vs-ACS continua em cada caso de uso).
 - **Create** `backend/sinalacs_server/lib/src/endpoints/authenticated_endpoint.dart` — `authenticateToken()` (função) + `AuthenticatedEndpoint` (classe-base).
 - **Create** `backend/sinalacs_server/test/unit/authorization_test.dart` — testes herméticos da guarda.
 - **Create** `backend/sinalacs_server/test/unit/endpoint_auth_posture_test.dart` — o guard de F4.
@@ -754,7 +754,7 @@ Em `spec/security_assessment.md`, no achado **F4**, acrescente ao final da seç�
 ```markdown
 **Estado atual (2026-09-18):** a extração recomendada foi implementada —
 `Authorization.require` (`backend/sinalacs_server/lib/src/application/auth/authorization.dart`)
-é a única regra de papel/território, os quatro endpoints com postura
+é a única regra de **papel** e de **presença de território no token** — a comparação entre a microárea **do paciente** e a do ACS continua em cada caso de uso (`onboarding_service.dart:112-113`, `visit_sync_service.dart:252-262`), porque a guarda nunca vê o paciente —, os quatro endpoints com postura
 integralmente autenticada estendem `AuthenticatedEndpoint`
 (`.../endpoints/authenticated_endpoint.dart`) e
 `test/unit/endpoint_auth_posture_test.dart` falha se um endpoint novo não
@@ -770,7 +770,9 @@ Em `spec/validation_report.md`, substitua o texto atual de L-09 (linhas 280-283)
 ```markdown
 - **L-09 · RNF06 (RBAC) — camada de autorização implementada, papéis
   institucionais ainda ausentes.** `Authorization.require` centraliza a decisão
-  de papel/território e substituiu as 8 checagens ad-hoc; os 4 endpoints
+  de papel e de presença de território no token — a comparação entre a microárea do
+  paciente e a do ACS continua em cada caso de uso — e substituiu as 8 checagens
+  ad-hoc; os 4 endpoints
   integralmente autenticados estendem `AuthenticatedEndpoint` e um teste de
   postura impede um endpoint novo de nascer público. O que **não** mudou: os
   papéis `coordinator` e `admin` continuam sem caminho de emissão e sem
@@ -782,7 +784,7 @@ Em `spec/validation_report.md`, substitua o texto atual de L-09 (linhas 280-283)
 Na tabela de RNF (linha 99), troque o veredito de RNF06 de `ausente` para `parcial`, mantendo a coluna de evidência coerente:
 
 ```markdown
-| RNF06 | RBAC | **parcial** | `Authorization.require` é a única regra de papel/território e um teste de postura cobre os 7 endpoints, mas `requireLogin` segue `false` (o `AuthenticationHandler` do Serverpod não está conectado) e os papéis `coordinator`/`admin` não têm caminho de emissão. |
+| RNF06 | RBAC | **parcial** | `Authorization.require` é a única regra de papel e de presença de território no token (a comparação entre a microárea do paciente e a do ACS segue em cada caso de uso) e um teste de postura cobre os 7 endpoints, mas `requireLogin` segue `false` (o `AuthenticationHandler` do Serverpod não está conectado) e os papéis `coordinator`/`admin` não têm caminho de emissão. |
 ```
 
 Atualize também a linha de contagem logo abaixo da tabela de RFs, se ela citar RNF06.
