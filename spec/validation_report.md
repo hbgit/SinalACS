@@ -96,7 +96,7 @@ cliente · **`parcial`** = existe, mas alimentado por dado fabricado ·
 | RNF03 | Criptografia AES-256 em repouso | **backend/app** | SQLCipher provado em dispositivo (o arquivo não contém o conteúdo em texto claro e não abre com chave errada). **No PostgreSQL não há criptografia de coluna** — `pgcrypto` previsto no PRD não foi adotado. |
 | RNF04 | TLS 1.3 em todas as comunicações | **parcial** | Broker em TLS com verificação de hostname. **O RPC do backend é HTTP puro** na 8080, sem TLS, inclusive do emulador. |
 | RNF05 | Acessibilidade WCAG AA | **app-only** | Matrizes de contraste, alvos de toque e `liveRegion` testados nos três apps. |
-| RNF06 | RBAC | **parcial** | `Authorization.require` é a única regra de papel/território e um teste de postura cobre os 7 endpoints, mas `requireLogin` segue `false` (o `AuthenticationHandler` do Serverpod não está conectado) e os papéis `coordinator`/`admin` não têm caminho de emissão. |
+| RNF06 | RBAC | **parcial** | `Authorization.require` é a única regra de papel e de presença de território no token (a comparação entre a microárea do paciente e a do ACS segue em cada caso de uso) e um teste de postura cobre os 7 endpoints, mas `requireLogin` segue `false` (o `AuthenticationHandler` do Serverpod não está conectado) e os papéis `coordinator`/`admin` não têm caminho de emissão. |
 
 ### Invariantes de negócio
 
@@ -279,7 +279,9 @@ script rodar.
 
 - **L-09 · RNF06 (RBAC) — camada de autorização implementada, papéis
   institucionais ainda ausentes.** `Authorization.require` centraliza a decisão
-  de papel/território e substituiu as 8 checagens ad-hoc; os 4 endpoints
+  de papel e de presença de território no token — a comparação entre a microárea
+  do paciente e a do ACS continua em cada caso de uso — e substituiu as 8
+  checagens ad-hoc; os 4 endpoints
   integralmente autenticados estendem `AuthenticatedEndpoint` e um teste de
   postura impede um endpoint novo de nascer público. O que **não** mudou: os
   papéis `coordinator` e `admin` continuam sem caminho de emissão e sem

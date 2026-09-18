@@ -199,9 +199,14 @@ enumere os endpoints e falhe se um novo endpoint com acesso a
 
 **Estado atual (verificado 2026-09-18):** a extração recomendada foi implementada —
 `Authorization.require` (`backend/sinalacs_server/lib/src/application/auth/authorization.dart`)
-é a única regra de papel/território, os quatro endpoints com postura
+é a única regra de **papel** e de **presença de território no token**: decide se o
+papel está entre os permitidos e se o token carrega uma microárea. A comparação
+entre a microárea **do paciente** e a do ACS **não** passou por ela e continua em
+cada caso de uso (`onboarding_service.dart:112-113`,
+`visit_sync_service.dart:252-262`) — a guarda nunca vê o paciente, então essa
+checagem não tem como migrar para lá. Os quatro endpoints com postura
 integralmente autenticada estendem `AuthenticatedEndpoint`
-(`.../endpoints/authenticated_endpoint.dart`) e
+(`backend/sinalacs_server/lib/src/endpoints/authenticated_endpoint.dart`) e
 `test/unit/endpoint_auth_posture_test.dart` falha se um endpoint novo não
 estender a base nem constar da allowlist explícita. `requireLogin` continua
 `false` em todos eles **de propósito**: o `AuthenticationHandler` do Serverpod

@@ -593,7 +593,7 @@ Cada registro possui um campo `version` (inteiro incremental). No momento da sin
 
 **Política ABAC (Atribute-Based Access Control):**
 
-Exemplo ilustrativo: não existe hoje uma camada de política ABAC genérica como esta. A checagem de papel e microárea passou a ser feita por uma regra única, `Authorization.require` (`backend/sinalacs_server/lib/src/application/auth/authorization.dart`), chamada pelos casos de uso; os papéis `admin` e `coordinator` ainda não têm caminho de emissão nem endpoint que os exercite, então o RBAC institucional completo segue pendente (ver RNF06 na seção 2.2). A API usada abaixo também é ilustrativa, não é a do ORM do Serverpod.
+Exemplo ilustrativo: não existe hoje uma camada de política ABAC genérica como esta. A checagem de papel — e a de que o token carrega uma microárea — passou a ser feita por uma regra única, `Authorization.require` (`backend/sinalacs_server/lib/src/application/auth/authorization.dart`), chamada pelos casos de uso; a comparação entre a microárea do paciente e a do ACS continua inline em cada caso de uso. Os papéis `admin` e `coordinator` ainda não têm caminho de emissão nem endpoint que os exercite, então o RBAC institucional completo segue pendente (ver RNF06 na seção 2.2). A API usada abaixo também é ilustrativa, não é a do ORM do Serverpod.
 
 ```dart
 // Exemplo ilustrativo — não há camada ABAC genérica no código real;
