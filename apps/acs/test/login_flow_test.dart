@@ -1381,6 +1381,30 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Não foi possível carregar'), findsOneWidget);
+      // O motivo só chega à tela pelo banner: a linha "Pacientes sincronizados"
+      // diz que falhou, este diz por quê.
+      expect(find.byKey(const Key('patients_error')), findsOneWidget);
+      expect(find.text('Sem conexão com o servidor.'), findsOneWidget);
+    });
+
+    testWidgets('uma falha não classificada ao carregar pacientes mostra o aviso genérico', (tester) async {
+      // `StateError` não é `BackendFailure` de propósito: cobre o ramo
+      // `catch (error, stackTrace)` de `_loadMicroAreaPatients`, irmão do mesmo
+      // ramo de `_pullVisits` — nenhum `BackendFailure` o exercita.
+      final backend = FakeAcsBackend()..listPatientsUnclassifiedFailure = StateError('queda inesperada');
+
+      await tester.pumpWidget(SinalAcsApp(
+        backend: backend,
+        feedBuilder: (queue) => FakeAlertFeed(queue),
+        visitPullService: pullService(backend),
+      ));
+      await tester.tap(find.byKey(const Key('login_button')));
+      await settleRealAsync(tester);
+      await tester.tap(find.text('Área'));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('patients_error')), findsOneWidget);
+      expect(find.text('Verifique a conexão e tente de novo.'), findsOneWidget);
     });
 
     testWidgets('"Atualizar dados da microárea" também repete o carregamento de pacientes após uma falha', (tester) async {

@@ -389,6 +389,20 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
           detail: failure.message,
         );
       });
+    } catch (error, stackTrace) {
+      developer.log(
+        'falha não classificada ao carregar pacientes da microárea',
+        name: 'sinalacs.acs.micro_area_patients',
+        error: error,
+        stackTrace: stackTrace,
+      );
+      if (!mounted) return;
+      setState(() {
+        _microAreaPatientsError = (
+          title: 'Não foi possível carregar os pacientes da microárea.',
+          detail: 'Verifique a conexão e tente de novo.',
+        );
+      });
     } finally {
       if (mounted) setState(() => _loadingMicroAreaPatients = false);
     }
@@ -776,6 +790,17 @@ class TerritorializationScreen extends StatelessWidget {
         const SizedBox(height: 12),
         _InfoRow('Pacientes sincronizados', _patientCountText()),
         _InfoRow('Cache local', _cacheFreshnessText()),
+        // A linha acima diz que falhou; este banner diz por quê. Sem ele o
+        // `detail` de `patientsError` (a mensagem do servidor) nunca chegava à
+        // tela — o `InfraNotice` inteiro era reduzido a "Não foi possível
+        // carregar". Mesmo tratamento que `pullError` já tinha logo abaixo,
+        // inclusive o `liveRegion` de SC 4.1.3.
+        if (patientsError != null)
+          _InfraBanner(
+            key: const Key('patients_error'),
+            icon: Icons.person_off_outlined,
+            notice: patientsError!,
+          ),
         const Divider(height: 32),
         const Text('Sincronização com a central', style: TextStyle(fontWeight: FontWeight.bold)),
         const SizedBox(height: 8),

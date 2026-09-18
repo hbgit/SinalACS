@@ -104,9 +104,17 @@ class FakeAcsBackend implements AcsBackend {
     ];
   }
 
+  /// Falha não classificada (não é `BackendFailure`), para exercitar o ramo
+  /// `catch (error, ...)` genérico de `_loadMicroAreaPatients` em `app.dart` —
+  /// algo que nenhum `BackendFailure` simula. Checada antes de
+  /// [listPatientsFailure].
+  Object? listPatientsUnclassifiedFailure;
+
   @override
   Future<List<MicroAreaPatient>> listPatients() async {
     listPatientsCount++;
+    final unclassified = listPatientsUnclassifiedFailure;
+    if (unclassified != null) throw unclassified;
     final failure = listPatientsFailure;
     if (failure != null) throw failure;
     return patients;
