@@ -46,7 +46,7 @@ import 'protocol.dart' as _i14;
 /// A autenticação continua sendo o token HMAC de desenvolvimento, verificado
 /// aqui em vez de no laço de requisições do servidor `dart:io`.
 /// {@category Endpoint}
-class EndpointAlerts extends _i1.EndpointRef {
+class EndpointAlerts extends EndpointAuthenticated {
   EndpointAlerts(_i1.EndpointCaller caller) : super(caller);
 
   @override
@@ -112,6 +112,21 @@ class EndpointAuth extends _i1.EndpointRef {
   );
 }
 
+/// Endpoint cujos métodos exigem credencial.
+///
+/// A existência desta classe é o que permite ao teste de postura
+/// (`test/unit/endpoint_auth_posture_test.dart`) distinguir, no texto-fonte,
+/// um endpoint autenticado de um público. `requireLogin` continua `false`: o
+/// stack de autenticação do próprio Serverpod (`AuthenticationHandler`) não
+/// está conectado neste projeto — a autenticação é feita à mão, com
+/// `verifyToken`, e ligar a flag sem conectar o handler rejeitaria *todas* as
+/// chamadas. O que muda aqui é a postura ficar declarada e verificável, que é
+/// o que o achado F4 de spec/security_assessment.md pede.
+/// {@category Endpoint}
+abstract class EndpointAuthenticated extends _i1.EndpointRef {
+  EndpointAuthenticated(_i1.EndpointCaller caller) : super(caller);
+}
+
 /// Sonda de saúde.
 ///
 /// Preserva a forma do antigo `GET /health` — `{status, mqtt_connected,
@@ -139,6 +154,12 @@ class EndpointHealth extends _i1.EndpointRef {
 /// Onboarding do paciente por convite do ACS (RF02) e captura de
 /// consentimento por finalidade (LGPD-RF02). Ver decisão §2 de
 /// docs/superpowers/specs/2026-09-16-decisoes-produto-pos-validacao.md.
+///
+/// Postura de autenticação **mista**, e é por isso que este endpoint não
+/// estende `AuthenticatedEndpoint`: `generateEnrollmentToken` exige token de
+/// ACS, mas `completeEnrollment` é público por desenho — quem o chama ainda
+/// não tem sessão, e o convite de uso único é a credencial. Ver a allowlist
+/// em `test/unit/endpoint_auth_posture_test.dart`.
 /// {@category Endpoint}
 class EndpointOnboarding extends _i1.EndpointRef {
   EndpointOnboarding(_i1.EndpointCaller caller) : super(caller);
@@ -185,7 +206,7 @@ class EndpointOnboarding extends _i1.EndpointRef {
 /// SAMU —, e sem esta lista não havia como o ACS escolher um paciente para
 /// visitar fora do caminho reativo.
 /// {@category Endpoint}
-class EndpointPatients extends _i1.EndpointRef {
+class EndpointPatients extends EndpointAuthenticated {
   EndpointPatients(_i1.EndpointCaller caller) : super(caller);
 
   @override
@@ -211,7 +232,7 @@ class EndpointPatients extends _i1.EndpointRef {
 /// resultado clínico era descartado — não havia prontuário, nem vínculo com o
 /// paciente, nem auditoria da triagem (RF17).
 /// {@category Endpoint}
-class EndpointTriage extends _i1.EndpointRef {
+class EndpointTriage extends EndpointAuthenticated {
   EndpointTriage(_i1.EndpointCaller caller) : super(caller);
 
   @override
@@ -250,7 +271,7 @@ class EndpointTriage extends _i1.EndpointRef {
 /// nenhuma. Um resultado parcial deixaria o dispositivo sem saber o que
 /// reenviar.
 /// {@category Endpoint}
-class EndpointVisits extends _i1.EndpointRef {
+class EndpointVisits extends EndpointAuthenticated {
   EndpointVisits(_i1.EndpointCaller caller) : super(caller);
 
   @override
