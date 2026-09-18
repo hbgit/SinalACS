@@ -154,7 +154,7 @@ events:
 | **RNF03** | Criptografia AES-256 em repouso | Sistema | - | **Crítico** | SQLCipher |
 | **RNF04** | TLS 1.3 em todas as comunicações | Sistema | - | **Crítico** | Traefik, cert-manager |
 | **RNF05** | Acessibilidade WCAG 2.1 Nível AA | UI | - | Médio | `accessibility_test` |
-| **RNF06** | RBAC (Role-Based Access Control) | Sistema | - | Alto | Auth própria no backend (ainda não implementado) |
+| **RNF06** | RBAC (Role-Based Access Control) | Sistema | - | Alto | Regra única de autorização implementada (`Authorization.require`); papéis institucionais ainda sem caminho de emissão |
 
 ### 2.2.1 Decisões de produto pós-validação (2026-09-16)
 
@@ -593,7 +593,7 @@ Cada registro possui um campo `version` (inteiro incremental). No momento da sin
 
 **Política ABAC (Atribute-Based Access Control):**
 
-Exemplo ilustrativo: não existe hoje uma camada de política ABAC genérica como esta. A checagem de papel e microárea é feita inline no caso de uso — ver `backend/sinalacs_server/lib/src/application/alerts/red_alert_service.dart` — e o RBAC institucional segue não implementado (ver RNF06 na seção 2.2). A API usada abaixo também é ilustrativa, não é a do ORM do Serverpod.
+Exemplo ilustrativo: não existe hoje uma camada de política ABAC genérica como esta. A checagem de papel e microárea passou a ser feita por uma regra única, `Authorization.require` (`backend/sinalacs_server/lib/src/application/auth/authorization.dart`), chamada pelos casos de uso; os papéis `admin` e `coordinator` ainda não têm caminho de emissão nem endpoint que os exercite, então o RBAC institucional completo segue pendente (ver RNF06 na seção 2.2). A API usada abaixo também é ilustrativa, não é a do ORM do Serverpod.
 
 ```dart
 // Exemplo ilustrativo — não há camada ABAC genérica no código real;
