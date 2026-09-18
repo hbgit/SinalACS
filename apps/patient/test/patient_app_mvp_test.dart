@@ -496,5 +496,71 @@ void main() {
         expect(find.byKey(Key('reminder_tile_${seeded.id}')), findsOneWidget);
       });
     });
+
+    group('consentimento recusado (LGPD)', () {
+      testWidgets('recusa registrada bloqueia a criação e nunca chama o agendador', (tester) async {
+        final store = _InMemoryReminderStore();
+        final scheduler = _RecordingReminderScheduler();
+        await tester.pumpWidget(buildRemindersScreen(
+          store,
+          scheduler,
+          consentPreferences: _FixedConsentPreferences(granted: false),
+        ));
+        await tester.pumpAndSettle();
+
+        final addButton = tester.widget<IconButton>(find.byKey(const Key('reminders_add_button')));
+        expect(addButton.onPressed, isNull);
+
+        expect(find.byKey(const Key('reminders_consent_denied_banner')), findsOneWidget);
+        expect(scheduler.scheduled, isEmpty);
+        expect(await store.list(), isEmpty);
+      });
+
+      testWidgets('recusa registrada bloqueia reativar um lembrete existente', (tester) async {
+        final store = _InMemoryReminderStore();
+        final seeded = await store.save(
+          const Reminder(id: 0, label: 'Metformina 850 mg', hour: 7, minute: 0, active: false),
+        );
+        final scheduler = _RecordingReminderScheduler();
+        await tester.pumpWidget(buildRemindersScreen(
+          store,
+          scheduler,
+          consentPreferences: _FixedConsentPreferences(granted: false),
+        ));
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.byKey(Key('reminder_switch_${seeded.id}')));
+        await tester.pumpAndSettle();
+
+        expect(find.byKey(const Key('reminders_error')), findsOneWidget);
+        expect(scheduler.scheduled, isEmpty);
+        final after = await store.list();
+        expect(after.single.active, isFalse);
+      });
+
+      testWidgets('consentimento concedido continua permitindo criar e agendar normalmente', (tester) async {
+        final store = _InMemoryReminderStore();
+        final scheduler = _RecordingReminderScheduler();
+        await tester.pumpWidget(buildRemindersScreen(
+          store,
+          scheduler,
+          consentPreferences: _FixedConsentPreferences(granted: true),
+        ));
+        await tester.pumpAndSettle();
+
+        expect(find.byKey(const Key('reminders_consent_denied_banner')), findsNothing);
+
+        await tester.tap(find.byKey(const Key('reminders_add_button')));
+        await tester.pumpAndSettle();
+        await tester.enterText(find.byKey(const Key('reminder_label_field')), 'Losartana 50 mg');
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const Key('reminder_save_button')));
+        await tester.pumpAndSettle();
+
+        final saved = await store.list();
+        expect(saved, hasLength(1));
+        expect(scheduler.scheduled, [saved.single.id]);
+      });
+    });
   });
 }
