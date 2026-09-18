@@ -272,6 +272,55 @@ void main() {
       expect(ack.status, isNull);
     });
 
+    test('paciente consulta o status do próprio alerta mais recente', () async {
+      await _seed(sessionBuilder.build());
+      final token =
+          await endpoints.auth.developmentLogin(sessionBuilder, role: 'patient');
+
+      final semAlerta =
+          await endpoints.alerts.statusFor(sessionBuilder, accessToken: token.accessToken);
+      expect(semAlerta.found, isFalse);
+      expect(semAlerta.alertId, isNull);
+
+      final criado = await endpoints.alerts.createRedAlert(
+        sessionBuilder,
+        accessToken: token.accessToken,
+        idempotencyKey: 'status-1',
+        locationHash: 'hash-sintetico',
+      );
+
+      final status =
+          await endpoints.alerts.statusFor(sessionBuilder, accessToken: token.accessToken);
+      expect(status.found, isTrue);
+      expect(status.alertId, criado.alertId);
+      expect(status.status, AlertStatus.pending);
+      expect(status.acknowledgedAt, isNull);
+
+      final tokenAcs =
+          await endpoints.auth.developmentLogin(sessionBuilder, role: 'acs');
+      await endpoints.alerts.acknowledge(
+        sessionBuilder,
+        accessToken: tokenAcs.accessToken,
+        alertId: criado.alertId,
+      );
+
+      final statusDepoisDoAck =
+          await endpoints.alerts.statusFor(sessionBuilder, accessToken: token.accessToken);
+      expect(statusDepoisDoAck.status, AlertStatus.acknowledged);
+      expect(statusDepoisDoAck.acknowledgedAt, isNotNull);
+    });
+
+    test('um ACS não pode consultar alerts.statusFor', () async {
+      await _seed(sessionBuilder.build());
+      final tokenAcs =
+          await endpoints.auth.developmentLogin(sessionBuilder, role: 'acs');
+
+      expect(
+        () => endpoints.alerts.statusFor(sessionBuilder, accessToken: tokenAcs.accessToken),
+        throwsA(isA<AlertPermissionException>()),
+      );
+    });
+
     test('confirmar com alertId vazio é rejeitado pelo endpoint', () async {
       await _seed(sessionBuilder.build());
       final tokenAcs =

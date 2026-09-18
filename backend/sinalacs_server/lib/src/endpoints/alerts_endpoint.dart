@@ -91,6 +91,32 @@ class AlertsEndpoint extends Endpoint {
     }
   }
 
+  /// Status do alerta mais recente do PRÓPRIO paciente (RF05, decisão §5).
+  /// `patientId` nunca é parâmetro — vem do token (INV-05).
+  Future<AlertStatusResult> statusFor(
+    Session session, {
+    required String accessToken,
+  }) async {
+    final user = _authenticate(accessToken);
+    final service = AlertRuntime.instance.serviceFor(session);
+
+    try {
+      final snapshot = await service.statusFor(user: user);
+      if (snapshot == null) return AlertStatusResult(found: false);
+
+      return AlertStatusResult(
+        found: true,
+        alertId: snapshot.alertId,
+        riskLevel: snapshot.riskLevel,
+        status: snapshot.status,
+        triggeredAt: snapshot.triggeredAt,
+        acknowledgedAt: snapshot.acknowledgedAt,
+      );
+    } on StateError catch (error) {
+      throw AlertPermissionException(message: error.message);
+    }
+  }
+
   AuthenticatedUser _authenticate(String accessToken) {
     final user = AlertRuntime.instance.auth.verifyToken(accessToken);
     if (user == null) {

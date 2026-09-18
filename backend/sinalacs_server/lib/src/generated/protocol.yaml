@@ -1,6 +1,7 @@
 alerts:
   - createRedAlert:
   - acknowledge:
+  - statusFor:
 auth:
   - developmentLogin:
 health:

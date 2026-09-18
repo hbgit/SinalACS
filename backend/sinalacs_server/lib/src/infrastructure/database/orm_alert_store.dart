@@ -153,7 +153,21 @@ class OrmAlertStore implements AlertStore {
 
   @override
   Future<AlertStatusSnapshot?> latestForPatient(String patientId) async {
-    // Implementado na próxima task deste plano (endpoint alerts.statusFor).
-    throw UnimplementedError('latestForPatient ainda não implementado em OrmAlertStore');
+    final row = await Alert.db.findFirstRow(
+      _session(),
+      where: (t) => t.patientId.equals(UuidValue.fromString(patientId)),
+      orderBy: (t) => t.triggeredAt,
+      orderDescending: true,
+      transaction: _transaction,
+    );
+    if (row == null) return null;
+
+    return AlertStatusSnapshot(
+      alertId: row.id!.uuid,
+      riskLevel: row.riskLevel,
+      status: row.status,
+      triggeredAt: row.triggeredAt,
+      acknowledgedAt: row.acknowledgedAt,
+    );
   }
 }
