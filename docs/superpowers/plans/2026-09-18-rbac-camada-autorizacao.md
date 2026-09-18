@@ -794,12 +794,15 @@ Atualize também a linha de contagem logo abaixo da tabela de RFs, se ela citar 
 No parágrafo "**Serverpod is RPC, not REST**" (linha 68), onde os endpoints são descritos, acrescente a informação de postura. O texto atual lista cada endpoint; acrescente ao final do parágrafo:
 
 ```markdown
-Toda autorização passa por uma regra única,
-`Authorization.require` (`lib/src/application/auth/authorization.dart`): o
+Toda decisão de papel e de presença de território no token passa por uma regra
+única, `Authorization.require` (`lib/src/application/auth/authorization.dart`): o
 chamador decide o que lançar (`StateError` nos serviços territoriais,
 `TriageAuthorizationException` na triagem), e é isso que preserva a tradução
-`StateError → AlertPermissionException` feita nos endpoints. Os endpoints com
-postura integralmente autenticada estendem `AuthenticatedEndpoint`
+`StateError → AlertPermissionException` feita nos endpoints. A comparação entre a
+microárea **do paciente** e a do ACS **não** passa por ela e continua inline em
+cada caso de uso (`onboarding_service.dart:112-113`,
+`visit_sync_service.dart:252-262`), porque a guarda nunca vê o paciente. Os
+endpoints com postura integralmente autenticada estendem `AuthenticatedEndpoint`
 (`lib/src/endpoints/authenticated_endpoint.dart`), que centraliza a
 verificação do token; `test/unit/endpoint_auth_posture_test.dart` lê o
 texto-fonte de `lib/src/endpoints/` e falha se um endpoint novo não estender a
