@@ -124,6 +124,16 @@ services:
       # fora dele. PRECISA ser a mesma do health-data-seed abaixo, ou o
       # diretório de pacientes não decifra o que o seed gravou.
       HEALTH_DATA_ENCRYPTION_KEY: ${HEALTH_DATA_ENCRYPTION_KEY:-}
+      # Pepper do HMAC de `users.cpfHash` (RF01). PRECISA ser o mesmo valor que o
+      # `cpf-hash-seed` recebe, pela mesma razão do
+      # HEALTH_DATA_ENCRYPTION_KEY acima: o seed deriva o hash e o servidor o
+      # procura — com peppers diferentes, nenhum CPF semeado é encontrado.
+      #
+      # `:-` e não `:?`, como o HEALTH_DATA_ENCRYPTION_KEY: o Compose interpola
+      # o arquivo INTEIRO, então um `:?` derrubaria toda invocação de
+      # `docker compose` numa máquina cujo `.env` é anterior à variável. O
+      # guarda não se perde: fora de development o `AppConfig` recusa subir.
+      CPF_HASH_PEPPER: ${CPF_HASH_PEPPER:-}
       APP_ENV: ${APP_ENV:-development}
       ENABLE_DEV_LOGIN: "${ENABLE_DEV_LOGIN:-true}"
     ports:
@@ -189,6 +199,31 @@ services:
       DEV_ACS_PASSWORD: ${DEV_ACS_PASSWORD:?defina em .env — rode ./scripts/dev/bootstrap_env.sh}
       APP_ENV: ${APP_ENV:-development}
     entrypoint: ["./seed_acs_credentials"]
+
+  # Quarta metade do seed: os hashes de CPF do login passwordless (RF01), que
+  # dependem do pepper e por isso só existem em Dart. Sem ele `users.cpfHash`
+  # fica com os literais que o SQL gravou ('development-patient'), que nenhum
+  # HMAC produz — e o login do paciente não encontra ninguém.
+  cpf-hash-seed:
+    image: sinalacs/server:local
+    depends_on:
+      database-seed:
+        condition: service_completed_successfully
+    environment:
+      SERVERPOD_DATABASE_HOST: postgres
+      SERVERPOD_DATABASE_PORT: "5432"
+      SERVERPOD_DATABASE_NAME: ${POSTGRES_DB:-sinalacs_db}
+      SERVERPOD_DATABASE_USER: ${POSTGRES_USER:-sinalacs_user}
+      SERVERPOD_DATABASE_PASSWORD: ${POSTGRES_PASSWORD:?defina em .env — rode ./scripts/dev/bootstrap_env.sh}
+      SERVERPOD_DATABASE_REQUIRE_SSL: "false"
+      # O MESMO pepper do serviço `serverpod` (ver a linha comentada lá): o seed
+      # deriva o hash e o servidor o procura, então peppers diferentes fazem o
+      # login deixar de achar qualquer paciente semeado.
+      #
+      # `:-` e não `:?` de propósito — ver o comentário no serviço `serverpod`.
+      CPF_HASH_PEPPER: ${CPF_HASH_PEPPER:-}
+      APP_ENV: ${APP_ENV:-development}
+    entrypoint: ["./seed_cpf_hashes"]
 
   traefik:
     image: traefik:v2.10

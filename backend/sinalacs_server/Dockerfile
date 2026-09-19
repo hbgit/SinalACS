@@ -34,6 +34,9 @@ RUN dart compile exe bin/seed_health_data.dart -o bin/seed_health_data
 # existe em Dart — Argon2id não é expressão de Postgres (ver
 # bin/seed_acs_credentials.dart).
 RUN dart compile exe bin/seed_acs_credentials.dart -o bin/seed_acs_credentials
+# Quarta metade: os hashes de CPF do login passwordless (RF01), que também só
+# existem em Dart — o HMAC depende do pepper (ver bin/seed_cpf_hashes.dart).
+RUN dart compile exe bin/seed_cpf_hashes.dart -o bin/seed_cpf_hashes
 
 # Fallback para diretórios possivelmente ausentes.
 RUN mkdir -p config web migrations
@@ -56,6 +59,7 @@ COPY --from=build /runtime/ /
 COPY --from=build /app/sinalacs_server/bin/server server
 COPY --from=build /app/sinalacs_server/bin/seed_health_data seed_health_data
 COPY --from=build /app/sinalacs_server/bin/seed_acs_credentials seed_acs_credentials
+COPY --from=build /app/sinalacs_server/bin/seed_cpf_hashes seed_cpf_hashes
 COPY --from=build /app/sinalacs_server/config/ config/
 COPY --from=build /app/sinalacs_server/web/ web/
 COPY --from=build /app/sinalacs_server/migrations/ migrations/
