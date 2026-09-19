@@ -76,6 +76,16 @@ echo '== sincronizando as CAs (broker e RPC) para os dois apps =='
 ./scripts/dev/sync_dev_ca.sh
 
 echo
+echo '== RNF04/L-08: as invariantes de TLS na stack que acabou de subir =='
+# Roda AQUI, com a stack de pé e antes dos apps, porque este é o único ponto do
+# repositório em que a stack existe e ninguém ainda gastou tempo em dispositivo:
+# sem esta linha a bateria só rodaria quando alguém lembrasse dela, e o job
+# `android-e2e` da CI (que executa este script) passa a medir o requisito de
+# graça. O `set -e` acima faz uma invariante vermelha derrubar o e2e — que é o
+# que "o RNF04 está violado" tem de fazer.
+./scripts/qa/tls_invariants.sh
+
+echo
 echo '== paciente: RPC (saúde, login, triagem, alerta, idempotência) =='
 (cd apps/patient && dart pub get >/dev/null && dart run tool/live_check.dart)
 

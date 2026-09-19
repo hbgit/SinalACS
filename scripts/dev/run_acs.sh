@@ -25,7 +25,7 @@
 #     entry in pubspec.yaml"); o app só se denuncia depois, no handshake do TLS.
 #     O `flutter analyze` é o único comando que reclama do diretório ausente —
 #     é o que o pubspec declara —, e é por isso que a guarda abaixo confere as
-#     duas cópias, uma a uma.
+#     duas cópias, uma a uma, contra a folha que está no runtime.
 #
 # A senha nunca é impressa e não trafega na linha de comando do flutter: vai
 # num arquivo temporário lido por --dart-define-from-file, criado com 0600
@@ -100,23 +100,46 @@ if [[ "$skip_ca" -eq 0 ]]; then
   if ! "$repo_root/scripts/dev/sync_dev_ca.sh"; then
     # Quem diz o que faltou é o próprio sync, logo acima: ele nomeia o
     # runtime/ de origem ausente, ou imprime o erro do openssl verify quando a
-    # CA de lá não assina mais a folha. Aqui só se decide se dá para seguir.
+    # CA de lá não assina a folha. Aqui só se decide se dá para seguir.
     #
-    # Seguir é seguro quando as DUAS cópias estão no asset: as CAs são
-    # PRESERVADAS entre subidas (só as folhas são regeradas), então a cópia
-    # anterior continua valendo. Conferir só a do broker era o defeito — com o
-    # runtime/ do RPC apagado, a guarda antiga seguia com exit 0, o build saía
-    # verde e a CA velha do RPC ficava dentro do APK, e a mensagem ainda
-    # apontava a stack inteira quando faltava um diretório só.
-    faltando=()
-    [[ -f "$app_dir/assets/certs/dev_ca.crt" ]]     || faltando+=('dev_ca.crt (CA do broker/MQTT)')
-    [[ -f "$app_dir/assets/certs/dev_rpc_ca.crt" ]] || faltando+=('dev_rpc_ca.crt (CA do RPC)')
-    if (( ${#faltando[@]} > 0 )); then
-      echo "erro: falta no asset do app: ${faltando[*]}." >&2
-      echo 'O erro acima nomeia o arquivo de origem (ausente, ou que não casa com a folha); suba a stack com `docker compose up` e rode de novo.' >&2
+    # Existir não é ser o certo. Os três modos de falha do sync — CA de origem
+    # ausente, folha de origem ausente e verify reprovado — dizem a mesma
+    # coisa, "o runtime está errado ou não está lá", e nenhum deles é
+    # transitório. A frase que justificava o fallback antigo ("as CAs são
+    # PRESERVADAS entre subidas, então a cópia anterior continua valendo") é
+    # verdadeira no caso comum e FALSA exatamente no caso para o qual o
+    # fallback existia: o caminho de recuperação documentado — apagar o
+    # runtime/ e subir de novo — faz o init.sh cunhar uma CA NOVA (o `needs_ca`
+    # é verdadeiro quando o ca.key não está lá), e a cópia antiga no asset
+    # deixa de valer. Medido: exit 0, mensagem tranquilizadora e um APK cuja CA
+    # não verifica mais a folha do servidor — o handshake falha e o sintoma
+    # aponta para o servidor.
+    #
+    # Seguir só é seguro com PROVA, e a prova é a mesma pergunta que o sync
+    # faz — "esta CA assina a folha do runtime?" —, feita entre o ASSET e o
+    # runtime em vez de dentro do runtime. Sem runtime não há o que provar, e
+    # aí é erro. O escopo é o asset DESTE app: é ele que o build leva.
+    sem_prova=()
+    for par in 'MQTT:dev_ca.crt:infra/docker/mosquitto/runtime/certs' \
+               'RPC:dev_rpc_ca.crt:infra/docker/traefik/runtime/certs'; do
+      IFS=':' read -r label asset_name runtime_rel <<< "$par"
+      if [[ ! -f "$app_dir/assets/certs/$asset_name" ]]; then
+        sem_prova+=("$asset_name ($label): não está no asset")
+      elif [[ ! -f "$repo_root/$runtime_rel/ca.crt" || ! -f "$repo_root/$runtime_rel/server.crt" ]]; then
+        sem_prova+=("$asset_name ($label): $runtime_rel/ não tem o par CA+folha")
+      elif ! openssl verify -CAfile "$app_dir/assets/certs/$asset_name" \
+             "$repo_root/$runtime_rel/server.crt" >/dev/null 2>&1; then
+        sem_prova+=("$asset_name ($label): não assina a folha de $runtime_rel/")
+      fi
+    done
+    if (( ${#sem_prova[@]} > 0 )); then
+      echo 'erro: não dá para provar que as CAs já copiadas no asset ainda valem:' >&2
+      printf '  · %s\n' "${sem_prova[@]}" >&2
+      echo 'Suba a stack com `docker compose up` (o erro acima, do sync, diz o que falta) e rode de novo.' >&2
+      echo 'Para dispensar a checagem de propósito — assumindo o risco de um APK que não valida o TLS —, use --skip-ca.' >&2
       exit 1
     fi
-    echo 'aviso: mantendo as CAs já copiadas no asset, sem conferir contra o runtime (o motivo está no erro acima).' >&2
+    echo 'aviso: o sync falhou, mas a CA no asset foi conferida contra a folha do runtime e continua valendo; seguindo com ela.' >&2
   fi
 fi
 

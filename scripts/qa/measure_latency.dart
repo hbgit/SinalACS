@@ -48,8 +48,19 @@ Future<void> main(List<String> args) async {
   // O host explícito é validado AQUI também. O `live_check` já para com a
   // mensagem certa, mas ela chegaria enterrada no `failures` do relatório JSON,
   // depois de gastar as amostras — e este script repassa `--host` direto para
-  // ele. A regra é a mesma do `requireSecureHost` do app, reescrita aqui porque
-  // esta ferramenta roda da raiz do repositório e só importa `dart:`.
+  // ele. A regra é a mesma do `requireSecureHost` do app, e tem TRÊS cópias, uma
+  // por app e uma aqui: apps/acs/lib/core/network/backend_client.dart:38,
+  // apps/patient/lib/core/network/backend_client.dart:40 e esta, porque o
+  // scripts/qa/ não tem pubspec e daqui não há como importar
+  // package:sinalacs_acs/….
+  //
+  // Nenhuma das três é cópia solta: cada uma está presa por uma asserção que foi
+  // medida vermelha quando a regra passou a aceitar http — as dos apps por
+  // apps/acs/test/backend_client_test.dart e
+  // apps/patient/test/backend_client_otp_test.dart (jobs acs-app e patient-app
+  // da CI), a daqui pelo grupo D de scripts/qa/tls_invariants.sh, que exige
+  // exit 2, NADA no stdout e o motivo nomeado no stderr para não passar por
+  // acidente com o `live_check` recusando no lugar desta checagem.
   if (!(Uri.tryParse(host)?.isScheme('https') ?? false)) {
     stderr.writeln('erro: o host ($host) não está em HTTPS. A porta 8080 em '
         'texto claro não é mais publicada (RNF04/L-08).');

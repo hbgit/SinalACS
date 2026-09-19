@@ -62,23 +62,35 @@ server_days=825
 # A guarda checa existência, validade E usabilidade. Só as duas primeiras deixam
 # passar um `ca.key` truncado — o arquivo existe e o `ca.crt` está longe de
 # vencer —, e a falha só aparecia na hora de assinar, depois de o `server.key`
-# já ter sido sobrescrito. Aqui ela sai com diagnóstico antes de tocar em
-# qualquer coisa, e NÃO regera a CA de propósito: regerá-la invalidaria em
-# silêncio as cópias já feitas para os apps (ver o cabeçalho). Como o serviço
-# `traefik-init` é fail-closed, o resultado é o Traefik não subir — e não um
-# certificado meio-gerado.
-needs_ca=0
-if [ ! -f "$certs_dir/ca.crt" ] || [ ! -f "$certs_dir/ca.key" ]; then
-  needs_ca=1
-elif ! openssl x509 -in "$certs_dir/ca.crt" -noout -checkend 2592000 >/dev/null 2>&1; then
-  echo 'CA de desenvolvimento do RPC expira em menos de 30 dias; regerando.'
-  needs_ca=1
-elif ! openssl pkey -in "$certs_dir/ca.key" -noout >/dev/null 2>&1; then
-  echo "erro: a chave da CA do RPC em $certs_dir/ca.key não é utilizável (vazia, truncada ou ilegível)." >&2
+# já ter sido sobrescrito. Desde então ela sai com diagnóstico antes de tocar em
+# qualquer coisa.
+#
+# E sai com o MESMO diagnóstico nos dois casos que recusam: uma chave
+# inutilizável e uma CA a menos de 30 dias de vencer têm a mesma consequência
+# para quem já copiou a CA para os apps, então não podem ter políticas opostas.
+# Tinham: a expiração regerava em silêncio o que a chave truncada se recusava a
+# regerar, duas linhas de distância, invalidando as mesmas cópias sem avisar.
+# Agora as duas passam por `recusar_regen`. Regerar continua acontecendo — e
+# avisando — só quando não há CA nenhuma para preservar.
+recusar_regen() {
+  echo "erro: $1" >&2
   echo "erro: nada foi regerado de propósito — regerar a CA invalidaria as cópias já feitas para os apps." >&2
   echo "erro: para forçar, apague $certs_dir/ca.crt e $certs_dir/ca.key, suba a stack de novo" >&2
   echo "erro: e rode scripts/dev/sync_dev_ca.sh para os apps confiarem na CA nova." >&2
   exit 1
+}
+
+needs_ca=0
+if [ ! -f "$certs_dir/ca.crt" ] || [ ! -f "$certs_dir/ca.key" ]; then
+  needs_ca=1
+elif ! checkend_out="$(openssl x509 -in "$certs_dir/ca.crt" -noout -checkend 2592000 2>&1)"; then
+  # A mensagem do openssl entra na nossa porque `-checkend` reprova por dois
+  # motivos distintos — "Certificate will expire" para quem está a menos de 30
+  # dias do fim, "Could not read certificate file" para um arquivo ilegível —,
+  # e afirmar "expira em menos de 30 dias" nos dois seria inventar a causa.
+  recusar_regen "a CA do RPC em $certs_dir/ca.crt não passou na checagem de 30 dias: $checkend_out"
+elif ! openssl pkey -in "$certs_dir/ca.key" -noout >/dev/null 2>&1; then
+  recusar_regen "a chave da CA do RPC em $certs_dir/ca.key não é utilizável (vazia, truncada ou ilegível)."
 else
   # Só aqui a CA é de fato reaproveitada: as três guardas passaram. A mensagem
   # importa porque uma CA rotacionada sem aviso é o outro modo de falha silenciosa
@@ -96,6 +108,12 @@ if [ "$needs_ca" -eq 1 ]; then
   # A CA mudou: o certificado do servidor assinado pela antiga não serve, e a
   # serial antiga não deve ser continuada.
   rm -f "$certs_dir/ca.srl" "$certs_dir/server.crt" "$certs_dir/server.key"
+  # Aqui a CA foi regerada, então o remédio tem de sair: é o único caso em que
+  # este script invalida as cópias dos apps de propósito. Sem esta linha, quem
+  # acabou de apagar o runtime/ (o caminho de recuperação documentado) sobe a
+  # stack, vê tudo verde e fica com um APK que não valida o TLS.
+  echo 'A CA do RPC foi regerada: as cópias em apps/*/assets/certs/ acabaram de'
+  echo 'deixar de valer. Rode ./scripts/dev/sync_dev_ca.sh antes de compilar os apps.'
 fi
 
 # A folha vai para arquivos temporários e só substitui o que está em uso depois

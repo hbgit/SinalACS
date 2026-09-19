@@ -19,6 +19,14 @@
 # esta cópia continua válida enquanto a CA não expirar. A folha muda, mas o app
 # confia na CA, não na folha. Rode este script sempre que subir a stack pela
 # primeira vez ou depois de apagar um runtime/.
+#
+# As três fases (conferir → preparar → renomear) existem porque a pergunta
+# "copia ou não copia?" é do CONJUNTO, não de cada par. Conferir dentro do par —
+# como este script fazia — deixa o estado misto: com a CA do RPC errada e a do
+# broker certa, o laço copiava a do broker para o ACS, só então falhava no par
+# do RPC, e imprimia "nada foi copiado" com um dos quatro assets já alterado.
+# Quem relê a mensagem conclui que o asset está como estava. Medido: era o que
+# acontecia.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -36,15 +44,13 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # contra a folha: CA errada, CA fora da própria janela de validade e CA
 # expirada dão todas erro (exit 2). É o mesmo comando que prova que a cópia
 # serve para o handshake.
-copy_ca() {
+check_ca() {
   local source_ca="$1"
   local source_leaf="$2"
-  local target_dir="$3"
-  local target_ca="$4"
-  local label="$5"
+  local label="$3"
 
   if [[ ! -f "$source_ca" ]]; then
-    echo "erro: $source_ca não existe." >&2
+    echo "erro: $source_ca não existe — nada foi copiado." >&2
     echo "Suba a stack primeiro (docker compose up) para que as CAs sejam geradas." >&2
     exit 1
   fi
@@ -54,7 +60,7 @@ copy_ca() {
   # CA é a certa — e é justamente essa prova que separa uma cópia boa de uma
   # que só vai falhar no handshake. Erro, e não cópia.
   if [[ ! -f "$source_leaf" ]]; then
-    echo "erro: a folha $source_leaf não existe, então não dá para conferir se a CA de $label é a que assina o certificado em uso." >&2
+    echo "erro: a folha $source_leaf não existe, então não dá para conferir se a CA de $label é a que assina o certificado em uso — nada foi copiado." >&2
     echo "Suba a stack primeiro (docker compose up) para que a folha seja gerada de novo." >&2
     exit 1
   fi
@@ -66,6 +72,13 @@ copy_ca() {
     echo "Apague o runtime correspondente e suba a stack de novo." >&2
     exit 1
   fi
+}
+
+# Prepara a cópia no `.tmp`, sem mexer ainda no asset. Quem renomeia é a fase 3.
+stage_ca() {
+  local source_ca="$1"
+  local target_dir="$2"
+  local target_ca="$3"
 
   mkdir -p "$target_dir"
   # temporário + mv, e não `cp` direto: `cp` trunca o destino antes de escrever,
@@ -74,23 +87,60 @@ copy_ca() {
   # anterior continuar valendo. Mesmo remédio que o init.sh do RPC aplicou na
   # folha. `mv` no mesmo diretório é rename: não há janela em que o asset não
   # exista.
+  #
+  # O `mv` fica para a fase 3 de propósito: assim um erro de I/O no TERCEIRO
+  # `cp` (disco cheio) não deixa dois assets novos e dois velhos — os quatro
+  # continuam como estavam, que é o estado que o erro declara.
   cp "$source_ca" "$target_ca.tmp"
+}
+
+# Fase 3 — renomear. `mv` no mesmo diretório é rename: não há janela em que o
+# asset não exista, e nada aqui pode falhar por espaço ou por leitura da origem.
+promote_ca() {
+  local target_ca="$1"
+  local label="$2"
+
   mv "$target_ca.tmp" "$target_ca"
   echo "CA ($label) copiada para $target_ca"
   openssl x509 -in "$target_ca" -noout -subject -dates
 }
 
+# Os dois pares e os quatro assets, numa tabela só: a mesma lista alimenta as
+# três fases, então conferir, preparar e renomear não podem divergir.
+# Formato: rótulo | runtime/ de origem | nome do arquivo no asset.
+pares=(
+  "MQTT|infra/docker/mosquitto/runtime/certs|dev_ca.crt"
+  "RPC|infra/docker/traefik/runtime/certs|dev_rpc_ca.crt"
+)
+
+# Fase 1 — conferir os DOIS pares de origem antes de copiar QUALQUER um dos
+# QUATRO assets (cada par alimenta os dois apps). É o que faz a mensagem "nada
+# foi copiado" ser verdadeira em todos os caminhos de erro.
+for par in "${pares[@]}"; do
+  IFS='|' read -r label runtime_rel _ <<< "$par"
+  check_ca \
+    "$repo_root/$runtime_rel/ca.crt" \
+    "$repo_root/$runtime_rel/server.crt" \
+    "$label"
+done
+
+# Fase 2 — preparar os quatro (nada visível ainda para quem lê o asset).
 for app in acs patient; do
-  copy_ca \
-    "$repo_root/infra/docker/mosquitto/runtime/certs/ca.crt" \
-    "$repo_root/infra/docker/mosquitto/runtime/certs/server.crt" \
-    "$repo_root/apps/$app/assets/certs" \
-    "$repo_root/apps/$app/assets/certs/dev_ca.crt" \
-    "MQTT"
-  copy_ca \
-    "$repo_root/infra/docker/traefik/runtime/certs/ca.crt" \
-    "$repo_root/infra/docker/traefik/runtime/certs/server.crt" \
-    "$repo_root/apps/$app/assets/certs" \
-    "$repo_root/apps/$app/assets/certs/dev_rpc_ca.crt" \
-    "RPC"
+  for par in "${pares[@]}"; do
+    IFS='|' read -r _ runtime_rel asset_name <<< "$par"
+    stage_ca \
+      "$repo_root/$runtime_rel/ca.crt" \
+      "$repo_root/apps/$app/assets/certs" \
+      "$repo_root/apps/$app/assets/certs/$asset_name"
+  done
+done
+
+# Fase 3 — publicar os quatro.
+for app in acs patient; do
+  for par in "${pares[@]}"; do
+    IFS='|' read -r label runtime_rel asset_name <<< "$par"
+    promote_ca \
+      "$repo_root/apps/$app/assets/certs/$asset_name" \
+      "$label"
+  done
 done
