@@ -1,5 +1,6 @@
 
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart' show SemanticsAction;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sinalacs_client/sinalacs_client.dart'
     show AlertStatus, AlertStatusResult, RiskLevel;
@@ -340,14 +341,31 @@ void main() {
   });
 
   testWidgets('deve expor rótulo semântico e alvo de toque acessível no fluxo do paciente', (tester) async {
+    // `getSemantics` abaixo só acha nó com a árvore semântica ligada.
+    final handle = tester.ensureSemantics();
     await tester.pumpWidget(SinalAcsApp(backend: FakePatientBackend()));
 
     final enterButton = tester.widget<FilledButton>(find.byKey(const Key('enter_button')));
     final minimumSize = enterButton.style?.minimumSize?.resolve({}) ?? const Size(0, 0);
 
-    expect(find.bySemanticsLabel('Entrar na triagem do paciente'), findsOneWidget);
+    // WCAG 2.5.3 (Label in Name, nível A): o nome acessível contém o texto
+    // visível do botão — `bySemanticsLabel` casa por *contains*. É o próprio
+    // botão que o expõe: o `Semantics` que existia aqui com o rótulo "Entrar na
+    // triagem do paciente" não fundia com ele, e sim criava um segundo nó, sem
+    // ação de toque, anunciado ANTES do botão real (WCAG 4.1.2). Daí as duas
+    // asserções serem sobre um nó com o texto visível e nenhum com o antigo.
+    expect(find.bySemanticsLabel('Entrar sem senha'), findsOneWidget);
+    expect(find.bySemanticsLabel('Entrar na triagem do paciente'), findsNothing);
+    final enterNode = tester.getSemantics(find.byKey(const Key('enter_button')));
+    expect(
+      enterNode.getSemanticsData().hasAction(SemanticsAction.tap),
+      isTrue,
+      reason: 'o nó que carrega o nome do botão tem de ser o que responde ao toque',
+    );
+
     expect(minimumSize.height, greaterThanOrEqualTo(48));
     expect(minimumSize.width, greaterThanOrEqualTo(48));
+    handle.dispose();
   });
 
   testWidgets('a tela de login atende às diretrizes de contraste e alvo de toque do Flutter', (tester) async {

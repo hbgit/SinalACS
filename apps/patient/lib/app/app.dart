@@ -300,6 +300,12 @@ class _PatientLoginScreenState extends State<PatientLoginScreen> {
   /// não havia como saber se o backend estava sequer alcançável.
   Future<void> _entrar() async {
     final cpf = _cpfDigitado;
+    // Inalcançável hoje: o passo do código só existe depois do sucesso de
+    // `_pedirCodigo`, que é quem guarda `_cpfDigitado`. O `assert` está aqui
+    // para que uma tela futura que torne o passo alcançável sem CPF falhe alto
+    // em desenvolvimento, em vez de deixar o CTA principal num no-op silencioso
+    // (o `return` abaixo continua sendo o comportamento de release).
+    assert(cpf != null, 'o passo do código exige o CPF guardado por _pedirCodigo');
     if (cpf == null) return;
 
     setState(() {
@@ -444,24 +450,24 @@ class _PatientLoginScreenState extends State<PatientLoginScreen> {
           ),
         ),
         const SizedBox(height: 20),
-        Semantics(
-          label: 'Entrar na triagem do paciente',
-          button: true,
-          container: true,
-          child: SizedBox(
-            width: double.infinity,
-            child: FilledButton(
-              key: const Key('enter_button'),
-              onPressed: _busy ? null : _pedirCodigo,
-              style: FilledButton.styleFrom(minimumSize: const Size(48, 52)),
-              child: _busy
-                  ? const SizedBox(
-                      height: 22,
-                      width: 22,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Text('Entrar sem senha'),
-            ),
+        // Sem `Semantics` em volta: o `Text` do botão já é o nome acessível, o
+        // `FilledButton` já expõe papel e ação de toque. Um wrapper com outro
+        // `label` e `container: true` não funde com o botão — cria um nó
+        // próprio, **sem ação**, anunciado ANTES do botão real: nome que não
+        // contém o texto visível (WCAG 2.5.3, nível A) e nó inerte (WCAG 4.1.2).
+        SizedBox(
+          width: double.infinity,
+          child: FilledButton(
+            key: const Key('enter_button'),
+            onPressed: _busy ? null : _pedirCodigo,
+            style: FilledButton.styleFrom(minimumSize: const Size(48, 52)),
+            child: _busy
+                ? const SizedBox(
+                    height: 22,
+                    width: 22,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Text('Entrar sem senha'),
           ),
         ),
       ];

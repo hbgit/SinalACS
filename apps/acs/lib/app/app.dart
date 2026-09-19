@@ -221,14 +221,19 @@ class _LoginScreenState extends State<LoginScreen> {
             decoration: const InputDecoration(labelText: 'Senha de acesso'),
           ),
           const SizedBox(height: 20),
-          Semantics(label: 'Entrar no painel de priorização', button: true, container: true, child: SizedBox(width: double.infinity, child: FilledButton(
+          // Sem `Semantics` em volta, pelo mesmo motivo do login do paciente:
+          // o `Text` do botão já é o nome acessível ("Entrar com credenciais")
+          // e o `FilledButton` já expõe papel e ação de toque. Um wrapper com
+          // outro `label` e `container: true` cria um nó próprio, sem ação,
+          // anunciado antes do botão real (WCAG 2.5.3 e 4.1.2).
+          SizedBox(width: double.infinity, child: FilledButton(
             key: const Key('login_button'),
             style: FilledButton.styleFrom(minimumSize: const Size(48, 52)),
             onPressed: _busy ? null : _enter,
             child: _busy
                 ? const SizedBox(height: 22, width: 22, child: CircularProgressIndicator(strokeWidth: 2))
                 : const Text('Entrar com credenciais'),
-          ))),
+          )),
           if (_error != null) Padding(
             padding: const EdgeInsets.only(top: 16),
             child: Semantics(

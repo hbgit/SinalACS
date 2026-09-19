@@ -3,11 +3,13 @@ import 'package:sinalacs_server/src/application/auth/cpf.dart';
 import 'package:sinalacs_server/src/application/auth/passwordless_auth_service.dart';
 import 'package:sinalacs_server/src/application/auth/sms_gateway.dart';
 import 'package:sinalacs_server/src/config/app_config.dart';
+import 'package:sinalacs_server/src/endpoints/auth_endpoint.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_otp_challenge_store.dart';
 import 'package:sinalacs_server/src/runtime/alert_runtime.dart';
 import 'package:test/test.dart';
 
+import 'test_tools/runtime_harness.dart';
 import 'test_tools/serverpod_test_tools.dart';
 
 /// Login passwordless contra Postgres real: prova o JOIN por `cpfHash` e a
@@ -144,6 +146,24 @@ void main() {
       // a microárea errada — ou nula — torna este login inútil ou o território
       // errado, e o papel sozinho não denuncia nenhum dos dois.
       expect(sessao?.microAreaId, _microAreaId);
+
+      // O TTL da sessão do paciente, preso aqui: `patientSessionLifetime`
+      // aparecia só na definição e no ponto de uso, e voltar o `issueToken` do
+      // `verifyOtp` para o default de 15 minutos — o defeito que o comentário
+      // do endpoint descreve como o que torna este login inutilizável — deixava
+      // a suíte inteira verde.
+      expect(
+        AlertRuntimeHarness.tokenLifetime(result.accessToken),
+        AuthEndpoint.patientSessionLifetime,
+      );
+      // E o número em si, porque a assimetria com o ACS é deliberada (o código
+      // OTP não se reapresenta, então o paciente não tem renovação silenciosa):
+      // 1 hora é o que `spec/lgpd_design.md` LGPD-RT06 exige. Sem esta linha,
+      // baixar a constante para os 15 minutos do ACS apagaria a assimetria sem
+      // que nada reclamassem — a metade do ACS está presa em
+      // `institutional_login_test.dart`, e é a diferença entre as duas que
+      // precisa continuar sendo lida como decisão, não como descuido.
+      expect(AuthEndpoint.patientSessionLifetime, const Duration(hours: 1));
 
       // Prova que o código em claro NÃO está no banco.
       final challenge = await OtpChallenge.db.findFirstRow(

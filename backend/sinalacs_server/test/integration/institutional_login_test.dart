@@ -272,6 +272,18 @@ void main() {
       // prova a perna territorial do JOIN, e não só a existência da linha.
       expect(user?.microAreaId, _microAreaId);
 
+      // A outra metade da assimetria deliberada dos TTLs: o ACS fica nos 15
+      // minutos do default de `issueToken`, porque a credencial institucional
+      // (RF07) vive em memória e renova a sessão em silêncio. O paciente fica
+      // em 1 hora (LGPD-RT06) — preso em `passwordless_login_test.dart`, que é
+      // onde está o motivo: o código OTP não se reapresenta. Os dois números
+      // precisam aparecer na suíte, senão um leitor futuro lê a diferença como
+      // descuido e "conserta" um dos lados.
+      expect(
+        AlertRuntimeHarness.tokenLifetime(result.accessToken),
+        const Duration(minutes: 15),
+      );
+
       // E o login válido limpou o estado sujo: os DOIS campos, contador e
       // bloqueio. Só o store ORM e um Postgres de verdade provam esta
       // gravação — o fake do teste unitário não tem linha para reler.

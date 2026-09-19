@@ -1,5 +1,6 @@
 
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart' show SemanticsAction;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sinalacs_acs/app/app.dart';
 import 'package:sinalacs_acs/core/geo/location_cell.dart';
@@ -177,6 +178,8 @@ void main() {
     });
 
     testWidgets('deve expor rótulo semântico e alvo de toque acessível no login do ACS', (tester) async {
+      // `getSemantics` abaixo só acha nó com a árvore semântica ligada.
+      final handle = tester.ensureSemantics();
       await tester.pumpWidget(SinalAcsApp(
         backend: FakeAcsBackend(),
         feedBuilder: (queue) => FakeAlertFeed(queue),
@@ -185,9 +188,22 @@ void main() {
       final loginButton = tester.widget<FilledButton>(find.byKey(const Key('login_button')));
       final minimumSize = loginButton.style?.minimumSize?.resolve({}) ?? const Size(0, 0);
 
-      expect(find.bySemanticsLabel('Entrar no painel de priorização'), findsOneWidget);
+      // WCAG 2.5.3 (Label in Name, nível A), a mesma correção do login do
+      // paciente: o nome acessível é o texto visível do botão, exposto pelo
+      // próprio botão. O `Semantics` com "Entrar no painel de priorização"
+      // criava um nó sem ação antes do botão real (WCAG 4.1.2).
+      expect(find.bySemanticsLabel('Entrar com credenciais'), findsOneWidget);
+      expect(find.bySemanticsLabel('Entrar no painel de priorização'), findsNothing);
+      final loginNode = tester.getSemantics(find.byKey(const Key('login_button')));
+      expect(
+        loginNode.getSemanticsData().hasAction(SemanticsAction.tap),
+        isTrue,
+        reason: 'o nó que carrega o nome do botão tem de ser o que responde ao toque',
+      );
+
       expect(minimumSize.height, greaterThanOrEqualTo(48));
       expect(minimumSize.width, greaterThanOrEqualTo(48));
+      handle.dispose();
     });
 
     testWidgets('a tela de login atende às diretrizes de contraste e alvo de toque do Flutter', (tester) async {
