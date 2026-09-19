@@ -945,12 +945,34 @@ ambiente do delta que se quer medir.
   intervalo mínimo é descrito com "AUC 0,96 a 0,99 entre duas medições independentes" (`:150`) e
   "já é ~2× mais lento que a recusa" (`:159`) — nenhuma das duas sobrevive à medição intercalada
   (0,675 e 1,19×) —, e a doc do `verifyOtp` (`:226-230`) repete "faixas sem interseção" e "mais
-  forte que ele", que é a comparação que o review final desmentiu. **Registrado, não corrigido**:
-  esta rodada mexe em `apps/patient/lib/app/app.dart` e neste `PROGRESS.md`, e só neles. **Dono:
+  forte que ele", que é a comparação que o review final desmentiu. ~~**Registrado, não corrigido**:
+  esta rodada mexe em `apps/patient/lib/app/app.dart` e neste `PROGRESS.md`, e só neles.~~ **Dono:
   quem implementar o gateway de SMS real** — o mesmo dono do piso de tempo na lista acima, e quem
   vai mexer nesse arquivo de qualquer jeito. É a mesma classe do comentário do app do paciente que
   esta rodada corrigiu: afirmação em código que a medição deixou de sustentar, no arquivo que o
   próximo leitor do RF01 abre.
+
+  **FECHADO em `cb63566`** (rodada final 2, mesmo dia). O motivo do adiamento era de escopo — o brief
+  listava dois arquivos —, e a discordância de quem executou ("são quatro linhas, sem risco de
+  comportamento") estava certa: eu a aceitei. As quatro cláusulas foram corrigidas **no arquivo de
+  código**, `+28 −11`, **só linhas `///`** (conferido: nenhuma linha alterada deixa de começar com
+  `///`). O que entrou: `:154` o ramo do intervalo mínimo passou a "acima do acaso — AUC 0,675 na
+  medição intercalada, contra 0,5", com a magnitude declarada **do ambiente** e o mecanismo (uma
+  consulta indexada de cada lado, mais o custo fixo do TLS/Traefik que comprime a razão); `:167`
+  "mais lento que a recusa — p50 1,19×"; `:239-243` o `verifyOtp` virou "**as caudas se tocando**:
+  AUC 0,9636" e "**mais FRACO que ele**", com a razão explícita: o que faz dele o mais perigoso
+  **não é a força, é o custo** — não precisa da data de nascimento. A manchete do `requestOtp`
+  (AUC 1,0000, reproduzida pelo review final) **não foi tocada**, e ganhou só a nota de que os
+  **absolutos** são da era do texto claro e sobem ~1,5× sob TLS, com a separação igual — sem ela o
+  arquivo passaria a ter absolutos de dois ambientes, os dois datados de 2026-09-19, lendo como
+  contradição. `dart test` → **276, exit 0**; `dart analyze` → exit 0 (33 `info`, **nenhuma** deste
+  arquivo). As referências `:150`/`:159`/`:226-230` desta entrada **não apontam mais** para as
+  frases — hoje são `:154`, `:167`, `:239-243` —, e o original fica riscado acima como registro.
+
+  **Uma ressalva que fica, e é menor:** a frase do código que remete a esta lista diz *"registrada
+  com dono no `PROGRESS.md`"*. Ela não é falsa — o dono **está** registrado —, mas lê mais forte do
+  que é, porque **o dono é um papel sem ocupante**: "quem implementar o gateway de SMS real", e o
+  provedor continua não escolhido. Fica como está, com esta nota.
 
 ### Um defeito do RF02 que esta entrega mediu — com dono (2026-09-19)
 
