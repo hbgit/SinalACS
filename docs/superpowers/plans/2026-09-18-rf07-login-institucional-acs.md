@@ -1944,3 +1944,43 @@ Co-Authored-By: Claude Code <noreply@anthropic.com>"
 - **Rate limiting por origem (IP)** — o bloqueio é por conta.
 - **Troca de senha / recuperação** — não há fluxo; `saveCredential` existe para que o seed e um futuro fluxo possam usá-lo.
 - **Refresh/expiração no app do paciente** — o app do paciente continua em `developmentLogin` até o plano de RF01.
+
+---
+
+## Correções aplicadas depois do review final (2026-09-18)
+
+O plano acima está executado. Duas de suas decisões **foram corrigidas** pelo review
+final da branch, com defeito confirmado em primeira mão pelo controller — vale registrar
+aqui porque os blocos de código das Tasks 3 e 4 não refletem mais o que está no
+repositório:
+
+1. **Task 4 — a contagem de tentativas não era atômica (`9efbe86`).** O plano fazia o
+   store ler a linha, mutar o contador e gravar (`findFirstRow` → `updateRow`), e o
+   serviço calculava `attempts` a partir de um valor lido numa chamada anterior. Store
+   sem transação, sem checagem de versão, e sem sequer o parâmetro `Transaction?` que
+   `OrmAlertStore`/`OrmVisitStore` têm. **N requisições concorrentes leem a mesma base e
+   gravam `base + 1`: o contador nunca chegava a 5 e o bloqueio nunca disparava** — o
+   controle principal do F6 derrotado por concorrência, com o custo do Argon2id servindo
+   de freio incidental, não de garantia. A política (limiar e duração) continua no serviço,
+   passada como parâmetro; o reset do contador quando o bloqueio vence continua valendo.
+
+2. **Task 3 — o bloqueio era revelado antes da senha (`9efbe86`).** O plano checava
+   `lockedUntil` antes de `matches`, o que dá um oráculo de existência determinístico:
+   cinco senhas-lixo por matrícula fazem uma conta existente responder "Acesso
+   temporariamente bloqueado…" enquanto uma inexistente segue respondendo "Matrícula ou
+   senha inválidos." Agora a senha errada **sempre** recebe a mensagem genérica, e o
+   bloqueio só é revelado a quem acertou a senha — a regra 3 que o próprio serviço
+   documentava, que o plano não cumpria para o bloqueio.
+
+   Nota: a forma literal proposta pelo review (revelar o bloqueio também para senha errada
+   em conta bloqueada) **manteria o oráculo**; quem executou implementou a prosa, não a
+   forma, e estava certo.
+
+3. **Registradas sem mudança de código (`2eb4490`):** a amplificação anônima do login (uma
+   derivação Argon2id completa — ~70-80 ms, 19 MiB — por requisição não autenticada, sem
+   limite por origem e sem auditoria, porque o bloqueio só cobre contas existentes), e a
+   consequência do deploy sem seed: como o único escritor de `user_credentials` é o seed de
+   desenvolvimento, **um deploy que não o rode não tem como nenhum humano obter credencial**.
+
+O que **não** mudou, e segue como lacuna registrada: MFA/TOTP, refresh token rotativo,
+limite por origem, troca de senha pelo próprio ACS, e as demais lacunas do `PROGRESS.md`.
