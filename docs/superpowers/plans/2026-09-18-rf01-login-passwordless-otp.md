@@ -523,7 +523,13 @@ Substitua o bloco `indexes` de `backend/sinalacs_server/lib/src/models/user.spy.
   ### tipo muda de `timestamp without time zone` para `date`: guardar hora e
   ### fuso numa data de nascimento é precisão que não existe na entrada e que
   ### faz duas datas iguais divergirem na comparação.
-  birthDate: DateTime, type=date
+  ### `birthDate` PERMANECE `timestamp`. O `type=date` que uma versão anterior
+  ### deste plano mandava escrever **não existe**: `type=` é o tipo *Dart* do
+  ### campo, e `DateTime` é fixado em `timestamp without time zone` pelo gerador
+  ### (`serverpod_cli` 3.4.13 e 4.0.0 — `ColumnType` não tem `date`). Escrever
+  ### isso faz `serverpod generate` recusar o modelo com "invalid datatype".
+  ### Ver a nota de decisão no fim deste Step.
+  birthDate: DateTime
 ```
 
 ```yaml
@@ -552,7 +558,26 @@ serverpod generate
 serverpod create-migration
 ```
 
-Expected: `otp_challenge.dart` e `otp_request_exception.dart` gerados; migração nova com `ALTER TABLE "users" ALTER COLUMN "birthDate" TYPE date`, o `DROP INDEX`/`CREATE UNIQUE INDEX` e o `CREATE TABLE "otp_challenges"`.
+Expected: `otp_challenge.dart` e `otp_request_exception.dart` gerados; migração nova com o
+`DROP INDEX "users_cpf_hash_idx"` / `CREATE UNIQUE INDEX "users_cpf_hash_key"` e o
+`CREATE TABLE "otp_challenges"`. **Nenhum `ALTER` em `birthDate`** — ver a decisão abaixo.
+
+**DECISÃO (2026-09-18, tomada na execução): a recomendação de `spec/lgpd_data_audit.md:197`
+— `birthDate` como `date`, não `timestamp` — NÃO é atendida, e não tem como ser por este
+caminho.** O motivo é do framework, não do plano: o Serverpod não expõe tipo de coluna `date`
+(`ColumnType` não tem a variante, e `DateTime` mapeia fixo para `timestamp without time
+zone`). As alternativas foram pesadas e rejeitadas:
+
+- escrever o `ALTER ... USING "birthDate"::date` à mão na migração: o `definition.sql`
+  gerado continuaria dizendo `timestamp` enquanto o banco diria `date` — o schema-de-registro
+  passaria a mentir, e um `serverpod create-repair-migration` reverteria a coluna;
+- guardar a data como `String`: perde a tipagem em toda a cadeia por uma otimização de
+  higiene de dado.
+
+Consequência prática: a coluna carrega um componente de hora (sempre meia-noite UTC, porque é
+o que o app envia) e o **serviço compara por dia** (`_sameDay`, ano/mês/dia em UTC), então a
+funcionalidade do RF01 não depende do tipo. A recomendação fica registrada como **não
+atendida** na Task 8, com este motivo — para o documento de LGPD não ler como satisfeita.
 
 **Confira a migração gerada antes de commitá-la** — a conversão de `timestamp` para `date` é destrutiva para a parte de hora, e é isso mesmo que se quer, mas o SQL precisa ser `USING "birthDate"::date` para o Postgres não recusar a conversão implícita. Se o gerador não emitir o `USING`, corrija **à mão** nesse arquivo de migração (é a única exceção à regra "nunca editar migrations": o gerador não conhece `USING`, e o projeto aceita essa correção pontual desde que o SQL final esteja certo).
 
@@ -581,7 +606,7 @@ git add backend/sinalacs_server/lib/src/models/ \
         backend/sinalacs_server/lib/src/generated/ \
         backend/sinalacs_server/migrations/ \
         backend/sinalacs_client/
-git commit -m "feat(backend): modelo otp_challenges, cpf unico e birthDate como date (RF01)
+git commit -m "feat(backend): modelo otp_challenges e CPF unico em users (RF01)
 
 Co-Authored-By: Claude Code <noreply@anthropic.com>"
 ```
@@ -2025,7 +2050,19 @@ Co-Authored-By: Claude Code <noreply@anthropic.com>"
 
 - [ ] **Step 2: Marcar o que saiu das recomendações de `lgpd_data_audit.md`**
 
-Nas linhas 185-197, ao lado de cada recomendação que este plano atende (`cpfHash` → HMAC-SHA-256 com pepper; `birthDate` → `date`), acrescente "**atendido** (2026-09-18, `docs/superpowers/plans/2026-09-18-rf01-login-passwordless-otp.md`)". Preserve o texto original: ele é o diagnóstico.
+Nas linhas 185-197, marque cada recomendação conforme o que este plano de fato fez, e
+preserve o texto original — ele é o diagnóstico:
+
+- `cpfHash` → HMAC-SHA-256 com pepper: "**atendido** (2026-09-18,
+  `docs/superpowers/plans/2026-09-18-rf01-login-passwordless-otp.md`)".
+- `birthDate` → `date`: "**não atendido** (2026-09-18): o Serverpod não expõe tipo de coluna
+  `date` (`ColumnType` não tem a variante, e `DateTime` mapeia fixo para `timestamp without
+  time zone`). A coluna carrega hora — sempre meia-noite UTC — e o serviço compara por dia,
+  então a funcionalidade não depende do tipo; a recomendação segue em aberto."
+- `users.cpfHash` (linha 10) e as demais já cobertas: deixe como estão.
+
+Não escreva "atendido" para o `birthDate`: um documento de conformidade que se declara
+satisfeito onde não está é pior que um que registra a lacuna.
 
 - [ ] **Step 3: Registrar as lacunas em `PROGRESS.md`**
 
