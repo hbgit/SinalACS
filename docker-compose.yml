@@ -169,6 +169,27 @@ services:
       APP_ENV: ${APP_ENV:-development}
     entrypoint: ["./seed_health_data"]
 
+  # Terceira metade do seed: a credencial institucional (RF07), que também só
+  # existe em Dart (Argon2id não é expressão de Postgres). Roda depois do
+  # database-seed, que é quem cria o usuário ACS referenciado.
+  acs-credential-seed:
+    image: sinalacs/server:local
+    depends_on:
+      database-seed:
+        condition: service_completed_successfully
+    environment:
+      SERVERPOD_DATABASE_HOST: postgres
+      SERVERPOD_DATABASE_PORT: "5432"
+      SERVERPOD_DATABASE_NAME: ${POSTGRES_DB:-sinalacs_db}
+      SERVERPOD_DATABASE_USER: ${POSTGRES_USER:-sinalacs_user}
+      SERVERPOD_DATABASE_PASSWORD: ${POSTGRES_PASSWORD:?defina em .env — rode ./scripts/dev/bootstrap_env.sh}
+      SERVERPOD_DATABASE_REQUIRE_SSL: "false"
+      # Senha do ACS de desenvolvimento. Gerada por máquina — o script recusa
+      # rodar fora de APP_ENV=development.
+      DEV_ACS_PASSWORD: ${DEV_ACS_PASSWORD:?defina em .env — rode ./scripts/dev/bootstrap_env.sh}
+      APP_ENV: ${APP_ENV:-development}
+    entrypoint: ["./seed_acs_credentials"]
+
   traefik:
     image: traefik:v2.10
     container_name: sinalacs-traefik
