@@ -527,7 +527,12 @@ class _FakeStore implements AcsCredentialStore {
   }
 }
 
-class _RecordingAudit implements AuditTrail {
+// `extends`, não `implements`: `AuditTrail` é uma `abstract class` com o
+// `recordSafely` concreto (herdado de propósito por todo implementador — ver o
+// comentário dela). Todos os fakes do repositório usam `extends`
+// (`visit_sync_service_test.dart:65`, `patient_directory_service_test.dart:34`,
+// `triage_session_service_test.dart:49`, `audit_chain_test.dart:6`).
+class _RecordingAudit extends AuditTrail {
   final events = <AuditEvent>[];
 
   @override
@@ -580,12 +585,23 @@ void main() {
     test('recusa matrícula inexistente com a MESMA exceção da senha errada', () async {
       final service = await build();
 
-      final inexistente = await service
-          .login(matricula: 'ACS-999', password: _senha)
-          .then((_) => null, onError: (Object error) => error);
-      final senhaErrada = await service
-          .login(matricula: 'ACS-001', password: 'outra')
-          .then((_) => null, onError: (Object error) => error);
+      // `try/catch` em vez de `Future.then(onError:)`: com o `then<Null>` que
+      // `(_) => null` infere, um `onError` que devolve `Object` estoura em
+      // runtime com "Invalid argument(s) (onError)" — o teste morre antes de
+      // chegar às asserções.
+      Object? capturar(Future<AuthenticatedUser> future) {
+        return future.then<Object?>(
+          (_) => null,
+          onError: (Object error) => error,
+        );
+      }
+
+      final inexistente = await capturar(
+        service.login(matricula: 'ACS-999', password: _senha),
+      );
+      final senhaErrada = await capturar(
+        service.login(matricula: 'ACS-001', password: 'outra'),
+      );
 
       expect(inexistente, isA<AuthenticationFailedException>());
       expect(senhaErrada, isA<AuthenticationFailedException>());
@@ -1794,7 +1810,12 @@ executando uma derivação descartada no caminho da inexistente para o tempo de
 resposta não vazar o que a mensagem esconde. **Continua aberto:** o bloqueio é
 por conta, não por origem — não há limite por IP, então um atacante com muitas
 matrículas válidas distribui as tentativas. Limitar por IP exige o IP do
-cliente, que o backend não coleta hoje.
+cliente, que o backend não coleta hoje. E uma varredura de matrículas
+**inexistentes não deixa rastro em `audit_logs`**: `AuditEvent.userId` é
+obrigatório e tem FK para `users`, então não há como auditar um sujeito que não
+existe — o que `spec/lgpd_design.md` pede como "registro de tentativas de
+acesso" fica atendido só para tentativas sobre contas reais. Fechar isso exige
+ou um sujeito por origem (IP) ou uma trilha separada sem FK.
 ```
 
 - [ ] **Step 3: Atualizar `apps/CLAUDE.md` e `backend/CLAUDE.md`**

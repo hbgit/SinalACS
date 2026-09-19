@@ -677,7 +677,9 @@ class _FakeStore implements OtpChallengeStore {
   Future<void> consume(String challengeId, DateTime at) async {}
 }
 
-class _RecordingAudit implements AuditTrail {
+// `extends`, não `implements`: `AuditTrail` é uma `abstract class` com
+// `recordSafely` concreto, herdado de propósito por todo implementador.
+class _RecordingAudit extends AuditTrail {
   final events = <AuditEvent>[];
   @override
   Future<void> record(AuditEvent event) async => events.add(event);
