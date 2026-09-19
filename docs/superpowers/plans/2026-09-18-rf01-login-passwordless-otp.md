@@ -1337,6 +1337,23 @@ Co-Authored-By: Claude Code <noreply@anthropic.com>"
 > suíte verde**. Prove cada uma com asserção contra o Postgres — não só contra o
 > retorno do endpoint, que passaria mesmo com o filtro errado.
 >
+> **Três defeitos do próprio plano, corrigidos depois de a Task 5 rodar** — ficam aqui porque
+> o plano é o que uma re-execução lê, e os três são do tipo que não falha alto:
+>
+> - **`latestOpen` ordena só por `createdAt`.** Dois desafios com o mesmo `createdAt` não têm
+>   ordem definida no Postgres, e a asserção obrigatória nº 1 ("`latestOpen` devolve o último")
+>   seria **flaky por construção**. Use `createdAt` distintos de propósito no teste, e saiba que
+>   é por isso.
+> - **O `git add` do Step 7 estava incompleto.** Faltavam
+>   `test/integration/test_tools/serverpod_test_tools.dart` (regenerado; sem ele o teste novo
+>   não compila) e `test/unit/endpoint_auth_posture_test.dart` (que o Step 3 manda editar).
+>   `serverpod generate` só está em `~/.pub-cache/bin/`, **não no PATH**.
+> - **A coluna "impacto" da tabela do CASO 1 põe o modo de falha silencioso em primeiro plano, e
+>   o silencioso é de um store de ids *string*, não deste.** Medido com a mutação que honra o
+>   `id: ''`: o ORM falha **alto**, com `DatabaseQueryException: invalid input syntax for type
+>   uuid: ""` no INSERT. O valor da asserção nº 1 não muda (é onde o contrato é medido), mas
+>   ninguém deve ler a tabela como afirmação sobre o modo de falha do store ORM.
+
 > **Lacuna de tempo, registrada e não resolvida.** O caminho válido de
 > `requestOtp` faz um `latestOpen`, um `save` e o envio de SMS; as duas recusas
 > (CPF inexistente, nascimento errado) fazem um `latestOpen` e retornam. Payload,
@@ -1372,6 +1389,13 @@ void main() {
     const patientId = '00000000-0000-4000-8000-000000000001';
     final cpf = Cpf.tryParse('12345678909')!;
     final nascimento = DateTime.utc(1990, 1, 1);
+
+    // Sem esta linha o `AlertRuntime` lê `AppConfig.fromEnvironment()` do
+    // processo, e o pepper/SMS vêm do ambiente — não da config do teste. O
+    // hash do CPF sai por uma chave e a busca do serviço por outra, ou o
+    // gateway de log é construído onde o teste espera o `RecordingSmsGateway`.
+    // É o mesmo motivo pelo qual os outros testes de integração já fazem isso.
+    setUp(() => AlertRuntime.instance.overrideConfig(_config()));
 
     setUp(() async {
       final session = sessionBuilder.build();
@@ -1546,9 +1570,11 @@ class OrmOtpChallengeStore implements OtpChallengeStore {
     if (user == null) return null;
 
     return PatientCredentialRecord(
-      userId: user.id!,
+      // `.uuid`: os dois records de `application/` falam `String`, não
+      // `UuidValue` — é a mesma convenção de `orm_acs_credential_store.dart:74`.
+      userId: user.id!.uuid,
       birthDate: user.birthDate,
-      microAreaId: user.microAreaId,
+      microAreaId: user.microAreaId?.uuid,
     );
   }
 
@@ -1576,7 +1602,10 @@ class OrmOtpChallengeStore implements OtpChallengeStore {
       where: (table) =>
           table.userId.equals(UuidValue.fromString(userId)) &
           table.consumedAt.equals(null) &
-          table.expiresAt.greaterThan(at),
+          // O operador de comparação do Serverpod 3 é o próprio `>` (vira
+          // `expiresAt > at` no SQL). `greaterThan` **não existe** nesta
+          // versão da API, apesar de parecer que deveria.
+          (table.expiresAt > at),
       orderBy: (table) => table.createdAt,
       orderDescending: true,
     );
@@ -1602,14 +1631,24 @@ class OrmOtpChallengeStore implements OtpChallengeStore {
       session,
       UuidValue.fromString(challengeId),
     );
-    if (row == null) return;
+    // O PRIMEIRO consumo é o que vale. Sem a segunda condição, um `consume`
+    // repetido **re-data** a linha, e o instante gravado passa a ser o da
+    // última chamada — a trilha de quando o código morreu vira ficção, e a
+    // asserção obrigatória do CASO 1 ("confirme que `consumedAt` não mudou")
+    // fica impossível de satisfazer.
+    //
+    // Isto **não** é a defesa contra duas verificações simultâneas: a interface
+    // é `Future<void>` e não tem como dizer a quem chama que outro chegou
+    // primeiro. O uso único é sustentado pelo filtro de `latestOpen` mais a
+    // repetição da checagem no serviço.
+    if (row == null || row.consumedAt != null) return;
     row.consumedAt = at;
     await OtpChallenge.db.updateRow(session, row);
   }
 
   OtpChallengeRecord _toRecord(OtpChallenge row) => OtpChallengeRecord(
-        id: row.id!,
-        userId: row.userId,
+        id: row.id!.uuid,
+        userId: row.userId.uuid,
         codeHash: row.codeHash,
         attempts: row.attempts,
         createdAt: row.createdAt,
