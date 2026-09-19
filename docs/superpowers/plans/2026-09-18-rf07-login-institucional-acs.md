@@ -1829,9 +1829,11 @@ falhas por credencial e bloqueia por 15 minutos após 5
 responde com mensagem idêntica para matrícula inexistente e senha errada,
 executando uma derivação descartada no caminho da inexistente para o tempo de
 resposta não vazar o que a mensagem esconde. **Continua aberto:** o bloqueio é
-por conta, não por origem — não há limite por IP, então um atacante com muitas
-matrículas válidas distribui as tentativas. Limitar por IP exige o IP do
-cliente, que o backend não coleta hoje. E uma varredura de matrículas
+por conta, não por origem — não há **contador** por origem, então um atacante com
+muitas matrículas válidas distribui as tentativas. O insumo já existe
+(`OrmAuditTrail` resolve `session.request?.remoteInfo` e grava
+`sha256(remoteInfo)` em `audit_logs.ipHash`); o que falta é contar por origem em
+vez de só registrar. E uma varredura de matrículas
 **inexistentes não deixa rastro em `audit_logs`**: `AuditEvent.userId` é
 obrigatório e tem FK para `users`, então não há como auditar um sujeito que não
 existe — o que `spec/lgpd_design.md` pede como "registro de tentativas de
