@@ -963,9 +963,14 @@ ambiente do delta que se quer medir.
   AUC 0,9636" e "**mais FRACO que ele**", com a razão explícita: o que faz dele o mais perigoso
   **não é a força, é o custo** — não precisa da data de nascimento. A manchete do `requestOtp`
   (AUC 1,0000, reproduzida pelo review final) **não foi tocada**, e ganhou só a nota de que os
-  **absolutos** são da era do texto claro e sobem ~1,5× sob TLS, com a separação igual — sem ela o
-  arquivo passaria a ter absolutos de dois ambientes, os dois datados de 2026-09-19, lendo como
-  contradição. `dart test` → **276, exit 0**; `dart analyze` → exit 0 (33 `info`, **nenhuma** deste
+  **absolutos** são da era do texto claro, com os do TLS ao lado (~4,7 ms e ~0,93 ms) e a separação
+  igual — sem ela o arquivo passaria a ter absolutos de dois ambientes, os dois datados de
+  2026-09-19, lendo como contradição. **O "~1,5×" que eu tinha escrito no lugar desses dois pares
+  foi removido** (re-review escopado, Minor): ele era derivado, não medido, e não fechava com o
+  resto do parágrafo — um custo aditivo não escala os **dois** absolutos pelo mesmo fator, e a
+  aritmética confirma: ~×1,46 num e ~×2,38 no outro. É o mesmo defeito que esta rodada inteira
+  caçou, uma última vez, e por isso o parágrafo passou a **dar os dois pares medidos** em vez do
+  fator que os ligava. `dart test` → **276, exit 0**; `dart analyze` → exit 0 (33 `info`, **nenhuma** deste
   arquivo). As referências `:150`/`:159`/`:226-230` desta entrada **não apontam mais** para as
   frases — hoje são `:154`, `:167`, `:239-243` —, e o original fica riscado acima como registro.
 

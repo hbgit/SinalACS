@@ -145,10 +145,12 @@ class PasswordlessAuthService {
   /// 2026-09-19, 300 amostras keep-alive por caso, tempo de parede do POST: o
   /// par correto responde em ~3,2 ms (p50) e o CPF não cadastrado em ~0,39 ms —
   /// as duas faixas **não se cruzam**, e **uma amostra de cada lado já separa o
-  /// par**, sem estatística nenhuma. Os dois valores absolutos são da era do
-  /// texto claro (a 8080) e sobem ~1,5× sob o TLS/Traefik: **a separação é a
-  /// mesma**, e a medição intercalada do review final a reproduz com **AUC
-  /// 1,0000**, com os extremos sem interseção. Dentro do intervalo mínimo a
+  /// par**, sem estatística nenhuma. Os absolutos acima são da era do texto
+  /// claro (a 8080); sob o TLS/Traefik a medição intercalada do review final
+  /// mede ~4,7 ms e ~0,93 ms, **com a mesma separação** — **AUC 1,0000**, com os
+  /// extremos sem interseção. O que se compara entre ambientes é a separação,
+  /// **não o valor**: o custo do TLS não incide igualmente nos dois ramos.
+  /// Dentro do intervalo mínimo a
   /// diferença encolhe (esse ramo faz o `latestOpen` e mais nada) e as
   /// distribuições passam a se sobrepor em parte, mas o sinal **fica acima do
   /// acaso** — AUC 0,675 na medição intercalada do review final, contra 0,5 de
