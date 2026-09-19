@@ -507,27 +507,77 @@ void main() {
     // colado numa issue. O desenvolvedor não precisa do destino: ele acabou de
     // digitar o CPF no formulário e sabe de quem é o pedido; o que ele não tem
     // é o código.
-    test('registra o código e não o destino', () {
+    //
+    // A versão anterior deste guard prendia o NOME `phone`
+    // (`RegExp(r'\bphone\b')`), e nome não é dado: renomear o parâmetro para
+    // `telefone` — exatamente o que a doc desta classe empurra a fazer, já que
+    // ela mesma diz que `phone` é nome falso para um CPF — e reintroduzir a
+    // referência na linha de log deixava a suíte INTEIRA verde. O que este
+    // guard prende agora é o VALOR referenciado no corpo: toda interpolação
+    // tem de ser `code`, seja qual for o nome que o parâmetro venha a ter.
+    test('registra o código e nenhuma outra interpolação', () {
       final body = _loggingGatewayBody();
 
-      // Auto-teste: se a extração do corpo quebrar, a asserção de baixo
-      // passaria por não estar olhando para lugar nenhum — e um guard que não
+      // Auto-teste: se a extração do corpo quebrar, as asserções de baixo
+      // passariam por não estar olhando para lugar nenhum — e um guard que não
       // lê nada absolve tudo.
       expect(
         body,
         contains('code'),
         reason: 'o corpo lido não menciona o código, que é o que a linha de log '
             'tem de entregar: a extração deste guard quebrou; conserte-a antes '
-            'de confiar nele',
+            'de confiar nela',
       );
 
+      final interpolacoes = _interpolacoesDe(body);
+
+      // Segundo auto-teste, e é ele que sustenta o de baixo: "toda interpolação
+      // é `code`" é verdade para o conjunto VAZIO. Sem exigir conjunto não
+      // vazio, uma extração que parasse de achar qualquer interpolação (regex
+      // quebrada, corpo trocado) absolveria o corpo inteiro — o defeito desta
+      // rodada, um nível mais fundo.
       expect(
-        RegExp(r'\bphone\b').hasMatch(body),
-        isFalse,
-        reason: 'LoggingSmsGateway.sendOtp voltou a referenciar `phone`, e o '
-            'único chamador preenche esse parâmetro com `cpf.formatted`: isso '
-            'põe CPF em claro no log do processo. O texto do log tem de sair '
-            'só do código.',
+        interpolacoes,
+        isNotEmpty,
+        reason: 'o guard não achou nenhuma interpolação no corpo de '
+            '$_loggingGatewayClass.$_loggingGatewayMethod — a extração quebrou; '
+            'conserte-a antes de confiar nela',
+      );
+
+      final proibidas = interpolacoes.where((nome) => nome != 'code').toList();
+
+      expect(
+        proibidas,
+        isEmpty,
+        reason: '$_loggingGatewayClass.$_loggingGatewayMethod interpola '
+            '${proibidas.join(', ')}, e não só `code`: o único chamador '
+            'preenche o parâmetro de destino com `cpf.formatted`, então essa '
+            'referência põe CPF em claro no log do processo. O texto do log tem '
+            'de sair só do código — `code`, e nada mais. Renomear o parâmetro '
+            '(para `telefone`, `destino`, `numero`) não escapa daqui: o guard '
+            'prende o VALOR referenciado no corpo, não o nome `phone`.',
+      );
+    });
+
+    // O defeito que este guard prende: o corpo do método não estar no formato
+    // com chaves que ele sabe ler. A versão anterior achava a chave de abertura
+    // com `indexOf('{')` a partir do fechamento dos parênteses — num corpo de
+    // expressão (`async => stdout.writeln(...)`, refactor legítimo e SEM
+    // vazamento) isso salta para a próxima chave do ARQUIVO, lê o corpo de
+    // `RecordingSmsGateway` e acusa a referência proibida no lugar errado; se o
+    // bloco seguinte não tivesse essa referência, o guard passaria lendo lixo.
+    // As duas saídas são ruins; a certa é dizer que não sabe ler.
+    test('não sabe ler corpo de expressão — e diz isso, em vez de acusar outro '
+        'trecho', () {
+      expect(
+        () => _loggingGatewayBody(fonte: _fonteComCorpoDeExpressao),
+        throwsA(
+          isA<TestFailure>().having(
+            (falha) => falha.message,
+            'mensagem',
+            contains('não está no formato com chaves'),
+          ),
+        ),
       );
     });
   });
@@ -539,6 +589,31 @@ const _loggingGatewayClass = 'LoggingSmsGateway';
 /// Método cujo corpo [main] vigia.
 const _loggingGatewayMethod = 'sendOtp';
 
+/// Fonte sintética com o formato que o guard tem de RECUSAR: corpo de
+/// expressão, sem vazamento nenhum, seguido de outra classe.
+///
+/// A classe seguinte tem de conter uma interpolação proibida — é ela que
+/// reproduz o defeito medido, e não um caso de laboratório: o `indexOf('{')`
+/// de antes saltava para o corpo dela, e o guard acusava um trecho de
+/// `LoggingSmsGateway` que não existe. É o mesmo arranjo do arquivo real, onde
+/// o bloco seguinte é `RecordingSmsGateway`.
+const _fonteComCorpoDeExpressao = r'''
+class LoggingSmsGateway implements SmsGateway {
+  @override
+  Future<void> sendOtp({required String phone, required String code}) async =>
+      stdout.writeln('[SMS-GATEWAY=log] código de acesso: $code ');
+}
+
+class RecordingSmsGateway implements SmsGateway {
+  final sent = <({String phone, String code})>[];
+
+  @override
+  Future<void> sendOtp({required String phone, required String code}) async {
+    sent.add((phone: phone, code: code));
+  }
+}
+''';
+
 /// O corpo de `LoggingSmsGateway.sendOtp`, com os comentários já apagados.
 ///
 /// Lê o TEXTO-FONTE pelo mesmo motivo de
@@ -549,19 +624,29 @@ const _loggingGatewayMethod = 'sendOtp';
 /// impedir apareceria de novo sem que nenhuma execução a denunciasse.
 ///
 /// A ASSINATURA fica fora do recorte de propósito: Dart exige que um override
-/// declare os mesmos parâmetros nomeados da interface, então `phone` precisa
-/// continuar na lista de parâmetros. O que se pode proibir — e é o que basta —
-/// é o corpo USAR o valor.
-String _loggingGatewayBody() {
+/// declare os mesmos parâmetros nomeados da interface, então o parâmetro de
+/// destino precisa continuar na lista. O que se pode proibir — e é o que basta
+/// — é o corpo USAR o valor, e é o valor (não o nome dele) que o guard prende.
+///
+/// [fonte] é do teste que prova o que este guard faz com um corpo que ele NÃO
+/// sabe ler: sem poder injetar a fonte, essa falha só seria observável editando
+/// `sms_gateway.dart` à mão. Sem argumento, lê o arquivo de verdade.
+String _loggingGatewayBody({String? fonte}) {
   const path = 'lib/src/application/auth/sms_gateway.dart';
-  final file = File(path);
-  expect(
-    file.existsSync(),
-    isTrue,
-    reason: 'o teste roda com cwd em backend/sinalacs_server',
-  );
+  final String cru;
+  if (fonte != null) {
+    cru = fonte;
+  } else {
+    final file = File(path);
+    expect(
+      file.existsSync(),
+      isTrue,
+      reason: 'o teste roda com cwd em backend/sinalacs_server',
+    );
+    cru = file.readAsStringSync();
+  }
 
-  final source = _withoutComments(file.readAsStringSync());
+  final source = _withoutComments(cru);
   final classAt = source.indexOf('class $_loggingGatewayClass');
   expect(
     classAt,
@@ -580,7 +665,19 @@ String _loggingGatewayBody() {
 
   final parametersOpen = source.indexOf('(', methodAt);
   final parametersClose = _matching(source, parametersOpen, '(', ')');
-  final bodyOpen = source.indexOf('{', parametersClose);
+  // Sem o `)` da lista de parâmetros, o `indexOf('{')` de depois procuraria a
+  // partir do começo do arquivo e o guard leria o primeiro bloco que
+  // aparecesse — a mesma leitura de lixo que _bodyBraceAfter existe para
+  // impedir, um passo antes dela.
+  expect(
+    parametersClose,
+    isNot(-1),
+    reason: 'não foi possível delimitar a lista de parâmetros de '
+        '$_loggingGatewayClass.$_loggingGatewayMethod em $path — sem isso o '
+        'guard lê um trecho qualquer do arquivo',
+  );
+
+  final bodyOpen = _bodyBraceAfter(source, parametersClose);
   final bodyClose = _matching(source, bodyOpen, '{', '}');
   expect(
     bodyClose,
@@ -592,6 +689,80 @@ String _loggingGatewayBody() {
 
   return source.substring(bodyOpen, bodyClose + 1);
 }
+
+/// Índice da `{` que abre o corpo do método cuja lista de parâmetros fecha em
+/// [parametersClose].
+///
+/// A chave tem de ser o primeiro token do CORPO: brancos não contam, e `async`
+/// é modificador da assinatura, não do corpo. Qualquer outra coisa ali — um
+/// corpo de expressão (`async => stdout.writeln(...)`) ou uma assinatura sem
+/// chaves — faz este guard falhar dizendo que não sabe ler.
+///
+/// Não é preciosismo. `indexOf('{')` a partir do fechamento dos parênteses, que
+/// era o que este guard fazia, num corpo de expressão salta para a próxima
+/// chave do ARQUIVO: no arquivo de hoje, o corpo de `RecordingSmsGateway`, que
+/// contém a palavra outrora proibida — e o guard acusava o lugar errado. Se o
+/// bloco seguinte não a contivesse, o guard passaria lendo lixo, que é o mesmo
+/// defeito calado. Exigir a chave onde ela tem de estar fecha os dois.
+int _bodyBraceAfter(String source, int parametersClose) {
+  var index = _semBrancos(source, parametersClose + 1);
+  if (source.startsWith('async', index)) {
+    index = _semBrancos(source, index + 'async'.length);
+  }
+
+  expect(
+    index < source.length && source[index] == '{',
+    isTrue,
+    reason: 'o corpo de $_loggingGatewayClass.$_loggingGatewayMethod não está no '
+        'formato com chaves que este guard sabe ler: depois da lista de '
+        'parâmetros vem ${_trechoApos(source, index)}, e não `{`. Este guard '
+        'delimita o corpo por casamento de chaves, e sem a chave de abertura '
+        'ele saltaria para um bloco qualquer do arquivo e acusaria o trecho '
+        'errado. Volte a escrever o método com corpo entre chaves ou reescreva '
+        'este guard.',
+  );
+  return index;
+}
+
+/// Índice do primeiro caractere não branco a partir de [from].
+int _semBrancos(String source, int from) {
+  var index = from;
+  while (index < source.length && _ehBranco(source[index])) {
+    index++;
+  }
+  return index;
+}
+
+/// Trecho curto a partir de [from], para a mensagem de falha mostrar o que o
+/// guard achou onde esperava a chave — um `=>` fica visível de imediato.
+String _trechoApos(String source, int from) {
+  if (from >= source.length) return 'o fim do arquivo';
+  final end = from + 16 > source.length ? source.length : from + 16;
+  return '"${source.substring(from, end).replaceAll('\n', ' ')}"';
+}
+
+bool _ehBranco(String char) =>
+    char == ' ' || char == '\n' || char == '\r' || char == '\t';
+
+/// Os nomes interpolados no texto de [body] — `$code`, `${code}`, `$telefone`.
+///
+/// A regex casa as duas formas de interpolação e devolve só o NOME, que é o
+/// que o texto-fonte revela sobre o valor que entra na string. É o VALOR que o
+/// guard prende: prender o nome de um parâmetro não prende nada, porque o
+/// próximo a mexer no arquivo pode renomeá-lo.
+///
+/// `$` que não abre interpolação não casa, porque a regex exige um
+/// identificador logo depois dele (`'R$ 5'` fica de fora). O falso positivo
+/// aceito de propósito é o dólar escapado: um `\$telefone` (TEXTO literal no
+/// log) casa como se fosse interpolação. Falhar a mais é o lado certo de
+/// errar — esse texto literal não existe nesta linha, e o guard não pode
+/// absolver um vazamento por causa de uma barra invertida.
+final _interpolacaoPattern = RegExp(r'\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?');
+
+Set<String> _interpolacoesDe(String body) => _interpolacaoPattern
+    .allMatches(body)
+    .map((match) => match.group(1)!)
+    .toSet();
 
 /// Índice do fechamento que casa com a abertura em [open]; `-1` se não fechar.
 int _matching(String source, int open, String opening, String closing) {

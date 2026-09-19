@@ -55,11 +55,29 @@ abstract interface class OtpChallengeStore {
   /// INSERT — e o id de verdade só aparece em [latestOpen], que é de onde o
   /// serviço o tira para chamar [registerAttempt] e [consume].
   ///
-  /// Um store escrito só por este contrato que HONRASSE o `id: ''` gravaria a
-  /// linha com chave vazia, e as duas escritas seguintes — contador de
-  /// tentativas e marca de consumo — não achariam mais o desafio: o limite de
-  /// tentativas e o uso único parariam de funcionar sem erro nenhum, porque
-  /// [registerAttempt] e [consume] não têm como falhar por linha ausente.
+  /// Honrar o `id: ''` quebra o fluxo em qualquer store, mas COMO ele quebra
+  /// depende de quem gera o id — e a diferença é de severidade, então vale
+  /// saber qual dos dois casos é o do store que se está escrevendo:
+  ///
+  /// - no store ORM, a quebra é **alta**: `otp_challenges.id` é `uuid NOT NULL
+  ///   DEFAULT gen_random_uuid()` e PRIMARY KEY, e a string vazia não é um
+  ///   uuid — o Postgres recusa o INSERT, e recusa qualquer comparação por esse
+  ///   id, com `invalid input syntax for type uuid: ""` (medido no banco de
+  ///   teste deste projeto). A escrita falha e não sobra linha nenhuma: o
+  ///   problema aparece no primeiro login, e não meses depois.
+  /// - num store cujos ids são **strings**, a quebra é **silenciosa**, e é de
+  ///   colisão, não de ausência: todo desafio passaria a carregar o mesmo id
+  ///   vazio, e [registerAttempt] e [consume] escreveriam na linha que casar
+  ///   com esse id — que não é necessariamente a que o serviço acabou de ler.
+  ///   Nenhuma das duas tem como falhar por linha ausente, então nem o teto de
+  ///   tentativas nem o uso único acusariam nada. Esta suíte não cobre esse
+  ///   caso: mutar o fake dela para honrar o `id: ''` a mantém verde.
+  ///
+  /// A regra é uma só, e é o que esta doc existe para dizer: **o id é do
+  /// store**. Quem implementa [save] não grava o `id: ''` recebido — no ORM,
+  /// `OtpChallenge.id` é opcional (`UuidValue?`, `defaultPersist=random`, e a
+  /// coluna tem `DEFAULT gen_random_uuid()`) justamente para o dono da coluna
+  /// atribuir a chave.
   Future<void> save(OtpChallengeRecord challenge);
 
   /// Desafio mais recente, não consumido e ainda dentro da validade.
