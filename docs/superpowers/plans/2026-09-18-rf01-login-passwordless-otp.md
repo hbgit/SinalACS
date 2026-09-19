@@ -2250,7 +2250,24 @@ Co-Authored-By: Claude Code <noreply@anthropic.com>"
 
 **Files:**
 - Modify: `spec/validation_report.md` (linha 69 — RF01; linha 548 não; linha 99 não)
-- Modify: `spec/lgpd_design.md` (o bloco "Estado atual" do login)
+- Modify: `spec/lgpd_design.md` (os **dois** blocos `**Atualização (2026-09-18):**` que falam do login — ver abaixo)
+
+> **Não existe bloco "Estado atual" sobre o login neste arquivo** — este plano apontava para um
+> que não existe, a mesma classe do ponteiro órfão para a lacuna de tempo. O "Estado atual"
+> (linha 61) é sobre `consent_logs`. O que a Task 8 precisa alcançar são **dois** blocos, os
+> dois marcados `**Atualização (2026-09-18):**`:
+>
+> 1. o da tabela de justificativa da chave do banco local, que diz que o `developmentLogin`
+>    "segue para as ferramentas de desenvolvimento **e para o login do app do paciente, que
+>    RF01 ainda não substituiu**" — depois desta task, os dois apps têm login próprio (ACS
+>    institucional, paciente passwordless) e o `developmentLogin` fica só nas ferramentas;
+> 2. o da tabela de autenticação, que diz que "o token expira em **15 minutos**, não há refresh
+>    token" — o do paciente passa a 1 hora (LGPD-RT06, Task 7), o do ACS continua em 15. A
+>    assimetria é deliberada e precisa estar escrita, senão o próximo leitor a lê como
+>    inconsistência.
+>
+> Nas duas, **preserve o texto anterior e acrescente** — é o padrão que o próprio arquivo já
+> usa, e é o que torna a mudança auditável.
 - Modify: `spec/lgpd_data_audit.md` — **tabela nova não classificada** (Step 5)
 - Modify: `spec/lgpd_data_audit.md` (linhas 185-197 — o que já foi feito do que era recomendação)
 - Modify: `apps/CLAUDE.md`, `backend/CLAUDE.md`, `PROGRESS.md`
