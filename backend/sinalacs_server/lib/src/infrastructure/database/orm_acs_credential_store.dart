@@ -11,26 +11,26 @@ import 'package:sinalacs_server/src/generated/protocol.dart';
 ///
 /// ## O contrato de escrita deste store
 ///
-/// **O store grava exatamente o que recebe; a política é do serviço.** Nenhum
-/// método aqui decide quantas tentativas valem, nem por quanto tempo bloquear:
-/// `registerFailedAttempt` persiste os dois valores que vieram, inclusive
-/// quando o número é MENOR que o da linha.
+/// **A contagem de tentativas é aplicada pelo banco, numa única instrução; a
+/// política continua no serviço.** `registerFailedAttempt` não recebe o valor
+/// final do contador — recebe as decisões de `InstitutionalAuthService`
+/// (`restartCounter`, o limite, o instante em que o bloqueio vence) e faz a
+/// aritmética dentro da própria `UPDATE`.
 ///
-/// Isso é deliberado, e o caso que o torna visível é a linha com
-/// `lockedUntil` **no passado** e `failedAttempts` **abaixo do limite**: ela não
-/// é produzida pelo serviço (o bloqueio só é gravado junto de
-/// `attempts >= maxFailedAttempts`), mas é alcançável por um seed ou por uma
-/// escrita manual no ORM. Quando o serviço encontra essa linha, ele conta a
-/// falha como `1` — o bloqueio venceu, então o contador recomeça (ver
-/// `lockedUntil` vencido em `InstitutionalAuthService.login`) — e gravar esse
-/// `1` seria **baixar** o contador da linha.
+/// O motivo é o modo de falha da leitura-e-escrita: contar em Dart, a partir
+/// de um valor lido numa consulta anterior, faz N requisições concorrentes
+/// lerem a mesma base e todas gravarem `base + 1` — o contador avança muito
+/// menos que o número de tentativas e o bloqueio pode nunca ser aplicado, ou
+/// seja, o controle do achado F6 vale só para tentativas serializadas (o custo
+/// do Argon2id é um freio incidental, não uma garantia). Com a soma dentro da
+/// `UPDATE`, o Postgres segura o lock da linha até o fim da instrução e cada
+/// tentativa enxerga o resultado da anterior: nenhuma atualização se perde.
 ///
-/// A decisão é deixar a gravação acontecer: um store que "corrigisse" o valor
-/// para não baixar o contador estaria decidindo política por conta própria e
-/// escondendo do serviço o que ele pediu para gravar — a camada errada para
-/// essa regra, e o oposto do arranjo de `application/` ✕ `infrastructure/` do
-/// repositório. Quem tem de nunca passar um contador rebaixado para uma linha
-/// ainda bloqueada é o serviço, que é quem conhece o limite e a duração.
+/// Nenhum número de política mora aqui: `5` e `15 minutos` são de
+/// `InstitutionalAuthService` e chegam como parâmetro (`maxFailedAttempts`,
+/// `lockUntil`). Mesmo arranjo de `OrmOnboardingStore.consumeIfValid`, que
+/// também resolve no `SET`/`WHERE` do Postgres o que o ORM não expressa — o
+/// ORM não tem `UPDATE ... SET col = col + 1`.
 class OrmAcsCredentialStore implements AcsCredentialStore {
   OrmAcsCredentialStore({required Session Function() session}) : _session = session;
 
@@ -40,7 +40,7 @@ class OrmAcsCredentialStore implements AcsCredentialStore {
   Future<AcsCredentialRecord?> findByEnrollmentId(String enrollmentId) async {
     final session = _session();
 
-    // Duas consultas em vez de um JOIN escrito à mão: o ORM do Serverpod não
+    // Três consultas em vez de um JOIN escrito à mão: o ORM do Serverpod não
     // expressa junção, e a alternativa — SQL cru — passaria por fora dos
     // tipos gerados. A matrícula é única (índice `acs_enrollment_id_key`),
     // então a primeira consulta devolve no máximo uma linha.
@@ -89,39 +89,79 @@ class OrmAcsCredentialStore implements AcsCredentialStore {
   @override
   Future<void> registerFailedAttempt(
     String acsId, {
-    required int failedAttempts,
-    required DateTime? lockedUntil,
+    required bool restartCounter,
+    required int maxFailedAttempts,
+    required DateTime lockUntil,
+    required DateTime at,
   }) async {
-    final session = _session();
-    final credential = await UserCredential.db.findFirstRow(
-      session,
-      where: (table) => table.userId.equals(UuidValue.fromString(acsId)),
+    // Uma instrução, três decisões do serviço:
+    //
+    // - `@restart` (bloqueio anterior já vencido) recomeça a contagem em `1`;
+    //   sem isso, `6 >= 5` trancaria a conta de novo a cada tentativa e uma
+    //   tentativa por janela bastaria para manter um ACS fora para sempre;
+    // - `"failedAttempts" + 1 >= @maxFailedAttempts` decide o bloqueio pelo
+    //   contador **da linha**, e não pelo contador que o serviço leu antes — é
+    //   essa diferença que faz a rajada concorrente ser contada inteira e
+    //   travar no limite;
+    // - `@lockUntil` é o vencimento já calculado pelo serviço
+    //   (`at.add(lockDuration)`), para o store não conhecer a duração.
+    //
+    // O `WHERE` recusa a escrita quando a linha está bloqueada AGORA e o
+    // serviço não mandou reiniciar: assim "bloqueio ativo não conta nem estende
+    // tentativa" — a regra do serviço — continua valendo mesmo quando duas
+    // requisições se cruzam e uma delas leu a linha antes de a outra trancá-la.
+    //
+    // Sem `RETURNING`: o serviço não consome o contador resultante (a falha é
+    // uma recusa de qualquer forma) e quem observa o estado é o teste, lendo a
+    // linha. Linha inexistente é no-op, como antes.
+    //
+    // `@lockUntil::timestamp` não é enfeite: dentro do `CASE` o Postgres não
+    // tem contexto para inferir o tipo do parâmetro (numa atribuição ou numa
+    // comparação ele infere da coluna) e o trata como `text`, que não tem
+    // conversão implícita para `timestamp without time zone` — sem o cast a
+    // instrução falha com "column lockedUntil is of type timestamp without time
+    // zone but expression is of type text".
+    await _session().db.unsafeExecute(
+      '''
+      UPDATE "user_credentials"
+         SET "failedAttempts" = CASE WHEN @restart THEN 1
+                                     ELSE "failedAttempts" + 1 END,
+             "lockedUntil" = CASE
+                 WHEN @restart THEN NULL
+                 WHEN "failedAttempts" + 1 >= @maxFailedAttempts
+                   THEN @lockUntil::timestamp
+                 ELSE NULL
+               END,
+             "updatedAt" = @at
+       WHERE "userId" = @userId::uuid
+         AND ("lockedUntil" IS NULL OR "lockedUntil" <= @at OR @restart);
+      ''',
+      parameters: QueryParameters.named({
+        'restart': restartCounter,
+        'maxFailedAttempts': maxFailedAttempts,
+        'lockUntil': lockUntil,
+        'at': at,
+        'userId': acsId,
+      }),
     );
-    if (credential == null) return;
-
-    credential.failedAttempts = failedAttempts;
-    credential.lockedUntil = lockedUntil;
-    credential.updatedAt = DateTime.now().toUtc();
-    await UserCredential.db.updateRow(session, credential);
   }
 
   @override
   Future<void> registerSuccessfulLogin(String acsId, DateTime at) async {
-    final session = _session();
-    final credential = await UserCredential.db.findFirstRow(
-      session,
-      where: (table) => table.userId.equals(UuidValue.fromString(acsId)),
-    );
-    if (credential == null) return;
-
     // Os DOIS campos: um login válido zera o contador **e** derruba o
     // bloqueio. Limpar só o contador manteria a conta trancada até
     // `lockedUntil` vencer, sem nada mais a contar; limpar só o bloqueio
     // deixaria o contador a uma falha de trancar de novo.
-    credential.failedAttempts = 0;
-    credential.lockedUntil = null;
-    credential.updatedAt = at;
-    await UserCredential.db.updateRow(session, credential);
+    //
+    // Mesma forma de `registerFailedAttempt`: uma instrução, sem
+    // leitura-antes-de-escrita. Aqui não há contagem a preservar (o alvo é
+    // constante — zero) e por isso nem `CASE` nem `RETURNING`.
+    await _session().db.unsafeExecute(
+      'UPDATE "user_credentials" '
+      'SET "failedAttempts" = 0, "lockedUntil" = NULL, "updatedAt" = @at '
+      'WHERE "userId" = @userId::uuid;',
+      parameters: QueryParameters.named({'at': at, 'userId': acsId}),
+    );
   }
 
   @override

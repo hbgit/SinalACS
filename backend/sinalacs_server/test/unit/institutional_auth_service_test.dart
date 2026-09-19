@@ -31,20 +31,39 @@ class _FakeStore implements AcsCredentialStore {
   @override
   Future<void> registerFailedAttempt(
     String acsId, {
-    required int failedAttempts,
-    required DateTime? lockedUntil,
+    required bool restartCounter,
+    required int maxFailedAttempts,
+    required DateTime lockUntil,
+    required DateTime at,
   }) async {
-    fieldsWritten['failedAttempts'] = failedAttempts;
-    fieldsWritten['lockedUntil'] = lockedUntil;
+    // O fake espelha a regra da `UPDATE` de `OrmAcsCredentialStore`
+    // (`restartCounter` recomeça em 1; o bloqueio entra quando a contagem DA
+    // LINHA cruza o limite; bloqueio ativo não conta nem estende). Sem isso as
+    // asserções deste arquivo deixariam de medir o desfecho — "gravou 5 e
+    // trancou" — e passariam a medir só os parâmetros. Quem prova que o SQL
+    // aplica essa regra é o teste de integração, contra Postgres.
     final current = record;
-    if (current != null) {
+    final previous = current?.failedAttempts ?? 0;
+    final bloqueadoAgora =
+        current?.lockedUntil != null && current!.lockedUntil!.isAfter(at);
+    if (bloqueadoAgora && !restartCounter) return; // mesmo `WHERE` do SQL
+
+    final next = restartCounter ? 1 : previous + 1;
+    final nextLockedUntil =
+        restartCounter || next < maxFailedAttempts ? null : lockUntil;
+
+    fieldsWritten['failedAttempts'] = next;
+    fieldsWritten['lockedUntil'] = nextLockedUntil;
+    fieldsWritten['restartCounter'] = restartCounter;
+    final atual = record;
+    if (atual != null) {
       record = AcsCredentialRecord(
-        acsId: current.acsId,
-        microAreaId: current.microAreaId,
-        active: current.active,
-        digest: current.digest,
-        failedAttempts: failedAttempts,
-        lockedUntil: lockedUntil,
+        acsId: atual.acsId,
+        microAreaId: atual.microAreaId,
+        active: atual.active,
+        digest: atual.digest,
+        failedAttempts: next,
+        lockedUntil: nextLockedUntil,
       );
     }
   }

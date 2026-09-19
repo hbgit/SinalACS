@@ -28,6 +28,12 @@ class Argon2PasswordHasher implements PasswordHasher {
   static const recommendedIterations = 2;
   static const recommendedParallelism = 1;
 
+  /// Comprimento do hash derivado, em bytes. **Não** viaja em [PasswordDigest],
+  /// ao contrário dos parâmetros de custo: `matches` decodifica o que estiver
+  /// gravado e compara com o que `_derive` produz aqui, então mudar este número
+  /// faz toda credencial existente verificar como senha errada — e "senha
+  /// errada" conta tentativa e bloqueia a conta. Subir o custo é troca de
+  /// constante; mexer aqui é migração de credencial.
   static const _hashLength = 32;
   static const _saltLength = 16;
 

@@ -32,12 +32,25 @@ abstract interface class AcsCredentialStore {
   /// Credencial do ACS dono desta matrícula, ou `null` se não existir.
   Future<AcsCredentialRecord?> findByEnrollmentId(String enrollmentId);
 
-  /// Grava a tentativa falha e o bloqueio resultante. A política (quantas
-  /// tentativas, quanto tempo) é do serviço; o store só persiste.
+  /// Conta a tentativa falha e aplica o bloqueio resultante.
+  ///
+  /// A política continua sendo do serviço — as decisões chegam como
+  /// parâmetro —, mas o *valor final do contador* não: o store precisa somar
+  /// sobre o número que está na linha, não sobre o que o serviço leu antes.
+  /// Passar o valor já somado é o que permite duas requisições concorrentes
+  /// lerem a mesma base e gravarem `base + 1` as duas, e uma delas se perder
+  /// (ver `OrmAcsCredentialStore.registerFailedAttempt`).
+  ///
+  /// [restartCounter] (`true` quando o bloqueio anterior já venceu) faz a
+  /// contagem recomeçar em `1` em vez de somar à anterior; [maxFailedAttempts]
+  /// é o limite a partir do qual a falha bloqueia; [lockUntil] é o instante do
+  /// vencimento do bloqueio, já calculado pelo serviço ([lockDuration] dele).
   Future<void> registerFailedAttempt(
     String acsId, {
-    required int failedAttempts,
-    required DateTime? lockedUntil,
+    required bool restartCounter,
+    required int maxFailedAttempts,
+    required DateTime lockUntil,
+    required DateTime at,
   });
 
   /// Zera o contador e o bloqueio depois de um login válido.
@@ -59,10 +72,17 @@ abstract interface class AcsCredentialStore {
 /// 2. A conta bloqueia depois de [maxFailedAttempts] falhas, por
 ///    [lockDuration] — a exigência de "registro de tentativas de acesso" de
 ///    `spec/lgpd_design.md` e o achado F6 de `spec/security_assessment.md`.
-/// 3. Inatividade e ausência de território só são reveladas **depois** de a
-///    senha conferir.
-/// 4. Cada desfecho vira uma linha em `audit_logs` (RF17), pela mesma trilha
-///    encadeada que os outros serviços usam.
+///    A contagem em si é aplicada pelo store numa única instrução, para não
+///    perder atualização sob concorrência.
+/// 3. Inatividade, ausência de território e bloqueio só são revelados
+///    **depois** de a senha conferir.
+/// 4. Cada desfecho de uma tentativa que chegou a identificar uma conta vira
+///    uma linha em `audit_logs` (RF17), pela mesma trilha encadeada que os
+///    outros serviços usam. A exceção é a recusa por entrada em branco
+///    (`Informe matrícula e senha.`), que responde antes de qualquer conta ser
+///    identificada — e `audit_logs.userId` é obrigatório com FK para `users`,
+///    então não há sujeito a quem atribuir a linha. É o mesmo limite do
+///    caminho da matrícula inexistente, registrado no achado F6.
 class InstitutionalAuthService {
   InstitutionalAuthService({
     required this.store,
@@ -82,6 +102,10 @@ class InstitutionalAuthService {
   static const deviceIdAbsent = 'nao-aplicavel-login-institucional';
 
   static const _invalidCredentials = 'Matrícula ou senha inválidos.';
+
+  /// Só chega a quem provou conhecer a senha (a ordem do `login` garante isso).
+  static const _lockMessage = 'Acesso temporariamente bloqueado por tentativas '
+      'inválidas. Tente novamente em alguns minutos.';
 
   Future<AuthenticatedUser> login({
     required String matricula,
@@ -119,14 +143,17 @@ class InstitutionalAuthService {
       throw AuthenticationFailedException(message: _invalidCredentials);
     }
 
+    // O bloqueio é decidido aqui e **revelado só depois** de a senha conferir.
+    // A ordem é a regra, não um detalhe: recusar pelo bloqueio antes de olhar a
+    // senha faz cinco chutes contra uma matrícula existente responderem
+    // "Acesso temporariamente bloqueado…", enquanto uma matrícula inexistente
+    // continua respondendo "Matrícula ou senha inválidos." — cinco requisições
+    // anônimas por candidata enumeram quem existe, que é exatamente o que a
+    // mensagem única existe para esconder. No caminho da senha errada o
+    // bloqueio ativo também não vira mensagem própria: ele só decide que a
+    // tentativa **não é contada**.
     final lockedUntil = record.lockedUntil;
-    if (lockedUntil != null && lockedUntil.isAfter(at)) {
-      await _recordAudit(record.acsId, 'denied_locked');
-      throw AuthenticationFailedException(
-        message: 'Acesso temporariamente bloqueado por tentativas inválidas. '
-            'Tente novamente em alguns minutos.',
-      );
-    }
+    final locked = lockedUntil != null && lockedUntil.isAfter(at);
 
     // `matches` fica FORA de qualquer try/catch de propósito: uma linha de
     // credencial corrompida (salt curto → `ArgumentError`, base64 inválido →
@@ -143,22 +170,40 @@ class InstitutionalAuthService {
     // comprimento deve morar — corrigir isso aqui exigiria adivinhar o
     // comprimento do hash por dentro do serviço de login.
     if (!await hasher.matches(password, record.digest)) {
+      if (locked) {
+        // Bloqueio ativo: a tentativa não é contada nem estende o castigo, e a
+        // resposta é a genérica — anunciar o bloqueio a quem não provou
+        // conhecer a senha reabriria a enumeração que a ordem acima fecha. A
+        // trilha registra o motivo real, que é interno.
+        await _recordAudit(record.acsId, 'denied_locked');
+        throw AuthenticationFailedException(message: _invalidCredentials);
+      }
+
       // Bloqueio vencido zera o contador. Sem isto, uma única tentativa errada
       // depois de cada expiração tranca de novo por mais `lockDuration`: uma
       // conta pode ficar presa indefinidamente com **uma** tentativa por
       // janela — negação de serviço contra o acesso do ACS, e o ACS que só
       // errou a senha uma vez por dia nunca mais entra. O bloqueio é para
       // frear rajada, não para acumular para sempre.
+      //
+      // O reinício viaja como decisão (`restartCounter`) porque quem aplica a
+      // contagem é o store, numa única instrução: somar aqui, sobre o valor
+      // lido acima, perderia tentativas concorrentes.
       final lockExpirou = lockedUntil != null && !lockedUntil.isAfter(at);
-      final attempts = lockExpirou ? 1 : record.failedAttempts + 1;
       await store.registerFailedAttempt(
         record.acsId,
-        failedAttempts: attempts,
-        lockedUntil:
-            attempts >= maxFailedAttempts ? at.add(lockDuration) : null,
+        restartCounter: lockExpirou,
+        maxFailedAttempts: maxFailedAttempts,
+        lockUntil: at.add(lockDuration),
+        at: at,
       );
       await _recordAudit(record.acsId, 'denied_credentials');
       throw AuthenticationFailedException(message: _invalidCredentials);
+    }
+
+    if (locked) {
+      await _recordAudit(record.acsId, 'denied_locked');
+      throw AuthenticationFailedException(message: _lockMessage);
     }
 
     // Daqui para baixo a senha já conferiu: distinguir os motivos deixa de
