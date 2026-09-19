@@ -4,8 +4,11 @@ import 'package:sinalacs_server/src/application/alerts/alert_outbox_dispatcher.d
 import 'package:sinalacs_server/src/application/alerts/red_alert_service.dart';
 import 'package:sinalacs_server/src/application/audit/audit_trail.dart';
 import 'package:sinalacs_server/src/application/auth/development_auth_service.dart';
+import 'package:sinalacs_server/src/application/auth/cpf_hasher.dart';
 import 'package:sinalacs_server/src/application/auth/institutional_auth_service.dart';
 import 'package:sinalacs_server/src/application/auth/password_hasher.dart';
+import 'package:sinalacs_server/src/application/auth/passwordless_auth_service.dart';
+import 'package:sinalacs_server/src/application/auth/sms_gateway.dart';
 import 'package:sinalacs_server/src/application/onboarding/onboarding_service.dart';
 import 'package:sinalacs_server/src/application/patients/patient_directory_service.dart';
 import 'package:sinalacs_server/src/application/triage/triage_session_service.dart';
@@ -13,11 +16,13 @@ import 'package:sinalacs_server/src/application/visits/visit_sync_service.dart';
 import 'package:sinalacs_server/src/config/app_config.dart';
 import 'package:sinalacs_server/src/infrastructure/crypto/argon2_password_hasher.dart';
 import 'package:sinalacs_server/src/infrastructure/crypto/health_data_cipher.dart';
+import 'package:sinalacs_server/src/infrastructure/crypto/hmac_cpf_hasher.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_acs_credential_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_alert_outbox.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_alert_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_audit_trail.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_onboarding_store.dart';
+import 'package:sinalacs_server/src/infrastructure/database/orm_otp_challenge_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_patient_directory_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_triage_session_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_visit_store.dart';
@@ -69,6 +74,44 @@ class AlertRuntime {
   /// aqui — ver `PasswordDigest`.
   PasswordHasher get passwordHasher => const Argon2PasswordHasher();
 
+  /// Hash do CPF e do código OTP do login passwordless (RF01), keyed pelo
+  /// pepper da config — sem ele o hash de um CPF é reversível por força bruta.
+  CpfHasher get cpfHasher =>
+      _cpfHasher ??= HmacCpfHasher(pepper: config.cpfHashPepper);
+  CpfHasher? _cpfHasher;
+
+  /// Mesmo hasher de [cpfHasher], exposto com nome próprio para os testes de
+  /// integração que precisam gravar o hash de um CPF sintético sem passar pelo
+  /// fluxo de login (o `users.cpfHash` é o índice que o login consulta).
+  @visibleForTesting
+  CpfHasher get cpfHasherForTests => cpfHasher;
+
+  /// Gateway de SMS do login passwordless.
+  ///
+  /// Sem override, é o de `SMS_GATEWAY`; hoje só existe `log`, e `AppConfig`
+  /// já recusa esse valor fora de `APP_ENV=development` — a exceção aqui é a
+  /// segunda linha de defesa, para uma config construída fora do
+  /// `fromEnvironment` (os testes) apontar o gateway errado em produção.
+  SmsGateway get smsGateway =>
+      _smsGatewayOverride ??
+      (_smsGateway ??= config.smsGateway == 'log'
+          ? const LoggingSmsGateway()
+          : throw StateError(
+              'SMS_GATEWAY=${config.smsGateway} não tem implementação: só '
+              '"log" existe hoje. Implemente SmsGateway antes de configurá-lo.',
+            ));
+  SmsGateway? _smsGateway;
+  SmsGateway? _smsGatewayOverride;
+
+  /// Substitui o gateway de SMS usado pelo login passwordless.
+  ///
+  /// Existe para os testes: o gateway de produção **envia** (ou escreve o
+  /// código no log), e o teste precisa capturar o código para provar o
+  /// caminho de verificação sem depender de um provedor. Passar `null`
+  /// restaura o gateway da config.
+  @visibleForTesting
+  void overrideSmsGateway(SmsGateway? gateway) => _smsGatewayOverride = gateway;
+
   bool get isMqttConnected => _dispatcher?.isConnected ?? false;
 
   /// Substitui a configuração lida do ambiente.
@@ -85,6 +128,10 @@ class AlertRuntime {
     // `healthDataEncryptionKey`, e manter a antiga faria os stores cifrarem
     // com uma chave que a config atual não conhece mais.
     _healthDataCipher = null;
+    // O hasher de CPF é keyed pelo pepper e o gateway de SMS depende do
+    // `smsGateway` da config: os dois foram derivados da config antiga.
+    _cpfHasher = null;
+    _smsGateway = null;
   }
 
   AlertPublisher? _publisherOverride;
@@ -175,6 +222,20 @@ class AlertRuntime {
       InstitutionalAuthService(
         store: OrmAcsCredentialStore(session: () => session),
         hasher: passwordHasher,
+        audit: auditTrailFor(session),
+      );
+
+  /// Serviço de login passwordless do paciente (RF01) para uma requisição.
+  ///
+  /// Mesmo arranjo dos outros `*ServiceFor`: o store recebe a sessão por
+  /// chamada, e a trilha é a da requisição, para que cada desfecho
+  /// (`otp_requested`, `denied_code`, `granted`…) vire uma linha encadeada em
+  /// `audit_logs`.
+  PasswordlessAuthService passwordlessAuthServiceFor(Session session) =>
+      PasswordlessAuthService(
+        store: OrmOtpChallengeStore(session: () => session),
+        hasher: cpfHasher,
+        sms: smsGateway,
         audit: auditTrailFor(session),
       );
 

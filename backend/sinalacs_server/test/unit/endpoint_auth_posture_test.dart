@@ -38,6 +38,10 @@ const _publicMethodsByDesign = <String, String>{
   'OnboardingEndpoint.completeEnrollment':
       'público por desenho: quem conclui o onboarding ainda não tem sessão — o '
       'convite de uso único é a credencial',
+  'AuthEndpoint.requestOtp':
+      'login por desenho: quem pede o código ainda não tem sessão',
+  'AuthEndpoint.verifyOtp':
+      'login por desenho: é esta chamada que emite a sessão do paciente',
 };
 
 /// A classe que o teste protege — e cuja declaração ele precisa ignorar.

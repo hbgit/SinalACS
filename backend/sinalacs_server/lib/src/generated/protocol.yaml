@@ -5,6 +5,8 @@ alerts:
 auth:
   - developmentLogin:
   - loginInstitutional:
+  - requestOtp:
+  - verifyOtp:
 health:
   - check:
 onboarding:

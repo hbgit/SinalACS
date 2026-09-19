@@ -208,6 +208,60 @@ class Endpoints extends _i1.EndpointDispatch {
                     deviceId: params['deviceId'],
                   ),
         ),
+        'requestOtp': _i1.MethodConnector(
+          name: 'requestOtp',
+          params: {
+            'cpf': _i1.ParameterDescription(
+              name: 'cpf',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'birthDate': _i1.ParameterDescription(
+              name: 'birthDate',
+              type: _i1.getType<DateTime>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async => (endpoints['auth'] as _i3.AuthEndpoint).requestOtp(
+                session,
+                cpf: params['cpf'],
+                birthDate: params['birthDate'],
+              ),
+        ),
+        'verifyOtp': _i1.MethodConnector(
+          name: 'verifyOtp',
+          params: {
+            'cpf': _i1.ParameterDescription(
+              name: 'cpf',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'code': _i1.ParameterDescription(
+              name: 'code',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'deviceId': _i1.ParameterDescription(
+              name: 'deviceId',
+              type: _i1.getType<String?>(),
+              nullable: true,
+            ),
+          },
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async => (endpoints['auth'] as _i3.AuthEndpoint).verifyOtp(
+                session,
+                cpf: params['cpf'],
+                code: params['code'],
+                deviceId: params['deviceId'],
+              ),
+        ),
       },
     );
     connectors['health'] = _i1.EndpointConnector(

@@ -91,7 +91,8 @@ class EndpointAlerts extends EndpointAuthenticated {
 }
 
 /// Autenticação. `developmentLogin` é acesso de desenvolvimento e **não** é
-/// autenticação institucional; `loginInstitutional` é o caminho real (RF07).
+/// autenticação institucional; `loginInstitutional` é o caminho real (RF07);
+/// `requestOtp`/`verifyOtp` são o login passwordless do paciente (RF01).
 ///
 /// `developmentLogin` substitui `POST /v1/auth/development/login`, preservando
 /// o gate do `ENABLE_DEV_LOGIN`: quando desligado, a chamada falha como se o
@@ -129,6 +130,53 @@ class EndpointAuth extends _i1.EndpointRef {
     {
       'matricula': matricula,
       'password': password,
+      'deviceId': deviceId,
+    },
+  );
+
+  /// Pedido do código de acesso (RF01). Público por definição: quem chama
+  /// ainda não tem sessão. A resposta é sempre a mesma — não revela se o CPF
+  /// está cadastrado (ver `PasswordlessAuthService.requestOtp`).
+  ///
+  /// O CPF é validado aqui, **antes** de virar hash: um número com dígito
+  /// verificador errado é erro de digitação, e tratá-lo como "não encontrado"
+  /// mandaria o paciente para a tela do código com um CPF que nunca vai casar.
+  /// A recusa não distingue esse caso de nenhum outro para quem sonda, porque
+  /// `Cpf.tryParse` devolve `null` sem dizer o motivo.
+  ///
+  /// Data de nascimento no futuro não é validada aqui de propósito: quem decide
+  /// se a data confere com o cadastro é o serviço, e uma checagem de faixa
+  /// étaria no endpoint seria mais um sinal distinguível.
+  _i2.Future<void> requestOtp({
+    required String cpf,
+    required DateTime birthDate,
+  }) => caller.callServerEndpoint<void>(
+    'auth',
+    'requestOtp',
+    {
+      'cpf': cpf,
+      'birthDate': birthDate,
+    },
+  );
+
+  /// Verificação do código, que emite a sessão do paciente (RF01).
+  ///
+  /// Público pelo mesmo motivo de [requestOtp] — é esta chamada que **emite** a
+  /// sessão —, e o token sai com o papel `patient` e a microárea lida do
+  /// cadastro pelo serviço, nunca de parâmetro.
+  ///
+  /// Toda recusa chega ao app como `OtpRequestException`, com a mensagem que o
+  /// serviço escolheu: uma só, para não dizer se aquele CPF existe.
+  _i2.Future<_i6.DevelopmentLoginResult> verifyOtp({
+    required String cpf,
+    required String code,
+    String? deviceId,
+  }) => caller.callServerEndpoint<_i6.DevelopmentLoginResult>(
+    'auth',
+    'verifyOtp',
+    {
+      'cpf': cpf,
+      'code': code,
       'deviceId': deviceId,
     },
   );
