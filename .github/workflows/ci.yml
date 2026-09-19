@@ -92,6 +92,26 @@ jobs:
         with:
           flutter-version: '3.44.8'
       - run: flutter pub get
+      # apps/patient/pubspec.yaml declara assets/certs/ — a pasta das CAs de
+      # desenvolvimento, gitignored e produzida por scripts/dev/sync_dev_ca.sh.
+      # Aquele script exige a stack de pé (valida a CA contra a folha que ela
+      # assina), e este job não tem Docker nem stack; então a pasta é criada
+      # VAZIA, que é o que basta para o que este job roda: o `flutter analyze`
+      # só confere se o diretório existe. Sem ele, o analyze sai 1 num clone
+      # limpo (`asset_directory_does_not_exist`) — é o que acontece aqui desde
+      # que a declaração entrou no pubspec.
+      #
+      # VAZIA NÃO SERVE PARA BUILDAR. `flutter build apk` e `flutter test` não
+      # reclamam do diretório ausente: saem verdes, e o APK vai sem nenhum .crt
+      # dentro — medido, com o diretório ausente e com ele vazio. Com o
+      # diretório ausente ainda sai uma linha "Error: unable to find directory
+      # entry in pubspec.yaml", que o build imprime e ignora; com o diretório
+      # vazio essa linha some, e o build fica silencioso de vez. Quem
+      # acrescentar um build a este job precisa das CAs de verdade:
+      # `docker compose up` e depois ./scripts/dev/sync_dev_ca.sh, que é quem
+      # copia certificado, não pasta.
+      - name: Cria o diretório assets/certs/ que o pubspec declara
+        run: mkdir -p assets/certs
       - run: flutter analyze
       - run: flutter test
 
@@ -106,6 +126,12 @@ jobs:
         with:
           flutter-version: '3.44.8'
       - run: flutter pub get
+      # Mesmo motivo do job patient-app, e o comentário completo está lá:
+      # assets/certs/ é gitignored e vem do scripts/dev/sync_dev_ca.sh, que
+      # precisa da stack de pé. O acs-app já falhava aqui por causa disso antes
+      # de o app do paciente declarar a mesma pasta.
+      - name: Cria o diretório assets/certs/ que o pubspec declara
+        run: mkdir -p assets/certs
       - run: flutter analyze
       - run: flutter test
 

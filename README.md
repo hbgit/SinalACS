@@ -90,8 +90,9 @@ cd apps/acs && flutter pub get && cd -
 
 Use o script, não `flutter run` direto. A senha do broker é resolvida em tempo
 de compilação e não tem valor padrão: ela é gerada por máquina pelo
-`bootstrap_env.sh`. O script lê o `.env`, copia a CA do broker para os assets e
-passa os quatro `--dart-define` por um arquivo temporário (`--dart-define-from-file`,
+`bootstrap_env.sh`. O script lê o `.env`, copia as duas CAs de desenvolvimento
+(a do broker e a do RPC) para os assets e passa os quatro `--dart-define` por um
+arquivo temporário (`--dart-define-from-file`,
 apagado ao sair), para a senha não trafegar na linha de comando do `flutter`. Um
 `flutter build apk` sem essas variáveis **falha** — a guarda vive em
 `apps/acs/android/app/build.gradle.kts` — em vez de compilar em silêncio um APK
@@ -116,6 +117,18 @@ flutter run
 # em aparelho físico, apontando para a máquina da stack:
 flutter run --dart-define=SINALACS_HOST=http://<ip-da-máquina>:8080/
 ```
+
+Antes do primeiro `flutter run` — ou sempre que um `runtime/` da stack for
+apagado —, copie as CAs de desenvolvimento para os assets, com a stack de pé:
+
+```bash
+./scripts/dev/sync_dev_ca.sh
+```
+
+Sem essa cópia **nada fica vermelho na hora de compilar**: `flutter build` e
+`flutter test` saem verdes e o APK vai sem certificado nenhum dentro, e o app só
+se denuncia depois, no handshake do TLS. O único comando que reclama é o
+`flutter analyze`, pelo diretório que o `pubspec.yaml` declara e não existe.
 
 ## Build
 

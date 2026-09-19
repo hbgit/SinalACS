@@ -72,7 +72,7 @@ echo '== aplicando o seed de desenvolvimento =='
 # Sem o seed, createRedAlert falha por chave estrangeira em alerts.patientId.
 docker compose up database-seed
 
-echo '== sincronizando a CA do broker para o app do ACS =='
+echo '== sincronizando as CAs (broker e RPC) para os dois apps =='
 ./scripts/dev/sync_dev_ca.sh
 
 echo
