@@ -1825,11 +1825,25 @@ Co-Authored-By: Claude Code <noreply@anthropic.com>"
 
 **Files:**
 - Create: `backend/sinalacs_server/bin/seed_cpf_hashes.dart`
+- **Modify: `backend/sinalacs_server/Dockerfile`** — sem isto o serviço não sobe (ver abaixo)
 - Modify: `docker-compose.yml`
 
 **Interfaces:**
 - Consumes: `HmacCpfHasher` (Task 2), `Cpf` (Task 1).
 - Produces: CPFs sintéticos conhecidos no banco de desenvolvimento, sem os quais `requestOtp` nunca encontra paciente nenhum.
+
+> **O `Dockerfile` não é um "confirme", é um passo.** A varredura pré-voo conferiu: o estágio de
+> build compila **cada** entrypoint de `bin/` por nome — `bin/main.dart` (linha 29),
+> `bin/seed_health_data.dart` (32) e `bin/seed_acs_credentials.dart` (36) — e o estágio final
+> copia os binários um a um (linhas 56-58). Não há glob, e `bin/` **não** entra na imagem
+> inteiro: só os quatro arquivos listados. Um `bin/seed_cpf_hashes.dart` novo que não ganhe as
+> suas duas linhas não existe dentro de `sinalacs/server:local`, e o serviço de compose falha
+> com "executable file not found" — depois do build, no boot da stack, não no `dart test`.
+>
+> Então: acrescente o `dart compile exe bin/seed_cpf_hashes.dart -o bin/seed_cpf_hashes` ao
+> estágio de build e o `COPY --from=build /app/sinalacs_server/bin/seed_cpf_hashes seed_cpf_hashes`
+> ao estágio final, ao lado dos dois irmãos. **Esta é a nota que o plano de RF07 registrou na
+> Task 5 dele** — o mesmo defeito, na mesma forma, e é a segunda vez que ele aparece.
 
 Sem isto a stack sobe com `users.cpfHash` contendo os literais `'development-patient'`, que **nenhum HMAC produz** — o login passwordless seria impossível de exercitar.
 
@@ -1970,7 +1984,9 @@ Em `docker-compose.yml`, depois do `acs-credential-seed`:
     entrypoint: ["./seed_cpf_hashes"]
 ```
 
-Confirme que o `Dockerfile` compila este entrypoint (ver a nota da Task 5 do plano de RF07).
+**O `Dockerfile` precisa das duas linhas** — o `dart compile exe` no estágio de build e o `COPY`
+no estágio final. Não é confirmação: o arquivo lista os entrypoints por nome, sem glob, e `bin/`
+não entra na imagem inteiro. Ver o bloco na File list desta task.
 
 - [ ] **Step 2b: Dar o pepper TAMBÉM ao serviço `serverpod`**
 
