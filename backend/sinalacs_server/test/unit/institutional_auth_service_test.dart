@@ -16,9 +16,17 @@ class _FakeStore implements AcsCredentialStore {
   AcsCredentialRecord? record;
   final fieldsWritten = <String, Object?>{};
 
+  /// Conta as consultas: sem isto, "não toca no banco" é uma afirmação que
+  /// nenhum teste consegue medir — `fieldsWritten` só registra escritas, e uma
+  /// validação que fosse feita depois do SELECT passaria como se não o tivesse
+  /// feito.
+  int lookups = 0;
+
   @override
-  Future<AcsCredentialRecord?> findByEnrollmentId(String enrollmentId) async =>
-      enrollmentId == 'ACS-001' ? record : null;
+  Future<AcsCredentialRecord?> findByEnrollmentId(String enrollmentId) async {
+    lookups++;
+    return enrollmentId == 'ACS-001' ? record : null;
+  }
 
   @override
   Future<void> registerFailedAttempt(
@@ -251,7 +259,7 @@ void main() {
       );
     });
 
-    test('recusa matrícula ou senha em branco sem tocar no banco', () async {
+    test('recusa matrícula em branco sem tocar no banco', () async {
       final service = await build();
       final store = service.store as _FakeStore;
 
@@ -261,6 +269,23 @@ void main() {
       );
 
       expect(store.fieldsWritten, isEmpty);
+      expect(store.lookups, 0);
+    });
+
+    test('recusa senha em branco com matrícula válida, também sem tocar no banco', () async {
+      final service = await build();
+      final store = service.store as _FakeStore;
+
+      await expectLater(
+        service.login(matricula: 'ACS-001', password: ''),
+        throwsA(isA<AuthenticationFailedException>()),
+      );
+
+      // A matrícula é válida e existe; o que barra é a senha vazia. Sem este
+      // caso, o `||` do serviço curto-circuita na matrícula em branco e a
+      // metade da senha nunca é exercitada por teste nenhum.
+      expect(store.fieldsWritten, isEmpty);
+      expect(store.lookups, 0);
     });
 
     test('marca o deviceId ausente em vez de inventar um', () async {
@@ -467,6 +492,47 @@ void main() {
         throwsA(isA<FormatException>()),
       );
       expect(store.fieldsWritten, isEmpty);
+    });
+
+    test('bloqueio ativo não conta tentativa nem com a senha errada', () async {
+      final agora = DateTime.utc(2026, 9, 18, 12);
+      final service = await build(
+        failedAttempts: 5,
+        lockedUntil: agora.add(const Duration(minutes: 5)),
+      );
+      final store = service.store as _FakeStore;
+
+      await expectLater(
+        service.login(matricula: 'ACS-001', password: 'outra', now: agora),
+        throwsA(isA<AuthenticationFailedException>()),
+      );
+
+      // A senha está errada de propósito: uma implementação que verificasse a
+      // senha ANTES do bloqueio passaria em todos os outros testes, e aqui
+      // contaria a tentativa e regravaria o bloqueio a cada chute durante o
+      // castigo — re-trancando a conta para sempre.
+      expect(store.fieldsWritten['failedAttempts'], isNull);
+      expect(store.fieldsWritten['lockedUntil'], isNull);
+    });
+
+    test('bloqueio vencido zera o contador em vez de recontar', () async {
+      final agora = DateTime.utc(2026, 9, 18, 12);
+      final service = await build(
+        failedAttempts: 5,
+        lockedUntil: agora.subtract(const Duration(minutes: 1)),
+      );
+      final store = service.store as _FakeStore;
+
+      await expectLater(
+        service.login(matricula: 'ACS-001', password: 'outra', now: agora),
+        throwsA(isA<AuthenticationFailedException>()),
+      );
+
+      // Sem o reset: attempts = 6 >= 5 e a conta tranca de novo por 15 min a
+      // cada tentativa — uma tentativa por janela basta para manter um ACS
+      // fora para sempre.
+      expect(store.fieldsWritten['failedAttempts'], 1);
+      expect(store.fieldsWritten['lockedUntil'], isNull);
     });
 
     test('o login bem-sucedido reseta em vez de contar tentativa', () async {

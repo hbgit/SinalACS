@@ -104,6 +104,17 @@ class InstitutionalAuthService {
       // matrícula inexistente volta em microssegundos enquanto a de uma
       // matrícula real demora o tempo do Argon2id — o relógio entregaria a
       // lista de matrículas que a mensagem única existe para esconder.
+      //
+      // Limite conhecido: `derive` deriva com o custo da **instância** (a
+      // configuração do processo), enquanto `matches`, no caminho da matrícula
+      // real, deriva com o custo **gravado na linha** — é justamente o que
+      // permite subir o custo sem invalidar credencial antiga. Os dois tempos
+      // só coincidem enquanto toda linha estiver no default do processo; no
+      // dia em que uma linha carregar custo diferente, o caminho da matrícula
+      // inexistente fica mensuravelmente mais rápido e o relógio reabre a
+      // enumeração que a mensagem idêntica fecha. Não é corrigível aqui: no
+      // caminho da inexistente não há linha de onde ler um custo. A saída é
+      // arquitetural (o serviço conhecer o custo corrente), não local.
       await hasher.derive(password);
       throw AuthenticationFailedException(message: _invalidCredentials);
     }
@@ -132,7 +143,14 @@ class InstitutionalAuthService {
     // comprimento deve morar — corrigir isso aqui exigiria adivinhar o
     // comprimento do hash por dentro do serviço de login.
     if (!await hasher.matches(password, record.digest)) {
-      final attempts = record.failedAttempts + 1;
+      // Bloqueio vencido zera o contador. Sem isto, uma única tentativa errada
+      // depois de cada expiração tranca de novo por mais `lockDuration`: uma
+      // conta pode ficar presa indefinidamente com **uma** tentativa por
+      // janela — negação de serviço contra o acesso do ACS, e o ACS que só
+      // errou a senha uma vez por dia nunca mais entra. O bloqueio é para
+      // frear rajada, não para acumular para sempre.
+      final lockExpirou = lockedUntil != null && !lockedUntil.isAfter(at);
+      final attempts = lockExpirou ? 1 : record.failedAttempts + 1;
       await store.registerFailedAttempt(
         record.acsId,
         failedAttempts: attempts,
