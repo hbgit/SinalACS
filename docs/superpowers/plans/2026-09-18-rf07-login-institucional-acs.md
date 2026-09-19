@@ -884,7 +884,14 @@ class InstitutionalAuthService {
     }
 
     if (!await hasher.matches(password, record.digest)) {
-      final attempts = record.failedAttempts + 1;
+      // Bloqueio vencido zera o contador. Sem isto, uma única tentativa errada
+      // depois de cada expiração tranca de novo por mais `lockDuration`: uma
+      // conta pode ficar presa indefinidamente com **uma** tentativa por
+      // janela — negação de serviço contra o acesso do ACS, e o ACS que só
+      // errou a senha uma vez por dia nunca mais entra. O bloqueio é para
+      // frear rajada, não para acumular para sempre.
+      final lockExpirou = lockedUntil != null && !lockedUntil.isAfter(at);
+      final attempts = lockExpirou ? 1 : record.failedAttempts + 1;
       await store.registerFailedAttempt(
         record.acsId,
         failedAttempts: attempts,
