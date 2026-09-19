@@ -982,10 +982,12 @@ Reusa `DevelopmentLoginResult` (`accessToken`, `tokenType`) em vez de criar um D
 Cria `backend/sinalacs_server/test/integration/institutional_login_test.dart`:
 
 ```dart
+import 'package:sinalacs_server/src/application/auth/institutional_auth_service.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
 import 'package:serverpod/serverpod.dart';
 import 'package:test/test.dart';
 
+import 'test_tools/runtime_harness.dart';
 import 'test_tools/serverpod_test_tools.dart';
 
 /// Login institucional contra Postgres real: prova o JOIN
@@ -1001,6 +1003,15 @@ void main() {
 
     setUp(() async {
       final session = sessionBuilder.build();
+
+      // O harness `withServerpod` aplica as MIGRAÇÕES, nunca o
+      // `development.sql`: sem estas linhas, `ACS-001` não existe no banco de
+      // teste e o JOIN não tem o que encontrar. Insere o mínimo que o caminho
+      // exige — UBS, microárea, usuário ACS e a linha em `acs` —, com UUIDs
+      // sintéticos próprios para não colidir com os de outros arquivos de
+      // integração que rodam sob o mesmo banco.
+      await AlertRuntimeHarness.seedAcs(session, acsId: acsId);
+
       // Mesma KDF de produção, com custo reduzido: o que se prova é o
       // caminho, não o custo.
       final digest = await AlertRuntimeHarness.hasher.derive(senha);
@@ -1128,13 +1139,13 @@ class OrmAcsCredentialStore implements AcsCredentialStore {
 
     final credential = await UserCredential.db.findFirstRow(
       session,
-      where: (table) => table.userId.equals(UuidValue.fromString(acs.id!)),
+      where: (table) => table.userId.equals(acs.id!),
     );
     if (credential == null) return null;
 
     final user = await User.db.findFirstRow(
       session,
-      where: (table) => table.id.equals(UuidValue.fromString(acs.id!)),
+      where: (table) => table.id.equals(acs.id!),
     );
     if (user == null) return null;
 
