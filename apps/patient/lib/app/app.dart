@@ -501,10 +501,17 @@ class _PatientLoginScreenState extends State<PatientLoginScreen> {
               : const Text('Entrar'),
         ),
         const SizedBox(height: 12),
-        // Não repete o pedido: dentro de um minuto o servidor recusa um segundo
-        // código para o mesmo CPF. Voltar ao passo anterior devolve o controle a
-        // quem está logando, que reenvia pelo botão de sempre — e vê a mensagem
-        // do servidor se ainda estiver dentro do intervalo.
+        // Não repete o pedido: dentro de um minuto o servidor **não envia** um
+        // segundo código para o mesmo CPF — e não responde nada de diferente,
+        // de propósito: um aviso de "aguarde um minuto" só seria alcançável por
+        // quem já acertou CPF e nascimento, ou seja, seria o verificador do par.
+        // Voltar ao passo anterior devolve o controle a quem está logando, que
+        // reenvia pelo botão de sempre — e, dentro do intervalo, o pedido passa
+        // em silêncio: nenhum código novo chega, e a tela não diz nada.
+        //
+        // Esse aviso é DESTE lado — é o app que sabe quando o pedido anterior
+        // saiu — e ainda não existe. Lacuna registrada no `PROGRESS.md`, com
+        // dono: quem mexer no app do paciente, que é este arquivo.
         SizedBox(
           width: double.infinity,
           child: OutlinedButton(

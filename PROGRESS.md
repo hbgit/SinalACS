@@ -843,10 +843,14 @@ medida — sem isso a amostra cairia no ramo do intervalo mínimo):
   concordam dentro de poucos por cento: o revisor mediu 3,21 ms contra 0,40 ms; esta rodada mediu
   3,21 ms contra 0,39 ms.
 - **Dentro do intervalo mínimo a diferença encolhe, mas não some:** esse ramo faz o `latestOpen` e
-  mais nada, e ainda assim é ~2× a recusa (AUC 0,956 nesta medição; 0,981, 0,996 e 0,986 nas três
-  do revisor). É o único destes números que **admite interseção**: nesta medição as faixas se
-  cruzam em parte, e o revisor registrou o mesmo em uma das rodadas dele. O que se afirma é o piso
-  — o sinal nunca chega a indistinguível —, e é isso que se confirma.
+  mais nada, e ainda assim **fica acima do acaso** (AUC 0,675 na medição intercalada do review
+  final, contra 0,5 de uma separação ao acaso). ~~era ~2× a recusa (AUC 0,956 nesta medição; 0,981,
+  0,996 e 0,986 nas três do revisor)~~ A **magnitude** medida em blocos **não se reproduziu** no
+  desenho intercalado (p50 1,19×, contra os ~2× daqui), e o motivo é o ambiente em que foi medida,
+  não o fenômeno — ver o fim desta subseção. O que **as duas medições sustentam** é o piso — o sinal
+  nunca chega a indistinguível —, e é isso que se afirma. É o único destes números que **admite
+  interseção**: nesta medição as faixas se cruzam em parte, e o revisor registrou o mesmo em uma
+  das rodadas dele.
 - **O delta é o `latestOpen`, e isso agrava o caso.** Ele só é alcançado **depois** de o par estar
   conferido, então o relógio **não é ruído alheio ao segredo: é correlacionado com ele** — quem
   responde rápido é quem não passou pela conferência. E ele é **anterior a qualquer envio**: o
@@ -854,7 +858,16 @@ medida — sem isso a amostra cairia no ramo do intervalo mínimo):
   registrada (tirar o envio do caminho de resposta) ataca o termo do provedor e **não alcança esse
   delta**; o que alcançaria é um piso constante sobre o **handler inteiro**, que é medida mais
   forte do que a registrada e só vale acima do caminho mais lento.
-- **`verifyOtp` tem o mesmo canal, e mais forte** — ver o item com dono na lista abaixo.
+- **`verifyOtp` tem canal de tempo próprio, e é a barreira MAIS BAIXA** — ver o item com dono na
+  lista abaixo. Ele existe, é decidível e **não precisa da data de nascimento**: onde o
+  `requestOtp` no par correto separa com AUC **1,0000** (os extremos nem se tocam), o `verifyOtp`
+  separa com **0,9636** — **mais fraca** que aquela, e era "e mais forte" o que esta linha dizia.
+  Quem for atacar a enumeração do RF01 começa por ele, e não pelo caminho mais caro.
+- **A ordem entre as duas últimas linhas da tabela não é fato.** "CPF não cadastrado" (0,39 ms) e
+  "CPF cadastrado, nascimento errado" (0,46 ms) estão a menos de 0,1 ms um do outro, e essa ordem
+  **troca de sinal entre ambientes** — é artefato de medição, não canal, e não deve ser lida como
+  propriedade de nenhum dos dois caminhos. Canal é a distância entre essas duas linhas e o par
+  correto, essa sim estável e grande.
 
 O parágrafo anterior a esta subseção dizia "o que **não se mede** com confiança é o tamanho da
 diferença", e a seção dizia "resíduo, não sinal": as duas frases eram **falsas**, e são a mesma
@@ -863,10 +876,14 @@ se contradizia sozinho — se o relógio não se medisse, não haveria nada a co
 
 **O que a correção não resolve** — ninguém deve ler "oráculo fechado" como "enumeração inviável":
 
-- **`verifyOtp` tem o mesmo canal de tempo, e mais forte — e não é regressão desta rodada.** Medido
-  em 2026-09-19: CPF cadastrado com desafio aberto ~4,0 ms (p50) contra ~1,7 ms do CPF não
+- **`verifyOtp` tem canal de tempo próprio, e não é regressão desta rodada.** Medido em blocos, em
+  2026-09-19: ~~CPF cadastrado com desafio aberto ~4,0 ms (p50) contra ~1,7 ms do CPF não
   cadastrado, faixas sem interseção, **AUC 0,997** na medição do revisor (0,990 sem desafio
-  aberto). **Uma chamada responde "este CPF é paciente da unidade" — e sem precisar da data de
+  aberto)~~ Na medição **intercalada** do review final, **4,58 ms contra 3,62 ms, com as caudas se
+  tocando, AUC 0,9636** — e é este o número que o registro sustenta. A comparação "**e mais
+  forte**" que esta lista trazia não se sustenta de nenhum dos dois lados: o canal do `requestOtp`
+  no par correto é AUC **1,0000**, e o daqui é **mais fraco** que aquele.
+  **Uma chamada responde "este CPF é paciente da unidade" — e sem precisar da data de
   nascimento**, que é justamente o fator que `requestOtp` exige. Não foi introduzido aqui e não
   estava em brief nenhum; existe porque o caminho do CPF cadastrado faz o `latestOpen`, o
   `registerAttempt` e a auditoria, e o do CPF inexistente só faz o `findByCpfHash`. A **Global
@@ -890,6 +907,50 @@ se contradizia sozinho — se o relógio não se medisse, não haveria nada a co
   [`spec/lgpd_data_audit.md`](spec/lgpd_data_audit.md) —, então a tabela é um rastro de tentativas
   de login sem prazo. **Registrado, não implementado**: depende de decidir prazo e de quem executa
   a limpeza, como as outras retenções do projeto.
+
+#### A medição intercalada do review final: a magnitude é do ambiente (2026-09-19)
+
+O review final de branch mediu de novo, com desenho **intercalado**, os números desta subseção — e
+**dois deles não se reproduziram**. Cada caso foi medido ao lado do seu controle, na mesma conexão
+keep-alive, 250 pares por bloco, por HTTPS via Traefik: é esse desenho que separa o custo fixo do
+ambiente do delta que se quer medir.
+
+| comparação | em blocos (este registro) | intercalada (review final) |
+|---|---|---|
+| `requestOtp` no intervalo mínimo × recusa | ~2×; AUC 0,956 / 0,981 / 0,996 / 0,986 | p50 **1,19×**; AUC **0,675** |
+| `verifyOtp`, CPF existe × não existe | ~4,0 × ~1,7 ms; AUC 0,997 / 0,990 | **4,58 × 3,62 ms**, caudas se tocando; AUC **0,9636** |
+| `requestOtp` no par correto × CPF não cadastrado | 3,21 × 0,39 ms, sem interseção | **AUC 1,0000**, separação perfeita |
+
+- **O encolhimento do ramo do intervalo mínimo tem mecanismo, e é por isso que o número antigo não
+  é falso — é do ambiente.** O ramo do intervalo mínimo e a recusa fazem **uma consulta indexada
+  cada** (o primeiro acha uma linha em `otp_challenges`, o segundo acha zero em `users`), e o
+  TLS/Traefik soma ~0,5 ms a **toda** chamada, comprimindo a razão: o registro foi medido na 8080
+  em texto claro, e contra a 443 a razão encolhe. O que **sobrevive às duas medições** é o piso — o
+  sinal nunca chega a indistinguível —, e é o que este documento afirma. A razão exata, essa, só
+  vale junto com o ambiente em que foi medida.
+- **A ordem entre "CPF não cadastrado" e "nascimento errado" não é fato** — é artefato de menos de
+  0,1 ms, que **troca de sinal entre ambientes**; a ressalva ficou ao pé da tabela, na lista de
+  bullets acima.
+- **A AUC 0,997 do `verifyOtp` vem da re-revisão da rodada 10** — a do commit `cdac75b`, cujos
+  achados viraram a rodada 11 —, está no registro da sessão e foi citada no brief da rodada 11, que
+  é de onde este documento a copiou. O review final **não a sustenta**: a medição intercalada dele
+  é **0,9636**, com as caudas se tocando, e ele foi explícito nisso. As duas ficam no registro; o
+  que muda é a conclusão, que passa a ser a que as duas medições juntas sustentam — o canal do
+  `verifyOtp` **existe, é decidível e não precisa da data de nascimento**, e é a **barreira mais
+  baixa** do RF01, não a mais alta. **Número sem medição viva não sustenta afirmação de segurança**
+  — a mesma classe de defeito que esta sessão inteira caçou, uma vez mais.
+- **Duas frases da mesma classe continuam dentro do código, e não foram tocadas nesta rodada.** No
+  arquivo da doc do `requestOtp`
+  (`backend/sinalacs_server/lib/src/application/auth/passwordless_auth_service.dart`), o ramo do
+  intervalo mínimo é descrito com "AUC 0,96 a 0,99 entre duas medições independentes" (`:150`) e
+  "já é ~2× mais lento que a recusa" (`:159`) — nenhuma das duas sobrevive à medição intercalada
+  (0,675 e 1,19×) —, e a doc do `verifyOtp` (`:226-230`) repete "faixas sem interseção" e "mais
+  forte que ele", que é a comparação que o review final desmentiu. **Registrado, não corrigido**:
+  esta rodada mexe em `apps/patient/lib/app/app.dart` e neste `PROGRESS.md`, e só neles. **Dono:
+  quem implementar o gateway de SMS real** — o mesmo dono do piso de tempo na lista acima, e quem
+  vai mexer nesse arquivo de qualquer jeito. É a mesma classe do comentário do app do paciente que
+  esta rodada corrigiu: afirmação em código que a medição deixou de sustentar, no arquivo que o
+  próximo leitor do RF01 abre.
 
 ### Um defeito do RF02 que esta entrega mediu — com dono (2026-09-19)
 
