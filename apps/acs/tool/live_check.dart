@@ -79,7 +79,10 @@ Future<void> main(List<String> args) async {
   MqttSecureClient? mqtt;
 
   try {
-    final session = await backend.login();
+    // Login de desenvolvimento, não o institucional: esta ferramenta roda com
+    // `ENABLE_DEV_LOGIN=true` e não carrega a senha do ACS (RF07) — embutir a
+    // senha do `.env` no código de teste é justamente o que não se quer.
+    final session = await backend.developmentLogin(role: 'acs');
     final microAreaId = session.microAreaId!;
     stdout.writeln('  login .............. papel=${session.role} microárea=$microAreaId');
 

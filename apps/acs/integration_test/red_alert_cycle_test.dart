@@ -82,14 +82,18 @@ void main() {
   }
 
   test('o ACS autentica e recebe a própria microárea', () async {
-    final session = await backend.login();
+    // `developmentLogin` e não o login institucional: este arquivo roda contra
+    // a stack local com `ENABLE_DEV_LOGIN=true` e não carrega a senha do ACS
+    // (RF07) — o caminho com matrícula e senha é coberto pelo widget test e
+    // pelo teste de renovação de sessão, sem senha real em código de teste.
+    final session = await backend.developmentLogin(role: 'acs');
 
     expect(session.role, 'acs');
     expect(session.microAreaId, seedMicroAreaId);
   });
 
   test('o alerta publicado pelo backend chega ao ACS pelo broker e é confirmado', () async {
-    final session = await backend.login();
+    final session = await backend.developmentLogin(role: 'acs');
     final microAreaId = session.microAreaId!;
 
     final queue = AlertQueue(microAreaId: microAreaId);
@@ -154,7 +158,7 @@ void main() {
   });
 
   test('confirmar um alerta inexistente devolve acknowledged: false, não erro', () async {
-    await backend.login();
+    await backend.developmentLogin(role: 'acs');
 
     final ack = await backend.acknowledge(
       alertId: '00000000-0000-4000-8000-0000000000ff',
@@ -164,7 +168,7 @@ void main() {
   });
 
   test('a fila offline de visitas sincroniza contra o servidor', () async {
-    await backend.login();
+    await backend.developmentLogin(role: 'acs');
 
     final queue = OfflineVisitQueue(
       synchronizer: BackendVisitSynchronizer(backend: backend),
@@ -193,7 +197,7 @@ void main() {
     const nome = 'sinalacs_retencao_probe.db';
     await EncryptedLocalDatabase.deleteDatabaseFile(nome);
 
-    await backend.login();
+    await backend.developmentLogin(role: 'acs');
 
     final store = SqlCipherVisitStore(
       keyStore: InMemoryDatabaseKeyStore(),
@@ -223,7 +227,7 @@ void main() {
   });
 
   test('reenviar a mesma visita não a duplica no servidor', () async {
-    await backend.login();
+    await backend.developmentLogin(role: 'acs');
 
     // `version` fica no padrão 1, que é a versão com que o servidor grava todo
     // insert. Enviar 0 fazia o reenvio cair na regra de atualização

@@ -27,7 +27,17 @@ abstract class AcsBackend {
 
   bool get isAuthenticated;
 
-  Future<AuthSession> login();
+  /// Autentica o ACS com matrícula e senha (RF07).
+  ///
+  /// A credencial fica **apenas em memória** — ver `_credentials` em
+  /// [BackendClient] — para a reautenticação silenciosa que o app já fazia
+  /// quando o token de 15 minutos expirava. Nada é gravado em disco.
+  Future<AuthSession> login({required String matricula, required String senha});
+
+  /// Login de DESENVOLVIMENTO, para `tool/` e `integration_test/` contra a
+  /// stack local. Só funciona com `ENABLE_DEV_LOGIN=true`; **não** é o caminho
+  /// do produto (RF07 é [login]).
+  Future<AuthSession> developmentLogin({required String role});
 
   Future<AlertAckResult> acknowledge({required String alertId});
 
@@ -57,6 +67,15 @@ class BackendClient implements AcsBackend {
 
   AuthSession? _session;
 
+  /// Credencial em memória, para reautenticar quando o token de 15 min expira.
+  ///
+  /// **Só em memória, nunca em disco.** É o que preserva o comportamento que o
+  /// app já tinha (reauth silencioso, que antes chamava `developmentLogin`) sem
+  /// persistir senha nenhuma. A correção durável é o refresh token rotativo que
+  /// `spec/lgpd_design.md` LGPD-RT06 exige e que este plano deliberadamente não
+  /// implementa — ver a lacuna registrada no plano.
+  ({String matricula, String senha})? _credentials;
+
   @override
   AuthSession? get session => _session;
 
@@ -73,7 +92,7 @@ class BackendClient implements AcsBackend {
   /// turno de campo longo passa a falhar com erro de permissão, que esconde a
   /// causa real.
   Future<String> _requireToken() async {
-    if (!isAuthenticated) await login();
+    if (!isAuthenticated) await renewSession();
     final current = _session;
     if (current == null) {
       throw const BackendFailure('Sessão não iniciada.', isRecoverable: false);
@@ -81,11 +100,64 @@ class BackendClient implements AcsBackend {
     return current.accessToken;
   }
 
-  /// Autentica como ACS. Ver ressalvas em [AuthSession].
+  /// Autentica contra `auth.loginInstitutional` (RF07).
+  ///
+  /// A recusa chega como `AuthenticationFailedException`, traduzida em
+  /// [BackendFailure] não recuperável por [_guard].
   @override
-  Future<AuthSession> login() async {
+  Future<AuthSession> login({
+    required String matricula,
+    required String senha,
+  }) async {
     final result = await _guard(
-      () => _client.auth.developmentLogin(role: 'acs'),
+      () => _client.auth.loginInstitutional(
+        matricula: matricula,
+        password: senha,
+      ),
+    );
+
+    final session = AuthSession.tryParse(result.accessToken, result.tokenType);
+    if (session == null) {
+      throw const BackendFailure(
+        'O servidor devolveu um token que o aplicativo não entendeu.',
+        isRecoverable: false,
+      );
+    }
+
+    _credentials = (matricula: matricula, senha: senha);
+    _session = session;
+    return session;
+  }
+
+  /// Reautentica usando a credencial em memória.
+  ///
+  /// Sem credencial guardada não há como renovar: quem chama recebe uma falha
+  /// não recuperável e a tela precisa mandar a pessoa entrar de novo.
+  Future<AuthSession> renewSession() async {
+    final credentials = _credentials;
+    if (credentials == null) {
+      throw const BackendFailure(
+        'Sua sessão expirou. Entre novamente.',
+        isRecoverable: false,
+      );
+    }
+    return login(
+      matricula: credentials.matricula,
+      senha: credentials.senha,
+    );
+  }
+
+  /// Login de desenvolvimento, para `tool/` e `integration_test/`.
+  ///
+  /// É a versão antiga de [login], preservada porque as ferramentas rodam
+  /// contra a stack local com `ENABLE_DEV_LOGIN=true` e não têm — nem devem ter
+  /// — a senha institucional embutida. Não guarda `_credentials`: sem
+  /// credencial não há renovação, e quem usar isto em produção recebe a falha
+  /// não recuperável de [renewSession] quando o token expirar.
+  @override
+  Future<AuthSession> developmentLogin({required String role}) async {
+    final result = await _guard(
+      () => _client.auth.developmentLogin(role: role),
     );
 
     final session = AuthSession.tryParse(result.accessToken, result.tokenType);
@@ -167,6 +239,12 @@ class BackendClient implements AcsBackend {
         'O acesso de desenvolvimento está desativado neste servidor.',
         isRecoverable: false,
       );
+    } on AuthenticationFailedException catch (error) {
+      // A mensagem vem do servidor de propósito: é ela que diferencia "senha
+      // inválida" de "acesso bloqueado por tentativas" — e é igual para
+      // matrícula inexistente e senha errada, para não revelar quais
+      // matrículas existem.
+      throw BackendFailure(error.message, isRecoverable: false);
     } on AlertPermissionException {
       // Acontece quando o alerta é de outra microárea. A territorialização é
       // invariante: o servidor recusa, e o app não deve tentar contornar.

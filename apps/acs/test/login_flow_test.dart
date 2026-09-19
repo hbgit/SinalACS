@@ -18,6 +18,30 @@ import 'package:sinalacs_acs/core/services/visit_pull_service.dart';
 
 import 'support/fakes.dart';
 
+/// Credencial sintética dos testes de tela. Nunca uma senha real: o fake só
+/// registra o que a tela mandou, e nenhum teste fala com servidor de verdade.
+const credencialMatricula = 'ACS-001';
+const credencialSenha = 'senha-sintetica';
+
+/// Preenche matrícula e senha e toca em "Entrar" — o caminho que o ACS faz no
+/// campo.
+///
+/// Existe porque o formulário passou a exigir os dois campos (RF07): sem isto,
+/// todo teste que só tocava no botão pararia na validação em vez de chegar ao
+/// painel. Não assenta os quadros de propósito — quem chama decide entre
+/// `pumpAndSettle` e `settleRealAsync`.
+Future<void> entrar(WidgetTester tester) async {
+  await tester.enterText(
+    find.byKey(const Key('matricula_field')),
+    credencialMatricula,
+  );
+  await tester.enterText(
+    find.byKey(const Key('senha_field')),
+    credencialSenha,
+  );
+  await tester.tap(find.byKey(const Key('login_button')));
+}
+
 void main() {
   group('login e painel', () {
     testWidgets('deve autenticar no backend e assinar o tópico da própria microárea', (tester) async {
@@ -29,7 +53,7 @@ void main() {
         feedBuilder: (queue) => feed = FakeAlertFeed(queue),
       ));
 
-      await tester.tap(find.byKey(const Key('login_button')));
+      await entrar(tester);
       await tester.pumpAndSettle();
 
       expect(backend.loginCount, 1);
@@ -48,7 +72,7 @@ void main() {
         feedBuilder: (queue) => FakeAlertFeed(queue),
       ));
 
-      await tester.tap(find.byKey(const Key('login_button')));
+      await entrar(tester);
       await tester.pumpAndSettle();
 
       expect(find.text('Painel de Priorização'), findsNothing);
@@ -65,7 +89,7 @@ void main() {
         feedBuilder: (queue) => FakeAlertFeed(queue),
       ));
 
-      await tester.tap(find.byKey(const Key('login_button')));
+      await entrar(tester);
       await tester.pumpAndSettle();
 
       expect(find.text('Painel de Priorização'), findsNothing);
@@ -81,7 +105,7 @@ void main() {
         feedBuilder: (queue) => feed = FakeAlertFeed(queue),
       ));
 
-      await tester.tap(find.byKey(const Key('login_button')));
+      await entrar(tester);
       await tester.pumpAndSettle();
 
       expect(find.text('Nenhum alerta na sua microárea agora.'), findsOneWidget);
@@ -111,7 +135,7 @@ void main() {
         backend: backend,
         feedBuilder: (queue) => feed = FakeAlertFeed(queue),
       ));
-      await tester.tap(find.byKey(const Key('login_button')));
+      await entrar(tester);
       await tester.pumpAndSettle();
 
       feed.deliver(testAlert(alertId: 'alerta-frase'));
@@ -140,7 +164,7 @@ void main() {
         feedBuilder: (queue) => FakeAlertFeed(queue, failOnStart: true),
       ));
 
-      await tester.tap(find.byKey(const Key('login_button')));
+      await entrar(tester);
       await tester.pumpAndSettle();
 
       expect(find.byKey(const Key('feed_error')), findsOneWidget);
@@ -189,6 +213,111 @@ void main() {
 
       expect(tester.widget<TextField>(find.byKey(const Key('matricula_field'))).controller?.text, isEmpty);
       expect(tester.widget<TextField>(find.byKey(const Key('senha_field'))).controller?.text, isEmpty);
+    });
+
+    testWidgets('envia ao backend a matrícula e a senha digitadas', (tester) async {
+      // O defeito que este teste fecha: os controllers de matrícula e senha
+      // existiam e eram descartados — o botão abria o painel sem olhar para
+      // nenhum dos dois.
+      final backend = FakeAcsBackend();
+
+      await tester.pumpWidget(SinalAcsApp(
+        backend: backend,
+        feedBuilder: (queue) => FakeAlertFeed(queue),
+      ));
+
+      // Matrícula diferente da do seed de propósito: se o app mandasse um valor
+      // fixo, a asserção abaixo passaria por acidente.
+      await tester.enterText(find.byKey(const Key('matricula_field')), 'ACS-007');
+      await tester.enterText(find.byKey(const Key('senha_field')), credencialSenha);
+      await tester.tap(find.byKey(const Key('login_button')));
+      await tester.pumpAndSettle();
+
+      expect(backend.lastCredentials?.matricula, 'ACS-007');
+      expect(backend.lastCredentials?.senha, credencialSenha);
+      expect(find.text('Painel de Priorização'), findsOneWidget);
+    });
+
+    testWidgets('campo em branco não chama o backend e mostra o que falta', (tester) async {
+      final handle = tester.ensureSemantics();
+      final backend = FakeAcsBackend();
+
+      await tester.pumpWidget(SinalAcsApp(
+        backend: backend,
+        feedBuilder: (queue) => FakeAlertFeed(queue),
+      ));
+
+      // Senha em branco: sem esta guarda, o app gastaria uma chamada — e uma
+      // tentativa falha da conta, que conta para o bloqueio por tentativas.
+      await tester.enterText(find.byKey(const Key('matricula_field')), credencialMatricula);
+      await tester.tap(find.byKey(const Key('login_button')));
+      await tester.pumpAndSettle();
+
+      expect(backend.loginCount, 0);
+      expect(backend.lastCredentials, isNull);
+      expect(find.text('Informe matrícula e senha.'), findsOneWidget);
+      expect(find.text('Painel de Priorização'), findsNothing);
+      // SC 4.1.3: a mensagem troca de estado sem tirar o foco de onde a pessoa
+      // estava — só é percebida por leitor de tela como região viva.
+      expect(
+        tester.getSemantics(find.byKey(const Key('login_error'))).flagsCollection.isLiveRegion,
+        isTrue,
+      );
+
+      // Matrícula em branco: o outro campo, para a guarda não valer só para um.
+      await tester.enterText(find.byKey(const Key('senha_field')), credencialSenha);
+      await tester.enterText(find.byKey(const Key('matricula_field')), '');
+      await tester.tap(find.byKey(const Key('login_button')));
+      await tester.pumpAndSettle();
+
+      expect(backend.loginCount, 0);
+      expect(backend.lastCredentials, isNull);
+      expect(find.text('Informe matrícula e senha.'), findsOneWidget);
+      handle.dispose();
+    });
+
+    testWidgets('a matrícula é aparada: só espaços não passa, com espaços vai sem eles', (tester) async {
+      // `trim()` é fácil de esquecer: sem ele, '   ' viraria uma chamada ao
+      // backend com uma matrícula que não existe.
+      final backend = FakeAcsBackend();
+
+      await tester.pumpWidget(SinalAcsApp(
+        backend: backend,
+        feedBuilder: (queue) => FakeAlertFeed(queue),
+      ));
+
+      await tester.enterText(find.byKey(const Key('senha_field')), credencialSenha);
+      await tester.enterText(find.byKey(const Key('matricula_field')), '   ');
+      await tester.tap(find.byKey(const Key('login_button')));
+      await tester.pumpAndSettle();
+
+      expect(backend.lastCredentials, isNull);
+      expect(find.text('Informe matrícula e senha.'), findsOneWidget);
+
+      await tester.enterText(find.byKey(const Key('matricula_field')), '  ACS-009  ');
+      await tester.tap(find.byKey(const Key('login_button')));
+      await tester.pumpAndSettle();
+
+      expect(backend.lastCredentials?.matricula, 'ACS-009');
+      expect(backend.lastCredentials?.senha, credencialSenha);
+    });
+
+    testWidgets('a senha não é aparada: espaço faz parte da credencial', (tester) async {
+      // Aparar a senha mudaria a credencial em silêncio, e a pessoa veria
+      // "senha inválida" por um caractere que ela digitou de propósito.
+      final backend = FakeAcsBackend();
+
+      await tester.pumpWidget(SinalAcsApp(
+        backend: backend,
+        feedBuilder: (queue) => FakeAlertFeed(queue),
+      ));
+
+      await tester.enterText(find.byKey(const Key('matricula_field')), credencialMatricula);
+      await tester.enterText(find.byKey(const Key('senha_field')), ' senha-sintetica ');
+      await tester.tap(find.byKey(const Key('login_button')));
+      await tester.pumpAndSettle();
+
+      expect(backend.lastCredentials?.senha, ' senha-sintetica ');
     });
   });
 
@@ -456,7 +585,7 @@ void main() {
         visitQueue: visitQueue,
       ));
 
-      await tester.tap(find.byKey(const Key('login_button')));
+      await entrar(tester);
       await tester.pumpAndSettle();
 
       feed.deliver(testAlert(alertId: 'alerta-1', riskLevel: 'yellow'));
@@ -489,7 +618,7 @@ void main() {
         visitQueue: visitQueue,
       ));
 
-      await tester.tap(find.byKey(const Key('login_button')));
+      await entrar(tester);
       await tester.pumpAndSettle();
 
       feed.deliver(testAlert(alertId: 'alerta-1', riskLevel: 'yellow'));
@@ -532,7 +661,7 @@ void main() {
         visitQueue: visitQueue,
       ));
 
-      await tester.tap(find.byKey(const Key('login_button')));
+      await entrar(tester);
       await tester.pumpAndSettle();
 
       feed.deliver(testAlert(alertId: 'alerta-chegada', riskLevel: 'yellow'));
@@ -598,7 +727,7 @@ void main() {
         visitQueue: visitQueue,
       ));
 
-      await tester.tap(find.byKey(const Key('login_button')));
+      await entrar(tester);
       await tester.pumpAndSettle();
 
       await tester.tap(find.text('Visita'));
@@ -636,7 +765,7 @@ void main() {
         visitQueue: visitQueue,
       ));
 
-      await tester.tap(find.byKey(const Key('login_button')));
+      await entrar(tester);
       await tester.pumpAndSettle();
       await tester.tap(find.text('Visita'));
       await tester.pumpAndSettle();
@@ -680,7 +809,7 @@ void main() {
         visitQueue: visitQueue,
       ));
 
-      await tester.tap(find.byKey(const Key('login_button')));
+      await entrar(tester);
       await tester.pumpAndSettle();
       await tester.tap(find.text('Visita'));
       await tester.pumpAndSettle();
@@ -727,7 +856,7 @@ void main() {
         visitQueue: visitQueue,
       ));
 
-      await tester.tap(find.byKey(const Key('login_button')));
+      await entrar(tester);
       await tester.pumpAndSettle();
       await tester.tap(find.text('Visita'));
       await tester.pumpAndSettle();
@@ -761,7 +890,7 @@ void main() {
         visitQueue: visitQueue,
       ));
 
-      await tester.tap(find.byKey(const Key('login_button')));
+      await entrar(tester);
       await tester.pumpAndSettle();
 
       feed.deliver(testAlert(alertId: 'alerta-1', riskLevel: 'yellow'));
@@ -805,7 +934,7 @@ void main() {
         visitQueue: visitQueue,
       ));
 
-      await tester.tap(find.byKey(const Key('login_button')));
+      await entrar(tester);
       await tester.pumpAndSettle();
 
       feed.deliver(testAlert(alertId: 'alerta-1', riskLevel: 'yellow'));
@@ -871,7 +1000,7 @@ void main() {
         feedBuilder: feedBuilder ?? (queue) => FakeAlertFeed(queue),
         visitQueue: visitQueue,
       ));
-      await tester.tap(find.byKey(const Key('login_button')));
+      await entrar(tester);
       await tester.pumpAndSettle();
     }
 
@@ -998,7 +1127,7 @@ void main() {
         feedBuilder: feedBuilder ?? (queue) => FakeAlertFeed(queue),
         visitQueue: visitQueue,
       ));
-      await tester.tap(find.byKey(const Key('login_button')));
+      await entrar(tester);
       await tester.pumpAndSettle();
     }
 
@@ -1214,7 +1343,7 @@ void main() {
         feedBuilder: (queue) => FakeAlertFeed(queue),
         visitPullService: pullService(backend),
       ));
-      await tester.tap(find.byKey(const Key('login_button')));
+      await entrar(tester);
       await settleRealAsync(tester);
 
       expect(backend.pullSinceCalls, hasLength(1));
@@ -1235,7 +1364,7 @@ void main() {
         feedBuilder: (queue) => FakeAlertFeed(queue),
         visitPullService: pullService(backend),
       ));
-      await tester.tap(find.byKey(const Key('login_button')));
+      await entrar(tester);
       await settleRealAsync(tester);
       await tester.tap(find.text('Área'));
       await tester.pumpAndSettle();
@@ -1261,7 +1390,7 @@ void main() {
         feedBuilder: (queue) => FakeAlertFeed(queue),
         visitPullService: pullService(backend),
       ));
-      await tester.tap(find.byKey(const Key('login_button')));
+      await entrar(tester);
       await settleRealAsync(tester);
       await tester.tap(find.text('Área'));
       await tester.pumpAndSettle();
@@ -1278,7 +1407,7 @@ void main() {
         feedBuilder: (queue) => FakeAlertFeed(queue),
         visitPullService: pullService(backend),
       ));
-      await tester.tap(find.byKey(const Key('login_button')));
+      await entrar(tester);
       await settleRealAsync(tester);
       await tester.tap(find.text('Área'));
       await tester.pumpAndSettle();
@@ -1304,7 +1433,7 @@ void main() {
         feedBuilder: (queue) => FakeAlertFeed(queue),
         visitPullService: pullService(backend, localVisits: localVisits),
       ));
-      await tester.tap(find.byKey(const Key('login_button')));
+      await entrar(tester);
       await settleRealAsync(tester);
       await tester.tap(find.text('Área'));
       await tester.pumpAndSettle();
@@ -1354,7 +1483,7 @@ void main() {
         feedBuilder: (queue) => FakeAlertFeed(queue),
         visitPullService: pullService(backend),
       ));
-      await tester.tap(find.byKey(const Key('login_button')));
+      await entrar(tester);
       await settleRealAsync(tester);
 
       expect(backend.listPatientsCount, 1);
@@ -1375,7 +1504,7 @@ void main() {
         feedBuilder: (queue) => FakeAlertFeed(queue),
         visitPullService: pullService(backend),
       ));
-      await tester.tap(find.byKey(const Key('login_button')));
+      await entrar(tester);
       await settleRealAsync(tester);
       await tester.tap(find.text('Área'));
       await tester.pumpAndSettle();
@@ -1398,7 +1527,7 @@ void main() {
         feedBuilder: (queue) => FakeAlertFeed(queue),
         visitPullService: pullService(backend),
       ));
-      await tester.tap(find.byKey(const Key('login_button')));
+      await entrar(tester);
       await settleRealAsync(tester);
       await tester.tap(find.text('Área'));
       await tester.pumpAndSettle();
@@ -1415,7 +1544,7 @@ void main() {
         feedBuilder: (queue) => FakeAlertFeed(queue),
         visitPullService: pullService(backend),
       ));
-      await tester.tap(find.byKey(const Key('login_button')));
+      await entrar(tester);
       await settleRealAsync(tester);
       await tester.tap(find.text('Área'));
       await tester.pumpAndSettle();
@@ -1459,7 +1588,7 @@ void main() {
         feedBuilder: (queue) => FakeAlertFeed(queue),
         syncInterval: const Duration(seconds: 10),
       ));
-      await tester.tap(find.byKey(const Key('login_button')));
+      await entrar(tester);
       await tester.pumpAndSettle();
 
       expect(backend.listPatientsCount, 1);
@@ -1479,7 +1608,7 @@ void main() {
         feedBuilder: (queue) => FakeAlertFeed(queue),
         syncInterval: const Duration(seconds: 10),
       ));
-      await tester.tap(find.byKey(const Key('login_button')));
+      await entrar(tester);
       await tester.pumpAndSettle();
       expect(backend.listPatientsCount, 1);
 

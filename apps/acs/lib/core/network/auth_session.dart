@@ -2,9 +2,11 @@ import 'dart:convert';
 
 /// Sessão autenticada contra o backend.
 ///
-/// **Não é autenticação institucional.** O token vem de
-/// `auth.developmentLogin`, que só existe com `ENABLE_DEV_LOGIN=true` e serve
-/// para validar a conexão, não para proteger dado real.
+/// No app do ACS o token vem de `auth.loginInstitutional` (RF07), com a
+/// credencial institucional. O acesso de desenvolvimento
+/// (`auth.developmentLogin`, que só existe com `ENABLE_DEV_LOGIN=true`)
+/// continua existindo para `tool/` e `integration_test/`, e é o que o app do
+/// paciente ainda usa.
 class AuthSession {
   const AuthSession({
     required this.accessToken,
@@ -69,7 +71,7 @@ class AuthSession {
     }
   }
 
-  /// O token de desenvolvimento vive 15 minutos.
+  /// O token vive 15 minutos, nos dois caminhos de login.
   ///
   /// A margem existe para não enviar um token que expira no meio da viagem:
   /// sem ela, um fluxo longo falha com erro de permissão em vez de

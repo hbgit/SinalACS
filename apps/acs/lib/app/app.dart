@@ -141,12 +141,28 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   void dispose() { _matricula.dispose(); _senha.dispose(); super.dispose(); }
 
-  /// Autentica contra `auth.developmentLogin` e só então abre o painel.
+  /// Autentica contra `auth.loginInstitutional` (RF07) e só então abre o
+  /// painel.
   Future<void> _enter() async {
+    final matricula = _matricula.text.trim();
+    // A senha não passa por `trim`: espaço faz parte da credencial, e aparar
+    // aqui mudaria o que a pessoa digitou.
+    final senha = _senha.text;
+    if (matricula.isEmpty || senha.isEmpty) {
+      setState(() {
+        _busy = false;
+        _error = 'Informe matrícula e senha.';
+      });
+      return;
+    }
+
     setState(() { _busy = true; _error = null; });
 
     try {
-      final session = await BackendScope.of(context).login();
+      final session = await BackendScope.of(context).login(
+        matricula: matricula,
+        senha: senha,
+      );
       final microAreaId = session.microAreaId;
       if (microAreaId == null) {
         // Sem microárea não há território, e sem território não há fila: é
@@ -190,9 +206,20 @@ class _LoginScreenState extends State<LoginScreen> {
           const SizedBox(height: 8),
           const Text('Acesso profissional', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
           const SizedBox(height: 20),
-          TextField(key: const Key('matricula_field'), controller: _matricula, decoration: const InputDecoration(labelText: 'Matrícula / CNS')),
+          TextField(
+            key: const Key('matricula_field'),
+            controller: _matricula,
+            autofillHints: const [AutofillHints.username],
+            decoration: const InputDecoration(labelText: 'Matrícula / CNS'),
+          ),
           const SizedBox(height: 16),
-          TextField(key: const Key('senha_field'), controller: _senha, obscureText: true, decoration: const InputDecoration(labelText: 'Senha de acesso')),
+          TextField(
+            key: const Key('senha_field'),
+            controller: _senha,
+            obscureText: true,
+            autofillHints: const [AutofillHints.password],
+            decoration: const InputDecoration(labelText: 'Senha de acesso'),
+          ),
           const SizedBox(height: 20),
           Semantics(label: 'Entrar no painel de priorização', button: true, container: true, child: SizedBox(width: double.infinity, child: FilledButton(
             key: const Key('login_button'),

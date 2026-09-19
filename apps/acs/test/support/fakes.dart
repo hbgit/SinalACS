@@ -49,9 +49,29 @@ class FakeAcsBackend implements AcsBackend {
   bool get isAuthenticated => _session != null;
 
 
+  /// Credencial que [login] recebeu. `null` enquanto a tela não chamar o
+  /// backend — é o que prova tanto "enviou o que foi digitado" quanto "campo em
+  /// branco não chamou nada".
+  ({String matricula, String senha})? lastCredentials;
+
   @override
-  Future<AuthSession> login() async {
+  Future<AuthSession> login({
+    required String matricula,
+    required String senha,
+  }) async {
     loginCount++;
+    lastCredentials = (matricula: matricula, senha: senha);
+    return _issueSession();
+  }
+
+  /// Ferramenta de desenvolvimento (`tool/`, `integration_test/`). Sem
+  /// credencial, não há o que registrar: quem exercita o caminho do produto
+  /// (RF07) é [login].
+  @override
+  Future<AuthSession> developmentLogin({required String role}) =>
+      _issueSession();
+
+  Future<AuthSession> _issueSession() async {
     final failure = loginFailure;
     if (failure != null) throw failure;
 
