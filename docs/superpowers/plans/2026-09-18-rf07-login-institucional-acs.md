@@ -1804,6 +1804,8 @@ Co-Authored-By: Claude Code <noreply@anthropic.com>"
 - Modify: `spec/security_assessment.md` (F6, linhas 212-219)
 - Modify: `spec/lgpd_data_audit.md` — **tabela nova não classificada** (ver Step 5)
 - Modify: `apps/CLAUDE.md` (a seção do app ACS, que hoje diz que `_enter` descarta os campos)
+- Modify: `backend/CLAUDE.md` — o parágrafo do seed (ver Step 7)
+- Modify: `.env.example` — `-hex 24` → `-hex 32` (ver Step 7)
 - Modify: `backend/CLAUDE.md` (a lista de endpoints)
 
 - [ ] **Step 1: RF07 no relatório de validação**
@@ -1868,7 +1870,21 @@ o parecer de entropia do §2.1 **não** se aplica a ela, porque Argon2id é fun�
 derivação lenta e com custo de memória, ao contrário do SHA-256 sem salt que o §2.1
 critica em `users.cpfHash`.
 
-- [ ] **Step 6: Registrar as lacunas em PROGRESS.md**
+- [ ] **Step 7: Três consistências que a Task 5 deixou apontadas**
+
+Todas de uma linha ou duas, e todas encontradas por quem executou a Task 5:
+
+1. **`backend/CLAUDE.md` diz "duas etapas" para o seed.** Agora são **três**:
+   `development.sql`, `health-data-seed` e `acs-credential-seed`. O parágrafo cita o
+   motivo das duas primeiras (SQL puro não produz AES-256-GCM) — acrescente o mesmo
+   raciocínio para Argon2id, que o SQL também não produz.
+2. **`.env.example` traz `openssl rand -hex 24` para `DEV_ACS_PASSWORD`**, enquanto o
+   script e os sete segredos vizinhos usam `-hex 32`. O valor veio do meu brief e está
+   inconsistente com a vizinhança; uniformize para `-hex 32`.
+3. **`DEV_ACS_PASSWORD` no `.env.example` fica VAZIO**, como os outros: o valor é gerado
+   por máquina, nunca versionado. Confirme que continua assim depois da correção.
+
+- [ ] **Step 8: Registrar as lacunas em PROGRESS.md**
 
 Acrescente uma seção curta, com data, listando o que este plano **não** fez e por quê: MFA/TOTP (exigido por LGPD-RF11/LGPD-RT06, F5), refresh token rotativo e TTL de 1h/8h (LGPD-RT06), limite de tentativas por IP (F6), e troca de senha pelo próprio ACS.
 
