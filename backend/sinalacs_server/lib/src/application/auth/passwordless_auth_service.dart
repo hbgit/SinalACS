@@ -145,10 +145,18 @@ class PasswordlessAuthService {
   /// 2026-09-19, 300 amostras keep-alive por caso, tempo de parede do POST: o
   /// par correto responde em ~3,2 ms (p50) e o CPF não cadastrado em ~0,39 ms —
   /// as duas faixas **não se cruzam**, e **uma amostra de cada lado já separa o
-  /// par**, sem estatística nenhuma. Dentro do intervalo mínimo a diferença
-  /// encolhe (esse ramo faz o `latestOpen` e mais nada) e as distribuições
-  /// passam a se sobrepor em parte, mas seguem separáveis: AUC 0,96 a 0,99
-  /// entre duas medições independentes.
+  /// par**, sem estatística nenhuma. Os dois valores absolutos são da era do
+  /// texto claro (a 8080) e sobem ~1,5× sob o TLS/Traefik: **a separação é a
+  /// mesma**, e a medição intercalada do review final a reproduz com **AUC
+  /// 1,0000**, com os extremos sem interseção. Dentro do intervalo mínimo a
+  /// diferença encolhe (esse ramo faz o `latestOpen` e mais nada) e as
+  /// distribuições passam a se sobrepor em parte, mas o sinal **fica acima do
+  /// acaso** — AUC 0,675 na medição intercalada do review final, contra 0,5 de
+  /// uma separação ao acaso. A **magnitude** é do ambiente, e não do fenômeno:
+  /// o ramo do intervalo mínimo e a recusa fazem uma consulta indexada cada, e
+  /// o custo fixo que o TLS/Traefik soma a toda chamada comprime a razão. O
+  /// "~2× mais lento que a recusa" que esta doc trazia foi medido na 8080 em
+  /// texto claro; contra a 443 a razão medida é p50 **1,19×**.
   ///
   /// O delta **não é ruído alheio ao segredo: é correlacionado com ele**, e é
   /// por isso que a correção registrada não o alcança. Ele existe porque o
@@ -156,7 +164,9 @@ class PasswordlessAuthService {
   /// rápido é quem não passou pela conferência. Tirar o envio do caminho de
   /// resposta (a correção da Task 8) ataca o termo do provedor, que é
   /// **posterior** a esse delta; o próprio ramo do intervalo mínimo, que não
-  /// envia, não grava e não audita, já é ~2× mais lento que a recusa. Um piso
+  /// envia, não grava e não audita, já é **mais lento que a recusa** — p50
+  /// 1,19× na medição intercalada, contra os ~2× que esta frase trazia, medidos
+  /// na 8080 em texto claro. Um piso
   /// de tempo sobre o handler INTEIRO cobriria — mas é medida mais forte do que
   /// "tirar o envio do caminho de resposta", e só vale acima do caminho mais
   /// lento. Não dá para equalizar aqui sem mentir sobre o envio. Lacuna
@@ -223,12 +233,19 @@ class PasswordlessAuthService {
   ///
   /// Isso é o **conteúdo**, e é só ele — não é a propriedade inteira. O
   /// **tempo** deste método diz se o CPF existe, **e sem precisar da data de
-  /// nascimento**: medido contra a stack em 2026-09-19 (300 amostras
-  /// keep-alive), CPF cadastrado com desafio aberto responde em ~4,0 ms e o CPF
-  /// não cadastrado em ~1,7 ms, faixas sem interseção — uma chamada responde
-  /// "este CPF é paciente da unidade". É o canal irmão do de [requestOtp], mais
-  /// forte que ele, e **anterior a esta rodada**: nenhuma mudança daqui o cria
-  /// ou o fecha. A invariante
+  /// nascimento**: medido contra a stack em 2026-09-19, na medição intercalada
+  /// do review final (cada caso ao lado do seu controle, mesma conexão
+  /// keep-alive, 250 pares por bloco, HTTPS via Traefik), o CPF cadastrado com
+  /// desafio aberto responde em ~4,58 ms e o CPF não cadastrado em ~3,62 ms — o
+  /// cadastrado ~1,27× mais lento, com **as caudas se tocando**: AUC 0,9636, e
+  /// não as "faixas sem interseção" que esta doc afirmava. Uma chamada responde
+  /// "este CPF é paciente da unidade". É o canal irmão do de [requestOtp], e
+  /// **mais FRACO que ele** — o canal do `requestOtp` no par correto mede AUC
+  /// 1,0000, com os extremos sem interseção. O que faz deste o mais perigoso
+  /// **não é a força, é o custo**: ele não precisa da data de nascimento, que
+  /// é o fator que o `requestOtp` exige, e é por isso a **barreira mais baixa**
+  /// do RF01. E é **anterior a esta rodada**: nenhuma mudança daqui o cria ou o
+  /// fecha. A invariante
   /// anti-enumeração vale para o RF, não para este método, e hoje não vale
   /// aqui tampouco — está registrada com dono no `PROGRESS.md`.
   Future<AuthenticatedUser> verifyOtp({
