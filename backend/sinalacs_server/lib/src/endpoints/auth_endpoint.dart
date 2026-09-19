@@ -92,6 +92,14 @@ class AuthEndpoint extends Endpoint {
   /// ainda não tem sessão. A resposta é sempre a mesma — não revela se o CPF
   /// está cadastrado (ver `PasswordlessAuthService.requestOtp`).
   ///
+  /// "Sempre a mesma" inclui a **segunda** chamada dentro do intervalo mínimo
+  /// de 60 s: ela também é um 200 sem corpo, e **não** uma recusa. Um "aguarde
+  /// um minuto" aqui seria alcançável só por quem já acertou CPF e nascimento,
+  /// e o status da resposta passaria a ser o verificador do par — foi o
+  /// defeito medido em 2026-09-19 (200, 400, 400 para o par cadastrado contra
+  /// 200, 200, 200 para o não cadastrado), corrigido no serviço. O aviso de
+  /// espera é do app, que é quem sabe quando pediu por último.
+  ///
   /// O CPF é validado aqui, **antes** de virar hash: um número com dígito
   /// verificador errado é erro de digitação, e tratá-lo como "não encontrado"
   /// mandaria o paciente para a tela do código com um CPF que nunca vai casar.

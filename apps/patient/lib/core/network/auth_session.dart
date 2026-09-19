@@ -77,6 +77,13 @@ class AuthSession {
   /// para reautenticar sem a pessoa. Ao expirar, o app **não** se renova — pede
   /// que ela entre de novo com um código novo.
   ///
+  /// A hora vale para o token de `auth.verifyOtp`, o caminho de login. **Não**
+  /// é uma regra do papel `patient`: `onboarding.completeEnrollment` ainda emite
+  /// o padrão de 15 minutos para o mesmo papel, lacuna do RF02 com dono
+  /// registrado no `PROGRESS.md`. Leia esta descrição como a do login, não como
+  /// a da sessão de todo paciente — o app lê a expiração do `exp` do token e
+  /// funciona com as duas.
+  ///
   /// A margem existe para não enviar um token que expira no meio da viagem:
   /// sem ela, a chamada falharia no servidor com uma resposta que não diz que o
   /// problema foi o relógio.

@@ -34,6 +34,36 @@ void main() {
     expect(hasher.hashOtpCode(cpf.digits), isNot(hasher.hash(cpf)));
   });
 
+  // O LITERAL do domínio, e não só a separação entre os dois: `sinalacs:cpf:v1:`
+  // e `sinalacs:otp:v1:` são as constantes privadas `_cpfDomain`/`_otpDomain`.
+  //
+  // Trocar `v1` por `v2` — a manutenção que o `:v1:` existe para permitir —
+  // invalida TODO `users.cpfHash` já gravado, do mesmo jeito e com a mesma
+  // consequência que `CPF_HASH_PEPPER` tem: nenhum CPF cadastrado é encontrado
+  // no login, e o banco não acusa nada. O `.env.example` documenta essa
+  // armadilha para o pepper e não a documentava aqui; sem um valor preso, a
+  // troca atravessava a suíte inteira verde, porque o teste acima compara os
+  // dois hashes ENTRE SI e acompanha qualquer prefixo.
+  //
+  // Os dois hex abaixo são o HMAC-SHA-256 de `'pepper-de-teste'` sobre
+  // `sinalacs:cpf:v1:12345678909` e `sinalacs:otp:v1:123456`. Eles prendem o
+  // texto inteiro da mensagem — prefixo, separador e valor —, então mudam se o
+  // prefixo mudar. Falha aqui significa que o valor dos hashes gravados mudou
+  // de significado: é migração de dados, não edição de teste.
+  test('o prefixo do domínio é literal, e mexer nele invalida o que está gravado',
+      () {
+    final hasher = HmacCpfHasher(pepper: 'pepper-de-teste');
+
+    expect(
+      hasher.hash(cpf),
+      'e82e61fb1c576bdd9e9833751f429c3dd75007057631e4789135fb80beacd976',
+    );
+    expect(
+      hasher.hashOtpCode('123456'),
+      '8da2e4761720a0643a2eccf518e56802b7fb57de7c48be7cdbb5ef75e6015ed8',
+    );
+  });
+
   test('recusa pepper vazio', () {
     expect(() => HmacCpfHasher(pepper: ''), throwsA(isA<ArgumentError>()));
     expect(() => HmacCpfHasher(pepper: '   '), throwsA(isA<ArgumentError>()));

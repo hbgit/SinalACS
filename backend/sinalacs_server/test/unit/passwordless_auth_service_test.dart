@@ -146,6 +146,27 @@ Future<String> _mensagemDe(Future<void> Function() recusar) async {
   fail('a chamada foi aceita — este caminho tinha de ser recusado');
 }
 
+/// O desfecho observável de uma chamada de `requestOtp`: o status e o corpo da
+/// resposta, que é o que o app (e quem sonda) tem para ler.
+///
+/// Ao contrário de [_mensagemDe], os dois desfechos são válidos aqui: não se está
+/// prendendo uma recusa, e sim a **igualdade entre caminhos** — e "aceito" é a
+/// resposta que o caminho de recusa dá, de propósito. Prender só a mensagem da
+/// recusa deixaria a sequência "aceito, aceito" passar como se fosse recusa.
+///
+/// Os rótulos são os códigos HTTP que o endpoint devolve, e existem para a
+/// falha sair legível: `recusa (200)` no lugar de um `null` solto.
+Future<({String status, String? corpo})> _desfechoDe(
+  Future<void> Function() chamar,
+) async {
+  try {
+    await chamar();
+    return (status: 'aceito (200)', corpo: null);
+  } on OtpRequestException catch (erro) {
+    return (status: 'recusa (400)', corpo: erro.message);
+  }
+}
+
 void main() {
   final encontrado = PatientCredentialRecord(
     userId: _patientId,
@@ -264,20 +285,87 @@ void main() {
       );
     });
 
-    test('respeita o intervalo mínimo entre pedidos', () async {
+    test('respeita o intervalo mínimo entre pedidos, sem dizer que o respeitou',
+        () async {
       final store = _FakeStore(record: encontrado);
+      final gateway = RecordingSmsGateway();
+      final audit = _RecordingAudit();
       final agora = DateTime.utc(2026, 9, 18, 12);
-      final service = _build(store: store);
+      final service = _build(store: store, gateway: gateway, audit: audit);
 
       await service.requestOtp(cpf: _cpf, birthDate: _nascimento, now: agora);
 
-      // Um segundo pedido imediato lança para quem chamou, mas sem dizer nada
-      // sobre o CPF — a mensagem é de fluxo, não de cadastro.
+      // O segundo pedido imediato **não** lança: um `throw` aqui seria o
+      // oráculo de "este CPF + este nascimento existem", porque só quem chega
+      // nesta linha está com o par confirmado — a exceção É o sinal.
       await expectLater(
         service.requestOtp(cpf: _cpf, birthDate: _nascimento, now: agora),
-        throwsA(isA<OtpRequestException>()),
+        completes,
       );
+
+      // O que o intervalo existe para impedir continua impedido: um CPF
+      // conhecido não vira gerador de SMS nem de desafio.
       expect(store.challenges, hasLength(1));
+      expect(gateway.sent, hasLength(1));
+      expect(audit.events, hasLength(1));
+    });
+
+    // C1b — a igualdade medida nos DOIS caminhos, em DUAS chamadas seguidas.
+    //
+    // Faltava exatamente este teste: um teste prendia a igualdade na PRIMEIRA
+    // chamada (`não revela CPF inexistente nem nascimento errado`) e outro
+    // prendia a violação na SEGUNDA (`throwsA` acima), e os dois ficavam
+    // verdes ao mesmo tempo — a suíte documentava o oráculo como se fosse o
+    // comportamento certo. O que separa as duas metades é o que precisa ser
+    // comparado de uma vez: a SEQUÊNCIA de respostas, não a resposta de uma
+    // chamada só.
+    //
+    // Sem ele, a mesma classe volta na próxima edição: qualquer ramo novo que
+    // só exista depois de o par estar confirmado (limite de tentativas, aviso
+    // de espera, bloqueio por origem) responde diferente do caminho de recusa,
+    // e nada acusa.
+    test('duas chamadas respondem o mesmo com e sem cadastro', () async {
+      final cadastrado = _build(store: _FakeStore(record: encontrado));
+      final semCadastro = _build(store: _FakeStore());
+      final semCadastroNascimentoErrado = _build(store: _FakeStore(record: encontrado));
+      final agora = DateTime.utc(2026, 9, 18, 12);
+
+      Future<List<({String status, String? corpo})>> duasChamadas(
+        Future<void> Function(int chamada) pedir,
+      ) async =>
+          [
+            await _desfechoDe(() => pedir(1)),
+            await _desfechoDe(() => pedir(2)),
+          ];
+
+      final doParCerto = await duasChamadas(
+        (_) => cadastrado.requestOtp(
+          cpf: _cpf,
+          birthDate: _nascimento,
+          now: agora,
+        ),
+      );
+      final doNaoCadastrado = await duasChamadas(
+        (_) => semCadastro.requestOtp(
+          cpf: _cpf,
+          birthDate: _nascimento,
+          now: agora,
+        ),
+      );
+      final doNascimentoErrado = await duasChamadas(
+        (_) => semCadastroNascimentoErrado.requestOtp(
+          cpf: _cpf,
+          birthDate: DateTime.utc(1991, 2, 2),
+          now: agora,
+        ),
+      );
+
+      // A primeira chamada é a referência: é a única em que os dois caminhos
+      // fazem coisas diferentes (o par certo ganha SMS e desafio — é o que o
+      // login existe para fazer). Da segunda em diante não pode sobrar
+      // diferença NENHUMA: é a segunda que decide o par.
+      expect(doNaoCadastrado, doParCerto);
+      expect(doNascimentoErrado, doParCerto);
     });
   });
 

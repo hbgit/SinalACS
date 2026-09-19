@@ -108,15 +108,24 @@ void main() {
 
     expect(find.byKey(const Key('cpf_field')), findsOneWidget);
     expect(find.byKey(const Key('otp_code_field')), findsNothing);
-    // O pedido não se repete sozinho: um segundo código em menos de um minuto é
-    // recusado pelo servidor.
+    // O pedido não se repete sozinho: dentro do intervalo mínimo o servidor
+    // não manda um código novo — e, desde 2026-09-19, também não diz que
+    // esperou (uma recusa aqui seria o oráculo de "este par existe").
     expect(backend.otpRequests, hasLength(1));
   });
 
   testWidgets('recusa ao pedir o código aparece na tela, sem avançar', (tester) async {
+    // A recusa que o servidor ainda emite neste passo é o dígito verificador
+    // inválido (`Cpf.tryParse` devolve null no endpoint, e o app não valida o
+    // DV por conta própria — ele só mascara o que a pessoa digitou). Era aqui
+    // que este teste usava "Aguarde um minuto": essa mensagem deixou de existir
+    // no servidor em 2026-09-19, porque só era alcançável por quem já acertou
+    // CPF e nascimento — o próprio oráculo do par. O aviso de espera passou a
+    // ser responsabilidade DESTE lado (o app sabe quando pediu por último) e
+    // ainda não foi implementado; ver `PROGRESS.md`.
     final backend = FakePatientBackend(
       requestOtpFailure: const BackendFailure(
-        'Um código já foi enviado. Aguarde um minuto antes de pedir outro.',
+        'Confira os dados informados.',
         isRecoverable: false,
       ),
     );
@@ -124,7 +133,7 @@ void main() {
 
     await pedirCodigo(tester);
 
-    expect(find.textContaining('Aguarde um minuto'), findsOneWidget);
+    expect(find.text('Confira os dados informados.'), findsOneWidget);
     expect(find.byKey(const Key('otp_code_field')), findsNothing);
   });
 

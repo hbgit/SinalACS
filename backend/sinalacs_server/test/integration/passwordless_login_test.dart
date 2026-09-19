@@ -317,6 +317,63 @@ void main() {
       expect(await OtpChallenge.db.find(session), isEmpty);
     });
 
+    // C1b, na porta por onde o app entra — status e corpo que o cliente
+    // recebe, em DUAS chamadas seguidas por caminho.
+    //
+    // A versão unitária irmã prende a mesma igualdade dentro do serviço. Esta
+    // existe porque foi AQUI que o oráculo foi medido contra a stack: o par
+    // cadastrado devolvia 200 e depois 400 (com a mensagem de "aguarde um
+    // minuto"), o não cadastrado devolvia 200 nas duas, e duas chamadas
+    // bastavam para decidir se o par existia. Um teste de uma chamada só não
+    // vê isso — a primeira chamada responde igual nos dois caminhos, de
+    // propósito.
+    test('duas chamadas devolvem o mesmo com e sem cadastro', () async {
+      Future<List<({String status, String? corpo})>> duasChamadas({
+        required String cpfDigits,
+        required DateTime birthDate,
+      }) async =>
+          [
+            await _desfechoDe(
+              () => endpoints.auth.requestOtp(
+                sessionBuilder,
+                cpf: cpfDigits,
+                birthDate: birthDate,
+              ),
+            ),
+            await _desfechoDe(
+              () => endpoints.auth.requestOtp(
+                sessionBuilder,
+                cpf: cpfDigits,
+                birthDate: birthDate,
+              ),
+            ),
+          ];
+
+      final doParCerto = await duasChamadas(
+        cpfDigits: cpf.digits,
+        birthDate: nascimento,
+      );
+      final doNaoCadastrado = await duasChamadas(
+        cpfDigits: naoCadastrado.digits,
+        birthDate: nascimento,
+      );
+      final doNascimentoErrado = await duasChamadas(
+        cpfDigits: cpf.digits,
+        birthDate: DateTime.utc(1991, 2, 2),
+      );
+
+      expect(doNaoCadastrado, doParCerto);
+      expect(doNascimentoErrado, doParCerto);
+
+      // E a igualdade não custou o intervalo: as duas chamadas do par certo
+      // deixaram UM desafio, não dois. Sem esta linha, apagar o cooldown
+      // inteiro mantém as três sequências idênticas (as duas chamadas passam a
+      // ser aceitas, como já eram as dos outros caminhos) e este teste fica
+      // verde enquanto um CPF conhecido volta a ser gerador de SMS.
+      final session = sessionBuilder.build();
+      expect(await OtpChallenge.db.find(session), hasLength(1));
+    });
+
     test('CPF com dígito verificador errado é recusado antes de virar hash', () async {
       final session = sessionBuilder.build();
 
@@ -575,6 +632,24 @@ Future<String> _mensagemDe(Future<void> Function() recusar) async {
     return erro.message;
   }
   fail('a chamada foi aceita — este caminho tinha de ser recusado');
+}
+
+/// O desfecho observável de uma chamada de `requestOtp` pelo endpoint: o
+/// status e o corpo que o cliente recebe.
+///
+/// [_mensagemDe] falha quando a chamada é aceita, porque olha uma recusa
+/// específica. Aqui os dois desfechos valem — "aceito" é a resposta que os
+/// caminhos de recusa dão, por desenho —, e o que se compara é a SEQUÊNCIA de
+/// duas chamadas entre caminhos diferentes.
+Future<({String status, String? corpo})> _desfechoDe(
+  Future<void> Function() chamar,
+) async {
+  try {
+    await chamar();
+    return (status: 'aceito (200)', corpo: null);
+  } on OtpRequestException catch (erro) {
+    return (status: 'recusa (400)', corpo: erro.message);
+  }
 }
 
 /// Um `OtpChallengeRecord` como o SERVIÇO o monta: `id: ''` (o id é do banco) e

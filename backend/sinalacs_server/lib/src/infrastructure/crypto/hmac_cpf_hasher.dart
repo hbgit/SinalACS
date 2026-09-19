@@ -14,8 +14,16 @@ import 'package:sinalacs_server/src/application/auth/cpf_hasher.dart';
 /// domínio: sem eles, um hash de código OTP (`'12345678909'` é um código de 11
 /// dígitos válido como string) seria idêntico ao hash de um CPF de mesmo
 /// valor, e um valor vazado numa finalidade valeria na outra. O `:v1:` é o
-/// mesmo espaço para versionar o esquema sem ambiguidade — trocar o prefixo
-/// invalida deliberadamente os hashes antigos, e é assim que se percebe.
+/// mesmo espaço para versionar o esquema sem ambiguidade.
+///
+/// **Subir a versão do prefixo invalida todo hash já gravado, em silêncio** —
+/// ao contrário do que o "assim se percebe" sugeria antes deste aviso, nada
+/// percebe: `users.cpfHash` deixa de casar no login e o banco não acusa nada.
+/// É o mesmo risco que `.env.example` documenta para `CPF_HASH_PEPPER`, com a
+/// mesma consequência (nenhum CPF cadastrado encontrado), e é por isso que o
+/// par de hashes de `test/unit/hmac_cpf_hasher_test.dart` prende este literal:
+/// uma troca de versão tem de vir como migração de dados, com o teste vermelho
+/// dizendo isso.
 class HmacCpfHasher implements CpfHasher {
   HmacCpfHasher({required String pepper}) : _key = _requirePepper(pepper);
 

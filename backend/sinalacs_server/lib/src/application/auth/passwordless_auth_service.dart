@@ -114,26 +114,40 @@ class PasswordlessAuthService {
 
   /// Intervalo mínimo entre dois pedidos, para um CPF conhecido não virar
   /// gerador de SMS pago.
+  ///
+  /// **O intervalo é silencioso, e não é detalhe de estilo.** O pedido repetido
+  /// devolve a mesma resposta que o CPF inexistente e que o nascimento errado:
+  /// um "aguarde um minuto" na tela só é alcançável por quem já acertou CPF e
+  /// nascimento, então a mensagem seria um verificador do par. Não existe texto
+  /// de cooldown neste serviço de propósito — o aviso é do app, que é quem sabe
+  /// quando pediu por último (registrado no `PROGRESS.md`).
   static const resendCooldown = Duration(seconds: 60);
 
   static const _invalidInput = 'Confira os dados informados.';
-  static const _resendTooSoon = 'Um código já foi enviado. Aguarde um minuto '
-      'antes de pedir outro.';
   static const _invalidCode = 'Código inválido ou expirado. Peça um novo.';
 
-  /// `requestOtp` devolve `void` e **não** distingue "enviado" de "CPF não
-  /// encontrado": qualquer diferença de resposta transformaria este endpoint num
-  /// verificador de quem é paciente da unidade.
+  /// `requestOtp` devolve `void` e a resposta é a **mesma** em todos os
+  /// desfechos: CPF não encontrado, nascimento errado e pedido repetido dentro
+  /// do intervalo mínimo. Qualquer diferença transformaria este endpoint num
+  /// verificador de quem é paciente da unidade — e é por isso que o intervalo
+  /// mínimo também é silencioso (ver [resendCooldown]).
   ///
-  /// A igualdade é de **payload, status e efeitos**: as duas recusas não
-  /// lançam, não gravam desafio, não enviam SMS e não escrevem auditoria.
+  /// A igualdade é de **payload, status e efeitos**: os três caminhos devolvem
+  /// o mesmo `void`, não lançam, não gravam desafio, não enviam SMS e não
+  /// escrevem auditoria. Quem prende isso é `duas chamadas respondem o mesmo
+  /// com e sem cadastro`, que compara a SEQUÊNCIA de duas chamadas: uma
+  /// chamada só não separa a igualdade da violação, e foi por isso que o
+  /// oráculo de 2026-09-19 sobreviveu a duas revisões com a suíte verde.
   ///
-  /// O **tempo não está equalizado**, e a versão anterior deste comentário
-  /// dizia o contrário: o caminho válido faz um `latestOpen`, um `save` e o
-  /// envio, que a recusa não faz. Um cronômetro distingue os dois. Não dá para
-  /// equalizar aqui sem mentir sobre o envio; quando houver gateway de verdade
-  /// o termo dominante é a ida ao provedor, e tirar o envio do caminho de
-  /// resposta é a correção. Lacuna registrada na Task 8 — não resolvida.
+  /// O **tempo não está equalizado**, e os dois termos disto não podem ser
+  /// trocados: o que está igual dos dois lados é o CONTEÚDO (status e payload);
+  /// o que continua diferente é o RELÓGIO — o caminho válido faz um
+  /// `latestOpen`, um `save` e o envio, que a recusa não faz. Um cronômetro
+  /// distingue os dois; o que não se mede com confiança é o tamanho da
+  /// diferença, que se sobrepõe ao ruído entre chamadas. Não dá para equalizar
+  /// aqui sem mentir sobre o envio; quando houver gateway de verdade o termo
+  /// dominante é a ida ao provedor, e tirar o envio do caminho de resposta é a
+  /// correção. Lacuna registrada na Task 8 — não resolvida.
   Future<void> requestOtp({
     required Cpf cpf,
     required DateTime birthDate,
@@ -149,9 +163,29 @@ class PasswordlessAuthService {
 
     final open = await store.latestOpen(record.userId, at);
     if (open != null && at.difference(open.createdAt) < resendCooldown) {
-      // Aqui lançar é seguro: chegar neste ponto exige CPF **e** nascimento
-      // corretos, então a exceção não revela nada a quem sonda.
-      throw OtpRequestException(message: _resendTooSoon);
+      // `return` em silêncio, e **não** uma exceção de "aguarde um minuto".
+      //
+      // Chegar NESTA linha exige CPF **e** nascimento corretos — é a
+      // precondição do ramo, e é justamente ela que faz do lançamento um
+      // oráculo: a exceção só existe para quem já provou o par, então o código
+      // de status da segunda chamada responde "este par existe". Medido contra
+      // a stack em 2026-09-19, quatro chamadas por caso: o par cadastrado
+      // devolvia 200 seguido de 400, 400, 400 e o CPF não cadastrado devolvia
+      // 200 nas quatro. Duas chamadas decidiam o par.
+      //
+      // A versão anterior deste comentário dizia o oposto — "aqui lançar é
+      // seguro: chegar neste ponto exige CPF e nascimento corretos, então a
+      // exceção não revela nada a quem sonda" — e é essa inversão que explica
+      // o defeito ter atravessado duas revisões: a precondição é o segredo, e
+      // a frase a usava como atestado de inocência. Um comentário que afirma
+      // que o ramo é seguro não prova nada; o que prova é a resposta ser igual
+      // à dos outros caminhos, e é isso que o teste de sequência mede.
+      //
+      // O que o intervalo segue impedindo é o EFEITO, não o sinal: sem `save`
+      // e sem `sendOtp`, um CPF conhecido não vira gerador de SMS nem semeia
+      // desafios em série — e quem pedir de novo dentro do minuto continua com
+      // o código anterior valendo, porque o TTL dele é maior que o intervalo.
+      return;
     }
 
     final code = _generateCode();

@@ -771,20 +771,75 @@ nascimento e o código de 6 dígitos recebido, e o servidor só emite a sessão 
 - **`requestOtp` não equaliza o TEMPO de resposta** — é a lacuna que o comentário de
   `requestOtp` em
   `backend/sinalacs_server/lib/src/application/auth/passwordless_auth_service.dart` chama de
-  "registrada na Task 8", e é por isso que ela está nesta lista. Payload, status e efeitos são
-  idênticos entre o CPF cadastrado e o não cadastrado — provado por teste
-  (`passwordless_auth_service_test.dart`, "não revela CPF inexistente nem nascimento errado") —,
-  mas o caminho válido faz um `latestOpen`, um `save` e o envio do código, enquanto as recusas
-  retornam na **primeira** condição — logo depois do `findByCpfHash` e **antes** do `latestOpen`,
-  sem nenhuma outra ida ao banco. Um cronômetro distingue os dois. A propriedade anti-enumeração
-  vale no conteúdo e **não** no relógio. Com gateway de verdade o termo dominante é a ida ao
-  provedor; a correção é tirar o envio do caminho de resposta (ou impor um piso constante de
-  tempo), e é endurecimento para quando o provedor for escolhido — não deste estágio, em que
-  `SMS_GATEWAY=log` não faz chamada nenhuma.
+  "registrada na Task 8", e é por isso que ela está nesta lista. O caminho válido faz um
+  `latestOpen`, um `save` e o envio do código, enquanto as recusas retornam na **primeira**
+  condição — logo depois do `findByCpfHash` e **antes** do `latestOpen`, sem nenhuma outra ida ao
+  banco. **O relógio é o resíduo que sobra, e não o que decidia o par:** era o conteúdo (status +
+  payload) que distinguia os dois casos, deterministicamente, e é o que a subseção abaixo fecha.
+  Este parágrafo dizia antes que "a propriedade anti-enumeração vale no conteúdo e **não** no
+  relógio" — o inverso, e a frase errada é parte do mesmo defeito. Com gateway de verdade o termo
+  dominante é a ida ao provedor; a correção é tirar o envio do caminho de resposta (ou impor um
+  piso constante de tempo), e é endurecimento para quando o provedor for escolhido — não deste
+  estágio, em que `SMS_GATEWAY=log` não faz chamada nenhuma.
 - **Biometria e leitura de QR Code.** `spec/sys_flow.md` lista "SMS/OTP, biometria ou QR Code
   gerado pelo ACS" como critérios de aceite do RF01. Biometria não existe em nenhum app; a
   leitura de QR pelo app do paciente também não — o onboarding pede para "colar ou digitar o
   código do convite".
+
+### O oráculo de `requestOtp` — e a frase invertida deste documento (2026-09-19)
+
+O review final de branch não aprovou o RF01 por um achado **Critical**: `requestOtp` respondia
+**diferente na segunda chamada** conforme o par CPF + nascimento existisse. Medido contra a stack,
+quatro chamadas por caso, só status e classe de exceção:
+
+```
+par cadastrado, nascimento certo   -> 200, 400, 400, 400
+par cadastrado, nascimento errado  -> 200, 200, 200, 200
+CPF não cadastrado (DV válido)     -> 200, 200, 200, 200
+```
+
+Duas chamadas decidiam o par — o código de status **era** o oráculo. O mecanismo é de ordem: a
+recusa (`record == null || !_sameDay(...)`) retornava **antes** do `latestOpen`, então o `throw` do
+intervalo de 60 s só era alcançável depois de o par estar confirmado. **A precondição era o
+segredo**, e o comentário que ficava ali dizia o contrário ("lançar é seguro: chegar neste ponto
+exige CPF e nascimento corretos, então a exceção não revela nada") — foi assim que o defeito
+atravessou uma revisão anterior, e o mesmo raciocínio invertido é o da frase que este documento
+trazia.
+
+**Corrigido em 2026-09-19:** o intervalo mínimo deixou de lançar e passou a `return` em silêncio —
+não cria desafio, não envia SMS, não audita e não produz sinal distinguível. O mesmo probe, depois
+da correção, devolve `200, 200, 200, 200` nos três casos; uma única linha no log do gateway para os
+doze chamados. A igualdade ganhou teste nos dois níveis — unitário e endpoint (`duas chamadas
+respondem o mesmo com e sem cadastro`) —, porque ela não existia: dois testes no mesmo `group`
+prendiam um a igualdade na primeira chamada e o outro a violação na segunda, e os dois ficavam
+verdes. O que mudou, as duas transcrições e a tabela de mutantes estão na seção fix-10 do
+relatório da Task 4 — `task-4-report.md`, na pasta de trabalho do SDD (`.superpowers/sdd/…`, fora
+do versionamento, como as rodadas anteriores; por isso o vínculo aqui é por nome, e não um link).
+
+**A frase que este documento trazia estava invertida.** Dizia que "a propriedade anti-enumeração
+vale no conteúdo e **não** no relógio": é o inverso. O **conteúdo** (status + payload) era o que
+distinguia os dois casos, deterministicamente — esse era o oráculo, e era o que faltava fechar. O
+**relógio** é o que não se mede com confiança: 200 amostras keep-alive por caso, com distribuições
+que se sobrepõem. Depois desta correção é o conteúdo que está igual; o relógio segue desigual e
+segue sendo resíduo, não sinal.
+
+**O que a correção não resolve** — ninguém deve ler "oráculo fechado" como "enumeração inviável":
+
+- **Não entrou limite nenhum.** O caminho de sonda continua sem rate limit por origem, que é a
+  lacuna já registrada nesta lista. Quem varre continua varrendo à vontade; o que acabou foi o
+  sinal determinístico de volta. Cada acerto ainda manda um SMS para a pessoa.
+- **A UX perdeu o aviso de "aguarde um minuto".** Com o intervalo mínimo silencioso, quem pede o
+  código duas vezes em menos de um minuto não vê aviso nenhum e fica esperando um SMS que não vem.
+  O servidor não pode mais dizer isso — quem sabe quando pediu por último é o **app**, e é lá que a
+  mensagem passa a morar. Hoje o app não implementa a espera: a tela não diz nada. **Dono: quem
+  mexer no app do paciente** — este RF01 não fecha com a mensagem de volta ao servidor, porque ela
+  só seria alcançável por quem já acertou o par.
+- **`otp_challenges` não tem retenção** (Minor do mesmo review). Não há `DELETE` nem limpeza em
+  `lib/` nem em `bin/`: desafios expirados e consumidos ficam para sempre, cada um com `userId`,
+  dois timestamps e `codeHash` — "Crítico — credencial" no inventário de
+  [`spec/lgpd_data_audit.md`](spec/lgpd_data_audit.md) —, então a tabela é um rastro de tentativas
+  de login sem prazo. **Registrado, não implementado**: depende de decidir prazo e de quem executa
+  a limpeza, como as outras retenções do projeto.
 
 ### Um defeito do RF02 que esta entrega mediu — com dono (2026-09-19)
 

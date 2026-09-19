@@ -133,11 +133,18 @@ class BackendClient implements PatientBackend {
   /// Pede o código de acesso (RF01).
   ///
   /// Devolve `void` porque a resposta **não** diz se o CPF existe: o servidor
-  /// trata "não encontrado" e "data errada" de forma idêntica e silenciosa
-  /// (anti-enumeração), e a tela avança para o passo do código nos dois casos.
-  /// As recusas que sobram — dígito verificador inválido, pedido repetido
-  /// dentro do intervalo mínimo — chegam como [BackendFailure] com a mensagem
-  /// que o servidor escolheu.
+  /// trata "não encontrado", "data de nascimento errada" e "pedido repetido
+  /// dentro do intervalo mínimo" de forma idêntica e silenciosa
+  /// (anti-enumeração), e a tela avança para o passo do código nos três casos.
+  /// A única recusa que sobra é o dígito verificador inválido, que chega como
+  /// [BackendFailure] com a mensagem que o servidor escolheu.
+  ///
+  /// A repetição silenciosa tem uma consequência que é DESTE lado: o servidor
+  /// não diz mais "aguarde um minuto", porque esse aviso só é alcançável por
+  /// quem já acertou CPF e nascimento — ou seja, seria o próprio verificador
+  /// do par. Quem pedir de novo dentro do minuto só pode ser avisado aqui, que
+  /// é quem sabe quando o pedido anterior saiu (seguimento registrado no
+  /// `PROGRESS.md`, no que ficou de fora do RF01).
   @override
   Future<void> requestOtp({
     required String cpf,

@@ -1144,12 +1144,14 @@ class PasswordlessAuthService {
   static const maxAttempts = 5;
 
   /// Intervalo mínimo entre dois pedidos, para um CPF conhecido não virar
-  /// gerador de SMS pago.
+  /// gerador de SMS pago. **Silencioso** — ver o ramo de `requestOtp` abaixo.
   static const resendCooldown = Duration(seconds: 60);
 
   static const _invalidInput = 'Confira os dados informados.';
-  static const _resendTooSoon = 'Um código já foi enviado. Aguarde um minuto '
-      'antes de pedir outro.';
+  // `_resendTooSoon` existia aqui e foi removido na rodada fix-10 (2026-09-19).
+  // Um "aguarde um minuto" só é alcançável por quem já acertou CPF **e**
+  // nascimento, então a mensagem era o oráculo do par. O aviso de espera passou
+  // a ser do app, que é quem sabe quando pediu por último (`PROGRESS.md`).
   static const _invalidCode = 'Código inválido ou expirado. Peça um novo.';
 
   /// `requestOtp` devolve `void` e **não** distingue "enviado" de "CPF não
@@ -1157,7 +1159,11 @@ class PasswordlessAuthService {
   /// verificador de quem é paciente da unidade.
   ///
   /// A igualdade é de **payload, status e efeitos**: as duas recusas não
-  /// lançam, não gravam desafio, não enviam SMS e não escrevem auditoria.
+  /// lançam, não gravam desafio, não enviam SMS e não escrevem auditoria. Vale
+  /// também para a **segunda** chamada: desde a rodada fix-10 o pedido repetido
+  /// dentro do minuto é um 200 sem corpo, e não uma recusa — a igualdade de uma
+  /// chamada só não separava a propriedade da violação, e foi por isso que o
+  /// oráculo de 2026-09-19 atravessou duas revisões com a suíte verde.
   ///
   /// O **tempo não está equalizado**, e a versão anterior deste comentário
   /// dizia o contrário: o caminho válido faz um `latestOpen`, um `save` e o
@@ -1180,9 +1186,13 @@ class PasswordlessAuthService {
 
     final open = await store.latestOpen(record.userId, at);
     if (open != null && at.difference(open.createdAt) < resendCooldown) {
-      // Aqui lançar é seguro: chegar neste ponto exige CPF **e** nascimento
-      // corretos, então a exceção não revela nada a quem sonda.
-      throw OtpRequestException(message: _resendTooSoon);
+      // `return` em silêncio, e **não** uma exceção (rodada fix-10, 2026-09-19).
+      // A versão anterior deste trecho dizia "aqui lançar é seguro: chegar neste
+      // ponto exige CPF **e** nascimento corretos, então a exceção não revela
+      // nada" — e é o contrário: a precondição É o segredo. Medido contra a
+      // stack, quatro chamadas por caso: 200, 400, 400, 400 no par cadastrado
+      // contra 200, 200, 200, 200 no não cadastrado. Duas chamadas decidiam o par.
+      return;
     }
 
     final code = _generateCode();
