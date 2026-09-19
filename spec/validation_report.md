@@ -58,7 +58,8 @@ alertas recebidos enquanto o dispositivo estava offline (INV-03).
 
 ## 3. Matriz de rastreabilidade RF / RNF / INV
 
-Legenda: **`backend`** = endpoint + teste · **`app-only`** = corretamente só no
+Legenda: **`backend`** = endpoint + teste · **`backend + app`** = endpoint com
+teste **e** consumido de verdade pelo app · **`app-only`** = corretamente só no
 cliente · **`parcial`** = existe, mas alimentado por dado fabricado ·
 **`ausente`** = sem código.
 
@@ -66,13 +67,13 @@ cliente · **`parcial`** = existe, mas alimentado por dado fabricado ·
 
 | ID | Requisito | Veredicto | Evidência |
 |---|---|---|---|
-| RF01 | Autenticação passwordless (CPF + nasc. + OTP) | **ausente** | Campos de CPF/data existem na UI mas são decorativos; o login chama `auth.developmentLogin(role)` ignorando a entrada. Sem gateway SMS. |
+| RF01 | Autenticação passwordless (CPF + nasc. + OTP) | **ausente** | Campos de CPF/data existem na UI mas são decorativos; o login chama `auth.developmentLogin(role)` ignorando a entrada. Sem gateway SMS. O plano de RF07 não cobriu este requisito — a autenticação institucional que ele implementou é a do ACS. |
 | RF02 | Onboarding via QR Code | **ausente** | Botão presente; `app.dart:170` emite snackbar "será disponibilizada". |
 | RF03 | Botão de alerta de urgência (MQTT) | **parcial** | Endpoint e entrega funcionam (validado em dispositivo). O app agora tenta ler a localização e envia somente um hash truncado; sem permissão/GPS usa `unknownLocationHash` e informa a pessoa. A precisão e o risco de reidentificação ainda exigem decisão de produto — ver L-02/L-05. |
 | RF04 | Formulário de triagem estruturada | **backend** | `triage.evaluate` exige token, classifica pelo motor determinístico e grava em `triage_sessions` com auditoria. |
 | RF05 | Painel de status da solicitação | **backend** | `alerts.statusFor` lê o status do alerta mais recente do paciente autenticado pelo próprio token — sem `patientId` como parâmetro, então um token só pode ler o próprio status (INV-05). A tela deixou de ser `const` e consome o endpoint (fecha L-03). |
 | RF06 | Lembretes de saúde | **ausente** | `RemindersScreen` tem lista fixa; salvar descarta. Sem `flutter_local_notifications`. |
-| RF07 | Login institucional (matrícula/senha) | **ausente** | Só o token HMAC de desenvolvimento, sob `ENABLE_DEV_LOGIN`. |
+| RF07 | Login institucional (matrícula/senha) | **backend + app** | `auth.loginInstitutional` verifica a senha com Argon2id contra `user_credentials`, bloqueia após 5 tentativas por 15 min (F6) e audita cada desfecho; o app ACS envia o que a pessoa digita. MFA/TOTP e refresh token seguem ausentes por decisão de escopo — ver `docs/superpowers/plans/2026-09-18-rf07-login-institucional-acs.md`. |
 | RF08 | Territorialização (cache da microárea) | **parcial** | `patients.listMicroArea` é real, territorializado, e a tela "Área" agora mostra o número real de pacientes (L-06 fechado). Continua parcial: a chamada é ao vivo a cada abertura/ciclo periódico, não um cache `sqflite` persistido em disco que sobrevive offline — esse é o trabalho que falta para RF08 completo. |
 | RF09 | Dashboard de priorização dinâmica | **backend** | Fila real alimentada por MQTT, ordenada por risco e idade; valida rejeição de alerta de outra microárea. |
 | RF10 | Mapa interativo | **parcial** | Coordenadas são **fabricadas** a partir do hash — ver L-05. |
@@ -85,7 +86,7 @@ cliente · **`parcial`** = existe, mas alimentado por dado fabricado ·
 | RF17 | Logs de auditoria e conformidade | **backend** | `audit_logs` encadeado por HMAC; gravou `granted` e `denied_territory` nesta validação; cadeia verificada íntegra. |
 | RF18 | Dark mode nativo | **app-only** | Tema único dark nos três apps, com matriz de contraste testada. |
 
-**Contagem:** 7 `backend` · 1 `app-only` · 3 `parcial` · 7 `ausente`.
+**Contagem:** 7 `backend` · 1 `backend + app` · 1 `app-only` · 3 `parcial` · 6 `ausente`.
 
 ### Requisitos não funcionais
 

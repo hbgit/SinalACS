@@ -236,6 +236,25 @@ precisa nascer com rate limiting, para não repetir a lacuna.
 *Recomendação:* tratar como pré-requisito de design da autenticação
 institucional, não como item avulso.
 
+**Estado atual (2026-09-18):** o rate limiting nasceu junto com a autenticação
+institucional, como recomendado. `InstitutionalAuthService` conta tentativas
+falhas por credencial e bloqueia por 15 minutos após 5
+(`maxFailedAttempts`/`lockDuration`), grava cada desfecho em `audit_logs` e
+responde com mensagem idêntica para matrícula inexistente e senha errada,
+executando uma derivação descartada no caminho da inexistente para o tempo de
+resposta não vazar o que a mensagem esconde. **Continua aberto:** o bloqueio é
+por conta, não por origem — não há limite por IP, então um atacante com muitas
+matrículas válidas distribui as tentativas. O insumo existe
+(`session.request?.remoteInfo`, que `OrmAuditTrail` já resolve atrás do proxy
+para o `ipHash` de `audit_logs`), mas nenhum contador por origem foi
+implementado: o estado de bloqueio vive na linha da credencial. E uma varredura
+de matrículas **inexistentes não deixa rastro em `audit_logs`**:
+`AuditEvent.userId` é obrigatório e tem FK para `users`, então não há como
+auditar um sujeito que não existe — o que `spec/lgpd_design.md` pede como
+"registro de tentativas de acesso" fica atendido só para tentativas sobre contas
+reais. Fechar isso exige ou um sujeito por origem (IP) ou uma trilha separada
+sem FK.
+
 **F7 — Gestão de segredos correta em código, sem cofre/rotação (Baixa/Média)**
 *Categoria:* PR.DS-01 · *SP 800-53:* SC-12, SC-28
 

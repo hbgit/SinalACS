@@ -6,11 +6,11 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 ///
 /// A chave **não** é derivada de PIN nem de biometria, apesar de
 /// `spec/PRD_system.md` (4.2.3) prescrever PBKDF2 a partir de PIN: não existe
-/// nenhum fluxo de PIN nos apps — a autenticação é `auth.developmentLogin`, sem
-/// credencial — e um PIN esquecido significaria perder visitas ainda não
-/// sincronizadas. Adotamos a leitura de `spec/test_plan.md` (126), "chave gerada
-/// pelo TEE do hardware": chave aleatória guardada no armazenamento seguro da
-/// plataforma.
+/// nenhum fluxo de PIN nos apps — a autenticação do ACS é institucional
+/// (matrícula + senha, RF07) e não usa PIN — e um PIN esquecido significaria
+/// perder visitas ainda não sincronizadas. Adotamos a leitura de
+/// `spec/test_plan.md` (126), "chave gerada pelo TEE do hardware": chave
+/// aleatória guardada no armazenamento seguro da plataforma.
 ///
 /// A interface aceita um segundo fator depois, sem migrar dados: bastaria
 /// envelopar a chave devolvida aqui.

@@ -644,7 +644,13 @@ O backend `dart:io` foi removido da árvore; o histórico do git o preserva.
 
 - **Autenticação institucional.** O acesso segue sendo o token HMAC de
   desenvolvimento, gated por `ENABLE_DEV_LOGIN`. Gov.br e matrícula da
-  Secretaria continuam não implementados.
+  Secretaria continuam não implementados. **Atualização (2026-09-18):** no app
+  do ACS isso deixou de valer — o login é institucional (matrícula + senha,
+  RF07), verificado com Argon2id contra `user_credentials`; o token de
+  desenvolvimento continua existindo para as ferramentas e para o app do
+  paciente. O que segue não implementado é a integração com Gov.br e com um
+  cadastro institucional real: a credencial do ACS nasce do seed de
+  desenvolvimento, não de um sistema da Secretaria (ver a seção abaixo).
 - ~~**Apps Flutter não consomem o cliente gerado.**~~ Desatualizado: os dois
   apps já consomem `sinalacs_client` por dependência de caminho e falam com o
   backend real (ver M2.4 acima) — `RiskLevel` atravessa a fronteira desde a
@@ -658,3 +664,52 @@ O backend `dart:io` foi removido da árvore; o histórico do git o preserva.
   `test/unit/alert_outbox_dispatcher_test.dart`.
 - **Deploy não executado.** O runbook em [backend/DEPLOY.md](backend/DEPLOY.md)
   foi reescrito para Serverpod, mas continua sem ter sido rodado.
+
+---
+
+## Login institucional do ACS (RF07) — o que ficou de fora (2026-09-18)
+
+O login do ACS deixou de ser o token HMAC de desenvolvimento: o app envia
+matrícula e senha a `auth.loginInstitutional`, o servidor verifica a senha com
+Argon2id contra a tabela `user_credentials`, bloqueia a conta por 15 minutos
+após 5 tentativas falhas e audita cada desfecho em `audit_logs` — o rate
+limiting que o achado F6 de `spec/security_assessment.md` pedia. As decisões de
+escopo estão em
+`docs/superpowers/plans/2026-09-18-rf07-login-institucional-acs.md`. O que este
+plano **não** fez:
+
+- **MFA/TOTP para o ACS.** Exigido por LGPD-RF11/LGPD-RT06 e pelo achado F5. O
+  critério de MVP do PRD pede "matrícula e senha", e não existe fluxo de
+  enrollment de TOTP em nenhum dos apps.
+- **Refresh token rotativo, e o TTL de 1h/8h.** Exigidos por LGPD-RT06. Na
+  prática a sessão dura 15 minutos e a renovação depende da credencial mantida
+  em memória.
+- **Limite de tentativas por origem (IP).** O bloqueio é por conta, não por
+  origem: um atacante com muitas matrículas válidas distribui as tentativas.
+- **Troca de senha pelo próprio ACS.** Não há fluxo; `saveCredential` existe no
+  serviço para que o seed e uma futura troca o usem.
+
+E quatro lacunas que só apareceram durante a execução. Nenhuma delas é um
+defeito:
+
+1. **Sem caminho de volta ao login quando a renovação falha de forma não
+   recuperável.** `BackendClient._requireToken` falha com `isRecoverable:
+   false` e a mensagem aparece no banner da tela que fez a chamada, mas nada
+   navega de volta à tela de login — a pessoa reinicia o app; `renewSession`
+   nem está na interface `AcsBackend`, então a UI não tem como chamá-la.
+   Alcançável em dois casos: conta bloqueada por tentativas feitas em outro
+   lugar, ou senha trocada no servidor. Não foi corrigido aqui de propósito: o
+   plano não especifica nenhum fluxo de navegação, e inventar UI sem plano é o
+   que o processo alerta contra. Candidato a um plano próprio.
+2. **A credencial vive até o processo morrer, sem caminho de limpeza.** Não há
+   logout: o record fica acessível pela instância de `BackendClient` enquanto o
+   app viver. É consequência direta de adiar o refresh token; some quando ele
+   existir.
+3. **`autofillHints` sem `AutofillGroup`** provavelmente não faz nada no
+   aparelho: o gerenciador de senhas do Android precisa do grupo (e de
+   `finishAutofillContext()`) para oferecer preenchimento.
+4. **A renovação e a recusa são provadas contra um servidor RPC falso**
+   (`dart:io`, espelhando o protocolo do Serverpod 3.4.13), não contra o
+   servidor vivo — `apps/acs/test/support/fake_rpc_server.dart`. Quem executou
+   evitou de propósito gastar o bloqueio de 5 tentativas do `ACS-001` com
+   senhas erradas. A prova é do caminho, não do servidor real.

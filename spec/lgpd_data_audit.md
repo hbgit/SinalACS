@@ -14,6 +14,14 @@ A tabela abaixo consolida o mapeamento exaustivo de dados persistidos pelo backe
 | | `microAreaId` | `uuid` | Pseudonimizado / Territorial | Chave estrangeira (`micro_areas.id`) | Essencial para a aplicação da invariante de privacidade INV-01 (delimitação estrita de acesso por microárea). |
 | | `createdAt` | `timestamp without time zone` | Metadado Técnico | Timestamp de criação | Registro temporal técnico de auditoria. |
 | | `updatedAt` | `timestamp without time zone` | Metadado Técnico | Timestamp de modificação | Rastreabilidade do ciclo de vida cadastral. |
+| **user_credentials** | `id` | `uuid` | Pseudonimizado | UUID da linha | — |
+| | `userId` | `uuid` | Pseudonimizado | Chave estrangeira (`users.id`), única | Uma credencial por usuário. |
+| | `passwordHash` | `text` | **Crítico** — credencial | Argon2id, base64, 32 bytes | Nunca a senha. Verificado por `Argon2PasswordHasher`; o parâmetro `salt` viaja ao lado. |
+| | `passwordSalt` | `text` | Crítico — credencial | Salt por credencial, base64, 16 bytes | Impede pré-computação entre credenciais. |
+| | `memoryKb` / `iterations` / `parallelism` | `bigint` | Metadado Técnico | Parâmetros do Argon2id vigentes na gravação | Gravados junto do hash para que subir o custo não invalide credencial antiga. |
+| | `failedAttempts` | `bigint` | Metadado de Segurança | Tentativas falhas desde o último sucesso | Base do bloqueio (achado F6). |
+| | `lockedUntil` | `timestamp without time zone` | Metadado de Segurança | Fim do bloqueio; `NULL` = não bloqueado | — |
+| | `createdAt` / `updatedAt` | `timestamp without time zone` | Metadado Técnico | Timestamps | — |
 | **patients** | `id` | `uuid` | Pseudonimizado | UUID (vínculo 1:1 com `users.id`) | Identificador do paciente no domínio clínico; sem risco direto de identificação sem junção com a tabela `users`. |
 | | `emergencyContact` | `text` | Identificável (PII de Terceiro) | Texto claro (telefone/nome) | **Alto:** Armazena dados de contato de pessoa externa sem gestão documentada de consentimento desse terceiro titular. |
 | | `isChronic` | `boolean` | Sensível (Saúde - Art. 5º, II) | Flag booleana | Sinaliza formalmente a existência de condição médica crônica. |
@@ -179,13 +187,14 @@ As tabelas `alerts` e `triage_sessions` retêm a coluna `deviceId text NOT NULL`
 
 ---
 
-### 2.5. Dados Cadastrais e Credenciais de Autenticação (`users` e `patients`)
+### 2.5. Dados Cadastrais e Credenciais de Autenticação (`users`, `patients` e `user_credentials`)
 
 * **`users.name`:** Mantido em texto claro no banco por necessidade estrita da operação assistencial domiciliar do ACS (Art. 6º, I e Art. 7º, V da LGPD). Requer controle de acesso rígido por microárea (INV-01) para que outros agentes não visualizem a listagem nominal.
 * **`users.birthDate` como Fator de Autenticação (RF01):** Conforme definido no requisito RF01 do PRD, a data de nascimento atua conjuntamente com o CPF como credencial no fluxo de *Login Passwordless*.
   * **Minimização de Tipo:** Como a autenticação exige a data exata, o truncamento para ano/idade é inviável sem quebrar o login. No entanto, o tipo de dado atual no PostgreSQL (`timestamp without time zone`) deve ser alterado para o tipo `date`, descartando horas, minutos e segundos desnecessários.
   * **Risco de Correlação:** Armazenar a data de nascimento em texto claro ao lado de um `cpfHash` frágil amplia exponencialmente o risco de reidentificação por cruzamento com bases públicas vazadas. A proteção de `users.cpfHash` via HMAC-SHA-256 com segredo (*pepper*) do backend torna-se mandatória para impedir que a credencial de login do paciente seja quebrada em caso de vazamento do banco.
 * **`patients.emergencyContact`:** Armazena dados de contato de terceiros (telefone/nome) em texto claro sem termo de consentimento específico. Deve permanecer sob acesso restrito (RBAC), sendo descriptografado ou revelado ao ACS exclusivamente durante o tratamento de alertas de emergência confirmados (alerta vermelho).
+* **`user_credentials` (RF07):** É onde vive a credencial institucional do ACS — matrícula (`acs.enrollmentId`) + senha. A senha **nunca** é armazenada, em nenhuma forma: a linha guarda o Argon2id (base64, 32 bytes) com o salt por credencial (16 bytes) e os parâmetros de custo vigentes na gravação (`memoryKb`, `iterations`, `parallelism`), gravados junto do hash para que subir o custo não invalide credencial antiga. O parecer de entropia do §2.1 **não** se aplica a este campo: Argon2id é função de derivação lenta e com custo de memória — hoje 19 MiB × 2 iterações × 1 via, o piso recomendado pela OWASP —, deliberadamente caro por tentativa, o oposto do SHA-256 sem salt e de execução instantânea que o §2.1 critica em `users.cpfHash`. O que a linha retém além do hash é estado de bloqueio por tentativas (`failedAttempts`, `lockedUntil`), metadado de segurança e não credencial — ver o achado F6 de `spec/security_assessment.md`.
 
 ---
 
