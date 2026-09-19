@@ -686,6 +686,23 @@ plano **não** fez:
   em memória.
 - **Limite de tentativas por origem (IP).** O bloqueio é por conta, não por
   origem: um atacante com muitas matrículas válidas distribui as tentativas.
+- **Amplificação anônima no caminho da matrícula inexistente.** Toda tentativa
+  com matrícula desconhecida executa uma derivação Argon2id **descartada** —
+  ~70–80 ms e 19 MiB medidos na stack —, e esse caminho não é limitado (o
+  bloqueio só cobre contas existentes) nem auditável (`audit_logs.userId` é
+  obrigatório e tem FK para `users`: um sujeito que não existe não tem como
+  deixar linha). Cada decisão isolada se sustenta; a combinação não — qualquer
+  anônimo transforma o servidor num amplificador de CPU e memória. Correção
+  estrutural barata, ainda não feita: um teto global de derivações simultâneas.
+  Registrado no achado F6 de `spec/security_assessment.md`.
+- **Um deploy que não rode o seed não tem como ninguém entrar.** A credencial
+  institucional nasce de `bin/seed_acs_credentials.dart`, único código da árvore
+  que grava em `user_credentials`, e ele **recusa** rodar fora de
+  `APP_ENV=development`. Antes desta mudança a stack nova funcionava de
+  imediato, porque o app chamava `auth.developmentLogin`; agora o app só chama
+  `loginInstitutional`, então uma instalação sem o seed (um `APP_ENV=production`
+  qualquer) sobe com o app **sem nenhum caminho de login**. A proveniência da
+  credencial estava documentada; a consequência, não.
 - **Troca de senha pelo próprio ACS.** Não há fluxo; `saveCredential` existe no
   serviço para que o seed e uma futura troca o usem.
 

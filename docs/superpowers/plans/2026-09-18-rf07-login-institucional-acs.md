@@ -468,6 +468,8 @@ Co-Authored-By: Claude Code <noreply@anthropic.com>"
 
 `saveCredential` entra já aqui porque a Task 5 (seed) e um futuro "trocar senha" precisam dele, e ele é a única operação de escrita da tabela.
 
+> **Atualizado pelo fix wave final (achado C1):** a assinatura de `registerFailedAttempt` acima (`failedAttempts` absoluto) **não** é a que ficou no código. A contagem passou a ser aplicada numa única `UPDATE` no store — `registerFailedAttempt(String acsId, {required bool restartCounter, required int maxFailedAttempts, required DateTime lockUntil, required DateTime at})` —, porque somar em Dart, sobre um valor lido numa consulta anterior, perde atualização sob concorrência. A política continua no serviço; o que mudou é onde a aritmética acontece. Ver `OrmAcsCredentialStore.registerFailedAttempt` e `test/integration/institutional_login_test.dart` (grupo da rajada).
+
 - [ ] **Step 1: Escrever o teste que falha**
 
 Cria `backend/sinalacs_server/test/unit/institutional_auth_service_test.dart`:
@@ -1932,7 +1934,7 @@ Co-Authored-By: Claude Code <noreply@anthropic.com>"
 - [ ] **Analisador limpo (backend e app):** `cd backend && dart analyze` e `cd apps/acs && flutter analyze`.
 - [ ] **App verde:** `cd apps/acs && flutter test` (descontadas as falhas pré-existentes de SQLite neste ambiente).
 - [ ] **Login real funciona na stack:** com `docker compose up --build`, o `acs-credential-seed` gravou a credencial e o `curl` da Task 5 devolveu `accessToken`.
-- [ ] **Bloqueio observável:** cinco `loginInstitutional` com senha errada fazem o sexto responder "Acesso temporariamente bloqueado…", e o log do servidor mostra `denied_credentials` cinco vezes seguidas.
+- [ ] **Bloqueio observável:** cinco `loginInstitutional` com senha errada fazem a sexta tentativa — com a senha **certa** — responder "Acesso temporariamente bloqueado…", e o log do servidor mostra `denied_credentials` cinco vezes seguidas. (Corrigido pelo fix wave final, achado I1: a mensagem de bloqueio só é dita a quem provou conhecer a senha, porque revelá-la a quem só chutou transformava cinco requisições anônimas por matrícula num oráculo de existência.)
 - [ ] **Nada de senha em disco:** `grep -rn "DEV_ACS_PASSWORD" apps/` → sem saída; `git log -p --all -S 'DEV_ACS_PASSWORD=' -- .env.example` → a variável aparece **vazia**, nunca com valor.
 
 ## Fora de escopo (registrado, não implementado)

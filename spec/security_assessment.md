@@ -253,7 +253,20 @@ de matrículas **inexistentes não deixa rastro em `audit_logs`**:
 auditar um sujeito que não existe — o que `spec/lgpd_design.md` pede como
 "registro de tentativas de acesso" fica atendido só para tentativas sobre contas
 reais. Fechar isso exige ou um sujeito por origem (IP) ou uma trilha separada
-sem FK.
+sem FK. **E o caminho da matrícula inexistente é um amplificador anônimo, não
+limitado e não auditado:** cada tentativa com matrícula desconhecida executa uma
+derivação Argon2id **descartada** (~70–80 ms, 19 MiB, medidos na stack), porque
+sem ela o tempo de resposta entregaria quais matrículas existem; e esse é
+exatamente o caminho que o bloqueio por conta **não** cobre (não há conta) e que
+não deixa rastro em `audit_logs` (pelo motivo da FK acima). Cada decisão se
+sustenta isolada — a derivação descartada protege a enumeração, o bloqueio
+protege a conta, a auditoria exige sujeito —, mas a combinação deixa qualquer
+requisição anônima converter ~19 MiB de memória e ~80 ms de CPU por chamada, sem
+teto e sem registro. A correção estrutural barata é um **teto global de
+derivações simultâneas** (semáforo em volta do `PasswordHasher`), que limita o
+amplificador independentemente da origem; contar por IP resolveria o mesmo
+problema de forma mais cara e ainda dependente de infraestrutura. `PROGRESS.md`
+registra a mesma lacuna.
 
 **F7 — Gestão de segredos correta em código, sem cofre/rotação (Baixa/Média)**
 *Categoria:* PR.DS-01 · *SP 800-53:* SC-12, SC-28
