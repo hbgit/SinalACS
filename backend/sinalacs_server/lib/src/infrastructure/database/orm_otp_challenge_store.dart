@@ -5,15 +5,21 @@ import 'package:sinalacs_server/src/generated/protocol.dart';
 /// Implementação de [OtpChallengeStore] sobre o ORM do Serverpod (RF01).
 ///
 /// É a fronteira entre o login (`application/`) e as tabelas `users` /
-/// `otp_challenges`, e é onde vivem as quatro semânticas que a interface não
-/// declara — cada uma presa por uma asserção contra o Postgres em
+/// `otp_challenges`, e é onde vivem quatro semânticas do login. Duas delas já
+/// estão declaradas no contrato da interface — [OtpChallengeStore.save] diz que
+/// o id é do store, e [OtpChallengeStore.latestOpen] diz o que ele filtra —, e
+/// o que falta a elas e às outras duas é **prova**: cada uma está presa por uma
+/// asserção contra o Postgres em
 /// `test/integration/passwordless_login_test.dart`, porque o store falso do
 /// teste unitário concorda com quem o escreveu e não as alcança:
 ///
 /// 1. [save] **ignora o `id` recebido** e deixa o banco atribuir o seu. O
 ///    serviço manda `id: ''` (o id é do banco — ver a doc de
-///    [OtpChallengeStore.save]); honrar esse valor não compila um uuid válido,
-///    e é o INSERT que falha, alto, em vez de gravar uma linha sem id.
+///    [OtpChallengeStore.save]); a string vazia não é um uuid, então é o
+///    INSERT que falha **alto** (`invalid input syntax for type uuid: ""`,
+///    22P02), em vez de gravar uma linha com id vazio — e é esse o desfecho
+///    que a asserção prende, não o modo silencioso de um store de ids `String`,
+///    que esta suíte não alcança.
 /// 2. [latestOpen] filtra `consumedAt IS NULL AND expiresAt > at` e ordena por
 ///    `createdAt` desc — uso único, TTL e "o mais recente" em uma consulta só.
 /// 3. [registerAttempt] grava a contagem **absoluta**, nunca `attempts + 1`: o

@@ -13,15 +13,22 @@ import 'test_tools/serverpod_test_tools.dart';
 /// Login passwordless contra Postgres real: prova o JOIN por `cpfHash` e a
 /// passagem por `otp_challenges` que o teste unitário (store falso) não alcança.
 ///
-/// O grupo "Store ORM" prende, direto no banco, cinco semânticas que a
-/// interface `OtpChallengeStore` **não declara** e que o fake de
+/// O grupo "Store ORM" prende, direto no banco, cinco semânticas que o fake de
 /// `passwordless_auth_service_test.dart` não consegue alcançar — um fake
-/// concorda com quem o escreveu. Sem estas asserções, o defeito passa com a
-/// suíte inteira verde. As quatro primeiras são as do bloco "CASO 1" do brief:
+/// concorda com quem o escreveu — e que, sem estas asserções, passariam com a
+/// suíte inteira verde. **Não falta declaração a elas: falta prova.** O
+/// contrato do id e o filtro do `latestOpen` já estão escritos na interface
+/// (`passwordless_auth_service.dart`), e é essa declaração que as asserções
+/// abaixo passam a medir. As quatro primeiras são as do bloco "CASO 1" do
+/// brief:
 ///
 /// 1. `save` ignora o `id` recebido e o banco atribui o seu (o serviço manda
-///    `id: ''`). No ORM isso falha ALTO (`''` não é uuid), mas o modo de falha
-///    silencioso de um store que honrasse o id recebido só é observável aqui.
+///    `id: ''`). Este é o ÚNICO lugar da suíte onde o **contrato do id** é
+///    medido: o fake do teste unitário numera as linhas por conta própria e não
+///    mede contrato nenhum. O que se mede aqui, no ORM, é o modo de falha
+///    **alto** — a string vazia não é uuid, e é o INSERT que recusa. O modo de
+///    falha **silencioso** é o de um store cujos ids são `String`, e **não é
+///    observável aqui**: um store assim não está em teste nenhum desta suíte.
 /// 2. `latestOpen` filtra `consumedAt IS NULL AND expiresAt > at`, do mais
 ///    recente: sem o primeiro filtro o código já usado volta a valer, sem o
 ///    segundo um desafio vencido volta a valer, e sem a ordenação o desafio
@@ -65,6 +72,10 @@ void main() {
     endpoints,
   ) {
     final cpf = Cpf.tryParse(_cpfSintetico)!;
+    // CPF sintético VÁLIDO (dígito verificador correto) que não está no
+    // cadastro: é ele que faz o serviço recusar pelo caminho "não existe",
+    // passando pela validação do endpoint.
+    final naoCadastrado = Cpf.tryParse('98765432100')!;
     final nascimento = DateTime.utc(1990, 1, 1);
 
     // Antes de qualquer uso do `AlertRuntime`: sem a config de teste,
@@ -146,13 +157,70 @@ void main() {
       expect(challenge.consumedAt, isNotNull);
     });
 
-    test('CPF não cadastrado não grava desafio', () async {
+    test('paciente sem microárea tem o login recusado (INV-01)', () async {
       final session = sessionBuilder.build();
-      final outro = Cpf.tryParse('98765432100')!;
+      final gateway = RecordingSmsGateway();
+      AlertRuntime.instance.overrideSmsGateway(gateway);
+
+      // `users.microAreaId` é NULLABLE no schema: "paciente sem território" é
+      // um dado que o banco aceita — e é para ele que o token sairia com
+      // `micro_area_id: null`, já que é o território do token que restringe o
+      // acesso do paciente (INV-01).
+      final user = (await User.db.findById(
+        session,
+        UuidValue.fromString(_patientId),
+      ))!;
+      user.microAreaId = null;
+      await User.db.updateRow(session, user);
 
       await endpoints.auth.requestOtp(
         sessionBuilder,
-        cpf: outro.digits,
+        cpf: cpf.digits,
+        birthDate: nascimento,
+      );
+
+      // Controle: o código foi pedido e enviado. Sem esta linha, a recusa
+      // abaixo passaria por "não há desafio aberto" — o motivo errado, que
+      // deixaria a guarda territorial invisível de novo.
+      expect(gateway.sent, hasLength(1));
+
+      // Sem token: com o código CERTO e um desafio aberto, o endpoint não
+      // devolve resultado nenhum — lança. É o único ponto desta suíte que
+      // mede a guarda territorial do login pelo caminho por onde o app entra.
+      await expectLater(
+        endpoints.auth.verifyOtp(
+          sessionBuilder,
+          cpf: cpf.digits,
+          code: gateway.sent.single.code,
+        ),
+        throwsA(isA<OtpRequestException>()),
+      );
+
+      // E a recusa é a do território, não uma recusa genérica de código: é o
+      // `result` da trilha que diz qual ramo recusou.
+      final recusas = await AuditLog.db.find(
+        session,
+        where: (table) =>
+            table.resourceType.equals('session') &
+            table.result.equals('denied_no_territory'),
+      );
+      expect(recusas, isNotEmpty);
+
+      // E nenhuma linha afirma um acesso concedido: um `granted` aqui seria o
+      // rastro de um token emitido para quem não tem território.
+      final concedidos = await AuditLog.db.find(
+        session,
+        where: (table) => table.result.equals('granted'),
+      );
+      expect(concedidos, isEmpty);
+    });
+
+    test('CPF não cadastrado não grava desafio', () async {
+      final session = sessionBuilder.build();
+
+      await endpoints.auth.requestOtp(
+        sessionBuilder,
+        cpf: naoCadastrado.digits,
         birthDate: nascimento,
       );
 
@@ -161,28 +229,60 @@ void main() {
     });
 
     test('código inválido é recusado pelo endpoint com a exceção tipada', () async {
-      await expectLater(
-        endpoints.auth.verifyOtp(
+      // Sem desafio aberto, a recusa sai do serviço com a mensagem de código —
+      // e é esta a referência contra a qual os testes irmãos comparam.
+      final semDesafio = await _mensagemDe(
+        () => endpoints.auth.verifyOtp(
           sessionBuilder,
           cpf: cpf.digits,
           code: '000000',
         ),
-        throwsA(isA<OtpRequestException>()),
       );
+
+      // CPF válido que não está no cadastro: a recusa é OUTRA, e a mensagem
+      // não pode ser — é ela que diz a quem sonda se aquele CPF existe. O
+      // teste unitário irmão prende a mesma igualdade dentro do serviço
+      // (`as recusas não se distinguem pela mensagem`); esta é a versão que
+      // mede a porta por onde o app entra.
+      final naoCadastradoMsg = await _mensagemDe(
+        () => endpoints.auth.verifyOtp(
+          sessionBuilder,
+          cpf: naoCadastrado.digits,
+          code: '000000',
+        ),
+      );
+
+      expect(naoCadastradoMsg, semDesafio);
     });
 
     test('verifyOtp com CPF impossível é recusado com a exceção tipada', () async {
       // Mesmo CPF sintético com o dígito final trocado: a validação do
       // endpoint recusa antes de qualquer consulta, e a recusa sai tipada —
       // não como o erro cru de uma conversão que só falharia depois.
-      await expectLater(
-        endpoints.auth.verifyOtp(
+      //
+      // A mensagem dela é um LITERAL repetido no endpoint, cópia da constante
+      // privada do serviço, e é essa duplicação que impede o oráculo de "este
+      // número é impossível". Comparar com a constante pelo nome exigiria
+      // torná-la pública; a comparação abaixo é o que dá para observar de
+      // fora — a mensagem que o PRÓPRIO serviço emite por esse mesmo texto.
+      // Um dos dois lados mudando sozinho deixa este teste vermelho.
+      final doServico = await _mensagemDe(
+        () => endpoints.auth.verifyOtp(
+          sessionBuilder,
+          cpf: naoCadastrado.digits,
+          code: '000000',
+        ),
+      );
+
+      final doEndpoint = await _mensagemDe(
+        () => endpoints.auth.verifyOtp(
           sessionBuilder,
           cpf: '12345678900',
           code: '000000',
         ),
-        throwsA(isA<OtpRequestException>()),
       );
+
+      expect(doEndpoint, doServico);
     });
 
     test('data de nascimento errada não gera desafio', () async {
@@ -203,21 +303,36 @@ void main() {
       // Mesmo CPF sintético com o último dígito trocado: 11 dígitos, DV
       // inválido. O endpoint recusa na porta, sem consultar o banco — não é
       // "CPF não encontrado", é "número impossível".
-      await expectLater(
-        endpoints.auth.requestOtp(
+      //
+      // A mensagem é outro LITERAL repetido no endpoint, cópia da constante
+      // privada que o serviço usa para entrada malformada (código de tamanho
+      // errado). Comparar com ela é o que prende a cópia: as duas recusas são
+      // de entrada inválida e não podem ganhar textos que sugiram qual campo
+      // estava errado.
+      final doServico = await _mensagemDe(
+        () => endpoints.auth.verifyOtp(
+          sessionBuilder,
+          cpf: cpf.digits,
+          code: '12345',
+        ),
+      );
+
+      final doEndpoint = await _mensagemDe(
+        () => endpoints.auth.requestOtp(
           sessionBuilder,
           cpf: '12345678900',
           birthDate: nascimento,
         ),
-        throwsA(isA<OtpRequestException>()),
       );
+
+      expect(doEndpoint, doServico);
 
       expect(await OtpChallenge.db.find(session), isEmpty);
     });
 
-    // As semânticas não declaradas da interface, medidas contra o Postgres e
-    // **direto no store** — pelo endpoint elas ficam escondidas atrás dos
-    // filtros que o próprio serviço repete.
+    // As semânticas do store, medidas contra o Postgres e **direto nele** —
+    // pelo endpoint elas ficam escondidas atrás dos filtros que o próprio
+    // serviço repete.
     group('Store ORM', () {
       test('save ignora o id recebido e o banco atribui um id próprio', () async {
         final session = sessionBuilder.build();
@@ -422,6 +537,24 @@ void main() {
       });
     });
   });
+}
+
+/// A mensagem com que [recusar] recusou; falha se a chamada foi ACEITA.
+///
+/// A classe da exceção não basta para fixar uma recusa: `OtpRequestException`
+/// é a mesma para todas, então dois literais que deviam dizer a mesma coisa
+/// podem divergir — e um deles virar oráculo de "este CPF existe" ou "este
+/// número é impossível" — sem que teste nenhum reclame enquanto ele só olhar o
+/// tipo (a mesma lição que o irmão unitário desta suíte documenta em
+/// `passwordless_auth_service_test.dart`). O que precisa ser comparado é o
+/// texto, e é isso que esta função expõe.
+Future<String> _mensagemDe(Future<void> Function() recusar) async {
+  try {
+    await recusar();
+  } on OtpRequestException catch (erro) {
+    return erro.message;
+  }
+  fail('a chamada foi aceita — este caminho tinha de ser recusado');
 }
 
 /// Um `OtpChallengeRecord` como o SERVIÇO o monta: `id: ''` (o id é do banco) e

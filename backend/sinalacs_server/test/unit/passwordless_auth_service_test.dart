@@ -306,6 +306,43 @@ void main() {
       expect(user.microAreaId, _microAreaId);
     });
 
+    test('recusa quem não tem microárea, mesmo com o código certo', () async {
+      // `users.microAreaId` é NULLABLE no schema, então "paciente sem
+      // território" é um dado que o banco aceita — e é para ele que o token
+      // sairia com `micro_area_id: null`, que é o INV-01 deste login: o
+      // território no token é o que restringe o acesso do paciente. Sem esta
+      // asserção, apagar a guarda de `microAreaId == null` deixava a suíte
+      // inteira verde (medido).
+      final audit = _RecordingAudit();
+      final service = _build(
+        store: _FakeStore(
+          record: PatientCredentialRecord(
+            userId: _patientId,
+            birthDate: _nascimento,
+            microAreaId: null,
+          ),
+        ),
+        audit: audit,
+      );
+      // O código foi pedido e chegou: o desafio está aberto e o código
+      // confere, então a ÚNICA coisa entre esta chamada e um token é a guarda
+      // territorial.
+      await service.requestOtp(cpf: _cpf, birthDate: _nascimento);
+
+      await expectLater(
+        service.verifyOtp(cpf: _cpf, code: '123456'),
+        throwsA(isA<OtpRequestException>()),
+      );
+
+      // A trilha registra a recusa do território — e só ela: um `denied_code`
+      // aqui seria outra recusa, e um `granted` seria o rastro de um acesso
+      // concedido a quem não tem território.
+      expect(
+        audit.events.map((event) => event.result).toList(),
+        ['otp_requested', 'denied_no_territory'],
+      );
+    });
+
     test('recusa código errado', () async {
       final service = await comCodigoPendente();
 
