@@ -2077,11 +2077,27 @@ Seção datada com o que **não** foi feito, cada item com o motivo e o ponteiro
 - **MFA/TOTP ausente** (F5).
 - **Sem limite de tentativas por origem** — o contador é por desafio e por CPF; não há IP.
 
-- [ ] **Step 4: Atualizar `apps/CLAUDE.md` e `backend/CLAUDE.md`**
+- [ ] **Step 4: Um ponteiro em `user.spy.yaml` para o beco sem saída do `birthDate`**
+
+Achado do review da Task 3. Quando o `type=date` foi revertido, o campo ficou sem
+comentário nenhum — e o próximo leitor que consultar `spec/lgpd_data_audit.md:197`
+vai tentar escrever `type=date` de novo, porque nada no arquivo diz que ele não
+existe. Uma linha evita repetir o beco sem saída:
+
+```yaml
+  ### `spec/lgpd_data_audit.md` recomenda o tipo SQL `date` aqui. Não é
+  ### expressável no DSL do Serverpod (3.4.13): `type=` é o tipo Dart do campo e
+  ### `DateTime` mapeia fixo para `timestamp without time zone` — `ColumnType` não
+  ### tem a variante `date`, e `serverpod generate` recusa o modelo. A coluna
+  ### carrega sempre meia-noite UTC e `PasswordlessAuthService` compara por dia.
+  birthDate: DateTime,
+```
+
+- [ ] **Step 5: Atualizar `apps/CLAUDE.md` e `backend/CLAUDE.md`**
 
 No primeiro, a seção do paciente: login por CPF+nascimento+OTP, sessão de 1 hora **sem renovação silenciosa** (e por quê). No segundo, a lista de endpoints (`auth.requestOtp`, `auth.verifyOtp`) e as tabelas novas (`otp_challenges`), mais `CPF_HASH_PEPPER`/`SMS_GATEWAY` entre as variáveis de `AppConfig`.
 
-- [ ] **Step 5: Classificar `otp_challenges` no inventário de LGPD**
+- [ ] **Step 6: Classificar `otp_challenges` no inventário de LGPD**
 
 `spec/lgpd_data_audit.md` §1 se declara um inventário campo a campo de **toda** tabela
 persistida, e `otp_challenges` guarda credencial de uso único — mas nenhuma task deste
@@ -2102,7 +2118,7 @@ domínio (`sinalacs:otp:v1:`), e o §2.1 do documento — que critica o SHA-256 
 há segredo de servidor na chave. Vale dizer isso na nota, para o leitor não ler a seção
 como se ela contradissesse a tabela.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 graphify update .
