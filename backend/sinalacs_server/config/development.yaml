@@ -4,14 +4,26 @@
 # The password for the database is stored in the config/passwords.yaml.
 #
 # When running your server locally, the server ports are the same as the public
-# facing ports.
+# facing ports — exceto o `apiServer`: ver o comentário do bloco abaixo.
 
 # Configuration for the main API server.
 apiServer:
+  # O processo continua escutando 8080 em texto claro DENTRO do container —
+  # quem termina TLS é o Traefik, que é o único que publica porta. Estes campos
+  # apontam para a URL cifrada, que é o endereço público real do RPC, e não para
+  # a porta interna.
+  #
+  # Ressalva MEDIDA, para o próximo leitor não tomar isto por mais do que é: quem
+  # serve estes campos é o `AppConfigRoute` de `lib/server.dart`, e a rota dele
+  # vive no webServer (8082) — que este compose não publica nem roteia —, não no
+  # apiServer que o Traefik atende: `https://localhost/app/assets/assets/config.json`
+  # devolve 404 do Serverpod. E nenhum dos apps lê esse arquivo; eles constroem o
+  # cliente com o host do `--dart-define`. Isto é o endereço declarado, não o
+  # endereço em uso.
   port: 8080
   publicHost: localhost
-  publicPort: 8080
-  publicScheme: http
+  publicPort: 443
+  publicScheme: https
 
 # Configuration for the Insights server.
 insightsServer:

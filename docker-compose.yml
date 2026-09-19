@@ -136,8 +136,25 @@ services:
       CPF_HASH_PEPPER: ${CPF_HASH_PEPPER:-}
       APP_ENV: ${APP_ENV:-development}
       ENABLE_DEV_LOGIN: "${ENABLE_DEV_LOGIN:-true}"
-    ports:
-      - "8080:8080"
+    # O RPC só é alcançável por HTTPS em :443. A publicação de 8080 foi
+    # REMOVIDA de propósito: enquanto ela existisse, o TLS seria decorativo —
+    # RNF04 pede TLS em todas as comunicações, e um caminho em texto claro ao
+    # lado do cifrado é o caminho que alguém usa.
+    #
+    # O `Host(...)` precisa casar com o que o cliente envia: o emulador manda
+    # `Host: 10.0.2.2`, as ferramentas na máquina mandam `Host: localhost`. Um
+    # host fora da regra devolve 404 do Traefik, e a mensagem não diz que o
+    # problema é o `Host` — para validar por outro endereço (IP da LAN, por
+    # exemplo), acrescente-o aqui.
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.sinalacs.rule=Host(`10.0.2.2`) || Host(`localhost`) || Host(`sinalacs.localhost`)
+      - traefik.http.routers.sinalacs.entrypoints=websecure
+      - traefik.http.routers.sinalacs.tls=true
+      # A porta INTERNA do container, que continua sendo 8080 — o que mudou foi
+      # não haver mais publicação no host. O processo segue escutando em texto
+      # claro aqui dentro; quem termina TLS é o Traefik.
+      - traefik.http.services.sinalacs.loadbalancer.server.port=8080
     volumes:
       - ./infra/docker/mosquitto/runtime/certs:/app/certs:ro
 
@@ -225,18 +242,70 @@ services:
       APP_ENV: ${APP_ENV:-development}
     entrypoint: ["./seed_cpf_hashes"]
 
+  # Gera a CA de desenvolvimento do RPC e o certificado do servidor. One-shot,
+  # como o mosquitto-init: roda antes do Traefik, que monta o resultado.
+  traefik-init:
+    image: alpine:3.19
+    container_name: sinalacs-traefik-init
+    environment:
+      # SANs adicionais para validar em aparelho físico na LAN:
+      #   RPC_CERT_SAN_EXTRA='IP:192.168.0.10' docker compose up
+      #
+      # ATENÇÃO, medido: com a stack JÁ DE PÉ, mudar só esta variável regera a
+      # folha (o `traefik-init` é recriado) mas **não** recria o `traefik`, que
+      # continua servindo a folha antiga — o fingerprint só muda depois de
+      # `docker compose restart traefik`. O Compose não recria o dependente
+      # quando só o `environment` do one-shot muda. Subir do zero funciona,
+      # porque o `depends_on` garante a ordem. Sem o restart, o teste em
+      # aparelho físico falha na validação de hostname e a mensagem não diz por quê.
+      RPC_CERT_SAN_EXTRA: ${RPC_CERT_SAN_EXTRA:-}
+    volumes:
+      # O script escreve em `$runtime_dir/certs/` (mesma forma do runtime do
+      # Mosquitto), então a raiz aqui é `runtime/` e os arquivos caem em
+      # `runtime/certs/` — que é o que o `traefik` monta abaixo. Montar
+      # `runtime/certs` aqui faria o gerador escrever em `runtime/certs/certs/`
+      # e o Traefik não acharia certificado nenhum (medido).
+      - ./infra/docker/traefik/init.sh:/init.sh:ro
+      - ./infra/docker/traefik/runtime:/certs
+    entrypoint: ["/bin/sh", "-c", "apk add --no-cache openssl && sh /init.sh"]
+
   traefik:
-    image: traefik:v2.10
+    # v2.11, e NÃO v2.10: o provider Docker do v2.10 fala a API 1.24 por padrão,
+    # e o Docker 29 deste host tem mínimo 1.40 — medido, `traefik:v2.10` (2.10.7)
+    # enche o log de "client version 1.24 is too old", não enxerga label nenhuma e
+    # o :443 responde 404 do Traefik (nenhum router existe). `DOCKER_API_VERSION`
+    # não resolve — o cliente do v2.10 não lê a variável (medido) —, e o v3.5
+    # falha igual (medido). O v2.11 (2.11.57) conecta e lista o router `sinalacs`.
+    # A config dinâmica é a mesma: o `dynamic/tls.yaml` da Task 1 carrega sem
+    # aviso neste v2.11.
+    image: traefik:v2.11
     container_name: sinalacs-traefik
+    depends_on:
+      traefik-init:
+        condition: service_completed_successfully
     command:
       - --api.insecure=true
       - --providers.docker=true
+      # O backend é roteado por label explícita (abaixo), não por exposição
+      # automática: `exposedByDefault=false` impede que um serviço novo
+      # publicado por engano ganhe uma rota pública sozinho.
+      - --providers.docker.exposedByDefault=false
+      - --providers.file.directory=/etc/traefik/dynamic
       - --entrypoints.web.address=:80
+      - --entrypoints.websecure.address=:443
     ports:
       - "80:80"
+      # Só o 443 chega ao RPC. O :80 continua declarado mas sem router nenhum
+      # apontando para o backend — ver a remoção de 8080 no serviço abaixo.
+      - "443:443"
       - "8081:8080"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./infra/docker/traefik/dynamic:/etc/traefik/dynamic:ro
+      # O Traefik é quem termina o TLS, então é ele quem lê os certificados. O
+      # subdiretório `certs/` é o que o gerador acima produz — ver o comentário
+      # do mount dele antes de mudar qualquer um dos dois.
+      - ./infra/docker/traefik/runtime/certs:/certs:ro
 
 volumes:
   pg_data:
