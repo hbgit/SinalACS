@@ -1391,10 +1391,16 @@ void main() {
     final nascimento = DateTime.utc(1990, 1, 1);
 
     // Sem esta linha o `AlertRuntime` lê `AppConfig.fromEnvironment()` do
-    // processo, e o pepper/SMS vêm do ambiente — não da config do teste. O
-    // hash do CPF sai por uma chave e a busca do serviço por outra, ou o
-    // gateway de log é construído onde o teste espera o `RecordingSmsGateway`.
-    // É o mesmo motivo pelo qual os outros testes de integração já fazem isso.
+    // processo, e o pepper e o gateway vêm do AMBIENTE em vez da config do
+    // teste. O modo de falha medido é o pior tipo: **verde**. O `cpfHasher` do
+    // runtime é cacheado e o serviço usa a MESMA instância que o `setUp` usou
+    // para gravar o hash, então o pepper é consistente dos dois lados por
+    // acidente; e o teste sobrescreve o gateway de SMS de qualquer jeito. O que
+    // sobra é um teste que passa por causa da máquina de quem o roda — com
+    // `APP_ENV=staging` no ambiente, o mesmo arquivo dá 11 falhas. É o mesmo
+    // motivo pelo qual os outros testes de integração já fazem isso
+    // (`onboarding_endpoint_test.dart`, `triage_session_persistence_test.dart`,
+    // `patient_directory_and_territory_test.dart`, `red_alert_cycle_test.dart`).
     setUp(() => AlertRuntime.instance.overrideConfig(_config()));
 
     setUp(() async {
