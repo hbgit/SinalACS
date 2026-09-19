@@ -1131,9 +1131,11 @@ class PasswordlessAuthService {
     );
   }
 
-  /// Compara ano/mês/dia em UTC. `birthDate` é coluna `date` e chega como meia-
-  /// noite UTC; a data digitada pelo app também. Comparar instantes recusaria
-  /// um nascimento correto por causa de fuso.
+  /// Compara ano/mês/dia em UTC, **não instantes**: `birthDate` é
+  /// `timestamp without time zone` (o Serverpod não expõe tipo de coluna
+  /// `date`) carregando sempre meia-noite UTC, e a data digitada pelo app
+  /// também. Comparar instantes recusaria um nascimento correto por causa de
+  /// fuso, e comparar só o dia é o que a credencial do RF01 significa.
   bool _sameDay(DateTime a, DateTime b) =>
       a.toUtc().year == b.toUtc().year &&
       a.toUtc().month == b.toUtc().month &&
