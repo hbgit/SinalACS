@@ -2270,7 +2270,25 @@ Co-Authored-By: Claude Code <noreply@anthropic.com>"
 > usa, e é o que torna a mudança auditável.
 - Modify: `spec/lgpd_data_audit.md` — **tabela nova não classificada** (Step 5)
 - Modify: `spec/lgpd_data_audit.md` (linhas 185-197 — o que já foi feito do que era recomendação)
-- Modify: `apps/CLAUDE.md`, `backend/CLAUDE.md`, `PROGRESS.md`
+- Modify: `CLAUDE.md` (**o da raiz** — ver abaixo), `apps/CLAUDE.md`, `backend/CLAUDE.md`, `PROGRESS.md`
+- Modify: `.github/workflows/ci.yml` (só um comentário desatualizado)
+
+> **Duas documentações que a Task 6 tornou falsas e que não são de nenhuma task.**
+>
+> 1. **O `CLAUDE.md` da raiz diz que o seed roda em TRÊS passos** e nomeia três serviços
+>    (`database-seed`, `health-data-seed`, `acs-credential-seed`). São **quatro** desde a Task 6
+>    — o `cpf-hash-seed` entrou. Este arquivo é lido em toda sessão, por qualquer agente, e é o
+>    mapa que alguém usa para entender a stack: um passo faltando ali não é detalhe, é a
+>    instrução de boot incompleta. (**Não confundir** com o `backend/CLAUDE.md`, que também
+>    descreve o seed em três passos — os dois precisam do quarto.)
+> 2. **`.github/workflows/ci.yml` comenta "16 testes herméticos … mais 9 de integração"**, e a
+>    suíte está em 208 herméticos e 269 no total. É comentário, não teste — não quebra nada —,
+>    mas é o número que alguém cita ao justificar cobertura, e um número errado citado com
+>    confiança é pior que número nenhum.
+>
+> A Task 6 não podia consertar o primeiro: ela não estava na lista de arquivos dela, e o defeito
+> apareceu *depois* do trabalho dela — foi a rodada de correção que acrescentou o quarto serviço.
+> Registrado aqui para ter dono.
 
 - [ ] **Step 1: RF01 no relatório de validação**
 
