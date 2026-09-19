@@ -96,8 +96,9 @@ Configurar como variáveis de ambiente secretas (nunca commitadas):
 > da API direto, sem essa borda, reabriria o caminho em texto claro.
 >
 > O certificado de desenvolvimento deste repositório
-> (`infra/docker/traefik/runtime/certs/`, auto-assinado, emitido pela CA de dev)
-> **não serve** para o piloto: ele existe para o emulador confiar no RPC local e
+> (`infra/docker/traefik/runtime/certs/` — a folha é emitida pela CA de dev
+> `SinalACS Dev RPC CA` e regerada a cada subida; **auto-assinada é a CA**, que é
+> preservada) **não serve** para o piloto: ele existe para o emulador confiar no RPC local e
 > só é aceito por quem carrega `dev_rpc_ca.crt` como asset. Um deploy real
 > precisa de domínio próprio e certificado de CA pública (`cert-manager`/ACME,
 > como o PRD prevê). Consequência prática para o app: compilado com o asset

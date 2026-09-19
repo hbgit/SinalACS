@@ -102,7 +102,7 @@ cliente · **`parcial`** = existe, mas alimentado por dado fabricado ·
 | RNF01 | Latência MQTT < 500 ms (p95) | **não medido** | Entrega funciona; não há instrumentação de latência. |
 | RNF02 | Sincronização offline > 99,5% | **não medido** | Semântica correta e testada; taxa nunca medida. |
 | RNF03 | Criptografia AES-256 em repouso | **backend/app** | SQLCipher provado em dispositivo (o arquivo não contém o conteúdo em texto claro e não abre com chave errada). **No PostgreSQL não há criptografia de coluna** — `pgcrypto` previsto no PRD não foi adotado. |
-| RNF04 | TLS 1.3 em todas as comunicações | **parcial** | Broker em TLS com verificação de hostname (já era) e o RPC agora atrás do Traefik com HTTPS em :443 e TLS 1.3 mínimo — a porta 8080 em texto claro deixou de ser publicada. **Continua parcial** porque o certificado é de desenvolvimento (auto-assinado, gerado no boot): produção depende de `cert-manager` e de um domínio real, que este repositório não tem. Ver `docs/superpowers/plans/2026-09-18-tls-rpc-rnf04-l08.md`. |
+| RNF04 | TLS 1.3 em todas as comunicações | **parcial** | Broker em TLS com verificação de hostname (já era) e o RPC agora atrás do Traefik com HTTPS em :443 e TLS 1.3 mínimo — a porta 8080 em texto claro deixou de ser publicada. **Continua parcial** por dois motivos, e o certificado é só o primeiro: (a) o certificado é de desenvolvimento — a folha é emitida pela CA de dev `SinalACS Dev RPC CA` e regerada no boot (auto-assinada é a CA, que é preservada entre subidas), então produção depende de `cert-manager` e de um domínio real, que este repositório não tem; (b) e **comprar o certificado não fecharia o requisito sozinho** — quem termina TLS é a borda e a última perna (proxy → processo) continua em texto claro, no piloto (Render) e também aqui, onde o `loadbalancer` do Traefik fala http com o container na 8080 (`docker-compose.yml`), então é o par `cert-manager` **+ rede privada** que fecha, como registra `backend/DEPLOY.md` em "Limitações conhecidas". Ver `docs/superpowers/plans/2026-09-18-tls-rpc-rnf04-l08.md`. |
 | RNF05 | Acessibilidade WCAG AA | **app-only** | Matrizes de contraste, alvos de toque e `liveRegion` testados nos três apps. |
 | RNF06 | RBAC | **parcial** | `Authorization.require` é a única regra de papel e de presença de território no token (a comparação entre a microárea do paciente e a do ACS segue em cada caso de uso) e um teste de postura cobre os 7 endpoints, mas `requireLogin` segue `false` (o `AuthenticationHandler` do Serverpod não está conectado) e os papéis `coordinator`/`admin` não têm caminho de emissão. |
 
@@ -280,7 +280,12 @@ mesmo vale para a TMRAV segmentada por risco, que é a métrica *North Star* do 
   CA de desenvolvimento copiada para os dois apps por `sync_dev_ca.sh`; a
   publicação de 8080 foi removida, então não há caminho sem criptografia. O que
   falta é o certificado de produção (domínio + `cert-manager`), que é decisão
-  de infraestrutura. Ver `docs/superpowers/plans/2026-09-18-tls-rpc-rnf04-l08.md`.
+  de infraestrutura — **mas ele não basta sozinho**: quem termina TLS é a borda,
+  e a última perna (proxy → processo) continua em texto claro, tanto no piloto
+  quanto aqui (o `loadbalancer` do Traefik fala http com o container na 8080).
+  É o par `cert-manager` **+ rede privada** que fecha a diferença; ver
+  "Limitações conhecidas" em `backend/DEPLOY.md`. Ver
+  `docs/superpowers/plans/2026-09-18-tls-rpc-rnf04-l08.md`.
 
 ### P2 — dívida de qualidade e processo
 
@@ -349,8 +354,27 @@ cd /caminho/para/SinalACS
 docker compose up --build -d
 # Copia as DUAS CAs de desenvolvimento — a do broker (MQTT em 8883) e a do RPC
 # (HTTPS em 443, terminado pelo Traefik). São CAs separadas de propósito; o
-# script confere com `openssl verify` que cada uma assina a folha em uso, e
-# aborta sem copiar nada se alguma não assinar.
+# script confere com `openssl verify` que cada uma assina a folha em uso.
+#
+# ~~e aborta sem copiar nada se alguma não assinar.~~ — **FALSO, medido em
+# 2026-09-19 em sandbox com certificados descartáveis.** A cópia é POR PAR
+# (app × CA) e a conferência acontece dentro de cada par, então a abortagem cai
+# no MEIO da sequência: com a CA do RPC não assinando a folha, o script copia a
+# CA do broker para o ACS e SÓ ENTÃO falha, imprimindo "nada foi copiado". Medido
+# nos dois estados possíveis do asset:
+#   * asset já preenchido — o ACS fica com a CA NOVA do broker e a CA ANTIGA do
+#     RPC (hash do dev_ca.crt muda, o do dev_rpc_ca.crt não), e o paciente não é
+#     tocado, porque o laço é por app (ACS inteiro antes do paciente);
+#   * asset vazio (clone limpo) — o ACS fica só com a CA do broker e o paciente
+#     com nada.
+# É exatamente o caso que o `openssl verify` foi acrescentado para pegar: quem
+# reexecutar esta bateria com um `runtime/` trocado fica com asset em estado
+# misto achando que nada mudou.
+#
+# Melhoria registrada e NÃO implementada (esta rodada é só documentação):
+# conferir os quatro pares antes de copiar qualquer um torna o "nada foi
+# copiado" verdadeiro. Medido em sandbox nos dois sentidos — na falha, os quatro
+# assets ficam intactos; no caminho bom, as quatro cópias saem iguais às de hoje.
 ./scripts/dev/sync_dev_ca.sh
 
 # 1) backend
