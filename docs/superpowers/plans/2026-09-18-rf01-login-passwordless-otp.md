@@ -2279,6 +2279,31 @@ Co-Authored-By: Claude Code <noreply@anthropic.com>"
 >
 > Os demais `Semantics(...)` (os `liveRegion`, o botão de sincronizar do ACS) têm outra forma e
 > **não** foram medidos: não os declare defeito sem medir, como o próprio review fez.
+>
+> **E atualize a linha 134**, que hoje lista "Login ACS, Login Paciente, Botão de Pânico" como
+> instâncias de `Semantics()`. Ela ficou desatualizada **nos dois sentidos** depois desta entrega:
+> dois desses três foram corrigidos (o rótulo saiu), e o terceiro — o botão de pânico — ganhou
+> `MergeSemantics`. A lista era um inventário de *onde existem* instâncias; depois da correção
+> ela precisa dizer o que **cada** sítio faz, senão o dono nomeado (a auditoria) fica sem nada
+> apontando para o trabalho dele.
+
+> **Um defeito do RF02 que o review da Task 7 mediu e que precisa de dono — não é do RF01.**
+>
+> `onboarding_endpoint.dart:62` faz `issueToken(user)` — o default de **15 minutos** — para
+> `role: UserRole.patient`, e o app consome esse token como sessão
+> (`apps/patient/lib/core/network/backend_client.dart:259-273`). Ou seja: **há dois caminhos de
+> sessão do paciente e eles discordam** — 1 hora no login passwordless (RF01) e 15 minutos no
+> onboarding (RF02) —, e no onboarding a renovação silenciosa também não existe, então a pessoa
+> cai para fora em 15 minutos.
+>
+> **Registre no `PROGRESS.md` com dono nomeado (RF02).** Não conserte aqui: é mudança de
+> comportamento de outra entrega. O motivo de registrar em vez de deixar passar é o que os
+> comentários novos do `auth_endpoint.dart` dizem querer evitar, por escrito: *"um leitor futuro
+> lê a diferença como descuido e conserta um dos lados"*.
+>
+> E **qualifique os comentários novos**: o de `auth_endpoint.dart` e o do teste de integração
+> leem hoje como fato global ("1 hora é o que LGPD-RT06 exige para o paciente"), quando há dois
+> caminhos. Um deles está fora da regra, e o comentário não diz isso.
 - Modify: `spec/lgpd_design.md` (os **dois** blocos `**Atualização (2026-09-18):**` que falam do login — ver abaixo)
 
 > **Não existe bloco "Estado atual" sobre o login neste arquivo** — este plano apontava para um
