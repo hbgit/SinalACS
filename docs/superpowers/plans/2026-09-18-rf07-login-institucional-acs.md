@@ -1768,6 +1768,7 @@ Co-Authored-By: Claude Code <noreply@anthropic.com>"
 **Files:**
 - Modify: `spec/validation_report.md` (linha 75 — RF07; linha 69 — RF01, para não deixar a impressão de que este plano o cobriu)
 - Modify: `spec/security_assessment.md` (F6, linhas 212-219)
+- Modify: `spec/lgpd_data_audit.md` — **tabela nova não classificada** (ver Step 5)
 - Modify: `apps/CLAUDE.md` (a seção do app ACS, que hoje diz que `_enter` descarta os campos)
 - Modify: `backend/CLAUDE.md` (a lista de endpoints)
 
@@ -1802,7 +1803,33 @@ Em `apps/CLAUDE.md`, a seção do ACS: onde hoje se lê que o app não tem auten
 
 Em `backend/CLAUDE.md`, no parágrafo que lista os endpoints (linha 68), acrescente `auth.loginInstitutional` (matrícula + senha, Argon2id, bloqueio por tentativas, auditado) e a tabela `user_credentials`.
 
-- [ ] **Step 4: Registrar as lacunas em PROGRESS.md**
+- [ ] **Step 5: Classificar `user_credentials` no inventário de LGPD**
+
+`spec/lgpd_data_audit.md` §1 se declara um inventário campo a campo de **toda** tabela
+persistida, e `user_credentials` guarda credencial — mas nenhuma task deste plano a
+classificava. Achado do review da Task 2 (a tabela é a 12ª do domínio). Acrescente as
+linhas à tabela do §1, no mesmo formato das vizinhas (`| tabela | campo | tipo |
+classificação | descrição | observação |`):
+
+```markdown
+| **user_credentials** | `id` | `uuid` | Pseudonimizado | UUID da linha | — |
+| | `userId` | `uuid` | Pseudonimizado | Chave estrangeira (`users.id`), única | Uma credencial por usuário. |
+| | `passwordHash` | `text` | **Crítico** — credencial | Argon2id, base64, 32 bytes | Nunca a senha. Verificado por `Argon2PasswordHasher`; o parâmetro `salt` viaja ao lado. |
+| | `passwordSalt` | `text` | Crítico — credencial | Salt por credencial, base64, 16 bytes | Impede pré-computação entre credenciais. |
+| | `memoryKb` / `iterations` / `parallelism` | `bigint` | Metadado Técnico | Parâmetros do Argon2id vigentes na gravação | Gravados junto do hash para que subir o custo não invalide credencial antiga. |
+| | `failedAttempts` | `bigint` | Metadado de Segurança | Tentativas falhas desde o último sucesso | Base do bloqueio (achado F6). |
+| | `lockedUntil` | `timestamp without time zone` | Metadado de Segurança | Fim do bloqueio; `NULL` = não bloqueado | — |
+| | `createdAt` / `updatedAt` | `timestamp without time zone` | Metadado Técnico | Timestamps | — |
+```
+
+E acrescente uma nota ao §2.5 ("Dados Cadastrais e Credenciais de Autenticação"), que hoje
+cobre `users` e `patients`: registre que `user_credentials` é onde vive a credencial
+institucional, que a senha nunca é armazenada — só o Argon2id com seus parâmetros — e que
+o parecer de entropia do §2.1 **não** se aplica a ela, porque Argon2id é função de
+derivação lenta e com custo de memória, ao contrário do SHA-256 sem salt que o §2.1
+critica em `users.cpfHash`.
+
+- [ ] **Step 6: Registrar as lacunas em PROGRESS.md**
 
 Acrescente uma seção curta, com data, listando o que este plano **não** fez e por quê: MFA/TOTP (exigido por LGPD-RF11/LGPD-RT06, F5), refresh token rotativo e TTL de 1h/8h (LGPD-RT06), limite de tentativas por IP (F6), e troca de senha pelo próprio ACS.
 
