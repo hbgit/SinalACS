@@ -171,7 +171,28 @@ class Cpf {
 Run: `cd backend/sinalacs_server && dart test test/unit/cpf_test.dart`
 Expected: PASS — 6 testes.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Classificar `otp_challenges` no inventário de LGPD**
+
+`spec/lgpd_data_audit.md` §1 se declara um inventário campo a campo de **toda** tabela
+persistida, e `otp_challenges` guarda credencial de uso único — mas nenhuma task deste
+plano a classificava (é o mesmo gap que o review da Task 2 do RF07 achou em
+`user_credentials`, já corrigido lá). Acrescente à tabela do §1:
+
+```markdown
+| **otp_challenges** | `id` | `uuid` | Pseudonimizado | UUID da linha | — |
+| | `userId` | `uuid` | Pseudonimizado | Chave estrangeira (`users.id`) | — |
+| | `codeHash` | `text` | Crítico — credencial | HMAC-SHA-256 do código, campo de domínio próprio | O código em claro nunca é persistido; existe só entre a geração e o envio. |
+| | `attempts` | `bigint` | Metadado de Segurança | Verificações gastas neste desafio | Teto de 5: 6 dígitos são 10^6 combinações. |
+| | `createdAt` / `expiresAt` / `consumedAt` | `timestamp without time zone` | Metadado Técnico | Janela de validade e consumo | TTL de 5 minutos; `consumedAt` marca uso único. |
+```
+
+Nota: `codeHash` usa o mesmo `CPF_HASH_PEPPER` do `users.cpfHash`, com separação de
+domínio (`sinalacs:otp:v1:`), e o §2.1 do documento — que critica o SHA-256 sem salt de
+`cpfHash` — **não** se aplica a ele pelo mesmo motivo que não se aplica ao CPF migrado:
+há segredo de servidor na chave. Vale dizer isso na nota, para o leitor não ler a seção
+como se ela contradissesse a tabela.
+
+- [ ] **Step 6: Commit**
 
 ```bash
 git add backend/sinalacs_server/lib/src/application/auth/cpf.dart \
@@ -1924,6 +1945,7 @@ Co-Authored-By: Claude Code <noreply@anthropic.com>"
 **Files:**
 - Modify: `spec/validation_report.md` (linha 69 — RF01; linha 548 não; linha 99 não)
 - Modify: `spec/lgpd_design.md` (o bloco "Estado atual" do login)
+- Modify: `spec/lgpd_data_audit.md` — **tabela nova não classificada** (Step 6)
 - Modify: `spec/lgpd_data_audit.md` (linhas 185-197 — o que já foi feito do que era recomendação)
 - Modify: `apps/CLAUDE.md`, `backend/CLAUDE.md`, `PROGRESS.md`
 
