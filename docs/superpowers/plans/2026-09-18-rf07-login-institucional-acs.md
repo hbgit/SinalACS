@@ -1890,9 +1890,29 @@ Todas de uma linha ou duas, e todas encontradas por quem executou a Task 5:
 
 - [ ] **Step 8: Registrar as lacunas em PROGRESS.md**
 
-Acrescente uma seção curta, com data, listando o que este plano **não** fez e por quê: MFA/TOTP (exigido por LGPD-RF11/LGPD-RT06, F5), refresh token rotativo e TTL de 1h/8h (LGPD-RT06), limite de tentativas por IP (F6), e troca de senha pelo próprio ACS.
+Acrescente uma seção curta, com data, listando o que este plano **não** fez e por quê:
+MFA/TOTP (exigido por LGPD-RF11/LGPD-RT06, F5), refresh token rotativo e TTL de 1h/8h
+(LGPD-RT06), limite de tentativas por IP (F6), e troca de senha pelo próprio ACS.
 
-- [ ] **Step 5: Rodar `graphify update` e commitar**
+E mais quatro, todas apontadas por quem executou as tasks e **nenhuma delas um defeito**:
+
+1. **Sem caminho de volta ao login quando a renovação falha de forma não recuperável.**
+   `BackendClient._requireToken` lança com `isRecoverable: false` e as telas mostram a
+   mensagem, mas nada navega de volta à tela de login — a pessoa reinicia o app. Alcançável
+   em dois casos: conta bloqueada por tentativas feitas em outro lugar, ou senha trocada no
+   servidor. Não foi corrigido aqui de propósito: o plano não especifica nenhum fluxo de
+   navegação, e inventar UI sem plano é o que o processo alerta contra. Candidato a um
+   plano próprio.
+2. **A credencial vive até o processo morrer, sem caminho de limpeza** (não há logout).
+   Consequência direta de adiar o refresh token; some quando ele existir.
+3. **`autofillHints` sem `AutofillGroup`** provavelmente não faz nada no aparelho — o
+   gerenciador de senhas do Android precisa do grupo para oferecer preenchimento.
+4. **A renovação e a recusa são provadas contra um servidor RPC falso** (`dart:io`,
+   espelhando o Serverpod 3.4.13), não contra o servidor vivo: quem executou evitou de
+   propósito gastar o bloqueio de 5 tentativas do `ACS-001` com senhas erradas. Registre
+   que a prova é do caminho, não do servidor real.
+
+- [ ] **Step 9: Rodar `graphify update` e commitar**
 
 ```bash
 graphify update .
