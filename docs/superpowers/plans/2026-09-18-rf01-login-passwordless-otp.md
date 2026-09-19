@@ -674,11 +674,43 @@ class _FakeStore implements OtpChallengeStore {
     return open.isEmpty ? null : open.last;
   }
 
+  /// Espelha o store real: a tentativa é REGISTRADA e o consumo é GRAVADO.
+  ///
+  /// Não podem ser no-op: com `consume` vazio o desafio continua aberto em
+  /// `latestOpen`, e o teste "não deixa o código ser usado duas vezes" fica
+  /// impossível de passar — foi o defeito que uma versão anterior deste plano
+  /// tinha. Mesmo precedente de `_FakeStore.registerFailedAttempt` em
+  /// `institutional_auth_service_test.dart`: o fake guarda o que o serviço
+  /// mandou guardar, senão o que ele prova não é o serviço.
   @override
-  Future<void> registerAttempt(String challengeId, int attempts) async {}
+  Future<void> registerAttempt(String challengeId, int attempts) async {
+    final index = challenges.indexWhere((c) => c.id == challengeId);
+    if (index < 0) return;
+    challenges[index] = OtpChallengeRecord(
+      id: challenges[index].id,
+      userId: challenges[index].userId,
+      codeHash: challenges[index].codeHash,
+      attempts: attempts,
+      createdAt: challenges[index].createdAt,
+      expiresAt: challenges[index].expiresAt,
+      consumedAt: challenges[index].consumedAt,
+    );
+  }
 
   @override
-  Future<void> consume(String challengeId, DateTime at) async {}
+  Future<void> consume(String challengeId, DateTime at) async {
+    final index = challenges.indexWhere((c) => c.id == challengeId);
+    if (index < 0) return;
+    challenges[index] = OtpChallengeRecord(
+      id: challenges[index].id,
+      userId: challenges[index].userId,
+      codeHash: challenges[index].codeHash,
+      attempts: challenges[index].attempts,
+      createdAt: challenges[index].createdAt,
+      expiresAt: challenges[index].expiresAt,
+      consumedAt: at,
+    );
+  }
 }
 
 // `extends`, não `implements`: `AuditTrail` é uma `abstract class` com
