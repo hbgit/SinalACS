@@ -1219,6 +1219,16 @@ void main() {
 
     setUp(() async {
       final session = sessionBuilder.build();
+
+      // O harness `withServerpod` aplica as MIGRAÇÕES, nunca o
+      // `development.sql`: o paciente do seed NÃO existe no banco de teste, e
+      // um `findById` seguido de `user!` estoura null-check antes de qualquer
+      // asserção. (Foi o defeito que quem executou a Task 4 do RF07 encontrou no
+      // teste irmão de lá.) Insere o mínimo que o caminho exige — UBS, microárea
+      // e o usuário paciente — com UUIDs sintéticos próprios para não colidir
+      // com os de outros arquivos de integração que rodam sob o mesmo banco.
+      await _seedPatient(session, patientId);
+
       final user = await User.db.findById(
         session,
         UuidValue.fromString(patientId),
@@ -1307,6 +1317,45 @@ void main() {
       expect(await OtpChallenge.db.find(session), isEmpty);
     });
   });
+}
+
+/// Semeia o mínimo que o login passwordless exige: UBS, microárea e o usuário
+/// paciente (o `users` é quem carrega `cpfHash`/`birthDate`/`microAreaId`).
+///
+/// UUIDs sintéticos e **próprios deste arquivo**: vários testes de integração
+/// rodam sob o mesmo banco e reusam `…0002`/`…0003`/`…0004`, o que funciona
+/// porque o harness reverte cada caso (`rollbackDatabase` = `afterEach`), mas
+/// usar um espaço próprio evita depender disso.
+Future<void> _seedPatient(Session session, String patientId) async {
+  const ubsId = '00000000-0000-4000-9000-000000000001';
+  const microAreaId = '00000000-0000-4000-9000-000000000002';
+
+  await Ubs.db.insertRow(
+    session,
+    Ubs(id: UuidValue.fromString(ubsId), name: 'UBS Teste RF01', address: 'Endereço sintético', city: 'São Paulo', state: 'SP'),
+  );
+  await MicroArea.db.insertRow(
+    session,
+    MicroArea(id: UuidValue.fromString(microAreaId), name: 'Microárea Teste RF01', ubsId: UuidValue.fromString(ubsId), geoJsonBoundary: '{}'),
+  );
+  await User.db.insertRow(
+    session,
+    User(
+      id: UuidValue.fromString(patientId),
+      // Placeholder: o `setUp` sobrescreve com o HMAC real do CPF sintético.
+      cpfHash: 'a-definir-no-setup',
+      name: 'Paciente Sintético RF01',
+      birthDate: DateTime.utc(1990, 1, 1),
+      role: UserRole.patient,
+      microAreaId: microAreaId,
+      createdAt: DateTime.now().toUtc(),
+      updatedAt: DateTime.now().toUtc(),
+    ),
+  );
+  await Patient.db.insertRow(
+    session,
+    Patient(id: UuidValue.fromString(patientId), emergencyContact: 'Contato sintético', isChronic: false, chronicConditionsEncrypted: '', chronicConditionsKeyVersion: 1),
+  );
 }
 ```
 
