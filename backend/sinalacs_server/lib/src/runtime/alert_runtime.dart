@@ -4,12 +4,16 @@ import 'package:sinalacs_server/src/application/alerts/alert_outbox_dispatcher.d
 import 'package:sinalacs_server/src/application/alerts/red_alert_service.dart';
 import 'package:sinalacs_server/src/application/audit/audit_trail.dart';
 import 'package:sinalacs_server/src/application/auth/development_auth_service.dart';
+import 'package:sinalacs_server/src/application/auth/institutional_auth_service.dart';
+import 'package:sinalacs_server/src/application/auth/password_hasher.dart';
 import 'package:sinalacs_server/src/application/onboarding/onboarding_service.dart';
 import 'package:sinalacs_server/src/application/patients/patient_directory_service.dart';
 import 'package:sinalacs_server/src/application/triage/triage_session_service.dart';
 import 'package:sinalacs_server/src/application/visits/visit_sync_service.dart';
 import 'package:sinalacs_server/src/config/app_config.dart';
+import 'package:sinalacs_server/src/infrastructure/crypto/argon2_password_hasher.dart';
 import 'package:sinalacs_server/src/infrastructure/crypto/health_data_cipher.dart';
+import 'package:sinalacs_server/src/infrastructure/database/orm_acs_credential_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_alert_outbox.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_alert_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_audit_trail.dart';
@@ -59,6 +63,11 @@ class AlertRuntime {
 
   MqttAlertDispatcher get dispatcher =>
       _dispatcher ??= MqttAlertDispatcher(config: config);
+
+  /// Derivação de senha do login institucional (RF07). `const`, sem estado:
+  /// os parâmetros de custo vivem em cada linha de `user_credentials`, não
+  /// aqui — ver `PasswordDigest`.
+  PasswordHasher get passwordHasher => const Argon2PasswordHasher();
 
   bool get isMqttConnected => _dispatcher?.isConnected ?? false;
 
@@ -154,6 +163,19 @@ class AlertRuntime {
           chainSecret: config.auditChainSecret,
           transaction: transaction,
         ),
+      );
+
+  /// Serviço de login institucional para uma requisição.
+  ///
+  /// Mesmo arranjo dos outros `*ServiceFor`: o store recebe a sessão por
+  /// chamada e a trilha de auditoria é a da requisição, para que cada
+  /// tentativa (granted, denied_credentials, denied_locked…) vire uma linha
+  /// encadeada em `audit_logs`.
+  InstitutionalAuthService institutionalAuthServiceFor(Session session) =>
+      InstitutionalAuthService(
+        store: OrmAcsCredentialStore(session: () => session),
+        hasher: passwordHasher,
+        audit: auditTrailFor(session),
       );
 
   /// Trilha de auditoria amarrada à sessão da chamada.

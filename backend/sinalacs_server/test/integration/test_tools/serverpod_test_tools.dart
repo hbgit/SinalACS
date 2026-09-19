@@ -355,6 +355,43 @@ class _AuthEndpoint {
       }
     });
   }
+
+  _i3.Future<_i7.DevelopmentLoginResult> loginInstitutional(
+    _i1.TestSessionBuilder sessionBuilder, {
+    required String matricula,
+    required String password,
+    String? deviceId,
+  }) async {
+    return _i1.callAwaitableFunctionAndHandleExceptions(() async {
+      var _localUniqueSession =
+          (sessionBuilder as _i1.InternalTestSessionBuilder).internalBuild(
+            endpoint: 'auth',
+            method: 'loginInstitutional',
+          );
+      try {
+        var _localCallContext = await _endpointDispatch.getMethodCallContext(
+          createSessionCallback: (_) => _localUniqueSession,
+          endpointPath: 'auth',
+          methodName: 'loginInstitutional',
+          parameters: _i1.testObjectToJson({
+            'matricula': matricula,
+            'password': password,
+            'deviceId': deviceId,
+          }),
+          serializationManager: _serializationManager,
+        );
+        var _localReturnValue =
+            await (_localCallContext.method.call(
+                  _localUniqueSession,
+                  _localCallContext.arguments,
+                )
+                as _i3.Future<_i7.DevelopmentLoginResult>);
+        return _localReturnValue;
+      } finally {
+        await _localUniqueSession.close();
+      }
+    });
+  }
 }
 
 class _HealthEndpoint {

@@ -90,12 +90,13 @@ class EndpointAlerts extends EndpointAuthenticated {
       );
 }
 
-/// Acesso de desenvolvimento. **Não** é autenticação institucional.
+/// Autenticação. `developmentLogin` é acesso de desenvolvimento e **não** é
+/// autenticação institucional; `loginInstitutional` é o caminho real (RF07).
 ///
-/// Substitui `POST /v1/auth/development/login`, preservando o gate do
-/// `ENABLE_DEV_LOGIN`: quando desligado, a chamada falha como se o endpoint não
-/// existisse, e não como "proibido" — o servidor `dart:io` respondia 404 e não
-/// 403, para não revelar a existência da rota.
+/// `developmentLogin` substitui `POST /v1/auth/development/login`, preservando
+/// o gate do `ENABLE_DEV_LOGIN`: quando desligado, a chamada falha como se o
+/// endpoint não existisse, e não como "proibido" — o servidor `dart:io`
+/// respondia 404 e não 403, para não revelar a existência da rota.
 /// {@category Endpoint}
 class EndpointAuth extends _i1.EndpointRef {
   EndpointAuth(_i1.EndpointCaller caller) : super(caller);
@@ -109,6 +110,27 @@ class EndpointAuth extends _i1.EndpointRef {
     'auth',
     'developmentLogin',
     {'role': role},
+  );
+
+  /// Login institucional do ACS (RF07): matrícula + senha.
+  ///
+  /// Não é gated por `ENABLE_DEV_LOGIN` — é o caminho real, e o gate existe
+  /// para o *outro* método. As recusas chegam ao app como
+  /// `AuthenticationFailedException`, com a mensagem que o serviço escolheu:
+  /// mensagem idêntica para matrícula inexistente e senha errada (ver
+  /// `InstitutionalAuthService`).
+  _i2.Future<_i6.DevelopmentLoginResult> loginInstitutional({
+    required String matricula,
+    required String password,
+    String? deviceId,
+  }) => caller.callServerEndpoint<_i6.DevelopmentLoginResult>(
+    'auth',
+    'loginInstitutional',
+    {
+      'matricula': matricula,
+      'password': password,
+      'deviceId': deviceId,
+    },
   );
 }
 

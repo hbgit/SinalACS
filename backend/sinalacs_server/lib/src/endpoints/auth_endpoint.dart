@@ -3,12 +3,13 @@ import 'package:sinalacs_server/src/application/auth/development_auth_service.da
 import 'package:sinalacs_server/src/generated/protocol.dart';
 import 'package:sinalacs_server/src/runtime/alert_runtime.dart';
 
-/// Acesso de desenvolvimento. **Não** é autenticação institucional.
+/// Autenticação. `developmentLogin` é acesso de desenvolvimento e **não** é
+/// autenticação institucional; `loginInstitutional` é o caminho real (RF07).
 ///
-/// Substitui `POST /v1/auth/development/login`, preservando o gate do
-/// `ENABLE_DEV_LOGIN`: quando desligado, a chamada falha como se o endpoint não
-/// existisse, e não como "proibido" — o servidor `dart:io` respondia 404 e não
-/// 403, para não revelar a existência da rota.
+/// `developmentLogin` substitui `POST /v1/auth/development/login`, preservando
+/// o gate do `ENABLE_DEV_LOGIN`: quando desligado, a chamada falha como se o
+/// endpoint não existisse, e não como "proibido" — o servidor `dart:io`
+/// respondia 404 e não 403, para não revelar a existência da rota.
 class AuthEndpoint extends Endpoint {
   @override
   bool get requireLogin => false;
@@ -47,6 +48,33 @@ class AuthEndpoint extends Endpoint {
         message: 'role deve ser patient ou acs',
       );
     }
+
+    return DevelopmentLoginResult(
+      accessToken: runtime.auth.issueToken(user),
+      tokenType: 'Bearer',
+    );
+  }
+
+  /// Login institucional do ACS (RF07): matrícula + senha.
+  ///
+  /// Não é gated por `ENABLE_DEV_LOGIN` — é o caminho real, e o gate existe
+  /// para o *outro* método. As recusas chegam ao app como
+  /// `AuthenticationFailedException`, com a mensagem que o serviço escolheu:
+  /// mensagem idêntica para matrícula inexistente e senha errada (ver
+  /// `InstitutionalAuthService`).
+  Future<DevelopmentLoginResult> loginInstitutional(
+    Session session, {
+    required String matricula,
+    required String password,
+    String? deviceId,
+  }) async {
+    final runtime = AlertRuntime.instance;
+
+    final user = await runtime.institutionalAuthServiceFor(session).login(
+          matricula: matricula,
+          password: password,
+          deviceId: deviceId,
+        );
 
     return DevelopmentLoginResult(
       accessToken: runtime.auth.issueToken(user),

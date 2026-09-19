@@ -32,6 +32,9 @@ const _publicMethodsByDesign = <String, String>{
   'HealthEndpoint.check':
       'liveness: precisa responder antes de haver credencial',
   'AuthEndpoint.developmentLogin': 'é o próprio emissor de token',
+  'AuthEndpoint.loginInstitutional':
+      'é o próprio emissor de token: quem chama o login institucional (RF07) '
+      'ainda não tem credencial — a matrícula e a senha SÃO a credencial',
   'OnboardingEndpoint.completeEnrollment':
       'público por desenho: quem conclui o onboarding ainda não tem sessão — o '
       'convite de uso único é a credencial',

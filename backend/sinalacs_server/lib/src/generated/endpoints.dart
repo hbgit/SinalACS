@@ -177,6 +177,37 @@ class Endpoints extends _i1.EndpointDispatch {
                     role: params['role'],
                   ),
         ),
+        'loginInstitutional': _i1.MethodConnector(
+          name: 'loginInstitutional',
+          params: {
+            'matricula': _i1.ParameterDescription(
+              name: 'matricula',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'password': _i1.ParameterDescription(
+              name: 'password',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'deviceId': _i1.ParameterDescription(
+              name: 'deviceId',
+              type: _i1.getType<String?>(),
+              nullable: true,
+            ),
+          },
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async =>
+                  (endpoints['auth'] as _i3.AuthEndpoint).loginInstitutional(
+                    session,
+                    matricula: params['matricula'],
+                    password: params['password'],
+                    deviceId: params['deviceId'],
+                  ),
+        ),
       },
     );
     connectors['health'] = _i1.EndpointConnector(

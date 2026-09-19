@@ -4,6 +4,7 @@ alerts:
   - statusFor:
 auth:
   - developmentLogin:
+  - loginInstitutional:
 health:
   - check:
 onboarding:
