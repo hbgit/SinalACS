@@ -36,7 +36,7 @@
 - **Create** `backend/sinalacs_server/bin/seed_cpf_hashes.dart`.
 - **Create** testes: `test/unit/cpf_test.dart`, `test/unit/hmac_cpf_hasher_test.dart`, `test/unit/passwordless_auth_service_test.dart`, `test/integration/passwordless_login_test.dart`.
 - **Modify** `backend/sinalacs_server/lib/src/models/user.spy.yaml` — índice único em `cpfHash`, `birthDate` para `date`.
-- **Modify** `backend/sinalacs_server/lib/src/config/app_config.dart` — `CPF_HASH_PEPPER`, `SMS_GATEWAY`.
+- **Modify** `backend/sinalacs_server/lib/src/config/app_config.dart` — `CPF_HASH_PEPPER`, `SMS_GATEWAY`. **Os `AppConfig(...)` construídos direto em `test/integration/` também precisam dos dois parâmetros novos** (são mecânicos e sem eles o commit não compila), então a Task 2 inclui `test/integration/` no commit.
 - **Modify** `backend/sinalacs_server/lib/src/endpoints/auth_endpoint.dart`, `runtime/alert_runtime.dart`.
 - **Modify** `docker-compose.yml`, `scripts/dev/bootstrap_env.sh`, `.env.example`.
 - **Modify** `apps/patient/lib/core/network/backend_client.dart`, `apps/patient/lib/app/app.dart`, os fakes de teste, `tool/live_check.dart`, `integration_test/backend_connection_test.dart`.
@@ -1735,7 +1735,16 @@ Em `docker-compose.yml`, depois do `acs-credential-seed`:
       SERVERPOD_DATABASE_REQUIRE_SSL: "false"
       # O MESMO pepper do servidor: se divergirem, o paciente do seed nunca é
       # encontrado no login.
-      CPF_HASH_PEPPER: ${CPF_HASH_PEPPER:?defina em .env — rode ./scripts/dev/bootstrap_env.sh}
+      #
+      # `:-` e não `:?` de propósito, seguindo o `HEALTH_DATA_ENCRYPTION_KEY`
+      # logo acima: o Compose interpola o arquivo INTEIRO, então um `:?` aqui
+      # derruba toda invocação de `docker compose` numa máquina cujo `.env` é
+      # anterior à variável — não só este serviço. E o guarda não se perde: sem
+      # a variável, `AppConfig` cai no fallback público de desenvolvimento, que
+      # é o MESMO valor que o servidor usa em `APP_ENV=development`, então seed
+      # e servidor continuam concordando; fora de development o `AppConfig`
+      # recusa subir, que é onde a regra pertence.
+      CPF_HASH_PEPPER: ${CPF_HASH_PEPPER:-}
       APP_ENV: ${APP_ENV:-development}
     entrypoint: ["./seed_cpf_hashes"]
 ```
