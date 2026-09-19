@@ -32,7 +32,27 @@ abstract class PatientBackend {
 
   Future<ServiceHealth> health();
 
-  Future<AuthSession> login();
+  /// Pede o código de acesso (RF01). A resposta não diz se o CPF existe.
+  Future<void> requestOtp({
+    required String cpf,
+    required DateTime birthDate,
+  });
+
+  /// Verifica o código e abre a sessão do paciente (RF01).
+  ///
+  /// Diferente do ACS, **não há renovação silenciosa**: o código OTP é de uso
+  /// único e não existe credencial reutilizável. Quando a sessão de 1 hora
+  /// expira, o app manda a pessoa autenticar de novo — é a consequência
+  /// registrada de adiar o refresh token de LGPD-RT06.
+  Future<AuthSession> verifyOtp({
+    required String cpf,
+    required String code,
+  });
+
+  /// Login de DESENVOLVIMENTO, para `tool/` e `integration_test/` contra a
+  /// stack local. Exige `ENABLE_DEV_LOGIN=true`. **Não** é o caminho do
+  /// produto — RF01 é [requestOtp]/[verifyOtp].
+  Future<AuthSession> developmentLogin({required String role});
 
   Future<RiskLevel> evaluateTriage({
     required bool chestPain,
@@ -88,17 +108,21 @@ class BackendClient implements PatientBackend {
     return current != null && !current.isExpired();
   }
 
-  /// Token válido para as chamadas que exigem autenticação.
+  /// Token válido para as chamadas autenticadas.
   ///
-  /// Reautentica sozinho quando o token de 15 minutos expirou — sem isso, um
-  /// fluxo demorado falha com erro de permissão, que esconde a causa real.
+  /// Sem renovação automática (ver [verifyOtp]): se a sessão expirou, quem
+  /// chama recebe uma falha não recuperável e a tela precisa mandar a pessoa
+  /// entrar de novo. Inventar uma renovação aqui exigiria ou guardar a
+  /// credencial — que para o paciente não existe — ou um refresh token, que
+  /// LGPD-RT06 exige e este plano deliberadamente não implementa.
   Future<String> _requireToken() async {
-    if (!isAuthenticated) await login();
     final current = _session;
-    if (current == null) {
-      throw const BackendFailure('Sessão não iniciada.', isRecoverable: false);
-    }
-    return current.accessToken;
+    if (current != null && !current.isExpired()) return current.accessToken;
+
+    throw const BackendFailure(
+      'Sua sessão expirou. Entre novamente com o código de acesso.',
+      isRecoverable: false,
+    );
   }
 
   @override
@@ -106,11 +130,54 @@ class BackendClient implements PatientBackend {
     return _guard(() => _client.health.check());
   }
 
-  /// Autentica como paciente. Ver ressalvas em [AuthSession].
+  /// Pede o código de acesso (RF01).
+  ///
+  /// Devolve `void` porque a resposta **não** diz se o CPF existe: o servidor
+  /// trata "não encontrado" e "data errada" de forma idêntica e silenciosa
+  /// (anti-enumeração), e a tela avança para o passo do código nos dois casos.
+  /// As recusas que sobram — dígito verificador inválido, pedido repetido
+  /// dentro do intervalo mínimo — chegam como [BackendFailure] com a mensagem
+  /// que o servidor escolheu.
   @override
-  Future<AuthSession> login() async {
+  Future<void> requestOtp({
+    required String cpf,
+    required DateTime birthDate,
+  }) {
+    return _guard(
+      () => _client.auth.requestOtp(cpf: cpf, birthDate: birthDate),
+    );
+  }
+
+  /// Verifica o código de uso único e abre a sessão do paciente (RF01).
+  ///
+  /// A sessão emitida aqui é a do produto — ver [_requireToken] para o que
+  /// acontece quando ela expira.
+  @override
+  Future<AuthSession> verifyOtp({
+    required String cpf,
+    required String code,
+  }) async {
     final result = await _guard(
-      () => _client.auth.developmentLogin(role: 'patient'),
+      () => _client.auth.verifyOtp(cpf: cpf, code: code),
+    );
+
+    final session = AuthSession.tryParse(result.accessToken, result.tokenType);
+    if (session == null) {
+      throw const BackendFailure(
+        'O servidor devolveu um token que o aplicativo não entendeu.',
+        isRecoverable: false,
+      );
+    }
+
+    _session = session;
+    return session;
+  }
+
+  /// Login de desenvolvimento. Ver ressalvas em [AuthSession].
+  @override
+  Future<AuthSession> developmentLogin({required String role}) async {
+    final result = await _guard(
+      () => _client.auth.developmentLogin(role: role),
     );
 
     final session = AuthSession.tryParse(result.accessToken, result.tokenType);
@@ -187,7 +254,7 @@ class BackendClient implements PatientBackend {
   }
 
   /// Conclui o onboarding a partir de um convite do ACS. Ver ressalvas em
-  /// [AuthSession] — a sessão emitida aqui é a mesma forma de [login].
+  /// [AuthSession] — a sessão emitida aqui é a mesma forma de [verifyOtp].
   @override
   Future<AuthSession> completeEnrollment({
     required String token,
@@ -238,6 +305,11 @@ class BackendClient implements PatientBackend {
     } on EnrollmentException catch (error) {
       // Token inválido/expirado/consumido ou consentimento obrigatório
       // recusado — nenhum caso é resolvido tentando de novo sem mudar nada.
+      throw BackendFailure(error.message, isRecoverable: false);
+    } on OtpRequestException catch (error) {
+      // Recusa do login passwordless (RF01). A mensagem é a do servidor de
+      // propósito: ela já é única para todas as causas, para não dizer se
+      // aquele CPF está cadastrado.
       throw BackendFailure(error.message, isRecoverable: false);
     } on AlertDispatchUnavailableException {
       // O alerta FOI gravado; só a publicação imediata falhou. Dizer que

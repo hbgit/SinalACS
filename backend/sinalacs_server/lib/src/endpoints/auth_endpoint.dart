@@ -16,6 +16,10 @@ class AuthEndpoint extends Endpoint {
   @override
   bool get requireLogin => false;
 
+  /// TTL da sessão do paciente (LGPD-RT06). O ACS continua nos 15 minutos
+  /// padrão — a renovação dele é silenciosa, por credencial em memória.
+  static const patientSessionLifetime = Duration(hours: 1);
+
   /// UUIDs fixos do seed de desenvolvimento. Dados sintéticos.
   static const _patient = AuthenticatedUser(
     id: '00000000-0000-4000-8000-000000000001',
@@ -139,11 +143,15 @@ class AuthEndpoint extends Endpoint {
         .verifyOtp(cpf: parsed, code: code, deviceId: deviceId);
 
     return DevelopmentLoginResult(
-      // TODO(RF01, Task 7): o TTL do paciente é definido lá e vale 1 hora. Até
-      // a constante `patientSessionLifetime` existir, este token sai com o
-      // padrão de `issueToken` (15 min); a Task 7 troca esta chamada por
-      // `runtime.auth.issueToken(user, lifetime: patientSessionLifetime)`.
-      accessToken: runtime.auth.issueToken(user),
+      // 1 hora é o que `spec/lgpd_design.md` LGPD-RT06 exige para o paciente.
+      // Com o padrão de 15 minutos, e sem refresh token, o paciente teria de
+      // receber um SMS novo a cada 15 minutos: o código OTP não pode ser
+      // reapresentado como a senha do ACS pode, então não existe renovação
+      // silenciosa para o paciente. Ver as Global Constraints do plano.
+      accessToken: runtime.auth.issueToken(
+        user,
+        lifetime: patientSessionLifetime,
+      ),
       tokenType: 'Bearer',
     );
   }

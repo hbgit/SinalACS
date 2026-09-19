@@ -40,7 +40,7 @@ void main() {
   });
 
   test('o login devolve uma sessão com a microárea do seed', () async {
-    final session = await backend.login();
+    final session = await backend.developmentLogin(role: 'patient');
 
     expect(session.role, 'patient');
     // A microárea sai do payload do token; é o que define o tópico que o ACS
@@ -50,7 +50,7 @@ void main() {
   });
 
   test('a triagem é classificada pelo motor do servidor', () async {
-    await backend.login();
+    await backend.developmentLogin(role: 'patient');
 
     final red = await backend.evaluateTriage(
       chestPain: true,
@@ -83,7 +83,7 @@ void main() {
   });
 
   test('a mesma resposta produz sempre o mesmo risco', () async {
-    await backend.login();
+    await backend.developmentLogin(role: 'patient');
 
     // Determinismo é invariante (INV-02): a classificação não pode variar entre
     // chamadas idênticas.
@@ -103,7 +103,7 @@ void main() {
   });
 
   test('o alerta vermelho é criado e o reenvio não duplica', () async {
-    await backend.login();
+    await backend.developmentLogin(role: 'patient');
     final key = newIdempotencyKey();
     final hash = locationHashFrom(-23.55052, -46.633308);
 
@@ -118,7 +118,7 @@ void main() {
   });
 
   test('a chave de idempotência reusada com outra localização é recusada', () async {
-    await backend.login();
+    await backend.developmentLogin(role: 'patient');
     final key = newIdempotencyKey();
 
     await backend.createRedAlert(

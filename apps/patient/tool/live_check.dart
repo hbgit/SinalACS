@@ -29,7 +29,7 @@ Future<void> main(List<String> args) async {
     stdout.writeln('  health ............. ${health.status} '
         '(db=${health.dbConnected} mqtt=${health.mqttConnected})');
 
-    final session = await backend.login();
+    final session = await backend.developmentLogin(role: 'patient');
     // O token nunca é impresso inteiro.
     stdout.writeln('  login .............. papel=${session.role} '
         'microárea=${session.microAreaId} expira=${session.expiresAt.toIso8601String()}');

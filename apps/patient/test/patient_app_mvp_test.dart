@@ -139,8 +139,22 @@ Future<void> answerTriage(
   }
 }
 
-Future<void> login(WidgetTester tester) async {
+/// Percorre o login passwordless inteiro (RF01): credenciais, pedido do código
+/// e verificação. É o mesmo ponto de entrada que os testes usavam quando a
+/// tela era um `developmentLogin` de um toque só.
+Future<void> login(
+  WidgetTester tester, {
+  String cpf = '123.456.789-09',
+  String nascimento = '01/01/1990',
+  String codigo = '123456',
+}) async {
+  await tester.enterText(find.byKey(const Key('cpf_field')), cpf);
+  await tester.enterText(find.byKey(const Key('birth_date_field')), nascimento);
   await tester.tap(find.byKey(const Key('enter_button')));
+  await tester.pumpAndSettle();
+
+  await tester.enterText(find.byKey(const Key('otp_code_field')), codigo);
+  await tester.tap(find.byKey(const Key('verify_code_button')));
   await tester.pumpAndSettle();
 }
 
@@ -159,14 +173,14 @@ void main() {
 
     await login(tester);
 
-    expect(backend.loginCount, 1);
+    expect(backend.otpVerifications, hasLength(1));
     expect(find.text('Triagem rápida'), findsOneWidget);
   });
 
   testWidgets('não deve avançar quando a autenticação falha', (tester) async {
     final handle = tester.ensureSemantics();
     final backend = FakePatientBackend(
-      loginFailure: const BackendFailure('Sem conexão com o servidor.'),
+      verifyOtpFailure: const BackendFailure('Sem conexão com o servidor.'),
     );
     await tester.pumpWidget(SinalAcsApp(backend: backend));
 

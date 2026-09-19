@@ -1,6 +1,8 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart'
+    show TextEditingValue, TextInputFormatter, TextSelection;
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:sinalacs_client/sinalacs_client.dart'
     show AlertStatus, AlertStatusResult, RiskLevel;
@@ -152,21 +154,161 @@ class PatientLoginScreen extends StatefulWidget {
   State<PatientLoginScreen> createState() => _PatientLoginScreenState();
 }
 
+/// Passo do acesso: as credenciais (CPF + nascimento) ou o código que chegou
+/// por SMS (RF01).
+enum _LoginStep { credenciais, codigo }
+
+/// Máscara de CPF do app: 11 dígitos exibidos como `000.000.000-00`.
+///
+/// O backend normaliza de qualquer forma (`Cpf.tryParse` aceita o texto cru),
+/// mas o app tem um formato de exibição próprio — e é esse formato que sai
+/// daqui: o que a tela mostra e o que vai para o servidor precisam ser a mesma
+/// coisa, senão dois lugares passam a discordar sobre o que é "o mesmo CPF".
+String _formatCpf(String input) {
+  final digits = input.replaceAll(RegExp(r'\D'), '');
+  final limited = digits.length > 11 ? digits.substring(0, 11) : digits;
+  final buffer = StringBuffer();
+  for (var index = 0; index < limited.length; index++) {
+    if (index == 3 || index == 6) buffer.write('.');
+    if (index == 9) buffer.write('-');
+    buffer.write(limited[index]);
+  }
+  return buffer.toString();
+}
+
+/// Aplica [_formatCpf] enquanto a pessoa digita.
+///
+/// O cursor é recolocado depois do mesmo número de dígitos, e não no fim do
+/// campo: sem isso, corrigir um dígito do meio jogaria o cursor para o final a
+/// cada tecla.
+class _CpfInputFormatter extends TextInputFormatter {
+  const _CpfInputFormatter();
+
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    final formatted = _formatCpf(newValue.text);
+    if (!newValue.selection.isValid) {
+      return TextEditingValue(text: formatted);
+    }
+
+    final digitsBeforeCursor = RegExp(r'\d')
+        .allMatches(newValue.text.substring(0, newValue.selection.baseOffset))
+        .length;
+    var offset = 0;
+    var seen = 0;
+    while (offset < formatted.length && seen < digitsBeforeCursor) {
+      if (RegExp(r'\d').hasMatch(formatted[offset])) seen++;
+      offset++;
+    }
+
+    return TextEditingValue(
+      text: formatted,
+      selection: TextSelection.collapsed(offset: offset),
+    );
+  }
+}
+
 class _PatientLoginScreenState extends State<PatientLoginScreen> {
+  final _cpf = TextEditingController();
+  final _nascimento = TextEditingController();
+  final _codigo = TextEditingController();
+
+  _LoginStep _step = _LoginStep.credenciais;
   bool _busy = false;
   String? _error;
 
-  /// Autentica de verdade contra `auth.developmentLogin` e só navega em caso de
-  /// sucesso. Antes a tela navegava incondicionalmente, ignorando o que era
-  /// digitado — não havia como saber se o backend estava sequer alcançável.
-  Future<void> _enter() async {
+  /// CPF exatamente como foi enviado em [PatientBackend.requestOtp].
+  ///
+  /// [PatientBackend.verifyOtp] precisa do **mesmo** valor, e reler o campo do
+  /// formulário no segundo passo devolveria o que a pessoa deixou lá — que pode
+  /// ter mudado no meio do caminho.
+  String? _cpfDigitado;
+
+  @override
+  void dispose() {
+    _cpf.dispose();
+    _nascimento.dispose();
+    _codigo.dispose();
+    super.dispose();
+  }
+
+  /// Converte o que a pessoa digitou em data e pede o código (RF01).
+  ///
+  /// A data vem como `DD/MM/AAAA` da máscara do campo. Um valor que não
+  /// converte é erro de digitação — e a tela diz isso, em vez de mandar um
+  /// pedido que o servidor vai ignorar em silêncio (a resposta dele é a mesma
+  /// para "não existe" e "data errada", de propósito).
+  DateTime? _parseNascimento(String input) {
+    final partes = input.trim().split(RegExp(r'[/-]'));
+    if (partes.length != 3) return null;
+    final dia = int.tryParse(partes[0]);
+    final mes = int.tryParse(partes[1]);
+    final ano = int.tryParse(partes[2]);
+    if (dia == null || mes == null || ano == null) return null;
+    if (dia < 1 || dia > 31 || mes < 1 || mes > 12 || ano < 1900 || ano > 2100) {
+      return null;
+    }
+    final data = DateTime.utc(ano, mes, dia);
+    // `DateTime.utc` normaliza dia inexistente em vez de recusá-lo: 31/02 vira
+    // 02/03. Sem esta checagem, o erro de digitação viraria uma data válida e
+    // diferente da cadastrada — e o servidor, de propósito, não diz nada sobre
+    // data errada. Por isso a conferência é contra o que foi digitado.
+    if (data.day != dia || data.month != mes || data.year != ano) return null;
+    return data;
+  }
+
+  Future<void> _pedirCodigo() async {
+    final nascimento = _parseNascimento(_nascimento.text);
+    if (nascimento == null) {
+      setState(() => _error = 'Confira a data de nascimento (DD/MM/AAAA).');
+      return;
+    }
+
+    final cpf = _formatCpf(_cpf.text);
     setState(() {
       _busy = true;
       _error = null;
     });
 
     try {
-      await BackendScope.of(context).login();
+      await BackendScope.of(context).requestOtp(
+        cpf: cpf,
+        birthDate: nascimento,
+      );
+      if (!mounted) return;
+      setState(() {
+        _busy = false;
+        _cpfDigitado = cpf;
+        _codigo.clear();
+        _step = _LoginStep.codigo;
+      });
+    } on BackendFailure catch (failure) {
+      if (!mounted) return;
+      setState(() {
+        _busy = false;
+        _error = failure.message;
+      });
+    }
+  }
+
+  /// Verifica o código e só navega em caso de sucesso.
+  ///
+  /// Antes a tela navegava incondicionalmente, ignorando o que era digitado —
+  /// não havia como saber se o backend estava sequer alcançável.
+  Future<void> _entrar() async {
+    final cpf = _cpfDigitado;
+    if (cpf == null) return;
+
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+
+    try {
+      await BackendScope.of(context).verifyOtp(cpf: cpf, code: _codigo.text.trim());
       if (!mounted) return;
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(
@@ -182,6 +324,14 @@ class _PatientLoginScreenState extends State<PatientLoginScreen> {
         _error = failure.message;
       });
     }
+  }
+
+  void _voltarParaCredenciais() {
+    setState(() {
+      _step = _LoginStep.credenciais;
+      _error = null;
+      _codigo.clear();
+    });
   }
 
   @override
@@ -211,44 +361,22 @@ class _PatientLoginScreenState extends State<PatientLoginScreen> {
                         const SizedBox(height: 16),
                         const Text('SinalACS', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
                         const SizedBox(height: 8),
-                        const Text('Acesso sem senha', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                        Text(
+                          _step == _LoginStep.credenciais ? 'Acesso sem senha' : 'Código de acesso',
+                          style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                        ),
                         const SizedBox(height: 8),
-                        const Text(
-                          'Use CPF e data de nascimento para receber o código de acesso.',
+                        Text(
+                          _step == _LoginStep.credenciais
+                              ? 'Use CPF e data de nascimento para receber o código de acesso.'
+                              // Nem "enviado para o seu celular": o app não sabe o
+                              // telefone cadastrado, e afirmar isso seria inventar.
+                              : 'Digite o código de 6 dígitos enviado pela sua unidade de saúde.',
                           textAlign: TextAlign.center,
-                          style: TextStyle(color: Colors.white70),
+                          style: const TextStyle(color: Colors.white70),
                         ),
                         const SizedBox(height: 24),
-                        const TextField(
-                          keyboardType: TextInputType.number,
-                          decoration: InputDecoration(labelText: 'CPF do paciente', hintText: '000.000.000-00'),
-                        ),
-                        const SizedBox(height: 16),
-                        const TextField(
-                          keyboardType: TextInputType.datetime,
-                          decoration: InputDecoration(labelText: 'Data de nascimento', hintText: 'DD/MM/AAAA'),
-                        ),
-                        const SizedBox(height: 20),
-                        Semantics(
-                          label: 'Entrar na triagem do paciente',
-                          button: true,
-                          container: true,
-                          child: SizedBox(
-                            width: double.infinity,
-                            child: FilledButton(
-                              key: const Key('enter_button'),
-                              onPressed: _busy ? null : _enter,
-                              style: FilledButton.styleFrom(minimumSize: const Size(48, 52)),
-                              child: _busy
-                                  ? const SizedBox(
-                                      height: 22,
-                                      width: 22,
-                                      child: CircularProgressIndicator(strokeWidth: 2),
-                                    )
-                                  : const Text('Entrar sem senha'),
-                            ),
-                          ),
-                        ),
+                        if (_step == _LoginStep.credenciais) ..._camposDeCredenciais() else ..._camposDoCodigo(),
                         if (_error != null)
                           Padding(
                             padding: const EdgeInsets.only(top: 16),
@@ -268,18 +396,20 @@ class _PatientLoginScreenState extends State<PatientLoginScreen> {
                               ),
                             ),
                           ),
-                        const SizedBox(height: 12),
-                        SizedBox(
-                          width: double.infinity,
-                          child: OutlinedButton.icon(
-                            key: const Key('start_onboarding_button'),
-                            onPressed: () => Navigator.of(context).push(
-                              MaterialPageRoute(builder: (_) => const OnboardingScreen()),
+                        if (_step == _LoginStep.credenciais) ...[
+                          const SizedBox(height: 12),
+                          SizedBox(
+                            width: double.infinity,
+                            child: OutlinedButton.icon(
+                              key: const Key('start_onboarding_button'),
+                              onPressed: () => Navigator.of(context).push(
+                                MaterialPageRoute(builder: (_) => const OnboardingScreen()),
+                              ),
+                              icon: const Icon(Icons.qr_code_scanner_outlined),
+                              label: const Text('Escanear QR Code do ACS'),
                             ),
-                            icon: const Icon(Icons.qr_code_scanner_outlined),
-                            label: const Text('Escanear QR Code do ACS'),
                           ),
-                        ),
+                        ],
                       ],
                     ),
                   ),
@@ -291,6 +421,89 @@ class _PatientLoginScreenState extends State<PatientLoginScreen> {
       ),
     );
   }
+
+  List<Widget> _camposDeCredenciais() => [
+        TextField(
+          key: const Key('cpf_field'),
+          controller: _cpf,
+          keyboardType: TextInputType.number,
+          inputFormatters: const [_CpfInputFormatter()],
+          decoration: const InputDecoration(
+            labelText: 'CPF do paciente',
+            hintText: '000.000.000-00',
+          ),
+        ),
+        const SizedBox(height: 16),
+        TextField(
+          key: const Key('birth_date_field'),
+          controller: _nascimento,
+          keyboardType: TextInputType.datetime,
+          decoration: const InputDecoration(
+            labelText: 'Data de nascimento',
+            hintText: 'DD/MM/AAAA',
+          ),
+        ),
+        const SizedBox(height: 20),
+        Semantics(
+          label: 'Entrar na triagem do paciente',
+          button: true,
+          container: true,
+          child: SizedBox(
+            width: double.infinity,
+            child: FilledButton(
+              key: const Key('enter_button'),
+              onPressed: _busy ? null : _pedirCodigo,
+              style: FilledButton.styleFrom(minimumSize: const Size(48, 52)),
+              child: _busy
+                  ? const SizedBox(
+                      height: 22,
+                      width: 22,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Text('Entrar sem senha'),
+            ),
+          ),
+        ),
+      ];
+
+  List<Widget> _camposDoCodigo() => [
+        TextField(
+          key: const Key('otp_code_field'),
+          controller: _codigo,
+          keyboardType: TextInputType.number,
+          decoration: const InputDecoration(
+            labelText: 'Código de acesso',
+            hintText: '000000',
+          ),
+        ),
+        const SizedBox(height: 20),
+        FilledButton(
+          key: const Key('verify_code_button'),
+          onPressed: _busy ? null : _entrar,
+          style: FilledButton.styleFrom(minimumSize: const Size(48, 52)),
+          child: _busy
+              ? const SizedBox(
+                  height: 22,
+                  width: 22,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Text('Entrar'),
+        ),
+        const SizedBox(height: 12),
+        // Não repete o pedido: dentro de um minuto o servidor recusa um segundo
+        // código para o mesmo CPF. Voltar ao passo anterior devolve o controle a
+        // quem está logando, que reenvia pelo botão de sempre — e vê a mensagem
+        // do servidor se ainda estiver dentro do intervalo.
+        SizedBox(
+          width: double.infinity,
+          child: OutlinedButton(
+            key: const Key('request_new_code_button'),
+            onPressed: _busy ? null : _voltarParaCredenciais,
+            style: OutlinedButton.styleFrom(minimumSize: const Size(48, 52)),
+            child: const Text('Pedir outro código'),
+          ),
+        ),
+      ];
 }
 
 /// Tela de onboarding: consome o convite de uso único gerado pelo ACS e
@@ -516,6 +729,15 @@ class PatientHomeShell extends StatefulWidget {
 class _PatientHomeShellState extends State<PatientHomeShell> {
   late PatientDestination _destination;
 
+  /// Sessão do paciente expirou com o app aberto.
+  ///
+  /// O paciente não tem renovação silenciosa (ver `BackendClient._requireToken`:
+  /// o código OTP é de uso único e não há credencial reutilizável), então a
+  /// única saída é entrar de novo — e é o app que precisa oferecer a porta, no
+  /// lugar onde a pessoa está, em vez de deixá-la presa numa tela que só
+  /// devolve "sua sessão expirou".
+  bool _sessionExpired = false;
+
   @override
   void initState() {
     super.initState();
@@ -524,14 +746,38 @@ class _PatientHomeShellState extends State<PatientHomeShell> {
 
   void _select(PatientDestination destination) => setState(() => _destination = destination);
 
+  /// Reage a uma falha relatada por uma das telas do shell.
+  ///
+  /// Quem decide se a pessoa é mandada de volta ao login é o shell, e não a
+  /// tela: a condição é a do plano — falha **não recuperável** *e* sessão já
+  /// expirada. Uma falha não recuperável com a sessão válida (permissão
+  /// negada, por exemplo) não tem nada a ver com sessão expirada, e oferecer
+  /// "Entrar novamente" ali seria mandar a pessoa refazer o login à toa.
+  void _reportFailure(BackendFailure failure) {
+    if (failure.isRecoverable) return;
+    final session = BackendScope.of(context).session;
+    if (session == null || !session.isExpired()) return;
+    if (!mounted || _sessionExpired) return;
+    setState(() => _sessionExpired = true);
+  }
+
+  void _reenter() {
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(builder: (_) => const PatientLoginScreen()),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final content = switch (_destination) {
-      PatientDestination.emergency => const EmergencyScreen(),
-      PatientDestination.triage => TriageScreen(onComplete: () => _select(PatientDestination.status)),
+      PatientDestination.emergency => EmergencyScreen(onFailure: _reportFailure),
+      PatientDestination.triage => TriageScreen(
+          onComplete: () => _select(PatientDestination.status),
+          onFailure: _reportFailure,
+        ),
       PatientDestination.questions => const QuestionsScreen(),
       PatientDestination.profile => const ClinicalProfileScreen(),
-      PatientDestination.status => const StatusScreen(),
+      PatientDestination.status => StatusScreen(onFailure: _reportFailure),
       PatientDestination.reminders => const RemindersScreen(),
     };
     final title = switch (_destination) {
@@ -545,7 +791,14 @@ class _PatientHomeShellState extends State<PatientHomeShell> {
 
     return Scaffold(
       appBar: _PatientHeader(eyebrow: 'SinalACS paciente', title: title),
-      body: SafeArea(child: content),
+      body: SafeArea(
+        child: Column(
+          children: [
+            if (_sessionExpired) _SessionExpiredBanner(onReenter: _reenter),
+            Expanded(child: content),
+          ],
+        ),
+      ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _navigationIndex(_destination),
         onDestinationSelected: (index) {
@@ -573,8 +826,59 @@ class _PatientHomeShellState extends State<PatientHomeShell> {
   };
 }
 
+/// Aviso de sessão expirada, com a porta de volta para o login.
+///
+/// Fica no shell, acima do conteúdo, e não dentro da tela que falhou: a sessão
+/// vale para o app inteiro, e a pessoa pode estar em qualquer aba quando ela
+/// expira.
+class _SessionExpiredBanner extends StatelessWidget {
+  const _SessionExpiredBanner({required this.onReenter});
+
+  final VoidCallback onReenter;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+      child: Card(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // SC 4.1.3: a sessão expirou sem que a pessoa tenha feito nada —
+              // sem `liveRegion` um leitor de tela não saberia que o app parou
+              // de responder ao servidor nem que existe um botão para voltar.
+              Semantics(
+                liveRegion: true,
+                child: const Text(
+                  key: Key('session_expired_notice'),
+                  'Sua sessão expirou. Entre novamente com o código de acesso.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Colors.white70),
+                ),
+              ),
+              const SizedBox(height: 12),
+              FilledButton(
+                key: const Key('reenter_button'),
+                onPressed: onReenter,
+                style: FilledButton.styleFrom(minimumSize: const Size(48, 52)),
+                child: const Text('Entrar novamente'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class EmergencyScreen extends StatefulWidget {
-  const EmergencyScreen({super.key});
+  const EmergencyScreen({super.key, this.onFailure});
+
+  /// Relata ao shell a falha capturada nesta tela. Ver
+  /// `_PatientHomeShellState._reportFailure` para o que o shell decide com ela.
+  final ValueChanged<BackendFailure>? onFailure;
 
   @override
   State<EmergencyScreen> createState() => _EmergencyScreenState();
@@ -659,6 +963,7 @@ class _EmergencyScreenState extends State<EmergencyScreen> {
       });
     } on BackendFailure catch (failure) {
       if (!mounted) return;
+      widget.onFailure?.call(failure);
       // A chave NÃO é limpa aqui: o retry precisa reusar a mesma tentativa.
       setState(() {
         _busy = false;
@@ -713,8 +1018,12 @@ class _EmergencyScreenState extends State<EmergencyScreen> {
 }
 
 class TriageScreen extends StatefulWidget {
-  const TriageScreen({super.key, this.onComplete});
+  const TriageScreen({super.key, this.onComplete, this.onFailure});
   final VoidCallback? onComplete;
+
+  /// Relata ao shell a falha capturada nesta tela. Ver
+  /// `_PatientHomeShellState._reportFailure`.
+  final ValueChanged<BackendFailure>? onFailure;
 
   @override
   State<TriageScreen> createState() => _TriageScreenState();
@@ -786,6 +1095,7 @@ class _TriageScreenState extends State<TriageScreen> {
       });
     } on BackendFailure catch (failure) {
       if (!mounted) return;
+      widget.onFailure?.call(failure);
       setState(() {
         _busy = false;
         _error = failure.message;
@@ -1028,21 +1338,29 @@ class _ClinicalProfileScreenState extends State<ClinicalProfileScreen> {
 /// `RemindersScope`, sem `BackendScope` — buscar o status no shell quebraria
 /// esse teste mesmo quando a aba aberta é outra.
 class StatusScreen extends StatelessWidget {
-  const StatusScreen({super.key, this.syncInterval = const Duration(minutes: 5)});
+  const StatusScreen({super.key, this.syncInterval = const Duration(minutes: 5), this.onFailure});
 
   /// Intervalo da sincronização periódica em segundo plano, além da busca ao
   /// abrir a aba e do botão manual. Produção usa o default (5 minutos);
   /// testes passam um valor curto para não esperar tempo real.
   final Duration syncInterval;
 
+  /// Relata ao shell a falha capturada nesta tela. Ver
+  /// `_PatientHomeShellState._reportFailure`.
+  final ValueChanged<BackendFailure>? onFailure;
+
   @override
-  Widget build(BuildContext context) => _StatusScreenBody(syncInterval: syncInterval);
+  Widget build(BuildContext context) => _StatusScreenBody(
+        syncInterval: syncInterval,
+        onFailure: onFailure,
+      );
 }
 
 class _StatusScreenBody extends StatefulWidget {
-  const _StatusScreenBody({required this.syncInterval});
+  const _StatusScreenBody({required this.syncInterval, this.onFailure});
 
   final Duration syncInterval;
+  final ValueChanged<BackendFailure>? onFailure;
 
   @override
   State<_StatusScreenBody> createState() => _StatusScreenBodyState();
@@ -1118,6 +1436,7 @@ class _StatusScreenBodyState extends State<_StatusScreenBody> with WidgetsBindin
       });
     } on BackendFailure catch (failure) {
       if (!mounted) return;
+      widget.onFailure?.call(failure);
       setState(() => _error = failure.message);
     } catch (_) {
       if (!mounted) return;
