@@ -74,8 +74,14 @@ abstract class EnrollmentToken implements _i1.SerializableModel {
   _i1.UuidValue? id;
 
   /// sha256 do token real. O valor em claro só existe no momento da geração
-  /// (devolvido ao ACS para virar QR Code) e nunca é persistido — mesmo
-  /// padrão de `users.cpfHash`.
+  /// (devolvido ao ACS para virar QR Code) e nunca é persistido — a mesma
+  /// disciplina de `users.cpfHash` (só o hash vai ao banco), mas **não** o
+  /// mesmo mecanismo: aqui é SHA-256 sem pepper e sem domínio, e ali é HMAC
+  /// com `CPF_HASH_PEPPER`. Não há equivalência a sugerir — o parecer do
+  /// §2.1 de `spec/lgpd_data_audit.md` não se aplica a nenhum dos dois, e
+  /// por motivos diferentes: o token tem 32 bytes de `Random.secure()` (nada
+  /// a enumerar), o CPF tem 10^9 possibilidades (era enumerável, e passou a
+  /// ter segredo de servidor na chave).
   String tokenHash;
 
   _i1.UuidValue patientId;

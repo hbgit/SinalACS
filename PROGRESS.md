@@ -774,12 +774,13 @@ nascimento e o código de 6 dígitos recebido, e o servidor só emite a sessão 
   "registrada na Task 8", e é por isso que ela está nesta lista. Payload, status e efeitos são
   idênticos entre o CPF cadastrado e o não cadastrado — provado por teste
   (`passwordless_auth_service_test.dart`, "não revela CPF inexistente nem nascimento errado") —,
-  mas o caminho válido faz um `latestOpen`, um `save` e o envio do código, e as recusas fazem um
-  `latestOpen` e retornam: um cronômetro distingue os dois. A propriedade anti-enumeração vale no
-  conteúdo e **não** no relógio. Com gateway de verdade o termo dominante é a ida ao provedor; a
-  correção é tirar o envio do caminho de resposta (ou impor um piso constante de tempo), e é
-  endurecimento para quando o provedor for escolhido — não deste estágio, em que `SMS_GATEWAY=log`
-  não faz chamada nenhuma.
+  mas o caminho válido faz um `latestOpen`, um `save` e o envio do código, enquanto as recusas
+  retornam na **primeira** condição — logo depois do `findByCpfHash` e **antes** do `latestOpen`,
+  sem nenhuma outra ida ao banco. Um cronômetro distingue os dois. A propriedade anti-enumeração
+  vale no conteúdo e **não** no relógio. Com gateway de verdade o termo dominante é a ida ao
+  provedor; a correção é tirar o envio do caminho de resposta (ou impor um piso constante de
+  tempo), e é endurecimento para quando o provedor for escolhido — não deste estágio, em que
+  `SMS_GATEWAY=log` não faz chamada nenhuma.
 - **Biometria e leitura de QR Code.** `spec/sys_flow.md` lista "SMS/OTP, biometria ou QR Code
   gerado pelo ACS" como critérios de aceite do RF01. Biometria não existe em nenhum app; a
   leitura de QR pelo app do paciente também não — o onboarding pede para "colar ou digitar o
@@ -796,7 +797,13 @@ credencial para renovar: quem conclui o cadastro cai para fora em 15 minutos, se
 caminho de volta que não seja entrar de novo pelo código.
 
 Não foi corrigido aqui de propósito: é mudança de comportamento de outra entrega. **Dono: o
-RF02.** O que torna o registro necessário é exatamente o que o comentário novo do
-`auth_endpoint.dart` diz querer evitar, por escrito — um leitor futuro lê a diferença como
-descuido e conserta um dos lados, e o lado mais provável de ele "consertar" é o TTL do login, que
-tem motivo para ser 1 hora.
+RF02.** O que torna o registro necessário está escrito em dois lugares, e nenhum deles é o
+comentário do `auth_endpoint.dart` — esse declara o TTL de 1 hora **deste** caminho e o motivo
+(o código OTP não se reapresenta, então não há renovação silenciosa) e aponta a lacuna do
+onboarding, mas não fala em leitor futuro. Quem diz, com essas palavras, é o **par de testes de
+integração** que prende cada metade da assimetria: `institutional_login_test.dart` (15 minutos,
+ACS) escreve que "os dois números precisam aparecer na suíte, senão um leitor futuro lê a
+diferença como descuido e 'conserta' um dos lados", e `passwordless_login_test.dart` (1 hora,
+paciente) que é "a diferença entre as duas que precisa continuar sendo lida como decisão, não
+como descuido" — o plano registra o mesmo nas Global Constraints. O lado mais provável de um
+leitor "consertar" é o TTL do login, que tem motivo para ser 1 hora.

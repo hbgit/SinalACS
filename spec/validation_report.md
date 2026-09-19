@@ -8,12 +8,13 @@
 
 ## 1. Sumário executivo
 
-**O backend está completo?** Não, mas o que existe é sólido. Os 7 métodos RPC
-implementados funcionam, têm cobertura de teste integral (83/83 passando) e
+**O backend está completo?** Não, mas o que existe é sólido. Os métodos RPC já
+implementados funcionam, têm cobertura de teste integral — a suíte passa
+inteira, e a contagem da execução que sustenta este relatório é a da §2 — e
 aplicam as invariantes de negócio que prometem. O que falta são requisitos
-inteiros do PRD que nunca saíram do papel — 7 dos 18 RF não têm código em lugar
-nenhum — e duas tabelas modeladas e migradas que **nenhuma linha de código
-escreve**.
+inteiros do PRD que nunca saíram do papel — **5 dos 18 RF não têm código em
+lugar nenhum** (a contagem por veredicto está no fim da §3) — e duas tabelas
+modeladas e migradas que **nenhuma linha de código escreve**.
 
 **Os apps têm integração total com o backend?** Depende do nível, e a diferença
 entre os dois é o achado central deste relatório:
@@ -48,7 +49,13 @@ Tudo abaixo foi executado nesta validação, com a stack local de pé e o seed a
 | `bin/audit_chain_check.dart` | **cadeia íntegra**, 4 linhas verificadas |
 | Smoke manual nos 3 apps | executado, telas classificadas na §5 |
 
-**Total: 108 testes automatizados passando** (83 backend + 25 no emulador).
+**Total desta execução: 108 testes automatizados passando** (83 backend + 25 no emulador).
+
+**As contagens desta seção são o snapshot de 2026-09-16** — a `Data` deste relatório. A suíte
+cresce a cada entrega e o número de hoje sai da própria execução do comando, nunca deste texto:
+para citar uma contagem atual, reexecute a bateria da §9 em vez de ler estas linhas. (Medido em
+2026-09-19, para dar a ordem de grandeza da diferença: o backend está em **212 testes herméticos
+e 273 no total**, contra os 83 daqui.)
 
 Observação de backlog: o `live_check` do ACS relatou **5 alertas reentregues**
 ao reconectar, confirmando que a sessão persistente com QoS 1 retém e reentrega
@@ -67,7 +74,7 @@ cliente · **`parcial`** = existe, mas alimentado por dado fabricado ·
 
 | ID | Requisito | Veredicto | Evidência |
 |---|---|---|---|
-| RF01 | Autenticação passwordless (CPF + nasc. + OTP) | **backend + app** | `auth.requestOtp`/`verifyOtp` com CPF validado por dígito verificador, hasheado em HMAC-SHA-256 com `CPF_HASH_PEPPER` (LGPD §196), código de 6 dígitos com TTL de 5 min, teto de 5 verificações, intervalo de 60 s e auditoria por desfecho (`otp_challenges`). **O provedor de SMS não está escolhido**: `SMS_GATEWAY=log` escreve o código no log e só é aceito em `development`. Ver `docs/superpowers/plans/2026-09-18-rf01-login-passwordless-otp.md`; lacunas em `PROGRESS.md`. |
+| RF01 | Autenticação passwordless (CPF + nasc. + OTP) | **backend + app** | `auth.requestOtp`/`verifyOtp` com CPF validado por dígito verificador, hasheado em HMAC-SHA-256 com `CPF_HASH_PEPPER` (§2.5/§2.6 de `spec/lgpd_data_audit.md`), código de 6 dígitos com TTL de 5 min, teto de 5 verificações, intervalo de 60 s e auditoria por desfecho (`otp_challenges`). **O provedor de SMS não está escolhido**: `SMS_GATEWAY=log` escreve o código no log e só é aceito em `development`. Ver `docs/superpowers/plans/2026-09-18-rf01-login-passwordless-otp.md`; lacunas em `PROGRESS.md`. |
 | RF02 | Onboarding via QR Code | **ausente** | Botão presente; `app.dart:170` emite snackbar "será disponibilizada". |
 | RF03 | Botão de alerta de urgência (MQTT) | **parcial** | Endpoint e entrega funcionam (validado em dispositivo). O app agora tenta ler a localização e envia somente um hash truncado; sem permissão/GPS usa `unknownLocationHash` e informa a pessoa. A precisão e o risco de reidentificação ainda exigem decisão de produto — ver L-02/L-05. |
 | RF04 | Formulário de triagem estruturada | **backend** | `triage.evaluate` exige token, classifica pelo motor determinístico e grava em `triage_sessions` com auditoria. |
@@ -314,6 +321,13 @@ script rodar.
 - **L-17 · Drift documental**, todos verificados nesta validação:
   - `PROGRESS.md` — caminhos `backend/lib/...` inexistentes, "18/18 testes" (são 83), "CI com 4 jobs" (são 6), milestones medidos marcados como feitos.
   - `CLAUDE.md` — "11 tabelas" (são 13); descreve a perda de alerta no commit como risco aberto, mas o outbox já existe.
+    **Atualização (2026-09-19):** o número medido hoje é **16 tabelas de domínio** — o
+    `definition.sql` da migração mais recente (`20260919032710552`) tem 29 `CREATE TABLE`, 13
+    delas `serverpod_*`. O "13" acima era o estado de `20260917125250890`; desde então entraram
+    `enrollment_tokens` (RF02) e o par `otp_challenges`/`user_credentials` (RF01/RF07). O
+    `CLAUDE.md` da raiz foi alinhado a 16 e o `backend/CLAUDE.md` ("16 tables") mede o mesmo.
+    Reconte no `definition.sql` da migração mais recente antes de citar o número — ele muda a
+    cada migração.
   - `CONTRIBUTING.md` — "a CI usa Flutter 3.24.0" (usa 3.44.8).
   - `spec/sys_flow.md` — afirma que o backend acessa Postgres "sem ORM" e cita `PROGRESS.md` para um motor de sync não conectado.
   - `docs/README.md` — não linka `telas-admin.md`.
@@ -333,7 +347,7 @@ docker compose up --build -d
 # 1) backend
 docker compose --profile test up -d postgres-test
 cd backend && dart pub get && dart analyze
-cd sinalacs_server && dart test                      # 83 testes
+cd sinalacs_server && dart test                      # suíte completa (unit + integração)
 
 # 2) integração sem dispositivo
 cd ../.. && ./scripts/qa/e2e.sh --keep

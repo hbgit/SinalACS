@@ -17,7 +17,7 @@ Read these before making product/architecture decisions — when project docs co
 - [spec/stack.md](spec/stack.md) — stack/infra architecture decisions.
 - [spec/ui_design.md](spec/ui_design.md) — visual language and UX behavior.
 - [spec/lgpd_design.md](spec/lgpd_design.md) — privacy/LGPD design.
-- [spec/lgpd_data_audit.md](spec/lgpd_data_audit.md) — field-by-field LGPD sensitivity classification for every persisted table (11 domain tables plus Serverpod's own).
+- [spec/lgpd_data_audit.md](spec/lgpd_data_audit.md) — field-by-field LGPD sensitivity classification for every persisted table (16 domain tables plus Serverpod's own; the count changes with every migration — re-measure it in the `definition.sql` of the latest `backend/sinalacs_server/migrations/*/`, and see L-17 of `spec/validation_report.md` for the drift this line has already accumulated).
 - [spec/ux_accessibility_assessment.md](spec/ux_accessibility_assessment.md) — WCAG 2.2 AA audit (contrast, touch targets, semantics) for the ACS/patient/admin apps; read before touching any color used as text/icon, not just fill.
 - [spec/ux_ui_test_plan.md](spec/ux_ui_test_plan.md) — UX/UI test plan derived from `spec/ui_design.md` (visual/interaction behavior, complementary to the accessibility assessment).
 - [AGENTS.md](AGENTS.md) — full agent working rules (Portuguese), summarized below.
