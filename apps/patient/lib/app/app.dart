@@ -986,20 +986,31 @@ class _EmergencyScreenState extends State<EmergencyScreen> {
         const Text('Em uma situação grave, envie um alerta imediato à sua equipe de saúde.', textAlign: TextAlign.center),
         const SizedBox(height: 28),
         Center(
-          child: Semantics(
-            label: 'Enviar alerta de emergência',
-            button: true,
-            child: SizedBox(
-              width: 208,
-              height: 208,
-              child: FilledButton(
-                key: const Key('panic_button'),
-                onPressed: _busy ? null : _sendAlert,
-                style: FilledButton.styleFrom(
-                  backgroundColor: PatientColors.danger,
-                  shape: const CircleBorder(),
+          // `MergeSemantics`, e não só o `Semantics`: em volta de um botão de
+          // verdade o `Semantics` **não funde** com ele — cria um nó próprio,
+          // com papel de botão e sem ação de toque (medido na árvore:
+          // `Rect.fromLTRB(0, 0, 752, 208)`, a largura toda), anunciado ANTES
+          // do botão real. No controle mais crítico do app o leitor de tela
+          // encontrava primeiro um "botão" que não faz nada (WCAG 4.1.2) e cujo
+          // nome não continha o texto visível (WCAG 2.5.3, nível A). Mesclado,
+          // sobra UM nó: nome "Enviar alerta de emergência\nEMERGÊNCIA", com a
+          // ação de toque, e a moldura volta a ser a do botão (208x208).
+          child: MergeSemantics(
+            child: Semantics(
+              label: 'Enviar alerta de emergência',
+              button: true,
+              child: SizedBox(
+                width: 208,
+                height: 208,
+                child: FilledButton(
+                  key: const Key('panic_button'),
+                  onPressed: _busy ? null : _sendAlert,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: PatientColors.danger,
+                    shape: const CircleBorder(),
+                  ),
+                  child: const Column(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.warning_amber_rounded, size: 52), SizedBox(height: 8), Text('EMERGÊNCIA', style: TextStyle(fontWeight: FontWeight.bold))]),
                 ),
-                child: const Column(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.warning_amber_rounded, size: 52), SizedBox(height: 8), Text('EMERGÊNCIA', style: TextStyle(fontWeight: FontWeight.bold))]),
               ),
             ),
           ),

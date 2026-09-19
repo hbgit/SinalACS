@@ -14,6 +14,7 @@ import 'package:sinalacs_patient/core/reminders/reminder_scheduler.dart';
 import 'package:sinalacs_patient/core/reminders/reminder_store.dart';
 
 import 'support/fake_patient_backend.dart';
+import 'support/semantics_scan.dart';
 
 /// Duplo de [ReminderStore] em memória — evita SQLite real no teste de
 /// widget, mesmo padrão de `_FixedLocationReader`/`FakePatientBackend`.
@@ -340,6 +341,48 @@ void main() {
     handle.dispose();
   });
 
+  testWidgets('o botão de EMERGÊNCIA é UM nó, com o texto visível e a ação de toque', (tester) async {
+    // WCAG 2.5.3 + 4.1.2 no controle mais crítico do app. Um `Semantics` em
+    // volta de um botão de verdade não funde com ele: cria um nó próprio, com
+    // papel de botão e sem ação, anunciado ANTES do botão real — o leitor de
+    // tela encontrava primeiro um "botão" que não faz nada, de largura total.
+    // `MergeSemantics` funde os dois: um nó só, com o texto visível dentro do
+    // nome acessível, e a ação de toque.
+    final handle = tester.ensureSemantics();
+    await tester.pumpWidget(SinalAcsApp(
+      backend: FakePatientBackend(),
+      locationReader: _FixedLocationReader(
+        const LocationUnavailable(LocationUnavailableReason.unknown),
+      ),
+    ));
+
+    await login(tester);
+    await tester.tap(find.text('Urgência'));
+    await tester.pumpAndSettle();
+
+    // A varredura vem primeiro de propósito: é ela que separa o defeito da
+    // correção. As três asserções abaixo descrevem a forma corrigida, mas são
+    // verdes com o defeito também (o nó do botão, sozinho, já responde ao toque
+    // e já carrega o texto visível) — quem acusa o nó inerte é a varredura.
+    expectNenhumBotaoInerte(tester);
+
+    // `getSemantics` sobe enquanto o nó estiver mesclado, então com o
+    // `MergeSemantics` este é o nó fundido — o mesmo que o leitor de tela lê.
+    final noEmergencia = tester.getSemantics(find.byKey(const Key('panic_button')));
+    final emergencia = noEmergencia.getSemanticsData();
+    // Literalmente o texto visível, não uma variação de caixa: é o que o 2.5.3
+    // exige, por qualquer leitura, sem depender de comparação case-insensitive.
+    expect(emergencia.label, contains('EMERGÊNCIA'));
+    // A frase descritiva continua no nome acessível.
+    expect(emergencia.label, contains('Enviar alerta de emergência'));
+    expect(emergencia.hasAction(SemanticsAction.tap), isTrue);
+    // Um nó só, com a moldura do botão: com o defeito a moldura do nó sem ação
+    // era a área de largura total do wrapper (752 de largura, medidos pela
+    // varredura), e não os 208x208 do alvo de toque.
+    expect(noEmergencia.rect.size, const Size(208, 208));
+    handle.dispose();
+  });
+
   testWidgets('deve expor rótulo semântico e alvo de toque acessível no fluxo do paciente', (tester) async {
     // `getSemantics` abaixo só acha nó com a árvore semântica ligada.
     final handle = tester.ensureSemantics();
@@ -348,20 +391,25 @@ void main() {
     final enterButton = tester.widget<FilledButton>(find.byKey(const Key('enter_button')));
     final minimumSize = enterButton.style?.minimumSize?.resolve({}) ?? const Size(0, 0);
 
-    // WCAG 2.5.3 (Label in Name, nível A): o nome acessível contém o texto
-    // visível do botão — `bySemanticsLabel` casa por *contains*. É o próprio
-    // botão que o expõe: o `Semantics` que existia aqui com o rótulo "Entrar na
-    // triagem do paciente" não fundia com ele, e sim criava um segundo nó, sem
-    // ação de toque, anunciado ANTES do botão real (WCAG 4.1.2). Daí as duas
-    // asserções serem sobre um nó com o texto visível e nenhum com o antigo.
+    // WCAG 2.5.3 (Label in Name, nível A): o nome acessível é o texto visível do
+    // botão, exposto pelo próprio botão — o `Semantics` que existia aqui com o
+    // rótulo "Entrar na triagem do paciente" não fundia com ele, e sim criava um
+    // segundo nó, sem ação de toque, anunciado ANTES do botão real (WCAG 4.1.2).
+    //
+    // Com `String`, `bySemanticsLabel` casa por **igualdade exata**
+    // (`finders.dart`: `pattern == propertyValue`), não por *contains*: igualdade
+    // é mais forte do que contenção, então a asserção vale — mas quem
+    // acrescentar algo ao texto visível ("Entrar sem senha agora") vê esta linha
+    // falhar mesmo com o rótulo contendo o texto. Com `RegExp` o finder casa por
+    // `hasMatch`.
     expect(find.bySemanticsLabel('Entrar sem senha'), findsOneWidget);
     expect(find.bySemanticsLabel('Entrar na triagem do paciente'), findsNothing);
-    final enterNode = tester.getSemantics(find.byKey(const Key('enter_button')));
-    expect(
-      enterNode.getSemanticsData().hasAction(SemanticsAction.tap),
-      isTrue,
-      reason: 'o nó que carrega o nome do botão tem de ser o que responde ao toque',
-    );
+    // A varredura substitui a asserção de `tap` que ficava aqui. Aquela era
+    // verde também com o defeito — nela, o nó que carrega o nome é justamente o
+    // inerte, e o que responde ao toque é o filho — e prendia um invariante
+    // ("o nó que carrega o nome do botão tem de ser o que responde ao toque")
+    // que ela não testava. A varredura prende a classe, na árvore inteira.
+    expectNenhumBotaoInerte(tester);
 
     expect(minimumSize.height, greaterThanOrEqualTo(48));
     expect(minimumSize.width, greaterThanOrEqualTo(48));
@@ -378,6 +426,56 @@ void main() {
     await expectLater(tester, meetsGuideline(androidTapTargetGuideline));
     await expectLater(tester, meetsGuideline(labeledTapTargetGuideline));
     handle.dispose();
+  });
+
+  group('a varredura de nós inertes detecta o que promete detectar', () {
+    // Sem isto, a varredura poderia estar olhando uma árvore que não montou e
+    // passando para todo mundo — o mesmo modo de falha silenciosa que ela
+    // existe para pegar. O app admin guarda o detector de overflow dele do
+    // mesmo jeito (`layout_harness_sanity_test.dart`).
+    testWidgets('acusa o "botão" sem ação de toque', (tester) async {
+      final handle = tester.ensureSemantics();
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: Semantics(
+            label: 'Rótulo de botão',
+            button: true,
+            child: SizedBox(
+              width: 200,
+              height: 60,
+              child: FilledButton(onPressed: () {}, child: const Text('Visível')),
+            ),
+          ),
+        ),
+      ));
+
+      final achados = botoesInertes(tester);
+      expect(achados, hasLength(1));
+      expect(achados.single, contains('Rótulo de botão'));
+      handle.dispose();
+    });
+
+    testWidgets('não acusa controle legitimamente desabilitado', (tester) async {
+      // `onPressed: null` também é `isButton` sem ação de toque, mas declara
+      // `isEnabled: false` e o leitor de tela anuncia "desativado". Uma
+      // varredura que acusasse isto apontaria defeito em toda tela com um botão
+      // desabilitado — e seria apagada.
+      final handle = tester.ensureSemantics();
+      await tester.pumpWidget(const MaterialApp(
+        home: Scaffold(body: FilledButton(onPressed: null, child: Text('Indisponível agora'))),
+      ));
+
+      expect(botoesInertes(tester), isEmpty);
+      handle.dispose();
+    });
+
+    testWidgets('não passa em silêncio quando não há o que medir', (tester) async {
+      final handle = tester.ensureSemantics();
+      await tester.pumpWidget(const MaterialApp(home: Scaffold(body: SizedBox())));
+
+      expect(() => botoesInertes(tester), throwsA(isA<TestFailure>()));
+      handle.dispose();
+    });
   });
 
   group('Lembretes locais (RF06)', () {

@@ -1,6 +1,5 @@
 
 import 'package:flutter/material.dart';
-import 'package:flutter/semantics.dart' show SemanticsAction;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sinalacs_acs/app/app.dart';
 import 'package:sinalacs_acs/core/geo/location_cell.dart';
@@ -18,6 +17,7 @@ import 'package:sinalacs_acs/core/security/database_key_store.dart';
 import 'package:sinalacs_acs/core/services/visit_pull_service.dart';
 
 import 'support/fakes.dart';
+import 'support/semantics_scan.dart';
 
 /// Credencial sintética dos testes de tela. Nunca uma senha real: o fake só
 /// registra o que a tela mandou, e nenhum teste fala com servidor de verdade.
@@ -156,6 +156,30 @@ void main() {
       handle.dispose();
     });
 
+    testWidgets('o painel com um alerta na fila não anuncia botão sem ação de toque', (tester) async {
+      // O painel é a tela de trabalho do ACS — grade de alertas, barra de
+      // navegação e os botões de cada cartão (confirmar, escalonar, visitar).
+      // É onde um nó "botão" inerte custaria mais: o leitor de tela o anuncia
+      // antes do controle real.
+      final handle = tester.ensureSemantics();
+      final backend = FakeAcsBackend();
+      late FakeAlertFeed feed;
+
+      await tester.pumpWidget(SinalAcsApp(
+        backend: backend,
+        feedBuilder: (queue) => feed = FakeAlertFeed(queue),
+      ));
+      await entrar(tester);
+      await tester.pumpAndSettle();
+
+      feed.deliver(testAlert(alertId: 'alerta-varredura'));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('alert_alerta-varredura')), findsOneWidget);
+
+      expectNenhumBotaoInerte(tester);
+      handle.dispose();
+    });
+
     testWidgets('deve avisar quando a central de alertas está inacessível', (tester) async {
       // Um ACS que não sabe que parou de receber alertas é o pior modo de falha
       // do produto: a falha precisa ser visível, não silenciosa.
@@ -192,14 +216,21 @@ void main() {
       // paciente: o nome acessível é o texto visível do botão, exposto pelo
       // próprio botão. O `Semantics` com "Entrar no painel de priorização"
       // criava um nó sem ação antes do botão real (WCAG 4.1.2).
+      //
+      // Com `String`, `bySemanticsLabel` casa por **igualdade exata**
+      // (`finders.dart`: `pattern == propertyValue`), não por *contains*: como
+      // igualdade implica contenção, as duas asserções abaixo continuam
+      // valendo — mas quem acrescentar algo ao texto visível ("Entrar com
+      // credenciais agora") vê esta linha falhar mesmo com o rótulo contendo o
+      // texto. Com `RegExp` o finder casa por `hasMatch`.
       expect(find.bySemanticsLabel('Entrar com credenciais'), findsOneWidget);
       expect(find.bySemanticsLabel('Entrar no painel de priorização'), findsNothing);
-      final loginNode = tester.getSemantics(find.byKey(const Key('login_button')));
-      expect(
-        loginNode.getSemanticsData().hasAction(SemanticsAction.tap),
-        isTrue,
-        reason: 'o nó que carrega o nome do botão tem de ser o que responde ao toque',
-      );
+      // A varredura substitui a asserção de `tap` que ficava aqui: aquela era
+      // verde também com o defeito — nela o nó que carrega o nome é justamente
+      // o inerte, e quem responde ao toque é o filho — e afirmava um invariante
+      // ("o nó que carrega o nome do botão tem de ser o que responde ao toque")
+      // que ela não testava.
+      expectNenhumBotaoInerte(tester);
 
       expect(minimumSize.height, greaterThanOrEqualTo(48));
       expect(minimumSize.width, greaterThanOrEqualTo(48));
@@ -219,6 +250,56 @@ void main() {
       await expectLater(tester, meetsGuideline(androidTapTargetGuideline));
       await expectLater(tester, meetsGuideline(labeledTapTargetGuideline));
       handle.dispose();
+    });
+
+    group('a varredura de nós inertes detecta o que promete detectar', () {
+      // Sem isto, a varredura poderia estar olhando uma árvore que não montou e
+      // passando para todo mundo — o mesmo modo de falha silenciosa que ela
+      // existe para pegar. O app admin guarda o detector de overflow dele do
+      // mesmo jeito (`layout_harness_sanity_test.dart`).
+      testWidgets('acusa o "botão" sem ação de toque', (tester) async {
+        final handle = tester.ensureSemantics();
+        await tester.pumpWidget(MaterialApp(
+          home: Scaffold(
+            body: Semantics(
+              label: 'Rótulo de botão',
+              button: true,
+              child: SizedBox(
+                width: 200,
+                height: 60,
+                child: FilledButton(onPressed: () {}, child: const Text('Visível')),
+              ),
+            ),
+          ),
+        ));
+
+        final achados = botoesInertes(tester);
+        expect(achados, hasLength(1));
+        expect(achados.single, contains('Rótulo de botão'));
+        handle.dispose();
+      });
+
+      testWidgets('não acusa controle legitimamente desabilitado', (tester) async {
+        // `onPressed: null` também é `isButton` sem ação de toque, mas declara
+        // `isEnabled: false` e o leitor de tela anuncia "desativado". Uma
+        // varredura que acusasse isto apontaria defeito em toda tela com um
+        // botão desabilitado — e seria apagada.
+        final handle = tester.ensureSemantics();
+        await tester.pumpWidget(const MaterialApp(
+          home: Scaffold(body: FilledButton(onPressed: null, child: Text('Indisponível agora'))),
+        ));
+
+        expect(botoesInertes(tester), isEmpty);
+        handle.dispose();
+      });
+
+      testWidgets('não passa em silêncio quando não há o que medir', (tester) async {
+        final handle = tester.ensureSemantics();
+        await tester.pumpWidget(const MaterialApp(home: Scaffold(body: SizedBox())));
+
+        expect(() => botoesInertes(tester), throwsA(isA<TestFailure>()));
+        handle.dispose();
+      });
     });
 
     testWidgets('não deve pré-preencher credenciais no formulário', (tester) async {

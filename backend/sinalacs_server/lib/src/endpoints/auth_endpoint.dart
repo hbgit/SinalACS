@@ -143,7 +143,11 @@ class AuthEndpoint extends Endpoint {
         .verifyOtp(cpf: parsed, code: code, deviceId: deviceId);
 
     return DevelopmentLoginResult(
-      // 1 hora é o que `spec/lgpd_design.md` LGPD-RT06 exige para o paciente.
+      // 1 hora **neste caminho**, o de login com OTP verificado — que é o que
+      // `spec/lgpd_design.md` LGPD-RT06 exige para o paciente. Não é o TTL de
+      // toda sessão de paciente: há dois caminhos de emissão, e o de onboarding
+      // (`onboarding_endpoint.dart`) ainda emite o padrão de 15 minutos, lacuna
+      // do RF02 registrada no plano.
       // Com o padrão de 15 minutos, e sem refresh token, o paciente teria de
       // receber um SMS novo a cada 15 minutos: o código OTP não pode ser
       // reapresentado como a senha do ACS pode, então não existe renovação
