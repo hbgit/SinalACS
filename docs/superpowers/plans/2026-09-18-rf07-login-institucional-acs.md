@@ -1236,7 +1236,7 @@ import 'package:sinalacs_server/src/infrastructure/database/orm_acs_credential_s
       );
 ```
 
-- [ ] **Step 5: Adicionar o endpoint**
+- [ ] **Step 5: Adicionar o endpoint e registrar a postura pública do método novo**
 
 Em `backend/sinalacs_server/lib/src/endpoints/auth_endpoint.dart`, acrescente o método na classe `AuthEndpoint`:
 
@@ -1268,6 +1268,24 @@ Em `backend/sinalacs_server/lib/src/endpoints/auth_endpoint.dart`, acrescente o 
     );
   }
 ```
+
+**E acrescente o método à allowlist do guard de postura.** O plano de RBAC (Task 4) entregou
+`test/unit/endpoint_auth_posture_test.dart`, que agora exige que **todo método público que
+recebe `Session session`** chame `authenticate(...)`/`authenticateToken(...)` ou conste de
+`_publicMethodsByDesign` com o motivo. `loginInstitutional` é público por desenho — quem
+chama ainda não tem token —, então sem esta entrada a suíte fica vermelha no primeiro
+`dart test` depois do método novo:
+
+```dart
+  'AuthEndpoint.loginInstitutional':
+      'login por desenho: quem chama ainda não tem sessão — matrícula e senha '
+      'são a credencial',
+```
+
+Isso é o guard funcionando como projetado: acrescentar um método público a um endpoint
+existente obriga a declarar a postura dele por escrito, em vez de deixá-la implícita. Rode
+`cd backend/sinalacs_server && dart test test/unit/endpoint_auth_posture_test.dart` e
+confirme que volta a passar.
 
 Não esqueça de atualizar o comentário de classe de `AuthEndpoint`, que hoje diz "Acesso de desenvolvimento. **Não** é autenticação institucional." — passa a descrever as duas coisas:
 

@@ -1418,7 +1418,24 @@ Em `alert_runtime.dart`, acrescente:
 
 Lembre de zerar `_cpfHasher`/`_smsGateway` em `overrideConfig` (o método já zera `_auth`/`_healthDataCipher` pelo mesmo motivo).
 
-- [ ] **Step 4: Adicionar os endpoints**
+**E acrescente os dois métodos à allowlist do guard de postura.** O plano de RBAC (Task 4)
+entregou `test/unit/endpoint_auth_posture_test.dart`, que agora exige que **todo método
+público que recebe `Session session`** chame `authenticate(...)`/`authenticateToken(...)`
+ou conste de `_publicMethodsByDesign` com o motivo. `requestOtp` e `verifyOtp` são públicos
+por desenho — é o login de quem ainda não tem sessão —, então sem estas entradas a suíte
+fica vermelha no primeiro `dart test` depois deles:
+
+```dart
+  'AuthEndpoint.requestOtp':
+      'login por desenho: quem pede o código ainda não tem sessão',
+  'AuthEndpoint.verifyOtp':
+      'login por desenho: é esta chamada que emite a sessão do paciente',
+```
+
+Rode `cd backend/sinalacs_server && dart test test/unit/endpoint_auth_posture_test.dart` e
+confirme que volta a passar.
+
+- [ ] **Step 4: Adicionar os endpoints e registrar a postura pública deles**
 
 Em `auth_endpoint.dart`:
 
