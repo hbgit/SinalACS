@@ -2,7 +2,7 @@
 
 ## 1. Inventário de Dados e Classificação de Sensibilidade
 
-A tabela abaixo consolida o mapeamento exaustivo de dados persistidos pelo backend do SinalACS, contemplando as 11 tabelas de domínio do sistema, os modelos de transporte/persistência intermediária e as tabelas operacionais geradas pelo framework Serverpod. A classificação adota os parâmetros da LGPD (Lei nº 13.709/2018, Art. 5º, I e II), confrontando-os com as invariantes de negócio (INV-01 a INV-05) e os requisitos funcionais de privacidade (LGPD-RF01 a RF21).
+A tabela abaixo consolida o mapeamento exaustivo de dados persistidos pelo backend do SinalACS, contemplando as tabelas de domínio do sistema, os modelos de transporte/persistência intermediária e as tabelas operacionais geradas pelo framework Serverpod. A classificação adota os parâmetros da LGPD (Lei nº 13.709/2018, Art. 5º, I e II), confrontando-os com as invariantes de negócio (INV-01 a INV-05) e os requisitos funcionais de privacidade (LGPD-RF01 a RF21).
 
 | Tabela / Entidade | Coluna / Atributo | Tipo de Dado | Classificação LGPD | Tratamento Atual | Risco / Avaliação de Conformidade |
 | :--- | :--- | :--- | :--- | :--- | :--- |

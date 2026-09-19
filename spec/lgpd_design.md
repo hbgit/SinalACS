@@ -618,7 +618,7 @@ como um item separado a lembrar depois.
 | Propriedade | Descrição |
 |-------------|-----------|
 | **Descrição** | Todas as APIs devem exigir autenticação (JWT) e implementar controle de acesso (RBAC) para garantir que apenas usuários autorizados acessem dados específicos. |
-| **Implementação** | Middleware de autenticação na camada de aplicação do backend; validação de permissões por endpoint; tokens JWT com expiração curta; refresh token seguro. Ainda não implementado no código atual — hoje só existe um endpoint de login de desenvolvimento sem autenticação institucional real (ver `CLAUDE.md`). |
+| **Implementação** | Middleware de autenticação na camada de aplicação do backend; validação de permissões por endpoint; tokens JWT com expiração curta; refresh token seguro. Ainda não implementado no código atual — hoje só existe um endpoint de login de desenvolvimento sem autenticação institucional real (ver `CLAUDE.md`). **Atualização (2026-09-18):** o login institucional existe (`auth.loginInstitutional`, RF07) — matrícula + senha verificadas com Argon2id contra `user_credentials`, com bloqueio por tentativas e auditoria em `audit_logs` — e a verificação de token dos endpoints sensíveis está centralizada (`Authorization.require`; os endpoints estendem `AuthenticatedEndpoint`). O que segue pendente desta linha: o token expira em 15 minutos, **não há refresh token** (LGPD-RT06) e os papéis `coordinator`/`admin` continuam sem caminho de emissão. |
 | **Critério de Aceite** | ✓ Todas as APIs autenticadas<br>✓ Testes de acesso não autorizado<br>✓ RBAC implementado e testado |
 
 ### LGPD-RT02 - Criptografia de Dados Sensíveis no Banco

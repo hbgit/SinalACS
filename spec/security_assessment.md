@@ -249,7 +249,7 @@ matrículas válidas distribui as tentativas. O insumo existe
 para o `ipHash` de `audit_logs`), mas nenhum contador por origem foi
 implementado: o estado de bloqueio vive na linha da credencial. E uma varredura
 de matrículas **inexistentes não deixa rastro em `audit_logs`**:
-`AuditEvent.userId` é obrigatório e tem FK para `users`, então não há como
+`audit_logs.userId` é obrigatório e tem FK para `users`, então não há como
 auditar um sujeito que não existe — o que `spec/lgpd_design.md` pede como
 "registro de tentativas de acesso" fica atendido só para tentativas sobre contas
 reais. Fechar isso exige ou um sujeito por origem (IP) ou uma trilha separada

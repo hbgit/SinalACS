@@ -115,20 +115,21 @@ cliente · **`parcial`** = existe, mas alimentado por dado fabricado ·
 
 | Método RPC | Paciente | ACS | Admin |
 |---|---|---|---|
-| `auth.developmentLogin` | ✅ `backend_client.dart:113` | ✅ `backend_client.dart:88` | ❌ |
+| `auth.developmentLogin` | ✅ `backend_client.dart:113` | ✅ só em `tool/` e `integration_test/` — `backend_client.dart:160` | ❌ |
+| `auth.loginInstitutional` | — | ✅ `backend_client.dart:113` | ❌ |
 | `health.check` | ⚠️ só em `live_check`/teste | ❌ saiu da interface (L-14) | ❌ |
 | `onboarding.generateEnrollmentToken` | ❌ | ❌ | ❌ |
 | `onboarding.completeEnrollment` | ✅ `backend_client.dart:199` | — | ❌ |
 | `triage.evaluate` | ✅ `backend_client.dart:143` | — | ❌ |
 | `alerts.createRedAlert` | ✅ `backend_client.dart:180` | — | ❌ |
 | `alerts.statusFor` | ✅ `backend_client.dart:161` | — | ❌ |
-| `alerts.acknowledge` | — | ✅ `backend_client.dart:113` | ❌ |
-| `visits.sync` | — | ✅ `backend_client.dart:125` | ❌ |
-| `visits.pull` | — | ✅ `backend_client.dart:140` | ❌ |
-| `patients.listMicroArea` | — | ✅ `backend_client.dart:148` | ❌ |
-| **Cobertura** | **6/11** | **5/11** | **0/11** |
+| `alerts.acknowledge` | — | ✅ `backend_client.dart:185` | ❌ |
+| `visits.sync` | — | ✅ `backend_client.dart:197` | ❌ |
+| `visits.pull` | — | ✅ `backend_client.dart:212` | ❌ |
+| `patients.listMicroArea` | — | ✅ `backend_client.dart:220` | ❌ |
+| **Cobertura** | **6/12** | **6/12** | **0/12** |
 
-**União paciente+ACS: 10/11.** Com uma exceção, nenhum endpoint do backend
+**União paciente+ACS: 11/12.** Com uma exceção, nenhum endpoint do backend
 está sem consumidor: `onboarding.generateEnrollmentToken` é o gerador de
 token de convite do lado da unidade de saúde (RF02) e só tem consumidor em
 teste (`onboarding_endpoint_test.dart`) — nasceu para o backoffice/posto,

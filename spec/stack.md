@@ -16,7 +16,7 @@
 ## 2. DX, Autenticação & Infraestrutura
 
 * **IaC:** Pulumi (com TypeScript) para provisionar os containers em VPS robustas. Abstrai a infraestrutura como código com forte tipagem, sem o *vendor lock-in* do AWS CDK.
-* **Autenticação na Borda:** Módulo de autenticação na camada de aplicação do backend acoplado ao **Traefik** como *Reverse Proxy/Edge Gateway*. O Traefik roteia tráfego REST e os WebSockets do MQTT. Ainda não implementado — hoje o backend só tem um endpoint de login de desenvolvimento, sem autenticação institucional real.
+* **Autenticação na Borda:** Módulo de autenticação na camada de aplicação do backend acoplado ao **Traefik** como *Reverse Proxy/Edge Gateway*. O Traefik roteia tráfego REST e os WebSockets do MQTT. Ainda não implementado — hoje o backend só tem um endpoint de login de desenvolvimento, sem autenticação institucional real. **Atualização (2026-09-18):** a autenticação institucional existe (`auth.loginInstitutional`, RF07) — matrícula + senha com Argon2id contra `user_credentials`, bloqueio por tentativas e auditoria. O que segue não implementado é o desenho desta seção: a autenticação vive na camada de aplicação do backend, não acoplada ao Traefik, e o RPC segue sem TLS (L-08).
 * **Login Fricção Zero:** A entrada *passwordless* por OTP ou QR Code no app do paciente é delegada à camada de aplicação.
 
 
