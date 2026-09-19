@@ -2250,6 +2250,35 @@ Co-Authored-By: Claude Code <noreply@anthropic.com>"
 
 **Files:**
 - Modify: `spec/validation_report.md` (linha 69 — RF01; linha 548 não; linha 99 não)
+- Modify: `spec/ux_accessibility_assessment.md` (**o ponto cego do 2.5.3** — ver abaixo)
+
+> **Um ponto cego da auditoria de acessibilidade, com três sítios medidos. Não é dívida do RF01
+> — é dívida da auditoria, e é aqui que ela tem dono.**
+>
+> O review da Task 7 mediu que `Semantics(container: true, label: X, button: true)` sobre um
+> `FilledButton` **não funde** com o botão: cria um nó próprio **sem ação de toque**. O leitor de
+> tela encontra primeiro um "botão" que **não faz nada**, e só depois o botão real. São dois
+> defeitos juntos — **WCAG 2.5.3** (Label in Name, **nível A**: o nome não contém o texto visível)
+> e **4.1.2** (nó inerte) —, e a correção **não é reescrever o texto**: isso deixaria dois nós com
+> o mesmo nome e o primeiro inerte. É remover o wrapper, ou usar `excludeSemantics: true` **mais**
+> `onTap` explícito.
+>
+> **`spec/ux_accessibility_assessment.md` não avalia isso:** zero ocorrências de `2.5.3` ou "Label
+> in Name". A §2.3 se chama "WCAG **4.1.2**" e lista *onde existem* instâncias de `Semantics()` —
+> cita "Login Paciente" como **sítio**, sem avaliar o valor. A baseline declarada é 2.1 AA, e
+> 2.5.3 é nível A do 2.1: está no escopo e simplesmente não foi avaliado.
+>
+> Corrigidos nesta entrega: o login do paciente e o login do ACS. **Registre os três que sobram**,
+> com a medição de cada um, na seção de achados do documento:
+>
+> | Sítio | O que foi medido | Por que não foi corrigido |
+> |---|---|---|
+> | `apps/patient/lib/app/app.dart` — **botão de emergência**, `label: 'Enviar alerta de emergência'` sobre o texto visível `'EMERGÊNCIA'` | `#47 isButton / "Enviar alerta de emergência" / sem actions` + filho `#48 tap / "EMERGÊNCIA"`. **2.5.3 e 4.1.2**, com o nó inerte cobrindo a área do `ListView`, **no botão mais crítico do app** | Remover o wrapper mudaria o anúncio para só "EMERGÊNCIA", perdendo a frase descritiva — é decisão de conteúdo, não de código. A correção certa é um rótulo que **contenha** o texto visível |
+> | `apps/admin/lib/app/app.dart:119` — login do backoffice | `#10 "Entrar no backoffice administrativo"` sem actions + `#11 tap / "Entrar"` | É do app admin; fica com a próxima rodada dele |
+> | `apps/patient/lib/app/app.dart:672` — 'Concluir cadastro' (onboarding) | Só a metade 4.1.2 (rótulo == texto visível); **não medido** (botão fora da primeira dobra no viewport de teste) | Declarado como não medido — não o trate como confirmado |
+>
+> Os demais `Semantics(...)` (os `liveRegion`, o botão de sincronizar do ACS) têm outra forma e
+> **não** foram medidos: não os declare defeito sem medir, como o próprio review fez.
 - Modify: `spec/lgpd_design.md` (os **dois** blocos `**Atualização (2026-09-18):**` que falam do login — ver abaixo)
 
 > **Não existe bloco "Estado atual" sobre o login neste arquivo** — este plano apontava para um
