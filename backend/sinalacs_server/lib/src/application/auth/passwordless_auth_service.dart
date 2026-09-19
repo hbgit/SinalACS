@@ -49,6 +49,17 @@ class OtpChallengeRecord {
 abstract interface class OtpChallengeStore {
   Future<PatientCredentialRecord?> findByCpfHash(String cpfHash);
 
+  /// Grava o desafio e **atribui o `id` dele**: o identificador é do store, não
+  /// de quem chama. `OtpChallengeRecord.id` é obrigatório para que a leitura o
+  /// carregue, mas quem grava manda `id: ''` — quem gera a chave é o banco, no
+  /// INSERT — e o id de verdade só aparece em [latestOpen], que é de onde o
+  /// serviço o tira para chamar [registerAttempt] e [consume].
+  ///
+  /// Um store escrito só por este contrato que HONRASSE o `id: ''` gravaria a
+  /// linha com chave vazia, e as duas escritas seguintes — contador de
+  /// tentativas e marca de consumo — não achariam mais o desafio: o limite de
+  /// tentativas e o uso único parariam de funcionar sem erro nenhum, porque
+  /// [registerAttempt] e [consume] não têm como falhar por linha ausente.
   Future<void> save(OtpChallengeRecord challenge);
 
   /// Desafio mais recente, não consumido e ainda dentro da validade.
@@ -93,9 +104,18 @@ class PasswordlessAuthService {
   static const _invalidCode = 'Código inválido ou expirado. Peça um novo.';
 
   /// `requestOtp` devolve `void` e **não** distingue "enviado" de "CPF não
-  /// encontrado": qualquer diferença de resposta (inclusive de tempo, por isso
-  /// o envio do SMS só acontece quando o paciente existe) transformaria este
-  /// endpoint num verificador de quem é paciente da unidade.
+  /// encontrado": qualquer diferença de resposta transformaria este endpoint num
+  /// verificador de quem é paciente da unidade.
+  ///
+  /// A igualdade é de **payload, status e efeitos**: as duas recusas não
+  /// lançam, não gravam desafio, não enviam SMS e não escrevem auditoria.
+  ///
+  /// O **tempo não está equalizado**, e a versão anterior deste comentário
+  /// dizia o contrário: o caminho válido faz um `latestOpen`, um `save` e o
+  /// envio, que a recusa não faz. Um cronômetro distingue os dois. Não dá para
+  /// equalizar aqui sem mentir sobre o envio; quando houver gateway de verdade
+  /// o termo dominante é a ida ao provedor, e tirar o envio do caminho de
+  /// resposta é a correção. Lacuna registrada na Task 8 — não resolvida.
   Future<void> requestOtp({
     required Cpf cpf,
     required DateTime birthDate,
@@ -151,7 +171,16 @@ class PasswordlessAuthService {
     }
 
     final challenge = await store.latestOpen(record.userId, at);
-    if (challenge == null || challenge.attempts >= maxAttempts) {
+    // As duas últimas condições repetem o que `latestOpen` promete filtrar, de
+    // propósito: uso único e validade são propriedades de SEGURANÇA, e apoiá-las
+    // só na consulta de outro arquivo faz esta suíte ficar verde no dia em que
+    // aquele filtro for esquecido. Contra o store real não muda nada — ele já
+    // não devolve desafio consumido nem expirado —, e o desfecho é o mesmo de
+    // qualquer recusa de código.
+    if (challenge == null ||
+        challenge.attempts >= maxAttempts ||
+        challenge.consumedAt != null ||
+        !challenge.expiresAt.isAfter(at)) {
       await _recordAudit(record.userId, 'denied_code');
       throw OtpRequestException(message: _invalidCode);
     }

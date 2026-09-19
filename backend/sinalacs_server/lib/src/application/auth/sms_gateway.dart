@@ -12,6 +12,8 @@ abstract interface class SmsGateway {
   /// [phone] é o identificador de destino. Hoje é o CPF formatado, porque não
   /// existe coluna de telefone em `Patient` nem no ER do PRD — ver a lacuna
   /// registrada no plano. O gateway real traduz para o número na integração.
+  /// O gateway de log **ignora** este parâmetro de propósito: ver
+  /// `LoggingSmsGateway`.
   Future<void> sendOtp({required String phone, required String code});
 }
 
@@ -22,13 +24,24 @@ abstract interface class SmsGateway {
 /// `APP_ENV=development`. O código é dado de curta duração e de uso único, mas
 /// ainda assim vai para o log de propósito — é o único jeito de exercitar o
 /// fluxo sem provedor — e o texto deixa isso explícito.
+///
+/// O **destino não entra no texto**, e é por isso que o parâmetro de destino
+/// não é usado aqui. Um gateway real mascara um telefone (`+55 ** ****-1234`),
+/// mas o destino deste é um CPF: uma máscara de CPF ainda diz de quem é o
+/// dado, então o certo é não registrar o dado. Quem lê este log acabou de
+/// digitar o CPF no formulário e sabe de quem é a requisição; o que ele não tem
+/// é o código, e é só isso que a linha entrega. Quem prende a ausência da
+/// referência é o teste de fonte em `passwordless_auth_service_test.dart`, e
+/// não a disciplina de quem editar este corpo depois.
 class LoggingSmsGateway implements SmsGateway {
   const LoggingSmsGateway();
 
   @override
   Future<void> sendOtp({required String phone, required String code}) async {
+    // O texto sai só do código; o destino é deliberadamente ignorado (ver a
+    // doc da classe).
     stdout.writeln(
-      '[SMS-GATEWAY=log] código de acesso para $phone: $code '
+      '[SMS-GATEWAY=log] código de acesso: $code '
       '(gateway de desenvolvimento — nenhum SMS foi enviado)',
     );
   }
