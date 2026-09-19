@@ -696,13 +696,15 @@ plano **não** fez:
   estrutural barata, ainda não feita: um teto global de derivações simultâneas.
   Registrado no achado F6 de `spec/security_assessment.md`.
 - **Um deploy que não rode o seed não tem como ninguém entrar.** A credencial
-  institucional nasce de `bin/seed_acs_credentials.dart`, único código da árvore
-  que grava em `user_credentials`, e ele **recusa** rodar fora de
-  `APP_ENV=development`. Antes desta mudança a stack nova funcionava de
-  imediato, porque o app chamava `auth.developmentLogin`; agora o app só chama
-  `loginInstitutional`, então uma instalação sem o seed (um `APP_ENV=production`
-  qualquer) sobe com o app **sem nenhum caminho de login**. A proveniência da
-  credencial estava documentada; a consequência, não.
+  institucional nasce de `bin/seed_acs_credentials.dart` — o único caminho pelo
+  qual uma credencial passa a existir (depois dela a tabela só é escrita para
+  contar tentativas e limpar bloqueio, em `OrmAcsCredentialStore`) — e esse
+  script **recusa** rodar fora de `APP_ENV=development`. Antes desta mudança a
+  stack nova funcionava de imediato, porque o app chamava
+  `auth.developmentLogin`; agora o app só chama `loginInstitutional`, então uma
+  instalação sem o seed (um `APP_ENV=production` qualquer) sobe com o app **sem
+  nenhum caminho de login**. A proveniência da credencial estava documentada; a
+  consequência, não.
 - **Troca de senha pelo próprio ACS.** Não há fluxo; `saveCredential` existe no
   serviço para que o seed e uma futura troca o usem.
 

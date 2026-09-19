@@ -366,6 +366,62 @@ void main() {
       );
     });
 
+    test('a falha depois do bloqueio vencido recomeça a contagem', () async {
+      final session = sessionBuilder.build();
+      // Bloqueio JÁ VENCIDO com o contador no limite: a linha em que o serviço
+      // decide reiniciar em 1 em vez de somar. Quem APLICA a decisão é o SQL
+      // (`CASE WHEN @restart THEN 1` e `lockedUntil = NULL` no reinício), então
+      // só um Postgres de verdade prende a regra — o fake do teste unitário
+      // espelha a mesma regra e, por construção, não acusa erro nenhum nela.
+      await _seedFailedAttempts(
+        session,
+        failedAttempts: 5,
+        lockedUntil: DateTime.now().toUtc().subtract(const Duration(minutes: 1)),
+      );
+
+      await expectLater(
+        endpoints.auth.loginInstitutional(
+          sessionBuilder,
+          matricula: _matricula,
+          password: 'outra',
+        ),
+        throwsA(isA<AuthenticationFailedException>()),
+      );
+
+      final credential = await _credential(session);
+      // 1, e não 6: sem o reinício, `6 >= 5` trancaria a conta de novo a cada
+      // tentativa e uma tentativa por janela bastaria para manter um ACS fora
+      // para sempre.
+      expect(credential?.failedAttempts, 1);
+      // E o bloqueio vencido sai da linha: manter `lockedUntil` no passado
+      // deixaria a leitura seguinte ambígua.
+      expect(credential?.lockedUntil, isNull);
+    });
+
+    test('a contagem recusa a escrita enquanto o bloqueio está ativo', () async {
+      final session = sessionBuilder.build();
+      final ativo = DateTime.now().toUtc().add(const Duration(minutes: 5));
+      await _seedFailedAttempts(session, failedAttempts: 5, lockedUntil: ativo);
+
+      // Chamada direta ao store, com o serviço fora do caminho: com bloqueio
+      // ativo o serviço recusa ANTES de contar (e é isso que o teste
+      // `bloqueio ativo não conta tentativa nem com a senha errada` prende), mas
+      // o serviço não é o único caminho até a `UPDATE` — duas requisições
+      // concorrentes podem chegar aqui com a linha já trancada por outra. É o
+      // `WHERE` da instrução que garante "não conta nem estende" nesse caso.
+      await AlertRuntimeHarness.store(session).registerFailedAttempt(
+        _acsId,
+        restartCounter: false,
+        maxFailedAttempts: InstitutionalAuthService.maxFailedAttempts,
+        lockUntil: ativo.add(const Duration(minutes: 15)),
+        at: DateTime.now().toUtc(),
+      );
+
+      final credential = await _credential(session);
+      expect(credential?.failedAttempts, 5);
+      expect(credential?.lockedUntil, ativo);
+    });
+
     test('o bloqueio só é revelado a quem acertou a senha', () async {
       final session = sessionBuilder.build();
       final agora = DateTime.now().toUtc();

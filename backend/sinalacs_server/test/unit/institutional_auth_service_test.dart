@@ -46,7 +46,7 @@ class _FakeStore implements AcsCredentialStore {
     final previous = current?.failedAttempts ?? 0;
     final bloqueadoAgora =
         current?.lockedUntil != null && current!.lockedUntil!.isAfter(at);
-    if (bloqueadoAgora && !restartCounter) return; // mesmo `WHERE` do SQL
+    if (bloqueadoAgora) return; // mesmo `WHERE` do SQL
 
     final next = restartCounter ? 1 : previous + 1;
     final nextLockedUntil =
@@ -526,10 +526,14 @@ void main() {
         throwsA(isA<AuthenticationFailedException>()),
       );
 
-      // A senha está errada de propósito: uma implementação que verificasse a
-      // senha ANTES do bloqueio passaria em todos os outros testes, e aqui
-      // contaria a tentativa e regravaria o bloqueio a cada chute durante o
-      // castigo — re-trancando a conta para sempre.
+      // Quem barra a contagem aqui são duas coisas, e nenhuma delas é a ordem:
+      // o ramo de bloqueio ativo DENTRO do caminho da senha errada
+      // (`institutional_auth_service.dart:172-180`, que responde a genérica sem
+      // contar) e, do lado do store, o `WHERE` da UPDATE — que recusa a escrita
+      // enquanto `lockedUntil` está no futuro, e cujo espelho neste fake devolve
+      // cedo. O que a senha errada mede é o par que importa: nem linha nova de
+      // tentativa, nem bloqueio reescrito a cada chute durante o castigo — que é
+      // como a conta se re-trancaria para sempre.
       expect(store.fieldsWritten['failedAttempts'], isNull);
       expect(store.fieldsWritten['lockedUntil'], isNull);
     });

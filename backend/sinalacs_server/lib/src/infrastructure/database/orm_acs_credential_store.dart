@@ -106,10 +106,14 @@ class OrmAcsCredentialStore implements AcsCredentialStore {
     // - `@lockUntil` é o vencimento já calculado pelo serviço
     //   (`at.add(lockDuration)`), para o store não conhecer a duração.
     //
-    // O `WHERE` recusa a escrita quando a linha está bloqueada AGORA e o
-    // serviço não mandou reiniciar: assim "bloqueio ativo não conta nem estende
-    // tentativa" — a regra do serviço — continua valendo mesmo quando duas
-    // requisições se cruzam e uma delas leu a linha antes de a outra trancá-la.
+    // O `WHERE` recusa a escrita enquanto a linha está bloqueada AGORA: assim
+    // "bloqueio ativo não conta nem estende tentativa" — a regra do serviço —
+    // continua valendo mesmo quando duas requisições se cruzam e uma delas leu
+    // a linha antes de a outra trancá-la. O reinício do contador não precisa de
+    // cláusula própria aqui: bloqueio vencido já satisfaz `"lockedUntil" <= @at`,
+    // então a escrita acontece; e se, entre a leitura do serviço e esta UPDATE,
+    // outra requisição re-trancar a conta, a escrita é recusada — um leitor
+    // atrasado não derruba um bloqueio recém-aplicado.
     //
     // Sem `RETURNING`: o serviço não consome o contador resultante (a falha é
     // uma recusa de qualquer forma) e quem observa o estado é o teste, lendo a
@@ -134,7 +138,7 @@ class OrmAcsCredentialStore implements AcsCredentialStore {
                END,
              "updatedAt" = @at
        WHERE "userId" = @userId::uuid
-         AND ("lockedUntil" IS NULL OR "lockedUntil" <= @at OR @restart);
+         AND ("lockedUntil" IS NULL OR "lockedUntil" <= @at);
       ''',
       parameters: QueryParameters.named({
         'restart': restartCounter,

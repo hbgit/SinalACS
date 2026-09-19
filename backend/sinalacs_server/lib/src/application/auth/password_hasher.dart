@@ -32,11 +32,14 @@ class PasswordDigest {
 abstract interface class PasswordHasher {
   Future<PasswordDigest> derive(String password);
 
-  /// `false` para senha errada, e só para isso. Credencial **inválida** lança
-  /// (`ArgumentError` para salt curto demais, `FormatException` para base64
-  /// quebrado): quem chama precisa distinguir "não confere" (conta com
-  /// tentativa contada) de "a linha está corrompida" (erro de servidor), e uma
-  /// exceção para o primeiro caso — ou um `false` para o segundo — apagaria
-  /// essa diferença.
+  /// `false` para senha errada. Credencial **inválida** lança (`ArgumentError`
+  /// para salt curto demais, `FormatException` para base64 quebrado): quem
+  /// chama precisa distinguir "não confere" (conta com tentativa contada) de "a
+  /// linha está corrompida" (erro de servidor), e uma exceção para o primeiro
+  /// caso — ou um `false` para o segundo — apagaria essa diferença. **Uma
+  /// exceção a isso:** um `hashBase64` que decodifica para um comprimento
+  /// diferente do esperado não lança e devolve `false`, indistinguível de senha
+  /// errada — é o limite documentado em `InstitutionalAuthService.login`, e a
+  /// validação de comprimento pertence a quem carrega a linha, não aqui.
   Future<bool> matches(String password, PasswordDigest digest);
 }
