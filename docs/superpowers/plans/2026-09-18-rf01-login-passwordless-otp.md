@@ -649,6 +649,25 @@ const _microAreaId = '00000000-0000-4000-8000-000000000003';
 final _cpf = Cpf.tryParse('12345678909')!;
 final _nascimento = DateTime.utc(1990, 1, 1);
 
+/// Fake que finge o store **tendo esquecido os filtros** de `latestOpen`.
+///
+/// Uso único e validade são duas propriedades de SEGURANÇA. O `_FakeStore`
+/// aplica `consumedAt == null` e `expiresAt.isAfter(at)`, então nunca devolve
+/// linha consumida nem expirada — e um teste escrito sobre ele não consegue
+/// medir o dia em que o store real esquecer um dos dois. Este fake é esse dia,
+/// simulado: devolve a linha mais recente do usuário, sem filtro nenhum.
+class _FakeStoreSemFiltro extends _FakeStore {
+  _FakeStoreSemFiltro({super.record});
+
+  @override
+  Future<OtpChallengeRecord?> latestOpen(String userId, DateTime at) async {
+    final doUsuario = challenges.where(
+      (challenge) => challenge.userId == userId,
+    );
+    return doUsuario.isEmpty ? null : doUsuario.last;
+  }
+}
+
 class _FakeStore implements OtpChallengeStore {
   _FakeStore({this.record});
 
@@ -941,6 +960,26 @@ void main() {
 }
 ```
 
+> **Três armadilhas de teste desta task, todas medidas na rodada de correção.**
+>
+> 1. **O teste do teto de tentativas era auto-referente.** Ele itera
+>    `PasswordlessAuthService.maxAttempts` vezes e depois exige a recusa — o laço acompanha o
+>    valor mutado, o contador chega exatamente nele e **qualquer** valor passa. A mutação
+>    `maxAttempts = 500` deixava a suíte inteira verde; nenhum dos três mutantes de parâmetro
+>    morria. Acrescente as asserções literais de `codeTtl`, `maxAttempts` e `resendCooldown`
+>    num teste próprio, senão os três valores são decorativos.
+> 2. **Prenda a MENSAGEM, não só a classe da exceção.** As recusas de `verifyOtp` usam a mesma
+>    constante `_invalidCode` de propósito; um teste que só assevera
+>    `throwsA(isA<OtpRequestException>())` fica verde no dia em que "CPF desconhecido" ganhar
+>    mensagem própria — que é o oráculo que a task existe para impedir. Compare as duas
+>    mensagens **entre si** (a igualdade é a propriedade; o literal pode mudar de redação).
+>    Idem para as recusas de `requestOtp`: assevere que `store.challenges` e `audit.events`
+>    ficaram **vazios**, não só que nenhum SMS saiu.
+> 3. **O guard de fonte precisa de auto-asserção.** O teste que lê o corpo de
+>    `LoggingSmsGateway.sendOtp` e recusa `\bphone\b` absolve tudo se a extração do corpo
+>    quebrar e ele passar a ler o vazio. Exija `contains('code')` no mesmo corpo: sem isso, um
+>    guard que não olha para lugar nenhum é indistinguível de um guard que aprova.
+
 - [ ] **Step 2: Rodar o teste e confirmar que falha**
 
 Run: `cd backend/sinalacs_server && dart test test/unit/passwordless_auth_service_test.dart`
@@ -975,13 +1014,29 @@ abstract interface class SmsGateway {
 /// `APP_ENV=development`. O código é dado de curta duração e de uso único, mas
 /// ainda assim vai para o log de propósito — é o único jeito de exercitar o
 /// fluxo sem provedor — e o texto deixa isso explícito.
+///
+/// O **destino não entra no texto**. O único chamador preenche `phone` com
+/// `cpf.formatted`, então imprimi-lo põe CPF em claro no log do processo, que a
+/// constraint global proíbe sem cláusula de ambiente — e log de desenvolvimento
+/// é justamente o que acaba colado numa issue. Um gateway real mascara um
+/// telefone (`+55 ** ****-1234`), mas o destino deste é um CPF: máscara de CPF
+/// ainda diz de quem é o dado. Quem lê este log acabou de digitar o CPF no
+/// formulário e sabe de quem é a requisição; o que ele não tem é o código.
+///
+/// `phone` continua na assinatura mesmo sem uso: um `override` de parâmetro
+/// nomeado casa **por nome**, então tirá-lo quebraria o contrato da interface —
+/// e o gateway real precisa dele para endereçar a mensagem. O que dá para tornar
+/// impossível é **usar** o valor, e é isso que o teste de fonte em
+/// `passwordless_auth_service_test.dart` prende, com uma auto-asserção
+/// (`contains('code')`) para não absolver tudo caso a extração do corpo quebre.
 class LoggingSmsGateway implements SmsGateway {
   const LoggingSmsGateway();
 
   @override
   Future<void> sendOtp({required String phone, required String code}) async {
+    // O texto sai só do código; o destino é deliberadamente ignorado.
     stdout.writeln(
-      '[SMS-GATEWAY=log] código de acesso para $phone: $code '
+      '[SMS-GATEWAY=log] código de acesso: $code '
       '(gateway de desenvolvimento — nenhum SMS foi enviado)',
     );
   }
@@ -1162,7 +1217,17 @@ class PasswordlessAuthService {
     }
 
     final challenge = await store.latestOpen(record.userId, at);
-    if (challenge == null || challenge.attempts >= maxAttempts) {
+    // Consumo e validade são checados AQUI também, e não só no filtro de
+    // `latestOpen`. O store da Task 5 filtra os dois, então contra ele este
+    // trecho é inalcançável — é defesa em profundidade de propósito: sem ele,
+    // uso único e TTL são duas propriedades de SEGURANÇA apoiadas só numa
+    // consulta de um arquivo, e o dia em que essa consulta esquecer um filtro
+    // não tem quem avise. Com o defeito, o serviço CONCEDIA ACESSO a um desafio
+    // já consumido e a um expirado (medido no RED da rodada de correção).
+    if (challenge == null ||
+        challenge.consumedAt != null ||
+        !challenge.expiresAt.isAfter(at) ||
+        challenge.attempts >= maxAttempts) {
       await _recordAudit(record.userId, 'denied_code');
       throw OtpRequestException(message: _invalidCode);
     }
