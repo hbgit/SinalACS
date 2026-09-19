@@ -84,6 +84,62 @@ abstract class AcsBackend {
   void close();
 }
 
+/// O backend de um app cujo host de RPC não está em HTTPS (RNF04/L-08).
+///
+/// Existe porque o boot **não pode morrer por configuração** — a mesma política
+/// que o asset da CA recebeu em `main.dart`. Como o [BackendClient] se recusa a
+/// ser construído com um host em texto claro (é o que [requireSecureHost]
+/// garante), o `main` monta este no lugar dele: o app sobe, a tela de login
+/// aparece, e **toda** chamada falha com [failure], que nomeia o host e diz o
+/// que fazer.
+///
+/// O que havia antes: a falha do host era capturada pelo `catch` da leitura do
+/// asset da CA, que logava "CA do RPC não pôde ser carregada" (**falso** — a CA
+/// tinha carregado) e, na linha seguinte, construía o cliente sem CA fora de
+/// qualquer guarda, o que subia antes do `runApp`. Log mentindo sobre a causa e
+/// app que não subia, para quem seguisse a receita antiga de
+/// `--dart-define=SINALACS_HOST=http://…`.
+class MisconfiguredBackend implements AcsBackend {
+  const MisconfiguredBackend(this.failure);
+
+  /// O motivo, como [requireSecureHost] o produziu.
+  final BackendFailure failure;
+
+  @override
+  AuthSession? get session => null;
+
+  @override
+  bool get isAuthenticated => false;
+
+  /// Recusa uma chamada. `Never` avisa o analisador de que nada abaixo disto
+  /// executa, então cada método abaixo é uma linha só.
+  Never _recusar() => throw failure;
+
+  @override
+  Future<AuthSession> login({required String matricula, required String senha}) async =>
+      _recusar();
+
+  @override
+  Future<AuthSession> developmentLogin({required String role}) async => _recusar();
+
+  @override
+  Future<AlertAckResult> acknowledge({required String alertId}) async => _recusar();
+
+  @override
+  Future<List<VisitSyncResult>> syncVisits(List<VisitSyncEntry> visits) async => _recusar();
+
+  @override
+  Future<List<VisitSyncEntry>> pullVisits({required DateTime since}) async => _recusar();
+
+  @override
+  Future<List<MicroAreaPatient>> listPatients() async => _recusar();
+
+  /// Fechar **não** é uma chamada ao backend: não há o que fechar, e um `close`
+  /// que lançasse derrubaria o `finally` de quem só queria encerrar.
+  @override
+  void close() {}
+}
+
 /// Fachada do backend para o app do ACS.
 class BackendClient implements AcsBackend {
   /// [trustedCaBytes] é a CA de desenvolvimento do RPC (RNF04). `null` faz o

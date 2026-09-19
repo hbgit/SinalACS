@@ -4,9 +4,16 @@
 /// se filma é a chamada de método tipada e o resultado tipado. Este script usa
 /// o mesmo cliente gerado (`sinalacs_client`) que os apps Flutter vão consumir.
 ///
+/// O RPC responde por **HTTPS na 443** e quem termina TLS é o Traefik
+/// (RNF04/L-08): a porta 8080 em texto claro deixou de ser publicada. Diferente
+/// dos apps, esta ferramenta roda na máquina (não num APK), então lê a CA de
+/// desenvolvimento do runtime local em vez de um asset Flutter — o mesmo
+/// caminho dos `tool/live_check.dart`.
+///
 /// Pré-requisitos (ver video/README.md):
 ///   · `docker compose up` com o serviço `database-seed` concluído — sem o seed,
 ///     `createRedAlert` falha por chave estrangeira em `alerts.patientId`;
+///   · `./scripts/dev/sync_dev_ca.sh` — a CA do RPC não é versionada;
 ///   · `ENABLE_DEV_LOGIN=true` (já está em docker-compose.yml).
 ///
 /// PRIVACIDADE: o token de acesso é impresso truncado. Nunca mostrar um token
@@ -17,11 +24,25 @@ import 'dart:io';
 
 import 'package:sinalacs_client/sinalacs_client.dart';
 
-const _host = String.fromEnvironment('SINALACS_HOST', defaultValue: 'http://localhost:8080/');
+const _host = String.fromEnvironment('SINALACS_HOST', defaultValue: 'https://localhost/');
 
 /// Pausa entre passos: o vídeo precisa que cada resultado fique legível em
-/// quadro antes de o próximo aparecer.
+/// quadro antes do próximo aparecer.
 const _beat = Duration(milliseconds: 1800);
+
+/// Caminho da CA de desenvolvimento do RPC (a que assina o certificado do
+/// Traefik em 443), dentro do repositório.
+///
+/// Sai da posição DESTE arquivo, e não do diretório de onde o comando foi
+/// executado (`Directory.fromUri(Platform.script)`, o mesmo idioma dos
+/// `tool/live_check.dart`): assim a CA é encontrada tanto de `video/rpc_demo`
+/// (o uso documentado no README) quanto da raiz do repositório. Um caminho
+/// relativo ao CWD erraria por um `../` conforme quem chamasse.
+File _devRpcCaFile() {
+  // video/rpc_demo/bin/red_alert_cycle.dart → raiz do repositório.
+  final repoRoot = Directory.fromUri(Platform.script).parent.parent.parent.parent;
+  return File('${repoRoot.path}/infra/docker/traefik/runtime/certs/ca.crt');
+}
 
 void _step(String n, String title) {
   stdout.writeln('');
@@ -38,7 +59,53 @@ String _truncate(String token) =>
     token.length <= 12 ? '***' : '${token.substring(0, 8)}…${token.substring(token.length - 4)}';
 
 Future<void> main() async {
-  final client = Client(_host)..connectivityMonitor = null;
+  // O host desta ferramenta também é validado. A regra é a mesma do
+  // `requireSecureHost` do app (`apps/*/lib/core/network/backend_client.dart`),
+  // reescrita aqui porque `video/` depende de `sinalacs_client`, e não dos apps.
+  // Sem ela, `--dart-define=SINALACS_HOST=http://…` faria o vídeo mostrar o
+  // ciclo inteiro por um caminho sem criptografia — com o `securityContext`
+  // abaixo aceito e ignorado, sem nada vermelho em lugar nenhum.
+  if (!(Uri.tryParse(_host)?.isScheme('https') ?? false)) {
+    stderr.writeln('erro: o endereço do backend ($_host) não está em HTTPS.');
+    stderr.writeln('A porta 8080 em texto claro não é mais publicada (RNF04/L-08).');
+    exitCode = 2;
+    return;
+  }
+
+  // A CA é lida ANTES de construir o cliente, e a ausência dela PARA a
+  // execução com o motivo real. Se ela faltasse e o cliente fosse construído
+  // assim mesmo, ele cairia no armazenamento do sistema, o handshake falharia
+  // com `CERTIFICATE_VERIFY_FAILED`, e a saída dizia só "falhou" — sem dizer
+  // que faltava um arquivo que o `sync_dev_ca.sh` produz.
+  final caFile = _devRpcCaFile();
+  if (!caFile.existsSync()) {
+    stderr.writeln('erro: a CA do RPC não existe em ${caFile.path}.');
+    stderr.writeln('Suba a stack (docker compose up) e rode ./scripts/dev/sync_dev_ca.sh.');
+    exitCode = 2;
+    return;
+  }
+
+  // A construção do cliente fica sob a **mesma** guarda da leitura acima: uma
+  // CA presente mas corrompida lança `TlsException` aqui, e sem guarda nenhuma
+  // isso subia como exceção não tratada (exit 255) — nunca chegava ao
+  // handshake, e nada na saída dizia qual arquivo estava errado. Guarda
+  // própria, e não o `try` do ciclo, porque o `catch` de lá imprime
+  // `falhou: $error`, que também não nomeia o caminho.
+  Client client;
+  try {
+    client = Client(
+      _host,
+      // Sem os bytes da CA local o cliente cai no armazenamento do sistema, que
+      // não conhece a CA de desenvolvimento: o handshake falha de forma
+      // explícita, nunca aceitando qualquer certificado.
+      securityContext: SecurityContext()..setTrustedCertificatesBytes(caFile.readAsBytesSync()),
+    )..connectivityMonitor = null;
+  } catch (error) {
+    stderr.writeln('erro: a CA do RPC em ${caFile.path} não pôde ser usada: $error');
+    stderr.writeln('Rode ./scripts/dev/sync_dev_ca.sh para copiá-la de novo.');
+    exitCode = 2;
+    return;
+  }
 
   stdout.writeln('\x1B[1mSinalACS — ciclo do alerta vermelho\x1B[0m');
   stdout.writeln('servidor: $_host   (Serverpod RPC)');

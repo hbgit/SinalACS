@@ -15,9 +15,11 @@
 ///   dart run tool/live_check.dart --mqtt-password "$MQTT_ACS_PASSWORD"
 ///
 /// O default do RPC é `https://localhost/` — a 8080 em texto claro não é mais
-/// publicada e quem termina TLS é o Traefik (RNF04/L-08). Diferente dos apps,
-/// esta ferramenta roda na máquina (não num APK), então lê a CA de
-/// desenvolvimento direto do runtime local em vez de um asset Flutter.
+/// publicada e quem termina TLS é o Traefik (RNF04/L-08). O `--host` explícito
+/// passa pela mesma regra: um endereço sem https para aqui com exit 2, antes de
+/// qualquer chamada. Diferente dos apps, esta ferramenta roda na máquina (não
+/// num APK), então lê a CA de desenvolvimento direto do runtime local em vez de
+/// um asset Flutter.
 ///
 /// São **duas** CAs aqui, e trocar uma pela outra quebra a leg oposta: `--ca` é
 /// a do **broker** (MQTT em 8883) e [_devRpcCaBytes] lê a do **RPC** (HTTPS em
@@ -88,7 +90,21 @@ void _emitMetric(
 }
 
 Future<void> main(List<String> args) async {
-  final host = _arg(args, 'host', 'https://localhost/');
+  // O `--host` explícito é validado AQUI. O `BackendClient` isenta host
+  // explícito de propósito — é o caminho dos testes herméticos, que apontam
+  // para servidores fake em `http://127.0.0.1:<porta efêmera>/`. Esta
+  // ferramenta não tem servidor fake: quem digita `--host http://…` quer falar
+  // com a stack, e falava em texto claro. Medido antes desta guarda:
+  // `--host http://localhost/` → exit 1 com "Não foi possível falar com o
+  // servidor (404)" — falhava, e não dizia https.
+  final String host;
+  try {
+    host = requireSecureHost(_arg(args, 'host', 'https://localhost/'));
+  } on BackendFailure catch (failure) {
+    stderr.writeln('erro: ${failure.message}');
+    exitCode = 2;
+    return;
+  }
   final brokerHost = _arg(args, 'broker', 'localhost');
   // CA do BROKER (MQTT). A do RPC é a de [_devRpcCaBytes], e continuam sendo
   // duas: apontar esta para a CA do Traefik derruba a leg do MQTT.
@@ -121,19 +137,35 @@ Future<void> main(List<String> args) async {
     return;
   }
 
-  final backend = BackendClient(host: host, trustedCaBytes: rpcCa);
-  // O paciente usa o cliente gerado diretamente: aqui ele só encena o disparo
-  // para que o ACS tenha o que receber.
-  //
-  // Este cliente passa pelo MESMO TLS, então também precisa da CA: sem ela ele
-  // cai no armazenamento do sistema, que não conhece a CA local, e o handshake
-  // falha com `CERTIFICATE_VERIFY_FAILED` — medido, e era o que derrubava esta
-  // leg. O plano de TLS listava só o `BackendClient` aqui; este cliente é
-  // criado à mão e ficou de fora da lista.
-  final patientClient = api.Client(
-    host,
-    securityContext: SecurityContext()..setTrustedCertificatesBytes(rpcCa),
-  )..connectivityMonitor = null;
+  // Os dois clientes são construídos sob a MESMA guarda da CA acima: uma CA
+  // **presente mas corrompida** lança `TlsException` em
+  // `setTrustedCertificatesBytes`, e sem guarda nenhuma isso subia como
+  // exceção não tratada (exit 255) — nunca chegava ao handshake, e nada na
+  // saída dizia qual arquivo estava errado. Guarda própria, e não o `try` do
+  // ciclo, porque o `catch` de lá imprime `falhou: $error`, que também não
+  // nomeia o caminho.
+  final BackendClient backend;
+  final api.Client patientClient;
+  try {
+    backend = BackendClient(host: host, trustedCaBytes: rpcCa);
+    // O paciente usa o cliente gerado diretamente: aqui ele só encena o
+    // disparo para que o ACS tenha o que receber.
+    //
+    // Este cliente passa pelo MESMO TLS, então também precisa da CA: sem ela
+    // ele cai no armazenamento do sistema, que não conhece a CA local, e o
+    // handshake falha com `CERTIFICATE_VERIFY_FAILED` — medido, e era o que
+    // derrubava esta leg. O plano de TLS listava só o `BackendClient` aqui;
+    // este cliente é criado à mão e ficou de fora da lista.
+    patientClient = api.Client(
+      host,
+      securityContext: SecurityContext()..setTrustedCertificatesBytes(rpcCa),
+    )..connectivityMonitor = null;
+  } catch (error) {
+    stderr.writeln('erro: a CA do RPC em ${_devRpcCaFile().path} não pôde ser usada: $error');
+    stderr.writeln('Rode ./scripts/dev/sync_dev_ca.sh para copiá-la de novo.');
+    exitCode = 2;
+    return;
+  }
 
   stdout.writeln('ACS → $host   broker → $brokerHost:8883');
   MqttSecureClient? mqtt;

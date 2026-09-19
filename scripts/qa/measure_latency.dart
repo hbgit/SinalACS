@@ -44,6 +44,19 @@ Future<void> main(List<String> args) async {
   // termina TLS é o Traefik (RNF04/L-08). O `live_check` recebe este host e lê
   // a CA de desenvolvimento do RPC sozinho, do runtime local.
   final host = _arg(args, 'host', 'https://localhost/');
+
+  // O host explícito é validado AQUI também. O `live_check` já para com a
+  // mensagem certa, mas ela chegaria enterrada no `failures` do relatório JSON,
+  // depois de gastar as amostras — e este script repassa `--host` direto para
+  // ele. A regra é a mesma do `requireSecureHost` do app, reescrita aqui porque
+  // esta ferramenta roda da raiz do repositório e só importa `dart:`.
+  if (!(Uri.tryParse(host)?.isScheme('https') ?? false)) {
+    stderr.writeln('erro: o host ($host) não está em HTTPS. A porta 8080 em '
+        'texto claro não é mais publicada (RNF04/L-08).');
+    exitCode = 2;
+    return;
+  }
+
   final broker = _arg(args, 'broker', 'localhost');
   final mqttPassword = _arg(
     args,

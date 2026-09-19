@@ -11,9 +11,11 @@
 ///   dart run tool/live_check.dart --host https://10.0.2.2/
 ///
 /// O default é `https://localhost/` — a 8080 em texto claro não é mais
-/// publicada e quem termina TLS é o Traefik (RNF04/L-08). Diferente do app,
-/// esta ferramenta roda na máquina (não num APK), então lê a CA de
-/// desenvolvimento do RPC direto do runtime local, e não de um asset Flutter.
+/// publicada e quem termina TLS é o Traefik (RNF04/L-08). O `--host` explícito
+/// passa pela mesma regra: um endereço sem https para aqui com exit 2, antes de
+/// qualquer chamada. Diferente do app, esta ferramenta roda na máquina (não num
+/// APK), então lê a CA de desenvolvimento do RPC direto do runtime local, e não
+/// de um asset Flutter.
 ///
 /// Este arquivo importa a lib do app, mas **só** o que a VM do Dart consegue
 /// compilar: `core/privacy/location_hash.dart` puxa `geolocator` → `flutter` →
@@ -50,10 +52,25 @@ Future<List<int>?> _devRpcCaBytes() async {
 }
 
 Future<void> main(List<String> args) async {
+  // O `--host` explícito é validado AQUI. O `BackendClient` isenta host
+  // explícito de propósito — é o caminho dos testes herméticos, que apontam
+  // para servidores fake em `http://127.0.0.1:<porta efêmera>/`. Esta
+  // ferramenta não tem servidor fake: quem digita `--host http://…` quer falar
+  // com a stack, e falava em texto claro. Medido antes desta guarda:
+  // `--host http://localhost/` → exit 1 com "Não foi possível falar com o
+  // servidor (404)" — falhava, e não dizia https.
   final hostIndex = args.indexOf('--host');
-  final host = hostIndex >= 0 && hostIndex + 1 < args.length
+  final hostArg = hostIndex >= 0 && hostIndex + 1 < args.length
       ? args[hostIndex + 1]
       : 'https://localhost/';
+  final String host;
+  try {
+    host = requireSecureHost(hostArg);
+  } on BackendFailure catch (failure) {
+    stderr.writeln('erro: ${failure.message}');
+    exitCode = 2;
+    return;
+  }
 
   // A CA do RPC é lida ANTES de construir o cliente, e a ausência dela PARA a
   // execução com o motivo real. Se ela faltasse e o cliente fosse construído
@@ -68,7 +85,21 @@ Future<void> main(List<String> args) async {
     return;
   }
 
-  final backend = BackendClient(host: host, trustedCaBytes: rpcCa);
+  // O cliente é construído sob a MESMA guarda da CA acima: uma CA **presente
+  // mas corrompida** lança `TlsException` em `setTrustedCertificatesBytes`, e
+  // sem guarda nenhuma isso subia como exceção não tratada (exit 255) — nunca
+  // chegava ao handshake, e nada na saída dizia qual arquivo estava errado.
+  // Guarda própria, e não o `try` do ciclo, porque o `catch` de lá imprime
+  // `falhou: $error`, que também não nomeia o caminho.
+  final BackendClient backend;
+  try {
+    backend = BackendClient(host: host, trustedCaBytes: rpcCa);
+  } catch (error) {
+    stderr.writeln('erro: a CA do RPC em ${_devRpcCaFile().path} não pôde ser usada: $error');
+    stderr.writeln('Rode ./scripts/dev/sync_dev_ca.sh para copiá-la de novo.');
+    exitCode = 2;
+    return;
+  }
   stdout.writeln('paciente → $host');
 
   try {
