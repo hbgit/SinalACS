@@ -774,13 +774,15 @@ nascimento e o código de 6 dígitos recebido, e o servidor só emite a sessão 
   "registrada na Task 8", e é por isso que ela está nesta lista. O caminho válido faz um
   `latestOpen`, um `save` e o envio do código, enquanto as recusas retornam na **primeira**
   condição — logo depois do `findByCpfHash` e **antes** do `latestOpen`, sem nenhuma outra ida ao
-  banco. **O relógio é o resíduo que sobra, e não o que decidia o par:** era o conteúdo (status +
-  payload) que distinguia os dois casos, deterministicamente, e é o que a subseção abaixo fecha.
-  Este parágrafo dizia antes que "a propriedade anti-enumeração vale no conteúdo e **não** no
-  relógio" — o inverso, e a frase errada é parte do mesmo defeito. Com gateway de verdade o termo
-  dominante é a ida ao provedor; a correção é tirar o envio do caminho de resposta (ou impor um
-  piso constante de tempo), e é endurecimento para quando o provedor for escolhido — não deste
-  estágio, em que `SMS_GATEWAY=log` não faz chamada nenhuma.
+  banco. **Dois canais, os dois abertos:** o CONTEÚDO (status + payload) distinguia os dois casos
+  deterministicamente — era o oráculo, e é o que a subseção abaixo fecha —, e o RELÓGIO **continua
+  distinguindo**, e com uma amostra de cada lado, sem estatística nenhuma (a subseção abaixo traz a
+  medição). Este parágrafo dizia antes que "a propriedade anti-enumeração vale no conteúdo e
+  **não** no relógio" — o inverso, e a frase errada é parte do mesmo defeito. Com gateway de verdade o termo dominante é a ida ao provedor; a correção é tirar
+  o envio do caminho de resposta (ou impor um piso constante de tempo sobre o handler inteiro), e é
+  endurecimento para quando o provedor for escolhido — não deste estágio, em que `SMS_GATEWAY=log`
+  não faz chamada nenhuma. O piso que resolve é o do handler inteiro, e não o do envio: o delta que
+  separa é **anterior** a qualquer envio.
 - **Biometria e leitura de QR Code.** `spec/sys_flow.md` lista "SMS/OTP, biometria ou QR Code
   gerado pelo ACS" como critérios de aceite do RF01. Biometria não existe em nenhum app; a
   leitura de QR pelo app do paciente também não — o onboarding pede para "colar ou digitar o
@@ -818,13 +820,61 @@ do versionamento, como as rodadas anteriores; por isso o vínculo aqui é por no
 
 **A frase que este documento trazia estava invertida.** Dizia que "a propriedade anti-enumeração
 vale no conteúdo e **não** no relógio": é o inverso. O **conteúdo** (status + payload) era o que
-distinguia os dois casos, deterministicamente — esse era o oráculo, e era o que faltava fechar. O
-**relógio** é o que não se mede com confiança: 200 amostras keep-alive por caso, com distribuições
-que se sobrepõem. Depois desta correção é o conteúdo que está igual; o relógio segue desigual e
-segue sendo resíduo, não sinal.
+distinguia os dois casos, deterministicamente — esse era o oráculo, e era o que faltava fechar.
+Depois desta correção é o conteúdo que está igual. **O relógio continua desigual, e é o outro
+oráculo — medido, não suposto.**
+
+#### O canal de tempo está ABERTO (2026-09-19)
+
+Medido contra a stack, 300 amostras keep-alive por caso, tempo de parede do `POST /auth`, uma
+conexão só (na 1ª chamada do par correto o desafio é apagado antes de cada amostra, fora da janela
+medida — sem isso a amostra cairia no ramo do intervalo mínimo):
+
+| caso | p50 | faixa [min, max] |
+|---|---|---|
+| par correto, 1ª chamada | **3,21 ms** | 2,76 – 6,63 ms |
+| par correto, dentro do intervalo mínimo | 0,80 ms | 0,51 – 1,41 ms |
+| CPF não cadastrado (DV válido) | **0,39 ms** | 0,29 – 1,01 ms |
+| CPF cadastrado, nascimento errado | 0,46 ms | 0,31 – 0,84 ms |
+
+- **A separação não precisa de estatística.** As faixas do par correto e do CPF não cadastrado
+  **não se cruzam**, e os 90 000 pares cruzados separaram: **uma amostra de cada lado decide**.
+  Duas medições independentes, com o mesmo desenho (keep-alive, 200 a 400 amostras por caso),
+  concordam dentro de poucos por cento: o revisor mediu 3,21 ms contra 0,40 ms; esta rodada mediu
+  3,21 ms contra 0,39 ms.
+- **Dentro do intervalo mínimo a diferença encolhe, mas não some:** esse ramo faz o `latestOpen` e
+  mais nada, e ainda assim é ~2× a recusa (AUC 0,956 nesta medição; 0,981, 0,996 e 0,986 nas três
+  do revisor). É o único destes números que **admite interseção**: nesta medição as faixas se
+  cruzam em parte, e o revisor registrou o mesmo em uma das rodadas dele. O que se afirma é o piso
+  — o sinal nunca chega a indistinguível —, e é isso que se confirma.
+- **O delta é o `latestOpen`, e isso agrava o caso.** Ele só é alcançado **depois** de o par estar
+  conferido, então o relógio **não é ruído alheio ao segredo: é correlacionado com ele** — quem
+  responde rápido é quem não passou pela conferência. E ele é **anterior a qualquer envio**: o
+  ramo do intervalo mínimo, que não envia, não grava e não audita, já separa. A correção
+  registrada (tirar o envio do caminho de resposta) ataca o termo do provedor e **não alcança esse
+  delta**; o que alcançaria é um piso constante sobre o **handler inteiro**, que é medida mais
+  forte do que a registrada e só vale acima do caminho mais lento.
+- **`verifyOtp` tem o mesmo canal, e mais forte** — ver o item com dono na lista abaixo.
+
+O parágrafo anterior a esta subseção dizia "o que **não se mede** com confiança é o tamanho da
+diferença", e a seção dizia "resíduo, não sinal": as duas frases eram **falsas**, e são a mesma
+classe de afirmação de segurança não medida que deixou o C1 atravessar duas revisões. O parágrafo
+se contradizia sozinho — se o relógio não se medisse, não haveria nada a corrigir nele.
 
 **O que a correção não resolve** — ninguém deve ler "oráculo fechado" como "enumeração inviável":
 
+- **`verifyOtp` tem o mesmo canal de tempo, e mais forte — e não é regressão desta rodada.** Medido
+  em 2026-09-19: CPF cadastrado com desafio aberto ~4,0 ms (p50) contra ~1,7 ms do CPF não
+  cadastrado, faixas sem interseção, **AUC 0,997** na medição do revisor (0,990 sem desafio
+  aberto). **Uma chamada responde "este CPF é paciente da unidade" — e sem precisar da data de
+  nascimento**, que é justamente o fator que `requestOtp` exige. Não foi introduzido aqui e não
+  estava em brief nenhum; existe porque o caminho do CPF cadastrado faz o `latestOpen`, o
+  `registerAttempt` e a auditoria, e o do CPF inexistente só faz o `findByCpfHash`. A **Global
+  Constraint nº 2** (anti-enumeração) é do **RF**, não do método: quem ler "oráculo fechado" nesta
+  seção fecha o RF01 achando que ela vale, e ela **não vale em `verifyOtp` tampouco**.
+  **Dono: quem implementar o gateway de SMS real** — o piso de tempo (sobre o handler inteiro, ver
+  acima) só faz sentido quando o provedor for escolhido, e é a mesma pessoa que vai mexer no
+  caminho de envio; hoje esse dono não existe, e o provedor continua não escolhido nesta lista.
 - **Não entrou limite nenhum.** O caminho de sonda continua sem rate limit por origem, que é a
   lacuna já registrada nesta lista. Quem varre continua varrendo à vontade; o que acabou foi o
   sinal determinístico de volta. Cada acerto ainda manda um SMS para a pessoa.

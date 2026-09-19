@@ -59,9 +59,16 @@ void main() {
     test('o 200 do pedido repetido não vira erro: a resposta é silenciosa',
         () async {
       // O caso do intervalo mínimo (`resendCooldown`): o servidor responde 200
-      // sem enviar SMS novo, e **não** recusa. Se alguém reintroduzir uma
-      // exceção lá, ela chega aqui como BackendFailure e este teste cai junto
-      // com o do serviço — a tela não pode mais exibir "aguarde um minuto".
+      // sem enviar SMS novo, e **não** recusa.
+      //
+      // O valor deste teste é pequeno e é só DESTE lado: prender que dois
+      // pedidos seguidos são tratados como sucesso, sem virar BackendFailure.
+      // Ele **não** protege contra regressão do servidor, e a versão anterior
+      // deste comentário dizia que sim ("se alguém reintroduzir uma exceção lá,
+      // ela chega aqui como BackendFailure e este teste cai"): não cai — este
+      // fake não tem cooldown nenhum, então nenhuma mudança no backend alcança
+      // este arquivo. Quem pega a volta daquela exceção são os testes de
+      // backend (unitário e de endpoint), medido.
       await backend.requestOtp(cpf: cpf, birthDate: nascimento);
       await backend.requestOtp(cpf: cpf, birthDate: nascimento);
 

@@ -139,15 +139,29 @@ class PasswordlessAuthService {
   /// chamada só não separa a igualdade da violação, e foi por isso que o
   /// oráculo de 2026-09-19 sobreviveu a duas revisões com a suíte verde.
   ///
-  /// O **tempo não está equalizado**, e os dois termos disto não podem ser
-  /// trocados: o que está igual dos dois lados é o CONTEÚDO (status e payload);
-  /// o que continua diferente é o RELÓGIO — o caminho válido faz um
-  /// `latestOpen`, um `save` e o envio, que a recusa não faz. Um cronômetro
-  /// distingue os dois; o que não se mede com confiança é o tamanho da
-  /// diferença, que se sobrepõe ao ruído entre chamadas. Não dá para equalizar
-  /// aqui sem mentir sobre o envio; quando houver gateway de verdade o termo
-  /// dominante é a ida ao provedor, e tirar o envio do caminho de resposta é a
-  /// correção. Lacuna registrada na Task 8 — não resolvida.
+  /// O **tempo é canal ABERTO e medido**, e não um resíduo: o que está igual
+  /// dos dois lados é o CONTEÚDO (status e payload); o RELÓGIO continua
+  /// distinguindo os casos, e distingue com folga. Medido contra a stack em
+  /// 2026-09-19, 300 amostras keep-alive por caso, tempo de parede do POST: o
+  /// par correto responde em ~3,2 ms (p50) e o CPF não cadastrado em ~0,39 ms —
+  /// as duas faixas **não se cruzam**, e **uma amostra de cada lado já separa o
+  /// par**, sem estatística nenhuma. Dentro do intervalo mínimo a diferença
+  /// encolhe (esse ramo faz o `latestOpen` e mais nada) e as distribuições
+  /// passam a se sobrepor em parte, mas seguem separáveis: AUC 0,96 a 0,99
+  /// entre duas medições independentes.
+  ///
+  /// O delta **não é ruído alheio ao segredo: é correlacionado com ele**, e é
+  /// por isso que a correção registrada não o alcança. Ele existe porque o
+  /// `latestOpen` só é atingido DEPOIS de o par estar conferido — quem responde
+  /// rápido é quem não passou pela conferência. Tirar o envio do caminho de
+  /// resposta (a correção da Task 8) ataca o termo do provedor, que é
+  /// **posterior** a esse delta; o próprio ramo do intervalo mínimo, que não
+  /// envia, não grava e não audita, já é ~2× mais lento que a recusa. Um piso
+  /// de tempo sobre o handler INTEIRO cobriria — mas é medida mais forte do que
+  /// "tirar o envio do caminho de resposta", e só vale acima do caminho mais
+  /// lento. Não dá para equalizar aqui sem mentir sobre o envio. Lacuna
+  /// registrada na Task 8 — não resolvida; o registro com dono está no
+  /// `PROGRESS.md`.
   Future<void> requestOtp({
     required Cpf cpf,
     required DateTime birthDate,
@@ -206,6 +220,17 @@ class PasswordlessAuthService {
 
   /// Verifica o código e devolve quem entrou. Uma exceção só, com mensagem de
   /// fluxo, para nenhuma recusa dizer se aquele CPF existe.
+  ///
+  /// Isso é o **conteúdo**, e é só ele — não é a propriedade inteira. O
+  /// **tempo** deste método diz se o CPF existe, **e sem precisar da data de
+  /// nascimento**: medido contra a stack em 2026-09-19 (300 amostras
+  /// keep-alive), CPF cadastrado com desafio aberto responde em ~4,0 ms e o CPF
+  /// não cadastrado em ~1,7 ms, faixas sem interseção — uma chamada responde
+  /// "este CPF é paciente da unidade". É o canal irmão do de [requestOtp], mais
+  /// forte que ele, e **anterior a esta rodada**: nenhuma mudança daqui o cria
+  /// ou o fecha. A invariante
+  /// anti-enumeração vale para o RF, não para este método, e hoje não vale
+  /// aqui tampouco — está registrada com dono no `PROGRESS.md`.
   Future<AuthenticatedUser> verifyOtp({
     required Cpf cpf,
     required String code,

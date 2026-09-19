@@ -621,6 +621,22 @@ void main() {
         PasswordlessAuthService.resendCooldown,
         const Duration(seconds: 60),
       );
+      // A RELAÇÃO entre os dois, que até aqui só existia na prosa do
+      // `resendCooldown` ("quem pedir de novo dentro do minuto continua com o
+      // código anterior valendo, porque o TTL dele é maior que o intervalo").
+      // O throttle de SMS que o intervalo promete é `min(cooldown, codeTtl)`:
+      // `latestOpen` só devolve desafio NÃO EXPIRADO (`orm_otp_challenge_store
+      // .dart:86-97`), então passado o TTL o pedido seguinte cria outro desafio
+      // e manda outro SMS mesmo dentro do minuto.
+      //
+      // Sem esta linha, baixar o `codeTtl` para 30 s e atualizar o literal acima
+      // — que é a reação natural ao vermelho deste teste — cortaria o throttle
+      // pela metade com a suíte verde: nenhum outro teste prende a relação, e os
+      // que consultam `latestOpen` em `t+1min` falam do TTL, não do intervalo.
+      expect(
+        PasswordlessAuthService.codeTtl,
+        greaterThan(PasswordlessAuthService.resendCooldown),
+      );
     });
   });
 

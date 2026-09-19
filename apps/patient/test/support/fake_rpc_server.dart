@@ -102,8 +102,13 @@ class FakeRpcServer {
     }
 
     final payload = switch (method) {
-      // `requestOtp` devolve `void`: o cliente ignora o corpo de um 200, então
-      // a resposta é vazia — como a do servidor real.
+      // `requestOtp` devolve `void`. Aqui o corpo é `{}`, e o servidor real
+      // devolve `null` — a diferença é inócua e conhecida: o cliente gerado
+      // chama `callServerEndpoint<void>`, que para `void` **não passa pelo
+      // `parseData`** e descarta o corpo inteiro
+      // (`serverpod_client_shared.dart:568-572`, na versão 3.4.13 deste
+      // workspace). Quem estender este fake para um método com retorno de
+      // verdade precisa do corpo real, não deste.
       'requestOtp' => const <String, Object?>{},
       'verifyOtp' => <String, Object?>{
           'accessToken': _token(),
