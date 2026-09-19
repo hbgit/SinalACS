@@ -659,9 +659,29 @@ class _FakeStore implements OtpChallengeStore {
   Future<PatientCredentialRecord?> findByCpfHash(String cpfHash) async =>
       cpfHash == _hasher.hash(_cpf) ? record : null;
 
+  /// O id é do store, não de quem chama.
+  ///
+  /// `save` **ignora** o `id` recebido: o serviço manda `id: ''` porque quem
+  /// insere é o banco. Se o fake guardasse esse `''` verbatim, `consume('')`
+  /// casaria por acidente, uma troca de id passaria despercebida e o teste de
+  /// uso único provaria menos do que aparenta. Atribuir um id próprio é o que
+  /// torna o fake fiel ao store que a Task 5 escreve.
+  var _lastId = 0;
+
   @override
-  Future<void> save(OtpChallengeRecord challenge) async =>
-      challenges.add(challenge);
+  Future<void> save(OtpChallengeRecord challenge) async {
+    _lastId++;
+    challenges.add(
+      OtpChallengeRecord(
+        id: 'desafio-$_lastId',
+        userId: challenge.userId,
+        codeHash: challenge.codeHash,
+        attempts: challenge.attempts,
+        createdAt: challenge.createdAt,
+        expiresAt: challenge.expiresAt,
+      ),
+    );
+  }
 
   @override
   Future<OtpChallengeRecord?> latestOpen(String userId, DateTime at) async {
@@ -1078,9 +1098,18 @@ class PasswordlessAuthService {
   static const _invalidCode = 'Código inválido ou expirado. Peça um novo.';
 
   /// `requestOtp` devolve `void` e **não** distingue "enviado" de "CPF não
-  /// encontrado": qualquer diferença de resposta (inclusive de tempo, por isso
-  /// o envio do SMS só acontece quando o paciente existe) transformaria este
-  /// endpoint num verificador de quem é paciente da unidade.
+  /// encontrado": qualquer diferença de resposta transformaria este endpoint num
+  /// verificador de quem é paciente da unidade.
+  ///
+  /// A igualdade é de **payload, status e efeitos**: as duas recusas não
+  /// lançam, não gravam desafio, não enviam SMS e não escrevem auditoria.
+  ///
+  /// O **tempo não está equalizado**, e a versão anterior deste comentário
+  /// dizia o contrário: o caminho válido faz um `latestOpen`, um `save` e o
+  /// envio, que a recusa não faz. Um cronômetro distingue os dois. Não dá para
+  /// equalizar aqui sem mentir sobre o envio; quando houver gateway de verdade
+  /// o termo dominante é a ida ao provedor, e tirar o envio do caminho de
+  /// resposta é a correção. Lacuna registrada na Task 8 — não resolvida.
   Future<void> requestOtp({
     required Cpf cpf,
     required DateTime birthDate,
@@ -1230,6 +1259,30 @@ Co-Authored-By: Claude Code <noreply@anthropic.com>"
 **Interfaces:**
 - Consumes: tudo da Task 4.
 - Produces: `auth.requestOtp(cpf, birthDate)` e `auth.verifyOtp(cpf, code, deviceId?) → DevelopmentLoginResult`; `AlertRuntime.instance.passwordlessAuthServiceFor(session)`.
+
+> **Duas obrigações de fidelidade que o teste unitário da Task 4 não alcança.**
+>
+> O store que a Task 4 pressupõe — e que o fake do teste dela espelha — tem
+> quatro semânticas que a interface sozinha não declara: `save` **ignora o `id`
+> recebido e atribui o seu** (o serviço manda `id: ''`, porque o id é do banco)
+> e o devolve em `latestOpen`; `latestOpen` filtra `consumedAt IS NULL AND
+> expiresAt > at`, do mais recente; `registerAttempt` grava a contagem
+> **absoluta**; `consume` não desfaz consumo. Um store que honre o `id: ''` faz
+> `consume('')` casar por acidente e a garantia de uso único evapora **com a
+> suíte verde**. Prove cada uma com asserção contra o Postgres — não só contra o
+> retorno do endpoint, que passaria mesmo com o filtro errado.
+>
+> **Lacuna de tempo, registrada e não resolvida.** O caminho válido de
+> `requestOtp` faz um `latestOpen`, um `save` e o envio de SMS; as duas recusas
+> (CPF inexistente, nascimento errado) fazem um `latestOpen` e retornam. Payload,
+> status e efeitos são idênticos — isso está provado por teste —, mas o **tempo
+> não é**: um cronômetro distingue "este CPF com este nascimento é de um paciente
+> da unidade". Não é corrigível dentro do serviço sem mentir sobre o envio, e com
+> gateway de verdade o termo dominante passa a ser a ida ao provedor. Decisão
+> desta etapa: manter o envio no caminho de resposta, tratar a diferença como
+> limitação conhecida e registrá-la na Task 8 — não fingir que a igualdade é
+> total. Tirar o envio do caminho de resposta é a correção quando o provedor
+> chegar.
 
 - [ ] **Step 1: Escrever o teste de integração que falha**
 
