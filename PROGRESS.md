@@ -43,7 +43,7 @@ A Fase 1 está concluída no código e validada por testes locais. A Fase 2 avan
 | M1.2 | CI Pipeline básica | Implementado | [.github/workflows/ci.yml](.github/workflows/ci.yml) com 4 jobs: backend, build da imagem Docker do backend, e os dois apps Flutter |
 | M1.3 | Motor de Triagem (algoritmo) | Implementado | [backend/lib/src/application/triage/triage_engine.dart](backend/lib/src/application/triage/triage_engine.dart) e [backend/test/triage_engine_test.dart](backend/test/triage_engine_test.dart) |
 | M1.4 | FSM de Sincronização | Implementado | [backend/lib/src/application/sync/sync_fsm.dart](backend/lib/src/application/sync/sync_fsm.dart) e [backend/test/sync_fsm_test.dart](backend/test/sync_fsm_test.dart) |
-| M1.5 | SQLCipher (local) | Implementado | [apps/patient/lib/core/database/encrypted_database.dart](apps/patient/lib/core/database/encrypted_database.dart) e [apps/acs/lib/core/database/encrypted_database.dart](apps/acs/lib/core/database/encrypted_database.dart) |
+| M1.5 | SQLCipher (local) | Implementado **no ACS** | [apps/acs/lib/core/database/encrypted_database.dart](apps/acs/lib/core/database/encrypted_database.dart) e [apps/acs/lib/core/database/sqlcipher_visit_store.dart](apps/acs/lib/core/database/sqlcipher_visit_store.dart). **O app do paciente não usa SQLCipher, de propósito**: os dois stores locais dele são [lembretes](apps/patient/lib/core/reminders/sqflite_reminder_store.dart) e [preferências de consentimento](apps/patient/lib/core/consent/sqflite_consent_preferences.dart), sobre `sqflite` puro — horário e texto livre curto não são dado de saúde, e o app do paciente não persiste nada clínico. Esta linha continuava linkando um `apps/patient/lib/core/database/encrypted_database.dart` que **foi removido** — era código morto, sem chamador, que afirmava uma garantia que não entregava (ver a "Correção de registro" da seção M1.5 abaixo, que já dizia isso desde então; a tabela é que ficou para trás). |
 
 ## O que já está pronto - Fase 1
 
@@ -491,7 +491,7 @@ completo em [backend/DEPLOY.md](backend/DEPLOY.md).
 | Resposta controlada quando o MQTT está fora do ar | `POST /v1/alerts/red` retorna 503 em vez de derrubar o processo | Implementado | [backend/bin/server.dart](backend/bin/server.dart) |
 | SSL na conexão PostgreSQL | `useSSL: true` por padrão, com opção `?sslmode=disable` para desenvolvimento local | Implementado | [backend/lib/src/infrastructure/database/postgres_alert_store.dart](backend/lib/src/infrastructure/database/postgres_alert_store.dart) |
 | `/health` com diagnóstico | Corpo da resposta passa a incluir `mqtt_connected` e `db_connected` | Implementado | [backend/bin/server.dart](backend/bin/server.dart) |
-| Dockerfile multi-stage (AOT) | Build com `dart compile exe`, imagem runtime mínima, usuário non-root e `HEALTHCHECK` | Implementado | [backend/Dockerfile](backend/Dockerfile) |
+| Dockerfile multi-stage (AOT) | Build com `dart compile exe`, imagem runtime mínima, usuário non-root e `HEALTHCHECK` | Implementado | [backend/sinalacs_server/Dockerfile](backend/sinalacs_server/Dockerfile) |
 | Remoção de dependência morta | `serverpod` removido do `pubspec.yaml` (não havia nenhum import real no código) | Implementado | [backend/pubspec.yaml](backend/pubspec.yaml) |
 | `JWT_SECRET` obrigatório em produção | Falha rápida no boot quando `APP_ENV=production` e o segredo não foi definido, em vez do fallback inseguro silencioso | Implementado | [backend/lib/src/config/app_config.dart](backend/lib/src/config/app_config.dart) |
 | Gate do dev-login | `/v1/auth/development/login` responde 404 a menos que `ENABLE_DEV_LOGIN=true` seja definido explicitamente | Implementado | [backend/bin/server.dart](backend/bin/server.dart) |
@@ -504,7 +504,7 @@ completo em [backend/DEPLOY.md](backend/DEPLOY.md).
 Como o ambiente de desenvolvimento não tinha o Dart SDK instalado, a
 verificação foi feita via Docker, reproduzindo o setup da CI:
 
-- Build da imagem multi-stage concluído com sucesso (`docker build -f backend/Dockerfile backend`), incluindo a compilação AOT via `dart compile exe`.
+- Build da imagem multi-stage concluído com sucesso (`docker build -f backend/sinalacs_server/Dockerfile backend/sinalacs_server`), incluindo a compilação AOT via `dart compile exe`.
 - `dart analyze` sem nenhum problema encontrado.
 - Suíte completa de testes (`dart test`) passando — 18/18, incluindo o teste de integração HTTP real (`red_alert_http_integration_test.dart`) contra PostgreSQL e Mosquitto reais em containers, cobrindo login, criação de alerta vermelho e ACK via HTTP.
 - Container rodando com `PORT` dinâmico e broker MQTT inexistente: `/health` respondeu 200 com `mqtt_connected: false` e `db_connected: true`, sem travar o boot; `POST /v1/alerts/red` retornou 503 corretamente.
