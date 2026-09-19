@@ -1,0 +1,7 @@
+### Recusa do fluxo OTP (RF01): entrada inválida, limite de tentativas, código
+### expirado ou nenhum código pendente. Uma exceção só, pelo mesmo motivo de
+### `AuthenticationFailedException` — a resposta não pode revelar se aquele CPF
+### está cadastrado.
+exception: OtpRequestException
+fields:
+  message: String

@@ -12,7 +12,8 @@ fields:
   createdAt: DateTime
   updatedAt: DateTime
 indexes:
-  users_cpf_hash_idx:
+  users_cpf_hash_key:
     fields: cpfHash
+    unique: true
   users_micro_area_idx:
     fields: microAreaId
