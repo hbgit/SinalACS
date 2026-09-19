@@ -65,7 +65,7 @@ Serviços expostos no ambiente local:
 |---|---|
 | Traefik | `http://localhost` |
 | Dashboard Traefik (inseguro, somente desenvolvimento) | `http://localhost:8081` |
-| Backend | `http://localhost:8080` |
+| Backend | `https://localhost/` (RPC atrás do Traefik; a 8080 em texto claro não é publicada) |
 | PostgreSQL | `localhost:5432` |
 | Mosquitto MQTT | `localhost:1883` |
 | Mosquitto WebSocket | `localhost:9001` |
@@ -115,7 +115,7 @@ cd apps/patient
 flutter pub get
 flutter run
 # em aparelho físico, apontando para a máquina da stack:
-flutter run --dart-define=SINALACS_HOST=http://<ip-da-máquina>:8080/
+flutter run --dart-define=SINALACS_HOST=https://<ip-da-máquina>/
 ```
 
 Antes do primeiro `flutter run` — ou sempre que um `runtime/` da stack for

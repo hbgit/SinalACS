@@ -702,6 +702,8 @@ Future<bool> canAccessPatient(Session session, String patientId) async {
 **docker-compose.dev.yml (recorte):**
 
 > Ilustrativo, não é o `docker-compose.yml` real do repositório — ver [`docker-compose.yml`](../docker-compose.yml), cujo serviço `serverpod` roda de fato o servidor Serverpod, aplica as migrações no boot e é seguido por um serviço `database-seed`.
+>
+> A versão do Traefik citada abaixo (`v2.10`) também é ilustrativa. A versão **medida como funcional** nesta stack é a **`v2.11`**: a `v2.10` (2.10.7) fala a API Docker 1.24, abaixo do mínimo 1.40 do Docker deste host, então não enxerga label nenhuma e o `:443` responde 404 do Traefik; a `v3` (3.5) falha igual (medido). O `docker-compose.yml` da raiz é a fonte da verdade operacional — ver [`stack.md`](stack.md) §4.
 
 ```yaml
 version: '3.8'
@@ -1175,6 +1177,8 @@ Impacto ↑
 ### A1. Docker-Compose de Produção (recorte)
 
 > Roadmap — nenhum ambiente de produção com esta topologia (Pulumi/VPS/redes privadas) existe hoje. O serviço abaixo chamado `serverpod` corresponde agora ao que de fato roda; a imagem é construída a partir de `backend/sinalacs_server/Dockerfile`, multi-stage com `dart compile exe`. Para um caminho de deploy documentado (piloto free-tier), ver [`backend/DEPLOY.md`](../backend/DEPLOY.md).
+>
+> A versão do Traefik abaixo (`v2.10`) é ilustrativa: a medida como funcional nesta stack é a **`v2.11`** — ver a nota do recorte de desenvolvimento acima.
 
 ```yaml
 version: '3.8'

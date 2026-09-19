@@ -102,7 +102,7 @@ cliente · **`parcial`** = existe, mas alimentado por dado fabricado ·
 | RNF01 | Latência MQTT < 500 ms (p95) | **não medido** | Entrega funciona; não há instrumentação de latência. |
 | RNF02 | Sincronização offline > 99,5% | **não medido** | Semântica correta e testada; taxa nunca medida. |
 | RNF03 | Criptografia AES-256 em repouso | **backend/app** | SQLCipher provado em dispositivo (o arquivo não contém o conteúdo em texto claro e não abre com chave errada). **No PostgreSQL não há criptografia de coluna** — `pgcrypto` previsto no PRD não foi adotado. |
-| RNF04 | TLS 1.3 em todas as comunicações | **parcial** | Broker em TLS com verificação de hostname. **O RPC do backend é HTTP puro** na 8080, sem TLS, inclusive do emulador. |
+| RNF04 | TLS 1.3 em todas as comunicações | **parcial** | Broker em TLS com verificação de hostname (já era) e o RPC agora atrás do Traefik com HTTPS em :443 e TLS 1.3 mínimo — a porta 8080 em texto claro deixou de ser publicada. **Continua parcial** porque o certificado é de desenvolvimento (auto-assinado, gerado no boot): produção depende de `cert-manager` e de um domínio real, que este repositório não tem. Ver `docs/superpowers/plans/2026-09-18-tls-rpc-rnf04-l08.md`. |
 | RNF05 | Acessibilidade WCAG AA | **app-only** | Matrizes de contraste, alvos de toque e `liveRegion` testados nos três apps. |
 | RNF06 | RBAC | **parcial** | `Authorization.require` é a única regra de papel e de presença de território no token (a comparação entre a microárea do paciente e a do ACS segue em cada caso de uso) e um teste de postura cobre os 7 endpoints, mas `requireLogin` segue `false` (o `AuthenticationHandler` do Serverpod não está conectado) e os papéis `coordinator`/`admin` não têm caminho de emissão. |
 
@@ -274,8 +274,13 @@ mesmo vale para a TMRAV segmentada por risco, que é a métrica *North Star* do 
   continua `parcial` — ver linha RF08 acima.
 - **L-07 · Escalonamento SAMU não funciona.** O botão mais crítico da UI de
   emergência é um snackbar.
-- **L-08 · RPC sem TLS.** O backend fala HTTP puro na 8080; só o broker usa TLS.
-  RNF04 não é atendido.
+- **L-08 · ~~RPC sem TLS. O backend fala HTTP puro na 8080; só o broker usa
+  TLS. RNF04 não é atendido.~~** RESOLVIDO em desenvolvimento — o RPC só é
+  alcançável por HTTPS em :443, terminado pelo Traefik, com TLS 1.3 mínimo e a
+  CA de desenvolvimento copiada para os dois apps por `sync_dev_ca.sh`; a
+  publicação de 8080 foi removida, então não há caminho sem criptografia. O que
+  falta é o certificado de produção (domínio + `cert-manager`), que é decisão
+  de infraestrutura. Ver `docs/superpowers/plans/2026-09-18-tls-rpc-rnf04-l08.md`.
 
 ### P2 — dívida de qualidade e processo
 
@@ -342,6 +347,10 @@ cd /caminho/para/SinalACS
 
 # 0) stack + seed  (o seed já roda sozinho: depends_on serverpod healthy)
 docker compose up --build -d
+# Copia as DUAS CAs de desenvolvimento — a do broker (MQTT em 8883) e a do RPC
+# (HTTPS em 443, terminado pelo Traefik). São CAs separadas de propósito; o
+# script confere com `openssl verify` que cada uma assina a folha em uso, e
+# aborta sem copiar nada se alguma não assinar.
 ./scripts/dev/sync_dev_ca.sh
 
 # 1) backend
@@ -355,9 +364,9 @@ cd ../.. && ./scripts/qa/e2e.sh --keep
 # 3) emulador — sempre com -d explícito
 set -a; source .env; set +a
 cd apps/patient && flutter test integration_test -d emulator-5554 \
-  --dart-define=SINALACS_HOST=http://10.0.2.2:8080/
+  --dart-define=SINALACS_HOST=https://10.0.2.2/
 cd ../acs && flutter test integration_test -d emulator-5554 \
-  --dart-define=SINALACS_HOST=http://10.0.2.2:8080/ \
+  --dart-define=SINALACS_HOST=https://10.0.2.2/ \
   --dart-define=SINALACS_MQTT_HOST=10.0.2.2 \
   --dart-define=SINALACS_MQTT_PASSWORD="$MQTT_ACS_PASSWORD" \
   --dart-define=GOOGLE_MAPS_API_KEY="$GOOGLE_MAPS_API_KEY"
