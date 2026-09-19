@@ -11,6 +11,8 @@ class AppConfig {
     required this.jwtSecret,
     required this.auditChainSecret,
     required this.healthDataEncryptionKey,
+    required this.cpfHashPepper,
+    required this.smsGateway,
     required this.mqttUsername,
     required this.mqttPassword,
     required this.mqttUseTls,
@@ -43,6 +45,31 @@ class AppConfig {
   /// Hexadecimal de exatamente 64 caracteres, validado no boot por
   /// [_resolveHealthDataEncryptionKey].
   final String healthDataEncryptionKey;
+
+  /// Pepper do HMAC de `users.cpfHash` e do hash do código OTP (RF01).
+  ///
+  /// `spec/lgpd_data_audit.md:196` nomeia esta variável e a torna obrigatória:
+  /// o CPF tem 10^9 valores possíveis, então um hash sem segredo é revertido
+  /// por força bruta em segundos a partir de um dump do banco. Segredo PRÓPRIO,
+  /// não derivado de `jwtSecret`/`auditChainSecret`/`healthDataEncryptionKey`:
+  /// rotacionar o pepper invalida os hashes de CPF gravados (é uma migração de
+  /// dados, não uma operação silenciosa) e não pode arrastar a trilha de
+  /// auditoria nem os tokens junto.
+  ///
+  /// O hash do código OTP usa o MESMO pepper, com campo de domínio próprio. A
+  /// independência de segredos que o resto deste arquivo prega existe para
+  /// dado de vida longa; um OTP vive 5 minutos, e rotacionar o pepper
+  /// simplesmente o invalida — que é o efeito desejado. Ver `HmacCpfHasher`.
+  final String cpfHashPepper;
+
+  /// Gateway de SMS do login passwordless (RF01).
+  ///
+  /// `log` só é aceito em `development`: ele **não envia SMS**, escreve o
+  /// código no log do processo para o desenvolvedor conseguir entrar. Fora de
+  /// desenvolvimento, ausência ou valor desconhecido falha no boot — um
+  /// servidor que sobe sem conseguir enviar código deixa todo paciente sem
+  /// login, e falhar cedo é melhor que falhar no primeiro cadastro real.
+  final String smsGateway;
 
   final String? mqttUsername;
   final String? mqttPassword;
@@ -79,6 +106,45 @@ class AppConfig {
   static const developmentHealthDataEncryptionKey =
       'deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef';
 
+  /// Pepper de desenvolvimento. Público, como os outros fallbacks — e por isso
+  /// restrito a `development` por [_resolveSecret].
+  static const developmentCpfHashPepper = 'development-cpf-hash-pepper';
+
+  static const _knownSmsGateways = {'log'};
+
+  /// Aceita apenas os gateways implementados, e `log` apenas em `development`.
+  static String _resolveSmsGateway({
+    required String? value,
+    required String appEnv,
+  }) {
+    final gateway = value?.trim().toLowerCase();
+    final isDevelopment = appEnv == 'development';
+
+    if (gateway == null || gateway.isEmpty) {
+      if (isDevelopment) return 'log';
+      throw StateError(
+        'SMS_GATEWAY é obrigatório quando APP_ENV=$appEnv: sem um gateway '
+        'configurado, nenhum paciente consegue receber o código de acesso.',
+      );
+    }
+
+    if (!_knownSmsGateways.contains(gateway)) {
+      throw StateError(
+        'SMS_GATEWAY="$gateway" não corresponde a nenhum gateway implementado '
+        '(${_knownSmsGateways.join(', ')}).',
+      );
+    }
+
+    if (gateway == 'log' && !isDevelopment) {
+      throw StateError(
+        'SMS_GATEWAY=log não envia SMS nenhum e por isso só vale em '
+        'development; APP_ENV=$appEnv. Configure um gateway real.',
+      );
+    }
+
+    return gateway;
+  }
+
   factory AppConfig.fromEnvironment() =>
       AppConfig.fromMap(Platform.environment);
 
@@ -108,6 +174,16 @@ class AppConfig {
         value: environment['HEALTH_DATA_ENCRYPTION_KEY'],
         appEnv: appEnv,
       ),
+      cpfHashPepper: _resolveSecret(
+        value: environment['CPF_HASH_PEPPER'],
+        appEnv: appEnv,
+        envVarName: 'CPF_HASH_PEPPER',
+        developmentFallback: developmentCpfHashPepper,
+      ),
+      smsGateway: _resolveSmsGateway(
+        value: environment['SMS_GATEWAY'],
+        appEnv: appEnv,
+      ),
       mqttUsername: environment['MQTT_USERNAME'],
       mqttPassword: environment['MQTT_PASSWORD'],
       mqttUseTls: environment['MQTT_USE_TLS'] == 'true',
@@ -119,8 +195,8 @@ class AppConfig {
 
   /// Decide um segredo de assinatura, recusando subir com um valor fraco.
   ///
-  /// Regra comum aos três segredos (`JWT_SECRET`, `AUDIT_CHAIN_SECRET` e
-  /// `HEALTH_DATA_ENCRYPTION_KEY`, este por
+  /// Regra comum aos quatro segredos (`JWT_SECRET`, `AUDIT_CHAIN_SECRET`,
+  /// `CPF_HASH_PEPPER` e `HEALTH_DATA_ENCRYPTION_KEY`, este por
   /// [_resolveHealthDataEncryptionKey], que acrescenta a checagem de
   /// formato): só `development` aceita
   /// ausência da variável. Fora dele a falha é no boot, e não na primeira

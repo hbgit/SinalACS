@@ -7,19 +7,30 @@ import 'package:test/test.dart';
 /// `== null`, então `JWT_SECRET=""` e `APP_ENV=staging` subiam assinando com um
 /// valor público — e o `docker-compose.yml` sequer passava a variável.
 /// `AUDIT_CHAIN_SECRET` segue exatamente a mesma regra, para a cadeia de hash
-/// de `audit_logs`.
+/// de `audit_logs`. `CPF_HASH_PEPPER` entrou depois, com a mesma regra.
+///
+/// Depois de `SMS_GATEWAY`, **nenhuma configuração fora de `development` pode
+/// ser construída**: o único gateway implementado é `log`, que só vale em
+/// desenvolvimento, e nenhum provedor real foi escolhido (`spec` do RF01). Por
+/// isso os casos de SUCESSO daqui montam em `development` — é o único ambiente
+/// em que existe configuração válida para os segredos serem observados. Os
+/// casos de recusa continuam cobrindo `production`.
 void main() {
   AppConfig build({
     required String appEnv,
     String? jwtSecret,
     String? auditChainSecret,
     String? healthDataEncryptionKey,
+    String? cpfHashPepper,
+    String? smsGateway,
   }) =>
       AppConfig.fromMap({
         'APP_ENV': appEnv,
         'JWT_SECRET': ?jwtSecret,
         'AUDIT_CHAIN_SECRET': ?auditChainSecret,
         'HEALTH_DATA_ENCRYPTION_KEY': ?healthDataEncryptionKey,
+        'CPF_HASH_PEPPER': ?cpfHashPepper,
+        'SMS_GATEWAY': ?smsGateway,
       });
 
   group('JWT_SECRET', () {
@@ -83,22 +94,27 @@ void main() {
       );
     });
 
-    test('production com segredo próprio sobe', () {
+    test('os quatro segredos próprios juntos produzem a configuração', () {
+      // Cada segredo é resolvido de forma independente: este caso preenche os
+      // quatro de uma vez e confere que nenhum sobrescreve o outro.
       final config = build(
-        appEnv: 'production',
+        appEnv: 'development',
         jwtSecret: 'b' * 64,
         auditChainSecret: 'd' * 64,
         healthDataEncryptionKey: 'e' * 64,
+        cpfHashPepper: 'f' * 64,
       );
 
       expect(config.jwtSecret, 'b' * 64);
-      expect(config.isProduction, isTrue);
+      expect(config.auditChainSecret, 'd' * 64);
+      expect(config.healthDataEncryptionKey, 'e' * 64);
+      expect(config.cpfHashPepper, 'f' * 64);
     });
 
     test('espaços em volta do segredo são aparados', () {
       expect(
         build(
-          appEnv: 'production',
+          appEnv: 'development',
           jwtSecret: '  ${'c' * 64}  ',
           auditChainSecret: 'd' * 64,
           healthDataEncryptionKey: 'e' * 64,
@@ -164,10 +180,9 @@ void main() {
       );
     });
 
-    test('production com segredo próprio sobe, independente do JWT_SECRET',
-        () {
+    test('segredo próprio sobe, independente do JWT_SECRET', () {
       final config = build(
-        appEnv: 'production',
+        appEnv: 'development',
         jwtSecret: 'b' * 64,
         auditChainSecret: 'd' * 64,
         healthDataEncryptionKey: 'e' * 64,
@@ -261,7 +276,7 @@ void main() {
 
     test('64 hexadecimais sobem, em maiúsculas ou minúsculas', () {
       final minusculas = build(
-        appEnv: 'production',
+        appEnv: 'development',
         jwtSecret: 'a' * 64,
         auditChainSecret: 'b' * 64,
         healthDataEncryptionKey: '0123456789abcdef' * 4,
@@ -269,7 +284,7 @@ void main() {
       expect(minusculas.healthDataEncryptionKey, '0123456789abcdef' * 4);
 
       final maiusculas = build(
-        appEnv: 'production',
+        appEnv: 'development',
         jwtSecret: 'a' * 64,
         auditChainSecret: 'b' * 64,
         healthDataEncryptionKey: '0123456789ABCDEF' * 4,
@@ -307,6 +322,47 @@ void main() {
     });
   });
 
+  group('SMS_GATEWAY', () {
+    // `log` NÃO envia SMS: escreve o código no log do processo, e por isso só
+    // vale em desenvolvimento. Fora dele, subir assim deixa todo paciente sem
+    // receber o código de acesso — falha no boot, não no primeiro cadastro.
+    test('log fora de development não sobe', () {
+      expect(
+        () => build(
+          appEnv: 'production',
+          jwtSecret: 'a' * 64,
+          auditChainSecret: 'b' * 64,
+          healthDataEncryptionKey: 'c' * 64,
+          cpfHashPepper: 'd' * 64,
+          smsGateway: 'log',
+        ),
+        throwsA(isA<StateError>().having(
+          (error) => error.message,
+          'message',
+          contains('SMS_GATEWAY=log'),
+        )),
+      );
+    });
+
+    test('ausente fora de development não sobe', () {
+      // Sem gateway nenhum o servidor sobe incapaz de enviar código.
+      expect(
+        () => build(
+          appEnv: 'production',
+          jwtSecret: 'a' * 64,
+          auditChainSecret: 'b' * 64,
+          healthDataEncryptionKey: 'c' * 64,
+          cpfHashPepper: 'd' * 64,
+        ),
+        throwsA(isA<StateError>().having(
+          (error) => error.message,
+          'message',
+          contains('SMS_GATEWAY é obrigatório'),
+        )),
+      );
+    });
+  });
+
   group('defaults', () {
     test('um ambiente vazio produz a configuração de desenvolvimento', () {
       final config = AppConfig.fromMap(const {});
@@ -314,6 +370,9 @@ void main() {
       expect(config.appEnv, 'development');
       expect(config.mqttBroker, 'localhost:1883');
       expect(config.mqttUseTls, isFalse);
+      // Sem gateway escolhido, development cai no `log` — é o que faz a stack
+      // local subir com o `SMS_GATEWAY=` vazio do .env gerado pelo bootstrap.
+      expect(config.smsGateway, 'log');
       // Gate do auth.developmentLogin: desligado quando não pedido.
       expect(config.enableDevLogin, isFalse);
     });

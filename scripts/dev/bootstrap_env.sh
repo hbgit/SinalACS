@@ -67,6 +67,7 @@ else
   JWT_SECRET="$(secret)" \
   AUDIT_CHAIN_SECRET="$(secret)" \
   HEALTH_DATA_ENCRYPTION_KEY="$(secret)" \
+  CPF_HASH_PEPPER="$(secret)" \
   DEV_ACS_PASSWORD="$(secret)" \
   awk '
     {
@@ -85,7 +86,7 @@ else
   echo "  .env gerado (POSTGRES_PASSWORD, TEST_DATABASE_PASSWORD,"
   echo "               MQTT_BACKEND_PASSWORD, MQTT_ACS_PASSWORD, JWT_SECRET,"
   echo "               AUDIT_CHAIN_SECRET, HEALTH_DATA_ENCRYPTION_KEY,"
-  echo "               DEV_ACS_PASSWORD)"
+  echo "               CPF_HASH_PEPPER, DEV_ACS_PASSWORD)"
 fi
 
 # --- config/passwords.yaml -------------------------------------------------

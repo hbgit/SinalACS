@@ -10,6 +10,8 @@ AppConfig _config() => AppConfig(
       // Hex de 64 caracteres: HealthDataCipher decodifica byte a byte
       // para montar a chave AES-256 (ver AppConfig).
       healthDataEncryptionKey: AppConfig.developmentHealthDataEncryptionKey,
+      cpfHashPepper: AppConfig.developmentCpfHashPepper,
+      smsGateway: 'log',
       mqttUsername: null,
       mqttPassword: null,
       mqttUseTls: false,
@@ -47,6 +49,8 @@ void main() {
           // Hex de 64 caracteres: HealthDataCipher decodifica byte a byte
           // para montar a chave AES-256 (ver AppConfig).
           healthDataEncryptionKey: AppConfig.developmentHealthDataEncryptionKey,
+          cpfHashPepper: AppConfig.developmentCpfHashPepper,
+          smsGateway: 'log',
           mqttUsername: null,
           mqttPassword: null,
           mqttUseTls: false,
