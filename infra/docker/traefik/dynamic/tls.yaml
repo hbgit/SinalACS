@@ -1,0 +1,22 @@
+# Configuração dinâmica do Traefik (provider `file`).
+#
+# Só aponta para caminhos: os certificados em si são gerados pelo
+# `traefik-init` em runtime/certs, que não é versionado.
+tls:
+  certificates:
+    - certFile: /certs/server.crt
+      keyFile: /certs/server.key
+  stores:
+    default:
+      # Sem isto, uma requisição cujo SNI não case com nenhum certificado
+      # recebe o certificado default do Traefik (auto-assinado por ele), e o
+      # app falharia com erro de confiança em vez de chegar ao servidor.
+      defaultCertificate:
+        certFile: /certs/server.crt
+        keyFile: /certs/server.key
+  options:
+    default:
+      # RNF04 pede TLS 1.3 nominalmente. Declarar o mínimo torna o requisito
+      # verificável (`openssl s_client -tls1_2` precisa FALHAR), em vez de
+      # "tem alguma criptografia".
+      minVersion: VersionTLS13

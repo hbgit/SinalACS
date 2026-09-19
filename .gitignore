@@ -25,11 +25,17 @@ coverage/
 # Docker / local runtime
 pg_data/
 infra/docker/mosquitto/runtime/
+# Certificados de desenvolvimento do RPC — gerados pelo traefik-init.
+infra/docker/traefik/runtime/
 
 # Grafo de conhecimento (saída regenerável do graphify)
 graphify-out/
 
-# Asset de desenvolvimento: CA do broker MQTT, copiada por
-# scripts/dev/sync_dev_ca.sh a partir do runtime regerável do Mosquitto.
+# Assets de desenvolvimento: CAs copiadas por scripts/dev/sync_dev_ca.sh a
+# partir dos runtimes regeráveis — a do broker MQTT (infra/docker/mosquitto) e a
+# do RPC (infra/docker/traefik). As duas entradas são explícitas de propósito:
+# um `apps/*/assets/certs/` cobriria em silêncio um terceiro app que aparecesse,
+# e uma CA de desenvolvimento gerada por máquina não pode ser versionada.
 apps/acs/assets/certs/
+apps/patient/assets/certs/
 .worktrees/
