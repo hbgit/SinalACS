@@ -19,7 +19,7 @@
 - **⚠️ Consequência de sessão que este plano expõe — leia antes de executar a Task 7.** O código OTP **não pode ser reapresentado**: ao contrário da senha do ACS, não existe credencial reutilizável para renovar a sessão em silêncio. Com o TTL de 15 minutos hoje vigente e sem refresh token, o paciente teria de receber um SMS novo a cada 15 minutos — o que torna o app inutilizável. A decisão genérica de "manter 15 min e registrar a lacuna" foi tomada em 2026-09-18 **antes** desta consequência ficar visível, e não se sustenta para o RF01. A Task 7 eleva o TTL do paciente a **1 hora**, que é o que `spec/lgpd_design.md` LGPD-RT06 **já exige** — não é uma decisão nova, é aplicar um requisito que já existe e que este plano não tem como evitar. O TTL do ACS permanece 15 minutos, como decidido.
 - **MFA/TOTP e refresh token rotativo continuam fora de escopo** (LGPD-RT06 / F5), com a lacuna registrada na Task 8.
 - Mensagens, comentários e nomes de domínio em português.
-- Depois de qualquer `.spy.yaml` novo ou alterado: `cd backend/sinalacs_server && serverpod generate && serverpod create-migration`.
+- Depois de qualquer `.spy.yaml` novo ou alterado: `cd backend/sinalacs_server && serverpod generate && serverpod create-migration`. O CLI do Serverpod pode não estar no PATH (`export PATH="$PATH:$HOME/.pub-cache/bin"`), e `create-migration` **aborta sem `--force`** quando a migração inclui índice único — esta task inclui um. Ver a Task 3.
 - Antes de `dart test` de integração: `docker compose --profile test up -d postgres-test`.
 
 ---
@@ -555,6 +555,19 @@ serverpod create-migration
 Expected: `otp_challenge.dart` e `otp_request_exception.dart` gerados; migração nova com `ALTER TABLE "users" ALTER COLUMN "birthDate" TYPE date`, o `DROP INDEX`/`CREATE UNIQUE INDEX` e o `CREATE TABLE "otp_challenges"`.
 
 **Confira a migração gerada antes de commitá-la** — a conversão de `timestamp` para `date` é destrutiva para a parte de hora, e é isso mesmo que se quer, mas o SQL precisa ser `USING "birthDate"::date` para o Postgres não recusar a conversão implícita. Se o gerador não emitir o `USING`, corrija **à mão** nesse arquivo de migração (é a única exceção à regra "nunca editar migrations": o gerador não conhece `USING`, e o projeto aceita essa correção pontual desde que o SQL final esteja certo).
+
+**O gerador vai ABORTAR por causa do índice único** e precisa de `--force`. Reportado por quem executou a Task 2 do RF07, que criou o índice único de `acs.enrollmentId`: `serverpod create-migration` recusa quando a migração inclui um índice único e pede `--force`. Esta task esbarra no mesmo aviso (`users_cpf_hash_key`, `unique: true`). Confirme que o `--force` não gera nada parcial — no RF07 a tentativa abortada não deixou resíduo:
+
+```bash
+cd backend/sinalacs_server
+serverpod create-migration --force
+```
+
+**E o CLI pode não estar no PATH** — se `serverpod` não for encontrado:
+
+```bash
+export PATH="$PATH:$HOME/.pub-cache/bin"
+```
 
 - [ ] **Step 5: Analisar**
 
