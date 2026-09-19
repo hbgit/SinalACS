@@ -629,7 +629,7 @@ Co-Authored-By: Claude Code <noreply@anthropic.com>"
   - `abstract interface class OtpChallengeStore { Future<PatientCredentialRecord?> findByCpfHash(String cpfHash); Future<void> save(OtpChallengeRecord challenge); Future<OtpChallengeRecord?> latestOpen(String userId, DateTime at); Future<void> registerAttempt(String challengeId, int attempts); Future<void> consume(String challengeId, DateTime at); }`
   - `class PasswordlessAuthService { Future<void> requestOtp({required Cpf cpf, required DateTime birthDate, DateTime? now}); Future<AuthenticatedUser> verifyOtp({required Cpf cpf, required String code, String? deviceId, DateTime? now}); }`
 
-**Sobre o telefone:** não existe coluna de telefone em `Patient` nem no ER do PRD, e inventar um número seria fabricar dado. O `SmsGateway` recebe um `phone` que, hoje, é o **próprio CPF formatado** — um identificador que o gateway real vai traduzir para o número na integração, e que o gateway de log simplesmente imprime ao lado do código. A ausência de telefone é uma lacuna de produto registrada na Task 8, não algo que este plano resolva inventando uma coluna.
+**Sobre o telefone:** não existe coluna de telefone em `Patient` nem no ER do PRD, e inventar um número seria fabricar dado. O `SmsGateway` recebe um `phone` que, hoje, é o **próprio CPF formatado** — um identificador que o gateway real vai traduzir para o número na integração. O gateway de log **não imprime esse destino**: imprimi-lo poria CPF em claro no log do processo, e uma máscara de CPF ainda diria de quem é o dado. Ele registra só o código. A ausência de telefone é uma lacuna de produto registrada na Task 8, não algo que este plano resolva inventando uma coluna.
 
 - [ ] **Step 1: Escrever o teste que falha**
 
@@ -2226,6 +2226,16 @@ Seção datada com o que **não** foi feito, cada item com o motivo e o ponteiro
 - **Refresh token rotativo continua ausente** (LGPD-RT06) — é o que permitiria voltar o TTL do paciente ao de 15 min sem quebrar a experiência.
 - **MFA/TOTP ausente** (F5).
 - **Sem limite de tentativas por origem** — o contador é por desafio e por CPF; não há IP.
+- **`requestOtp` não equaliza o TEMPO de resposta.** Payload, status e efeitos são idênticos
+  entre o CPF que existe e o que não existe — isso está provado por teste —, mas o caminho
+  válido faz um `latestOpen`, um `save` e o envio de SMS, e as recusas fazem um `latestOpen` e
+  retornam. Um cronômetro distingue os dois, então a propriedade anti-enumeração vale no
+  conteúdo e **não** no relógio. Com gateway de verdade o termo dominante passa a ser a ida ao
+  provedor; a correção é tirar o envio do caminho de resposta (ou impor um piso constante), e é
+  trabalho de endurecimento para quando o provedor for escolhido — não deste estágio, em que
+  `SMS_GATEWAY=log` não faz chamada nenhuma. Registrado aqui porque o comentário de
+  `requestOtp` aponta para esta lista, e um ponteiro que não leva a lugar nenhum é pior que
+  lacuna nenhuma: foi assim que ela quase saiu do registro.
 
 - [ ] **Step 4: Um ponteiro em `user.spy.yaml` para o beco sem saída do `birthDate`**
 
