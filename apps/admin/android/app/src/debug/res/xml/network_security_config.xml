@@ -1,19 +1,33 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-    Cleartext HTTP liberado APENAS em builds de debug e APENAS para o backend
-    local. A partir do targetSdk 28 o Android bloqueia cleartext por padrão, e o
-    Serverpod de desenvolvimento responde em http://10.0.2.2:8080 (o host visto
-    de dentro do emulador Android).
+    Sem exceção de cleartext.
 
-    O manifest de src/main/ não é tocado: builds de release continuam sem
-    nenhuma exceção de cleartext.
+    Este arquivo era byte a byte igual aos dos apps ACS e paciente: liberava
+    HTTP puro para 10.0.2.2/localhost/127.0.0.1, porque o RPC de
+    desenvolvimento respondia em http://10.0.2.2:8080. Aquela porta deixou de
+    ser publicada (RNF04/L-08) e o backend só responde por HTTPS na 443, com o
+    certificado que o Traefik apresenta: não há mais caminho sem criptografia
+    para liberar.
+
+    No app admin ele nunca chegou a ser usado — o backoffice ainda roda sobre
+    `MockAdminDataSource` e não faz requisição nenhuma (ver o comentário do
+    AndroidManifest.xml de src/debug/). Houve a tentação de apagá-lo: fica,
+    porque quem implementar o `AdminDataSource` real sobre `sinalacs_client`
+    vai precisar de duas coisas, e é melhor achá-las escritas do que
+    redescobri-las — (a) o RPC é HTTPS e (b) a CA de desenvolvimento precisa
+    ser carregada como asset, como os outros dois apps fazem.
+
+    O `<base-config>` abaixo repete o default de targetSdk 28+ de forma
+    explícita, para que "não há exceção" seja uma declaração escrita.
+
+    Ressalva medida no app do ACS, com um arquivo byte a byte igual a este: esta
+    configuração NÃO é o que bloqueia o cleartext do `dart:io` — o `POST`
+    http://10.0.2.2/health/check passou com a exceção, sem regra nenhuma e com
+    `cleartextTrafficPermitted="false"` explícito. Ela vale para a pilha Java
+    (OkHttp, WebView, HttpURLConnection), não para a engine do Flutter. Quem
+    fechar o caminho do lado do app deve fazê-lo no cliente, recusando host sem
+    `https://`; hoje o que fecha é a 8080 não existir mais.
 -->
 <network-security-config>
-    <domain-config cleartextTrafficPermitted="true">
-        <!-- Host da máquina de desenvolvimento, visto do emulador Android. -->
-        <domain includeSubdomains="false">10.0.2.2</domain>
-        <!-- Execução em desktop/loopback. -->
-        <domain includeSubdomains="false">localhost</domain>
-        <domain includeSubdomains="false">127.0.0.1</domain>
-    </domain-config>
+    <base-config cleartextTrafficPermitted="false"/>
 </network-security-config>

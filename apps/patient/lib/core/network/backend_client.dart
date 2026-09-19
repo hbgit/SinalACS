@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:sinalacs_client/sinalacs_client.dart';
 import 'package:sinalacs_patient/core/network/auth_session.dart';
 import 'package:sinalacs_patient/core/network/backend_config.dart';
@@ -91,9 +93,23 @@ abstract class PatientBackend {
 /// código gerado por `serverpod generate` que o servidor usa, então qualquer
 /// divergência de contrato quebra em tempo de compilação, não em produção.
 class BackendClient implements PatientBackend {
-  BackendClient({String? host})
-      : _client = Client(host ?? BackendConfig.host)
-          ..connectivityMonitor = null;
+  /// [trustedCaBytes] é a CA de desenvolvimento do RPC (RNF04). `null` faz o
+  /// cliente usar o armazenamento de confiança do sistema — que **não** conhece
+  /// a CA local, e por isso a conexão falha de forma explícita em vez de ser
+  /// aceita às cegas. Nunca instale um `badCertificateCallback` que aceite tudo:
+  /// a verificação de hostname é o que impede um certificado de outro host de
+  /// passar, e ceder aqui anularia RNF04 exatamente no ponto onde ele mais
+  /// importa.
+  BackendClient({String? host, List<int>? trustedCaBytes})
+      : _client = Client(
+          host ?? BackendConfig.host,
+          // `SecurityContext()` já vem com `withTrustedRoots: false`, isto é,
+          // **só** a CA passada abaixo é aceita — nenhuma autoridade pública.
+          // Mesma técnica (e mesma escolha) do `MqttSecureClient` do app ACS.
+          securityContext: trustedCaBytes == null
+              ? null
+              : (SecurityContext()..setTrustedCertificatesBytes(trustedCaBytes)),
+        )..connectivityMonitor = null;
 
   final Client _client;
 

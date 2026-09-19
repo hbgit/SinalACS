@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:sinalacs_acs/core/network/auth_session.dart';
 import 'package:sinalacs_acs/core/network/backend_config.dart';
 import 'package:sinalacs_client/sinalacs_client.dart';
@@ -59,9 +61,23 @@ abstract class AcsBackend {
 
 /// Fachada do backend para o app do ACS.
 class BackendClient implements AcsBackend {
-  BackendClient({String? host})
-      : _client = Client(host ?? BackendConfig.host)
-          ..connectivityMonitor = null;
+  /// [trustedCaBytes] é a CA de desenvolvimento do RPC (RNF04). `null` faz o
+  /// cliente usar o armazenamento de confiança do sistema — que **não** conhece
+  /// a CA local, e por isso a conexão falha de forma explícita em vez de ser
+  /// aceita às cegas. Nunca instale um `badCertificateCallback` que aceite tudo:
+  /// este app já faz verificação de hostname no MQTT e ceder aqui anularia
+  /// RNF04 no ponto onde ele mais importa.
+  BackendClient({String? host, List<int>? trustedCaBytes})
+      : _client = Client(
+          host ?? BackendConfig.host,
+          // `SecurityContext()` já vem com `withTrustedRoots: false`, isto é,
+          // **só** a CA passada abaixo é aceita — nenhuma autoridade pública.
+          // Mesma técnica (e mesma escolha) do `mqtt_secure_client.dart` deste
+          // mesmo app, que faz isso com a CA do broker.
+          securityContext: trustedCaBytes == null
+              ? null
+              : (SecurityContext()..setTrustedCertificatesBytes(trustedCaBytes)),
+        )..connectivityMonitor = null;
 
   final Client _client;
 

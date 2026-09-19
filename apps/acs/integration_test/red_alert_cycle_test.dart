@@ -5,14 +5,15 @@
 ///
 /// Pré-requisitos:
 ///   · `docker compose up` com o database-seed concluído;
-///   · `./scripts/dev/sync_dev_ca.sh` — a CA do broker é asset do app e é
-///     regerada, não versionada.
+///   · `./scripts/dev/sync_dev_ca.sh` — as DUAS CAs são assets do app (a do
+///     broker, para o MQTT, e a do RPC, para o HTTPS) e são geradas, não
+///     versionadas.
 ///
 /// O caminho pronto é `./scripts/qa/e2e.sh --emulator`, que sobe a stack e
 /// preenche os dart-defines a partir do `.env`. À mão:
 ///
 ///   flutter test integration_test \
-///     --dart-define=SINALACS_HOST=http://10.0.2.2:8080/ \
+///     --dart-define=SINALACS_HOST=https://10.0.2.2/ \
 ///     --dart-define=SINALACS_MQTT_HOST=10.0.2.2 \
 ///     --dart-define=SINALACS_MQTT_PASSWORD="$MQTT_ACS_PASSWORD"
 ///
@@ -22,7 +23,9 @@
 library;
 
 import 'dart:async';
+import 'dart:io';
 
+import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:sinalacs_acs/core/database/encrypted_database.dart';
@@ -39,6 +42,23 @@ import 'package:sinalacs_client/sinalacs_client.dart' as api;
 const seedMicroAreaId = '00000000-0000-4000-8000-000000000003';
 const seedPatientId = '00000000-0000-4000-8000-000000000001';
 const otherMicroAreaId = '00000000-0000-4000-8000-000000000099';
+
+/// Bytes da CA de desenvolvimento do RPC, lidos do bundle do app.
+///
+/// É o MESMO trabalho que `main.dart` faz. Ausente, o cliente cai no
+/// armazenamento do sistema e o handshake falha — o que apareceria como "sem
+/// conexão", culpando a rede por um asset que ninguém copiou.
+///
+/// Atenção: a CA do **broker** é outra, e o `MqttAlertFeed` a carrega sozinho
+/// ([BackendConfig.mqttCaAsset]) — são dois destinos, duas CAs.
+Future<List<int>?> _devRpcCaBytes() async {
+  try {
+    final data = await rootBundle.load(BackendConfig.rpcCaAsset);
+    return data.buffer.asUint8List();
+  } catch (_) {
+    return null;
+  }
+}
 
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
@@ -58,11 +78,20 @@ void main() {
   late BackendClient backend;
   late api.Client patientClient;
 
-  setUp(() {
-    backend = BackendClient();
-    // O paciente entra em cena só para dar ao ACS o que receber.
+  setUp(() async {
+    // O cliente do app é o mesmo caminho de `main.dart`: a CA do RPC vem do
+    // bundle e é a ÚNICA raiz confiável (RNF04/L-08). Sem ela o handshake
+    // falha — de propósito: o armazenamento do sistema não conhece a CA de
+    // desenvolvimento.
+    final caBytes = await _devRpcCaBytes();
+    backend = BackendClient(trustedCaBytes: caBytes);
+    // O paciente entra em cena só para dar ao ACS o que receber. Ele usa o
+    // `api.Client` cru, então monta o mesmo `SecurityContext` à mão.
     patientClient = api.Client(
-      const String.fromEnvironment('SINALACS_HOST', defaultValue: 'http://10.0.2.2:8080/'),
+      const String.fromEnvironment('SINALACS_HOST', defaultValue: 'https://10.0.2.2/'),
+      securityContext: caBytes == null
+          ? null
+          : (SecurityContext()..setTrustedCertificatesBytes(caBytes)),
     )..connectivityMonitor = null;
   });
 

@@ -6,29 +6,63 @@
 /// CI segue hermético.
 ///
 ///   flutter test integration_test \
-///     --dart-define=SINALACS_HOST=http://10.0.2.2:8080/
+///     --dart-define=SINALACS_HOST=https://10.0.2.2/
 ///
 /// O default é 10.0.2.2, o host da máquina visto de dentro do emulador Android.
+///
+/// O RPC é **HTTPS na 443** (RNF04/L-08) e o certificado é assinado pela CA de
+/// desenvolvimento, que chega ao app como asset — é por isso que o caminho
+/// pronto (`./scripts/qa/e2e.sh --emulator`) roda o `sync_dev_ca.sh` antes. Sem
+/// essa CA o handshake falha, e é o que se quer: o armazenamento do sistema não
+/// a conhece, e aceitar qualquer certificado anularia o requisito.
 ///
 /// PRIVACIDADE: só os UUIDs sintéticos do seed. Nenhum dado real de paciente,
 /// e o token nunca é impresso.
 library;
 
+import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:sinalacs_client/sinalacs_client.dart';
 import 'package:sinalacs_patient/core/network/backend_client.dart';
+import 'package:sinalacs_patient/core/network/backend_config.dart';
 import 'package:sinalacs_patient/core/network/idempotency.dart';
 import 'package:sinalacs_patient/core/privacy/location_hash.dart';
 
 const seedMicroAreaId = '00000000-0000-4000-8000-000000000003';
+
+/// Bytes da CA de desenvolvimento do RPC, lidos do bundle do app.
+///
+/// É o MESMO trabalho que `main.dart` faz: este teste constrói o `BackendClient`
+/// por conta própria, então precisa entregar a CA por conta própria também.
+/// Ausente, o cliente cai no armazenamento do sistema e o handshake falha — o
+/// que apareceria como "sem conexão", culpando a rede por um asset que ninguém
+/// copiou.
+Future<List<int>?> _devRpcCaBytes() async {
+  try {
+    final data = await rootBundle.load(BackendConfig.rpcCaAsset);
+    return data.buffer.asUint8List();
+  } catch (_) {
+    return null;
+  }
+}
 
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
   late BackendClient backend;
 
-  setUp(() => backend = BackendClient());
+  setUp(() async {
+    final caBytes = await _devRpcCaBytes();
+    if (caBytes == null) {
+      fail(
+        'A CA do RPC não está no bundle (${BackendConfig.rpcCaAsset}). Rode '
+        './scripts/dev/sync_dev_ca.sh com a stack de pé — sem ela o handshake '
+        'falha e este teste falaria de rede em vez de falar de asset.',
+      );
+    }
+    backend = BackendClient(trustedCaBytes: caBytes);
+  });
   tearDown(() => backend.close());
 
   test('a stack responde à sonda de saúde', () async {

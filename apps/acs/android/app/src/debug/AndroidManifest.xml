@@ -5,8 +5,10 @@
     -->
     <uses-permission android:name="android.permission.INTERNET"/>
 
-    <!-- Exceção de cleartext restrita ao backend local de desenvolvimento.
-         Ver res/xml/network_security_config.xml. Só existe em debug. -->
+    <!-- Sem exceção de cleartext: o RPC é HTTPS na 443 desde o RNF04/L-08 e não
+         há caminho em texto claro para liberar. A referência fica para que a
+         decisão esteja onde alguém a procuraria — ver
+         res/xml/network_security_config.xml. Só existe em debug. -->
     <application
         android:networkSecurityConfig="@xml/network_security_config" />
 </manifest>
