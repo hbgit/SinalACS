@@ -340,7 +340,10 @@ script rodar.
     cada migração.
   - `CONTRIBUTING.md` — "a CI usa Flutter 3.24.0" (usa 3.44.8).
   - `spec/sys_flow.md` — afirma que o backend acessa Postgres "sem ORM" e cita `PROGRESS.md` para um motor de sync não conectado.
-  - `docs/README.md` — não linka `telas-admin.md`.
+  - ~~`docs/README.md` — não linka `telas-admin.md`.~~ **Correção (2026-09-19): falso.** O
+    `docs/README.md:5` linka `telas-admin.md`, e o arquivo existe. Uma verificação de uma linha
+    derruba a afirmação — e ela ficou aqui desde a validação original, no meio de uma lista cujo
+    propósito é justamente registrar drift verificado.
 
 ---
 
