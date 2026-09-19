@@ -40,3 +40,7 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    # CAs de desenvolvimento (broker MQTT e RPC), copiadas por
+    # scripts/dev/sync_dev_ca.sh. Regeneráveis e fora do versionamento.
+    - assets/certs/
