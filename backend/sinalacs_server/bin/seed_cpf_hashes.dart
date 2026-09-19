@@ -46,29 +46,63 @@ const _birthDateByUser = <String, String>{
 };
 
 /// Recusa, antes de abrir conexão, quando os dois mapas não cobrem os mesmos
-/// usuários.
+/// usuários — ou quando dois usuários apontam para o MESMO CPF.
 ///
-/// Sem esta checagem a divergência falha **no meio do laço**, depois de já ter
-/// atualizado as linhas anteriores, e como erro de Postgres (`birthDate` é
-/// `NOT NULL`) — que não diz qual entrada do mapa ficou pela metade. Comparar
-/// as chaves é barato e nomeia a entrada: os UUIDs identificam a linha em
-/// `development.sql` sem depender do CPF, que não pode aparecer em mensagem de
-/// erro.
-void _assertSameUserKeys() {
+/// As chaves primeiro. Sem esta checagem a divergência falha **no meio do
+/// laço**, depois de já ter atualizado as linhas anteriores, e como erro de
+/// Postgres (`birthDate` é `NOT NULL`) — que não diz qual entrada do mapa ficou
+/// pela metade. Comparar as chaves é barato e nomeia a entrada: os UUIDs
+/// identificam a linha em `development.sql` sem depender do CPF, que não pode
+/// aparecer em mensagem de erro.
+///
+/// Depois os valores. Duas chaves apontando para o mesmo CPF passam pela
+/// comparação de chaves e estouram **no mesmo lugar**: `users.cpfHash` tem
+/// índice único (`users_cpf_hash_key`), então o laço grava o primeiro e o
+/// segundo viola a constraint — depois de já ter atualizado as linhas
+/// anteriores, e com o hash repetido impresso pelo driver do Postgres na
+/// mensagem. Nenhuma pessoa compartilha CPF: dois usuários com o mesmo valor em
+/// `_cpfByUser` é engano de digitação, e o lugar de recusar é aqui.
+///
+/// Nem o CPF nem o hash entram nas mensagens abaixo — quem identifica a entrada
+/// é o UUID, como no resto deste arquivo.
+void _assertConsistentMaps() {
   final semCpf = _birthDateByUser.keys.toSet().difference(
     _cpfByUser.keys.toSet(),
   );
   final semData = _cpfByUser.keys.toSet().difference(
     _birthDateByUser.keys.toSet(),
   );
-  if (semCpf.isEmpty && semData.isEmpty) return;
+  if (semCpf.isNotEmpty || semData.isNotEmpty) {
+    throw StateError(
+      'Os dois mapas deste seed precisam cobrir os mesmos usuários'
+      '${semCpf.isEmpty ? '' : '; sem CPF em _cpfByUser: ${semCpf.join(', ')}'}'
+      '${semData.isEmpty ? '' : '; sem data em _birthDateByUser: ${semData.join(', ')}'}.',
+    );
+  }
+
+  final usuariosPorCpf = <String, List<String>>{};
+  for (final entry in _cpfByUser.entries) {
+    usuariosPorCpf.putIfAbsent(entry.value, () => <String>[]).add(entry.key);
+  }
+  final repetidos = usuariosPorCpf.values
+      .where((usuarios) => usuarios.length > 1)
+      .map(_emLista)
+      .toList();
+  if (repetidos.isEmpty) return;
 
   throw StateError(
-    'Os dois mapas deste seed precisam cobrir os mesmos usuários'
-    '${semCpf.isEmpty ? '' : '; sem CPF em _cpfByUser: ${semCpf.join(', ')}'}'
-    '${semData.isEmpty ? '' : '; sem data em _birthDateByUser: ${semData.join(', ')}'}.',
+    'Dois usuários deste seed apontam para o mesmo CPF '
+    '(${repetidos.join('; ')}), e `users.cpfHash` tem índice único '
+    '(`users_cpf_hash_key`): o laço gravaria o primeiro e estouraria no '
+    'segundo, no meio do seed. O valor repetido não entra nesta mensagem — '
+    'abra `_cpfByUser`.',
   );
 }
+
+/// Os itens na forma de lista em português: `a`, `a e b`, `a, b e c`.
+String _emLista(List<String> itens) => itens.length == 1
+    ? itens.single
+    : '${itens.take(itens.length - 1).join(', ')} e ${itens.last}';
 
 Future<void> main(List<String> args) async {
   final env = Platform.environment;
@@ -104,7 +138,7 @@ Future<void> main(List<String> args) async {
     exit(2);
   }
 
-  _assertSameUserKeys();
+  _assertConsistentMaps();
 
   // A MESMA instância que o servidor usa, pelo mesmo pepper: se divergirem,
   // nenhum CPF do seed é encontrado no login.
