@@ -40,7 +40,10 @@ extension on Iterable<Map<String, dynamic>> {
 
 Future<void> main(List<String> args) async {
   final repoRoot = Directory.fromUri(Platform.script).parent.parent.parent.path;
-  final host = _arg(args, 'host', 'http://localhost:8080/');
+  // O RPC é HTTPS na 443: a 8080 em texto claro não é mais publicada e quem
+  // termina TLS é o Traefik (RNF04/L-08). O `live_check` recebe este host e lê
+  // a CA de desenvolvimento do RPC sozinho, do runtime local.
+  final host = _arg(args, 'host', 'https://localhost/');
   final broker = _arg(args, 'broker', 'localhost');
   final mqttPassword = _arg(
     args,

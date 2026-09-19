@@ -6,7 +6,7 @@
 #   ./scripts/dev/run_acs.sh                    # flutter run no dispositivo padrão
 #   ./scripts/dev/run_acs.sh -d emulator-5554   # argumentos extras vão para o flutter
 #   ./scripts/dev/run_acs.sh --build            # flutter build apk --debug
-#   ./scripts/dev/run_acs.sh --host http://192.168.0.10:8080/ --mqtt-host 192.168.0.10
+#   ./scripts/dev/run_acs.sh --host https://192.168.0.10/ --mqtt-host 192.168.0.10
 #   ./scripts/dev/run_acs.sh --skip-ca          # não recopia as CAs para o asset
 #
 # Por que existe:
@@ -40,7 +40,9 @@ app_dir="$repo_root/apps/acs"
 env_file="$repo_root/.env"
 
 # Defaults do emulador Android, que enxerga o host da máquina em 10.0.2.2.
-host='http://10.0.2.2:8080/'
+# O RPC é HTTPS na 443 (quem termina o TLS é o Traefik): a 8080 em texto claro
+# deixou de ser publicada (RNF04/L-08), e um host em http aqui não conecta.
+host='https://10.0.2.2/'
 mqtt_host='10.0.2.2'
 action='run'
 skip_ca=0
@@ -80,7 +82,13 @@ fi
 mqtt_password="${MQTT_ACS_PASSWORD:-$(grep -E '^MQTT_ACS_PASSWORD=' "$env_file" | head -1 | cut -d= -f2-)}"
 # Usuário criado por infra/docker/mosquitto/init.sh.
 mqtt_user="${MQTT_ACS_USER:-acs-area-12}"
-google_maps_api_key="${GOOGLE_MAPS_API_KEY:-$(grep -E '^GOOGLE_MAPS_API_KEY=' "$env_file" | head -1 | cut -d= -f2-)}"
+# `|| true` dentro da substituição: sem a linha no .env, o `grep` sai 1, o
+# `pipefail` propaga e este script inteiro morria com exit 1 e SAÍDA NENHUMA —
+# um `--dart-define` ausente e opcional derrubando o wrapper de forma
+# indistinguível de um erro de shell. Medido: `.env` sem `GOOGLE_MAPS_API_KEY=`.
+# As outras duas leituras do .env têm guarda depois (a senha vazia é erro
+# declarado); esta é a única opcional.
+google_maps_api_key="${GOOGLE_MAPS_API_KEY:-$(grep -E '^GOOGLE_MAPS_API_KEY=' "$env_file" | head -1 | cut -d= -f2- || true)}"
 
 if [[ -z "$mqtt_password" ]]; then
   echo 'erro: MQTT_ACS_PASSWORD está vazio no .env.' >&2

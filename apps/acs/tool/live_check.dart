@@ -7,12 +7,21 @@
 ///
 /// Pré-requisitos:
 ///   · `docker compose up` com o database-seed concluído;
-///   · `./scripts/dev/sync_dev_ca.sh` (a CA é regerada, não versionada).
+///   · `./scripts/dev/sync_dev_ca.sh` (as CAs são regeradas, não versionadas).
 ///
 ///   cd apps/acs
 ///   dart run tool/live_check.dart
-///   dart run tool/live_check.dart --host http://10.0.2.2:8080/ --broker 10.0.2.2
+///   dart run tool/live_check.dart --host https://10.0.2.2/ --broker 10.0.2.2
 ///   dart run tool/live_check.dart --mqtt-password "$MQTT_ACS_PASSWORD"
+///
+/// O default do RPC é `https://localhost/` — a 8080 em texto claro não é mais
+/// publicada e quem termina TLS é o Traefik (RNF04/L-08). Diferente dos apps,
+/// esta ferramenta roda na máquina (não num APK), então lê a CA de
+/// desenvolvimento direto do runtime local em vez de um asset Flutter.
+///
+/// São **duas** CAs aqui, e trocar uma pela outra quebra a leg oposta: `--ca` é
+/// a do **broker** (MQTT em 8883) e [_devRpcCaBytes] lê a do **RPC** (HTTPS em
+/// 443). Um `--host` em https com a CA do broker dá `HandshakeException`.
 ///
 /// `--mqtt-password` é obrigatório: a senha do broker não tem default.
 library;
@@ -38,6 +47,33 @@ int _intArg(List<String> args, String name, int fallback) {
   return int.tryParse(value) ?? fallback;
 }
 
+/// Caminho da CA de desenvolvimento do RPC (a que assina o certificado do
+/// Traefik em 443), dentro do repositório.
+///
+/// Sai da posição DESTE arquivo, e não do diretório de onde o comando foi
+/// executado (`Directory.fromUri(Platform.script)`, o mesmo idioma de
+/// `scripts/qa/measure_latency.dart`): a CA é encontrada tanto rodando de
+/// `apps/acs` quanto da raiz do repositório (medido). Um caminho relativo ao CWD
+/// erraria por um `../` conforme quem chamasse, e o handshake falharia — que é o
+/// desfecho que esta leitura existe para não produzir.
+///
+/// O `--ca` do broker, esse, continua relativo ao diretório de execução —
+/// `../../infra/docker/mosquitto/…` só existe a partir de `apps/acs`, que é o
+/// uso documentado no topo. Não é regressão: sempre foi assim.
+File _devRpcCaFile() {
+  // apps/acs/tool/live_check.dart → raiz do repositório.
+  final repoRoot = Directory.fromUri(Platform.script).parent.parent.parent.parent;
+  return File('${repoRoot.path}/infra/docker/traefik/runtime/certs/ca.crt');
+}
+
+/// Lê a CA de desenvolvimento do RPC do runtime local.
+///
+/// `null` quando o arquivo não existe; quem chama diz o que fazer a respeito.
+Future<List<int>?> _devRpcCaBytes() async {
+  final file = _devRpcCaFile();
+  return await file.exists() ? file.readAsBytes() : null;
+}
+
 void _emitMetric(
   bool enabled,
   String event, {
@@ -52,8 +88,10 @@ void _emitMetric(
 }
 
 Future<void> main(List<String> args) async {
-  final host = _arg(args, 'host', 'http://localhost:8080/');
+  final host = _arg(args, 'host', 'https://localhost/');
   final brokerHost = _arg(args, 'broker', 'localhost');
+  // CA do BROKER (MQTT). A do RPC é a de [_devRpcCaBytes], e continuam sendo
+  // duas: apontar esta para a CA do Traefik derruba a leg do MQTT.
   final caPath = _arg(args, 'ca', '../../infra/docker/mosquitto/runtime/certs/ca.crt');
   final emitMetrics = args.contains('--emit-metrics');
   final visitCount = _intArg(args, 'visit-count', 1).clamp(1, 1000);
@@ -70,10 +108,32 @@ Future<void> main(List<String> args) async {
     return;
   }
 
-  final backend = BackendClient(host: host);
+  // A CA do RPC é lida ANTES de construir o cliente, e a ausência dela PARA a
+  // execução com o motivo real. Se ela faltasse e o cliente fosse construído
+  // assim mesmo, ele cairia no armazenamento do sistema, o handshake falharia,
+  // e a saída diria "o backend não respondeu" — exatamente a confusão que este
+  // plano existe para não produzir.
+  final rpcCa = await _devRpcCaBytes();
+  if (rpcCa == null) {
+    stderr.writeln('erro: a CA do RPC não existe em ${_devRpcCaFile().path}.');
+    stderr.writeln('Suba a stack (docker compose up) e rode ./scripts/dev/sync_dev_ca.sh.');
+    exitCode = 2;
+    return;
+  }
+
+  final backend = BackendClient(host: host, trustedCaBytes: rpcCa);
   // O paciente usa o cliente gerado diretamente: aqui ele só encena o disparo
   // para que o ACS tenha o que receber.
-  final patientClient = api.Client(host)..connectivityMonitor = null;
+  //
+  // Este cliente passa pelo MESMO TLS, então também precisa da CA: sem ela ele
+  // cai no armazenamento do sistema, que não conhece a CA local, e o handshake
+  // falha com `CERTIFICATE_VERIFY_FAILED` — medido, e era o que derrubava esta
+  // leg. O plano de TLS listava só o `BackendClient` aqui; este cliente é
+  // criado à mão e ficou de fora da lista.
+  final patientClient = api.Client(
+    host,
+    securityContext: SecurityContext()..setTrustedCertificatesBytes(rpcCa),
+  )..connectivityMonitor = null;
 
   stdout.writeln('ACS → $host   broker → $brokerHost:8883');
   MqttSecureClient? mqtt;

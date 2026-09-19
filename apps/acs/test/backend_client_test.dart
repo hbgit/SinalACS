@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sinalacs_acs/core/network/backend_client.dart';
+import 'package:sinalacs_acs/core/network/backend_config.dart';
 
 import 'support/fake_rpc_server.dart';
 
@@ -117,5 +118,52 @@ void main() {
     expect(session.microAreaId, server.microAreaId);
     expect(server.requests.single.method, 'developmentLogin');
     expect(server.requests.single.args['role'], 'acs');
+  });
+
+  /// RNF04/L-08: o host do `--dart-define` não pode voltar para http. A Task 4
+  /// mediu que o `network_security_config.xml` não bloqueia o cleartext do
+  /// `dart:io`, então esta validação é a única barreira que sobrou — e é aqui
+  /// que ela fica vermelha se alguém a apagar.
+  group('host do RPC', () {
+    test('recusa http — a porta em texto claro não existe mais', () {
+      expect(
+        () => requireSecureHost('http://10.0.2.2:8080/'),
+        throwsA(
+          isA<BackendFailure>()
+              .having((f) => f.isRecoverable, 'isRecoverable', isFalse)
+              .having((f) => f.message, 'message', contains('https')),
+        ),
+      );
+      // Sem host nenhum também é recusa, e não um cliente sem endereço.
+      expect(() => requireSecureHost(''), throwsA(isA<BackendFailure>()));
+      expect(() => requireSecureHost('10.0.2.2'), throwsA(isA<BackendFailure>()));
+    });
+
+    test('aceita https e devolve o mesmo endereço', () {
+      expect(requireSecureHost('https://10.0.2.2/'), 'https://10.0.2.2/');
+    });
+
+    test('o default de compilação é https', () {
+      // O valor que o APK carrega sem nenhum --dart-define.
+      expect(BackendConfig.host, startsWith('https://'));
+      expect(BackendClient.resolveHost(null), BackendConfig.host);
+    });
+
+    test('valida quando o cliente cai no default, não quando o host é explícito', () {
+      // O caminho do `--dart-define`: validado (é o defeito que este teste
+      // prende). `defaultHost` existe porque o valor real é resolvido em tempo
+      // de compilação e não muda dentro de um `flutter test`.
+      expect(
+        () => BackendClient.resolveHost(null, defaultHost: 'http://10.0.2.2:8080/'),
+        throwsA(isA<BackendFailure>()),
+      );
+
+      // O caminho dos testes herméticos, que apontam para servidores fake em
+      // `http://127.0.0.1:<porta efêmera>/`: passa como veio.
+      expect(
+        BackendClient.resolveHost('http://127.0.0.1:4444/'),
+        'http://127.0.0.1:4444/',
+      );
+    });
   });
 }

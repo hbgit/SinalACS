@@ -22,6 +22,31 @@ class BackendFailure implements Exception {
   String toString() => message;
 }
 
+/// Recusa um host de RPC que não esteja em **HTTPS** (RNF04/L-08).
+///
+/// Existe porque a rede do sistema operacional **não** segura mais nada: a Task
+/// 4 deste plano mediu que o `network_security_config.xml` não bloqueia o
+/// cleartext do `dart:io` (quatro variantes, com o controle de que a config
+/// estava aplicada dentro do APK, e o POST em claro saiu assim mesmo). A única
+/// decisão que resta é a do aplicativo — e [BackendConfig.host] é uma constante
+/// de compilação: um `--dart-define=SINALACS_HOST=http://…` "funcionava", isto
+/// é, subia e falava em texto claro sem nada vermelho em lugar nenhum.
+///
+/// Função pura de propósito: é o único ponto onde o defeito ("aceitar http")
+/// consegue ficar vermelho num teste hermético, porque o valor validado é um
+/// parâmetro e não a constante de compilação.
+String requireSecureHost(String host) {
+  final uri = Uri.tryParse(host);
+  if (uri == null || !uri.isScheme('https')) {
+    throw BackendFailure(
+      'O endereço do backend ($host) não está em HTTPS. A porta 8080 em texto '
+      'claro não é mais publicada (RNF04): use https://… em SINALACS_HOST.',
+      isRecoverable: false,
+    );
+  }
+  return host;
+}
+
 /// Contrato do backend visto pela UI do paciente.
 ///
 /// A UI depende desta abstração, nunca do [Client] gerado — mesmo padrão que o
@@ -102,7 +127,12 @@ class BackendClient implements PatientBackend {
   /// importa.
   BackendClient({String? host, List<int>? trustedCaBytes})
       : _client = Client(
-          host ?? BackendConfig.host,
+          // Só o host que veio do `--dart-define` (o default de compilação) é
+          // validado. Um host **explícito** passa como veio: é o caminho dos
+          // testes herméticos, que apontam para servidores fake em
+          // `http://127.0.0.1:<porta efêmera>/` — validá-lo quebraria testes
+          // que precisam ficar verdes.
+          resolveHost(host),
           // `SecurityContext()` já vem com `withTrustedRoots: false`, isto é,
           // **só** a CA passada abaixo é aceita — nenhuma autoridade pública.
           // Mesma técnica (e mesma escolha) do `MqttSecureClient` do app ACS.
@@ -110,6 +140,16 @@ class BackendClient implements PatientBackend {
               ? null
               : (SecurityContext()..setTrustedCertificatesBytes(trustedCaBytes)),
         )..connectivityMonitor = null;
+
+  /// O host efetivo do cliente, com a validação de HTTPS do default.
+  ///
+  /// [defaultHost] só existe para o teste poder exercitar este caminho: o valor
+  /// real é [BackendConfig.host], resolvido em tempo de **compilação**, e por
+  /// isso não muda dentro de um `flutter test`. Sem ele, a linha do `??` — que
+  /// é justamente onde a validação entra — ficaria sem teste que falhe no
+  /// defeito.
+  static String resolveHost(String? host, {String? defaultHost}) =>
+      host ?? requireSecureHost(defaultHost ?? BackendConfig.host);
 
   final Client _client;
 
@@ -344,6 +384,18 @@ class BackendClient implements PatientBackend {
     } on ServerpodClientException catch (error) {
       throw BackendFailure(
         'Não foi possível falar com o servidor (${error.statusCode}).',
+      );
+    } on TlsException {
+      // Medido: uma CA que não assina o certificado do Traefik chega aqui como
+      // `HandshakeException` (que é um `TlsException`) **cru**, sem vir
+      // embrulhado pelo cliente gerado. Sem esta cláusula, ela cai no
+      // `catch (_)` e a pessoa lê "sem conexão com o servidor" — que manda
+      // procurar rede onde o problema é o certificado, que é exatamente a
+      // confusão que a RNF04 não pode produzir.
+      throw const BackendFailure(
+        'Não foi possível confirmar a identidade do servidor (certificado '
+        'TLS). Verifique a instalação e tente de novo.',
+        isRecoverable: false,
       );
     } catch (_) {
       throw const BackendFailure(

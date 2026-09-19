@@ -7,8 +7,8 @@
 #   ./scripts/qa/e2e.sh --emulator # inclui os testes de integração no emulador
 #
 # Sem --emulator, roda as verificações que não precisam de dispositivo
-# (tool/live_check.dart dos dois apps), que já exercitam o RPC, o MQTT com TLS e
-# a sincronização de visitas usando o código de rede real dos apps.
+# (tool/live_check.dart dos dois apps), que já exercitam o RPC sobre TLS, o MQTT
+# com TLS e a sincronização de visitas usando o código de rede real dos apps.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -90,11 +90,12 @@ if [[ "$run_emulator" -eq 1 ]]; then
   (cd apps/patient && flutter pub get >/dev/null)
   (cd apps/acs && flutter pub get >/dev/null)
   (cd apps/admin && flutter pub get >/dev/null)
-  # O emulador alcança o host da máquina por 10.0.2.2.
+  # O emulador alcança o host da máquina por 10.0.2.2 — em 443, porque o RPC
+  # não publica mais porta em texto claro (RNF04/L-08).
   (cd apps/patient && flutter test integration_test -d emulator-5554 \
-      --dart-define=SINALACS_HOST=http://10.0.2.2:8080/)
+      --dart-define=SINALACS_HOST=https://10.0.2.2/)
   acs_cmd=(flutter test integration_test -d emulator-5554
-    --dart-define=SINALACS_HOST=http://10.0.2.2:8080/
+    --dart-define=SINALACS_HOST=https://10.0.2.2/
     --dart-define=SINALACS_MQTT_HOST=10.0.2.2
     --dart-define=SINALACS_MQTT_PASSWORD="$MQTT_ACS_PASSWORD")
   if [[ -n "${GOOGLE_MAPS_API_KEY:-}" ]]; then
