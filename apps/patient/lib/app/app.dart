@@ -21,15 +21,24 @@ import 'package:sinalacs_patient/core/reminders/sqflite_reminder_store.dart';
 class SinalAcsApp extends StatefulWidget {
   const SinalAcsApp({
     super.key,
-    this.backend,
+    required this.backend,
     this.locationReader,
     this.reminderStore,
     this.reminderScheduler,
     this.consentPreferences,
   });
 
-  /// Injetável para teste. Em execução normal é o [BackendClient] real.
-  final PatientBackend? backend;
+  /// Backend do app. **Obrigatório, e construído em `main.dart`.**
+  ///
+  /// Havia aqui um `widget.backend ?? BackendClient()`: um cliente **sem a CA do
+  /// RPC** (RNF04/L-08) falando com o `https` padrão. Em produção o `main` sempre
+  /// injetou, então ele nunca mordeu — mas era o caminho que um teste ou uma
+  /// tela nova pegava sem perceber, e que falharia no handshake com a cara de
+  /// "problema de servidor". Só o `main` pode construir este cliente: é o único
+  /// lugar onde a CA já foi lida do bundle. Injetável para teste, onde o duplo
+  /// entra no lugar do real. Os demais parâmetros continuam opcionais: os
+  /// fallbacks deles não carregam CA nem apontam para a rede.
+  final PatientBackend backend;
 
   /// Injetável para teste. Em execução normal é o [GeolocatorLocationReader]
   /// real, que fala com o GPS do aparelho.
@@ -53,7 +62,6 @@ class SinalAcsApp extends StatefulWidget {
 }
 
 class _SinalAcsAppState extends State<SinalAcsApp> {
-  late final PatientBackend _backend = widget.backend ?? BackendClient();
   late final LocationReader _locationReader =
       widget.locationReader ?? const GeolocatorLocationReader();
   late final ReminderStore _reminderStore = widget.reminderStore ?? SqfliteReminderStore();
@@ -62,17 +70,14 @@ class _SinalAcsAppState extends State<SinalAcsApp> {
   late final ConsentPreferences _consentPreferences =
       widget.consentPreferences ?? SqfliteConsentPreferences();
 
-  @override
-  void dispose() {
-    // Só fecha o que este widget criou; um backend injetado é de quem injetou.
-    if (widget.backend == null) _backend.close();
-    super.dispose();
-  }
+  // Sem `dispose`: este widget não cria mais cliente nenhum (o `main` é quem
+  // constrói e injeta), então não há o que fechar — fechar um backend injetado
+  // seria fechar o de quem injetou.
 
   @override
   Widget build(BuildContext context) {
     return BackendScope(
-      backend: _backend,
+      backend: widget.backend,
       child: LocationScope(
         reader: _locationReader,
         child: RemindersScope(

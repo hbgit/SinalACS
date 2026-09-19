@@ -83,15 +83,25 @@ void main() {
     // bundle e é a ÚNICA raiz confiável (RNF04/L-08). Sem ela o handshake
     // falha — de propósito: o armazenamento do sistema não conhece a CA de
     // desenvolvimento.
+    //
+    // Por isso a ausência do asset **falha aqui e alto**: sem esta guarda, este
+    // arquivo acusa "sem conexão" e o sintoma aponta para o servidor quando o
+    // problema é o bundle. Mesmo molde de
+    // `apps/patient/integration_test/backend_connection_test.dart`.
     final caBytes = await _devRpcCaBytes();
+    if (caBytes == null) {
+      fail(
+        'A CA do RPC não está no bundle (${BackendConfig.rpcCaAsset}). Rode '
+        './scripts/dev/sync_dev_ca.sh com a stack de pé — sem ela o handshake '
+        'falha e este teste falaria de rede em vez de falar de asset.',
+      );
+    }
     backend = BackendClient(trustedCaBytes: caBytes);
     // O paciente entra em cena só para dar ao ACS o que receber. Ele usa o
     // `api.Client` cru, então monta o mesmo `SecurityContext` à mão.
     patientClient = api.Client(
       const String.fromEnvironment('SINALACS_HOST', defaultValue: 'https://10.0.2.2/'),
-      securityContext: caBytes == null
-          ? null
-          : (SecurityContext()..setTrustedCertificatesBytes(caBytes)),
+      securityContext: SecurityContext()..setTrustedCertificatesBytes(caBytes),
     )..connectivityMonitor = null;
   });
 

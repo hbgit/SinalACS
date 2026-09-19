@@ -23,7 +23,7 @@ import 'package:sinalacs_acs/core/services/visit_queue_factory.dart';
 class SinalAcsApp extends StatefulWidget {
   const SinalAcsApp({
     super.key,
-    this.backend,
+    required this.backend,
     this.feedBuilder,
     this.visitQueue,
     this.visitPullService,
@@ -32,8 +32,16 @@ class SinalAcsApp extends StatefulWidget {
     this.syncInterval,
   });
 
-  /// Injetáveis para teste. Em execução normal são as implementações reais.
-  final AcsBackend? backend;
+  /// Backend do app. **Obrigatório, e construído em `main.dart`.**
+  ///
+  /// Havia aqui um `widget.backend ?? BackendClient()`: um cliente **sem a CA do
+  /// RPC** (RNF04/L-08) falando com o `https` padrão. Em produção o `main` sempre
+  /// injetou, então ele nunca mordeu — mas era o caminho que um teste ou uma
+  /// tela nova pegava sem perceber, e que falharia no handshake com a cara de
+  /// "problema de servidor". Só o `main` pode construir este cliente: é o único
+  /// lugar onde a CA já foi lida do bundle. Injetável para teste, onde o duplo
+  /// entra no lugar do real.
+  final AcsBackend backend;
   final AlertFeed Function(AlertQueue queue)? feedBuilder;
   final OfflineVisitQueue? visitQueue;
   final VisitPullService? visitPullService;
@@ -50,8 +58,6 @@ class SinalAcsApp extends StatefulWidget {
 }
 
 class _SinalAcsAppState extends State<SinalAcsApp> {
-  late final AcsBackend _backend = widget.backend ?? BackendClient();
-
   /// Compartilhado entre a fila offline e o serviço de pull (RF15).
   ///
   /// `VisitPullService` lê deste MESMO store para nunca reintroduzir
@@ -72,26 +78,25 @@ class _SinalAcsAppState extends State<SinalAcsApp> {
   /// Fila respaldada pelo banco criptografado, com o sincronizador ligado.
   ///
   /// A chave vive no Keystore/Keychain, nunca no código. Deixou de ser `static`
-  /// para enxergar [_backend]: sem sincronizador, `sync()` caía no ramo sem
+  /// para enxergar o backend: sem sincronizador, `sync()` caía no ramo sem
   /// remetente e devolvia erro — as visitas nunca subiam ao servidor e o que já
   /// estava confirmado nunca era apagado do disco.
-  OfflineVisitQueue _persistentQueue() => buildVisitQueue(backend: _backend, store: _visitStore);
+  OfflineVisitQueue _persistentQueue() =>
+      buildVisitQueue(backend: widget.backend, store: _visitStore);
 
   /// Serviço de pull central→dispositivo (RF15, decisão §5).
   ///
   /// Usa o MESMO `_visitStore` da fila — ver o comentário acima.
-  late final VisitPullService _visitPullService =
-      widget.visitPullService ?? buildVisitPullService(backend: _backend, localVisits: _visitStore);
+  late final VisitPullService _visitPullService = widget.visitPullService ??
+      buildVisitPullService(backend: widget.backend, localVisits: _visitStore);
 
-  @override
-  void dispose() {
-    if (widget.backend == null) _backend.close();
-    super.dispose();
-  }
+  // Sem `dispose`: este widget não cria mais cliente nenhum (o `main` é quem
+  // constrói e injeta), então não há o que fechar — fechar um backend injetado
+  // seria fechar o de quem injetou.
 
   @override
   Widget build(BuildContext context) => BackendScope(
-        backend: _backend,
+        backend: widget.backend,
         child: MaterialApp(
           title: 'SinalACS ACS',
           debugShowCheckedModeBanner: false,
