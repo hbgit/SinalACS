@@ -651,6 +651,11 @@ O backend `dart:io` foi removido da árvore; o histórico do git o preserva.
   paciente. O que segue não implementado é a integração com Gov.br e com um
   cadastro institucional real: a credencial do ACS nasce do seed de
   desenvolvimento, não de um sistema da Secretaria (ver a seção abaixo).
+  **Atualização (2026-09-19):** o app do paciente também deixou de usar o token
+  de desenvolvimento — o login dele é passwordless (CPF + data de nascimento +
+  código OTP, RF01) —, então o `developmentLogin` ficou só nas ferramentas
+  (`tool/`, `integration_test/`) dos dois apps, contra uma stack com
+  `ENABLE_DEV_LOGIN=true` (ver a seção do RF01 ao fim deste arquivo).
 - ~~**Apps Flutter não consomem o cliente gerado.**~~ Desatualizado: os dois
   apps já consomem `sinalacs_client` por dependência de caminho e falam com o
   backend real (ver M2.4 acima) — `RiskLevel` atravessa a fronteira desde a
@@ -732,3 +737,66 @@ defeito:
    servidor vivo — `apps/acs/test/support/fake_rpc_server.dart`. Quem executou
    evitou de propósito gastar o bloqueio de 5 tentativas do `ACS-001` com
    senhas erradas. A prova é do caminho, não do servidor real.
+
+---
+
+## Login passwordless do paciente (RF01) — o que ficou de fora (2026-09-19)
+
+O login do paciente deixou de ser o token HMAC de desenvolvimento: o app envia CPF (validado por
+dígito verificador, e hasheado no servidor em HMAC-SHA-256 com `CPF_HASH_PEPPER`), data de
+nascimento e o código de 6 dígitos recebido, e o servidor só emite a sessão depois de
+`auth.verifyOtp`. As decisões de escopo estão em
+`docs/superpowers/plans/2026-09-18-rf01-login-passwordless-otp.md`. O que este plano **não** fez:
+
+- **O provedor de SMS não foi escolhido.** Hoje `SMS_GATEWAY=log` escreve o código no log do
+  servidor e só é aceito em `development`; fora dele o boot falha nomeando a variável. Falta a
+  decisão de produto/infra: conta no provedor, custo por mensagem, contrato, e o que fazer
+  quando o envio falha.
+- **Não existe coluna de telefone** em `users`/`patients` nem no ER do PRD. O gateway de
+  desenvolvimento recebe o CPF formatado como identificador de destino; um gateway real precisa
+  do número, o que é decisão de produto — e dado pessoal novo, a coletar com finalidade e
+  retenção próprias (`spec/lgpd_data_audit.md`).
+- **A sessão do paciente passou a 1 hora** (`AuthEndpoint.patientSessionLifetime`), e não aos 15
+  minutos do padrão, aplicando LGPD-RT06. O motivo: o código OTP não pode ser reapresentado como
+  a senha do ACS pode, então **não há renovação silenciosa** para o paciente — com 15 minutos
+  ele receberia um SMS novo a cada 15 minutos. O ACS continua com 15 minutos e renovação pela
+  credencial mantida em memória (RF07). A assimetria é deliberada e está escrita em
+  `spec/lgpd_design.md`.
+- **Refresh token rotativo continua ausente** (LGPD-RT06) — é o que permitiria voltar o TTL do
+  paciente aos 15 minutos sem quebrar a experiência.
+- **MFA/TOTP ausente** (achado F5 de `spec/security_assessment.md`).
+- **Sem limite de tentativas por origem (IP).** O teto de 5 verificações é por desafio e o
+  intervalo de 60 s é por CPF; nada olha de onde vem a chamada — o mesmo vale para o pedido de
+  código em si, que não tem limite nenhum.
+- **`requestOtp` não equaliza o TEMPO de resposta** — é a lacuna que o comentário de
+  `requestOtp` em
+  `backend/sinalacs_server/lib/src/application/auth/passwordless_auth_service.dart` chama de
+  "registrada na Task 8", e é por isso que ela está nesta lista. Payload, status e efeitos são
+  idênticos entre o CPF cadastrado e o não cadastrado — provado por teste
+  (`passwordless_auth_service_test.dart`, "não revela CPF inexistente nem nascimento errado") —,
+  mas o caminho válido faz um `latestOpen`, um `save` e o envio do código, e as recusas fazem um
+  `latestOpen` e retornam: um cronômetro distingue os dois. A propriedade anti-enumeração vale no
+  conteúdo e **não** no relógio. Com gateway de verdade o termo dominante é a ida ao provedor; a
+  correção é tirar o envio do caminho de resposta (ou impor um piso constante de tempo), e é
+  endurecimento para quando o provedor for escolhido — não deste estágio, em que `SMS_GATEWAY=log`
+  não faz chamada nenhuma.
+- **Biometria e leitura de QR Code.** `spec/sys_flow.md` lista "SMS/OTP, biometria ou QR Code
+  gerado pelo ACS" como critérios de aceite do RF01. Biometria não existe em nenhum app; a
+  leitura de QR pelo app do paciente também não — o onboarding pede para "colar ou digitar o
+  código do convite".
+
+### Um defeito do RF02 que esta entrega mediu — com dono (2026-09-19)
+
+`onboarding_endpoint.dart:62` faz `issueToken(user)` — o default de **15 minutos** — para
+`role: UserRole.patient`, e o app consome esse token como sessão
+(`apps/patient/lib/core/network/backend_client.dart:259-273`). Ou seja: **há dois caminhos de
+sessão do paciente e eles discordam** — 1 hora no login passwordless (RF01) e 15 minutos no
+onboarding (RF02) —, e no onboarding a renovação silenciosa também não existe, porque não há
+credencial para renovar: quem conclui o cadastro cai para fora em 15 minutos, sem aviso e sem
+caminho de volta que não seja entrar de novo pelo código.
+
+Não foi corrigido aqui de propósito: é mudança de comportamento de outra entrega. **Dono: o
+RF02.** O que torna o registro necessário é exatamente o que o comentário novo do
+`auth_endpoint.dart` diz querer evitar, por escrito — um leitor futuro lê a diferença como
+descuido e conserta um dos lados, e o lado mais provável de ele "consertar" é o TTL do login, que
+tem motivo para ser 1 hora.

@@ -28,8 +28,9 @@ pelo MQTT/TLS real).
 | **1.4.1 Color Use** | A cor não deve ser o único indicador visual de estado/risco | Duplo canal (Texto/Ícone + Cor) em sinais clínicos de risco | **Conforme** | Rótulos explícitos `'Risco: Vermelho'`, `'Risco: Amarelo'`, `'Risco: Verde'` acompanhados de ícone, nos dois apps. |
 | **1.4.3 Contrast (Minimum)** | Razão de contraste min. de 4.5:1 (texto normal) e 3:1 (texto grande/UI) | ≥ 4.5:1 para texto sobre fundo escuro nos temas | **Conforme (corrigido)** | Cinco pares de token/superfície falhavam quando medidos corretamente (§2.1); corrigidos separando token de PREENCHIMENTO de token de TEXTO (`redOnSurface`/`accentOnSurface` no ACS, `dangerOnSurface`/`accentOnSurface` no paciente, `redOnSurface`/`accentOnSurface` no admin). Guardado por teste determinístico. |
 | **2.4.7 Focus Visible** | Indicador claro de foco visual ao navegar por campos interativos | Foco visível em todos os elementos selecionáveis | **Conforme** | Indicador de foco nativo do Android acompanha todos os alvos tocáveis, sem truncamento. |
+| **2.5.3 Label in Name** | O nome acessível de um controle com rótulo visível deve **conter** esse texto | (ausente da avaliação anterior) | **Parcial (corrigido em parte)** | Critério não coberto pelo relatório original — a baseline declarada é 2.1 AA e 2.5.3 é **nível A**. O padrão `Semantics(button: true)` em volta de um `FilledButton` produz **os dois** defeitos ao mesmo tempo: nome que não contém o texto visível (2.5.3) e um nó inerte (4.1.2). Três sítios medidos corrigidos nesta revisão (login do paciente, login do ACS, botão de EMERGÊNCIA); dois seguem em aberto com dono — ver §2.6 e §3. |
 | **2.5.5 Target Size** | Alvo de toque adequado para interatividade | ≥ 48x48 dp (padrão), ≥ 60x60 dp (botão de emergência/pânico) | **Conforme (corrigido)** | Botão de pânico do paciente: `208x208 dp`. "Ligar para o SAMU (192)" no ACS não tinha `minimumSize` (default M3 de 40dp de altura visual) — corrigido para `64x60 dp`. Quatro outros botões de ação primária no ACS também não tinham `minimumSize` explícito; padronizados em `48x52 dp`. |
-| **4.1.2 Name, Role, Value** | Árvore semântica exposta para leitores de tela nativos | Rótulos e papeis em 100% dos fluxos críticos | **Conforme** | Árvore semântica nativa do Flutter expõe abas (**Área, Fila, Mapa, Visita, Mais**) e formulários com clareza; o cartão de alerta da fila passou a ser lido como uma frase única (§3, achado antigo de prioridade Baixa). |
+| **4.1.2 Name, Role, Value** | Árvore semântica exposta para leitores de tela nativos | Rótulos e papeis em 100% dos fluxos críticos | **Parcial (ver §2.6)** | Árvore semântica nativa do Flutter expõe abas (**Área, Fila, Mapa, Visita, Mais**) e formulários com clareza; o cartão de alerta da fila passou a ser lido como uma frase única (§3, achado antigo de prioridade Baixa). **Ressalva (2026-09-19):** o critério volta a **parcial** pelo nó inerte do §2.6 — o mesmo `Semantics` em volta de um botão que viola o 2.5.3 cria um nó anunciado como botão **sem ação de toque**, e há dois sítios ainda em aberto (login do admin, com dono; 'Concluir cadastro', não medido). |
 | **4.1.3 Status Messages** | Uma mudança de status deve ser anunciada por tecnologia assistiva sem exigir foco | (ausente da avaliação anterior) | **Conforme (corrigido)** | Critério não coberto pelo relatório original. Sete pontos de status dinâmico (erro de login nos dois apps, confirmação de alerta de emergência, banners de falha de broker/armazenamento, erro do diretório de pacientes, contador de visitas recusadas) não eram anunciados; corrigidos com `Semantics(liveRegion: true)`. |
 
 ---
@@ -131,8 +132,17 @@ Reprodução: `meetsGuideline(androidTapTargetGuideline)` em ambos os apps (`log
 ### 2.3 Rótulos Semânticos e Navegação por Leitor de Tela (WCAG 4.1.2)
 
 #### Inspeção Estática de Código
-* **Instâncias de `Semantics()`:** Login ACS (`app.dart`), Login Paciente, Botão de Pânico,
-  banners de infraestrutura, e — nesta revisão — o cartão de alerta da fila.
+* **Instâncias de `Semantics()`:** a lista anterior — "Login ACS (`app.dart`), Login Paciente,
+  Botão de Pânico, banners de infraestrutura, e — nesta revisão — o cartão de alerta da fila" —
+  era um inventário de *onde existem* instâncias, e ficou desatualizada **nos dois sentidos**:
+  o rótulo saiu dos dois logins e o botão de pânico ganhou `MergeSemantics`. Cada sítio hoje diz
+  o que faz: **login do paciente** e **login do ACS** não têm `Semantics` nenhum em volta (o
+  `Text` do botão é o nome acessível); **botão de EMERGÊNCIA**, `MergeSemantics` em volta do
+  `Semantics(label: ...)` — um nó só, com a frase descritiva dentro do nome. Os demais —
+  **banners de infraestrutura**, **cartão de alerta da fila** e os `liveRegion` do §2.5 —
+  continuam como estavam: têm outra forma (região viva ou rótulo sobre um bloco de texto, não
+  `button: true`) e **não foram medidos** como nós de botão. Não os leia como defeito sem medir
+  — a regra que separa as duas formas está no §2.6.
 * **Instâncias de `tooltip:`:** `'Enviar mensagem'`, `'Novo alarme'` no app paciente.
 
 #### Correção: cartão de alerta lido como frase única
@@ -190,6 +200,43 @@ chegou marcado como região viva.
 
 ---
 
+### 2.6 Nome Acessível e Nós Inertes (WCAG 2.5.3 e 4.1.2) — critério novo
+
+Ausente da avaliação anterior: **zero ocorrências de `2.5.3` ou "Label in Name"** neste
+documento. A baseline declarada é 2.1 AA, e 2.5.3 (Label in Name) é **nível A** do 2.1 — estava
+no escopo e simplesmente não foi avaliado. A §2.3 cita "Login Paciente" como *sítio* de
+`Semantics()`, sem avaliar o valor.
+
+**A regra que o caso ensina.** Um `Semantics` em volta de um controle **ou funde com ele**
+(mesmo nó, com a ação — `MergeSemantics`, ou `excludeSemantics: true` + `onTap` explícito) **ou
+cria um nó próprio**, anunciado com papel de botão e **sem ação de toque**. A segunda forma é a
+que engana: o nome acessível parece certo — é até mais descritivo que o texto do botão —, mas o
+leitor de tela encontra primeiro um "botão" que não faz nada, e só depois o botão real. São dois
+critérios violados de uma vez: o nome não contém o texto visível (**2.5.3**) e o nó é inerte
+(**4.1.2**). Note que **a correção não é reescrever o texto**: um rótulo igual ao texto visível
+deixaria dois nós com o mesmo nome, o primeiro deles inerte — some-se o wrapper, ou use-se
+`excludeSemantics: true` com `onTap` explícito.
+
+| Sítio | O que foi medido | Situação |
+| :--- | :--- | :--- |
+| `apps/patient/lib/app/app.dart` — **botão de EMERGÊNCIA**, `label: 'Enviar alerta de emergência'` sobre o texto visível `'EMERGÊNCIA'` | `#47 isButton / "Enviar alerta de emergência" / sem actions` + filho `#48 tap / "EMERGÊNCIA"`, com o nó inerte cobrindo `Rect.fromLTRB(0, 0, 752, 208)` — a largura toda do `ListView`. **2.5.3 e 4.1.2 no controle mais crítico do app** | **Corrigido** com `MergeSemantics` em volta do `Semantics`: um nó só, `rect=(0,0,208,208)`, rótulo `"Enviar alerta de emergência\nEMERGÊNCIA"` e ação de toque. Adiar não se sustentou: nenhum teste prendia aquele rótulo, e fundir não exige escolher texto novo — a frase descritiva continua no nome acessível, que é o motivo de não se remover o wrapper aqui. |
+| `apps/patient/lib/app/app.dart` — **login** (`enter_button`, texto visível `'Entrar sem senha'`) | mesmo par de nós; o `Semantics` chamava-se `'Entrar na triagem do paciente'` | **Corrigido** — o wrapper saiu; o nome acessível é o `Text` do próprio botão. Prendido por `find.bySemanticsLabel('Entrar sem senha')` (igualdade exata, não *contains*) e pela ausência do rótulo antigo. |
+| `apps/acs/lib/app/app.dart` — **login do ACS** (`login_button`, texto visível `'Entrar com credenciais'`) | mesmo par de nós | **Corrigido** — wrapper removido, pelo mesmo motivo. |
+| `apps/admin/lib/app/app.dart:119` — **login do backoffice** | `#10 "Entrar no backoffice administrativo"` sem actions + `#11 tap / "Entrar"` | **Em aberto, com dono: o app admin.** Não é dívida do RF01; fica com a próxima rodada do backoffice. |
+| `apps/patient/lib/app/app.dart:672` — **'Concluir cadastro'** (onboarding) | **Só a metade 4.1.2** (o rótulo é igual ao texto visível, então 2.5.3 não falha pelo nome); **não medido** — o botão fica fora da primeira dobra no viewport de teste | **Declarado como não medido** — não o trate como confirmado. |
+
+Os demais `Semantics(...)` — os `liveRegion` do §2.5, o rótulo do cartão de alerta da fila, os
+banners de infraestrutura — têm outra forma e **não** foram medidos como nós de botão: não os
+declare defeito sem medir.
+
+Reprodução: `expectNenhumBotaoInerte(tester)` (`test/support/semantics_scan.dart`, nos dois apps)
+roda na árvore inteira das telas tocadas — login e tela de emergência no app do paciente, login
+e painel com alerta na fila no ACS — e é ela, não as asserções de rótulo (verdes nos dois
+estados), quem separa o defeito da correção. O nó mesclado no pai (`MergeSemantics`) não é
+contado: o que a plataforma anuncia é a fronteira da fusão, e é isso que a varredura mede.
+
+---
+
 ## 3. Matriz de Achados — Situação Após Esta Revisão
 
 | Prioridade original | Critério | Localização | Situação nesta revisão |
@@ -200,6 +247,7 @@ chegou marcado como região viva.
 | Média | 2.5.5 | Botão do SAMU | **Corrigido** para `64x60 dp`; a medição original ("48x52 dp") estava incorreta — o botão não tinha `minimumSize`. |
 | Baixa | 4.1.2 | Cartões de alerta do ACS | **Corrigido** — cartão agora é uma frase semântica única. |
 | (não avaliado) | 4.1.3 | Sete pontos de status dinâmico | **Critério ausente da baseline anterior, incorporado e corrigido nesta revisão.** |
+| (não avaliado) | **2.5.3** | `Semantics(button: true)` em volta de um botão de verdade — login do paciente, login do ACS, botão de EMERGÊNCIA, login do admin e 'Concluir cadastro' | **Critério ausente da baseline anterior (nível A do 2.1), incorporado nesta revisão.** Medição e regra no §2.6. Três sítios corrigidos (login do paciente, login do ACS, botão de EMERGÊNCIA); **dois em aberto**: login do admin (**dono: o app admin**) e 'Concluir cadastro' (**não medido** — declare como não medido, não como confirmado). |
 
 ---
 
@@ -228,6 +276,7 @@ corrigidos acima.
 | `meetsGuideline` (contraste + alvo de toque) | `login_flow_test.dart`, `patient_app_mvp_test.dart` | Regressão de contraste ou alvo de toque nas telas de login |
 | `SemanticsFlags.isLiveRegion` | idem | Status dinâmico deixar de ser anunciado |
 | Rótulo semântico do cartão de alerta | `login_flow_test.dart` | Cartão voltar a ser lido como nós soltos |
+| Varredura de nós "botão" sem ação de toque (WCAG 4.1.2 e 2.5.3) | `test/support/semantics_scan.dart` (`expectNenhumBotaoInerte`), usado em `login_flow_test.dart` e `patient_app_mvp_test.dart` | Um `Semantics` em volta de um botão voltar a anunciar um "botão" que não responde ao toque. A varredura olha a árvore inteira, não um sítio — prender por sítio passaria com o defeito, porque o nó que carrega o nome é justamente o inerte. Tem testes de sanidade (`acusa o "botão" sem ação de toque`, `não acusa controle legitimamente desabilitado`, `não passa em silêncio quando não há o que medir`). |
 | 14 testes de integração em dispositivo | `apps/acs/integration_test/` | Regressão de fluxo real (criptografia, MQTT/TLS, mapa, escalonamento) |
 
 Este conjunto roda no CI (`serverpod-backend`, `patient-app`, `acs-app` — ver `.github/workflows/ci.yml`

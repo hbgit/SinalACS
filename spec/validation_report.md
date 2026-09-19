@@ -67,7 +67,7 @@ cliente · **`parcial`** = existe, mas alimentado por dado fabricado ·
 
 | ID | Requisito | Veredicto | Evidência |
 |---|---|---|---|
-| RF01 | Autenticação passwordless (CPF + nasc. + OTP) | **ausente** | Campos de CPF/data existem na UI mas são decorativos; o login chama `auth.developmentLogin(role)` ignorando a entrada. Sem gateway SMS. O plano de RF07 não cobriu este requisito — a autenticação institucional que ele implementou é a do ACS. |
+| RF01 | Autenticação passwordless (CPF + nasc. + OTP) | **backend + app** | `auth.requestOtp`/`verifyOtp` com CPF validado por dígito verificador, hasheado em HMAC-SHA-256 com `CPF_HASH_PEPPER` (LGPD §196), código de 6 dígitos com TTL de 5 min, teto de 5 verificações, intervalo de 60 s e auditoria por desfecho (`otp_challenges`). **O provedor de SMS não está escolhido**: `SMS_GATEWAY=log` escreve o código no log e só é aceito em `development`. Ver `docs/superpowers/plans/2026-09-18-rf01-login-passwordless-otp.md`; lacunas em `PROGRESS.md`. |
 | RF02 | Onboarding via QR Code | **ausente** | Botão presente; `app.dart:170` emite snackbar "será disponibilizada". |
 | RF03 | Botão de alerta de urgência (MQTT) | **parcial** | Endpoint e entrega funcionam (validado em dispositivo). O app agora tenta ler a localização e envia somente um hash truncado; sem permissão/GPS usa `unknownLocationHash` e informa a pessoa. A precisão e o risco de reidentificação ainda exigem decisão de produto — ver L-02/L-05. |
 | RF04 | Formulário de triagem estruturada | **backend** | `triage.evaluate` exige token, classifica pelo motor determinístico e grava em `triage_sessions` com auditoria. |
@@ -86,7 +86,7 @@ cliente · **`parcial`** = existe, mas alimentado por dado fabricado ·
 | RF17 | Logs de auditoria e conformidade | **backend** | `audit_logs` encadeado por HMAC; gravou `granted` e `denied_territory` nesta validação; cadeia verificada íntegra. |
 | RF18 | Dark mode nativo | **app-only** | Tema único dark nos três apps, com matriz de contraste testada. |
 
-**Contagem:** 7 `backend` · 1 `backend + app` · 1 `app-only` · 3 `parcial` · 6 `ausente`.
+**Contagem:** 7 `backend` · 2 `backend + app` · 1 `app-only` · 3 `parcial` · 5 `ausente`.
 
 ### Requisitos não funcionais
 
@@ -115,21 +115,23 @@ cliente · **`parcial`** = existe, mas alimentado por dado fabricado ·
 
 | Método RPC | Paciente | ACS | Admin |
 |---|---|---|---|
-| `auth.developmentLogin` | ✅ `backend_client.dart:113` | ✅ só em `tool/` e `integration_test/` — `backend_client.dart:160` | ❌ |
+| `auth.developmentLogin` | ✅ só em `tool/` e `integration_test/` — `backend_client.dart:180` | ✅ só em `tool/` e `integration_test/` — `backend_client.dart:160` | ❌ |
 | `auth.loginInstitutional` | — | ✅ `backend_client.dart:113` | ❌ |
+| `auth.requestOtp` | ✅ `backend_client.dart:147` | — | ❌ |
+| `auth.verifyOtp` | ✅ `backend_client.dart:161` | — | ❌ |
 | `health.check` | ⚠️ só em `live_check`/teste | ❌ saiu da interface (L-14) | ❌ |
 | `onboarding.generateEnrollmentToken` | ❌ | ❌ | ❌ |
-| `onboarding.completeEnrollment` | ✅ `backend_client.dart:199` | — | ❌ |
-| `triage.evaluate` | ✅ `backend_client.dart:143` | — | ❌ |
-| `alerts.createRedAlert` | ✅ `backend_client.dart:180` | — | ❌ |
-| `alerts.statusFor` | ✅ `backend_client.dart:161` | — | ❌ |
+| `onboarding.completeEnrollment` | ✅ `backend_client.dart:266` | — | ❌ |
+| `triage.evaluate` | ✅ `backend_client.dart:210` | — | ❌ |
+| `alerts.createRedAlert` | ✅ `backend_client.dart:247` | — | ❌ |
+| `alerts.statusFor` | ✅ `backend_client.dart:228` | — | ❌ |
 | `alerts.acknowledge` | — | ✅ `backend_client.dart:185` | ❌ |
 | `visits.sync` | — | ✅ `backend_client.dart:197` | ❌ |
 | `visits.pull` | — | ✅ `backend_client.dart:212` | ❌ |
 | `patients.listMicroArea` | — | ✅ `backend_client.dart:220` | ❌ |
-| **Cobertura** | **6/12** | **6/12** | **0/12** |
+| **Cobertura** | **8/14** (7 + `health.check`, que só as ferramentas usam) | **6/14** | **0/14** |
 
-**União paciente+ACS: 11/12.** Com uma exceção, nenhum endpoint do backend
+**União paciente+ACS: 13/14.** Com uma exceção, nenhum endpoint do backend
 está sem consumidor: `onboarding.generateEnrollmentToken` é o gerador de
 token de convite do lado da unidade de saúde (RF02) e só tem consumidor em
 teste (`onboarding_endpoint_test.dart`) — nasceu para o backoffice/posto,
@@ -150,7 +152,7 @@ de alertas — se o broker cair, não há caminho alternativo de leitura.
 
 | App | Tela | Origem | Observação |
 |---|---|---|---|
-| Paciente | Login | **real** | Autentica de verdade; campos CPF/nascimento são decorativos. |
+| Paciente | Login | **real** | Autentica de verdade — o login é CPF + data de nascimento + código OTP (RF01); os campos deixaram de ser decorativos. |
 | Paciente | Triagem | **real** | 6 sintomas, risco vem do servidor. |
 | Paciente | Urgência | **real (parcial)** | Lê localização em primeiro plano, envia somente `locationHash` e explicita o fallback quando GPS/permissão falham; ainda não há validação E2E em dispositivo nesta revisão. |
 | Paciente | **Status** | **real** | Consome `alerts.statusFor` (RF05); mostra o status real do alerta mais recente do paciente, não mais o texto fixo "Solicitação #4082 · Triagem Vermelha". Fechado por `docs/superpowers/plans/2026-09-18-sync-periodica-rf05-l06.md` (L-03). |

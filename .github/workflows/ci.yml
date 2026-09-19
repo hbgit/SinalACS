@@ -63,9 +63,11 @@ jobs:
         run: |
           printf "test:\n  database: '%s'\n" "$CI_POSTGRES_PASSWORD" \
             > sinalacs_server/config/passwords.yaml
-      # Suíte completa: 16 testes herméticos em test/unit, que usam fakes das
-      # interfaces AlertPublisher e AlertStore, mais 9 de integração que sobem o
-      # servidor em processo pelo harness e exercitam os endpoints tipados.
+      # Suíte completa: os herméticos de test/unit (fakes das interfaces
+      # AlertPublisher/AlertStore e afins, sem banco) mais os de test/integration,
+      # que sobem o servidor em processo pelo harness e exercitam os endpoints
+      # tipados. A contagem exata está na saída deste job — de propósito, não
+      # aqui: número em comentário envelhece e alguém o cita como se fosse atual.
       - run: dart test
         working-directory: backend/sinalacs_server
 

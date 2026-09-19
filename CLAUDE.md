@@ -76,7 +76,7 @@ rejecting the new one.
 docker compose up --build
 docker compose down
 ```
-Services: Traefik `http://localhost`, Traefik dashboard `http://localhost:8081` (dev only, insecure), backend `http://localhost:8080`, Postgres `localhost:5432`, Mosquitto MQTT over TLS `localhost:8883` (the only port the broker exposes — anonymous 1883 and WebSockets 9001 are not published). The dev seed runs in three steps: `database-seed` applies `development.sql` once the server is healthy, `health-data-seed` then fills the encrypted clinical columns, and `acs-credential-seed` writes the ACS's institutional credential (RF07) — the last two because plain SQL cannot produce a value only Dart can compute (AES-256-GCM there, Argon2id here). See [backend/CLAUDE.md](backend/CLAUDE.md).
+Services: Traefik `http://localhost`, Traefik dashboard `http://localhost:8081` (dev only, insecure), backend `http://localhost:8080`, Postgres `localhost:5432`, Mosquitto MQTT over TLS `localhost:8883` (the only port the broker exposes — anonymous 1883 and WebSockets 9001 are not published). The dev seed runs in four steps: `database-seed` applies `development.sql` once the server is healthy, `health-data-seed` then fills the encrypted clinical columns, `acs-credential-seed` writes the ACS's institutional credential (RF07) and `cpf-hash-seed` writes the patients' CPF hashes (RF01) — the last three because plain SQL cannot produce a value only Dart can compute (AES-256-GCM there, Argon2id and the HMAC-SHA-256 keyed by `CPF_HASH_PEPPER` here; without the hashes, no seeded patient could log in). See [backend/CLAUDE.md](backend/CLAUDE.md).
 
 ### Backend, apps e validação E2E
 
