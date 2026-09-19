@@ -1733,23 +1733,52 @@ Em `docker-compose.yml`, depois do `acs-credential-seed`:
       SERVERPOD_DATABASE_USER: ${POSTGRES_USER:-sinalacs_user}
       SERVERPOD_DATABASE_PASSWORD: ${POSTGRES_PASSWORD:?defina em .env — rode ./scripts/dev/bootstrap_env.sh}
       SERVERPOD_DATABASE_REQUIRE_SSL: "false"
-      # O MESMO pepper do servidor: se divergirem, o paciente do seed nunca é
-      # encontrado no login.
+      # O MESMO pepper do servidor — e por isso o serviço `serverpod` TAMBÉM
+      # precisa recebê-lo (ver o Step 2b). Sem isso o seed grava HMACs com o
+      # pepper real do `.env` enquanto o servidor procura com o fallback
+      # público, e **nenhum CPF semeado é encontrado no login**.
       #
       # `:-` e não `:?` de propósito, seguindo o `HEALTH_DATA_ENCRYPTION_KEY`
       # logo acima: o Compose interpola o arquivo INTEIRO, então um `:?` aqui
       # derruba toda invocação de `docker compose` numa máquina cujo `.env` é
-      # anterior à variável — não só este serviço. E o guarda não se perde: sem
-      # a variável, `AppConfig` cai no fallback público de desenvolvimento, que
-      # é o MESMO valor que o servidor usa em `APP_ENV=development`, então seed
-      # e servidor continuam concordando; fora de development o `AppConfig`
-      # recusa subir, que é onde a regra pertence.
+      # anterior à variável — não só este serviço. O guarda não se perde: fora
+      # de development o `AppConfig` recusa subir, que é onde a regra pertence.
       CPF_HASH_PEPPER: ${CPF_HASH_PEPPER:-}
       APP_ENV: ${APP_ENV:-development}
     entrypoint: ["./seed_cpf_hashes"]
 ```
 
 Confirme que o `Dockerfile` compila este entrypoint (ver a nota da Task 5 do plano de RF07).
+
+- [ ] **Step 2b: Dar o pepper TAMBÉM ao serviço `serverpod`**
+
+Achado do review da Task 2, e é determinístico, não hipotético: o bloco
+`environment:` do serviço `serverpod` (docker-compose.yml:96-128) recebe
+`JWT_SECRET` e `HEALTH_DATA_ENCRYPTION_KEY`, mas **não** `CPF_HASH_PEPPER`, e o
+arquivo não tem `env_file:` em lugar nenhum. Sem esta linha o servidor cai no
+fallback público `development-cpf-hash-pepper` enquanto o seed grava com o pepper
+real do `.env` — e o login não encontra nenhum paciente semeado.
+
+É a mesma razão pela qual `HEALTH_DATA_ENCRYPTION_KEY` aparece **duas** vezes no
+arquivo (`:126` no servidor, `:168` no `health-data-seed`): as duas pontas
+precisam derivar a mesma chave.
+
+Acrescente ao bloco `environment:` do serviço `serverpod`, ao lado do
+`HEALTH_DATA_ENCRYPTION_KEY`:
+
+```yaml
+      # Pepper do HMAC de `users.cpfHash` (RF01). PRECISA ser o mesmo valor que o
+      # `cpf-hash-seed` recebe, pela mesma razão do
+      # HEALTH_DATA_ENCRYPTION_KEY acima: o seed deriva o hash e o servidor o
+      # procura — com peppers diferentes, nenhum CPF semeado é encontrado.
+      CPF_HASH_PEPPER: ${CPF_HASH_PEPPER:-}
+```
+
+Depois disso, `docker compose config` precisa continuar passando, e a
+**Verificação final** do plano tem de provar a concordância de verdade: com a
+stack de pé e o seed aplicado, um `requestOtp` para um dos CPFs semeados tem de
+encontrar o paciente (o log do `SMS_GATEWAY=log` mostra o código pedido). Se não
+encontrar, os dois peppers divergiram.
 
 - [ ] **Step 3: Verificar na stack**
 
