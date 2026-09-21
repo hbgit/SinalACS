@@ -7,11 +7,12 @@ import 'package:sinalacs_server/src/infrastructure/crypto/health_data_cipher.dar
 /// Ajudantes para os testes que precisam SEMEAR linhas cifradas.
 ///
 /// `patients.chronicConditions` virou `chronicConditionsEncrypted` (Track E,
-/// RNF03/INV-04), e não existe caminho Dart de produção que escreva essa
-/// coluna — só leitura. Os testes de integração, porém, precisam montar o
-/// prontuário de partida, e é isso que estas funções fazem: cifram com a
-/// MESMA chave de desenvolvimento que o `AlertRuntime` usa nos testes, para
-/// que o store consiga decifrar de volta.
+/// RNF03/INV-04). `patients.updateChronicConditions` é hoje o único caminho
+/// Dart de produção que escreve essa coluna (perfil clínico do próprio
+/// paciente); estas funções aqui são para o estado de PARTIDA de cada teste
+/// de integração, sem passar pelo endpoint. Cifram com a MESMA chave de
+/// desenvolvimento que o `AlertRuntime` usa nos testes, para que o store
+/// consiga decifrar de volta.
 ///
 /// Nunca dado real de paciente aqui — só rótulos sintéticos (regra do
 /// repositório, LGPD).

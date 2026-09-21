@@ -30,6 +30,29 @@ class FakePatientBackend implements PatientBackend {
   BackendFailure? statusFailure;
   int statusForCallCount = 0;
 
+  /// Estado "gravado no servidor", que [myChronicConditions] devolve e
+  /// [updateChronicConditions] substitui — o mesmo papel que [statusResult]
+  /// tem para `statusFor`.
+  List<String> chronicConditions = const [];
+  BackendFailure? myChronicConditionsFailure;
+  BackendFailure? updateChronicConditionsFailure;
+  int myChronicConditionsCallCount = 0;
+  final List<List<String>> updateChronicConditionsCalls = <List<String>>[];
+
+  /// Estado "gravado no servidor" para o painel "Meus Dados", devolvido por
+  /// [myData].
+  PatientDataOverview myDataResult = PatientDataOverview(
+    name: 'Paciente de Teste',
+    birthDate: DateTime.utc(1990, 1, 1),
+    emergencyContact: 'Contato de teste',
+    isChronic: false,
+    chronicConditions: const [],
+    consents: const [],
+    riskHistory: const [],
+  );
+  BackendFailure? myDataFailure;
+  int myDataCallCount = 0;
+
   /// Código que o "servidor" aceita em [verifyOtp].
   ///
   /// O backend real nunca devolve o código ao app — ele sai por SMS, e o app
@@ -232,6 +255,30 @@ class FakePatientBackend implements PatientBackend {
     );
     _session = session;
     return session;
+  }
+
+  @override
+  Future<List<String>> myChronicConditions() async {
+    myChronicConditionsCallCount++;
+    final failure = myChronicConditionsFailure;
+    if (failure != null) throw failure;
+    return chronicConditions;
+  }
+
+  @override
+  Future<void> updateChronicConditions(List<String> conditions) async {
+    final failure = updateChronicConditionsFailure;
+    if (failure != null) throw failure;
+    updateChronicConditionsCalls.add(conditions);
+    chronicConditions = conditions;
+  }
+
+  @override
+  Future<PatientDataOverview> myData() async {
+    myDataCallCount++;
+    final failure = myDataFailure;
+    if (failure != null) throw failure;
+    return myDataResult;
   }
 
   @override

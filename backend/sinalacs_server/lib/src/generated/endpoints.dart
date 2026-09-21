@@ -371,6 +371,68 @@ class Endpoints extends _i1.EndpointDispatch {
                     accessToken: params['accessToken'],
                   ),
         ),
+        'myChronicConditions': _i1.MethodConnector(
+          name: 'myChronicConditions',
+          params: {
+            'accessToken': _i1.ParameterDescription(
+              name: 'accessToken',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async => (endpoints['patients'] as _i6.PatientsEndpoint)
+                  .myChronicConditions(
+                    session,
+                    accessToken: params['accessToken'],
+                  ),
+        ),
+        'updateChronicConditions': _i1.MethodConnector(
+          name: 'updateChronicConditions',
+          params: {
+            'accessToken': _i1.ParameterDescription(
+              name: 'accessToken',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'conditions': _i1.ParameterDescription(
+              name: 'conditions',
+              type: _i1.getType<List<String>>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async => (endpoints['patients'] as _i6.PatientsEndpoint)
+                  .updateChronicConditions(
+                    session,
+                    accessToken: params['accessToken'],
+                    conditions: params['conditions'],
+                  ),
+        ),
+        'myData': _i1.MethodConnector(
+          name: 'myData',
+          params: {
+            'accessToken': _i1.ParameterDescription(
+              name: 'accessToken',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async => (endpoints['patients'] as _i6.PatientsEndpoint).myData(
+                session,
+                accessToken: params['accessToken'],
+              ),
+        ),
       },
     );
     connectors['triage'] = _i1.EndpointConnector(

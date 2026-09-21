@@ -5,6 +5,7 @@ import 'package:sinalacs_patient/core/consent/consent_preferences.dart';
 import 'package:sinalacs_patient/core/network/backend_client.dart';
 
 import 'support/fake_patient_backend.dart';
+import 'support/semantics_scan.dart';
 
 /// Fake local para os testes deste arquivo — mesma forma de
 /// `_FixedConsentPreferences` (Task 2, em `patient_app_mvp_test.dart`), mas
@@ -153,5 +154,25 @@ void main() {
     await tapKey(tester, 'complete_enrollment_button');
 
     expect(consentPreferences.saved, isFalse);
+  });
+
+  testWidgets("'Concluir cadastro' é UM nó, com o texto visível e a ação de toque", (tester) async {
+    // WCAG 4.1.2, medido pela primeira vez aqui: `spec/ux_accessibility_assessment.md`
+    // linha 242 declarava este botão "não medido" — fora da primeira dobra do
+    // viewport padrão de teste (o `ListView` é mais alto que os 600dp). O
+    // `ensureVisible` de `tapKey`/`openOnboarding` acima já rola até ele; esta
+    // varredura precisa do mesmo antes de olhar a árvore.
+    final handle = tester.ensureSemantics();
+    await tester.pumpWidget(SinalAcsApp(backend: FakePatientBackend()));
+    await openOnboarding(tester);
+    await tester.ensureVisible(find.byKey(const Key('complete_enrollment_button')));
+    await tester.pumpAndSettle();
+
+    expectNenhumBotaoInerte(tester);
+
+    final node = tester.getSemantics(find.byKey(const Key('complete_enrollment_button')));
+    final data = node.getSemanticsData();
+    expect(data.label, contains('Concluir cadastro'));
+    handle.dispose();
   });
 }

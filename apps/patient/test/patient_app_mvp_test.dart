@@ -1,9 +1,18 @@
 
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart' show SemanticsAction;
+import 'package:flutter/services.dart' show Clipboard, SystemChannels;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sinalacs_client/sinalacs_client.dart'
-    show AlertStatus, AlertStatusResult, RiskLevel;
+    show
+        AlertStatus,
+        AlertStatusResult,
+        PatientConsentRecord,
+        PatientDataOverview,
+        PatientRiskEvent,
+        RiskLevel;
 import 'package:sinalacs_patient/app/app.dart';
 import 'package:sinalacs_patient/core/consent/consent_preferences.dart';
 import 'package:sinalacs_patient/core/network/backend_client.dart';
@@ -157,6 +166,23 @@ Future<void> login(
 
   await tester.enterText(find.byKey(const Key('otp_code_field')), codigo);
   await tester.tap(find.byKey(const Key('verify_code_button')));
+  await tester.pumpAndSettle();
+}
+
+/// Abre "Perfil clínico" pelo menu "Mais" — a tela não tem aba própria na
+/// navegação principal.
+Future<void> openClinicalProfile(WidgetTester tester) async {
+  await tester.tap(find.text('Mais'));
+  await tester.pumpAndSettle();
+  await tester.tap(find.text('Perfil clínico'));
+  await tester.pumpAndSettle();
+}
+
+/// Abre "Meus dados" pelo menu "Mais".
+Future<void> openMyData(WidgetTester tester) async {
+  await tester.tap(find.text('Mais'));
+  await tester.pumpAndSettle();
+  await tester.tap(find.text('Meus dados'));
   await tester.pumpAndSettle();
 }
 
@@ -729,6 +755,234 @@ void main() {
         expect(after.single.active, isFalse);
         expect(find.text('Pausado'), findsOneWidget);
       });
+    });
+  });
+
+  group('Perfil clínico', () {
+    testWidgets('carrega o estado salvo do servidor — marca só o que já está na lista', (tester) async {
+      final backend = FakePatientBackend()..chronicConditions = ['hipertensão'];
+      await tester.pumpWidget(SinalAcsApp(backend: backend));
+      await login(tester);
+      await openClinicalProfile(tester);
+
+      expect(backend.myChronicConditionsCallCount, 1);
+      final hipertensao = tester.widget<CheckboxListTile>(
+        find.byKey(const Key('chronic_condition_hipertensão')),
+      );
+      final diabetes = tester.widget<CheckboxListTile>(
+        find.byKey(const Key('chronic_condition_diabetes')),
+      );
+      expect(hipertensao.value, isTrue);
+      expect(diabetes.value, isFalse);
+    });
+
+    testWidgets('marcar uma condição e salvar envia só as marcadas, substituindo a lista', (tester) async {
+      final backend = FakePatientBackend()..chronicConditions = ['hipertensão'];
+      await tester.pumpWidget(SinalAcsApp(backend: backend));
+      await login(tester);
+      await openClinicalProfile(tester);
+
+      // Desmarca a que veio do servidor e marca outra — a chamada de salvar
+      // precisa refletir exatamente o estado final da tela, não uma união.
+      await tester.tap(find.byKey(const Key('chronic_condition_hipertensão')));
+      await tester.tap(find.byKey(const Key('chronic_condition_diabetes')));
+      await tester.tap(find.byKey(const Key('save_clinical_profile_button')));
+      await tester.pumpAndSettle();
+
+      expect(backend.updateChronicConditionsCalls, [
+        ['diabetes'],
+      ]);
+      expect(find.byKey(const Key('clinical_profile_confirmation')), findsOneWidget);
+      final confirmacao = tester.getSemantics(find.byKey(const Key('clinical_profile_confirmation')));
+      expect(confirmacao.flagsCollection.isLiveRegion, isTrue);
+    });
+
+    testWidgets('falha ao carregar mostra erro inline, sem lista de condições', (tester) async {
+      final handle = tester.ensureSemantics();
+      final backend = FakePatientBackend()
+        ..myChronicConditionsFailure = const BackendFailure('Sem conexão com o servidor.');
+      await tester.pumpWidget(SinalAcsApp(backend: backend));
+      await login(tester);
+      await openClinicalProfile(tester);
+
+      expect(find.byKey(const Key('clinical_profile_error')), findsOneWidget);
+      expect(find.text('Sem conexão com o servidor.'), findsOneWidget);
+      expect(find.byKey(const Key('save_clinical_profile_button')), findsNothing);
+      final semantics = tester.getSemantics(find.byKey(const Key('clinical_profile_error')));
+      expect(semantics.flagsCollection.isLiveRegion, isTrue);
+      handle.dispose();
+    });
+
+    testWidgets('falha ao salvar mostra erro inline e mantém a seleção na tela', (tester) async {
+      final backend = FakePatientBackend()
+        ..updateChronicConditionsFailure = const BackendFailure('Sem conexão com o servidor.');
+      await tester.pumpWidget(SinalAcsApp(backend: backend));
+      await login(tester);
+      await openClinicalProfile(tester);
+
+      await tester.tap(find.byKey(const Key('chronic_condition_diabetes')));
+      await tester.tap(find.byKey(const Key('save_clinical_profile_button')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('clinical_profile_error')), findsOneWidget);
+      final diabetes = tester.widget<CheckboxListTile>(find.byKey(const Key('chronic_condition_diabetes')));
+      expect(diabetes.value, isTrue);
+    });
+  });
+
+  group('Meus dados (LGPD)', () {
+    PatientDataOverview overview({
+      List<PatientConsentRecord> consents = const [],
+      List<PatientRiskEvent> riskHistory = const [],
+    }) =>
+        PatientDataOverview(
+          name: 'Fulano de Tal',
+          birthDate: DateTime.utc(1975, 3, 10),
+          emergencyContact: 'Ciclana, (11) 90000-0000',
+          isChronic: true,
+          chronicConditions: const ['hipertensão'],
+          consents: consents,
+          riskHistory: riskHistory,
+        );
+
+    testWidgets('mostra o cadastro e as condições crônicas devolvidas pelo servidor', (tester) async {
+      final backend = FakePatientBackend()..myDataResult = overview();
+      await tester.pumpWidget(SinalAcsApp(backend: backend));
+      await login(tester);
+      await openMyData(tester);
+
+      expect(backend.myDataCallCount, 1);
+      expect(find.text('Fulano de Tal'), findsOneWidget);
+      expect(find.textContaining('10/03/1975'), findsOneWidget);
+      expect(find.textContaining('Ciclana, (11) 90000-0000'), findsOneWidget);
+      expect(find.textContaining('Hipertensão'), findsOneWidget);
+    });
+
+    testWidgets('mostra os consentimentos e o histórico de risco devolvidos pelo servidor', (tester) async {
+      final backend = FakePatientBackend()
+        ..myDataResult = overview(
+          consents: [
+            PatientConsentRecord(
+              purpose: 'healthDataProcessing',
+              action: 'granted',
+              version: '2026.1',
+              timestamp: DateTime.utc(2026, 1, 1),
+            ),
+          ],
+          riskHistory: [
+            PatientRiskEvent(
+              source: 'alert',
+              riskLevel: RiskLevel.red,
+              recordedAt: DateTime.utc(2026, 3, 1),
+            ),
+          ],
+        );
+      await tester.pumpWidget(SinalAcsApp(backend: backend));
+      await login(tester);
+      await openMyData(tester);
+
+      expect(find.text('healthDataProcessing'), findsOneWidget);
+      expect(find.textContaining('Concedido'), findsOneWidget);
+      expect(find.textContaining('Alerta de urgência'), findsOneWidget);
+      expect(find.textContaining('Vermelho'), findsOneWidget);
+    });
+
+    testWidgets('sem consentimentos nem histórico, mostra os estados vazios (não listas fixas)', (tester) async {
+      final backend = FakePatientBackend()..myDataResult = overview();
+      await tester.pumpWidget(SinalAcsApp(backend: backend));
+      await login(tester);
+      await openMyData(tester);
+
+      expect(find.text('Nenhum consentimento registrado.'), findsOneWidget);
+      expect(find.text('Nenhum evento registrado.'), findsOneWidget);
+    });
+
+    testWidgets('"Copiar meus dados" grava um JSON válido na área de transferência e avisa', (tester) async {
+      // `flutter_test` não mocka o canal de clipboard por padrão: sem este
+      // handler, `Clipboard.getData` fica esperando uma resposta que nunca
+      // chega (a suíte real já mediu isso — 10 minutos até o timeout).
+      String? clipboardText;
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
+        if (call.method == 'Clipboard.setData') {
+          clipboardText = (call.arguments as Map)['text'] as String?;
+          return null;
+        }
+        if (call.method == 'Clipboard.getData') {
+          return {'text': clipboardText};
+        }
+        return null;
+      });
+      addTearDown(
+        () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, null),
+      );
+
+      final backend = FakePatientBackend()
+        ..myDataResult = overview(
+          consents: [
+            PatientConsentRecord(
+              purpose: 'healthDataProcessing',
+              action: 'granted',
+              version: '2026.1',
+              timestamp: DateTime.utc(2026, 1, 1),
+            ),
+          ],
+        );
+      await tester.pumpWidget(SinalAcsApp(backend: backend));
+      await login(tester);
+      await openMyData(tester);
+
+      // O botão fica abaixo da primeira dobra do viewport padrão de teste,
+      // atrás dos cartões de consentimento/histórico — mesma armadilha que
+      // `test/onboarding_flow_test.dart` já documenta para "Concluir cadastro".
+      final exportButton = find.byKey(const Key('export_my_data_button'));
+      await tester.ensureVisible(exportButton);
+      await tester.pumpAndSettle();
+      await tester.tap(exportButton);
+      await tester.pumpAndSettle();
+
+      final clipboard = await Clipboard.getData('text/plain');
+      final decoded = jsonDecode(clipboard!.text!) as Map<String, dynamic>;
+      expect(decoded['nome'], 'Fulano de Tal');
+      expect(decoded['condicoesCronicas'], ['hipertensão']);
+      expect((decoded['consentimentos'] as List).single, {
+        'finalidade': 'healthDataProcessing',
+        'decisao': 'granted',
+        'versao': '2026.1',
+        'data': DateTime.utc(2026, 1, 1).toIso8601String(),
+      });
+
+      expect(find.byKey(const Key('my_data_export_confirmation')), findsOneWidget);
+      final semantics = tester.getSemantics(find.byKey(const Key('my_data_export_confirmation')));
+      expect(semantics.flagsCollection.isLiveRegion, isTrue);
+    });
+
+    testWidgets('falha ao carregar mostra erro inline, sem o cartão de cadastro', (tester) async {
+      final handle = tester.ensureSemantics();
+      final backend = FakePatientBackend()
+        ..myDataFailure = const BackendFailure('Sem conexão com o servidor.');
+      await tester.pumpWidget(SinalAcsApp(backend: backend));
+      await login(tester);
+      await openMyData(tester);
+
+      expect(find.byKey(const Key('my_data_error')), findsOneWidget);
+      expect(find.text('Sem conexão com o servidor.'), findsOneWidget);
+      expect(find.byKey(const Key('export_my_data_button')), findsNothing);
+      final semantics = tester.getSemantics(find.byKey(const Key('my_data_error')));
+      expect(semantics.flagsCollection.isLiveRegion, isTrue);
+      handle.dispose();
+    });
+
+    testWidgets('o botão "Copiar meus dados" não é um nó de botão inerte', (tester) async {
+      final handle = tester.ensureSemantics();
+      final backend = FakePatientBackend()..myDataResult = overview();
+      await tester.pumpWidget(SinalAcsApp(backend: backend));
+      await login(tester);
+      await openMyData(tester);
+      await tester.ensureVisible(find.byKey(const Key('export_my_data_button')));
+      await tester.pumpAndSettle();
+
+      expectNenhumBotaoInerte(tester);
+      handle.dispose();
     });
   });
 

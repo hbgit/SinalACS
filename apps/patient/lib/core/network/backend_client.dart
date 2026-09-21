@@ -109,6 +109,19 @@ abstract class PatientBackend {
     required bool pushConsent,
   });
 
+  /// Condições crônicas do próprio paciente autenticado (tela "Perfil
+  /// clínico"). `patientId` nunca é argumento — o servidor deriva do token
+  /// (INV-05), mesma ressalva de [statusFor].
+  Future<List<String>> myChronicConditions();
+
+  /// Grava a lista de condições crônicas do próprio paciente autenticado,
+  /// substituindo a anterior por inteiro — não é um merge.
+  Future<void> updateChronicConditions(List<String> conditions);
+
+  /// Painel "Meus Dados" (LGPD): confirmação de existência de tratamento e
+  /// acesso aos dados pessoais do próprio paciente autenticado.
+  Future<PatientDataOverview> myData();
+
   void close();
 }
 
@@ -187,6 +200,15 @@ class MisconfiguredBackend implements PatientBackend {
     required bool pushConsent,
   }) async =>
       _recusar();
+
+  @override
+  Future<List<String>> myChronicConditions() async => _recusar();
+
+  @override
+  Future<void> updateChronicConditions(List<String> conditions) async => _recusar();
+
+  @override
+  Future<PatientDataOverview> myData() async => _recusar();
 
   /// Fechar **não** é uma chamada ao backend: não há o que fechar, e um `close`
   /// que lançasse derrubaria o `finally` de quem só queria encerrar.
@@ -424,6 +446,31 @@ class BackendClient implements PatientBackend {
     }
     _session = session;
     return session;
+  }
+
+  /// Ver ressalva de [PatientBackend.myChronicConditions]. `patientId` nunca
+  /// é argumento — o servidor deriva do token (INV-05).
+  @override
+  Future<List<String>> myChronicConditions() async {
+    final token = await _requireToken();
+    return _guard(() => _client.patients.myChronicConditions(accessToken: token));
+  }
+
+  @override
+  Future<void> updateChronicConditions(List<String> conditions) async {
+    final token = await _requireToken();
+    await _guard(
+      () => _client.patients.updateChronicConditions(
+        accessToken: token,
+        conditions: conditions,
+      ),
+    );
+  }
+
+  @override
+  Future<PatientDataOverview> myData() async {
+    final token = await _requireToken();
+    return _guard(() => _client.patients.myData(accessToken: token));
   }
 
   @override

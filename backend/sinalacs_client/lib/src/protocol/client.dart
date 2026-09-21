@@ -25,11 +25,13 @@ import 'package:sinalacs_client/src/protocol/api/enrollment_token_result.dart'
 import 'package:sinalacs_client/src/protocol/api/enrollment_result.dart' as _i9;
 import 'package:sinalacs_client/src/protocol/api/micro_area_patient.dart'
     as _i10;
-import 'package:sinalacs_client/src/protocol/api/triage_result.dart' as _i11;
+import 'package:sinalacs_client/src/protocol/api/patient_data_overview.dart'
+    as _i11;
+import 'package:sinalacs_client/src/protocol/api/triage_result.dart' as _i12;
 import 'package:sinalacs_client/src/protocol/api/visit_sync_result.dart'
-    as _i12;
-import 'package:sinalacs_client/src/protocol/api/visit_sync_entry.dart' as _i13;
-import 'protocol.dart' as _i14;
+    as _i13;
+import 'package:sinalacs_client/src/protocol/api/visit_sync_entry.dart' as _i14;
+import 'protocol.dart' as _i15;
 
 /// Ciclo do alerta vermelho.
 ///
@@ -137,6 +139,14 @@ class EndpointAuth extends _i1.EndpointRef {
   /// Pedido do código de acesso (RF01). Público por definição: quem chama
   /// ainda não tem sessão. A resposta é sempre a mesma — não revela se o CPF
   /// está cadastrado (ver `PasswordlessAuthService.requestOtp`).
+  ///
+  /// "Sempre a mesma" inclui a **segunda** chamada dentro do intervalo mínimo
+  /// de 60 s: ela também é um 200 sem corpo, e **não** uma recusa. Um "aguarde
+  /// um minuto" aqui seria alcançável só por quem já acertou CPF e nascimento,
+  /// e o status da resposta passaria a ser o verificador do par — foi o
+  /// defeito medido em 2026-09-19 (200, 400, 400 para o par cadastrado contra
+  /// 200, 200, 200 para o não cadastrado), corrigido no serviço. O aviso de
+  /// espera é do app, que é quem sabe quando pediu por último.
   ///
   /// O CPF é validado aqui, **antes** de virar hash: um número com dígito
   /// verificador errado é erro de digitação, e tratá-lo como "não encontrado"
@@ -289,6 +299,40 @@ class EndpointPatients extends EndpointAuthenticated {
     'listMicroArea',
     {'accessToken': accessToken},
   );
+
+  /// Condições crônicas do próprio paciente autenticado — tela "Perfil
+  /// clínico" do app. Chamado pelo app do paciente, nunca pelo do ACS (esse
+  /// usa [listMicroArea]).
+  _i2.Future<List<String>> myChronicConditions({required String accessToken}) =>
+      caller.callServerEndpoint<List<String>>(
+        'patients',
+        'myChronicConditions',
+        {'accessToken': accessToken},
+      );
+
+  /// Grava a lista de condições crônicas do próprio paciente autenticado,
+  /// substituindo a anterior por inteiro (não é um merge).
+  _i2.Future<void> updateChronicConditions({
+    required String accessToken,
+    required List<String> conditions,
+  }) => caller.callServerEndpoint<void>(
+    'patients',
+    'updateChronicConditions',
+    {
+      'accessToken': accessToken,
+      'conditions': conditions,
+    },
+  );
+
+  /// Painel "Meus Dados" do próprio paciente autenticado (LGPD,
+  /// spec/lgpd_design.md linhas 417/581-595): confirmação de existência de
+  /// tratamento e acesso aos dados pessoais.
+  _i2.Future<_i11.PatientDataOverview> myData({required String accessToken}) =>
+      caller.callServerEndpoint<_i11.PatientDataOverview>(
+        'patients',
+        'myData',
+        {'accessToken': accessToken},
+      );
 }
 
 /// Motor de triagem determinístico, inspirado no Protocolo de Manchester.
@@ -308,7 +352,7 @@ class EndpointTriage extends EndpointAuthenticated {
   @override
   String get name => 'triage';
 
-  _i2.Future<_i11.TriageResult> evaluate({
+  _i2.Future<_i12.TriageResult> evaluate({
     required String accessToken,
     required bool chestPain,
     required bool difficultyBreathing,
@@ -316,7 +360,7 @@ class EndpointTriage extends EndpointAuthenticated {
     required bool persistentVomiting,
     required bool bleeding,
     required bool severeWeakness,
-  }) => caller.callServerEndpoint<_i11.TriageResult>(
+  }) => caller.callServerEndpoint<_i12.TriageResult>(
     'triage',
     'evaluate',
     {
@@ -347,10 +391,10 @@ class EndpointVisits extends EndpointAuthenticated {
   @override
   String get name => 'visits';
 
-  _i2.Future<List<_i12.VisitSyncResult>> sync({
+  _i2.Future<List<_i13.VisitSyncResult>> sync({
     required String accessToken,
-    required List<_i13.VisitSyncEntry> visits,
-  }) => caller.callServerEndpoint<List<_i12.VisitSyncResult>>(
+    required List<_i14.VisitSyncEntry> visits,
+  }) => caller.callServerEndpoint<List<_i13.VisitSyncResult>>(
     'visits',
     'sync',
     {
@@ -362,10 +406,10 @@ class EndpointVisits extends EndpointAuthenticated {
   /// Sincronização central→dispositivo: visitas da microárea do ACS
   /// autenticado alteradas após `since`, para reconciliar um device que
   /// ficou offline ou foi reinstalado.
-  _i2.Future<List<_i13.VisitSyncEntry>> pull({
+  _i2.Future<List<_i14.VisitSyncEntry>> pull({
     required String accessToken,
     required DateTime since,
-  }) => caller.callServerEndpoint<List<_i13.VisitSyncEntry>>(
+  }) => caller.callServerEndpoint<List<_i14.VisitSyncEntry>>(
     'visits',
     'pull',
     {
@@ -395,7 +439,7 @@ class Client extends _i1.ServerpodClientShared {
     bool? disconnectStreamsOnLostInternetConnection,
   }) : super(
          host,
-         _i14.Protocol(),
+         _i15.Protocol(),
          securityContext: securityContext,
          streamingConnectionTimeout: streamingConnectionTimeout,
          connectionTimeout: connectionTimeout,

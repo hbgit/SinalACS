@@ -1,11 +1,13 @@
 import 'package:serverpod/serverpod.dart';
 import 'package:sinalacs_server/src/application/auth/development_auth_service.dart';
 import 'package:sinalacs_server/src/config/app_config.dart';
+import 'package:sinalacs_server/src/endpoints/auth_endpoint.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
 import 'package:sinalacs_server/src/runtime/alert_runtime.dart';
 import 'package:test/test.dart';
 
 import '../support/health_data_fixtures.dart';
+import 'test_tools/runtime_harness.dart';
 import 'test_tools/serverpod_test_tools.dart';
 
 /// Prova, contra Postgres real, o primeiro escritor de `consent_logs` e o
@@ -305,6 +307,15 @@ void main() {
       expect(user!.id, _patientId);
       expect(user.role, UserRole.patient);
       expect(user.microAreaId, _microAreaId);
+
+      // A sessão de onboarding precisa da mesma vida útil da de
+      // `verifyOtp` (RF01): nenhum dos dois caminhos tem renovação
+      // silenciosa, e voltar este TTL para o default de 15 minutos
+      // reabriria o defeito registrado em PROGRESS.md com dono no RF02.
+      expect(
+        AlertRuntimeHarness.tokenLifetime(result.accessToken),
+        AuthEndpoint.patientSessionLifetime,
+      );
     });
 
     test('segundo uso do mesmo token falha com EnrollmentException', () async {

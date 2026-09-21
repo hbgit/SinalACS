@@ -1,11 +1,12 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart'
-    show TextEditingValue, TextInputFormatter, TextSelection;
+    show Clipboard, ClipboardData, TextEditingValue, TextInputFormatter, TextSelection;
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:sinalacs_client/sinalacs_client.dart'
-    show AlertStatus, AlertStatusResult, RiskLevel;
+    show AlertStatus, AlertStatusResult, PatientDataOverview, RiskLevel;
 import 'package:sinalacs_patient/app/patient_theme.dart';
 import 'package:sinalacs_patient/core/consent/consent_preferences.dart';
 import 'package:sinalacs_patient/core/consent/sqflite_consent_preferences.dart';
@@ -225,6 +226,17 @@ class _PatientLoginScreenState extends State<PatientLoginScreen> {
   bool _busy = false;
   String? _error;
 
+  /// Intervalo mínimo entre dois pedidos de código para o mesmo CPF,
+  /// espelhando o que o servidor já impõe (`PasswordlessAuthService`) — o
+  /// servidor não envia um segundo SMS dentro da janela e não diz nada
+  /// diferente por design (fecha um oráculo de tempo), então só o app sabe
+  /// quando o último pedido saiu.
+  static const _otpResendCooldown = Duration(seconds: 60);
+
+  /// `null` até o primeiro `requestOtp` bem-sucedido desta sessão de tela.
+  DateTime? _ultimoPedidoEm;
+  Timer? _cooldownTicker;
+
   /// CPF exatamente como foi enviado em [PatientBackend.requestOtp].
   ///
   /// [PatientBackend.verifyOtp] precisa do **mesmo** valor, e reler o campo do
@@ -237,7 +249,35 @@ class _PatientLoginScreenState extends State<PatientLoginScreen> {
     _cpf.dispose();
     _nascimento.dispose();
     _codigo.dispose();
+    _cooldownTicker?.cancel();
     super.dispose();
+  }
+
+  /// Quanto falta para liberar um novo pedido de código, ou [Duration.zero]
+  /// se já passou (ou nunca houve pedido).
+  Duration _cooldownRestante() {
+    final ultimo = _ultimoPedidoEm;
+    if (ultimo == null) return Duration.zero;
+    final decorrido = DateTime.now().difference(ultimo);
+    if (decorrido >= _otpResendCooldown) return Duration.zero;
+    return _otpResendCooldown - decorrido;
+  }
+
+  /// Reconstrói a tela a cada segundo enquanto o cooldown estiver ativo, só
+  /// para a contagem regressiva do aviso — sem depender de resposta nenhuma
+  /// do servidor, que não distingue mais os dois casos de propósito.
+  void _iniciarCooldownTicker() {
+    _cooldownTicker?.cancel();
+    _cooldownTicker = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      if (_cooldownRestante() == Duration.zero) {
+        timer.cancel();
+      }
+      setState(() {});
+    });
   }
 
   /// Converte o que a pessoa digitou em data e pede o código (RF01).
@@ -289,7 +329,9 @@ class _PatientLoginScreenState extends State<PatientLoginScreen> {
         _cpfDigitado = cpf;
         _codigo.clear();
         _step = _LoginStep.codigo;
+        _ultimoPedidoEm = DateTime.now();
       });
+      _iniciarCooldownTicker();
     } on BackendFailure catch (failure) {
       if (!mounted) return;
       setState(() {
@@ -433,49 +475,67 @@ class _PatientLoginScreenState extends State<PatientLoginScreen> {
     );
   }
 
-  List<Widget> _camposDeCredenciais() => [
-        TextField(
-          key: const Key('cpf_field'),
-          controller: _cpf,
-          keyboardType: TextInputType.number,
-          inputFormatters: const [_CpfInputFormatter()],
-          decoration: const InputDecoration(
-            labelText: 'CPF do paciente',
-            hintText: '000.000.000-00',
+  List<Widget> _camposDeCredenciais() {
+    final restante = _cooldownRestante();
+    final emCooldown = restante > Duration.zero;
+    return [
+      TextField(
+        key: const Key('cpf_field'),
+        controller: _cpf,
+        keyboardType: TextInputType.number,
+        inputFormatters: const [_CpfInputFormatter()],
+        decoration: const InputDecoration(
+          labelText: 'CPF do paciente',
+          hintText: '000.000.000-00',
+        ),
+      ),
+      const SizedBox(height: 16),
+      TextField(
+        key: const Key('birth_date_field'),
+        controller: _nascimento,
+        keyboardType: TextInputType.datetime,
+        decoration: const InputDecoration(
+          labelText: 'Data de nascimento',
+          hintText: 'DD/MM/AAAA',
+        ),
+      ),
+      const SizedBox(height: 20),
+      // Sem `Semantics` em volta: o `Text` do botão já é o nome acessível, o
+      // `FilledButton` já expõe papel e ação de toque. Um wrapper com outro
+      // `label` e `container: true` não funde com o botão — cria um nó
+      // próprio, **sem ação**, anunciado ANTES do botão real: nome que não
+      // contém o texto visível (WCAG 2.5.3, nível A) e nó inerte (WCAG 4.1.2).
+      SizedBox(
+        width: double.infinity,
+        child: FilledButton(
+          key: const Key('enter_button'),
+          onPressed: (_busy || emCooldown) ? null : _pedirCodigo,
+          style: FilledButton.styleFrom(minimumSize: const Size(48, 52)),
+          child: _busy
+              ? const SizedBox(
+                  height: 22,
+                  width: 22,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Text('Entrar sem senha'),
+        ),
+      ),
+      if (emCooldown) ...[
+        const SizedBox(height: 8),
+        // SC 4.1.3: sem `liveRegion` quem usa leitor de tela não saberia por
+        // que o botão que acabou de usar ficou desativado.
+        Semantics(
+          liveRegion: true,
+          child: Text(
+            key: const Key('otp_cooldown_message'),
+            'Você pode pedir um novo código em ${restante.inSeconds}s.',
+            textAlign: TextAlign.center,
+            style: const TextStyle(color: Colors.white70),
           ),
         ),
-        const SizedBox(height: 16),
-        TextField(
-          key: const Key('birth_date_field'),
-          controller: _nascimento,
-          keyboardType: TextInputType.datetime,
-          decoration: const InputDecoration(
-            labelText: 'Data de nascimento',
-            hintText: 'DD/MM/AAAA',
-          ),
-        ),
-        const SizedBox(height: 20),
-        // Sem `Semantics` em volta: o `Text` do botão já é o nome acessível, o
-        // `FilledButton` já expõe papel e ação de toque. Um wrapper com outro
-        // `label` e `container: true` não funde com o botão — cria um nó
-        // próprio, **sem ação**, anunciado ANTES do botão real: nome que não
-        // contém o texto visível (WCAG 2.5.3, nível A) e nó inerte (WCAG 4.1.2).
-        SizedBox(
-          width: double.infinity,
-          child: FilledButton(
-            key: const Key('enter_button'),
-            onPressed: _busy ? null : _pedirCodigo,
-            style: FilledButton.styleFrom(minimumSize: const Size(48, 52)),
-            child: _busy
-                ? const SizedBox(
-                    height: 22,
-                    width: 22,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Text('Entrar sem senha'),
-          ),
-        ),
-      ];
+      ],
+    ];
+  }
 
   List<Widget> _camposDoCodigo() => [
         TextField(
@@ -505,13 +565,10 @@ class _PatientLoginScreenState extends State<PatientLoginScreen> {
         // segundo código para o mesmo CPF — e não responde nada de diferente,
         // de propósito: um aviso de "aguarde um minuto" só seria alcançável por
         // quem já acertou CPF e nascimento, ou seja, seria o verificador do par.
-        // Voltar ao passo anterior devolve o controle a quem está logando, que
-        // reenvia pelo botão de sempre — e, dentro do intervalo, o pedido passa
-        // em silêncio: nenhum código novo chega, e a tela não diz nada.
-        //
-        // Esse aviso é DESTE lado — é o app que sabe quando o pedido anterior
-        // saiu — e ainda não existe. Lacuna registrada no `PROGRESS.md`, com
-        // dono: quem mexer no app do paciente, que é este arquivo.
+        // Voltar ao passo anterior devolve o controle a quem está logando; o
+        // aviso de quanto falta é responsabilidade DESTE lado — é o app que
+        // sabe quando o pedido anterior saiu — e mora em `enter_button`, no
+        // passo de credenciais (`_camposDeCredenciais`, `_otpResendCooldown`).
         SizedBox(
           width: double.infinity,
           child: OutlinedButton(
@@ -681,23 +738,30 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                           title: const Text('Recebimento de avisos segmentados por push'),
                         ),
                         const SizedBox(height: 20),
-                        Semantics(
-                          label: 'Concluir cadastro',
-                          button: true,
-                          container: true,
-                          child: SizedBox(
-                            width: double.infinity,
-                            child: FilledButton(
-                              key: const Key('complete_enrollment_button'),
-                              onPressed: (_busy || tokenEmpty) ? null : _complete,
-                              style: FilledButton.styleFrom(minimumSize: const Size(48, 52)),
-                              child: _busy
-                                  ? const SizedBox(
-                                      height: 22,
-                                      width: 22,
-                                      child: CircularProgressIndicator(strokeWidth: 2),
-                                    )
-                                  : const Text('Concluir cadastro'),
+                        // `MergeSemantics`, mesma correção do botão de EMERGÊNCIA e dos
+                        // logins do paciente/ACS: um `Semantics(button: true)` em volta de
+                        // um botão de verdade não funde com ele, cria um segundo nó, sem
+                        // ação de toque, anunciado antes do controle real (WCAG 4.1.2) —
+                        // medido em `test/onboarding_flow_test.dart`.
+                        MergeSemantics(
+                          child: Semantics(
+                            label: 'Concluir cadastro',
+                            button: true,
+                            container: true,
+                            child: SizedBox(
+                              width: double.infinity,
+                              child: FilledButton(
+                                key: const Key('complete_enrollment_button'),
+                                onPressed: (_busy || tokenEmpty) ? null : _complete,
+                                style: FilledButton.styleFrom(minimumSize: const Size(48, 52)),
+                                child: _busy
+                                    ? const SizedBox(
+                                        height: 22,
+                                        width: 22,
+                                        child: CircularProgressIndicator(strokeWidth: 2),
+                                      )
+                                    : const Text('Concluir cadastro'),
+                              ),
                             ),
                           ),
                         ),
@@ -733,7 +797,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   }
 }
 
-enum PatientDestination { emergency, triage, questions, profile, status, reminders }
+enum PatientDestination { emergency, triage, profile, status, reminders, myData }
 
 class PatientHomeShell extends StatefulWidget {
   const PatientHomeShell({super.key, this.initialDestination = PatientDestination.emergency});
@@ -793,16 +857,16 @@ class _PatientHomeShellState extends State<PatientHomeShell> {
           onComplete: () => _select(PatientDestination.status),
           onFailure: _reportFailure,
         ),
-      PatientDestination.questions => const QuestionsScreen(),
       PatientDestination.profile => const ClinicalProfileScreen(),
+      PatientDestination.myData => const MyDataScreen(),
       PatientDestination.status => StatusScreen(onFailure: _reportFailure),
       PatientDestination.reminders => const RemindersScreen(),
     };
     final title = switch (_destination) {
       PatientDestination.emergency => 'Alerta de urgência',
       PatientDestination.triage => 'Triagem rápida',
-      PatientDestination.questions => 'Canal de dúvidas',
       PatientDestination.profile => 'Perfil clínico',
+      PatientDestination.myData => 'Meus dados',
       PatientDestination.status => 'Acompanhamento',
       PatientDestination.reminders => 'Lembretes',
     };
@@ -1275,61 +1339,21 @@ class _TriageResult extends StatelessWidget {
   }
 }
 
-class QuestionsScreen extends StatefulWidget {
-  const QuestionsScreen({super.key});
-  @override
-  State<QuestionsScreen> createState() => _QuestionsScreenState();
-}
+/// Catálogo de condições que a tela oferece para marcar/desmarcar — mesmo
+/// conjunto que `spec/idea.md` documenta como a origem do produto ("Perfil
+/// Clínico e Cadastro de Crônicos"): diabetes, hipertensão, uso contínuo de
+/// insulina. O que vai para `patients.updateChronicConditions` é só o
+/// subconjunto marcado deste catálogo — não é texto livre, e os valores
+/// batem com o que o seed de desenvolvimento já grava
+/// (`bin/seed_health_data.dart`).
+const List<String> _chronicConditionCatalog = [
+  'diabetes',
+  'hipertensão',
+  'uso contínuo de insulina',
+];
 
-class _QuestionsScreenState extends State<QuestionsScreen> {
-  final _controller = TextEditingController();
-  final _messages = <String>['UBS Central: Como podemos ajudar hoje?'];
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        Expanded(
-          child: ListView.builder(
-            padding: const EdgeInsets.all(20),
-            itemCount: _messages.length,
-            itemBuilder: (_, index) => Align(
-              alignment: index.isEven ? Alignment.centerLeft : Alignment.centerRight,
-              child: Card(child: Padding(padding: const EdgeInsets.all(12), child: Text(_messages[index]))),
-            ),
-          ),
-        ),
-        Padding(
-          padding: const EdgeInsets.all(16),
-          child: Row(
-            children: [
-              Expanded(child: TextField(controller: _controller, decoration: const InputDecoration(hintText: 'Digite sua mensagem'))),
-              const SizedBox(width: 8),
-              IconButton(
-                tooltip: 'Enviar mensagem',
-                onPressed: () {
-                  if (_controller.text.isEmpty) return;
-                  setState(() {
-                    _messages.add('Você: ${_controller.text}');
-                    _messages.add('Resposta automática: Para informações sobre vacinação, procure a UBS Central.');
-                    _controller.clear();
-                  });
-                },
-                icon: const Icon(Icons.send),
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-}
+String _conditionLabel(String condition) =>
+    condition.isEmpty ? condition : condition[0].toUpperCase() + condition.substring(1);
 
 class ClinicalProfileScreen extends StatefulWidget {
   const ClinicalProfileScreen({super.key});
@@ -1338,10 +1362,70 @@ class ClinicalProfileScreen extends StatefulWidget {
 }
 
 class _ClinicalProfileScreenState extends State<ClinicalProfileScreen> {
-  final conditions = <String, bool>{'Hipertensão arterial': true, 'Diabetes mellitus tipo 2': true, 'Uso contínuo de insulina': false, 'Gestante na família': false};
+  Map<String, bool>? _conditions;
+  String? _error;
+  String? _confirmation;
+  bool _saving = false;
+  bool _requestedLoad = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Mesmo motivo de `_RemindersScreenState`: `BackendScope.of` depende do
+    // `InheritedWidget` acima na árvore, que só está disponível a partir
+    // daqui — não em `initState`.
+    if (!_requestedLoad) {
+      _requestedLoad = true;
+      _load();
+    }
+  }
+
+  Future<void> _load() async {
+    try {
+      final saved = await BackendScope.of(context).myChronicConditions();
+      if (!mounted) return;
+      setState(() {
+        _conditions = {
+          for (final condition in _chronicConditionCatalog) condition: saved.contains(condition),
+        };
+        _error = null;
+      });
+    } on BackendFailure catch (failure) {
+      if (!mounted) return;
+      setState(() => _error = failure.message);
+    }
+  }
+
+  Future<void> _save() async {
+    final conditions = _conditions;
+    if (conditions == null || _saving) return;
+    setState(() {
+      _saving = true;
+      _error = null;
+      _confirmation = null;
+    });
+    try {
+      // Substitui a lista inteira — não é um merge com o que o servidor já
+      // tinha, mesma semântica de `patients.updateChronicConditions`.
+      final selected = [for (final entry in conditions.entries) if (entry.value) entry.key];
+      await BackendScope.of(context).updateChronicConditions(selected);
+      if (!mounted) return;
+      setState(() {
+        _saving = false;
+        _confirmation = 'Perfil clínico atualizado.';
+      });
+    } on BackendFailure catch (failure) {
+      if (!mounted) return;
+      setState(() {
+        _saving = false;
+        _error = failure.message;
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
+    final conditions = _conditions;
     return ListView(
       padding: const EdgeInsets.all(20),
       children: [
@@ -1349,9 +1433,253 @@ class _ClinicalProfileScreenState extends State<ClinicalProfileScreen> {
         const SizedBox(height: 8),
         const Text('Essas informações apoiam a priorização clínica.'),
         const SizedBox(height: 16),
-        ...conditions.entries.map((entry) => Card(child: CheckboxListTile(value: entry.value, onChanged: (value) => setState(() => conditions[entry.key] = value ?? false), title: Text(entry.key), subtitle: Text(entry.value ? 'Ativo' : 'Inativo')))),
+        if (_error != null)
+          // SC 4.1.3, mesmo padrão das outras telas: sem `liveRegion` um
+          // leitor de tela não saberia que carregar ou salvar falhou.
+          Padding(
+            padding: const EdgeInsets.only(bottom: 16),
+            child: Semantics(
+              liveRegion: true,
+              child: Text(
+                _error!,
+                key: const Key('clinical_profile_error'),
+                style: const TextStyle(color: PatientColors.dangerOnSurface, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ),
+        if (_confirmation != null)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 16),
+            child: Semantics(
+              liveRegion: true,
+              child: Text(_confirmation!, key: const Key('clinical_profile_confirmation')),
+            ),
+          ),
+        if (conditions == null && _error == null)
+          const Padding(
+            padding: EdgeInsets.only(top: 40),
+            child: Center(child: CircularProgressIndicator()),
+          )
+        else if (conditions != null) ...[
+          ...conditions.entries.map(
+            (entry) => Card(
+              child: CheckboxListTile(
+                key: Key('chronic_condition_${entry.key}'),
+                value: entry.value,
+                onChanged: (value) => setState(() => conditions[entry.key] = value ?? false),
+                title: Text(_conditionLabel(entry.key)),
+                subtitle: Text(entry.value ? 'Ativo' : 'Inativo'),
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          FilledButton(
+            key: const Key('save_clinical_profile_button'),
+            onPressed: _saving ? null : _save,
+            child: _saving
+                ? const SizedBox(
+                    height: 22,
+                    width: 22,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Text('Salvar alterações no perfil'),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+/// Painel "Meus Dados" (LGPD, spec/lgpd_design.md linhas 417/581-595):
+/// confirmação de que os dados do paciente estão sendo tratados, acesso ao
+/// que está cadastrado e uma opção de exportação. Consome
+/// `patients.myData`, escopado ao próprio paciente pelo token — nunca há
+/// parâmetro de id.
+class MyDataScreen extends StatefulWidget {
+  const MyDataScreen({super.key});
+  @override
+  State<MyDataScreen> createState() => _MyDataScreenState();
+}
+
+class _MyDataScreenState extends State<MyDataScreen> {
+  PatientDataOverview? _data;
+  String? _error;
+  String? _confirmation;
+  bool _requestedLoad = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Mesmo motivo de `_RemindersScreenState`/`_ClinicalProfileScreenState`:
+    // `BackendScope.of` só está disponível a partir daqui, não em `initState`.
+    if (!_requestedLoad) {
+      _requestedLoad = true;
+      _load();
+    }
+  }
+
+  Future<void> _load() async {
+    try {
+      final data = await BackendScope.of(context).myData();
+      if (!mounted) return;
+      setState(() {
+        _data = data;
+        _error = null;
+      });
+    } on BackendFailure catch (failure) {
+      if (!mounted) return;
+      setState(() => _error = failure.message);
+    }
+  }
+
+  /// JSON da "exportação" pedida por spec/lgpd_design.md — não há
+  /// infraestrutura de e-mail/arquivo nesta etapa, então a saída é a área de
+  /// transferência: a pessoa cola onde quiser salvar ou compartilhar.
+  Map<String, Object?> _toJson(PatientDataOverview data) => {
+        'nome': data.name,
+        'dataNascimento': data.birthDate.toIso8601String(),
+        'contatoEmergencia': data.emergencyContact,
+        'pacienteCronico': data.isChronic,
+        'condicoesCronicas': data.chronicConditions,
+        'consentimentos': [
+          for (final consent in data.consents)
+            {
+              'finalidade': consent.purpose,
+              'decisao': consent.action,
+              'versao': consent.version,
+              'data': consent.timestamp.toIso8601String(),
+            },
+        ],
+        'historicoDeClassificacaoDeRisco': [
+          for (final event in data.riskHistory)
+            {
+              'origem': event.source,
+              'risco': event.riskLevel.name,
+              'data': event.recordedAt.toIso8601String(),
+            },
+        ],
+      };
+
+  Future<void> _export() async {
+    final data = _data;
+    if (data == null) return;
+    final json = const JsonEncoder.withIndent('  ').convert(_toJson(data));
+    await Clipboard.setData(ClipboardData(text: json));
+    if (!mounted) return;
+    setState(() => _confirmation = 'Dados copiados. Cole onde quiser salvar ou compartilhar.');
+  }
+
+  String _riskLabel(RiskLevel risk) => switch (risk) {
+        RiskLevel.red => 'Vermelho',
+        RiskLevel.yellow => 'Amarelo',
+        RiskLevel.green => 'Verde',
+      };
+
+  String _sourceLabel(String source) => switch (source) {
+        'alert' => 'Alerta de urgência',
+        'triage' => 'Triagem',
+        _ => source,
+      };
+
+  @override
+  Widget build(BuildContext context) {
+    final data = _data;
+    return ListView(
+      padding: const EdgeInsets.all(20),
+      children: [
+        const Text('Meus dados', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 8),
+        const Text(
+          'Confirmação de que seus dados pessoais estão sendo tratados pelo '
+          'SinalACS, o que está cadastrado, e uma cópia para guardar.',
+        ),
         const SizedBox(height: 16),
-        FilledButton(onPressed: () => _showPrototypeMessage(context, 'Alterações salvas apenas neste protótipo.'), child: const Text('Salvar alterações no perfil')),
+        if (_error != null)
+          // SC 4.1.3, mesmo padrão das outras telas: sem `liveRegion` um
+          // leitor de tela não saberia que carregar falhou.
+          Padding(
+            padding: const EdgeInsets.only(bottom: 16),
+            child: Semantics(
+              liveRegion: true,
+              child: Text(
+                _error!,
+                key: const Key('my_data_error'),
+                style: const TextStyle(color: PatientColors.dangerOnSurface, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ),
+        if (_confirmation != null)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 16),
+            child: Semantics(
+              liveRegion: true,
+              child: Text(_confirmation!, key: const Key('my_data_export_confirmation')),
+            ),
+          ),
+        if (data == null && _error == null)
+          const Padding(
+            padding: EdgeInsets.only(top: 40),
+            child: Center(child: CircularProgressIndicator()),
+          )
+        else if (data != null) ...[
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(data.name, style: const TextStyle(fontWeight: FontWeight.bold)),
+                  Text('Data de nascimento: ${data.birthDate.day.toString().padLeft(2, '0')}/'
+                      '${data.birthDate.month.toString().padLeft(2, '0')}/${data.birthDate.year}'),
+                  Text('Contato de emergência: ${data.emergencyContact}'),
+                  Text('Condição crônica: ${data.isChronic ? 'Sim' : 'Não'}'),
+                  if (data.chronicConditions.isNotEmpty)
+                    Text('Condições: ${data.chronicConditions.map(_conditionLabel).join(', ')}'),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          const Text('Consentimentos', style: TextStyle(fontWeight: FontWeight.bold)),
+          if (data.consents.isEmpty)
+            const Padding(
+              padding: EdgeInsets.only(top: 8),
+              child: Text('Nenhum consentimento registrado.', style: TextStyle(color: Colors.white54)),
+            )
+          else
+            ...data.consents.map(
+              (consent) => ListTile(
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                title: Text(consent.purpose),
+                subtitle: Text('${consent.action == 'granted' ? 'Concedido' : 'Recusado'} · '
+                    'v${consent.version} · ${consent.timestamp.toIso8601String().split('T').first}'),
+              ),
+            ),
+          const SizedBox(height: 16),
+          const Text('Histórico de classificação de risco', style: TextStyle(fontWeight: FontWeight.bold)),
+          if (data.riskHistory.isEmpty)
+            const Padding(
+              padding: EdgeInsets.only(top: 8),
+              child: Text('Nenhum evento registrado.', style: TextStyle(color: Colors.white54)),
+            )
+          else
+            ...data.riskHistory.map(
+              (event) => ListTile(
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                title: Text('${_sourceLabel(event.source)} · Risco: ${_riskLabel(event.riskLevel)}'),
+                subtitle: Text(event.recordedAt.toIso8601String().split('T').first),
+              ),
+            ),
+          const SizedBox(height: 16),
+          FilledButton.icon(
+            key: const Key('export_my_data_button'),
+            onPressed: _export,
+            icon: const Icon(Icons.copy_outlined),
+            label: const Text('Copiar meus dados (JSON)'),
+          ),
+        ],
       ],
     );
   }
@@ -1959,7 +2287,5 @@ class _PatientHeader extends StatelessWidget implements PreferredSizeWidget {
 }
 
 void _showMoreDestinations(BuildContext context, ValueChanged<PatientDestination> select) {
-  showModalBottomSheet<void>(context: context, builder: (sheetContext) => SafeArea(child: Column(mainAxisSize: MainAxisSize.min, children: [ListTile(leading: const Icon(Icons.chat_bubble_outline), title: const Text('Dúvidas'), onTap: () { Navigator.pop(sheetContext); select(PatientDestination.questions); }), ListTile(leading: const Icon(Icons.person_outline), title: const Text('Perfil clínico'), onTap: () { Navigator.pop(sheetContext); select(PatientDestination.profile); }), ListTile(leading: const Icon(Icons.alarm_outlined), title: const Text('Lembretes'), onTap: () { Navigator.pop(sheetContext); select(PatientDestination.reminders); })])));
+  showModalBottomSheet<void>(context: context, builder: (sheetContext) => SafeArea(child: Column(mainAxisSize: MainAxisSize.min, children: [ListTile(leading: const Icon(Icons.person_outline), title: const Text('Perfil clínico'), onTap: () { Navigator.pop(sheetContext); select(PatientDestination.profile); }), ListTile(leading: const Icon(Icons.alarm_outlined), title: const Text('Lembretes'), onTap: () { Navigator.pop(sheetContext); select(PatientDestination.reminders); }), ListTile(leading: const Icon(Icons.privacy_tip_outlined), title: const Text('Meus dados'), onTap: () { Navigator.pop(sheetContext); select(PatientDestination.myData); })])));
 }
-
-void _showPrototypeMessage(BuildContext context, String message) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));

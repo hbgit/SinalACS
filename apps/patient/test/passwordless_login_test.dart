@@ -114,6 +114,33 @@ void main() {
     expect(backend.otpRequests, hasLength(1));
   });
 
+  testWidgets('depois de pedir o código, "Entrar sem senha" fica desativado com aviso de cooldown', (tester) async {
+    // O servidor não avisa mais quando o pedido cai dentro do intervalo
+    // mínimo (fechou um oráculo de tempo) — sem este aviso local, quem volta
+    // e pede de novo via `enter_button` via o pedido sumir em silêncio: nenhum
+    // código novo chega e a tela não diz nada.
+    final handle = tester.ensureSemantics();
+    final backend = FakePatientBackend();
+    await tester.pumpWidget(SinalAcsApp(backend: backend));
+
+    await pedirCodigo(tester);
+    await tester.tap(find.byKey(const Key('request_new_code_button')));
+    await tester.pumpAndSettle();
+
+    final enterButton = tester.widget<FilledButton>(find.byKey(const Key('enter_button')));
+    expect(enterButton.onPressed, isNull);
+
+    final aviso = tester.getSemantics(find.byKey(const Key('otp_cooldown_message')));
+    expect(aviso.getSemanticsData().label, contains('Você pode pedir um novo código em'));
+    expect(aviso.getSemanticsData().flagsCollection.isLiveRegion, isTrue);
+
+    // Um botão desativado que declara o estado não é nó inerte (WCAG 4.1.2) —
+    // continua sem responder ao toque de propósito, e é isso que se afirma
+    // aqui, e não pelo texto sumido.
+    expect(backend.otpRequests, hasLength(1));
+    handle.dispose();
+  });
+
   testWidgets('recusa ao pedir o código aparece na tela, sem avançar', (tester) async {
     // A recusa que o servidor ainda emite neste passo é o dígito verificador
     // inválido (`Cpf.tryParse` devolve null no endpoint, e o app não valida o

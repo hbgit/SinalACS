@@ -901,6 +901,13 @@ se contradizia sozinho — se o relógio não se medisse, não haveria nada a co
   mensagem passa a morar. Hoje o app não implementa a espera: a tela não diz nada. **Dono: quem
   mexer no app do paciente** — este RF01 não fecha com a mensagem de volta ao servidor, porque ela
   só seria alcançável por quem já acertou o par.
+
+  **FECHADO em 2026-09-21.** `_PatientLoginScreenState` (`apps/patient/lib/app/app.dart`) passou a
+  guardar `_ultimoPedidoEm` no sucesso de `requestOtp` e a desabilitar `enter_button` por 60s
+  (`_otpResendCooldown`), com um `Semantics(liveRegion: true)` avisando quanto falta —
+  inteiramente do lado do app, sem depender de resposta nenhuma do servidor. Coberto por
+  `passwordless_login_test.dart`: "depois de pedir o código, 'Entrar sem senha' fica desativado
+  com aviso de cooldown".
 - **`otp_challenges` não tem retenção** (Minor do mesmo review). Não há `DELETE` nem limpeza em
   `lib/` nem em `bin/`: desafios expirados e consumidos ficam para sempre, cada um com `userId`,
   dois timestamps e `codeHash` — "Crítico — credencial" no inventário de
@@ -1000,3 +1007,54 @@ diferença como descuido e 'conserta' um dos lados", e `passwordless_login_test.
 paciente) que é "a diferença entre as duas que precisa continuar sendo lida como decisão, não
 como descuido" — o plano registra o mesmo nas Global Constraints. O lado mais provável de um
 leitor "consertar" é o TTL do login, que tem motivo para ser 1 hora.
+
+**FECHADO (2026-09-21).** `onboarding_endpoint.dart:62` passou a chamar `issueToken(user,
+lifetime: AuthEndpoint.patientSessionLifetime)`, alinhando `completeEnrollment` com `verifyOtp`:
+os dois caminhos de emissão do papel `patient` agora concordam em 1 hora, pelo mesmo motivo (nem
+o código OTP nem o convite de uso único se reapresentam, então nenhum dos dois tem renovação
+silenciosa). `onboarding_endpoint_test.dart` ganhou a mesma asserção de TTL que
+`passwordless_login_test.dart` já tinha para `verifyOtp`, usando `AlertRuntimeHarness.tokenLifetime`.
+O comentário de `apps/patient/lib/core/network/auth_session.dart:73`, que descrevia a hora como
+regra só do login, foi atualizado para descrever os dois caminhos.
+
+## Finalização do app paciente — telas soltas do menu "Mais" (2026-09-21)
+
+Plano de fechamento de `apps/patient` que sobrou de fora do que RF01–RF06 cobriam. As mudanças
+de RF02 (TTL do onboarding) e a UX de cooldown do OTP já estão registradas acima, nas seções que
+elas fecham; esta entrada cobre o resto:
+
+- **Perfil clínico deixou de ser protótipo.** `ClinicalProfileScreen` lia/escrevia um
+  `Map<String, bool>` local que o botão "Salvar" descartava. Ganhou dois métodos novos em
+  `PatientsEndpoint` — `myChronicConditions`/`updateChronicConditions`, papel `patient` apenas,
+  `patientId` sempre do token (INV-05) — que leem/gravam `patients.chronicConditionsEncrypted`
+  de verdade (AES-256-GCM), fechando a lacuna que o comentário de `OrmPatientDirectoryStore` já
+  antecipava ("quando um endpoint de cadastro existir..."). Catálogo de condições
+  (diabetes, hipertensão, uso contínuo de insulina) vem de `spec/idea.md`, não inventado. Coberto
+  por `patient_directory_service_test.dart` (fake), `patient_chronic_conditions_endpoint_test.dart`
+  (Postgres + cifra reais) e um grupo novo em `patient_app_mvp_test.dart`.
+- **"Dúvidas" foi removida**, não terminada — a tela era chat com resposta automática fixa, sem
+  backend, e contradizia a exclusão explícita de mensageria assíncrona do escopo MVP
+  (`spec/PRD_system.md` §6.1). Saiu do enum `PatientDestination`, do menu "Mais" e do código.
+- **`spec/validation_report.md` §5 estava com três linhas erradas** para o app paciente: Perfil
+  clínico e Perguntas foram atualizadas por este plano; Lembretes já estava real desde antes
+  (`RemindersScreen`/`sqflite_reminder_store.dart`/`flutter_local_notifications`) e a linha "hardcoded"
+  nunca tinha sido corrigida — achado desta rodada de exploração, não mudança de comportamento.
+- **`spec/ux_accessibility_assessment.md`**: 'Concluir cadastro' (onboarding) saiu de "não medido"
+  — era o mesmo defeito de nó inerte dos outros três sítios já corrigidos (`Semantics(button: true)`
+  sem `MergeSemantics`). Medido e corrigido.
+
+**Atualização (2026-09-21, mesmo dia):** o painel "Meus Dados" acima descrito como fora de escopo
+**entrou nesta mesma rodada**, afinal. `PatientsEndpoint.myData` agrega `patients` + `users` +
+`consent_logs` + `triage_sessions`/`alerts` (só `resultRisk`/`riskLevel` e o timestamp — nunca o
+conteúdo cifrado de uma triagem nem a localização de um alerta) num único `PatientDataOverview`,
+três modelos novos em `models/api/` (`PatientDataOverview`, `PatientConsentRecord`,
+`PatientRiskEvent`, nenhum com `table:`, então sem migração). Tela `MyDataScreen` no app, no lugar
+que "Dúvidas" deixou vago no menu "Mais"; "exportar" é copiar o JSON para a área de transferência —
+sem infraestrutura de e-mail/arquivo nesta etapa. Coberto por
+`patient_data_overview_service_test.dart` (fake), `patient_data_overview_endpoint_test.dart`
+(Postgres real, as quatro tabelas) e um grupo novo em `patient_app_mvp_test.dart` (inclusive a
+varredura de nó de botão inerte, que 'Concluir cadastro' mostrou não ser dispensável). Fica de fora
+ainda: revogar consentimento a partir deste painel (já existe em `RemindersScreen`/onboarding) e o
+SLA de 15 dias para pedidos que exigem intervenção humana — isso é processo, não código. Endurecimento
+de segurança do RF01 (rate limit por IP, canal de tempo, retenção de `otp_challenges`, refresh token)
+continua como já registrado acima, sem dono novo.

@@ -163,9 +163,9 @@ de alertas — se o broker cair, não há caminho alternativo de leitura.
 | Paciente | Triagem | **real** | 6 sintomas, risco vem do servidor. |
 | Paciente | Urgência | **real (parcial)** | Lê localização em primeiro plano, envia somente `locationHash` e explicita o fallback quando GPS/permissão falham; ainda não há validação E2E em dispositivo nesta revisão. |
 | Paciente | **Status** | **real** | Consome `alerts.statusFor` (RF05); mostra o status real do alerta mais recente do paciente, não mais o texto fixo "Solicitação #4082 · Triagem Vermelha". Fechado por `docs/superpowers/plans/2026-09-18-sync-periodica-rf05-l06.md` (L-03). |
-| Paciente | Perguntas | **hardcoded** | Resposta automática fixa sobre vacinação. |
-| Paciente | Perfil clínico | **hardcoded** | Condições fixas; salvar descarta. |
-| Paciente | Lembretes | **hardcoded** | Medicações fixas. |
+| Paciente | Perguntas | **removida (2026-09-21)** | Era resposta automática fixa sobre vacinação, sem backend — contradizia a exclusão explícita de mensageria assíncrona do escopo MVP (`spec/PRD_system.md` §6.1). Tirada do menu "Mais" e do código. |
+| Paciente | Perfil clínico | **real (2026-09-21)** | Lê/grava `patients.myChronicConditions`/`updateChronicConditions` — condições crônicas cifradas (AES-256-GCM) via `Patient.chronicConditionsEncrypted`, não mais fixas. |
+| Paciente | Lembretes | **real** | Esta linha estava desatualizada: `RemindersScreen` já persiste em SQLite local (`sqflite_reminder_store.dart`) e agenda via `flutter_local_notifications`, gated por consentimento — não há lista fixa de exemplo. |
 | ACS | Login | **real** | |
 | ACS | **Fila** | **real** | Alerta criado via RPC apareceu ao vivo no emulador. |
 | ACS | **Área** | **real** | Consome `patients.listMicroArea` ao vivo; mostra a contagem real de pacientes da microárea, não mais "142 cadastrados" fixo. Fechado por `docs/superpowers/plans/2026-09-18-sync-periodica-rf05-l06.md` (L-06). |

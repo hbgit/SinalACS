@@ -10,6 +10,7 @@ import 'package:sinalacs_server/src/application/auth/password_hasher.dart';
 import 'package:sinalacs_server/src/application/auth/passwordless_auth_service.dart';
 import 'package:sinalacs_server/src/application/auth/sms_gateway.dart';
 import 'package:sinalacs_server/src/application/onboarding/onboarding_service.dart';
+import 'package:sinalacs_server/src/application/patients/patient_data_overview_service.dart';
 import 'package:sinalacs_server/src/application/patients/patient_directory_service.dart';
 import 'package:sinalacs_server/src/application/triage/triage_session_service.dart';
 import 'package:sinalacs_server/src/application/visits/visit_sync_service.dart';
@@ -23,6 +24,7 @@ import 'package:sinalacs_server/src/infrastructure/database/orm_alert_store.dart
 import 'package:sinalacs_server/src/infrastructure/database/orm_audit_trail.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_onboarding_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_otp_challenge_store.dart';
+import 'package:sinalacs_server/src/infrastructure/database/orm_patient_data_overview_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_patient_directory_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_triage_session_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_visit_store.dart';
@@ -181,6 +183,16 @@ class AlertRuntime {
   PatientDirectoryService patientDirectoryServiceFor(Session session) =>
       PatientDirectoryService(
         store: OrmPatientDirectoryStore(
+          session: () => session,
+          cipher: healthDataCipher,
+        ),
+        audit: auditTrailFor(session),
+      );
+
+  /// Constrói o painel "Meus Dados" (LGPD) para uma requisição.
+  PatientDataOverviewService patientDataOverviewServiceFor(Session session) =>
+      PatientDataOverviewService(
+        store: OrmPatientDataOverviewStore(
           session: () => session,
           cipher: healthDataCipher,
         ),
