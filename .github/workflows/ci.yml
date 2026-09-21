@@ -200,19 +200,10 @@ jobs:
           profile: pixel_7
           disable-animations: true
           emulator-options: -no-window -no-audio -gpu swiftshader_indirect -no-snapshot -no-boot-anim
-          script: |
-            trap 'docker compose down' EXIT
-            if [[ -z "${GOOGLE_MAPS_API_KEY:-}" ]]; then
-              echo 'erro: GOOGLE_MAPS_API_KEY é obrigatória para o E2E Android.' >&2
-              exit 1
-            fi
-            set -a
-            source .env
-            set +a
-            ./scripts/qa/e2e.sh --emulator --keep
-            dart run scripts/qa/measure_latency.dart \
-              --mqtt-password "$MQTT_ACS_PASSWORD" \
-              --output build/qa/latency/metrics.json
+          # Uma linha só: a action roda cada linha de "script" como um `sh -c`
+          # separado, então lógica multi-linha (if/fi, set -a + source .env)
+          # precisa viver num script de verdade — ver run_android_e2e.sh.
+          script: ./scripts/qa/run_android_e2e.sh
       - uses: actions/upload-artifact@v4
         if: always()
         with:
