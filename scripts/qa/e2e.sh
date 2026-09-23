@@ -94,6 +94,23 @@ echo '== ACS: ciclo completo (RPC + MQTT/TLS + sincronização de visita) =='
 (cd apps/acs && dart pub get >/dev/null && \
   dart run tool/live_check.dart --mqtt-password "$MQTT_ACS_PASSWORD")
 
+# `adb install` falha de forma transiente e conhecida em emuladores sem
+# aceleração de hardware (o caso deste runner — medido, o boot já loga "Linux
+# VM where hardware acceleration is not available") com "cmd: Failure calling
+# service package: Broken pipe (32)" — a instalação do APK cai no meio, sem
+# relação com rede/certificado; uma segunda tentativa costuma passar. Só o
+# `flutter test integration_test` (que reinstala o APK) é envolvido — o
+# `docker compose`/seed acima não tem esse modo de falha.
+tentar_flutter_test() {
+  if "$@"; then
+    return 0
+  fi
+  echo 'aviso: flutter test integration_test falhou (possível "Broken pipe" do' >&2
+  echo 'adb install em emulador sem aceleração de hardware); tentando de novo.' >&2
+  sleep 5
+  "$@"
+}
+
 if [[ "$run_emulator" -eq 1 ]]; then
   echo
   echo '== testes de integração no dispositivo =='
@@ -128,7 +145,7 @@ if [[ "$run_emulator" -eq 1 ]]; then
   # privilegiada, então mantém a mesma porta dos dois lados.
   adb -s emulator-5554 reverse tcp:8443 tcp:443
   adb -s emulator-5554 reverse tcp:8883 tcp:8883
-  (cd apps/patient && flutter test integration_test -d emulator-5554 \
+  (cd apps/patient && tentar_flutter_test flutter test integration_test -d emulator-5554 \
       --dart-define=SINALACS_HOST=https://localhost:8443/)
   acs_cmd=(flutter test integration_test -d emulator-5554
     --dart-define=SINALACS_HOST=https://localhost:8443/
@@ -137,8 +154,8 @@ if [[ "$run_emulator" -eq 1 ]]; then
   if [[ -n "${GOOGLE_MAPS_API_KEY:-}" ]]; then
     acs_cmd+=(--dart-define=GOOGLE_MAPS_API_KEY="$GOOGLE_MAPS_API_KEY")
   fi
-  (cd apps/acs && "${acs_cmd[@]}")
-  (cd apps/admin && flutter test integration_test -d emulator-5554)
+  (cd apps/acs && tentar_flutter_test "${acs_cmd[@]}")
+  (cd apps/admin && tentar_flutter_test flutter test integration_test -d emulator-5554)
 fi
 
 echo
