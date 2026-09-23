@@ -111,17 +111,27 @@ if [[ "$run_emulator" -eq 1 ]]; then
   # caminhos é justamente essa tradução de rede.
   #
   # `adb reverse` tunela pelo protocolo do próprio adb, sem depender da NAT do
-  # emulador, então os dois `--dart-define` abaixo passam a apontar para
+  # emulador, então os `--dart-define` abaixo passam a apontar para
   # "localhost" — reencaminhado pelo adb — em vez de 10.0.2.2. `localhost` (não
   # `127.0.0.1`) porque é o Host que a regra do Traefik e o SAN dos dois
   # certificados (RPC e broker) já esperam — ver docker-compose.yml e os dois
   # `init.sh` em infra/docker/.
-  adb -s emulator-5554 reverse tcp:443 tcp:443
+  #
+  # A porta do RPC no lado do DISPOSITIVO não pode ser 443: medido, `adb
+  # reverse` recusa abrir o listener nessa porta dentro do emulador ("cannot
+  # bind listener: Permission denied") — Android não deixa um processo comum
+  # ligar em porta privilegiada (<1024), nem para o próprio adbd. 8443 do lado
+  # do dispositivo, encaminhado para os 443 reais do host, resolve sem tocar no
+  # lado do host: a regra `Host(...)` do Traefik e a verificação de hostname
+  # TLS comparam só o nome (`localhost`), nunca a porta, então uma porta
+  # diferente no cliente não quebra nenhuma das duas. 8883 (MQTT) já não é
+  # privilegiada, então mantém a mesma porta dos dois lados.
+  adb -s emulator-5554 reverse tcp:8443 tcp:443
   adb -s emulator-5554 reverse tcp:8883 tcp:8883
   (cd apps/patient && flutter test integration_test -d emulator-5554 \
-      --dart-define=SINALACS_HOST=https://localhost/)
+      --dart-define=SINALACS_HOST=https://localhost:8443/)
   acs_cmd=(flutter test integration_test -d emulator-5554
-    --dart-define=SINALACS_HOST=https://localhost/
+    --dart-define=SINALACS_HOST=https://localhost:8443/
     --dart-define=SINALACS_MQTT_HOST=localhost
     --dart-define=SINALACS_MQTT_PASSWORD="$MQTT_ACS_PASSWORD")
   if [[ -n "${GOOGLE_MAPS_API_KEY:-}" ]]; then
