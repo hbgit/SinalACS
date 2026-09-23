@@ -100,13 +100,29 @@ if [[ "$run_emulator" -eq 1 ]]; then
   (cd apps/patient && flutter pub get >/dev/null)
   (cd apps/acs && flutter pub get >/dev/null)
   (cd apps/admin && flutter pub get >/dev/null)
-  # O emulador alcança o host da máquina por 10.0.2.2 — em 443, porque o RPC
-  # não publica mais porta em texto claro (RNF04/L-08).
+  # Medido no runner da CI: o app falha ao falar com o RPC via 10.0.2.2:443 —
+  # "Não foi possível falar com o servidor (-1)" (ServerpodClientException com
+  # statusCode -1, o wrap genérico do cliente gerado para quando a conexão TCP
+  # em si não se completa; um TLS/certificado ruim cai num catch diferente,
+  # com outra mensagem) — mesmo com a stack saudável e os mesmos 443/8883 já
+  # confirmados alcançáveis por localhost segundos antes, rodando no host (RNF04,
+  # `tls_invariants.sh` e os dois `live_check.dart` acima). 10.0.2.2 é o alias
+  # de gateway do NAT do emulador para o host; o que muda entre os dois
+  # caminhos é justamente essa tradução de rede.
+  #
+  # `adb reverse` tunela pelo protocolo do próprio adb, sem depender da NAT do
+  # emulador, então os dois `--dart-define` abaixo passam a apontar para
+  # "localhost" — reencaminhado pelo adb — em vez de 10.0.2.2. `localhost` (não
+  # `127.0.0.1`) porque é o Host que a regra do Traefik e o SAN dos dois
+  # certificados (RPC e broker) já esperam — ver docker-compose.yml e os dois
+  # `init.sh` em infra/docker/.
+  adb -s emulator-5554 reverse tcp:443 tcp:443
+  adb -s emulator-5554 reverse tcp:8883 tcp:8883
   (cd apps/patient && flutter test integration_test -d emulator-5554 \
-      --dart-define=SINALACS_HOST=https://10.0.2.2/)
+      --dart-define=SINALACS_HOST=https://localhost/)
   acs_cmd=(flutter test integration_test -d emulator-5554
-    --dart-define=SINALACS_HOST=https://10.0.2.2/
-    --dart-define=SINALACS_MQTT_HOST=10.0.2.2
+    --dart-define=SINALACS_HOST=https://localhost/
+    --dart-define=SINALACS_MQTT_HOST=localhost
     --dart-define=SINALACS_MQTT_PASSWORD="$MQTT_ACS_PASSWORD")
   if [[ -n "${GOOGLE_MAPS_API_KEY:-}" ]]; then
     acs_cmd+=(--dart-define=GOOGLE_MAPS_API_KEY="$GOOGLE_MAPS_API_KEY")

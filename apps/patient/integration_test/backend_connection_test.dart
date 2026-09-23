@@ -9,6 +9,11 @@
 ///     --dart-define=SINALACS_HOST=https://10.0.2.2/
 ///
 /// O default é 10.0.2.2, o host da máquina visto de dentro do emulador Android.
+/// `./scripts/qa/e2e.sh --emulator` (o caminho da CI) usa `localhost` com
+/// `adb reverse tcp:443 tcp:443` em vez disso: medido no runner da CI que
+/// 10.0.2.2 não chega ao RPC (a mesma stack respondia por `localhost` rodando
+/// no host segundos antes), embora 10.0.2.2 funcione normalmente num emulador
+/// local comum.
 ///
 /// O RPC é **HTTPS na 443** (RNF04/L-08) e o certificado é assinado pela CA de
 /// desenvolvimento, que chega ao app como asset — é por isso que o caminho

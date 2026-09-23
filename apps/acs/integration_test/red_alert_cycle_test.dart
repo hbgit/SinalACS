@@ -17,6 +17,10 @@
 ///     --dart-define=SINALACS_MQTT_HOST=10.0.2.2 \
 ///     --dart-define=SINALACS_MQTT_PASSWORD="$MQTT_ACS_PASSWORD"
 ///
+/// A CI usa `localhost` com `adb reverse tcp:443 tcp:443` e
+/// `adb reverse tcp:8883 tcp:8883` em vez de 10.0.2.2: medido no runner da CI
+/// que 10.0.2.2 não chega à stack, embora funcione num emulador local comum.
+///
 /// A senha é obrigatória: ela não tem default no `BackendConfig`.
 ///
 /// PRIVACIDADE: só os UUIDs sintéticos do seed.
