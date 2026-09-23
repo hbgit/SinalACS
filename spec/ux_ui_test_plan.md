@@ -160,3 +160,25 @@ Complementa (não duplica) o teste funcional de `offline_visit_queue.dart` já c
 - **UXtweak** (já planejado em `spec/ux_accessibility_assessment.md` §4): estender o Cenário 2
   (priorização na fila) para cobrir também o item 3.3 (entendimento do estado offline), em vez de
   abrir uma frente de pesquisa nova.
+
+---
+## Execução e Resolução (Atualizado pós-auditoria)
+
+**Decisão Geral:** Todos os achados foram formalizados através de atualizações explícitas nas regras do arquivo `spec/ui_design.md`, sem necessidade de regressão no código nativo.
+
+* **[Resolvido] §1.1 e §3.4 (Container Responsivo):** Decisão de Produto (A) acatada. Confirmado que a restrição de container aplica-se apenas ao Login. Telas pós-login mantêm comportamento expansível nativo (borda a borda). Regra atualizada em `ui_design.md`.
+* **[Resolvido] §1.2 (Dark Mode):** Documentado formalmente como fixo/permanente no documento de design.
+* **[Resolvido] §1.3 (Foco Suave):** Inspeção visual validada: o anel M3 padrão apresenta constraste funcional sobre o `surfaceRaised` sem necessidade de overrides.
+* **[Resolvido] §1.4 (Microinterações):** *Ripple* formalizado como equivalência intencional ao `active:scale`.
+* **[Resolvido] §2.1 (Fricção de Emergência):** Limiar formalizado de "≤ 4 toques e ≤ 10s" no design.
+* **[Resolvido] §2.3 (Hierarquia do Botão de Emergência):** Validado estaticamente. Dimensão de 208x208dp domina o viewport mobile, sem concorrência de tamanho/saturação.
+* **[Resolvido] §3.1 (Cor Restrita):** Exceção aceitável do geofencing (status geográfico) devidamente documentada no design.
+* **[Resolvido] §3.2 (Reordenação da Fila):** Rebuild nativo da lista atende à necessidade inicial. Implementação de `AnimatedList` é classificada como melhoria futura não-bloqueante.
+* **[Resolvido] §3.3 (Compreensão do Estado Offline):** Estendido via roteiro remoto no UXtweak (vide abaixo).
+
+### Cenário 3 - UXtweak: Compreensão do Estado Offline (§3.3)
+*(Adendo ao Planejamento de Testes de Usabilidade Remota - spec/ux_accessibility_assessment.md §4)*
+
+* **Objetivo:** Avaliar a legibilidade narrativa da tela de Visita e se o ACS compreende intuitivamente que o registro foi salvo localmente mas carece de sincronização (`pending_visits_count` e banner de erro de storage).
+* **Métrica:** Taxa de compreensão correta (Sim/Não) e contagem de cliques no botão `sync_visits`.
+* **Instrução dada ao usuário:** *"Você preencheu e salvou os dados da triagem em um local sem sinal de internet. Volte para a tela inicial do aplicativo e verifique o status dessa visita. Ela foi enviada para o posto de saúde, perdida ou está salva no seu aparelho aguardando conexão?"*
