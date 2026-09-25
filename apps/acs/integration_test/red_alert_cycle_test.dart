@@ -56,11 +56,6 @@ import 'package:sinalacs_acs/core/services/alert_queue.dart';
 import 'package:sinalacs_acs/core/services/backend_visit_synchronizer.dart';
 import 'package:sinalacs_acs/core/services/offline_visit_queue.dart';
 import 'package:sinalacs_client/sinalacs_client.dart' as api;
-// `flutter_test` não reexporta `Timeout` (só importa para o parâmetro
-// nomeado do próprio `test()`), então precisa vir direto do test_api — é
-// dependência transitiva de `flutter_test`, então não precisa entrar no
-// pubspec.yaml.
-import 'package:test_api/scaffolding.dart' show Timeout;
 
 const seedMicroAreaId = '00000000-0000-4000-8000-000000000003';
 const seedPatientId = '00000000-0000-4000-8000-000000000001';
