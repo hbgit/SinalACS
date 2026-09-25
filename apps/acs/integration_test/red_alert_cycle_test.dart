@@ -29,6 +29,15 @@
 /// A senha é obrigatória: ela não tem default no `BackendConfig`.
 ///
 /// PRIVACIDADE: só os UUIDs sintéticos do seed.
+///
+/// Medido no runner da CI (sem aceleração de hardware — nem KVM nem HAXM, só
+/// swiftshader por software): "a visita confirmada SAI do disco criptografado"
+/// combina abrir/gravar/fechar um banco SQLCipher real com uma chamada de rede
+/// real (`visits.sync`), e as duas juntas passam dos 30s default do
+/// `package:test` só nesse emulador — o mesmo teste tem tempo de sobra num
+/// emulador local acelerado. O timeout maior cobre o arquivo inteiro porque o
+/// teste seguinte faz a mesma combinação.
+@Timeout(Duration(minutes: 2))
 library;
 
 import 'dart:async';
@@ -47,6 +56,11 @@ import 'package:sinalacs_acs/core/services/alert_queue.dart';
 import 'package:sinalacs_acs/core/services/backend_visit_synchronizer.dart';
 import 'package:sinalacs_acs/core/services/offline_visit_queue.dart';
 import 'package:sinalacs_client/sinalacs_client.dart' as api;
+// `flutter_test` não reexporta `Timeout` (só importa para o parâmetro
+// nomeado do próprio `test()`), então precisa vir direto do test_api — é
+// dependência transitiva de `flutter_test`, então não precisa entrar no
+// pubspec.yaml.
+import 'package:test_api/scaffolding.dart' show Timeout;
 
 const seedMicroAreaId = '00000000-0000-4000-8000-000000000003';
 const seedPatientId = '00000000-0000-4000-8000-000000000001';
