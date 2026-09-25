@@ -15,11 +15,23 @@ import 'package:serverpod_client/serverpod_client.dart' as _i1;
 import 'dart:async' as _i2;
 import 'package:sinalacs_client/src/protocol/api/red_alert_result.dart' as _i3;
 import 'package:sinalacs_client/src/protocol/api/alert_ack_result.dart' as _i4;
-import 'package:sinalacs_client/src/protocol/api/development_login_result.dart'
+import 'package:sinalacs_client/src/protocol/api/alert_status_result.dart'
     as _i5;
-import 'package:sinalacs_client/src/protocol/api/service_health.dart' as _i6;
-import 'package:sinalacs_client/src/protocol/api/triage_result.dart' as _i7;
-import 'protocol.dart' as _i8;
+import 'package:sinalacs_client/src/protocol/api/development_login_result.dart'
+    as _i6;
+import 'package:sinalacs_client/src/protocol/api/service_health.dart' as _i7;
+import 'package:sinalacs_client/src/protocol/api/enrollment_token_result.dart'
+    as _i8;
+import 'package:sinalacs_client/src/protocol/api/enrollment_result.dart' as _i9;
+import 'package:sinalacs_client/src/protocol/api/micro_area_patient.dart'
+    as _i10;
+import 'package:sinalacs_client/src/protocol/api/patient_data_overview.dart'
+    as _i11;
+import 'package:sinalacs_client/src/protocol/api/triage_result.dart' as _i12;
+import 'package:sinalacs_client/src/protocol/api/visit_sync_result.dart'
+    as _i13;
+import 'package:sinalacs_client/src/protocol/api/visit_sync_entry.dart' as _i14;
+import 'protocol.dart' as _i15;
 
 /// Ciclo do alerta vermelho.
 ///
@@ -36,7 +48,7 @@ import 'protocol.dart' as _i8;
 /// A autenticação continua sendo o token HMAC de desenvolvimento, verificado
 /// aqui em vez de no laço de requisições do servidor `dart:io`.
 /// {@category Endpoint}
-class EndpointAlerts extends _i1.EndpointRef {
+class EndpointAlerts extends EndpointAuthenticated {
   EndpointAlerts(_i1.EndpointCaller caller) : super(caller);
 
   @override
@@ -46,6 +58,7 @@ class EndpointAlerts extends _i1.EndpointRef {
     required String accessToken,
     required String idempotencyKey,
     required String locationHash,
+    String? locationCell,
   }) => caller.callServerEndpoint<_i3.RedAlertResult>(
     'alerts',
     'createRedAlert',
@@ -53,6 +66,7 @@ class EndpointAlerts extends _i1.EndpointRef {
       'accessToken': accessToken,
       'idempotencyKey': idempotencyKey,
       'locationHash': locationHash,
+      'locationCell': locationCell,
     },
   );
 
@@ -67,14 +81,25 @@ class EndpointAlerts extends _i1.EndpointRef {
       'alertId': alertId,
     },
   );
+
+  /// Status do alerta mais recente do PRÓPRIO paciente (RF05, decisão §5).
+  /// `patientId` nunca é parâmetro — vem do token (INV-05).
+  _i2.Future<_i5.AlertStatusResult> statusFor({required String accessToken}) =>
+      caller.callServerEndpoint<_i5.AlertStatusResult>(
+        'alerts',
+        'statusFor',
+        {'accessToken': accessToken},
+      );
 }
 
-/// Acesso de desenvolvimento. **Não** é autenticação institucional.
+/// Autenticação. `developmentLogin` é acesso de desenvolvimento e **não** é
+/// autenticação institucional; `loginInstitutional` é o caminho real (RF07);
+/// `requestOtp`/`verifyOtp` são o login passwordless do paciente (RF01).
 ///
-/// Substitui `POST /v1/auth/development/login`, preservando o gate do
-/// `ENABLE_DEV_LOGIN`: quando desligado, a chamada falha como se o endpoint não
-/// existisse, e não como "proibido" — o servidor `dart:io` respondia 404 e não
-/// 403, para não revelar a existência da rota.
+/// `developmentLogin` substitui `POST /v1/auth/development/login`, preservando
+/// o gate do `ENABLE_DEV_LOGIN`: quando desligado, a chamada falha como se o
+/// endpoint não existisse, e não como "proibido" — o servidor `dart:io`
+/// respondia 404 e não 403, para não revelar a existência da rota.
 /// {@category Endpoint}
 class EndpointAuth extends _i1.EndpointRef {
   EndpointAuth(_i1.EndpointCaller caller) : super(caller);
@@ -82,13 +107,104 @@ class EndpointAuth extends _i1.EndpointRef {
   @override
   String get name => 'auth';
 
-  _i2.Future<_i5.DevelopmentLoginResult> developmentLogin({
+  _i2.Future<_i6.DevelopmentLoginResult> developmentLogin({
     required String role,
-  }) => caller.callServerEndpoint<_i5.DevelopmentLoginResult>(
+  }) => caller.callServerEndpoint<_i6.DevelopmentLoginResult>(
     'auth',
     'developmentLogin',
     {'role': role},
   );
+
+  /// Login institucional do ACS (RF07): matrícula + senha.
+  ///
+  /// Não é gated por `ENABLE_DEV_LOGIN` — é o caminho real, e o gate existe
+  /// para o *outro* método. As recusas chegam ao app como
+  /// `AuthenticationFailedException`, com a mensagem que o serviço escolheu:
+  /// mensagem idêntica para matrícula inexistente e senha errada (ver
+  /// `InstitutionalAuthService`).
+  _i2.Future<_i6.DevelopmentLoginResult> loginInstitutional({
+    required String matricula,
+    required String password,
+    String? deviceId,
+  }) => caller.callServerEndpoint<_i6.DevelopmentLoginResult>(
+    'auth',
+    'loginInstitutional',
+    {
+      'matricula': matricula,
+      'password': password,
+      'deviceId': deviceId,
+    },
+  );
+
+  /// Pedido do código de acesso (RF01). Público por definição: quem chama
+  /// ainda não tem sessão. A resposta é sempre a mesma — não revela se o CPF
+  /// está cadastrado (ver `PasswordlessAuthService.requestOtp`).
+  ///
+  /// "Sempre a mesma" inclui a **segunda** chamada dentro do intervalo mínimo
+  /// de 60 s: ela também é um 200 sem corpo, e **não** uma recusa. Um "aguarde
+  /// um minuto" aqui seria alcançável só por quem já acertou CPF e nascimento,
+  /// e o status da resposta passaria a ser o verificador do par — foi o
+  /// defeito medido em 2026-09-19 (200, 400, 400 para o par cadastrado contra
+  /// 200, 200, 200 para o não cadastrado), corrigido no serviço. O aviso de
+  /// espera é do app, que é quem sabe quando pediu por último.
+  ///
+  /// O CPF é validado aqui, **antes** de virar hash: um número com dígito
+  /// verificador errado é erro de digitação, e tratá-lo como "não encontrado"
+  /// mandaria o paciente para a tela do código com um CPF que nunca vai casar.
+  /// A recusa não distingue esse caso de nenhum outro para quem sonda, porque
+  /// `Cpf.tryParse` devolve `null` sem dizer o motivo.
+  ///
+  /// Data de nascimento no futuro não é validada aqui de propósito: quem decide
+  /// se a data confere com o cadastro é o serviço, e uma checagem de faixa
+  /// étaria no endpoint seria mais um sinal distinguível.
+  _i2.Future<void> requestOtp({
+    required String cpf,
+    required DateTime birthDate,
+  }) => caller.callServerEndpoint<void>(
+    'auth',
+    'requestOtp',
+    {
+      'cpf': cpf,
+      'birthDate': birthDate,
+    },
+  );
+
+  /// Verificação do código, que emite a sessão do paciente (RF01).
+  ///
+  /// Público pelo mesmo motivo de [requestOtp] — é esta chamada que **emite** a
+  /// sessão —, e o token sai com o papel `patient` e a microárea lida do
+  /// cadastro pelo serviço, nunca de parâmetro.
+  ///
+  /// Toda recusa chega ao app como `OtpRequestException`, com a mensagem que o
+  /// serviço escolheu: uma só, para não dizer se aquele CPF existe.
+  _i2.Future<_i6.DevelopmentLoginResult> verifyOtp({
+    required String cpf,
+    required String code,
+    String? deviceId,
+  }) => caller.callServerEndpoint<_i6.DevelopmentLoginResult>(
+    'auth',
+    'verifyOtp',
+    {
+      'cpf': cpf,
+      'code': code,
+      'deviceId': deviceId,
+    },
+  );
+}
+
+/// Endpoint cujos métodos exigem credencial.
+///
+/// A existência desta classe é o que permite ao teste de postura
+/// (`test/unit/endpoint_auth_posture_test.dart`) distinguir, no texto-fonte,
+/// um endpoint autenticado de um público. `requireLogin` continua `false`: o
+/// stack de autenticação do próprio Serverpod (`AuthenticationHandler`) não
+/// está conectado neste projeto — a autenticação é feita à mão, com
+/// `verifyToken`, e ligar a flag sem conectar o handler rejeitaria *todas* as
+/// chamadas. O que muda aqui é a postura ficar declarada e verificável, que é
+/// o que o achado F4 de spec/security_assessment.md pede.
+/// {@category Endpoint}
+abstract class EndpointAuthenticated extends _i1.EndpointRef {
+  EndpointAuthenticated(_i1.EndpointCaller caller) : super(caller);
 }
 
 /// Sonda de saúde.
@@ -107,47 +223,198 @@ class EndpointHealth extends _i1.EndpointRef {
   @override
   String get name => 'health';
 
-  _i2.Future<_i6.ServiceHealth> check() =>
-      caller.callServerEndpoint<_i6.ServiceHealth>(
+  _i2.Future<_i7.ServiceHealth> check() =>
+      caller.callServerEndpoint<_i7.ServiceHealth>(
         'health',
         'check',
         {},
       );
 }
 
-/// Motor de triagem determinístico, inspirado no Protocolo de Manchester.
+/// Onboarding do paciente por convite do ACS (RF02) e captura de
+/// consentimento por finalidade (LGPD-RF02). Ver decisão §2 de
+/// docs/superpowers/specs/2026-09-16-decisoes-produto-pos-validacao.md.
 ///
-/// Endpoint novo: o [TriageEngine] já existia e era testado, mas nunca esteve
-/// exposto por HTTP — os apps replicavam a regra do lado do cliente. Publicá-lo
-/// permite que a classificação passe a vir de uma única fonte.
+/// Postura de autenticação **mista**, e é por isso que este endpoint não
+/// estende `AuthenticatedEndpoint`: `generateEnrollmentToken` exige token de
+/// ACS, mas `completeEnrollment` é público por desenho — quem o chama ainda
+/// não tem sessão, e o convite de uso único é a credencial. Ver a allowlist
+/// em `test/unit/endpoint_auth_posture_test.dart`.
+/// {@category Endpoint}
+class EndpointOnboarding extends _i1.EndpointRef {
+  EndpointOnboarding(_i1.EndpointCaller caller) : super(caller);
+
+  @override
+  String get name => 'onboarding';
+
+  /// Chamado pelo app do ACS. Exige sessão de ACS.
+  _i2.Future<_i8.EnrollmentTokenResult> generateEnrollmentToken({
+    required String accessToken,
+    required String patientId,
+  }) => caller.callServerEndpoint<_i8.EnrollmentTokenResult>(
+    'onboarding',
+    'generateEnrollmentToken',
+    {
+      'accessToken': accessToken,
+      'patientId': patientId,
+    },
+  );
+
+  /// Chamado pelo app do paciente. Não exige sessão prévia — é a própria
+  /// conclusão do onboarding que emite a primeira sessão.
+  _i2.Future<_i9.EnrollmentResult> completeEnrollment({
+    required String token,
+    required bool healthDataConsent,
+    required bool remindersConsent,
+    required bool pushConsent,
+  }) => caller.callServerEndpoint<_i9.EnrollmentResult>(
+    'onboarding',
+    'completeEnrollment',
+    {
+      'token': token,
+      'healthDataConsent': healthDataConsent,
+      'remindersConsent': remindersConsent,
+      'pushConsent': pushConsent,
+    },
+  );
+}
+
+/// Diretório de pacientes da microárea do ACS.
+///
+/// Existe para a visita de rotina: o único produtor de alertas
+/// (`alerts.createRedAlert`) publica só `riskLevel: 'red'` — emergência com
+/// SAMU —, e sem esta lista não havia como o ACS escolher um paciente para
+/// visitar fora do caminho reativo.
+/// {@category Endpoint}
+class EndpointPatients extends EndpointAuthenticated {
+  EndpointPatients(_i1.EndpointCaller caller) : super(caller);
+
+  @override
+  String get name => 'patients';
+
+  _i2.Future<List<_i10.MicroAreaPatient>> listMicroArea({
+    required String accessToken,
+  }) => caller.callServerEndpoint<List<_i10.MicroAreaPatient>>(
+    'patients',
+    'listMicroArea',
+    {'accessToken': accessToken},
+  );
+
+  /// Condições crônicas do próprio paciente autenticado — tela "Perfil
+  /// clínico" do app. Chamado pelo app do paciente, nunca pelo do ACS (esse
+  /// usa [listMicroArea]).
+  _i2.Future<List<String>> myChronicConditions({required String accessToken}) =>
+      caller.callServerEndpoint<List<String>>(
+        'patients',
+        'myChronicConditions',
+        {'accessToken': accessToken},
+      );
+
+  /// Grava a lista de condições crônicas do próprio paciente autenticado,
+  /// substituindo a anterior por inteiro (não é um merge).
+  _i2.Future<void> updateChronicConditions({
+    required String accessToken,
+    required List<String> conditions,
+  }) => caller.callServerEndpoint<void>(
+    'patients',
+    'updateChronicConditions',
+    {
+      'accessToken': accessToken,
+      'conditions': conditions,
+    },
+  );
+
+  /// Painel "Meus Dados" do próprio paciente autenticado (LGPD,
+  /// spec/lgpd_design.md linhas 417/581-595): confirmação de existência de
+  /// tratamento e acesso aos dados pessoais.
+  _i2.Future<_i11.PatientDataOverview> myData({required String accessToken}) =>
+      caller.callServerEndpoint<_i11.PatientDataOverview>(
+        'patients',
+        'myData',
+        {'accessToken': accessToken},
+      );
+}
+
+/// Motor de triagem determinístico, inspirado no Protocolo de Manchester.
 ///
 /// A mesma entrada produz sempre a mesma saída, sem modelo probabilístico e sem
 /// campo editável: a classificação de risco não é alterável por intervenção
 /// manual no fluxo de triagem (INV-02).
+///
+/// Passou a exigir `accessToken` e a gravar em `triage_sessions`: antes disso o
+/// endpoint era uma função pura, respondia sem autenticação alguma, e o
+/// resultado clínico era descartado — não havia prontuário, nem vínculo com o
+/// paciente, nem auditoria da triagem (RF17).
 /// {@category Endpoint}
-class EndpointTriage extends _i1.EndpointRef {
+class EndpointTriage extends EndpointAuthenticated {
   EndpointTriage(_i1.EndpointCaller caller) : super(caller);
 
   @override
   String get name => 'triage';
 
-  _i2.Future<_i7.TriageResult> evaluate({
+  _i2.Future<_i12.TriageResult> evaluate({
+    required String accessToken,
     required bool chestPain,
     required bool difficultyBreathing,
     required bool fever,
     required bool persistentVomiting,
     required bool bleeding,
     required bool severeWeakness,
-  }) => caller.callServerEndpoint<_i7.TriageResult>(
+  }) => caller.callServerEndpoint<_i12.TriageResult>(
     'triage',
     'evaluate',
     {
+      'accessToken': accessToken,
       'chestPain': chestPain,
       'difficultyBreathing': difficultyBreathing,
       'fever': fever,
       'persistentVomiting': persistentVomiting,
       'bleeding': bleeding,
       'severeWeakness': severeWeakness,
+    },
+  );
+}
+
+/// Sincronização das visitas domiciliares registradas offline.
+///
+/// É a contraparte da fila offline do app do ACS: o dispositivo grava a visita
+/// localmente durante a visita (onde normalmente não há rede) e envia o lote
+/// quando a conexão volta.
+///
+/// O lote inteiro roda em uma transação: ou todas as visitas são aplicadas, ou
+/// nenhuma. Um resultado parcial deixaria o dispositivo sem saber o que
+/// reenviar.
+/// {@category Endpoint}
+class EndpointVisits extends EndpointAuthenticated {
+  EndpointVisits(_i1.EndpointCaller caller) : super(caller);
+
+  @override
+  String get name => 'visits';
+
+  _i2.Future<List<_i13.VisitSyncResult>> sync({
+    required String accessToken,
+    required List<_i14.VisitSyncEntry> visits,
+  }) => caller.callServerEndpoint<List<_i13.VisitSyncResult>>(
+    'visits',
+    'sync',
+    {
+      'accessToken': accessToken,
+      'visits': visits,
+    },
+  );
+
+  /// Sincronização central→dispositivo: visitas da microárea do ACS
+  /// autenticado alteradas após `since`, para reconciliar um device que
+  /// ficou offline ou foi reinstalado.
+  _i2.Future<List<_i14.VisitSyncEntry>> pull({
+    required String accessToken,
+    required DateTime since,
+  }) => caller.callServerEndpoint<List<_i14.VisitSyncEntry>>(
+    'visits',
+    'pull',
+    {
+      'accessToken': accessToken,
+      'since': since,
     },
   );
 }
@@ -172,7 +439,7 @@ class Client extends _i1.ServerpodClientShared {
     bool? disconnectStreamsOnLostInternetConnection,
   }) : super(
          host,
-         _i8.Protocol(),
+         _i15.Protocol(),
          securityContext: securityContext,
          streamingConnectionTimeout: streamingConnectionTimeout,
          connectionTimeout: connectionTimeout,
@@ -184,7 +451,10 @@ class Client extends _i1.ServerpodClientShared {
     alerts = EndpointAlerts(this);
     auth = EndpointAuth(this);
     health = EndpointHealth(this);
+    onboarding = EndpointOnboarding(this);
+    patients = EndpointPatients(this);
     triage = EndpointTriage(this);
+    visits = EndpointVisits(this);
   }
 
   late final EndpointAlerts alerts;
@@ -193,14 +463,23 @@ class Client extends _i1.ServerpodClientShared {
 
   late final EndpointHealth health;
 
+  late final EndpointOnboarding onboarding;
+
+  late final EndpointPatients patients;
+
   late final EndpointTriage triage;
+
+  late final EndpointVisits visits;
 
   @override
   Map<String, _i1.EndpointRef> get endpointRefLookup => {
     'alerts': alerts,
     'auth': auth,
     'health': health,
+    'onboarding': onboarding,
+    'patients': patients,
     'triage': triage,
+    'visits': visits,
   };
 
   @override

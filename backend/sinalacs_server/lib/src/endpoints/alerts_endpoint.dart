@@ -1,5 +1,5 @@
 import 'package:serverpod/serverpod.dart';
-import 'package:sinalacs_server/src/application/auth/development_auth_service.dart';
+import 'package:sinalacs_server/src/endpoints/authenticated_endpoint.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
 import 'package:sinalacs_server/src/runtime/alert_runtime.dart';
 
@@ -17,17 +17,15 @@ import 'package:sinalacs_server/src/runtime/alert_runtime.dart';
 ///
 /// A autenticação continua sendo o token HMAC de desenvolvimento, verificado
 /// aqui em vez de no laço de requisições do servidor `dart:io`.
-class AlertsEndpoint extends Endpoint {
-  @override
-  bool get requireLogin => false;
-
+class AlertsEndpoint extends AuthenticatedEndpoint {
   Future<RedAlertResult> createRedAlert(
     Session session, {
     required String accessToken,
     required String idempotencyKey,
     required String locationHash,
+    String? locationCell,
   }) async {
-    final user = _authenticate(accessToken);
+    final user = authenticate(accessToken);
 
     try {
       // Gravar o alerta, registrar a chave de idempotência e publicar no broker
@@ -44,6 +42,7 @@ class AlertsEndpoint extends Endpoint {
           user: user,
           idempotencyKey: idempotencyKey,
           locationHash: locationHash,
+          locationCell: locationCell,
         );
       });
 
@@ -71,7 +70,7 @@ class AlertsEndpoint extends Endpoint {
     required String accessToken,
     required String alertId,
   }) async {
-    final user = _authenticate(accessToken);
+    final user = authenticate(accessToken);
     final service = AlertRuntime.instance.serviceFor(session);
 
     try {
@@ -89,11 +88,29 @@ class AlertsEndpoint extends Endpoint {
     }
   }
 
-  AuthenticatedUser _authenticate(String accessToken) {
-    final user = AlertRuntime.instance.auth.verifyToken(accessToken);
-    if (user == null) {
-      throw AlertPermissionException(message: 'token inválido ou expirado');
+  /// Status do alerta mais recente do PRÓPRIO paciente (RF05, decisão §5).
+  /// `patientId` nunca é parâmetro — vem do token (INV-05).
+  Future<AlertStatusResult> statusFor(
+    Session session, {
+    required String accessToken,
+  }) async {
+    final user = authenticate(accessToken);
+    final service = AlertRuntime.instance.serviceFor(session);
+
+    try {
+      final snapshot = await service.statusFor(user: user);
+      if (snapshot == null) return AlertStatusResult(found: false);
+
+      return AlertStatusResult(
+        found: true,
+        alertId: snapshot.alertId,
+        riskLevel: snapshot.riskLevel,
+        status: snapshot.status,
+        triggeredAt: snapshot.triggeredAt,
+        acknowledgedAt: snapshot.acknowledgedAt,
+      );
+    } on StateError catch (error) {
+      throw AlertPermissionException(message: error.message);
     }
-    return user;
   }
 }

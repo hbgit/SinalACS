@@ -137,7 +137,7 @@ events:
 | **RF04** | Formulário de Triagem Estruturada (árvore de decisão) | Paciente | S | Médio | Nenhuma (local) |
 | **RF05** | Painel de Status de Solicitação | Paciente | S | Baixo | API HTTP do backend |
 | **RF06** | Lembretes de Saúde (Local Notifications) | Paciente | S | Médio | `flutter_local_notifications` |
-| **RF07** | Login Institucional (Matrícula/Senha) | ACS | S | Médio | Auth própria no backend (hoje só existe login de desenvolvimento) |
+| **RF07** | Login Institucional (Matrícula/Senha) | ACS | S | Médio | Auth própria no backend (`auth.loginInstitutional`); MFA/TOTP e refresh token pendentes |
 | **RF08** | Territorialização (Download de Microárea para cache) | ACS | M | Médio | `sqflite`, API |
 | **RF09** | Dashboard de Priorização Dinâmica (FSM de fila) | ACS | M | Alto | Motor de Triagem |
 | **RF10** | Mapa Interativo (Google Maps) | ACS | M | Médio | `google_maps_flutter` |
@@ -154,7 +154,38 @@ events:
 | **RNF03** | Criptografia AES-256 em repouso | Sistema | - | **Crítico** | SQLCipher |
 | **RNF04** | TLS 1.3 em todas as comunicações | Sistema | - | **Crítico** | Traefik, cert-manager |
 | **RNF05** | Acessibilidade WCAG 2.1 Nível AA | UI | - | Médio | `accessibility_test` |
-| **RNF06** | RBAC (Role-Based Access Control) | Sistema | - | Alto | Auth própria no backend (ainda não implementado) |
+| **RNF06** | RBAC (Role-Based Access Control) | Sistema | - | Alto | Regra única de autorização implementada (`Authorization.require`); papéis institucionais ainda sem caminho de emissão |
+
+### 2.2.1 Decisões de produto pós-validação (2026-09-16)
+
+`spec/validation_report.md` classificou RF02, RF06, RF10 (L-05), RF12, RF14 e
+metade de RF15 como ausentes/parciais, e apontou consentimento granular
+(LGPD-RF02) sem escritor. Antes de implementar qualquer um, foram tomadas as
+decisões de produto/arquitetura registradas em
+`docs/superpowers/specs/2026-09-16-decisoes-produto-pos-validacao.md` —
+documento de decisão, não implementação:
+
+| Requisito | Decisão | Bloqueio externo |
+|---|---|---|
+| RF10 (mapa) | Geocélula arredondada, não posição exata (§1) | Não |
+| RF02 + LGPD-RF02 (onboarding/consentimento) | Token de convite de uso único + consentimento por finalidade (§2) | Não |
+| RF06 (lembretes) | Local ao dispositivo, sem endpoint (§3.1) | Não |
+| RF14 (avisos push) | Contrato FCM definido (§3.2) | **Sim** — sem projeto Firebase provisionado |
+| RF12 (geofencing) | Geofence atrelado a visita ativa, sem rastreamento contínuo (§4) | Parcial — submissão à loja pendente |
+| RF15 (sync central→dispositivo) | Pull incremental por cursor (§5) | Não |
+| RNF03 (criptografia Postgres) | AES-256-GCM em nível de aplicação (§6) | Não |
+
+Cada linha é um plano independente, não uma tarefa transversal. Nenhuma foi
+implementada por esta decisão; a matriz acima e `spec/validation_report.md`
+continuam refletindo o estado de código real.
+
+RF15 teve sua metade ACS (contrato + tela consumidora) implementada em
+`docs/superpowers/plans/2026-09-17-decisoes-produto-pos-validacao-implementacao.md`
+(Task 10) e `docs/superpowers/plans/2026-09-18-rf15-consumo-acs-pull-visitas.md`;
+a metade paciente (RF05, `alerts.statusFor`) e a sincronização periódica em
+segundo plano nos dois apps foram implementadas em
+`docs/superpowers/plans/2026-09-18-sync-periodica-rf05-l06.md`, que também
+fechou o débito L-06/RF08 (números reais na tela "Área" do ACS).
 
 ### 2.3 Modelagem de Fluxos Críticos como Máquinas de Estados (FSM)
 
@@ -381,7 +412,10 @@ erDiagram
         uuid resource_id
         timestamp timestamp
         string ip_hash
-        string result "SUCCESS | FAILURE | DENIED"
+        string result "granted | denied_territory, etc."
+        bigint sequence "posição na cadeia de hash, única"
+        string previous_hash "entryHash da linha anterior"
+        string entry_hash "HMAC-SHA256 do conteúdo da linha"
     }
     
     USER ||--o{ PATIENT : is
@@ -559,10 +593,11 @@ Cada registro possui um campo `version` (inteiro incremental). No momento da sin
 
 **Política ABAC (Atribute-Based Access Control):**
 
-Exemplo ilustrativo da decisão original de stack (estilo Serverpod), sem correspondência com o código real do repositório:
+Exemplo ilustrativo: não existe hoje uma camada de política ABAC genérica como esta. A checagem de papel — e a de que o token carrega uma microárea — passou a ser feita por uma regra única, `Authorization.require` (`backend/sinalacs_server/lib/src/application/auth/authorization.dart`), chamada pelos casos de uso; a comparação entre a microárea do paciente e a do ACS continua inline em cada caso de uso. Os papéis `admin` e `coordinator` ainda não têm caminho de emissão nem endpoint que os exercite, então o RBAC institucional completo segue pendente (ver RNF06 na seção 2.2). A API usada abaixo também é ilustrativa, não é a do ORM do Serverpod.
 
 ```dart
-// Exemplo ilustrativo — não corresponde ao código real (o backend não usa Serverpod/ORM)
+// Exemplo ilustrativo — não há camada ABAC genérica no código real;
+// o papel é decidido por Authorization.require; a comparação paciente-vs-ACS abaixo continua inline nos casos de uso
 Future<bool> canAccessPatient(Session session, String patientId) async {
   final user = await session.auth.getUser();
   switch (user.role) {
@@ -592,7 +627,7 @@ Future<bool> canAccessPatient(Session session, String patientId) async {
 | **Comunicação App ↔ Traefik** | TLS 1.3 | Certificado Let's Encrypt (auto-renovável) | Proteção contra MITM |
 | **Comunicação Traefik ↔ Backend** | TLS 1.3 | Certificado interno (mTLS) | Segurança na rede interna |
 | **PostgreSQL (SSOT)** | pgcrypto (AES-256) | Chave gerenciada por Vault/HashiCorp | Proteção contra acesso ao banco |
-| **Logs de Auditoria** | Assinatura Hash Chain | - | Integridade e não-repúdio |
+| **Logs de Auditoria** | Assinatura Hash Chain (HMAC-SHA256) | `AUDIT_CHAIN_SECRET`, próprio, fora do Postgres | Integridade e não-repúdio |
 
 #### 4.2.4 Conformidade LGPD (Resumo)
 
@@ -667,6 +702,8 @@ Future<bool> canAccessPatient(Session session, String patientId) async {
 **docker-compose.dev.yml (recorte):**
 
 > Ilustrativo, não é o `docker-compose.yml` real do repositório — ver [`docker-compose.yml`](../docker-compose.yml), cujo serviço `serverpod` roda de fato o servidor Serverpod, aplica as migrações no boot e é seguido por um serviço `database-seed`.
+>
+> A versão do Traefik citada abaixo (`v2.10`) também é ilustrativa. A versão **medida como funcional** nesta stack é a **`v2.11`**: a `v2.10` (2.10.7) fala a API Docker 1.24, abaixo do mínimo 1.40 do Docker deste host, então não enxerga label nenhuma e o `:443` responde 404 do Traefik; a `v3` (3.5) falha igual (medido). O `docker-compose.yml` da raiz é a fonte da verdade operacional — ver [`stack.md`](stack.md) §4.
 
 ```yaml
 version: '3.8'
@@ -1140,6 +1177,8 @@ Impacto ↑
 ### A1. Docker-Compose de Produção (recorte)
 
 > Roadmap — nenhum ambiente de produção com esta topologia (Pulumi/VPS/redes privadas) existe hoje. O serviço abaixo chamado `serverpod` corresponde agora ao que de fato roda; a imagem é construída a partir de `backend/sinalacs_server/Dockerfile`, multi-stage com `dart compile exe`. Para um caminho de deploy documentado (piloto free-tier), ver [`backend/DEPLOY.md`](../backend/DEPLOY.md).
+>
+> A versão do Traefik abaixo (`v2.10`) é ilustrativa: a medida como funcional nesta stack é a **`v2.11`** — ver a nota do recorte de desenvolvimento acima.
 
 ```yaml
 version: '3.8'

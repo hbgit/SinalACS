@@ -1,0 +1,11 @@
+### Um registro de consentimento do próprio titular, para o painel "Meus
+### Dados" (LGPD, spec/lgpd_design.md linhas 417/581-595). Espelha `ConsentLog`
+### sem os campos técnicos de auditoria (`ipHash`, `userAgent`, `signature`)
+### — esses provam integridade da trilha, não servem ao titular lendo o
+### próprio histórico.
+class: PatientConsentRecord
+fields:
+  purpose: String
+  action: String
+  version: String
+  timestamp: DateTime

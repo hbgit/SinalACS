@@ -7,7 +7,10 @@ Este documento consolida o que foi implementado no repositório em relação às
 > reescritas: elas descrevem o servidor `dart:io` roteado à mão, e seus links
 > para `backend/bin/`, `backend/lib/` e `backend/test/` apontam para código que
 > **não existe mais na árvore atual** — só no histórico do git. O mesmo vale para
-> a seção de preparação de deploy, escrita para aquele servidor.
+> a seção de preparação de deploy, escrita para aquele servidor. Pela mesma
+> razão, contagens pontuais citadas nessas entradas (jobs de CI, número de
+> testes) refletem o momento em que cada trecho foi escrito, não o estado atual
+> do [.github/workflows/ci.yml](.github/workflows/ci.yml) ou da suíte de testes.
 >
 > O estado atual está descrito na seção
 > ["Migração para Serverpod"](#migração-para-serverpod) ao final deste documento,
@@ -40,7 +43,7 @@ A Fase 1 está concluída no código e validada por testes locais. A Fase 2 avan
 | M1.2 | CI Pipeline básica | Implementado | [.github/workflows/ci.yml](.github/workflows/ci.yml) com 4 jobs: backend, build da imagem Docker do backend, e os dois apps Flutter |
 | M1.3 | Motor de Triagem (algoritmo) | Implementado | [backend/lib/src/application/triage/triage_engine.dart](backend/lib/src/application/triage/triage_engine.dart) e [backend/test/triage_engine_test.dart](backend/test/triage_engine_test.dart) |
 | M1.4 | FSM de Sincronização | Implementado | [backend/lib/src/application/sync/sync_fsm.dart](backend/lib/src/application/sync/sync_fsm.dart) e [backend/test/sync_fsm_test.dart](backend/test/sync_fsm_test.dart) |
-| M1.5 | SQLCipher (local) | Implementado | [apps/patient/lib/core/database/encrypted_database.dart](apps/patient/lib/core/database/encrypted_database.dart) e [apps/acs/lib/core/database/encrypted_database.dart](apps/acs/lib/core/database/encrypted_database.dart) |
+| M1.5 | SQLCipher (local) | Implementado **no ACS** | [apps/acs/lib/core/database/encrypted_database.dart](apps/acs/lib/core/database/encrypted_database.dart) e [apps/acs/lib/core/database/sqlcipher_visit_store.dart](apps/acs/lib/core/database/sqlcipher_visit_store.dart). **O app do paciente não usa SQLCipher, de propósito**: os dois stores locais dele são [lembretes](apps/patient/lib/core/reminders/sqflite_reminder_store.dart) e [preferências de consentimento](apps/patient/lib/core/consent/sqflite_consent_preferences.dart), sobre `sqflite` puro — horário e texto livre curto não são dado de saúde, e o app do paciente não persiste nada clínico. Esta linha continuava linkando um `apps/patient/lib/core/database/encrypted_database.dart` que **foi removido** — era código morto, sem chamador, que afirmava uma garantia que não entregava (ver a "Correção de registro" da seção M1.5 abaixo, que já dizia isso desde então; a tabela é que ficou para trás). |
 
 ## O que já está pronto - Fase 1
 
@@ -92,12 +95,28 @@ Os cenários de transição e conflito foram validados em [backend/test/sync_fsm
 
 ### M1.5 - Criptografia local com SQLCipher
 
-A camada de banco local criptografado foi adicionada em:
+> **Correção de registro.** Esta entrada afirmava que o milestone estava
+> concluído porque a classe `EncryptedLocalDatabase` existia. Ela existia, mas
+> **nenhum código de produção a chamava**: o único chamador em todo o
+> repositório era o teste unitário, com uma passphrase literal. Pior, o
+> "fallback FFI para ambientes de teste/VM" abria o banco **sem criptografia
+> nenhuma**, e era justamente o caminho que o CI (Linux) exercitava — o teste
+> chamado "deve abrir banco criptografado" não provava nada do que o nome
+> prometia. O repositório declarava uma propriedade de segurança que não tinha.
 
-- [apps/patient/lib/core/database/encrypted_database.dart](apps/patient/lib/core/database/encrypted_database.dart)
-- [apps/acs/lib/core/database/encrypted_database.dart](apps/acs/lib/core/database/encrypted_database.dart)
+O milestone passou a ser real:
 
-A implementação usa SQLCipher para plataformas móveis e fallback FFI para ambientes de teste/VM, preservando a exigência de proteção de dados sensíveis em repouso.
+- [apps/acs/lib/core/security/database_key_store.dart](apps/acs/lib/core/security/database_key_store.dart) — a chave de 256 bits vive no Android Keystore / iOS Keychain, nunca no código.
+- [apps/acs/lib/core/database/encrypted_database.dart](apps/acs/lib/core/database/encrypted_database.dart) — fora de Android/iOS a abertura **lança**, a menos que se passe `allowUnencryptedForTesting`, flag de nome deliberadamente constrangedor que só os testes de VM usam.
+- [apps/acs/lib/core/database/sqlcipher_visit_store.dart](apps/acs/lib/core/database/sqlcipher_visit_store.dart) — o consumidor real: a fila de visitas offline, que antes vivia só em memória e perdia o trabalho de campo ao fechar o app.
+- [apps/acs/integration_test/encrypted_storage_test.dart](apps/acs/integration_test/encrypted_storage_test.dart) — a prova, **em dispositivo**: lê o arquivo cru e afirma que ele não começa com `SQLite format 3` nem contém o conteúdo da visita. Verificado em emulador, inclusive por falsificação (removendo o SQLCipher, o teste falha).
+
+A cópia do app do paciente foi removida: era código morto, sem chamador, que
+afirmava uma garantia que não entregava.
+
+Permanece fora: chave derivada de PIN/biometria (PRD 4.2.3) — não há fluxo de PIN
+nos apps, e a interface de custódia aceita esse segundo fator depois sem migrar
+dados.
 
 ## Milestones Técnicos - Fase 2
 
@@ -108,7 +127,7 @@ A implementação usa SQLCipher para plataformas móveis e fallback FFI para amb
 | M2.3 | MQTT com TLS | Parcialmente implementado | [apps/acs/lib/core/services/mqtt_secure_client.dart](apps/acs/lib/core/services/mqtt_secure_client.dart) adiciona configuração segura e payload de alerta com TLS/WSS e teste em [apps/acs/test/mqtt_secure_client_test.dart](apps/acs/test/mqtt_secure_client_test.dart) |
 | M2.4 | Sincronização Offline-First | Implementado | [apps/acs/lib/core/services/offline_visit_queue.dart](apps/acs/lib/core/services/offline_visit_queue.dart) com lote, retry e conflito, validado em [apps/acs/test/login_flow_test.dart](apps/acs/test/login_flow_test.dart) |
 | M2.5 | Testes de Caos (Toxiproxy) | Implementado | [apps/acs/lib/core/services/network_chaos_simulator.dart](apps/acs/lib/core/services/network_chaos_simulator.dart) e [apps/acs/test/network_chaos_test.dart](apps/acs/test/network_chaos_test.dart) simulam latência, jitter e retry em cenários de falha |
-| M2.6 | Testes de Usabilidade | Implementado | [apps/acs/test/login_flow_test.dart](apps/acs/test/login_flow_test.dart) e [apps/patient/test/patient_app_mvp_test.dart](apps/patient/test/patient_app_mvp_test.dart) validam labels semânticas e área mínima de toque para os principais botões |
+| M2.6 | Testes de Usabilidade e Acessibilidade | Implementado | [spec/ux_accessibility_assessment.md](spec/ux_accessibility_assessment.md) — matriz de contraste WCAG 1.4.3 determinística (`contrast_tokens_test.dart`), `meetsGuideline` de contraste/alvo de toque e `liveRegion` (SC 4.1.3) em [apps/acs/test/login_flow_test.dart](apps/acs/test/login_flow_test.dart) e [apps/patient/test/patient_app_mvp_test.dart](apps/patient/test/patient_app_mvp_test.dart), validado ponta a ponta no emulador contra o backend e o broker reais |
 
 ## O que já está pronto - Fase 2
 
@@ -161,6 +180,258 @@ A fila local de visitas foi evoluída em [apps/acs/lib/core/services/offline_vis
 
 A validação foi incluída em [apps/acs/test/login_flow_test.dart](apps/acs/test/login_flow_test.dart), cobrindo o fluxo de sucesso e o caso de conflito com reprocessamento.
 
+#### A fila passou a sair do aparelho
+
+O `BackendVisitSynchronizer` existia e era testado, mas **não era injetado**: o app
+montava a fila sem ele, `sync()` caía no ramo sem remetente e devolvia erro. Na
+prática as visitas nunca subiam, e a retenção — `SqlCipherVisitStore.save()` apaga
+do disco tudo que saiu da lista de pendentes — nunca disparava em produção.
+
+Nenhum teste podia ver isso: a UI só é testável com a fila injetada, então a
+montagem real nunca era exercitada. A fiação foi extraída para
+[apps/acs/lib/core/services/visit_queue_factory.dart](apps/acs/lib/core/services/visit_queue_factory.dart)
+e ganhou teste próprio.
+
+Para ligar o sincronizador, o registro passou a guardar `patientId` em vez de
+`patientName`. O rótulo antigo era `'Paciente ' + 8 dos 32 dígitos do UUID`:
+irreversível, então o servidor recusaria a visita por identificador inválido — e
+era texto legível sobre a pessoa num disco que não precisava dele. Agora o
+identificador vai ao banco e o rótulo é montado na tela (minimização,
+LGPD-RF01). Consequência de produto: a aba "Visita" sem alerta selecionado não
+grava mais, porque sem alerta não há paciente.
+
+O schema local subiu para v2 (`patient_id`), com `onUpgrade` que **recria** a
+tabela — nem `local_queue` nem a `offline_visits` v1 guardavam o UUID. Isso perde
+visitas pendentes gravadas antes da atualização, que de qualquer forma o servidor
+recusaria. **A partir do primeiro release real, essa migração precisa preservar
+dados.**
+
+A tela ganhou contador de pendentes/conflitos e o botão "Sincronizar agora" — o
+gatilho é manual, para o ACS decidir quando gastar dados em campo.
+
+Dois defeitos vizinhos apareceram no caminho e foram corrigidos: `sync()`
+devolvia `synced` quando o servidor recusava uma visita (o status `error` caía no
+ramo `default`), o que a prendia na fila em silêncio; e `visits.sync` reportava
+"este alerta não pertence à sua microárea" para erro de sessão.
+
+#### O app passou a dizer o que está errado
+
+Dois defeitos vizinhos, com a mesma forma: o app sabia e não contava.
+
+O painel tinha **um slot de banner para dois estados** (`_feedError ?? _storageError`).
+Em campo o broker e o armazenamento caem juntos, e o `??` sempre mostrava o do
+broker: o ACS via "sem conexão com a central" e nunca descobria que as visitas
+do dia não estavam sendo salvas. O subtítulo era fixo, então quando o banner
+exibido era o de disco ele ainda afirmava algo sobre alertas. E o aviso de
+persistência era calculado uma vez, no `initState` — falhas posteriores de
+gravação ficavam invisíveis. Agora são dois banners independentes, cada um com
+seu texto, e o de persistência é lido do estado corrente da fila a cada build.
+A tela de visita ganhou o mesmo aviso inline: é onde a pessoa acabou de gravar.
+
+Os avisos de infraestrutura passaram a usar o azul de destaque. `docs/telas-acs.md`
+reserva a cor para a gravidade clínica, e um card vermelho de falha técnica
+competia com o alerta vermelho de um paciente na mesma lista.
+
+O segundo defeito: **`SINALACS_MQTT_PASSWORD` tinha um default que nunca
+funcionou**. O broker cria `acs-area-12` com `MQTT_ACS_PASSWORD`, segredo
+aleatório por máquina, então nenhum valor embutido no código poderia acertá-lo —
+e toda a documentação mandava rodar `flutter run` sem `--dart-define` nenhum. O
+resultado era um app que nunca recebia alerta e dizia apenas "sem conexão".
+
+- O default saiu. Vazio virou estado detectável, e a tela diz que o aplicativo
+  foi compilado sem a senha.
+- `scripts/dev/run_acs.sh` lê o `.env`, roda o `sync_dev_ca.sh` (a CA é asset
+  gitignored que o build exige) e preenche os quatro dart-defines.
+- As falhas do feed viraram `AlertFeedFailure` classificada. Senha ausente, CA
+  ausente, credencial recusada e broker inalcançável eram a mesma frase; o
+  `mqtt_client` já trazia o motivo no CONNACK e o código o descartava, junto com
+  o próprio erro, que agora vai para `dart:developer`.
+
+Verificado no emulador, os quatro caminhos: compilado sem senha, compilado pelo
+script, senha errada e broker parado — cada um com sua mensagem.
+
+#### O app desistia do broker na primeira tentativa
+
+`_connectFeed()` rodava **uma vez**, no `initState`. Se falhasse, o app nunca
+mais tentava — o banner ficava na tela até alguém fechar e reabrir o
+aplicativo. O `autoReconnect` do `mqtt_client` não cobria isso: ele só age
+**depois** de uma conexão bem-sucedida, e as duas rotas de erro do cliente
+chamam `disconnect()`, que o desliga de propósito para o cliente não ficar
+órfão tentando para sempre.
+
+Em campo isso significava um ACS que abre o app na zona rural sem sinal ficar
+sem alerta pelo resto do turno, mesmo com o sinal voltando cinco minutos
+depois — e como a sessão MQTT é persistente, o broker estava guardando esses
+alertas com QoS 1 o tempo todo, só esperando uma conexão que nunca vinha.
+
+`AcsHomeShell` passou a retentar sozinho quando a falha é **transitória**
+(broker inalcançável, ou `brokerUnavailable` do CONNACK — nunca senha ausente,
+CA ausente, ou credencial/identificador recusado, que não mudam sozinhos):
+backoff de 2s a 60s em [reconnect_schedule.dart](apps/acs/lib/core/services/reconnect_schedule.dart),
+os mesmos valores do `MqttAlertDispatcher` do backend. O banner ganhou "Tentar
+agora" para quem já vê o sinal voltar, e voltar do segundo plano dispara uma
+tentativa imediata — é o gatilho que mais importa, porque o sinal costuma
+voltar com a tela apagada.
+
+Defeito vizinho, a outra metade do mesmo problema: o chip do cabeçalho também
+era escrito uma única vez. Uma queda **depois** de uma conexão bem-sucedida
+nunca chegava a ele, que continuava dizendo "em linha" para sempre enquanto o
+`autoReconnect` trabalhava por baixo em silêncio. `AlertFeed.onConnectionChanged`
+subiu para a interface como campo mutável para o shell poder assinar mudanças
+de estado a qualquer momento, não só no retorno do `start()`.
+
+#### `flutter build apk` puro ainda entregava um APK que nunca conectava
+
+Os dois defeitos acima foram fechados, mas sobrava uma lacuna: mesmo sem
+`SINALACS_MQTT_PASSWORD`, `flutter build apk` compilava normalmente. O defeito
+só se denunciava em tempo de execução, pelo banner "compilado sem a senha" —
+tarde demais para quem já distribuiu o APK.
+
+[apps/acs/android/app/build.gradle.kts](apps/acs/android/app/build.gradle.kts)
+ganhou uma guarda em `doFirst` das tarefas `compileFlutterBuild*`: decodifica a
+propriedade `dart-defines` (o Flutter Gradle Plugin já lê essa mesma
+propriedade) e falha, com o comando certo, se `SINALACS_MQTT_PASSWORD` não
+estiver lá. Precisou ser `doFirst` de tarefa, e não bloco de configuração —
+senão dispararia em todo `gradlew`, inclusive o sync do Android Studio, que não
+passa define nenhum. Escotilha explícita para quem quer de propósito um APK
+sem senha (por exemplo, para reproduzir o banner):
+`-Psinalacs.allowMissingMqttPassword=true`, no molde constrangedor-de-digitar
+de `allowUnencryptedForTesting`.
+
+Aproveitado para tirar a senha do `argv`: `run_acs.sh` passou de `--dart-define`
+para `--dart-define-from-file`, com um arquivo temporário (`mktemp`, 0600) que
+um `trap` apaga ao sair. A troca exigiu remover o `exec` das duas chamadas ao
+`flutter` — `exec` substitui o processo do shell, e o `trap` nunca rodaria,
+deixando o arquivo com a senha esquecido em `/tmp` depois de cada execução.
+`scripts/qa/e2e.sh` continua passando a senha por `argv`: aquele caminho roda
+`flutter test`/`dart run`, não `flutter build`, e não passa pela guarda.
+
+#### O registro de visitas não tinha caminho algum na operação real
+
+`alerts.createRedAlert` é o único produtor de alertas, e crava sempre
+`riskLevel: 'red'` — emergência, com SAMU. O cartão do painel tinha **um**
+botão, mutuamente exclusivo entre "Acionar SAMU / Atender" e "Iniciar rota de
+visita" conforme o risco; como só chega vermelho, o segundo era código morto em
+produção — só alcançável injetando um alerta amarelo à mão no broker. Com
+`patientId` obrigatório desde a fiação da sincronização, e sem nenhum alerta
+não-vermelho para habilitar o formulário, a aba "Visita" ficou inalcançável: o
+PRD mede engajamento do ACS em **≥ 8 visitas/dia**, e visita de rotina — o
+padrão de uso real — não tinha de onde partir.
+
+Dois caminhos, não um. O reativo já tinha meio-caminho andado: a tela de
+escalonamento ganhara, numa mudança anterior não documentada aqui, um segundo
+botão "Iniciar rota de visita" (`Key('escalation_visit')`) com o aviso "a
+visita é acompanhamento do caso e não substitui o acionamento do SAMU" — o ACS
+aciona o SAMU primeiro, visita depois. Verificado que já funciona ponta a
+ponta; nada mexido ali.
+
+O que faltava era o de rotina: `patients.listMicroArea` (backend, novo) lista
+os pacientes da microárea do ACS — a microárea vem do token, nunca de um
+parâmetro, e a consulta é um JOIN em duas etapas
+(`OrmPatientDirectoryStore`, `backend/sinalacs_server/lib/src/infrastructure/database/`)
+porque `Patient` não guarda microárea: ela vive em `users`, e `Patient.id` É o
+UUID do usuário. O payload é só nome e condições crônicas — o que
+`spec/lgpd_design.md` autoriza para visita de rotina, nada além.
+`VisitRegistrationScreen` ganhou o seletor (`Key('patient_picker')`): sem
+alerta selecionado, busca por nome e uma lista; escolher libera o formulário
+exatamente como um alerta faria. O nome vive só em memória, para o rótulo —
+`OfflineVisitRecord` continua carregando apenas o UUID, mesma disciplina já
+estabelecida para o caminho por alerta.
+
+Dois furos adjacentes fechados no caminho, achados ao implementar o diretório:
+
+- **Territorialização do sync, furo do INV-01.** `VisitSyncService` validava
+  que o ACS é territorializado, mas nunca que o PACIENTE pertence ao mesmo
+  território — qualquer UUID de paciente existente era aceito, de qualquer
+  microárea. `VisitStore.microAreaOfPatient` fecha isso; a recusa é por visita
+  (na época, `SyncStatus.error` — virou `SyncStatus.rejected`, terminal, numa
+  mudança posterior, ver abaixo), não descarta o resto do lote.
+- **`audit_logs` era tabela morta.** Existia desde a migração-base,
+  documentada como "trilha de auditoria de acesso a dados sensíveis
+  append-only", e nenhuma linha de código escrevia nela — este PR introduzia a
+  primeira leitura em massa de PHI do sistema. `AuditTrail`
+  (`backend/sinalacs_server/lib/src/application/audit/`) liga os dois pontos
+  que este PR cria: a leitura da lista de pacientes (evento, sem enumerar quem
+  foi lido — listar recriaria o prontuário dentro do próprio log) e a recusa
+  por território (com o UUID do paciente envolvido). `ipHash` nunca é IP em
+  claro — SHA-256 sobre `request.remoteInfo`, que o próprio Serverpod já
+  resolve corretamente atrás do Traefik (prefere `Forwarded`/`X-Forwarded-For`
+  antes do endereço da conexão). A escrita é best-effort: uma trilha fora do ar
+  não pode impedir o ACS de trabalhar, só faz o processo logar a falha. A
+  assinatura em hash chain que `spec/lgpd_design.md` (LGPD-RT03) descreve
+  continua não implementada, e os demais endpoints sensíveis (alertas, ack,
+  triagem) ainda não escrevem na trilha.
+
+Seed de desenvolvimento ganhou cinco pacientes sintéticos (nomes obviamente
+fictícios) na microárea do ACS, mais um sexto fora dela — para o seletor ser
+demonstrável e para provar territorialização sem precisar de outra stack de
+teste.
+
+Verificado no emulador, contra a stack local rodando de verdade: o seletor
+lista os pacientes reais do Postgres; escolher um e sincronizar grava
+`syncStatus: synced` no servidor; o arquivo do banco cifrado, puxado do
+aparelho depois de gravar e sincronizar pelo seletor, não contém o nome em
+nenhum ponto (nem o logcat); uma visita para paciente de outra microárea volta
+como `error` (na época — ver abaixo) e grava a linha `denied_territory` em
+`audit_logs`, sem tocar `visits`; o caminho por alerta (vermelho → SAMU →
+escalonamento → visita) continua idêntico ao de antes desta mudança.
+
+#### A cadeia de hash da trilha de auditoria, e a recusa que ficava presa na fila para sempre
+
+Duas dívidas registradas explicitamente no PR anterior, fechadas nesta mudança.
+
+**A cadeia de hash de `audit_logs` (LGPD-RT03).** A trilha ganhara escritores
+no PR anterior, mas só fazia `insertRow` — qualquer um com acesso de escrita ao
+Postgres editava ou apagava uma linha sem deixar rastro, o que não serve ao
+não-repúdio que a spec promete. `audit_logs` ganhou três colunas: `sequence`
+(posição, contígua, índice único), `previousHash` (o `entryHash` da linha
+anterior, ou `AuditChain.genesisHash` — 64 zeros — na primeira) e `entryHash`
+(HMAC-SHA256 do conteúdo da linha). A chave é um segredo PRÓPRIO
+(`AUDIT_CHAIN_SECRET`), nunca derivado do `JWT_SECRET`: os dois precisam poder
+rotacionar de forma independente, e SHA-256 sem chave não detectaria uma
+reescrita completa por quem tem acesso de escrita ao banco — exatamente o
+adversário que a §458 de `spec/lgpd_design.md` descreve.
+`OrmAuditTrail.record` agora lê a última linha e insere a próxima dentro da
+MESMA transação, sob `pg_advisory_xact_lock`, para duas gravações concorrentes
+não lerem a mesma linha anterior e bifurcarem a cadeia. `AuditChainVerifier` (e
+o `bin/audit_chain_check.dart` que o expõe como script) reconstrói a cadeia
+inteira e detecta edição, remoção ou reordenação de qualquer linha — verificado
+ao vivo: adulterar uma linha por `UPDATE` direto no Postgres faz o verificador
+falhar exatamente na `sequence` afetada. Fora de escopo, registrado na spec: o
+append-only em si não é imposto pelo banco (sem trigger/`REVOKE`) — a cadeia
+*detecta* a violação, não a impede.
+
+**Recusa definitiva presa na fila para sempre.** `VisitSyncService._syncOne`
+colapsava seis motivos de falha distintos no mesmo `SyncStatus.error`, e
+`OfflineVisitQueue._applyOutcomes` reenfileirava `error` incondicionalmente.
+Para a recusa territorial isso era retentativa eterna garantida: a checagem de
+território roda antes do lookup por `localId`, então o reenvio falha de forma
+idêntica para sempre, e nada no aparelho explicava por quê. `SyncStatus` ganhou
+`rejected`, terminal: localId vazio, UUID malformado, território incompatível e
+visita de outro agente agora retornam `rejected` (só "paciente não encontrado"
+continua `error` — pode ser cadastrado depois, é legitimamente retentável).
+`SyncFsm` ganhou o estado espelhado, sem transição de saída. No aparelho,
+`OfflineVisitRecord` ganhou `rejectionReason`; a fila ganhou uma quarta lista
+(`_rejected`, ao lado de pendente/sincronizada/conflito) que sai da retentativa
+mas continua no disco — `VisitStore.save` passou a persistir pendentes MAIS
+recusadas, não só pendentes, senão a recusada sumiria do aparelho no instante
+da recusa, antes de o ACS decidir. A tela ganhou o contador
+(`Key('rejected_visits_count')`) e um botão de descarte com confirmação
+(`Key('discard_rejected')`) — nada remove a recusada do aparelho sem essa
+confirmação explícita. `encrypted_database.dart` foi de v3 a v4 com
+`ALTER TABLE ... ADD COLUMN rejection_reason` — a primeira migração aditiva
+desde que o schema existe; as anteriores (v1 → v2) recriavam a tabela porque o
+app ainda não tinha tido release.
+
+Verificação: 83 testes no backend (69 unit + 14 integração, incluindo a
+gravação real de duas linhas encadeadas contra Postgres e a checagem do
+`pg_advisory_xact_lock` — a cadeia de hash tem cobertura própria em
+`test/unit/audit_chain_test.dart`, incluindo detecção de edição, remoção,
+renumeração e segredo errado), 89 testes herméticos no app ACS (6 novos:
+recusa saindo da fila sem reenviar, precedência sobre conflito, `discardRejected`,
+persistência da recusada em disco, migração v3 → v4 preservando linhas, e o
+fluxo completo de descarte com confirmação na tela).
+
 ### M2.5 - Testes de Caos
 
 Foi adicionada a simulação de degradação de rede em [apps/acs/lib/core/services/network_chaos_simulator.dart](apps/acs/lib/core/services/network_chaos_simulator.dart):
@@ -175,13 +446,33 @@ Os cenários de falha foram validados em [apps/acs/test/network_chaos_test.dart]
 
 ### M2.6 - Testes de Usabilidade e Acessibilidade
 
-Foi implementada a validação de UX básica em [apps/acs/test/login_flow_test.dart](apps/acs/test/login_flow_test.dart) e [apps/patient/test/patient_app_mvp_test.dart](apps/patient/test/patient_app_mvp_test.dart):
+[spec/ux_accessibility_assessment.md](spec/ux_accessibility_assessment.md) documenta a auditoria
+completa contra a baseline WCAG 2.1 AA do PRD (§4.3). A primeira versão do relatório media
+contraste manualmente contra o fundo do `Scaffold`, mas texto de risco/status é renderizado
+dentro de `Card` — produziu um falso positivo e deixou passar duas falhas piores (vermelho e azul
+de preenchimento usados como cor de texto, abaixo de 4.5:1 sobre o card). A revisão trocou a
+medição manual por uma matriz determinística
+(`apps/{acs,patient}/test/contrast_tokens_test.dart`), corrigiu os tokens separando cor de
+PREENCHIMENTO de cor de TEXTO (`redOnSurface`/`accentOnSurface` no ACS,
+`dangerOnSurface`/`accentOnSurface` no paciente, em
+[apps/acs/lib/app/acs_theme.dart](apps/acs/lib/app/acs_theme.dart) e
+[apps/patient/lib/app/patient_theme.dart](apps/patient/lib/app/patient_theme.dart)), e adicionou:
 
-- rótulos semânticos para leitores de tela
-- mínimo de 48x48 dp nos principais botões de ação
-- manutenção do fluxo principal logo após a validação de acessibilidade
+- `meetsGuideline(textContrastGuideline/androidTapTargetGuideline/labeledTapTargetGuideline)` em
+  [apps/acs/test/login_flow_test.dart](apps/acs/test/login_flow_test.dart) e
+  [apps/patient/test/patient_app_mvp_test.dart](apps/patient/test/patient_app_mvp_test.dart)
+- alvo de toque de 60x60 dp no botão "Ligar para o SAMU (192)", que não tinha `minimumSize`
+  (default de 40dp de altura visual — a medição anterior de "48x52 dp" estava incorreta)
+- `Semantics(liveRegion: true)` em sete pontos de status dinâmico (WCAG 4.1.3, critério ausente
+  da avaliação original), incluindo a confirmação do alerta de emergência do paciente
+- o cartão de alerta da fila do ACS passou a ser lido como uma frase única pelo leitor de tela,
+  em vez de nós soltos
 
-O app também foi ajustado para expor essas metas corretamente em [apps/acs/lib/app/app.dart](apps/acs/lib/app/app.dart) e [apps/patient/lib/app/app.dart](apps/patient/lib/app/app.dart).
+Validado ponta a ponta no emulador Android (`emulator-5554`): o app Paciente disparou um alerta de
+emergência real contra o backend em Docker Compose, e o app ACS recebeu pelo broker MQTT/TLS real,
+exibindo o novo contraste, o botão do SAMU no novo tamanho e o risco traduzido corretamente. Os 14
+testes de integração em dispositivo de `apps/acs/integration_test/` (inclusive o que lê o arquivo
+do banco criptografado) passam sobre o código revisado.
 
 ## Preparação de deploy — piloto em serviços free-tier (backend)
 
@@ -200,7 +491,7 @@ completo em [backend/DEPLOY.md](backend/DEPLOY.md).
 | Resposta controlada quando o MQTT está fora do ar | `POST /v1/alerts/red` retorna 503 em vez de derrubar o processo | Implementado | [backend/bin/server.dart](backend/bin/server.dart) |
 | SSL na conexão PostgreSQL | `useSSL: true` por padrão, com opção `?sslmode=disable` para desenvolvimento local | Implementado | [backend/lib/src/infrastructure/database/postgres_alert_store.dart](backend/lib/src/infrastructure/database/postgres_alert_store.dart) |
 | `/health` com diagnóstico | Corpo da resposta passa a incluir `mqtt_connected` e `db_connected` | Implementado | [backend/bin/server.dart](backend/bin/server.dart) |
-| Dockerfile multi-stage (AOT) | Build com `dart compile exe`, imagem runtime mínima, usuário non-root e `HEALTHCHECK` | Implementado | [backend/Dockerfile](backend/Dockerfile) |
+| Dockerfile multi-stage (AOT) | Build com `dart compile exe`, imagem runtime mínima, usuário non-root e `HEALTHCHECK` | Implementado | [backend/sinalacs_server/Dockerfile](backend/sinalacs_server/Dockerfile) |
 | Remoção de dependência morta | `serverpod` removido do `pubspec.yaml` (não havia nenhum import real no código) | Implementado | [backend/pubspec.yaml](backend/pubspec.yaml) |
 | `JWT_SECRET` obrigatório em produção | Falha rápida no boot quando `APP_ENV=production` e o segredo não foi definido, em vez do fallback inseguro silencioso | Implementado | [backend/lib/src/config/app_config.dart](backend/lib/src/config/app_config.dart) |
 | Gate do dev-login | `/v1/auth/development/login` responde 404 a menos que `ENABLE_DEV_LOGIN=true` seja definido explicitamente | Implementado | [backend/bin/server.dart](backend/bin/server.dart) |
@@ -213,7 +504,7 @@ completo em [backend/DEPLOY.md](backend/DEPLOY.md).
 Como o ambiente de desenvolvimento não tinha o Dart SDK instalado, a
 verificação foi feita via Docker, reproduzindo o setup da CI:
 
-- Build da imagem multi-stage concluído com sucesso (`docker build -f backend/Dockerfile backend`), incluindo a compilação AOT via `dart compile exe`.
+- Build da imagem multi-stage concluído com sucesso (`docker build -f backend/sinalacs_server/Dockerfile backend/sinalacs_server`), incluindo a compilação AOT via `dart compile exe`.
 - `dart analyze` sem nenhum problema encontrado.
 - Suíte completa de testes (`dart test`) passando — 18/18, incluindo o teste de integração HTTP real (`red_alert_http_integration_test.dart`) contra PostgreSQL e Mosquitto reais em containers, cobrindo login, criação de alerta vermelho e ACK via HTTP.
 - Container rodando com `PORT` dinâmico e broker MQTT inexistente: `/health` respondeu 200 com `mqtt_connected: false` e `db_connected: true`, sem travar o boot; `POST /v1/alerts/red` retornou 503 corretamente.
@@ -252,7 +543,7 @@ deve ser usado com dados reais de pacientes.
 - [x] M1.2 - CI básica
 - [x] M1.3 - Motor de triagem
 - [x] M1.4 - FSM de sincronização
-- [x] M1.5 - SQLCipher local
+- [x] M1.5 - SQLCipher local (ver a correção de registro na seção M1.5)
 
 ### Fase 2
 
@@ -291,10 +582,10 @@ fecha esse buraco.
 | Item | Situação |
 |---|---|
 | Servidor | Serverpod 3.4.13, workspace Dart em `backend/` com `sinalacs_server` e `sinalacs_client` |
-| Schema | 11 tabelas como modelos `.spy.yaml`, mais `alert_idempotency_keys`; migrações geradas e aplicadas pelo servidor no boot |
-| Endpoints | RPC: `alerts.createRedAlert`, `alerts.acknowledge`, `auth.developmentLogin`, `health.check`, `triage.evaluate` |
-| Testes | 25 verdes — 16 unitários herméticos e 9 de integração sobre o harness `withServerpod` |
-| Cliente gerado | Publicado em `backend/sinalacs_client`, **ainda não consumido pelos apps Flutter** |
+| Schema | 13 tabelas como modelos `.spy.yaml` (as 11 originais mais `alert_idempotency_keys` e `alert_outbox` — ver "cadeia de hash" e "outbox pattern" abaixo); migrações geradas e aplicadas pelo servidor no boot |
+| Endpoints | RPC: `alerts.createRedAlert`, `alerts.acknowledge`, `auth.developmentLogin`, `health.check`, `triage.evaluate`, `patients.listMicroArea`, `visits.sync` |
+| Testes | 16 arquivos (12 unitários herméticos, 4 de integração) sobre o harness `withServerpod`; contagem estática de `test(` no código-fonte, não uma execução nesta revisão — rodar `cd backend/sinalacs_server && dart test` contra a stack local para o número de casos passando |
+| Cliente gerado | Publicado em `backend/sinalacs_client`; **paciente e ACS já o consomem** por dependência local (ver M2.4 acima); `apps/admin` ainda não |
 
 ### Decisões de schema que valem registro
 
@@ -353,13 +644,417 @@ O backend `dart:io` foi removido da árvore; o histórico do git o preserva.
 
 - **Autenticação institucional.** O acesso segue sendo o token HMAC de
   desenvolvimento, gated por `ENABLE_DEV_LOGIN`. Gov.br e matrícula da
-  Secretaria continuam não implementados.
-- **Apps Flutter não consomem o cliente gerado.** `sinalacs_client` existe e é
-  publicado, mas `apps/acs` e `apps/patient` seguem com dados locais — e por isso
-  o `RiskLevel` ainda não atravessa a fronteira na prática.
-- **Risco residual de entrega.** MQTT não participa da transação: se a publicação
-  tem êxito e o commit falha, o alerta chega ao ACS sem linha no banco. Raro e
-  erra para o lado seguro quanto à INV-03; fechar por completo exigiria outbox
-  pattern.
+  Secretaria continuam não implementados. **Atualização (2026-09-18):** no app
+  do ACS isso deixou de valer — o login é institucional (matrícula + senha,
+  RF07), verificado com Argon2id contra `user_credentials`; o token de
+  desenvolvimento continua existindo para as ferramentas e para o app do
+  paciente. O que segue não implementado é a integração com Gov.br e com um
+  cadastro institucional real: a credencial do ACS nasce do seed de
+  desenvolvimento, não de um sistema da Secretaria (ver a seção abaixo).
+  **Atualização (2026-09-19):** o app do paciente também deixou de usar o token
+  de desenvolvimento — o login dele é passwordless (CPF + data de nascimento +
+  código OTP, RF01) —, então o `developmentLogin` ficou só nas ferramentas
+  (`tool/`, `integration_test/`) dos dois apps, contra uma stack com
+  `ENABLE_DEV_LOGIN=true` (ver a seção do RF01 ao fim deste arquivo).
+- ~~**Apps Flutter não consomem o cliente gerado.**~~ Desatualizado: os dois
+  apps já consomem `sinalacs_client` por dependência de caminho e falam com o
+  backend real (ver M2.4 acima) — `RiskLevel` atravessa a fronteira desde a
+  triagem.
+- ~~**Risco residual de entrega.** MQTT não participa da transação: se a
+  publicação tem êxito e o commit falha, o alerta chega ao ACS sem linha no
+  banco... fechar por completo exigiria outbox pattern.~~ Desatualizado: a
+  tabela `alert_outbox` e `AlertOutboxDispatcher`
+  (`backend/sinalacs_server/lib/src/application/alerts/alert_outbox_dispatcher.dart`)
+  implementam o outbox pattern, com teste próprio em
+  `test/unit/alert_outbox_dispatcher_test.dart`.
 - **Deploy não executado.** O runbook em [backend/DEPLOY.md](backend/DEPLOY.md)
   foi reescrito para Serverpod, mas continua sem ter sido rodado.
+
+---
+
+## Login institucional do ACS (RF07) — o que ficou de fora (2026-09-18)
+
+O login do ACS deixou de ser o token HMAC de desenvolvimento: o app envia
+matrícula e senha a `auth.loginInstitutional`, o servidor verifica a senha com
+Argon2id contra a tabela `user_credentials`, bloqueia a conta por 15 minutos
+após 5 tentativas falhas e audita cada desfecho em `audit_logs` — o rate
+limiting que o achado F6 de `spec/security_assessment.md` pedia. As decisões de
+escopo estão em
+`docs/superpowers/plans/2026-09-18-rf07-login-institucional-acs.md`. O que este
+plano **não** fez:
+
+- **MFA/TOTP para o ACS.** Exigido por LGPD-RF11/LGPD-RT06 e pelo achado F5. O
+  critério de MVP do PRD pede "matrícula e senha", e não existe fluxo de
+  enrollment de TOTP em nenhum dos apps.
+- **Refresh token rotativo, e o TTL de 1h/8h.** Exigidos por LGPD-RT06. Na
+  prática a sessão dura 15 minutos e a renovação depende da credencial mantida
+  em memória.
+- **Limite de tentativas por origem (IP).** O bloqueio é por conta, não por
+  origem: um atacante com muitas matrículas válidas distribui as tentativas.
+- **Amplificação anônima no caminho da matrícula inexistente.** Toda tentativa
+  com matrícula desconhecida executa uma derivação Argon2id **descartada** —
+  ~70–80 ms e 19 MiB medidos na stack —, e esse caminho não é limitado (o
+  bloqueio só cobre contas existentes) nem auditável (`audit_logs.userId` é
+  obrigatório e tem FK para `users`: um sujeito que não existe não tem como
+  deixar linha). Cada decisão isolada se sustenta; a combinação não — qualquer
+  anônimo transforma o servidor num amplificador de CPU e memória. Correção
+  estrutural barata, ainda não feita: um teto global de derivações simultâneas.
+  Registrado no achado F6 de `spec/security_assessment.md`.
+- **Um deploy que não rode o seed não tem como ninguém entrar.** A credencial
+  institucional nasce de `bin/seed_acs_credentials.dart` — o único caminho pelo
+  qual uma credencial passa a existir (depois dela a tabela só é escrita para
+  contar tentativas e limpar bloqueio, em `OrmAcsCredentialStore`) — e esse
+  script **recusa** rodar fora de `APP_ENV=development`. Antes desta mudança a
+  stack nova funcionava de imediato, porque o app chamava
+  `auth.developmentLogin`; agora o app só chama `loginInstitutional`, então uma
+  instalação sem o seed (um `APP_ENV=production` qualquer) sobe com o app **sem
+  nenhum caminho de login**. A proveniência da credencial estava documentada; a
+  consequência, não.
+- **Troca de senha pelo próprio ACS.** Não há fluxo; `saveCredential` existe no
+  serviço para que o seed e uma futura troca o usem.
+
+E quatro lacunas que só apareceram durante a execução. Nenhuma delas é um
+defeito:
+
+1. **Sem caminho de volta ao login quando a renovação falha de forma não
+   recuperável.** `BackendClient._requireToken` falha com `isRecoverable:
+   false` e a mensagem aparece no banner da tela que fez a chamada, mas nada
+   navega de volta à tela de login — a pessoa reinicia o app; `renewSession`
+   nem está na interface `AcsBackend`, então a UI não tem como chamá-la.
+   Alcançável em dois casos: conta bloqueada por tentativas feitas em outro
+   lugar, ou senha trocada no servidor. Não foi corrigido aqui de propósito: o
+   plano não especifica nenhum fluxo de navegação, e inventar UI sem plano é o
+   que o processo alerta contra. Candidato a um plano próprio.
+2. **A credencial vive até o processo morrer, sem caminho de limpeza.** Não há
+   logout: o record fica acessível pela instância de `BackendClient` enquanto o
+   app viver. É consequência direta de adiar o refresh token; some quando ele
+   existir.
+3. **`autofillHints` sem `AutofillGroup`** provavelmente não faz nada no
+   aparelho: o gerenciador de senhas do Android precisa do grupo (e de
+   `finishAutofillContext()`) para oferecer preenchimento.
+4. **A renovação e a recusa são provadas contra um servidor RPC falso**
+   (`dart:io`, espelhando o protocolo do Serverpod 3.4.13), não contra o
+   servidor vivo — `apps/acs/test/support/fake_rpc_server.dart`. Quem executou
+   evitou de propósito gastar o bloqueio de 5 tentativas do `ACS-001` com
+   senhas erradas. A prova é do caminho, não do servidor real.
+
+---
+
+## Login passwordless do paciente (RF01) — o que ficou de fora (2026-09-19)
+
+O login do paciente deixou de ser o token HMAC de desenvolvimento: o app envia CPF (validado por
+dígito verificador, e hasheado no servidor em HMAC-SHA-256 com `CPF_HASH_PEPPER`), data de
+nascimento e o código de 6 dígitos recebido, e o servidor só emite a sessão depois de
+`auth.verifyOtp`. As decisões de escopo estão em
+`docs/superpowers/plans/2026-09-18-rf01-login-passwordless-otp.md`. O que este plano **não** fez:
+
+- **O provedor de SMS não foi escolhido.** Hoje `SMS_GATEWAY=log` escreve o código no log do
+  servidor e só é aceito em `development`; fora dele o boot falha nomeando a variável. Falta a
+  decisão de produto/infra: conta no provedor, custo por mensagem, contrato, e o que fazer
+  quando o envio falha.
+- **Não existe coluna de telefone** em `users`/`patients` nem no ER do PRD. O gateway de
+  desenvolvimento recebe o CPF formatado como identificador de destino; um gateway real precisa
+  do número, o que é decisão de produto — e dado pessoal novo, a coletar com finalidade e
+  retenção próprias (`spec/lgpd_data_audit.md`).
+- **A sessão do paciente passou a 1 hora** (`AuthEndpoint.patientSessionLifetime`), e não aos 15
+  minutos do padrão, aplicando LGPD-RT06. O motivo: o código OTP não pode ser reapresentado como
+  a senha do ACS pode, então **não há renovação silenciosa** para o paciente — com 15 minutos
+  ele receberia um SMS novo a cada 15 minutos. O ACS continua com 15 minutos e renovação pela
+  credencial mantida em memória (RF07). A assimetria é deliberada e está escrita em
+  `spec/lgpd_design.md`.
+- **Refresh token rotativo continua ausente** (LGPD-RT06) — é o que permitiria voltar o TTL do
+  paciente aos 15 minutos sem quebrar a experiência.
+- **MFA/TOTP ausente** (achado F5 de `spec/security_assessment.md`).
+- **Sem limite de tentativas por origem (IP).** O teto de 5 verificações é por desafio e o
+  intervalo de 60 s é por CPF; nada olha de onde vem a chamada — o mesmo vale para o pedido de
+  código em si, que não tem limite nenhum.
+- **`requestOtp` não equaliza o TEMPO de resposta** — é a lacuna que o comentário de
+  `requestOtp` em
+  `backend/sinalacs_server/lib/src/application/auth/passwordless_auth_service.dart` chama de
+  "registrada na Task 8", e é por isso que ela está nesta lista. O caminho válido faz um
+  `latestOpen`, um `save` e o envio do código, enquanto as recusas retornam na **primeira**
+  condição — logo depois do `findByCpfHash` e **antes** do `latestOpen`, sem nenhuma outra ida ao
+  banco. **Dois canais, os dois abertos:** o CONTEÚDO (status + payload) distinguia os dois casos
+  deterministicamente — era o oráculo, e é o que a subseção abaixo fecha —, e o RELÓGIO **continua
+  distinguindo**, e com uma amostra de cada lado, sem estatística nenhuma (a subseção abaixo traz a
+  medição). Este parágrafo dizia antes que "a propriedade anti-enumeração vale no conteúdo e
+  **não** no relógio" — o inverso, e a frase errada é parte do mesmo defeito. Com gateway de verdade o termo dominante é a ida ao provedor; a correção é tirar
+  o envio do caminho de resposta (ou impor um piso constante de tempo sobre o handler inteiro), e é
+  endurecimento para quando o provedor for escolhido — não deste estágio, em que `SMS_GATEWAY=log`
+  não faz chamada nenhuma. O piso que resolve é o do handler inteiro, e não o do envio: o delta que
+  separa é **anterior** a qualquer envio.
+- **Biometria e leitura de QR Code.** `spec/sys_flow.md` lista "SMS/OTP, biometria ou QR Code
+  gerado pelo ACS" como critérios de aceite do RF01. Biometria não existe em nenhum app; a
+  leitura de QR pelo app do paciente também não — o onboarding pede para "colar ou digitar o
+  código do convite".
+
+### O oráculo de `requestOtp` — e a frase invertida deste documento (2026-09-19)
+
+O review final de branch não aprovou o RF01 por um achado **Critical**: `requestOtp` respondia
+**diferente na segunda chamada** conforme o par CPF + nascimento existisse. Medido contra a stack,
+quatro chamadas por caso, só status e classe de exceção:
+
+```
+par cadastrado, nascimento certo   -> 200, 400, 400, 400
+par cadastrado, nascimento errado  -> 200, 200, 200, 200
+CPF não cadastrado (DV válido)     -> 200, 200, 200, 200
+```
+
+Duas chamadas decidiam o par — o código de status **era** o oráculo. O mecanismo é de ordem: a
+recusa (`record == null || !_sameDay(...)`) retornava **antes** do `latestOpen`, então o `throw` do
+intervalo de 60 s só era alcançável depois de o par estar confirmado. **A precondição era o
+segredo**, e o comentário que ficava ali dizia o contrário ("lançar é seguro: chegar neste ponto
+exige CPF e nascimento corretos, então a exceção não revela nada") — foi assim que o defeito
+atravessou uma revisão anterior, e o mesmo raciocínio invertido é o da frase que este documento
+trazia.
+
+**Corrigido em 2026-09-19:** o intervalo mínimo deixou de lançar e passou a `return` em silêncio —
+não cria desafio, não envia SMS, não audita e não produz sinal distinguível. O mesmo probe, depois
+da correção, devolve `200, 200, 200, 200` nos três casos; uma única linha no log do gateway para os
+doze chamados. A igualdade ganhou teste nos dois níveis — unitário e endpoint (`duas chamadas
+respondem o mesmo com e sem cadastro`) —, porque ela não existia: dois testes no mesmo `group`
+prendiam um a igualdade na primeira chamada e o outro a violação na segunda, e os dois ficavam
+verdes. O que mudou, as duas transcrições e a tabela de mutantes estão na seção fix-10 do
+relatório da Task 4 — `task-4-report.md`, na pasta de trabalho do SDD (`.superpowers/sdd/…`, fora
+do versionamento, como as rodadas anteriores; por isso o vínculo aqui é por nome, e não um link).
+
+**A frase que este documento trazia estava invertida.** Dizia que "a propriedade anti-enumeração
+vale no conteúdo e **não** no relógio": é o inverso. O **conteúdo** (status + payload) era o que
+distinguia os dois casos, deterministicamente — esse era o oráculo, e era o que faltava fechar.
+Depois desta correção é o conteúdo que está igual. **O relógio continua desigual, e é o outro
+oráculo — medido, não suposto.**
+
+#### O canal de tempo está ABERTO (2026-09-19)
+
+Medido contra a stack, 300 amostras keep-alive por caso, tempo de parede do `POST /auth`, uma
+conexão só (na 1ª chamada do par correto o desafio é apagado antes de cada amostra, fora da janela
+medida — sem isso a amostra cairia no ramo do intervalo mínimo):
+
+| caso | p50 | faixa [min, max] |
+|---|---|---|
+| par correto, 1ª chamada | **3,21 ms** | 2,76 – 6,63 ms |
+| par correto, dentro do intervalo mínimo | 0,80 ms | 0,51 – 1,41 ms |
+| CPF não cadastrado (DV válido) | **0,39 ms** | 0,29 – 1,01 ms |
+| CPF cadastrado, nascimento errado | 0,46 ms | 0,31 – 0,84 ms |
+
+- **A separação não precisa de estatística.** As faixas do par correto e do CPF não cadastrado
+  **não se cruzam**, e os 90 000 pares cruzados separaram: **uma amostra de cada lado decide**.
+  Duas medições independentes, com o mesmo desenho (keep-alive, 200 a 400 amostras por caso),
+  concordam dentro de poucos por cento: o revisor mediu 3,21 ms contra 0,40 ms; esta rodada mediu
+  3,21 ms contra 0,39 ms.
+- **Dentro do intervalo mínimo a diferença encolhe, mas não some:** esse ramo faz o `latestOpen` e
+  mais nada, e ainda assim **fica acima do acaso** (AUC 0,675 na medição intercalada do review
+  final, contra 0,5 de uma separação ao acaso). ~~era ~2× a recusa (AUC 0,956 nesta medição; 0,981,
+  0,996 e 0,986 nas três do revisor)~~ A **magnitude** medida em blocos **não se reproduziu** no
+  desenho intercalado (p50 1,19×, contra os ~2× daqui), e o motivo é o ambiente em que foi medida,
+  não o fenômeno — ver o fim desta subseção. O que **as duas medições sustentam** é o piso — o sinal
+  nunca chega a indistinguível —, e é isso que se afirma. É o único destes números que **admite
+  interseção**: nesta medição as faixas se cruzam em parte, e o revisor registrou o mesmo em uma
+  das rodadas dele.
+- **O delta é o `latestOpen`, e isso agrava o caso.** Ele só é alcançado **depois** de o par estar
+  conferido, então o relógio **não é ruído alheio ao segredo: é correlacionado com ele** — quem
+  responde rápido é quem não passou pela conferência. E ele é **anterior a qualquer envio**: o
+  ramo do intervalo mínimo, que não envia, não grava e não audita, já separa. A correção
+  registrada (tirar o envio do caminho de resposta) ataca o termo do provedor e **não alcança esse
+  delta**; o que alcançaria é um piso constante sobre o **handler inteiro**, que é medida mais
+  forte do que a registrada e só vale acima do caminho mais lento.
+- **`verifyOtp` tem canal de tempo próprio, e é a barreira MAIS BAIXA** — ver o item com dono na
+  lista abaixo. Ele existe, é decidível e **não precisa da data de nascimento**: onde o
+  `requestOtp` no par correto separa com AUC **1,0000** (os extremos nem se tocam), o `verifyOtp`
+  separa com **0,9636** — **mais fraca** que aquela, e era "e mais forte" o que esta linha dizia.
+  Quem for atacar a enumeração do RF01 começa por ele, e não pelo caminho mais caro.
+- **A ordem entre as duas últimas linhas da tabela não é fato.** "CPF não cadastrado" (0,39 ms) e
+  "CPF cadastrado, nascimento errado" (0,46 ms) estão a menos de 0,1 ms um do outro, e essa ordem
+  **troca de sinal entre ambientes** — é artefato de medição, não canal, e não deve ser lida como
+  propriedade de nenhum dos dois caminhos. Canal é a distância entre essas duas linhas e o par
+  correto, essa sim estável e grande.
+
+O parágrafo anterior a esta subseção dizia "o que **não se mede** com confiança é o tamanho da
+diferença", e a seção dizia "resíduo, não sinal": as duas frases eram **falsas**, e são a mesma
+classe de afirmação de segurança não medida que deixou o C1 atravessar duas revisões. O parágrafo
+se contradizia sozinho — se o relógio não se medisse, não haveria nada a corrigir nele.
+
+**O que a correção não resolve** — ninguém deve ler "oráculo fechado" como "enumeração inviável":
+
+- **`verifyOtp` tem canal de tempo próprio, e não é regressão desta rodada.** Medido em blocos, em
+  2026-09-19: ~~CPF cadastrado com desafio aberto ~4,0 ms (p50) contra ~1,7 ms do CPF não
+  cadastrado, faixas sem interseção, **AUC 0,997** na medição do revisor (0,990 sem desafio
+  aberto)~~ Na medição **intercalada** do review final, **4,58 ms contra 3,62 ms, com as caudas se
+  tocando, AUC 0,9636** — e é este o número que o registro sustenta. A comparação "**e mais
+  forte**" que esta lista trazia não se sustenta de nenhum dos dois lados: o canal do `requestOtp`
+  no par correto é AUC **1,0000**, e o daqui é **mais fraco** que aquele.
+  **Uma chamada responde "este CPF é paciente da unidade" — e sem precisar da data de
+  nascimento**, que é justamente o fator que `requestOtp` exige. Não foi introduzido aqui e não
+  estava em brief nenhum; existe porque o caminho do CPF cadastrado faz o `latestOpen`, o
+  `registerAttempt` e a auditoria, e o do CPF inexistente só faz o `findByCpfHash`. A **Global
+  Constraint nº 2** (anti-enumeração) é do **RF**, não do método: quem ler "oráculo fechado" nesta
+  seção fecha o RF01 achando que ela vale, e ela **não vale em `verifyOtp` tampouco**.
+  **Dono: quem implementar o gateway de SMS real** — o piso de tempo (sobre o handler inteiro, ver
+  acima) só faz sentido quando o provedor for escolhido, e é a mesma pessoa que vai mexer no
+  caminho de envio; hoje esse dono não existe, e o provedor continua não escolhido nesta lista.
+- **Não entrou limite nenhum.** O caminho de sonda continua sem rate limit por origem, que é a
+  lacuna já registrada nesta lista. Quem varre continua varrendo à vontade; o que acabou foi o
+  sinal determinístico de volta. Cada acerto ainda manda um SMS para a pessoa.
+- **A UX perdeu o aviso de "aguarde um minuto".** Com o intervalo mínimo silencioso, quem pede o
+  código duas vezes em menos de um minuto não vê aviso nenhum e fica esperando um SMS que não vem.
+  O servidor não pode mais dizer isso — quem sabe quando pediu por último é o **app**, e é lá que a
+  mensagem passa a morar. Hoje o app não implementa a espera: a tela não diz nada. **Dono: quem
+  mexer no app do paciente** — este RF01 não fecha com a mensagem de volta ao servidor, porque ela
+  só seria alcançável por quem já acertou o par.
+
+  **FECHADO em 2026-09-21.** `_PatientLoginScreenState` (`apps/patient/lib/app/app.dart`) passou a
+  guardar `_ultimoPedidoEm` no sucesso de `requestOtp` e a desabilitar `enter_button` por 60s
+  (`_otpResendCooldown`), com um `Semantics(liveRegion: true)` avisando quanto falta —
+  inteiramente do lado do app, sem depender de resposta nenhuma do servidor. Coberto por
+  `passwordless_login_test.dart`: "depois de pedir o código, 'Entrar sem senha' fica desativado
+  com aviso de cooldown".
+- **`otp_challenges` não tem retenção** (Minor do mesmo review). Não há `DELETE` nem limpeza em
+  `lib/` nem em `bin/`: desafios expirados e consumidos ficam para sempre, cada um com `userId`,
+  dois timestamps e `codeHash` — "Crítico — credencial" no inventário de
+  [`spec/lgpd_data_audit.md`](spec/lgpd_data_audit.md) —, então a tabela é um rastro de tentativas
+  de login sem prazo. **Registrado, não implementado**: depende de decidir prazo e de quem executa
+  a limpeza, como as outras retenções do projeto.
+
+#### A medição intercalada do review final: a magnitude é do ambiente (2026-09-19)
+
+O review final de branch mediu de novo, com desenho **intercalado**, os números desta subseção — e
+**dois deles não se reproduziram**. Cada caso foi medido ao lado do seu controle, na mesma conexão
+keep-alive, 250 pares por bloco, por HTTPS via Traefik: é esse desenho que separa o custo fixo do
+ambiente do delta que se quer medir.
+
+| comparação | em blocos (este registro) | intercalada (review final) |
+|---|---|---|
+| `requestOtp` no intervalo mínimo × recusa | ~2×; AUC 0,956 / 0,981 / 0,996 / 0,986 | p50 **1,19×**; AUC **0,675** |
+| `verifyOtp`, CPF existe × não existe | ~4,0 × ~1,7 ms; AUC 0,997 / 0,990 | **4,58 × 3,62 ms**, caudas se tocando; AUC **0,9636** |
+| `requestOtp` no par correto × CPF não cadastrado | 3,21 × 0,39 ms, sem interseção | **AUC 1,0000**, separação perfeita |
+
+- **O encolhimento do ramo do intervalo mínimo tem mecanismo, e é por isso que o número antigo não
+  é falso — é do ambiente.** O ramo do intervalo mínimo e a recusa fazem **uma consulta indexada
+  cada** (o primeiro acha uma linha em `otp_challenges`, o segundo acha zero em `users`), e o
+  TLS/Traefik soma ~0,5 ms a **toda** chamada, comprimindo a razão: o registro foi medido na 8080
+  em texto claro, e contra a 443 a razão encolhe. O que **sobrevive às duas medições** é o piso — o
+  sinal nunca chega a indistinguível —, e é o que este documento afirma. A razão exata, essa, só
+  vale junto com o ambiente em que foi medida.
+- **A ordem entre "CPF não cadastrado" e "nascimento errado" não é fato** — é artefato de menos de
+  0,1 ms, que **troca de sinal entre ambientes**; a ressalva ficou ao pé da tabela, na lista de
+  bullets acima.
+- **A AUC 0,997 do `verifyOtp` vem da re-revisão da rodada 10** — a do commit `cdac75b`, cujos
+  achados viraram a rodada 11 —, está no registro da sessão e foi citada no brief da rodada 11, que
+  é de onde este documento a copiou. O review final **não a sustenta**: a medição intercalada dele
+  é **0,9636**, com as caudas se tocando, e ele foi explícito nisso. As duas ficam no registro; o
+  que muda é a conclusão, que passa a ser a que as duas medições juntas sustentam — o canal do
+  `verifyOtp` **existe, é decidível e não precisa da data de nascimento**, e é a **barreira mais
+  baixa** do RF01, não a mais alta. **Número sem medição viva não sustenta afirmação de segurança**
+  — a mesma classe de defeito que esta sessão inteira caçou, uma vez mais.
+- **Duas frases da mesma classe continuam dentro do código, e não foram tocadas nesta rodada.** No
+  arquivo da doc do `requestOtp`
+  (`backend/sinalacs_server/lib/src/application/auth/passwordless_auth_service.dart`), o ramo do
+  intervalo mínimo é descrito com "AUC 0,96 a 0,99 entre duas medições independentes" (`:150`) e
+  "já é ~2× mais lento que a recusa" (`:159`) — nenhuma das duas sobrevive à medição intercalada
+  (0,675 e 1,19×) —, e a doc do `verifyOtp` (`:226-230`) repete "faixas sem interseção" e "mais
+  forte que ele", que é a comparação que o review final desmentiu. ~~**Registrado, não corrigido**:
+  esta rodada mexe em `apps/patient/lib/app/app.dart` e neste `PROGRESS.md`, e só neles.~~ **Dono:
+  quem implementar o gateway de SMS real** — o mesmo dono do piso de tempo na lista acima, e quem
+  vai mexer nesse arquivo de qualquer jeito. É a mesma classe do comentário do app do paciente que
+  esta rodada corrigiu: afirmação em código que a medição deixou de sustentar, no arquivo que o
+  próximo leitor do RF01 abre.
+
+  **FECHADO em `cb63566`** (rodada final 2, mesmo dia). O motivo do adiamento era de escopo — o brief
+  listava dois arquivos —, e a discordância de quem executou ("são quatro linhas, sem risco de
+  comportamento") estava certa: eu a aceitei. As quatro cláusulas foram corrigidas **no arquivo de
+  código**, `+28 −11`, **só linhas `///`** (conferido: nenhuma linha alterada deixa de começar com
+  `///`). O que entrou: `:154` o ramo do intervalo mínimo passou a "acima do acaso — AUC 0,675 na
+  medição intercalada, contra 0,5", com a magnitude declarada **do ambiente** e o mecanismo (uma
+  consulta indexada de cada lado, mais o custo fixo do TLS/Traefik que comprime a razão); `:167`
+  "mais lento que a recusa — p50 1,19×"; `:239-243` o `verifyOtp` virou "**as caudas se tocando**:
+  AUC 0,9636" e "**mais FRACO que ele**", com a razão explícita: o que faz dele o mais perigoso
+  **não é a força, é o custo** — não precisa da data de nascimento. A manchete do `requestOtp`
+  (AUC 1,0000, reproduzida pelo review final) **não foi tocada**, e ganhou só a nota de que os
+  **absolutos** são da era do texto claro, com os do TLS ao lado (~4,7 ms e ~0,93 ms) e a separação
+  igual — sem ela o arquivo passaria a ter absolutos de dois ambientes, os dois datados de
+  2026-09-19, lendo como contradição. **O "~1,5×" que eu tinha escrito no lugar desses dois pares
+  foi removido** (re-review escopado, Minor): ele era derivado, não medido, e não fechava com o
+  resto do parágrafo — um custo aditivo não escala os **dois** absolutos pelo mesmo fator, e a
+  aritmética confirma: ~×1,46 num e ~×2,38 no outro. É o mesmo defeito que esta rodada inteira
+  caçou, uma última vez, e por isso o parágrafo passou a **dar os dois pares medidos** em vez do
+  fator que os ligava. `dart test` → **276, exit 0**; `dart analyze` → exit 0 (33 `info`, **nenhuma** deste
+  arquivo). As referências `:150`/`:159`/`:226-230` desta entrada **não apontam mais** para as
+  frases — hoje são `:154`, `:167`, `:239-243` —, e o original fica riscado acima como registro.
+
+  **Uma ressalva que fica, e é menor:** a frase do código que remete a esta lista diz *"registrada
+  com dono no `PROGRESS.md`"*. Ela não é falsa — o dono **está** registrado —, mas lê mais forte do
+  que é, porque **o dono é um papel sem ocupante**: "quem implementar o gateway de SMS real", e o
+  provedor continua não escolhido. Fica como está, com esta nota.
+
+### Um defeito do RF02 que esta entrega mediu — com dono (2026-09-19)
+
+`onboarding_endpoint.dart:62` faz `issueToken(user)` — o default de **15 minutos** — para
+`role: UserRole.patient`, e o app consome esse token como sessão
+(`apps/patient/lib/core/network/backend_client.dart:259-273`). Ou seja: **há dois caminhos de
+sessão do paciente e eles discordam** — 1 hora no login passwordless (RF01) e 15 minutos no
+onboarding (RF02) —, e no onboarding a renovação silenciosa também não existe, porque não há
+credencial para renovar: quem conclui o cadastro cai para fora em 15 minutos, sem aviso e sem
+caminho de volta que não seja entrar de novo pelo código.
+
+Não foi corrigido aqui de propósito: é mudança de comportamento de outra entrega. **Dono: o
+RF02.** O que torna o registro necessário está escrito em dois lugares, e nenhum deles é o
+comentário do `auth_endpoint.dart` — esse declara o TTL de 1 hora **deste** caminho e o motivo
+(o código OTP não se reapresenta, então não há renovação silenciosa) e aponta a lacuna do
+onboarding, mas não fala em leitor futuro. Quem diz, com essas palavras, é o **par de testes de
+integração** que prende cada metade da assimetria: `institutional_login_test.dart` (15 minutos,
+ACS) escreve que "os dois números precisam aparecer na suíte, senão um leitor futuro lê a
+diferença como descuido e 'conserta' um dos lados", e `passwordless_login_test.dart` (1 hora,
+paciente) que é "a diferença entre as duas que precisa continuar sendo lida como decisão, não
+como descuido" — o plano registra o mesmo nas Global Constraints. O lado mais provável de um
+leitor "consertar" é o TTL do login, que tem motivo para ser 1 hora.
+
+**FECHADO (2026-09-21).** `onboarding_endpoint.dart:62` passou a chamar `issueToken(user,
+lifetime: AuthEndpoint.patientSessionLifetime)`, alinhando `completeEnrollment` com `verifyOtp`:
+os dois caminhos de emissão do papel `patient` agora concordam em 1 hora, pelo mesmo motivo (nem
+o código OTP nem o convite de uso único se reapresentam, então nenhum dos dois tem renovação
+silenciosa). `onboarding_endpoint_test.dart` ganhou a mesma asserção de TTL que
+`passwordless_login_test.dart` já tinha para `verifyOtp`, usando `AlertRuntimeHarness.tokenLifetime`.
+O comentário de `apps/patient/lib/core/network/auth_session.dart:73`, que descrevia a hora como
+regra só do login, foi atualizado para descrever os dois caminhos.
+
+## Finalização do app paciente — telas soltas do menu "Mais" (2026-09-21)
+
+Plano de fechamento de `apps/patient` que sobrou de fora do que RF01–RF06 cobriam. As mudanças
+de RF02 (TTL do onboarding) e a UX de cooldown do OTP já estão registradas acima, nas seções que
+elas fecham; esta entrada cobre o resto:
+
+- **Perfil clínico deixou de ser protótipo.** `ClinicalProfileScreen` lia/escrevia um
+  `Map<String, bool>` local que o botão "Salvar" descartava. Ganhou dois métodos novos em
+  `PatientsEndpoint` — `myChronicConditions`/`updateChronicConditions`, papel `patient` apenas,
+  `patientId` sempre do token (INV-05) — que leem/gravam `patients.chronicConditionsEncrypted`
+  de verdade (AES-256-GCM), fechando a lacuna que o comentário de `OrmPatientDirectoryStore` já
+  antecipava ("quando um endpoint de cadastro existir..."). Catálogo de condições
+  (diabetes, hipertensão, uso contínuo de insulina) vem de `spec/idea.md`, não inventado. Coberto
+  por `patient_directory_service_test.dart` (fake), `patient_chronic_conditions_endpoint_test.dart`
+  (Postgres + cifra reais) e um grupo novo em `patient_app_mvp_test.dart`.
+- **"Dúvidas" foi removida**, não terminada — a tela era chat com resposta automática fixa, sem
+  backend, e contradizia a exclusão explícita de mensageria assíncrona do escopo MVP
+  (`spec/PRD_system.md` §6.1). Saiu do enum `PatientDestination`, do menu "Mais" e do código.
+- **`spec/validation_report.md` §5 estava com três linhas erradas** para o app paciente: Perfil
+  clínico e Perguntas foram atualizadas por este plano; Lembretes já estava real desde antes
+  (`RemindersScreen`/`sqflite_reminder_store.dart`/`flutter_local_notifications`) e a linha "hardcoded"
+  nunca tinha sido corrigida — achado desta rodada de exploração, não mudança de comportamento.
+- **`spec/ux_accessibility_assessment.md`**: 'Concluir cadastro' (onboarding) saiu de "não medido"
+  — era o mesmo defeito de nó inerte dos outros três sítios já corrigidos (`Semantics(button: true)`
+  sem `MergeSemantics`). Medido e corrigido.
+
+**Atualização (2026-09-21, mesmo dia):** o painel "Meus Dados" acima descrito como fora de escopo
+**entrou nesta mesma rodada**, afinal. `PatientsEndpoint.myData` agrega `patients` + `users` +
+`consent_logs` + `triage_sessions`/`alerts` (só `resultRisk`/`riskLevel` e o timestamp — nunca o
+conteúdo cifrado de uma triagem nem a localização de um alerta) num único `PatientDataOverview`,
+três modelos novos em `models/api/` (`PatientDataOverview`, `PatientConsentRecord`,
+`PatientRiskEvent`, nenhum com `table:`, então sem migração). Tela `MyDataScreen` no app, no lugar
+que "Dúvidas" deixou vago no menu "Mais"; "exportar" é copiar o JSON para a área de transferência —
+sem infraestrutura de e-mail/arquivo nesta etapa. Coberto por
+`patient_data_overview_service_test.dart` (fake), `patient_data_overview_endpoint_test.dart`
+(Postgres real, as quatro tabelas) e um grupo novo em `patient_app_mvp_test.dart` (inclusive a
+varredura de nó de botão inerte, que 'Concluir cadastro' mostrou não ser dispensável). Fica de fora
+ainda: revogar consentimento a partir deste painel (já existe em `RemindersScreen`/onboarding) e o
+SLA de 15 dias para pedidos que exigem intervenção humana — isso é processo, não código. Endurecimento
+de segurança do RF01 (rate limit por IP, canal de tempo, retenção de `otp_challenges`, refresh token)
+continua como já registrado acima, sem dono novo.

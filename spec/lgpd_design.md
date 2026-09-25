@@ -10,6 +10,32 @@ A estratégia de conformidade adota os princípios de **Privacy by Design** e **
 
 ## 1. Requisitos de Conformidade LGPD para o Sistema
 
+### Implementação atual do hash de localização
+
+O app do paciente lê a localização somente em primeiro plano, quando a pessoa
+confirma um alerta. Latitude e longitude não são enviadas ao backend nem ao
+MQTT: são normalizadas em seis casas decimais e transformadas em um digest
+SHA-256 truncado para `locationHash`. Quando a permissão, o serviço ou o GPS
+falham, o alerta continua sendo enviado com `unknownLocationHash`, e a tela
+informa que a localização não foi anexada.
+
+Esse hash é pseudonimização, não anonimização. A precisão atualmente adotada
+pode permitir reidentificação por força bruta ou correlação com a microárea,
+especialmente em áreas rurais. A validação em dispositivo ainda é obrigatória
+para fechar L-02.
+
+**Decisão de produto (2026-09-16):** a alternativa aprovada para o mapa do
+ACS (RF10, achado L-05) é a **geocélula arredondada** — reduzir a precisão da
+normalização antes do hash (de seis para três casas decimais por padrão) e
+transmitir, além do `locationHash` já existente, uma célula espacial de baixa
+resolução (`locationCell`) só para desenho do mapa, nunca a coordenada crua.
+Essa decisão ainda não foi implementada — nenhuma migração, endpoint ou app
+foi alterado por ela. Ver
+`docs/superpowers/specs/2026-09-16-decisoes-produto-pos-validacao.md` §1 para
+o desenho completo (quem lê cada dado, retenção e o que muda no envelope
+MQTT). `spec/validation_report.md` continua classificando L-05/RF10 como
+bloqueador até essa implementação existir com teste.
+
 ### LGPD-RF01 - Coleta Mínima e Transparente
 
 | Propriedade | Descrição |
@@ -31,6 +57,25 @@ A estratégia de conformidade adota os princípios de **Privacy by Design** e **
 | **Base Legal** | Art. 5º, XII e XIII; Art. 7º, I; Art. 8º |
 | **Artigos LGPD** | 5º, XII; 7º, I; 8º, §1º, §2º, §3º, §4º, §5º, §6º |
 | **Critério de Aceite** | ✓ Consentimento é requerido para cada finalidade distinta<br>✓ Opções de consentimento são independentes (não agrupadas)<br>✓ Registro de consentimento com timestamp e versão<br>✓ Possibilidade de revogação por finalidade específica |
+
+**Estado atual (verificado 2026-09-18):** `consent_logs` é gravada por
+`OnboardingService.completeEnrollment` para as três finalidades (§2 de
+`docs/superpowers/specs/2026-09-16-decisoes-produto-pos-validacao.md`).
+Do lado da leitura: `ConsentPurpose.localReminders` agora é respeitada —
+`RemindersScreen` (`apps/patient/lib/app/app.dart`) só agenda notificações
+locais quando o consentimento espelhado no aparelho
+(`core/consent/consent_preferences.dart`) é `true`, com padrão de recusa
+(`false`) quando não há registro local.
+
+**Aviso — `ConsentPurpose.segmentedPush` continua sem leitor.** RF14 (avisos
+segmentados por push) não tem nenhum código de envio no repositório ainda —
+está bloqueado externamente na provisão de um projeto Firebase (§3.2 do
+mesmo documento de decisões), não apenas pendente de implementação. Não há
+o que "respeitar" hoje porque nada envia. Quando `notices.sendSegmented` for
+implementado, ele **deve** consultar o consentimento de `segmentedPush`
+antes de enviar, com o mesmo padrão de recusa por omissão adotado aqui para
+`localReminders` — tratar isso como parte da implementação de RF14, não
+como um item separado a lembrar depois.
 
 ### LGPD-RF03 - Gerenciamento de Preferências de Privacidade
 
@@ -431,6 +476,17 @@ A estratégia de conformidade adota os princípios de **Privacy by Design** e **
 | **Implementação** | TLS para todas as comunicações (Flutter ↔ backend), AES-256 para dados locais no `sqflite`, criptografia de campos sensíveis (CPF, condições crônicas) no banco central PostgreSQL. |
 | **Riscos Mitigados** | Interceptação de dados (MITM), violação de dados por acesso físico ao dispositivo, vazamento em caso de comprometimento do banco de dados. |
 
+#### Decisão de custódia da chave (app do ACS)
+
+| Propriedade | Descrição |
+|-------------|-----------|
+| **Decisão** | A chave do SQLCipher é aleatória (256 bits) e fica no Android Keystore / iOS Keychain, via `flutter_secure_storage`. Não é derivada de PIN nem de biometria. |
+| **Contexto** | `spec/PRD_system.md` (4.2.3) prescreve "chave derivada do PIN/Biometria (PBKDF2)"; `spec/test_plan.md` (item 1 da matriz de risco) fala em "chave gerada pelo TEE do hardware". Adotamos a segunda leitura. |
+| **Motivo** | Não existe nenhum fluxo de PIN nos apps — a autenticação é `auth.developmentLogin`, sem credencial. Derivar de PIN exigiria projetar definição, desbloqueio, política de tentativas e recuperação; e um PIN esquecido significaria perder visitas ainda não sincronizadas. O keystore protege contra o risco que esta seção nomeia (acesso físico ao dispositivo) sem inventar produto. **Atualização (2026-09-18):** no app do ACS a autenticação deixou de ser o `developmentLogin` — passou a ser institucional (matrícula + senha, RF07), com a credencial só em memória e nada em disco. A decisão da chave não muda: continua não existindo fluxo de PIN em app nenhum, e o `developmentLogin` segue para as ferramentas de desenvolvimento e para o login do app do paciente, que RF01 ainda não substituiu. **Atualização (2026-09-19):** o app do paciente também deixou de usar o `developmentLogin` — o login dele é passwordless (CPF + data de nascimento + código OTP, RF01) —, então o token de desenvolvimento ficou só nas ferramentas (`tool/`, `integration_test/`) nos dois apps, como o parágrafo anterior já registrava para o ACS. Nada nesta linha muda com isso: segue não existindo fluxo de PIN em app nenhum, e a custódia da chave continua no keystore. |
+| **Reversibilidade** | A interface `DatabaseKeyStore` aceita um segundo fator depois, envelopando a chave, **sem migrar dados**. O caminho do PRD segue aberto. |
+| **Limite conhecido** | Num aparelho comprometido (root) com o usuário autenticado, a chave é alcançável. Proteger contra isso exigiria o fator de posse do PIN. |
+| **Verificação** | `apps/acs/integration_test/encrypted_storage_test.dart` lê o arquivo do banco e afirma que ele não contém o conteúdo em texto plano. Roda em dispositivo — no CI (Linux) o caminho é o FFI, que não criptografa, e por isso a abertura fora de Android/iOS lança por padrão. |
+
 ### 5.2 Controle de Acesso por Perfil (RBAC)
 
 | Propriedade | Descrição |
@@ -470,6 +526,17 @@ A estratégia de conformidade adota os princípios de **Privacy by Design** e **
 | **Objetivo** | Garantir que dados sejam mantidos apenas pelo tempo necessário e eliminados de forma segura. |
 | **Implementação** | Tabela com política de retenção por categoria de dado: alertas (2 anos), visitas (5 anos conforme legislação), logs de acesso (1 ano), dados de consentimento (indeterminado). Processo automatizado de expurgo com anonimização. |
 | **Riscos Mitigados** | Acumulação excessiva de dados, violação do princípio da necessidade, armazenamento desnecessário de dados sensíveis. |
+
+#### Retenção no aparelho do ACS (implementada)
+
+| Propriedade | Descrição |
+|-------------|-----------|
+| **Decisão** | O banco local guarda **apenas** visitas ainda não sincronizadas. `SqlCipherVisitStore.save()` reescreve a tabela inteira a partir da lista de pendentes, então a visita confirmada pelo servidor deixa o dispositivo na gravação seguinte. |
+| **Estado** | Passou a valer de fato quando o `BackendVisitSynchronizer` foi ligado em produção. Antes, o app montava a fila sem sincronizador: `sync()` devolvia erro, nada era confirmado e nada era apagado — a retenção estava implementada e testada, mas nunca disparava. |
+| **O que é gravado** | `patient_id` (UUID), risco, status, desfecho, data e versão. **Não** é gravado nome, rótulo legível nem endereço. As observações de campo digitadas na tela ainda não são persistidas nem enviadas. |
+| **Por que o identificador, e não o rótulo** | A tela antes gravava `'Paciente ' + 8 dos 32 dígitos hex` e descartava o UUID. Era pior nos dois sentidos: texto legível sobre a pessoa no disco, e um identificador irrecuperável — `visits.sync` só aceita UUID, então a visita nunca poderia sair do aparelho e a retenção nunca a alcançaria. Guardar o identificador e montar o rótulo na tela é o desenho de minimização correto (LGPD-RF01). |
+| **Consequência de produto** | Sem alerta vinculado não há paciente, logo a tela de visita não grava. Um seletor de pacientes da microárea exigiria um endpoint de listagem que não existe. |
+| **Verificação** | `apps/acs/integration_test/encrypted_storage_test.dart` afirma que nem o conteúdo da visita nem o `patient_id` aparecem legíveis no arquivo do banco; `apps/acs/integration_test/red_alert_cycle_test.dart` ("a visita confirmada SAI do disco criptografado") prova a retenção contra o servidor real, em dispositivo. |
 
 ### 5.7 Anonimização/Pseudonimização
 
@@ -551,7 +618,7 @@ A estratégia de conformidade adota os princípios de **Privacy by Design** e **
 | Propriedade | Descrição |
 |-------------|-----------|
 | **Descrição** | Todas as APIs devem exigir autenticação (JWT) e implementar controle de acesso (RBAC) para garantir que apenas usuários autorizados acessem dados específicos. |
-| **Implementação** | Middleware de autenticação na camada de aplicação do backend; validação de permissões por endpoint; tokens JWT com expiração curta; refresh token seguro. Ainda não implementado no código atual — hoje só existe um endpoint de login de desenvolvimento sem autenticação institucional real (ver `CLAUDE.md`). |
+| **Implementação** | Middleware de autenticação na camada de aplicação do backend; validação de permissões por endpoint; tokens JWT com expiração curta; refresh token seguro. Ainda não implementado no código atual — hoje só existe um endpoint de login de desenvolvimento sem autenticação institucional real (ver `CLAUDE.md`). **Atualização (2026-09-18):** o login institucional existe (`auth.loginInstitutional`, RF07) — matrícula + senha verificadas com Argon2id contra `user_credentials`, com bloqueio por tentativas e auditoria em `audit_logs` — e a verificação de token dos endpoints sensíveis está centralizada (`Authorization.require`; os endpoints estendem `AuthenticatedEndpoint`). O que segue pendente desta linha: o token expira em 15 minutos, **não há refresh token** (LGPD-RT06) e os papéis `coordinator`/`admin` continuam sem caminho de emissão. **Atualização (2026-09-19):** o TTL deixou de ser um só. A sessão emitida pelo **login do paciente** (passwordless, RF01) vale **1 hora**, aplicando LGPD-RT06 — o código OTP é de uso único e não se reapresenta, então não existe renovação silenciosa desse lado; a do **ACS** continua em **15 minutos**, renovada em silêncio pela credencial que vive em memória (RF07). A assimetria é deliberada, e é a diferença entre as duas que precisa ser lida como decisão e não como inconsistência. Dentro do lado do paciente há uma exceção conhecida: o *onboarding* (`onboarding.completeEnrollment`, RF02) ainda emite o padrão de 15 minutos, porque o caminho dele não passa por esta decisão — lacuna com dono no `PROGRESS.md`. O que segue pendente: **não há refresh token** (LGPD-RT06) — é ele que permitiria devolver o TTL do paciente aos 15 minutos sem quebrar a experiência —, e os papéis `coordinator`/`admin` continuam sem caminho de emissão. |
 | **Critério de Aceite** | ✓ Todas as APIs autenticadas<br>✓ Testes de acesso não autorizado<br>✓ RBAC implementado e testado |
 
 ### LGPD-RT02 - Criptografia de Dados Sensíveis no Banco
@@ -567,8 +634,8 @@ A estratégia de conformidade adota os princípios de **Privacy by Design** e **
 | Propriedade | Descrição |
 |-------------|-----------|
 | **Descrição** | Todos os acessos e operações devem ser registrados em logs estruturados (JSON), imutáveis, e auditáveis. |
-| **Implementação** | Tabela `audit_logs` no PostgreSQL; assinatura criptográfica dos logs (hash chain); armazenamento em tabela imutável (append-only). |
-| **Critério de Aceite** | ✓ Todos os endpoints geram logs<br>✓ Logs são imutáveis (append-only)<br>✓ Logs incluem data, usuário, ação, IP (anonimizado) |
+| **Implementação** | Tabela `audit_logs` no PostgreSQL; assinatura criptográfica dos logs (hash chain); armazenamento em tabela imutável (append-only). A tabela existia desde a migração-base sem escritor nenhum; os dois primeiros — `patients.listMicroArea` e a recusa por território em `visits.sync` (`AuditTrail`, `backend/sinalacs_server/lib/src/application/audit/`) — foram ligados, sempre com `ipHash` (nunca IP em claro) e best-effort (uma falha na trilha não derruba a operação clínica). **A assinatura em hash chain está implementada** (`AuditChain`, no mesmo diretório): cada linha carrega `sequence`, `previousHash` e `entryHash` — um HMAC-SHA256 sobre o conteúdo da linha, com um segredo próprio (`AUDIT_CHAIN_SECRET`) que nunca deriva do `JWT_SECRET`, para que rotacionar um não afete o outro. A escrita é serializada por `pg_advisory_xact_lock` dentro da mesma transação do apêndice, e um índice único em `sequence` é o segundo cinto contra bifurcação por concorrência. `AuditChainVerifier` (mesmo pacote) e `bin/audit_chain_check.dart` verificam a cadeia inteira sob demanda, detectando edição, remoção ou reordenação de qualquer linha — inclusive por quem tem acesso de escrita direto ao Postgres, já que o segredo fica fora do banco. **O que ainda falta**: o append-only em si não é imposto pelo banco (nenhum trigger/`REVOKE` bloqueia `UPDATE`/`DELETE` em `audit_logs` — a cadeia só *detecta* a violação, não a impede), e os demais endpoints que tocam dado sensível (alertas, ack, triagem) ainda não escrevem na trilha. |
+| **Critério de Aceite** | ✓ Todos os endpoints geram logs (parcial: só `patients.listMicroArea` e a recusa territorial de `visits.sync`)<br>✓ Logs têm assinatura em hash chain verificável (`AuditChainVerifier`)<br>✗ Logs são imutáveis por construção do banco (append-only ainda é só convenção, sem trigger/`REVOKE`)<br>✓ Logs incluem data, usuário, ação, IP (anonimizado) |
 
 ### LGPD-RT04 - Consentimento Versionado
 

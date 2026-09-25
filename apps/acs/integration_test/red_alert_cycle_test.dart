@@ -1,0 +1,310 @@
+/// Ciclo do alerta vermelho ponta a ponta, com a stack local de pé.
+///
+/// Prova o caminho que nenhum teste hermético alcança: o backend publica no
+/// broker e o app do ACS recebe pelo MQTT com TLS.
+///
+/// Pré-requisitos:
+///   · `docker compose up` com o database-seed concluído;
+///   · `./scripts/dev/sync_dev_ca.sh` — as DUAS CAs são assets do app (a do
+///     broker, para o MQTT, e a do RPC, para o HTTPS) e são geradas, não
+///     versionadas.
+///
+/// O caminho pronto é `./scripts/qa/e2e.sh --emulator`, que sobe a stack e
+/// preenche os dart-defines a partir do `.env`. À mão:
+///
+///   flutter test integration_test \
+///     --dart-define=SINALACS_HOST=https://10.0.2.2/ \
+///     --dart-define=SINALACS_MQTT_HOST=10.0.2.2 \
+///     --dart-define=SINALACS_MQTT_PASSWORD="$MQTT_ACS_PASSWORD"
+///
+/// A CI usa `https://localhost:8443/` com `adb reverse tcp:8443 tcp:443` e
+/// `adb reverse tcp:8883 tcp:8883` em vez de 10.0.2.2: medido no runner da CI
+/// que 10.0.2.2 não chega à stack, embora funcione num emulador local comum. A
+/// porta do RPC no dispositivo não pode ser 443 — medido, `adb reverse` recusa
+/// abrir listener em porta privilegiada dentro do emulador —, mas isso não
+/// afeta o Host que o Traefik casa nem o hostname que o TLS verifica, só o
+/// nome (`localhost`) importa para os dois. 8883 (MQTT) já não é privilegiada,
+/// então mantém a mesma porta dos dois lados.
+///
+/// A senha é obrigatória: ela não tem default no `BackendConfig`.
+///
+/// PRIVACIDADE: só os UUIDs sintéticos do seed.
+///
+/// Medido no runner da CI (sem aceleração de hardware — nem KVM nem HAXM, só
+/// swiftshader por software): "a visita confirmada SAI do disco criptografado"
+/// combina abrir/gravar/fechar um banco SQLCipher real com uma chamada de rede
+/// real (`visits.sync`), e as duas juntas passam dos 30s default do
+/// `package:test` só nesse emulador — o mesmo teste tem tempo de sobra num
+/// emulador local acelerado. O timeout maior cobre o arquivo inteiro porque o
+/// teste seguinte faz a mesma combinação.
+@Timeout(Duration(minutes: 2))
+library;
+
+import 'dart:async';
+import 'dart:io';
+
+import 'package:flutter/services.dart' show rootBundle;
+import 'package:flutter_test/flutter_test.dart';
+import 'package:integration_test/integration_test.dart';
+import 'package:sinalacs_acs/core/database/encrypted_database.dart';
+import 'package:sinalacs_acs/core/database/sqlcipher_visit_store.dart';
+import 'package:sinalacs_acs/core/network/backend_client.dart';
+import 'package:sinalacs_acs/core/network/backend_config.dart';
+import 'package:sinalacs_acs/core/security/database_key_store.dart';
+import 'package:sinalacs_acs/core/services/alert_feed.dart';
+import 'package:sinalacs_acs/core/services/alert_queue.dart';
+import 'package:sinalacs_acs/core/services/backend_visit_synchronizer.dart';
+import 'package:sinalacs_acs/core/services/offline_visit_queue.dart';
+import 'package:sinalacs_client/sinalacs_client.dart' as api;
+
+const seedMicroAreaId = '00000000-0000-4000-8000-000000000003';
+const seedPatientId = '00000000-0000-4000-8000-000000000001';
+const otherMicroAreaId = '00000000-0000-4000-8000-000000000099';
+
+/// Bytes da CA de desenvolvimento do RPC, lidos do bundle do app.
+///
+/// É o MESMO trabalho que `main.dart` faz. Ausente, o cliente cai no
+/// armazenamento do sistema e o handshake falha — o que apareceria como "sem
+/// conexão", culpando a rede por um asset que ninguém copiou.
+///
+/// Atenção: a CA do **broker** é outra, e o `MqttAlertFeed` a carrega sozinho
+/// ([BackendConfig.mqttCaAsset]) — são dois destinos, duas CAs.
+Future<List<int>?> _devRpcCaBytes() async {
+  try {
+    final data = await rootBundle.load(BackendConfig.rpcCaAsset);
+    return data.buffer.asUint8List();
+  } catch (_) {
+    return null;
+  }
+}
+
+void main() {
+  IntegrationTestWidgetsFlutterBinding.ensureInitialized();
+
+  setUpAll(() {
+    // Sem a senha, a assinatura do tópico falha depois do timeout do broker e
+    // o motivo real — o comando de compilação — não aparece em lugar nenhum.
+    if (BackendConfig.mqttPasswordMissing) {
+      fail(
+        'Compile com --dart-define=SINALACS_MQTT_PASSWORD (o valor está em '
+        'MQTT_ACS_PASSWORD no .env). O caminho pronto é '
+        './scripts/qa/e2e.sh --emulator.',
+      );
+    }
+  });
+
+  late BackendClient backend;
+  late api.Client patientClient;
+
+  setUp(() async {
+    // O cliente do app é o mesmo caminho de `main.dart`: a CA do RPC vem do
+    // bundle e é a ÚNICA raiz confiável (RNF04/L-08). Sem ela o handshake
+    // falha — de propósito: o armazenamento do sistema não conhece a CA de
+    // desenvolvimento.
+    //
+    // Por isso a ausência do asset **falha aqui e alto**: sem esta guarda, este
+    // arquivo acusa "sem conexão" e o sintoma aponta para o servidor quando o
+    // problema é o bundle. Mesmo molde de
+    // `apps/patient/integration_test/backend_connection_test.dart`.
+    final caBytes = await _devRpcCaBytes();
+    if (caBytes == null) {
+      fail(
+        'A CA do RPC não está no bundle (${BackendConfig.rpcCaAsset}). Rode '
+        './scripts/dev/sync_dev_ca.sh com a stack de pé — sem ela o handshake '
+        'falha e este teste falaria de rede em vez de falar de asset.',
+      );
+    }
+    backend = BackendClient(trustedCaBytes: caBytes);
+    // O paciente entra em cena só para dar ao ACS o que receber. Ele usa o
+    // `api.Client` cru, então monta o mesmo `SecurityContext` à mão.
+    patientClient = api.Client(
+      const String.fromEnvironment('SINALACS_HOST', defaultValue: 'https://10.0.2.2/'),
+      securityContext: SecurityContext()..setTrustedCertificatesBytes(caBytes),
+    )..connectivityMonitor = null;
+  });
+
+  tearDown(() {
+    backend.close();
+    patientClient.close();
+  });
+
+  Future<String> createRedAlertAsPatient() async {
+    final login = await patientClient.auth.developmentLogin(role: 'patient');
+    final created = await patientClient.alerts.createRedAlert(
+      accessToken: login.accessToken,
+      idempotencyKey: 'integ-${DateTime.now().microsecondsSinceEpoch}',
+      locationHash: 'sem-local-00',
+    );
+    return created.alertId;
+  }
+
+  test('o ACS autentica e recebe a própria microárea', () async {
+    // `developmentLogin` e não o login institucional: este arquivo roda contra
+    // a stack local com `ENABLE_DEV_LOGIN=true` e não carrega a senha do ACS
+    // (RF07) — o caminho com matrícula e senha é coberto pelo widget test e
+    // pelo teste de renovação de sessão, sem senha real em código de teste.
+    final session = await backend.developmentLogin(role: 'acs');
+
+    expect(session.role, 'acs');
+    expect(session.microAreaId, seedMicroAreaId);
+  });
+
+  test('o alerta publicado pelo backend chega ao ACS pelo broker e é confirmado', () async {
+    final session = await backend.developmentLogin(role: 'acs');
+    final microAreaId = session.microAreaId!;
+
+    final queue = AlertQueue(microAreaId: microAreaId);
+    final feed = MqttAlertFeed(queue: queue);
+
+    /// Espera o alerta ESPECÍFICO criado pelo teste.
+    ///
+    /// Não serve olhar `alerts.first`: com sessão persistente o broker
+    /// reentrega o que ficou pendente de execuções anteriores, e a fila ordena
+    /// por antiguidade — o primeiro seria justamente o alerta antigo do
+    /// backlog.
+    Future<PrioritizedAlert> waitFor(String alertId, {Duration timeout = const Duration(seconds: 20)}) async {
+      final deadline = DateTime.now().add(timeout);
+      while (DateTime.now().isBefore(deadline)) {
+        for (final alert in queue.alerts) {
+          if (alert.alertId == alertId) return alert;
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 200));
+      }
+      throw TimeoutException('o alerta $alertId não chegou pelo broker');
+    }
+
+    // Conecta com TLS usando a CA do asset. Falhar aqui aponta para o
+    // certificado sem SAN ou para a ACL do broker.
+    await feed.start(microAreaId: microAreaId, acsId: session.userId);
+    expect(feed.isConnected, isTrue, reason: 'o ACS não conectou ao broker');
+
+    try {
+      final alertId = await createRedAlertAsPatient();
+
+      final alert = await waitFor(alertId);
+      expect(alert.alertId, alertId);
+      expect(alert.riskLevel, 'red');
+      expect(alert.microAreaId, microAreaId);
+
+      final ack = await backend.acknowledge(alertId: alert.alertId);
+      expect(ack.acknowledged, isTrue);
+      expect(ack.status, api.AlertStatus.acknowledged);
+    } finally {
+      feed.stop();
+      queue.dispose();
+    }
+  });
+
+  test('a fila recusa alerta de fora da microárea do ACS', () async {
+    // Territorialização é invariante. A ACL do broker é a primeira barreira; a
+    // fila é a segunda.
+    final queue = AlertQueue(microAreaId: seedMicroAreaId);
+
+    final accepted = queue.upsert(PrioritizedAlert(
+      alertId: 'alerta-de-outra-area',
+      patientId: seedPatientId,
+      microAreaId: otherMicroAreaId,
+      riskLevel: 'red',
+      locationHash: 'sem-local-00',
+      triggeredAt: DateTime.now().toUtc(),
+    ));
+
+    expect(accepted, isFalse);
+    expect(queue.isEmpty, isTrue);
+    queue.dispose();
+  });
+
+  test('confirmar um alerta inexistente devolve acknowledged: false, não erro', () async {
+    await backend.developmentLogin(role: 'acs');
+
+    final ack = await backend.acknowledge(
+      alertId: '00000000-0000-4000-8000-0000000000ff',
+    );
+
+    expect(ack.acknowledged, isFalse);
+  });
+
+  test('a fila offline de visitas sincroniza contra o servidor', () async {
+    await backend.developmentLogin(role: 'acs');
+
+    final queue = OfflineVisitQueue(
+      synchronizer: BackendVisitSynchronizer(backend: backend),
+    );
+
+    await queue.add(OfflineVisitRecord(
+      patientId: seedPatientId,
+      risk: 'red',
+      status: 'PENDENTE',
+      outcome: 'realizada',
+    ));
+
+    final result = await queue.sync();
+
+    expect(result.kind, SyncOutcomeKind.synced);
+    expect(queue.pendingCount, 0);
+    expect(queue.syncedCount, 1);
+  });
+
+  test('a visita confirmada SAI do disco criptografado', () async {
+    // O único lugar onde retenção, criptografia real e servidor real se
+    // encontram: o teste hermético não tem SQLCipher, e o de criptografia não
+    // tem servidor. Minimização (LGPD-RF07 / seção 5.6 de spec/lgpd_design.md):
+    // o que já chegou ao servidor não continua num aparelho que pode ser
+    // perdido ou roubado.
+    const nome = 'sinalacs_retencao_probe.db';
+    await EncryptedLocalDatabase.deleteDatabaseFile(nome);
+
+    await backend.developmentLogin(role: 'acs');
+
+    final store = SqlCipherVisitStore(
+      keyStore: InMemoryDatabaseKeyStore(),
+      databaseName: nome,
+    );
+    final queue = OfflineVisitQueue(
+      store: store,
+      synchronizer: BackendVisitSynchronizer(backend: backend),
+    );
+
+    await queue.add(OfflineVisitRecord(
+      patientId: seedPatientId,
+      risk: 'red',
+      status: 'PENDENTE',
+      outcome: 'realizada',
+    ));
+    expect(await store.load(), hasLength(1), reason: 'a visita não foi gravada');
+
+    final result = await queue.sync();
+
+    expect(result.kind, SyncOutcomeKind.synced, reason: result.message);
+    expect(queue.syncedCount, 1);
+    expect(await store.load(), isEmpty, reason: 'a visita continua no aparelho');
+
+    await store.close();
+    await EncryptedLocalDatabase.deleteDatabaseFile(nome);
+  });
+
+  test('reenviar a mesma visita não a duplica no servidor', () async {
+    await backend.developmentLogin(role: 'acs');
+
+    // `version` fica no padrão 1, que é a versão com que o servidor grava todo
+    // insert. Enviar 0 fazia o reenvio cair na regra de atualização
+    // (`entry.version == existing.version - 1`) e subir para 2 — o oposto da
+    // idempotência que este teste existe para provar.
+    final visit = OfflineVisitRecord(
+      patientId: seedPatientId,
+      risk: 'red',
+      status: 'PENDENTE',
+      outcome: 'realizada',
+    );
+
+    final synchronizer = BackendVisitSynchronizer(backend: backend);
+
+    final first = await synchronizer.push([visit]);
+    // Mesmo localId, mesma versão: é o retry de quem não viu a resposta.
+    final retry = await synchronizer.push([visit]);
+
+    expect(first.single.status, 'synced');
+    expect(retry.single.status, 'synced');
+    expect(retry.single.serverVersion, first.single.serverVersion);
+  });
+}

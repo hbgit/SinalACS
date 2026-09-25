@@ -1,0 +1,30 @@
+### Uma visita registrada offline, enviada pelo app do ACS para sincronização.
+###
+### `localId` é gerado no dispositivo e tem índice único em `visits`: é o que
+### permite reenviar o mesmo lote depois de uma falha de rede sem duplicar a
+### visita. `version` é a versão que o dispositivo conhece — divergir da versão
+### do servidor significa que alguém alterou a visita no meio, e o resultado é
+### conflito, não sobrescrita.
+class: VisitSyncEntry
+fields:
+  localId: String
+  patientId: String
+  scheduledAt: DateTime
+  completedAt: DateTime?
+  status: String
+  riskLevelBefore: RiskLevel
+  riskLevelAfter: RiskLevel?
+  notes: Map<String, String>
+  version: int
+  ### Como o check-in desta visita foi registrado (RF12, decisão §4). Hoje
+  ### `visits.sync` só recebe `manual` — nenhum app integra geofencing nativo
+  ### nesta task; o campo existe para não exigir mais uma migração quando essa
+  ### integração for implementada.
+  arrivalMethod: ArrivalMethod
+  ### Momento (relógio do SERVIDOR) em que esta visita foi sincronizada pela
+  ### última vez. Só populado no sentido servidor→dispositivo (`visits.pull`);
+  ### `visits.sync` (dispositivo→servidor) ignora este campo quando presente
+  ### na entrada recebida — o servidor sempre atribui seu próprio relógio, nunca
+  ### confia no do cliente. Opcional para não quebrar o sentido de envio, onde
+  ### o dispositivo nunca o preenche.
+  syncAt: DateTime?

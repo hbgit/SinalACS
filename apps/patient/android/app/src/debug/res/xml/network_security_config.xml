@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Sem exceção de cleartext — e é assim que tem de ficar.
+
+    Até o plano de TLS (RNF04/L-08) este arquivo liberava HTTP puro para
+    10.0.2.2/localhost/127.0.0.1, porque o RPC de desenvolvimento respondia em
+    http://10.0.2.2:8080. Aquela porta deixou de ser publicada e o backend só
+    responde por HTTPS na 443, com o certificado que o Traefik apresenta: não há
+    mais caminho sem criptografia para liberar.
+
+    O `<base-config>` repete o default de targetSdk 28+ de forma explícita, para
+    que "não há exceção" seja uma declaração escrita, e não um arquivo vazio que
+    alguém leria como esquecimento.
+
+    MEDIDO no emulador (API 36, Flutter 3.44.8), no app do ACS, cujo arquivo era
+    byte a byte igual a este — e o resultado é contraintuitivo: quem bloqueia o
+    cleartext do app NÃO é este arquivo. Com a exceção, com o arquivo sem regra
+    nenhuma e com `cleartextTrafficPermitted="false"` explícito, o `dart:io`
+    completou um `POST http://10.0.2.2/health/check` e recebeu 404 do Traefik
+    nas TRÊS versões; acrescentar `android:usesCleartextTraffic="false"` ao
+    manifest de debug também não mudou nada. Não trate este arquivo como a
+    barreira: ele é a declaração da política (vale para a pilha Java — OkHttp,
+    WebView, HttpURLConnection —, não para o `dart:io` desta engine). O que
+    fecha o caminho em texto claro é o outro lado: a 8080 não existe mais, então
+    um dart-define apontando de volta para `http://` encontra a porta fechada
+    (medido na mesma sonda).
+
+    O manifest de src/main/ não é tocado: builds de release continuam sem
+    configuração nenhuma.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false"/>
+</network-security-config>

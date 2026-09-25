@@ -1,4 +1,10 @@
 ### Estado de sincronização offline-first, espelha a SyncFsm.
+###
+### `rejected` é TERMINAL: ao contrário de `error`, que é retentável (o
+### dispositivo tenta de novo mais tarde), uma visita `rejected` nunca vai dar
+### certo numa próxima tentativa — o motivo não muda com o tempo (ex.: paciente
+### fora da microárea do ACS, identificador malformado). `SyncFsm.rejected` não
+### tem transição de saída; `networkUp`/`syncStart` não o alcançam.
 enum: SyncStatus
 serialized: byName
 values:
@@ -6,3 +12,4 @@ values:
   - synced
   - conflict
   - error
+  - rejected

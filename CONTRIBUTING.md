@@ -44,8 +44,8 @@ com uma convenção genérica, a documentação do projeto prevalece.
 
 ## Pré-requisitos
 
-- Flutter SDK compatível com Dart `>=3.3.0 <4.0.0`; a CI usa Flutter 3.24.0.
-- Dart SDK 3.8.0 para o backend.
+- Flutter SDK compatível com Dart `>=3.8.0 <4.0.0` (`apps/patient`, `apps/acs`) ou `>=3.3.0 <4.0.0` (`apps/admin`); a CI usa Flutter 3.44.8.
+- Dart SDK `>=3.8.0` para o backend.
 - Docker Engine com Docker Compose v2.
 - Android SDK API 36 e JDK 17 para executar ou gerar os aplicativos Android.
 
@@ -71,8 +71,8 @@ públicos. Para limitações do piloto, consulte
 ## Validar alterações
 
 Execute as validações relativas aos componentes alterados. A CI executa análise
-e testes para backend e ambos os aplicativos, além do build da imagem do
-servidor.
+e testes para o backend e os três aplicativos (paciente, ACS, admin), além do
+build da imagem do servidor e do build Android do app admin.
 
 ### Backend
 
@@ -104,7 +104,7 @@ docker build -f backend/sinalacs_server/Dockerfile backend
 
 ### Aplicativos Flutter
 
-Execute em `apps/acs` ou `apps/patient`, conforme a área alterada:
+Execute em `apps/acs`, `apps/patient` ou `apps/admin`, conforme a área alterada:
 
 ```bash
 flutter pub get
@@ -115,8 +115,14 @@ flutter test
 Para executar um aplicativo em dispositivo ou emulador:
 
 ```bash
-flutter run
+./scripts/dev/run_acs.sh      # ACS: preenche os dart-defines a partir do .env
+cd apps/patient && flutter run
 ```
+
+O ACS precisa do script: a senha do broker é constante de compilação, sem valor
+padrão, e é gerada por máquina. Um `flutter build apk` puro **falha** — a
+guarda vive em `apps/acs/android/app/build.gradle.kts` — em vez de compilar em
+silêncio um APK que nunca recebe alerta.
 
 ## Alterações no backend
 

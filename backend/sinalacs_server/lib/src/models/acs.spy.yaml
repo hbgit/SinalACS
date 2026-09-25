@@ -13,3 +13,9 @@ fields:
 indexes:
   acs_ubs_idx:
     fields: ubsId
+  ### O login institucional procura o ACS por `enrollmentId`. Sem unicidade, a
+  ### matrícula deixaria de identificar uma pessoa: duas linhas com 'ACS-001' e
+  ### o login passaria a escolher a primeira que o Postgres devolvesse.
+  acs_enrollment_id_key:
+    fields: enrollmentId
+    unique: true

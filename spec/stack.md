@@ -16,7 +16,7 @@
 ## 2. DX, Autenticação & Infraestrutura
 
 * **IaC:** Pulumi (com TypeScript) para provisionar os containers em VPS robustas. Abstrai a infraestrutura como código com forte tipagem, sem o *vendor lock-in* do AWS CDK.
-* **Autenticação na Borda:** Módulo de autenticação na camada de aplicação do backend acoplado ao **Traefik** como *Reverse Proxy/Edge Gateway*. O Traefik roteia tráfego REST e os WebSockets do MQTT. Ainda não implementado — hoje o backend só tem um endpoint de login de desenvolvimento, sem autenticação institucional real.
+* **Autenticação na Borda:** Módulo de autenticação na camada de aplicação do backend acoplado ao **Traefik** como *Reverse Proxy/Edge Gateway*. O Traefik roteia tráfego REST e os WebSockets do MQTT. Ainda não implementado — hoje o backend só tem um endpoint de login de desenvolvimento, sem autenticação institucional real. **Atualização (2026-09-18):** a autenticação institucional existe (`auth.loginInstitutional`, RF07) — matrícula + senha com Argon2id contra `user_credentials`, bloqueio por tentativas e auditoria. O que segue não implementado é o desenho desta seção: a autenticação vive na camada de aplicação do backend, não acoplada ao Traefik, e o RPC segue sem TLS (L-08).
 * **Login Fricção Zero:** A entrada *passwordless* por OTP ou QR Code no app do paciente é delegada à camada de aplicação.
 
 
@@ -32,3 +32,36 @@ A **Sincronização Bidirecional Offline-First** é o componente de maior risco 
 ## 4. Docker-Compose MVTS
 
 A decisão arquitetural é usar Postgres + Mosquitto + Traefik como reverse proxy na stack local, orquestrados via Docker Compose. A topologia concreta (serviços de inicialização de banco/broker, TLS no MQTT, variáveis de ambiente de produção, healthchecks) evoluiu bastante desde a concepção inicial deste documento — o [`docker-compose.yml`](../docker-compose.yml) na raiz do repositório é a fonte da verdade operacional atual, não um exemplo espelhado aqui (evita os dois arquivos divergirem silenciosamente ao longo do tempo, como já havia acontecido).
+
+## 5. Decisões de stack pendentes de implementação (2026-09-16)
+
+`spec/validation_report.md` identificou lacunas que exigiam decisão de
+arquitetura antes de qualquer código novo. As decisões abaixo estão
+detalhadas em `docs/superpowers/specs/2026-09-16-decisoes-produto-pos-validacao.md`.
+Desse documento, já têm implementação (mesmo que parcial, com limitações
+conhecidas): criptografia de colunas (§6), geocélula do mapa (§1, RF10),
+onboarding e consentimento (§2, RF02) e a metade central→dispositivo da
+sincronização (§5, RF15 — pull incremental; a leitura fica do lado do ACS,
+não há geração de mudança do lado do paciente ainda). Lembretes locais
+(§3.1, RF06) também têm implementação no app do paciente. Ainda **não**
+implementados: push segmentado (§3.2, RF14 — bloqueado externamente, sem
+projeto Firebase) e geofencing (§4, RF12 — só o contrato de dados
+`arrivalMethod` foi desenhado, sem o serviço de geofence em primeiro plano):
+
+* **Criptografia de colunas no PostgreSQL (RNF03/INV-04, §6 — implementada):**
+  decidido usar criptografia de aplicação (AES-256-GCM em Dart, na camada de
+  repositório, via `package:cryptography` ^2.7.0 — `backend/sinalacs_server/lib/src/infrastructure/crypto/health_data_cipher.dart`),
+  não `pgcrypto` em SQL — evita que o dado de saúde em texto claro passe pelo
+  `serverpod_query_log` antes de virar ciphertext. A chave (`HEALTH_DATA_ENCRYPTION_KEY`,
+  hex de 64 caracteres) segue o mesmo padrão de segredo por variável de
+  ambiente já usado para `JWT_SECRET`/`AUDIT_CHAIN_SECRET` — gerada por
+  `scripts/dev/bootstrap_env.sh`, opcional em `development` (cai num valor
+  público conhecido) e obrigatória fora dele —, sem introduzir um KMS externo
+  nesta fase.
+* **Push segmentado (RF14):** Firebase Cloud Messaging é o provedor
+  escolhido, mas a decisão está **bloqueada externamente** — não existe
+  projeto Firebase provisionado neste repositório.
+* **Geofencing (RF12):** rejeitado rastreamento contínuo em segundo plano do
+  ACS; adotado geofence único atrelado a uma visita ativa, com serviço em
+  primeiro plano e notificação persistente, para evitar a política mais
+  restritiva de "background location" da Play Store.

@@ -1,0 +1,312 @@
+import 'package:sinalacs_acs/core/network/auth_session.dart';
+import 'package:sinalacs_acs/core/network/backend_client.dart';
+import 'package:sinalacs_acs/core/services/alert_feed.dart';
+import 'package:sinalacs_acs/core/services/alert_queue.dart';
+import 'package:sinalacs_acs/core/services/offline_visit_queue.dart';
+import 'package:sinalacs_client/sinalacs_client.dart';
+
+/// UUIDs do seed de desenvolvimento. Dados sintéticos.
+const seedAcsId = '00000000-0000-4000-8000-000000000002';
+const seedPatientId = '00000000-0000-4000-8000-000000000001';
+const seedMicroAreaId = '00000000-0000-4000-8000-000000000003';
+const otherMicroAreaId = '00000000-0000-4000-8000-000000000099';
+
+/// UUIDs sintéticos distintos, para os testes que precisam de mais de um
+/// paciente. Nome próprio não entra em teste de repositório de saúde.
+String syntheticPatientId(int n) =>
+    '00000000-0000-4000-8000-${n.toString().padLeft(12, '0')}';
+
+/// Célula de teste com centro determinístico (ver
+/// `apps/acs/test/location_cell_test.dart`), para exercitar o caminho do
+/// mapa com posição sem depender de GPS real de paciente algum.
+const testLocationCell = '-1580:-4783';
+
+class FakeAcsBackend implements AcsBackend {
+  FakeAcsBackend({this.loginFailure, this.acknowledged = true, this.microAreaId = seedMicroAreaId});
+
+  BackendFailure? loginFailure;
+  bool acknowledged;
+  String? microAreaId;
+
+  /// Pacientes que `listPatients()` devolve. Vazio por padrão: um teste que
+  /// não configurar isto exercita o caminho "sem paciente na microárea".
+  List<MicroAreaPatient> patients = const [];
+
+  /// Falha da chamada, como uma queda de rede ao carregar a lista.
+  BackendFailure? listPatientsFailure;
+
+  int listPatientsCount = 0;
+
+  final List<String> acknowledgedAlertIds = <String>[];
+  int loginCount = 0;
+
+  AuthSession? _session;
+
+  @override
+  AuthSession? get session => _session;
+
+  @override
+  bool get isAuthenticated => _session != null;
+
+
+  /// Credencial que [login] recebeu. `null` enquanto a tela não chamar o
+  /// backend — é o que prova tanto "enviou o que foi digitado" quanto "campo em
+  /// branco não chamou nada".
+  ({String matricula, String senha})? lastCredentials;
+
+  @override
+  Future<AuthSession> login({
+    required String matricula,
+    required String senha,
+  }) async {
+    loginCount++;
+    lastCredentials = (matricula: matricula, senha: senha);
+    return _issueSession();
+  }
+
+  /// Ferramenta de desenvolvimento (`tool/`, `integration_test/`). Sem
+  /// credencial, não há o que registrar: quem exercita o caminho do produto
+  /// (RF07) é [login].
+  @override
+  Future<AuthSession> developmentLogin({required String role}) =>
+      _issueSession();
+
+  Future<AuthSession> _issueSession() async {
+    final failure = loginFailure;
+    if (failure != null) throw failure;
+
+    final session = AuthSession(
+      accessToken: 'token-de-teste',
+      tokenType: 'Bearer',
+      userId: seedAcsId,
+      role: 'acs',
+      microAreaId: microAreaId,
+      expiresAt: DateTime.now().toUtc().add(const Duration(minutes: 15)),
+    );
+    _session = session;
+    return session;
+  }
+
+  @override
+  Future<AlertAckResult> acknowledge({required String alertId}) async {
+    acknowledgedAlertIds.add(alertId);
+    return AlertAckResult(
+      alertId: alertId,
+      acknowledged: acknowledged,
+      status: acknowledged ? AlertStatus.acknowledged : null,
+    );
+  }
+
+  final List<List<VisitSyncEntry>> syncedVisitBatches = <List<VisitSyncEntry>>[];
+
+  /// Falha da chamada inteira, como uma queda de rede.
+  BackendFailure? syncFailure;
+
+  /// Resultado por visita; ausente significa `synced`.
+  VisitSyncResult Function(VisitSyncEntry entry)? syncResultFor;
+
+  @override
+  Future<List<VisitSyncResult>> syncVisits(List<VisitSyncEntry> visits) async {
+    syncedVisitBatches.add(List.of(visits));
+    final failure = syncFailure;
+    if (failure != null) throw failure;
+
+    final custom = syncResultFor;
+    if (custom != null) return [for (final visit in visits) custom(visit)];
+
+    return [
+      for (final visit in visits)
+        VisitSyncResult(
+          localId: visit.localId,
+          syncStatus: SyncStatus.synced,
+          serverVersion: visit.version + 1,
+        ),
+    ];
+  }
+
+  /// Falha não classificada (não é `BackendFailure`), para exercitar o ramo
+  /// `catch (error, ...)` genérico de `_loadMicroAreaPatients` em `app.dart` —
+  /// algo que nenhum `BackendFailure` simula. Checada antes de
+  /// [listPatientsFailure].
+  Object? listPatientsUnclassifiedFailure;
+
+  @override
+  Future<List<MicroAreaPatient>> listPatients() async {
+    listPatientsCount++;
+    final unclassified = listPatientsUnclassifiedFailure;
+    if (unclassified != null) throw unclassified;
+    final failure = listPatientsFailure;
+    if (failure != null) throw failure;
+    return patients;
+  }
+
+  /// Entradas que `pullVisits` devolve. Vazio por padrão.
+  List<VisitSyncEntry> pullEntries = const [];
+
+  /// Falha da chamada, como uma queda de rede ou sessão expirada.
+  BackendFailure? pullFailure;
+
+  /// Falha não classificada (não é `BackendFailure`), para exercitar o ramo
+  /// `catch (error, ...)` genérico de `_pullVisits` em `app.dart` — algo que
+  /// nenhum `BackendFailure` simula. Checada antes de [pullFailure].
+  Object? pullUnclassifiedFailure;
+
+  /// `since` recebido em cada chamada, na ordem em que ocorreram — prova que
+  /// o cursor lido é exatamente o que chega ao backend.
+  final List<DateTime> pullSinceCalls = <DateTime>[];
+
+  @override
+  Future<List<VisitSyncEntry>> pullVisits({required DateTime since}) async {
+    pullSinceCalls.add(since);
+    final unclassified = pullUnclassifiedFailure;
+    if (unclassified != null) throw unclassified;
+    final failure = pullFailure;
+    if (failure != null) throw failure;
+    return pullEntries;
+  }
+
+  @override
+  void close() {}
+}
+
+/// Feed de alertas controlado pelo teste.
+///
+/// Expõe a [AlertQueue] para que o teste empurre alertas como se tivessem
+/// chegado pelo broker, sem precisar de rede nem de emulador.
+class FakeAlertFeed implements AlertFeed {
+  FakeAlertFeed(this.queue, {this.failOnStart = false, this.failure, this.failuresBeforeSuccess = 0});
+
+  final AlertQueue queue;
+  final bool failOnStart;
+
+  /// Falha já classificada, para exercitar cada banner do painel.
+  ///
+  /// `failOnStart` continua lançando um erro genérico de propósito: é o ramo de
+  /// defesa do shell, o que nenhum `AlertFeedFailure` cobre.
+  final AlertFeedFailure? failure;
+
+  /// Quantas chamadas a [start] devem falhar antes de uma que conecta.
+  ///
+  /// É o que prova que a retentativa do shell não só acontece, mas **dá
+  /// certo**: sem isto, todo teste de reconexão ficaria preso numa falha para
+  /// sempre.
+  final int failuresBeforeSuccess;
+
+  bool started = false;
+  bool stopped = false;
+  String? startedTopicMicroArea;
+
+  /// Quantas vezes [start] foi chamado — inclusive as que falharam.
+  int startCount = 0;
+
+  @override
+  bool get isConnected => started;
+
+  @override
+  void Function(bool connected)? onConnectionChanged;
+
+  @override
+  Future<void> start({required String microAreaId, required String acsId}) async {
+    startCount++;
+    if (startCount <= failuresBeforeSuccess) {
+      throw failure ?? const AlertFeedFailure(
+        AlertFeedFailureKind.unreachable,
+        title: 'Sem conexão com a central de alertas.',
+        detail: 'Novos alertas podem não estar chegando.',
+        transient: true,
+      );
+    }
+    final classified = failure;
+    if (classified != null) throw classified;
+    if (failOnStart) throw StateError('broker indisponível');
+    started = true;
+    startedTopicMicroArea = microAreaId;
+    onConnectionChanged?.call(true);
+  }
+
+  @override
+  void stop() {
+    started = false;
+    stopped = true;
+  }
+
+  /// Simula a chegada de um alerta pelo tópico assinado.
+  void deliver(PrioritizedAlert alert) => queue.upsert(alert);
+}
+
+/// Armazenamento que recusa gravar, para acender `persistenceFailed`.
+///
+/// Separar `load` de `save` importa: um banco que abre e depois falha ao gravar
+/// é o caso em que o sinalizador precisa acender **depois** do `initState` —
+/// exatamente o que um campo congelado ali não enxergava.
+class FailingVisitStore implements VisitStore {
+  FailingVisitStore({this.failOnLoad = true, this.failOnSave = true});
+
+  final bool failOnLoad;
+  final bool failOnSave;
+
+  List<OfflineVisitRecord> _visits = <OfflineVisitRecord>[];
+
+  @override
+  Future<List<OfflineVisitRecord>> load() async {
+    if (failOnLoad) throw StateError('sem banco');
+    return List.of(_visits);
+  }
+
+  @override
+  Future<void> save(List<OfflineVisitRecord> visits) async {
+    if (failOnSave) throw StateError('sem banco');
+    _visits = List.of(visits);
+  }
+}
+
+/// Sincronizador que devolve o resultado programado pelo teste.
+class FakeVisitSynchronizer implements VisitSynchronizer {
+  FakeVisitSynchronizer({this.statusFor, this.messageFor, this.throwOnPush = false});
+
+  /// Status por localId; ausente significa `synced`.
+  String Function(OfflineVisitRecord visit)? statusFor;
+
+  /// Motivo devolvido pelo servidor, como em `VisitSyncResult.message`.
+  String? Function(OfflineVisitRecord visit)? messageFor;
+  bool throwOnPush;
+
+  final List<List<OfflineVisitRecord>> batches = <List<OfflineVisitRecord>>[];
+
+  @override
+  Future<List<VisitSyncOutcome>> push(List<OfflineVisitRecord> visits) async {
+    batches.add(List.of(visits));
+    if (throwOnPush) throw StateError('sem rede');
+
+    return [
+      for (final visit in visits)
+        VisitSyncOutcome(
+          localId: visit.localId,
+          status: statusFor?.call(visit) ?? 'synced',
+          serverVersion: visit.version + 1,
+          message: messageFor?.call(visit),
+        ),
+    ];
+  }
+}
+
+PrioritizedAlert testAlert({
+  required String alertId,
+  String riskLevel = 'red',
+  String microAreaId = seedMicroAreaId,
+  DateTime? triggeredAt,
+  // Ausente por padrão: um teste que não passar isto exercita o caminho
+  // "sem GPS no paciente", que é o estado mais comum e não deve fabricar
+  // marcador nenhum no mapa.
+  String? locationCell,
+}) {
+  return PrioritizedAlert(
+    alertId: alertId,
+    patientId: seedPatientId,
+    microAreaId: microAreaId,
+    riskLevel: riskLevel,
+    locationHash: 'sem-local-00',
+    locationCell: locationCell,
+    triggeredAt: triggeredAt ?? DateTime.utc(2026, 9, 11, 12),
+  );
+}

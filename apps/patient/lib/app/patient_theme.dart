@@ -8,6 +8,16 @@ abstract final class PatientColors {
   static const accent = Color(0xFF0D9488);
   static const accentDark = Color(0xFF0F766E);
   static const danger = Color(0xFFDC2626);
+
+  /// Variantes de `accent`/`danger` para uso como TEXTO/ÍCONE sobre
+  /// superfície escura (`surface`/`surfaceRaised`), não como preenchimento.
+  ///
+  /// `accent` só atinge 5.37:1 sobre o fundo do Scaffold — sobre
+  /// `surfaceRaised` cai para 3.91:1, abaixo de 4.5:1 (WCAG 1.4.3). `danger`
+  /// como preenchimento do botão de pânico continua correto (branco sobre
+  /// ele dá 4.83:1); como texto sobre card cairia para 3.03:1.
+  static const accentOnSurface = Color(0xFF2DD4BF);
+  static const dangerOnSurface = Color(0xFFF87171);
 }
 
 ThemeData buildPatientTheme() {

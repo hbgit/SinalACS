@@ -2,10 +2,12 @@ import 'package:serverpod/serverpod.dart';
 import 'package:sinalacs_server/src/application/alerts/red_alert_service.dart';
 import 'package:sinalacs_server/src/config/app_config.dart';
 import 'package:sinalacs_server/src/domain/entities/alert_delivery.dart';
+import 'package:sinalacs_server/src/endpoints/health_endpoint.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
 import 'package:sinalacs_server/src/runtime/alert_runtime.dart';
 import 'package:test/test.dart';
 
+import '../support/health_data_fixtures.dart';
 import 'test_tools/serverpod_test_tools.dart';
 
 /// Substitui o teste que subia o servidor `dart:io` com
@@ -36,9 +38,14 @@ const _microAreaId = '00000000-0000-4000-8000-000000000003';
 const _ubsId = '00000000-0000-4000-8000-000000000004';
 
 AppConfig _config({required bool enableDevLogin}) => AppConfig(
-      databaseUrl: 'postgresql://localhost/sinalacs_test',
       mqttBroker: 'localhost:1883',
       jwtSecret: 'test-secret',
+      auditChainSecret: 'test-audit-chain-secret',
+      // Hex de 64 caracteres: HealthDataCipher decodifica byte a byte
+      // para montar a chave AES-256 (ver AppConfig).
+      healthDataEncryptionKey: AppConfig.developmentHealthDataEncryptionKey,
+      cpfHashPepper: AppConfig.developmentCpfHashPepper,
+      smsGateway: 'log',
       mqttUsername: null,
       mqttPassword: null,
       mqttUseTls: false,
@@ -94,11 +101,10 @@ Future<void> _seed(Session session) async {
   // foram recuperadas sob o ORM do Serverpod.
   await Patient.db.insertRow(
     session,
-    Patient(
-      id: UuidValue.fromString(_patientId),
+    await encryptedPatient(
+      id: _patientId,
       emergencyContact: 'Contato de desenvolvimento',
       isChronic: false,
-      chronicConditions: [],
     ),
   );
   await Acs.db.insertRow(
@@ -142,9 +148,27 @@ void main() {
       expect(health.mqttConnected, isFalse);
     });
 
+    test('a sonda de saúde segue respondendo ok quando a verificação do banco falha',
+        () async {
+      final endpoint = HealthEndpoint(
+        databaseProbe: (_) async => throw Exception('db indisponível'),
+      );
+
+      final health = await endpoint.check(sessionBuilder.build());
+
+      expect(health.status, 'ok');
+      expect(health.dbConnected, isFalse);
+    });
+
     test('a triagem classifica de forma determinística', () async {
+      final session = sessionBuilder.build();
+      await _seed(session);
+
+      final login = await endpoints.auth.developmentLogin(sessionBuilder, role: 'patient');
+
       final vermelho = await endpoints.triage.evaluate(
         sessionBuilder,
+        accessToken: login.accessToken,
         chestPain: true,
         difficultyBreathing: false,
         fever: false,
@@ -152,8 +176,11 @@ void main() {
         bleeding: false,
         severeWeakness: false,
       );
+      expect(vermelho.risk, RiskLevel.red);
+
       final verde = await endpoints.triage.evaluate(
         sessionBuilder,
+        accessToken: login.accessToken,
         chestPain: false,
         difficultyBreathing: false,
         fever: false,
@@ -161,8 +188,6 @@ void main() {
         bleeding: false,
         severeWeakness: false,
       );
-
-      expect(vermelho.risk, RiskLevel.red);
       expect(verde.risk, RiskLevel.green);
     });
 
@@ -230,6 +255,87 @@ void main() {
       expect(confirmado.acknowledged, isTrue);
       expect(confirmado.status, AlertStatus.acknowledged);
       expect(await AlertDeliveryRecord.db.find(session), hasLength(1));
+    });
+
+    test('confirmar um alerta inexistente devolve acknowledged false, sem erro',
+        () async {
+      await _seed(sessionBuilder.build());
+      final tokenAcs =
+          await endpoints.auth.developmentLogin(sessionBuilder, role: 'acs');
+
+      final ack = await endpoints.alerts.acknowledge(
+        sessionBuilder,
+        accessToken: tokenAcs.accessToken,
+        alertId: '00000000-0000-4000-8000-0000000000ff',
+      );
+
+      expect(ack.alertId, '00000000-0000-4000-8000-0000000000ff');
+      expect(ack.acknowledged, isFalse);
+      expect(ack.status, isNull);
+    });
+
+    test('paciente consulta o status do próprio alerta mais recente', () async {
+      await _seed(sessionBuilder.build());
+      final token =
+          await endpoints.auth.developmentLogin(sessionBuilder, role: 'patient');
+
+      final semAlerta =
+          await endpoints.alerts.statusFor(sessionBuilder, accessToken: token.accessToken);
+      expect(semAlerta.found, isFalse);
+      expect(semAlerta.alertId, isNull);
+
+      final criado = await endpoints.alerts.createRedAlert(
+        sessionBuilder,
+        accessToken: token.accessToken,
+        idempotencyKey: 'status-1',
+        locationHash: 'hash-sintetico',
+      );
+
+      final status =
+          await endpoints.alerts.statusFor(sessionBuilder, accessToken: token.accessToken);
+      expect(status.found, isTrue);
+      expect(status.alertId, criado.alertId);
+      expect(status.status, AlertStatus.pending);
+      expect(status.acknowledgedAt, isNull);
+
+      final tokenAcs =
+          await endpoints.auth.developmentLogin(sessionBuilder, role: 'acs');
+      await endpoints.alerts.acknowledge(
+        sessionBuilder,
+        accessToken: tokenAcs.accessToken,
+        alertId: criado.alertId,
+      );
+
+      final statusDepoisDoAck =
+          await endpoints.alerts.statusFor(sessionBuilder, accessToken: token.accessToken);
+      expect(statusDepoisDoAck.status, AlertStatus.acknowledged);
+      expect(statusDepoisDoAck.acknowledgedAt, isNotNull);
+    });
+
+    test('um ACS não pode consultar alerts.statusFor', () async {
+      await _seed(sessionBuilder.build());
+      final tokenAcs =
+          await endpoints.auth.developmentLogin(sessionBuilder, role: 'acs');
+
+      expect(
+        () => endpoints.alerts.statusFor(sessionBuilder, accessToken: tokenAcs.accessToken),
+        throwsA(isA<AlertPermissionException>()),
+      );
+    });
+
+    test('confirmar com alertId vazio é rejeitado pelo endpoint', () async {
+      await _seed(sessionBuilder.build());
+      final tokenAcs =
+          await endpoints.auth.developmentLogin(sessionBuilder, role: 'acs');
+
+      await expectLater(
+        endpoints.alerts.acknowledge(
+          sessionBuilder,
+          accessToken: tokenAcs.accessToken,
+          alertId: '   ',
+        ),
+        throwsA(isA<AlertValidationException>()),
+      );
     });
 
     test('com o broker fora, o alerta é gravado e a entrega fica pendente',

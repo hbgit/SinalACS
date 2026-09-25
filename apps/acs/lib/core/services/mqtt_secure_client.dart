@@ -5,6 +5,69 @@ import 'package:crypto/crypto.dart';
 import 'package:mqtt_client/mqtt_client.dart';
 import 'package:mqtt_client/mqtt_server_client.dart';
 
+/// Prefixo dos tópicos de alerta, espelhando `AlertDelivery.topicPrefix` no
+/// servidor e a ACL do broker (infra/docker/mosquitto/aclfile).
+///
+/// Os três lugares precisam concordar: o servidor publica aqui, o broker só
+/// autoriza aqui, e o app só recebe o que assinar aqui.
+const String alertTopicPrefix = 'sinalacs/v1/microareas';
+
+/// Tópico onde os alertas de uma microárea são publicados.
+String alertTopicFor(String microAreaId) =>
+    '$alertTopicPrefix/$microAreaId/alerts';
+
+/// Tópico onde o ACS confirma o recebimento de um alerta.
+String ackTopicFor(String alertId) => 'sinalacs/v1/alerts/$alertId/acks';
+
+/// O broker respondeu, e recusou.
+///
+/// Distinguir isso de "não deu para chegar ao broker" é o que separa uma senha
+/// errada de uma central fora do ar — que antes chegavam à tela como a mesma
+/// frase.
+class MqttConnectionRefused implements Exception {
+  const MqttConnectionRefused(this.message, {this.transient = false});
+
+  /// Já em português e pronta para a tela. **Nunca** contém credencial.
+  final String message;
+
+  /// Se vale a pena tentar de novo sem intervenção humana.
+  ///
+  /// Ver [mqttRefusalIsTransient] para o critério.
+  final bool transient;
+
+  @override
+  String toString() => message;
+}
+
+/// Traduz o código de recusa do CONNACK.
+///
+/// O `mqtt_client` grava o motivo em `connectionStatus.returnCode` antes de
+/// derrubar a conexão; o código antigo lançava um `StateError` genérico e
+/// jogava fora a única informação que separava os casos. Devolve `null` quando
+/// não houve recusa — aí a falha foi de transporte, não de autorização.
+///
+/// Nunca cita usuário nem senha: a mensagem vai para a tela do ACS.
+String? mqttRefusalReason(MqttConnectReturnCode? code) => switch (code) {
+      MqttConnectReturnCode.badUsernameOrPassword ||
+      MqttConnectReturnCode.notAuthorized =>
+        'A central recusou as credenciais deste aplicativo.',
+      MqttConnectReturnCode.identifierRejected =>
+        'A central recusou o identificador deste aplicativo.',
+      MqttConnectReturnCode.brokerUnavailable =>
+        'A central de alertas está indisponível.',
+      MqttConnectReturnCode.unacceptedProtocolVersion =>
+        'A central não aceita a versão de protocolo deste aplicativo.',
+      _ => null,
+    };
+
+/// Se vale tentar de novo depois de uma recusa.
+///
+/// Só `brokerUnavailable`: a central pode estar reiniciando ou sobrecarregada.
+/// Credencial e identificador recusados não mudam sozinhos — insistir neles
+/// só gastaria bateria sem chance de sucesso.
+bool mqttRefusalIsTransient(MqttConnectReturnCode? code) =>
+    code == MqttConnectReturnCode.brokerUnavailable;
+
 class SecureMqttConfig {
   const SecureMqttConfig({
     required this.brokerHost,
@@ -12,10 +75,10 @@ class SecureMqttConfig {
     required this.clientId,
     required this.topic,
     this.useTls = true,
-    this.useWebSocket = true,
+    this.useWebSocket = false,
     this.username,
     this.password,
-    this.caCertificatePath,
+    this.caCertificate,
   });
 
   final String brokerHost;
@@ -23,10 +86,21 @@ class SecureMqttConfig {
   final String clientId;
   final String topic;
   final bool useTls;
+
+  /// O broker publica **apenas** a porta 8883 (TCP/TLS): não há listener
+  /// WebSocket. O default era `true`, o que fazia [MqttSecureClient.connect]
+  /// lançar `UnsupportedError` na configuração padrão — ou seja, o cliente se
+  /// autodesabilitava e nunca chegou a ser usado.
   final bool useWebSocket;
+
   final String? username;
   final String? password;
-  final String? caCertificatePath;
+
+  /// Certificado da CA que assina o broker, em bytes (PEM).
+  ///
+  /// São bytes e não caminho de arquivo porque no Android a CA vem de um asset
+  /// dentro do APK, onde não existe caminho no sistema de arquivos.
+  final List<int>? caCertificate;
 
   String get connectionUri {
     if (useWebSocket) {
@@ -46,6 +120,7 @@ class ReceivedMqttAlert {
     required this.microAreaId,
     required this.riskLevel,
     required this.locationHash,
+    this.locationCell,
     required this.triggeredAt,
   });
 
@@ -54,6 +129,12 @@ class ReceivedMqttAlert {
   final String microAreaId;
   final String riskLevel;
   final String locationHash;
+
+  /// Célula de baixa resolução (`"latCell:lngCell"`) calculada no dispositivo
+  /// do paciente — `null` quando o GPS do paciente não estava disponível.
+  /// O ACS só desenha um círculo de incerteza quando isto existe; nunca
+  /// fabrica posição a partir de [locationHash].
+  final String? locationCell;
   final DateTime triggeredAt;
 
   static ReceivedMqttAlert? tryParse(String body) {
@@ -70,6 +151,7 @@ class ReceivedMqttAlert {
         microAreaId: json['micro_area_id'] as String,
         riskLevel: json['risk_level'] as String,
         locationHash: (json['location_hash'] as String?) ?? (json['location_hash'] ?? 'unknown') as String,
+        locationCell: json['location_cell'] as String?,
         triggeredAt: DateTime.parse(triggeredAtRaw),
       );
     } on FormatException {
@@ -89,6 +171,7 @@ class MqttSecureAlertPayload {
     required this.longitude,
     required this.microAreaId,
     String? locationHash,
+    this.locationCell,
     String? timestampOverride,
   })  : locationHash = locationHash ?? _defaultLocationHash(latitude, longitude),
         timestamp = timestampOverride ?? DateTime.now().toUtc().toIso8601String();
@@ -100,6 +183,11 @@ class MqttSecureAlertPayload {
   final double longitude;
   final String microAreaId;
   final String locationHash;
+
+  /// Só preenchido quando o teste passa um valor explícito — nada aqui
+  /// fabrica uma célula a partir de latitude/longitude, esse cálculo é do
+  /// dispositivo do paciente (`apps/patient/lib/core/privacy/location_cell.dart`).
+  final String? locationCell;
   final String timestamp;
 
   Map<String, dynamic> toJson() {
@@ -112,16 +200,19 @@ class MqttSecureAlertPayload {
       'longitude': longitude,
       'micro_area_id': microAreaId,
       'location_hash': locationHash,
+      if (locationCell != null) 'location_cell': locationCell,
       'triggered_at': timestamp,
       'timestamp': timestamp,
-      'mqtt_topic': '/alerts/$microAreaId',
+      // Namespace do backend (AlertDelivery.topicPrefix) e da ACL do broker.
+      // Era '/alerts/$microAreaId', que não existe em nenhum dos dois.
+      'mqtt_topic': alertTopicFor(microAreaId),
     };
   }
 
   String toJsonString() => jsonEncode(toJson());
 
   static String _defaultLocationHash(double latitude, double longitude) {
-    final normalized = '${latitude.toStringAsFixed(6)}:${longitude.toStringAsFixed(6)}';
+    final normalized = '${latitude.toStringAsFixed(3)}:${longitude.toStringAsFixed(3)}';
     final bytes = utf8.encode(normalized);
     final digest = sha256.convert(bytes).toString();
     return digest.substring(0, 12);
@@ -158,7 +249,13 @@ class MqttSecureClient {
   final SecureMqttConfig config;
   MqttServerClient? _client;
 
-  Future<void> connect({required void Function(ReceivedMqttAlert alert) onAlert}) async {
+  bool get isConnected =>
+      _client?.connectionStatus?.state == MqttConnectionState.connected;
+
+  Future<void> connect({
+    required void Function(ReceivedMqttAlert alert) onAlert,
+    void Function(bool connected)? onConnectionChanged,
+  }) async {
     if (config.useWebSocket) {
       throw UnsupportedError('O transporte WebSocket será configurado pelo gateway de produção.');
     }
@@ -166,17 +263,62 @@ class MqttSecureClient {
     final client = MqttServerClient.withPort(config.brokerHost, config.clientId, config.port)
       ..keepAlivePeriod = 30
       ..secure = config.useTls
+      // Um ACS em campo perde rede o tempo todo; sem reconexão automática a
+      // fila de alertas simplesmente para de chegar, em silêncio.
+      ..autoReconnect = true
+      ..resubscribeOnAutoReconnect = true
+      ..onDisconnected = (() => onConnectionChanged?.call(false))
+      ..onAutoReconnected = (() => onConnectionChanged?.call(true))
+      ..onConnected = (() => onConnectionChanged?.call(true))
       ..connectionMessage = MqttConnectMessage()
           .withClientIdentifier(config.clientId)
+          // NÃO chamar startClean(): sessão persistente é o default
+          // (cleanStart = false). Com QoS 1, o broker guarda os alertas
+          // publicados enquanto este ACS estava offline e os entrega na
+          // reconexão — é o que impede um alerta vermelho de sumir porque o
+          // aparelho estava sem sinal. Depende de o clientId ser ESTÁVEL entre
+          // execuções; um id aleatório cria sessão nova a cada conexão e
+          // descarta o que estava pendente.
           .withWillQos(MqttQos.atLeastOnce);
-    if (config.useTls && config.caCertificatePath != null) {
+    final caCertificate = config.caCertificate;
+    if (config.useTls && caCertificate != null) {
+      // `withTrustedRoots: false` é deliberado: só a CA do broker é aceita,
+      // nenhuma autoridade pública. A verificação de hostname continua ligada —
+      // é o que o certificado com subjectAltName (infra/docker/mosquitto/init.sh)
+      // passou a satisfazer. Não desligue com `onBadCertificate`: seria abrir o
+      // caminho de spoofing do tópico de alertas.
       client.securityContext = SecurityContext(withTrustedRoots: false)
-        ..setTrustedCertificates(config.caCertificatePath!);
+        ..setTrustedCertificatesBytes(caCertificate);
     }
 
-    await client.connect(config.username, config.password);
+    // O cliente é assumido ANTES de conectar. Com `autoReconnect`, uma falha de
+    // conexão (certificado errado, credencial recusada) deixa o cliente
+    // tentando de novo indefinidamente; se a referência só fosse guardada
+    // depois do sucesso, esse cliente ficaria órfão, reconectando para sempre e
+    // fora do alcance de [disconnect].
+    _client = client;
+
+    try {
+      await client.connect(config.username, config.password);
+    } catch (error) {
+      // Lidos ANTES do disconnect, que zera o connectionStatus.
+      final returnCode = client.connectionStatus?.returnCode;
+      final refusal = mqttRefusalReason(returnCode);
+      disconnect();
+      if (refusal != null) {
+        throw MqttConnectionRefused(refusal, transient: mqttRefusalIsTransient(returnCode));
+      }
+      rethrow;
+    }
+
     if (client.connectionStatus?.state != MqttConnectionState.connected) {
-      throw StateError('Não foi possível conectar ao broker MQTT.');
+      final returnCode = client.connectionStatus?.returnCode;
+      final refusal = mqttRefusalReason(returnCode);
+      disconnect();
+      throw MqttConnectionRefused(
+        refusal ?? 'Não foi possível conectar ao broker MQTT.',
+        transient: mqttRefusalIsTransient(returnCode),
+      );
     }
 
     client.subscribe(config.topic, MqttQos.atLeastOnce);
@@ -193,7 +335,16 @@ class MqttSecureClient {
     _client = client;
   }
 
-  void disconnect() => _client?.disconnect();
+  void disconnect() {
+    final client = _client;
+    _client = null;
+    if (client == null) return;
+    // Desligar a reconexão automática vem PRIMEIRO: sem isso, o disconnect
+    // dispara o evento de reconexão e o cliente volta a tentar sozinho — quem
+    // pediu para parar não conseguiria parar.
+    client.autoReconnect = false;
+    client.disconnect();
+  }
 
   String _microAreaFromTopic(String topic) {
     final segments = topic.split('/').where((segment) => segment.isNotEmpty).toList();

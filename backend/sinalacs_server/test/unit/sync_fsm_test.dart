@@ -34,5 +34,34 @@ void main() {
 
       expect(fsm.state, SyncState.conflict);
     });
+
+    test('syncRejected registra recusa definitiva', () {
+      final fsm = SyncFsm();
+
+      fsm.trigger(SyncEvent.save);
+      fsm.trigger(SyncEvent.syncRejected);
+
+      expect(fsm.state, SyncState.rejected);
+    });
+
+    test('rejected é terminal: networkUp não tira a visita de lá', () {
+      final fsm = SyncFsm();
+
+      fsm.trigger(SyncEvent.save);
+      fsm.trigger(SyncEvent.syncRejected);
+      fsm.trigger(SyncEvent.networkUp);
+
+      expect(fsm.state, SyncState.rejected);
+    });
+
+    test('rejected é terminal: syncStart não tira a visita de lá', () {
+      final fsm = SyncFsm();
+
+      fsm.trigger(SyncEvent.save);
+      fsm.trigger(SyncEvent.syncRejected);
+      fsm.trigger(SyncEvent.syncStart);
+
+      expect(fsm.state, SyncState.rejected);
+    });
   });
 }

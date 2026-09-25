@@ -35,6 +35,7 @@ class OrmAlertStore implements AlertStore {
         triggeredAt: alert.triggeredAt,
         riskLevel: RiskLevel.red,
         locationHash: alert.locationHash,
+        locationCell: alert.locationCell,
         status: AlertStatus.pending,
         mqttTopic: alert.topic,
         deviceId: deviceId,
@@ -69,6 +70,7 @@ class OrmAlertStore implements AlertStore {
         microAreaId: alert.microAreaId!.uuid,
         riskLevel: alert.riskLevel.name,
         locationHash: alert.locationHash,
+        locationCell: alert.locationCell,
         triggeredAt: alert.triggeredAt,
       ),
       idempotencyKey: idempotencyKey,
@@ -147,5 +149,25 @@ class OrmAlertStore implements AlertStore {
 
     final existing = _transaction;
     return existing != null ? run(existing) : session.db.transaction(run);
+  }
+
+  @override
+  Future<AlertStatusSnapshot?> latestForPatient(String patientId) async {
+    final row = await Alert.db.findFirstRow(
+      _session(),
+      where: (t) => t.patientId.equals(UuidValue.fromString(patientId)),
+      orderBy: (t) => t.triggeredAt,
+      orderDescending: true,
+      transaction: _transaction,
+    );
+    if (row == null) return null;
+
+    return AlertStatusSnapshot(
+      alertId: row.id!.uuid,
+      riskLevel: row.riskLevel,
+      status: row.status,
+      triggeredAt: row.triggeredAt,
+      acknowledgedAt: row.acknowledgedAt,
+    );
   }
 }

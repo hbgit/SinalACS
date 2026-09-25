@@ -1,0 +1,13 @@
+### Status do alerta mais recente do paciente autenticado (RF05, decisão §5,
+### docs/superpowers/specs/2026-09-16-decisoes-produto-pos-validacao.md).
+###
+### `found: false` quando o paciente nunca disparou um alerta — os demais
+### campos ficam nulos, mesmo padrão de AlertAckResult.acknowledged: false.
+class: AlertStatusResult
+fields:
+  found: bool
+  alertId: String?
+  riskLevel: RiskLevel?
+  status: AlertStatus?
+  triggeredAt: DateTime?
+  acknowledgedAt: DateTime?

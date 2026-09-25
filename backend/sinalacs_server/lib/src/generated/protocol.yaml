@@ -1,9 +1,24 @@
 alerts:
   - createRedAlert:
   - acknowledge:
+  - statusFor:
 auth:
   - developmentLogin:
+  - loginInstitutional:
+  - requestOtp:
+  - verifyOtp:
 health:
   - check:
+onboarding:
+  - generateEnrollmentToken:
+  - completeEnrollment:
+patients:
+  - listMicroArea:
+  - myChronicConditions:
+  - updateChronicConditions:
+  - myData:
 triage:
   - evaluate:
+visits:
+  - sync:
+  - pull:

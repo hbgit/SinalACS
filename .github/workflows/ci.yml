@@ -11,6 +11,21 @@ jobs:
     defaults:
       run:
         working-directory: backend
+    env:
+      # Senha do Postgres efêmero deste job. NÃO é um segredo: o banco existe só
+      # dentro do runner, some ao fim do job e nunca é alcançável de fora.
+      #
+      # O que importa é que este valor não seja compartilhado com mais nada.
+      # Antes era a MESMA senha do config/passwords.yaml local — que o
+      # .gitignore protege e que é idêntica nos blocos development, test,
+      # staging e production. O segredo protegido pelo .gitignore estava, na
+      # prática, publicado aqui.
+      #
+      # Declarado uma vez e referenciado nos dois lugares: o serviço abaixo e a
+      # geração do passwords.yaml. Eram dois literais mantidos iguais à mão, e
+      # divergir fazia a suíte morrer sem log nenhum.
+      CI_POSTGRES_PASSWORD: ci-ephemeral-not-a-secret
+
     services:
       # Banco que o harness de teste do Serverpod espera, conforme
       # sinalacs_server/config/test.yaml. O harness aplica as migrações sozinho
@@ -20,7 +35,7 @@ jobs:
         image: postgres:15-alpine
         env:
           POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: ZGib82sxRnAaTto3iglbPkARA1qZUv0W
+          POSTGRES_PASSWORD: ${{ env.CI_POSTGRES_PASSWORD }}
           POSTGRES_DB: sinalacs_test
         ports:
           - 9090:5432
@@ -41,15 +56,18 @@ jobs:
       # Serverpod não carrega a senha do banco, falha ainda no carregamento de
       # config e chama exit(1); como o exit() do Dart não dá flush no stdout, a
       # mensagem de erro se perde e a falha fica totalmente silenciosa (exit 1,
-      # zero linhas de log). A senha tem que ser a mesma do serviço postgres
-      # acima: se as duas divergirem, o harness volta a falhar sem log nenhum.
+      # zero linhas de log).
+      #
+      # Localmente, quem gera este arquivo é scripts/dev/bootstrap_env.sh.
       - name: Cria config/passwords.yaml para o harness de teste
         run: |
-          printf "test:\n  database: '%s'\n" 'ZGib82sxRnAaTto3iglbPkARA1qZUv0W' \
+          printf "test:\n  database: '%s'\n" "$CI_POSTGRES_PASSWORD" \
             > sinalacs_server/config/passwords.yaml
-      # Suíte completa: 16 testes herméticos em test/unit, que usam fakes das
-      # interfaces AlertPublisher e AlertStore, mais 9 de integração que sobem o
-      # servidor em processo pelo harness e exercitam os endpoints tipados.
+      # Suíte completa: os herméticos de test/unit (fakes das interfaces
+      # AlertPublisher/AlertStore e afins, sem banco) mais os de test/integration,
+      # que sobem o servidor em processo pelo harness e exercitam os endpoints
+      # tipados. A contagem exata está na saída deste job — de propósito, não
+      # aqui: número em comentário envelhece e alguém o cita como se fosse atual.
       - run: dart test
         working-directory: backend/sinalacs_server
 
@@ -74,6 +92,26 @@ jobs:
         with:
           flutter-version: '3.44.8'
       - run: flutter pub get
+      # apps/patient/pubspec.yaml declara assets/certs/ — a pasta das CAs de
+      # desenvolvimento, gitignored e produzida por scripts/dev/sync_dev_ca.sh.
+      # Aquele script exige a stack de pé (valida a CA contra a folha que ela
+      # assina), e este job não tem Docker nem stack; então a pasta é criada
+      # VAZIA, que é o que basta para o que este job roda: o `flutter analyze`
+      # só confere se o diretório existe. Sem ele, o analyze sai 1 num clone
+      # limpo (`asset_directory_does_not_exist`) — é o que acontece aqui desde
+      # que a declaração entrou no pubspec.
+      #
+      # VAZIA NÃO SERVE PARA BUILDAR. `flutter build apk` e `flutter test` não
+      # reclamam do diretório ausente: saem verdes, e o APK vai sem nenhum .crt
+      # dentro — medido, com o diretório ausente e com ele vazio. Com o
+      # diretório ausente ainda sai uma linha "Error: unable to find directory
+      # entry in pubspec.yaml", que o build imprime e ignora; com o diretório
+      # vazio essa linha some, e o build fica silencioso de vez. Quem
+      # acrescentar um build a este job precisa das CAs de verdade:
+      # `docker compose up` e depois ./scripts/dev/sync_dev_ca.sh, que é quem
+      # copia certificado, não pasta.
+      - name: Cria o diretório assets/certs/ que o pubspec declara
+        run: mkdir -p assets/certs
       - run: flutter analyze
       - run: flutter test
 
@@ -88,5 +126,119 @@ jobs:
         with:
           flutter-version: '3.44.8'
       - run: flutter pub get
+      # Mesmo motivo do job patient-app, e o comentário completo está lá:
+      # assets/certs/ é gitignored e vem do scripts/dev/sync_dev_ca.sh, que
+      # precisa da stack de pé. O acs-app já falhava aqui por causa disso antes
+      # de o app do paciente declarar a mesma pasta.
+      - name: Cria o diretório assets/certs/ que o pubspec declara
+        run: mkdir -p assets/certs
       - run: flutter analyze
       - run: flutter test
+
+  admin-app:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/admin
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.44.8'
+      - run: flutter pub get
+      - run: flutter analyze
+      - run: flutter test
+
+  coverage-report:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: 3.12.2
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.44.8'
+      - name: Dependência nativa do SQLCipher/SQLite no Linux
+        run: sudo apt-get update && sudo apt-get install -y libsqlite3-0
+      - name: Bootstrap do ambiente local de testes
+        run: ./scripts/dev/bootstrap_env.sh
+      - name: Banco de teste do backend
+        run: docker compose --profile test up -d postgres-test
+      - name: Mede cobertura dos quatro pacotes
+        run: ./scripts/qa/measure_coverage.sh
+      - name: Derruba banco de teste
+        if: always()
+        run: docker compose --profile test down
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-reports
+          path: build/qa/coverage
+
+  android-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.44.8'
+      - name: Bootstrap da stack local
+        run: ./scripts/dev/bootstrap_env.sh
+      - name: E2E no emulador Android
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 36
+          arch: x86_64
+          profile: pixel_7
+          disable-animations: true
+          emulator-options: -no-window -no-audio -gpu swiftshader_indirect -no-snapshot -no-boot-anim
+          # Uma linha só: a action roda cada linha de "script" como um `sh -c`
+          # separado, então lógica multi-linha (if/fi, set -a + source .env)
+          # precisa viver num script de verdade — ver run_android_e2e.sh.
+          script: ./scripts/qa/run_android_e2e.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: android-e2e-metrics
+          path: build/qa/latency
+
+  # Único job do repositório que executa o Gradle. `flutter analyze` e
+  # `flutter test` não enxergam namespace inconsistente, AGP/Kotlin
+  # incompatíveis, MainActivity em pacote errado nem merge de manifest
+  # quebrado — erros que só apareceriam quando alguém tentasse compilar.
+  #
+  # É o app admin e não o ACS porque `apps/acs/android/app/build.gradle.kts`
+  # tem a guarda que faz o build falhar sem SINALACS_MQTT_PASSWORD: cobri-lo
+  # aqui exigiria compilar um APK que a própria guarda declara inútil.
+  admin-android-build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/admin
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.44.8'
+      # Sem cache, cada execução rebaixa ~200MB de Gradle e AGP.
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-admin-${{ hashFiles('apps/admin/android/**/*.gradle.kts', 'apps/admin/android/gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: gradle-admin-
+      - run: flutter pub get
+      - run: flutter build apk --debug

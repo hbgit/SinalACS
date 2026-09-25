@@ -1,0 +1,10 @@
+### Credencial institucional recusada (RF07). Uma exceção única para matrícula
+### inexistente, senha errada, conta bloqueada e acesso inativo — de propósito:
+### distinguir "esta matrícula não existe" de "a senha está errada" entrega a
+### quem sonda a lista de matrículas da unidade. O bloqueio e o inativo são
+### distinguidos na MENSAGEM porque só chegam a quem já acertou a senha (o
+### teste de inatividade acontece depois da verificação) ou já estourou o
+### limite com a matrícula certa.
+exception: AuthenticationFailedException
+fields:
+  message: String

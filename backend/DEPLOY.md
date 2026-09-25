@@ -88,6 +88,36 @@ Configurar como variáveis de ambiente secretas (nunca commitadas):
 | `APP_ENV` | `production` |
 | `ENABLE_DEV_LOGIN` | `true` (decisão consciente — é o único mecanismo de auth do piloto) |
 
+> **TLS (RNF04).** O container **não** atende RNF04 sozinho: o Serverpod continua
+> escutando em **texto claro** na porta que o Render injeta em `PORT`, e quem
+> termina TLS é o proxy do Render, na borda — por isso a URL do serviço é
+> `https://<seu-app>.onrender.com` e a sonda da seção 5 é chamada por `https`.
+> O piloto, portanto, **depende de um proxy com TLS na frente**; publicar a porta
+> da API direto, sem essa borda, reabriria o caminho em texto claro.
+>
+> O certificado de desenvolvimento deste repositório
+> (`infra/docker/traefik/runtime/certs/` — a folha é emitida pela CA de dev
+> `SinalACS Dev RPC CA` e regerada a cada subida; **auto-assinada é a CA**, que é
+> preservada) **não serve** para o piloto: ele existe para o emulador confiar no RPC local e
+> só é aceito por quem carrega `dev_rpc_ca.crt` como asset. Um deploy real
+> precisa de domínio próprio e certificado de CA pública (`cert-manager`/ACME,
+> como o PRD prevê). Consequência prática para o app: compilado com o asset
+> `dev_rpc_ca.crt`, o cliente confia **só** naquela CA (`SecurityContext()` vem
+> com `withTrustedRoots: false`) e recusa o certificado público da borda —
+> apontar para o piloto exige compilar sem esse asset, para o cliente usar o
+> armazenamento de confiança do sistema.
+>
+> **Sobre os valores de desenvolvimento.** As senhas de desenvolvimento do
+> repositório foram rotacionadas: `.env` passou a ser gerado por máquina com
+> `scripts/dev/bootstrap_env.sh`, e os literais que antes estavam no
+> `docker-compose.yml`, no `ci.yml` e no compose do Serverpod foram removidos.
+> Os valores antigos continuam visíveis no histórico do git (que não foi
+> reescrito) e **não valem mais** em lugar nenhum — não os reaproveite.
+>
+> `JWT_SECRET` agora é obrigatório fora de `development`: o servidor recusa subir
+> com o valor ausente, vazio ou igual ao fallback de desenvolvimento, em vez de
+> assinar tokens com uma chave pública.
+
 Não setar `MQTT_CA_CERT_PATH` — o HiveMQ Cloud usa certificado de CA pública, e
 o cliente MQTT confia nas CAs padrão do sistema quando essa variável não é
 definida.
@@ -154,3 +184,10 @@ que roda contra o harness local.
   não encontra o que atualizar. É raro e erra para o lado seguro quanto à
   INV-03 (o alerta não se perde, a auditoria sim); fechar isso por completo
   exigiria outbox pattern.
+- **O TLS termina na borda, não no processo.** RNF04 pede TLS em todas as
+  comunicações; no piloto ele vale entre o app e o proxy, e o Serverpod continua
+  escutando em texto claro na porta que o Render injeta em `PORT`. É menos do que
+  o caminho cifrado ponta a ponta do PRD, e é o par `cert-manager` + rede privada
+  que fecha a diferença num deploy real — o certificado de desenvolvimento deste
+  repositório não substitui esse certificado (ver o quadro em "Criar o serviço no
+  Render").
