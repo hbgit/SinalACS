@@ -4,7 +4,14 @@
 #
 #   ./scripts/qa/e2e.sh            # sobe a stack, valida na VM, derruba
 #   ./scripts/qa/e2e.sh --keep     # mantém a stack de pé ao final
-#   ./scripts/qa/e2e.sh --emulator # inclui os testes de integração no emulador
+#   ./scripts/qa/e2e.sh --emulator # + smoke no emulador (integration_test/smoke_test.dart)
+#   ./scripts/qa/e2e.sh --emulator --full # + TODA a bateria integration_test dos três apps
+#
+# --emulator sozinho é o que a CI roda: um arquivo, um teste e um APK por app
+# (paciente e ACS). Cada arquivo de integration_test/ custa um build e um
+# `adb install`, que é o que domina o tempo no emulador; o resto da bateria
+# fica para --full, rodado à mão antes de mexer em rede, criptografia local ou
+# mapa.
 #
 # Sem --emulator, roda as verificações que não precisam de dispositivo
 # (tool/live_check.dart dos dois apps), que já exercitam o RPC sobre TLS, o MQTT
@@ -16,13 +23,19 @@ cd "$repo_root"
 
 keep_stack=0
 run_emulator=0
+run_full=0
 for arg in "$@"; do
   case "$arg" in
     --keep) keep_stack=1 ;;
     --emulator) run_emulator=1 ;;
+    --full) run_full=1 ;;
     *) echo "argumento desconhecido: $arg" >&2; exit 2 ;;
   esac
 done
+if [[ "$run_full" -eq 1 && "$run_emulator" -eq 0 ]]; then
+  echo 'erro: --full só faz sentido junto com --emulator.' >&2
+  exit 2
+fi
 
 cleanup() {
   if [[ "$keep_stack" -eq 0 ]]; then
@@ -95,28 +108,47 @@ echo '== ACS: ciclo completo (RPC + MQTT/TLS + sincronização de visita) =='
   dart run tool/live_check.dart --mqtt-password "$MQTT_ACS_PASSWORD")
 
 # `adb install` falha de forma transiente e conhecida em emuladores sem
-# aceleração de hardware (o caso deste runner — medido, o boot já loga "Linux
-# VM where hardware acceleration is not available") com "cmd: Failure calling
-# service package: Broken pipe (32)" — a instalação do APK cai no meio, sem
-# relação com rede/certificado; uma segunda tentativa costuma passar. Só o
-# `flutter test integration_test` (que reinstala o APK) é envolvido — o
-# `docker compose`/seed acima não tem esse modo de falha.
+# aceleração de hardware (medido no runner da CI antes de o job habilitar o
+# KVM: o boot logava "Linux VM where hardware acceleration is not available")
+# com "cmd: Failure calling service package: Broken pipe (32)" — a instalação
+# do APK cai no meio, sem relação com rede/certificado; uma segunda tentativa
+# costuma passar. Só o `flutter test integration_test` (que reinstala o APK) é
+# envolvido — o `docker compose`/seed acima não tem esse modo de falha.
+#
+# A nova tentativa acontece SÓ quando a saída tem "Broken pipe". Antes ela
+# disparava em qualquer falha: um teste realmente vermelho rodava a suíte
+# inteira duas vezes, e foi o que empurrou o job para além dos 60 min.
 tentar_flutter_test() {
-  if "$@"; then
+  local saida
+  saida="$(mktemp)"
+  if "$@" 2>&1 | tee "$saida"; then
+    rm -f "$saida"
     return 0
   fi
-  echo 'aviso: flutter test integration_test falhou (possível "Broken pipe" do' >&2
-  echo 'adb install em emulador sem aceleração de hardware); tentando de novo.' >&2
+  if ! grep -q 'Broken pipe' "$saida"; then
+    rm -f "$saida"
+    return 1
+  fi
+  rm -f "$saida"
+  echo 'aviso: "Broken pipe" no adb install; tentando de novo.' >&2
   sleep 5
   "$@"
 }
 
 if [[ "$run_emulator" -eq 1 ]]; then
   echo
-  echo '== testes de integração no dispositivo =='
+  # Smoke: um arquivo por app, que é um build e um `adb install` por app.
+  # --full: a pasta inteira, como era antes, mais o admin (hermético, roda
+  # sobre o MockAdminDataSource e não precisa da stack).
+  if [[ "$run_full" -eq 1 ]]; then
+    alvo_integracao=integration_test
+    echo '== testes de integração no dispositivo (bateria completa) =='
+  else
+    alvo_integracao=integration_test/smoke_test.dart
+    echo '== smoke de integração no dispositivo =='
+  fi
   (cd apps/patient && flutter pub get >/dev/null)
   (cd apps/acs && flutter pub get >/dev/null)
-  (cd apps/admin && flutter pub get >/dev/null)
   # Medido no runner da CI: o app falha ao falar com o RPC via 10.0.2.2:443 —
   # "Não foi possível falar com o servidor (-1)" (ServerpodClientException com
   # statusCode -1, o wrap genérico do cliente gerado para quando a conexão TCP
@@ -145,9 +177,9 @@ if [[ "$run_emulator" -eq 1 ]]; then
   # privilegiada, então mantém a mesma porta dos dois lados.
   adb -s emulator-5554 reverse tcp:8443 tcp:443
   adb -s emulator-5554 reverse tcp:8883 tcp:8883
-  (cd apps/patient && tentar_flutter_test flutter test integration_test -d emulator-5554 \
+  (cd apps/patient && tentar_flutter_test flutter test "$alvo_integracao" -d emulator-5554 \
       --dart-define=SINALACS_HOST=https://localhost:8443/)
-  acs_cmd=(flutter test integration_test -d emulator-5554
+  acs_cmd=(flutter test "$alvo_integracao" -d emulator-5554
     --dart-define=SINALACS_HOST=https://localhost:8443/
     --dart-define=SINALACS_MQTT_HOST=localhost
     --dart-define=SINALACS_MQTT_PASSWORD="$MQTT_ACS_PASSWORD")
@@ -155,7 +187,10 @@ if [[ "$run_emulator" -eq 1 ]]; then
     acs_cmd+=(--dart-define=GOOGLE_MAPS_API_KEY="$GOOGLE_MAPS_API_KEY")
   fi
   (cd apps/acs && tentar_flutter_test "${acs_cmd[@]}")
-  (cd apps/admin && tentar_flutter_test flutter test integration_test -d emulator-5554)
+  if [[ "$run_full" -eq 1 ]]; then
+    (cd apps/admin && flutter pub get >/dev/null && \
+      tentar_flutter_test flutter test integration_test -d emulator-5554)
+  fi
 fi
 
 echo
