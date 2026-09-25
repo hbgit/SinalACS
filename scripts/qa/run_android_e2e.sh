@@ -14,9 +14,11 @@ cd "$repo_root"
 
 trap 'docker compose down' EXIT
 
+# GOOGLE_MAPS_API_KEY não é mais obrigatória: a CI roda só o smoke de cada app
+# (e2e.sh --emulator, sem --full), e o map_flow_test.dart ficou fora dele. Se
+# vier no ambiente, o e2e.sh ainda a repassa ao build do ACS.
 if [[ -z "${GOOGLE_MAPS_API_KEY:-}" ]]; then
-  echo 'erro: GOOGLE_MAPS_API_KEY é obrigatória para o E2E Android.' >&2
-  exit 1
+  echo 'aviso: GOOGLE_MAPS_API_KEY ausente — o mapa do ACS fica sem tiles.' >&2
 fi
 
 set -a

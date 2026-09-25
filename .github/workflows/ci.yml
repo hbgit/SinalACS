@@ -183,6 +183,17 @@ jobs:
       GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
     steps:
       - uses: actions/checkout@v4
+      # Sem isto o emulador roda por emulação de CPU em software: medido, o log
+      # dizia "ProbeKVM: This user doesn't have permissions to use KVM", o boot
+      # levava ~12 min e cada `adb install` de 45 a 95 s. O runner tem
+      # /dev/kvm, só não para o usuário do job — a regra do udev abre o
+      # dispositivo. É o passo documentado pelo android-emulator-runner.
+      - name: Habilita KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -190,19 +201,65 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.44.8'
+          cache: true
+      # O 1º `assembleDebug` levava 311 s sem cache, 24 deles instalando o
+      # CMake do NDK. Chave pelos pubspec.lock e scripts Gradle dos dois apps
+      # que rodam no emulador — mesmo padrão do job admin-android-build.
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.pub-cache
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+            /usr/local/lib/android/sdk/cmake
+          key: e2e-deps-${{ hashFiles('apps/patient/pubspec.lock', 'apps/acs/pubspec.lock', 'apps/patient/android/**/*.gradle.kts', 'apps/acs/android/**/*.gradle.kts', 'apps/*/android/gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: e2e-deps-
+      # Snapshot do AVD já inicializado: sem ele, todo run paga o primeiro
+      # boot a frio. Os parâmetros do emulador precisam ser os mesmos aqui e
+      # no step que roda os testes, ou o snapshot é descartado.
+      - uses: actions/cache@v4
+        id: avd-cache
+        with:
+          path: |
+            ~/.android/avd/*
+            ~/.android/adb*
+          key: avd-36-x86_64-pixel_7
+      - name: Gera o snapshot do AVD para o cache
+        if: steps.avd-cache.outputs.cache-hit != 'true'
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 36
+          arch: x86_64
+          profile: pixel_7
+          force-avd-creation: false
+          disable-animations: false
+          emulator-options: -no-window -no-audio -gpu swiftshader_indirect -no-boot-anim
+          script: echo "snapshot do AVD gerado para o cache"
       - name: Bootstrap da stack local
         run: ./scripts/dev/bootstrap_env.sh
+      # O que não depende do emulador sai de dentro do step dele: o
+      # `docker compose up --build` e os `flutter pub get` do e2e.sh viram
+      # cache hit (os `pub get` sequenciais levavam ~4 min lá dentro).
+      - name: Pré-build da stack e dependências dos apps
+        run: |
+          # `wait` sem argumento sempre sai 0; esperar cada PID propaga a falha.
+          docker compose build & p1=$!
+          (cd apps/patient && flutter pub get) & p2=$!
+          (cd apps/acs && flutter pub get) & p3=$!
+          wait $p1 && wait $p2 && wait $p3
       - name: E2E no emulador Android
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 36
           arch: x86_64
           profile: pixel_7
+          force-avd-creation: false
           disable-animations: true
-          emulator-options: -no-window -no-audio -gpu swiftshader_indirect -no-snapshot -no-boot-anim
+          emulator-options: -no-window -no-audio -gpu swiftshader_indirect -no-snapshot-save -no-boot-anim
           # Uma linha só: a action roda cada linha de "script" como um `sh -c`
           # separado, então lógica multi-linha (if/fi, set -a + source .env)
           # precisa viver num script de verdade — ver run_android_e2e.sh.
+          # Roda só o smoke de cada app (e2e.sh --emulator, sem --full).
           script: ./scripts/qa/run_android_e2e.sh
       - uses: actions/upload-artifact@v4
         if: always()
