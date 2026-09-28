@@ -254,7 +254,7 @@ jobs:
           path: |
             ~/.android/avd/*
             ~/.android/adb*
-          key: avd-36-x86_64-pixel_7
+          key: avd-36-x86_64-pixel_7-ubuntu-24.04
       - name: Gera o snapshot do AVD para o cache
         if: steps.avd-cache.outputs.cache-hit != 'true'
         uses: reactivecircus/android-emulator-runner@v2
