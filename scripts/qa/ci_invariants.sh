@@ -18,6 +18,7 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 exec python3 - "$repo_root/.github/workflows/ci.yml" "$@" <<'PY'
+import json
 import sys
 
 import yaml
@@ -146,9 +147,36 @@ def check_runner():
             falhas.append(f"FINDING-6: {nome_job} roda em {job.get('runs-on')!r}; esperado {RUNNER!r}")
 
 
+# Checks obrigatórios para merge em main e develop (FINDING-5). O
+# android-e2e fica de fora enquanto não tiver histórico verde: torná-lo
+# obrigatório hoje travaria toda PR num job sabidamente instável (FINDING-4).
+# A proteção de branch é aplicada a partir desta lista (--checks-obrigatorios),
+# então renomear um job quebra aqui antes de deixar PRs esperando por um check
+# que não existe mais.
+CHECKS_OBRIGATORIOS = sorted(JOBS_DOCUMENTADOS - {'android-e2e'})
+# App GitHub Actions: amarrar o check ao app impede que outra integração
+# publique um status com o mesmo nome e destrave o merge.
+APP_GITHUB_ACTIONS = 15368
+
+def check_checks_obrigatorios():
+    if 'android-e2e' in CHECKS_OBRIGATORIOS:
+        falhas.append('FINDING-4: android-e2e não pode ser obrigatório enquanto for instável')
+    for nome in CHECKS_OBRIGATORIOS:
+        job = jobs.get(nome)
+        if job is None:
+            falhas.append(f'FINDING-5: check obrigatório {nome} não existe no workflow')
+            continue
+        # O nome do check é o `name:` do job, se houver; e um job com `if:`
+        # pode não rodar e nunca reportar.
+        if job.get('name', nome) != nome:
+            falhas.append(f"FINDING-5: {nome} tem name: {job['name']!r}; o check obrigatório não casaria")
+        if 'if' in job:
+            falhas.append(f'FINDING-5: {nome} tem if: no nível do job; pode nunca reportar')
+
+
 CHECKS = [check_jobs, check_gatilhos, check_sem_filtro_de_paths, check_concorrencia,
           check_limpeza_do_workspace, check_versoes_de_acoes,
-          check_runner]
+          check_runner, check_checks_obrigatorios]
 
 for check in CHECKS:
     check()
@@ -157,5 +185,8 @@ if falhas:
     for falha in falhas:
         print(f'FALHA: {falha}', file=sys.stderr)
     sys.exit(1)
+if '--checks-obrigatorios' in sys.argv[2:]:
+    print(json.dumps([{'context': c, 'app_id': APP_GITHUB_ACTIONS} for c in CHECKS_OBRIGATORIOS]))
+    sys.exit(0)
 print(f'ok: {len(CHECKS)} grupos de invariantes do CI')
 PY

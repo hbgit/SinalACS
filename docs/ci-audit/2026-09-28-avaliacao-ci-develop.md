@@ -275,3 +275,5 @@ Plano: `docs/superpowers/plans/2026-09-28-ci-correcoes-avaliacao.md`.
 | FINDING-6 (ações) | Fechado | run `36496121047`: 0 avisos de Node 20/setup-java v4 (eram emitidos em todos os jobs); guarda `check_versoes_de_acoes` |
 | FINDING-6 (runner) | Fechado para o prazo de 2026-10-19 | run `36496906676` sobre `2fdab9b`: 9/9 `success`, todos os jobs em `ubuntu-24.04`, 0 avisos de migração; guarda `check_runner`. Ensaio do 26.04: ver a linha seguinte |
 | Ensaio ubuntu-26.04 | Sem bloqueio para a migração | run `36497671043` (PR #17, fechada sem merge): 9/9 `success` em `ubuntu-26.04`; `android-e2e` em 17 min, contra ~7 no 24.04, com cache de AVD frio. O actionlint 1.7.12 ainda não reconhece o rótulo `ubuntu-26.04`: a migração precisa atualizar o actionlint ou declarar o rótulo em `.github/actionlint.yaml` |
+| FINDING-5 | Fechado | proteção em `main` e `develop` com os checks de `ci_invariants.sh --checks-obrigatorios` (todos menos `android-e2e`), `enforce_admins: false`; PR obrigatória em `main` |
+| FINDING-3 | Fechado como regra | `CONTRIBUTING.md` › CI e merge; aplicado pela proteção do FINDING-5 |
