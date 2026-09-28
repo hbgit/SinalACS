@@ -287,6 +287,13 @@ jobs:
           # precisa viver num script de verdade — ver run_android_e2e.sh.
           # Roda só o smoke de cada app (e2e.sh --emulator, sem --full).
           script: ./scripts/qa/run_android_e2e.sh
+      # O volume do Postgres fica no workspace com modo 700 e dono do
+      # container. O pós-passo do flutter-action faz hashFiles('**/pubspec.lock')
+      # sobre o workspace inteiro, não consegue ler pg_data/ e derruba o job
+      # depois de o E2E ter passado — medido no run 36494654391.
+      - name: Remove pg_data/ do workspace
+        if: always()
+        run: sudo rm -rf pg_data
       - uses: actions/upload-artifact@v4
         if: always()
         with:

@@ -92,7 +92,23 @@ def check_concorrencia():
         falhas.append('FINDING-7: concurrency sem cancel-in-progress: true')
 
 
-CHECKS = [check_jobs, check_gatilhos, check_sem_filtro_de_paths, check_concorrencia]
+def check_limpeza_do_workspace():
+    # A stack do android-e2e deixa pg_data/ no workspace com modo 700 e dono
+    # do container: o hashFiles('**/pubspec.lock') do pós-passo do
+    # flutter-action não consegue varrê-lo e derruba um job cujo E2E passou
+    # (run 36494654391). Algum passo depois do E2E tem de apagá-lo, sempre.
+    passos = (jobs.get('android-e2e') or {}).get('steps') or []
+    nomes = [p.get('name', '') for p in passos]
+    if 'E2E no emulador Android' not in nomes:
+        falhas.append('android-e2e sem o passo "E2E no emulador Android"')
+        return
+    depois = passos[nomes.index('E2E no emulador Android') + 1:]
+    if not any(p.get('if') == 'always()' and 'pg_data' in (p.get('run') or '') for p in depois):
+        falhas.append('android-e2e: nenhum passo if: always() apaga pg_data/ depois do E2E')
+
+
+CHECKS = [check_jobs, check_gatilhos, check_sem_filtro_de_paths, check_concorrencia,
+          check_limpeza_do_workspace]
 
 for check in CHECKS:
     check()
