@@ -28,7 +28,7 @@ jobs:
   # 2026-09-28 mostrou derivarem sem ninguém ver (jobs × documentação,
   # gatilhos, concorrência, versões de ações, imagem do runner).
   workflow-lint:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v7
       - name: actionlint
@@ -38,7 +38,7 @@ jobs:
           python3 -c 'import yaml' 2>/dev/null || { sudo apt-get update && sudo apt-get install -y python3-yaml; }
           ./scripts/qa/ci_invariants.sh
   serverpod-backend:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     defaults:
       run:
         working-directory: backend
@@ -103,7 +103,7 @@ jobs:
         working-directory: backend/sinalacs_server
 
   backend-docker-build:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v7
       # Imagem do servidor Serverpod, a mesma que o docker-compose constrói.
@@ -113,7 +113,7 @@ jobs:
         run: docker build -f backend/sinalacs_server/Dockerfile backend
 
   patient-app:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     defaults:
       run:
         working-directory: apps/patient
@@ -147,7 +147,7 @@ jobs:
       - run: flutter test
 
   acs-app:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     defaults:
       run:
         working-directory: apps/acs
@@ -167,7 +167,7 @@ jobs:
       - run: flutter test
 
   admin-app:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     defaults:
       run:
         working-directory: apps/admin
@@ -181,7 +181,7 @@ jobs:
       - run: flutter test
 
   coverage-report:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v7
       - uses: dart-lang/setup-dart@v1
@@ -208,7 +208,7 @@ jobs:
           path: build/qa/coverage
 
   android-e2e:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 60
     env:
       GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
@@ -254,7 +254,7 @@ jobs:
           path: |
             ~/.android/avd/*
             ~/.android/adb*
-          key: avd-36-x86_64-pixel_7
+          key: avd-36-x86_64-pixel_7-ubuntu-26.04
       - name: Gera o snapshot do AVD para o cache
         if: steps.avd-cache.outputs.cache-hit != 'true'
         uses: reactivecircus/android-emulator-runner@v2
@@ -314,7 +314,7 @@ jobs:
   # tem a guarda que faz o build falhar sem SINALACS_MQTT_PASSWORD: cobri-lo
   # aqui exigiria compilar um APK que a própria guarda declara inútil.
   admin-android-build:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     defaults:
       run:
         working-directory: apps/admin

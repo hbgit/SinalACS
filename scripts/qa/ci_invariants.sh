@@ -137,7 +137,7 @@ def check_versoes_de_acoes():
 # Imagem fixada (FINDING-6): `ubuntu-latest` migra de versão sozinho, no dia
 # que a GitHub escolher (Ubuntu 26 a partir de 2026-10-19). Trocar de imagem
 # tem de ser um PR, não uma surpresa.
-RUNNER = 'ubuntu-24.04'
+RUNNER = 'ubuntu-26.04'
 
 
 def check_runner():
