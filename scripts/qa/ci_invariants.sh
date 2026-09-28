@@ -134,8 +134,21 @@ def check_versoes_de_acoes():
                 falhas.append(f'FINDING-6: {nome_job} usa {uses}; mínimo v{minimo}')
 
 
+# Imagem fixada (FINDING-6): `ubuntu-latest` migra de versão sozinho, no dia
+# que a GitHub escolher (Ubuntu 26 a partir de 2026-10-19). Trocar de imagem
+# tem de ser um PR, não uma surpresa.
+RUNNER = 'ubuntu-24.04'
+
+
+def check_runner():
+    for nome_job, job in jobs.items():
+        if job.get('runs-on') != RUNNER:
+            falhas.append(f"FINDING-6: {nome_job} roda em {job.get('runs-on')!r}; esperado {RUNNER!r}")
+
+
 CHECKS = [check_jobs, check_gatilhos, check_sem_filtro_de_paths, check_concorrencia,
-          check_limpeza_do_workspace, check_versoes_de_acoes]
+          check_limpeza_do_workspace, check_versoes_de_acoes,
+          check_runner]
 
 for check in CHECKS:
     check()
