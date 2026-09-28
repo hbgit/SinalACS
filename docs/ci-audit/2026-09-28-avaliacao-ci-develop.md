@@ -150,3 +150,93 @@ Ou seja: o time já escreveu e commitou (`74d89c0`) a correção mais provável 
 `android-e2e` continua sendo o único job do repositório que sobe um emulador Android real e exercita o ciclo completo (per `AGENTS.md`/`CLAUDE.md`: MQTT com TLS, fila offline, ciclo de alerta vermelho). Os outros 7 jobs (`flutter analyze`/`flutter test` unitário, build de APK do admin, testes de integração do backend) não cobrem o que `android-e2e` cobre, e enquanto ele não roda de verdade contra `74d89c0`, essa cobertura fim-a-fim está, na prática, sem sinal algum — nem verde, nem vermelho, ausente.
 
 Recomendação: antes de qualquer sessão de debugging, gerar o dado que falta — abrir a PR `develop → main` (ou disparar o workflow manualmente contra `develop`) para obter uma execução real de CI contra `74d89c0`. Só então decidir o próximo passo: se `android-e2e` passar, o KVM resolveu a causa já documentada; se falhar, aí sim abrir uma sessão dedicada com a skill `superpowers:systematic-debugging`, usando `scripts/qa/run_android_e2e.sh` como ponto de entrada. O artifact `android-e2e-metrics` não é uma fonte confiável de dados de latência enquanto o job abortar antes do fim: neste run ele nem foi gerado (`No files were found with the provided path: build/qa/latency. No artifacts will be uploaded.` — só o artifact `coverage-reports` apareceu na lista de artifacts do run).
+
+## 4. Governança e segurança
+
+Comandos executados em 2026-09-28 (nova chamada, para esta seção):
+
+### 4.1 Proteção de branch
+
+```bash
+gh api repos/:owner/:repo/branches/develop/protection
+gh api repos/:owner/:repo/branches/main/protection
+```
+
+Ambos retornam o mesmo 404, hoje:
+
+```json
+{"message":"Branch not protected","documentation_url":"https://docs.github.com/rest/branches/branch-protection#get-branch-protection","status":"404"}
+```
+
+Idêntico ao snapshot do brief — sem drift.
+
+**FINDING-5 (severidade: alta — CI não é um gate, é só um relatório).** Nem `develop` nem `main` têm branch protection configurada no GitHub (ambos retornam 404 "Branch not protected"). Isso significa que nenhum check de CI é obrigatório para merge — combinado ao FINDING-3 (15 execuções seguidas vermelhas na PR de integração), fica claro que o CI vermelho nunca impediu ninguém de continuar commitando ou, potencialmente, de fazer merge. O invariante do projeto "Red alerts must never be silently dropped" (`CLAUDE.md`) é sobre o produto, mas o mesmo princípio de "nunca falhar silenciosamente" vale para o pipeline que valida esse produto — hoje ele pode falhar silenciosamente (ninguém é bloqueado) por dias.
+
+### 4.2 Ações desatualizadas e prazos de infraestrutura
+
+**Correção ao brief: as annotations não estavam de fato transcritas nas Seções 2/3 do arquivo.** Reli as Seções 2 e 3 antes de escrever este trecho (conforme pedido) e nenhuma delas contém o texto das annotations de depreciação — só o job inventory da Seção 1 lista as ações (`actions/setup-java@v4` etc.), sem as mensagens de aviso. Em vez de copiar o texto do brief sem verificação, refiz a captura ao vivo contra o run mais recente disponível (`36179475405`, o mesmo identificado na Seção 3 como o run que efetivamente testa `9f21b9d`, não `74d89c0` — mas as annotations de infraestrutura independem do commit testado, já que vêm do runner/GitHub, não do código):
+
+```bash
+gh run view 36179475405
+```
+
+Bloco `ANNOTATIONS` (trecho relevante, agregado por tipo de aviso — cada aviso aparece uma vez por job que o dispara):
+
+```
+! Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4, actions/upload-artifact@v4 (coverage-report, android-e2e)
+! Node.js 20 is deprecated. [...]: actions/checkout@v4 (admin-app, acs-app, serverpod-backend, backend-docker-build, patient-app)
+! Node.js 20 is deprecated. [...]: actions/cache@v4, actions/checkout@v4, actions/setup-java@v4 (admin-android-build)
+! Node.js 20 is deprecated. [...]: actions/checkout@v4, actions/setup-java@v4, actions/upload-artifact@v4 (android-e2e)
+! setup-java v4 is deprecated and will no longer receive updates. Please migrate to actions/setup-java@v5. (admin-android-build, android-e2e)
+- "The ubuntu-latest label will migrate to Ubuntu 26 beginning October 19, 2026. [...]" (todos os 8 jobs)
+```
+
+Confirmado ao vivo: as quatro ações citadas no brief (`checkout@v4`, `cache@v4`, `setup-java@v4`, `upload-artifact@v4`) aparecem de fato nos avisos de Node.js 20, distribuídas entre os jobs conforme o uso de cada uma (nem toda ação aparece em todo job — `cache@v4` só é usada por `admin-android-build`, por exemplo); o aviso de depreciação do `setup-java v4` em si aparece nos dois jobs que o usam (`admin-android-build`, `android-e2e`); e o aviso de migração para Ubuntu 26 em 2026-10-19 aparece nos 8 jobs, já que todos usam `ubuntu-latest`.
+
+**Recomputado: hoje (2026-09-28) até 2026-10-19 são exatamente 21 dias corridos — 3 semanas, sem arredondamento.** A data do contexto desta sessão confirma a mesma data usada no brief; não houve drift.
+
+**FINDING-6 (severidade: média — dívida de infraestrutura com prazo concreto).** Toda execução do CI emite estas annotations, hoje ignoradas:
+- `actions/checkout@v4`, `actions/cache@v4`, `actions/setup-java@v4`, `actions/upload-artifact@v4` — todas ainda no Node.js 20, forçadas a rodar em Node 24 pelo runner (aviso de depreciação da GitHub, não bloqueante ainda).
+- `setup-java v4` está deprecated; o vendor recomenda migrar para `setup-java@v5`.
+- `ubuntu-latest` migra para Ubuntu 26 a partir de **2026-10-19** — a **três semanas** da data desta avaliação (2026-09-28). Como nenhum job fixa a versão da imagem (todos usam `ubuntu-latest`), essa migração vai acontecer automaticamente e sem aviso prévio no dia, podendo quebrar qualquer job que dependa implicitamente de pacotes/versões do Ubuntu 24 atual (candidatos mais prováveis: `android-e2e`, que já depende de KVM e de uma regra de udev específica, e `admin-android-build`/`acs-app`/`patient-app`, que dependem do NDK/CMake cacheado).
+
+Recomendação: fixar as ações em versões mais novas (`checkout@v5`, `setup-java@v5`, etc.) num PR pequeno e isolado, e rodar o pipeline uma vez contra uma imagem `ubuntu-24.04` explícita antes de 2026-10-19 para confirmar que nada quebra com a migração.
+
+### 4.3 Uso de segredos e controle de concorrência
+
+```bash
+grep -n "secrets\." .github/workflows/ci.yml
+grep -n "^concurrency:" .github/workflows/ci.yml
+```
+
+Saída:
+
+```
+183:      GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
+```
+
+(`concurrency:` não retorna nenhuma linha — ausente do arquivo.) Idêntico ao esperado pelo brief: só uma ocorrência de `secrets.`, nenhum bloco `concurrency:`.
+
+**Nota positiva (não é finding).** O único segredo real referenciado é `secrets.GOOGLE_MAPS_API_KEY`. `CI_POSTGRES_PASSWORD` é deliberadamente hardcoded (`.github/workflows/ci.yml:27`, valor literal `ci-ephemeral-not-a-secret`) e documentado no próprio workflow como não-segredo (banco efêmero, existe só dentro do runner) — não há vazamento de credencial de dev/prod no pipeline.
+
+**FINDING-7 (severidade: baixa — desperdício de minutos de CI).** Não há bloco `concurrency:` no workflow. Cada novo push à mesma PR dispara uma execução completa sem cancelar a anterior. Isso é particularmente caro para `android-e2e`, que sozinho pode consumir até 60 minutos por tentativa (timeout configurado) — e a Seção 2 mostrou 15 tentativas em 10 dias na mesma PR. Um bloco como:
+
+```yaml
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+```
+
+cancelaria runs obsoletos assim que um novo commit chegasse na mesma PR/branch.
+
+### 4.4 Verificação de log por segredo exposto
+
+Job usado como amostra: `serverpod-backend` do run `36169873626` (job `108186514572`), por ser o que gera `config/passwords.yaml`. ID confirmado ao vivo com `gh run view 36169873626 --json jobs -q '.jobs[] | select(.name=="serverpod-backend") | .databaseId'` → `108186514572`, igual ao do brief.
+
+```bash
+gh run view --log --job=108186514572 2>&1 | grep -i "senha\|password\|secret\|token" | grep -v "CI_POSTGRES_PASSWORD\|GOOGLE_MAPS_API_KEY\|passwords.yaml"
+```
+
+A saída não veio vazia como no brief, mas nada nela é um segredo real: as linhas são (a) `Secret source: Actions` e `##[group]GITHUB_TOKEN Permissions` — texto padrão do runner sobre o próprio `GITHUB_TOKEN` efêmero, não um valor; (b) `token: ***` — já mascarado pelo GitHub; (c) o comando `docker create` do Postgres de teste, contendo `-e "POSTGRES_PASSWORD=ci-ephemeral-not-a-secret"` — o mesmo valor não-secreto da nota positiva acima, só que sem o texto literal `CI_POSTGRES_PASSWORD` que meu filtro excluía (o nome da env var vira `POSTGRES_PASSWORD` dentro do comando docker); e (d) dezenas de nomes de teste em português contendo "senha"/"token"/"segredo" (ex.: `login institucional aceita matrícula e senha corretas`, `JWT_SECRET development aceita um segredo próprio`) — são descrições de casos de teste de autenticação, não credenciais. Nenhum valor de segredo real (JWT_SECRET, AUDIT_CHAIN_SECRET, senha de paciente/ACS real, etc.) aparece no log.
+
+Nenhum segredo exposto em log encontrado na amostra verificada.
