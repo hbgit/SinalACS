@@ -260,3 +260,20 @@ Ordenado por severidade (crítica → alta → média → baixa → informativa)
 | FINDING-2 | Informativa | `push` só dispara CI em `main`/`master`; um push direto em `develop` sem PR aberta não roda o workflow — e hoje não há nenhuma PR `develop → main` aberta (a única, #7, foi mesclada em 2026-09-25), então essa cobertura simplesmente não existe agora. É exatamente essa ausência que abre a lacuna de verificação descrita no FINDING-4 | Nenhuma ação obrigatória por si só, mas é a causa estrutural do FINDING-4: considerar adicionar `push: branches: [..., develop]` ou um trigger `workflow_dispatch` para que a cobertura de CI não dependa de haver uma PR aberta por acaso | N/A por padrão; se adotada, PR pequeno em `.github/workflows/ci.yml` |
 
 Follow-up sugerido: um plano de implementação separado (via `superpowers:writing-plans` de novo) para os itens de severidade alta/média. A prioridade imediata **não** é depurar `android-e2e` (FINDING-4) — é gerar o dado que falta, abrindo a PR `develop → main` ou disparando o workflow manualmente, já que hoje não existe nenhuma execução de CI contra a única correção já tentada. Em paralelo, o item estrutural é FINDING-5 (branch protection), para que corrigir o CI passe a valer a pena de fato.
+
+## 6. Acompanhamento das correções
+
+Plano: `docs/superpowers/plans/2026-09-28-ci-correcoes-avaliacao.md`.
+
+| Achado | Estado | Evidência |
+|---|---|---|
+| FINDING-1 | Fechado | `32ddad5` (docs) e guarda `check_jobs` em `scripts/qa/ci_invariants.sh` |
+| FINDING-2 | Fechado | `push` em `develop` e `workflow_dispatch` no `ci.yml`; guarda `check_gatilhos` |
+| FINDING-7 | Fechado | bloco `concurrency` por PR/SHA; guarda `check_concorrencia` |
+| FINDING-4 | Fechado — a correção de `74d89c0` funciona | run `36494654391` sobre `9d84f80` (descendente de `74d89c0`, confirmado com `git merge-base --is-ancestor`), primeiro run de CI a cobrir `74d89c0`: o passo "E2E no emulador Android" passou (smoke do paciente 1/1, smoke do ACS 1/1, RNF04 OK, ciclo do alerta vermelho OK). O job ainda terminou `failure` em 13m28s, por um defeito diferente, só visível agora que o E2E chega ao fim: o pós-passo do `subosito/flutter-action` roda `hashFiles('**/pubspec.lock')` sobre o workspace e não consegue ler `pg_data/` (modo 700, dono do container do Postgres). Corrigido com um passo `if: always()` que apaga `pg_data/` depois do E2E, com guarda `check_limpeza_do_workspace` |
+| FINDING-4 (confirmação) | Fechado | run `36496121047` sobre `acb2478`: **9/9 jobs `success`**, `android-e2e` em 7m37s — o primeiro run totalmente verde desde, pelo menos, 2026-09-15 (FINDING-3) |
+| FINDING-6 (ações) | Fechado | run `36496121047`: 0 avisos de Node 20/setup-java v4 (eram emitidos em todos os jobs); guarda `check_versoes_de_acoes` |
+| FINDING-6 (runner) | Fechado para o prazo de 2026-10-19 | run `36496906676` sobre `2fdab9b`: 9/9 `success`, todos os jobs em `ubuntu-24.04`, 0 avisos de migração; guarda `check_runner`. Ensaio do 26.04: ver a linha seguinte |
+| Ensaio ubuntu-26.04 | Sem bloqueio para a migração | run `36497671043` (PR #17, fechada sem merge): 9/9 `success` em `ubuntu-26.04`; `android-e2e` em 17 min, contra ~7 no 24.04, com cache de AVD frio. O actionlint 1.7.12 ainda não reconhece o rótulo `ubuntu-26.04`: a migração precisa atualizar o actionlint ou declarar o rótulo em `.github/actionlint.yaml` |
+| FINDING-5 | Fechado | proteção em `main` e `develop` com os checks de `ci_invariants.sh --checks-obrigatorios` (todos menos `android-e2e`), `enforce_admins: false`; PR obrigatória em `main` |
+| FINDING-3 | Fechado como regra | `CONTRIBUTING.md` › CI e merge; aplicado pela proteção do FINDING-5 |
