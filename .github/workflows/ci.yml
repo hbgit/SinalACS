@@ -2,10 +2,36 @@ name: CI
 
 on:
   push:
-    branches: [main, master]
+    # develop entra aqui porque, sem PR develop → main aberta, commit nenhum
+    # de develop rodava CI — foi assim que 74d89c0 ficou sem um run sequer
+    # (FINDING-2/FINDING-4 da avaliação de 2026-09-28).
+    branches: [main, master, develop]
   pull_request:
+  # Para gerar o dado sem precisar abrir PR: `gh workflow run CI --ref <branch>`.
+  workflow_dispatch:
+
+# Um run vivo por PR: push novo na mesma PR cancela o anterior, que já não
+# descreve a ponta dela — o android-e2e sozinho chega a 60 min (FINDING-7).
+# Push e dispatch são agrupados pelo SHA, então nenhum commit de main/develop
+# perde o próprio resultado para o commit seguinte.
+concurrency:
+  group: ci-${{ github.event_name }}-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
 
 jobs:
+  # Guarda do próprio workflow: actionlint e as invariantes que a avaliação de
+  # 2026-09-28 mostrou derivarem sem ninguém ver (jobs × documentação,
+  # gatilhos, concorrência, versões de ações, imagem do runner).
+  workflow-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: actionlint
+        run: docker run --rm -v "$PWD:/repo" --workdir /repo rhysd/actionlint:1.7.12 -color
+      - name: Invariantes do CI
+        run: |
+          python3 -c 'import yaml' 2>/dev/null || { sudo apt-get update && sudo apt-get install -y python3-yaml; }
+          ./scripts/qa/ci_invariants.sh
   serverpod-backend:
     runs-on: ubuntu-latest
     defaults:

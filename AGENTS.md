@@ -144,7 +144,7 @@ Importante:
 - `flutter test` é hermético e não substitui validações com stack local real;
 - os testes de integração e validação de conexão vivem fora do `flutter test` e utilizam a stack Docker/VM;
 - a validação contra a stack real está na skill `validacao-e2e` (`scripts/qa/e2e.sh`, `tool/live_check.dart`, `integration_test` no emulador);
-- o CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) tem oito jobs: `serverpod-backend`, `backend-docker-build`, `patient-app`, `acs-app`, `admin-app`, `coverage-report`, `android-e2e` (único que sobe emulador Android contra a stack; hoje o mais instável) e `admin-android-build` (compila o APK do admin);
+- o CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) roda em toda PR, em push para `main`/`develop` e à mão (`gh workflow run CI --ref <branch>`), e tem nove jobs: `workflow-lint` (actionlint + `scripts/qa/ci_invariants.sh`, que falha quando esta lista diverge do workflow), `serverpod-backend`, `backend-docker-build`, `patient-app`, `acs-app`, `admin-app`, `coverage-report`, `android-e2e` (único que sobe emulador Android contra a stack; hoje o mais instável) e `admin-android-build` (compila o APK do admin);
 - nem `main` nem `develop` têm branch protection: CI vermelho não bloqueia merge — ver [docs/ci-audit/2026-09-28-avaliacao-ci-develop.md](docs/ci-audit/2026-09-28-avaliacao-ci-develop.md).
 
 ## Observações finais
