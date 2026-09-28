@@ -18,12 +18,17 @@ concurrency:
   group: ci-${{ github.event_name }}-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.sha }}
   cancel-in-progress: true
 
+# Todos os jobs fixam ubuntu-24.04 em vez de ubuntu-latest: o label migra
+# para Ubuntu 26 a partir de 2026-10-19 sem aviso no dia, e o android-e2e
+# (KVM, udev) e os builds Android (NDK/CMake em cache) são os mais sensíveis à
+# troca. A migração é feita de propósito, depois de um ensaio — ver a Seção 6
+# de docs/ci-audit/2026-09-28-avaliacao-ci-develop.md.
 jobs:
   # Guarda do próprio workflow: actionlint e as invariantes que a avaliação de
   # 2026-09-28 mostrou derivarem sem ninguém ver (jobs × documentação,
   # gatilhos, concorrência, versões de ações, imagem do runner).
   workflow-lint:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
       - name: actionlint
@@ -33,7 +38,7 @@ jobs:
           python3 -c 'import yaml' 2>/dev/null || { sudo apt-get update && sudo apt-get install -y python3-yaml; }
           ./scripts/qa/ci_invariants.sh
   serverpod-backend:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: backend
@@ -98,7 +103,7 @@ jobs:
         working-directory: backend/sinalacs_server
 
   backend-docker-build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
       # Imagem do servidor Serverpod, a mesma que o docker-compose constrói.
@@ -108,7 +113,7 @@ jobs:
         run: docker build -f backend/sinalacs_server/Dockerfile backend
 
   patient-app:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: apps/patient
@@ -142,7 +147,7 @@ jobs:
       - run: flutter test
 
   acs-app:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: apps/acs
@@ -162,7 +167,7 @@ jobs:
       - run: flutter test
 
   admin-app:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: apps/admin
@@ -176,7 +181,7 @@ jobs:
       - run: flutter test
 
   coverage-report:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
       - uses: dart-lang/setup-dart@v1
@@ -203,7 +208,7 @@ jobs:
           path: build/qa/coverage
 
   android-e2e:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
       GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
@@ -309,7 +314,7 @@ jobs:
   # tem a guarda que faz o build falhar sem SINALACS_MQTT_PASSWORD: cobri-lo
   # aqui exigiria compilar um APK que a própria guarda declara inútil.
   admin-android-build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: apps/admin
