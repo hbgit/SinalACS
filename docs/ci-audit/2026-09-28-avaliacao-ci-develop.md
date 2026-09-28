@@ -66,3 +66,84 @@ Confirmação adicional (além do que o brief já constatava): o commit `9f21b9d
 2. `android-e2e` falhando ou estourando o timeout de 60 minutos (recorrente em 21, 23 e 25/09, inclusive no run mais recente observado; ver FINDING-4 para o estado após a última tentativa de correção em `74d89c0`).
 
 Conclusão: durante toda a janela observada, não houve um único run totalmente verde da PR que leva `develop` para `main`. Isso é consistente com a ausência de branch protection (FINDING-5): nada no GitHub bloqueou o trabalho de continuar avançando apesar do CI vermelho, então o sinal vermelho não gerou pressão para corrigir a causa raiz — apenas se acumulou.
+
+## 3. Estado atual da HEAD
+
+Comandos executados em 2026-09-28 (nova chamada, para esta seção):
+
+```bash
+git log -1 --format='%H %ci' HEAD
+gh run list --limit 10 --json databaseId,status,conclusion,createdAt,headBranch,event,headSha
+```
+
+`HEAD` local é `9ed4f92` (2026-09-28 09:47:00 -0400) — **dois commits à frente** do snapshot do brief (`74d89c0`, 2026-09-25 19:46:48 +0000): `2eae254` e `9ed4f92`, que são exatamente os commits das Tasks 1 e 2 deste próprio plano (só tocam `docs/ci-audit/2026-09-28-avaliacao-ci-develop.md`, `git show --stat` confirma). `git status --short --branch` mostra `develop...origin/develop [ahead 2]` — esses dois commits ainda não foram enviados ao remoto; `origin/develop` continua em `74d89c0`.
+
+Nenhuma execução do CI cobre `74d89c0`, `2eae254` ou `9ed4f92`. Confirmado por busca direta na API, não só pela lista dos últimos 10/15 runs:
+
+```bash
+gh api "repos/hbgit/SinalACS/actions/runs?per_page=100" \
+  --jq '.workflow_runs[] | select(.head_sha | startswith("74d89c0") or startswith("2eae254") or startswith("9ed4f92"))'
+```
+
+Retorna vazio para os três SHAs. Isso já era previsível pela FINDING-2 (Seção 1) e pelo texto da Seção 2 ("nenhum novo run apareceu contra `develop` apesar dos commits `74d89c0` e `2eae254`..."): `push` só dispara CI em `main`/`master`, e a única PR `develop → main` (#7) já foi mesclada e fechada em 2026-09-25T19:24:17Z — não há PR aberta hoje que pegue esses commits. `gh pr list --state all` confirma: as únicas PRs abertas no momento são `#12` (`docs/ui-ux-test-plan-execution → develop`) e `#11` (`feat/theme-light-dark → develop`), nenhuma delas `develop → main`.
+
+**Correção ao brief: o run `36179475405` usado como "estado da HEAD" não testa `74d89c0`.** O brief presumiu que o run `36179475405` (`push` em `main`, `headSha` `543cded`, criado pela mesclagem da PR #7) incluía `74d89c0` por ser o run mais recente disponível. Não inclui:
+
+```bash
+git merge-base --is-ancestor 74d89c0 543cded && echo ancestor || echo "not ancestor"
+# → not ancestor
+git log --oneline -1 543cded^   # pai do merge commit
+# → 9f21b9d fix(ci): remove import obsoleto de test_api que quebrava o flutter analyze
+```
+
+A PR #7 foi mesclada às 19:24:17Z; o commit `74d89c0` só foi enviado a `develop` 22 minutos depois, às 19:46:48Z — ou seja, `74d89c0` (o commit "perf(ci): android-e2e com KVM, caches e smoke de um teste por app", que é a própria tentativa de correção do `android-e2e`) **fisicamente não existia ainda** quando a PR #7 foi mesclada. `36179475405` testa o código em `9f21b9d`, um commit *antes* da tentativa de correção — não depois dela. Não existe, e não existirá até uma nova PR `develop → main` ser aberta, nenhuma execução de CI que exercite `74d89c0` ou qualquer commit posterior.
+
+Dado esse limite (ver "Quando você estiver sobrecarregado" no brief da Task 3), uso `36179475405` como run mais recente disponível — é o mesmo run que o brief usou, mas seus resultados descrevem o estado do `android-e2e` **antes** de `74d89c0`, não depois. Trato isso como o achado principal desta seção.
+
+```bash
+gh run view 36179475405
+```
+
+```
+JOBS
+✓ coverage-report      ✓ admin-app          ✓ admin-android-build
+✓ acs-app              ✓ serverpod-backend  ✓ backend-docker-build
+✓ patient-app
+X android-e2e in 21m58s (ID 108218045718)
+```
+
+7 de 8 jobs verdes; `android-e2e` é o único vermelho, e termina em 21m58s — não é o timeout de 60 min visto no run anterior da Seção 2.
+
+```bash
+gh run view --job=108218045718 | grep -A5 -i "error\|failed\|passed"
+```
+
+```
+X The process '/usr/bin/sh' failed with exit code 1
+X 0 tests passed, 1 failed.
+X 0 tests passed, 1 failed.
+```
+
+**Segunda correção ao brief: as duas linhas "0 tests passed, 1 failed" não são uma por app.** O brief presumiu uma linha para `apps/patient` e outra para `apps/acs`, já que o smoke roda um arquivo por app. Lendo o log completo do passo que falhou (`gh run view --log-failed --job=108218045718`), as duas linhas correspondem à **mesma tentativa, duas vezes, no mesmo app**:
+
+```
+19:45:40 adb: failed to install .../apps/patient/build/app/outputs/flutter-apk/app-debug.apk: cmd: Failure calling service package: Broken pipe (32)
+19:45:44 ❌ loading .../apps/patient/integration_test/backend_connection_test.dart (failed): Unable to start the app on the device.
+19:45:44 0 tests passed, 1 failed.
+19:45:44 aviso: flutter test integration_test falhou (possível "Broken pipe" do adb install em emulador sem aceleração de hardware); tentando de novo.
+19:46:12 adb: failed to install .../apps/patient/build/app/outputs/flutter-apk/app-debug.apk: cmd: Can't find service: package
+19:46:14 ❌ loading .../apps/patient/integration_test/backend_connection_test.dart (failed): Unable to start the app on the device.
+19:46:14 0 tests passed, 1 failed.
+```
+
+(o texto do aviso e o alvo `integration_test` — a pasta inteira, não `smoke_test.dart` — confirmam de novo que este run roda o script de `9f21b9d`, anterior ao "smoke de um teste por app" de `74d89c0`.) As duas falhas são a tentativa inicial e a única retentativa de `apps/patient` — nenhuma delas é `apps/acs`. O script (`scripts/qa/e2e.sh`, `set -euo pipefail`) roda `apps/patient` primeiro; como a retentativa também falhou por incapacidade de instalar o APK no emulador (mesma causa "Broken pipe"/"Can't find service", raiz em emulador sem aceleração de hardware — documentada nos comentários do próprio `e2e.sh`), o script abortou ali. **`apps/acs` e `apps/admin` nunca chegaram a rodar neste run.** Não sabemos, a partir dele, se o smoke do `acs` passaria ou falharia.
+
+Comparação com a Seção 2: o run imediatamente anterior na mesma cadeia de commits, `36143685083` (`40035a6`, um commit antes de `9f21b9d`), teve "10 tests passed, 4 failed" — passagem parcial, sinal de que ao menos alguns testes chegaram a rodar em pelo menos um dos apps. Entre `40035a6` e `9f21b9d` a única mudança é a remoção do import não usado em `acs-app` (lint, não toca `e2e.sh`); ainda assim o `android-e2e` piorou de "passagem parcial" para "aborta na primeira instalação do APK, zero testes chegam a rodar". Isso é consistente com falha de infraestrutura não determinística (emulador sem KVM, mencionada nos comentários de `e2e.sh` como causa já identificada antes de `74d89c0`), não com uma regressão introduzida por código de teste.
+
+**FINDING-4 (severidade: crítica — o único job que exercita o device de verdade está com o resultado da correção tentada ainda não verificado por CI).** No HEAD atual (`9ed4f92`) e em todo commit a partir de `74d89c0` (inclusive), não existe **nenhuma** execução de CI: a PR `develop → main` que cobria esses commits já foi mesclada antes de `74d89c0` existir, e sem uma PR nova aberta o workflow não dispara para `develop` (FINDING-2). A execução mais recente disponível, `36179475405`, na verdade testa `9f21b9d` — o commit imediatamente *anterior* a `74d89c0`, a própria tentativa de correção (KVM, cache, smoke de um teste por app) que o time aplicou para resolver a instabilidade do `android-e2e` registrada na Seção 2. Nessa execução, `android-e2e` falhou em 21m58s (não por timeout): a instalação do APK do `apps/patient` no emulador falhou duas vezes seguidas ("Broken pipe (32)", depois "Can't find service: package") e o script abortou antes de sequer tentar `apps/acs` ou `apps/admin` — um retrocesso em relação ao run anterior da mesma cadeia (`36143685083`, "10 tests passed, 4 failed", passagem parcial), mas causado por flakiness de infraestrutura documentada (emulador sem aceleração de hardware), não por uma mudança de código de teste.
+
+Ou seja: o time já escreveu e commitou (`74d89c0`) a correção mais provável para essa causa raiz — mas essa correção nunca rodou no CI, nem uma única vez. Não há como hoje afirmar se `android-e2e` está corrigido, seguindo quebrado do mesmo jeito, ou pior — o dado simplesmente não existe. Isso é mais grave do que uma regressão confirmada: é um item que a equipe acredita ter resolvido, sem qualquer verificação. Combinado com o FINDING-2 (push direto em `develop` não dispara CI) e o fato de não haver hoje PR aberta `develop → main`, essa lacuna de verificação persiste indefinidamente até que alguém abra essa PR (ou dispare o workflow manualmente) — não é algo que se resolva sozinho com o tempo.
+
+`android-e2e` continua sendo o único job do repositório que sobe um emulador Android real e exercita o ciclo completo (per `AGENTS.md`/`CLAUDE.md`: MQTT com TLS, fila offline, ciclo de alerta vermelho). Os outros 7 jobs (`flutter analyze`/`flutter test` unitário, build de APK do admin, testes de integração do backend) não cobrem o que `android-e2e` cobre, e enquanto ele não roda de verdade contra `74d89c0`, essa cobertura fim-a-fim está, na prática, sem sinal algum — nem verde, nem vermelho, ausente.
+
+Recomendação: antes de qualquer sessão de debugging, gerar o dado que falta — abrir a PR `develop → main` (ou disparar o workflow manualmente contra `develop`) para obter uma execução real de CI contra `74d89c0`. Só então decidir o próximo passo: se `android-e2e` passar, o KVM resolveu a causa já documentada; se falhar, aí sim abrir uma sessão dedicada com a skill `superpowers:systematic-debugging`, usando `scripts/qa/run_android_e2e.sh` como ponto de entrada. O artifact `android-e2e-metrics` não é uma fonte confiável de dados de latência enquanto o job abortar antes do fim: neste run ele nem foi gerado (`No files were found with the provided path: build/qa/latency. No artifacts will be uploaded.` — só o artifact `coverage-reports` apareceu na lista de artifacts do run).
