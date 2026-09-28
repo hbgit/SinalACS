@@ -124,6 +124,22 @@ padrão, e é gerada por máquina. Um `flutter build apk` puro **falha** — a
 guarda vive em `apps/acs/android/app/build.gradle.kts` — em vez de compilar em
 silêncio um APK que nunca recebe alerta.
 
+## CI e merge
+
+`main` e `develop` são protegidas: uma PR só entra com todos os jobs do CI
+verdes, exceto `android-e2e`. O `android-e2e` é informativo até acumular
+histórico verde, mas vermelho nele continua sendo defeito a investigar, não
+ruído. A lista de checks obrigatórios vem de
+`./scripts/qa/ci_invariants.sh --checks-obrigatorios`. Ao criar, renomear ou
+remover um job, atualize `JOBS_DOCUMENTADOS` nesse script, `CLAUDE.md` e
+`AGENTS.md` no mesmo commit. O job `workflow-lint` falha se não fizer isso.
+
+Não mescle com CI vermelho. Para rodar o CI numa branch sem abrir PR:
+
+```bash
+gh workflow run CI --ref <branch>
+```
+
 ## Alterações no backend
 
 O backend é um workspace Serverpod. Mantenha lógica de negócio em `application/`
