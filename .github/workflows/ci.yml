@@ -25,7 +25,7 @@ jobs:
   workflow-lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: actionlint
         run: docker run --rm -v "$PWD:/repo" --workdir /repo rhysd/actionlint:1.7.12 -color
       - name: Invariantes do CI
@@ -71,7 +71,7 @@ jobs:
           --health-timeout=5s
           --health-retries=5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dart-lang/setup-dart@v1
         with:
           sdk: 3.12.2
@@ -100,7 +100,7 @@ jobs:
   backend-docker-build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # Imagem do servidor Serverpod, a mesma que o docker-compose constrói.
       # O contexto é a raiz do workspace, porque o build precisa do pubspec.lock
       # compartilhado entre sinalacs_server e sinalacs_client.
@@ -113,7 +113,7 @@ jobs:
       run:
         working-directory: apps/patient
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.44.8'
@@ -147,7 +147,7 @@ jobs:
       run:
         working-directory: apps/acs
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.44.8'
@@ -167,7 +167,7 @@ jobs:
       run:
         working-directory: apps/admin
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.44.8'
@@ -178,7 +178,7 @@ jobs:
   coverage-report:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dart-lang/setup-dart@v1
         with:
           sdk: 3.12.2
@@ -196,7 +196,7 @@ jobs:
       - name: Derruba banco de teste
         if: always()
         run: docker compose --profile test down
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: coverage-reports
@@ -208,7 +208,7 @@ jobs:
     env:
       GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # Sem isto o emulador roda por emulação de CPU em software: medido, o log
       # dizia "ProbeKVM: This user doesn't have permissions to use KVM", o boot
       # levava ~12 min e cada `adb install` de 45 a 95 s. O runner tem
@@ -220,7 +220,7 @@ jobs:
             | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: '17'
@@ -231,7 +231,7 @@ jobs:
       # O 1º `assembleDebug` levava 311 s sem cache, 24 deles instalando o
       # CMake do NDK. Chave pelos pubspec.lock e scripts Gradle dos dois apps
       # que rodam no emulador — mesmo padrão do job admin-android-build.
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: |
             ~/.pub-cache
@@ -243,7 +243,7 @@ jobs:
       # Snapshot do AVD já inicializado: sem ele, todo run paga o primeiro
       # boot a frio. Os parâmetros do emulador precisam ser os mesmos aqui e
       # no step que roda os testes, ou o snapshot é descartado.
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         id: avd-cache
         with:
           path: |
@@ -294,7 +294,7 @@ jobs:
       - name: Remove pg_data/ do workspace
         if: always()
         run: sudo rm -rf pg_data
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: android-e2e-metrics
@@ -314,8 +314,8 @@ jobs:
       run:
         working-directory: apps/admin
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: '17'
@@ -323,7 +323,7 @@ jobs:
         with:
           flutter-version: '3.44.8'
       # Sem cache, cada execução rebaixa ~200MB de Gradle e AGP.
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: |
             ~/.gradle/caches

@@ -107,8 +107,35 @@ def check_limpeza_do_workspace():
         falhas.append('android-e2e: nenhum passo if: always() apaga pg_data/ depois do E2E')
 
 
+# Major mínimo de cada ação da GitHub (FINDING-6): abaixo disso ela roda em
+# Node 20, depreciado, ou — setup-java v4 — não recebe mais atualização.
+MAJOR_MINIMO = {
+    'actions/checkout': 7,
+    'actions/setup-java': 6,
+    'actions/cache': 6,
+    'actions/upload-artifact': 7,
+}
+
+
+def check_versoes_de_acoes():
+    for nome_job, job in jobs.items():
+        for passo in job.get('steps') or []:
+            uses = passo.get('uses') or ''
+            acao, _, versao = uses.partition('@')
+            minimo = MAJOR_MINIMO.get(acao)
+            if minimo is None:
+                continue
+            if not versao.startswith('v') or not versao[1:].split('.')[0].isdigit():
+                # Fixar por SHA é legítimo, mas então esta guarda precisa
+                # aprender a ler o comentário de versão — não passar calada.
+                falhas.append(f'FINDING-6: {nome_job} usa {uses}; este check só entende tags vN')
+                continue
+            if int(versao[1:].split('.')[0]) < minimo:
+                falhas.append(f'FINDING-6: {nome_job} usa {uses}; mínimo v{minimo}')
+
+
 CHECKS = [check_jobs, check_gatilhos, check_sem_filtro_de_paths, check_concorrencia,
-          check_limpeza_do_workspace]
+          check_limpeza_do_workspace, check_versoes_de_acoes]
 
 for check in CHECKS:
     check()
