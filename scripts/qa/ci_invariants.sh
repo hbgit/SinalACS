@@ -145,14 +145,21 @@ def check_runner():
     for nome_job, job in jobs.items():
         if job.get('runs-on') != RUNNER:
             falhas.append(f"FINDING-6: {nome_job} roda em {job.get('runs-on')!r}; esperado {RUNNER!r}")
+    # O snapshot do AVD é específico da imagem do runner: sem a imagem na
+    # chave, a primeira execução numa imagem nova restauraria o AVD da antiga.
+    for passo in jobs.get('android-e2e', {}).get('steps', []):
+        chave = str((passo.get('with') or {}).get('key', ''))
+        if chave.startswith('avd-') and not chave.endswith(f'-{RUNNER}'):
+            falhas.append(f'FINDING-6: chave do cache de AVD {chave!r} não termina em -{RUNNER}')
 
 
 # Checks obrigatórios para merge em main e develop (FINDING-5). O
 # android-e2e fica de fora enquanto não tiver histórico verde: torná-lo
 # obrigatório hoje travaria toda PR num job sabidamente instável (FINDING-4).
-# A proteção de branch é aplicada a partir desta lista (--checks-obrigatorios),
-# então renomear um job quebra aqui antes de deixar PRs esperando por um check
-# que não existe mais.
+# A proteção de branch é aplicada a partir desta lista (--checks-obrigatorios).
+# Este script não lê a proteção configurada no GitHub: ao renomear ou criar um
+# job, reaplique-a (ver CONTRIBUTING.md › CI e merge), senão PRs esperam por um
+# check que não existe mais.
 CHECKS_OBRIGATORIOS = sorted(JOBS_DOCUMENTADOS - {'android-e2e'})
 # App GitHub Actions: amarrar o check ao app impede que outra integração
 # publique um status com o mesmo nome e destrave o merge.
