@@ -4,11 +4,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project overview
 
-SinalACS is a platform that prioritizes Primary Health Care visits in Brazil by turning structured clinical signals into a risk-ranked work queue for the Community Health Agent (ACS). Project documentation, code comments, and UI copy are in Portuguese — match that language for anything user-facing or spec-related. Current state: functional prototype, validated locally via Docker Compose; not production-ready (no real institutional auth, no mTLS on the broker, no production deploy).
+SinalACS is a platform that prioritizes Primary Health Care visits in Brazil by turning structured clinical signals into a risk-ranked work queue for the Community Health Agent (ACS). Project documentation, code comments, and UI copy are in Portuguese — match that language for anything user-facing or spec-related. Current state: functional prototype, validated locally via Docker Compose; not production-ready. Already delivered: ACS institutional login (RF07, matrícula + senha/Argon2id, credentials kept locally — no integration with a real identity provider), patient passwordless login (RF01, CPF + birth date + OTP), RBAC per micro-area (RNF06), TLS on the RPC via Traefik (RNF04) and on the broker (password + ACL). Still missing: MFA and refresh token (deliberately deferred — see `PROGRESS.md`), mTLS on the broker (no client certificates), a backend for the admin backoffice (`apps/admin` still runs on `MockAdminDataSource`), and a production deploy (`backend/DEPLOY.md` is only a free-tier demo path).
 
 Two core flows:
-- **Paciente (patient)**: simple auth, urgency alert, structured triage, request status tracking.
+- **Paciente (patient)**: passwordless auth (OTP), urgency alert, structured triage, request status tracking, "Meus Dados" (LGPD).
 - **ACS**: dynamic prioritization, territorialization (micro-area), offline visit registration, micro-area follow-up.
+
+A third app, `apps/admin`, is a read-only backoffice (Indicadores, Microáreas, Alertas, Auditoria) on mock data.
+
+Main RPC endpoints (`backend/sinalacs_server/lib/src/endpoints/`): `auth` (`loginInstitutional`, `requestOtp`, `verifyOtp`, `developmentLogin` — the last only with `ENABLE_DEV_LOGIN`), `onboarding`, `triage.evaluate`, `alerts` (`createRedAlert`, `acknowledge`, `statusFor`), `patients` (`listMicroArea`, `myData`, chronic conditions), `visits` (`sync`, `pull`), `health.check`.
+
+`PROGRESS.md` holds milestone status and the open items with owners. `spec/validation_report.md` is stale in both directions (items it lists as open are closed, and its test counts are far below the real ones) — verify against the code before trusting it.
 
 ## Required reading before implementing features
 
@@ -98,7 +104,8 @@ Product/architecture source of truth (PRD, UX flows, LGPD design, stack decision
 - Prefer simple, predictable solutions aligned with the stack already chosen (Flutter + Dart backend + Postgres + MQTT) over introducing new frameworks/services not in `spec/stack.md`.
 - Keep triage/prioritization logic deterministic and consistent with the Manchester Protocol model referenced in the PRD — do not make risk classification probabilistic or user-overridable.
 - When touching sync behavior (backend `SyncFsm` or the ACS `offline_visit_queue.dart`), preserve retry/queue/conflict semantics — offline-first correctness is the primary architectural risk called out in `AGENTS.md`.
-- When reusing a clinical fill color (`red`/`accent`/`danger`/`yellow`/`green`) as text or icon color in the Flutter apps, use the `*OnSurface` token and measure contrast against the surface it actually renders on (commonly `Card`/`surfaceRaised`), not the Scaffold background — see the WCAG contrast tokens note above and `spec/ux_accessibility_assessment.md`.
+- When reusing a clinical fill color (`red`/`accent`/`danger`/`yellow`/`green`) as text or icon color in the Flutter apps, use the `*OnSurface` token and measure contrast against the surface it actually renders on (commonly `Card`/`surfaceRaised`), not the Scaffold background — see the WCAG contrast tokens section in [apps/CLAUDE.md](apps/CLAUDE.md), `spec/ux_accessibility_assessment.md` and each app's `test/contrast_tokens_test.dart`.
+- CI lives in [.github/workflows/ci.yml](.github/workflows/ci.yml) (8 jobs: `serverpod-backend`, `backend-docker-build`, `patient-app`, `acs-app`, `admin-app`, `coverage-report`, `android-e2e`, `admin-android-build`). `android-e2e` is the only one that boots a real emulator against the stack and is the least stable. Neither `main` nor `develop` has branch protection, so red CI does not block merges — see `docs/ci-audit/2026-09-28-avaliacao-ci-develop.md`.
 - Never commit real patient data, credentials, or the dev Docker Compose secrets into anything beyond local development.
 
 ## graphify
