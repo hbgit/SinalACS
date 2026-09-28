@@ -92,9 +92,12 @@ Retorna vazio para os três SHAs. Isso já era previsível pela FINDING-2 (Seç�
 ```bash
 git merge-base --is-ancestor 74d89c0 543cded && echo ancestor || echo "not ancestor"
 # → not ancestor
-git log --oneline -1 543cded^   # pai do merge commit
+git log --oneline -1 543cded^2   # segundo pai do merge commit = ponta de develop mesclada pela PR #7
 # → 9f21b9d fix(ci): remove import obsoleto de test_api que quebrava o flutter analyze
 ```
+
+(`543cded^1`, o primeiro pai, é `9293536` — a ponta de `main` antes da mesclagem, não usado aqui;
+o commit relevante para esta comparação é o segundo pai, a ponta de `develop` que a PR #7 trouxe.)
 
 A PR #7 foi mesclada às 19:24:17Z; o commit `74d89c0` só foi enviado a `develop` 22 minutos depois, às 19:46:48Z — ou seja, `74d89c0` (o commit "perf(ci): android-e2e com KVM, caches e smoke de um teste por app", que é a própria tentativa de correção do `android-e2e`) **fisicamente não existia ainda** quando a PR #7 foi mesclada. `36179475405` testa o código em `9f21b9d`, um commit *antes* da tentativa de correção — não depois dela. Não existe, e não existirá até uma nova PR `develop → main` ser aberta, nenhuma execução de CI que exercite `74d89c0` ou qualquer commit posterior.
 
