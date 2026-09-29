@@ -93,6 +93,28 @@ void main() {
     service = DataSubjectRightsService(store: store, audit: audit, clock: () => _now);
   });
 
+  group('acceptTermsOfUse (LGPD-RF18)', () {
+    test('grava "granted" para termsOfUse com a versão vigente e audita', () async {
+      final record = await service.acceptTermsOfUse(_patient);
+
+      final entry = store.consents.single;
+      expect(entry.userId, _patientId);
+      expect(entry.purpose, ConsentPurpose.termsOfUse);
+      expect(entry.action, 'granted');
+      expect(entry.version, consentPolicyVersion);
+      expect(entry.timestamp, _now);
+      expect(record.purpose, 'termsOfUse');
+      expect(record.action, 'granted');
+      expect(audit.events.single.resourceType, 'consent_log');
+    });
+
+    test('só paciente aceita: ACS é recusado sem gravar nada', () async {
+      await expectLater(service.acceptTermsOfUse(_acs), throwsA(isA<StateError>()));
+      expect(store.consents, isEmpty);
+      expect(audit.events, isEmpty);
+    });
+  });
+
   group('updateConsent (LGPD-RF05)', () {
     test('revogar grava uma linha nova "denied", com a versão vigente e o relógio do servidor', () async {
       final record = await service.updateConsent(

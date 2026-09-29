@@ -79,8 +79,25 @@ class DataSubjectRightsService {
       );
     }
 
+    return _record(user, purpose: purpose, action: granted ? 'granted' : 'denied');
+  }
+
+  /// Aceite explícito do Termo de Uso e da Política de Privacidade por quem
+  /// entrou por CPF + OTP sem passar pelo onboarding (LGPD-RF18) — ou que
+  /// aceitou uma versão anterior. É a única via de escrita de `termsOfUse`
+  /// fora do cadastro: [updateConsent] continua recusando esse propósito, para
+  /// que o termo não vire uma chave liga/desliga no painel.
+  Future<ConsentRecordSnapshot> acceptTermsOfUse(AuthenticatedUser user) async {
+    _requirePatient(user);
+    return _record(user, purpose: ConsentPurpose.termsOfUse, action: 'granted');
+  }
+
+  Future<ConsentRecordSnapshot> _record(
+    AuthenticatedUser user, {
+    required ConsentPurpose purpose,
+    required String action,
+  }) async {
     final now = _clock().toUtc();
-    final action = granted ? 'granted' : 'denied';
     await _store.recordConsent(ConsentLogEntry(
       userId: user.id,
       purpose: purpose,

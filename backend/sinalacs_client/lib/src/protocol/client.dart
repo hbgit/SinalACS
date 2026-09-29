@@ -363,6 +363,17 @@ class EndpointPatients extends EndpointAuthenticated {
     },
   );
 
+  /// Aceite do Termo de Uso e da Política de Privacidade vigentes (LGPD-RF18)
+  /// por quem entrou por OTP sem passar pelo onboarding, ou aceitou uma versão
+  /// anterior. Só paciente; grava uma linha nova e assinada em `consent_logs`.
+  _i2.Future<_i12.PatientConsentRecord> acceptTermsOfUse({
+    required String accessToken,
+  }) => caller.callServerEndpoint<_i12.PatientConsentRecord>(
+    'patients',
+    'acceptTermsOfUse',
+    {'accessToken': accessToken},
+  );
+
   /// Pedido de exclusão/anonimização dos próprios dados (LGPD-RF08).
   /// Idempotente enquanto houver um pedido de exclusão em aberto.
   _i2.Future<_i14.PatientDataSubjectRequestRecord> requestDataDeletion({

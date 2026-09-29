@@ -18,6 +18,7 @@ patients:
   - updateChronicConditions:
   - myData:
   - updateConsent:
+  - acceptTermsOfUse:
   - requestDataDeletion:
   - requestDataCorrection:
 triage:

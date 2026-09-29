@@ -1,5 +1,6 @@
 import 'package:serverpod/serverpod.dart';
 import 'package:sinalacs_server/src/application/onboarding/consent_signature.dart';
+import 'package:sinalacs_server/src/application/onboarding/onboarding_service.dart' show consentPolicyVersion;
 import 'package:sinalacs_server/src/config/app_config.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
 import 'package:sinalacs_server/src/runtime/alert_runtime.dart';
@@ -139,6 +140,50 @@ void main() {
       final overview = await endpoints.patients.myData(sessionBuilder, accessToken: token);
       expect(overview.consents.last.purpose, 'localReminders');
       expect(overview.consents.last.action, 'denied');
+    });
+
+    test('acceptTermsOfUse grava termsOfUse assinado e myData passa a mostrá-lo', () async {
+      final session = sessionBuilder.build();
+      await _seed(session);
+      final token = await patientToken();
+
+      final record = await endpoints.patients.acceptTermsOfUse(sessionBuilder, accessToken: token);
+      expect(record.purpose, 'termsOfUse');
+      expect(record.action, 'granted');
+
+      final row = (await ConsentLog.db.find(
+        session,
+        where: (t) => t.userId.equals(UuidValue.fromString(_patientId)),
+      ))
+          .single;
+      expect(row.purpose, 'termsOfUse');
+      expect(row.version, consentPolicyVersion);
+      expect(
+        row.signature,
+        ConsentSignature(secret: _chainSecret).compute(
+          userId: _patientId,
+          purpose: row.purpose,
+          action: row.action,
+          version: row.version,
+          timestamp: row.timestamp,
+        ),
+      );
+
+      final overview = await endpoints.patients.myData(sessionBuilder, accessToken: token);
+      expect(overview.consents.last.purpose, 'termsOfUse');
+    });
+
+    test('acceptTermsOfUse recusa token de ACS sem gravar nada', () async {
+      final session = sessionBuilder.build();
+      await _seed(session);
+      final acsToken =
+          (await endpoints.auth.developmentLogin(sessionBuilder, role: 'acs')).accessToken;
+
+      await expectLater(
+        endpoints.patients.acceptTermsOfUse(sessionBuilder, accessToken: acsToken),
+        throwsA(isA<AlertPermissionException>()),
+      );
+      expect(await ConsentLog.db.count(session), 0);
     });
 
     test('updateConsent recusa a finalidade obrigatória sem gravar nada', () async {

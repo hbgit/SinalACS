@@ -128,6 +128,30 @@ class PatientsEndpoint extends AuthenticatedEndpoint {
     }
   }
 
+  /// Aceite do Termo de Uso e da Política de Privacidade vigentes (LGPD-RF18)
+  /// por quem entrou por OTP sem passar pelo onboarding, ou aceitou uma versão
+  /// anterior. Só paciente; grava uma linha nova e assinada em `consent_logs`.
+  Future<PatientConsentRecord> acceptTermsOfUse(
+    Session session, {
+    required String accessToken,
+  }) async {
+    final user = authenticate(accessToken);
+
+    try {
+      final record = await AlertRuntime.instance
+          .dataSubjectRightsServiceFor(session)
+          .acceptTermsOfUse(user);
+      return PatientConsentRecord(
+        purpose: record.purpose,
+        action: record.action,
+        version: record.version,
+        timestamp: record.timestamp,
+      );
+    } on StateError catch (error) {
+      throw AlertPermissionException(message: error.message);
+    }
+  }
+
   /// Pedido de exclusão/anonimização dos próprios dados (LGPD-RF08).
   /// Idempotente enquanto houver um pedido de exclusão em aberto.
   Future<PatientDataSubjectRequestRecord> requestDataDeletion(
