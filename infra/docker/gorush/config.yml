@@ -1,0 +1,20 @@
+# Configuração do Gorush (RF14). Confira os nomes das chaves contra o README da
+# imagem que estiver fixada no docker-compose.yml antes de subir.
+core:
+  port: "8088"
+  sync: true
+  feedback_timeout: 10
+android:
+  enabled: true
+  credential: ""
+  key_path: /credentials/fcm-service-account.json
+ios:
+  enabled: true
+  key_path: /credentials/apns-key.p8
+  key_id: ""
+  team_id: ""
+  production: false
+log:
+  format: json
+  access_log: "-"
+  error_log: "-"

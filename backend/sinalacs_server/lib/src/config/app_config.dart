@@ -19,9 +19,18 @@ class AppConfig {
     required this.mqttCaCertificatePath,
     required this.appEnv,
     required this.enableDevLogin,
+    this.gorushUrl,
   });
 
   final String mqttBroker;
+
+  /// Endereço do Gorush, o relé de push para FCM/APNs (RF14, decisão §3.2), sem
+  /// barra final. `null` desliga o envio de avisos: o backend sobe e responde
+  /// tudo o mais, e `notices.sendSegmented` recusa com uma mensagem clara.
+  final String? gorushUrl;
+
+  /// Tempo máximo de uma chamada ao Gorush, do connect à resposta inteira.
+  Duration get gorushTimeout => const Duration(seconds: 5);
 
   /// Chave HMAC que assina os tokens de `auth.developmentLogin`.
   ///
@@ -190,7 +199,20 @@ class AppConfig {
       mqttCaCertificatePath: environment['MQTT_CA_CERT_PATH'],
       appEnv: appEnv,
       enableDevLogin: environment['ENABLE_DEV_LOGIN'] == 'true',
+      gorushUrl: _resolveGorushUrl(environment['GORUSH_URL']),
     );
+  }
+
+  static String? _resolveGorushUrl(String? value) {
+    var url = value?.trim() ?? '';
+    if (url.isEmpty) return null;
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+      throw StateError('GORUSH_URL deve começar com http:// ou https://.');
+    }
+    while (url.endsWith('/')) {
+      url = url.substring(0, url.length - 1);
+    }
+    return url;
   }
 
   /// Decide um segredo de assinatura, recusando subir com um valor fraco.
