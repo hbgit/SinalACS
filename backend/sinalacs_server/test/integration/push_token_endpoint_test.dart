@@ -1,4 +1,6 @@
 import 'package:serverpod/serverpod.dart';
+import 'package:sinalacs_server/src/application/patients/push_token_service.dart'
+    show PushRegistration, maxPushTokensPerUser;
 import 'package:sinalacs_server/src/config/app_config.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
 import 'package:sinalacs_server/src/application/onboarding/onboarding_service.dart'
@@ -264,8 +266,9 @@ void main() {
 
       Future<void> cleanup(Session session) async {
         final id = UuidValue.fromString(_racePatientId);
-        await PushToken.db.deleteWhere(session, where: (t) => t.userId.equals(id));
-        await ConsentLog.db.deleteWhere(session, where: (t) => t.userId.equals(id));
+        final other = UuidValue.fromString(_raceAcsId);
+        await PushToken.db.deleteWhere(session, where: (t) => t.userId.equals(id) | t.userId.equals(other));
+        await ConsentLog.db.deleteWhere(session, where: (t) => t.userId.equals(id) | t.userId.equals(other));
         await User.db.deleteWhere(
           session,
           where: (t) => t.id.equals(id) | t.id.equals(UuidValue.fromString(_raceAcsId)),
@@ -307,10 +310,13 @@ void main() {
                 platform: 'android',
                 now: DateTime.now().toUtc(),
               ),
-              () async {
-                await consent('denied');
-                await tokens.deleteAllFor(_racePatientId);
-              }(),
+              consents.recordConsentRevokingPush(ConsentLogEntry(
+                userId: _racePatientId,
+                purpose: ConsentPurpose.segmentedPush,
+                action: 'denied',
+                version: consentPolicyVersion,
+                timestamp: DateTime.now().toUtc(),
+              )),
             ]);
             final left = await PushToken.db.count(
               session,
@@ -348,7 +354,7 @@ void main() {
               platform: 'android',
               now: DateTime.now().toUtc(),
             ),
-            isTrue,
+            PushRegistration.registered,
           );
 
           // O ACS de teste faz o papel da segunda pessoa: nunca consentiu.
@@ -360,12 +366,123 @@ void main() {
             now: DateTime.now().toUtc(),
           );
 
-          expect(registered, isFalse);
+          expect(registered, PushRegistration.refused);
           expect(
             await PushToken.db.count(session, where: (t) => t.token.equals('tok-compartilhado')),
             0,
             reason: 'o token continuaria ligado ao titular anterior',
           );
+        } finally {
+          await cleanup(session);
+        }
+      });
+
+      Future<void> grant(OrmDataSubjectRightsStore consents, String userId) =>
+          consents.recordConsent(ConsentLogEntry(
+            userId: userId,
+            purpose: ConsentPurpose.segmentedPush,
+            action: 'granted',
+            version: consentPolicyVersion,
+            timestamp: DateTime.now().toUtc(),
+          ));
+
+      OrmDataSubjectRightsStore consentStore({bool failAfterTokenDelete = false}) =>
+          OrmDataSubjectRightsStore(
+            session: () => sessionBuilder.build(),
+            chainSecret: _chainSecret,
+            cipher: AlertRuntime.instance.healthDataCipher,
+            debugFailAfterTokenDelete: failAfterTokenDelete,
+          );
+
+      test('revogação atômica: falha depois de apagar os tokens desfaz tudo', () async {
+        final session = sessionBuilder.build();
+        await _seedRaceLean(session);
+        try {
+          await grant(consentStore(), _racePatientId);
+          final tokens = OrmPushTokenStore(session: () => sessionBuilder.build());
+          await tokens.registerIfConsented(
+            userId: _racePatientId,
+            microAreaId: _raceMicroAreaId,
+            token: 'tok-atomico',
+            platform: 'android',
+            now: DateTime.now().toUtc(),
+          );
+
+          await expectLater(
+            consentStore(failAfterTokenDelete: true).recordConsentRevokingPush(ConsentLogEntry(
+              userId: _racePatientId,
+              purpose: ConsentPurpose.segmentedPush,
+              action: 'denied',
+              version: consentPolicyVersion,
+              timestamp: DateTime.now().toUtc(),
+            )),
+            throwsA(isA<StateError>()),
+          );
+
+          expect(
+            await PushToken.db.count(session, where: (t) => t.token.equals('tok-atomico')),
+            1,
+            reason: 'o apagamento dos tokens tinha de reverter junto',
+          );
+          final denied = await ConsentLog.db.count(
+            session,
+            where: (t) => t.userId.equals(UuidValue.fromString(_racePatientId)) & t.action.equals('denied'),
+          );
+          expect(denied, 0);
+        } finally {
+          await cleanup(session);
+        }
+      });
+
+      test('passou do teto, o token mais antigo sai e o novo entra', () async {
+        final session = sessionBuilder.build();
+        await _seedRaceLean(session);
+        try {
+          await grant(consentStore(), _racePatientId);
+          final tokens = OrmPushTokenStore(session: () => sessionBuilder.build());
+          final base = DateTime.now().toUtc();
+          for (var i = 0; i <= maxPushTokensPerUser; i++) {
+            await tokens.registerIfConsented(
+              userId: _racePatientId,
+              microAreaId: _raceMicroAreaId,
+              token: 'tok-teto-$i',
+              platform: 'android',
+              now: base.add(Duration(seconds: i)),
+            );
+          }
+
+          final left = await PushToken.db.find(
+            session,
+            where: (t) => t.userId.equals(UuidValue.fromString(_racePatientId)),
+          );
+          expect(left, hasLength(maxPushTokensPerUser));
+          expect(left.map((t) => t.token), isNot(contains('tok-teto-0')));
+          expect(left.map((t) => t.token), contains('tok-teto-$maxPushTokensPerUser'));
+        } finally {
+          await cleanup(session);
+        }
+      });
+
+      test('troca de dono devolve ownerChanged; repetir devolve registered', () async {
+        final session = sessionBuilder.build();
+        await _seedRaceLean(session);
+        try {
+          final consents = consentStore();
+          await grant(consents, _racePatientId);
+          await grant(consents, _raceAcsId);
+          final tokens = OrmPushTokenStore(session: () => sessionBuilder.build());
+          Future<PushRegistration> register(String userId) => tokens.registerIfConsented(
+                userId: userId,
+                microAreaId: _raceMicroAreaId,
+                token: 'tok-dono',
+                platform: 'android',
+                now: DateTime.now().toUtc(),
+              );
+
+          expect(await register(_racePatientId), PushRegistration.registered);
+          expect(await register(_raceAcsId), PushRegistration.ownerChanged);
+          expect(await register(_raceAcsId), PushRegistration.registered);
+          expect(await PushToken.db.count(session, where: (t) => t.token.equals('tok-dono')), 1);
         } finally {
           await cleanup(session);
         }

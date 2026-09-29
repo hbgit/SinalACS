@@ -224,7 +224,6 @@ class AlertRuntime {
           cipher: healthDataCipher,
         ),
         audit: auditTrailFor(session),
-        pushTokens: OrmPushTokenStore(session: () => session),
       );
 
   /// Aviso comunitário do ACS (RF14). Sem `GORUSH_URL` o serviço nasce sem relé e
@@ -243,7 +242,10 @@ class AlertRuntime {
 
   /// Registro do aparelho para avisos segmentados (RF14).
   PushTokenService pushTokenServiceFor(Session session) =>
-      PushTokenService(store: OrmPushTokenStore(session: () => session));
+      PushTokenService(
+        store: OrmPushTokenStore(session: () => session),
+        audit: auditTrailFor(session),
+      );
 
   /// Constrói o serviço de triagem persistida para uma requisição.
   TriageSessionService triageSessionServiceFor(Session session) =>

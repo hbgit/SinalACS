@@ -1,3 +1,4 @@
+import 'package:sinalacs_server/src/application/audit/audit_trail.dart';
 import 'package:sinalacs_server/src/application/auth/development_auth_service.dart';
 import 'package:sinalacs_server/src/application/patients/push_token_service.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
@@ -28,37 +29,41 @@ const _acs = AuthenticatedUser(
 
 class _FakePushTokenStore implements PushTokenStore {
   var consent = true;
-  var deleted = 0;
   final rows = <String, ({String userId, String platform})>{};
 
   @override
-  Future<bool> registerIfConsented({
+  Future<PushRegistration> registerIfConsented({
     required String userId,
     required String? microAreaId,
     required String token,
     required String platform,
     required DateTime now,
   }) async {
-    if (!consent) return false;
+    if (!consent) return PushRegistration.refused;
+    final previous = rows[token];
     rows[token] = (userId: userId, platform: platform);
-    return true;
+    return previous != null && previous.userId != userId
+        ? PushRegistration.ownerChanged
+        : PushRegistration.registered;
   }
+}
+
+class _FakeAudit extends AuditTrail {
+  final events = <AuditEvent>[];
 
   @override
-  Future<int> deleteAllFor(String userId) async {
-    deleted++;
-    rows.removeWhere((_, r) => r.userId == userId);
-    return 1;
-  }
+  Future<void> record(AuditEvent event) async => events.add(event);
 }
 
 void main() {
   late _FakePushTokenStore store;
+  late _FakeAudit audit;
   late PushTokenService service;
 
   setUp(() {
     store = _FakePushTokenStore();
-    service = PushTokenService(store: store, clock: () => DateTime.utc(2026, 9, 29));
+    audit = _FakeAudit();
+    service = PushTokenService(store: store, audit: audit, clock: () => DateTime.utc(2026, 9, 29));
   });
 
   test('sem consentimento vigente, recusa e não grava', () async {
@@ -97,5 +102,25 @@ void main() {
       service.register(_acs, token: 'tok-1', platform: 'android'),
       throwsA(isA<StateError>()),
     );
+  });
+
+  test('troca de dono é auditada; primeiro registro e repetição não', () async {
+    await service.register(_patient, token: 'tok-1', platform: 'android');
+    await service.register(_patient, token: 'tok-1', platform: 'android');
+    expect(audit.events, isEmpty);
+
+    await service.register(_otherPatient, token: 'tok-1', platform: 'android');
+    expect(audit.events.single.resourceType, 'push_token');
+    expect(audit.events.single.userId, _otherPatient.id);
+    expect('${audit.events.single.resourceId} ${audit.events.single.result}'.contains('tok-1'), isFalse);
+  });
+
+  test('recusa por falta de consentimento lança e não audita', () async {
+    store.consent = false;
+    await expectLater(
+      service.register(_patient, token: 'tok-1', platform: 'android'),
+      throwsA(isA<DataRightsException>()),
+    );
+    expect(audit.events, isEmpty);
   });
 }

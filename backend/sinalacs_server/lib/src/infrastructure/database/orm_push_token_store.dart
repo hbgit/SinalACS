@@ -15,7 +15,7 @@ class OrmPushTokenStore implements PushTokenStore {
   /// virar atualização). Só se espera pela trava do token com a do titular na
   /// mão, e quem a segura a solta no fim da própria transação: não há ciclo.
   @override
-  Future<bool> registerIfConsented({
+  Future<PushRegistration> registerIfConsented({
     required String userId,
     required String? microAreaId,
     required String token,
@@ -45,8 +45,9 @@ class OrmPushTokenStore implements PushTokenStore {
         if (existing != null && existing.userId != userUuid) {
           await PushToken.db.deleteRow(session, existing, transaction: transaction);
         }
-        return false;
+        return PushRegistration.refused;
       }
+      final ownerChanged = existing != null && existing.userId != userUuid;
       if (existing != null) {
         await PushToken.db.updateRow(
           session,
@@ -58,35 +59,32 @@ class OrmPushTokenStore implements PushTokenStore {
           ),
           transaction: transaction,
         );
-        return true;
+      } else {
+        await PushToken.db.insertRow(
+          session,
+          PushToken(
+            userId: userUuid,
+            microAreaId: areaUuid,
+            token: token,
+            platform: platform,
+            createdAt: now,
+            updatedAt: now,
+          ),
+          transaction: transaction,
+        );
       }
-      await PushToken.db.insertRow(
+      // Teto por titular: os mais antigos saem, nunca o que acabou de entrar.
+      final mine = await PushToken.db.find(
         session,
-        PushToken(
-          userId: userUuid,
-          microAreaId: areaUuid,
-          token: token,
-          platform: platform,
-          createdAt: now,
-          updatedAt: now,
-        ),
+        where: (t) => t.userId.equals(userUuid),
+        orderBy: (t) => t.updatedAt,
+        orderDescending: true,
         transaction: transaction,
       );
-      return true;
-    });
-  }
-
-  @override
-  Future<int> deleteAllFor(String userId) async {
-    final session = _session();
-    return session.db.transaction((transaction) async {
-      await lockPerSubject(session, transaction, namespace: lockNamespacePushToken, key: userId);
-      final removed = await PushToken.db.deleteWhere(
-        session,
-        where: (t) => t.userId.equals(UuidValue.fromString(userId)),
-        transaction: transaction,
-      );
-      return removed.length;
+      for (final old in mine.skip(maxPushTokensPerUser)) {
+        await PushToken.db.deleteRow(session, old, transaction: transaction);
+      }
+      return ownerChanged ? PushRegistration.ownerChanged : PushRegistration.registered;
     });
   }
 }

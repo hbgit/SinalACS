@@ -1,3 +1,4 @@
+import 'package:meta/meta.dart';
 import 'package:serverpod/serverpod.dart';
 import 'package:sinalacs_server/src/application/onboarding/consent_signature.dart';
 import 'package:sinalacs_server/src/application/onboarding/onboarding_service.dart'
@@ -36,13 +37,16 @@ class OrmDataSubjectRightsStore implements DataSubjectRightsStore {
     required Session Function() session,
     required String chainSecret,
     required HealthDataCipher cipher,
+    @visibleForTesting bool debugFailAfterTokenDelete = false,
   })  : _session = session,
         _signature = ConsentSignature(secret: chainSecret),
-        _cipher = cipher;
+        _cipher = cipher,
+        _debugFailAfterTokenDelete = debugFailAfterTokenDelete;
 
   final Session Function() _session;
   final ConsentSignature _signature;
   final HealthDataCipher _cipher;
+  final bool _debugFailAfterTokenDelete;
 
   @override
   Future<String> recordConsent(ConsentLogEntry entry) async {
@@ -51,6 +55,34 @@ class OrmDataSubjectRightsStore implements DataSubjectRightsStore {
       signedConsentLog(entry, signature: _signature, origin: 'painel-titular'),
     );
     return row.id!.uuid;
+  }
+
+  /// Trava por titular (a MESMA de `OrmPushTokenStore.registerIfConsented`), apaga
+  /// os tokens e só então grava o `denied`, tudo numa transação: se qualquer passo
+  /// falhar, nada fica — nem o consentimento revogado com o token vivo, nem o
+  /// contrário.
+  @override
+  Future<String> recordConsentRevokingPush(ConsentLogEntry entry) async {
+    final session = _session();
+    final userUuid = UuidValue.fromString(entry.userId);
+    return session.db.transaction((transaction) async {
+      await lockPerSubject(session, transaction,
+          namespace: lockNamespacePushToken, key: entry.userId);
+      await PushToken.db.deleteWhere(
+        session,
+        where: (t) => t.userId.equals(userUuid),
+        transaction: transaction,
+      );
+      if (_debugFailAfterTokenDelete) {
+        throw StateError('falha injetada depois de apagar os tokens (só em teste)');
+      }
+      final row = await ConsentLog.db.insertRow(
+        session,
+        signedConsentLog(entry, signature: _signature, origin: 'painel-titular'),
+        transaction: transaction,
+      );
+      return row.id!.uuid;
+    });
   }
 
   @override
@@ -69,16 +101,16 @@ class OrmDataSubjectRightsStore implements DataSubjectRightsStore {
         orderDescending: true,
         transaction: transaction,
       );
-      if (latest != null && latest.action == 'granted' && latest.version == entry.version) {
-        return (
-          id: null,
-          existing: ConsentRecordSnapshot(
-            purpose: latest.purpose,
-            action: latest.action,
-            version: latest.version,
-            timestamp: latest.timestamp,
-          ),
-        );
+      final snapshot = latest == null
+          ? null
+          : ConsentRecordSnapshot(
+              purpose: latest.purpose,
+              action: latest.action,
+              version: latest.version,
+              timestamp: latest.timestamp,
+            );
+      if (isCurrentAcceptance(snapshot, version: entry.version)) {
+        return (id: null, existing: snapshot);
       }
       final row = await ConsentLog.db.insertRow(
         session,

@@ -5,7 +5,6 @@ import 'package:sinalacs_server/src/application/onboarding/onboarding_service.da
     show ConsentLogEntry, consentPolicyVersion;
 import 'package:sinalacs_server/src/application/patients/patient_data_overview_service.dart'
     show ConsentRecordSnapshot, DataSubjectRequestSnapshot;
-import 'package:sinalacs_server/src/application/patients/push_token_service.dart' show PushTokenStore;
 import 'package:sinalacs_server/src/generated/protocol.dart';
 
 /// Persistência das operações do titular sobre os próprios dados. Interface
@@ -15,6 +14,11 @@ abstract interface class DataSubjectRightsStore {
   /// Grava uma linha nova, assinada, em `consent_logs` — nunca edita uma
   /// anterior (append-only, LGPD-RF04).
   Future<String> recordConsent(ConsentLogEntry entry);
+
+  /// Grava o `denied` de `segmentedPush` e apaga os tokens de push do titular na
+  /// MESMA transação, sob o lock por titular do registro de token: sem consentimento,
+  /// sem token, e nenhum dos dois efeitos acontece sem o outro (RF14).
+  Future<String> recordConsentRevokingPush(ConsentLogEntry entry);
 
   /// Grava `entry` **só se** a linha mais recente do propósito ainda não for um
   /// `granted` na mesma versão, de forma atômica por titular: duas chamadas
@@ -45,6 +49,11 @@ abstract interface class DataSubjectRightsStore {
   });
 }
 
+/// A regra do aceite vigente, num lugar só: a linha mais recente é um `granted`
+/// na [version] em vigor. Usada pela consulta do login e pela gravação atômica.
+bool isCurrentAcceptance(ConsentRecordSnapshot? latest, {required String version}) =>
+    latest != null && latest.action == 'granted' && latest.version == version;
+
 /// Prazo de resposta a um pedido do titular (spec/lgpd_design.md, 596-597).
 const Duration dataSubjectRequestDeadline = Duration(days: 15);
 
@@ -62,16 +71,13 @@ class DataSubjectRightsService {
   DataSubjectRightsService({
     required DataSubjectRightsStore store,
     required AuditTrail audit,
-    PushTokenStore? pushTokens,
     DateTime Function()? clock,
   })  : _store = store,
         _audit = audit,
-        _pushTokens = pushTokens,
         _clock = clock ?? DateTime.now;
 
   final DataSubjectRightsStore _store;
   final AuditTrail _audit;
-  final PushTokenStore? _pushTokens;
   final DateTime Function() _clock;
 
   /// Concede ou revoga uma finalidade opcional. `healthDataProcessing` é
@@ -97,13 +103,13 @@ class DataSubjectRightsService {
       );
     }
 
-    final record = await _record(user, purpose: purpose, action: granted ? 'granted' : 'denied');
-    // Sem consentimento, sem token: o aparelho deixa de estar ligado ao titular
-    // no mesmo instante da revogação (RF14).
-    if (purpose == ConsentPurpose.segmentedPush && !granted) {
-      await _pushTokens?.deleteAllFor(user.id);
-    }
-    return record;
+    // Revogar avisos apaga os tokens na mesma transação do `denied` (RF14).
+    return _record(
+      user,
+      purpose: purpose,
+      action: granted ? 'granted' : 'denied',
+      revokePush: purpose == ConsentPurpose.segmentedPush && !granted,
+    );
   }
 
   /// Aceite explícito do Termo de Uso e da Política de Privacidade por quem
@@ -133,31 +139,35 @@ class DataSubjectRightsService {
     );
   }
 
-  bool _isCurrentAcceptance(ConsentRecordSnapshot? latest) =>
-      latest != null && latest.action == 'granted' && latest.version == consentPolicyVersion;
-
   /// `true` quando a linha mais recente de `termsOfUse` é um `granted` na versão
   /// vigente (LGPD-RF18). É o que o app consulta depois do login por OTP: um
   /// `bool`, em vez do painel "Meus dados" inteiro — que também gravaria uma
   /// linha de auditoria de leitura a cada login.
   Future<bool> hasAcceptedCurrentTerms(AuthenticatedUser user) async {
     _requirePatient(user);
-    return _isCurrentAcceptance(await _store.latestConsent(user.id, ConsentPurpose.termsOfUse));
+    return isCurrentAcceptance(
+      await _store.latestConsent(user.id, ConsentPurpose.termsOfUse),
+      version: consentPolicyVersion,
+    );
   }
 
   Future<ConsentRecordSnapshot> _record(
     AuthenticatedUser user, {
     required ConsentPurpose purpose,
     required String action,
+    bool revokePush = false,
   }) async {
     final now = _clock().toUtc();
-    final id = await _store.recordConsent(ConsentLogEntry(
+    final entry = ConsentLogEntry(
       userId: user.id,
       purpose: purpose,
       action: action,
       version: consentPolicyVersion,
       timestamp: now,
-    ));
+    );
+    final id = revokePush
+        ? await _store.recordConsentRevokingPush(entry)
+        : await _store.recordConsent(entry);
     await _audit.recordSafely(AuditEvent(
       userId: user.id,
       actionType: 'write',

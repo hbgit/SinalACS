@@ -3,7 +3,6 @@ import 'package:sinalacs_server/src/application/auth/development_auth_service.da
 import 'package:sinalacs_server/src/application/onboarding/onboarding_service.dart';
 import 'package:sinalacs_server/src/application/patients/data_subject_rights_service.dart';
 import 'package:sinalacs_server/src/application/patients/patient_data_overview_service.dart';
-import 'package:sinalacs_server/src/application/patients/push_token_service.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
 import 'package:test/test.dart';
 
@@ -42,6 +41,14 @@ class FakeDataSubjectRightsStore implements DataSubjectRightsStore {
       return (id: null, existing: latest);
     }
     return (id: await recordConsent(entry), existing: null);
+  }
+
+  var revokingPushCalls = 0;
+
+  @override
+  Future<String> recordConsentRevokingPush(ConsentLogEntry entry) async {
+    revokingPushCalls++;
+    return recordConsent(entry);
   }
 
   @override
@@ -111,26 +118,6 @@ class FakeDataSubjectRightsStore implements DataSubjectRightsStore {
   }
 }
 
-class FakePushTokenStore implements PushTokenStore {
-  var deleteCalls = <String>[];
-
-  @override
-  Future<bool> registerIfConsented({
-    required String userId,
-    required String? microAreaId,
-    required String token,
-    required String platform,
-    required DateTime now,
-  }) async =>
-      true;
-
-  @override
-  Future<int> deleteAllFor(String userId) async {
-    deleteCalls.add(userId);
-    return 0;
-  }
-}
-
 class FakeAuditTrail extends AuditTrail {
   FakeAuditTrail({this.failOnRecord = false});
 
@@ -155,22 +142,17 @@ void main() {
     service = DataSubjectRightsService(store: store, audit: audit, clock: () => _now);
   });
 
-  group('revogar segmentedPush apaga os tokens de push (RF14)', () {
-    test('só a revogação de segmentedPush chama deleteAllFor', () async {
-      final pushTokens = FakePushTokenStore();
-      final svc = DataSubjectRightsService(
-        store: store,
-        audit: audit,
-        pushTokens: pushTokens,
-        clock: () => _now,
-      );
+  group('revogar segmentedPush (RF14)', () {
+    test('a revogação usa a gravação atômica; o resto usa recordConsent', () async {
+      await service.updateConsent(_patient, purpose: ConsentPurpose.segmentedPush, granted: true);
+      await service.updateConsent(_patient, purpose: ConsentPurpose.localReminders, granted: false);
+      expect(store.revokingPushCalls, 0);
 
-      await svc.updateConsent(_patient, purpose: ConsentPurpose.segmentedPush, granted: true);
-      await svc.updateConsent(_patient, purpose: ConsentPurpose.localReminders, granted: false);
-      expect(pushTokens.deleteCalls, isEmpty);
-
-      await svc.updateConsent(_patient, purpose: ConsentPurpose.segmentedPush, granted: false);
-      expect(pushTokens.deleteCalls, [_patientId]);
+      await service.updateConsent(_patient, purpose: ConsentPurpose.segmentedPush, granted: false);
+      expect(store.revokingPushCalls, 1);
+      expect(store.consents.last.action, 'denied');
+      expect(store.consents.last.purpose, ConsentPurpose.segmentedPush);
+      expect(audit.events.last.resourceType, 'consent_log');
     });
   });
 
