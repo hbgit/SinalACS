@@ -13,24 +13,69 @@
 #
 # Não precisa de rede nem da stack; só python3 com PyYAML. Roda no job
 # workflow-lint do próprio CI.
+#
+# CI_INVARIANTS_WORKFLOW aponta para um workflow diferente do real — só para
+# testar as checagens contra fixtures sintéticas, sem tocar em
+# .github/workflows/ci.yml.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+caminho_workflow="${CI_INVARIANTS_WORKFLOW:-$repo_root/.github/workflows/ci.yml}"
 
-exec python3 - "$repo_root/.github/workflows/ci.yml" "$@" <<'PY'
+# Sem isto, o Python usa a codificação do locale do host para stdout/stderr —
+# em runners Linux normalmente já é UTF-8, mas não é garantido (e não é, por
+# padrão, no Windows), e as mensagens de falha têm acento. Sem UTF-8 forçado,
+# elas saem corrompidas em vez de crashar, o que é pior: passa despercebido.
+export PYTHONIOENCODING=utf-8
+
+exec python3 - "$caminho_workflow" "$@" <<'PY'
 import json
 import sys
 
 import yaml
 
+# Valida os argumentos ANTES de fazer qualquer trabalho — uma flag digitada
+# errada (ex.: --checks-obrigatorio, sem o S) não pode sair calada com "ok"/
+# exit 0: quem chama este script com --checks-obrigatorios normalmente
+# alimenta a saída direto num PUT da API de proteção de branch, e "ok" sem o
+# JSON esperado quebra ali, longe da causa real (issue #22).
+FLAGS_CONHECIDAS = {'--checks-obrigatorios'}
+flags_desconhecidas = [a for a in sys.argv[2:] if a not in FLAGS_CONHECIDAS]
+if flags_desconhecidas:
+    print(f'uso: ci_invariants.sh [{" | ".join(sorted(FLAGS_CONHECIDAS))}]', file=sys.stderr)
+    print(f'flag(s) desconhecida(s): {flags_desconhecidas}', file=sys.stderr)
+    sys.exit(2)
+
 caminho = sys.argv[1]
 with open(caminho, encoding='utf-8') as f:
     wf = yaml.safe_load(f)
 
-# PyYAML segue o YAML 1.1, em que a chave `on` é lida como o booleano True.
-gatilhos = wf.get('on', wf.get(True)) or {}
-jobs = wf.get('jobs') or {}
 falhas = []
+
+
+def _normaliza_gatilhos(bruto):
+    # PyYAML segue o YAML 1.1, em que a chave `on` é lida como o booleano
+    # True. E `on:` aceita três formas no GitHub Actions: dict (a única que
+    # os checks abaixo sabem ler), string solta (`on: push`) e lista
+    # (`on: [push, pull_request]`) — as duas últimas não carregam
+    # sub-configuração nenhuma (não dá para expressar `branches:` nelas), e
+    # sem normalizar viravam `str`/`list` aqui e quebravam com AttributeError
+    # no primeiro `.get()` de check_gatilhos, longe da causa (issue #22).
+    valor = bruto.get('on', bruto.get(True))
+    if valor is None:
+        return {}
+    if isinstance(valor, dict):
+        return valor
+    if isinstance(valor, str):
+        return {valor: None}
+    if isinstance(valor, list):
+        return {evento: None for evento in valor}
+    falhas.append(f'on: tem tipo inesperado ({type(valor).__name__}): {valor!r}')
+    return {}
+
+
+gatilhos = _normaliza_gatilhos(wf)
+jobs = wf.get('jobs') or {}
 
 # Os jobs que CLAUDE.md e AGENTS.md enumeram. Mudou aqui, muda lá no mesmo
 # commit — foi exatamente essa enumeração que envelheceu (FINDING-1).
