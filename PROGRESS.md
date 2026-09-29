@@ -1094,8 +1094,8 @@ O que **não** foi feito, de propósito:
   `pg_advisory_xact_lock` por titular, já que o Serverpod não declara `WHERE` em
   índice e um índice único parcial não é possível); ver "Fechamento das
   pendências do paciente".
-- **`segmentedPush` é registrado mas não tem efeito**: não há projeto Firebase
-  (RF14). A descrição na tela diz isso.
+- **`segmentedPush` é registrado mas não tem efeito**: não há Gorush hospedado nem credenciais
+  FCM/APNs (RF14). A descrição na tela diz isso.
 
 ## QR Code do onboarding e documentos legais (2026-09-29)
 
@@ -1160,9 +1160,19 @@ Plano: `docs/superpowers/plans/2026-09-29-menores-adiados-e-push-do-paciente.md`
 - Revogar grava o `denied` e apaga os tokens em duas operações: se a segunda falhar, o consentimento já está revogado e o token fica até a próxima revogação.
 - `devices.registerPushToken` não grava linha de auditoria (a revogação já deixa `consent_log`); a troca de dono do token não deixa rastro.
 - Sem teto de tokens por titular; sem teste do caso "fonte de token que nunca completa"; `PushTokenScope.of` sem `maybeOf`.
-- Envio segmentado (`notices.sendSegmented`), tela de avisos do ACS e o SDK `firebase_messaging`: bloqueio externo do §3.2 (sem projeto Firebase).
+- Envio segmentado (`notices.sendSegmented`), tela de avisos do ACS e a captura do token nativo: dependem de hospedar o Gorush e provisionar credenciais FCM/APNs (§3.2, revisado em 2026-09-29 — Gorush no lugar de integrar o Firebase).
 - Apagar tokens ao atender o pedido de exclusão: pertence ao backoffice que atende os pedidos, ainda inexistente.
 - Aviso de 15 dias de mudança dos termos e revisão jurídica do texto 2026.1.
 - O erro de um pedido em "Meus dados" aparece no topo da lista, fora da tela para quem rolou até o botão (anterior a esta rodada).
 - Baseline do `dart analyze` do backend: 44 infos (eram 41), os três novos são o mesmo `prefer_initializing_formals` que o resto dos serviços já tem.
 - Contagens de teste: backend 359, paciente 190, ACS 172.
+
+## Revisão do RF14: Gorush no lugar do Firebase (2026-09-29)
+
+Só especificação; nenhum código mudou. `spec/stack.md`, `spec/PRD_system.md`, `spec/lgpd_design.md`, `spec/validation_report.md` e o §3.2 de `docs/superpowers/specs/2026-09-16-decisoes-produto-pos-validacao.md` passaram a descrever o envio por **Gorush** (auto-hospedado), com segmentação em SQL restrita a quem consentiu.
+
+- A tabela continua `push_tokens` (já existe); o nome `user_push_tokens` não foi adotado.
+- **Riverpod só no push do paciente** (decisão de 2026-09-29): `flutter_riverpod` na captura e no registro do token; o resto segue por `InheritedWidget`.
+- **O Gorush não elimina as credenciais:** é relé para FCM/APNs, então Android ainda precisa de uma credencial FCM e iOS de uma chave APNs. A pendência muda de "projeto Firebase" para "hospedar o Gorush e provisionar credenciais".
+- Em aberto: o pacote que captura o token nativo em cada plataforma (`firebase_messaging` ou canal nativo no Android; pacote leve de APNs no iOS).
+- O plano `2026-09-29-menores-do-push-e-aviso-de-mudanca-dos-termos.md` não é afetado: não toca envio nem provedor.

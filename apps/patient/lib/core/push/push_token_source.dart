@@ -11,10 +11,11 @@ class PushDevice {
   final String platform;
 }
 
-/// De onde o app tira o token de push. A implementação real (FCM) entra quando
-/// existir um projeto Firebase (decisão §3.2 do documento de decisões de
-/// produto); até lá [NoPushTokenSource] mantém o registro inerte, e servidor e
-/// telas já estão prontos para a troca.
+/// De onde o app tira o token de push. A implementação real (token nativo do
+/// FCM no Android e do APNs no iOS, entregue depois ao Gorush pelo backend —
+/// decisão §3.2 do documento de decisões de produto) entra quando o Gorush e as
+/// credenciais existirem; até lá [NoPushTokenSource] mantém o registro inerte, e
+/// servidor e telas já estão prontos para a troca.
 abstract interface class PushTokenSource {
   /// `null` quando o aparelho não tem token (sem provedor, sem permissão).
   Future<PushDevice?> currentDevice();
