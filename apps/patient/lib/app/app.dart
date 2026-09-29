@@ -1554,6 +1554,10 @@ class _MyDataScreenState extends State<MyDataScreen> {
   Future<void> _alignLocalRemindersMirror(RemindersScope scope, PatientDataOverview data) async {
     final granted = currentConsentDecisions(data.consents)[ConsentPurpose.localReminders];
     if (granted == null) return;
+    await _applyLocalRemindersDecision(scope, granted);
+  }
+
+  Future<void> _applyLocalRemindersDecision(RemindersScope scope, bool granted) async {
     try {
       if (await scope.consentPreferences.localRemindersGranted() != granted) {
         await scope.consentPreferences.saveLocalRemindersConsent(granted);
@@ -1601,6 +1605,7 @@ class _MyDataScreenState extends State<MyDataScreen> {
     if (!granted && !await _confirmRevocation(purpose)) return;
     if (!mounted) return;
     final backend = BackendScope.of(context);
+    final reminders = RemindersScope.of(context);
     setState(() {
       _busy = true;
       _error = null;
@@ -1608,6 +1613,12 @@ class _MyDataScreenState extends State<MyDataScreen> {
     });
     try {
       final record = await backend.updateConsent(purpose: purpose, granted: granted);
+      // A decisão já está gravada no servidor: aplicar no aparelho aqui, sem
+      // depender do recarregamento abaixo — se ele falhar, um lembrete
+      // agendado continuaria disparando depois de uma revogação confirmada.
+      if (purpose == ConsentPurpose.localReminders) {
+        await _applyLocalRemindersDecision(reminders, granted);
+      }
       if (!mounted) return;
       setState(() => _confirmation = '${consentPurposeLabel(purpose)}: consentimento '
           '${granted ? 'concedido' : 'revogado'} em ${_formatDate(record.timestamp.toLocal())}.');

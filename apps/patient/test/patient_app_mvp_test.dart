@@ -959,6 +959,30 @@ void main() {
       );
     });
 
+    testWidgets(
+        'revogação confirmada pelo servidor cancela os lembretes mesmo se o '
+        'recarregamento de "Meus dados" falhar', (tester) async {
+      final store = _InMemoryReminderStore();
+      final seeded = await store.save(
+        const Reminder(id: 0, label: 'Losartana 50 mg', hour: 8, minute: 0, active: true),
+      );
+      final scheduler = _RecordingReminderScheduler();
+      final prefs = _FixedConsentPreferences(granted: true);
+      final backend = FakePatientBackend()..myDataResult = overview(consents: onboardingConsents());
+      await pumpMyData(tester, backend, store: store, scheduler: scheduler, consentPreferences: prefs);
+
+      // A carga inicial já passou; só o recarregamento depois da revogação falha.
+      backend.myDataFailure = const BackendFailure('Sem conexão com o servidor.');
+      await tapSwitch(tester, ConsentPurpose.localReminders);
+      await tester.tap(find.byKey(const Key('consent_revoke_confirm')));
+      await tester.pumpAndSettle();
+
+      expect(backend.updateConsentCalls.single, (purpose: ConsentPurpose.localReminders, granted: false));
+      expect(prefs.granted, isFalse);
+      expect(scheduler.cancelled, [seeded.id]);
+      expect((await store.list()).single.active, isFalse);
+    });
+
     testWidgets('conceder não pede confirmação e não mexe nos lembretes', (tester) async {
       final scheduler = _RecordingReminderScheduler();
       final backend = FakePatientBackend()..myDataResult = overview(consents: onboardingConsents());
