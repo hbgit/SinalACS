@@ -2002,8 +2002,109 @@ class GeofencingScreen extends StatelessWidget {
         },
       );
 }
-class NoticesScreen extends StatefulWidget { const NoticesScreen({super.key}); @override State<NoticesScreen> createState() => _NoticesScreenState(); }
-class _NoticesScreenState extends State<NoticesScreen> { final notice = TextEditingController(); @override void dispose() { notice.dispose(); super.dispose(); } @override Widget build(BuildContext context) => _page([const Text('Aviso comunitário', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)), const SizedBox(height: 16), const TextField(decoration: InputDecoration(labelText: 'Público-alvo', hintText: 'Pacientes com condições crônicas')), const SizedBox(height: 16), TextField(controller: notice, maxLines: 4, decoration: const InputDecoration(labelText: 'Mensagem')), const SizedBox(height: 20), FilledButton(onPressed: () => _message(context, 'Envio depende da integração de notificações push.'), child: const Text('Preparar aviso'))]); }
+/// Aviso comunitário do ACS aos pacientes da própria microárea (RF14).
+///
+/// Só chega a quem aceitou receber avisos: o servidor consulta o consentimento
+/// mais recente de cada titular antes de montar a lista. O texto nunca deve
+/// citar paciente nem condição de saúde — o aviso vai para o aparelho de várias
+/// pessoas e aparece na tela bloqueada.
+class NoticesScreen extends StatefulWidget {
+  const NoticesScreen({super.key});
+
+  @override
+  State<NoticesScreen> createState() => _NoticesScreenState();
+}
+
+class _NoticesScreenState extends State<NoticesScreen> {
+  final _title = TextEditingController();
+  final _messageController = TextEditingController();
+  bool _chronicOnly = false;
+  bool _busy = false;
+  String? _error;
+  String? _result;
+
+  @override
+  void dispose() {
+    _title.dispose();
+    _messageController.dispose();
+    super.dispose();
+  }
+
+  bool get _canSend =>
+      !_busy && _title.text.trim().isNotEmpty && _messageController.text.trim().isNotEmpty;
+
+  Future<void> _send() async {
+    if (!_canSend) return;
+    setState(() {
+      _busy = true;
+      _error = null;
+      _result = null;
+    });
+    try {
+      final r = await BackendScope.of(context).sendNotice(
+        title: _title.text.trim(),
+        message: _messageController.text.trim(),
+        chronicOnly: _chronicOnly,
+      );
+      if (!mounted) return;
+      setState(() => _result = r.recipients == 0
+          ? 'Nenhum paciente da sua microárea aceitou receber avisos ainda.'
+          : 'Aviso enviado a ${r.accepted} de ${r.recipients} pacientes.');
+    } on BackendFailure catch (failure) {
+      if (!mounted) return;
+      setState(() => _error = failure.message);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => _page([
+        const Text('Aviso comunitário', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 8),
+        const Text(
+          'Só chega a quem aceitou receber avisos. Não escreva nome nem condição de saúde na mensagem.',
+        ),
+        const SizedBox(height: 16),
+        TextField(
+          key: const Key('notice_title_field'),
+          controller: _title,
+          maxLength: 60,
+          onChanged: (_) => setState(() {}),
+          decoration: const InputDecoration(labelText: 'Título'),
+        ),
+        const SizedBox(height: 8),
+        TextField(
+          key: const Key('notice_message_field'),
+          controller: _messageController,
+          maxLength: 240,
+          maxLines: 4,
+          onChanged: (_) => setState(() {}),
+          decoration: const InputDecoration(labelText: 'Mensagem'),
+        ),
+        SwitchListTile(
+          key: const Key('notice_chronic_switch'),
+          contentPadding: EdgeInsets.zero,
+          title: const Text('Só pacientes com condição crônica'),
+          value: _chronicOnly,
+          onChanged: _busy ? null : (value) => setState(() => _chronicOnly = value),
+        ),
+        const SizedBox(height: 12),
+        FilledButton(
+          key: const Key('notice_send_button'),
+          onPressed: _canSend ? _send : null,
+          child: Text(_busy ? 'Enviando…' : 'Enviar aviso'),
+        ),
+        if (_error != null) ...[
+          const SizedBox(height: 12),
+          Text(_error!, key: const Key('notice_error'), style: const TextStyle(color: AcsColors.redOnSurface)),
+        ],
+        if (_result != null) ...[
+          const SizedBox(height: 12),
+          Text(_result!, key: const Key('notice_result')),
+        ],
+      ]);
+}
 
 Widget _page(List<Widget> children) => ListView(padding: const EdgeInsets.all(20), children: [Card(child: Padding(padding: const EdgeInsets.all(20), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: children)))]);
 

@@ -166,6 +166,32 @@ class FakeAcsBackend implements AcsBackend {
     );
   }
 
+  /// Avisos pedidos em `sendNotice`, na ordem: (título, mensagem, só crônicos).
+  final List<(String, String, bool)> notices = <(String, String, bool)>[];
+
+  /// Falha do envio, como o relé de push fora do ar.
+  BackendFailure? noticeFailure;
+
+  /// Quando definido, `sendNotice` só responde depois que ele completa —
+  /// simula a rede lenta de campo.
+  Completer<void>? noticeGate;
+
+  /// Resultado devolvido por `sendNotice`.
+  NoticeSendResult noticeResult = NoticeSendResult(recipients: 3, accepted: 2);
+
+  @override
+  Future<NoticeSendResult> sendNotice({
+    required String title,
+    required String message,
+    required bool chronicOnly,
+  }) async {
+    notices.add((title, message, chronicOnly));
+    await noticeGate?.future;
+    final failure = noticeFailure;
+    if (failure != null) throw failure;
+    return noticeResult;
+  }
+
   /// Entradas que `pullVisits` devolve. Vazio por padrão.
   List<VisitSyncEntry> pullEntries = const [];
 
