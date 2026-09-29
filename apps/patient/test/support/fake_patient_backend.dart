@@ -62,6 +62,17 @@ class FakePatientBackend implements PatientBackend {
       <({ConsentPurpose purpose, bool granted})>[];
   BackendFailure? updateConsentFailure;
 
+  /// Chamadas a [registerPushToken], na ordem.
+  final List<(String, String)> pushRegistrations = <(String, String)>[];
+  BackendFailure? pushRegistrationFailure;
+
+  @override
+  Future<void> registerPushToken({required String token, required String platform}) async {
+    pushRegistrations.add((token, platform));
+    final failure = pushRegistrationFailure;
+    if (failure != null) throw failure;
+  }
+
   /// O que o servidor responderia a [hasAcceptedCurrentTerms].
   bool termsAccepted = true;
   int termsStatusCalls = 0;

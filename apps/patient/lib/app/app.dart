@@ -23,6 +23,7 @@ import 'package:sinalacs_patient/core/legal/legal_documents.dart';
 import 'package:sinalacs_patient/core/consent/consent_preferences.dart';
 import 'package:sinalacs_patient/core/consent/sqflite_consent_preferences.dart';
 import 'package:sinalacs_patient/core/network/backend_client.dart';
+import 'package:sinalacs_patient/core/push/push_token_source.dart';
 import 'package:sinalacs_patient/core/network/backend_scope.dart';
 import 'package:sinalacs_patient/core/network/idempotency.dart';
 import 'package:sinalacs_patient/core/onboarding/enrollment_qr.dart';
@@ -41,6 +42,7 @@ class SinalAcsApp extends StatefulWidget {
     this.reminderScheduler,
     this.consentPreferences,
     this.qrScanner,
+    this.pushTokens,
   });
 
   /// Backend do app. **Obrigatório, e construído em `main.dart`.**
@@ -76,6 +78,11 @@ class SinalAcsApp extends StatefulWidget {
   /// a câmera do aparelho.
   final QrScanner? qrScanner;
 
+  /// Injetável para teste. Em execução normal é [NoPushTokenSource]: sem
+  /// projeto Firebase (RF14, decisão §3.2) o aparelho não tem token, e o
+  /// registro fica inerte até a implementação do FCM entrar aqui.
+  final PushTokenSource? pushTokens;
+
   @override
   State<SinalAcsApp> createState() => _SinalAcsAppState();
 }
@@ -89,6 +96,7 @@ class _SinalAcsAppState extends State<SinalAcsApp> {
   late final ConsentPreferences _consentPreferences =
       widget.consentPreferences ?? SqfliteConsentPreferences();
   late final QrScanner _qrScanner = widget.qrScanner ?? scanQrWithCamera;
+  late final PushTokenSource _pushTokens = widget.pushTokens ?? const NoPushTokenSource();
 
   // Sem `dispose`: este widget não cria mais cliente nenhum (o `main` é quem
   // constrói e injeta), então não há o que fechar — fechar um backend injetado
@@ -104,13 +112,16 @@ class _SinalAcsAppState extends State<SinalAcsApp> {
           store: _reminderStore,
           scheduler: _reminderScheduler,
           consentPreferences: _consentPreferences,
-          child: QrScannerScope(
-            scanner: _qrScanner,
-            child: MaterialApp(
-              title: 'SinalACS Paciente',
-              debugShowCheckedModeBanner: false,
-              theme: buildPatientTheme(),
-              home: const PatientLoginScreen(),
+          child: PushTokenScope(
+            source: _pushTokens,
+            child: QrScannerScope(
+              scanner: _qrScanner,
+              child: MaterialApp(
+                title: 'SinalACS Paciente',
+                debugShowCheckedModeBanner: false,
+                theme: buildPatientTheme(),
+                home: const PatientLoginScreen(),
+              ),
             ),
           ),
         ),
@@ -405,6 +416,7 @@ class _PatientLoginScreenState extends State<PatientLoginScreen> {
     try {
       await BackendScope.of(context).verifyOtp(cpf: cpf, code: _codigo.text.trim());
       if (!mounted) return;
+      unawaited(registerPushDevice(BackendScope.of(context), PushTokenScope.of(context)));
       final needsTerms = await _needsTerms();
       if (!mounted) return;
       MaterialPageRoute<void> home() => MaterialPageRoute<void>(
@@ -757,6 +769,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         // Intencionalmente silencioso — ver comentário acima.
       }
       if (!mounted) return;
+      unawaited(registerPushDevice(BackendScope.of(context), PushTokenScope.of(context)));
       // Mesmo caminho que `_PatientLoginScreenState._enter()` já usa para
       // entrar na navegação principal — a sessão já está em `BackendScope`,
       // não há estado novo para duplicar aqui.
@@ -1753,6 +1766,9 @@ class _MyDataScreenState extends State<MyDataScreen> {
     });
     try {
       final record = await backend.updateConsent(purpose: purpose, granted: granted);
+      if (purpose == ConsentPurpose.segmentedPush && granted && mounted) {
+        unawaited(registerPushDevice(backend, PushTokenScope.of(context)));
+      }
       // A decisão já está gravada no servidor: aplicar no aparelho aqui, sem
       // depender do recarregamento abaixo — se ele falhar, um lembrete
       // agendado continuaria disparando depois de uma revogação confirmada.

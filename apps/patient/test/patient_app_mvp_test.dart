@@ -22,6 +22,7 @@ import 'package:sinalacs_patient/app/app.dart';
 import 'package:sinalacs_patient/app/legal_screens.dart';
 import 'package:sinalacs_patient/core/consent/consent_preferences.dart';
 import 'package:sinalacs_patient/core/network/backend_client.dart';
+import 'package:sinalacs_patient/core/push/push_token_source.dart';
 import 'package:sinalacs_patient/core/network/backend_scope.dart';
 import 'package:sinalacs_patient/core/privacy/location_hash.dart';
 import 'package:sinalacs_patient/core/reminders/reminder.dart';
@@ -33,6 +34,15 @@ import 'support/semantics_scan.dart';
 
 /// Duplo de [ReminderStore] em memória — evita SQLite real no teste de
 /// widget, mesmo padrão de `_FixedLocationReader`/`FakePatientBackend`.
+class _FixedPushSource implements PushTokenSource {
+  const _FixedPushSource(this.device);
+
+  final PushDevice device;
+
+  @override
+  Future<PushDevice?> currentDevice() async => device;
+}
+
 class _InMemoryReminderStore implements ReminderStore {
   final _items = <int, Reminder>{};
   int _nextId = 1;
@@ -1036,6 +1046,30 @@ void main() {
 
       expect(prefs.granted, isFalse);
       expect(scheduler.cancelled, [seeded.id]);
+    });
+
+    testWidgets('conceder "Avisos da equipe" registra o token; revogar não registra', (tester) async {
+      final backend = FakePatientBackend()..myDataResult = overview(consents: onboardingConsents());
+      await tester.pumpWidget(SinalAcsApp(
+        backend: backend,
+        reminderStore: _InMemoryReminderStore(),
+        reminderScheduler: _RecordingReminderScheduler(),
+        consentPreferences: _FixedConsentPreferences(),
+        pushTokens: const _FixedPushSource(PushDevice(token: 'tok-9', platform: 'ios')),
+      ));
+      await login(tester);
+      await openMyData(tester);
+      backend.pushRegistrations.clear(); // o login também registra
+
+      await tapSwitch(tester, ConsentPurpose.segmentedPush);
+      expect(backend.updateConsentCalls.last.granted, isTrue);
+      expect(backend.pushRegistrations, [('tok-9', 'ios')]);
+
+      await tapSwitch(tester, ConsentPurpose.segmentedPush);
+      await tester.tap(find.byKey(const Key('consent_revoke_confirm')));
+      await tester.pumpAndSettle();
+      expect(backend.updateConsentCalls.last.granted, isFalse);
+      expect(backend.pushRegistrations, hasLength(1));
     });
 
     testWidgets('os interruptores não criam nó de botão inerte', (tester) async {

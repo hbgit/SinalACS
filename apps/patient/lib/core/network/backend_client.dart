@@ -138,6 +138,10 @@ abstract class PatientBackend {
   /// não foi aceita; repetir devolve a existente.
   Future<PatientConsentRecord> acceptTermsOfUse();
 
+  /// Registra o token de push do aparelho (RF14). Falha se não houver
+  /// consentimento `segmentedPush` vigente; quem chama ignora a falha.
+  Future<void> registerPushToken({required String token, required String platform});
+
   /// Se o paciente já aceitou o Termo de Uso e a Política de Privacidade da
   /// versão vigente (LGPD-RF18). O login por OTP consulta isto para decidir se
   /// mostra o convite ao aceite.
@@ -252,6 +256,10 @@ class MisconfiguredBackend implements PatientBackend {
 
   @override
   Future<bool> hasAcceptedCurrentTerms() async => _recusar();
+
+  @override
+  Future<void> registerPushToken({required String token, required String platform}) async =>
+      _recusar();
 
   @override
   Future<PatientDataSubjectRequestRecord> requestDataDeletion() async => _recusar();
@@ -540,6 +548,15 @@ class BackendClient implements PatientBackend {
   Future<PatientConsentRecord> acceptTermsOfUse() async {
     final token = await _requireToken();
     return _guard(() => _client.patients.acceptTermsOfUse(accessToken: token));
+  }
+
+  @override
+  Future<void> registerPushToken({required String token, required String platform}) async {
+    final accessToken = await _requireToken();
+    return _guard(
+      () => _client.devices
+          .registerPushToken(accessToken: accessToken, token: token, platform: platform),
+    );
   }
 
   @override
