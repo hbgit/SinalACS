@@ -49,7 +49,14 @@ class FakePatientBackend implements PatientBackend {
     emergencyContact: 'Contato de teste',
     isChronic: false,
     chronicConditions: const [],
-    consents: const [],
+    consents: [
+      PatientConsentRecord(
+        purpose: 'termsOfUse',
+        action: 'granted',
+        version: '2026.1',
+        timestamp: DateTime.utc(2026, 9, 1),
+      ),
+    ],
     riskHistory: const [],
     requests: const [],
   );
@@ -60,6 +67,26 @@ class FakePatientBackend implements PatientBackend {
   final List<({ConsentPurpose purpose, bool granted})> updateConsentCalls =
       <({ConsentPurpose purpose, bool granted})>[];
   BackendFailure? updateConsentFailure;
+
+  /// Chamadas a [acceptTermsOfUse].
+  int acceptTermsCalls = 0;
+  BackendFailure? acceptTermsFailure;
+
+  /// Como no servidor: uma linha `termsOfUse` `granted` a mais no histórico.
+  @override
+  Future<PatientConsentRecord> acceptTermsOfUse() async {
+    acceptTermsCalls++;
+    final failure = acceptTermsFailure;
+    if (failure != null) throw failure;
+    final record = PatientConsentRecord(
+      purpose: 'termsOfUse',
+      action: 'granted',
+      version: '2026.1',
+      timestamp: DateTime.now().toUtc(),
+    );
+    myDataResult = myDataResult.copyWith(consents: [...myDataResult.consents, record]);
+    return record;
+  }
 
   int requestDataDeletionCount = 0;
   final List<String> correctionRequests = <String>[];

@@ -20,6 +20,7 @@ import 'package:sinalacs_patient/app/patient_theme.dart';
 import 'package:sinalacs_patient/app/qr_scanner.dart';
 import 'package:sinalacs_patient/core/consent/consent_decisions.dart';
 import 'package:sinalacs_patient/core/legal/legal_documents.dart';
+import 'package:sinalacs_patient/core/legal/terms_acceptance.dart';
 import 'package:sinalacs_patient/core/consent/consent_preferences.dart';
 import 'package:sinalacs_patient/core/consent/sqflite_consent_preferences.dart';
 import 'package:sinalacs_patient/core/network/backend_client.dart';
@@ -363,6 +364,18 @@ class _PatientLoginScreenState extends State<PatientLoginScreen> {
     }
   }
 
+  /// Quem entrou por OTP sem onboarding, ou com aceite de versão anterior,
+  /// recebe o convite ao aceite (LGPD-RF18). Falhou a leitura → entra direto:
+  /// o alerta de emergência não espera por um aceite.
+  Future<bool> _needsTerms() async {
+    try {
+      final overview = await BackendScope.of(context).myData();
+      return needsTermsAcceptance(overview.consents);
+    } on BackendFailure {
+      return false;
+    }
+  }
+
   /// Verifica o código e só navega em caso de sucesso.
   ///
   /// Antes a tela navegava incondicionalmente, ignorando o que era digitado —
@@ -385,12 +398,19 @@ class _PatientLoginScreenState extends State<PatientLoginScreen> {
     try {
       await BackendScope.of(context).verifyOtp(cpf: cpf, code: _codigo.text.trim());
       if (!mounted) return;
+      final needsTerms = await _needsTerms();
+      if (!mounted) return;
+      final home = MaterialPageRoute<void>(
+        builder: (_) => const PatientHomeShell(initialDestination: PatientDestination.triage),
+      );
       Navigator.of(context).pushReplacement(
-        MaterialPageRoute(
-          builder: (_) => const PatientHomeShell(
-            initialDestination: PatientDestination.triage,
-          ),
-        ),
+        needsTerms
+            ? MaterialPageRoute<void>(
+                builder: (routeContext) => TermsAcceptanceScreen(
+                  onContinue: () => Navigator.of(routeContext).pushReplacement(home),
+                ),
+              )
+            : home,
       );
     } on BackendFailure catch (failure) {
       if (!mounted) return;

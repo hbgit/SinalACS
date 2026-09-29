@@ -194,6 +194,14 @@ Future<void> openMyData(WidgetTester tester) async {
   tester.view.physicalSize = const Size(800, 2400);
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.reset);
+  // Os testes de "Meus dados" montam o próprio `myDataResult`, em geral sem
+  // aceite do termo: o login cai na tela de aceite. O assunto aqui é o painel,
+  // então o paciente toca "Agora não", como faria de verdade.
+  final later = find.byKey(const Key('terms_gate_later_button'));
+  if (later.evaluate().isNotEmpty) {
+    await tester.tap(later);
+    await tester.pumpAndSettle();
+  }
   await tester.tap(find.text('Mais'));
   await tester.pumpAndSettle();
   await tester.tap(find.text('Meus dados'));
@@ -1207,7 +1215,8 @@ void main() {
       await login(tester);
       await openMyData(tester);
 
-      expect(backend.myDataCallCount, 1);
+      // Uma leitura do login (checa o aceite do termo) e uma do painel.
+      expect(backend.myDataCallCount, 2);
       expect(find.text('Fulano de Tal'), findsOneWidget);
       expect(find.textContaining('10/03/1975'), findsOneWidget);
       expect(find.textContaining('Ciclana, (11) 90000-0000'), findsOneWidget);

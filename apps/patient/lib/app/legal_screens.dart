@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:sinalacs_patient/app/patient_theme.dart';
 import 'package:sinalacs_patient/core/legal/legal_documents.dart';
+import 'package:sinalacs_patient/core/network/backend_client.dart';
+import 'package:sinalacs_patient/core/network/backend_scope.dart';
 
 /// Índice "Privacidade e termos": abre a partir do login (antes do cadastro,
 /// para ler antes de aceitar) e do menu "Mais" — Mais → Privacidade e termos →
@@ -129,6 +131,106 @@ class LegalDocumentScreen extends StatelessWidget {
                     subtitle: Text(entry.changes),
                   ),
               ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Convite para aceitar o Termo de Uso e a Política de Privacidade vigentes,
+/// mostrado depois do login por OTP a quem ainda não aceitou a versão atual
+/// (LGPD-RF18).
+///
+/// **Não é um portão.** "Agora não" segue para a tela inicial e o aviso volta
+/// no próximo login: um paciente em emergência precisa chegar ao alerta de
+/// urgência sem ler nada antes (invariante "red alerts never dropped").
+class TermsAcceptanceScreen extends StatefulWidget {
+  const TermsAcceptanceScreen({required this.onContinue, super.key});
+
+  /// Chamado depois do aceite gravado, ou ao escolher "Agora não".
+  final VoidCallback onContinue;
+
+  @override
+  State<TermsAcceptanceScreen> createState() => _TermsAcceptanceScreenState();
+}
+
+class _TermsAcceptanceScreenState extends State<TermsAcceptanceScreen> {
+  bool _checked = false;
+  bool _busy = false;
+  String? _error;
+
+  Future<void> _accept() async {
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      await BackendScope.of(context).acceptTermsOfUse();
+      if (!mounted) return;
+      widget.onContinue();
+    } on BackendFailure catch (failure) {
+      if (!mounted) return;
+      setState(() {
+        _busy = false;
+        _error = failure.message;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Termo de Uso e Privacidade')),
+      body: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.all(24),
+          children: [
+            const Text(
+              'Atualizamos o Termo de Uso e a Política de Privacidade '
+              '(versão $legalDocumentsVersion). Leia e aceite para continuar '
+              'usando o app com tudo em dia.',
+            ),
+            const SizedBox(height: 16),
+            OutlinedButton.icon(
+              key: const Key('terms_gate_read_button'),
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const LegalDocumentsScreen()),
+              ),
+              style: OutlinedButton.styleFrom(minimumSize: const Size(48, 52)),
+              icon: const Icon(Icons.description_outlined),
+              label: const Text('Ler o Termo e a Política'),
+            ),
+            CheckboxListTile(
+              key: const Key('terms_gate_checkbox'),
+              value: _checked,
+              onChanged: _busy ? null : (value) => setState(() => _checked = value ?? false),
+              controlAffinity: ListTileControlAffinity.leading,
+              title: const Text('Li e aceito o Termo de Uso e a Política de Privacidade.'),
+            ),
+            if (_error != null)
+              Semantics(
+                liveRegion: true,
+                child: Text(
+                  _error!,
+                  key: const Key('terms_gate_error'),
+                  style: const TextStyle(color: PatientColors.dangerOnSurface),
+                ),
+              ),
+            const SizedBox(height: 16),
+            FilledButton(
+              key: const Key('terms_gate_accept_button'),
+              onPressed: _checked && !_busy ? _accept : null,
+              style: FilledButton.styleFrom(minimumSize: const Size(48, 52)),
+              child: const Text('Aceitar e continuar'),
+            ),
+            const SizedBox(height: 8),
+            TextButton(
+              key: const Key('terms_gate_later_button'),
+              onPressed: _busy ? null : widget.onContinue,
+              style: TextButton.styleFrom(minimumSize: const Size(48, 52)),
+              child: const Text('Agora não'),
             ),
           ],
         ),
