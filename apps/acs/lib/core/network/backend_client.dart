@@ -81,6 +81,11 @@ abstract class AcsBackend {
   /// partir fora do caminho reativo.
   Future<List<MicroAreaPatient>> listPatients();
 
+  /// Convite de onboarding de um paciente da própria microárea (RF02). O
+  /// token em claro volta só nesta resposta e vira o QR Code da tela
+  /// "Convidar paciente" — nunca é gravado no aparelho.
+  Future<EnrollmentTokenResult> generateInvite({required String patientId});
+
   void close();
 }
 
@@ -133,6 +138,9 @@ class MisconfiguredBackend implements AcsBackend {
 
   @override
   Future<List<MicroAreaPatient>> listPatients() async => _recusar();
+
+  @override
+  Future<EnrollmentTokenResult> generateInvite({required String patientId}) async => _recusar();
 
   /// Fechar **não** é uma chamada ao backend: não há o que fechar, e um `close`
   /// que lançasse derrubaria o `finally` de quem só queria encerrar.
@@ -330,6 +338,20 @@ class BackendClient implements AcsBackend {
     final token = await _requireToken();
     return _guard(
       () => _client.patients.listMicroArea(accessToken: token),
+    );
+  }
+
+  @override
+  Future<EnrollmentTokenResult> generateInvite({required String patientId}) async {
+    final token = await _requireToken();
+    return _guard(
+      () => _client.onboarding.generateEnrollmentToken(
+        accessToken: token,
+        patientId: patientId,
+      ),
+      // O servidor recusa com `AlertPermissionException` quando o paciente
+      // não é da microárea do ACS (INV-01) — "este alerta" não faria sentido.
+      permissionMessage: 'Este paciente não pertence à sua microárea.',
     );
   }
 

@@ -140,6 +140,23 @@ class FakeAcsBackend implements AcsBackend {
     return patients;
   }
 
+  /// patientIds pedidos em `generateInvite`, na ordem.
+  final List<String> inviteCalls = <String>[];
+
+  /// Falha da geração do convite, como paciente fora da microárea.
+  BackendFailure? inviteFailure;
+
+  @override
+  Future<EnrollmentTokenResult> generateInvite({required String patientId}) async {
+    inviteCalls.add(patientId);
+    final failure = inviteFailure;
+    if (failure != null) throw failure;
+    return EnrollmentTokenResult(
+      token: 'convite-sintetico-${inviteCalls.length}',
+      expiresAt: DateTime.utc(2026, 9, 29, 10, 15),
+    );
+  }
+
   /// Entradas que `pullVisits` devolve. Vazio por padrão.
   List<VisitSyncEntry> pullEntries = const [];
 
