@@ -6,8 +6,9 @@ import 'package:flutter/services.dart'
     show Clipboard, ClipboardData, TextEditingValue, TextInputFormatter, TextSelection;
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:sinalacs_client/sinalacs_client.dart'
-    show AlertStatus, AlertStatusResult, PatientDataOverview, RiskLevel;
+    show AlertStatus, AlertStatusResult, ConsentPurpose, PatientDataOverview, RiskLevel;
 import 'package:sinalacs_patient/app/patient_theme.dart';
+import 'package:sinalacs_patient/core/consent/consent_decisions.dart';
 import 'package:sinalacs_patient/core/consent/consent_preferences.dart';
 import 'package:sinalacs_patient/core/consent/sqflite_consent_preferences.dart';
 import 'package:sinalacs_patient/core/network/backend_client.dart';
@@ -1506,6 +1507,7 @@ class _MyDataScreenState extends State<MyDataScreen> {
   String? _error;
   String? _confirmation;
   bool _requestedLoad = false;
+  bool _busy = false;
 
   @override
   void didChangeDependencies() {
@@ -1519,18 +1521,110 @@ class _MyDataScreenState extends State<MyDataScreen> {
   }
 
   Future<void> _load() async {
+    final backend = BackendScope.of(context);
+    final reminders = RemindersScope.of(context);
     try {
-      final data = await BackendScope.of(context).myData();
+      final data = await backend.myData();
       if (!mounted) return;
       setState(() {
         _data = data;
         _error = null;
       });
+      await _alignLocalRemindersMirror(reminders, data);
     } on BackendFailure catch (failure) {
       if (!mounted) return;
       setState(() => _error = failure.message);
     }
   }
+
+  /// O servidor é a fonte da decisão de lembretes (`consent_logs`); o store
+  /// local é só o espelho que `RemindersScreen` consulta (ver
+  /// `ConsentPreferences`). Alinhar aqui cobre a revogação feita nesta tela e
+  /// também o aparelho que entrou pelo login OTP (RF01) sem passar pelo
+  /// onboarding, que nunca teve espelho. Sem decisão de lembretes no servidor,
+  /// não mexe em nada.
+  Future<void> _alignLocalRemindersMirror(RemindersScope scope, PatientDataOverview data) async {
+    final granted = currentConsentDecisions(data.consents)[ConsentPurpose.localReminders];
+    if (granted == null) return;
+    try {
+      if (await scope.consentPreferences.localRemindersGranted() != granted) {
+        await scope.consentPreferences.saveLocalRemindersConsent(granted);
+      }
+      if (!granted) await deactivateAllReminders(scope);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _error =
+          'Sua escolha foi registrada, mas os lembretes deste aparelho não puderam ser atualizados.');
+    }
+  }
+
+  Future<bool> _confirmRevocation(ConsentPurpose purpose) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Revogar consentimento?'),
+        content: Text(
+          '${consentPurposeLabel(purpose)}: seus dados deixam de ser usados para esta '
+          'finalidade a partir de agora. Você pode conceder de novo quando quiser.'
+          '${purpose == ConsentPurpose.localReminders ? ' Os lembretes agendados neste aparelho serão desativados.' : ''}',
+        ),
+        actions: [
+          TextButton(
+            key: const Key('consent_revoke_cancel'),
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            key: const Key('consent_revoke_confirm'),
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Revogar'),
+          ),
+        ],
+      ),
+    );
+    return confirmed == true;
+  }
+
+  /// LGPD-RF05: revogar pede confirmação explícita; conceder, não. O
+  /// interruptor segue a decisão devolvida pelo servidor no recarregamento,
+  /// então uma falha o deixa exatamente como estava.
+  Future<void> _changeConsent(ConsentPurpose purpose, bool granted) async {
+    if (_busy) return;
+    if (!granted && !await _confirmRevocation(purpose)) return;
+    if (!mounted) return;
+    final backend = BackendScope.of(context);
+    setState(() {
+      _busy = true;
+      _error = null;
+      _confirmation = null;
+    });
+    try {
+      final record = await backend.updateConsent(purpose: purpose, granted: granted);
+      if (!mounted) return;
+      setState(() => _confirmation = '${consentPurposeLabel(purpose)}: consentimento '
+          '${granted ? 'concedido' : 'revogado'} em ${_formatDate(record.timestamp.toLocal())}.');
+      await _load();
+    } on BackendFailure catch (failure) {
+      if (!mounted) return;
+      setState(() => _error = failure.message);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  /// dd/mm/aaaa. Não converte fuso: quem passa um instante (consentimento,
+  /// pedido) chama `.toLocal()` antes; a data de nascimento é meia-noite UTC e
+  /// passa como está, senão cairia no dia anterior no Brasil.
+  String _formatDate(DateTime date) => '${date.day.toString().padLeft(2, '0')}/'
+      '${date.month.toString().padLeft(2, '0')}/${date.year}';
+
+  String _purposeDescription(ConsentPurpose purpose) => switch (purpose) {
+        ConsentPurpose.localReminders =>
+          'Notificações de remédios e cuidados que você agenda em "Lembretes".',
+        ConsentPurpose.segmentedPush =>
+          'Avisos da UBS para a sua microárea. Ainda não são enviados nesta versão.',
+        ConsentPurpose.healthDataProcessing => 'Obrigatório para usar o app.',
+      };
 
   /// JSON da "exportação" pedida por spec/lgpd_design.md — não há
   /// infraestrutura de e-mail/arquivo nesta etapa, então a saída é a área de
@@ -1584,6 +1678,9 @@ class _MyDataScreenState extends State<MyDataScreen> {
   @override
   Widget build(BuildContext context) {
     final data = _data;
+    final decisions = data == null
+        ? const <ConsentPurpose, bool>{}
+        : currentConsentDecisions(data.consents);
     return ListView(
       padding: const EdgeInsets.all(20),
       children: [
@@ -1613,7 +1710,7 @@ class _MyDataScreenState extends State<MyDataScreen> {
             padding: const EdgeInsets.only(bottom: 16),
             child: Semantics(
               liveRegion: true,
-              child: Text(_confirmation!, key: const Key('my_data_export_confirmation')),
+              child: Text(_confirmation!, key: const Key('my_data_confirmation')),
             ),
           ),
         if (data == null && _error == null)
@@ -1629,8 +1726,7 @@ class _MyDataScreenState extends State<MyDataScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(data.name, style: const TextStyle(fontWeight: FontWeight.bold)),
-                  Text('Data de nascimento: ${data.birthDate.day.toString().padLeft(2, '0')}/'
-                      '${data.birthDate.month.toString().padLeft(2, '0')}/${data.birthDate.year}'),
+                  Text('Data de nascimento: ${_formatDate(data.birthDate)}'),
                   Text('Contato de emergência: ${data.emergencyContact}'),
                   Text('Condição crônica: ${data.isChronic ? 'Sim' : 'Não'}'),
                   if (data.chronicConditions.isNotEmpty)
@@ -1640,7 +1736,26 @@ class _MyDataScreenState extends State<MyDataScreen> {
             ),
           ),
           const SizedBox(height: 16),
-          const Text('Consentimentos', style: TextStyle(fontWeight: FontWeight.bold)),
+          const Text('Suas escolhas de consentimento', style: TextStyle(fontWeight: FontWeight.bold)),
+          const SizedBox(height: 8),
+          Text(
+            decisions[ConsentPurpose.healthDataProcessing] == true
+                ? '${consentPurposeLabel(ConsentPurpose.healthDataProcessing)}: concedido — '
+                    'obrigatório para usar o app. Para retirá-lo, solicite a exclusão dos seus dados abaixo.'
+                : '${consentPurposeLabel(ConsentPurpose.healthDataProcessing)}: sem registro de consentimento.',
+            key: const Key('consent_health_data_notice'),
+          ),
+          for (final purpose in const [ConsentPurpose.localReminders, ConsentPurpose.segmentedPush])
+            SwitchListTile(
+              key: Key('consent_switch_${purpose.name}'),
+              contentPadding: EdgeInsets.zero,
+              title: Text(consentPurposeLabel(purpose)),
+              subtitle: Text(_purposeDescription(purpose)),
+              value: decisions[purpose] ?? false,
+              onChanged: _busy ? null : (value) => _changeConsent(purpose, value),
+            ),
+          const SizedBox(height: 16),
+          const Text('Histórico de consentimentos', style: TextStyle(fontWeight: FontWeight.bold)),
           if (data.consents.isEmpty)
             const Padding(
               padding: EdgeInsets.only(top: 8),
@@ -1651,9 +1766,9 @@ class _MyDataScreenState extends State<MyDataScreen> {
               (consent) => ListTile(
                 dense: true,
                 contentPadding: EdgeInsets.zero,
-                title: Text(consent.purpose),
+                title: Text(consentRecordLabel(consent.purpose)),
                 subtitle: Text('${consent.action == 'granted' ? 'Concedido' : 'Recusado'} · '
-                    'v${consent.version} · ${consent.timestamp.toIso8601String().split('T').first}'),
+                    'v${consent.version} · ${_formatDate(consent.timestamp.toLocal())}'),
               ),
             ),
           const SizedBox(height: 16),
@@ -1929,6 +2044,22 @@ String _formatTime(DateTime value) {
   return '${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}';
 }
 
+/// Cancela no sistema operacional e desativa no store todo lembrete ativo.
+///
+/// É o que acontece quando o consentimento de lembretes não está (ou deixou de
+/// estar) concedido: `RemindersScreen` chama ao abrir, e "Meus dados" chama ao
+/// saber de uma revogação — sem isso, um lembrete agendado antes continuaria
+/// disparando até a pessoa abrir "Lembretes" (LGPD-RF05). Devolve se algum
+/// lembrete foi alterado.
+Future<bool> deactivateAllReminders(RemindersScope scope) async {
+  final stillActive = (await scope.store.list()).where((r) => r.active).toList();
+  for (final r in stillActive) {
+    await scope.scheduler.cancel(r.id);
+    await scope.store.save(r.copyWith(active: false));
+  }
+  return stillActive.isNotEmpty;
+}
+
 /// Lembretes locais de saúde (medicamento, pesagem, etc.), RF06 §3.1.
 ///
 /// Carrega do [ReminderStore] injetado via [RemindersScope]; abre vazia
@@ -1974,12 +2105,7 @@ class _RemindersScreenState extends State<RemindersScreen> {
         // segurança): nenhum lembrete pode continuar agendado no sistema
         // operacional depois disso — sem isso, um lembrete criado antes da
         // recusa continuaria disparando mesmo depois dela (LGPD-RF05).
-        final stillActive = reminders.where((r) => r.active).toList();
-        for (final r in stillActive) {
-          await scope.scheduler.cancel(r.id);
-          await scope.store.save(r.copyWith(active: false));
-        }
-        if (stillActive.isNotEmpty) {
+        if (await deactivateAllReminders(scope)) {
           reminders = await scope.store.list();
         }
       }
@@ -2006,8 +2132,8 @@ class _RemindersScreenState extends State<RemindersScreen> {
 
   String _consentDeniedMessage(bool? granted) {
     if (granted == false) {
-      return 'Você recusou o consentimento para lembretes locais no cadastro — '
-          'não é possível agendar notificações.';
+      return 'Você recusou ou revogou o consentimento para lembretes locais — '
+          'reative em "Meus dados" para agendar notificações.';
     }
     return 'Não encontramos seu consentimento para lembretes locais neste '
         'aparelho — conclua o cadastro para ativar notificações.';

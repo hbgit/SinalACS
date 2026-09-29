@@ -9,6 +9,7 @@ import 'package:sinalacs_client/sinalacs_client.dart'
     show
         AlertStatus,
         AlertStatusResult,
+        ConsentPurpose,
         PatientConsentRecord,
         PatientDataOverview,
         PatientDataSubjectRequestRecord,
@@ -180,7 +181,15 @@ Future<void> openClinicalProfile(WidgetTester tester) async {
 }
 
 /// Abre "Meus dados" pelo menu "Mais".
+///
+/// A tela é um `ListView` preguiçoso e, com os interruptores de consentimento,
+/// passou da altura da superfície padrão de teste (800x600): o histórico e o
+/// segundo interruptor ficavam fora da área construída, e nenhum `find` os via.
+/// Uma superfície alta mantém a tela inteira construída.
 Future<void> openMyData(WidgetTester tester) async {
+  tester.view.physicalSize = const Size(800, 2400);
+  tester.view.devicePixelRatio = 1;
+  addTearDown(tester.view.reset);
   await tester.tap(find.text('Mais'));
   await tester.pumpAndSettle();
   await tester.tap(find.text('Meus dados'));
@@ -848,6 +857,170 @@ void main() {
           requests: requests,
         );
 
+    PatientConsentRecord consent(ConsentPurpose purpose, String action, DateTime at) =>
+        PatientConsentRecord(purpose: purpose.name, action: action, version: '2026.1', timestamp: at);
+
+    List<PatientConsentRecord> onboardingConsents() {
+      final at = DateTime.utc(2026, 1, 1);
+      return [
+        consent(ConsentPurpose.healthDataProcessing, 'granted', at),
+        consent(ConsentPurpose.localReminders, 'granted', at),
+        consent(ConsentPurpose.segmentedPush, 'denied', at),
+      ];
+    }
+
+    /// "Meus dados" com os duplos de lembretes: a tela agora lê e alinha o
+    /// espelho local, e sem eles o `SinalAcsApp` montaria o SQLite real.
+    Future<void> pumpMyData(
+      WidgetTester tester,
+      FakePatientBackend backend, {
+      ReminderStore? store,
+      ReminderScheduler? scheduler,
+      ConsentPreferences? consentPreferences,
+    }) async {
+      await tester.pumpWidget(SinalAcsApp(
+        backend: backend,
+        reminderStore: store ?? _InMemoryReminderStore(),
+        reminderScheduler: scheduler ?? _RecordingReminderScheduler(),
+        consentPreferences: consentPreferences ?? _FixedConsentPreferences(),
+      ));
+      await login(tester);
+      await openMyData(tester);
+    }
+
+    Future<void> tapSwitch(WidgetTester tester, ConsentPurpose purpose) async {
+      final finder = find.byKey(Key('consent_switch_${purpose.name}'));
+      await tester.ensureVisible(finder);
+      await tester.pumpAndSettle();
+      await tester.tap(finder);
+      await tester.pumpAndSettle();
+    }
+
+    bool switchValue(WidgetTester tester, ConsentPurpose purpose) =>
+        tester.widget<SwitchListTile>(find.byKey(Key('consent_switch_${purpose.name}'))).value;
+
+    testWidgets('os interruptores mostram a decisão mais recente de cada finalidade', (tester) async {
+      final backend = FakePatientBackend()
+        ..myDataResult = overview(consents: [
+          ...onboardingConsents(),
+          consent(ConsentPurpose.localReminders, 'denied', DateTime.utc(2026, 2, 1)),
+        ]);
+      await pumpMyData(tester, backend, consentPreferences: _FixedConsentPreferences(granted: false));
+
+      expect(switchValue(tester, ConsentPurpose.localReminders), isFalse);
+      expect(switchValue(tester, ConsentPurpose.segmentedPush), isFalse);
+      expect(find.byKey(const Key('consent_switch_healthDataProcessing')), findsNothing);
+      expect(
+        tester.widget<Text>(find.byKey(const Key('consent_health_data_notice'))).data,
+        contains('solicite a exclusão'),
+      );
+    });
+
+    testWidgets('revogar pede confirmação; cancelar não chama o servidor', (tester) async {
+      final backend = FakePatientBackend()..myDataResult = overview(consents: onboardingConsents());
+      await pumpMyData(tester, backend);
+
+      await tapSwitch(tester, ConsentPurpose.localReminders);
+      expect(find.text('Revogar consentimento?'), findsOneWidget);
+      await tester.tap(find.byKey(const Key('consent_revoke_cancel')));
+      await tester.pumpAndSettle();
+
+      expect(backend.updateConsentCalls, isEmpty);
+      expect(switchValue(tester, ConsentPurpose.localReminders), isTrue);
+    });
+
+    testWidgets(
+        'confirmar a revogação de lembretes registra no servidor, atualiza o espelho e '
+        'cancela na hora o lembrete já agendado', (tester) async {
+      final store = _InMemoryReminderStore();
+      final seeded = await store.save(
+        const Reminder(id: 0, label: 'Losartana 50 mg', hour: 8, minute: 0, active: true),
+      );
+      final scheduler = _RecordingReminderScheduler();
+      final prefs = _FixedConsentPreferences(granted: true);
+      final backend = FakePatientBackend()..myDataResult = overview(consents: onboardingConsents());
+      await pumpMyData(tester, backend, store: store, scheduler: scheduler, consentPreferences: prefs);
+
+      await tapSwitch(tester, ConsentPurpose.localReminders);
+      await tester.tap(find.byKey(const Key('consent_revoke_confirm')));
+      await tester.pumpAndSettle();
+
+      expect(backend.updateConsentCalls.single, (purpose: ConsentPurpose.localReminders, granted: false));
+      expect(prefs.granted, isFalse);
+      expect(scheduler.cancelled, [seeded.id]);
+      expect((await store.list()).single.active, isFalse);
+      expect(switchValue(tester, ConsentPurpose.localReminders), isFalse);
+      expect(
+        tester.widget<Text>(find.byKey(const Key('my_data_confirmation'))).data,
+        contains('revogado'),
+      );
+    });
+
+    testWidgets('conceder não pede confirmação e não mexe nos lembretes', (tester) async {
+      final scheduler = _RecordingReminderScheduler();
+      final backend = FakePatientBackend()..myDataResult = overview(consents: onboardingConsents());
+      await pumpMyData(tester, backend, scheduler: scheduler);
+
+      await tapSwitch(tester, ConsentPurpose.segmentedPush);
+
+      expect(find.text('Revogar consentimento?'), findsNothing);
+      expect(backend.updateConsentCalls.single, (purpose: ConsentPurpose.segmentedPush, granted: true));
+      expect(scheduler.cancelled, isEmpty);
+      expect(switchValue(tester, ConsentPurpose.segmentedPush), isTrue);
+    });
+
+    testWidgets('falha do servidor mostra o erro e o interruptor fica como estava', (tester) async {
+      final handle = tester.ensureSemantics();
+      final backend = FakePatientBackend()
+        ..myDataResult = overview(consents: onboardingConsents())
+        ..updateConsentFailure = const BackendFailure('Sem conexão com o servidor.');
+      await pumpMyData(tester, backend);
+
+      await tapSwitch(tester, ConsentPurpose.segmentedPush);
+
+      expect(find.text('Sem conexão com o servidor.'), findsOneWidget);
+      expect(tester.getSemantics(find.byKey(const Key('my_data_error'))).flagsCollection.isLiveRegion, isTrue);
+      expect(switchValue(tester, ConsentPurpose.segmentedPush), isFalse);
+      handle.dispose();
+    });
+
+    testWidgets('aparelho sem espelho local (login OTP) recebe a concessão do servidor ao abrir', (tester) async {
+      final prefs = _FixedConsentPreferences(granted: null);
+      final backend = FakePatientBackend()..myDataResult = overview(consents: onboardingConsents());
+      await pumpMyData(tester, backend, consentPreferences: prefs);
+
+      expect(prefs.granted, isTrue);
+    });
+
+    testWidgets('recusa vinda do servidor cancela lembretes ativos de um aparelho sem espelho', (tester) async {
+      final store = _InMemoryReminderStore();
+      final seeded = await store.save(
+        const Reminder(id: 0, label: 'Metformina 850 mg', hour: 7, minute: 0, active: true),
+      );
+      final scheduler = _RecordingReminderScheduler();
+      final prefs = _FixedConsentPreferences(granted: null);
+      final backend = FakePatientBackend()
+        ..myDataResult = overview(consents: [
+          ...onboardingConsents(),
+          consent(ConsentPurpose.localReminders, 'denied', DateTime.utc(2026, 2, 1)),
+        ]);
+      await pumpMyData(tester, backend, store: store, scheduler: scheduler, consentPreferences: prefs);
+
+      expect(prefs.granted, isFalse);
+      expect(scheduler.cancelled, [seeded.id]);
+    });
+
+    testWidgets('os interruptores não criam nó de botão inerte', (tester) async {
+      final handle = tester.ensureSemantics();
+      final backend = FakePatientBackend()..myDataResult = overview(consents: onboardingConsents());
+      await pumpMyData(tester, backend);
+      await tester.ensureVisible(find.byKey(const Key('consent_switch_segmentedPush')));
+      await tester.pumpAndSettle();
+
+      expectNenhumBotaoInerte(tester);
+      handle.dispose();
+    });
+
     testWidgets('mostra o cadastro e as condições crônicas devolvidas pelo servidor', (tester) async {
       final backend = FakePatientBackend()..myDataResult = overview();
       await tester.pumpWidget(SinalAcsApp(backend: backend));
@@ -884,7 +1057,7 @@ void main() {
       await login(tester);
       await openMyData(tester);
 
-      expect(find.text('healthDataProcessing'), findsOneWidget);
+      expect(find.text('Tratamento de dados de saúde'), findsOneWidget);
       expect(find.textContaining('Concedido'), findsOneWidget);
       expect(find.textContaining('Alerta de urgência'), findsOneWidget);
       expect(find.textContaining('Vermelho'), findsOneWidget);
@@ -954,8 +1127,8 @@ void main() {
         'data': DateTime.utc(2026, 1, 1).toIso8601String(),
       });
 
-      expect(find.byKey(const Key('my_data_export_confirmation')), findsOneWidget);
-      final semantics = tester.getSemantics(find.byKey(const Key('my_data_export_confirmation')));
+      expect(find.byKey(const Key('my_data_confirmation')), findsOneWidget);
+      final semantics = tester.getSemantics(find.byKey(const Key('my_data_confirmation')));
       expect(semantics.flagsCollection.isLiveRegion, isTrue);
     });
 
