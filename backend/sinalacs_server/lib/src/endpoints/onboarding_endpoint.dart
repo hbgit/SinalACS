@@ -63,8 +63,9 @@ class OnboardingEndpoint extends Endpoint {
 
     // Mesmo motivo do RF01 (`AuthEndpoint.verifyOtp`): o convite de uso único
     // não se reapresenta como a senha do ACS, então não há renovação
-    // silenciosa — 15 minutos padrão bastaria pouco. Ver PROGRESS.md
-    // "Um defeito do RF02 que esta entrega mediu".
+    // silenciosa, então a sessão usa `patientSessionLifetime` (1 hora), como o
+    // login por OTP. O TTL de 15 minutos era um defeito do RF02, corrigido —
+    // ver PROGRESS.md "Um defeito do RF02 que esta entrega mediu".
     return EnrollmentResult(
       accessToken: AlertRuntime.instance.auth.issueToken(
         user,

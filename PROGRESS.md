@@ -988,6 +988,8 @@ ambiente do delta que se quer medir.
 
 ### Um defeito do RF02 que esta entrega mediu — com dono (2026-09-19)
 
+> **Resolvido:** `completeEnrollment` já emite `patientSessionLifetime`; `onboarding_endpoint_test.dart` prende o valor. Esta seção descreve o defeito como foi medido.
+
 `onboarding_endpoint.dart:62` faz `issueToken(user)` — o default de **15 minutos** — para
 `role: UserRole.patient`, e o app consome esse token como sessão
 (`apps/patient/lib/core/network/backend_client.dart:259-273`). Ou seja: **há dois caminhos de
@@ -1109,3 +1111,15 @@ Plano: `docs/superpowers/plans/2026-09-29-qr-onboarding-e-documentos-legais.md`,
 - Canal de dúvidas é "fale com o ACS ou a UBS", sem canal digital próprio.
 - A página da câmera (`_CameraScanPage`) só roda no aparelho; os testes cobrem o fluxo com um leitor duplo. Validar no emulador com um QR gerado pelo app do ACS.
 - Contagens de teste depois desta entrega: backend 329, paciente 167, ACS 168.
+
+## Aceite do termo no login OTP (2026-09-29)
+
+Plano: `docs/superpowers/plans/2026-09-29-aceite-do-termo-no-login-otp.md`, branch `fix/patient`.
+
+**O que existe.** `patients.acceptTermsOfUse` (só paciente) grava `termsOfUse` `granted` com `consentPolicyVersion` em `consent_logs`, pela mesma trilha assinada de `updateConsent`, que continua recusando esse propósito. No app, depois de `verifyOtp` o login lê `myData()`; se a linha mais recente de `termsOfUse` não for `granted` na versão `legalDocumentsVersion` (`needsTermsAcceptance`), abre `TermsAcceptanceScreen`. Isso cobre pacientes do seed e de OTP sem onboarding, e o reaceite quando a versão mudar. A sessão do onboarding de 1 hora, que estava no escopo pedido, já estava no código; só os comentários e docs foram corrigidos.
+
+**Ficou de fora, de propósito:**
+- O aceite **não é portão duro**: "Agora não" e uma falha de `myData()` entram direto, porque o alerta de urgência nunca pode ficar atrás de uma tela de aceite. Consequência: quem pula pode seguir sem aceite registrado, e o aviso volta no próximo login.
+- Aviso de mudança com 15 dias de antecedência e revisão jurídica do texto seguem pendentes.
+- `acceptTermsOfUse` grava uma linha nova a cada chamada, sem checar se já havia aceite da versão vigente; o app só chama quando `needsTermsAcceptance`.
+- Contagens de teste depois desta entrega: backend 333, paciente 179, ACS 168.
