@@ -17,6 +17,7 @@ import 'package:sinalacs_client/sinalacs_client.dart'
         RiskLevel;
 import 'package:sinalacs_patient/app/legal_screens.dart';
 import 'package:sinalacs_patient/app/patient_theme.dart';
+import 'package:sinalacs_patient/app/qr_scanner.dart';
 import 'package:sinalacs_patient/core/consent/consent_decisions.dart';
 import 'package:sinalacs_patient/core/legal/legal_documents.dart';
 import 'package:sinalacs_patient/core/consent/consent_preferences.dart';
@@ -24,6 +25,7 @@ import 'package:sinalacs_patient/core/consent/sqflite_consent_preferences.dart';
 import 'package:sinalacs_patient/core/network/backend_client.dart';
 import 'package:sinalacs_patient/core/network/backend_scope.dart';
 import 'package:sinalacs_patient/core/network/idempotency.dart';
+import 'package:sinalacs_patient/core/onboarding/enrollment_qr.dart';
 import 'package:sinalacs_patient/core/privacy/location_hash.dart';
 import 'package:sinalacs_patient/core/reminders/reminder.dart';
 import 'package:sinalacs_patient/core/reminders/reminder_scheduler.dart';
@@ -38,6 +40,7 @@ class SinalAcsApp extends StatefulWidget {
     this.reminderStore,
     this.reminderScheduler,
     this.consentPreferences,
+    this.qrScanner,
   });
 
   /// Backend do app. **Obrigatório, e construído em `main.dart`.**
@@ -69,6 +72,10 @@ class SinalAcsApp extends StatefulWidget {
   /// real.
   final ConsentPreferences? consentPreferences;
 
+  /// Injetável para teste. Em execução normal é [scanQrWithCamera], que abre
+  /// a câmera do aparelho.
+  final QrScanner? qrScanner;
+
   @override
   State<SinalAcsApp> createState() => _SinalAcsAppState();
 }
@@ -81,6 +88,7 @@ class _SinalAcsAppState extends State<SinalAcsApp> {
       widget.reminderScheduler ?? LocalNotificationsReminderScheduler(FlutterLocalNotificationsPlugin());
   late final ConsentPreferences _consentPreferences =
       widget.consentPreferences ?? SqfliteConsentPreferences();
+  late final QrScanner _qrScanner = widget.qrScanner ?? scanQrWithCamera;
 
   // Sem `dispose`: este widget não cria mais cliente nenhum (o `main` é quem
   // constrói e injeta), então não há o que fechar — fechar um backend injetado
@@ -96,11 +104,14 @@ class _SinalAcsAppState extends State<SinalAcsApp> {
           store: _reminderStore,
           scheduler: _reminderScheduler,
           consentPreferences: _consentPreferences,
-          child: MaterialApp(
-            title: 'SinalACS Paciente',
-            debugShowCheckedModeBanner: false,
-            theme: buildPatientTheme(),
-            home: const PatientLoginScreen(),
+          child: QrScannerScope(
+            scanner: _qrScanner,
+            child: MaterialApp(
+              title: 'SinalACS Paciente',
+              debugShowCheckedModeBanner: false,
+              theme: buildPatientTheme(),
+              home: const PatientLoginScreen(),
+            ),
           ),
         ),
       ),
@@ -604,9 +615,9 @@ class _PatientLoginScreenState extends State<PatientLoginScreen> {
 /// grava os 3 consentimentos por finalidade (LGPD-RF02) antes de ativar a
 /// sessão do paciente (RF02).
 ///
-/// O campo de texto recebe o valor do token do QR Code — a leitura por
-/// câmera é apenas um jeito alternativo de preencher o mesmo campo, não uma
-/// dependência nova desta tela (fora de escopo aqui).
+/// O campo de texto recebe o token do convite. A leitura do QR Code pela
+/// câmera ("Ler QR Code com a câmera") preenche o mesmo campo — digitar
+/// continua possível para quem não tem câmera ou negou a permissão.
 class OnboardingScreen extends StatefulWidget {
   const OnboardingScreen({super.key});
 
@@ -634,6 +645,29 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   void dispose() {
     _tokenController.dispose();
     super.dispose();
+  }
+
+  Future<void> _scan() async {
+    final scanner = QrScannerScope.of(context);
+    final String? raw;
+    try {
+      raw = await scanner(context);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _error = 'Não foi possível usar a câmera. Digite o código do convite.');
+      return;
+    }
+    if (!mounted || raw == null) return;
+    final token = parseEnrollmentQr(raw);
+    setState(() {
+      if (token == null) {
+        _error = 'Este QR Code não é um convite do SinalACS. Peça ao agente de '
+            'saúde para mostrar o convite de novo.';
+      } else {
+        _tokenController.text = token;
+        _error = null;
+      }
+    });
   }
 
   Future<void> _complete() async {
@@ -726,11 +760,21 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         const Text(
-                          'Cole ou digite o código do convite recebido do agente '
-                          'comunitário de saúde. A leitura do QR Code preenche o '
-                          'mesmo campo.',
+                          'Leia o QR Code do convite mostrado pelo agente '
+                          'comunitário de saúde, ou digite o código.',
                           textAlign: TextAlign.center,
                           style: TextStyle(color: Colors.white70),
+                        ),
+                        const SizedBox(height: 20),
+                        SizedBox(
+                          width: double.infinity,
+                          child: OutlinedButton.icon(
+                            key: const Key('scan_qr_button'),
+                            onPressed: _busy ? null : _scan,
+                            style: OutlinedButton.styleFrom(minimumSize: const Size(48, 52)),
+                            icon: const Icon(Icons.qr_code_scanner_outlined),
+                            label: const Text('Ler QR Code com a câmera'),
+                          ),
                         ),
                         const SizedBox(height: 20),
                         TextField(

@@ -10,6 +10,12 @@
          sem isso, os alarmes agendados via `flutter_local_notifications`
          somem em cada reboot (não sobrevivem sozinhos). -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- Usada por `scanQrWithCamera` (lib/app/qr_scanner.dart) para ler o QR
+         Code do convite do ACS no onboarding (RF02). A imagem não sai do
+         aparelho: só o texto do QR preenche o campo do convite. Câmera não é
+         obrigatória para instalar — sem ela, a pessoa digita o código. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
     <application
         android:label="sinalacs_patient"
         android:name="${applicationName}"

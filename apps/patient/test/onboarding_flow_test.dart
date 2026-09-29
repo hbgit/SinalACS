@@ -38,6 +38,9 @@ Future<void> tapKey(WidgetTester tester, String key) async {
   await tester.pumpAndSettle();
 }
 
+/// Token sintético no formato real (43 caracteres base64url).
+const _conviteSintetico = 'AbCdEfGhIjKlMnOpQrStUvWxYz0123456789-_AbCde';
+
 void main() {
   testWidgets('deve abrir com campo de token e os 3 consentimentos desmarcados', (tester) async {
     await tester.pumpWidget(SinalAcsApp(backend: FakePatientBackend()));
@@ -212,5 +215,71 @@ void main() {
 
     await tapKey(tester, 'onboarding_open_privacy');
     expect(find.text('Política de Privacidade'), findsWidgets);
+  });
+
+  testWidgets('ler o QR do convite preenche o campo e libera concluir', (tester) async {
+    final backend = FakePatientBackend();
+    await tester.pumpWidget(SinalAcsApp(
+      backend: backend,
+      qrScanner: (_) async => _conviteSintetico,
+    ));
+    await openOnboarding(tester);
+
+    await tapKey(tester, 'scan_qr_button');
+    final field = tester.widget<TextField>(find.byKey(const Key('onboarding_token_field')));
+    expect(field.controller!.text, _conviteSintetico);
+
+    await tapKey(tester, 'onboarding_consent_health');
+    await tapKey(tester, 'onboarding_terms_accept');
+    await tapKey(tester, 'complete_enrollment_button');
+    expect(backend.enrollmentCalls.single['token'], _conviteSintetico);
+  });
+
+  testWidgets('cancelar a leitura não muda o que já foi digitado', (tester) async {
+    await tester.pumpWidget(SinalAcsApp(
+      backend: FakePatientBackend(),
+      qrScanner: (_) async => null,
+    ));
+    await openOnboarding(tester);
+    await tester.enterText(find.byKey(const Key('onboarding_token_field')), 'convite-123');
+
+    await tapKey(tester, 'scan_qr_button');
+
+    final field = tester.widget<TextField>(find.byKey(const Key('onboarding_token_field')));
+    expect(field.controller!.text, 'convite-123');
+    expect(find.byKey(const Key('onboarding_error')), findsNothing);
+  });
+
+  testWidgets('QR que não é convite mostra aviso e não preenche o campo', (tester) async {
+    await tester.pumpWidget(SinalAcsApp(
+      backend: FakePatientBackend(),
+      qrScanner: (_) async => 'https://exemplo.invalid/pagina',
+    ));
+    await openOnboarding(tester);
+    await tester.enterText(find.byKey(const Key('onboarding_token_field')), 'convite-123');
+
+    await tapKey(tester, 'scan_qr_button');
+
+    expect(find.textContaining('não é um convite do SinalACS'), findsOneWidget);
+    final field = tester.widget<TextField>(find.byKey(const Key('onboarding_token_field')));
+    expect(field.controller!.text, 'convite-123');
+  });
+
+  testWidgets('falha da câmera mostra aviso e o campo manual continua utilizável', (tester) async {
+    final backend = FakePatientBackend();
+    await tester.pumpWidget(SinalAcsApp(
+      backend: backend,
+      qrScanner: (_) async => throw StateError('câmera indisponível'),
+    ));
+    await openOnboarding(tester);
+
+    await tapKey(tester, 'scan_qr_button');
+    expect(find.textContaining('Não foi possível usar a câmera'), findsOneWidget);
+
+    await tester.enterText(find.byKey(const Key('onboarding_token_field')), 'convite-123');
+    await tapKey(tester, 'onboarding_consent_health');
+    await tapKey(tester, 'onboarding_terms_accept');
+    await tapKey(tester, 'complete_enrollment_button');
+    expect(backend.enrollmentCalls, hasLength(1));
   });
 }

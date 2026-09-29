@@ -30,6 +30,7 @@ dependencies:
   # transitiva de `flutter_local_notifications`; declarada aqui porque o
   # código do app importa `package:timezone/timezone.dart` diretamente.
   timezone: ^0.9.4
+  mobile_scanner: ^7.0.0
 
 dev_dependencies:
   flutter_test:
