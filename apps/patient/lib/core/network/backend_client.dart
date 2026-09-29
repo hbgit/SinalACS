@@ -142,6 +142,10 @@ abstract class PatientBackend {
   /// consentimento `segmentedPush` vigente; quem chama ignora a falha.
   Future<void> registerPushToken({required String token, required String platform});
 
+  /// Aviso de mudança dos termos ativo agora (LGPD-RF18, 15 dias de antecedência),
+  /// ou `null`. O app ignora falha e lentidão: sem aviso, sem cartão.
+  Future<TermsChangeNotice?> termsChangeNotice();
+
   /// Se o paciente já aceitou o Termo de Uso e a Política de Privacidade da
   /// versão vigente (LGPD-RF18). O login por OTP consulta isto para decidir se
   /// mostra o convite ao aceite.
@@ -256,6 +260,9 @@ class MisconfiguredBackend implements PatientBackend {
 
   @override
   Future<bool> hasAcceptedCurrentTerms() async => _recusar();
+
+  @override
+  Future<TermsChangeNotice?> termsChangeNotice() async => _recusar();
 
   @override
   Future<void> registerPushToken({required String token, required String platform}) async =>
@@ -557,6 +564,12 @@ class BackendClient implements PatientBackend {
       () => _client.devices
           .registerPushToken(accessToken: accessToken, token: token, platform: platform),
     );
+  }
+
+  @override
+  Future<TermsChangeNotice?> termsChangeNotice() async {
+    final token = await _requireToken();
+    return _guard(() => _client.patients.termsChangeNotice(accessToken: token));
   }
 
   @override

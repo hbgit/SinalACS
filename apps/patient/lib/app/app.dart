@@ -15,12 +15,14 @@ import 'package:sinalacs_client/sinalacs_client.dart'
         DataSubjectRequestType,
         PatientDataOverview,
         PatientDataSubjectRequestRecord,
+        TermsChangeNotice,
         RiskLevel;
 import 'package:sinalacs_patient/app/legal_screens.dart';
 import 'package:sinalacs_patient/app/patient_theme.dart';
 import 'package:sinalacs_patient/app/qr_scanner.dart';
 import 'package:sinalacs_patient/core/consent/consent_decisions.dart';
 import 'package:sinalacs_patient/core/legal/legal_documents.dart';
+import 'package:sinalacs_patient/core/legal/terms_change_notice_card.dart';
 import 'package:sinalacs_patient/core/consent/consent_preferences.dart';
 import 'package:sinalacs_patient/core/consent/sqflite_consent_preferences.dart';
 import 'package:sinalacs_patient/core/network/backend_client.dart';
@@ -434,7 +436,7 @@ class _PatientLoginScreenState extends State<PatientLoginScreen> {
     try {
       await BackendScope.of(context).verifyOtp(cpf: cpf, code: _codigo.text.trim());
       if (!mounted) return;
-      unawaited(registerPushDevice(BackendScope.of(context), PushTokenScope.of(context)));
+      unawaited(registerPushDevice(BackendScope.of(context), PushTokenScope.maybeOf(context)));
       final needsTerms = await _needsTerms();
       if (!mounted) return;
       MaterialPageRoute<void> home() => MaterialPageRoute<void>(
@@ -787,7 +789,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         // Intencionalmente silencioso — ver comentário acima.
       }
       if (!mounted) return;
-      unawaited(registerPushDevice(BackendScope.of(context), PushTokenScope.of(context)));
+      unawaited(registerPushDevice(BackendScope.of(context), PushTokenScope.maybeOf(context)));
       // Mesmo caminho que `_PatientLoginScreenState._enter()` já usa para
       // entrar na navegação principal — a sessão já está em `BackendScope`,
       // não há estado novo para duplicar aqui.
@@ -997,10 +999,40 @@ class _PatientHomeShellState extends State<PatientHomeShell> {
   /// devolve "sua sessão expirou".
   bool _sessionExpired = false;
 
+  /// Aviso de mudança dos termos (LGPD-RF18), buscado uma vez ao abrir a home.
+  /// Nunca bloqueia: falha, lentidão ou ausência de `BackendScope` = sem cartão.
+  TermsChangeNotice? _notice;
+  bool _noticeDismissed = false;
+
   @override
   void initState() {
     super.initState();
     _destination = widget.initialDestination;
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (!_noticeRequested) {
+      _noticeRequested = true;
+      unawaited(_loadNotice());
+    }
+  }
+
+  bool _noticeRequested = false;
+
+  Future<void> _loadNotice() async {
+    // `getInheritedWidgetOfExactType` e não `BackendScope.of`: um shell montado
+    // sem `BackendScope` (o teste de Lembretes) não pode quebrar por causa de um
+    // aviso acessório.
+    final backend = context.getInheritedWidgetOfExactType<BackendScope>()?.backend;
+    if (backend == null) return;
+    try {
+      final notice = await backend.termsChangeNotice().timeout(_termsCheckTimeout);
+      if (mounted) setState(() => _notice = notice);
+    } catch (_) {
+      // Sem aviso: a home segue como estava.
+    }
   }
 
   void _select(PatientDestination destination) => setState(() => _destination = destination);
@@ -1054,6 +1086,14 @@ class _PatientHomeShellState extends State<PatientHomeShell> {
         child: Column(
           children: [
             if (_sessionExpired) _SessionExpiredBanner(onReenter: _reenter),
+            if (_notice != null && !_noticeDismissed)
+              TermsChangeNoticeCard(
+                notice: _notice!,
+                onDismiss: () => setState(() => _noticeDismissed = true),
+                onRead: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const LegalDocumentsScreen()),
+                ),
+              ),
             Expanded(child: content),
           ],
         ),
@@ -1785,7 +1825,7 @@ class _MyDataScreenState extends State<MyDataScreen> {
     try {
       final record = await backend.updateConsent(purpose: purpose, granted: granted);
       if (purpose == ConsentPurpose.segmentedPush && granted && mounted) {
-        unawaited(registerPushDevice(backend, PushTokenScope.of(context)));
+        unawaited(registerPushDevice(backend, PushTokenScope.maybeOf(context)));
       }
       // A decisão já está gravada no servidor: aplicar no aparelho aqui, sem
       // depender do recarregamento abaixo — se ele falhar, um lembrete

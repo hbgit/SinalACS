@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sinalacs_patient/app/app.dart';
@@ -66,9 +68,32 @@ void main() {
 
     expect(find.byType(PatientHomeShell), findsOneWidget);
   });
+
+  testWidgets('fonte de token que nunca completa não atrasa a home', (tester) async {
+    await tester.pumpWidget(SinalAcsApp(
+      backend: FakePatientBackend(),
+      pushTokens: _NeverSource(),
+    ));
+    await login(tester);
+    expect(find.byType(PatientHomeShell), findsOneWidget);
+  });
+
+  testWidgets('sem PushTokenScope, maybeOf devolve a fonte inerte', (tester) async {
+    PushTokenSource? achada;
+    await tester.pumpWidget(Builder(builder: (context) {
+      achada = PushTokenScope.maybeOf(context);
+      return const SizedBox();
+    }));
+    expect(achada, isA<NoPushTokenSource>());
+  });
 }
 
 class _ThrowingSource implements PushTokenSource {
   @override
   Future<PushDevice?> currentDevice() async => throw StateError('sem provedor');
+}
+
+class _NeverSource implements PushTokenSource {
+  @override
+  Future<PushDevice?> currentDevice() => Completer<PushDevice?>().future;
 }

@@ -57,6 +57,12 @@ class PushTokenScope extends InheritedWidget {
     return scope!.source;
   }
 
+  /// Como [of], mas sem escopo cai em [NoPushTokenSource]: o registro de push é
+  /// acessório, e uma tela montada fora do `SinalAcsApp` não pode quebrar o login.
+  static PushTokenSource maybeOf(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<PushTokenScope>()?.source ??
+      const NoPushTokenSource();
+
   @override
   bool updateShouldNotify(PushTokenScope oldWidget) => source != oldWidget.source;
 }

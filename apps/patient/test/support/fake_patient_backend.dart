@@ -73,6 +73,24 @@ class FakePatientBackend implements PatientBackend {
     if (failure != null) throw failure;
   }
 
+  /// O aviso de mudança dos termos que o servidor devolveria, ou `null`.
+  TermsChangeNotice? termsNotice;
+  int termsNoticeCalls = 0;
+  BackendFailure? termsNoticeFailure;
+
+  /// Quando definido, [termsChangeNotice] só responde depois que ele completa —
+  /// simula um backend lento ou pendurado.
+  Completer<void>? termsNoticeGate;
+
+  @override
+  Future<TermsChangeNotice?> termsChangeNotice() async {
+    termsNoticeCalls++;
+    await termsNoticeGate?.future;
+    final failure = termsNoticeFailure;
+    if (failure != null) throw failure;
+    return termsNotice;
+  }
+
   /// O que o servidor responderia a [hasAcceptedCurrentTerms].
   bool termsAccepted = true;
   int termsStatusCalls = 0;
