@@ -1122,7 +1122,7 @@ Plano: `docs/superpowers/plans/2026-09-29-aceite-do-termo-no-login-otp.md`, bran
 
 **Ficou de fora, de propósito:**
 - O aceite **não é portão duro**: "Agora não" e uma falha de `hasAcceptedCurrentTerms` entram direto, porque o alerta de urgência nunca pode ficar atrás de uma tela de aceite. Consequência: quem pula pode seguir sem aceite registrado, e o aviso volta no próximo login.
-- Aviso de mudança com 15 dias de antecedência e revisão jurídica do texto seguem pendentes.
+- Aviso de mudança com 15 dias de antecedência: feito depois (ver "Menores do push e aviso de 15 dias"); revisão jurídica do texto segue pendente.
 - ~~`acceptTermsOfUse` grava uma linha nova a cada chamada~~ — resolvido na rodada "Menores adiados e push do paciente": o aceite é idempotente e atômico.
 - Contagens de teste depois desta entrega: backend 333, paciente 182, ACS 168.
 
@@ -1142,7 +1142,7 @@ Plano: `docs/superpowers/plans/2026-09-29-fechamento-de-pendencias-do-paciente.m
 **Ficou de fora, de propósito:**
 - `ipHash` e `userAgent` `nao-aplicavel-painel-titular` em `consent_logs` seguem como estão: é um marcador deliberado de ausência (o request HTTP já é auditado em `audit_logs`), documentado em `signed_consent_log.dart`. Guardar o IP do titular ali é uma decisão de privacidade, não um conserto.
 - A prova da corrida cobre o store ORM, não o endpoint: o endpoint grava `audit_logs`, que tem FK para `users` e cadeia de hash, e a limpeza manual do grupo sem rollback quebraria os dois.
-- Backoffice que atende os pedidos, push (RF14) e o aviso de 15 dias seguem pendentes.
+- Backoffice que atende os pedidos e o push (RF14) seguem pendentes; o aviso de 15 dias foi feito depois, ver "Menores do push e aviso de 15 dias".
 - Contagens de teste depois desta entrega: backend 346, paciente 182, ACS 172.
 
 ## Menores adiados e push do paciente (2026-09-29)
@@ -1158,12 +1158,12 @@ Plano: `docs/superpowers/plans/2026-09-29-menores-adiados-e-push-do-paciente.md`
 **Achados do revisor final, corrigidos:** o consentimento era lido fora da transação do registro, então registrar × revogar em paralelo deixava um token ligado a um titular que já tinha revogado; hoje `registerIfConsented` lê e grava sob um lock por titular, e a revogação (`deleteAllFor`) espera o mesmo lock (teste de corrida de 40 iterações contra Postgres real). E um aparelho apresentado por quem não consentiu perde o vínculo do titular anterior, porque o token prova que o aparelho está na mão de outra pessoa.
 
 **Ficou de fora, de propósito:**
-- Revogar grava o `denied` e apaga os tokens em duas operações: se a segunda falhar, o consentimento já está revogado e o token fica até a próxima revogação.
-- `devices.registerPushToken` não grava linha de auditoria (a revogação já deixa `consent_log`); a troca de dono do token não deixa rastro.
-- Sem teto de tokens por titular; sem teste do caso "fonte de token que nunca completa"; `PushTokenScope.of` sem `maybeOf`.
+- ~~Revogar grava o `denied` e apaga os tokens em duas operações~~ — resolvido na rodada "Menores do push e aviso de 15 dias": as duas coisas são uma transação só.
+- `devices.registerPushToken` só grava auditoria na **troca de dono** do token (`push_token`); registrar e repetir não, porque a revogação já deixa `consent_log`.
+- ~~Sem teto de tokens por titular; sem teste da fonte que nunca completa; `PushTokenScope.of` sem `maybeOf`~~ — resolvidos na rodada "Menores do push e aviso de 15 dias".
 - Envio segmentado, tela de avisos do ACS e captura do token nativo: **o código do envio e a tela foram feitos depois**, ver "RF14: envio de avisos segmentados com Gorush". Continuam pendentes o Gorush hospedado, as credenciais FCM/APNs e o lado nativo do token (§3.2, revisado em 2026-09-29).
 - Apagar tokens ao atender o pedido de exclusão: pertence ao backoffice que atende os pedidos, ainda inexistente.
-- Aviso de 15 dias de mudança dos termos e revisão jurídica do texto 2026.1.
+- ~~Aviso de 15 dias de mudança dos termos~~ — feito na rodada "Menores do push e aviso de 15 dias" (a agenda está vazia); revisão jurídica do texto 2026.1 segue pendente.
 - O erro de um pedido em "Meus dados" aparece no topo da lista, fora da tela para quem rolou até o botão (anterior a esta rodada).
 - Baseline do `dart analyze` do backend: 44 infos (eram 41), os três novos são o mesmo `prefer_initializing_formals` que o resto dos serviços já tem.
 - Contagens de teste: backend 359, paciente 190, ACS 172.
@@ -1198,3 +1198,19 @@ Plano: `docs/superpowers/plans/2026-09-29-rf14-gorush-avisos-segmentados.md`, br
 **Fora de escopo:** migrar o resto do paciente para Riverpod, salvar o token no SQLite local, histórico ou agendamento de avisos.
 
 **Achados do revisor final do RF14, corrigidos:** timeout do envio agora é "resultado desconhecido" (mensagem manda conferir antes de reenviar, auditoria `unknown`), porque o Gorush com `sync: true` pode entregar depois do limite de 5 s e o "tente de novo" duplicaria o aviso; "aceitos" passou a ser alvos menos falhas, sem confiar em `counts`; `MismatchSenderId` deixou de apagar tokens (é erro de configuração do servidor e esvaziaria a microárea) e a string de erro do FCM v1 entrou; `hide_messages: true` no `config.yml`. **Deferido:** `HttpClient` sem `close()`, resposta JSON de forma inesperada fora do erro tipado, desempate por timestamp igual, `INNER JOIN` com `patients`, Gorush em loop sem credenciais, auditoria `granted` com 0 aceitos, nome do teste de auditoria que promete mais do que verifica.
+
+## Menores do push e aviso de 15 dias (2026-09-29)
+
+Plano: `docs/superpowers/plans/2026-09-29-menores-do-push-e-aviso-de-mudanca-dos-termos.md`, branch `fix/patient`.
+
+**O que foi fechado:**
+- A revogação de `segmentedPush` grava o `denied` e apaga os tokens do titular numa transação só, sob o lock por titular (`recordConsentRevokingPush`); um teste com falha injetada depois de apagar os tokens prova que nada fica pela metade.
+- A troca de dono de um token de push é auditada (`push_token`, sem o token); cada titular fica com no máximo 10 tokens (o mais antigo sai); a regra do aceite vigente existe num lugar só (`isCurrentAcceptance`).
+- **Aviso de 15 dias (LGPD-RF18):** `TermsChangeSchedule` (recusa vigência a menos de 15 dias da publicação), `patients.termsChangeNotice` e um cartão dispensável na home do paciente. A agenda real (`upcomingTermsChange`) está **vazia**: nenhuma mudança de termos está anunciada, então o cartão nunca aparece em produção até alguém agendar uma. O canal do aviso é só dentro do app (push ainda não chega a aparelhos; SMS é só de OTP).
+- `PushTokenScope.maybeOf` e o teste da fonte de token que nunca completa.
+- Contagens de teste: backend 411, paciente 207, ACS 178. Analyze do backend em 51 infos.
+
+**Ficou de fora, de propósito:**
+- O contraste do texto do cartão não foi medido contra a superfície em que ele renderiza.
+- O caso "agenda ativa" só é provado no serviço e no app com um backend falso; nenhum teste de integração exercita uma agenda ativa porque a constante do repositório é `null`.
+- O cartão só aparece quando a home abre; quem já está com o app aberto não o vê até reabrir.

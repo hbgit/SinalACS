@@ -105,9 +105,10 @@ A tabela abaixo consolida o mapeamento exaustivo de dados persistidos pelo backe
 | **push_tokens** | `id` | `uuid` | Pseudonimizado | UUID v4 (`gen_random_uuid()`) | Identificador da linha do token de push (RF14). |
 | | `userId` | `uuid` | Pseudonimizado | Chave estrangeira (`users.id`) | Liga o aparelho ao titular; apagado quando o consentimento `segmentedPush` é revogado. |
 | | `microAreaId` | `uuid` | Pseudonimizado | Copiado do token de acesso | Segmentação dos avisos por microárea. |
-| | `token` | `text` | Identificador de aparelho | Emitido pelo FCM/APNs | Identifica um aparelho, não uma pessoa; junto de `userId` liga os dois. Índice único: o mesmo token nunca tem dois donos. |
+| | `token` | `text` | Identificador de aparelho | Emitido pelo FCM/APNs | Identifica um aparelho, não uma pessoa; junto de `userId` liga os dois. Índice único: o mesmo token nunca tem dois donos. No máximo 10 linhas por titular (`maxPushTokensPerUser`). |
 | | `platform` | `text` | Metadado Técnico | `android` \| `ios` | Escolhe o provedor do envio. |
 | | `createdAt` / `updatedAt` | `timestamp without time zone` | Metadado Técnico | Relógio do servidor | Primeiro registro e última confirmação do token. |
+| | (`audit_logs`) | — | Metadado Técnico | `resourceType = push_token` | Só a troca de dono de um token de push (`result = granted`): o token nunca é gravado na trilha. |
 | | (`audit_logs`) | — | Metadado Técnico | `resourceType = community_notice` | Uma linha por aviso comunitário enviado: `userId` do ACS, `resourceId` = microárea, `result` = `granted` ou `no_recipients`. O texto do aviso nunca é gravado. |
 | **audit_logs** | `id` | `uuid` | Pseudonimizado | UUID v4 (`gen_random_uuid()`) | Identificador do registro de auditoria (LGPD-RF11). |
 | | `userId` | `uuid` | Pseudonimizado | Chave estrangeira (`users.id`) | Identifica o operador que executou a ação auditada. |
