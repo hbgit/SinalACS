@@ -93,9 +93,15 @@ A tabela abaixo consolida o mapeamento exaustivo de dados persistidos pelo backe
 | | `action` | `text` | Metadado Legal | Enum textual (`GRANT`, `REVOKE`, etc.) | Ação exercida sobre o consentimento pelo titular. |
 | | `version` | `text` | Metadado Legal | String de versão semântica | Versão dos termos aceita no momento da ação (LGPD-RT04). |
 | | `timestamp` | `timestamp without time zone` | Metadado Legal | Timestamp de registro | Comprovação temporal imutável da manifestação de vontade. |
-| | `ipHash` | `text` | Pseudonimizado | Hash SHA-256 do IP | Se gerado para IPv4 sem salt ($2^{32}$ combinações), é reversível por força bruta imediata; requer salt rotativo. |
+| | `ipHash` | `text` | Pseudonimizado | Hash SHA-256 do IP | Se gerado para IPv4 sem salt ($2^{32}$ combinações), é reversível por força bruta imediata; requer salt rotativo. Linhas gravadas pelo painel "Meus Dados" (LGPD-RF05) usam o marcador `nao-aplicavel-painel-titular`. |
 | | `userAgent` | `text` | Metadado Técnico / Fingerprint | String de cabeçalho User-Agent | Auxilia na caracterização do dispositivo utilizado. |
 | | `signature` | `text` | Metadado Legal / Prova Criptográfica | Assinatura digital/hash | Garantia de não repúdio e integridade do consentimento (LGPD-RT05). |
+| **data_subject_requests** | `id` | `uuid` | Pseudonimizado | UUID v4 (`gen_random_uuid()`) | Identificador do pedido do titular (LGPD-RF08). |
+| | `userId` | `uuid` | Pseudonimizado | Chave estrangeira (`users.id`) | Titular que fez o pedido — sempre o do token, nunca parâmetro (INV-05). |
+| | `requestType` | `text` | Metadado de Conformidade | `deletion` \| `correction` | — |
+| | `detailsEncrypted` / `detailsKeyVersion` | `text` / `bigint` | Potencialmente Sensível (texto livre do titular) | AES-256-GCM na aplicação, mesma `HEALTH_DATA_ENCRYPTION_KEY` do §2.3 | O pedido de correção é texto livre e pode citar condição de saúde; cifrado pelo mesmo motivo de `visits.notes`. Num pedido de exclusão guarda o JSON `null` cifrado. Nunca copiado para `audit_logs`. |
+| | `status` | `text` | Metadado de Conformidade | `open` \| `completed` \| `rejected` | Só `open` tem escritor nesta versão — quem atende o pedido (backoffice) ainda não existe (ver `PROGRESS.md`). |
+| | `createdAt` / `dueAt` | `timestamp without time zone` | Metadado de Conformidade | `dueAt` = `createdAt` + 15 dias | Prazo de resposta do Art. 18 (spec/lgpd_design.md, linhas 596-597). |
 | **audit_logs** | `id` | `uuid` | Pseudonimizado | UUID v4 (`gen_random_uuid()`) | Identificador do registro de auditoria (LGPD-RF11). |
 | | `userId` | `uuid` | Pseudonimizado | Chave estrangeira (`users.id`) | Identifica o operador que executou a ação auditada. |
 | | `actionType` | `text` | Metadado Técnico | Enum textual (`READ`, `WRITE`, `DELETE`, etc.) | Operação registrada. |

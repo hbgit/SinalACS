@@ -1,0 +1,9 @@
+### Um pedido do próprio titular, para o painel "Meus Dados". `details` já
+### decifrado — é texto que o próprio titular escreveu (direito de acesso).
+class: PatientDataSubjectRequestRecord
+fields:
+  type: DataSubjectRequestType
+  status: DataSubjectRequestStatus
+  details: String?
+  createdAt: DateTime
+  dueAt: DateTime

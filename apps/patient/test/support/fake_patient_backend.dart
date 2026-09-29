@@ -49,6 +49,7 @@ class FakePatientBackend implements PatientBackend {
     chronicConditions: const [],
     consents: const [],
     riskHistory: const [],
+    requests: const [],
   );
   BackendFailure? myDataFailure;
   int myDataCallCount = 0;

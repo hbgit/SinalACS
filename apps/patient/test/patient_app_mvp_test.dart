@@ -11,6 +11,7 @@ import 'package:sinalacs_client/sinalacs_client.dart'
         AlertStatusResult,
         PatientConsentRecord,
         PatientDataOverview,
+        PatientDataSubjectRequestRecord,
         PatientRiskEvent,
         RiskLevel;
 import 'package:sinalacs_patient/app/app.dart';
@@ -834,6 +835,7 @@ void main() {
     PatientDataOverview overview({
       List<PatientConsentRecord> consents = const [],
       List<PatientRiskEvent> riskHistory = const [],
+      List<PatientDataSubjectRequestRecord> requests = const [],
     }) =>
         PatientDataOverview(
           name: 'Fulano de Tal',
@@ -843,6 +845,7 @@ void main() {
           chronicConditions: const ['hipertensão'],
           consents: consents,
           riskHistory: riskHistory,
+          requests: requests,
         );
 
     testWidgets('mostra o cadastro e as condições crônicas devolvidas pelo servidor', (tester) async {

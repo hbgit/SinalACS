@@ -1,4 +1,5 @@
 import 'package:serverpod/serverpod.dart';
+import 'package:sinalacs_server/src/application/patients/patient_data_overview_service.dart';
 import 'package:sinalacs_server/src/endpoints/authenticated_endpoint.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
 import 'package:sinalacs_server/src/runtime/alert_runtime.dart';
@@ -90,9 +91,19 @@ class PatientsEndpoint extends AuthenticatedEndpoint {
           for (final r in snapshot.riskHistory)
             PatientRiskEvent(source: r.source, riskLevel: r.riskLevel, recordedAt: r.recordedAt),
         ],
+        requests: [for (final r in snapshot.requests) _requestRecord(r)],
       );
     } on StateError catch (error) {
       throw AlertPermissionException(message: error.message);
     }
   }
+
+  static PatientDataSubjectRequestRecord _requestRecord(DataSubjectRequestSnapshot r) =>
+      PatientDataSubjectRequestRecord(
+        type: r.type,
+        status: r.status,
+        details: r.details,
+        createdAt: r.createdAt,
+        dueAt: r.dueAt,
+      );
 }
