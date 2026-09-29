@@ -1832,8 +1832,11 @@ class _MyDataScreenState extends State<MyDataScreen> {
 
   Future<void> _requestCorrection() async {
     if (_busy) return;
+    // Sem `barrierDismissible`: tocar fora fecharia o diálogo com `null` e
+    // apagaria o rascunho. Só "Cancelar" descarta de propósito.
     final details = await showDialog<String>(
       context: context,
+      barrierDismissible: false,
       builder: (_) => _CorrectionRequestDialog(initialText: _pendingCorrection),
     );
     if (details == null || !mounted) {

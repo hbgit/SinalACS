@@ -1224,6 +1224,41 @@ void main() {
       );
     });
 
+    testWidgets('tocar fora do diálogo de correção não descarta o rascunho', (tester) async {
+      final backend = FakePatientBackend()..myDataResult = overview();
+      await pumpMyData(tester, backend);
+
+      await tapByKey(tester, 'request_correction_button');
+      await tester.enterText(find.byKey(const Key('correction_details_field')), 'Meu contato mudou.');
+      await tester.pump();
+
+      await tester.tapAt(const Offset(4, 4)); // fora do diálogo
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('correction_details_field')), findsOneWidget);
+      expect(
+        tester.widget<TextField>(find.byKey(const Key('correction_details_field'))).controller!.text,
+        'Meu contato mudou.',
+      );
+    });
+
+    testWidgets('Cancelar descarta o rascunho: reabrir vem vazio', (tester) async {
+      final backend = FakePatientBackend()..myDataResult = overview();
+      await pumpMyData(tester, backend);
+
+      await tapByKey(tester, 'request_correction_button');
+      await tester.enterText(find.byKey(const Key('correction_details_field')), 'Meu contato mudou.');
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('correction_request_cancel')));
+      await tester.pumpAndSettle();
+
+      await tapByKey(tester, 'request_correction_button');
+      expect(
+        tester.widget<TextField>(find.byKey(const Key('correction_details_field'))).controller!.text,
+        isEmpty,
+      );
+    });
+
     testWidgets('os botões de pedido não criam nó de botão inerte', (tester) async {
       final handle = tester.ensureSemantics();
       final backend = FakePatientBackend()..myDataResult = overview();

@@ -309,6 +309,26 @@ void main() {
     expect(calls, 2, reason: 'depois de voltar, dá para ler de novo');
   });
 
+  testWidgets('o botão de ler QR volta a funcionar depois que o leitor lança', (tester) async {
+    var calls = 0;
+    await tester.pumpWidget(SinalAcsApp(
+      backend: FakePatientBackend(),
+      qrScanner: (_) async {
+        calls++;
+        if (calls == 1) throw StateError('câmera indisponível');
+        return null;
+      },
+    ));
+    await openOnboarding(tester);
+
+    await tapKey(tester, 'scan_qr_button');
+    expect(find.textContaining('Não foi possível usar a câmera'), findsOneWidget);
+    expect(tester.widget<OutlinedButton>(find.byKey(const Key('scan_qr_button'))).onPressed, isNotNull);
+
+    await tapKey(tester, 'scan_qr_button');
+    expect(calls, 2);
+  });
+
   testWidgets('o aviso do QR some quando a pessoa volta a digitar', (tester) async {
     await tester.pumpWidget(SinalAcsApp(
       backend: FakePatientBackend(),
