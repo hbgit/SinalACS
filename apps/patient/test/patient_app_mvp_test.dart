@@ -1,4 +1,5 @@
 
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -10,6 +11,8 @@ import 'package:sinalacs_client/sinalacs_client.dart'
         AlertStatus,
         AlertStatusResult,
         ConsentPurpose,
+        DataSubjectRequestStatus,
+        DataSubjectRequestType,
         PatientConsentRecord,
         PatientDataOverview,
         PatientDataSubjectRequestRecord,
@@ -1021,6 +1024,158 @@ void main() {
       handle.dispose();
     });
 
+    Future<void> tapByKey(WidgetTester tester, String key) async {
+      final finder = find.byKey(Key(key));
+      await tester.ensureVisible(finder);
+      await tester.pumpAndSettle();
+      await tester.tap(finder);
+      await tester.pumpAndSettle();
+    }
+
+    OutlinedButton outlined(WidgetTester tester, String key) =>
+        tester.widget<OutlinedButton>(find.byKey(Key(key)));
+
+    PatientDataSubjectRequestRecord openRequest(DataSubjectRequestType type, {String? details}) =>
+        PatientDataSubjectRequestRecord(
+          type: type,
+          status: DataSubjectRequestStatus.open,
+          details: details,
+          // Meio-dia UTC: `toLocal()` mantém o dia em qualquer fuso entre
+          // UTC-11 e UTC+11 — meia-noite viraria 15/09 no Brasil.
+          createdAt: DateTime.utc(2026, 9, 1, 12),
+          dueAt: DateTime.utc(2026, 9, 16, 12),
+        );
+
+    testWidgets('sem pedidos, mostra o estado vazio e os dois botões habilitados', (tester) async {
+      final backend = FakePatientBackend()..myDataResult = overview();
+      await pumpMyData(tester, backend);
+
+      expect(find.text('Nenhum pedido feito.'), findsOneWidget);
+      expect(outlined(tester, 'request_deletion_button').onPressed, isNotNull);
+      expect(outlined(tester, 'request_correction_button').onPressed, isNotNull);
+    });
+
+    testWidgets('pedir exclusão explica prazo e retenção, registra e mostra o pedido em análise', (tester) async {
+      final backend = FakePatientBackend()..myDataResult = overview();
+      await pumpMyData(tester, backend);
+
+      await tapByKey(tester, 'request_deletion_button');
+      // Escopado ao diálogo: o cartão de cadastro atrás dele também diz
+      // "Contato de emergência".
+      Finder inDialog(String text) =>
+          find.descendant(of: find.byType(AlertDialog), matching: find.textContaining(text));
+      expect(inDialog('15 dias'), findsOneWidget);
+      expect(inDialog('emergência'), findsOneWidget);
+      await tester.tap(find.byKey(const Key('deletion_request_confirm')));
+      await tester.pumpAndSettle();
+
+      expect(backend.requestDataDeletionCount, 1);
+      expect(find.textContaining('Exclusão dos dados · Em análise'), findsOneWidget);
+      expect(outlined(tester, 'request_deletion_button').onPressed, isNull);
+      expect(find.text('Exclusão já solicitada — em análise'), findsOneWidget);
+      expect(
+        tester.widget<Text>(find.byKey(const Key('my_data_confirmation'))).data,
+        startsWith('Pedido de exclusão registrado'),
+      );
+    });
+
+    testWidgets('cancelar o diálogo de exclusão não chama o servidor', (tester) async {
+      final backend = FakePatientBackend()..myDataResult = overview();
+      await pumpMyData(tester, backend);
+
+      await tapByKey(tester, 'request_deletion_button');
+      await tester.tap(find.byKey(const Key('deletion_request_cancel')));
+      await tester.pumpAndSettle();
+
+      expect(backend.requestDataDeletionCount, 0);
+    });
+
+    testWidgets('com o pedido em voo os botões ficam desabilitados — um pedido só', (tester) async {
+      final gate = Completer<void>();
+      final backend = FakePatientBackend()
+        ..myDataResult = overview()
+        ..dataRequestGate = gate;
+      await pumpMyData(tester, backend);
+
+      await tapByKey(tester, 'request_deletion_button');
+      await tester.tap(find.byKey(const Key('deletion_request_confirm')));
+      await tester.pumpAndSettle();
+
+      expect(outlined(tester, 'request_deletion_button').onPressed, isNull);
+      expect(outlined(tester, 'request_correction_button').onPressed, isNull);
+
+      gate.complete();
+      await tester.pumpAndSettle();
+      expect(backend.requestDataDeletionCount, 1);
+    });
+
+    testWidgets('pedido aberto vindo do servidor já desabilita o botão de exclusão', (tester) async {
+      final backend = FakePatientBackend()
+        ..myDataResult = overview(requests: [openRequest(DataSubjectRequestType.deletion)]);
+      await pumpMyData(tester, backend);
+
+      expect(outlined(tester, 'request_deletion_button').onPressed, isNull);
+      expect(find.textContaining('resposta até 16/09/2026'), findsOneWidget);
+    });
+
+    testWidgets('correção: só envia com texto de verdade, e sem os espaços das pontas', (tester) async {
+      final backend = FakePatientBackend()..myDataResult = overview();
+      await pumpMyData(tester, backend);
+
+      await tapByKey(tester, 'request_correction_button');
+      FilledButton submit() =>
+          tester.widget<FilledButton>(find.byKey(const Key('correction_request_submit')));
+      expect(submit().onPressed, isNull);
+
+      await tester.enterText(find.byKey(const Key('correction_details_field')), '   ');
+      await tester.pump();
+      expect(submit().onPressed, isNull);
+
+      await tester.enterText(find.byKey(const Key('correction_details_field')), '  Meu contato mudou.  ');
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('correction_request_submit')));
+      await tester.pumpAndSettle();
+
+      expect(backend.correctionRequests, ['Meu contato mudou.']);
+      expect(find.textContaining('Correção de dados · Em análise'), findsOneWidget);
+      expect(find.textContaining('"Meu contato mudou."'), findsOneWidget);
+    });
+
+    testWidgets('com uma correção aberta, pedir outra continua possível', (tester) async {
+      final backend = FakePatientBackend()
+        ..myDataResult = overview(
+          requests: [openRequest(DataSubjectRequestType.correction, details: 'Contato errado.')],
+        );
+      await pumpMyData(tester, backend);
+
+      expect(outlined(tester, 'request_correction_button').onPressed, isNotNull);
+    });
+
+    testWidgets('falha ao pedir exclusão mostra o erro e reabilita o botão', (tester) async {
+      final backend = FakePatientBackend()
+        ..myDataResult = overview()
+        ..dataRequestFailure = const BackendFailure('Sem conexão com o servidor.');
+      await pumpMyData(tester, backend);
+
+      await tapByKey(tester, 'request_deletion_button');
+      await tester.tap(find.byKey(const Key('deletion_request_confirm')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Sem conexão com o servidor.'), findsOneWidget);
+      expect(outlined(tester, 'request_deletion_button').onPressed, isNotNull);
+    });
+
+    testWidgets('os botões de pedido não criam nó de botão inerte', (tester) async {
+      final handle = tester.ensureSemantics();
+      final backend = FakePatientBackend()..myDataResult = overview();
+      await pumpMyData(tester, backend);
+      await tester.ensureVisible(find.byKey(const Key('request_correction_button')));
+      await tester.pumpAndSettle();
+
+      expectNenhumBotaoInerte(tester);
+      handle.dispose();
+    });
+
     testWidgets('mostra o cadastro e as condições crônicas devolvidas pelo servidor', (tester) async {
       final backend = FakePatientBackend()..myDataResult = overview();
       await tester.pumpWidget(SinalAcsApp(backend: backend));
@@ -1102,6 +1257,7 @@ void main() {
               timestamp: DateTime.utc(2026, 1, 1),
             ),
           ],
+          requests: [openRequest(DataSubjectRequestType.deletion)],
         );
       await tester.pumpWidget(SinalAcsApp(backend: backend));
       await login(tester);
@@ -1125,6 +1281,12 @@ void main() {
         'decisao': 'granted',
         'versao': '2026.1',
         'data': DateTime.utc(2026, 1, 1).toIso8601String(),
+      });
+      expect((decoded['pedidos'] as List).single, {
+        'tipo': 'deletion',
+        'situacao': 'open',
+        'data': DateTime.utc(2026, 9, 1, 12).toIso8601String(),
+        'prazo': DateTime.utc(2026, 9, 16, 12).toIso8601String(),
       });
 
       expect(find.byKey(const Key('my_data_confirmation')), findsOneWidget);

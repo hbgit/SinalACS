@@ -6,7 +6,15 @@ import 'package:flutter/services.dart'
     show Clipboard, ClipboardData, TextEditingValue, TextInputFormatter, TextSelection;
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:sinalacs_client/sinalacs_client.dart'
-    show AlertStatus, AlertStatusResult, ConsentPurpose, PatientDataOverview, RiskLevel;
+    show
+        AlertStatus,
+        AlertStatusResult,
+        ConsentPurpose,
+        DataSubjectRequestStatus,
+        DataSubjectRequestType,
+        PatientDataOverview,
+        PatientDataSubjectRequestRecord,
+        RiskLevel;
 import 'package:sinalacs_patient/app/patient_theme.dart';
 import 'package:sinalacs_patient/core/consent/consent_decisions.dart';
 import 'package:sinalacs_patient/core/consent/consent_preferences.dart';
@@ -1612,6 +1620,86 @@ class _MyDataScreenState extends State<MyDataScreen> {
     }
   }
 
+  /// Envia um pedido e recarrega. Mesmo formato de [_changeConsent]: `_busy`
+  /// desabilita os controles enquanto a chamada está em voo, e é isso que
+  /// impede o segundo toque de virar segundo pedido.
+  Future<void> _submitRequest(
+    Future<PatientDataSubjectRequestRecord> Function(PatientBackend backend) call,
+    String done,
+  ) async {
+    final backend = BackendScope.of(context);
+    setState(() {
+      _busy = true;
+      _error = null;
+      _confirmation = null;
+    });
+    try {
+      final record = await call(backend);
+      if (!mounted) return;
+      setState(() => _confirmation = '$done. Resposta até ${_formatDate(record.dueAt.toLocal())}.');
+      await _load();
+    } on BackendFailure catch (failure) {
+      if (!mounted) return;
+      setState(() => _error = failure.message);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _requestDeletion() async {
+    if (_busy) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Solicitar exclusão dos seus dados?'),
+        content: const Text(
+          'A equipe da UBS analisa o pedido em até 15 dias e a resposta aparece aqui. '
+          'Registros de saúde (alertas, triagens e visitas) podem ser mantidos pelo prazo '
+          'legal de 5 anos e anonimizados depois, em vez de apagados. Enquanto o pedido '
+          'estiver em análise, o app continua funcionando — inclusive o botão de emergência.',
+        ),
+        actions: [
+          TextButton(
+            key: const Key('deletion_request_cancel'),
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            key: const Key('deletion_request_confirm'),
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Solicitar exclusão'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    await _submitRequest((backend) => backend.requestDataDeletion(), 'Pedido de exclusão registrado');
+  }
+
+  Future<void> _requestCorrection() async {
+    if (_busy) return;
+    final details = await showDialog<String>(
+      context: context,
+      builder: (_) => const _CorrectionRequestDialog(),
+    );
+    if (details == null || !mounted) return;
+    await _submitRequest(
+      (backend) => backend.requestDataCorrection(details),
+      'Pedido de correção registrado',
+    );
+  }
+
+  String _requestTypeLabel(DataSubjectRequestType type) => switch (type) {
+        DataSubjectRequestType.deletion => 'Exclusão dos dados',
+        DataSubjectRequestType.correction => 'Correção de dados',
+      };
+
+  String _requestStatusLabel(DataSubjectRequestStatus status) => switch (status) {
+        DataSubjectRequestStatus.open => 'Em análise',
+        DataSubjectRequestStatus.completed => 'Atendido',
+        DataSubjectRequestStatus.rejected => 'Recusado',
+      };
+
   /// dd/mm/aaaa. Não converte fuso: quem passa um instante (consentimento,
   /// pedido) chama `.toLocal()` antes; a data de nascimento é meia-noite UTC e
   /// passa como está, senão cairia no dia anterior no Brasil.
@@ -1652,6 +1740,16 @@ class _MyDataScreenState extends State<MyDataScreen> {
               'data': event.recordedAt.toIso8601String(),
             },
         ],
+        'pedidos': [
+          for (final request in data.requests)
+            {
+              'tipo': request.type.name,
+              'situacao': request.status.name,
+              if (request.details != null) 'detalhes': request.details,
+              'data': request.createdAt.toIso8601String(),
+              'prazo': request.dueAt.toIso8601String(),
+            },
+        ],
       };
 
   Future<void> _export() async {
@@ -1681,6 +1779,10 @@ class _MyDataScreenState extends State<MyDataScreen> {
     final decisions = data == null
         ? const <ConsentPurpose, bool>{}
         : currentConsentDecisions(data.consents);
+    final openDeletion = data?.requests.any((r) =>
+            r.type == DataSubjectRequestType.deletion &&
+            r.status == DataSubjectRequestStatus.open) ??
+        false;
     return ListView(
       padding: const EdgeInsets.all(20),
       children: [
@@ -1688,7 +1790,8 @@ class _MyDataScreenState extends State<MyDataScreen> {
         const SizedBox(height: 8),
         const Text(
           'Confirmação de que seus dados pessoais estão sendo tratados pelo '
-          'SinalACS, o que está cadastrado, e uma cópia para guardar.',
+          'SinalACS, o que está cadastrado, suas escolhas de consentimento, '
+          'pedidos de correção ou exclusão, e uma cópia para guardar.',
         ),
         const SizedBox(height: 16),
         if (_error != null)
@@ -1788,6 +1891,40 @@ class _MyDataScreenState extends State<MyDataScreen> {
               ),
             ),
           const SizedBox(height: 16),
+          const Text('Pedidos sobre seus dados', style: TextStyle(fontWeight: FontWeight.bold)),
+          if (data.requests.isEmpty)
+            const Padding(
+              padding: EdgeInsets.only(top: 8),
+              child: Text('Nenhum pedido feito.', style: TextStyle(color: Colors.white54)),
+            )
+          else
+            ...data.requests.map(
+              (request) => ListTile(
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                title: Text('${_requestTypeLabel(request.type)} · ${_requestStatusLabel(request.status)}'),
+                subtitle: Text([
+                  'Pedido em ${_formatDate(request.createdAt.toLocal())} · '
+                      'resposta até ${_formatDate(request.dueAt.toLocal())}',
+                  if (request.details != null) '"${request.details}"',
+                ].join('\n')),
+              ),
+            ),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            key: const Key('request_deletion_button'),
+            onPressed: _busy || openDeletion ? null : _requestDeletion,
+            icon: const Icon(Icons.delete_outline),
+            label: Text(openDeletion ? 'Exclusão já solicitada — em análise' : 'Solicitar exclusão dos dados'),
+          ),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            key: const Key('request_correction_button'),
+            onPressed: _busy ? null : _requestCorrection,
+            icon: const Icon(Icons.edit_note_outlined),
+            label: const Text('Solicitar correção'),
+          ),
+          const SizedBox(height: 16),
           FilledButton.icon(
             key: const Key('export_my_data_button'),
             onPressed: _export,
@@ -1795,6 +1932,59 @@ class _MyDataScreenState extends State<MyDataScreen> {
             label: const Text('Copiar meus dados (JSON)'),
           ),
         ],
+      ],
+    );
+  }
+}
+
+/// Pede o texto de uma correção (LGPD-RF08). Devolve o texto já sem espaços
+/// nas pontas, ou `null` se a pessoa cancelar. O limite de 500 é o mesmo que o
+/// servidor impõe (`correctionDetailsMaxLength`); o servidor revalida, porque
+/// o app não é a única origem possível da chamada.
+class _CorrectionRequestDialog extends StatefulWidget {
+  const _CorrectionRequestDialog();
+
+  @override
+  State<_CorrectionRequestDialog> createState() => _CorrectionRequestDialogState();
+}
+
+class _CorrectionRequestDialogState extends State<_CorrectionRequestDialog> {
+  final _controller = TextEditingController();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final details = _controller.text.trim();
+    return AlertDialog(
+      title: const Text('Solicitar correção'),
+      content: TextField(
+        key: const Key('correction_details_field'),
+        controller: _controller,
+        maxLength: 500,
+        maxLines: 4,
+        onChanged: (_) => setState(() {}),
+        decoration: const InputDecoration(
+          labelText: 'O que precisa ser corrigido?',
+          helperText: 'Condições crônicas você mesmo atualiza em "Perfil clínico".',
+          helperMaxLines: 2,
+        ),
+      ),
+      actions: [
+        TextButton(
+          key: const Key('correction_request_cancel'),
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancelar'),
+        ),
+        FilledButton(
+          key: const Key('correction_request_submit'),
+          onPressed: details.isEmpty ? null : () => Navigator.pop(context, details),
+          child: const Text('Enviar pedido'),
+        ),
       ],
     );
   }
