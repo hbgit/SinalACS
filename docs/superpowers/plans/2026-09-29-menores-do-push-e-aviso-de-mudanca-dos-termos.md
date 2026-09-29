@@ -8,15 +8,17 @@
 
 **Tech Stack:** Serverpod 3.4.13 (`serverpod generate` + `create-migration`), Postgres com `pg_advisory_xact_lock`, Flutter 3.44, `flutter_test`.
 
+**Revisão de 2026-09-29 (depois do RF14 com Gorush):** este plano foi escrito antes do envio de avisos e revisado contra o código de `aa4f3ae`. O que mudou desde então e já vale aqui: o RF14 usa Gorush (`notices.sendSegmented`, `GorushClient`, `NoticeService`); `push_token_endpoint_test.dart` ganhou um grupo de corrida com `_seedRaceLean` (ids `9200…`, sem `Patient` nem `Acs`) e os outros arquivos filtram contagens por `userId`; o baseline do `dart analyze` do backend é 50 infos; `NoticeService` audita `community_notice`. Nada aqui toca o envio, o Gorush nem o ACS.
+
 **Spec:** `docs/superpowers/specs/2026-09-16-decisoes-produto-pos-validacao.md` §2 e §3.2; `spec/lgpd_design.md` (LGPD-RF18: "aviso de mudança com 15 dias de antecedência e novo aceite quando a versão mudar").
 
 ## Global Constraints
 
 - Regenerar com `export PATH=$PATH:~/.pub-cache/bin; cd backend/sinalacs_server && serverpod generate && serverpod create-migration`. Testes de integração: `docker compose --profile test up -d postgres-test`.
-- `flutter analyze` limpo nos dois apps, infos incluídas. `dart analyze` do backend no baseline de 44 infos (avisos: zero).
+- `flutter analyze` limpo nos dois apps, infos incluídas. `dart analyze` do backend no baseline de 50 infos (avisos: zero).
 - Alerta vermelho nunca é descartado nem atrasado: aviso de termos e registro de push nunca bloqueiam login, home nem o botão de urgência; falha ou lentidão vira "sem aviso".
 - `userId` vem sempre de `user.id` (INV-05). Textos de UI e comentários em português. Nenhum dado real em testes.
-- Testes de integração sem rollback usam ids próprios (`9300…`) e `enrollmentId` próprio, e limpam à mão; o seed de `ACS-001` derruba outros arquivos em paralelo.
+- Testes de integração sem rollback usam ids próprios (o grupo de corrida do push já usa `9200…`; o que este plano acrescentar usa `9300…`) e `enrollmentId` próprio, e limpam à mão; o seed de `ACS-001` derruba outros arquivos em paralelo.
 - `legalDocumentsVersion` (app) continua igual a `consentPolicyVersion` (backend); esta rodada não troca a versão.
 
 ## Review Focus
@@ -92,7 +94,7 @@ test('recusa por falta de consentimento não é auditada e lança', () async {
 });
 ```
 
-(O `_FakePushTokenStore` decide `ownerChanged` quando a linha já existe com outro `userId`. `PushTokenService` passa a receber `AuditTrail audit`, e o `setUp` usa o `FakeAuditTrail` de `data_subject_rights_service_test.dart`, copiado para o arquivo ou movido para `test/support/fake_audit_trail.dart`.)
+(O `_FakePushTokenStore` decide `ownerChanged` quando a linha já existe com outro `userId`. `PushTokenService` passa a receber `AuditTrail audit`, e o `setUp` usa um `_FakeAudit` local (subclasse de `AuditTrail` que só acumula `events`), o mesmo que `notice_service_test.dart` já faz; não há `test/support/fake_audit_trail.dart`.)
 
 Run: `cd backend/sinalacs_server && dart test test/unit/data_subject_rights_service_test.dart test/unit/push_token_service_test.dart`
 Expected: FAIL — `recordConsentRevokingPush`, `PushRegistration` e o parâmetro `audit` não existem.
@@ -149,13 +151,13 @@ Expected: PASS.
 
 - [ ] **Step 4: Testes de integração vermelhos**
 
-Em `push_token_endpoint_test.dart`, grupo de corrida (ids `9200`, mesmo `cleanup`), três testes novos:
+Em `push_token_endpoint_test.dart`, no grupo de corrida existente (ids `9200…`, semente `_seedRaceLean`, o `cleanup` já apaga `PushToken` e `ConsentLog` do titular), três testes novos. Esse grupo COMMITA: mantenha as sementes enxutas (sem `Patient`), porque outros arquivos contam tabelas inteiras e já ficaram intermitentes por causa disso:
 
 ```dart
 test('revogação atômica: falha ao apagar tokens não deixa denied gravado', () async {
-  // seed + consentimento granted + token registrado (via store)
-  // chama recordConsentRevokingPush com um entry inválido de propósito
-  // (userId inexistente => violação de FK do consent_logs) e espera o erro
+  // _seedRaceLean + consentimento granted + token registrado (via store)
+  // constrói OrmDataSubjectRightsStore(..., debugFailAfterTokenDelete: true)
+  // chama recordConsentRevokingPush(entry 'denied') e espera o erro
   // depois: o último consent do titular continua 'granted' e o token continua lá
 });
 
@@ -170,7 +172,7 @@ test('troca de dono devolve ownerChanged', () async {
 });
 ```
 
-Para o primeiro, prove a atomicidade com uma falha real do banco: `entry.userId` que não existe em `users` faz o `insertRow` violar a FK; o `deleteWhere` do mesmo bloco não pode ter efeito (`count` do token do titular real continua 1, e nenhuma linha `denied` existe para ele). Como o titular do `entry` é inexistente, mande o `entry` com o `userId` de um segundo usuário semeado e faça a falha vir de `purpose` fora do enum? Não: use a FK. O que importa é que a transação inteira reverta.
+Para o primeiro, uma falha "natural" do banco não dá: o `userId` que apaga os tokens é o mesmo que o `INSERT` do consentimento exige por FK, então não existe entrada que faça só o segundo passo falhar. Por isso `OrmDataSubjectRightsStore` ganha o parâmetro nomeado opcional `@visibleForTesting bool debugFailAfterTokenDelete = false`: com ele ligado, `recordConsentRevokingPush` lança `StateError` **depois** do `deleteWhere` e **antes** do `insertRow`, na mesma transação. A ordem dentro da transação passa a ser: trava por titular → apagar tokens → gravar o consentimento. O teste prova o que importa: a transação inteira reverteu (o token continua no banco e nenhum `denied` existe).
 
 Run: `dart test test/integration/push_token_endpoint_test.dart`
 Expected: FAIL — `recordConsentRevokingPush` não existe.
@@ -187,20 +189,25 @@ Expected: FAIL — `recordConsentRevokingPush` não existe.
     return session.db.transaction((transaction) async {
       await lockPerSubject(session, transaction,
           namespace: lockNamespacePushToken, key: entry.userId);
-      final row = await ConsentLog.db.insertRow(
-        session,
-        signedConsentLog(entry, signature: _signature, origin: 'painel-titular'),
-        transaction: transaction,
-      );
       await PushToken.db.deleteWhere(
         session,
         where: (t) => t.userId.equals(userUuid),
+        transaction: transaction,
+      );
+      if (_debugFailAfterTokenDelete) {
+        throw StateError('falha injetada depois de apagar os tokens (só em teste)');
+      }
+      final row = await ConsentLog.db.insertRow(
+        session,
+        signedConsentLog(entry, signature: _signature, origin: 'painel-titular'),
         transaction: transaction,
       );
       return row.id!.uuid;
     });
   }
 ```
+
+`orm_data_subject_rights_store.dart` ganha o parâmetro nomeado opcional `@visibleForTesting bool debugFailAfterTokenDelete = false` no construtor (campo `_debugFailAfterTokenDelete`), usado só pelo teste de atomicidade; `AlertRuntime` nunca o passa.
 
 `orm_push_token_store.dart`: `registerIfConsented` devolve `PushRegistration`. Sem consentimento: apaga o token de outro titular e devolve `refused`. Existente com outro dono: atualiza e devolve `ownerChanged`. Existente do mesmo dono: atualiza e devolve `registered`. Novo: insere; depois, ainda na transação, lê os tokens do titular ordenados por `updatedAt` descendente e apaga os que passam de `maxPushTokensPerUser`:
 
@@ -222,7 +229,7 @@ O teto roda nos dois caminhos que gravam (insere e atualiza), para que trocar de
 - [ ] **Step 6: Suíte e commit**
 
 Run: `cd backend/sinalacs_server && dart test && dart analyze`
-Expected: tudo verde, estável em 5 execuções seguidas de `dart test`; analyze em 44 infos, zero avisos.
+Expected: tudo verde, estável em 5 execuções seguidas de `dart test`; analyze em 50 infos, zero avisos.
 
 ```bash
 git add backend/sinalacs_server
@@ -467,7 +474,7 @@ Expected: PASS. Se `endpoint_auth_posture_test.dart` ou o teste de cobertura de 
 - [ ] **Step 4: Suíte e commit**
 
 Run: `cd backend/sinalacs_server && dart test && dart analyze`
-Expected: verde e estável em 5 execuções; 44 infos.
+Expected: verde e estável em 5 execuções; 50 infos.
 
 ```bash
 git add backend/sinalacs_server apps/patient/lib
@@ -622,7 +629,7 @@ git commit -m "feat(paciente): cartão de aviso de mudança dos termos e push se
 - [ ] **Step 2: Verificação completa**
 
 Run: `cd backend/sinalacs_server && dart test && dart analyze; cd ../../apps/patient && flutter test && flutter analyze; cd ../acs && flutter test && flutter analyze; cd ../.. && ./scripts/qa/ci_invariants.sh; graphify update .`
-Expected: backend verde (repetir `dart test` 5 vezes, sem falhas intermitentes), analyze do backend em 44 infos e zero avisos, paciente e ACS verdes, `ci_invariants` ok.
+Expected: backend verde (repetir `dart test` 5 vezes, sem falhas intermitentes), analyze do backend em 50 infos e zero avisos, paciente e ACS verdes, `ci_invariants` ok.
 
 - [ ] **Step 3: Commit**
 
