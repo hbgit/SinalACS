@@ -19,6 +19,7 @@ patients:
   - myData:
   - updateConsent:
   - acceptTermsOfUse:
+  - hasAcceptedCurrentTerms:
   - requestDataDeletion:
   - requestDataCorrection:
 triage:

@@ -374,6 +374,18 @@ class EndpointPatients extends EndpointAuthenticated {
     {'accessToken': accessToken},
   );
 
+  /// Se o paciente já aceitou o Termo de Uso e a Política de Privacidade da
+  /// versão vigente (LGPD-RF18). O app consulta depois do login por OTP para
+  /// decidir se mostra o convite ao aceite — um `bool`, sem ler o painel
+  /// "Meus Dados". Não grava auditoria: devolve ao próprio titular um fato
+  /// sobre o consentimento dele.
+  _i2.Future<bool> hasAcceptedCurrentTerms({required String accessToken}) =>
+      caller.callServerEndpoint<bool>(
+        'patients',
+        'hasAcceptedCurrentTerms',
+        {'accessToken': accessToken},
+      );
+
   /// Pedido de exclusão/anonimização dos próprios dados (LGPD-RF08).
   /// Idempotente enquanto houver um pedido de exclusão em aberto.
   _i2.Future<_i14.PatientDataSubjectRequestRecord> requestDataDeletion({

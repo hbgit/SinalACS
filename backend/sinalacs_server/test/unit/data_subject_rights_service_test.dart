@@ -31,21 +31,49 @@ class FakeDataSubjectRightsStore implements DataSubjectRightsStore {
   var _nextId = 1;
 
   @override
-  Future<void> recordConsent(ConsentLogEntry entry) async => consents.add(entry);
+  Future<String> recordConsent(ConsentLogEntry entry) async {
+    consents.add(entry);
+    return 'consentimento-${consents.length}';
+  }
 
   @override
-  Future<DataSubjectRequestSnapshot?> findOpenRequest(
-    String userId,
-    DataSubjectRequestType type,
-  ) async {
+  Future<ConsentRecordSnapshot?> latestConsent(String userId, ConsentPurpose purpose) async {
+    ConsentLogEntry? latest;
+    for (final e in consents) {
+      if (e.userId != userId || e.purpose != purpose) continue;
+      if (latest == null || e.timestamp.isAfter(latest.timestamp)) latest = e;
+    }
+    return latest == null
+        ? null
+        : ConsentRecordSnapshot(
+            purpose: latest.purpose.name,
+            action: latest.action,
+            version: latest.version,
+            timestamp: latest.timestamp,
+          );
+  }
+
+  @override
+  Future<({DataSubjectRequestSnapshot request, bool created})> createDeletionRequestIfNoneOpen({
+    required String userId,
+    required DateTime createdAt,
+    required DateTime dueAt,
+  }) async {
     for (final r in requests.reversed) {
       if (r.userId == userId &&
-          r.snapshot.type == type &&
+          r.snapshot.type == DataSubjectRequestType.deletion &&
           r.snapshot.status == DataSubjectRequestStatus.open) {
-        return r.snapshot;
+        return (request: r.snapshot, created: false);
       }
     }
-    return null;
+    final created = await createRequest(
+      userId: userId,
+      type: DataSubjectRequestType.deletion,
+      details: null,
+      createdAt: createdAt,
+      dueAt: dueAt,
+    );
+    return (request: created, created: true);
   }
 
   @override
@@ -113,9 +141,84 @@ void main() {
       expect(store.consents, isEmpty);
       expect(audit.events, isEmpty);
     });
+
+    test('aceitar de novo com o aceite vigente não grava nada', () async {
+      await service.acceptTermsOfUse(_patient);
+      final again = await service.acceptTermsOfUse(_patient);
+
+      expect(store.consents, hasLength(1));
+      expect(audit.events, hasLength(1));
+      expect(again.action, 'granted');
+      expect(again.version, consentPolicyVersion);
+    });
+
+    test('aceite de versão anterior não conta: grava de novo', () async {
+      store.consents.add(ConsentLogEntry(
+        userId: _patientId,
+        purpose: ConsentPurpose.termsOfUse,
+        action: 'granted',
+        version: '2025.9',
+        timestamp: _now.subtract(const Duration(days: 30)),
+      ));
+
+      await service.acceptTermsOfUse(_patient);
+
+      expect(store.consents, hasLength(2));
+      expect(store.consents.last.version, consentPolicyVersion);
+    });
+  });
+
+  group('hasAcceptedCurrentTerms (LGPD-RF18)', () {
+    ConsentLogEntry linha(String action, String version, int minutos,
+            {ConsentPurpose purpose = ConsentPurpose.termsOfUse}) =>
+        ConsentLogEntry(
+          userId: _patientId,
+          purpose: purpose,
+          action: action,
+          version: version,
+          timestamp: _now.add(Duration(minutes: minutos)),
+        );
+
+    test('sem nenhuma linha de termsOfUse, não aceitou', () async {
+      expect(await service.hasAcceptedCurrentTerms(_patient), isFalse);
+      store.consents.add(linha('granted', consentPolicyVersion, 0, purpose: ConsentPurpose.localReminders));
+      expect(await service.hasAcceptedCurrentTerms(_patient), isFalse);
+    });
+
+    test('aceite da versão vigente conta', () async {
+      store.consents.add(linha('granted', consentPolicyVersion, 0));
+      expect(await service.hasAcceptedCurrentTerms(_patient), isTrue);
+    });
+
+    test('aceite de versão anterior não conta', () async {
+      store.consents.add(linha('granted', '2025.9', 0));
+      expect(await service.hasAcceptedCurrentTerms(_patient), isFalse);
+    });
+
+    test('vale a linha mais recente, seja qual for a ordem em que foram gravadas', () async {
+      store.consents.add(linha('granted', consentPolicyVersion, 5));
+      store.consents.add(linha('granted', '2025.9', 0));
+      expect(await service.hasAcceptedCurrentTerms(_patient), isTrue);
+    });
+
+    test('linha mais recente que não é "granted" não conta', () async {
+      store.consents.add(linha('granted', consentPolicyVersion, 0));
+      store.consents.add(linha('denied', consentPolicyVersion, 5));
+      expect(await service.hasAcceptedCurrentTerms(_patient), isFalse);
+    });
+
+    test('só paciente consulta: ACS é recusado', () async {
+      await expectLater(service.hasAcceptedCurrentTerms(_acs), throwsA(isA<StateError>()));
+    });
   });
 
   group('updateConsent (LGPD-RF05)', () {
+    test('a linha de auditoria aponta para a linha de consentimento gravada', () async {
+      await service.updateConsent(_patient, purpose: ConsentPurpose.localReminders, granted: false);
+
+      expect(audit.events.single.resourceId, 'consentimento-1');
+    });
+
     test('revogar grava uma linha nova "denied", com a versão vigente e o relógio do servidor', () async {
       final record = await service.updateConsent(
         _patient,
@@ -214,7 +317,10 @@ void main() {
 
       expect(second.id, first.id);
       expect(store.requests, hasLength(1));
-      expect(audit.events, hasLength(1));
+      // A repetição também é auditada, com o resultado `repeated`.
+      expect(audit.events, hasLength(2));
+      expect(audit.events.last.resourceId, first.id);
+      expect(audit.events.last.result, 'repeated');
     });
 
     test('o pedido novo vai para audit_logs com o id do pedido', () async {

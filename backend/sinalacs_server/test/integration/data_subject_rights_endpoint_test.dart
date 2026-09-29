@@ -2,7 +2,10 @@ import 'package:serverpod/serverpod.dart';
 import 'package:sinalacs_server/src/application/onboarding/consent_signature.dart';
 import 'package:sinalacs_server/src/application/onboarding/onboarding_service.dart' show consentPolicyVersion;
 import 'package:sinalacs_server/src/config/app_config.dart';
+import 'package:sinalacs_server/src/application/patients/patient_data_overview_service.dart'
+    show DataSubjectRequestSnapshot;
 import 'package:sinalacs_server/src/generated/protocol.dart';
+import 'package:sinalacs_server/src/infrastructure/database/orm_data_subject_rights_store.dart';
 import 'package:sinalacs_server/src/runtime/alert_runtime.dart';
 import 'package:test/test.dart';
 
@@ -97,6 +100,81 @@ Future<void> _seed(Session session) async {
   );
 }
 
+// Grupo de corrida (sem rollback): ids próprios, distintos dos `8000` do grupo
+// principal e dos fixos de `auth.developmentLogin`, para poder ser limpo à mão.
+const _raceUbsId = '00000000-0000-4000-9100-000000000001';
+const _raceMicroAreaId = '00000000-0000-4000-9100-000000000002';
+const _racePatientId = '00000000-0000-4000-9100-000000000003';
+
+Future<void> _seedRace(Session session) async {
+  await Ubs.db.insertRow(
+    session,
+    Ubs(
+      id: UuidValue.fromString(_raceUbsId),
+      name: 'UBS Desenvolvimento (corrida exclusão)',
+      address: 'Endereço local',
+      city: 'São Paulo',
+      state: 'SP',
+    ),
+  );
+  await MicroArea.db.insertRow(
+    session,
+    MicroArea(
+      id: UuidValue.fromString(_raceMicroAreaId),
+      name: 'Microárea de corrida',
+      ubsId: UuidValue.fromString(_raceUbsId),
+      geoJsonBoundary: '{}',
+    ),
+  );
+  final now = DateTime.now().toUtc();
+  await User.db.insertRow(
+    session,
+    User(
+      id: UuidValue.fromString(_racePatientId),
+      cpfHash: 'development-patient-corrida-exclusao',
+      name: 'Paciente de corrida',
+      birthDate: DateTime.utc(1975, 3, 10),
+      role: UserRole.patient,
+      microAreaId: UuidValue.fromString(_raceMicroAreaId),
+      createdAt: now,
+      updatedAt: now,
+    ),
+  );
+  await Patient.db.insertRow(
+    session,
+    await encryptedPatient(
+      id: _racePatientId,
+      emergencyContact: 'Contato de desenvolvimento',
+      isChronic: false,
+    ),
+  );
+}
+
+/// Desfaz à mão o que [_seedRace] e o teste gravam: esse grupo roda com
+/// `RollbackDatabase.disabled`. Filhos antes dos pais.
+Future<void> _cleanupRace(Session session) async {
+  await DataSubjectRequest.db.deleteWhere(
+    session,
+    where: (t) => t.userId.equals(UuidValue.fromString(_racePatientId)),
+  );
+  await Patient.db.deleteWhere(
+    session,
+    where: (t) => t.id.equals(UuidValue.fromString(_racePatientId)),
+  );
+  await User.db.deleteWhere(
+    session,
+    where: (t) => t.id.equals(UuidValue.fromString(_racePatientId)),
+  );
+  await MicroArea.db.deleteWhere(
+    session,
+    where: (t) => t.id.equals(UuidValue.fromString(_raceMicroAreaId)),
+  );
+  await Ubs.db.deleteWhere(
+    session,
+    where: (t) => t.id.equals(UuidValue.fromString(_raceUbsId)),
+  );
+}
+
 void main() {
   withServerpod('Dados os direitos do titular exercidos pelo app', (sessionBuilder, endpoints) {
     setUp(() => AlertRuntime.instance.overrideConfig(_config()));
@@ -184,6 +262,39 @@ void main() {
         throwsA(isA<AlertPermissionException>()),
       );
       expect(await ConsentLog.db.count(session), 0);
+    });
+
+    test('hasAcceptedCurrentTerms: falso antes, verdadeiro depois de aceitar', () async {
+      final session = sessionBuilder.build();
+      await _seed(session);
+      final token = await patientToken();
+
+      expect(await endpoints.patients.hasAcceptedCurrentTerms(sessionBuilder, accessToken: token), isFalse);
+      await endpoints.patients.acceptTermsOfUse(sessionBuilder, accessToken: token);
+      expect(await endpoints.patients.hasAcceptedCurrentTerms(sessionBuilder, accessToken: token), isTrue);
+    });
+
+    test('hasAcceptedCurrentTerms recusa token de ACS', () async {
+      final session = sessionBuilder.build();
+      await _seed(session);
+      final acsToken =
+          (await endpoints.auth.developmentLogin(sessionBuilder, role: 'acs')).accessToken;
+
+      await expectLater(
+        endpoints.patients.hasAcceptedCurrentTerms(sessionBuilder, accessToken: acsToken),
+        throwsA(isA<AlertPermissionException>()),
+      );
+    });
+
+    test('acceptTermsOfUse duas vezes grava uma linha só', () async {
+      final session = sessionBuilder.build();
+      await _seed(session);
+      final token = await patientToken();
+
+      await endpoints.patients.acceptTermsOfUse(sessionBuilder, accessToken: token);
+      await endpoints.patients.acceptTermsOfUse(sessionBuilder, accessToken: token);
+
+      expect(await ConsentLog.db.count(session), 1);
     });
 
     test('updateConsent recusa a finalidade obrigatória sem gravar nada', () async {
@@ -291,4 +402,64 @@ void main() {
       expect(requestRows.single.userId, UuidValue.fromString(_patientId));
     });
   });
+
+  // Grupo separado, com rollback desligado: com o rollback ligado, todas as
+  // chamadas dividem a MESMA transação externa do harness e chamadas
+  // concorrentes que abrem a própria transação são recusadas. Só assim cada
+  // chamada abre uma transação real do Postgres, que é o que a corrida exige.
+  withServerpod(
+    'Dado o pedido de exclusão, sem rollback automático (corrida)',
+    (sessionBuilder, endpoints) {
+      setUp(() => AlertRuntime.instance.overrideConfig(_config()));
+      tearDown(() => AlertRuntime.instance.overrideConfig(null));
+
+      test('três pedidos de exclusão simultâneos deixam um só pedido aberto', () async {
+        final session = sessionBuilder.build();
+        await _seedRace(session);
+        try {
+          // Direto no store ORM, com uma `Session` por chamada (como cada
+          // requisição monta a sua): passar pelo endpoint gravaria linhas de
+          // `audit_logs`, que têm FK para `users` e cadeia de hash — e a
+          // limpeza manual quebraria os dois.
+          Future<Object> attempt() async {
+            final store = OrmDataSubjectRightsStore(
+              session: () => sessionBuilder.build(),
+              chainSecret: _chainSecret,
+              cipher: AlertRuntime.instance.healthDataCipher,
+            );
+            try {
+              return await store.createDeletionRequestIfNoneOpen(
+                userId: _racePatientId,
+                createdAt: DateTime.now().toUtc(),
+                dueAt: DateTime.now().toUtc().add(const Duration(days: 15)),
+              );
+            } catch (error) {
+              return error;
+            }
+          }
+
+          final results = await Future.wait([attempt(), attempt(), attempt()]);
+
+          final outcomes = results
+              .whereType<({DataSubjectRequestSnapshot request, bool created})>()
+              .toList();
+          expect(outcomes, hasLength(3), reason: 'nenhuma chamada pode falhar: $results');
+          expect(outcomes.where((o) => o.created), hasLength(1),
+              reason: 'só uma das três cria; as outras recebem a dela');
+          expect(outcomes.map((o) => o.request.id).toSet(), hasLength(1));
+          final open = await DataSubjectRequest.db.find(
+            session,
+            where: (t) =>
+                t.userId.equals(UuidValue.fromString(_racePatientId)) &
+                t.requestType.equals(DataSubjectRequestType.deletion) &
+                t.status.equals(DataSubjectRequestStatus.open),
+          );
+          expect(open, hasLength(1));
+        } finally {
+          await _cleanupRace(session);
+        }
+      });
+    },
+    rollbackDatabase: RollbackDatabase.disabled,
+  );
 }

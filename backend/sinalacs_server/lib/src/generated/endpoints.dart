@@ -492,6 +492,25 @@ class Endpoints extends _i1.EndpointDispatch {
                     accessToken: params['accessToken'],
                   ),
         ),
+        'hasAcceptedCurrentTerms': _i1.MethodConnector(
+          name: 'hasAcceptedCurrentTerms',
+          params: {
+            'accessToken': _i1.ParameterDescription(
+              name: 'accessToken',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async => (endpoints['patients'] as _i6.PatientsEndpoint)
+                  .hasAcceptedCurrentTerms(
+                    session,
+                    accessToken: params['accessToken'],
+                  ),
+        ),
         'requestDataDeletion': _i1.MethodConnector(
           name: 'requestDataDeletion',
           params: {

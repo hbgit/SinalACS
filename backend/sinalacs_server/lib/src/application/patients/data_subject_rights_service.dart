@@ -13,13 +13,19 @@ import 'package:sinalacs_server/src/generated/protocol.dart';
 abstract interface class DataSubjectRightsStore {
   /// Grava uma linha nova, assinada, em `consent_logs` — nunca edita uma
   /// anterior (append-only, LGPD-RF04).
-  Future<void> recordConsent(ConsentLogEntry entry);
+  Future<String> recordConsent(ConsentLogEntry entry);
 
-  /// O pedido em aberto mais recente daquele tipo, ou `null`.
-  Future<DataSubjectRequestSnapshot?> findOpenRequest(
-    String userId,
-    DataSubjectRequestType type,
-  );
+  /// A linha mais recente (por `timestamp`) daquela finalidade, ou `null`.
+  Future<ConsentRecordSnapshot?> latestConsent(String userId, ConsentPurpose purpose);
+
+  /// Cria o pedido de exclusão **só se** não houver um aberto, de forma atômica:
+  /// dois chamadores simultâneos resultam em uma única linha aberta, e o segundo
+  /// recebe a do primeiro com `created == false`.
+  Future<({DataSubjectRequestSnapshot request, bool created})> createDeletionRequestIfNoneOpen({
+    required String userId,
+    required DateTime createdAt,
+    required DateTime dueAt,
+  });
 
   Future<DataSubjectRequestSnapshot> createRequest({
     required String userId,
@@ -89,7 +95,23 @@ class DataSubjectRightsService {
   /// que o termo não vire uma chave liga/desliga no painel.
   Future<ConsentRecordSnapshot> acceptTermsOfUse(AuthenticatedUser user) async {
     _requirePatient(user);
+    final latest = await _store.latestConsent(user.id, ConsentPurpose.termsOfUse);
+    // Idempotente: já aceitou a versão vigente, devolve a linha existente em
+    // vez de crescer o histórico e a trilha de auditoria a cada chamada.
+    if (_isCurrentAcceptance(latest)) return latest!;
     return _record(user, purpose: ConsentPurpose.termsOfUse, action: 'granted');
+  }
+
+  bool _isCurrentAcceptance(ConsentRecordSnapshot? latest) =>
+      latest != null && latest.action == 'granted' && latest.version == consentPolicyVersion;
+
+  /// `true` quando a linha mais recente de `termsOfUse` é um `granted` na versão
+  /// vigente (LGPD-RF18). É o que o app consulta depois do login por OTP: um
+  /// `bool`, em vez do painel "Meus dados" inteiro — que também gravaria uma
+  /// linha de auditoria de leitura a cada login.
+  Future<bool> hasAcceptedCurrentTerms(AuthenticatedUser user) async {
+    _requirePatient(user);
+    return _isCurrentAcceptance(await _store.latestConsent(user.id, ConsentPurpose.termsOfUse));
   }
 
   Future<ConsentRecordSnapshot> _record(
@@ -98,7 +120,7 @@ class DataSubjectRightsService {
     required String action,
   }) async {
     final now = _clock().toUtc();
-    await _store.recordConsent(ConsentLogEntry(
+    final id = await _store.recordConsent(ConsentLogEntry(
       userId: user.id,
       purpose: purpose,
       action: action,
@@ -109,6 +131,7 @@ class DataSubjectRightsService {
       userId: user.id,
       actionType: 'write',
       resourceType: 'consent_log',
+      resourceId: id,
       result: 'granted',
     ));
 
@@ -125,9 +148,20 @@ class DataSubjectRightsService {
   /// vez de empilhar pedidos iguais para a equipe.
   Future<DataSubjectRequestSnapshot> requestDeletion(AuthenticatedUser user) async {
     _requirePatient(user);
-    final open = await _store.findOpenRequest(user.id, DataSubjectRequestType.deletion);
-    if (open != null) return open;
-    return _create(user, DataSubjectRequestType.deletion, null);
+    final now = _clock().toUtc();
+    final result = await _store.createDeletionRequestIfNoneOpen(
+      userId: user.id,
+      createdAt: now,
+      dueAt: now.add(dataSubjectRequestDeadline),
+    );
+    await _audit.recordSafely(AuditEvent(
+      userId: user.id,
+      actionType: 'write',
+      resourceType: 'data_subject_request',
+      resourceId: result.request.id,
+      result: result.created ? 'granted' : 'repeated',
+    ));
+    return result.request;
   }
 
   /// Pede a correção de um dado. Ao contrário da exclusão, NÃO é idempotente:
