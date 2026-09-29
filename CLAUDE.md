@@ -12,7 +12,7 @@ Two core flows:
 
 A third app, `apps/admin`, is a read-only backoffice (Indicadores, Microáreas, Alertas, Auditoria) on mock data.
 
-Main RPC endpoints (`backend/sinalacs_server/lib/src/endpoints/`): `auth` (`loginInstitutional`, `requestOtp`, `verifyOtp`, `developmentLogin` — the last only with `ENABLE_DEV_LOGIN`), `onboarding`, `triage.evaluate`, `alerts` (`createRedAlert`, `acknowledge`, `statusFor`), `patients` (`listMicroArea`, `myData`, chronic conditions), `visits` (`sync`, `pull`), `health.check`.
+Main RPC endpoints (`backend/sinalacs_server/lib/src/endpoints/`): `auth` (`loginInstitutional`, `requestOtp`, `verifyOtp`, `developmentLogin` — the last only with `ENABLE_DEV_LOGIN`), `onboarding`, `triage.evaluate`, `alerts` (`createRedAlert`, `acknowledge`, `statusFor`), `patients` (`listMicroArea`, `myData`, chronic conditions, `updateConsent`, `requestDataDeletion`, `requestDataCorrection`), `visits` (`sync`, `pull`), `health.check`.
 
 `PROGRESS.md` holds milestone status and the open items with owners. `spec/validation_report.md` is stale in both directions (items it lists as open are closed, and its test counts are far below the real ones) — verify against the code before trusting it.
 
@@ -23,7 +23,7 @@ Read these before making product/architecture decisions — when project docs co
 - [spec/stack.md](spec/stack.md) — stack/infra architecture decisions.
 - [spec/ui_design.md](spec/ui_design.md) — visual language and UX behavior.
 - [spec/lgpd_design.md](spec/lgpd_design.md) — privacy/LGPD design.
-- [spec/lgpd_data_audit.md](spec/lgpd_data_audit.md) — field-by-field LGPD sensitivity classification for every persisted table (16 domain tables plus Serverpod's own; the count changes with every migration — re-measure it in the `definition.sql` of the latest `backend/sinalacs_server/migrations/*/`, and see L-17 of `spec/validation_report.md` for the drift this line has already accumulated).
+- [spec/lgpd_data_audit.md](spec/lgpd_data_audit.md) — field-by-field LGPD sensitivity classification for every persisted table (17 domain tables plus Serverpod's own; the count changes with every migration — re-measure it in the `definition.sql` of the latest `backend/sinalacs_server/migrations/*/`, and see L-17 of `spec/validation_report.md` for the drift this line has already accumulated).
 - [spec/ux_accessibility_assessment.md](spec/ux_accessibility_assessment.md) — WCAG 2.2 AA audit (contrast, touch targets, semantics) for the ACS/patient/admin apps; read before touching any color used as text/icon, not just fill.
 - [spec/ux_ui_test_plan.md](spec/ux_ui_test_plan.md) — UX/UI test plan derived from `spec/ui_design.md` (visual/interaction behavior, complementary to the accessibility assessment).
 - [AGENTS.md](AGENTS.md) — full agent working rules (Portuguese), summarized below.

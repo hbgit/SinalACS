@@ -1058,3 +1058,38 @@ ainda: revogar consentimento a partir deste painel (já existe em `RemindersScre
 SLA de 15 dias para pedidos que exigem intervenção humana — isso é processo, não código. Endurecimento
 de segurança do RF01 (rate limit por IP, canal de tempo, retenção de `otp_challenges`, refresh token)
 continua como já registrado acima, sem dono novo.
+
+## Direitos do titular no app paciente — LGPD-RF05 e LGPD-RF08 (2026-09-28)
+
+"Meus dados" deixou de ser só leitura. O paciente agora:
+
+- **concede ou revoga** por conta própria as duas finalidades opcionais
+  (`localReminders`, `segmentedPush`) — `patients.updateConsent` grava uma
+  linha nova assinada em `consent_logs` (append-only; a assinatura sai de
+  `signedConsentLog`, a mesma função do onboarding). Revogar pede confirmação
+  explícita. Revogar lembretes cancela na hora os lembretes agendados no
+  aparelho, e o espelho local (`ConsentPreferences`) passa a ser alinhado ao
+  servidor sempre que "Meus dados" carrega — o que também resolve o aparelho que
+  entrou pelo login OTP sem passar pelo onboarding;
+- **pede exclusão** (`patients.requestDataDeletion`, idempotente enquanto houver
+  uma aberta) ou **correção** (`patients.requestDataCorrection`, texto livre de
+  até 500 caracteres, cifrado com AES-256-GCM em `data_subject_requests`), e vê
+  a situação e o prazo (15 dias) de cada pedido.
+
+O que **não** foi feito, de propósito:
+
+- **Ninguém atende os pedidos.** `status` só é escrito como `open`: o backoffice
+  (`apps/admin`) ainda roda sobre `MockAdminDataSource`. O prazo de 15 dias é
+  exibido mas não é cumprido por sistema nenhum. **Dono:** quem der backend ao
+  admin.
+- **`healthDataProcessing` não tem interruptor.** É a base legal do app inteiro,
+  inclusive do alerta de emergência; `updateConsent` recusa essa finalidade com
+  `DataRightsException` e aponta para o pedido de exclusão. Parar o tratamento
+  depois da exclusão atendida (LGPD-RF07, "em até 15 dias") depende do mesmo
+  atendimento acima.
+- **Corrida de dois pedidos de exclusão simultâneos.** A idempotência é
+  "procura aberto, senão cria", sem índice único parcial (o Serverpod não
+  declara `WHERE` em índice). Dois pedidos concorrentes podem gerar duas linhas
+  abertas; no app, o botão desabilitado com o pedido em voo cobre o toque duplo.
+- **`segmentedPush` é registrado mas não tem efeito**: não há projeto Firebase
+  (RF14). A descrição na tela diz isso.
