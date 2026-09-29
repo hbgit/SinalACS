@@ -34,9 +34,14 @@ class PushSendReport {
 /// O relé de push não respondeu como esperado (fora do ar, lento, 5xx). A
 /// mensagem nunca inclui tokens nem o corpo enviado.
 class PushGatewayException implements Exception {
-  const PushGatewayException(this.message);
+  const PushGatewayException(this.message, {this.outcomeUnknown = false});
 
   final String message;
+
+  /// `true` quando o pedido saiu mas a resposta não voltou a tempo: o Gorush
+  /// pode ter entregue o aviso a parte dos aparelhos. Reenviar às cegas duplica
+  /// o aviso; quem chama deve dizer isso à pessoa.
+  final bool outcomeUnknown;
 
   @override
   String toString() => 'PushGatewayException: $message';
@@ -62,13 +67,16 @@ class GorushClient implements PushSender {
   static const _ios = 1;
   static const _android = 2;
 
+  /// Erros que dizem que o TOKEN morreu. `MismatchSenderId` fica de fora de
+  /// propósito: é a conta de serviço do servidor errada, e apagar por causa dele
+  /// esvaziaria `push_tokens` da microárea inteira num único envio.
   static const _invalidTokenErrors = [
     'notregistered',
     'unregistered',
     'invalidregistration',
+    'requested entity was not found', // FCM v1 (firebase-admin-go)
     'baddevicetoken',
     'devicetokennotfortopic',
-    'mismatchsenderid',
   ];
 
   @override
@@ -97,7 +105,10 @@ class GorushClient implements PushSender {
     } on PushGatewayException {
       rethrow;
     } on TimeoutException {
-      throw const PushGatewayException('O Gorush não respondeu a tempo.');
+      throw const PushGatewayException(
+        'O Gorush não respondeu a tempo.',
+        outcomeUnknown: true,
+      );
     } on SocketException {
       throw const PushGatewayException('O Gorush está inacessível.');
     } on HttpException {
@@ -127,7 +138,12 @@ class GorushClient implements PushSender {
       final token = log['token'];
       if (token is String && _invalidTokenErrors.any(error.contains)) invalid.add(token);
     }
-    final counts = json['counts'];
-    return PushSendReport(accepted: counts is int ? counts : (total - failed).clamp(0, total), invalidTokens: invalid);
+    // `counts` do Gorush não é confiável como "aceitos" (conta notificações
+    // enfileiradas, não entregas): o número que vai para o ACS é o total menos as
+    // falhas que o próprio Gorush relatou.
+    return PushSendReport(
+      accepted: (total - failed).clamp(0, total),
+      invalidTokens: invalid,
+    );
   }
 }

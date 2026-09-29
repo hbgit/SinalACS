@@ -1094,8 +1094,9 @@ O que **não** foi feito, de propósito:
   `pg_advisory_xact_lock` por titular, já que o Serverpod não declara `WHERE` em
   índice e um índice único parcial não é possível); ver "Fechamento das
   pendências do paciente".
-- **`segmentedPush` é registrado mas não tem efeito**: não há Gorush hospedado nem credenciais
-  FCM/APNs (RF14). A descrição na tela diz isso.
+- **`segmentedPush` tem leitor no código, mas nenhum aviso chega a um aparelho ainda**:
+  `notices.sendSegmented` respeita o consentimento, mas não há Gorush hospedado, credenciais
+  FCM/APNs nem lado nativo do token (RF14, ver "RF14: envio de avisos segmentados com Gorush").
 
 ## QR Code do onboarding e documentos legais (2026-09-29)
 
@@ -1160,7 +1161,7 @@ Plano: `docs/superpowers/plans/2026-09-29-menores-adiados-e-push-do-paciente.md`
 - Revogar grava o `denied` e apaga os tokens em duas operações: se a segunda falhar, o consentimento já está revogado e o token fica até a próxima revogação.
 - `devices.registerPushToken` não grava linha de auditoria (a revogação já deixa `consent_log`); a troca de dono do token não deixa rastro.
 - Sem teto de tokens por titular; sem teste do caso "fonte de token que nunca completa"; `PushTokenScope.of` sem `maybeOf`.
-- Envio segmentado (`notices.sendSegmented`), tela de avisos do ACS e a captura do token nativo: dependem de hospedar o Gorush e provisionar credenciais FCM/APNs (§3.2, revisado em 2026-09-29 — Gorush no lugar de integrar o Firebase).
+- Envio segmentado, tela de avisos do ACS e captura do token nativo: **o código do envio e a tela foram feitos depois**, ver "RF14: envio de avisos segmentados com Gorush". Continuam pendentes o Gorush hospedado, as credenciais FCM/APNs e o lado nativo do token (§3.2, revisado em 2026-09-29).
 - Apagar tokens ao atender o pedido de exclusão: pertence ao backoffice que atende os pedidos, ainda inexistente.
 - Aviso de 15 dias de mudança dos termos e revisão jurídica do texto 2026.1.
 - O erro de um pedido em "Meus dados" aparece no topo da lista, fora da tela para quem rolou até o botão (anterior a esta rodada).
@@ -1195,3 +1196,5 @@ Plano: `docs/superpowers/plans/2026-09-29-rf14-gorush-avisos-segmentados.md`, br
 - O `async` do app do paciente subiu de 2.11.0 para 2.13.1 por causa do Riverpod 3.
 
 **Fora de escopo:** migrar o resto do paciente para Riverpod, salvar o token no SQLite local, histórico ou agendamento de avisos.
+
+**Achados do revisor final do RF14, corrigidos:** timeout do envio agora é "resultado desconhecido" (mensagem manda conferir antes de reenviar, auditoria `unknown`), porque o Gorush com `sync: true` pode entregar depois do limite de 5 s e o "tente de novo" duplicaria o aviso; "aceitos" passou a ser alvos menos falhas, sem confiar em `counts`; `MismatchSenderId` deixou de apagar tokens (é erro de configuração do servidor e esvaziaria a microárea) e a string de erro do FCM v1 entrou; `hide_messages: true` no `config.yml`. **Deferido:** `HttpClient` sem `close()`, resposta JSON de forma inesperada fora do erro tipado, desempate por timestamp igual, `INNER JOIN` com `patients`, Gorush em loop sem credenciais, auditoria `granted` com 0 aceitos, nome do teste de auditoria que promete mais do que verifica.

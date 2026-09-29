@@ -66,7 +66,7 @@ provisionar as credenciais FCM/APNs) e geofencing (§4, RF12 — só o contrato 
   restrita a quem consentiu (`segmentedPush`); o backend entrega a lista de
   tokens ao Gorush, que fala com o FCM/APNs. O app do paciente adota
   `flutter_riverpod` **somente** na captura e no registro do token
-  (`pushTokenProvider`); o resto da injeção segue por `InheritedWidget`. O Gorush ainda precisa de credencial FCM (Android) e chave
+  (`pushTokenSourceProvider`); o resto da injeção segue por `InheritedWidget`. O Gorush ainda precisa de credencial FCM (Android) e chave
   APNs (iOS), então a pendência passa de "projeto Firebase" para "hospedar o
   Gorush e provisionar essas credenciais" — decisão de infra, não de código.
 * **Geofencing (RF12):** rejeitado rastreamento contínuo em segundo plano do

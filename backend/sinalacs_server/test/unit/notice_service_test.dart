@@ -137,6 +137,16 @@ void main() {
     expect(audit.events.where((e) => e.result == 'granted'), isEmpty);
   });
 
+  test('timeout: o resultado é desconhecido, a mensagem manda conferir antes de reenviar', () async {
+    sender.failure = const PushGatewayException('demorou', outcomeUnknown: true);
+    await expectLater(
+      service.sendSegmented(_acs, title: 't', message: 'm', audience: 'everyone'),
+      throwsA(isA<NoticeDeliveryException>()
+          .having((e) => e.message, 'message', contains('Confira antes de reenviar'))),
+    );
+    expect(audit.events.single.result, 'unknown');
+  });
+
   test('sem Gorush configurado o envio é recusado com mensagem clara', () async {
     final off = NoticeService(store: store, sender: null, audit: audit);
     await expectLater(

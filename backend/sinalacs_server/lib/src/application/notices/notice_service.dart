@@ -102,7 +102,16 @@ class NoticeService {
         PushMessage(title: cleanTitle, body: cleanMessage, data: const {'screen': 'notices'}),
         targets,
       );
-    } on PushGatewayException {
+    } on PushGatewayException catch (error) {
+      if (error.outcomeUnknown) {
+        // O pedido saiu e a resposta não voltou: parte dos pacientes pode já ter
+        // recebido. Dizer "tente de novo" levaria ao aviso em duplicata.
+        await _record(user, microAreaId, 'unknown');
+        throw NoticeDeliveryException(
+          message: 'O envio demorou e o resultado é desconhecido: alguns pacientes '
+              'podem já ter recebido o aviso. Confira antes de reenviar.',
+        );
+      }
       throw NoticeDeliveryException(
         message: 'Não foi possível entregar o aviso agora. Tente de novo em instantes.',
       );

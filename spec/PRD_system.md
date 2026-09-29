@@ -170,7 +170,7 @@ documento de decisão, não implementação:
 | RF10 (mapa) | Geocélula arredondada, não posição exata (§1) | Não |
 | RF02 + LGPD-RF02 (onboarding/consentimento) | Token de convite de uso único + consentimento por finalidade (§2) | Não |
 | RF06 (lembretes) | Local ao dispositivo, sem endpoint (§3.1) | Não |
-| RF14 (avisos push) | Contrato com Gorush definido (§3.2, revisado 2026-09-29); lado do paciente pronto (`devices.registerPushToken`, `push_tokens`, `PushTokenSource`); envio, Gorush e captura do token nativo pendentes | **Parcial** — falta hospedar o Gorush e provisionar credenciais FCM/APNs |
+| RF14 (avisos push) | Contrato com Gorush definido (§3.2, revisado 2026-09-29); lado do paciente e envio prontos em código (`devices.registerPushToken`, `push_tokens`, `PushTokenSource`, `notices.sendSegmented`, tela de avisos do ACS); Gorush hospedado, credenciais e lado nativo do token pendentes | **Parcial** — falta hospedar o Gorush e provisionar credenciais FCM/APNs |
 | RF12 (geofencing) | Geofence atrelado a visita ativa, sem rastreamento contínuo (§4) | Parcial — submissão à loja pendente |
 | RF15 (sync central→dispositivo) | Pull incremental por cursor (§5) | Não |
 | RNF03 (criptografia Postgres) | AES-256-GCM em nível de aplicação (§6) | Não |

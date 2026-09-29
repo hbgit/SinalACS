@@ -93,23 +93,56 @@ void main() {
     expect(report.invalidTokens.toSet(), {'a2', 'i1'}); // erro transitório não apaga token
   });
 
+  test('"counts" não é confiável: aceitos = alvos menos as falhas dos logs', () async {
+    final gw = await FakeGorush.start(response: {
+      'counts': 3,
+      'logs': [
+        {'type': 'failed-push', 'token': 'a2', 'error': 'ServiceUnavailable'},
+      ],
+    });
+    addTearDown(gw.close);
+    final client = GorushClient(baseUrl: gw.url, timeout: const Duration(seconds: 2));
+    final report = await client.send(_msg, const [
+      PushTarget(token: 'a1', platform: 'android'),
+      PushTarget(token: 'a2', platform: 'android'),
+      PushTarget(token: 'a3', platform: 'android'),
+    ]);
+    expect(report.accepted, 2);
+  });
+
+  test('MismatchSenderId é erro de configuração do servidor e não apaga token', () async {
+    final gw = await FakeGorush.start(response: {
+      'logs': [
+        {'type': 'failed-push', 'token': 'a1', 'error': 'MismatchSenderId'},
+        {'type': 'failed-push', 'token': 'a2', 'error': 'Requested entity was not found.'},
+      ],
+    });
+    addTearDown(gw.close);
+    final client = GorushClient(baseUrl: gw.url, timeout: const Duration(seconds: 2));
+    final report = await client.send(_msg, const [
+      PushTarget(token: 'a1', platform: 'android'),
+      PushTarget(token: 'a2', platform: 'android'),
+    ]);
+    expect(report.invalidTokens, ['a2']);
+  });
+
   test('status 5xx vira PushGatewayException', () async {
     final gw = await FakeGorush.start(status: 503);
     addTearDown(gw.close);
     final client = GorushClient(baseUrl: gw.url, timeout: const Duration(seconds: 2));
     await expectLater(
       client.send(_msg, const [PushTarget(token: 'a', platform: 'android')]),
-      throwsA(isA<PushGatewayException>()),
+      throwsA(isA<PushGatewayException>().having((e) => e.outcomeUnknown, 'outcomeUnknown', isFalse)),
     );
   });
 
-  test('servidor que não responde estoura o tempo limite como PushGatewayException', () async {
+  test('servidor que não responde estoura o tempo limite com resultado desconhecido', () async {
     final gw = await FakeGorush.start(hang: true);
     addTearDown(gw.close);
     final client = GorushClient(baseUrl: gw.url, timeout: const Duration(milliseconds: 300));
     await expectLater(
       client.send(_msg, const [PushTarget(token: 'a', platform: 'android')]),
-      throwsA(isA<PushGatewayException>()),
+      throwsA(isA<PushGatewayException>().having((e) => e.outcomeUnknown, 'outcomeUnknown', isTrue)),
     );
   });
 

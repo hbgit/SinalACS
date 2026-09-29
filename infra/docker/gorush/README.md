@@ -15,7 +15,18 @@ O Gorush é um relé, **não substitui** as credenciais dos provedores. Coloque 
 - `apns-key.p8` — chave de autenticação do APNs (iOS), com `GORUSH_IOS_KEY_ID` e
   `GORUSH_IOS_TEAM_ID` no `.env`.
 
-Nada disso é versionado nem gerado por `bootstrap_env.sh`.
+Nada disso é versionado nem gerado por `bootstrap_env.sh` (a decisão §3.2 falava em
+"padrão `bootstrap_env.sh`" para o que for segredo aleatório; credenciais de provedor
+não são aleatórias, são emitidas por ele).
+
+## O que ainda não foi verificado contra um Gorush real
+
+O cliente do backend foi provado só contra um servidor HTTP falso. Confira, antes de
+ligar em produção: (1) se `counts` e `logs` da resposta síncrona têm o formato assumido;
+(2) se o `log.hide_token` padrão mascara o token na resposta — nesse caso a poda de
+tokens inválidos não casa com `push_tokens.token`; (3) as strings de erro do FCM v1 e do
+APNs; (4) se o Gorush sobe sem credenciais (com o `restart: unless-stopped`, pode entrar
+em loop); (5) fixe uma tag em vez de `:latest`.
 
 ## Ligar o backend
 

@@ -224,8 +224,10 @@ específico já decidido em §2.
 
 **Estado atual:** o lado do paciente registra o token do aparelho
 (`devices.registerPushToken`, tabela `push_tokens`, só com o consentimento
-`segmentedPush` vigente). Não há envio segmentado, nem tela de avisos no ACS,
-nem servidor de push. `NoticesScreen` continua descartando a entrada.
+`segmentedPush` vigente), o backend envia (`notices.sendSegmented`, cliente do
+Gorush, restrito ao ACS — o perfil admin não existe ainda) e a tela de avisos do
+ACS chama esse endpoint. Falta hospedar o Gorush, as credenciais FCM/APNs e o
+lado nativo do token no app. Nenhum push real foi visto chegando a um aparelho.
 
 **Decisão aprovada (revisada em 2026-09-29: Gorush no lugar de um SDK/console
 Firebase como ponto de integração):**

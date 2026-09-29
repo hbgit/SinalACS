@@ -15,6 +15,9 @@ ios:
   team_id: ""
   production: false
 log:
+  # O texto do aviso não deve ir para `docker logs`: o backend já não o grava
+  # na auditoria, e o relé não pode ser o ponto onde ele vaza.
+  hide_messages: true
   format: json
   access_log: "-"
   error_log: "-"
