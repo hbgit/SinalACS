@@ -10,6 +10,7 @@ import 'package:sinalacs_server/src/application/auth/password_hasher.dart';
 import 'package:sinalacs_server/src/application/auth/passwordless_auth_service.dart';
 import 'package:sinalacs_server/src/application/auth/sms_gateway.dart';
 import 'package:sinalacs_server/src/application/onboarding/onboarding_service.dart';
+import 'package:sinalacs_server/src/application/patients/data_subject_rights_service.dart';
 import 'package:sinalacs_server/src/application/patients/patient_data_overview_service.dart';
 import 'package:sinalacs_server/src/application/patients/patient_directory_service.dart';
 import 'package:sinalacs_server/src/application/triage/triage_session_service.dart';
@@ -24,6 +25,7 @@ import 'package:sinalacs_server/src/infrastructure/database/orm_alert_store.dart
 import 'package:sinalacs_server/src/infrastructure/database/orm_audit_trail.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_onboarding_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_otp_challenge_store.dart';
+import 'package:sinalacs_server/src/infrastructure/database/orm_data_subject_rights_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_patient_data_overview_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_patient_directory_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_triage_session_store.dart';
@@ -194,6 +196,18 @@ class AlertRuntime {
       PatientDataOverviewService(
         store: OrmPatientDataOverviewStore(
           session: () => session,
+          cipher: healthDataCipher,
+        ),
+        audit: auditTrailFor(session),
+      );
+
+  /// Constrói o serviço de direitos do titular (LGPD-RF05/RF08) para uma
+  /// requisição.
+  DataSubjectRightsService dataSubjectRightsServiceFor(Session session) =>
+      DataSubjectRightsService(
+        store: OrmDataSubjectRightsStore(
+          session: () => session,
+          chainSecret: config.auditChainSecret,
           cipher: healthDataCipher,
         ),
         audit: auditTrailFor(session),

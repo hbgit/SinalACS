@@ -27,11 +27,17 @@ import 'package:sinalacs_client/src/protocol/api/micro_area_patient.dart'
     as _i10;
 import 'package:sinalacs_client/src/protocol/api/patient_data_overview.dart'
     as _i11;
-import 'package:sinalacs_client/src/protocol/api/triage_result.dart' as _i12;
-import 'package:sinalacs_client/src/protocol/api/visit_sync_result.dart'
+import 'package:sinalacs_client/src/protocol/api/patient_consent_record.dart'
+    as _i12;
+import 'package:sinalacs_client/src/protocol/enums/consent_purpose.dart'
     as _i13;
-import 'package:sinalacs_client/src/protocol/api/visit_sync_entry.dart' as _i14;
-import 'protocol.dart' as _i15;
+import 'package:sinalacs_client/src/protocol/api/patient_data_subject_request_record.dart'
+    as _i14;
+import 'package:sinalacs_client/src/protocol/api/triage_result.dart' as _i15;
+import 'package:sinalacs_client/src/protocol/api/visit_sync_result.dart'
+    as _i16;
+import 'package:sinalacs_client/src/protocol/api/visit_sync_entry.dart' as _i17;
+import 'protocol.dart' as _i18;
 
 /// Ciclo do alerta vermelho.
 ///
@@ -285,6 +291,9 @@ class EndpointOnboarding extends _i1.EndpointRef {
 /// (`alerts.createRedAlert`) publica só `riskLevel: 'red'` — emergência com
 /// SAMU —, e sem esta lista não havia como o ACS escolher um paciente para
 /// visitar fora do caminho reativo.
+///
+/// Serve também o próprio paciente: "Perfil clínico", "Meus Dados" e os
+/// direitos do titular (LGPD-RF05/RF08) — sempre escopados pelo id do token.
 /// {@category Endpoint}
 class EndpointPatients extends EndpointAuthenticated {
   EndpointPatients(_i1.EndpointCaller caller) : super(caller);
@@ -333,6 +342,49 @@ class EndpointPatients extends EndpointAuthenticated {
         'myData',
         {'accessToken': accessToken},
       );
+
+  /// Concede ou revoga, pelo próprio titular, uma finalidade opcional de
+  /// consentimento (LGPD-RF05): uma linha nova em `consent_logs`, nunca a
+  /// edição da anterior. `healthDataProcessing` volta como
+  /// [DataRightsException] — retirá-lo passa pelo pedido de exclusão.
+  _i2.Future<_i12.PatientConsentRecord> updateConsent({
+    required String accessToken,
+    required _i13.ConsentPurpose purpose,
+    required bool granted,
+  }) => caller.callServerEndpoint<_i12.PatientConsentRecord>(
+    'patients',
+    'updateConsent',
+    {
+      'accessToken': accessToken,
+      'purpose': purpose,
+      'granted': granted,
+    },
+  );
+
+  /// Pedido de exclusão/anonimização dos próprios dados (LGPD-RF08).
+  /// Idempotente enquanto houver um pedido de exclusão em aberto.
+  _i2.Future<_i14.PatientDataSubjectRequestRecord> requestDataDeletion({
+    required String accessToken,
+  }) => caller.callServerEndpoint<_i14.PatientDataSubjectRequestRecord>(
+    'patients',
+    'requestDataDeletion',
+    {'accessToken': accessToken},
+  );
+
+  /// Pedido de correção de um dado (LGPD-RF08). [details] é texto livre do
+  /// titular, gravado cifrado; vazio ou acima de 500 caracteres volta como
+  /// [DataRightsException].
+  _i2.Future<_i14.PatientDataSubjectRequestRecord> requestDataCorrection({
+    required String accessToken,
+    required String details,
+  }) => caller.callServerEndpoint<_i14.PatientDataSubjectRequestRecord>(
+    'patients',
+    'requestDataCorrection',
+    {
+      'accessToken': accessToken,
+      'details': details,
+    },
+  );
 }
 
 /// Motor de triagem determinístico, inspirado no Protocolo de Manchester.
@@ -352,7 +404,7 @@ class EndpointTriage extends EndpointAuthenticated {
   @override
   String get name => 'triage';
 
-  _i2.Future<_i12.TriageResult> evaluate({
+  _i2.Future<_i15.TriageResult> evaluate({
     required String accessToken,
     required bool chestPain,
     required bool difficultyBreathing,
@@ -360,7 +412,7 @@ class EndpointTriage extends EndpointAuthenticated {
     required bool persistentVomiting,
     required bool bleeding,
     required bool severeWeakness,
-  }) => caller.callServerEndpoint<_i12.TriageResult>(
+  }) => caller.callServerEndpoint<_i15.TriageResult>(
     'triage',
     'evaluate',
     {
@@ -391,10 +443,10 @@ class EndpointVisits extends EndpointAuthenticated {
   @override
   String get name => 'visits';
 
-  _i2.Future<List<_i13.VisitSyncResult>> sync({
+  _i2.Future<List<_i16.VisitSyncResult>> sync({
     required String accessToken,
-    required List<_i14.VisitSyncEntry> visits,
-  }) => caller.callServerEndpoint<List<_i13.VisitSyncResult>>(
+    required List<_i17.VisitSyncEntry> visits,
+  }) => caller.callServerEndpoint<List<_i16.VisitSyncResult>>(
     'visits',
     'sync',
     {
@@ -406,10 +458,10 @@ class EndpointVisits extends EndpointAuthenticated {
   /// Sincronização central→dispositivo: visitas da microárea do ACS
   /// autenticado alteradas após `since`, para reconciliar um device que
   /// ficou offline ou foi reinstalado.
-  _i2.Future<List<_i14.VisitSyncEntry>> pull({
+  _i2.Future<List<_i17.VisitSyncEntry>> pull({
     required String accessToken,
     required DateTime since,
-  }) => caller.callServerEndpoint<List<_i14.VisitSyncEntry>>(
+  }) => caller.callServerEndpoint<List<_i17.VisitSyncEntry>>(
     'visits',
     'pull',
     {
@@ -439,7 +491,7 @@ class Client extends _i1.ServerpodClientShared {
     bool? disconnectStreamsOnLostInternetConnection,
   }) : super(
          host,
-         _i15.Protocol(),
+         _i18.Protocol(),
          securityContext: securityContext,
          streamingConnectionTimeout: streamingConnectionTimeout,
          connectionTimeout: connectionTimeout,

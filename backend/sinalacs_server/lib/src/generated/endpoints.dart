@@ -19,7 +19,10 @@ import '../endpoints/onboarding_endpoint.dart' as _i5;
 import '../endpoints/patients_endpoint.dart' as _i6;
 import '../endpoints/triage_endpoint.dart' as _i7;
 import '../endpoints/visits_endpoint.dart' as _i8;
-import 'package:sinalacs_server/src/generated/api/visit_sync_entry.dart' as _i9;
+import 'package:sinalacs_server/src/generated/enums/consent_purpose.dart'
+    as _i9;
+import 'package:sinalacs_server/src/generated/api/visit_sync_entry.dart'
+    as _i10;
 
 class Endpoints extends _i1.EndpointDispatch {
   @override
@@ -433,6 +436,81 @@ class Endpoints extends _i1.EndpointDispatch {
                 accessToken: params['accessToken'],
               ),
         ),
+        'updateConsent': _i1.MethodConnector(
+          name: 'updateConsent',
+          params: {
+            'accessToken': _i1.ParameterDescription(
+              name: 'accessToken',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'purpose': _i1.ParameterDescription(
+              name: 'purpose',
+              type: _i1.getType<_i9.ConsentPurpose>(),
+              nullable: false,
+            ),
+            'granted': _i1.ParameterDescription(
+              name: 'granted',
+              type: _i1.getType<bool>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async =>
+                  (endpoints['patients'] as _i6.PatientsEndpoint).updateConsent(
+                    session,
+                    accessToken: params['accessToken'],
+                    purpose: params['purpose'],
+                    granted: params['granted'],
+                  ),
+        ),
+        'requestDataDeletion': _i1.MethodConnector(
+          name: 'requestDataDeletion',
+          params: {
+            'accessToken': _i1.ParameterDescription(
+              name: 'accessToken',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async => (endpoints['patients'] as _i6.PatientsEndpoint)
+                  .requestDataDeletion(
+                    session,
+                    accessToken: params['accessToken'],
+                  ),
+        ),
+        'requestDataCorrection': _i1.MethodConnector(
+          name: 'requestDataCorrection',
+          params: {
+            'accessToken': _i1.ParameterDescription(
+              name: 'accessToken',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'details': _i1.ParameterDescription(
+              name: 'details',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async => (endpoints['patients'] as _i6.PatientsEndpoint)
+                  .requestDataCorrection(
+                    session,
+                    accessToken: params['accessToken'],
+                    details: params['details'],
+                  ),
+        ),
       },
     );
     connectors['triage'] = _i1.EndpointConnector(
@@ -509,7 +587,7 @@ class Endpoints extends _i1.EndpointDispatch {
             ),
             'visits': _i1.ParameterDescription(
               name: 'visits',
-              type: _i1.getType<List<_i9.VisitSyncEntry>>(),
+              type: _i1.getType<List<_i10.VisitSyncEntry>>(),
               nullable: false,
             ),
           },

@@ -17,6 +17,9 @@ patients:
   - myChronicConditions:
   - updateChronicConditions:
   - myData:
+  - updateConsent:
+  - requestDataDeletion:
+  - requestDataCorrection:
 triage:
   - evaluate:
 visits:
