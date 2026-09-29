@@ -137,6 +137,11 @@ abstract class PatientBackend {
   /// linha `termsOfUse` `granted` em `consent_logs`.
   Future<PatientConsentRecord> acceptTermsOfUse();
 
+  /// Se o paciente já aceitou o Termo de Uso e a Política de Privacidade da
+  /// versão vigente (LGPD-RF18). O login por OTP consulta isto para decidir se
+  /// mostra o convite ao aceite.
+  Future<bool> hasAcceptedCurrentTerms();
+
   /// Pede a exclusão dos próprios dados (LGPD-RF08). Pedir de novo com um
   /// pedido aberto devolve o mesmo.
   Future<PatientDataSubjectRequestRecord> requestDataDeletion();
@@ -243,6 +248,9 @@ class MisconfiguredBackend implements PatientBackend {
 
   @override
   Future<PatientConsentRecord> acceptTermsOfUse() async => _recusar();
+
+  @override
+  Future<bool> hasAcceptedCurrentTerms() async => _recusar();
 
   @override
   Future<PatientDataSubjectRequestRecord> requestDataDeletion() async => _recusar();
@@ -531,6 +539,12 @@ class BackendClient implements PatientBackend {
   Future<PatientConsentRecord> acceptTermsOfUse() async {
     final token = await _requireToken();
     return _guard(() => _client.patients.acceptTermsOfUse(accessToken: token));
+  }
+
+  @override
+  Future<bool> hasAcceptedCurrentTerms() async {
+    final token = await _requireToken();
+    return _guard(() => _client.patients.hasAcceptedCurrentTerms(accessToken: token));
   }
 
   @override

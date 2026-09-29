@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sinalacs_patient/app/app.dart';
@@ -281,5 +283,44 @@ void main() {
     await tapKey(tester, 'onboarding_terms_accept');
     await tapKey(tester, 'complete_enrollment_button');
     expect(backend.enrollmentCalls, hasLength(1));
+  });
+
+  testWidgets('toque duplo em "Ler QR Code" abre uma leitura só', (tester) async {
+    final gate = Completer<String?>();
+    var calls = 0;
+    await tester.pumpWidget(SinalAcsApp(
+      backend: FakePatientBackend(),
+      qrScanner: (_) {
+        calls++;
+        return gate.future;
+      },
+    ));
+    await openOnboarding(tester);
+
+    await tester.tap(find.byKey(const Key('scan_qr_button')));
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('scan_qr_button')), warnIfMissed: false);
+    await tester.pump();
+    expect(calls, 1);
+
+    gate.complete(null);
+    await tester.pumpAndSettle();
+    await tapKey(tester, 'scan_qr_button');
+    expect(calls, 2, reason: 'depois de voltar, dá para ler de novo');
+  });
+
+  testWidgets('o aviso do QR some quando a pessoa volta a digitar', (tester) async {
+    await tester.pumpWidget(SinalAcsApp(
+      backend: FakePatientBackend(),
+      qrScanner: (_) async => 'https://exemplo.invalid/pagina',
+    ));
+    await openOnboarding(tester);
+    await tapKey(tester, 'scan_qr_button');
+    expect(find.textContaining('não é um convite do SinalACS'), findsOneWidget);
+
+    await tester.enterText(find.byKey(const Key('onboarding_token_field')), 'convite-123');
+    await tester.pump();
+
+    expect(find.textContaining('não é um convite do SinalACS'), findsNothing);
   });
 }

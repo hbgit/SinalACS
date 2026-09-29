@@ -20,7 +20,6 @@ import 'package:sinalacs_patient/app/patient_theme.dart';
 import 'package:sinalacs_patient/app/qr_scanner.dart';
 import 'package:sinalacs_patient/core/consent/consent_decisions.dart';
 import 'package:sinalacs_patient/core/legal/legal_documents.dart';
-import 'package:sinalacs_patient/core/legal/terms_acceptance.dart';
 import 'package:sinalacs_patient/core/consent/consent_preferences.dart';
 import 'package:sinalacs_patient/core/consent/sqflite_consent_preferences.dart';
 import 'package:sinalacs_patient/core/network/backend_client.dart';
@@ -374,8 +373,9 @@ class _PatientLoginScreenState extends State<PatientLoginScreen> {
     try {
       // Teto curto: a espera padrão do cliente é de 20 s, e esta checagem não
       // pode ficar entre um login já verificado e o alerta de urgência.
-      final overview = await BackendScope.of(context).myData().timeout(_termsCheckTimeout);
-      return needsTermsAcceptance(overview.consents);
+      final accepted =
+          await BackendScope.of(context).hasAcceptedCurrentTerms().timeout(_termsCheckTimeout);
+      return !accepted;
     } on BackendFailure {
       return false;
     } on TimeoutException {
@@ -666,6 +666,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   bool _termsAccepted = false;
 
   bool _busy = false;
+  bool _scanning = false;
   String? _error;
 
   @override
@@ -675,6 +676,16 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   }
 
   Future<void> _scan() async {
+    if (_scanning) return;
+    setState(() => _scanning = true);
+    try {
+      await _readQr();
+    } finally {
+      if (mounted) setState(() => _scanning = false);
+    }
+  }
+
+  Future<void> _readQr() async {
     final scanner = QrScannerScope.of(context);
     final String? raw;
     try {
@@ -797,7 +808,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                           width: double.infinity,
                           child: OutlinedButton.icon(
                             key: const Key('scan_qr_button'),
-                            onPressed: _busy ? null : _scan,
+                            onPressed: _busy || _scanning ? null : _scan,
                             style: OutlinedButton.styleFrom(minimumSize: const Size(48, 52)),
                             icon: const Icon(Icons.qr_code_scanner_outlined),
                             label: const Text('Ler QR Code com a câmera'),
@@ -807,7 +818,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                         TextField(
                           key: const Key('onboarding_token_field'),
                           controller: _tokenController,
-                          onChanged: (_) => setState(() {}),
+                          onChanged: (_) => setState(() => _error = null),
                           decoration: const InputDecoration(labelText: 'Código do convite'),
                         ),
                         const SizedBox(height: 20),
@@ -1640,6 +1651,9 @@ class _MyDataScreenState extends State<MyDataScreen> {
   PatientDataOverview? _data;
   String? _error;
   String? _confirmation;
+
+  /// Texto de uma correção ainda não aceita pelo servidor.
+  String? _pendingCorrection;
   bool _requestedLoad = false;
   bool _busy = false;
 
@@ -1760,7 +1774,8 @@ class _MyDataScreenState extends State<MyDataScreen> {
   /// Envia um pedido e recarrega. Mesmo formato de [_changeConsent]: `_busy`
   /// desabilita os controles enquanto a chamada está em voo, e é isso que
   /// impede o segundo toque de virar segundo pedido.
-  Future<void> _submitRequest(
+  /// `true` quando o servidor aceitou o pedido.
+  Future<bool> _submitRequest(
     Future<PatientDataSubjectRequestRecord> Function(PatientBackend backend) call,
     String done,
   ) async {
@@ -1772,12 +1787,14 @@ class _MyDataScreenState extends State<MyDataScreen> {
     });
     try {
       final record = await call(backend);
-      if (!mounted) return;
+      if (!mounted) return true;
       setState(() => _confirmation = '$done. Resposta até ${_formatDate(record.dueAt.toLocal())}.');
       await _load();
+      return true;
     } on BackendFailure catch (failure) {
-      if (!mounted) return;
+      if (!mounted) return false;
       setState(() => _error = failure.message);
+      return false;
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -1817,13 +1834,21 @@ class _MyDataScreenState extends State<MyDataScreen> {
     if (_busy) return;
     final details = await showDialog<String>(
       context: context,
-      builder: (_) => const _CorrectionRequestDialog(),
+      builder: (_) => _CorrectionRequestDialog(initialText: _pendingCorrection),
     );
-    if (details == null || !mounted) return;
-    await _submitRequest(
+    if (details == null || !mounted) {
+      // Cancelou de propósito: o rascunho não fica para trás.
+      _pendingCorrection = null;
+      return;
+    }
+    // Guardado até o servidor aceitar: se o envio falhar, o texto volta quando
+    // a pessoa reabrir o diálogo, em vez de ser digitado de novo.
+    _pendingCorrection = details;
+    final ok = await _submitRequest(
       (backend) => backend.requestDataCorrection(details),
       'Pedido de correção registrado',
     );
+    if (ok) _pendingCorrection = null;
   }
 
   String _requestTypeLabel(DataSubjectRequestType type) => switch (type) {
@@ -2080,14 +2105,16 @@ class _MyDataScreenState extends State<MyDataScreen> {
 /// servidor impõe (`correctionDetailsMaxLength`); o servidor revalida, porque
 /// o app não é a única origem possível da chamada.
 class _CorrectionRequestDialog extends StatefulWidget {
-  const _CorrectionRequestDialog();
+  const _CorrectionRequestDialog({this.initialText});
+
+  final String? initialText;
 
   @override
   State<_CorrectionRequestDialog> createState() => _CorrectionRequestDialogState();
 }
 
 class _CorrectionRequestDialogState extends State<_CorrectionRequestDialog> {
-  final _controller = TextEditingController();
+  late final _controller = TextEditingController(text: widget.initialText);
 
   @override
   void dispose() {

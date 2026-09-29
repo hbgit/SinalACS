@@ -194,14 +194,6 @@ Future<void> openMyData(WidgetTester tester) async {
   tester.view.physicalSize = const Size(800, 2400);
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.reset);
-  // Os testes de "Meus dados" montam o próprio `myDataResult`, em geral sem
-  // aceite do termo: o login cai na tela de aceite. O assunto aqui é o painel,
-  // então o paciente toca "Agora não", como faria de verdade.
-  final later = find.byKey(const Key('terms_gate_later_button'));
-  if (later.evaluate().isNotEmpty) {
-    await tester.tap(later);
-    await tester.pumpAndSettle();
-  }
   await tester.tap(find.text('Mais'));
   await tester.pumpAndSettle();
   await tester.tap(find.text('Meus dados'));
@@ -1198,6 +1190,40 @@ void main() {
       expect(outlined(tester, 'request_deletion_button').onPressed, isNotNull);
     });
 
+    testWidgets('correção que falhou volta com o texto ao reabrir; sai do rascunho depois de enviada', (tester) async {
+      final backend = FakePatientBackend()
+        ..myDataResult = overview()
+        ..dataRequestFailure = const BackendFailure('Sem conexão com o servidor.');
+      await pumpMyData(tester, backend);
+
+      await tapByKey(tester, 'request_correction_button');
+      await tester.enterText(find.byKey(const Key('correction_details_field')), 'Meu contato mudou.');
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('correction_request_submit')));
+      await tester.pumpAndSettle();
+      // O aviso fica no topo da lista, que a rolagem até o botão deixou para trás.
+      await tester.drag(find.byType(Scrollable).first, const Offset(0, 3000));
+      await tester.pumpAndSettle();
+      expect(find.text('Sem conexão com o servidor.'), findsOneWidget);
+
+      backend.dataRequestFailure = null;
+      await tapByKey(tester, 'request_correction_button');
+      expect(
+        tester.widget<TextField>(find.byKey(const Key('correction_details_field'))).controller!.text,
+        'Meu contato mudou.',
+      );
+      await tester.tap(find.byKey(const Key('correction_request_submit')));
+      await tester.pumpAndSettle();
+      // A tentativa que falhou também chegou ao fake, com o mesmo texto.
+      expect(backend.correctionRequests, ['Meu contato mudou.', 'Meu contato mudou.']);
+
+      await tapByKey(tester, 'request_correction_button');
+      expect(
+        tester.widget<TextField>(find.byKey(const Key('correction_details_field'))).controller!.text,
+        isEmpty,
+      );
+    });
+
     testWidgets('os botões de pedido não criam nó de botão inerte', (tester) async {
       final handle = tester.ensureSemantics();
       final backend = FakePatientBackend()..myDataResult = overview();
@@ -1215,8 +1241,7 @@ void main() {
       await login(tester);
       await openMyData(tester);
 
-      // Uma leitura do login (checa o aceite do termo) e uma do painel.
-      expect(backend.myDataCallCount, 2);
+      expect(backend.myDataCallCount, 1);
       expect(find.text('Fulano de Tal'), findsOneWidget);
       expect(find.textContaining('10/03/1975'), findsOneWidget);
       expect(find.textContaining('Ciclana, (11) 90000-0000'), findsOneWidget);

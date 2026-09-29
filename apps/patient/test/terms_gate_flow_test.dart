@@ -34,11 +34,7 @@ Future<void> tapKey(WidgetTester tester, String key) async {
 }
 
 /// Paciente que ainda não aceitou nada: é o de quem entrou por OTP sem onboarding.
-FakePatientBackend semAceite() {
-  final backend = FakePatientBackend();
-  backend.myDataResult = backend.myDataResult.copyWith(consents: const []);
-  return backend;
-}
+FakePatientBackend semAceite() => FakePatientBackend()..termsAccepted = false;
 
 void main() {
   testWidgets('sem aceite registrado, o login leva à tela de aceite', (tester) async {
@@ -82,12 +78,13 @@ void main() {
     await login(tester);
 
     expect(find.byKey(const Key('terms_gate_accept_button')), findsNothing);
-    expect(backend.myDataCallCount, 1);
+    expect(backend.termsStatusCalls, 1);
+    expect(backend.myDataCallCount, 0, reason: 'o login não lê mais o painel inteiro');
   });
 
   testWidgets('falha ao ler os consentimentos não impede a entrada', (tester) async {
     // Emergência: o alerta de urgência não pode ficar atrás de um aceite.
-    final backend = semAceite()..myDataFailure = const BackendFailure('sem rede');
+    final backend = semAceite()..termsStatusFailure = const BackendFailure('sem rede');
     await tester.pumpWidget(SinalAcsApp(backend: backend));
     await login(tester);
 
@@ -124,7 +121,7 @@ void main() {
   testWidgets('leitura de consentimentos pendurada não segura o paciente no login', (tester) async {
     // `verifyOtp` já deu sessão: a checagem do aceite não pode ficar entre o
     // paciente e o alerta de urgência (a espera padrão do cliente é de 20 s).
-    final backend = semAceite()..myDataGate = Completer<void>();
+    final backend = semAceite()..termsStatusGate = Completer<void>();
     await tester.pumpWidget(SinalAcsApp(backend: backend));
     await login(tester);
     await tester.pump(const Duration(seconds: 4));
@@ -153,5 +150,32 @@ void main() {
 
     expect(tester.takeException(), isNull);
     expect(find.byType(NavigationBar), findsOneWidget);
+  });
+
+  testWidgets('"Agora não" leva à tela inicial e nada é gravado', (tester) async {
+    final backend = semAceite();
+    await tester.pumpWidget(SinalAcsApp(backend: backend));
+    await login(tester);
+
+    await tapKey(tester, 'terms_gate_later_button');
+
+    expect(find.byType(NavigationBar), findsOneWidget);
+    expect(backend.acceptTermsCalls, 0);
+  });
+
+  testWidgets('quem tocou "Agora não" vê o aviso de novo no login seguinte', (tester) async {
+    final backend = semAceite();
+    await tester.pumpWidget(SinalAcsApp(backend: backend));
+    await login(tester);
+    await tapKey(tester, 'terms_gate_later_button');
+    expect(find.byType(NavigationBar), findsOneWidget);
+
+    // Novo início do app sobre o mesmo backend: a árvore é refeita do zero.
+    await tester.pumpWidget(const SizedBox());
+    await tester.pumpWidget(SinalAcsApp(backend: backend));
+    await login(tester);
+
+    expect(find.byKey(const Key('terms_gate_accept_button')), findsOneWidget);
+    expect(backend.acceptTermsCalls, 0);
   });
 }

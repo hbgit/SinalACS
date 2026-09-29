@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:sinalacs_client/sinalacs_client.dart';
+import 'package:sinalacs_patient/core/legal/legal_documents.dart';
 import 'package:sinalacs_patient/core/network/auth_session.dart';
 import 'package:sinalacs_patient/core/network/backend_client.dart';
 
@@ -49,28 +50,35 @@ class FakePatientBackend implements PatientBackend {
     emergencyContact: 'Contato de teste',
     isChronic: false,
     chronicConditions: const [],
-    consents: [
-      PatientConsentRecord(
-        purpose: 'termsOfUse',
-        action: 'granted',
-        version: '2026.1',
-        timestamp: DateTime.utc(2026, 9, 1),
-      ),
-    ],
+    consents: const [],
     riskHistory: const [],
     requests: const [],
   );
   BackendFailure? myDataFailure;
-
-  /// Quando definido, [myData] só responde depois que ele completa — simula
-  /// um backend lento ou pendurado.
-  Completer<void>? myDataGate;
   int myDataCallCount = 0;
 
   /// Chamadas a [updateConsent], na ordem.
   final List<({ConsentPurpose purpose, bool granted})> updateConsentCalls =
       <({ConsentPurpose purpose, bool granted})>[];
   BackendFailure? updateConsentFailure;
+
+  /// O que o servidor responderia a [hasAcceptedCurrentTerms].
+  bool termsAccepted = true;
+  int termsStatusCalls = 0;
+  BackendFailure? termsStatusFailure;
+
+  /// Quando definido, [hasAcceptedCurrentTerms] só responde depois que ele
+  /// completa — simula um backend lento ou pendurado.
+  Completer<void>? termsStatusGate;
+
+  @override
+  Future<bool> hasAcceptedCurrentTerms() async {
+    termsStatusCalls++;
+    await termsStatusGate?.future;
+    final failure = termsStatusFailure;
+    if (failure != null) throw failure;
+    return termsAccepted;
+  }
 
   /// Chamadas a [acceptTermsOfUse].
   int acceptTermsCalls = 0;
@@ -85,9 +93,10 @@ class FakePatientBackend implements PatientBackend {
     final record = PatientConsentRecord(
       purpose: 'termsOfUse',
       action: 'granted',
-      version: '2026.1',
+      version: legalDocumentsVersion,
       timestamp: DateTime.now().toUtc(),
     );
+    termsAccepted = true;
     myDataResult = myDataResult.copyWith(consents: [...myDataResult.consents, record]);
     return record;
   }
@@ -325,7 +334,6 @@ class FakePatientBackend implements PatientBackend {
   @override
   Future<PatientDataOverview> myData() async {
     myDataCallCount++;
-    await myDataGate?.future;
     final failure = myDataFailure;
     if (failure != null) throw failure;
     return myDataResult;
@@ -344,7 +352,7 @@ class FakePatientBackend implements PatientBackend {
     final record = PatientConsentRecord(
       purpose: purpose.name,
       action: granted ? 'granted' : 'denied',
-      version: '2026.1',
+      version: legalDocumentsVersion,
       timestamp: DateTime.now().toUtc(),
     );
     myDataResult = myDataResult.copyWith(consents: [...myDataResult.consents, record]);
