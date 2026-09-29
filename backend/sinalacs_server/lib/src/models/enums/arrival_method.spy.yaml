@@ -1,0 +1,13 @@
+### Como o check-in da visita foi registrado. `geofence` é reservado para
+### quando a integração nativa de geofencing existir (RF12, decisão §4) —
+### nenhum código hoje produz esse valor; `manual` é o único caminho real.
+###
+### Escopo desta task: só o contrato de dados. Nenhuma API nativa de geofence
+### foi integrada, nenhuma permissão de localização em primeiro/segundo plano
+### foi adicionada a nenhum app, e a escolha de plugin/texto de divulgação
+### seguem bloqueados por revisão de produto/jurídico.
+enum: ArrivalMethod
+serialized: byName
+values:
+  - manual
+  - geofence

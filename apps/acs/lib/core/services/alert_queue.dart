@@ -10,6 +10,7 @@ class PrioritizedAlert {
     required this.microAreaId,
     required this.riskLevel,
     required this.locationHash,
+    this.locationCell,
     required this.triggeredAt,
     this.acknowledged = false,
   });
@@ -21,6 +22,7 @@ class PrioritizedAlert {
       microAreaId: alert.microAreaId,
       riskLevel: alert.riskLevel,
       locationHash: alert.locationHash,
+      locationCell: alert.locationCell,
       triggeredAt: alert.triggeredAt,
     );
   }
@@ -33,6 +35,11 @@ class PrioritizedAlert {
   final String riskLevel;
 
   final String locationHash;
+
+  /// Célula de baixa resolução do alerta, ou `null` quando o dispositivo do
+  /// paciente não conseguiu GPS. É a única fonte de posição para o mapa do
+  /// ACS — nada deriva coordenada de [locationHash].
+  final String? locationCell;
   final DateTime triggeredAt;
   final bool acknowledged;
 
@@ -42,6 +49,7 @@ class PrioritizedAlert {
         microAreaId: microAreaId,
         riskLevel: riskLevel,
         locationHash: locationHash,
+        locationCell: locationCell,
         triggeredAt: triggeredAt,
         acknowledged: acknowledged ?? this.acknowledged,
       );

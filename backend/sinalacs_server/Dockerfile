@@ -2,7 +2,14 @@
 #   docker build -f sinalacs_server/Dockerfile backend
 
 # Estágio de build
-FROM dart:3.8.0 AS build
+#
+# Pinado na mesma versão exata usada por dart-lang/setup-dart no CI
+# (.github/workflows/ci.yml), para reprodutibilidade e paridade entre o que
+# é testado e o que vira imagem. dart:3.8.0 (a versão anterior aqui) ficou
+# incompatível quando a Task 11 (package:cryptography, HealthDataCipher)
+# trouxe transitivamente `postgres` >=3.5.8, que exige SDK ^3.9.0 — o build
+# falhava em `dart pub get` com "version solving failed".
+FROM dart:3.12.2 AS build
 
 # Workspace mínimo, preservando as versões travadas do pubspec.lock.
 WORKDIR /app
@@ -20,6 +27,16 @@ RUN dart pub get
 # Compila o executável AOT.
 WORKDIR /app/sinalacs_server
 RUN dart compile exe bin/main.dart -o bin/server
+# Segunda metade do seed de desenvolvimento: preenche os campos clínicos
+# cifrados, que o seed SQL não consegue montar (ver bin/seed_health_data.dart).
+RUN dart compile exe bin/seed_health_data.dart -o bin/seed_health_data
+# Terceira metade: a credencial institucional do ACS (RF07), que também só
+# existe em Dart — Argon2id não é expressão de Postgres (ver
+# bin/seed_acs_credentials.dart).
+RUN dart compile exe bin/seed_acs_credentials.dart -o bin/seed_acs_credentials
+# Quarta metade: os hashes de CPF do login passwordless (RF01), que também só
+# existem em Dart — o HMAC depende do pepper (ver bin/seed_cpf_hashes.dart).
+RUN dart compile exe bin/seed_cpf_hashes.dart -o bin/seed_cpf_hashes
 
 # Fallback para diretórios possivelmente ausentes.
 RUN mkdir -p config web migrations
@@ -40,6 +57,9 @@ ENV role=monolith
 
 COPY --from=build /runtime/ /
 COPY --from=build /app/sinalacs_server/bin/server server
+COPY --from=build /app/sinalacs_server/bin/seed_health_data seed_health_data
+COPY --from=build /app/sinalacs_server/bin/seed_acs_credentials seed_acs_credentials
+COPY --from=build /app/sinalacs_server/bin/seed_cpf_hashes seed_cpf_hashes
 COPY --from=build /app/sinalacs_server/config/ config/
 COPY --from=build /app/sinalacs_server/web/ web/
 COPY --from=build /app/sinalacs_server/migrations/ migrations/

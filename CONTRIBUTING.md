@@ -44,8 +44,8 @@ com uma convenção genérica, a documentação do projeto prevalece.
 
 ## Pré-requisitos
 
-- Flutter SDK compatível com Dart `>=3.3.0 <4.0.0`; a CI usa Flutter 3.24.0.
-- Dart SDK 3.8.0 para o backend.
+- Flutter SDK compatível com Dart `>=3.8.0 <4.0.0` (`apps/patient`, `apps/acs`) ou `>=3.3.0 <4.0.0` (`apps/admin`); a CI usa Flutter 3.44.8.
+- Dart SDK `>=3.8.0` para o backend.
 - Docker Engine com Docker Compose v2.
 - Android SDK API 36 e JDK 17 para executar ou gerar os aplicativos Android.
 
@@ -71,8 +71,8 @@ públicos. Para limitações do piloto, consulte
 ## Validar alterações
 
 Execute as validações relativas aos componentes alterados. A CI executa análise
-e testes para backend e ambos os aplicativos, além do build da imagem do
-servidor.
+e testes para o backend e os três aplicativos (paciente, ACS, admin), além do
+build da imagem do servidor e do build Android do app admin.
 
 ### Backend
 
@@ -104,7 +104,7 @@ docker build -f backend/sinalacs_server/Dockerfile backend
 
 ### Aplicativos Flutter
 
-Execute em `apps/acs` ou `apps/patient`, conforme a área alterada:
+Execute em `apps/acs`, `apps/patient` ou `apps/admin`, conforme a área alterada:
 
 ```bash
 flutter pub get
@@ -123,6 +123,39 @@ O ACS precisa do script: a senha do broker é constante de compilação, sem val
 padrão, e é gerada por máquina. Um `flutter build apk` puro **falha** — a
 guarda vive em `apps/acs/android/app/build.gradle.kts` — em vez de compilar em
 silêncio um APK que nunca recebe alerta.
+
+## CI e merge
+
+`main` e `develop` são protegidas: uma PR só entra com todos os jobs do CI
+verdes, exceto `android-e2e`. O `android-e2e` é informativo até acumular
+histórico verde, mas vermelho nele continua sendo defeito a investigar, não
+ruído. A lista de checks obrigatórios vem de
+`./scripts/qa/ci_invariants.sh --checks-obrigatorios`. Ao criar, renomear ou
+remover um job, atualize `JOBS_DOCUMENTADOS` nesse script, `CLAUDE.md` e
+`AGENTS.md` no mesmo commit. O job `workflow-lint` falha se não fizer isso.
+
+O `workflow-lint` não enxerga a proteção configurada no GitHub. Depois de
+mesclar uma PR que muda a lista, um admin tem de reaplicar a proteção, senão
+as PRs ficam esperando um check que não existe mais (job renomeado) ou um job
+novo fica opcional sem ninguém perceber. Para conferir as duas listas:
+
+```bash
+esperado=$(./scripts/qa/ci_invariants.sh --checks-obrigatorios | python3 -c 'import json,sys; print(" ".join(c["context"] for c in json.load(sys.stdin)))')
+for b in develop main; do
+  atual=$(gh api "repos/hbgit/SinalACS/branches/$b/protection/required_status_checks" --jq '[.checks[].context] | sort | join(" ")')
+  [ "$atual" = "$esperado" ] && echo "$b ok" || echo "$b DIVERGE: $atual"
+done
+```
+
+Para reaplicar, use o `PUT .../branches/<branch>/protection` da Task 6 de
+`docs/superpowers/plans/2026-09-28-ci-correcoes-avaliacao.md`, com
+`"checks"` igual à saída de `--checks-obrigatorios`.
+
+Não mescle com CI vermelho. Para rodar o CI numa branch sem abrir PR:
+
+```bash
+gh workflow run CI --ref <branch>
+```
 
 ## Alterações no backend
 

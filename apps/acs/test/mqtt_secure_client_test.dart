@@ -83,7 +83,41 @@ void main() {
 
     expect(alert?.alertId, 'alert-123');
     expect(alert?.microAreaId, 'area-12');
+    // Sem `location_cell` no envelope (GPS indisponível no paciente): o campo
+    // fica `null`, não um valor fabricado.
+    expect(alert?.locationCell, isNull);
     expect(ReceivedMqttAlert.tryParse('{"version":2}'), isNull);
+  });
+
+  test('decodifica location_cell quando o envelope traz a célula do paciente', () {
+    final alert = ReceivedMqttAlert.tryParse('''
+      {"version":1,"alert_id":"alert-123","patient_id":"patient-42","micro_area_id":"area-12","risk_level":"red","location_hash":"6gyf4bf","location_cell":"-1580:-4783","triggered_at":"2026-09-01T12:00:00.000Z"}
+    ''');
+
+    expect(alert?.locationCell, '-1580:-4783');
+  });
+
+  test('payload de alerta só inclui location_cell quando o teste fornece um', () {
+    final semCelula = MqttSecureAlertPayload(
+      alertId: 'alert-123',
+      patientId: 'patient-42',
+      riskLevel: 'vermelho',
+      latitude: -23.5505,
+      longitude: -46.6333,
+      microAreaId: 'microarea-01',
+    );
+    expect(semCelula.toJson().containsKey('location_cell'), isFalse);
+
+    final comCelula = MqttSecureAlertPayload(
+      alertId: 'alert-124',
+      patientId: 'patient-42',
+      riskLevel: 'vermelho',
+      latitude: -23.5505,
+      longitude: -46.6333,
+      microAreaId: 'microarea-01',
+      locationCell: '-1580:-4783',
+    );
+    expect(comCelula.toJson()['location_cell'], '-1580:-4783');
   });
 
   group('recusa do broker', () {

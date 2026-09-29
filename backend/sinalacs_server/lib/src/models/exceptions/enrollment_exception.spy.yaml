@@ -1,0 +1,5 @@
+### Convite de onboarding inválido, expirado, já consumido, ou consentimento
+### obrigatório recusado. Mensagem nunca cita o paciente por nome/CPF.
+exception: EnrollmentException
+fields:
+  message: String

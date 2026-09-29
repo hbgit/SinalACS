@@ -1,8 +1,8 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:sinalacs_acs/app/app.dart';
+import 'package:sinalacs_acs/core/geo/location_cell.dart';
 import 'package:sinalacs_acs/core/network/backend_client.dart';
 import 'package:sinalacs_acs/core/services/alert_feed.dart';
 import 'package:sinalacs_acs/core/services/alert_queue.dart';
@@ -10,9 +10,38 @@ import 'package:sinalacs_acs/core/services/backend_visit_synchronizer.dart';
 import 'package:sinalacs_acs/core/services/offline_visit_queue.dart';
 import 'package:sinalacs_acs/core/services/visit_queue_factory.dart';
 import 'package:sinalacs_client/sinalacs_client.dart'
-    show MicroAreaPatient, SyncStatus, VisitSyncResult;
+    show ArrivalMethod, MicroAreaPatient, RiskLevel, SyncStatus, VisitSyncEntry, VisitSyncResult;
+import 'package:sinalacs_acs/core/database/encrypted_database.dart';
+import 'package:sinalacs_acs/core/database/sync_cursor_store.dart';
+import 'package:sinalacs_acs/core/security/database_key_store.dart';
+import 'package:sinalacs_acs/core/services/visit_pull_service.dart';
 
 import 'support/fakes.dart';
+import 'support/semantics_scan.dart';
+
+/// Credencial sintética dos testes de tela. Nunca uma senha real: o fake só
+/// registra o que a tela mandou, e nenhum teste fala com servidor de verdade.
+const credencialMatricula = 'ACS-001';
+const credencialSenha = 'senha-sintetica';
+
+/// Preenche matrícula e senha e toca em "Entrar" — o caminho que o ACS faz no
+/// campo.
+///
+/// Existe porque o formulário passou a exigir os dois campos (RF07): sem isto,
+/// todo teste que só tocava no botão pararia na validação em vez de chegar ao
+/// painel. Não assenta os quadros de propósito — quem chama decide entre
+/// `pumpAndSettle` e `settleRealAsync`.
+Future<void> entrar(WidgetTester tester) async {
+  await tester.enterText(
+    find.byKey(const Key('matricula_field')),
+    credencialMatricula,
+  );
+  await tester.enterText(
+    find.byKey(const Key('senha_field')),
+    credencialSenha,
+  );
+  await tester.tap(find.byKey(const Key('login_button')));
+}
 
 void main() {
   group('login e painel', () {
@@ -25,7 +54,7 @@ void main() {
         feedBuilder: (queue) => feed = FakeAlertFeed(queue),
       ));
 
-      await tester.tap(find.byKey(const Key('login_button')));
+      await entrar(tester);
       await tester.pumpAndSettle();
 
       expect(backend.loginCount, 1);
@@ -44,7 +73,7 @@ void main() {
         feedBuilder: (queue) => FakeAlertFeed(queue),
       ));
 
-      await tester.tap(find.byKey(const Key('login_button')));
+      await entrar(tester);
       await tester.pumpAndSettle();
 
       expect(find.text('Painel de Priorização'), findsNothing);
@@ -61,7 +90,7 @@ void main() {
         feedBuilder: (queue) => FakeAlertFeed(queue),
       ));
 
-      await tester.tap(find.byKey(const Key('login_button')));
+      await entrar(tester);
       await tester.pumpAndSettle();
 
       expect(find.text('Painel de Priorização'), findsNothing);
@@ -77,7 +106,7 @@ void main() {
         feedBuilder: (queue) => feed = FakeAlertFeed(queue),
       ));
 
-      await tester.tap(find.byKey(const Key('login_button')));
+      await entrar(tester);
       await tester.pumpAndSettle();
 
       expect(find.text('Nenhum alerta na sua microárea agora.'), findsOneWidget);
@@ -107,7 +136,7 @@ void main() {
         backend: backend,
         feedBuilder: (queue) => feed = FakeAlertFeed(queue),
       ));
-      await tester.tap(find.byKey(const Key('login_button')));
+      await entrar(tester);
       await tester.pumpAndSettle();
 
       feed.deliver(testAlert(alertId: 'alerta-frase'));
@@ -127,6 +156,30 @@ void main() {
       handle.dispose();
     });
 
+    testWidgets('o painel com um alerta na fila não anuncia botão sem ação de toque', (tester) async {
+      // O painel é a tela de trabalho do ACS — grade de alertas, barra de
+      // navegação e os botões de cada cartão (confirmar, escalonar, visitar).
+      // É onde um nó "botão" inerte custaria mais: o leitor de tela o anuncia
+      // antes do controle real.
+      final handle = tester.ensureSemantics();
+      final backend = FakeAcsBackend();
+      late FakeAlertFeed feed;
+
+      await tester.pumpWidget(SinalAcsApp(
+        backend: backend,
+        feedBuilder: (queue) => feed = FakeAlertFeed(queue),
+      ));
+      await entrar(tester);
+      await tester.pumpAndSettle();
+
+      feed.deliver(testAlert(alertId: 'alerta-varredura'));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('alert_alerta-varredura')), findsOneWidget);
+
+      expectNenhumBotaoInerte(tester);
+      handle.dispose();
+    });
+
     testWidgets('deve avisar quando a central de alertas está inacessível', (tester) async {
       // Um ACS que não sabe que parou de receber alertas é o pior modo de falha
       // do produto: a falha precisa ser visível, não silenciosa.
@@ -136,7 +189,7 @@ void main() {
         feedBuilder: (queue) => FakeAlertFeed(queue, failOnStart: true),
       ));
 
-      await tester.tap(find.byKey(const Key('login_button')));
+      await entrar(tester);
       await tester.pumpAndSettle();
 
       expect(find.byKey(const Key('feed_error')), findsOneWidget);
@@ -149,6 +202,8 @@ void main() {
     });
 
     testWidgets('deve expor rótulo semântico e alvo de toque acessível no login do ACS', (tester) async {
+      // `getSemantics` abaixo só acha nó com a árvore semântica ligada.
+      final handle = tester.ensureSemantics();
       await tester.pumpWidget(SinalAcsApp(
         backend: FakeAcsBackend(),
         feedBuilder: (queue) => FakeAlertFeed(queue),
@@ -157,9 +212,29 @@ void main() {
       final loginButton = tester.widget<FilledButton>(find.byKey(const Key('login_button')));
       final minimumSize = loginButton.style?.minimumSize?.resolve({}) ?? const Size(0, 0);
 
-      expect(find.bySemanticsLabel('Entrar no painel de priorização'), findsOneWidget);
+      // WCAG 2.5.3 (Label in Name, nível A), a mesma correção do login do
+      // paciente: o nome acessível é o texto visível do botão, exposto pelo
+      // próprio botão. O `Semantics` com "Entrar no painel de priorização"
+      // criava um nó sem ação antes do botão real (WCAG 4.1.2).
+      //
+      // Com `String`, `bySemanticsLabel` casa por **igualdade exata**
+      // (`finders.dart`: `pattern == propertyValue`), não por *contains*: como
+      // igualdade implica contenção, as duas asserções abaixo continuam
+      // valendo — mas quem acrescentar algo ao texto visível ("Entrar com
+      // credenciais agora") vê esta linha falhar mesmo com o rótulo contendo o
+      // texto. Com `RegExp` o finder casa por `hasMatch`.
+      expect(find.bySemanticsLabel('Entrar com credenciais'), findsOneWidget);
+      expect(find.bySemanticsLabel('Entrar no painel de priorização'), findsNothing);
+      // A varredura substitui a asserção de `tap` que ficava aqui: aquela era
+      // verde também com o defeito — nela o nó que carrega o nome é justamente
+      // o inerte, e quem responde ao toque é o filho — e afirmava um invariante
+      // ("o nó que carrega o nome do botão tem de ser o que responde ao toque")
+      // que ela não testava.
+      expectNenhumBotaoInerte(tester);
+
       expect(minimumSize.height, greaterThanOrEqualTo(48));
       expect(minimumSize.width, greaterThanOrEqualTo(48));
+      handle.dispose();
     });
 
     testWidgets('a tela de login atende às diretrizes de contraste e alvo de toque do Flutter', (tester) async {
@@ -177,6 +252,56 @@ void main() {
       handle.dispose();
     });
 
+    group('a varredura de nós inertes detecta o que promete detectar', () {
+      // Sem isto, a varredura poderia estar olhando uma árvore que não montou e
+      // passando para todo mundo — o mesmo modo de falha silenciosa que ela
+      // existe para pegar. O app admin guarda o detector de overflow dele do
+      // mesmo jeito (`layout_harness_sanity_test.dart`).
+      testWidgets('acusa o "botão" sem ação de toque', (tester) async {
+        final handle = tester.ensureSemantics();
+        await tester.pumpWidget(MaterialApp(
+          home: Scaffold(
+            body: Semantics(
+              label: 'Rótulo de botão',
+              button: true,
+              child: SizedBox(
+                width: 200,
+                height: 60,
+                child: FilledButton(onPressed: () {}, child: const Text('Visível')),
+              ),
+            ),
+          ),
+        ));
+
+        final achados = botoesInertes(tester);
+        expect(achados, hasLength(1));
+        expect(achados.single, contains('Rótulo de botão'));
+        handle.dispose();
+      });
+
+      testWidgets('não acusa controle legitimamente desabilitado', (tester) async {
+        // `onPressed: null` também é `isButton` sem ação de toque, mas declara
+        // `isEnabled: false` e o leitor de tela anuncia "desativado". Uma
+        // varredura que acusasse isto apontaria defeito em toda tela com um
+        // botão desabilitado — e seria apagada.
+        final handle = tester.ensureSemantics();
+        await tester.pumpWidget(const MaterialApp(
+          home: Scaffold(body: FilledButton(onPressed: null, child: Text('Indisponível agora'))),
+        ));
+
+        expect(botoesInertes(tester), isEmpty);
+        handle.dispose();
+      });
+
+      testWidgets('não passa em silêncio quando não há o que medir', (tester) async {
+        final handle = tester.ensureSemantics();
+        await tester.pumpWidget(const MaterialApp(home: Scaffold(body: SizedBox())));
+
+        expect(() => botoesInertes(tester), throwsA(isA<TestFailure>()));
+        handle.dispose();
+      });
+    });
+
     testWidgets('não deve pré-preencher credenciais no formulário', (tester) async {
       await tester.pumpWidget(SinalAcsApp(
         backend: FakeAcsBackend(),
@@ -185,6 +310,111 @@ void main() {
 
       expect(tester.widget<TextField>(find.byKey(const Key('matricula_field'))).controller?.text, isEmpty);
       expect(tester.widget<TextField>(find.byKey(const Key('senha_field'))).controller?.text, isEmpty);
+    });
+
+    testWidgets('envia ao backend a matrícula e a senha digitadas', (tester) async {
+      // O defeito que este teste fecha: os controllers de matrícula e senha
+      // existiam e eram descartados — o botão abria o painel sem olhar para
+      // nenhum dos dois.
+      final backend = FakeAcsBackend();
+
+      await tester.pumpWidget(SinalAcsApp(
+        backend: backend,
+        feedBuilder: (queue) => FakeAlertFeed(queue),
+      ));
+
+      // Matrícula diferente da do seed de propósito: se o app mandasse um valor
+      // fixo, a asserção abaixo passaria por acidente.
+      await tester.enterText(find.byKey(const Key('matricula_field')), 'ACS-007');
+      await tester.enterText(find.byKey(const Key('senha_field')), credencialSenha);
+      await tester.tap(find.byKey(const Key('login_button')));
+      await tester.pumpAndSettle();
+
+      expect(backend.lastCredentials?.matricula, 'ACS-007');
+      expect(backend.lastCredentials?.senha, credencialSenha);
+      expect(find.text('Painel de Priorização'), findsOneWidget);
+    });
+
+    testWidgets('campo em branco não chama o backend e mostra o que falta', (tester) async {
+      final handle = tester.ensureSemantics();
+      final backend = FakeAcsBackend();
+
+      await tester.pumpWidget(SinalAcsApp(
+        backend: backend,
+        feedBuilder: (queue) => FakeAlertFeed(queue),
+      ));
+
+      // Senha em branco: sem esta guarda, o app gastaria uma chamada — e uma
+      // tentativa falha da conta, que conta para o bloqueio por tentativas.
+      await tester.enterText(find.byKey(const Key('matricula_field')), credencialMatricula);
+      await tester.tap(find.byKey(const Key('login_button')));
+      await tester.pumpAndSettle();
+
+      expect(backend.loginCount, 0);
+      expect(backend.lastCredentials, isNull);
+      expect(find.text('Informe matrícula e senha.'), findsOneWidget);
+      expect(find.text('Painel de Priorização'), findsNothing);
+      // SC 4.1.3: a mensagem troca de estado sem tirar o foco de onde a pessoa
+      // estava — só é percebida por leitor de tela como região viva.
+      expect(
+        tester.getSemantics(find.byKey(const Key('login_error'))).flagsCollection.isLiveRegion,
+        isTrue,
+      );
+
+      // Matrícula em branco: o outro campo, para a guarda não valer só para um.
+      await tester.enterText(find.byKey(const Key('senha_field')), credencialSenha);
+      await tester.enterText(find.byKey(const Key('matricula_field')), '');
+      await tester.tap(find.byKey(const Key('login_button')));
+      await tester.pumpAndSettle();
+
+      expect(backend.loginCount, 0);
+      expect(backend.lastCredentials, isNull);
+      expect(find.text('Informe matrícula e senha.'), findsOneWidget);
+      handle.dispose();
+    });
+
+    testWidgets('a matrícula é aparada: só espaços não passa, com espaços vai sem eles', (tester) async {
+      // `trim()` é fácil de esquecer: sem ele, '   ' viraria uma chamada ao
+      // backend com uma matrícula que não existe.
+      final backend = FakeAcsBackend();
+
+      await tester.pumpWidget(SinalAcsApp(
+        backend: backend,
+        feedBuilder: (queue) => FakeAlertFeed(queue),
+      ));
+
+      await tester.enterText(find.byKey(const Key('senha_field')), credencialSenha);
+      await tester.enterText(find.byKey(const Key('matricula_field')), '   ');
+      await tester.tap(find.byKey(const Key('login_button')));
+      await tester.pumpAndSettle();
+
+      expect(backend.lastCredentials, isNull);
+      expect(find.text('Informe matrícula e senha.'), findsOneWidget);
+
+      await tester.enterText(find.byKey(const Key('matricula_field')), '  ACS-009  ');
+      await tester.tap(find.byKey(const Key('login_button')));
+      await tester.pumpAndSettle();
+
+      expect(backend.lastCredentials?.matricula, 'ACS-009');
+      expect(backend.lastCredentials?.senha, credencialSenha);
+    });
+
+    testWidgets('a senha não é aparada: espaço faz parte da credencial', (tester) async {
+      // Aparar a senha mudaria a credencial em silêncio, e a pessoa veria
+      // "senha inválida" por um caractere que ela digitou de propósito.
+      final backend = FakeAcsBackend();
+
+      await tester.pumpWidget(SinalAcsApp(
+        backend: backend,
+        feedBuilder: (queue) => FakeAlertFeed(queue),
+      ));
+
+      await tester.enterText(find.byKey(const Key('matricula_field')), credencialMatricula);
+      await tester.enterText(find.byKey(const Key('senha_field')), ' senha-sintetica ');
+      await tester.tap(find.byKey(const Key('login_button')));
+      await tester.pumpAndSettle();
+
+      expect(backend.lastCredentials?.senha, ' senha-sintetica ');
     });
   });
 
@@ -452,7 +682,7 @@ void main() {
         visitQueue: visitQueue,
       ));
 
-      await tester.tap(find.byKey(const Key('login_button')));
+      await entrar(tester);
       await tester.pumpAndSettle();
 
       feed.deliver(testAlert(alertId: 'alerta-1', riskLevel: 'yellow'));
@@ -485,7 +715,7 @@ void main() {
         visitQueue: visitQueue,
       ));
 
-      await tester.tap(find.byKey(const Key('login_button')));
+      await entrar(tester);
       await tester.pumpAndSettle();
 
       feed.deliver(testAlert(alertId: 'alerta-1', riskLevel: 'yellow'));
@@ -528,7 +758,7 @@ void main() {
         visitQueue: visitQueue,
       ));
 
-      await tester.tap(find.byKey(const Key('login_button')));
+      await entrar(tester);
       await tester.pumpAndSettle();
 
       feed.deliver(testAlert(alertId: 'alerta-chegada', riskLevel: 'yellow'));
@@ -567,13 +797,8 @@ void main() {
 
     testWidgets('deve informar explicitamente quando o ACS alcançou o local do paciente', (tester) async {
       final visitQueue = OfflineVisitQueue();
-      final alert = testAlert(alertId: 'alerta-geofence', riskLevel: 'yellow');
-      final hash = alert.locationHash;
-      final seed = hash.codeUnits.fold<int>(0, (sum, code) => sum + code) % 1000;
-      final destination = LatLng(
-        -15.7942 + ((seed % 7) * 0.0025),
-        -47.8828 + (((seed ~/ 7) % 9) * 0.0035),
-      );
+      final alert = testAlert(alertId: 'alerta-geofence', riskLevel: 'yellow', locationCell: testLocationCell);
+      final destination = parseLocationCell(testLocationCell)!;
 
       await tester.pumpWidget(MaterialApp(
         home: VisitRegistrationScreen(
@@ -599,7 +824,7 @@ void main() {
         visitQueue: visitQueue,
       ));
 
-      await tester.tap(find.byKey(const Key('login_button')));
+      await entrar(tester);
       await tester.pumpAndSettle();
 
       await tester.tap(find.text('Visita'));
@@ -637,7 +862,7 @@ void main() {
         visitQueue: visitQueue,
       ));
 
-      await tester.tap(find.byKey(const Key('login_button')));
+      await entrar(tester);
       await tester.pumpAndSettle();
       await tester.tap(find.text('Visita'));
       await tester.pumpAndSettle();
@@ -681,7 +906,7 @@ void main() {
         visitQueue: visitQueue,
       ));
 
-      await tester.tap(find.byKey(const Key('login_button')));
+      await entrar(tester);
       await tester.pumpAndSettle();
       await tester.tap(find.text('Visita'));
       await tester.pumpAndSettle();
@@ -728,7 +953,7 @@ void main() {
         visitQueue: visitQueue,
       ));
 
-      await tester.tap(find.byKey(const Key('login_button')));
+      await entrar(tester);
       await tester.pumpAndSettle();
       await tester.tap(find.text('Visita'));
       await tester.pumpAndSettle();
@@ -762,7 +987,7 @@ void main() {
         visitQueue: visitQueue,
       ));
 
-      await tester.tap(find.byKey(const Key('login_button')));
+      await entrar(tester);
       await tester.pumpAndSettle();
 
       feed.deliver(testAlert(alertId: 'alerta-1', riskLevel: 'yellow'));
@@ -806,7 +1031,7 @@ void main() {
         visitQueue: visitQueue,
       ));
 
-      await tester.tap(find.byKey(const Key('login_button')));
+      await entrar(tester);
       await tester.pumpAndSettle();
 
       feed.deliver(testAlert(alertId: 'alerta-1', riskLevel: 'yellow'));
@@ -872,7 +1097,7 @@ void main() {
         feedBuilder: feedBuilder ?? (queue) => FakeAlertFeed(queue),
         visitQueue: visitQueue,
       ));
-      await tester.tap(find.byKey(const Key('login_button')));
+      await entrar(tester);
       await tester.pumpAndSettle();
     }
 
@@ -999,7 +1224,7 @@ void main() {
         feedBuilder: feedBuilder ?? (queue) => FakeAlertFeed(queue),
         visitQueue: visitQueue,
       ));
-      await tester.tap(find.byKey(const Key('login_button')));
+      await entrar(tester);
       await tester.pumpAndSettle();
     }
 
@@ -1147,6 +1372,356 @@ void main() {
       );
 
       expect(queue.synchronizer, isA<BackendVisitSynchronizer>());
+    });
+  });
+
+  group('sincronização central→dispositivo (RF15)', () {
+    const dbName = 'login_flow_test_visit_pull.db';
+
+    setUp(() => EncryptedLocalDatabase.deleteDatabaseFile(dbName));
+    tearDown(() => EncryptedLocalDatabase.deleteDatabaseFile(dbName));
+
+    /// Bombeia frames finitos, intercalados com esperas REAIS (fora do
+    /// relógio falso de `testWidgets`), até o pull terminar — nunca com
+    /// `pumpAndSettle`.
+    ///
+    /// Dois problemas juntos, dos quais qualquer um sozinho já derrubaria
+    /// `pumpAndSettle`:
+    /// 1. `VisitPullService` usa um banco de verdade
+    ///    (`allowUnencryptedForTesting: true`) e `sqflite_common_ffi` sempre
+    ///    passa pelo isolate próprio dele, mesmo sem criptografia — o
+    ///    round-trip é REAL, não fake. Sem ceder tempo de relógio de
+    ///    verdade (via `runAsync`), o teste segue adiante achando que já
+    ///    sincronizou, e o `tearDown` desta suíte apaga o arquivo do banco
+    ///    por baixo de uma consulta ainda em voo (`SqfliteFfiException`
+    ///    "database has already been closed").
+    /// 2. Enquanto `_pullingVisits` é `true`, o `CircularProgressIndicator`
+    ///    indeterminado do botão "Atualizar dados da microárea" agenda
+    ///    frame atrás de frame para sempre — `pumpAndSettle` nunca decide
+    ///    que "assentou" com esse spinner na tela, mesmo depois do pull
+    ///    terminar de verdade.
+    Future<void> settleRealAsync(WidgetTester tester) async {
+      for (var i = 0; i < 30; i++) {
+        await tester.pump(const Duration(milliseconds: 16));
+        await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+      }
+      await tester.pump();
+    }
+
+    VisitPullService pullService(FakeAcsBackend backend, {VisitStore? localVisits}) =>
+        VisitPullService(
+          backend: backend,
+          cursorStore: SyncCursorStore(
+            keyStore: InMemoryDatabaseKeyStore(),
+            databaseName: dbName,
+            allowUnencryptedForTesting: true,
+          ),
+          localVisits: localVisits ?? InMemoryVisitStore(),
+        );
+
+    VisitSyncEntry visitaRemota(String localId) => VisitSyncEntry(
+          localId: localId,
+          patientId: seedPatientId,
+          scheduledAt: DateTime.utc(2026, 9, 12, 9),
+          status: 'realizada',
+          riskLevelBefore: RiskLevel.green,
+          notes: const {},
+          version: 1,
+          syncAt: DateTime.utc(2026, 9, 12, 10),
+          arrivalMethod: ArrivalMethod.manual,
+        );
+
+    testWidgets('ao abrir o painel, a aba Área mostra as visitas recebidas da central', (tester) async {
+      final backend = FakeAcsBackend()
+        ..pullEntries = [visitaRemota('remota-1'), visitaRemota('remota-2')];
+
+      await tester.pumpWidget(SinalAcsApp(
+        backend: backend,
+        feedBuilder: (queue) => FakeAlertFeed(queue),
+        visitPullService: pullService(backend),
+      ));
+      await entrar(tester);
+      await settleRealAsync(tester);
+
+      expect(backend.pullSinceCalls, hasLength(1));
+
+      await tester.tap(find.text('Área'));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('pull_status')), findsOneWidget);
+      expect(find.textContaining('2 atualizações recebidas da central'), findsOneWidget);
+    });
+
+    testWidgets('uma falha ao sincronizar mostra o aviso, sem travar a tela', (tester) async {
+      final backend = FakeAcsBackend()
+        ..pullFailure = const BackendFailure('Sem conexão com o servidor.');
+
+      await tester.pumpWidget(SinalAcsApp(
+        backend: backend,
+        feedBuilder: (queue) => FakeAlertFeed(queue),
+        visitPullService: pullService(backend),
+      ));
+      await entrar(tester);
+      await settleRealAsync(tester);
+      await tester.tap(find.text('Área'));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('pull_error')), findsOneWidget);
+      expect(find.text('Sem conexão com o servidor.'), findsOneWidget);
+      // O botão continua ativo: a falha não pode travar a única forma de
+      // tentar de novo.
+      expect(
+        tester.widget<FilledButton>(find.byKey(const Key('pull_visits'))).onPressed,
+        isNotNull,
+      );
+    });
+
+    testWidgets('uma falha não classificada ao sincronizar mostra o aviso genérico', (tester) async {
+      // `StateError` não é `BackendFailure` de propósito: cobre o ramo
+      // `catch (error, stackTrace)` de `_pullVisits` em app.dart, que hoje só
+      // é exercitado pela lógica do app, nunca por um teste direto.
+      final backend = FakeAcsBackend()..pullUnclassifiedFailure = StateError('queda inesperada');
+
+      await tester.pumpWidget(SinalAcsApp(
+        backend: backend,
+        feedBuilder: (queue) => FakeAlertFeed(queue),
+        visitPullService: pullService(backend),
+      ));
+      await entrar(tester);
+      await settleRealAsync(tester);
+      await tester.tap(find.text('Área'));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('pull_error')), findsOneWidget);
+      expect(find.text('Verifique a conexão e tente de novo.'), findsOneWidget);
+    });
+
+    testWidgets('"Atualizar dados da microárea" repete a sincronização manualmente', (tester) async {
+      final backend = FakeAcsBackend()..pullEntries = [visitaRemota('remota-1')];
+
+      await tester.pumpWidget(SinalAcsApp(
+        backend: backend,
+        feedBuilder: (queue) => FakeAlertFeed(queue),
+        visitPullService: pullService(backend),
+      ));
+      await entrar(tester);
+      await settleRealAsync(tester);
+      await tester.tap(find.text('Área'));
+      await tester.pumpAndSettle();
+
+      expect(backend.pullSinceCalls, hasLength(1));
+
+      await tester.tap(find.byKey(const Key('pull_visits')));
+      await settleRealAsync(tester);
+
+      expect(backend.pullSinceCalls, hasLength(2));
+    });
+
+    testWidgets('entradas já presentes na fila offline local não contam como novidade', (tester) async {
+      final localVisits = InMemoryVisitStore();
+      await localVisits.save([
+        OfflineVisitRecord(localId: 'ja-existe', patientId: seedPatientId, risk: 'green', status: 'PENDENTE'),
+      ]);
+      final backend = FakeAcsBackend()
+        ..pullEntries = [visitaRemota('ja-existe'), visitaRemota('nova')];
+
+      await tester.pumpWidget(SinalAcsApp(
+        backend: backend,
+        feedBuilder: (queue) => FakeAlertFeed(queue),
+        visitPullService: pullService(backend, localVisits: localVisits),
+      ));
+      await entrar(tester);
+      await settleRealAsync(tester);
+      await tester.tap(find.text('Área'));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('1 atualização recebida da central'), findsOneWidget);
+    });
+  });
+
+  group('território real na tela Área (L-06/RF08)', () {
+    const dbName = 'territorializacao_test.db';
+
+    setUp(() => EncryptedLocalDatabase.deleteDatabaseFile(dbName));
+    tearDown(() => EncryptedLocalDatabase.deleteDatabaseFile(dbName));
+
+    /// Constrói um `VisitPullService` com banco em memória para testes.
+    VisitPullService pullService(FakeAcsBackend backend) =>
+        VisitPullService(
+          backend: backend,
+          cursorStore: SyncCursorStore(
+            keyStore: InMemoryDatabaseKeyStore(),
+            databaseName: dbName,
+            allowUnencryptedForTesting: true,
+          ),
+          localVisits: InMemoryVisitStore(),
+        );
+
+    /// Bombeia frames finitos intercalados com esperas REAIS até o pull
+    /// terminar, porque `VisitPullService` usa um banco de verdade (sqflite
+    /// com round-trip real, não fake) — `pumpAndSettle` sozinho não converge.
+    Future<void> settleRealAsync(WidgetTester tester) async {
+      for (var i = 0; i < 30; i++) {
+        await tester.pump(const Duration(milliseconds: 16));
+        await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+      }
+      await tester.pump();
+    }
+
+    testWidgets('mostra o número real de pacientes da microárea, não o literal fixo', (tester) async {
+      final backend = FakeAcsBackend()
+        ..patients = [
+          MicroAreaPatient(patientId: seedPatientId, name: 'Paciente 1', isChronic: false, chronicConditions: []),
+          MicroAreaPatient(patientId: 'p2', name: 'Paciente 2', isChronic: true, chronicConditions: ['Hipertensão']),
+        ];
+
+      await tester.pumpWidget(SinalAcsApp(
+        backend: backend,
+        feedBuilder: (queue) => FakeAlertFeed(queue),
+        visitPullService: pullService(backend),
+      ));
+      await entrar(tester);
+      await settleRealAsync(tester);
+
+      expect(backend.listPatientsCount, 1);
+
+      await tester.tap(find.text('Área'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('2 cadastrados'), findsOneWidget);
+      expect(find.text('142 cadastrados'), findsNothing);
+    });
+
+    testWidgets('uma falha ao carregar os pacientes mostra o motivo, sem travar a tela', (tester) async {
+      final backend = FakeAcsBackend()
+        ..listPatientsFailure = const BackendFailure('Sem conexão com o servidor.');
+
+      await tester.pumpWidget(SinalAcsApp(
+        backend: backend,
+        feedBuilder: (queue) => FakeAlertFeed(queue),
+        visitPullService: pullService(backend),
+      ));
+      await entrar(tester);
+      await settleRealAsync(tester);
+      await tester.tap(find.text('Área'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Não foi possível carregar'), findsOneWidget);
+      // O motivo só chega à tela pelo banner: a linha "Pacientes sincronizados"
+      // diz que falhou, este diz por quê.
+      expect(find.byKey(const Key('patients_error')), findsOneWidget);
+      expect(find.text('Sem conexão com o servidor.'), findsOneWidget);
+    });
+
+    testWidgets('uma falha não classificada ao carregar pacientes mostra o aviso genérico', (tester) async {
+      // `StateError` não é `BackendFailure` de propósito: cobre o ramo
+      // `catch (error, stackTrace)` de `_loadMicroAreaPatients`, irmão do mesmo
+      // ramo de `_pullVisits` — nenhum `BackendFailure` o exercita.
+      final backend = FakeAcsBackend()..listPatientsUnclassifiedFailure = StateError('queda inesperada');
+
+      await tester.pumpWidget(SinalAcsApp(
+        backend: backend,
+        feedBuilder: (queue) => FakeAlertFeed(queue),
+        visitPullService: pullService(backend),
+      ));
+      await entrar(tester);
+      await settleRealAsync(tester);
+      await tester.tap(find.text('Área'));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('patients_error')), findsOneWidget);
+      expect(find.text('Verifique a conexão e tente de novo.'), findsOneWidget);
+    });
+
+    testWidgets('"Atualizar dados da microárea" também repete o carregamento de pacientes após uma falha', (tester) async {
+      final backend = FakeAcsBackend()..listPatientsFailure = const BackendFailure('Sem conexão com o servidor.');
+
+      await tester.pumpWidget(SinalAcsApp(
+        backend: backend,
+        feedBuilder: (queue) => FakeAlertFeed(queue),
+        visitPullService: pullService(backend),
+      ));
+      await entrar(tester);
+      await settleRealAsync(tester);
+      await tester.tap(find.text('Área'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Não foi possível carregar'), findsOneWidget);
+      expect(backend.listPatientsCount, 1);
+
+      backend.listPatientsFailure = null;
+      backend.patients = [
+        MicroAreaPatient(patientId: seedPatientId, name: 'Paciente 1', isChronic: false, chronicConditions: []),
+      ];
+      await tester.tap(find.byKey(const Key('pull_visits')));
+      await settleRealAsync(tester);
+
+      expect(backend.listPatientsCount, 2);
+      expect(find.text('1 cadastrado'), findsOneWidget);
+    });
+
+    testWidgets('botão de sincronizar fica desabilitado enquanto os pacientes estão carregando', (tester) async {
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: TerritorializationScreen(
+            pulling: false,
+            loadingPatients: true,
+            onRefresh: () {},
+          ),
+        ),
+      ));
+
+      final button = tester.widget<FilledButton>(find.byKey(const Key('pull_visits')));
+      expect(button.onPressed, isNull);
+    });
+  });
+
+  group('sincronização periódica em segundo plano', () {
+    testWidgets('repete a sincronização com a central em intervalos, sem toque manual', (tester) async {
+      final backend = FakeAcsBackend();
+
+      await tester.pumpWidget(SinalAcsApp(
+        backend: backend,
+        feedBuilder: (queue) => FakeAlertFeed(queue),
+        syncInterval: const Duration(seconds: 10),
+      ));
+      await entrar(tester);
+      await tester.pumpAndSettle();
+
+      expect(backend.listPatientsCount, 1);
+
+      await tester.pump(const Duration(seconds: 10));
+      expect(backend.listPatientsCount, 2);
+
+      await tester.pump(const Duration(seconds: 10));
+      expect(backend.listPatientsCount, 3);
+    });
+
+    testWidgets('sair do primeiro plano cancela o ciclo; voltar sincroniza na hora e recomeça', (tester) async {
+      final backend = FakeAcsBackend();
+
+      await tester.pumpWidget(SinalAcsApp(
+        backend: backend,
+        feedBuilder: (queue) => FakeAlertFeed(queue),
+        syncInterval: const Duration(seconds: 10),
+      ));
+      await entrar(tester);
+      await tester.pumpAndSettle();
+      expect(backend.listPatientsCount, 1);
+
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      await tester.pump(const Duration(seconds: 30));
+      // Em segundo plano, nenhum ciclo novo dispara.
+      expect(backend.listPatientsCount, 1);
+
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pumpAndSettle();
+      // Retomar sincroniza imediatamente...
+      expect(backend.listPatientsCount, 2);
+
+      // ...e o ciclo periódico recomeça do zero a partir daqui.
+      await tester.pump(const Duration(seconds: 10));
+      expect(backend.listPatientsCount, 3);
     });
   });
 }

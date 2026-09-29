@@ -197,6 +197,21 @@ compilação/design óbvio, não uma omissão silenciosa. Adicionar um teste que
 enumere os endpoints e falhe se um novo endpoint com acesso a
 `Session.db`/dados de paciente não herdar dessa base.
 
+**Estado atual (verificado 2026-09-18):** a extração recomendada foi implementada —
+`Authorization.require` (`backend/sinalacs_server/lib/src/application/auth/authorization.dart`)
+é a única regra de **papel** e de **presença de território no token**: decide se o
+papel está entre os permitidos e se o token carrega uma microárea. A comparação
+entre a microárea **do paciente** e a do ACS **não** passou por ela e continua em
+cada caso de uso (`onboarding_service.dart:112-113`,
+`visit_sync_service.dart:252-262`) — a guarda nunca vê o paciente, então essa
+checagem não tem como migrar para lá. Os quatro endpoints com postura
+integralmente autenticada estendem `AuthenticatedEndpoint`
+(`backend/sinalacs_server/lib/src/endpoints/authenticated_endpoint.dart`) e
+`test/unit/endpoint_auth_posture_test.dart` falha se um endpoint novo não
+estender a base nem constar da allowlist explícita. `requireLogin` continua
+`false` em todos eles **de propósito**: o `AuthenticationHandler` do Serverpod
+não está conectado, e ligar a flag sem conectá-lo rejeitaria todas as chamadas.
+
 **F5 — Ausência de MFA para ACS (Média)**
 *Categoria:* PR.AA-01 · *SP 800-53:* IA-2(1)
 
@@ -220,6 +235,38 @@ precisa nascer com rate limiting, para não repetir a lacuna.
 
 *Recomendação:* tratar como pré-requisito de design da autenticação
 institucional, não como item avulso.
+
+**Estado atual (2026-09-18):** o rate limiting nasceu junto com a autenticação
+institucional, como recomendado. `InstitutionalAuthService` conta tentativas
+falhas por credencial e bloqueia por 15 minutos após 5
+(`maxFailedAttempts`/`lockDuration`), grava cada desfecho em `audit_logs` e
+responde com mensagem idêntica para matrícula inexistente e senha errada,
+executando uma derivação descartada no caminho da inexistente para o tempo de
+resposta não vazar o que a mensagem esconde. **Continua aberto:** o bloqueio é
+por conta, não por origem — não há limite por IP, então um atacante com muitas
+matrículas válidas distribui as tentativas. O insumo existe
+(`session.request?.remoteInfo`, que `OrmAuditTrail` já resolve atrás do proxy
+para o `ipHash` de `audit_logs`), mas nenhum contador por origem foi
+implementado: o estado de bloqueio vive na linha da credencial. E uma varredura
+de matrículas **inexistentes não deixa rastro em `audit_logs`**:
+`audit_logs.userId` é obrigatório e tem FK para `users`, então não há como
+auditar um sujeito que não existe — o que `spec/lgpd_design.md` pede como
+"registro de tentativas de acesso" fica atendido só para tentativas sobre contas
+reais. Fechar isso exige ou um sujeito por origem (IP) ou uma trilha separada
+sem FK. **E o caminho da matrícula inexistente é um amplificador anônimo, não
+limitado e não auditado:** cada tentativa com matrícula desconhecida executa uma
+derivação Argon2id **descartada** (~70–80 ms, 19 MiB, medidos na stack), porque
+sem ela o tempo de resposta entregaria quais matrículas existem; e esse é
+exatamente o caminho que o bloqueio por conta **não** cobre (não há conta) e que
+não deixa rastro em `audit_logs` (pelo motivo da FK acima). Cada decisão se
+sustenta isolada — a derivação descartada protege a enumeração, o bloqueio
+protege a conta, a auditoria exige sujeito —, mas a combinação deixa qualquer
+requisição anônima converter ~19 MiB de memória e ~80 ms de CPU por chamada, sem
+teto e sem registro. A correção estrutural barata é um **teto global de
+derivações simultâneas** (semáforo em volta do `PasswordHasher`), que limita o
+amplificador independentemente da origem; contar por IP resolveria o mesmo
+problema de forma mais cara e ainda dependente de infraestrutura. `PROGRESS.md`
+registra a mesma lacuna.
 
 **F7 — Gestão de segredos correta em código, sem cofre/rotação (Baixa/Média)**
 *Categoria:* PR.DS-01 · *SP 800-53:* SC-12, SC-28

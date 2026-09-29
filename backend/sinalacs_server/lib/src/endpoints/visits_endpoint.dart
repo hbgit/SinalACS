@@ -1,5 +1,5 @@
 import 'package:serverpod/serverpod.dart';
-import 'package:sinalacs_server/src/application/auth/development_auth_service.dart';
+import 'package:sinalacs_server/src/endpoints/authenticated_endpoint.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
 import 'package:sinalacs_server/src/runtime/alert_runtime.dart';
 
@@ -12,16 +12,13 @@ import 'package:sinalacs_server/src/runtime/alert_runtime.dart';
 /// O lote inteiro roda em uma transação: ou todas as visitas são aplicadas, ou
 /// nenhuma. Um resultado parcial deixaria o dispositivo sem saber o que
 /// reenviar.
-class VisitsEndpoint extends Endpoint {
-  @override
-  bool get requireLogin => false;
-
+class VisitsEndpoint extends AuthenticatedEndpoint {
   Future<List<VisitSyncResult>> sync(
     Session session, {
     required String accessToken,
     required List<VisitSyncEntry> visits,
   }) async {
-    final user = _authenticate(accessToken);
+    final user = authenticate(accessToken);
 
     if (visits.isEmpty) return <VisitSyncResult>[];
 
@@ -38,11 +35,21 @@ class VisitsEndpoint extends Endpoint {
     }
   }
 
-  AuthenticatedUser _authenticate(String accessToken) {
-    final user = AlertRuntime.instance.auth.verifyToken(accessToken);
-    if (user == null) {
-      throw AlertPermissionException(message: 'token inválido ou expirado');
+  /// Sincronização central→dispositivo: visitas da microárea do ACS
+  /// autenticado alteradas após `since`, para reconciliar um device que
+  /// ficou offline ou foi reinstalado.
+  Future<List<VisitSyncEntry>> pull(
+    Session session, {
+    required String accessToken,
+    required DateTime since,
+  }) async {
+    final user = authenticate(accessToken);
+    try {
+      return await AlertRuntime.instance
+          .visitSyncServiceFor(session)
+          .pull(user: user, since: since);
+    } on StateError catch (error) {
+      throw AlertPermissionException(message: error.message);
     }
-    return user;
   }
 }

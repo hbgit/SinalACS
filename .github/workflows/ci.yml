@@ -2,12 +2,43 @@ name: CI
 
 on:
   push:
-    branches: [main, master]
+    # develop entra aqui porque, sem PR develop → main aberta, commit nenhum
+    # de develop rodava CI — foi assim que 74d89c0 ficou sem um run sequer
+    # (FINDING-2/FINDING-4 da avaliação de 2026-09-28).
+    branches: [main, master, develop]
   pull_request:
+  # Para gerar o dado sem precisar abrir PR: `gh workflow run CI --ref <branch>`.
+  workflow_dispatch:
 
+# Um run vivo por PR: push novo na mesma PR cancela o anterior, que já não
+# descreve a ponta dela — o android-e2e sozinho chega a 60 min (FINDING-7).
+# Push e dispatch são agrupados pelo SHA, então nenhum commit de main/develop
+# perde o próprio resultado para o commit seguinte.
+concurrency:
+  group: ci-${{ github.event_name }}-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+# Todos os jobs fixam ubuntu-24.04 em vez de ubuntu-latest: o label migra
+# para Ubuntu 26 a partir de 2026-10-19 sem aviso no dia, e o android-e2e
+# (KVM, udev) e os builds Android (NDK/CMake em cache) são os mais sensíveis à
+# troca. A migração é feita de propósito, depois de um ensaio — ver a Seção 6
+# de docs/ci-audit/2026-09-28-avaliacao-ci-develop.md.
 jobs:
+  # Guarda do próprio workflow: actionlint e as invariantes que a avaliação de
+  # 2026-09-28 mostrou derivarem sem ninguém ver (jobs × documentação,
+  # gatilhos, concorrência, versões de ações, imagem do runner).
+  workflow-lint:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: actionlint
+        run: docker run --rm -v "$PWD:/repo" --workdir /repo rhysd/actionlint:1.7.12 -color
+      - name: Invariantes do CI
+        run: |
+          python3 -c 'import yaml' 2>/dev/null || { sudo apt-get update && sudo apt-get install -y python3-yaml; }
+          ./scripts/qa/ci_invariants.sh
   serverpod-backend:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: backend
@@ -45,7 +76,7 @@ jobs:
           --health-timeout=5s
           --health-retries=5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dart-lang/setup-dart@v1
         with:
           sdk: 3.12.2
@@ -63,16 +94,18 @@ jobs:
         run: |
           printf "test:\n  database: '%s'\n" "$CI_POSTGRES_PASSWORD" \
             > sinalacs_server/config/passwords.yaml
-      # Suíte completa: 16 testes herméticos em test/unit, que usam fakes das
-      # interfaces AlertPublisher e AlertStore, mais 9 de integração que sobem o
-      # servidor em processo pelo harness e exercitam os endpoints tipados.
+      # Suíte completa: os herméticos de test/unit (fakes das interfaces
+      # AlertPublisher/AlertStore e afins, sem banco) mais os de test/integration,
+      # que sobem o servidor em processo pelo harness e exercitam os endpoints
+      # tipados. A contagem exata está na saída deste job — de propósito, não
+      # aqui: número em comentário envelhece e alguém o cita como se fosse atual.
       - run: dart test
         working-directory: backend/sinalacs_server
 
   backend-docker-build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # Imagem do servidor Serverpod, a mesma que o docker-compose constrói.
       # O contexto é a raiz do workspace, porque o build precisa do pubspec.lock
       # compartilhado entre sinalacs_server e sinalacs_client.
@@ -80,26 +113,66 @@ jobs:
         run: docker build -f backend/sinalacs_server/Dockerfile backend
 
   patient-app:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: apps/patient
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.44.8'
       - run: flutter pub get
+      # apps/patient/pubspec.yaml declara assets/certs/ — a pasta das CAs de
+      # desenvolvimento, gitignored e produzida por scripts/dev/sync_dev_ca.sh.
+      # Aquele script exige a stack de pé (valida a CA contra a folha que ela
+      # assina), e este job não tem Docker nem stack; então a pasta é criada
+      # VAZIA, que é o que basta para o que este job roda: o `flutter analyze`
+      # só confere se o diretório existe. Sem ele, o analyze sai 1 num clone
+      # limpo (`asset_directory_does_not_exist`) — é o que acontece aqui desde
+      # que a declaração entrou no pubspec.
+      #
+      # VAZIA NÃO SERVE PARA BUILDAR. `flutter build apk` e `flutter test` não
+      # reclamam do diretório ausente: saem verdes, e o APK vai sem nenhum .crt
+      # dentro — medido, com o diretório ausente e com ele vazio. Com o
+      # diretório ausente ainda sai uma linha "Error: unable to find directory
+      # entry in pubspec.yaml", que o build imprime e ignora; com o diretório
+      # vazio essa linha some, e o build fica silencioso de vez. Quem
+      # acrescentar um build a este job precisa das CAs de verdade:
+      # `docker compose up` e depois ./scripts/dev/sync_dev_ca.sh, que é quem
+      # copia certificado, não pasta.
+      - name: Cria o diretório assets/certs/ que o pubspec declara
+        run: mkdir -p assets/certs
       - run: flutter analyze
       - run: flutter test
 
   acs-app:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: apps/acs
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.44.8'
+      - run: flutter pub get
+      # Mesmo motivo do job patient-app, e o comentário completo está lá:
+      # assets/certs/ é gitignored e vem do scripts/dev/sync_dev_ca.sh, que
+      # precisa da stack de pé. O acs-app já falhava aqui por causa disso antes
+      # de o app do paciente declarar a mesma pasta.
+      - name: Cria o diretório assets/certs/ que o pubspec declara
+        run: mkdir -p assets/certs
+      - run: flutter analyze
+      - run: flutter test
+
+  admin-app:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: apps/admin
+    steps:
+      - uses: actions/checkout@v7
       - uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.44.8'
@@ -107,16 +180,160 @@ jobs:
       - run: flutter analyze
       - run: flutter test
 
-  admin-app:
-    runs-on: ubuntu-latest
+  coverage-report:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: 3.12.2
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.44.8'
+      - name: Dependência nativa do SQLCipher/SQLite no Linux
+        run: sudo apt-get update && sudo apt-get install -y libsqlite3-0
+      - name: Bootstrap do ambiente local de testes
+        run: ./scripts/dev/bootstrap_env.sh
+      - name: Banco de teste do backend
+        run: docker compose --profile test up -d postgres-test
+      - name: Mede cobertura dos quatro pacotes
+        run: ./scripts/qa/measure_coverage.sh
+      - name: Derruba banco de teste
+        if: always()
+        run: docker compose --profile test down
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: coverage-reports
+          path: build/qa/coverage
+
+  android-e2e:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
+    steps:
+      - uses: actions/checkout@v7
+      # Sem isto o emulador roda por emulação de CPU em software: medido, o log
+      # dizia "ProbeKVM: This user doesn't have permissions to use KVM", o boot
+      # levava ~12 min e cada `adb install` de 45 a 95 s. O runner tem
+      # /dev/kvm, só não para o usuário do job — a regra do udev abre o
+      # dispositivo. É o passo documentado pelo android-emulator-runner.
+      - name: Habilita KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.44.8'
+          cache: true
+      # O 1º `assembleDebug` levava 311 s sem cache, 24 deles instalando o
+      # CMake do NDK. Chave pelos pubspec.lock e scripts Gradle dos dois apps
+      # que rodam no emulador — mesmo padrão do job admin-android-build.
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.pub-cache
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+            /usr/local/lib/android/sdk/cmake
+          key: e2e-deps-${{ hashFiles('apps/patient/pubspec.lock', 'apps/acs/pubspec.lock', 'apps/patient/android/**/*.gradle.kts', 'apps/acs/android/**/*.gradle.kts', 'apps/*/android/gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: e2e-deps-
+      # Snapshot do AVD já inicializado: sem ele, todo run paga o primeiro
+      # boot a frio. Os parâmetros do emulador precisam ser os mesmos aqui e
+      # no step que roda os testes, ou o snapshot é descartado.
+      - uses: actions/cache@v6
+        id: avd-cache
+        with:
+          path: |
+            ~/.android/avd/*
+            ~/.android/adb*
+          key: avd-36-x86_64-pixel_7-ubuntu-24.04
+      - name: Gera o snapshot do AVD para o cache
+        if: steps.avd-cache.outputs.cache-hit != 'true'
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 36
+          arch: x86_64
+          profile: pixel_7
+          force-avd-creation: false
+          disable-animations: false
+          emulator-options: -no-window -no-audio -gpu swiftshader_indirect -no-boot-anim
+          script: echo "snapshot do AVD gerado para o cache"
+      - name: Bootstrap da stack local
+        run: ./scripts/dev/bootstrap_env.sh
+      # O que não depende do emulador sai de dentro do step dele: o
+      # `docker compose up --build` e os `flutter pub get` do e2e.sh viram
+      # cache hit (os `pub get` sequenciais levavam ~4 min lá dentro).
+      - name: Pré-build da stack e dependências dos apps
+        run: |
+          # `wait` sem argumento sempre sai 0; esperar cada PID propaga a falha.
+          docker compose build & p1=$!
+          (cd apps/patient && flutter pub get) & p2=$!
+          (cd apps/acs && flutter pub get) & p3=$!
+          wait $p1 && wait $p2 && wait $p3
+      - name: E2E no emulador Android
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 36
+          arch: x86_64
+          profile: pixel_7
+          force-avd-creation: false
+          disable-animations: true
+          emulator-options: -no-window -no-audio -gpu swiftshader_indirect -no-snapshot-save -no-boot-anim
+          # Uma linha só: a action roda cada linha de "script" como um `sh -c`
+          # separado, então lógica multi-linha (if/fi, set -a + source .env)
+          # precisa viver num script de verdade — ver run_android_e2e.sh.
+          # Roda só o smoke de cada app (e2e.sh --emulator, sem --full).
+          script: ./scripts/qa/run_android_e2e.sh
+      # O volume do Postgres fica no workspace com modo 700 e dono do
+      # container. O pós-passo do flutter-action faz hashFiles('**/pubspec.lock')
+      # sobre o workspace inteiro, não consegue ler pg_data/ e derruba o job
+      # depois de o E2E ter passado — medido no run 36494654391.
+      - name: Remove pg_data/ do workspace
+        if: always()
+        run: sudo rm -rf pg_data
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: android-e2e-metrics
+          path: build/qa/latency
+
+  # Único job do repositório que executa o Gradle. `flutter analyze` e
+  # `flutter test` não enxergam namespace inconsistente, AGP/Kotlin
+  # incompatíveis, MainActivity em pacote errado nem merge de manifest
+  # quebrado — erros que só apareceriam quando alguém tentasse compilar.
+  #
+  # É o app admin e não o ACS porque `apps/acs/android/app/build.gradle.kts`
+  # tem a guarda que faz o build falhar sem SINALACS_MQTT_PASSWORD: cobri-lo
+  # aqui exigiria compilar um APK que a própria guarda declara inútil.
+  admin-android-build:
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: apps/admin
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '17'
       - uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.44.8'
+      # Sem cache, cada execução rebaixa ~200MB de Gradle e AGP.
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-admin-${{ hashFiles('apps/admin/android/**/*.gradle.kts', 'apps/admin/android/gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: gradle-admin-
       - run: flutter pub get
-      - run: flutter analyze
-      - run: flutter test
+      - run: flutter build apk --debug

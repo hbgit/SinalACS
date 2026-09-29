@@ -6,6 +6,7 @@ import 'package:sinalacs_server/src/infrastructure/database/orm_audit_chain_read
 import 'package:sinalacs_server/src/runtime/alert_runtime.dart';
 import 'package:test/test.dart';
 
+import '../support/health_data_fixtures.dart';
 import 'test_tools/serverpod_test_tools.dart';
 
 /// Prova, contra Postgres real, o que `patient_directory_service_test.dart` e
@@ -20,11 +21,17 @@ const _ubsId = '00000000-0000-4000-8000-000000000004';
 
 const _patientInAreaId = '00000000-0000-4000-8000-000000000005';
 const _patientOutsideAreaId = '00000000-0000-4000-8000-000000000009';
+const _unknownPatientId = '00000000-0000-4000-8000-0000000000ee';
 
 AppConfig _config() => AppConfig(
       mqttBroker: 'localhost:1883',
       jwtSecret: 'test-secret',
       auditChainSecret: 'test-audit-chain-secret',
+      // Hex de 64 caracteres: HealthDataCipher decodifica byte a byte
+      // para montar a chave AES-256 (ver AppConfig).
+      healthDataEncryptionKey: AppConfig.developmentHealthDataEncryptionKey,
+      cpfHashPepper: AppConfig.developmentCpfHashPepper,
+      smsGateway: 'log',
       mqttUsername: null,
       mqttPassword: null,
       mqttUseTls: false,
@@ -103,20 +110,35 @@ Future<void> _seed(Session session) async {
     ),
   );
   await Patient.db.insert(session, [
-    Patient(
-      id: UuidValue.fromString(_patientInAreaId),
+    await encryptedPatient(
+      id: _patientInAreaId,
       emergencyContact: 'Contato de desenvolvimento',
       isChronic: true,
-      chronicConditions: ['hipertensão'],
+      chronicConditions: const ['hipertensão'],
     ),
-    Patient(
-      id: UuidValue.fromString(_patientOutsideAreaId),
+    await encryptedPatient(
+      id: _patientOutsideAreaId,
       emergencyContact: 'Contato de desenvolvimento',
       isChronic: false,
-      chronicConditions: [],
     ),
   ]);
 }
+
+VisitSyncEntry _visitEntry({
+  required String localId,
+  required String patientId,
+  required int version,
+}) =>
+    VisitSyncEntry(
+      localId: localId,
+      patientId: patientId,
+      scheduledAt: DateTime.utc(2026, 9, 12, 9),
+      status: 'realizada',
+      riskLevelBefore: RiskLevel.green,
+      notes: const {},
+      version: version,
+      arrivalMethod: ArrivalMethod.manual,
+    );
 
 void main() {
   withServerpod('Dado o diretório de pacientes e a territorialização do sync',
@@ -158,6 +180,18 @@ void main() {
       expect(rows.single.ipHash, isNotEmpty);
     });
 
+    test('patients.listMicroArea rejeita token inválido', () async {
+      await _seed(sessionBuilder.build());
+
+      await expectLater(
+        endpoints.patients.listMicroArea(
+          sessionBuilder,
+          accessToken: 'token-invalido',
+        ),
+        throwsA(isA<AlertPermissionException>()),
+      );
+    });
+
     test('duas escritas reais na trilha ficam encadeadas e passam na verificação',
         () async {
       final session = sessionBuilder.build();
@@ -179,6 +213,7 @@ void main() {
             riskLevelBefore: RiskLevel.green,
             notes: const {},
             version: 0,
+            arrivalMethod: ArrivalMethod.manual,
           ),
         ],
       );
@@ -217,6 +252,7 @@ void main() {
             riskLevelBefore: RiskLevel.green,
             notes: const {},
             version: 0,
+            arrivalMethod: ArrivalMethod.manual,
           ),
         ],
       );
@@ -232,6 +268,171 @@ void main() {
       );
       expect(audited, hasLength(1));
       expect(audited.single.resourceId, UuidValue.fromString(_patientOutsideAreaId));
+    });
+
+    test('visits.sync devolve lista vazia quando não há visitas', () async {
+      await _seed(sessionBuilder.build());
+      final login =
+          await endpoints.auth.developmentLogin(sessionBuilder, role: 'acs');
+
+      final results = await endpoints.visits.sync(
+        sessionBuilder,
+        accessToken: login.accessToken,
+        visits: const [],
+      );
+
+      expect(results, isEmpty);
+    });
+
+    test('visits.sync expõe synced, conflict e error pelo endpoint', () async {
+      final session = sessionBuilder.build();
+      await _seed(session);
+      final login =
+          await endpoints.auth.developmentLogin(sessionBuilder, role: 'acs');
+
+      final synced = await endpoints.visits.sync(
+        sessionBuilder,
+        accessToken: login.accessToken,
+        visits: [
+          _visitEntry(
+            localId: '00000000-0000-4000-8000-0000000000c1',
+            patientId: _patientInAreaId,
+            version: 0,
+          ),
+        ],
+      );
+      expect(synced.single.syncStatus, SyncStatus.synced);
+      expect(synced.single.serverVersion, 1);
+
+      final update = await endpoints.visits.sync(
+        sessionBuilder,
+        accessToken: login.accessToken,
+        visits: [
+          _visitEntry(
+            localId: '00000000-0000-4000-8000-0000000000c1',
+            patientId: _patientInAreaId,
+            version: 0,
+          ),
+        ],
+      );
+      expect(update.single.syncStatus, SyncStatus.synced);
+      expect(update.single.serverVersion, 2);
+
+      final conflict = await endpoints.visits.sync(
+        sessionBuilder,
+        accessToken: login.accessToken,
+        visits: [
+          _visitEntry(
+            localId: '00000000-0000-4000-8000-0000000000c1',
+            patientId: _patientInAreaId,
+            version: 0,
+          ),
+        ],
+      );
+      expect(conflict.single.syncStatus, SyncStatus.conflict);
+      expect(conflict.single.serverVersion, 2);
+
+      final error = await endpoints.visits.sync(
+        sessionBuilder,
+        accessToken: login.accessToken,
+        visits: [
+          _visitEntry(
+            localId: '00000000-0000-4000-8000-0000000000c2',
+            patientId: _unknownPatientId,
+            version: 0,
+          ),
+        ],
+      );
+      expect(error.single.syncStatus, SyncStatus.error);
+      expect(error.single.message, contains('paciente não encontrado'));
+
+      final rows = await Visit.db.find(session);
+      expect(rows, hasLength(1), reason: 'somente a visita válida deve persistir');
+    });
+
+    test(
+        'visits.pull devolve só visitas da própria microárea, alteradas após '
+        'since, contra Postgres real', () async {
+      final session = sessionBuilder.build();
+      await _seed(session);
+
+      final referencia = DateTime.utc(2026, 9, 16, 12);
+
+      // As notas viajam cifradas na coluna (RNF03): o fixture monta o par
+      // `notesEncrypted`/`notesKeyVersion` com a mesma chave de
+      // desenvolvimento que o `AlertRuntime` usa aqui.
+      final notasVazias = await encryptedVisitNotes(const {});
+
+      Visit visita({
+        required String localId,
+        required String patientId,
+        required DateTime syncAt,
+      }) =>
+          Visit(
+            patientId: UuidValue.fromString(patientId),
+            acsId: UuidValue.fromString(_acsId),
+            scheduledAt: DateTime.utc(2026, 9, 12, 9),
+            completedAt: DateTime.utc(2026, 9, 12, 10),
+            status: 'realizada',
+            riskLevelBefore: RiskLevel.green,
+            riskLevelAfter: RiskLevel.green,
+            notesEncrypted: notasVazias.ciphertextBase64,
+            notesKeyVersion: notasVazias.keyVersion,
+            syncStatus: SyncStatus.synced,
+            localId: UuidValue.fromString(localId),
+            syncAt: syncAt,
+            version: 1,
+          );
+
+      // Grava direto no banco (via seed), não via `visits.sync` — o objetivo
+      // aqui é provar o filtro de leitura, não o fluxo de gravação.
+      final visitaRecenteMesmaArea = await Visit.db.insertRow(
+        session,
+        visita(
+          localId: '00000000-0000-4000-8000-0000000000f1',
+          patientId: _patientInAreaId,
+          syncAt: referencia.add(const Duration(hours: 1)),
+        ),
+      );
+      await Visit.db.insertRow(
+        session,
+        visita(
+          localId: '00000000-0000-4000-8000-0000000000f2',
+          patientId: _patientInAreaId,
+          syncAt: referencia.subtract(const Duration(hours: 1)),
+        ),
+      );
+      await Visit.db.insertRow(
+        session,
+        visita(
+          localId: '00000000-0000-4000-8000-0000000000f3',
+          patientId: _patientOutsideAreaId,
+          syncAt: referencia.add(const Duration(hours: 1)),
+        ),
+      );
+
+      final login = await endpoints.auth.developmentLogin(sessionBuilder, role: 'acs');
+      final result = await endpoints.visits.pull(
+        sessionBuilder,
+        accessToken: login.accessToken,
+        since: referencia,
+      );
+
+      expect(result.map((e) => e.localId), [visitaRecenteMesmaArea.localId.uuid]);
+    });
+
+    test('visits.pull rejeita quem não é ACS territorializado', () async {
+      await _seed(sessionBuilder.build());
+      final login = await endpoints.auth.developmentLogin(sessionBuilder, role: 'patient');
+
+      await expectLater(
+        endpoints.visits.pull(
+          sessionBuilder,
+          accessToken: login.accessToken,
+          since: DateTime.utc(2026, 9, 16, 12),
+        ),
+        throwsA(isA<AlertPermissionException>()),
+      );
     });
   });
 }

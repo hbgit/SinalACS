@@ -1,0 +1,8 @@
+### Resultado da conclusão do onboarding pelo paciente: já vem com a sessão
+### ativa, mesma forma de `DevelopmentLoginResult` — reaproveita o mecanismo
+### de token existente porque a autenticação institucional (RF01/RF07)
+### segue como decisão separada e bloqueada.
+class: EnrollmentResult
+fields:
+  accessToken: String
+  tokenType: String

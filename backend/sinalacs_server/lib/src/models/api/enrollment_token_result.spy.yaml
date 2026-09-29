@@ -1,0 +1,7 @@
+### Resultado da geração de um convite de onboarding pelo ACS.
+class: EnrollmentTokenResult
+fields:
+  ### Valor em claro, de uso único — só existe nesta resposta. Vira o
+  ### conteúdo do QR Code exibido ao paciente.
+  token: String
+  expiresAt: DateTime

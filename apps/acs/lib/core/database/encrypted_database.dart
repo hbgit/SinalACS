@@ -19,8 +19,11 @@ class EncryptedLocalDatabase {
   /// com a versão anterior instalada tem — e uma `offline_visits` com
   /// `patient_name`. v2 grava `patient_id`. v4 acrescenta `rejection_reason`,
   /// para a visita recusada em definitivo pelo servidor (`SyncStatus.rejected`)
-  /// ficar visível no aparelho em vez de retentar para sempre.
-  static const schemaVersion = 4;
+  /// ficar visível no aparelho em vez de retentar para sempre. v5 acrescenta
+  /// `sync_cursor`, para o cursor de `visits.pull` (`SyncCursorStore`) — dado
+  /// operacional do dispositivo, não uma visita, mas vive no mesmo banco
+  /// criptografado por estar sob a mesma política de proteção.
+  static const schemaVersion = 5;
 
   /// Visitas registradas offline, aguardando sincronização.
   ///
@@ -42,7 +45,15 @@ CREATE TABLE IF NOT EXISTS offline_visits (
   rejection_reason TEXT
 )''';
 
-  /// Migração v1 → v2, v2 → v3 e v3 → v4.
+  /// Cursor de sincronização central→dispositivo (`visits.pull`), por
+  /// instalação do app — ver `SyncCursorStore`.
+  static const createSyncCursor = '''
+CREATE TABLE IF NOT EXISTS sync_cursor (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+)''';
+
+  /// Migração v1 → v2, v2 → v3, v3 → v4 e v4 → v5.
   ///
   /// Nenhuma das duas formas de v1 guarda o UUID do paciente: `patient_name`
   /// era `'Paciente ' + 8 dos 32 dígitos hex`, irreversível. Sem UUID,
@@ -86,6 +97,12 @@ CREATE TABLE IF NOT EXISTS offline_visits (
           'ALTER TABLE offline_visits ADD COLUMN rejection_reason TEXT;',
         );
       }
+    }
+
+    if (from < 5) {
+      // Aditiva: `CREATE TABLE IF NOT EXISTS` não toca em `offline_visits`,
+      // então nenhuma visita pendente ou recusada existente é perdida.
+      await db.execute(createSyncCursor);
     }
   }
 
@@ -136,7 +153,10 @@ CREATE TABLE IF NOT EXISTS offline_visits (
         path,
         password: passphrase,
         version: schemaVersion,
-        onCreate: (db, version) => db.execute(createOfflineVisits),
+        onCreate: (db, version) async {
+          await db.execute(createOfflineVisits);
+          await db.execute(createSyncCursor);
+        },
         onUpgrade: _upgrade,
         // Um rollback de APK abriria um arquivo v2 pedindo v1 e lançaria,
         // deixando o app travado a cada abertura.
@@ -148,7 +168,10 @@ CREATE TABLE IF NOT EXISTS offline_visits (
       path,
       options: OpenDatabaseOptions(
         version: schemaVersion,
-        onCreate: (db, version) => db.execute(createOfflineVisits),
+        onCreate: (db, version) async {
+          await db.execute(createOfflineVisits);
+          await db.execute(createSyncCursor);
+        },
         onUpgrade: _upgrade,
         onDowngrade: onDatabaseDowngradeDelete,
       ),

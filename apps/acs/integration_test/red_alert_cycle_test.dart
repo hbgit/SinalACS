@@ -5,24 +5,45 @@
 ///
 /// Pré-requisitos:
 ///   · `docker compose up` com o database-seed concluído;
-///   · `./scripts/dev/sync_dev_ca.sh` — a CA do broker é asset do app e é
-///     regerada, não versionada.
+///   · `./scripts/dev/sync_dev_ca.sh` — as DUAS CAs são assets do app (a do
+///     broker, para o MQTT, e a do RPC, para o HTTPS) e são geradas, não
+///     versionadas.
 ///
 /// O caminho pronto é `./scripts/qa/e2e.sh --emulator`, que sobe a stack e
 /// preenche os dart-defines a partir do `.env`. À mão:
 ///
 ///   flutter test integration_test \
-///     --dart-define=SINALACS_HOST=http://10.0.2.2:8080/ \
+///     --dart-define=SINALACS_HOST=https://10.0.2.2/ \
 ///     --dart-define=SINALACS_MQTT_HOST=10.0.2.2 \
 ///     --dart-define=SINALACS_MQTT_PASSWORD="$MQTT_ACS_PASSWORD"
+///
+/// A CI usa `https://localhost:8443/` com `adb reverse tcp:8443 tcp:443` e
+/// `adb reverse tcp:8883 tcp:8883` em vez de 10.0.2.2: medido no runner da CI
+/// que 10.0.2.2 não chega à stack, embora funcione num emulador local comum. A
+/// porta do RPC no dispositivo não pode ser 443 — medido, `adb reverse` recusa
+/// abrir listener em porta privilegiada dentro do emulador —, mas isso não
+/// afeta o Host que o Traefik casa nem o hostname que o TLS verifica, só o
+/// nome (`localhost`) importa para os dois. 8883 (MQTT) já não é privilegiada,
+/// então mantém a mesma porta dos dois lados.
 ///
 /// A senha é obrigatória: ela não tem default no `BackendConfig`.
 ///
 /// PRIVACIDADE: só os UUIDs sintéticos do seed.
+///
+/// Medido no runner da CI (sem aceleração de hardware — nem KVM nem HAXM, só
+/// swiftshader por software): "a visita confirmada SAI do disco criptografado"
+/// combina abrir/gravar/fechar um banco SQLCipher real com uma chamada de rede
+/// real (`visits.sync`), e as duas juntas passam dos 30s default do
+/// `package:test` só nesse emulador — o mesmo teste tem tempo de sobra num
+/// emulador local acelerado. O timeout maior cobre o arquivo inteiro porque o
+/// teste seguinte faz a mesma combinação.
+@Timeout(Duration(minutes: 2))
 library;
 
 import 'dart:async';
+import 'dart:io';
 
+import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:sinalacs_acs/core/database/encrypted_database.dart';
@@ -39,6 +60,23 @@ import 'package:sinalacs_client/sinalacs_client.dart' as api;
 const seedMicroAreaId = '00000000-0000-4000-8000-000000000003';
 const seedPatientId = '00000000-0000-4000-8000-000000000001';
 const otherMicroAreaId = '00000000-0000-4000-8000-000000000099';
+
+/// Bytes da CA de desenvolvimento do RPC, lidos do bundle do app.
+///
+/// É o MESMO trabalho que `main.dart` faz. Ausente, o cliente cai no
+/// armazenamento do sistema e o handshake falha — o que apareceria como "sem
+/// conexão", culpando a rede por um asset que ninguém copiou.
+///
+/// Atenção: a CA do **broker** é outra, e o `MqttAlertFeed` a carrega sozinho
+/// ([BackendConfig.mqttCaAsset]) — são dois destinos, duas CAs.
+Future<List<int>?> _devRpcCaBytes() async {
+  try {
+    final data = await rootBundle.load(BackendConfig.rpcCaAsset);
+    return data.buffer.asUint8List();
+  } catch (_) {
+    return null;
+  }
+}
 
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
@@ -58,11 +96,30 @@ void main() {
   late BackendClient backend;
   late api.Client patientClient;
 
-  setUp(() {
-    backend = BackendClient();
-    // O paciente entra em cena só para dar ao ACS o que receber.
+  setUp(() async {
+    // O cliente do app é o mesmo caminho de `main.dart`: a CA do RPC vem do
+    // bundle e é a ÚNICA raiz confiável (RNF04/L-08). Sem ela o handshake
+    // falha — de propósito: o armazenamento do sistema não conhece a CA de
+    // desenvolvimento.
+    //
+    // Por isso a ausência do asset **falha aqui e alto**: sem esta guarda, este
+    // arquivo acusa "sem conexão" e o sintoma aponta para o servidor quando o
+    // problema é o bundle. Mesmo molde de
+    // `apps/patient/integration_test/backend_connection_test.dart`.
+    final caBytes = await _devRpcCaBytes();
+    if (caBytes == null) {
+      fail(
+        'A CA do RPC não está no bundle (${BackendConfig.rpcCaAsset}). Rode '
+        './scripts/dev/sync_dev_ca.sh com a stack de pé — sem ela o handshake '
+        'falha e este teste falaria de rede em vez de falar de asset.',
+      );
+    }
+    backend = BackendClient(trustedCaBytes: caBytes);
+    // O paciente entra em cena só para dar ao ACS o que receber. Ele usa o
+    // `api.Client` cru, então monta o mesmo `SecurityContext` à mão.
     patientClient = api.Client(
-      const String.fromEnvironment('SINALACS_HOST', defaultValue: 'http://10.0.2.2:8080/'),
+      const String.fromEnvironment('SINALACS_HOST', defaultValue: 'https://10.0.2.2/'),
+      securityContext: SecurityContext()..setTrustedCertificatesBytes(caBytes),
     )..connectivityMonitor = null;
   });
 
@@ -82,14 +139,18 @@ void main() {
   }
 
   test('o ACS autentica e recebe a própria microárea', () async {
-    final session = await backend.login();
+    // `developmentLogin` e não o login institucional: este arquivo roda contra
+    // a stack local com `ENABLE_DEV_LOGIN=true` e não carrega a senha do ACS
+    // (RF07) — o caminho com matrícula e senha é coberto pelo widget test e
+    // pelo teste de renovação de sessão, sem senha real em código de teste.
+    final session = await backend.developmentLogin(role: 'acs');
 
     expect(session.role, 'acs');
     expect(session.microAreaId, seedMicroAreaId);
   });
 
   test('o alerta publicado pelo backend chega ao ACS pelo broker e é confirmado', () async {
-    final session = await backend.login();
+    final session = await backend.developmentLogin(role: 'acs');
     final microAreaId = session.microAreaId!;
 
     final queue = AlertQueue(microAreaId: microAreaId);
@@ -154,7 +215,7 @@ void main() {
   });
 
   test('confirmar um alerta inexistente devolve acknowledged: false, não erro', () async {
-    await backend.login();
+    await backend.developmentLogin(role: 'acs');
 
     final ack = await backend.acknowledge(
       alertId: '00000000-0000-4000-8000-0000000000ff',
@@ -164,7 +225,7 @@ void main() {
   });
 
   test('a fila offline de visitas sincroniza contra o servidor', () async {
-    await backend.login();
+    await backend.developmentLogin(role: 'acs');
 
     final queue = OfflineVisitQueue(
       synchronizer: BackendVisitSynchronizer(backend: backend),
@@ -193,7 +254,7 @@ void main() {
     const nome = 'sinalacs_retencao_probe.db';
     await EncryptedLocalDatabase.deleteDatabaseFile(nome);
 
-    await backend.login();
+    await backend.developmentLogin(role: 'acs');
 
     final store = SqlCipherVisitStore(
       keyStore: InMemoryDatabaseKeyStore(),
@@ -223,7 +284,7 @@ void main() {
   });
 
   test('reenviar a mesma visita não a duplica no servidor', () async {
-    await backend.login();
+    await backend.developmentLogin(role: 'acs');
 
     // `version` fica no padrão 1, que é a versão com que o servidor grava todo
     // insert. Enviar 0 fazia o reenvio cair na regra de atualização

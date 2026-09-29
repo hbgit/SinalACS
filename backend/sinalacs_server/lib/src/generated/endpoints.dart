@@ -15,10 +15,11 @@ import 'package:serverpod/serverpod.dart' as _i1;
 import '../endpoints/alerts_endpoint.dart' as _i2;
 import '../endpoints/auth_endpoint.dart' as _i3;
 import '../endpoints/health_endpoint.dart' as _i4;
-import '../endpoints/patients_endpoint.dart' as _i5;
-import '../endpoints/triage_endpoint.dart' as _i6;
-import '../endpoints/visits_endpoint.dart' as _i7;
-import 'package:sinalacs_server/src/generated/api/visit_sync_entry.dart' as _i8;
+import '../endpoints/onboarding_endpoint.dart' as _i5;
+import '../endpoints/patients_endpoint.dart' as _i6;
+import '../endpoints/triage_endpoint.dart' as _i7;
+import '../endpoints/visits_endpoint.dart' as _i8;
+import 'package:sinalacs_server/src/generated/api/visit_sync_entry.dart' as _i9;
 
 class Endpoints extends _i1.EndpointDispatch {
   @override
@@ -42,19 +43,25 @@ class Endpoints extends _i1.EndpointDispatch {
           'health',
           null,
         ),
-      'patients': _i5.PatientsEndpoint()
+      'onboarding': _i5.OnboardingEndpoint()
+        ..initialize(
+          server,
+          'onboarding',
+          null,
+        ),
+      'patients': _i6.PatientsEndpoint()
         ..initialize(
           server,
           'patients',
           null,
         ),
-      'triage': _i6.TriageEndpoint()
+      'triage': _i7.TriageEndpoint()
         ..initialize(
           server,
           'triage',
           null,
         ),
-      'visits': _i7.VisitsEndpoint()
+      'visits': _i8.VisitsEndpoint()
         ..initialize(
           server,
           'visits',
@@ -83,6 +90,11 @@ class Endpoints extends _i1.EndpointDispatch {
               type: _i1.getType<String>(),
               nullable: false,
             ),
+            'locationCell': _i1.ParameterDescription(
+              name: 'locationCell',
+              type: _i1.getType<String?>(),
+              nullable: true,
+            ),
           },
           call:
               (
@@ -94,6 +106,7 @@ class Endpoints extends _i1.EndpointDispatch {
                     accessToken: params['accessToken'],
                     idempotencyKey: params['idempotencyKey'],
                     locationHash: params['locationHash'],
+                    locationCell: params['locationCell'],
                   ),
         ),
         'acknowledge': _i1.MethodConnector(
@@ -121,6 +134,24 @@ class Endpoints extends _i1.EndpointDispatch {
                     alertId: params['alertId'],
                   ),
         ),
+        'statusFor': _i1.MethodConnector(
+          name: 'statusFor',
+          params: {
+            'accessToken': _i1.ParameterDescription(
+              name: 'accessToken',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async => (endpoints['alerts'] as _i2.AlertsEndpoint).statusFor(
+                session,
+                accessToken: params['accessToken'],
+              ),
+        ),
       },
     );
     connectors['auth'] = _i1.EndpointConnector(
@@ -146,6 +177,91 @@ class Endpoints extends _i1.EndpointDispatch {
                     role: params['role'],
                   ),
         ),
+        'loginInstitutional': _i1.MethodConnector(
+          name: 'loginInstitutional',
+          params: {
+            'matricula': _i1.ParameterDescription(
+              name: 'matricula',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'password': _i1.ParameterDescription(
+              name: 'password',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'deviceId': _i1.ParameterDescription(
+              name: 'deviceId',
+              type: _i1.getType<String?>(),
+              nullable: true,
+            ),
+          },
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async =>
+                  (endpoints['auth'] as _i3.AuthEndpoint).loginInstitutional(
+                    session,
+                    matricula: params['matricula'],
+                    password: params['password'],
+                    deviceId: params['deviceId'],
+                  ),
+        ),
+        'requestOtp': _i1.MethodConnector(
+          name: 'requestOtp',
+          params: {
+            'cpf': _i1.ParameterDescription(
+              name: 'cpf',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'birthDate': _i1.ParameterDescription(
+              name: 'birthDate',
+              type: _i1.getType<DateTime>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async => (endpoints['auth'] as _i3.AuthEndpoint).requestOtp(
+                session,
+                cpf: params['cpf'],
+                birthDate: params['birthDate'],
+              ),
+        ),
+        'verifyOtp': _i1.MethodConnector(
+          name: 'verifyOtp',
+          params: {
+            'cpf': _i1.ParameterDescription(
+              name: 'cpf',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'code': _i1.ParameterDescription(
+              name: 'code',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'deviceId': _i1.ParameterDescription(
+              name: 'deviceId',
+              type: _i1.getType<String?>(),
+              nullable: true,
+            ),
+          },
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async => (endpoints['auth'] as _i3.AuthEndpoint).verifyOtp(
+                session,
+                cpf: params['cpf'],
+                code: params['code'],
+                deviceId: params['deviceId'],
+              ),
+        ),
       },
     );
     connectors['health'] = _i1.EndpointConnector(
@@ -161,6 +277,74 @@ class Endpoints extends _i1.EndpointDispatch {
                 Map<String, dynamic> params,
               ) async =>
                   (endpoints['health'] as _i4.HealthEndpoint).check(session),
+        ),
+      },
+    );
+    connectors['onboarding'] = _i1.EndpointConnector(
+      name: 'onboarding',
+      endpoint: endpoints['onboarding']!,
+      methodConnectors: {
+        'generateEnrollmentToken': _i1.MethodConnector(
+          name: 'generateEnrollmentToken',
+          params: {
+            'accessToken': _i1.ParameterDescription(
+              name: 'accessToken',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'patientId': _i1.ParameterDescription(
+              name: 'patientId',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async => (endpoints['onboarding'] as _i5.OnboardingEndpoint)
+                  .generateEnrollmentToken(
+                    session,
+                    accessToken: params['accessToken'],
+                    patientId: params['patientId'],
+                  ),
+        ),
+        'completeEnrollment': _i1.MethodConnector(
+          name: 'completeEnrollment',
+          params: {
+            'token': _i1.ParameterDescription(
+              name: 'token',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'healthDataConsent': _i1.ParameterDescription(
+              name: 'healthDataConsent',
+              type: _i1.getType<bool>(),
+              nullable: false,
+            ),
+            'remindersConsent': _i1.ParameterDescription(
+              name: 'remindersConsent',
+              type: _i1.getType<bool>(),
+              nullable: false,
+            ),
+            'pushConsent': _i1.ParameterDescription(
+              name: 'pushConsent',
+              type: _i1.getType<bool>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async => (endpoints['onboarding'] as _i5.OnboardingEndpoint)
+                  .completeEnrollment(
+                    session,
+                    token: params['token'],
+                    healthDataConsent: params['healthDataConsent'],
+                    remindersConsent: params['remindersConsent'],
+                    pushConsent: params['pushConsent'],
+                  ),
         ),
       },
     );
@@ -182,10 +366,72 @@ class Endpoints extends _i1.EndpointDispatch {
                 _i1.Session session,
                 Map<String, dynamic> params,
               ) async =>
-                  (endpoints['patients'] as _i5.PatientsEndpoint).listMicroArea(
+                  (endpoints['patients'] as _i6.PatientsEndpoint).listMicroArea(
                     session,
                     accessToken: params['accessToken'],
                   ),
+        ),
+        'myChronicConditions': _i1.MethodConnector(
+          name: 'myChronicConditions',
+          params: {
+            'accessToken': _i1.ParameterDescription(
+              name: 'accessToken',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async => (endpoints['patients'] as _i6.PatientsEndpoint)
+                  .myChronicConditions(
+                    session,
+                    accessToken: params['accessToken'],
+                  ),
+        ),
+        'updateChronicConditions': _i1.MethodConnector(
+          name: 'updateChronicConditions',
+          params: {
+            'accessToken': _i1.ParameterDescription(
+              name: 'accessToken',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'conditions': _i1.ParameterDescription(
+              name: 'conditions',
+              type: _i1.getType<List<String>>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async => (endpoints['patients'] as _i6.PatientsEndpoint)
+                  .updateChronicConditions(
+                    session,
+                    accessToken: params['accessToken'],
+                    conditions: params['conditions'],
+                  ),
+        ),
+        'myData': _i1.MethodConnector(
+          name: 'myData',
+          params: {
+            'accessToken': _i1.ParameterDescription(
+              name: 'accessToken',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async => (endpoints['patients'] as _i6.PatientsEndpoint).myData(
+                session,
+                accessToken: params['accessToken'],
+              ),
         ),
       },
     );
@@ -196,6 +442,11 @@ class Endpoints extends _i1.EndpointDispatch {
         'evaluate': _i1.MethodConnector(
           name: 'evaluate',
           params: {
+            'accessToken': _i1.ParameterDescription(
+              name: 'accessToken',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
             'chestPain': _i1.ParameterDescription(
               name: 'chestPain',
               type: _i1.getType<bool>(),
@@ -231,8 +482,9 @@ class Endpoints extends _i1.EndpointDispatch {
               (
                 _i1.Session session,
                 Map<String, dynamic> params,
-              ) async => (endpoints['triage'] as _i6.TriageEndpoint).evaluate(
+              ) async => (endpoints['triage'] as _i7.TriageEndpoint).evaluate(
                 session,
+                accessToken: params['accessToken'],
                 chestPain: params['chestPain'],
                 difficultyBreathing: params['difficultyBreathing'],
                 fever: params['fever'],
@@ -257,7 +509,7 @@ class Endpoints extends _i1.EndpointDispatch {
             ),
             'visits': _i1.ParameterDescription(
               name: 'visits',
-              type: _i1.getType<List<_i8.VisitSyncEntry>>(),
+              type: _i1.getType<List<_i9.VisitSyncEntry>>(),
               nullable: false,
             ),
           },
@@ -265,10 +517,34 @@ class Endpoints extends _i1.EndpointDispatch {
               (
                 _i1.Session session,
                 Map<String, dynamic> params,
-              ) async => (endpoints['visits'] as _i7.VisitsEndpoint).sync(
+              ) async => (endpoints['visits'] as _i8.VisitsEndpoint).sync(
                 session,
                 accessToken: params['accessToken'],
                 visits: params['visits'],
+              ),
+        ),
+        'pull': _i1.MethodConnector(
+          name: 'pull',
+          params: {
+            'accessToken': _i1.ParameterDescription(
+              name: 'accessToken',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'since': _i1.ParameterDescription(
+              name: 'since',
+              type: _i1.getType<DateTime>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async => (endpoints['visits'] as _i8.VisitsEndpoint).pull(
+                session,
+                accessToken: params['accessToken'],
+                since: params['since'],
               ),
         ),
       },

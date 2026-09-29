@@ -7,6 +7,7 @@ class AlertDelivery {
     required this.microAreaId,
     required this.riskLevel,
     required this.locationHash,
+    this.locationCell,
     required this.triggeredAt,
   });
 
@@ -17,6 +18,12 @@ class AlertDelivery {
   final String microAreaId;
   final String riskLevel;
   final String locationHash;
+
+  /// Célula geográfica de baixa resolução (~1,1 km), para o mapa do ACS
+  /// desenhar uma área de incerteza — nunca um ponto exato. `null` quando o
+  /// dispositivo não conseguiu GPS (mesmo caso de `unknownLocationHash`).
+  /// Decisão: docs/superpowers/specs/2026-09-16-decisoes-produto-pos-validacao.md §1.
+  final String? locationCell;
   final DateTime triggeredAt;
 
   String get topic => '$topicPrefix/$microAreaId/alerts';
@@ -28,6 +35,7 @@ class AlertDelivery {
         'micro_area_id': microAreaId,
         'risk_level': riskLevel,
         'location_hash': locationHash,
+        if (locationCell != null) 'location_cell': locationCell,
         'triggered_at': triggeredAt.toUtc().toIso8601String(),
       });
 
@@ -50,6 +58,7 @@ class AlertDelivery {
         microAreaId: json['micro_area_id'] as String,
         riskLevel: json['risk_level'] as String,
         locationHash: json['location_hash'] as String,
+        locationCell: json['location_cell'] as String?,
         triggeredAt: DateTime.parse(triggeredAtRaw),
       );
     } on FormatException {

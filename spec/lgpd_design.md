@@ -10,6 +10,32 @@ A estratégia de conformidade adota os princípios de **Privacy by Design** e **
 
 ## 1. Requisitos de Conformidade LGPD para o Sistema
 
+### Implementação atual do hash de localização
+
+O app do paciente lê a localização somente em primeiro plano, quando a pessoa
+confirma um alerta. Latitude e longitude não são enviadas ao backend nem ao
+MQTT: são normalizadas em seis casas decimais e transformadas em um digest
+SHA-256 truncado para `locationHash`. Quando a permissão, o serviço ou o GPS
+falham, o alerta continua sendo enviado com `unknownLocationHash`, e a tela
+informa que a localização não foi anexada.
+
+Esse hash é pseudonimização, não anonimização. A precisão atualmente adotada
+pode permitir reidentificação por força bruta ou correlação com a microárea,
+especialmente em áreas rurais. A validação em dispositivo ainda é obrigatória
+para fechar L-02.
+
+**Decisão de produto (2026-09-16):** a alternativa aprovada para o mapa do
+ACS (RF10, achado L-05) é a **geocélula arredondada** — reduzir a precisão da
+normalização antes do hash (de seis para três casas decimais por padrão) e
+transmitir, além do `locationHash` já existente, uma célula espacial de baixa
+resolução (`locationCell`) só para desenho do mapa, nunca a coordenada crua.
+Essa decisão ainda não foi implementada — nenhuma migração, endpoint ou app
+foi alterado por ela. Ver
+`docs/superpowers/specs/2026-09-16-decisoes-produto-pos-validacao.md` §1 para
+o desenho completo (quem lê cada dado, retenção e o que muda no envelope
+MQTT). `spec/validation_report.md` continua classificando L-05/RF10 como
+bloqueador até essa implementação existir com teste.
+
 ### LGPD-RF01 - Coleta Mínima e Transparente
 
 | Propriedade | Descrição |
@@ -31,6 +57,25 @@ A estratégia de conformidade adota os princípios de **Privacy by Design** e **
 | **Base Legal** | Art. 5º, XII e XIII; Art. 7º, I; Art. 8º |
 | **Artigos LGPD** | 5º, XII; 7º, I; 8º, §1º, §2º, §3º, §4º, §5º, §6º |
 | **Critério de Aceite** | ✓ Consentimento é requerido para cada finalidade distinta<br>✓ Opções de consentimento são independentes (não agrupadas)<br>✓ Registro de consentimento com timestamp e versão<br>✓ Possibilidade de revogação por finalidade específica |
+
+**Estado atual (verificado 2026-09-18):** `consent_logs` é gravada por
+`OnboardingService.completeEnrollment` para as três finalidades (§2 de
+`docs/superpowers/specs/2026-09-16-decisoes-produto-pos-validacao.md`).
+Do lado da leitura: `ConsentPurpose.localReminders` agora é respeitada —
+`RemindersScreen` (`apps/patient/lib/app/app.dart`) só agenda notificações
+locais quando o consentimento espelhado no aparelho
+(`core/consent/consent_preferences.dart`) é `true`, com padrão de recusa
+(`false`) quando não há registro local.
+
+**Aviso — `ConsentPurpose.segmentedPush` continua sem leitor.** RF14 (avisos
+segmentados por push) não tem nenhum código de envio no repositório ainda —
+está bloqueado externamente na provisão de um projeto Firebase (§3.2 do
+mesmo documento de decisões), não apenas pendente de implementação. Não há
+o que "respeitar" hoje porque nada envia. Quando `notices.sendSegmented` for
+implementado, ele **deve** consultar o consentimento de `segmentedPush`
+antes de enviar, com o mesmo padrão de recusa por omissão adotado aqui para
+`localReminders` — tratar isso como parte da implementação de RF14, não
+como um item separado a lembrar depois.
 
 ### LGPD-RF03 - Gerenciamento de Preferências de Privacidade
 
@@ -437,7 +482,7 @@ A estratégia de conformidade adota os princípios de **Privacy by Design** e **
 |-------------|-----------|
 | **Decisão** | A chave do SQLCipher é aleatória (256 bits) e fica no Android Keystore / iOS Keychain, via `flutter_secure_storage`. Não é derivada de PIN nem de biometria. |
 | **Contexto** | `spec/PRD_system.md` (4.2.3) prescreve "chave derivada do PIN/Biometria (PBKDF2)"; `spec/test_plan.md` (item 1 da matriz de risco) fala em "chave gerada pelo TEE do hardware". Adotamos a segunda leitura. |
-| **Motivo** | Não existe nenhum fluxo de PIN nos apps — a autenticação é `auth.developmentLogin`, sem credencial. Derivar de PIN exigiria projetar definição, desbloqueio, política de tentativas e recuperação; e um PIN esquecido significaria perder visitas ainda não sincronizadas. O keystore protege contra o risco que esta seção nomeia (acesso físico ao dispositivo) sem inventar produto. |
+| **Motivo** | Não existe nenhum fluxo de PIN nos apps — a autenticação é `auth.developmentLogin`, sem credencial. Derivar de PIN exigiria projetar definição, desbloqueio, política de tentativas e recuperação; e um PIN esquecido significaria perder visitas ainda não sincronizadas. O keystore protege contra o risco que esta seção nomeia (acesso físico ao dispositivo) sem inventar produto. **Atualização (2026-09-18):** no app do ACS a autenticação deixou de ser o `developmentLogin` — passou a ser institucional (matrícula + senha, RF07), com a credencial só em memória e nada em disco. A decisão da chave não muda: continua não existindo fluxo de PIN em app nenhum, e o `developmentLogin` segue para as ferramentas de desenvolvimento e para o login do app do paciente, que RF01 ainda não substituiu. **Atualização (2026-09-19):** o app do paciente também deixou de usar o `developmentLogin` — o login dele é passwordless (CPF + data de nascimento + código OTP, RF01) —, então o token de desenvolvimento ficou só nas ferramentas (`tool/`, `integration_test/`) nos dois apps, como o parágrafo anterior já registrava para o ACS. Nada nesta linha muda com isso: segue não existindo fluxo de PIN em app nenhum, e a custódia da chave continua no keystore. |
 | **Reversibilidade** | A interface `DatabaseKeyStore` aceita um segundo fator depois, envelopando a chave, **sem migrar dados**. O caminho do PRD segue aberto. |
 | **Limite conhecido** | Num aparelho comprometido (root) com o usuário autenticado, a chave é alcançável. Proteger contra isso exigiria o fator de posse do PIN. |
 | **Verificação** | `apps/acs/integration_test/encrypted_storage_test.dart` lê o arquivo do banco e afirma que ele não contém o conteúdo em texto plano. Roda em dispositivo — no CI (Linux) o caminho é o FFI, que não criptografa, e por isso a abertura fora de Android/iOS lança por padrão. |
@@ -573,7 +618,7 @@ A estratégia de conformidade adota os princípios de **Privacy by Design** e **
 | Propriedade | Descrição |
 |-------------|-----------|
 | **Descrição** | Todas as APIs devem exigir autenticação (JWT) e implementar controle de acesso (RBAC) para garantir que apenas usuários autorizados acessem dados específicos. |
-| **Implementação** | Middleware de autenticação na camada de aplicação do backend; validação de permissões por endpoint; tokens JWT com expiração curta; refresh token seguro. Ainda não implementado no código atual — hoje só existe um endpoint de login de desenvolvimento sem autenticação institucional real (ver `CLAUDE.md`). |
+| **Implementação** | Middleware de autenticação na camada de aplicação do backend; validação de permissões por endpoint; tokens JWT com expiração curta; refresh token seguro. Ainda não implementado no código atual — hoje só existe um endpoint de login de desenvolvimento sem autenticação institucional real (ver `CLAUDE.md`). **Atualização (2026-09-18):** o login institucional existe (`auth.loginInstitutional`, RF07) — matrícula + senha verificadas com Argon2id contra `user_credentials`, com bloqueio por tentativas e auditoria em `audit_logs` — e a verificação de token dos endpoints sensíveis está centralizada (`Authorization.require`; os endpoints estendem `AuthenticatedEndpoint`). O que segue pendente desta linha: o token expira em 15 minutos, **não há refresh token** (LGPD-RT06) e os papéis `coordinator`/`admin` continuam sem caminho de emissão. **Atualização (2026-09-19):** o TTL deixou de ser um só. A sessão emitida pelo **login do paciente** (passwordless, RF01) vale **1 hora**, aplicando LGPD-RT06 — o código OTP é de uso único e não se reapresenta, então não existe renovação silenciosa desse lado; a do **ACS** continua em **15 minutos**, renovada em silêncio pela credencial que vive em memória (RF07). A assimetria é deliberada, e é a diferença entre as duas que precisa ser lida como decisão e não como inconsistência. Dentro do lado do paciente há uma exceção conhecida: o *onboarding* (`onboarding.completeEnrollment`, RF02) ainda emite o padrão de 15 minutos, porque o caminho dele não passa por esta decisão — lacuna com dono no `PROGRESS.md`. O que segue pendente: **não há refresh token** (LGPD-RT06) — é ele que permitiria devolver o TTL do paciente aos 15 minutos sem quebrar a experiência —, e os papéis `coordinator`/`admin` continuam sem caminho de emissão. |
 | **Critério de Aceite** | ✓ Todas as APIs autenticadas<br>✓ Testes de acesso não autorizado<br>✓ RBAC implementado e testado |
 
 ### LGPD-RT02 - Criptografia de Dados Sensíveis no Banco

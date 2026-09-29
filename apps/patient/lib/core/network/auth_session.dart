@@ -2,9 +2,10 @@ import 'dart:convert';
 
 /// Sessão autenticada contra o backend.
 ///
-/// **Não é autenticação institucional.** O token vem de
-/// `auth.developmentLogin`, que só existe com `ENABLE_DEV_LOGIN=true` e serve
-/// para validar a conexão, não para proteger dado real.
+/// Vem do login do produto — `auth.verifyOtp`, o RF01 — ou, nas ferramentas de
+/// desenvolvimento (`tool/`, `integration_test/`), de `auth.developmentLogin`,
+/// que só existe com `ENABLE_DEV_LOGIN=true`. Os dois emitem o mesmo token; o
+/// que muda é o TTL (ver [isExpired]).
 class AuthSession {
   const AuthSession({
     required this.accessToken,
@@ -69,11 +70,22 @@ class AuthSession {
     }
   }
 
-  /// O token de desenvolvimento vive 15 minutos.
+  /// O token do paciente vive 1 hora (LGPD-RT06), decidido no servidor.
+  ///
+  /// São 60 minutos, e não os 15 do ACS, porque não existe renovação silenciosa
+  /// deste lado: nem o código OTP (`auth.verifyOtp`) nem o convite de uso único
+  /// (`onboarding.completeEnrollment`) se reapresentam como a senha do ACS, e
+  /// nenhum dos dois tem credencial reutilizável para reautenticar sem a
+  /// pessoa. Ao expirar, o app **não** se renova — pede que ela entre de novo.
+  ///
+  /// Os dois caminhos de emissão do papel `patient` concordam nessa hora desde
+  /// o fechamento do defeito de RF02 registrado no `PROGRESS.md` — o app lê a
+  /// expiração do `exp` do token, então funciona com as duas sem precisar
+  /// saber qual das duas o emitiu.
   ///
   /// A margem existe para não enviar um token que expira no meio da viagem:
-  /// sem ela, um fluxo longo falha com erro de permissão em vez de
-  /// reautenticar, que é um sintoma bem mais confuso de diagnosticar.
+  /// sem ela, a chamada falharia no servidor com uma resposta que não diz que o
+  /// problema foi o relógio.
   bool isExpired({
     DateTime? now,
     Duration margin = const Duration(seconds: 30),

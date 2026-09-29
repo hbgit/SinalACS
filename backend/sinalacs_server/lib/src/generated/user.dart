@@ -75,6 +75,14 @@ abstract class User
 
   String name;
 
+  /// `spec/lgpd_data_audit.md` recomenda o tipo SQL `date` aqui, e a recomendação
+  /// segue **em aberto**. Não é expressável no DSL do Serverpod (3.4.13): `type=` é
+  /// o tipo Dart do campo, `DateTime` mapeia fixo para `timestamp without time zone`,
+  /// `ColumnType` não tem a variante `date` e o gerador recusa o modelo. Um
+  /// `ALTER ... USING "birthDate"::date` escrito à mão deixaria o schema-de-registro
+  /// mentindo (e um `create-repair-migration` reverteria a coluna). A coluna carrega
+  /// sempre meia-noite UTC e `PasswordlessAuthService` compara por dia, não por
+  /// instante — é por isso que o login funciona apesar disso.
   DateTime birthDate;
 
   _i2.UserRole role;
@@ -299,6 +307,14 @@ class UserTable extends _i1.Table<_i1.UuidValue?> {
 
   late final _i1.ColumnString name;
 
+  /// `spec/lgpd_data_audit.md` recomenda o tipo SQL `date` aqui, e a recomendação
+  /// segue **em aberto**. Não é expressável no DSL do Serverpod (3.4.13): `type=` é
+  /// o tipo Dart do campo, `DateTime` mapeia fixo para `timestamp without time zone`,
+  /// `ColumnType` não tem a variante `date` e o gerador recusa o modelo. Um
+  /// `ALTER ... USING "birthDate"::date` escrito à mão deixaria o schema-de-registro
+  /// mentindo (e um `create-repair-migration` reverteria a coluna). A coluna carrega
+  /// sempre meia-noite UTC e `PasswordlessAuthService` compara por dia, não por
+  /// instante — é por isso que o login funciona apesar disso.
   late final _i1.ColumnDateTime birthDate;
 
   late final _i1.ColumnEnum<_i2.UserRole> role;

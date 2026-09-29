@@ -12,7 +12,6 @@
 // ignore_for_file: no_leading_underscores_for_library_prefixes
 
 import 'package:serverpod/serverpod.dart' as _i1;
-import 'package:sinalacs_server/src/generated/protocol.dart' as _i2;
 
 /// Dados clínicos do paciente.
 ///
@@ -28,16 +27,19 @@ abstract class Patient
     this.id,
     required this.emergencyContact,
     required this.isChronic,
-    required this.chronicConditions,
+    String? chronicConditionsEncrypted,
+    int? chronicConditionsKeyVersion,
     this.lastLocationHash,
     this.lastTriageAt,
-  });
+  }) : chronicConditionsEncrypted = chronicConditionsEncrypted ?? '',
+       chronicConditionsKeyVersion = chronicConditionsKeyVersion ?? 1;
 
   factory Patient({
     _i1.UuidValue? id,
     required String emergencyContact,
     required bool isChronic,
-    required List<String> chronicConditions,
+    String? chronicConditionsEncrypted,
+    int? chronicConditionsKeyVersion,
     String? lastLocationHash,
     DateTime? lastTriageAt,
   }) = _PatientImpl;
@@ -49,9 +51,10 @@ abstract class Patient
           : _i1.UuidValueJsonExtension.fromJson(jsonSerialization['id']),
       emergencyContact: jsonSerialization['emergencyContact'] as String,
       isChronic: _i1.BoolJsonExtension.fromJson(jsonSerialization['isChronic']),
-      chronicConditions: _i2.Protocol().deserialize<List<String>>(
-        jsonSerialization['chronicConditions'],
-      ),
+      chronicConditionsEncrypted:
+          jsonSerialization['chronicConditionsEncrypted'] as String?,
+      chronicConditionsKeyVersion:
+          jsonSerialization['chronicConditionsKeyVersion'] as int?,
       lastLocationHash: jsonSerialization['lastLocationHash'] as String?,
       lastTriageAt: jsonSerialization['lastTriageAt'] == null
           ? null
@@ -72,7 +75,20 @@ abstract class Patient
 
   bool isChronic;
 
-  List<String> chronicConditions;
+  /// JSON de List<String>, cifrado em AES-256-GCM (RNF03, INV-04). Decifrado
+  /// e cifrado na borda do repositório (OrmPatientDirectoryStore), nunca em
+  /// application/ — ver docs/superpowers/specs/2026-09-16-decisoes-produto-pos-validacao.md §6.
+  ///
+  /// O tipo é String e não List<String> porque o Serverpod persiste
+  /// exatamente os campos do modelo: não existe "coluna cifrada com tipo
+  /// estruturado". A tradução JSON↔List<String> deixou de ser automática e
+  /// passou a ser explícita no store ORM, que já é a fronteira entre o mundo
+  /// tipado de application/ e o mundo persistido.
+  String chronicConditionsEncrypted;
+
+  /// Versão da chave que cifrou o campo acima, para permitir rotação futura
+  /// sem reescrever todas as linhas de uma vez.
+  int chronicConditionsKeyVersion;
 
   String? lastLocationHash;
 
@@ -88,7 +104,8 @@ abstract class Patient
     _i1.UuidValue? id,
     String? emergencyContact,
     bool? isChronic,
-    List<String>? chronicConditions,
+    String? chronicConditionsEncrypted,
+    int? chronicConditionsKeyVersion,
     String? lastLocationHash,
     DateTime? lastTriageAt,
   });
@@ -99,7 +116,8 @@ abstract class Patient
       if (id != null) 'id': id?.toJson(),
       'emergencyContact': emergencyContact,
       'isChronic': isChronic,
-      'chronicConditions': chronicConditions.toJson(),
+      'chronicConditionsEncrypted': chronicConditionsEncrypted,
+      'chronicConditionsKeyVersion': chronicConditionsKeyVersion,
       if (lastLocationHash != null) 'lastLocationHash': lastLocationHash,
       if (lastTriageAt != null) 'lastTriageAt': lastTriageAt?.toJson(),
     };
@@ -112,7 +130,8 @@ abstract class Patient
       if (id != null) 'id': id?.toJson(),
       'emergencyContact': emergencyContact,
       'isChronic': isChronic,
-      'chronicConditions': chronicConditions.toJson(),
+      'chronicConditionsEncrypted': chronicConditionsEncrypted,
+      'chronicConditionsKeyVersion': chronicConditionsKeyVersion,
       if (lastLocationHash != null) 'lastLocationHash': lastLocationHash,
       if (lastTriageAt != null) 'lastTriageAt': lastTriageAt?.toJson(),
     };
@@ -155,14 +174,16 @@ class _PatientImpl extends Patient {
     _i1.UuidValue? id,
     required String emergencyContact,
     required bool isChronic,
-    required List<String> chronicConditions,
+    String? chronicConditionsEncrypted,
+    int? chronicConditionsKeyVersion,
     String? lastLocationHash,
     DateTime? lastTriageAt,
   }) : super._(
          id: id,
          emergencyContact: emergencyContact,
          isChronic: isChronic,
-         chronicConditions: chronicConditions,
+         chronicConditionsEncrypted: chronicConditionsEncrypted,
+         chronicConditionsKeyVersion: chronicConditionsKeyVersion,
          lastLocationHash: lastLocationHash,
          lastTriageAt: lastTriageAt,
        );
@@ -175,7 +196,8 @@ class _PatientImpl extends Patient {
     Object? id = _Undefined,
     String? emergencyContact,
     bool? isChronic,
-    List<String>? chronicConditions,
+    String? chronicConditionsEncrypted,
+    int? chronicConditionsKeyVersion,
     Object? lastLocationHash = _Undefined,
     Object? lastTriageAt = _Undefined,
   }) {
@@ -183,8 +205,10 @@ class _PatientImpl extends Patient {
       id: id is _i1.UuidValue? ? id : this.id,
       emergencyContact: emergencyContact ?? this.emergencyContact,
       isChronic: isChronic ?? this.isChronic,
-      chronicConditions:
-          chronicConditions ?? this.chronicConditions.map((e0) => e0).toList(),
+      chronicConditionsEncrypted:
+          chronicConditionsEncrypted ?? this.chronicConditionsEncrypted,
+      chronicConditionsKeyVersion:
+          chronicConditionsKeyVersion ?? this.chronicConditionsKeyVersion,
       lastLocationHash: lastLocationHash is String?
           ? lastLocationHash
           : this.lastLocationHash,
@@ -209,12 +233,17 @@ class PatientUpdateTable extends _i1.UpdateTable<PatientTable> {
     value,
   );
 
-  _i1.ColumnValue<List<String>, List<String>> chronicConditions(
-    List<String> value,
-  ) => _i1.ColumnValue(
-    table.chronicConditions,
-    value,
-  );
+  _i1.ColumnValue<String, String> chronicConditionsEncrypted(String value) =>
+      _i1.ColumnValue(
+        table.chronicConditionsEncrypted,
+        value,
+      );
+
+  _i1.ColumnValue<int, int> chronicConditionsKeyVersion(int value) =>
+      _i1.ColumnValue(
+        table.chronicConditionsKeyVersion,
+        value,
+      );
 
   _i1.ColumnValue<String, String> lastLocationHash(String? value) =>
       _i1.ColumnValue(
@@ -240,9 +269,15 @@ class PatientTable extends _i1.Table<_i1.UuidValue?> {
       'isChronic',
       this,
     );
-    chronicConditions = _i1.ColumnSerializable<List<String>>(
-      'chronicConditions',
+    chronicConditionsEncrypted = _i1.ColumnString(
+      'chronicConditionsEncrypted',
       this,
+      hasDefault: true,
+    );
+    chronicConditionsKeyVersion = _i1.ColumnInt(
+      'chronicConditionsKeyVersion',
+      this,
+      hasDefault: true,
     );
     lastLocationHash = _i1.ColumnString(
       'lastLocationHash',
@@ -260,7 +295,20 @@ class PatientTable extends _i1.Table<_i1.UuidValue?> {
 
   late final _i1.ColumnBool isChronic;
 
-  late final _i1.ColumnSerializable<List<String>> chronicConditions;
+  /// JSON de List<String>, cifrado em AES-256-GCM (RNF03, INV-04). Decifrado
+  /// e cifrado na borda do repositório (OrmPatientDirectoryStore), nunca em
+  /// application/ — ver docs/superpowers/specs/2026-09-16-decisoes-produto-pos-validacao.md §6.
+  ///
+  /// O tipo é String e não List<String> porque o Serverpod persiste
+  /// exatamente os campos do modelo: não existe "coluna cifrada com tipo
+  /// estruturado". A tradução JSON↔List<String> deixou de ser automática e
+  /// passou a ser explícita no store ORM, que já é a fronteira entre o mundo
+  /// tipado de application/ e o mundo persistido.
+  late final _i1.ColumnString chronicConditionsEncrypted;
+
+  /// Versão da chave que cifrou o campo acima, para permitir rotação futura
+  /// sem reescrever todas as linhas de uma vez.
+  late final _i1.ColumnInt chronicConditionsKeyVersion;
 
   late final _i1.ColumnString lastLocationHash;
 
@@ -271,7 +319,8 @@ class PatientTable extends _i1.Table<_i1.UuidValue?> {
     id,
     emergencyContact,
     isChronic,
-    chronicConditions,
+    chronicConditionsEncrypted,
+    chronicConditionsKeyVersion,
     lastLocationHash,
     lastTriageAt,
   ];

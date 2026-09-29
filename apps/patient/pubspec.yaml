@@ -28,6 +28,11 @@ dependencies:
   # Preferência de tema (claro/escuro/automático) — dado de UI não sensível,
   # não precisa do Keystore/Keychain do flutter_secure_storage.
   shared_preferences: ^2.3.2
+  # Usado diretamente por `core/reminders/reminder_scheduler.dart` para
+  # construir o `tz.TZDateTime` que `zonedSchedule` exige. Já vinha como
+  # transitiva de `flutter_local_notifications`; declarada aqui porque o
+  # código do app importa `package:timezone/timezone.dart` diretamente.
+  timezone: ^0.9.4
 
 dev_dependencies:
   flutter_test:
@@ -38,3 +43,7 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    # CAs de desenvolvimento (broker MQTT e RPC), copiadas por
+    # scripts/dev/sync_dev_ca.sh. Regeneráveis e fora do versionamento.
+    - assets/certs/

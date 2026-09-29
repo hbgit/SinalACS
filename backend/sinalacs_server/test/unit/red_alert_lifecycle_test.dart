@@ -37,6 +37,11 @@ class RecordingStore implements AlertStore {
   @override
   Future<void> rememberIdempotencyKey(RedAlertRecord record) async =>
       keys[record.idempotencyKey] = record;
+
+  @override
+  Future<AlertStatusSnapshot?> latestForPatient(String patientId) async {
+    throw UnimplementedError('não usado nos testes deste arquivo');
+  }
 }
 
 

@@ -16,6 +16,11 @@ const otherMicroAreaId = '00000000-0000-4000-8000-000000000099';
 String syntheticPatientId(int n) =>
     '00000000-0000-4000-8000-${n.toString().padLeft(12, '0')}';
 
+/// Célula de teste com centro determinístico (ver
+/// `apps/acs/test/location_cell_test.dart`), para exercitar o caminho do
+/// mapa com posição sem depender de GPS real de paciente algum.
+const testLocationCell = '-1580:-4783';
+
 class FakeAcsBackend implements AcsBackend {
   FakeAcsBackend({this.loginFailure, this.acknowledged = true, this.microAreaId = seedMicroAreaId});
 
@@ -43,13 +48,30 @@ class FakeAcsBackend implements AcsBackend {
   @override
   bool get isAuthenticated => _session != null;
 
-  @override
-  Future<ServiceHealth> health() async =>
-      ServiceHealth(status: 'ok', mqttConnected: true, dbConnected: true);
+
+  /// Credencial que [login] recebeu. `null` enquanto a tela não chamar o
+  /// backend — é o que prova tanto "enviou o que foi digitado" quanto "campo em
+  /// branco não chamou nada".
+  ({String matricula, String senha})? lastCredentials;
 
   @override
-  Future<AuthSession> login() async {
+  Future<AuthSession> login({
+    required String matricula,
+    required String senha,
+  }) async {
     loginCount++;
+    lastCredentials = (matricula: matricula, senha: senha);
+    return _issueSession();
+  }
+
+  /// Ferramenta de desenvolvimento (`tool/`, `integration_test/`). Sem
+  /// credencial, não há o que registrar: quem exercita o caminho do produto
+  /// (RF07) é [login].
+  @override
+  Future<AuthSession> developmentLogin({required String role}) =>
+      _issueSession();
+
+  Future<AuthSession> _issueSession() async {
     final failure = loginFailure;
     if (failure != null) throw failure;
 
@@ -102,12 +124,45 @@ class FakeAcsBackend implements AcsBackend {
     ];
   }
 
+  /// Falha não classificada (não é `BackendFailure`), para exercitar o ramo
+  /// `catch (error, ...)` genérico de `_loadMicroAreaPatients` em `app.dart` —
+  /// algo que nenhum `BackendFailure` simula. Checada antes de
+  /// [listPatientsFailure].
+  Object? listPatientsUnclassifiedFailure;
+
   @override
   Future<List<MicroAreaPatient>> listPatients() async {
     listPatientsCount++;
+    final unclassified = listPatientsUnclassifiedFailure;
+    if (unclassified != null) throw unclassified;
     final failure = listPatientsFailure;
     if (failure != null) throw failure;
     return patients;
+  }
+
+  /// Entradas que `pullVisits` devolve. Vazio por padrão.
+  List<VisitSyncEntry> pullEntries = const [];
+
+  /// Falha da chamada, como uma queda de rede ou sessão expirada.
+  BackendFailure? pullFailure;
+
+  /// Falha não classificada (não é `BackendFailure`), para exercitar o ramo
+  /// `catch (error, ...)` genérico de `_pullVisits` em `app.dart` — algo que
+  /// nenhum `BackendFailure` simula. Checada antes de [pullFailure].
+  Object? pullUnclassifiedFailure;
+
+  /// `since` recebido em cada chamada, na ordem em que ocorreram — prova que
+  /// o cursor lido é exatamente o que chega ao backend.
+  final List<DateTime> pullSinceCalls = <DateTime>[];
+
+  @override
+  Future<List<VisitSyncEntry>> pullVisits({required DateTime since}) async {
+    pullSinceCalls.add(since);
+    final unclassified = pullUnclassifiedFailure;
+    if (unclassified != null) throw unclassified;
+    final failure = pullFailure;
+    if (failure != null) throw failure;
+    return pullEntries;
   }
 
   @override
@@ -240,6 +295,10 @@ PrioritizedAlert testAlert({
   String riskLevel = 'red',
   String microAreaId = seedMicroAreaId,
   DateTime? triggeredAt,
+  // Ausente por padrão: um teste que não passar isto exercita o caminho
+  // "sem GPS no paciente", que é o estado mais comum e não deve fabricar
+  // marcador nenhum no mapa.
+  String? locationCell,
 }) {
   return PrioritizedAlert(
     alertId: alertId,
@@ -247,6 +306,7 @@ PrioritizedAlert testAlert({
     microAreaId: microAreaId,
     riskLevel: riskLevel,
     locationHash: 'sem-local-00',
+    locationCell: locationCell,
     triggeredAt: triggeredAt ?? DateTime.utc(2026, 9, 11, 12),
   );
 }

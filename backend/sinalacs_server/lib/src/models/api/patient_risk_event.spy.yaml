@@ -1,0 +1,12 @@
+### Um evento de classificação de risco do próprio titular, para o histórico
+### do painel "Meus Dados" (LGPD). Vem de `triage_sessions.resultRisk` ou de
+### `alerts.riskLevel` — as duas tabelas não se unificam num tipo comum, e
+### `source` é o que diferencia. Nunca o conteúdo bruto de uma triagem
+### (`answersEncrypted`) nem a localização de um alerta: só a classificação e
+### quando ela aconteceu.
+class: PatientRiskEvent
+fields:
+  ### 'triage' ou 'alert'.
+  source: String
+  riskLevel: RiskLevel
+  recordedAt: DateTime

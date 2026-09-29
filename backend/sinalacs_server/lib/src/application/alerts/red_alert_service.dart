@@ -1,5 +1,6 @@
 import 'package:uuid/uuid.dart';
 
+import 'package:sinalacs_server/src/application/auth/authorization.dart';
 import 'package:sinalacs_server/src/application/auth/development_auth_service.dart';
 import 'package:sinalacs_server/src/domain/entities/alert_delivery.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
@@ -23,6 +24,10 @@ abstract interface class AlertStore {
 
   /// Registra a chave na mesma unidade de trabalho do alerta.
   Future<void> rememberIdempotencyKey(RedAlertRecord record);
+
+  /// Alerta mais recente do paciente, para RF05 (`alerts.statusFor`). `null`
+  /// quando o paciente nunca disparou um alerta.
+  Future<AlertStatusSnapshot?> latestForPatient(String patientId);
 }
 
 /// Fila durável de entregas pendentes.
@@ -64,6 +69,31 @@ class RedAlertRecord {
   final String idempotencyKey;
 }
 
+/// Status do alerta mais recente de um paciente, para RF05.
+///
+/// Espelha os campos que `Alert` guarda além de [AlertDelivery] — `status` e
+/// `acknowledgedAt` não existem no envelope MQTT, só na linha persistida.
+class AlertStatusSnapshot {
+  const AlertStatusSnapshot({
+    required this.alertId,
+    required this.riskLevel,
+    required this.status,
+    required this.triggeredAt,
+    this.acknowledgedAt,
+  });
+
+  final String alertId;
+  final RiskLevel riskLevel;
+  final AlertStatus status;
+  final DateTime triggeredAt;
+  final DateTime? acknowledgedAt;
+}
+
+/// Formato produzido por `locationCellFrom()` (apps/patient/lib/core/privacy/location_cell.dart):
+/// `"<latCell>:<lngCell>"`, dois inteiros (a célula é `(coordenada /
+/// cellSizeDegrees).floor()`, então pode ser negativa) separados por `:`.
+final _locationCellFormat = RegExp(r'^-?\d{1,6}:-?\d{1,6}$');
+
 class RedAlertService {
   RedAlertService({
     required AlertStore store,
@@ -81,12 +111,26 @@ class RedAlertService {
     required AuthenticatedUser user,
     required String idempotencyKey,
     required String locationHash,
+    String? locationCell,
   }) async {
-    if (user.role != UserRole.patient || user.microAreaId == null) {
-      throw StateError('Somente pacientes territorializados podem criar alertas.');
-    }
+    Authorization.require(
+      user,
+      roles: {UserRole.patient},
+      onDenied: () =>
+          StateError('Somente pacientes territorializados podem criar alertas.'),
+    );
     if (idempotencyKey.isEmpty || locationHash.isEmpty) {
       throw ArgumentError('A chave de idempotência e a localização são obrigatórias.');
+    }
+    if (locationCell != null && locationCell.isNotEmpty && !_locationCellFormat.hasMatch(locationCell)) {
+      // `locationCell` é opcional (GPS pode estar indisponível no
+      // dispositivo), mas quando presente precisa ser exatamente o formato
+      // que `locationCellFrom()` produz (apps/patient/lib/core/privacy/location_cell.dart):
+      // dois inteiros, possivelmente negativos, separados por `:`. Sem esta
+      // checagem, um valor malformado (coordenada decimal, texto arbitrário)
+      // entraria direto em `AlertDelivery.locationCell` e quebraria o mapa do
+      // ACS, que espera célula, não ponto.
+      throw ArgumentError('locationCell inválido — formato esperado "<latCell>:<lngCell>".');
     }
 
     final existing = await _store.findByIdempotencyKey(idempotencyKey);
@@ -104,6 +148,7 @@ class RedAlertService {
       microAreaId: user.microAreaId!,
       riskLevel: 'red',
       locationHash: locationHash,
+      locationCell: locationCell,
       triggeredAt: triggeredAt,
     );
     final record = RedAlertRecord(delivery: alert, idempotencyKey: idempotencyKey);
@@ -128,12 +173,32 @@ class RedAlertService {
   String _newAlertId() => _uuid.v4();
 
   Future<bool> acknowledge({required AuthenticatedUser user, required String alertId}) {
-    if (user.role != UserRole.acs || user.microAreaId == null) {
-      throw StateError('Somente ACS territorializados podem confirmar alertas.');
-    }
+    Authorization.require(
+      user,
+      roles: {UserRole.acs},
+      onDenied: () =>
+          StateError('Somente ACS territorializados podem confirmar alertas.'),
+    );
     if (alertId.trim().isEmpty) {
       throw ArgumentError('O identificador do alerta é obrigatório.');
     }
     return _store.acknowledge(alertId: alertId, acsId: user.id, microAreaId: user.microAreaId!);
+  }
+
+  /// Status do alerta mais recente do próprio paciente autenticado (RF05,
+  /// decisão §5). O paciente nunca informa `patientId` — vem sempre do token
+  /// (INV-05), mesma disciplina de `TriageSessionService`/`VisitSyncService`.
+  Future<AlertStatusSnapshot?> statusFor({required AuthenticatedUser user}) async {
+    // `requireMicroArea: false` preserva a regra de hoje: `statusFor` é
+    // escopado ao próprio titular pelo `user.id` do token (INV-05), então um
+    // paciente sem microárea continua podendo ver o próprio status.
+    Authorization.require(
+      user,
+      roles: {UserRole.patient},
+      onDenied: () =>
+          StateError('Somente pacientes podem consultar o status do próprio alerta.'),
+      requireMicroArea: false,
+    );
+    return _store.latestForPatient(user.id);
   }
 }

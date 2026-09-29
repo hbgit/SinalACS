@@ -77,13 +77,19 @@ silencioso.
 ### 3. Bloco 5 — o ciclo RPC no terminal
 
 O backend é **Serverpod RPC, não REST**: `alerts.createRedAlert` e
-`alerts.acknowledge`. Não há URL para filmar.
+`alerts.acknowledge`. Não há URL para filmar. O RPC responde por **HTTPS na
+443**, com TLS terminado no Traefik (RNF04/L-08): a porta 8080 em texto claro
+deixou de ser publicada, e esta ferramenta recusa um host sem https antes de
+tentar conectar (exit 2) em vez de gravar o ciclo por um caminho sem
+criptografia.
 
 ```bash
 cd ..                                  # raiz do repo
 docker compose up --build              # ENABLE_DEV_LOGIN=true já está no compose
 # aguarde o serviço database-seed concluir — sem o seed, createRedAlert falha
 # por chave estrangeira em alerts.patientId
+./scripts/dev/sync_dev_ca.sh           # a CA do RPC não é versionada; sem ela o
+                                       # ciclo para com exit 2 nomeando o caminho
 ```
 
 Grave em **dois painéis lado a lado**:
@@ -94,6 +100,8 @@ video/rpc_demo/watch_mqtt.sh
 
 # painel direito
 cd video/rpc_demo && dart run bin/red_alert_cycle.dart
+# outro host (ex.: a stack em outra máquina), sempre em https:
+#   dart run --define=SINALACS_HOST=https://192.168.0.10/ bin/red_alert_cycle.dart
 ```
 
 O ciclo imprime cinco passos: saúde da stack, login, `createRedAlert`
@@ -131,6 +139,13 @@ cd video/remotion && npm run render:block5           # → out/takes/backend.mp4
 > preferir uma gravação de tela genuína, grave os dois painéis com OBS (captura
 > PipeWire — `ffmpeg -f x11grab` não funciona no Wayland) e salve por cima de
 > `video/out/takes/backend.mp4`; o resto do pipeline não muda.
+>
+> **O `captured/` versionado é ANTERIOR ao TLS (2026-09-11) e mostra
+> `servidor: http://localhost:8080/`** — um host que não existe mais. Quem for
+> renderizar o bloco 5 com a árvore atual precisa regravar os dois painéis com a
+> receita acima (que agora inclui o `sync_dev_ca.sh`) antes de rodar o
+> `gen_block5_data.py`; senão a cartela afirma, em quadro, um endereço em texto
+> claro que o backend não publica.
 
 **Privacidade:** o token de acesso é impresso truncado pelo próprio script. Antes
 de qualquer gravação de tela, feche painéis com `config/passwords.yaml`,

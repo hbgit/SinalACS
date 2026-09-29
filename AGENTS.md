@@ -9,10 +9,13 @@ O repositório já contém um protótipo funcional com:
 - apps Flutter para paciente e ACS;
 - PostgreSQL como persistência central;
 - broker MQTT para entrega de alertas em tempo real;
-- fluxo de sincronização offline para visitas do ACS.
+- fluxo de sincronização offline para visitas do ACS;
+- app administrativo (`apps/admin`) somente leitura, ainda sobre dados mock.
+
+Já entregue: login institucional do ACS (RF07, matrícula + senha com Argon2id), login passwordless do paciente (RF01, CPF + nascimento + OTP), RBAC por microárea (RNF06), TLS no RPC via Traefik (RNF04) e TLS no broker MQTT com senha e ACL, colunas clínicas cifradas (RNF03), painel "Meus Dados" (LGPD) no app do paciente.
 
 Os dois fluxos centrais continuam sendo:
-- paciente: autenticação simples, alerta de urgência, triagem estruturada e acompanhamento de status;
+- paciente: autenticação passwordless (OTP), alerta de urgência, triagem estruturada acompanhamento de status e "Meus Dados";
 - ACS: priorização dinâmica, territorialização por microárea, registro offline e acompanhamento do território.
 
 ## Leitura obrigatória antes de implementar
@@ -24,12 +27,15 @@ Antes de mexer em produto, arquitetura ou comportamento, consulte primeiro:
 - [spec/ui_design.md](spec/ui_design.md) — linguagem visual e UX;
 - [spec/lgpd_design.md](spec/lgpd_design.md) — privacidade e LGPD;
 - [spec/lgpd_data_audit.md](spec/lgpd_data_audit.md) — classificação de sensibilidade LGPD, campo a campo, de todas as tabelas persistidas;
-- [spec/ux_accessibility_assessment.md](spec/ux_accessibility_assessment.md) — auditoria WCAG 2.2 AA (contraste, alvo de toque, semântica) dos apps ACS e paciente;
+- [spec/ux_accessibility_assessment.md](spec/ux_accessibility_assessment.md) — auditoria WCAG 2.2 AA (contraste, alvo de toque, semântica) dos apps ACS, paciente e admin;
 - [spec/ux_ui_test_plan.md](spec/ux_ui_test_plan.md) — plano de testes de UX/UI derivado de `spec/ui_design.md`;
 - [CLAUDE.md](CLAUDE.md) — guia técnico e comandos para IA; é a referência mais atualizada do repositório;
-- [PROGRESS.md](PROGRESS.md) — status dos milestones e histórico de migração;
+- [PROGRESS.md](PROGRESS.md) — status dos milestones, histórico de migração e itens em aberto com dono;
+- [spec/security_assessment.md](spec/security_assessment.md) — avaliação de segurança;
+- [spec/validation_report.md](spec/validation_report.md) — relatório de validação; **está desatualizado nos dois sentidos** (lista como abertos itens já fechados e traz contagens de teste muito abaixo das reais) — confira no código antes de confiar;
+- [backend/CLAUDE.md](backend/CLAUDE.md) e [apps/CLAUDE.md](apps/CLAUDE.md) — detalhes técnicos de backend e apps;
 - [backend/](backend) — workspace Dart com `sinalacs_server` e `sinalacs_client`;
-- [apps/acs](apps/acs) e [apps/patient](apps/patient) — aplicativos Flutter reais;
+- [apps/acs](apps/acs), [apps/patient](apps/patient) e [apps/admin](apps/admin) — aplicativos Flutter reais;
 - [spec/ui_acs](spec/ui_acs) e [spec/ui_paciente](spec/ui_paciente) — protótipos visuais e fluxos do produto.
 
 Quando houver conflito entre convenções gerais e documentação do projeto, a documentação do projeto vence.
@@ -49,10 +55,11 @@ Não violar estes pontos sob qualquer hipótese:
 ### Backend
 - O backend está em um workspace Dart em [backend/](backend), com os pacotes `sinalacs_server` e `sinalacs_client`.
 - A stack atual é Serverpod, não um servidor hand-rolled em `dart:io`.
-- O servidor usa PostgreSQL e MQTT; a autenticação de desenvolvimento é opcional e não substitui autenticação institucional real.
+- O servidor usa PostgreSQL e MQTT. A autenticação real é `auth.loginInstitutional` (ACS) e `auth.requestOtp`/`auth.verifyOtp` (paciente); `auth.developmentLogin` só existe com `ENABLE_DEV_LOGIN` e não deve ser usado como caminho de produção.
+- Colunas clínicas sensíveis (`patients.chronicConditions`, `triage_sessions.answers`, `visits.notes`) são cifradas com AES-256-GCM (pares `*Encrypted`/`*KeyVersion`, chave em `HEALTH_DATA_ENCRYPTION_KEY`).
 - A camada de domínio fica em `backend/sinalacs_server/lib/src/application/` e a infraestrutura em `.../infrastructure/`.
 - Os modelos e endpoints são definidos com Serverpod; não se deve editar manualmente arquivos gerados em `lib/src/generated/` ou migrações sem regenerar via `serverpod generate` e `serverpod create-migration`.
-- O fluxo principal inclui: `auth.developmentLogin`, `triage.evaluate`, `alerts.createRedAlert`, `alerts.acknowledge` e `visits.sync`.
+- Endpoints principais: `auth` (`loginInstitutional`, `requestOtp`, `verifyOtp`, `developmentLogin`), `onboarding` (`generateEnrollmentToken`, `completeEnrollment`), `triage.evaluate`, `alerts` (`createRedAlert`, `acknowledge`, `statusFor`), `patients` (`listMicroArea`, `myData`, `myChronicConditions`, `updateChronicConditions`), `visits` (`sync`, `pull`) e `health.check`.
 - MQTT conecta em background após boot, com reconexão exponencial e sem bloquear a API.
 
 ### Apps Flutter
@@ -61,10 +68,11 @@ Não violar estes pontos sob qualquer hipótese:
 - O app ACS é o mais crítico em termos de offline-first e sincronização: guarda visitas locais, tenta sincronizar em fila e trata conflitos sem perder registros.
 - O tema visual é dark mode, com foco em legibilidade e uso de cor restrito a sinal clínico (vermelho, amarelo, verde).
 - O app do paciente não deve reintroduzir regras de risco no cliente; a classificação deve vir do backend via `triage.evaluate`.
-- [apps/admin](apps/admin) (`sinalacs_admin`) é o backoffice administrativo — deixou de ser um esqueleto de pubspec e hoje é um app navegável real, com 4 telas somente leitura (Indicadores, Microáreas, Alertas, Auditoria) atrás de `AdminHomeShell`. Ainda não consome `sinalacs_client`: usa a interface `AdminDataSource`, hoje implementada só por `MockAdminDataSource`, seguindo o mesmo padrão de DI de `PatientBackend`/`AcsBackend`. O login é local e não chama `auth.developmentLogin` (o backend só aceita `role: 'patient'`/`role: 'acs'` hoje). Toda tela que exibe dado sensível registra o próprio acesso via `recordAccess()` antes de renderizar, por exigência de auditoria do PRD §4.2.2. É o único dos três apps com suporte a Flutter Web.
+- [apps/admin](apps/admin) (`sinalacs_admin`) é o backoffice administrativo — deixou de ser um esqueleto de pubspec e hoje é um app navegável real, com 4 telas somente leitura (Indicadores, Microáreas, Alertas, Auditoria) atrás de `AdminHomeShell`. Ainda não consome `sinalacs_client`: usa a interface `AdminDataSource`, hoje implementada só por `MockAdminDataSource`, seguindo o mesmo padrão de DI de `PatientBackend`/`AcsBackend`. O login é local e não chama `auth.developmentLogin` (o backend só aceita `role: 'patient'`/`role: 'acs'` hoje). Toda tela que exibe dado sensível registra o próprio acesso via `recordAccess()` antes de renderizar, por exigência de auditoria do PRD §4.2.2. É o único dos três apps com suporte a Flutter Web, e desde a adição da plataforma Android também roda em celular e tablet (`flutter run -d emulator-5554`). O layout segue desktop-first: os pontos de quebra ficam em `lib/app/admin_layout.dart` e o layout compacto é complemento, nunca substituição — os dez testes de widget originais continuam passando sem edição, o que é o que prova isso.
 
 ### Infraestrutura local
-- O ambiente de desenvolvimento usa Docker Compose com PostgreSQL, Mosquitto, backend e Traefik.
+- O ambiente de desenvolvimento usa Docker Compose com PostgreSQL, Mosquitto, backend e Traefik. O backend é exposto só em HTTPS (`https://localhost/`, TLS terminado no Traefik) e o broker só em MQTT sobre TLS (`localhost:8883`).
+- O seed de desenvolvimento roda em quatro etapas (`database-seed`, `health-data-seed`, `acs-credential-seed`, `cpf-hash-seed`); as três últimas existem porque SQL puro não produz valores cifrados, hashes Argon2id nem o HMAC do CPF.
 - Há geração local de segredos via [scripts/dev/bootstrap_env.sh](scripts/dev/bootstrap_env.sh); o projeto não possui `.env` versionado.
 - O servidor e o broker exigem valores configurados por ambiente; não reaproveitar credenciais do ambiente local em produção.
 
@@ -96,10 +104,10 @@ Não violar estes pontos sob qualquer hipótese:
 - Manter dark mode, alta legibilidade e baixo ruído visual.
 - Usar cores apenas para sinal clínico; não decorar interfaces com vermelho/amarelo/verde sem relação com risco.
 - Manter foco em mobile-first e acessibilidade.
-- Ao reaproveitar uma cor clínica de preenchimento (`red`/`accent`/`danger`) como cor de texto/ícone, usar a variante `*OnSurface` (`acs_theme.dart`/`patient_theme.dart`) e medir contraste contra a superfície real (`Card`/`surfaceRaised`), não contra o fundo do Scaffold — ver `spec/ux_accessibility_assessment.md` e os testes em `test/contrast_tokens_test.dart` de cada app.
+- Ao reaproveitar uma cor clínica de preenchimento (`red`/`accent`/`danger`/`yellow`/`green`) como cor de texto/ícone, usar a variante `*OnSurface` (`acs_theme.dart`/`patient_theme.dart`/`admin_theme.dart`) e medir contraste contra a superfície real (`Card`/`surfaceRaised`), não contra o fundo do Scaffold — ver `spec/ux_accessibility_assessment.md` e os testes em `test/contrast_tokens_test.dart` de cada app.
 
 ### 6) Quando o trabalho for de backend ou dados
-- Considerar uso de SQLite/SQLCipher e filas locais para operação offline.
+- A operação offline do ACS usa SQLite/SQLCipher e fila local (`offline_visit_queue.dart`); no backend, a sincronização passa pela `SyncFsm`.
 - Planejar retry, reconciliação de conflitos e rastreabilidade de eventos.
 - Manter a lógica de sincronização e persistência consistentes com o fluxo de visitas do ACS.
 
@@ -128,18 +136,25 @@ Rodar análise do Flutter nos apps:
 cd apps/patient && flutter pub get && flutter analyze && flutter test
 cd apps/acs && flutter pub get && flutter analyze && flutter test
 cd apps/admin && flutter pub get && flutter analyze && flutter test
+cd apps/admin && flutter run -d emulator-5554          # no emulador Android
+cd apps/admin && flutter test integration_test -d emulator-5554   # hermético: não precisa da stack
 ```
 
 Importante:
 - `flutter test` é hermético e não substitui validações com stack local real;
 - os testes de integração e validação de conexão vivem fora do `flutter test` e utilizam a stack Docker/VM;
-- o CI do projeto valida cinco jobs separados: `serverpod-backend`, `backend-docker-build`, `patient-app`, `acs-app` e `admin-app`.
+- a validação contra a stack real está na skill `validacao-e2e` (`scripts/qa/e2e.sh`, `tool/live_check.dart`, `integration_test` no emulador);
+- o CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) roda em toda PR, em push para `main`/`develop` e à mão (`gh workflow run CI --ref <branch>`), e tem nove jobs: `workflow-lint`, `serverpod-backend`, `backend-docker-build`, `patient-app`, `acs-app`, `admin-app`, `coverage-report`, `android-e2e` (único que sobe emulador Android contra a stack) e `admin-android-build` (compila o APK do admin);
+- o `workflow-lint` roda actionlint e `scripts/qa/ci_invariants.sh`, que falha se a lista de jobs divergir de `JOBS_DOCUMENTADOS`, se um job sair do runner fixado (`ubuntu-24.04`, nunca `ubuntu-latest`), se uma ação cair abaixo da major em node24 (`checkout@v7`, `setup-java@v6`, `cache@v6`, `upload-artifact@v7`), se o workflow ganhar filtro de `paths` ou perder o grupo de `concurrency` por PR/SHA, se o `android-e2e` perder a limpeza de `pg_data/` ou se a chave do cache de AVD não terminar em `-<RUNNER>`;
+- `main` e `develop` são protegidas: os 8 checks de `./scripts/qa/ci_invariants.sh --checks-obrigatorios` (todo job exceto `android-e2e`) precisam passar para mesclar, e `main` exige PR; admins ainda podem dar push direto. O `android-e2e` está verde desde as correções de 2026-09-28, mas segue informativo até acumular histórico;
+- o script não lê a proteção configurada no GitHub: ao renomear ou criar um job, reaplique-a (ver `CONTRIBUTING.md` › CI e merge), senão as PRs ficam esperando um check que não existe mais;
+- migrar para o Ubuntu 26.04 (`ubuntu-latest` migra em 2026-10-19; um ensaio passou 9/9) é uma PR que troca juntos `runs-on`, `RUNNER` e o sufixo da chave do AVD, e precisa de um actionlint que conheça o rótulo `ubuntu-26.04`. Histórico em [docs/ci-audit/2026-09-28-avaliacao-ci-develop.md](docs/ci-audit/2026-09-28-avaliacao-ci-develop.md); lacunas conhecidas da guarda nas issues #19 a #24.
 
 ## Observações finais
 
 Este repositório já não é apenas um conjunto de especificações. Ele contém um protótipo funcional validado localmente em stack Docker, com backend, apps reais e infraestrutura mínima operável para desenvolvimento.
 
-O estado atual não é produção: não há autenticação institucional real, não há mTLS no broker, e não existe deploy de produção concluído. Mesmo assim, qualquer mudança deve preservar a direção arquitetural do projeto e os invariantes de negócio definidos no PRD.
+O estado atual não é produção: o login institucional guarda credenciais localmente (sem integração com provedor de identidade real), MFA e refresh token foram adiados por decisão registrada em `PROGRESS.md`, não há mTLS no broker (sem certificado de cliente), o backoffice admin não tem backend, e não existe deploy de produção concluído (`backend/DEPLOY.md` é só um caminho de demo free-tier). Mesmo assim, qualquer mudança deve preservar a direção arquitetural do projeto e os invariantes de negócio definidos no PRD.
 
 A documentação do produto, a arquitetura e os comandos de execução já estão no repositório; a implementação deve seguir o que está ali registrado e não inventar novos padrões sem alinhamento técnico e funcional.
 

@@ -32,7 +32,7 @@ Consulte [PROGRESS.md](PROGRESS.md) para o status detalhado dos milestones e
 apps/
 	acs/       Aplicativo Flutter do Agente Comunitário de Saúde
 	patient/   Aplicativo Flutter do paciente
-	admin/     Base do aplicativo administrativo
+	admin/     Backoffice administrativo (Flutter Web e Android)
 backend/     Backend Dart (dart:io, sem framework) e regras de domínio
 infra/       Configuração local de infraestrutura
 spec/        PRD, UX, privacidade e fluxos do produto
@@ -42,7 +42,7 @@ tests/       Testes compartilhados
 ## Pré-requisitos
 
 - Flutter SDK compatível com Dart `>=3.3.0 <4.0.0`.
-- Android SDK com API 36 e JDK 17 para gerar ou executar o app ACS no Android.
+- Android SDK com API 36 e JDK 17 para gerar ou executar os apps ACS, paciente e admin no Android.
 - Docker Engine com Docker Compose v2 para subir a stack local.
 - Um emulador Android ou dispositivo físico, opcional para execução mobile.
 
@@ -65,10 +65,16 @@ Serviços expostos no ambiente local:
 |---|---|
 | Traefik | `http://localhost` |
 | Dashboard Traefik (inseguro, somente desenvolvimento) | `http://localhost:8081` |
-| Backend | `http://localhost:8080` |
+| Backend | `https://localhost/` (RPC atrás do Traefik; a 8080 em texto claro não é publicada) |
 | PostgreSQL | `localhost:5432` |
-| Mosquitto MQTT | `localhost:1883` |
-| Mosquitto WebSocket | `localhost:9001` |
+| Mosquitto MQTT (TLS) | `localhost:8883` |
+
+`8883` é a **única** porta que o broker publica. A 1883 anônima e a WebSocket
+9001 não são publicadas **nem escutadas**: o `mosquitto.conf` só declara
+`listener 8883` (medido: as duas recusam conexão no host e não aparecem em
+`/proc/net/tcp` dentro do container). O `docker compose ps` mostra `1883/tcp` na
+linha do mosquitto porque a imagem a declara em `EXPOSE`, não porque exista algo
+atendendo nela.
 
 Para encerrar a stack:
 
@@ -90,11 +96,15 @@ cd apps/acs && flutter pub get && cd -
 
 Use o script, não `flutter run` direto. A senha do broker é resolvida em tempo
 de compilação e não tem valor padrão: ela é gerada por máquina pelo
-`bootstrap_env.sh`. O script lê o `.env`, copia a CA do broker para os assets e
-passa os quatro `--dart-define` por um arquivo temporário (`--dart-define-from-file`,
-apagado ao sair), para a senha não trafegar na linha de comando do `flutter`. Um
-`flutter build apk` sem essas variáveis **falha** — a guarda vive em
-`apps/acs/android/app/build.gradle.kts` — em vez de compilar em silêncio um APK
+`bootstrap_env.sh`. O script lê o `.env`, copia as duas CAs de desenvolvimento
+(a do broker e a do RPC) para os assets e passa os cinco `--dart-define` por um
+arquivo temporário (`--dart-define-from-file`,
+apagado ao sair), para a senha não trafegar na linha de comando do `flutter`. Os
+cinco são `SINALACS_HOST`, `SINALACS_MQTT_HOST`, `SINALACS_MQTT_USER`,
+`SINALACS_MQTT_PASSWORD` e `GOOGLE_MAPS_API_KEY`. Um
+`flutter build apk` sem o `SINALACS_MQTT_PASSWORD` — o único dos cinco sem
+valor padrão — **falha** (a guarda vive em
+`apps/acs/android/app/build.gradle.kts`) em vez de compilar em silêncio um APK
 que nunca recebe alerta.
 
 Para escolher o dispositivo, ou gerar o APK:
@@ -114,8 +124,31 @@ cd apps/patient
 flutter pub get
 flutter run
 # em aparelho físico, apontando para a máquina da stack:
-flutter run --dart-define=SINALACS_HOST=http://<ip-da-máquina>:8080/
+flutter run --dart-define=SINALACS_HOST=https://<ip-da-máquina>/
 ```
+
+**Em aparelho físico na LAN, o host precisa casar em dois lugares — não só no
+certificado.** O `RPC_CERT_SAN_EXTRA` (`.env`) acrescenta o IP ao SAN da folha do
+Traefik, mas quem decide se a requisição chega ao backend é a regra do router:
+`Host(\`10.0.2.2\`) || Host(\`localhost\`) || Host(\`sinalacs.localhost\`)`
+(`docker-compose.yml`). Um host coberto pelo SAN e **fora** da regra faz o TLS
+passar e recebe o 404 do Traefik — medido: com a folha que cobre `127.0.0.1`,
+`curl --cacert …/ca.crt https://127.0.0.1/health/check` devolve
+`404 page not found`, enquanto `https://localhost/` devolve 200. Então o IP
+precisa entrar **também** na regra; no broker não existe router, e é por isso
+que lá o SAN sozinho basta.
+
+Antes do primeiro `flutter run` — ou sempre que um `runtime/` da stack for
+apagado —, copie as CAs de desenvolvimento para os assets, com a stack de pé:
+
+```bash
+./scripts/dev/sync_dev_ca.sh
+```
+
+Sem essa cópia **nada fica vermelho na hora de compilar**: `flutter build` e
+`flutter test` saem verdes e o APK vai sem certificado nenhum dentro, e o app só
+se denuncia depois, no handshake do TLS. O único comando que reclama é o
+`flutter analyze`, pelo diretório que o `pubspec.yaml` declara e não existe.
 
 ## Build
 

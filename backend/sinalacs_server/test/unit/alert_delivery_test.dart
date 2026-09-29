@@ -26,6 +26,44 @@ void main() {
         'triggered_at': '2026-09-01T12:00:00.000Z',
       });
     });
+
+    test('inclui location_cell quando presente, omite quando ausente', () {
+      final comCelula = AlertDelivery(
+        alertId: 'alert-123',
+        patientId: 'patient-456',
+        microAreaId: 'area-12',
+        riskLevel: 'red',
+        locationHash: '6gyf4bf',
+        locationCell: '-1580:-4783',
+        triggeredAt: DateTime.utc(2026, 9, 1, 12),
+      );
+      expect(jsonDecode(comCelula.toJson())['location_cell'], '-1580:-4783');
+
+      final semCelula = AlertDelivery(
+        alertId: 'alert-124',
+        patientId: 'patient-456',
+        microAreaId: 'area-12',
+        riskLevel: 'red',
+        locationHash: 'sem-local-00',
+        triggeredAt: DateTime.utc(2026, 9, 1, 12),
+      );
+      expect(jsonDecode(semCelula.toJson()).containsKey('location_cell'), isFalse);
+    });
+
+    test('tryParse aceita envelope sem location_cell (compatibilidade)', () {
+      final body = jsonEncode({
+        'version': 1,
+        'alert_id': 'alert-123',
+        'patient_id': 'patient-456',
+        'micro_area_id': 'area-12',
+        'risk_level': 'red',
+        'location_hash': '6gyf4bf',
+        'triggered_at': '2026-09-01T12:00:00.000Z',
+      });
+      final parsed = AlertDelivery.tryParse(body);
+      expect(parsed, isNotNull);
+      expect(parsed!.locationCell, isNull);
+    });
   });
 
   test('vincula o ACK ao alerta e ao ACS que o confirmou', () {

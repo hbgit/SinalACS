@@ -13,7 +13,7 @@
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 source "$(dirname "${BASH_SOURCE[0]}")/coords.env"
 
-PKG="${PATIENT_PKG:-com.example.sinalacs_patient}"
+PKG="${PATIENT_PKG:-br.com.prismrr.sinalacs.patient}"
 
 check_coords() {
   for name in PATIENT_CPF_FIELD PATIENT_BIRTH_FIELD PATIENT_ENTER \

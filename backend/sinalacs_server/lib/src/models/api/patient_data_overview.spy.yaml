@@ -1,0 +1,15 @@
+### Painel "Meus Dados" do próprio paciente autenticado — confirmação de
+### existência de tratamento e acesso aos dados pessoais, critério de aceite
+### formal de spec/lgpd_design.md (linhas 417, 581-595). Minimização: nunca o
+### conteúdo bruto de uma triagem nem a localização de um alerta — só o que o
+### titular precisa para conferir/corrigir o que está cadastrado e ver o
+### próprio histórico de classificação de risco.
+class: PatientDataOverview
+fields:
+  name: String
+  birthDate: DateTime
+  emergencyContact: String
+  isChronic: bool
+  chronicConditions: List<String>
+  consents: List<PatientConsentRecord>
+  riskHistory: List<PatientRiskEvent>

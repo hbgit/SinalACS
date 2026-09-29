@@ -1,0 +1,25 @@
+### Desafio de código OTP do login passwordless (RF01).
+###
+### Mesmo padrão de hash-só de `enrollment_tokens`: o código em claro existe
+### apenas no momento da geração (enviado por SMS) e nunca é persistido. A
+### tabela guarda o HMAC, para que um dump do banco não entregue códigos
+### válidos de pacientes que estão tentando entrar agora.
+class: OtpChallenge
+table: otp_challenges
+fields:
+  id: UuidValue?, defaultPersist=random
+  userId: UuidValue, relation(parent=users)
+  ### HMAC-SHA-256 do código, com campo de domínio próprio (ver HmacCpfHasher).
+  codeHash: String
+  ### Tentativas de verificação já gastas. O código morre ao atingir o limite,
+  ### mesmo antes de expirar — 6 dígitos são 10^6 combinações, e sem contador
+  ### um atacante com um código enviado teria tentativas ilimitadas.
+  attempts: int
+  createdAt: DateTime
+  expiresAt: DateTime
+  ### Marca o consumo. `null` = ainda válido; nunca consumido = o desafio mais
+  ### recente do paciente é o que vale.
+  consumedAt: DateTime?
+indexes:
+  otp_challenges_user_id_created_at_idx:
+    fields: userId, createdAt

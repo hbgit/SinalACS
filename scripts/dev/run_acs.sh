@@ -6,8 +6,8 @@
 #   ./scripts/dev/run_acs.sh                    # flutter run no dispositivo padrão
 #   ./scripts/dev/run_acs.sh -d emulator-5554   # argumentos extras vão para o flutter
 #   ./scripts/dev/run_acs.sh --build            # flutter build apk --debug
-#   ./scripts/dev/run_acs.sh --host http://192.168.0.10:8080/ --mqtt-host 192.168.0.10
-#   ./scripts/dev/run_acs.sh --skip-ca          # não recopia a CA do broker
+#   ./scripts/dev/run_acs.sh --host https://192.168.0.10/ --mqtt-host 192.168.0.10
+#   ./scripts/dev/run_acs.sh --skip-ca          # não recopia as CAs para o asset
 #
 # Por que existe:
 #   · SINALACS_MQTT_PASSWORD é resolvido em tempo de COMPILAÇÃO e não tem
@@ -17,9 +17,15 @@
 #     `flutter run` produz um app que nunca recebe alerta nenhum — e desde
 #     que apps/acs/android/app/build.gradle.kts ganhou a guarda, um
 #     `flutter build apk` puro nem chega a compilar.
-#   · A CA do broker é asset do APK (apps/acs/assets/certs/), regerada pelo
-#     mosquitto-init e não versionada. Sem ela o build falha antes do TLS —
-#     apps/acs/pubspec.yaml declara o diretório — e não haveria em quem confiar.
+#   · As DUAS CAs de desenvolvimento são asset do APK (apps/acs/assets/certs/),
+#     copiadas pelo sync_dev_ca.sh e não versionadas: a do broker assina o
+#     certificado do MQTT em 8883, a do RPC assina o do Traefik em 443. Sem elas
+#     o build NÃO falha — sai verde e o APK vai sem certificado nenhum, com uma
+#     única pista que ele imprime e ignora ("Error: unable to find directory
+#     entry in pubspec.yaml"); o app só se denuncia depois, no handshake do TLS.
+#     O `flutter analyze` é o único comando que reclama do diretório ausente —
+#     é o que o pubspec declara —, e é por isso que a guarda abaixo confere as
+#     duas cópias, uma a uma, contra a folha que está no runtime.
 #
 # A senha nunca é impressa e não trafega na linha de comando do flutter: vai
 # num arquivo temporário lido por --dart-define-from-file, criado com 0600
@@ -34,7 +40,9 @@ app_dir="$repo_root/apps/acs"
 env_file="$repo_root/.env"
 
 # Defaults do emulador Android, que enxerga o host da máquina em 10.0.2.2.
-host='http://10.0.2.2:8080/'
+# O RPC é HTTPS na 443 (quem termina o TLS é o Traefik): a 8080 em texto claro
+# deixou de ser publicada (RNF04/L-08), e um host em http aqui não conecta.
+host='https://10.0.2.2/'
 mqtt_host='10.0.2.2'
 action='run'
 skip_ca=0
@@ -46,7 +54,11 @@ while [[ $# -gt 0 ]]; do
     --mqtt-host) mqtt_host="${2:?--mqtt-host exige um valor}"; shift 2 ;;
     --build)     action='build'; shift ;;
     --skip-ca)   skip_ca=1; shift ;;
-    -h|--help)   sed -n '3,26p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    # Intervalo sem número fixo: imprime da linha 3 até a primeira que não é
+    # comentário. A faixa à mão (era '3,26p') cortava a última frase do texto
+    # depois de qualquer edição no cabeçalho — e ninguém percebia, porque a
+    # saída do --help não tem teste.
+    -h|--help)   sed -n '/^#/!q; 3,$p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     --)          shift; flutter_args+=("$@"); break ;;
     *)           flutter_args+=("$1"); shift ;;
   esac
@@ -70,7 +82,13 @@ fi
 mqtt_password="${MQTT_ACS_PASSWORD:-$(grep -E '^MQTT_ACS_PASSWORD=' "$env_file" | head -1 | cut -d= -f2-)}"
 # Usuário criado por infra/docker/mosquitto/init.sh.
 mqtt_user="${MQTT_ACS_USER:-acs-area-12}"
-google_maps_api_key="${GOOGLE_MAPS_API_KEY:-$(grep -E '^GOOGLE_MAPS_API_KEY=' "$env_file" | head -1 | cut -d= -f2-)}"
+# `|| true` dentro da substituição: sem a linha no .env, o `grep` sai 1, o
+# `pipefail` propaga e este script inteiro morria com exit 1 e SAÍDA NENHUMA —
+# um `--dart-define` ausente e opcional derrubando o wrapper de forma
+# indistinguível de um erro de shell. Medido: `.env` sem `GOOGLE_MAPS_API_KEY=`.
+# As outras duas leituras do .env têm guarda depois (a senha vazia é erro
+# declarado); esta é a única opcional.
+google_maps_api_key="${GOOGLE_MAPS_API_KEY:-$(grep -E '^GOOGLE_MAPS_API_KEY=' "$env_file" | head -1 | cut -d= -f2- || true)}"
 
 if [[ -z "$mqtt_password" ]]; then
   echo 'erro: MQTT_ACS_PASSWORD está vazio no .env.' >&2
@@ -80,13 +98,48 @@ fi
 
 if [[ "$skip_ca" -eq 0 ]]; then
   if ! "$repo_root/scripts/dev/sync_dev_ca.sh"; then
-    if [[ -f "$app_dir/assets/certs/dev_ca.crt" ]]; then
-      echo 'aviso: a stack parece estar fora do ar; mantendo a CA já copiada.' >&2
-    else
-      echo 'erro: sem a CA do broker o app nem compila (pubspec declara assets/certs/).' >&2
-      echo 'Suba a stack com `docker compose up` e rode de novo.' >&2
+    # Quem diz o que faltou é o próprio sync, logo acima: ele nomeia o
+    # runtime/ de origem ausente, ou imprime o erro do openssl verify quando a
+    # CA de lá não assina a folha. Aqui só se decide se dá para seguir.
+    #
+    # Existir não é ser o certo. Os três modos de falha do sync — CA de origem
+    # ausente, folha de origem ausente e verify reprovado — dizem a mesma
+    # coisa, "o runtime está errado ou não está lá", e nenhum deles é
+    # transitório. A frase que justificava o fallback antigo ("as CAs são
+    # PRESERVADAS entre subidas, então a cópia anterior continua valendo") é
+    # verdadeira no caso comum e FALSA exatamente no caso para o qual o
+    # fallback existia: o caminho de recuperação documentado — apagar o
+    # runtime/ e subir de novo — faz o init.sh cunhar uma CA NOVA (o `needs_ca`
+    # é verdadeiro quando o ca.key não está lá), e a cópia antiga no asset
+    # deixa de valer. Medido: exit 0, mensagem tranquilizadora e um APK cuja CA
+    # não verifica mais a folha do servidor — o handshake falha e o sintoma
+    # aponta para o servidor.
+    #
+    # Seguir só é seguro com PROVA, e a prova é a mesma pergunta que o sync
+    # faz — "esta CA assina a folha do runtime?" —, feita entre o ASSET e o
+    # runtime em vez de dentro do runtime. Sem runtime não há o que provar, e
+    # aí é erro. O escopo é o asset DESTE app: é ele que o build leva.
+    sem_prova=()
+    for par in 'MQTT:dev_ca.crt:infra/docker/mosquitto/runtime/certs' \
+               'RPC:dev_rpc_ca.crt:infra/docker/traefik/runtime/certs'; do
+      IFS=':' read -r label asset_name runtime_rel <<< "$par"
+      if [[ ! -f "$app_dir/assets/certs/$asset_name" ]]; then
+        sem_prova+=("$asset_name ($label): não está no asset")
+      elif [[ ! -f "$repo_root/$runtime_rel/ca.crt" || ! -f "$repo_root/$runtime_rel/server.crt" ]]; then
+        sem_prova+=("$asset_name ($label): $runtime_rel/ não tem o par CA+folha")
+      elif ! openssl verify -CAfile "$app_dir/assets/certs/$asset_name" \
+             "$repo_root/$runtime_rel/server.crt" >/dev/null 2>&1; then
+        sem_prova+=("$asset_name ($label): não assina a folha de $runtime_rel/")
+      fi
+    done
+    if (( ${#sem_prova[@]} > 0 )); then
+      echo 'erro: não dá para provar que as CAs já copiadas no asset ainda valem:' >&2
+      printf '  · %s\n' "${sem_prova[@]}" >&2
+      echo 'Suba a stack com `docker compose up` (o erro acima, do sync, diz o que falta) e rode de novo.' >&2
+      echo 'Para dispensar a checagem de propósito — assumindo o risco de um APK que não valida o TLS —, use --skip-ca.' >&2
       exit 1
     fi
+    echo 'aviso: o sync falhou, mas a CA no asset foi conferida contra a folha do runtime e continua valendo; seguindo com ela.' >&2
   fi
 fi
 

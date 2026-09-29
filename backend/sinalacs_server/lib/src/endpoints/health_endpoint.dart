@@ -2,6 +2,8 @@ import 'package:serverpod/serverpod.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
 import 'package:sinalacs_server/src/runtime/alert_runtime.dart';
 
+typedef DatabaseProbe = Future<void> Function(Session session);
+
 /// Sonda de saúde.
 ///
 /// Preserva a forma do antigo `GET /health` — `{status, mqtt_connected,
@@ -12,6 +14,11 @@ import 'package:sinalacs_server/src/runtime/alert_runtime.dart';
 /// do broker e do banco: hosts free-tier hibernam, e um healthcheck que falha
 /// junto com a dependência impede o host de acordar.
 class HealthEndpoint extends Endpoint {
+  HealthEndpoint({DatabaseProbe? databaseProbe})
+      : _databaseProbe = databaseProbe ?? _defaultDatabaseProbe;
+
+  final DatabaseProbe _databaseProbe;
+
   @override
   bool get requireLogin => false;
 
@@ -25,11 +32,15 @@ class HealthEndpoint extends Endpoint {
 
   Future<bool> _isDatabaseReachable(Session session) async {
     try {
-      await session.db.unsafeSimpleQuery('SELECT 1');
+      await _databaseProbe(session);
       return true;
     } catch (_) {
       // Reportar o estado, nunca derrubar o healthcheck junto com o banco.
       return false;
     }
+  }
+
+  static Future<void> _defaultDatabaseProbe(Session session) async {
+    await session.db.unsafeSimpleQuery('SELECT 1');
   }
 }

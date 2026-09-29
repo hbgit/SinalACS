@@ -5,8 +5,11 @@ import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:sinalacs_acs/app/acs_theme.dart';
+import 'package:sinalacs_acs/core/database/sqlcipher_visit_store.dart';
+import 'package:sinalacs_acs/core/geo/location_cell.dart';
 import 'package:sinalacs_acs/core/network/backend_client.dart';
 import 'package:sinalacs_acs/core/network/backend_scope.dart';
+import 'package:sinalacs_acs/core/security/database_key_store.dart';
 import 'package:sinalacs_acs/core/services/alert_feed.dart';
 import 'package:sinalacs_acs/core/services/alert_queue.dart';
 import 'package:sinalacs_acs/core/services/offline_visit_queue.dart';
@@ -14,33 +17,59 @@ import 'package:sinalacs_client/sinalacs_client.dart' show MicroAreaPatient;
 import 'package:sinalacs_acs/core/services/reconnect_schedule.dart';
 import 'package:sinalacs_acs/core/services/route_service.dart';
 import 'package:sinalacs_acs/core/services/theme_controller.dart';
+import 'package:sinalacs_acs/core/services/visit_pull_service.dart';
+import 'package:sinalacs_acs/core/services/visit_pull_service_factory.dart';
 import 'package:sinalacs_acs/core/services/visit_queue_factory.dart';
 
 class SinalAcsApp extends StatefulWidget {
   const SinalAcsApp({
     super.key,
-    this.backend,
+    required this.backend,
     this.feedBuilder,
     this.visitQueue,
+    this.visitPullService,
     this.initialAlert,
     this.currentPosition,
     this.themeController,
+    this.syncInterval,
   });
 
-  /// Injetáveis para teste. Em execução normal são as implementações reais.
-  final AcsBackend? backend;
+  /// Backend do app. **Obrigatório, e construído em `main.dart`.**
+  ///
+  /// Havia aqui um `widget.backend ?? BackendClient()`: um cliente **sem a CA do
+  /// RPC** (RNF04/L-08) falando com o `https` padrão. Em produção o `main` sempre
+  /// injetou, então ele nunca mordeu — mas era o caminho que um teste ou uma
+  /// tela nova pegava sem perceber, e que falharia no handshake com a cara de
+  /// "problema de servidor". Só o `main` pode construir este cliente: é o único
+  /// lugar onde a CA já foi lida do bundle. Injetável para teste, onde o duplo
+  /// entra no lugar do real.
+  final AcsBackend backend;
   final AlertFeed Function(AlertQueue queue)? feedBuilder;
   final OfflineVisitQueue? visitQueue;
+  final VisitPullService? visitPullService;
   final PrioritizedAlert? initialAlert;
   final LatLng? currentPosition;
   final ThemeController? themeController;
+
+  /// Intervalo da sincronização periódica em segundo plano (visitas +
+  /// pacientes da microárea). `null` usa `AcsHomeShell.defaultSyncInterval`
+  /// — testes passam um valor curto para não esperar 5 minutos reais.
+  final Duration? syncInterval;
 
   @override
   State<SinalAcsApp> createState() => _SinalAcsAppState();
 }
 
 class _SinalAcsAppState extends State<SinalAcsApp> {
-  late final AcsBackend _backend = widget.backend ?? BackendClient();
+  /// Compartilhado entre a fila offline e o serviço de pull (RF15).
+  ///
+  /// `VisitPullService` lê deste MESMO store para nunca reintroduzir
+  /// localmente uma visita que já está na fila offline (dedupe por
+  /// `localId`, ver `visit_pull_service.dart`). Duas instâncias separadas de
+  /// `SqlCipherVisitStore` apontando para o mesmo arquivo até funcionariam,
+  /// mas por acaso — uma só instância é o que garante que o pull enxerga
+  /// exatamente o que a fila gravou por último.
+  late final VisitStore _visitStore = SqlCipherVisitStore(keyStore: SecureStorageDatabaseKeyStore());
 
   /// Uma única fila por execução do app.
   ///
@@ -52,12 +81,19 @@ class _SinalAcsAppState extends State<SinalAcsApp> {
   /// Fila respaldada pelo banco criptografado, com o sincronizador ligado.
   ///
   /// A chave vive no Keystore/Keychain, nunca no código. Deixou de ser `static`
-  /// para enxergar [_backend]: sem sincronizador, `sync()` caía no ramo sem
+  /// para enxergar o backend: sem sincronizador, `sync()` caía no ramo sem
   /// remetente e devolvia erro — as visitas nunca subiam ao servidor e o que já
   /// estava confirmado nunca era apagado do disco.
-  OfflineVisitQueue _persistentQueue() => buildVisitQueue(backend: _backend);
+  OfflineVisitQueue _persistentQueue() =>
+      buildVisitQueue(backend: widget.backend, store: _visitStore);
 
   late final ThemeController _themeController = widget.themeController ?? ThemeController();
+
+  /// Serviço de pull central→dispositivo (RF15, decisão §5).
+  ///
+  /// Usa o MESMO `_visitStore` da fila — ver o comentário acima.
+  late final VisitPullService _visitPullService = widget.visitPullService ??
+      buildVisitPullService(backend: widget.backend, localVisits: _visitStore);
 
   @override
   void initState() {
@@ -67,14 +103,13 @@ class _SinalAcsAppState extends State<SinalAcsApp> {
 
   @override
   void dispose() {
-    if (widget.backend == null) _backend.close();
     if (widget.themeController == null) _themeController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) => BackendScope(
-        backend: _backend,
+        backend: widget.backend,
         child: ValueListenableBuilder<ThemeMode>(
           valueListenable: _themeController,
           builder: (context, mode, _) => MaterialApp(
@@ -86,9 +121,11 @@ class _SinalAcsAppState extends State<SinalAcsApp> {
             home: LoginScreen(
               feedBuilder: widget.feedBuilder,
               visitQueue: _visitQueue,
+              visitPullService: _visitPullService,
               initialAlert: widget.initialAlert,
               initialPosition: widget.currentPosition,
               themeController: _themeController,
+              syncInterval: widget.syncInterval,
             ),
           ),
         ),
@@ -99,17 +136,21 @@ class LoginScreen extends StatefulWidget {
   const LoginScreen({
     required this.visitQueue,
     required this.themeController,
+    required this.visitPullService,
     super.key,
     this.feedBuilder,
     this.initialAlert,
     this.initialPosition,
+    this.syncInterval,
   });
 
   final AlertFeed Function(AlertQueue queue)? feedBuilder;
   final OfflineVisitQueue visitQueue;
+  final VisitPullService visitPullService;
   final PrioritizedAlert? initialAlert;
   final LatLng? initialPosition;
   final ThemeController themeController;
+  final Duration? syncInterval;
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
@@ -126,12 +167,28 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   void dispose() { _matricula.dispose(); _senha.dispose(); super.dispose(); }
 
-  /// Autentica contra `auth.developmentLogin` e só então abre o painel.
+  /// Autentica contra `auth.loginInstitutional` (RF07) e só então abre o
+  /// painel.
   Future<void> _enter() async {
+    final matricula = _matricula.text.trim();
+    // A senha não passa por `trim`: espaço faz parte da credencial, e aparar
+    // aqui mudaria o que a pessoa digitou.
+    final senha = _senha.text;
+    if (matricula.isEmpty || senha.isEmpty) {
+      setState(() {
+        _busy = false;
+        _error = 'Informe matrícula e senha.';
+      });
+      return;
+    }
+
     setState(() { _busy = true; _error = null; });
 
     try {
-      final session = await BackendScope.of(context).login();
+      final session = await BackendScope.of(context).login(
+        matricula: matricula,
+        senha: senha,
+      );
       final microAreaId = session.microAreaId;
       if (microAreaId == null) {
         // Sem microárea não há território, e sem território não há fila: é
@@ -150,9 +207,11 @@ class _LoginScreenState extends State<LoginScreen> {
           acsId: session.userId,
           feedBuilder: widget.feedBuilder,
           visitQueue: widget.visitQueue,
+          visitPullService: widget.visitPullService,
           initialAlert: widget.initialAlert,
           initialPosition: widget.initialPosition,
           themeController: widget.themeController,
+          syncInterval: widget.syncInterval,
         ),
       ));
     } on BackendFailure catch (failure) {
@@ -174,18 +233,34 @@ class _LoginScreenState extends State<LoginScreen> {
           const SizedBox(height: 8),
           const Text('Acesso profissional', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
           const SizedBox(height: 20),
-          TextField(key: const Key('matricula_field'), controller: _matricula, decoration: const InputDecoration(labelText: 'Matrícula / CNS')),
+          TextField(
+            key: const Key('matricula_field'),
+            controller: _matricula,
+            autofillHints: const [AutofillHints.username],
+            decoration: const InputDecoration(labelText: 'Matrícula / CNS'),
+          ),
           const SizedBox(height: 16),
-          TextField(key: const Key('senha_field'), controller: _senha, obscureText: true, decoration: const InputDecoration(labelText: 'Senha de acesso')),
+          TextField(
+            key: const Key('senha_field'),
+            controller: _senha,
+            obscureText: true,
+            autofillHints: const [AutofillHints.password],
+            decoration: const InputDecoration(labelText: 'Senha de acesso'),
+          ),
           const SizedBox(height: 20),
-          Semantics(label: 'Entrar no painel de priorização', button: true, container: true, child: SizedBox(width: double.infinity, child: FilledButton(
+          // Sem `Semantics` em volta, pelo mesmo motivo do login do paciente:
+          // o `Text` do botão já é o nome acessível ("Entrar com credenciais")
+          // e o `FilledButton` já expõe papel e ação de toque. Um wrapper com
+          // outro `label` e `container: true` cria um nó próprio, sem ação,
+          // anunciado antes do botão real (WCAG 2.5.3 e 4.1.2).
+          SizedBox(width: double.infinity, child: FilledButton(
             key: const Key('login_button'),
             style: FilledButton.styleFrom(minimumSize: const Size(48, 52)),
             onPressed: _busy ? null : _enter,
             child: _busy
                 ? const SizedBox(height: 22, width: 22, child: CircularProgressIndicator(strokeWidth: 2))
                 : const Text('Entrar com credenciais'),
-          ))),
+          )),
           if (_error != null) Padding(
             padding: const EdgeInsets.only(top: 16),
             child: Semantics(
@@ -214,10 +289,12 @@ class AcsHomeShell extends StatefulWidget {
     required this.acsId,
     required this.visitQueue,
     required this.themeController,
+    required this.visitPullService,
     super.key,
     this.feedBuilder,
     this.initialAlert,
     this.initialPosition,
+    this.syncInterval,
   });
 
   final String microAreaId;
@@ -227,10 +304,25 @@ class AcsHomeShell extends StatefulWidget {
   final LatLng? initialPosition;
   final ThemeController themeController;
 
+  /// Intervalo entre sincronizações automáticas com a central (visitas +
+  /// pacientes da microárea), além do disparo ao abrir o painel e do botão
+  /// manual. `null` usa [defaultSyncInterval].
+  final Duration? syncInterval;
+
+  /// Produção: 5 minutos é frequente o bastante para um ACS ver, sem apertar
+  /// botão, uma visita registrada por outro colega — sem virar polling
+  /// agressivo que gasta bateria/dados em campo.
+  static const defaultSyncInterval = Duration(minutes: 5);
+
   /// Obrigatória: a tela de visita usava `widget.visitQueue ?? OfflineVisitQueue()`,
   /// e um dia em que o shell fosse construído sem fila voltaria a descartar a
   /// visita em silêncio.
   final OfflineVisitQueue visitQueue;
+
+  /// Serviço de pull central→dispositivo (RF15). Obrigatório pelo mesmo
+  /// motivo de [visitQueue]: construir um substituto aqui dentro, silencioso,
+  /// já foi o defeito de outra fila neste mesmo arquivo.
+  final VisitPullService visitPullService;
 
   @override
   State<AcsHomeShell> createState() => _AcsHomeShellState();
@@ -255,6 +347,51 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
   Timer? _reconnectTimer;
   final ReconnectSchedule _reconnectDelay = ReconnectSchedule();
 
+  /// `null` quando nenhum ciclo periódico está agendado (app em segundo
+  /// plano, ou ainda não iniciado).
+  Timer? _periodicSyncTimer;
+
+  Duration get _syncInterval => widget.syncInterval ?? AcsHomeShell.defaultSyncInterval;
+
+  /// `true` enquanto uma chamada a `visits.pull` está em andamento.
+  bool _pullingVisits = false;
+
+  /// Quantas entradas a última sincronização bem-sucedida trouxe que ainda
+  /// não estavam na fila offline local. `null` antes da primeira tentativa
+  /// desta sessão.
+  int? _lastPulledCount;
+
+  /// Quando a última sincronização bem-sucedida terminou. `null` antes da
+  /// primeira tentativa desta sessão.
+  DateTime? _lastPulledAt;
+
+  /// Presente quando a última tentativa falhou. Não trava a tela: sem
+  /// confirmação do servidor, o cursor local não avança
+  /// (`VisitPullService.pullAndMerge`), então tentar de novo reconsulta o
+  /// mesmo ponto sem risco de perder nada.
+  InfraNotice? _pullError;
+
+  /// `true` enquanto `patients.listMicroArea` está em andamento.
+  bool _loadingMicroAreaPatients = false;
+
+  /// Pacientes cadastrados na microárea, segundo o servidor. `null` antes da
+  /// primeira carga desta sessão.
+  ///
+  /// Corrige L-06: a tela "Área" mostrava "142 cadastrados" fixo,
+  /// contradizendo o servidor — a microárea semeada em desenvolvimento tem 5
+  /// pacientes (spec/validation_report.md). `patients.listMicroArea` já
+  /// territorializa pelo token do ACS (INV-01), mesma chamada que alimenta o
+  /// seletor de paciente da visita de rotina.
+  List<MicroAreaPatient>? _microAreaPatients;
+
+  /// Quando a última carga bem-sucedida terminou.
+  DateTime? _microAreaPatientsLoadedAt;
+
+  /// Presente quando a última tentativa falhou.
+  InfraNotice? _microAreaPatientsError;
+
+  bool _patientsRequested = false;
+
   @override
   void initState() {
     super.initState();
@@ -267,7 +404,78 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
     _feed.onConnectionChanged = _onBrokerConnectionChanged;
     _connectFeed();
     _restoreVisits();
+    _pullVisits();
     _loadCurrentPosition();
+    _startPeriodicSync();
+  }
+
+  /// Sincronização periódica em segundo plano: repete `_refreshAreaData()`
+  /// (visitas + pacientes da microárea) a cada [_syncInterval] enquanto o
+  /// painel está aberto e o app em primeiro plano — sem isso, um ACS só via
+  /// dado novo ao reabrir a aba "Área" ou apertar "Atualizar dados da
+  /// microárea" (decisão de produto adiada em
+  /// docs/superpowers/plans/2026-09-18-rf15-consumo-acs-pull-visitas.md).
+  void _startPeriodicSync() {
+    _periodicSyncTimer?.cancel();
+    _periodicSyncTimer = Timer.periodic(_syncInterval, (_) => _refreshAreaData());
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // BackendScope.of(context) só é seguro a partir daqui, não em initState —
+    // mesmo motivo de VisitRegistrationScreen._patientsRequested.
+    if (!_patientsRequested) {
+      _patientsRequested = true;
+      _loadMicroAreaPatients();
+    }
+  }
+
+  Future<void> _loadMicroAreaPatients() async {
+    final backend = BackendScope.of(context);
+    setState(() { _loadingMicroAreaPatients = true; _microAreaPatientsError = null; });
+
+    try {
+      final patients = await backend.listPatients();
+      if (!mounted) return;
+      setState(() {
+        _microAreaPatients = patients;
+        _microAreaPatientsLoadedAt = DateTime.now();
+      });
+    } on BackendFailure catch (failure) {
+      if (!mounted) return;
+      setState(() {
+        _microAreaPatientsError = (
+          title: 'Não foi possível carregar os pacientes da microárea.',
+          detail: failure.message,
+        );
+      });
+    } catch (error, stackTrace) {
+      developer.log(
+        'falha não classificada ao carregar pacientes da microárea',
+        name: 'sinalacs.acs.micro_area_patients',
+        error: error,
+        stackTrace: stackTrace,
+      );
+      if (!mounted) return;
+      setState(() {
+        _microAreaPatientsError = (
+          title: 'Não foi possível carregar os pacientes da microárea.',
+          detail: 'Verifique a conexão e tente de novo.',
+        );
+      });
+    } finally {
+      if (mounted) setState(() => _loadingMicroAreaPatients = false);
+    }
+  }
+
+  /// O botão "Atualizar dados da microárea" repete os dois carregamentos da
+  /// aba "Área" — visitas (RF15) e pacientes da microárea (L-06/RF08) — para
+  /// que uma falha em qualquer um dos dois tenha um jeito de tentar de novo,
+  /// não só o pull de visitas.
+  void _refreshAreaData() {
+    _pullVisits();
+    _loadMicroAreaPatients();
   }
 
   /// Recarrega as visitas gravadas em execuções anteriores.
@@ -287,6 +495,54 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
     // o sinalizador congelava aqui e toda falha posterior de `add()`/`sync()`
     // ficava invisível.
     if (mounted) setState(() {});
+  }
+
+  /// Sincronização central→dispositivo (RF15, decisão §5): busca no servidor
+  /// as visitas da microárea alteradas desde o cursor deste aparelho.
+  ///
+  /// Só leitura, de propósito — `VisitPullService` nunca escreve na
+  /// [OfflineVisitQueue] (ver a documentação da própria classe). O que muda
+  /// aqui é só o que a tela "Área" mostra sobre o resultado, nunca a fila de
+  /// visitas pendentes.
+  ///
+  /// Disparado automaticamente ao abrir o painel, mais um botão manual na
+  /// própria tela — não um timer de sincronização em segundo plano, decisão
+  /// de produto separada e fora do escopo desta task.
+  Future<void> _pullVisits() async {
+    setState(() { _pullingVisits = true; _pullError = null; });
+
+    try {
+      await widget.visitPullService.pullAndMerge();
+      if (!mounted) return;
+      setState(() {
+        _lastPulledCount = widget.visitPullService.lastPulled.length;
+        _lastPulledAt = DateTime.now();
+      });
+    } on BackendFailure catch (failure) {
+      if (!mounted) return;
+      setState(() {
+        _pullError = (
+          title: 'Não foi possível sincronizar com a central.',
+          detail: failure.message,
+        );
+      });
+    } catch (error, stackTrace) {
+      developer.log(
+        'falha não classificada ao sincronizar visitas da central',
+        name: 'sinalacs.acs.visit_pull',
+        error: error,
+        stackTrace: stackTrace,
+      );
+      if (!mounted) return;
+      setState(() {
+        _pullError = (
+          title: 'Não foi possível sincronizar com a central.',
+          detail: 'Verifique a conexão e tente de novo.',
+        );
+      });
+    } finally {
+      if (mounted) setState(() => _pullingVisits = false);
+    }
   }
 
   Future<void> _loadCurrentPosition() async {
@@ -431,11 +687,21 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
       // bateria; a tentativa volta ao primeiro plano.
       _reconnectTimer?.cancel();
       _reconnectTimer = null;
-    } else if (state == AppLifecycleState.resumed && _feedErrorIsTransient) {
-      // O gatilho que mais importa na prática: o sinal costuma voltar com a
-      // tela apagada, e o ACS tira o aparelho do bolso já esperando o alerta.
-      _reconnectDelay.reset();
-      _connectFeed();
+      _periodicSyncTimer?.cancel();
+      _periodicSyncTimer = null;
+    } else if (state == AppLifecycleState.resumed) {
+      if (_feedErrorIsTransient) {
+        // O gatilho que mais importa na prática: o sinal costuma voltar com
+        // a tela apagada, e o ACS tira o aparelho do bolso já esperando o
+        // alerta.
+        _reconnectDelay.reset();
+        _connectFeed();
+      }
+      // Retomar sincroniza na hora — sem isto, um app que passou minutos em
+      // segundo plano só voltaria a sincronizar no próximo toque manual ou
+      // na próxima virada do ciclo, que pode estar longe.
+      _refreshAreaData();
+      _startPeriodicSync();
     }
   }
 
@@ -456,6 +722,7 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
   @override
   void dispose() {
     _reconnectTimer?.cancel();
+    _periodicSyncTimer?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     _feed.stop();
     _queue.dispose();
@@ -466,7 +733,17 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
   Widget build(BuildContext context) => Scaffold(
     appBar: _Header('ACS • ${_brokerConnected ? 'em linha' : 'sem conexão'}', 'Painel operacional', connected: _brokerConnected),
     body: SafeArea(child: switch (destination) {
-      AcsDestination.area => const TerritorializationScreen(),
+      AcsDestination.area => TerritorializationScreen(
+          pulling: _pullingVisits,
+          lastPulledCount: _lastPulledCount,
+          lastPulledAt: _lastPulledAt,
+          pullError: _pullError,
+          onRefresh: _refreshAreaData,
+          loadingPatients: _loadingMicroAreaPatients,
+          patientCount: _microAreaPatients?.length,
+          patientsLoadedAt: _microAreaPatientsLoadedAt,
+          patientsError: _microAreaPatientsError,
+        ),
       AcsDestination.queue => DashboardScreen(
           queue: _queue,
           feedError: _feedError,
@@ -523,7 +800,132 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
   Widget _moreItem(BuildContext sheet, IconData icon, String label, AcsDestination value) => ListTile(leading: Icon(icon), title: Text(label), onTap: () { Navigator.pop(sheet); setState(() => destination = value); });
 }
 
-class TerritorializationScreen extends StatelessWidget { const TerritorializationScreen({super.key}); @override Widget build(BuildContext context) => _page([const Text('Microárea 12 - Zona Rural', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)), const SizedBox(height: 12), const _InfoRow('Pacientes sincronizados', '142 cadastrados'), const _InfoRow('Cache local', 'Atualizado há 10 min'), const SizedBox(height: 20), FilledButton(onPressed: () => _message(context, 'Atualização será integrada à API central.'), child: const Text('Atualizar dados da microárea'))]); }
+/// Painel territorial da microárea, incluindo o status da sincronização
+/// central→dispositivo (RF15, decisão §5) e o número real de pacientes da
+/// microárea (L-06/RF08, fechado nesta task: antes mostrava "142
+/// cadastrados" fixo, contradizendo o servidor).
+class TerritorializationScreen extends StatelessWidget {
+  const TerritorializationScreen({
+    super.key,
+    this.pulling = false,
+    this.lastPulledCount,
+    this.lastPulledAt,
+    this.pullError,
+    this.onRefresh,
+    this.loadingPatients = false,
+    this.patientCount,
+    this.patientsLoadedAt,
+    this.patientsError,
+  });
+
+  /// `true` enquanto uma chamada a `visits.pull` está em andamento.
+  final bool pulling;
+
+  /// Quantas entradas a última sincronização bem-sucedida trouxe que ainda
+  /// não estavam na fila offline local. `null` antes da primeira tentativa
+  /// desta sessão.
+  final int? lastPulledCount;
+
+  /// Quando a última sincronização bem-sucedida terminou. `null` antes da
+  /// primeira tentativa desta sessão.
+  final DateTime? lastPulledAt;
+
+  /// Presente quando a última tentativa falhou.
+  final InfraNotice? pullError;
+
+  final VoidCallback? onRefresh;
+
+  /// `true` enquanto `patients.listMicroArea` está em andamento.
+  final bool loadingPatients;
+
+  /// Pacientes cadastrados na microárea. `null` antes da primeira carga.
+  final int? patientCount;
+
+  /// Quando a última carga bem-sucedida terminou.
+  final DateTime? patientsLoadedAt;
+
+  /// Presente quando a última tentativa falhou.
+  final InfraNotice? patientsError;
+
+  @override
+  Widget build(BuildContext context) => _page([
+        const Text('Microárea 12 - Zona Rural', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 12),
+        _InfoRow('Pacientes sincronizados', _patientCountText()),
+        _InfoRow('Cache local', _cacheFreshnessText()),
+        // A linha acima diz que falhou; este banner diz por quê. Sem ele o
+        // `detail` de `patientsError` (a mensagem do servidor) nunca chegava à
+        // tela — o `InfraNotice` inteiro era reduzido a "Não foi possível
+        // carregar". Mesmo tratamento que `pullError` já tinha logo abaixo,
+        // inclusive o `liveRegion` de SC 4.1.3.
+        if (patientsError != null)
+          _InfraBanner(
+            key: const Key('patients_error'),
+            icon: Icons.person_off_outlined,
+            notice: patientsError!,
+          ),
+        const Divider(height: 32),
+        const Text('Sincronização com a central', style: TextStyle(fontWeight: FontWeight.bold)),
+        const SizedBox(height: 8),
+        if (pullError != null)
+          _InfraBanner(key: const Key('pull_error'), icon: Icons.sync_problem_outlined, notice: pullError!)
+        else
+          // SC 4.1.3 (Status Messages): sem `liveRegion`, um leitor de tela só
+          // saberia que a sincronização terminou se varresse a tela de novo por
+          // conta própria — igual ao que `_InfraBanner` já garante para o erro.
+          Semantics(
+            liveRegion: true,
+            child: Text(key: const Key('pull_status'), _pullStatusText()),
+          ),
+        const SizedBox(height: 16),
+        Semantics(
+          label: pulling ? 'Sincronizando com a central' : null,
+          child: FilledButton(
+            key: const Key('pull_visits'),
+            onPressed: (pulling || loadingPatients) ? null : onRefresh,
+            // O texto do botão fica sempre visível: substituí-lo só pelo
+            // spinner deixava um botão desabilitado sem nome para leitor de
+            // tela, além de encolher e reposicionar o botão na tela.
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              if (pulling) ...[
+                const SizedBox(height: 22, width: 22, child: CircularProgressIndicator(strokeWidth: 2)),
+                const SizedBox(width: 8),
+              ],
+              const Text('Atualizar dados da microárea'),
+            ]),
+          ),
+        ),
+      ]);
+
+  String _pullStatusText() {
+    final at = lastPulledAt;
+    if (at == null) return 'Ainda não sincronizado nesta sessão.';
+
+    final novidade = switch (lastPulledCount ?? 0) {
+      0 => 'Nenhuma novidade da central',
+      1 => '1 atualização recebida da central',
+      final count => '$count atualizações recebidas da central',
+    };
+    return '$novidade • ${_time(at)}';
+  }
+
+  String _time(DateTime value) {
+    final local = value.toLocal();
+    return '${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}';
+  }
+
+  String _patientCountText() {
+    if (patientsError != null) return 'Não foi possível carregar';
+    final count = patientCount;
+    if (count == null) return loadingPatients ? 'Carregando...' : 'Ainda não carregado';
+    return count == 1 ? '1 cadastrado' : '$count cadastrados';
+  }
+
+  String _cacheFreshnessText() {
+    final at = patientsLoadedAt;
+    return at == null ? 'Ainda não sincronizado' : 'Atualizado às ${_time(at)}';
+  }
+}
 
 /// Painel de priorização alimentado pelos alertas que chegam do broker.
 ///
@@ -762,14 +1164,6 @@ class MapScreen extends StatefulWidget {
 
   static const LatLng _fallbackCenter = LatLng(-15.7942, -47.8828);
 
-  static LatLng alertPositionFor(PrioritizedAlert alert) {
-    final hash = alert.locationHash;
-    final seed = hash.codeUnits.fold<int>(0, (sum, code) => sum + code) % 1000;
-    final lat = -15.7942 + ((seed % 7) * 0.0025);
-    final lng = -47.8828 + (((seed ~/ 7) % 9) * 0.0035);
-    return LatLng(lat, lng);
-  }
-
   @override
   State<MapScreen> createState() => _MapScreenState();
 }
@@ -783,7 +1177,8 @@ class _MapScreenState extends State<MapScreen> {
   void _buildRouteFor([PrioritizedAlert? alert]) {
     final target = alert ?? _selectedAlert ?? (widget.queue.alerts.isEmpty ? null : widget.queue.alerts.first);
     final origin = widget.currentPosition;
-    if (target == null || origin == null) {
+    final destination = target == null ? null : _cellCenter(target);
+    if (target == null || origin == null || destination == null) {
       setState(() {
         _routePoints = const <LatLng>[];
         _routePlan = null;
@@ -792,7 +1187,6 @@ class _MapScreenState extends State<MapScreen> {
       return;
     }
 
-    final destination = _markerPosition(target);
     final plan = _routeService.plan(origin: origin, destination: destination);
     setState(() {
       _selectedAlert = target;
@@ -816,20 +1210,38 @@ class _MapScreenState extends State<MapScreen> {
                 infoWindow: const InfoWindow(title: 'Localização atual'),
               ),
             for (final alert in widget.queue.alerts)
-              Marker(
-                markerId: MarkerId('alert_${alert.alertId}'),
-                position: _markerPosition(alert),
-                icon: _markerColor(alert.riskLevel),
-                consumeTapEvents: true,
-                onTap: () {
-                  _buildRouteFor(alert);
-                  _showAlertDetail(context, alert);
-                },
-                infoWindow: InfoWindow(
-                  title: 'Paciente ${alert.patientId.substring(0, 8)}',
-                  snippet: '${_riskLabel(alert.riskLevel)} • ${_time(alert.triggeredAt)}',
+              if (_cellCenter(alert) case final center?)
+                Marker(
+                  markerId: MarkerId('alert_${alert.alertId}'),
+                  position: center,
+                  icon: _markerColor(alert.riskLevel),
+                  consumeTapEvents: true,
+                  onTap: () {
+                    _buildRouteFor(alert);
+                    _showAlertDetail(context, alert);
+                  },
+                  infoWindow: InfoWindow(
+                    title: 'Paciente ${alert.patientId.substring(0, 8)}',
+                    snippet: '${_riskLabel(alert.riskLevel)} • ${_time(alert.triggeredAt)} • área aproximada',
+                  ),
                 ),
-              ),
+          };
+
+          // Círculo de incerteza no centro da célula — nunca um ponto exato.
+          // Alertas sem célula (GPS indisponível no paciente) não ganham
+          // marcador nem círculo: `null` é estado explícito, não é
+          // arredondado para uma posição inventada.
+          final circles = <Circle>{
+            for (final alert in widget.queue.alerts)
+              if (_cellCenter(alert) case final center?)
+                Circle(
+                  circleId: CircleId('cell_${alert.alertId}'),
+                  center: center,
+                  radius: cellRadiusMeters,
+                  fillColor: _cellFillColor(alert.riskLevel),
+                  strokeColor: AcsColors.accent,
+                  strokeWidth: 1,
+                ),
           };
 
           final polylines = <Polyline>{
@@ -846,6 +1258,7 @@ class _MapScreenState extends State<MapScreen> {
               ? GoogleMap(
                   initialCameraPosition: CameraPosition(target: center, zoom: 13),
                   markers: markers,
+                  circles: circles,
                   polylines: polylines,
                   myLocationEnabled: widget.currentPosition != null,
                   myLocationButtonEnabled: false,
@@ -1010,6 +1423,16 @@ class _MapScreenState extends State<MapScreen> {
     };
   }
 
+  /// Preenchimento do círculo de incerteza — deriva de [riskLevel], não do
+  /// `BitmapDescriptor` do marcador (aquele é opaco, não dá para extrair cor
+  /// nem alpha dele).
+  Color _cellFillColor(String riskLevel) => switch (riskLevel.toLowerCase()) {
+        'red' || 'vermelho' => AcsColors.red.withValues(alpha: 0.15),
+        'yellow' || 'amarelo' => AcsColors.yellow.withValues(alpha: 0.15),
+        'green' || 'verde' => AcsColors.green.withValues(alpha: 0.15),
+        _ => AcsColors.accent.withValues(alpha: 0.15),
+      };
+
   String _riskLabel(String riskLevel) => switch (riskLevel.toLowerCase()) {
         'red' || 'vermelho' => 'Vermelho',
         'yellow' || 'amarelo' => 'Amarelo',
@@ -1017,7 +1440,11 @@ class _MapScreenState extends State<MapScreen> {
         _ => 'Não classificado',
       };
 
-  LatLng _markerPosition(PrioritizedAlert alert) => MapScreen.alertPositionFor(alert);
+  /// Centro da célula do alerta, ou `null` se o dispositivo do paciente não
+  /// conseguiu GPS. `null` é um estado explícito — o mapa não deve inventar
+  /// posição (débito técnico L-05 fechado: nada aqui deriva coordenada do
+  /// hash).
+  LatLng? _cellCenter(PrioritizedAlert alert) => parseLocationCell(alert.locationCell);
 
   String _time(DateTime value) {
     final local = value.toLocal();
@@ -1152,7 +1579,9 @@ class _VisitRegistrationScreenState extends State<VisitRegistrationScreen> {
     final position = widget.currentPosition;
     if (alert == null || position == null) return false;
 
-    final destination = MapScreen.alertPositionFor(alert);
+    // Sem célula (GPS indisponível no paciente), não há destino contra o qual
+    // comparar — `arrivalStatus` já trata destino nulo como indisponível.
+    final destination = parseLocationCell(alert.locationCell);
     const routeService = RouteService();
     return routeService.arrivalStatus(origin: position, destination: destination) == ArrivalStatus.arrived;
   }
@@ -1557,12 +1986,18 @@ class GeofencingScreen extends StatelessWidget {
             ]);
           }
 
-          final destination = MapScreen.alertPositionFor(alert);
+          // Sem célula (GPS indisponível no paciente), não há destino para
+          // medir proximidade — `arrivalStatus` trata isso como indisponível,
+          // igual à falta de posição atual do ACS.
+          final destination = parseLocationCell(alert.locationCell);
           const routeService = RouteService();
           final status = routeService.arrivalStatus(origin: currentPosition, destination: destination);
-          final distance = currentPosition == null
+          final distance = currentPosition == null || destination == null
               ? null
               : routeService.distanceToDestination(origin: currentPosition!, destination: destination);
+          final unavailableMessage = currentPosition == null
+              ? 'Localização atual indisponível. O check-in não pode ser confirmado.'
+              : 'Localização do paciente indisponível. O check-in não pode ser confirmado.';
 
           return _page([
             const Icon(Icons.location_searching, size: 44),
@@ -1575,7 +2010,7 @@ class GeofencingScreen extends StatelessWidget {
             const SizedBox(height: 12),
             Text(
               switch (status) {
-                ArrivalStatus.unavailable => 'Localização atual indisponível. O check-in não pode ser confirmado.',
+                ArrivalStatus.unavailable => unavailableMessage,
                 ArrivalStatus.approaching => 'A caminho do local${distance == null ? '' : ' • ${(distance * 1000).round()} m restantes'}.',
                 ArrivalStatus.arrived => 'Local alcançado. O registro da visita está liberado.',
               },

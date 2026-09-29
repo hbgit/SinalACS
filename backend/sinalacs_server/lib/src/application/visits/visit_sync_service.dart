@@ -1,7 +1,100 @@
 import 'package:serverpod/serverpod.dart' show UuidValue;
 import 'package:sinalacs_server/src/application/audit/audit_trail.dart';
+import 'package:sinalacs_server/src/application/auth/authorization.dart';
 import 'package:sinalacs_server/src/application/auth/development_auth_service.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
+
+/// Uma visita EM CLARO, do jeito que o serviço a manipula.
+///
+/// Espelha o modelo persistido `Visit` campo a campo, com uma diferença: aqui
+/// `notes` é `Map<String, String>` legível, enquanto na coluna é ciphertext
+/// (`notesEncrypted`/`notesKeyVersion`). A tradução acontece só em
+/// `OrmVisitStore` — `application/` não sabe que as notas são cifradas
+/// (RNF03, INV-04). Mesma fronteira de [PatientDirectoryEntry] e
+/// [TriageSessionRecord].
+class VisitRecord {
+  const VisitRecord({
+    this.id,
+    required this.patientId,
+    required this.acsId,
+    required this.scheduledAt,
+    this.startedAt,
+    this.completedAt,
+    required this.status,
+    required this.riskLevelBefore,
+    this.riskLevelAfter,
+    required this.notes,
+    required this.syncStatus,
+    required this.arrivalMethod,
+    required this.localId,
+    this.syncAt,
+    required this.version,
+  });
+
+  final UuidValue? id;
+  final UuidValue patientId;
+  final UuidValue acsId;
+  final DateTime scheduledAt;
+  final DateTime? startedAt;
+  final DateTime? completedAt;
+  final String status;
+  final RiskLevel riskLevelBefore;
+  final RiskLevel? riskLevelAfter;
+  final Map<String, String> notes;
+  final SyncStatus syncStatus;
+
+  /// Como o check-in desta visita foi registrado (RF12, decisão §4). Definido
+  /// na criação da visita, como [scheduledAt]/[riskLevelBefore] — não muda na
+  /// atualização feita ao concluir (ver `VisitSyncService._syncOne`).
+  final ArrivalMethod arrivalMethod;
+  final UuidValue localId;
+  final DateTime? syncAt;
+  final int version;
+
+  /// Mesma semântica de sentinela do `copyWith` gerado pelo Serverpod: passar
+  /// `null` explicitamente ZERA o campo, e omitir o argumento preserva o valor
+  /// atual. Sem a sentinela, `completedAt: null` (uma visita reaberta) seria
+  /// indistinguível de "não mexa neste campo".
+  VisitRecord copyWith({
+    Object? id = _keep,
+    UuidValue? patientId,
+    UuidValue? acsId,
+    DateTime? scheduledAt,
+    Object? startedAt = _keep,
+    Object? completedAt = _keep,
+    String? status,
+    RiskLevel? riskLevelBefore,
+    Object? riskLevelAfter = _keep,
+    Map<String, String>? notes,
+    SyncStatus? syncStatus,
+    ArrivalMethod? arrivalMethod,
+    UuidValue? localId,
+    Object? syncAt = _keep,
+    int? version,
+  }) =>
+      VisitRecord(
+        id: id == _keep ? this.id : id as UuidValue?,
+        patientId: patientId ?? this.patientId,
+        acsId: acsId ?? this.acsId,
+        scheduledAt: scheduledAt ?? this.scheduledAt,
+        startedAt: startedAt == _keep ? this.startedAt : startedAt as DateTime?,
+        completedAt: completedAt == _keep ? this.completedAt : completedAt as DateTime?,
+        status: status ?? this.status,
+        riskLevelBefore: riskLevelBefore ?? this.riskLevelBefore,
+        riskLevelAfter:
+            riskLevelAfter == _keep ? this.riskLevelAfter : riskLevelAfter as RiskLevel?,
+        notes: notes ?? this.notes,
+        syncStatus: syncStatus ?? this.syncStatus,
+        arrivalMethod: arrivalMethod ?? this.arrivalMethod,
+        localId: localId ?? this.localId,
+        syncAt: syncAt == _keep ? this.syncAt : syncAt as DateTime?,
+        version: version ?? this.version,
+      );
+}
+
+/// Sentinela de [VisitRecord.copyWith] — equivalente ao `_Undefined` que o
+/// Serverpod gera para os seus próprios modelos.
+const Object _keep = Object();
 
 /// Persistência das visitas sincronizadas.
 ///
@@ -9,13 +102,13 @@ import 'package:sinalacs_server/src/generated/protocol.dart';
 /// Postgres real.
 abstract interface class VisitStore {
   /// Visita já gravada com este `localId`, se houver.
-  Future<Visit?> findByLocalId(String localId);
+  Future<VisitRecord?> findByLocalId(String localId);
 
   /// Grava uma visita nova, já com `version` inicial.
-  Future<Visit> insert(Visit visit);
+  Future<VisitRecord> insert(VisitRecord visit);
 
   /// Atualiza uma visita existente, incrementando a versão.
-  Future<Visit> update(Visit visit);
+  Future<VisitRecord> update(VisitRecord visit);
 
   /// Microárea do paciente, ou `null` se ele não existir.
   ///
@@ -23,6 +116,10 @@ abstract interface class VisitStore {
   /// PACIENTE pertence ao mesmo território — qualquer UUID de paciente
   /// existente era aceito, de qualquer microárea (furo do INV-01).
   Future<UuidValue?> microAreaOfPatient(UuidValue patientId);
+
+  /// Visitas da microárea cujo `syncAt` é posterior a `since` — o cursor
+  /// incremental de `visits.pull` (RF15, decisão §5).
+  Future<List<VisitRecord>> listChangedInMicroArea(UuidValue microAreaId, DateTime since);
 }
 
 /// Sincronização das visitas registradas offline pelo ACS.
@@ -49,13 +146,67 @@ class VisitSyncService {
   final AuditTrail _audit;
   final DateTime Function() _clock;
 
+  /// Sincronização central→dispositivo: visitas da microárea do ACS
+  /// alteradas desde `since`, para reconciliar um device que ficou offline ou
+  /// foi reinstalado. Território vem sempre do token (INV-01), nunca de
+  /// parâmetro — mesma regra de `PatientDirectoryService.listForAcs`.
+  Future<List<VisitSyncEntry>> pull({
+    required AuthenticatedUser user,
+    required DateTime since,
+  }) async {
+    Authorization.require(
+      user,
+      roles: {UserRole.acs},
+      onDenied: () =>
+          StateError('Somente ACS territorializados podem sincronizar visitas.'),
+    );
+
+    final microAreaId = UuidValue.fromString(user.microAreaId!);
+    final visits = await _store.listChangedInMicroArea(microAreaId, since);
+
+    // Best-effort, mesmo padrão de `PatientDirectoryService.listForAcs`: uma
+    // trilha de auditoria que falha não pode impedir o ACS de sincronizar. A
+    // leitura audita o EVENTO — `notes` é texto clínico decifrado na volta —,
+    // não as visitas retornadas, para não recriar o prontuário dentro do
+    // próprio log de auditoria.
+    await _audit.recordSafely(AuditEvent(
+      userId: user.id,
+      actionType: 'read',
+      resourceType: 'visit_pull',
+      result: 'granted',
+    ));
+
+    return [
+      for (final visit in visits)
+        VisitSyncEntry(
+          localId: visit.localId.uuid,
+          patientId: visit.patientId.uuid,
+          scheduledAt: visit.scheduledAt,
+          completedAt: visit.completedAt,
+          status: visit.status,
+          riskLevelBefore: visit.riskLevelBefore,
+          riskLevelAfter: visit.riskLevelAfter,
+          notes: visit.notes,
+          version: visit.version,
+          arrivalMethod: visit.arrivalMethod,
+          // Relógio do SERVIDOR (gravado em `_syncOne` via `_clock()`), nunca
+          // o do dispositivo. É o que o cursor do app usa para avançar sem
+          // depender do relógio do aparelho — ver `VisitPullService` no ACS.
+          syncAt: visit.syncAt,
+        ),
+    ];
+  }
+
   Future<List<VisitSyncResult>> sync({
     required AuthenticatedUser user,
     required List<VisitSyncEntry> entries,
   }) async {
-    if (user.role != UserRole.acs || user.microAreaId == null) {
-      throw StateError('Somente ACS territorializados podem sincronizar visitas.');
-    }
+    Authorization.require(
+      user,
+      roles: {UserRole.acs},
+      onDenied: () =>
+          StateError('Somente ACS territorializados podem sincronizar visitas.'),
+    );
 
     final results = <VisitSyncResult>[];
     for (final entry in entries) {
@@ -132,7 +283,7 @@ class VisitSyncService {
     final existing = await _store.findByLocalId(entry.localId);
 
     if (existing == null) {
-      final inserted = await _store.insert(Visit(
+      final inserted = await _store.insert(VisitRecord(
         patientId: patientId,
         acsId: acsId,
         scheduledAt: entry.scheduledAt,
@@ -142,6 +293,7 @@ class VisitSyncService {
         riskLevelAfter: entry.riskLevelAfter,
         notes: entry.notes,
         syncStatus: SyncStatus.synced,
+        arrivalMethod: entry.arrivalMethod,
         localId: localId,
         syncAt: _clock().toUtc(),
         version: 1,
@@ -186,6 +338,10 @@ class VisitSyncService {
       );
     }
 
+    // `arrivalMethod` fica de fora deliberadamente: é definido na criação da
+    // visita (como `scheduledAt`/`riskLevelBefore`), não numa atualização de
+    // conclusão — `copyWith` sem o argumento preserva o valor gravado no
+    // insert.
     final updated = await _store.update(existing.copyWith(
       completedAt: entry.completedAt,
       status: entry.status,

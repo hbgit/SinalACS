@@ -16,6 +16,9 @@ fields:
   acknowledgedAt: DateTime?
   riskLevel: RiskLevel
   locationHash: String
+  ### Célula geográfica de baixa resolução para o mapa do ACS (~1,1 km).
+  ### Nunca a coordenada exata — ver docs/superpowers/specs/2026-09-16-decisoes-produto-pos-validacao.md §1.
+  locationCell: String?
   status: AlertStatus
   mqttTopic: String
   deviceId: String
