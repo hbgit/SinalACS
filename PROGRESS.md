@@ -1176,3 +1176,22 @@ Só especificação; nenhum código mudou. `spec/stack.md`, `spec/PRD_system.md`
 - **O Gorush não elimina as credenciais:** é relé para FCM/APNs, então Android ainda precisa de uma credencial FCM e iOS de uma chave APNs. A pendência muda de "projeto Firebase" para "hospedar o Gorush e provisionar credenciais".
 - Em aberto: o pacote que captura o token nativo em cada plataforma (`firebase_messaging` ou canal nativo no Android; pacote leve de APNs no iOS).
 - O plano `2026-09-29-menores-do-push-e-aviso-de-mudanca-dos-termos.md` não é afetado: não toca envio nem provedor.
+
+## RF14: envio de avisos segmentados com Gorush (2026-09-29)
+
+Plano: `docs/superpowers/plans/2026-09-29-rf14-gorush-avisos-segmentados.md`, branch `fix/patient`.
+
+**O que existe:**
+- **Infra:** serviço `gorush` no `docker-compose.yml` sob o perfil `push` (sem porta publicada), `GORUSH_URL` no `AppConfig` (vazio desliga o envio), `infra/docker/gorush/` com `config.yml` e README.
+- **Backend:** `GorushClient` (`dart:io`, 5 s, poda de tokens inválidos), `NoticeService` e `notices.sendSegmented` (só ACS; microárea do token; consentimento `segmentedPush` mais recente por titular; filtro opcional de crônicos; 0 destinatários não chama o Gorush; auditoria `community_notice` sem o texto).
+- **ACS:** `NoticesScreen` real (título 60, mensagem 240, público, resultado "X de Y pacientes").
+- **Paciente:** `pushTokenSourceProvider` (único uso de `flutter_riverpod`, ^3.4.3) e `NativePushTokenSource` sobre o canal `sinalacs/push_token`.
+- Contagens de teste: backend 390, paciente 197, ACS 178.
+
+**O que NÃO está provado nem pronto:**
+- **Nenhum teste fala com um Gorush ou com o FCM/APNs de verdade.** O cliente é provado contra um servidor HTTP falso; nunca se viu um push chegar a um aparelho.
+- **O lado nativo do canal (Kotlin/Swift) não existe:** o app do paciente nunca obtém um token real, então `push_tokens` só tem linhas de teste.
+- As credenciais FCM (conta de serviço) e APNs (chave `.p8`) são da organização e não estão no repositório; o `config.yml` foi escrito sem conferir os nomes das chaves contra uma tag fixa do `appleboy/gorush`, e o Compose usa `:latest`.
+- O `async` do app do paciente subiu de 2.11.0 para 2.13.1 por causa do Riverpod 3.
+
+**Fora de escopo:** migrar o resto do paciente para Riverpod, salvar o token no SQLite local, histórico ou agendamento de avisos.

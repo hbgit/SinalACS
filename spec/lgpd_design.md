@@ -69,8 +69,10 @@ locais quando o consentimento espelhado no aparelho
 
 **Aviso — `ConsentPurpose.segmentedPush` continua sem leitor.** RF14 (avisos
 segmentados por push) não tem nenhum código de envio no repositório ainda —
-depende de hospedar o Gorush e provisionar credenciais FCM/APNs (§3.2 do
-mesmo documento de decisões), não apenas de implementação. Não há
+tem hoje um leitor: `notices.sendSegmented` (RF14) consulta a linha de
+consentimento mais recente de cada titular antes de montar a lista de
+destinatários. O envio real ainda depende de hospedar o Gorush e provisionar
+credenciais FCM/APNs (§3.2 do mesmo documento de decisões). Não há
 o que "respeitar" hoje porque nada envia. Quando `notices.sendSegmented` for
 implementado, ele **deve** consultar o consentimento de `segmentedPush`
 antes de enviar, com o mesmo padrão de recusa por omissão adotado aqui para

@@ -44,7 +44,7 @@ onboarding e consentimento (§2, RF02) e a metade central→dispositivo da
 sincronização (§5, RF15 — pull incremental; a leitura fica do lado do ACS,
 não há geração de mudança do lado do paciente ainda). Lembretes locais
 (§3.1, RF06) também têm implementação no app do paciente. Ainda **não**
-implementados: push segmentado (§3.2, RF14 — Gorush; falta hospedá-lo e
+implementados de ponta a ponta: push segmentado (§3.2, RF14 — o código do envio existe, com Gorush; falta hospedá-lo e
 provisionar as credenciais FCM/APNs) e geofencing (§4, RF12 — só o contrato de dados
 `arrivalMethod` foi desenhado, sem o serviço de geofence em primeiro plano):
 
