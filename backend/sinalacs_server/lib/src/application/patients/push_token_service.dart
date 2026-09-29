@@ -5,11 +5,14 @@ import 'package:sinalacs_server/src/generated/protocol.dart';
 /// Persistência dos tokens de push (RF14, decisão §3.2). Interface aqui,
 /// implementação ORM em `infrastructure/`.
 abstract interface class PushTokenStore {
-  /// `true` quando a linha mais recente de `segmentedPush` do titular é `granted`.
-  Future<bool> hasGrantedConsent(String userId);
-
-  /// Grava o token; se ele já existe, muda o dono e renova `updatedAt`.
-  Future<void> upsert({
+  /// Registra o token **só se** a linha mais recente de `segmentedPush` do
+  /// titular for `granted`, tudo numa transação sob lock por titular: a leitura
+  /// do consentimento e a gravação não têm janela entre si, e a revogação
+  /// (`deleteAllFor`) espera o mesmo lock. Se o token já existe, muda o dono e
+  /// renova `updatedAt`. Devolve `false` sem consentimento — e nesse caso apaga
+  /// o vínculo de outro titular com o mesmo token, porque quem apresenta o
+  /// token está com o aparelho em mãos.
+  Future<bool> registerIfConsented({
     required String userId,
     required String? microAreaId,
     required String token,
@@ -17,7 +20,8 @@ abstract interface class PushTokenStore {
     required DateTime now,
   });
 
-  /// Apaga todos os tokens do titular e devolve quantos eram.
+  /// Apaga todos os tokens do titular (sob o mesmo lock por titular do
+  /// registro) e devolve quantos eram.
   Future<int> deleteAllFor(String userId);
 }
 
@@ -55,17 +59,17 @@ class PushTokenService {
         !pushPlatforms.contains(platform)) {
       throw DataRightsException(message: 'Aparelho inválido para receber avisos.');
     }
-    if (!await _store.hasGrantedConsent(user.id)) {
-      throw DataRightsException(
-        message: 'Ative "Avisos da equipe de saúde" em Meus Dados para receber avisos.',
-      );
-    }
-    await _store.upsert(
+    final registered = await _store.registerIfConsented(
       userId: user.id,
       microAreaId: user.microAreaId,
       token: trimmed,
       platform: platform,
       now: _clock().toUtc(),
     );
+    if (!registered) {
+      throw DataRightsException(
+        message: 'Ative "Avisos da equipe de saúde" em Meus Dados para receber avisos.',
+      );
+    }
   }
 }

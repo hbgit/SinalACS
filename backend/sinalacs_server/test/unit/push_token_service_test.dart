@@ -32,17 +32,16 @@ class _FakePushTokenStore implements PushTokenStore {
   final rows = <String, ({String userId, String platform})>{};
 
   @override
-  Future<bool> hasGrantedConsent(String userId) async => consent;
-
-  @override
-  Future<void> upsert({
+  Future<bool> registerIfConsented({
     required String userId,
     required String? microAreaId,
     required String token,
     required String platform,
     required DateTime now,
   }) async {
+    if (!consent) return false;
     rows[token] = (userId: userId, platform: platform);
+    return true;
   }
 
   @override

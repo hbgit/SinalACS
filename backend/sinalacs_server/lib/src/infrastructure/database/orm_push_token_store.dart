@@ -9,23 +9,13 @@ class OrmPushTokenStore implements PushTokenStore {
 
   final Session Function() _session;
 
+  /// Duas travas, sempre nesta ordem: por titular (fecha a janela entre ler o
+  /// consentimento e gravar, contra a revogação) e depois por token (o índice
+  /// único recusaria o segundo inserto de uma corrida, e aqui o segundo deve
+  /// virar atualização). Só se espera pela trava do token com a do titular na
+  /// mão, e quem a segura a solta no fim da própria transação: não há ciclo.
   @override
-  Future<bool> hasGrantedConsent(String userId) async {
-    final row = await ConsentLog.db.findFirstRow(
-      _session(),
-      where: (t) =>
-          t.userId.equals(UuidValue.fromString(userId)) &
-          t.purpose.equals(ConsentPurpose.segmentedPush.name),
-      orderBy: (t) => t.timestamp,
-      orderDescending: true,
-    );
-    return row != null && row.action == 'granted';
-  }
-
-  /// Serializa por token com advisory lock: o índice único de `token` recusaria
-  /// o segundo inserto de uma corrida, e aqui o segundo deve virar atualização.
-  @override
-  Future<void> upsert({
+  Future<bool> registerIfConsented({
     required String userId,
     required String? microAreaId,
     required String token,
@@ -35,13 +25,28 @@ class OrmPushTokenStore implements PushTokenStore {
     final session = _session();
     final userUuid = UuidValue.fromString(userId);
     final areaUuid = microAreaId == null ? null : UuidValue.fromString(microAreaId);
-    await session.db.transaction((transaction) async {
-      await lockPerSubject(session, transaction, namespace: lockNamespacePushToken, key: token);
+    return session.db.transaction((transaction) async {
+      await lockPerSubject(session, transaction, namespace: lockNamespacePushToken, key: userId);
+      await lockPerSubject(session, transaction, namespace: lockNamespacePushTokenRow, key: token);
+      final consent = await ConsentLog.db.findFirstRow(
+        session,
+        where: (t) =>
+            t.userId.equals(userUuid) & t.purpose.equals(ConsentPurpose.segmentedPush.name),
+        orderBy: (t) => t.timestamp,
+        orderDescending: true,
+        transaction: transaction,
+      );
       final existing = await PushToken.db.findFirstRow(
         session,
         where: (t) => t.token.equals(token),
         transaction: transaction,
       );
+      if (consent == null || consent.action != 'granted') {
+        if (existing != null && existing.userId != userUuid) {
+          await PushToken.db.deleteRow(session, existing, transaction: transaction);
+        }
+        return false;
+      }
       if (existing != null) {
         await PushToken.db.updateRow(
           session,
@@ -53,7 +58,7 @@ class OrmPushTokenStore implements PushTokenStore {
           ),
           transaction: transaction,
         );
-        return;
+        return true;
       }
       await PushToken.db.insertRow(
         session,
@@ -67,15 +72,21 @@ class OrmPushTokenStore implements PushTokenStore {
         ),
         transaction: transaction,
       );
+      return true;
     });
   }
 
   @override
   Future<int> deleteAllFor(String userId) async {
-    final removed = await PushToken.db.deleteWhere(
-      _session(),
-      where: (t) => t.userId.equals(UuidValue.fromString(userId)),
-    );
-    return removed.length;
+    final session = _session();
+    return session.db.transaction((transaction) async {
+      await lockPerSubject(session, transaction, namespace: lockNamespacePushToken, key: userId);
+      final removed = await PushToken.db.deleteWhere(
+        session,
+        where: (t) => t.userId.equals(UuidValue.fromString(userId)),
+        transaction: transaction,
+      );
+      return removed.length;
+    });
   }
 }

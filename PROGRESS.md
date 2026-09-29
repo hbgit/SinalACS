@@ -1154,7 +1154,12 @@ Plano: `docs/superpowers/plans/2026-09-29-menores-adiados-e-push-do-paciente.md`
 - O diálogo de correção não fecha mais ao tocar fora (`barrierDismissible: false`); só "Cancelar" descarta o rascunho. Dois testes de caracterização entraram: cancelar limpa o rascunho e o botão de ler QR volta a funcionar depois que o leitor lança.
 - **RF14, lado do paciente:** tabela `push_tokens`, `devices.registerPushToken` (só paciente, só com o consentimento `segmentedPush` vigente, uma linha por token, o token de outro titular troca de dono) e revogação de `segmentedPush` apaga os tokens do titular. No app, `PushTokenSource` (padrão `NoPushTokenSource`, sem Firebase) registra o aparelho depois do login, do onboarding e ao conceder "Avisos da equipe", em silêncio: recusa ou falha nunca atrasa a home nem o alerta.
 
+**Achados do revisor final, corrigidos:** o consentimento era lido fora da transação do registro, então registrar × revogar em paralelo deixava um token ligado a um titular que já tinha revogado; hoje `registerIfConsented` lê e grava sob um lock por titular, e a revogação (`deleteAllFor`) espera o mesmo lock (teste de corrida de 40 iterações contra Postgres real). E um aparelho apresentado por quem não consentiu perde o vínculo do titular anterior, porque o token prova que o aparelho está na mão de outra pessoa.
+
 **Ficou de fora, de propósito:**
+- Revogar grava o `denied` e apaga os tokens em duas operações: se a segunda falhar, o consentimento já está revogado e o token fica até a próxima revogação.
+- `devices.registerPushToken` não grava linha de auditoria (a revogação já deixa `consent_log`); a troca de dono do token não deixa rastro.
+- Sem teto de tokens por titular; sem teste do caso "fonte de token que nunca completa"; `PushTokenScope.of` sem `maybeOf`.
 - Envio segmentado (`notices.sendSegmented`), tela de avisos do ACS e o SDK `firebase_messaging`: bloqueio externo do §3.2 (sem projeto Firebase).
 - Apagar tokens ao atender o pedido de exclusão: pertence ao backoffice que atende os pedidos, ainda inexistente.
 - Aviso de 15 dias de mudança dos termos e revisão jurídica do texto 2026.1.

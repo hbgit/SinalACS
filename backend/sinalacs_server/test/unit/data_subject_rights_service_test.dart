@@ -115,16 +115,14 @@ class FakePushTokenStore implements PushTokenStore {
   var deleteCalls = <String>[];
 
   @override
-  Future<bool> hasGrantedConsent(String userId) async => true;
-
-  @override
-  Future<void> upsert({
+  Future<bool> registerIfConsented({
     required String userId,
     required String? microAreaId,
     required String token,
     required String platform,
     required DateTime now,
-  }) async {}
+  }) async =>
+      true;
 
   @override
   Future<int> deleteAllFor(String userId) async {

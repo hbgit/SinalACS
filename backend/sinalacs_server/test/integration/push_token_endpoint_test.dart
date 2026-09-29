@@ -1,6 +1,10 @@
 import 'package:serverpod/serverpod.dart';
 import 'package:sinalacs_server/src/config/app_config.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
+import 'package:sinalacs_server/src/application/onboarding/onboarding_service.dart'
+    show ConsentLogEntry, consentPolicyVersion;
+import 'package:sinalacs_server/src/infrastructure/database/orm_data_subject_rights_store.dart';
+import 'package:sinalacs_server/src/infrastructure/database/orm_push_token_store.dart';
 import 'package:sinalacs_server/src/runtime/alert_runtime.dart';
 import 'package:test/test.dart';
 
@@ -13,6 +17,12 @@ const _patientId = '00000000-0000-4000-8000-000000000001';
 const _acsId = '00000000-0000-4000-8000-000000000002';
 const _microAreaId = '00000000-0000-4000-8000-000000000003';
 const _ubsId = '00000000-0000-4000-8000-000000000004';
+// Ids do grupo de corrida (sem rollback): distintos dos `8000` dos outros
+// arquivos de integração, que rodam em paralelo contra o mesmo banco.
+const _raceUbsId = '00000000-0000-4000-9200-000000000004';
+const _raceMicroAreaId = '00000000-0000-4000-9200-000000000003';
+const _racePatientId = '00000000-0000-4000-9200-000000000001';
+const _raceAcsId = '00000000-0000-4000-9200-000000000002';
 const _chainSecret = 'test-audit-chain-secret';
 
 AppConfig _config() => AppConfig(
@@ -30,11 +40,18 @@ AppConfig _config() => AppConfig(
       enableDevLogin: true,
     );
 
-Future<void> _seed(Session session) async {
+Future<void> _seed(
+  Session session, {
+  String ubsId = _ubsId,
+  String microAreaId = _microAreaId,
+  String patientId = _patientId,
+  String acsId = _acsId,
+  String enrollmentId = 'ACS-001',
+}) async {
   await Ubs.db.insertRow(
     session,
     Ubs(
-      id: UuidValue.fromString(_ubsId),
+      id: UuidValue.fromString(ubsId),
       name: 'UBS Desenvolvimento',
       address: 'Endereço local',
       city: 'São Paulo',
@@ -44,31 +61,31 @@ Future<void> _seed(Session session) async {
   await MicroArea.db.insertRow(
     session,
     MicroArea(
-      id: UuidValue.fromString(_microAreaId),
+      id: UuidValue.fromString(microAreaId),
       name: 'Microárea 12',
-      ubsId: UuidValue.fromString(_ubsId),
+      ubsId: UuidValue.fromString(ubsId),
       geoJsonBoundary: '{}',
     ),
   );
   final now = DateTime.now().toUtc();
   await User.db.insert(session, [
     User(
-      id: UuidValue.fromString(_patientId),
-      cpfHash: 'development-patient',
+      id: UuidValue.fromString(patientId),
+      cpfHash: 'development-patient-$patientId',
       name: 'Paciente de desenvolvimento',
       birthDate: DateTime.utc(1990, 1, 1),
       role: UserRole.patient,
-      microAreaId: UuidValue.fromString(_microAreaId),
+      microAreaId: UuidValue.fromString(microAreaId),
       createdAt: now,
       updatedAt: now,
     ),
     User(
-      id: UuidValue.fromString(_acsId),
-      cpfHash: 'development-acs',
+      id: UuidValue.fromString(acsId),
+      cpfHash: 'development-acs-$acsId',
       name: 'ACS de desenvolvimento',
       birthDate: DateTime.utc(1980, 1, 1),
       role: UserRole.acs,
-      microAreaId: UuidValue.fromString(_microAreaId),
+      microAreaId: UuidValue.fromString(microAreaId),
       createdAt: now,
       updatedAt: now,
     ),
@@ -76,16 +93,16 @@ Future<void> _seed(Session session) async {
   await Acs.db.insertRow(
     session,
     Acs(
-      id: UuidValue.fromString(_acsId),
-      enrollmentId: 'ACS-001',
-      ubsId: UuidValue.fromString(_ubsId),
+      id: UuidValue.fromString(acsId),
+      enrollmentId: enrollmentId,
+      ubsId: UuidValue.fromString(ubsId),
       active: true,
     ),
   );
   await Patient.db.insertRow(
     session,
     await encryptedPatient(
-      id: _patientId,
+      id: patientId,
       emergencyContact: 'Contato de desenvolvimento',
       isChronic: false,
       chronicConditions: const [],
@@ -194,4 +211,128 @@ void main() {
       );
     });
   });
+
+  // Grupo de corrida (sem rollback): cada chamada abre a própria transação
+  // real do Postgres, que é o que registrar × revogar exige.
+  withServerpod(
+    'Dado registrar e revogar ao mesmo tempo, sem rollback automático (corrida)',
+    (sessionBuilder, endpoints) {
+      setUp(() => AlertRuntime.instance.overrideConfig(_config()));
+      tearDown(() => AlertRuntime.instance.overrideConfig(null));
+
+      Future<void> cleanup(Session session) async {
+        final id = UuidValue.fromString(_racePatientId);
+        await PushToken.db.deleteWhere(session, where: (t) => t.userId.equals(id));
+        await ConsentLog.db.deleteWhere(session, where: (t) => t.userId.equals(id));
+        await Patient.db.deleteWhere(session, where: (t) => t.id.equals(id));
+        await Acs.db.deleteWhere(session, where: (t) => t.id.equals(UuidValue.fromString(_raceAcsId)));
+        await User.db.deleteWhere(
+          session,
+          where: (t) => t.id.equals(id) | t.id.equals(UuidValue.fromString(_raceAcsId)),
+        );
+        await MicroArea.db.deleteWhere(
+          session,
+          where: (t) => t.id.equals(UuidValue.fromString(_raceMicroAreaId)),
+        );
+        await Ubs.db.deleteWhere(session, where: (t) => t.id.equals(UuidValue.fromString(_raceUbsId)));
+      }
+
+      test('depois de registrar × revogar em paralelo, denied nunca convive com token', () async {
+        final session = sessionBuilder.build();
+        await _seed(session,
+            ubsId: _raceUbsId, microAreaId: _raceMicroAreaId, patientId: _racePatientId, acsId: _raceAcsId, enrollmentId: 'ACS-CORRIDA-PUSH');
+        try {
+          final consents = OrmDataSubjectRightsStore(
+            session: () => sessionBuilder.build(),
+            chainSecret: _chainSecret,
+            cipher: AlertRuntime.instance.healthDataCipher,
+          );
+          final tokens = OrmPushTokenStore(session: () => sessionBuilder.build());
+          Future<void> consent(String action) async {
+            await consents.recordConsent(ConsentLogEntry(
+              userId: _racePatientId,
+              purpose: ConsentPurpose.segmentedPush,
+              action: action,
+              version: consentPolicyVersion,
+              timestamp: DateTime.now().toUtc(),
+            ));
+          }
+
+          for (var i = 0; i < 40; i++) {
+            await consent('granted');
+            await Future.wait([
+              tokens.registerIfConsented(
+                userId: _racePatientId,
+                microAreaId: _raceMicroAreaId,
+                token: 'tok-corrida',
+                platform: 'android',
+                now: DateTime.now().toUtc(),
+              ),
+              () async {
+                await consent('denied');
+                await tokens.deleteAllFor(_racePatientId);
+              }(),
+            ]);
+            final left = await PushToken.db.count(
+              session,
+              where: (t) => t.userId.equals(UuidValue.fromString(_racePatientId)),
+            );
+            expect(left, 0, reason: 'iteração $i: consentimento revogado, token ficou');
+          }
+        } finally {
+          await cleanup(session);
+        }
+      });
+
+      test('aparelho de outro titular sem consentimento perde o vínculo do dono antigo', () async {
+        final session = sessionBuilder.build();
+        await _seed(session,
+            ubsId: _raceUbsId, microAreaId: _raceMicroAreaId, patientId: _racePatientId, acsId: _raceAcsId, enrollmentId: 'ACS-CORRIDA-PUSH');
+        try {
+          final consents = OrmDataSubjectRightsStore(
+            session: () => sessionBuilder.build(),
+            chainSecret: _chainSecret,
+            cipher: AlertRuntime.instance.healthDataCipher,
+          );
+          final tokens = OrmPushTokenStore(session: () => sessionBuilder.build());
+          await consents.recordConsent(ConsentLogEntry(
+            userId: _racePatientId,
+            purpose: ConsentPurpose.segmentedPush,
+            action: 'granted',
+            version: consentPolicyVersion,
+            timestamp: DateTime.now().toUtc(),
+          ));
+          expect(
+            await tokens.registerIfConsented(
+              userId: _racePatientId,
+              microAreaId: _raceMicroAreaId,
+              token: 'tok-compartilhado',
+              platform: 'android',
+              now: DateTime.now().toUtc(),
+            ),
+            isTrue,
+          );
+
+          // O ACS de teste faz o papel da segunda pessoa: nunca consentiu.
+          final registered = await tokens.registerIfConsented(
+            userId: _raceAcsId,
+            microAreaId: _raceMicroAreaId,
+            token: 'tok-compartilhado',
+            platform: 'android',
+            now: DateTime.now().toUtc(),
+          );
+
+          expect(registered, isFalse);
+          expect(
+            await PushToken.db.count(session, where: (t) => t.token.equals('tok-compartilhado')),
+            0,
+            reason: 'o token continuaria ligado ao titular anterior',
+          );
+        } finally {
+          await cleanup(session);
+        }
+      });
+    },
+    rollbackDatabase: RollbackDatabase.disabled,
+  );
 }

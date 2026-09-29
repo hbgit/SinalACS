@@ -5,7 +5,9 @@ import 'package:serverpod/serverpod.dart';
 /// (`OrmAuditTrail`), então um `hashtext` nunca colide com a cadeia de auditoria.
 const int lockNamespaceDeletion = 1;
 const int lockNamespaceTerms = 2;
+/// Push: 3 serializa por titular (consentimento × token), 4 por token.
 const int lockNamespacePushToken = 3;
+const int lockNamespacePushTokenRow = 4;
 
 /// Serializa, dentro de [transaction], quem disputa a mesma [key] no mesmo
 /// [namespace]. Solta sozinho no fim da transação.
