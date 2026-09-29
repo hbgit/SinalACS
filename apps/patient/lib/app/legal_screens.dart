@@ -1,0 +1,136 @@
+import 'package:flutter/material.dart';
+import 'package:sinalacs_patient/app/patient_theme.dart';
+import 'package:sinalacs_patient/core/legal/legal_documents.dart';
+
+/// Índice "Privacidade e termos": abre a partir do login (antes do cadastro,
+/// para ler antes de aceitar) e do menu "Mais" — Mais → Privacidade e termos →
+/// documento, três toques (painel de privacidade em até 3 cliques,
+/// LGPD-RF03).
+class LegalDocumentsScreen extends StatelessWidget {
+  const LegalDocumentsScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Privacidade e termos')),
+      body: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
+            for (final (key, document) in const [
+              ('legal_open_privacy', privacyPolicy),
+              ('legal_open_terms', termsOfUse),
+            ])
+              Card(
+                child: ListTile(
+                  key: Key(key),
+                  leading: Icon(
+                    document.id == 'privacy'
+                        ? Icons.privacy_tip_outlined
+                        : Icons.description_outlined,
+                  ),
+                  title: Text(document.title),
+                  subtitle: Text(
+                    'Versão ${document.version} · vigente desde ${document.effectiveDate}',
+                  ),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => LegalDocumentScreen(document: document),
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Um documento legal: primeiro o resumo visual (passos numerados, na ordem
+/// em que o dado circula — LGPD-RF10), depois a versão completa em seções
+/// expansíveis e, por fim, o histórico de versões (LGPD-RF18/RF19).
+class LegalDocumentScreen extends StatelessWidget {
+  const LegalDocumentScreen({super.key, required this.document});
+
+  final LegalDocument document;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: Text(document.title)),
+      body: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
+            Text(
+              'Versão ${document.version} · vigente desde ${document.effectiveDate}',
+              key: const Key('legal_version'),
+              style: const TextStyle(color: Colors.white70),
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              'Resumo',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            Column(
+              key: const Key('legal_summary'),
+              children: [
+                for (final (index, step) in document.summary.indexed)
+                  Card(
+                    child: ListTile(
+                      leading: CircleAvatar(
+                        backgroundColor: PatientColors.accent,
+                        foregroundColor: Colors.white,
+                        child: Text('${index + 1}'),
+                      ),
+                      title: Text(
+                        step.title,
+                        style: const TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      subtitle: Text(step.text),
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              'Texto completo',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+            for (final (index, section) in document.sections.indexed)
+              ExpansionTile(
+                key: Key('legal_section_$index'),
+                tilePadding: EdgeInsets.zero,
+                childrenPadding: const EdgeInsets.only(bottom: 12),
+                expandedAlignment: Alignment.centerLeft,
+                title: Text(section.title),
+                children: [Text(section.body)],
+              ),
+            const SizedBox(height: 16),
+            const Text(
+              'Histórico de versões',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+            Column(
+              key: const Key('legal_history'),
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                for (final entry in document.history)
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: Text(
+                      '${entry.version} · ${entry.version == document.version ? 'vigente desde' : 'de'} ${entry.date}',
+                    ),
+                    subtitle: Text(entry.changes),
+                  ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}

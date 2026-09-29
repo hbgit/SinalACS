@@ -19,6 +19,7 @@ import 'package:sinalacs_client/sinalacs_client.dart'
         PatientRiskEvent,
         RiskLevel;
 import 'package:sinalacs_patient/app/app.dart';
+import 'package:sinalacs_patient/app/legal_screens.dart';
 import 'package:sinalacs_patient/core/consent/consent_preferences.dart';
 import 'package:sinalacs_patient/core/network/backend_client.dart';
 import 'package:sinalacs_patient/core/network/backend_scope.dart';
@@ -1455,5 +1456,16 @@ void main() {
       await tester.pump(const Duration(seconds: 10));
       expect(backend.statusForCallCount, 3);
     });
+  });
+
+  testWidgets('menu Mais abre Privacidade e termos', (tester) async {
+    await tester.pumpWidget(SinalAcsApp(backend: FakePatientBackend()));
+    await login(tester);
+    await tester.tap(find.text('Mais'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('more_legal')));
+    await tester.pumpAndSettle();
+    expect(find.byType(LegalDocumentsScreen), findsOneWidget);
   });
 }

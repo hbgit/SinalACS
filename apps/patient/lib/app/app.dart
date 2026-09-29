@@ -15,6 +15,7 @@ import 'package:sinalacs_client/sinalacs_client.dart'
         PatientDataOverview,
         PatientDataSubjectRequestRecord,
         RiskLevel;
+import 'package:sinalacs_patient/app/legal_screens.dart';
 import 'package:sinalacs_patient/app/patient_theme.dart';
 import 'package:sinalacs_patient/core/consent/consent_decisions.dart';
 import 'package:sinalacs_patient/core/consent/consent_preferences.dart';
@@ -470,6 +471,14 @@ class _PatientLoginScreenState extends State<PatientLoginScreen> {
                               icon: const Icon(Icons.qr_code_scanner_outlined),
                               label: const Text('Escanear QR Code do ACS'),
                             ),
+                          ),
+                          const SizedBox(height: 4),
+                          TextButton(
+                            key: const Key('login_legal_link'),
+                            onPressed: () => Navigator.of(context).push(
+                              MaterialPageRoute(builder: (_) => const LegalDocumentsScreen()),
+                            ),
+                            child: const Text('Política de Privacidade e Termo de Uso'),
                           ),
                         ],
                       ],
@@ -2614,5 +2623,5 @@ class _PatientHeader extends StatelessWidget implements PreferredSizeWidget {
 }
 
 void _showMoreDestinations(BuildContext context, ValueChanged<PatientDestination> select) {
-  showModalBottomSheet<void>(context: context, builder: (sheetContext) => SafeArea(child: Column(mainAxisSize: MainAxisSize.min, children: [ListTile(leading: const Icon(Icons.person_outline), title: const Text('Perfil clínico'), onTap: () { Navigator.pop(sheetContext); select(PatientDestination.profile); }), ListTile(leading: const Icon(Icons.alarm_outlined), title: const Text('Lembretes'), onTap: () { Navigator.pop(sheetContext); select(PatientDestination.reminders); }), ListTile(leading: const Icon(Icons.privacy_tip_outlined), title: const Text('Meus dados'), onTap: () { Navigator.pop(sheetContext); select(PatientDestination.myData); })])));
+  showModalBottomSheet<void>(context: context, builder: (sheetContext) => SafeArea(child: Column(mainAxisSize: MainAxisSize.min, children: [ListTile(leading: const Icon(Icons.person_outline), title: const Text('Perfil clínico'), onTap: () { Navigator.pop(sheetContext); select(PatientDestination.profile); }), ListTile(leading: const Icon(Icons.alarm_outlined), title: const Text('Lembretes'), onTap: () { Navigator.pop(sheetContext); select(PatientDestination.reminders); }), ListTile(leading: const Icon(Icons.privacy_tip_outlined), title: const Text('Meus dados'), onTap: () { Navigator.pop(sheetContext); select(PatientDestination.myData); }), ListTile(key: const Key('more_legal'), leading: const Icon(Icons.gavel_outlined), title: const Text('Privacidade e termos'), onTap: () { Navigator.pop(sheetContext); Navigator.of(context).push(MaterialPageRoute(builder: (_) => const LegalDocumentsScreen())); })])));
 }
