@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:sinalacs_acs/app/acs_theme.dart';
@@ -27,6 +29,8 @@ class _InviteScreenState extends State<InviteScreen> {
   String? _error;
   bool _loading = true;
   bool _generating = false;
+  Timer? _expiryTimer;
+  bool _expired = false;
 
   @override
   void initState() {
@@ -34,6 +38,33 @@ class _InviteScreenState extends State<InviteScreen> {
     // `BackendScope.of` depende de herança: não pode rodar dentro do
     // `initState` em si.
     WidgetsBinding.instance.addPostFrameCallback((_) => _load());
+  }
+
+  @override
+  void dispose() {
+    _expiryTimer?.cancel();
+    super.dispose();
+  }
+
+  void _clearExpiry() {
+    _expiryTimer?.cancel();
+    _expiryTimer = null;
+    _expired = false;
+  }
+
+  /// Agenda o aviso para o instante em que o convite deixa de valer. O relógio
+  /// do aparelho pode estar errado: o servidor é quem recusa um convite
+  /// expirado, e isto só evita deixar um QR morto na tela como se valesse.
+  void _watchExpiry(DateTime expiresAt) {
+    _clearExpiry();
+    final remaining = expiresAt.difference(DateTime.now());
+    if (remaining <= Duration.zero) {
+      _expired = true;
+      return;
+    }
+    _expiryTimer = Timer(remaining, () {
+      if (mounted) setState(() => _expired = true);
+    });
   }
 
   Future<void> _load() async {
@@ -61,7 +92,10 @@ class _InviteScreenState extends State<InviteScreen> {
     setState(() {
       // O convite exibido pertence ao paciente anterior: nunca deixá-lo na
       // tela sob o nome de outra pessoa.
-      if (_selected?.patientId != patient.patientId) _invite = null;
+      if (_selected?.patientId != patient.patientId) {
+        _invite = null;
+        _clearExpiry();
+      }
       _selected = patient;
       _error = null;
     });
@@ -83,7 +117,10 @@ class _InviteScreenState extends State<InviteScreen> {
         _generating = false;
         // A resposta pode chegar depois de o ACS trocar de paciente (rede
         // lenta): o token é de quem foi pedido, nunca do selecionado agora.
-        if (_selected?.patientId == patient.patientId) _invite = invite;
+        if (_selected?.patientId == patient.patientId) {
+          _invite = invite;
+          _watchExpiry(invite.expiresAt);
+        }
       });
     } on BackendFailure catch (failure) {
       if (!mounted) return;
@@ -91,6 +128,7 @@ class _InviteScreenState extends State<InviteScreen> {
         _generating = false;
         if (_selected?.patientId != patient.patientId) return;
         _invite = null;
+        _clearExpiry();
         _error = failure.message;
       });
     }
@@ -174,7 +212,20 @@ class _InviteScreenState extends State<InviteScreen> {
               ),
             ),
           ),
-        if (invite != null && _selected != null) ...[
+        if (invite != null && _expired)
+          Padding(
+            padding: const EdgeInsets.only(top: 24),
+            child: Semantics(
+              liveRegion: true,
+              child: const Text(
+                'O convite expirou. Gere um novo.',
+                key: Key('invite_expired'),
+                textAlign: TextAlign.center,
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+            ),
+          ),
+        if (invite != null && _selected != null && !_expired) ...[
           const SizedBox(height: 24),
           Center(
             child: Container(

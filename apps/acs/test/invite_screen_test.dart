@@ -259,4 +259,49 @@ void main() {
     expectNenhumBotaoInerte(tester);
     handle.dispose();
   });
+
+  testWidgets('convite que expira com a tela aberta some e pede um novo', (tester) async {
+    tester.view.physicalSize = const Size(800, 2000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final backend = backendComPacientes();
+    await tester.pumpWidget(
+      SinalAcsApp(backend: backend, feedBuilder: (queue) => FakeAlertFeed(queue)),
+    );
+    await entrar(tester);
+    await abrirConvite(tester);
+    await tapKey(tester, 'invite_patient_${syntheticPatientId(5)}');
+    await tapKey(tester, 'generate_invite_button');
+    expect(find.byType(QrImageView), findsOneWidget);
+
+    await tester.pump(const Duration(minutes: 15, seconds: 1));
+
+    expect(find.byType(QrImageView), findsNothing);
+    expect(find.byKey(const Key('invite_token_text')), findsNothing);
+    expect(find.byKey(const Key('invite_expired')), findsOneWidget);
+
+    await tapKey(tester, 'generate_invite_button');
+    expect(find.byType(QrImageView), findsOneWidget);
+    expect(find.byKey(const Key('invite_expired')), findsNothing);
+  });
+
+  testWidgets('trocar de paciente cancela o aviso de expiração do convite anterior', (tester) async {
+    tester.view.physicalSize = const Size(800, 2000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final backend = backendComPacientes();
+    await tester.pumpWidget(
+      SinalAcsApp(backend: backend, feedBuilder: (queue) => FakeAlertFeed(queue)),
+    );
+    await entrar(tester);
+    await abrirConvite(tester);
+    await tapKey(tester, 'invite_patient_${syntheticPatientId(5)}');
+    await tapKey(tester, 'generate_invite_button');
+    await tapKey(tester, 'invite_patient_${syntheticPatientId(6)}');
+
+    await tester.pump(const Duration(minutes: 16));
+
+    expect(find.byKey(const Key('invite_expired')), findsNothing,
+        reason: 'o convite já tinha saído da tela; nada a avisar');
+  });
 }

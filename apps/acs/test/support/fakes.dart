@@ -151,6 +151,9 @@ class FakeAcsBackend implements AcsBackend {
   /// simula a rede lenta de campo.
   Completer<void>? inviteGate;
 
+  /// Validade do convite devolvido por `generateInvite`, contada de agora.
+  Duration inviteLifetime = const Duration(minutes: 15);
+
   @override
   Future<EnrollmentTokenResult> generateInvite({required String patientId}) async {
     inviteCalls.add(patientId);
@@ -159,7 +162,7 @@ class FakeAcsBackend implements AcsBackend {
     if (failure != null) throw failure;
     return EnrollmentTokenResult(
       token: 'convite-sintetico-${inviteCalls.length}',
-      expiresAt: DateTime.utc(2026, 9, 29, 10, 15),
+      expiresAt: DateTime.now().toUtc().add(inviteLifetime),
     );
   }
 
