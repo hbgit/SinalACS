@@ -39,3 +39,6 @@ graphify-out/
 apps/acs/assets/certs/
 apps/patient/assets/certs/
 .worktrees/
+
+# Estado local do proxy headroom (PID e timestamps), reescrito a cada sessão
+.claude/.headroom_wrap_*.json
