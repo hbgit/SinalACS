@@ -134,6 +134,23 @@ ruído. A lista de checks obrigatórios vem de
 remover um job, atualize `JOBS_DOCUMENTADOS` nesse script, `CLAUDE.md` e
 `AGENTS.md` no mesmo commit. O job `workflow-lint` falha se não fizer isso.
 
+O `workflow-lint` não enxerga a proteção configurada no GitHub. Depois de
+mesclar uma PR que muda a lista, um admin tem de reaplicar a proteção, senão
+as PRs ficam esperando um check que não existe mais (job renomeado) ou um job
+novo fica opcional sem ninguém perceber. Para conferir as duas listas:
+
+```bash
+esperado=$(./scripts/qa/ci_invariants.sh --checks-obrigatorios | python3 -c 'import json,sys; print(" ".join(c["context"] for c in json.load(sys.stdin)))')
+for b in develop main; do
+  atual=$(gh api "repos/hbgit/SinalACS/branches/$b/protection/required_status_checks" --jq '[.checks[].context] | sort | join(" ")')
+  [ "$atual" = "$esperado" ] && echo "$b ok" || echo "$b DIVERGE: $atual"
+done
+```
+
+Para reaplicar, use o `PUT .../branches/<branch>/protection` da Task 6 de
+`docs/superpowers/plans/2026-09-28-ci-correcoes-avaliacao.md`, com
+`"checks"` igual à saída de `--checks-obrigatorios`.
+
 Não mescle com CI vermelho. Para rodar o CI numa branch sem abrir PR:
 
 ```bash
