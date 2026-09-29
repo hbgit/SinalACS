@@ -251,12 +251,14 @@ class FakePatientBackend implements PatientBackend {
     required bool healthDataConsent,
     required bool remindersConsent,
     required bool pushConsent,
+    required bool termsAccepted,
   }) async {
     enrollmentCalls.add(<String, Object>{
       'token': token,
       'healthDataConsent': healthDataConsent,
       'remindersConsent': remindersConsent,
       'pushConsent': pushConsent,
+      'termsAccepted': termsAccepted,
     });
     final failure = enrollmentFailure;
     if (failure != null) throw failure;

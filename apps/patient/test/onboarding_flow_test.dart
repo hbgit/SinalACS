@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sinalacs_patient/app/app.dart';
+import 'package:sinalacs_patient/app/legal_screens.dart';
 import 'package:sinalacs_patient/core/consent/consent_preferences.dart';
 import 'package:sinalacs_patient/core/network/backend_client.dart';
 
@@ -59,6 +60,11 @@ void main() {
     expect(healthConsent.value, isFalse);
     expect(remindersConsent.value, isFalse);
     expect(pushConsent.value, isFalse);
+    await tester.ensureVisible(find.byKey(const Key('onboarding_terms_accept')));
+    final termsAccept = tester.widget<CheckboxListTile>(
+      find.byKey(const Key('onboarding_terms_accept')),
+    );
+    expect(termsAccept.value, isFalse);
   });
 
   testWidgets('botão de concluir cadastro fica desabilitado enquanto o token estiver vazio', (tester) async {
@@ -99,6 +105,7 @@ void main() {
 
     await tester.enterText(find.byKey(const Key('onboarding_token_field')), 'convite-123');
     await tapKey(tester, 'onboarding_consent_health');
+    await tapKey(tester, 'onboarding_terms_accept');
     await tapKey(tester, 'onboarding_consent_reminders');
     await tapKey(tester, 'complete_enrollment_button');
 
@@ -108,6 +115,7 @@ void main() {
       'healthDataConsent': true,
       'remindersConsent': true,
       'pushConsent': false,
+      'termsAccepted': true,
     });
     expect(find.text('Triagem rápida'), findsOneWidget);
   });
@@ -121,6 +129,7 @@ void main() {
 
     await tester.enterText(find.byKey(const Key('onboarding_token_field')), 'convite-123');
     await tapKey(tester, 'onboarding_consent_health');
+    await tapKey(tester, 'onboarding_terms_accept');
     await tapKey(tester, 'complete_enrollment_button');
 
     expect(find.text('Convite inválido, expirado ou já utilizado.'), findsOneWidget);
@@ -136,6 +145,7 @@ void main() {
 
     await tester.enterText(find.byKey(const Key('onboarding_token_field')), 'convite-123');
     await tapKey(tester, 'onboarding_consent_health');
+    await tapKey(tester, 'onboarding_terms_accept');
     await tapKey(tester, 'onboarding_consent_reminders');
     await tapKey(tester, 'complete_enrollment_button');
 
@@ -150,6 +160,7 @@ void main() {
 
     await tester.enterText(find.byKey(const Key('onboarding_token_field')), 'convite-123');
     await tapKey(tester, 'onboarding_consent_health');
+    await tapKey(tester, 'onboarding_terms_accept');
     // onboarding_consent_reminders permanece desmarcado.
     await tapKey(tester, 'complete_enrollment_button');
 
@@ -174,5 +185,32 @@ void main() {
     final data = node.getSemanticsData();
     expect(data.label, contains('Concluir cadastro'));
     handle.dispose();
+  });
+
+  testWidgets('sem aceitar o termo, concluir mostra o motivo e não chama o backend', (tester) async {
+    final backend = FakePatientBackend();
+    await tester.pumpWidget(SinalAcsApp(backend: backend));
+    await openOnboarding(tester);
+
+    await tester.enterText(find.byKey(const Key('onboarding_token_field')), 'convite-123');
+    await tapKey(tester, 'onboarding_consent_health');
+    await tapKey(tester, 'complete_enrollment_button');
+
+    expect(find.text('É preciso aceitar o Termo de Uso e a Política de Privacidade.'), findsOneWidget);
+    expect(backend.enrollmentCalls, isEmpty);
+  });
+
+  testWidgets('o onboarding abre o termo e a política antes do aceite', (tester) async {
+    await tester.pumpWidget(SinalAcsApp(backend: FakePatientBackend()));
+    await openOnboarding(tester);
+
+    await tapKey(tester, 'onboarding_open_terms');
+    expect(find.byType(LegalDocumentScreen), findsOneWidget);
+    expect(find.text('Termo de Uso'), findsWidgets);
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+
+    await tapKey(tester, 'onboarding_open_privacy');
+    expect(find.text('Política de Privacidade'), findsWidgets);
   });
 }

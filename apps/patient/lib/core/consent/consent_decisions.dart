@@ -28,6 +28,7 @@ String consentPurposeLabel(ConsentPurpose purpose) => switch (purpose) {
       ConsentPurpose.healthDataProcessing => 'Tratamento de dados de saúde',
       ConsentPurpose.localReminders => 'Lembretes neste aparelho',
       ConsentPurpose.segmentedPush => 'Avisos da equipe de saúde',
+      ConsentPurpose.termsOfUse => 'Termo de Uso e Política de Privacidade',
     };
 
 /// Rótulo de um registro do histórico, que carrega a finalidade como texto.

@@ -100,13 +100,15 @@ abstract class PatientBackend {
     String? locationCell,
   });
 
-  /// Conclui o onboarding a partir de um convite do ACS, gravando os 3
-  /// consentimentos por finalidade (LGPD-RF02) e ativando a sessão.
+  /// Conclui o onboarding a partir de um convite do ACS, gravando os 4
+  /// registros de consentimento, incluindo o aceite do Termo de Uso
+  /// (LGPD-RF02/RF18), e ativando a sessão.
   Future<AuthSession> completeEnrollment({
     required String token,
     required bool healthDataConsent,
     required bool remindersConsent,
     required bool pushConsent,
+    required bool termsAccepted,
   });
 
   /// Condições crônicas do próprio paciente autenticado (tela "Perfil
@@ -214,6 +216,7 @@ class MisconfiguredBackend implements PatientBackend {
     required bool healthDataConsent,
     required bool remindersConsent,
     required bool pushConsent,
+    required bool termsAccepted,
   }) async =>
       _recusar();
 
@@ -458,6 +461,7 @@ class BackendClient implements PatientBackend {
     required bool healthDataConsent,
     required bool remindersConsent,
     required bool pushConsent,
+    required bool termsAccepted,
   }) async {
     final result = await _guard(
       () => _client.onboarding.completeEnrollment(
@@ -465,6 +469,7 @@ class BackendClient implements PatientBackend {
         healthDataConsent: healthDataConsent,
         remindersConsent: remindersConsent,
         pushConsent: pushConsent,
+        termsAccepted: termsAccepted,
       ),
     );
     final session = AuthSession.tryParse(result.accessToken, result.tokenType);

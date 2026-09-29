@@ -18,6 +18,7 @@ import 'package:sinalacs_client/sinalacs_client.dart'
 import 'package:sinalacs_patient/app/legal_screens.dart';
 import 'package:sinalacs_patient/app/patient_theme.dart';
 import 'package:sinalacs_patient/core/consent/consent_decisions.dart';
+import 'package:sinalacs_patient/core/legal/legal_documents.dart';
 import 'package:sinalacs_patient/core/consent/consent_preferences.dart';
 import 'package:sinalacs_patient/core/consent/sqflite_consent_preferences.dart';
 import 'package:sinalacs_patient/core/network/backend_client.dart';
@@ -621,6 +622,10 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   bool _healthDataConsent = false;
   bool _remindersConsent = false;
   bool _pushConsent = false;
+  // Aceite do Termo de Uso e da Política de Privacidade (LGPD-RF18): também
+  // desmarcado por padrão e obrigatório, gravado pelo servidor com a versão
+  // vigente dos documentos.
+  bool _termsAccepted = false;
 
   bool _busy = false;
   String? _error;
@@ -644,6 +649,12 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       });
       return;
     }
+    if (!_termsAccepted) {
+      setState(() {
+        _error = 'É preciso aceitar o Termo de Uso e a Política de Privacidade.';
+      });
+      return;
+    }
 
     setState(() {
       _busy = true;
@@ -656,6 +667,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         healthDataConsent: _healthDataConsent,
         remindersConsent: _remindersConsent,
         pushConsent: _pushConsent,
+        termsAccepted: _termsAccepted,
       );
       if (!mounted) return;
       // Espelha localmente a resposta já enviada ao backend — é o único
@@ -754,6 +766,40 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                           onChanged: (value) => setState(() => _pushConsent = value ?? false),
                           controlAffinity: ListTileControlAffinity.leading,
                           title: const Text('Recebimento de avisos segmentados por push'),
+                        ),
+                        const SizedBox(height: 12),
+                        const Align(
+                          alignment: Alignment.centerLeft,
+                          child: Text('Termo de Uso e Privacidade', style: TextStyle(fontWeight: FontWeight.bold)),
+                        ),
+                        Wrap(
+                          spacing: 8,
+                          children: [
+                            TextButton(
+                              key: const Key('onboarding_open_terms'),
+                              onPressed: () => Navigator.of(context).push(
+                                MaterialPageRoute(builder: (_) => const LegalDocumentScreen(document: termsOfUse)),
+                              ),
+                              child: const Text('Ler o Termo de Uso'),
+                            ),
+                            TextButton(
+                              key: const Key('onboarding_open_privacy'),
+                              onPressed: () => Navigator.of(context).push(
+                                MaterialPageRoute(builder: (_) => const LegalDocumentScreen(document: privacyPolicy)),
+                              ),
+                              child: const Text('Ler a Política de Privacidade'),
+                            ),
+                          ],
+                        ),
+                        CheckboxListTile(
+                          key: const Key('onboarding_terms_accept'),
+                          value: _termsAccepted,
+                          onChanged: (value) => setState(() => _termsAccepted = value ?? false),
+                          controlAffinity: ListTileControlAffinity.leading,
+                          title: const Text(
+                            'Li e aceito o Termo de Uso e a Política de Privacidade '
+                            '(versão $legalDocumentsVersion) (obrigatório)',
+                          ),
                         ),
                         const SizedBox(height: 20),
                         // `MergeSemantics`, mesma correção do botão de EMERGÊNCIA e dos
@@ -1732,6 +1778,7 @@ class _MyDataScreenState extends State<MyDataScreen> {
         ConsentPurpose.segmentedPush =>
           'Avisos da UBS para a sua microárea. Ainda não são enviados nesta versão.',
         ConsentPurpose.healthDataProcessing => 'Obrigatório para usar o app.',
+        ConsentPurpose.termsOfUse => 'Aceito no cadastro.',
       };
 
   /// JSON da "exportação" pedida por spec/lgpd_design.md — não há
