@@ -41,8 +41,9 @@ class OnboardingEndpoint extends Endpoint {
     required bool healthDataConsent,
     required bool remindersConsent,
     required bool pushConsent,
+    required bool termsAccepted,
   }) async {
-    // Consumir o convite e gravar os 3 `consent_logs` formam uma unidade só —
+    // Consumir o convite e gravar os 4 `consent_logs` formam uma unidade só —
     // mesmo arranjo de `AlertsEndpoint.createRedAlert`. A emissão do token de
     // sessão NÃO participa: acontece depois do commit, sobre o usuário já
     // resolvido, e não depende de nenhuma escrita adicional.
@@ -55,6 +56,7 @@ class OnboardingEndpoint extends Endpoint {
               ConsentPurpose.healthDataProcessing: healthDataConsent,
               ConsentPurpose.localReminders: remindersConsent,
               ConsentPurpose.segmentedPush: pushConsent,
+              ConsentPurpose.termsOfUse: termsAccepted,
             },
           );
     });

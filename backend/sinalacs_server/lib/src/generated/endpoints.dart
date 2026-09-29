@@ -335,6 +335,11 @@ class Endpoints extends _i1.EndpointDispatch {
               type: _i1.getType<bool>(),
               nullable: false,
             ),
+            'termsAccepted': _i1.ParameterDescription(
+              name: 'termsAccepted',
+              type: _i1.getType<bool>(),
+              nullable: false,
+            ),
           },
           call:
               (
@@ -347,6 +352,7 @@ class Endpoints extends _i1.EndpointDispatch {
                     healthDataConsent: params['healthDataConsent'],
                     remindersConsent: params['remindersConsent'],
                     pushConsent: params['pushConsent'],
+                    termsAccepted: params['termsAccepted'],
                   ),
         ),
       },

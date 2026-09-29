@@ -134,6 +134,15 @@ void main() {
       expect(audit.events, isEmpty);
     });
 
+    test('recusa mexer no aceite do Termo de Uso pelo painel', () async {
+      await expectLater(
+        service.updateConsent(_patient, purpose: ConsentPurpose.termsOfUse, granted: false),
+        throwsA(isA<DataRightsException>()),
+      );
+      expect(store.consents, isEmpty);
+      expect(audit.events, isEmpty);
+    });
+
     test('um ACS não altera consentimento de ninguém', () async {
       await expectLater(
         service.updateConsent(_acs, purpose: ConsentPurpose.localReminders, granted: false),

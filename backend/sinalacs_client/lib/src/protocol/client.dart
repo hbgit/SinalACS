@@ -273,6 +273,7 @@ class EndpointOnboarding extends _i1.EndpointRef {
     required bool healthDataConsent,
     required bool remindersConsent,
     required bool pushConsent,
+    required bool termsAccepted,
   }) => caller.callServerEndpoint<_i9.EnrollmentResult>(
     'onboarding',
     'completeEnrollment',
@@ -281,6 +282,7 @@ class EndpointOnboarding extends _i1.EndpointRef {
       'healthDataConsent': healthDataConsent,
       'remindersConsent': remindersConsent,
       'pushConsent': pushConsent,
+      'termsAccepted': termsAccepted,
     },
   );
 }

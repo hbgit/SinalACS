@@ -566,6 +566,7 @@ class _OnboardingEndpoint {
     required bool healthDataConsent,
     required bool remindersConsent,
     required bool pushConsent,
+    required bool termsAccepted,
   }) async {
     return _i1.callAwaitableFunctionAndHandleExceptions(() async {
       var _localUniqueSession =
@@ -583,6 +584,7 @@ class _OnboardingEndpoint {
             'healthDataConsent': healthDataConsent,
             'remindersConsent': remindersConsent,
             'pushConsent': pushConsent,
+            'termsAccepted': termsAccepted,
           }),
           serializationManager: _serializationManager,
         );

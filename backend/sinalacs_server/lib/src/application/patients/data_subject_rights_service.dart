@@ -72,6 +72,12 @@ class DataSubjectRightsService {
             'Para retirá-lo, solicite a exclusão dos seus dados.',
       );
     }
+    if (purpose == ConsentPurpose.termsOfUse) {
+      throw DataRightsException(
+        message: 'O aceite do Termo de Uso é feito no cadastro e não é alterado aqui. '
+            'Para deixar de usar o app, solicite a exclusão dos seus dados.',
+      );
+    }
 
     final now = _clock().toUtc();
     final action = granted ? 'granted' : 'denied';
