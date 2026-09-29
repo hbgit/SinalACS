@@ -134,7 +134,8 @@ abstract class PatientBackend {
 
   /// Aceita o Termo de Uso e a Política de Privacidade vigentes (LGPD-RF18),
   /// para quem entrou por OTP sem passar pelo onboarding. O servidor grava uma
-  /// linha `termsOfUse` `granted` em `consent_logs`.
+  /// linha `termsOfUse` `granted` em `consent_logs` só se a versão vigente ainda
+  /// não foi aceita; repetir devolve a existente.
   Future<PatientConsentRecord> acceptTermsOfUse();
 
   /// Se o paciente já aceitou o Termo de Uso e a Política de Privacidade da

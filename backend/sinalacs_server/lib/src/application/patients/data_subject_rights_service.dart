@@ -15,6 +15,14 @@ abstract interface class DataSubjectRightsStore {
   /// anterior (append-only, LGPD-RF04).
   Future<String> recordConsent(ConsentLogEntry entry);
 
+  /// Grava `entry` **só se** a linha mais recente do propósito ainda não for um
+  /// `granted` na mesma versão, de forma atômica por titular: duas chamadas
+  /// simultâneas resultam em uma linha, e a segunda recebe a da primeira em
+  /// `existing`.
+  Future<({String? id, ConsentRecordSnapshot? existing})> recordConsentUnlessCurrent(
+    ConsentLogEntry entry,
+  );
+
   /// A linha mais recente (por `timestamp`) daquela finalidade, ou `null`.
   Future<ConsentRecordSnapshot?> latestConsent(String userId, ConsentPurpose purpose);
 
@@ -95,11 +103,24 @@ class DataSubjectRightsService {
   /// que o termo não vire uma chave liga/desliga no painel.
   Future<ConsentRecordSnapshot> acceptTermsOfUse(AuthenticatedUser user) async {
     _requirePatient(user);
-    final latest = await _store.latestConsent(user.id, ConsentPurpose.termsOfUse);
+    final now = _clock().toUtc();
+    final result = await _store.recordConsentUnlessCurrent(ConsentLogEntry(
+      userId: user.id,
+      purpose: ConsentPurpose.termsOfUse,
+      action: 'granted',
+      version: consentPolicyVersion,
+      timestamp: now,
+    ));
     // Idempotente: já aceitou a versão vigente, devolve a linha existente em
     // vez de crescer o histórico e a trilha de auditoria a cada chamada.
-    if (_isCurrentAcceptance(latest)) return latest!;
-    return _record(user, purpose: ConsentPurpose.termsOfUse, action: 'granted');
+    if (result.existing != null) return result.existing!;
+    await _auditConsent(user, result.id!);
+    return ConsentRecordSnapshot(
+      purpose: ConsentPurpose.termsOfUse.name,
+      action: 'granted',
+      version: consentPolicyVersion,
+      timestamp: now,
+    );
   }
 
   bool _isCurrentAcceptance(ConsentRecordSnapshot? latest) =>
@@ -142,6 +163,14 @@ class DataSubjectRightsService {
       timestamp: now,
     );
   }
+
+  Future<void> _auditConsent(AuthenticatedUser user, String id) => _audit.recordSafely(AuditEvent(
+        userId: user.id,
+        actionType: 'write',
+        resourceType: 'consent_log',
+        resourceId: id,
+        result: 'granted',
+      ));
 
   /// Pede a exclusão/anonimização dos próprios dados. Idempotente enquanto
   /// houver um pedido de exclusão em aberto: pedir de novo devolve o mesmo, em

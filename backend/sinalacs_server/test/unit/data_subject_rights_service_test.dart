@@ -29,6 +29,19 @@ class FakeDataSubjectRightsStore implements DataSubjectRightsStore {
   final consents = <ConsentLogEntry>[];
   final requests = <({String userId, DataSubjectRequestSnapshot snapshot})>[];
   var _nextId = 1;
+  var unlessCurrentCalls = 0;
+
+  @override
+  Future<({String? id, ConsentRecordSnapshot? existing})> recordConsentUnlessCurrent(
+    ConsentLogEntry entry,
+  ) async {
+    unlessCurrentCalls++;
+    final latest = await latestConsent(entry.userId, entry.purpose);
+    if (latest != null && latest.action == 'granted' && latest.version == entry.version) {
+      return (id: null, existing: latest);
+    }
+    return (id: await recordConsent(entry), existing: null);
+  }
 
   @override
   Future<String> recordConsent(ConsentLogEntry entry) async {
@@ -134,6 +147,15 @@ void main() {
       expect(record.purpose, 'termsOfUse');
       expect(record.action, 'granted');
       expect(audit.events.single.resourceType, 'consent_log');
+    });
+
+    test('usa a gravação condicional e não audita a repetição', () async {
+      await service.acceptTermsOfUse(_patient);
+      await service.acceptTermsOfUse(_patient);
+
+      expect(store.unlessCurrentCalls, 2);
+      expect(store.consents.where((c) => c.purpose == ConsentPurpose.termsOfUse), hasLength(1));
+      expect(audit.events.where((e) => e.resourceType == 'consent_log'), hasLength(1));
     });
 
     test('só paciente aceita: ACS é recusado sem gravar nada', () async {

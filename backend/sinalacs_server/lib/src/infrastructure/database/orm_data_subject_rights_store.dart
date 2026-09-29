@@ -9,6 +9,7 @@ import 'package:sinalacs_server/src/generated/protocol.dart';
 import 'package:sinalacs_server/src/infrastructure/crypto/encrypted_json.dart';
 import 'package:sinalacs_server/src/infrastructure/crypto/health_data_cipher.dart';
 import 'package:sinalacs_server/src/infrastructure/database/signed_consent_log.dart';
+import 'package:sinalacs_server/src/infrastructure/database/subject_lock.dart';
 
 /// Um pedido lido do banco, com `details` decifrado. Compartilhado com
 /// `OrmPatientDataOverviewStore`, que lista os mesmos pedidos em "Meus Dados".
@@ -53,6 +54,42 @@ class OrmDataSubjectRightsStore implements DataSubjectRightsStore {
   }
 
   @override
+  Future<({String? id, ConsentRecordSnapshot? existing})> recordConsentUnlessCurrent(
+    ConsentLogEntry entry,
+  ) async {
+    final session = _session();
+    final userUuid = UuidValue.fromString(entry.userId);
+    return session.db.transaction((transaction) async {
+      await lockPerSubject(session, transaction,
+          namespace: lockNamespaceTerms, key: '${entry.purpose.name}:${entry.userId}');
+      final latest = await ConsentLog.db.findFirstRow(
+        session,
+        where: (t) => t.userId.equals(userUuid) & t.purpose.equals(entry.purpose.name),
+        orderBy: (t) => t.timestamp,
+        orderDescending: true,
+        transaction: transaction,
+      );
+      if (latest != null && latest.action == 'granted' && latest.version == entry.version) {
+        return (
+          id: null,
+          existing: ConsentRecordSnapshot(
+            purpose: latest.purpose,
+            action: latest.action,
+            version: latest.version,
+            timestamp: latest.timestamp,
+          ),
+        );
+      }
+      final row = await ConsentLog.db.insertRow(
+        session,
+        signedConsentLog(entry, signature: _signature, origin: 'painel-titular'),
+        transaction: transaction,
+      );
+      return (id: row.id!.uuid, existing: null);
+    });
+  }
+
+  @override
   Future<ConsentRecordSnapshot?> latestConsent(String userId, ConsentPurpose purpose) async {
     final row = await ConsentLog.db.findFirstRow(
       _session(),
@@ -84,11 +121,7 @@ class OrmDataSubjectRightsStore implements DataSubjectRightsStore {
     final userUuid = UuidValue.fromString(userId);
     final encrypted = await _cipher.encryptJson(null);
     return session.db.transaction((transaction) async {
-      await session.db.unsafeExecute(
-        'SELECT pg_advisory_xact_lock(hashtext(@key));',
-        parameters: QueryParameters.named({'key': 'exclusao:$userId'}),
-        transaction: transaction,
-      );
+      await lockPerSubject(session, transaction, namespace: lockNamespaceDeletion, key: userId);
       final open = await DataSubjectRequest.db.findFirstRow(
         session,
         where: (t) =>

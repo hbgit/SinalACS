@@ -130,7 +130,8 @@ class PatientsEndpoint extends AuthenticatedEndpoint {
 
   /// Aceite do Termo de Uso e da Política de Privacidade vigentes (LGPD-RF18)
   /// por quem entrou por OTP sem passar pelo onboarding, ou aceitou uma versão
-  /// anterior. Só paciente; grava uma linha nova e assinada em `consent_logs`.
+  /// anterior. Só paciente; grava uma linha assinada em `consent_logs` só se a
+  /// versão vigente ainda não foi aceita — repetir devolve a existente.
   Future<PatientConsentRecord> acceptTermsOfUse(
     Session session, {
     required String accessToken,

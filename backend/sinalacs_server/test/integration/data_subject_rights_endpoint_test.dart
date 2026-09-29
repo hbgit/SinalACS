@@ -1,9 +1,9 @@
 import 'package:serverpod/serverpod.dart';
 import 'package:sinalacs_server/src/application/onboarding/consent_signature.dart';
-import 'package:sinalacs_server/src/application/onboarding/onboarding_service.dart' show consentPolicyVersion;
+import 'package:sinalacs_server/src/application/onboarding/onboarding_service.dart' show ConsentLogEntry, consentPolicyVersion;
 import 'package:sinalacs_server/src/config/app_config.dart';
 import 'package:sinalacs_server/src/application/patients/patient_data_overview_service.dart'
-    show DataSubjectRequestSnapshot;
+    show ConsentRecordSnapshot, DataSubjectRequestSnapshot;
 import 'package:sinalacs_server/src/generated/protocol.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_data_subject_rights_store.dart';
 import 'package:sinalacs_server/src/runtime/alert_runtime.dart';
@@ -153,6 +153,10 @@ Future<void> _seedRace(Session session) async {
 /// Desfaz à mão o que [_seedRace] e o teste gravam: esse grupo roda com
 /// `RollbackDatabase.disabled`. Filhos antes dos pais.
 Future<void> _cleanupRace(Session session) async {
+  await ConsentLog.db.deleteWhere(
+    session,
+    where: (t) => t.userId.equals(UuidValue.fromString(_racePatientId)),
+  );
   await DataSubjectRequest.db.deleteWhere(
     session,
     where: (t) => t.userId.equals(UuidValue.fromString(_racePatientId)),
@@ -455,6 +459,47 @@ void main() {
                 t.status.equals(DataSubjectRequestStatus.open),
           );
           expect(open, hasLength(1));
+        } finally {
+          await _cleanupRace(session);
+        }
+      });
+
+      test('dois aceites do termo simultâneos gravam uma linha só', () async {
+        final session = sessionBuilder.build();
+        await _seedRace(session);
+        try {
+          Future<Object> attempt() async {
+            final store = OrmDataSubjectRightsStore(
+              session: () => sessionBuilder.build(),
+              chainSecret: _chainSecret,
+              cipher: AlertRuntime.instance.healthDataCipher,
+            );
+            try {
+              return await store.recordConsentUnlessCurrent(ConsentLogEntry(
+                userId: _racePatientId,
+                purpose: ConsentPurpose.termsOfUse,
+                action: 'granted',
+                version: consentPolicyVersion,
+                timestamp: DateTime.now().toUtc(),
+              ));
+            } catch (error) {
+              return error;
+            }
+          }
+
+          final results = await Future.wait([attempt(), attempt(), attempt()]);
+
+          final outcomes =
+              results.whereType<({String? id, ConsentRecordSnapshot? existing})>().toList();
+          expect(outcomes, hasLength(3), reason: 'nenhuma chamada pode falhar: $results');
+          expect(outcomes.where((o) => o.id != null), hasLength(1));
+          final rows = await ConsentLog.db.find(
+            session,
+            where: (t) =>
+                t.userId.equals(UuidValue.fromString(_racePatientId)) &
+                t.purpose.equals(ConsentPurpose.termsOfUse.name),
+          );
+          expect(rows, hasLength(1));
         } finally {
           await _cleanupRace(session);
         }
