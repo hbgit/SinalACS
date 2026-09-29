@@ -7,10 +7,12 @@ const Duration termsChangeNoticePeriod = Duration(days: 15);
 
 /// Uma versão nova dos termos anunciada antes de valer.
 ///
-/// O construtor recusa (em `assert`, que roda em desenvolvimento e nos testes) uma
-/// vigência a menos de 15 dias da publicação: publicar o aviso tarde é um erro de
-/// quem edita o repositório, não algo que o app deva corrigir depois. Não é
-/// `const` porque `DateTime.difference` não é constante.
+/// O construtor recusa, com `ArgumentError` (que roda também no binário de
+/// release, ao contrário de `assert`), uma vigência a menos de 15 dias da
+/// publicação: publicar o aviso tarde é um erro de quem edita o repositório, não
+/// algo que o app deva corrigir depois. A regra compara as datas declaradas; não
+/// prova que o aviso chegou a alguém 15 dias antes (um `publishedAt` retroativo
+/// passa). Não é `const` porque `DateTime.difference` não é constante.
 ///
 /// Para agendar uma mudança: acrescente uma `LegalVersion` no app, troque
 /// [upcomingTermsChange] por uma agenda com a versão nova e só depois — na data de
@@ -21,11 +23,18 @@ class TermsChangeSchedule {
     required this.publishedAt,
     required this.effectiveFrom,
     required this.summary,
-  })  : assert(version != consentPolicyVersion, 'a versão anunciada já é a vigente'),
-        assert(
-          effectiveFrom.difference(publishedAt) >= termsChangeNoticePeriod,
-          'o aviso exige 15 dias entre a publicação e a vigência',
-        );
+  }) {
+    if (version == consentPolicyVersion) {
+      throw ArgumentError.value(version, 'version', 'a versão anunciada já é a vigente');
+    }
+    if (effectiveFrom.difference(publishedAt) < termsChangeNoticePeriod) {
+      throw ArgumentError.value(
+        effectiveFrom,
+        'effectiveFrom',
+        'o aviso exige 15 dias entre a publicação e a vigência',
+      );
+    }
+  }
 
   final String version;
   final DateTime publishedAt;

@@ -167,7 +167,7 @@ como um item separado a lembrar depois.
 | **Artigos LGPD** | 6º, VI; 9º |
 | **Critério de Aceite** | ✓ Política de Privacidade com linguagem clara e acessível<br>✓ Resumo visual do fluxo de dados no app<br>✓ Notificações sobre mudanças nas políticas<br>✓ Canal de dúvidas sobre tratamento de dados |
 
-> **Estado (2026-09-29):** implementado no app paciente — ver PROGRESS.md "QR Code do onboarding e documentos legais". Pendentes: revisão jurídica do texto, aviso com 15 dias de antecedência e canal digital de dúvidas.
+> **Estado (2026-09-29):** implementado no app paciente — ver PROGRESS.md "QR Code do onboarding e documentos legais". Pendentes: revisão jurídica do texto e canal digital de dúvidas. O aviso com 15 dias de antecedência existe (`TermsChangeSchedule`, `patients.termsChangeNotice` e um cartão dispensável na home), mas a agenda está vazia e o canal é só dentro do app.
 
 ### LGPD-RF11 - Controle de Acesso e RBAC
 
@@ -260,7 +260,7 @@ como um item separado a lembrar depois.
 | **Conteúdo Mínimo** | Regras de uso, responsabilidades, proibições, propriedade intelectual, limitação de responsabilidade, jurisdição, alterações no termo. |
 | **Critério de Aceite** | ✓ Texto em linguagem simples (acessibilidade para idosos e baixo letramento)<br>✓ Disponibilizado no app e no site<br>✓ Aceite explícito no cadastro<br>✓ Controle de versões disponível para consulta |
 
-> **Estado (2026-09-29):** implementado no app paciente — ver PROGRESS.md "QR Code do onboarding e documentos legais". Pacientes que entram por OTP sem onboarding são convidados a aceitar no primeiro login (`patients.acceptTermsOfUse`), e de novo quando a versão mudar; o convite não é obrigatório para acessar o alerta de emergência. Pendentes: revisão jurídica do texto e aviso com 15 dias de antecedência.
+> **Estado (2026-09-29):** implementado no app paciente — ver PROGRESS.md "QR Code do onboarding e documentos legais". Pacientes que entram por OTP sem onboarding são convidados a aceitar no primeiro login (`patients.acceptTermsOfUse`), e de novo quando a versão mudar; o convite não é obrigatório para acessar o alerta de emergência. Pendentes: revisão jurídica do texto. O aviso com 15 dias de antecedência existe (`TermsChangeSchedule`, `patients.termsChangeNotice`, cartão dispensável na home; agenda vazia).
 
 ### LGPD-RF19 - Política de Privacidade
 
@@ -272,7 +272,7 @@ como um item separado a lembrar depois.
 | **Conteúdo Mínimo** | Identificação do controlador, dados coletados (por funcionalidade), finalidades específicas, bases legais, compartilhamento, transferências, retenção, direitos, medidas de segurança, DPO/encarregado. |
 | **Critério de Aceite** | ✓ Linguagem acessível para leigos (recomendado: Nível de leitura 8º ano)<br>✓ Tópicos claros e organizados<br>✓ Versão resumida (sumário visual) e versão completa<br>✓ Atualização comunicada com no mínimo 15 dias de antecedência |
 
-> **Estado (2026-09-29):** implementado no app paciente — ver PROGRESS.md "QR Code do onboarding e documentos legais". Pendentes: revisão jurídica do texto, aviso com 15 dias de antecedência e reaceite a cada nova versão.
+> **Estado (2026-09-29):** implementado no app paciente — ver PROGRESS.md "QR Code do onboarding e documentos legais". Pendentes: revisão jurídica do texto. O aviso com 15 dias de antecedência existe (`TermsChangeSchedule`, `patients.termsChangeNotice`, cartão dispensável na home; agenda vazia) e o reaceite a cada nova versão também (`hasAcceptedCurrentTerms`).
 
 ### LGPD-RF20 - Aviso de Consentimento (Banner/Modal)
 

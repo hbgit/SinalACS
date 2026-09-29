@@ -1086,7 +1086,9 @@ class _PatientHomeShellState extends State<PatientHomeShell> {
         child: Column(
           children: [
             if (_sessionExpired) _SessionExpiredBanner(onReenter: _reenter),
-            if (_notice != null && !_noticeDismissed)
+            // Nunca na aba de urgência: o cartão desce o botão de pânico (e um aviso que
+            // chega de forma assíncrona o moveria sob o dedo). Volta nas outras abas.
+            if (_notice != null && !_noticeDismissed && _destination != PatientDestination.emergency)
               TermsChangeNoticeCard(
                 notice: _notice!,
                 onDismiss: () => setState(() => _noticeDismissed = true),

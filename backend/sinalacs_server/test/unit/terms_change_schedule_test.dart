@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:sinalacs_server/src/application/onboarding/onboarding_service.dart'
     show consentPolicyVersion;
 import 'package:sinalacs_server/src/application/patients/terms_change_schedule.dart';
@@ -16,8 +18,15 @@ void main() {
   test('vigência com menos de 15 dias da publicação não existe', () {
     expect(
       () => agenda(vigencia: _pub.add(const Duration(days: 14, hours: 23))),
-      throwsA(isA<AssertionError>()),
+      throwsA(isA<ArgumentError>()),
     );
+  });
+
+  test('a regra vale sem `assert` (binário de release não roda assert)', () {
+    // Prova que a recusa não depende de asserts: vem de um `throw` no corpo.
+    final source = File('lib/src/application/patients/terms_change_schedule.dart').readAsStringSync();
+    expect(source.contains('assert('), isFalse, reason: 'assert some em release');
+    expect(source.contains('ArgumentError'), isTrue);
   });
 
   test('exatamente 15 dias é aceito', () {
@@ -25,7 +34,7 @@ void main() {
   });
 
   test('a versão anunciada não pode ser a vigente', () {
-    expect(() => agenda(versao: consentPolicyVersion), throwsA(isA<AssertionError>()));
+    expect(() => agenda(versao: consentPolicyVersion), throwsA(isA<ArgumentError>()));
   });
 
   test('ativa na publicação, inativa na vigência', () {

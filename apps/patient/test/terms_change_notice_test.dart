@@ -102,4 +102,36 @@ void main() {
     expectNenhumBotaoInerte(tester);
     handle.dispose();
   });
+
+  testWidgets('na aba de urgência o cartão não aparece e o botão de pânico fica na tela', (tester) async {
+    // Tela pequena e fonte grande: o pior caso para o botão descer.
+    tester.view.physicalSize = const Size(360, 640);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final backend = FakePatientBackend()..termsNotice = _aviso;
+    await tester.pumpWidget(SinalAcsApp(backend: backend));
+    await login(tester);
+    expect(find.byKey(const Key('terms_change_notice_card')), findsOneWidget);
+
+    await tester.tap(find.text('Urgência'));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('terms_change_notice_card')), findsNothing);
+    final botao = find.byKey(const Key('panic_button'));
+    expect(botao, findsOneWidget);
+    final area = tester.getRect(botao);
+    expect(area.top, greaterThanOrEqualTo(0));
+    expect(area.bottom, lessThanOrEqualTo(640));
+  });
+
+  testWidgets('o cartão volta nas outras abas depois de passar pela urgência', (tester) async {
+    final backend = FakePatientBackend()..termsNotice = _aviso;
+    await tester.pumpWidget(SinalAcsApp(backend: backend));
+    await login(tester);
+    await tester.tap(find.text('Urgência'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Status'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('terms_change_notice_card')), findsOneWidget);
+  });
 }
