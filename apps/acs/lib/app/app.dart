@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:sinalacs_acs/app/acs_theme.dart';
+import 'package:sinalacs_acs/app/invite_screen.dart';
 import 'package:sinalacs_acs/core/database/sqlcipher_visit_store.dart';
 import 'package:sinalacs_acs/core/geo/location_cell.dart';
 import 'package:sinalacs_acs/core/network/backend_client.dart';
@@ -252,7 +253,7 @@ class _LoginScreenState extends State<LoginScreen> {
   );
 }
 
-enum AcsDestination { area, queue, map, visit, escalation, geofencing, notices }
+enum AcsDestination { area, queue, map, visit, escalation, geofencing, notices, invite }
 
 /// Aviso de infraestrutura: o que quebrou e a consequência prática.
 ///
@@ -759,6 +760,7 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
           }),
         ),
       AcsDestination.notices => const NoticesScreen(),
+      AcsDestination.invite => const InviteScreen(),
     }),
     bottomNavigationBar: NavigationBar(
       selectedIndex: destination.index <= 3 ? destination.index : 4,
@@ -770,6 +772,7 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
     _moreItem(sheet, Icons.call_outlined, 'Acionamento', AcsDestination.escalation),
     _moreItem(sheet, Icons.location_searching, 'Geofencing', AcsDestination.geofencing),
     _moreItem(sheet, Icons.campaign_outlined, 'Avisos à comunidade', AcsDestination.notices),
+    _moreItem(sheet, Icons.qr_code_2, 'Convidar paciente', AcsDestination.invite),
   ])));
   Widget _moreItem(BuildContext sheet, IconData icon, String label, AcsDestination value) => ListTile(leading: Icon(icon), title: Text(label), onTap: () { Navigator.pop(sheet); setState(() => destination = value); });
 }
