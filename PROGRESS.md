@@ -1142,4 +1142,4 @@ Plano: `docs/superpowers/plans/2026-09-29-fechamento-de-pendencias-do-paciente.m
 - `ipHash` e `userAgent` `nao-aplicavel-painel-titular` em `consent_logs` seguem como estão: é um marcador deliberado de ausência (o request HTTP já é auditado em `audit_logs`), documentado em `signed_consent_log.dart`. Guardar o IP do titular ali é uma decisão de privacidade, não um conserto.
 - A prova da corrida cobre o store ORM, não o endpoint: o endpoint grava `audit_logs`, que tem FK para `users` e cadeia de hash, e a limpeza manual do grupo sem rollback quebraria os dois.
 - Backoffice que atende os pedidos, push (RF14) e o aviso de 15 dias seguem pendentes.
-- Contagens de teste depois desta entrega: backend 346, paciente 182, ACS 170.
+- Contagens de teste depois desta entrega: backend 346, paciente 182, ACS 172.

@@ -304,4 +304,46 @@ void main() {
     expect(find.byKey(const Key('invite_expired')), findsNothing,
         reason: 'o convite já tinha saído da tela; nada a avisar');
   });
+
+  testWidgets('relógio do aparelho adiantado não esconde um convite válido', (tester) async {
+    // O servidor carimba `expiresAt` com o relógio dele. Com o do aparelho 30
+    // minutos à frente, o convite chega "já vencido" para o aparelho — e o
+    // servidor ainda o aceitaria. A tela mede a validade a partir do recebimento.
+    tester.view.physicalSize = const Size(800, 2000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final backend = backendComPacientes()..inviteLifetime = const Duration(minutes: -30);
+    await tester.pumpWidget(
+      SinalAcsApp(backend: backend, feedBuilder: (queue) => FakeAlertFeed(queue)),
+    );
+    await entrar(tester);
+    await abrirConvite(tester);
+    await tapKey(tester, 'invite_patient_${syntheticPatientId(5)}');
+    await tapKey(tester, 'generate_invite_button');
+
+    expect(find.byType(QrImageView), findsOneWidget);
+    expect(find.byKey(const Key('invite_expired')), findsNothing);
+
+    await tester.pump(const Duration(minutes: 15, seconds: 1));
+    expect(find.byKey(const Key('invite_expired')), findsOneWidget);
+  });
+
+  testWidgets('relógio do aparelho atrasado não deixa o QR na tela além dos 15 minutos', (tester) async {
+    tester.view.physicalSize = const Size(800, 2000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final backend = backendComPacientes()..inviteLifetime = const Duration(minutes: 45);
+    await tester.pumpWidget(
+      SinalAcsApp(backend: backend, feedBuilder: (queue) => FakeAlertFeed(queue)),
+    );
+    await entrar(tester);
+    await abrirConvite(tester);
+    await tapKey(tester, 'invite_patient_${syntheticPatientId(5)}');
+    await tapKey(tester, 'generate_invite_button');
+    expect(find.byType(QrImageView), findsOneWidget);
+
+    await tester.pump(const Duration(minutes: 15, seconds: 1));
+
+    expect(find.byKey(const Key('invite_expired')), findsOneWidget);
+  });
 }

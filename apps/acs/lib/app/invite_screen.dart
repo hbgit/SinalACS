@@ -22,6 +22,9 @@ class InviteScreen extends StatefulWidget {
   State<InviteScreen> createState() => _InviteScreenState();
 }
 
+/// Validade de um convite, igual à do servidor.
+const _inviteLifetime = Duration(minutes: 15);
+
 class _InviteScreenState extends State<InviteScreen> {
   List<MicroAreaPatient>? _patients;
   MicroAreaPatient? _selected;
@@ -52,15 +55,21 @@ class _InviteScreenState extends State<InviteScreen> {
     _expired = false;
   }
 
-  /// Agenda o aviso para o instante em que o convite deixa de valer. O relógio
-  /// do aparelho pode estar errado: o servidor é quem recusa um convite
-  /// expirado, e isto só evita deixar um QR morto na tela como se valesse.
+  /// Agenda o aviso de que o convite deixou de valer.
+  ///
+  /// `expiresAt` vem do relógio do servidor; comparar com o do aparelho falha
+  /// nos dois sentidos. Aparelho adiantado: o convite chegaria "já vencido" e a
+  /// tela nunca mostraria um QR que o servidor aceitaria. Aparelho atrasado: o
+  /// QR ficaria de pé depois de morto. Por isso a espera é limitada a
+  /// [_inviteLifetime] (o mesmo TTL do servidor, `_tokenLifetime` em
+  /// `onboarding_service.dart`), contado do recebimento, e um `expiresAt` que já
+  /// passou para o aparelho usa o prazo inteiro em vez de valer como vencido.
+  /// O servidor segue sendo quem recusa um convite expirado.
   void _watchExpiry(DateTime expiresAt) {
     _clearExpiry();
-    final remaining = expiresAt.difference(DateTime.now());
-    if (remaining <= Duration.zero) {
-      _expired = true;
-      return;
+    var remaining = expiresAt.difference(DateTime.now());
+    if (remaining <= Duration.zero || remaining > _inviteLifetime) {
+      remaining = _inviteLifetime;
     }
     _expiryTimer = Timer(remaining, () {
       if (mounted) setState(() => _expired = true);
