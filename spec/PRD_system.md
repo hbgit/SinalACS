@@ -132,7 +132,7 @@ events:
 | ID | Requisito | Ator | Complexidade | Risco | Dependência |
 |----|-----------|------|--------------|-------|-------------|
 | **RF01** | Autenticação Passwordless (CPF + Data Nasc + OTP) | Paciente | M | Médio | SMS Gateway |
-| **RF02** | Onboarding via QR Code (ACS gera, paciente escaneia) | Paciente | M | Médio | Câmera, `qr_code_scanner` |
+| **RF02** | Onboarding via QR Code (ACS gera, paciente escaneia) | Paciente | M | Médio | Câmera, `mobile_scanner` (paciente) e `qr_flutter` (ACS) |
 | **RF03** | Botão de Alerta de Urgência (MQTT) | Paciente | M | **Crítico** | Mosquitto, GPS |
 | **RF04** | Formulário de Triagem Estruturada (árvore de decisão) | Paciente | S | Médio | Nenhuma (local) |
 | **RF05** | Painel de Status de Solicitação | Paciente | S | Baixo | API HTTP do backend |

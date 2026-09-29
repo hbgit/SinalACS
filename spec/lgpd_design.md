@@ -165,6 +165,8 @@ como um item separado a lembrar depois.
 | **Artigos LGPD** | 6º, VI; 9º |
 | **Critério de Aceite** | ✓ Política de Privacidade com linguagem clara e acessível<br>✓ Resumo visual do fluxo de dados no app<br>✓ Notificações sobre mudanças nas políticas<br>✓ Canal de dúvidas sobre tratamento de dados |
 
+> **Estado (2026-09-29):** implementado no app paciente — ver PROGRESS.md "QR Code do onboarding e documentos legais". Pendentes: revisão jurídica do texto, aviso com 15 dias de antecedência e canal digital de dúvidas.
+
 ### LGPD-RF11 - Controle de Acesso e RBAC
 
 | Propriedade | Descrição |
@@ -256,6 +258,8 @@ como um item separado a lembrar depois.
 | **Conteúdo Mínimo** | Regras de uso, responsabilidades, proibições, propriedade intelectual, limitação de responsabilidade, jurisdição, alterações no termo. |
 | **Critério de Aceite** | ✓ Texto em linguagem simples (acessibilidade para idosos e baixo letramento)<br>✓ Disponibilizado no app e no site<br>✓ Aceite explícito no cadastro<br>✓ Controle de versões disponível para consulta |
 
+> **Estado (2026-09-29):** implementado no app paciente — ver PROGRESS.md "QR Code do onboarding e documentos legais". Pendentes: revisão jurídica do texto, aviso com 15 dias de antecedência e reaceite a cada nova versão.
+
 ### LGPD-RF19 - Política de Privacidade
 
 | Propriedade | Descrição |
@@ -265,6 +269,8 @@ como um item separado a lembrar depois.
 | **Objetivo** | Garantir transparência total sobre o tratamento de dados, cumprindo o Art. 9º da LGPD. |
 | **Conteúdo Mínimo** | Identificação do controlador, dados coletados (por funcionalidade), finalidades específicas, bases legais, compartilhamento, transferências, retenção, direitos, medidas de segurança, DPO/encarregado. |
 | **Critério de Aceite** | ✓ Linguagem acessível para leigos (recomendado: Nível de leitura 8º ano)<br>✓ Tópicos claros e organizados<br>✓ Versão resumida (sumário visual) e versão completa<br>✓ Atualização comunicada com no mínimo 15 dias de antecedência |
+
+> **Estado (2026-09-29):** implementado no app paciente — ver PROGRESS.md "QR Code do onboarding e documentos legais". Pendentes: revisão jurídica do texto, aviso com 15 dias de antecedência e reaceite a cada nova versão.
 
 ### LGPD-RF20 - Aviso de Consentimento (Banner/Modal)
 

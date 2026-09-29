@@ -1093,3 +1093,19 @@ O que **não** foi feito, de propósito:
   abertas; no app, o botão desabilitado com o pedido em voo cobre o toque duplo.
 - **`segmentedPush` é registrado mas não tem efeito**: não há projeto Firebase
   (RF14). A descrição na tela diz isso.
+
+## QR Code do onboarding e documentos legais (2026-09-29)
+
+Plano: `docs/superpowers/plans/2026-09-29-qr-onboarding-e-documentos-legais.md`, branch `fix/patient`.
+
+**RF02 de ponta a ponta.** O ACS ganhou "Mais › Convidar paciente": escolhe um paciente da própria microárea, gera o convite (`onboarding.generateEnrollmentToken`, que existia sem nenhum chamador) e mostra o QR Code (`qr_flutter`), com validade de 15 minutos e o código em texto para digitação. O paciente lê com "Ler QR Code com a câmera" (`mobile_scanner`, permissão `CAMERA`, câmera opcional na instalação), que preenche o mesmo campo do código; QR que não tem o formato do convite (43 caracteres base64url) é recusado sem sobrescrever o campo. O PRD citava `qr_code_scanner`, pacote descontinuado — trocado por `mobile_scanner`.
+
+**LGPD-RF18/RF19/RF10.** Termo de Uso e Política de Privacidade versão 2026.1 no app paciente (`lib/core/legal/legal_documents.dart`): resumo visual em passos (fluxo do dado), texto completo em seções, histórico de versões. Abrem antes do cadastro (link no login e no onboarding) e depois em "Mais › Privacidade e termos". O aceite é explícito, desmarcado por padrão e obrigatório; vira `ConsentPurpose.termsOfUse` em `consent_logs`, na mesma transação dos outros consentimentos, com `version = consentPolicyVersion`. `updateConsent` recusa alterá-lo. Um teste do app falha se a versão exibida divergir da carimbada pelo backend.
+
+**Ficou de fora, de propósito:**
+- O texto 2026.1 precisa de revisão jurídica e dos dados reais do controlador e do encarregado (hoje genéricos: "Secretaria Municipal de Saúde do seu município").
+- Aviso de mudança com 15 dias de antecedência e novo aceite quando a versão mudar: só existe uma versão; não há mecanismo de reaceite no login.
+- Pacientes que entram por CPF + OTP (RF01) sem ter passado pelo onboarding nunca aceitaram o termo — o seed inclusive. Falta um aceite no primeiro login.
+- Canal de dúvidas é "fale com o ACS ou a UBS", sem canal digital próprio.
+- A página da câmera (`_CameraScanPage`) só roda no aparelho; os testes cobrem o fluxo com um leitor duplo. Validar no emulador com um QR gerado pelo app do ACS.
+- Contagens de teste depois desta entrega: backend 329, paciente 162, ACS 167.
