@@ -158,6 +158,8 @@ class TestEndpoints {
 
   late final _AuthEndpoint auth;
 
+  late final _DevicesEndpoint devices;
+
   late final _HealthEndpoint health;
 
   late final _OnboardingEndpoint onboarding;
@@ -181,6 +183,10 @@ class _InternalTestEndpoints extends TestEndpoints
       serializationManager,
     );
     auth = _AuthEndpoint(
+      endpoints,
+      serializationManager,
+    );
+    devices = _DevicesEndpoint(
       endpoints,
       serializationManager,
     );
@@ -466,6 +472,54 @@ class _AuthEndpoint {
                   _localCallContext.arguments,
                 )
                 as _i3.Future<_i7.DevelopmentLoginResult>);
+        return _localReturnValue;
+      } finally {
+        await _localUniqueSession.close();
+      }
+    });
+  }
+}
+
+class _DevicesEndpoint {
+  _DevicesEndpoint(
+    this._endpointDispatch,
+    this._serializationManager,
+  );
+
+  final _i2.EndpointDispatch _endpointDispatch;
+
+  final _i2.SerializationManager _serializationManager;
+
+  _i3.Future<void> registerPushToken(
+    _i1.TestSessionBuilder sessionBuilder, {
+    required String accessToken,
+    required String token,
+    required String platform,
+  }) async {
+    return _i1.callAwaitableFunctionAndHandleExceptions(() async {
+      var _localUniqueSession =
+          (sessionBuilder as _i1.InternalTestSessionBuilder).internalBuild(
+            endpoint: 'devices',
+            method: 'registerPushToken',
+          );
+      try {
+        var _localCallContext = await _endpointDispatch.getMethodCallContext(
+          createSessionCallback: (_) => _localUniqueSession,
+          endpointPath: 'devices',
+          methodName: 'registerPushToken',
+          parameters: _i1.testObjectToJson({
+            'accessToken': accessToken,
+            'token': token,
+            'platform': platform,
+          }),
+          serializationManager: _serializationManager,
+        );
+        var _localReturnValue =
+            await (_localCallContext.method.call(
+                  _localUniqueSession,
+                  _localCallContext.arguments,
+                )
+                as _i3.Future<void>);
         return _localReturnValue;
       } finally {
         await _localUniqueSession.close();

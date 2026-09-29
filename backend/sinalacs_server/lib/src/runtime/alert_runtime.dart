@@ -26,6 +26,8 @@ import 'package:sinalacs_server/src/infrastructure/database/orm_audit_trail.dart
 import 'package:sinalacs_server/src/infrastructure/database/orm_onboarding_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_otp_challenge_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_data_subject_rights_store.dart';
+import 'package:sinalacs_server/src/infrastructure/database/orm_push_token_store.dart';
+import 'package:sinalacs_server/src/application/patients/push_token_service.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_patient_data_overview_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_patient_directory_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_triage_session_store.dart';
@@ -211,7 +213,12 @@ class AlertRuntime {
           cipher: healthDataCipher,
         ),
         audit: auditTrailFor(session),
+        pushTokens: OrmPushTokenStore(session: () => session),
       );
+
+  /// Registro do aparelho para avisos segmentados (RF14).
+  PushTokenService pushTokenServiceFor(Session session) =>
+      PushTokenService(store: OrmPushTokenStore(session: () => session));
 
   /// Constrói o serviço de triagem persistida para uma requisição.
   TriageSessionService triageSessionServiceFor(Session session) =>

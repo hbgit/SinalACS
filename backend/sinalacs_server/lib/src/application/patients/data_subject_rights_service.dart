@@ -5,6 +5,7 @@ import 'package:sinalacs_server/src/application/onboarding/onboarding_service.da
     show ConsentLogEntry, consentPolicyVersion;
 import 'package:sinalacs_server/src/application/patients/patient_data_overview_service.dart'
     show ConsentRecordSnapshot, DataSubjectRequestSnapshot;
+import 'package:sinalacs_server/src/application/patients/push_token_service.dart' show PushTokenStore;
 import 'package:sinalacs_server/src/generated/protocol.dart';
 
 /// Persistência das operações do titular sobre os próprios dados. Interface
@@ -61,13 +62,16 @@ class DataSubjectRightsService {
   DataSubjectRightsService({
     required DataSubjectRightsStore store,
     required AuditTrail audit,
+    PushTokenStore? pushTokens,
     DateTime Function()? clock,
   })  : _store = store,
         _audit = audit,
+        _pushTokens = pushTokens,
         _clock = clock ?? DateTime.now;
 
   final DataSubjectRightsStore _store;
   final AuditTrail _audit;
+  final PushTokenStore? _pushTokens;
   final DateTime Function() _clock;
 
   /// Concede ou revoga uma finalidade opcional. `healthDataProcessing` é
@@ -93,7 +97,13 @@ class DataSubjectRightsService {
       );
     }
 
-    return _record(user, purpose: purpose, action: granted ? 'granted' : 'denied');
+    final record = await _record(user, purpose: purpose, action: granted ? 'granted' : 'denied');
+    // Sem consentimento, sem token: o aparelho deixa de estar ligado ao titular
+    // no mesmo instante da revogação (RF14).
+    if (purpose == ConsentPurpose.segmentedPush && !granted) {
+      await _pushTokens?.deleteAllFor(user.id);
+    }
+    return record;
   }
 
   /// Aceite explícito do Termo de Uso e da Política de Privacidade por quem

@@ -7,6 +7,8 @@ auth:
   - loginInstitutional:
   - requestOtp:
   - verifyOtp:
+devices:
+  - registerPushToken:
 health:
   - check:
 onboarding:

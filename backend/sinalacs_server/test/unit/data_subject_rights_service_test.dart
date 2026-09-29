@@ -3,6 +3,7 @@ import 'package:sinalacs_server/src/application/auth/development_auth_service.da
 import 'package:sinalacs_server/src/application/onboarding/onboarding_service.dart';
 import 'package:sinalacs_server/src/application/patients/data_subject_rights_service.dart';
 import 'package:sinalacs_server/src/application/patients/patient_data_overview_service.dart';
+import 'package:sinalacs_server/src/application/patients/push_token_service.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
 import 'package:test/test.dart';
 
@@ -110,6 +111,28 @@ class FakeDataSubjectRightsStore implements DataSubjectRightsStore {
   }
 }
 
+class FakePushTokenStore implements PushTokenStore {
+  var deleteCalls = <String>[];
+
+  @override
+  Future<bool> hasGrantedConsent(String userId) async => true;
+
+  @override
+  Future<void> upsert({
+    required String userId,
+    required String? microAreaId,
+    required String token,
+    required String platform,
+    required DateTime now,
+  }) async {}
+
+  @override
+  Future<int> deleteAllFor(String userId) async {
+    deleteCalls.add(userId);
+    return 0;
+  }
+}
+
 class FakeAuditTrail extends AuditTrail {
   FakeAuditTrail({this.failOnRecord = false});
 
@@ -132,6 +155,25 @@ void main() {
     store = FakeDataSubjectRightsStore();
     audit = FakeAuditTrail();
     service = DataSubjectRightsService(store: store, audit: audit, clock: () => _now);
+  });
+
+  group('revogar segmentedPush apaga os tokens de push (RF14)', () {
+    test('só a revogação de segmentedPush chama deleteAllFor', () async {
+      final pushTokens = FakePushTokenStore();
+      final svc = DataSubjectRightsService(
+        store: store,
+        audit: audit,
+        pushTokens: pushTokens,
+        clock: () => _now,
+      );
+
+      await svc.updateConsent(_patient, purpose: ConsentPurpose.segmentedPush, granted: true);
+      await svc.updateConsent(_patient, purpose: ConsentPurpose.localReminders, granted: false);
+      expect(pushTokens.deleteCalls, isEmpty);
+
+      await svc.updateConsent(_patient, purpose: ConsentPurpose.segmentedPush, granted: false);
+      expect(pushTokens.deleteCalls, [_patientId]);
+    });
   });
 
   group('acceptTermsOfUse (LGPD-RF18)', () {

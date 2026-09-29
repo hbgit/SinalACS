@@ -213,6 +213,31 @@ abstract class EndpointAuthenticated extends _i1.EndpointRef {
   EndpointAuthenticated(_i1.EndpointCaller caller) : super(caller);
 }
 
+/// Aparelhos do paciente para avisos segmentados (RF14, decisão §3.2).
+/// {@category Endpoint}
+class EndpointDevices extends EndpointAuthenticated {
+  EndpointDevices(_i1.EndpointCaller caller) : super(caller);
+
+  @override
+  String get name => 'devices';
+
+  /// Registra o token de push do aparelho do paciente autenticado. Só grava com
+  /// o consentimento `segmentedPush` vigente; sem ele, [DataRightsException].
+  _i2.Future<void> registerPushToken({
+    required String accessToken,
+    required String token,
+    required String platform,
+  }) => caller.callServerEndpoint<void>(
+    'devices',
+    'registerPushToken',
+    {
+      'accessToken': accessToken,
+      'token': token,
+      'platform': platform,
+    },
+  );
+}
+
 /// Sonda de saúde.
 ///
 /// Preserva a forma do antigo `GET /health` — `{status, mqtt_connected,
@@ -365,7 +390,8 @@ class EndpointPatients extends EndpointAuthenticated {
 
   /// Aceite do Termo de Uso e da Política de Privacidade vigentes (LGPD-RF18)
   /// por quem entrou por OTP sem passar pelo onboarding, ou aceitou uma versão
-  /// anterior. Só paciente; grava uma linha nova e assinada em `consent_logs`.
+  /// anterior. Só paciente; grava uma linha assinada em `consent_logs` só se a
+  /// versão vigente ainda não foi aceita — repetir devolve a existente.
   _i2.Future<_i12.PatientConsentRecord> acceptTermsOfUse({
     required String accessToken,
   }) => caller.callServerEndpoint<_i12.PatientConsentRecord>(
@@ -527,6 +553,7 @@ class Client extends _i1.ServerpodClientShared {
        ) {
     alerts = EndpointAlerts(this);
     auth = EndpointAuth(this);
+    devices = EndpointDevices(this);
     health = EndpointHealth(this);
     onboarding = EndpointOnboarding(this);
     patients = EndpointPatients(this);
@@ -537,6 +564,8 @@ class Client extends _i1.ServerpodClientShared {
   late final EndpointAlerts alerts;
 
   late final EndpointAuth auth;
+
+  late final EndpointDevices devices;
 
   late final EndpointHealth health;
 
@@ -552,6 +581,7 @@ class Client extends _i1.ServerpodClientShared {
   Map<String, _i1.EndpointRef> get endpointRefLookup => {
     'alerts': alerts,
     'auth': auth,
+    'devices': devices,
     'health': health,
     'onboarding': onboarding,
     'patients': patients,
