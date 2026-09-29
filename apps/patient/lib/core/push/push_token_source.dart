@@ -11,11 +11,12 @@ class PushDevice {
   final String platform;
 }
 
-/// De onde o app tira o token de push. A implementação real (token nativo do
-/// FCM no Android e do APNs no iOS, entregue depois ao Gorush pelo backend —
-/// decisão §3.2 do documento de decisões de produto) entra quando o Gorush e as
-/// credenciais existirem; até lá [NoPushTokenSource] mantém o registro inerte, e
-/// servidor e telas já estão prontos para a troca.
+/// De onde o app tira o token de push. A implementação real,
+/// `NativePushTokenSource` (canal `sinalacs/push_token`, ainda sem o lado
+/// nativo), lê o token do FCM no Android e do APNs no iOS, e o backend o entrega
+/// depois ao Gorush (decisão §3.2 do documento de decisões de produto). Até o
+/// lado nativo e as credenciais existirem, o canal não responde e o registro
+/// fica inerte; servidor e telas já estão prontos.
 abstract interface class PushTokenSource {
   /// `null` quando o aparelho não tem token (sem provedor, sem permissão).
   Future<PushDevice?> currentDevice();

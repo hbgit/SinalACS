@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart' show ProviderScope;
 import 'package:flutter/services.dart'
     show Clipboard, ClipboardData, TextEditingValue, TextInputFormatter, TextSelection;
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
@@ -23,6 +24,7 @@ import 'package:sinalacs_patient/core/legal/legal_documents.dart';
 import 'package:sinalacs_patient/core/consent/consent_preferences.dart';
 import 'package:sinalacs_patient/core/consent/sqflite_consent_preferences.dart';
 import 'package:sinalacs_patient/core/network/backend_client.dart';
+import 'package:sinalacs_patient/core/push/push_token_provider.dart';
 import 'package:sinalacs_patient/core/push/push_token_source.dart';
 import 'package:sinalacs_patient/core/network/backend_scope.dart';
 import 'package:sinalacs_patient/core/network/idempotency.dart';
@@ -96,7 +98,23 @@ class _SinalAcsAppState extends State<SinalAcsApp> {
   late final ConsentPreferences _consentPreferences =
       widget.consentPreferences ?? SqfliteConsentPreferences();
   late final QrScanner _qrScanner = widget.qrScanner ?? scanQrWithCamera;
-  late final PushTokenSource _pushTokens = widget.pushTokens ?? const NoPushTokenSource();
+  // O parâmetro (teste) tem precedência; senão, o provider Riverpod, se houver um
+  // `ProviderScope` acima; senão, sem push. Lido em `didChangeDependencies`.
+  PushTokenSource _pushTokens = const NoPushTokenSource();
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _pushTokens = widget.pushTokens ?? _providerSource();
+  }
+
+  PushTokenSource _providerSource() {
+    try {
+      return ProviderScope.containerOf(context, listen: false).read(pushTokenSourceProvider);
+    } catch (_) {
+      return const NoPushTokenSource();
+    }
+  }
 
   // Sem `dispose`: este widget não cria mais cliente nenhum (o `main` é quem
   // constrói e injeta), então não há o que fechar — fechar um backend injetado
