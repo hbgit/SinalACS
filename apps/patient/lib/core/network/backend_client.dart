@@ -122,6 +122,22 @@ abstract class PatientBackend {
   /// acesso aos dados pessoais do próprio paciente autenticado.
   Future<PatientDataOverview> myData();
 
+  /// Concede ou revoga uma finalidade opcional de consentimento (LGPD-RF05).
+  /// O servidor grava uma linha nova em `consent_logs`; `healthDataProcessing`
+  /// é recusado com [BackendFailure] não recuperável.
+  Future<PatientConsentRecord> updateConsent({
+    required ConsentPurpose purpose,
+    required bool granted,
+  });
+
+  /// Pede a exclusão dos próprios dados (LGPD-RF08). Pedir de novo com um
+  /// pedido aberto devolve o mesmo.
+  Future<PatientDataSubjectRequestRecord> requestDataDeletion();
+
+  /// Pede a correção de um dado (LGPD-RF08). O servidor faz o `trim` e recusa
+  /// texto vazio ou acima de 500 caracteres.
+  Future<PatientDataSubjectRequestRecord> requestDataCorrection(String details);
+
   void close();
 }
 
@@ -209,6 +225,20 @@ class MisconfiguredBackend implements PatientBackend {
 
   @override
   Future<PatientDataOverview> myData() async => _recusar();
+
+  @override
+  Future<PatientConsentRecord> updateConsent({
+    required ConsentPurpose purpose,
+    required bool granted,
+  }) async =>
+      _recusar();
+
+  @override
+  Future<PatientDataSubjectRequestRecord> requestDataDeletion() async => _recusar();
+
+  @override
+  Future<PatientDataSubjectRequestRecord> requestDataCorrection(String details) async =>
+      _recusar();
 
   /// Fechar **não** é uma chamada ao backend: não há o que fechar, e um `close`
   /// que lançasse derrubaria o `finally` de quem só queria encerrar.
@@ -474,6 +504,31 @@ class BackendClient implements PatientBackend {
   }
 
   @override
+  Future<PatientConsentRecord> updateConsent({
+    required ConsentPurpose purpose,
+    required bool granted,
+  }) async {
+    final token = await _requireToken();
+    return _guard(
+      () => _client.patients.updateConsent(accessToken: token, purpose: purpose, granted: granted),
+    );
+  }
+
+  @override
+  Future<PatientDataSubjectRequestRecord> requestDataDeletion() async {
+    final token = await _requireToken();
+    return _guard(() => _client.patients.requestDataDeletion(accessToken: token));
+  }
+
+  @override
+  Future<PatientDataSubjectRequestRecord> requestDataCorrection(String details) async {
+    final token = await _requireToken();
+    return _guard(
+      () => _client.patients.requestDataCorrection(accessToken: token, details: details),
+    );
+  }
+
+  @override
   void close() => _client.close();
 
   /// Traduz as exceções tipadas do backend para [BackendFailure].
@@ -502,6 +557,11 @@ class BackendClient implements PatientBackend {
       // Recusa do login passwordless (RF01). A mensagem é a do servidor de
       // propósito: ela já é única para todas as causas, para não dizer se
       // aquele CPF está cadastrado.
+      throw BackendFailure(error.message, isRecoverable: false);
+    } on DataRightsException catch (error) {
+      // Recusa de negócio de um direito do titular (consentimento obrigatório,
+      // texto de correção inválido). A mensagem é do servidor, pronta para a
+      // pessoa ler; tentar de novo sem mudar nada dá a mesma recusa.
       throw BackendFailure(error.message, isRecoverable: false);
     } on AlertDispatchUnavailableException {
       // O alerta FOI gravado; só a publicação imediata falhou. Dizer que

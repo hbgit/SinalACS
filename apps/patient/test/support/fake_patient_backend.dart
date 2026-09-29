@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:sinalacs_client/sinalacs_client.dart';
 import 'package:sinalacs_patient/core/network/auth_session.dart';
 import 'package:sinalacs_patient/core/network/backend_client.dart';
@@ -53,6 +55,19 @@ class FakePatientBackend implements PatientBackend {
   );
   BackendFailure? myDataFailure;
   int myDataCallCount = 0;
+
+  /// Chamadas a [updateConsent], na ordem.
+  final List<({ConsentPurpose purpose, bool granted})> updateConsentCalls =
+      <({ConsentPurpose purpose, bool granted})>[];
+  BackendFailure? updateConsentFailure;
+
+  int requestDataDeletionCount = 0;
+  final List<String> correctionRequests = <String>[];
+  BackendFailure? dataRequestFailure;
+
+  /// Definido, segura [requestDataDeletion] até ser completado — é como o teste
+  /// observa a tela com o pedido ainda em voo.
+  Completer<void>? dataRequestGate;
 
   /// Código que o "servidor" aceita em [verifyOtp].
   ///
@@ -280,6 +295,63 @@ class FakePatientBackend implements PatientBackend {
     final failure = myDataFailure;
     if (failure != null) throw failure;
     return myDataResult;
+  }
+
+  /// Como no servidor: uma linha nova no histórico, que o próximo [myData]
+  /// devolve.
+  @override
+  Future<PatientConsentRecord> updateConsent({
+    required ConsentPurpose purpose,
+    required bool granted,
+  }) async {
+    updateConsentCalls.add((purpose: purpose, granted: granted));
+    final failure = updateConsentFailure;
+    if (failure != null) throw failure;
+    final record = PatientConsentRecord(
+      purpose: purpose.name,
+      action: granted ? 'granted' : 'denied',
+      version: '2026.1',
+      timestamp: DateTime.now().toUtc(),
+    );
+    myDataResult = myDataResult.copyWith(consents: [...myDataResult.consents, record]);
+    return record;
+  }
+
+  /// Idempotente enquanto houver exclusão aberta, como o servidor.
+  @override
+  Future<PatientDataSubjectRequestRecord> requestDataDeletion() async {
+    requestDataDeletionCount++;
+    await dataRequestGate?.future;
+    final failure = dataRequestFailure;
+    if (failure != null) throw failure;
+    for (final request in myDataResult.requests) {
+      if (request.type == DataSubjectRequestType.deletion &&
+          request.status == DataSubjectRequestStatus.open) {
+        return request;
+      }
+    }
+    return _appendRequest(DataSubjectRequestType.deletion, null);
+  }
+
+  @override
+  Future<PatientDataSubjectRequestRecord> requestDataCorrection(String details) async {
+    correctionRequests.add(details);
+    final failure = dataRequestFailure;
+    if (failure != null) throw failure;
+    return _appendRequest(DataSubjectRequestType.correction, details);
+  }
+
+  PatientDataSubjectRequestRecord _appendRequest(DataSubjectRequestType type, String? details) {
+    final now = DateTime.now().toUtc();
+    final record = PatientDataSubjectRequestRecord(
+      type: type,
+      status: DataSubjectRequestStatus.open,
+      details: details,
+      createdAt: now,
+      dueAt: now.add(const Duration(days: 15)),
+    );
+    myDataResult = myDataResult.copyWith(requests: [...myDataResult.requests, record]);
+    return record;
   }
 
   @override
