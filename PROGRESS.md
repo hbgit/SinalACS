@@ -1122,4 +1122,4 @@ Plano: `docs/superpowers/plans/2026-09-29-aceite-do-termo-no-login-otp.md`, bran
 - O aceite **não é portão duro**: "Agora não" e uma falha de `myData()` entram direto, porque o alerta de urgência nunca pode ficar atrás de uma tela de aceite. Consequência: quem pula pode seguir sem aceite registrado, e o aviso volta no próximo login.
 - Aviso de mudança com 15 dias de antecedência e revisão jurídica do texto seguem pendentes.
 - `acceptTermsOfUse` grava uma linha nova a cada chamada, sem checar se já havia aceite da versão vigente; o app só chama quando `needsTermsAcceptance`.
-- Contagens de teste depois desta entrega: backend 333, paciente 179, ACS 168.
+- Contagens de teste depois desta entrega: backend 333, paciente 182, ACS 168.

@@ -61,6 +61,10 @@ class FakePatientBackend implements PatientBackend {
     requests: const [],
   );
   BackendFailure? myDataFailure;
+
+  /// Quando definido, [myData] só responde depois que ele completa — simula
+  /// um backend lento ou pendurado.
+  Completer<void>? myDataGate;
   int myDataCallCount = 0;
 
   /// Chamadas a [updateConsent], na ordem.
@@ -321,6 +325,7 @@ class FakePatientBackend implements PatientBackend {
   @override
   Future<PatientDataOverview> myData() async {
     myDataCallCount++;
+    await myDataGate?.future;
     final failure = myDataFailure;
     if (failure != null) throw failure;
     return myDataResult;

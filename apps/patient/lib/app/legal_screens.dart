@@ -159,7 +159,16 @@ class TermsAcceptanceScreen extends StatefulWidget {
 class _TermsAcceptanceScreenState extends State<TermsAcceptanceScreen> {
   bool _checked = false;
   bool _busy = false;
+  bool _left = false;
   String? _error;
+
+  /// Sai da tela uma vez só: um segundo toque em "Agora não" durante a
+  /// transição não pode empilhar a tela inicial de novo.
+  void _continue() {
+    if (_left) return;
+    _left = true;
+    widget.onContinue();
+  }
 
   Future<void> _accept() async {
     setState(() {
@@ -169,7 +178,7 @@ class _TermsAcceptanceScreenState extends State<TermsAcceptanceScreen> {
     try {
       await BackendScope.of(context).acceptTermsOfUse();
       if (!mounted) return;
-      widget.onContinue();
+      _continue();
     } on BackendFailure catch (failure) {
       if (!mounted) return;
       setState(() {
@@ -188,9 +197,9 @@ class _TermsAcceptanceScreenState extends State<TermsAcceptanceScreen> {
           padding: const EdgeInsets.all(24),
           children: [
             const Text(
-              'Atualizamos o Termo de Uso e a Política de Privacidade '
-              '(versão $legalDocumentsVersion). Leia e aceite para continuar '
-              'usando o app com tudo em dia.',
+              'Para usar o app com tudo em dia, leia e aceite o Termo de Uso e a '
+              'Política de Privacidade (versão $legalDocumentsVersion). Você pode '
+              'aceitar depois: o alerta de urgência continua disponível.',
             ),
             const SizedBox(height: 16),
             OutlinedButton.icon(
@@ -228,7 +237,7 @@ class _TermsAcceptanceScreenState extends State<TermsAcceptanceScreen> {
             const SizedBox(height: 8),
             TextButton(
               key: const Key('terms_gate_later_button'),
-              onPressed: _busy ? null : widget.onContinue,
+              onPressed: _busy ? null : _continue,
               style: TextButton.styleFrom(minimumSize: const Size(48, 52)),
               child: const Text('Agora não'),
             ),

@@ -240,6 +240,9 @@ class _CpfInputFormatter extends TextInputFormatter {
   }
 }
 
+/// Quanto o login espera pela checagem do aceite do termo antes de entrar sem ela.
+const _termsCheckTimeout = Duration(seconds: 3);
+
 class _PatientLoginScreenState extends State<PatientLoginScreen> {
   final _cpf = TextEditingController();
   final _nascimento = TextEditingController();
@@ -369,9 +372,13 @@ class _PatientLoginScreenState extends State<PatientLoginScreen> {
   /// o alerta de emergência não espera por um aceite.
   Future<bool> _needsTerms() async {
     try {
-      final overview = await BackendScope.of(context).myData();
+      // Teto curto: a espera padrão do cliente é de 20 s, e esta checagem não
+      // pode ficar entre um login já verificado e o alerta de urgência.
+      final overview = await BackendScope.of(context).myData().timeout(_termsCheckTimeout);
       return needsTermsAcceptance(overview.consents);
     } on BackendFailure {
+      return false;
+    } on TimeoutException {
       return false;
     }
   }
@@ -400,17 +407,17 @@ class _PatientLoginScreenState extends State<PatientLoginScreen> {
       if (!mounted) return;
       final needsTerms = await _needsTerms();
       if (!mounted) return;
-      final home = MaterialPageRoute<void>(
-        builder: (_) => const PatientHomeShell(initialDestination: PatientDestination.triage),
-      );
+      MaterialPageRoute<void> home() => MaterialPageRoute<void>(
+            builder: (_) => const PatientHomeShell(initialDestination: PatientDestination.triage),
+          );
       Navigator.of(context).pushReplacement(
         needsTerms
             ? MaterialPageRoute<void>(
                 builder: (routeContext) => TermsAcceptanceScreen(
-                  onContinue: () => Navigator.of(routeContext).pushReplacement(home),
+                  onContinue: () => Navigator.of(routeContext).pushReplacement(home()),
                 ),
               )
-            : home,
+            : home(),
       );
     } on BackendFailure catch (failure) {
       if (!mounted) return;

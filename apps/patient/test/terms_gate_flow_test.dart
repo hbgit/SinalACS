@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sinalacs_patient/app/app.dart';
@@ -117,5 +119,39 @@ void main() {
     await tapKey(tester, 'terms_gate_read_button');
 
     expect(find.textContaining('Versão $legalDocumentsVersion'), findsWidgets);
+  });
+
+  testWidgets('leitura de consentimentos pendurada não segura o paciente no login', (tester) async {
+    // `verifyOtp` já deu sessão: a checagem do aceite não pode ficar entre o
+    // paciente e o alerta de urgência (a espera padrão do cliente é de 20 s).
+    final backend = semAceite()..myDataGate = Completer<void>();
+    await tester.pumpWidget(SinalAcsApp(backend: backend));
+    await login(tester);
+    await tester.pump(const Duration(seconds: 4));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('terms_gate_accept_button')), findsNothing);
+    expect(find.byType(NavigationBar), findsOneWidget);
+  });
+
+  testWidgets('a tela de aceite não diz que é obrigatório e lembra do alerta', (tester) async {
+    await tester.pumpWidget(SinalAcsApp(backend: semAceite()));
+    await login(tester);
+
+    expect(find.textContaining('para continuar'), findsNothing);
+    expect(find.textContaining('alerta de urgência continua disponível'), findsOneWidget);
+  });
+
+  testWidgets('"Agora não" tocado duas vezes entra uma vez só', (tester) async {
+    await tester.pumpWidget(SinalAcsApp(backend: semAceite()));
+    await login(tester);
+
+    final later = find.byKey(const Key('terms_gate_later_button'));
+    await tester.tap(later);
+    await tester.tap(later, warnIfMissed: false);
+    await tester.pumpAndSettle();
+
+    expect(tester.takeException(), isNull);
+    expect(find.byType(NavigationBar), findsOneWidget);
   });
 }
