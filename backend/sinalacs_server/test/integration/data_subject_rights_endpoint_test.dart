@@ -265,7 +265,7 @@ void main() {
         endpoints.patients.acceptTermsOfUse(sessionBuilder, accessToken: acsToken),
         throwsA(isA<AlertPermissionException>()),
       );
-      expect(await ConsentLog.db.count(session), 0);
+      expect(await ConsentLog.db.count(session, where: (t) => t.userId.equals(UuidValue.fromString(_patientId))), 0);
     });
 
     test('hasAcceptedCurrentTerms: falso antes, verdadeiro depois de aceitar', () async {
@@ -298,7 +298,7 @@ void main() {
       await endpoints.patients.acceptTermsOfUse(sessionBuilder, accessToken: token);
       await endpoints.patients.acceptTermsOfUse(sessionBuilder, accessToken: token);
 
-      expect(await ConsentLog.db.count(session), 1);
+      expect(await ConsentLog.db.count(session, where: (t) => t.userId.equals(UuidValue.fromString(_patientId))), 1);
     });
 
     test('updateConsent recusa a finalidade obrigatória sem gravar nada', () async {
@@ -315,7 +315,7 @@ void main() {
         ),
         throwsA(isA<DataRightsException>()),
       );
-      expect(await ConsentLog.db.count(session), 0);
+      expect(await ConsentLog.db.count(session, where: (t) => t.userId.equals(UuidValue.fromString(_patientId))), 0);
     });
 
     test('requestDataDeletion repetido deixa um pedido só, com prazo de 15 dias, visível em myData', () async {

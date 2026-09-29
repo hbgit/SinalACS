@@ -111,6 +111,48 @@ Future<void> _seed(
 }
 
 
+/// Semente enxuta do grupo de corrida: só o que o registro de token e o
+/// consentimento exigem por chave estrangeira (UBS, microárea e usuários). Sem
+/// `Patient` nem `Acs`: esse grupo COMMITA, e outros arquivos contam linhas
+/// dessas tabelas inteiras; quanto menos ele deixa visível, menos interfere.
+Future<void> _seedRaceLean(Session session) async {
+  await Ubs.db.insertRow(
+    session,
+    Ubs(
+      id: UuidValue.fromString(_raceUbsId),
+      name: 'UBS de corrida (push)',
+      address: 'Endereço local',
+      city: 'São Paulo',
+      state: 'SP',
+    ),
+  );
+  await MicroArea.db.insertRow(
+    session,
+    MicroArea(
+      id: UuidValue.fromString(_raceMicroAreaId),
+      name: 'Microárea de corrida (push)',
+      ubsId: UuidValue.fromString(_raceUbsId),
+      geoJsonBoundary: '{}',
+    ),
+  );
+  final now = DateTime.now().toUtc();
+  for (final (id, role) in [(_racePatientId, UserRole.patient), (_raceAcsId, UserRole.patient)]) {
+    await User.db.insertRow(
+      session,
+      User(
+        id: UuidValue.fromString(id),
+        cpfHash: 'development-push-race-$id',
+        name: 'Titular de corrida',
+        birthDate: DateTime.utc(1985, 5, 5),
+        role: role,
+        microAreaId: UuidValue.fromString(_raceMicroAreaId),
+        createdAt: now,
+        updatedAt: now,
+      ),
+    );
+  }
+}
+
 void main() {
   withServerpod('Dado o registro de token de push do paciente (RF14)', (sessionBuilder, endpoints) {
     setUp(() => AlertRuntime.instance.overrideConfig(_config()));
@@ -224,8 +266,6 @@ void main() {
         final id = UuidValue.fromString(_racePatientId);
         await PushToken.db.deleteWhere(session, where: (t) => t.userId.equals(id));
         await ConsentLog.db.deleteWhere(session, where: (t) => t.userId.equals(id));
-        await Patient.db.deleteWhere(session, where: (t) => t.id.equals(id));
-        await Acs.db.deleteWhere(session, where: (t) => t.id.equals(UuidValue.fromString(_raceAcsId)));
         await User.db.deleteWhere(
           session,
           where: (t) => t.id.equals(id) | t.id.equals(UuidValue.fromString(_raceAcsId)),
@@ -239,8 +279,7 @@ void main() {
 
       test('depois de registrar × revogar em paralelo, denied nunca convive com token', () async {
         final session = sessionBuilder.build();
-        await _seed(session,
-            ubsId: _raceUbsId, microAreaId: _raceMicroAreaId, patientId: _racePatientId, acsId: _raceAcsId, enrollmentId: 'ACS-CORRIDA-PUSH');
+        await _seedRaceLean(session);
         try {
           final consents = OrmDataSubjectRightsStore(
             session: () => sessionBuilder.build(),
@@ -286,8 +325,7 @@ void main() {
 
       test('aparelho de outro titular sem consentimento perde o vínculo do dono antigo', () async {
         final session = sessionBuilder.build();
-        await _seed(session,
-            ubsId: _raceUbsId, microAreaId: _raceMicroAreaId, patientId: _racePatientId, acsId: _raceAcsId, enrollmentId: 'ACS-CORRIDA-PUSH');
+        await _seedRaceLean(session);
         try {
           final consents = OrmDataSubjectRightsStore(
             session: () => sessionBuilder.build(),

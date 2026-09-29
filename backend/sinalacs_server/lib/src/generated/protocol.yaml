@@ -11,6 +11,8 @@ devices:
   - registerPushToken:
 health:
   - check:
+notices:
+  - sendSegmented:
 onboarding:
   - generateEnrollmentToken:
   - completeEnrollment:

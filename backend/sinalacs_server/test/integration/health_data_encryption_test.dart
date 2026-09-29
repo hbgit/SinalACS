@@ -120,12 +120,21 @@ Future<void> _seed(Session session) async {
 
 /// Lê a coluna como texto puro, sem passar pelo ORM — é o que garante que a
 /// asserção olha para o BYTE gravado, e não para o valor já decifrado.
+///
+/// [rowId] restringe à linha semeada por este teste: os grupos de corrida dos
+/// outros arquivos commitam linhas em `patients` por alguns instantes, e contar
+/// a tabela inteira tornava este teste intermitente.
 Future<String> _colunaBruta(
   Session session, {
   required String table,
   required String column,
+  String? rowId,
 }) async {
-  final rows = await session.db.unsafeQuery('SELECT "$column"::text FROM "$table";');
+  final rows = await session.db.unsafeQuery(
+    rowId == null
+        ? 'SELECT "$column"::text FROM "$table";'
+        : 'SELECT "$column"::text FROM "$table" WHERE "id" = \'$rowId\'::uuid;',
+  );
   expect(rows, hasLength(1), reason: 'o seed deve ter gravado exatamente 1 linha');
   return rows.single.first.toString();
 }
@@ -177,6 +186,7 @@ void main() {
         session,
         table: 'patients',
         column: 'chronicConditionsEncrypted',
+        rowId: _patientId,
       );
       expect(bruto, isNotEmpty);
       expectSemTextoClaro(bruto, _condicoes);
@@ -185,6 +195,7 @@ void main() {
         session,
         table: 'patients',
         column: 'chronicConditionsKeyVersion',
+        rowId: _patientId,
       );
       expect(versao, '1');
 

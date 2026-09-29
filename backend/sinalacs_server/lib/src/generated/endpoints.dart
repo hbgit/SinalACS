@@ -16,14 +16,15 @@ import '../endpoints/alerts_endpoint.dart' as _i2;
 import '../endpoints/auth_endpoint.dart' as _i3;
 import '../endpoints/devices_endpoint.dart' as _i4;
 import '../endpoints/health_endpoint.dart' as _i5;
-import '../endpoints/onboarding_endpoint.dart' as _i6;
-import '../endpoints/patients_endpoint.dart' as _i7;
-import '../endpoints/triage_endpoint.dart' as _i8;
-import '../endpoints/visits_endpoint.dart' as _i9;
+import '../endpoints/notices_endpoint.dart' as _i6;
+import '../endpoints/onboarding_endpoint.dart' as _i7;
+import '../endpoints/patients_endpoint.dart' as _i8;
+import '../endpoints/triage_endpoint.dart' as _i9;
+import '../endpoints/visits_endpoint.dart' as _i10;
 import 'package:sinalacs_server/src/generated/enums/consent_purpose.dart'
-    as _i10;
-import 'package:sinalacs_server/src/generated/api/visit_sync_entry.dart'
     as _i11;
+import 'package:sinalacs_server/src/generated/api/visit_sync_entry.dart'
+    as _i12;
 
 class Endpoints extends _i1.EndpointDispatch {
   @override
@@ -53,25 +54,31 @@ class Endpoints extends _i1.EndpointDispatch {
           'health',
           null,
         ),
-      'onboarding': _i6.OnboardingEndpoint()
+      'notices': _i6.NoticesEndpoint()
+        ..initialize(
+          server,
+          'notices',
+          null,
+        ),
+      'onboarding': _i7.OnboardingEndpoint()
         ..initialize(
           server,
           'onboarding',
           null,
         ),
-      'patients': _i7.PatientsEndpoint()
+      'patients': _i8.PatientsEndpoint()
         ..initialize(
           server,
           'patients',
           null,
         ),
-      'triage': _i8.TriageEndpoint()
+      'triage': _i9.TriageEndpoint()
         ..initialize(
           server,
           'triage',
           null,
         ),
-      'visits': _i9.VisitsEndpoint()
+      'visits': _i10.VisitsEndpoint()
         ..initialize(
           server,
           'visits',
@@ -327,6 +334,49 @@ class Endpoints extends _i1.EndpointDispatch {
         ),
       },
     );
+    connectors['notices'] = _i1.EndpointConnector(
+      name: 'notices',
+      endpoint: endpoints['notices']!,
+      methodConnectors: {
+        'sendSegmented': _i1.MethodConnector(
+          name: 'sendSegmented',
+          params: {
+            'accessToken': _i1.ParameterDescription(
+              name: 'accessToken',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'title': _i1.ParameterDescription(
+              name: 'title',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'message': _i1.ParameterDescription(
+              name: 'message',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'audience': _i1.ParameterDescription(
+              name: 'audience',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async =>
+                  (endpoints['notices'] as _i6.NoticesEndpoint).sendSegmented(
+                    session,
+                    accessToken: params['accessToken'],
+                    title: params['title'],
+                    message: params['message'],
+                    audience: params['audience'],
+                  ),
+        ),
+      },
+    );
     connectors['onboarding'] = _i1.EndpointConnector(
       name: 'onboarding',
       endpoint: endpoints['onboarding']!,
@@ -349,7 +399,7 @@ class Endpoints extends _i1.EndpointDispatch {
               (
                 _i1.Session session,
                 Map<String, dynamic> params,
-              ) async => (endpoints['onboarding'] as _i6.OnboardingEndpoint)
+              ) async => (endpoints['onboarding'] as _i7.OnboardingEndpoint)
                   .generateEnrollmentToken(
                     session,
                     accessToken: params['accessToken'],
@@ -389,7 +439,7 @@ class Endpoints extends _i1.EndpointDispatch {
               (
                 _i1.Session session,
                 Map<String, dynamic> params,
-              ) async => (endpoints['onboarding'] as _i6.OnboardingEndpoint)
+              ) async => (endpoints['onboarding'] as _i7.OnboardingEndpoint)
                   .completeEnrollment(
                     session,
                     token: params['token'],
@@ -419,7 +469,7 @@ class Endpoints extends _i1.EndpointDispatch {
                 _i1.Session session,
                 Map<String, dynamic> params,
               ) async =>
-                  (endpoints['patients'] as _i7.PatientsEndpoint).listMicroArea(
+                  (endpoints['patients'] as _i8.PatientsEndpoint).listMicroArea(
                     session,
                     accessToken: params['accessToken'],
                   ),
@@ -437,7 +487,7 @@ class Endpoints extends _i1.EndpointDispatch {
               (
                 _i1.Session session,
                 Map<String, dynamic> params,
-              ) async => (endpoints['patients'] as _i7.PatientsEndpoint)
+              ) async => (endpoints['patients'] as _i8.PatientsEndpoint)
                   .myChronicConditions(
                     session,
                     accessToken: params['accessToken'],
@@ -461,7 +511,7 @@ class Endpoints extends _i1.EndpointDispatch {
               (
                 _i1.Session session,
                 Map<String, dynamic> params,
-              ) async => (endpoints['patients'] as _i7.PatientsEndpoint)
+              ) async => (endpoints['patients'] as _i8.PatientsEndpoint)
                   .updateChronicConditions(
                     session,
                     accessToken: params['accessToken'],
@@ -481,7 +531,7 @@ class Endpoints extends _i1.EndpointDispatch {
               (
                 _i1.Session session,
                 Map<String, dynamic> params,
-              ) async => (endpoints['patients'] as _i7.PatientsEndpoint).myData(
+              ) async => (endpoints['patients'] as _i8.PatientsEndpoint).myData(
                 session,
                 accessToken: params['accessToken'],
               ),
@@ -496,7 +546,7 @@ class Endpoints extends _i1.EndpointDispatch {
             ),
             'purpose': _i1.ParameterDescription(
               name: 'purpose',
-              type: _i1.getType<_i10.ConsentPurpose>(),
+              type: _i1.getType<_i11.ConsentPurpose>(),
               nullable: false,
             ),
             'granted': _i1.ParameterDescription(
@@ -510,7 +560,7 @@ class Endpoints extends _i1.EndpointDispatch {
                 _i1.Session session,
                 Map<String, dynamic> params,
               ) async =>
-                  (endpoints['patients'] as _i7.PatientsEndpoint).updateConsent(
+                  (endpoints['patients'] as _i8.PatientsEndpoint).updateConsent(
                     session,
                     accessToken: params['accessToken'],
                     purpose: params['purpose'],
@@ -530,7 +580,7 @@ class Endpoints extends _i1.EndpointDispatch {
               (
                 _i1.Session session,
                 Map<String, dynamic> params,
-              ) async => (endpoints['patients'] as _i7.PatientsEndpoint)
+              ) async => (endpoints['patients'] as _i8.PatientsEndpoint)
                   .acceptTermsOfUse(
                     session,
                     accessToken: params['accessToken'],
@@ -549,7 +599,7 @@ class Endpoints extends _i1.EndpointDispatch {
               (
                 _i1.Session session,
                 Map<String, dynamic> params,
-              ) async => (endpoints['patients'] as _i7.PatientsEndpoint)
+              ) async => (endpoints['patients'] as _i8.PatientsEndpoint)
                   .hasAcceptedCurrentTerms(
                     session,
                     accessToken: params['accessToken'],
@@ -568,7 +618,7 @@ class Endpoints extends _i1.EndpointDispatch {
               (
                 _i1.Session session,
                 Map<String, dynamic> params,
-              ) async => (endpoints['patients'] as _i7.PatientsEndpoint)
+              ) async => (endpoints['patients'] as _i8.PatientsEndpoint)
                   .requestDataDeletion(
                     session,
                     accessToken: params['accessToken'],
@@ -592,7 +642,7 @@ class Endpoints extends _i1.EndpointDispatch {
               (
                 _i1.Session session,
                 Map<String, dynamic> params,
-              ) async => (endpoints['patients'] as _i7.PatientsEndpoint)
+              ) async => (endpoints['patients'] as _i8.PatientsEndpoint)
                   .requestDataCorrection(
                     session,
                     accessToken: params['accessToken'],
@@ -648,7 +698,7 @@ class Endpoints extends _i1.EndpointDispatch {
               (
                 _i1.Session session,
                 Map<String, dynamic> params,
-              ) async => (endpoints['triage'] as _i8.TriageEndpoint).evaluate(
+              ) async => (endpoints['triage'] as _i9.TriageEndpoint).evaluate(
                 session,
                 accessToken: params['accessToken'],
                 chestPain: params['chestPain'],
@@ -675,7 +725,7 @@ class Endpoints extends _i1.EndpointDispatch {
             ),
             'visits': _i1.ParameterDescription(
               name: 'visits',
-              type: _i1.getType<List<_i11.VisitSyncEntry>>(),
+              type: _i1.getType<List<_i12.VisitSyncEntry>>(),
               nullable: false,
             ),
           },
@@ -683,7 +733,7 @@ class Endpoints extends _i1.EndpointDispatch {
               (
                 _i1.Session session,
                 Map<String, dynamic> params,
-              ) async => (endpoints['visits'] as _i9.VisitsEndpoint).sync(
+              ) async => (endpoints['visits'] as _i10.VisitsEndpoint).sync(
                 session,
                 accessToken: params['accessToken'],
                 visits: params['visits'],
@@ -707,7 +757,7 @@ class Endpoints extends _i1.EndpointDispatch {
               (
                 _i1.Session session,
                 Map<String, dynamic> params,
-              ) async => (endpoints['visits'] as _i9.VisitsEndpoint).pull(
+              ) async => (endpoints['visits'] as _i10.VisitsEndpoint).pull(
                 session,
                 accessToken: params['accessToken'],
                 since: params['since'],

@@ -26,7 +26,10 @@ import 'package:sinalacs_server/src/infrastructure/database/orm_audit_trail.dart
 import 'package:sinalacs_server/src/infrastructure/database/orm_onboarding_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_otp_challenge_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_data_subject_rights_store.dart';
+import 'package:sinalacs_server/src/infrastructure/database/orm_notice_recipient_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_push_token_store.dart';
+import 'package:sinalacs_server/src/infrastructure/push/gorush_client.dart';
+import 'package:sinalacs_server/src/application/notices/notice_service.dart';
 import 'package:sinalacs_server/src/application/patients/push_token_service.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_patient_data_overview_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_patient_directory_store.dart';
@@ -48,6 +51,7 @@ class AlertRuntime {
   static final AlertRuntime instance = AlertRuntime._();
 
   AppConfig? _config;
+  PushSender? Function()? _noticeSenderOverride;
   MqttAlertDispatcher? _dispatcher;
   DevelopmentAuthService? _auth;
   HealthDataCipher? _healthDataCipher;
@@ -119,6 +123,13 @@ class AlertRuntime {
   void overrideSmsGateway(SmsGateway? gateway) => _smsGatewayOverride = gateway;
 
   bool get isMqttConnected => _dispatcher?.isConnected ?? false;
+
+  /// Troca o relé de push dos avisos comunitários (RF14) por um duplo de teste.
+  /// `null` volta a montar o [GorushClient] a partir de `GORUSH_URL`.
+  @visibleForTesting
+  void overrideNoticeSender(PushSender? Function()? factory) {
+    _noticeSenderOverride = factory;
+  }
 
   /// Substitui a configuração lida do ambiente.
   ///
@@ -215,6 +226,20 @@ class AlertRuntime {
         audit: auditTrailFor(session),
         pushTokens: OrmPushTokenStore(session: () => session),
       );
+
+  /// Aviso comunitário do ACS (RF14). Sem `GORUSH_URL` o serviço nasce sem relé e
+  /// recusa o envio com uma mensagem clara.
+  NoticeService noticeServiceFor(Session session) {
+    final override = _noticeSenderOverride;
+    final url = config.gorushUrl;
+    return NoticeService(
+      store: OrmNoticeRecipientStore(session: () => session),
+      sender: override != null
+          ? override()
+          : (url == null ? null : GorushClient(baseUrl: url, timeout: config.gorushTimeout)),
+      audit: auditTrailFor(session),
+    );
+  }
 
   /// Registro do aparelho para avisos segmentados (RF14).
   PushTokenService pushTokenServiceFor(Session session) =>
