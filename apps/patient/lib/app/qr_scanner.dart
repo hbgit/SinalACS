@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
@@ -33,6 +35,33 @@ Future<String?> scanQrWithCamera(BuildContext context) =>
       MaterialPageRoute(builder: (_) => const _CameraScanPage()),
     );
 
+/// Decide se uma leitura da câmera fecha a tela de leitura.
+///
+/// Separado de `_CameraScanPage` porque a câmera real não existe no
+/// `flutter test`: esta é a parte da página que dá para provar sem aparelho.
+class QrDetectionGate {
+  // A câmera entrega vários quadros por segundo: sem esta trava, o mesmo QR
+  // tentaria fechar a tela várias vezes.
+  bool _done = false;
+
+  /// O texto do QR que deve fechar a tela, ou `null` para ignorar a leitura.
+  ///
+  /// [routeIsCurrent] falso quer dizer que a pessoa já voltou: a rota segue
+  /// montada durante a animação de saída e a câmera segue lendo, mas um `pop`
+  /// nesse momento fecharia a tela de baixo (o onboarding), não esta.
+  String? accept(BarcodeCapture capture, {required bool routeIsCurrent}) {
+    if (_done || !routeIsCurrent) return null;
+    for (final barcode in capture.barcodes) {
+      final value = barcode.rawValue;
+      if (value != null && value.isNotEmpty) {
+        _done = true;
+        return value;
+      }
+    }
+    return null;
+  }
+}
+
 class _CameraScanPage extends StatefulWidget {
   const _CameraScanPage();
 
@@ -43,9 +72,7 @@ class _CameraScanPage extends StatefulWidget {
 class _CameraScanPageState extends State<_CameraScanPage> {
   final _controller = MobileScannerController(formats: const [BarcodeFormat.qrCode]);
 
-  // A câmera entrega vários quadros por segundo: sem esta trava, o mesmo QR
-  // tentaria fechar a tela várias vezes.
-  bool _done = false;
+  final _gate = QrDetectionGate();
 
   @override
   void dispose() {
@@ -54,15 +81,15 @@ class _CameraScanPageState extends State<_CameraScanPage> {
   }
 
   void _onDetect(BarcodeCapture capture) {
-    if (_done) return;
-    for (final barcode in capture.barcodes) {
-      final value = barcode.rawValue;
-      if (value != null && value.isNotEmpty) {
-        _done = true;
-        Navigator.of(context).pop(value);
-        return;
-      }
-    }
+    // Um quadro já enfileirado pode chegar depois do `dispose`.
+    if (!mounted) return;
+    final value = _gate.accept(
+      capture,
+      routeIsCurrent: ModalRoute.of(context)?.isCurrent ?? false,
+    );
+    if (value == null) return;
+    unawaited(_controller.stop());
+    Navigator.of(context).pop(value);
   }
 
   @override

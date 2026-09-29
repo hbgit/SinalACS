@@ -82,7 +82,9 @@ class LegalDocumentScreen extends StatelessWidget {
                   Card(
                     child: ListTile(
                       leading: CircleAvatar(
-                        backgroundColor: PatientColors.accent,
+                        // `accentDark`, não `accent`: o dígito é texto normal
+                        // e branco sobre `accent` fica abaixo de 4.5:1.
+                        backgroundColor: PatientColors.accentDark,
                         foregroundColor: Colors.white,
                         child: Text('${index + 1}'),
                       ),

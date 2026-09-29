@@ -1108,4 +1108,4 @@ Plano: `docs/superpowers/plans/2026-09-29-qr-onboarding-e-documentos-legais.md`,
 - Pacientes que entram por CPF + OTP (RF01) sem ter passado pelo onboarding nunca aceitaram o termo — o seed inclusive. Falta um aceite no primeiro login.
 - Canal de dúvidas é "fale com o ACS ou a UBS", sem canal digital próprio.
 - A página da câmera (`_CameraScanPage`) só roda no aparelho; os testes cobrem o fluxo com um leitor duplo. Validar no emulador com um QR gerado pelo app do ACS.
-- Contagens de teste depois desta entrega: backend 329, paciente 162, ACS 167.
+- Contagens de teste depois desta entrega: backend 329, paciente 167, ACS 168.

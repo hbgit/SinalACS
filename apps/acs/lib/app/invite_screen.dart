@@ -80,15 +80,18 @@ class _InviteScreenState extends State<InviteScreen> {
       ).generateInvite(patientId: patient.patientId);
       if (!mounted) return;
       setState(() {
-        _invite = invite;
         _generating = false;
+        // A resposta pode chegar depois de o ACS trocar de paciente (rede
+        // lenta): o token é de quem foi pedido, nunca do selecionado agora.
+        if (_selected?.patientId == patient.patientId) _invite = invite;
       });
     } on BackendFailure catch (failure) {
       if (!mounted) return;
       setState(() {
+        _generating = false;
+        if (_selected?.patientId != patient.patientId) return;
         _invite = null;
         _error = failure.message;
-        _generating = false;
       });
     }
   }

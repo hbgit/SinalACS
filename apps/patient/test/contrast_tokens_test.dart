@@ -22,6 +22,8 @@ void main() {
     ('dangerOnSurface sobre card', PatientColors.dangerOnSurface, PatientColors.surfaceRaised, normalText),
     ('dangerOnSurface sobre scaffold', PatientColors.dangerOnSurface, PatientColors.background, normalText),
     ('accentOnSurface sobre card', PatientColors.accentOnSurface, PatientColors.surfaceRaised, normalText),
+    // Círculo numerado do resumo da Política/Termo (`legal_screens.dart`).
+    ('branco sobre accentDark (passos do resumo legal)', Colors.white, PatientColors.accentDark, normalText),
     // Preenchimento de botão: continua correto sem token novo.
     ('branco sobre botão de pânico (danger fill)', Colors.white, PatientColors.danger, largeTextOrUi),
   ];

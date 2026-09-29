@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:sinalacs_acs/core/network/auth_session.dart';
 import 'package:sinalacs_acs/core/network/backend_client.dart';
 import 'package:sinalacs_acs/core/services/alert_feed.dart';
@@ -146,9 +147,14 @@ class FakeAcsBackend implements AcsBackend {
   /// Falha da geração do convite, como paciente fora da microárea.
   BackendFailure? inviteFailure;
 
+  /// Quando definido, `generateInvite` só responde depois que ele completa —
+  /// simula a rede lenta de campo.
+  Completer<void>? inviteGate;
+
   @override
   Future<EnrollmentTokenResult> generateInvite({required String patientId}) async {
     inviteCalls.add(patientId);
+    await inviteGate?.future;
     final failure = inviteFailure;
     if (failure != null) throw failure;
     return EnrollmentTokenResult(

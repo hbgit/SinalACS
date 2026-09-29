@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:qr_flutter/qr_flutter.dart';
@@ -133,6 +135,46 @@ void main() {
     await tapKey(tester, 'invite_patient_${syntheticPatientId(6)}');
     expect(find.byType(QrImageView), findsNothing);
     expect(find.text('convite-sintetico-1'), findsNothing);
+  });
+
+  testWidgets('convite que chega depois da troca de paciente é descartado', (
+    tester,
+  ) async {
+    // Rede lenta: o ACS pede o convite de um paciente e troca de paciente
+    // antes da resposta. O token que chega é do primeiro — mostrá-lo sob o
+    // nome do segundo ativaria a sessão da pessoa errada.
+    tester.view.physicalSize = const Size(800, 2000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final gate = Completer<void>();
+    final backend = backendComPacientes()..inviteGate = gate;
+    await tester.pumpWidget(
+      SinalAcsApp(
+        backend: backend,
+        feedBuilder: (queue) => FakeAlertFeed(queue),
+      ),
+    );
+    await entrar(tester);
+    await abrirConvite(tester);
+
+    await tapKey(tester, 'invite_patient_${syntheticPatientId(5)}');
+    await tester.tap(find.byKey(const Key('generate_invite_button')));
+    await tester.pump();
+    await tapKey(tester, 'invite_patient_${syntheticPatientId(6)}');
+
+    gate.complete();
+    await tester.pumpAndSettle();
+
+    expect(find.byType(QrImageView), findsNothing);
+    expect(find.text('convite-sintetico-1'), findsNothing);
+    expect(find.textContaining('Convite de Ciclana'), findsNothing);
+    expect(
+      tester
+          .widget<FilledButton>(find.byKey(const Key('generate_invite_button')))
+          .onPressed,
+      isNotNull,
+      reason: 'a geração abandonada não pode deixar o botão travado',
+    );
   });
 
   testWidgets('recusa do servidor mostra o motivo e nenhum QR', (tester) async {

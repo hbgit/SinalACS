@@ -5,6 +5,7 @@ import 'package:sinalacs_patient/app/legal_screens.dart';
 import 'package:sinalacs_patient/core/legal/legal_documents.dart';
 
 import 'support/fake_patient_backend.dart';
+import 'support/contrast.dart';
 import 'support/semantics_scan.dart';
 
 Future<void> tapKey(WidgetTester tester, String key) async {
@@ -78,4 +79,25 @@ void main() {
       handle.dispose();
     },
   );
+
+  testWidgets('números dos passos do resumo têm contraste de texto normal', (
+    tester,
+  ) async {
+    // Dígito de 16sp sobre círculo preenchido: é texto normal (WCAG 1.4.3,
+    // 4.5:1), não "texto grande" — o fill `accent` puro fica em ~3.7:1.
+    await tester.pumpWidget(
+      const MaterialApp(home: LegalDocumentScreen(document: privacyPolicy)),
+    );
+    final avatars = tester.widgetList<CircleAvatar>(
+      find.descendant(
+        of: find.byKey(const Key('legal_summary')),
+        matching: find.byType(CircleAvatar),
+      ),
+    );
+    expect(avatars, isNotEmpty);
+    for (final avatar in avatars) {
+      final ratio = contrastOn(avatar.foregroundColor!, avatar.backgroundColor!);
+      expect(ratio, greaterThanOrEqualTo(4.5), reason: '$ratio:1');
+    }
+  });
 }
