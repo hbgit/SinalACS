@@ -1089,10 +1089,11 @@ O que **não** foi feito, de propósito:
   `DataRightsException` e aponta para o pedido de exclusão. Parar o tratamento
   depois da exclusão atendida (LGPD-RF07, "em até 15 dias") depende do mesmo
   atendimento acima.
-- **Corrida de dois pedidos de exclusão simultâneos.** A idempotência é
-  "procura aberto, senão cria", sem índice único parcial (o Serverpod não
-  declara `WHERE` em índice). Dois pedidos concorrentes podem gerar duas linhas
-  abertas; no app, o botão desabilitado com o pedido em voo cobre o toque duplo.
+- **Corrida de dois pedidos de exclusão simultâneos — resolvida (2026-09-29).**
+  A criação passou a ser atômica (`createDeletionRequestIfNoneOpen`, com
+  `pg_advisory_xact_lock` por titular, já que o Serverpod não declara `WHERE` em
+  índice e um índice único parcial não é possível); ver "Fechamento das
+  pendências do paciente".
 - **`segmentedPush` é registrado mas não tem efeito**: não há projeto Firebase
   (RF14). A descrição na tela diz isso.
 
@@ -1106,8 +1107,8 @@ Plano: `docs/superpowers/plans/2026-09-29-qr-onboarding-e-documentos-legais.md`,
 
 **Ficou de fora, de propósito:**
 - O texto 2026.1 precisa de revisão jurídica e dos dados reais do controlador e do encarregado (hoje genéricos: "Secretaria Municipal de Saúde do seu município").
-- Aviso de mudança com 15 dias de antecedência e novo aceite quando a versão mudar: só existe uma versão; não há mecanismo de reaceite no login.
-- Pacientes que entram por CPF + OTP (RF01) sem ter passado pelo onboarding nunca aceitaram o termo — o seed inclusive. Falta um aceite no primeiro login.
+- Aviso de mudança com 15 dias de antecedência e novo aceite quando a versão mudar: só existe uma versão; não há mecanismo de reaceite no login. — **reaceite resolvido**, ver "Aceite do termo no login OTP" (o aviso de 15 dias segue pendente).
+- Pacientes que entram por CPF + OTP (RF01) sem ter passado pelo onboarding nunca aceitaram o termo — o seed inclusive. Falta um aceite no primeiro login. — **resolvido**, ver "Aceite do termo no login OTP".
 - Canal de dúvidas é "fale com o ACS ou a UBS", sem canal digital próprio.
 - A página da câmera (`_CameraScanPage`) só roda no aparelho; os testes cobrem o fluxo com um leitor duplo. Validar no emulador com um QR gerado pelo app do ACS.
 - Contagens de teste depois desta entrega: backend 329, paciente 167, ACS 168.
@@ -1123,3 +1124,22 @@ Plano: `docs/superpowers/plans/2026-09-29-aceite-do-termo-no-login-otp.md`, bran
 - Aviso de mudança com 15 dias de antecedência e revisão jurídica do texto seguem pendentes.
 - `acceptTermsOfUse` grava uma linha nova a cada chamada, sem checar se já havia aceite da versão vigente; o app só chama quando `needsTermsAcceptance`.
 - Contagens de teste depois desta entrega: backend 333, paciente 182, ACS 168.
+
+## Fechamento das pendências do paciente (2026-09-29)
+
+Plano: `docs/superpowers/plans/2026-09-29-fechamento-de-pendencias-do-paciente.md`, branch `fix/patient`.
+
+**O que foi fechado:**
+- O login por OTP consulta `patients.hasAcceptedCurrentTerms` (um `bool`) em vez de ler o painel "Meus dados" inteiro: menos dados no aparelho e nenhuma linha de auditoria de leitura por login. A consulta tem teto de 3 s.
+- `acceptTermsOfUse` ficou idempotente: com o aceite vigente já gravado, devolve a linha existente e não cresce o histórico.
+- Pedidos de exclusão simultâneos deixam uma só linha aberta (lock por titular). A repetição agora também é auditada, com `result: repeated`.
+- A linha de auditoria de consentimento passou a levar o `resourceId` da linha gravada.
+- Câmera do onboarding: o toque duplo em "Ler QR Code" abre uma leitura só, e o aviso de QR inválido some quando a pessoa volta a digitar.
+- O texto de uma correção que falhou volta ao reabrir o diálogo; é descartado ao enviar ou cancelar.
+- ACS: o convite expirado some da tela e pede um novo.
+
+**Ficou de fora, de propósito:**
+- `ipHash` e `userAgent` `nao-aplicavel-painel-titular` em `consent_logs` seguem como estão: é um marcador deliberado de ausência (o request HTTP já é auditado em `audit_logs`), documentado em `signed_consent_log.dart`. Guardar o IP do titular ali é uma decisão de privacidade, não um conserto.
+- A prova da corrida cobre o store ORM, não o endpoint: o endpoint grava `audit_logs`, que tem FK para `users` e cadeia de hash, e a limpeza manual do grupo sem rollback quebraria os dois.
+- Backoffice que atende os pedidos, push (RF14) e o aviso de 15 dias seguem pendentes.
+- Contagens de teste depois desta entrega: backend 346, paciente 182, ACS 170.
