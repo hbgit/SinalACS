@@ -102,6 +102,12 @@ A tabela abaixo consolida o mapeamento exaustivo de dados persistidos pelo backe
 | | `detailsEncrypted` / `detailsKeyVersion` | `text` / `bigint` | Potencialmente Sensível (texto livre do titular) | AES-256-GCM na aplicação, mesma `HEALTH_DATA_ENCRYPTION_KEY` do §2.3 | O pedido de correção é texto livre e pode citar condição de saúde; cifrado pelo mesmo motivo de `visits.notes`. Num pedido de exclusão guarda o JSON `null` cifrado. Nunca copiado para `audit_logs`. |
 | | `status` | `text` | Metadado de Conformidade | `open` \| `completed` \| `rejected` | Só `open` tem escritor nesta versão — quem atende o pedido (backoffice) ainda não existe (ver `PROGRESS.md`). |
 | | `createdAt` / `dueAt` | `timestamp without time zone` | Metadado de Conformidade | `dueAt` = `createdAt` + 15 dias | Prazo de resposta do Art. 18 (spec/lgpd_design.md, linhas 596-597). |
+| **push_tokens** | `id` | `uuid` | Pseudonimizado | UUID v4 (`gen_random_uuid()`) | Identificador da linha do token de push (RF14). |
+| | `userId` | `uuid` | Pseudonimizado | Chave estrangeira (`users.id`) | Liga o aparelho ao titular; apagado quando o consentimento `segmentedPush` é revogado. |
+| | `microAreaId` | `uuid` | Pseudonimizado | Copiado do token de acesso | Segmentação dos avisos por microárea. |
+| | `token` | `text` | Identificador de aparelho | Emitido pelo FCM/APNs | Identifica um aparelho, não uma pessoa; junto de `userId` liga os dois. Índice único: o mesmo token nunca tem dois donos. |
+| | `platform` | `text` | Metadado Técnico | `android` \| `ios` | Escolhe o provedor do envio. |
+| | `createdAt` / `updatedAt` | `timestamp without time zone` | Metadado Técnico | Relógio do servidor | Primeiro registro e última confirmação do token. |
 | **audit_logs** | `id` | `uuid` | Pseudonimizado | UUID v4 (`gen_random_uuid()`) | Identificador do registro de auditoria (LGPD-RF11). |
 | | `userId` | `uuid` | Pseudonimizado | Chave estrangeira (`users.id`) | Identifica o operador que executou a ação auditada. |
 | | `actionType` | `text` | Metadado Técnico | Enum textual (`READ`, `WRITE`, `DELETE`, etc.) | Operação registrada. |

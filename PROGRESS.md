@@ -1117,12 +1117,12 @@ Plano: `docs/superpowers/plans/2026-09-29-qr-onboarding-e-documentos-legais.md`,
 
 Plano: `docs/superpowers/plans/2026-09-29-aceite-do-termo-no-login-otp.md`, branch `fix/patient`.
 
-**O que existe.** `patients.acceptTermsOfUse` (só paciente) grava `termsOfUse` `granted` com `consentPolicyVersion` em `consent_logs`, pela mesma trilha assinada de `updateConsent`, que continua recusando esse propósito. No app, depois de `verifyOtp` o login lê `myData()`; se a linha mais recente de `termsOfUse` não for `granted` na versão `legalDocumentsVersion` (`needsTermsAcceptance`), abre `TermsAcceptanceScreen`. Isso cobre pacientes do seed e de OTP sem onboarding, e o reaceite quando a versão mudar. A sessão do onboarding de 1 hora, que estava no escopo pedido, já estava no código; só os comentários e docs foram corrigidos.
+**O que existe.** `patients.acceptTermsOfUse` (só paciente) grava `termsOfUse` `granted` com `consentPolicyVersion` em `consent_logs`, pela mesma trilha assinada de `updateConsent`, que continua recusando esse propósito. No app, depois de `verifyOtp` o login (hoje consulta `hasAcceptedCurrentTerms`; ver "Fechamento das pendências do paciente") lê o status; se a linha mais recente de `termsOfUse` não for `granted` na versão `legalDocumentsVersion` (`needsTermsAcceptance`), abre `TermsAcceptanceScreen`. Isso cobre pacientes do seed e de OTP sem onboarding, e o reaceite quando a versão mudar. A sessão do onboarding de 1 hora, que estava no escopo pedido, já estava no código; só os comentários e docs foram corrigidos.
 
 **Ficou de fora, de propósito:**
-- O aceite **não é portão duro**: "Agora não" e uma falha de `myData()` entram direto, porque o alerta de urgência nunca pode ficar atrás de uma tela de aceite. Consequência: quem pula pode seguir sem aceite registrado, e o aviso volta no próximo login.
+- O aceite **não é portão duro**: "Agora não" e uma falha de `hasAcceptedCurrentTerms` entram direto, porque o alerta de urgência nunca pode ficar atrás de uma tela de aceite. Consequência: quem pula pode seguir sem aceite registrado, e o aviso volta no próximo login.
 - Aviso de mudança com 15 dias de antecedência e revisão jurídica do texto seguem pendentes.
-- `acceptTermsOfUse` grava uma linha nova a cada chamada, sem checar se já havia aceite da versão vigente; o app só chama quando `needsTermsAcceptance`.
+- ~~`acceptTermsOfUse` grava uma linha nova a cada chamada~~ — resolvido na rodada "Menores adiados e push do paciente": o aceite é idempotente e atômico.
 - Contagens de teste depois desta entrega: backend 333, paciente 182, ACS 168.
 
 ## Fechamento das pendências do paciente (2026-09-29)
@@ -1143,3 +1143,21 @@ Plano: `docs/superpowers/plans/2026-09-29-fechamento-de-pendencias-do-paciente.m
 - A prova da corrida cobre o store ORM, não o endpoint: o endpoint grava `audit_logs`, que tem FK para `users` e cadeia de hash, e a limpeza manual do grupo sem rollback quebraria os dois.
 - Backoffice que atende os pedidos, push (RF14) e o aviso de 15 dias seguem pendentes.
 - Contagens de teste depois desta entrega: backend 346, paciente 182, ACS 172.
+
+## Menores adiados e push do paciente (2026-09-29)
+
+Plano: `docs/superpowers/plans/2026-09-29-menores-adiados-e-push-do-paciente.md`, branch `fix/patient`.
+
+**O que foi fechado:**
+- `patients.acceptTermsOfUse` é atômico: `recordConsentUnlessCurrent` grava sob advisory lock por titular, então duas chamadas simultâneas deixam uma linha só (teste de corrida contra Postgres real, três chamadas).
+- Os advisory locks por titular usam a forma de duas chaves (`lockPerSubject`, namespaces em `subject_lock.dart`), que não divide espaço com a chave única da cadeia de auditoria.
+- O diálogo de correção não fecha mais ao tocar fora (`barrierDismissible: false`); só "Cancelar" descarta o rascunho. Dois testes de caracterização entraram: cancelar limpa o rascunho e o botão de ler QR volta a funcionar depois que o leitor lança.
+- **RF14, lado do paciente:** tabela `push_tokens`, `devices.registerPushToken` (só paciente, só com o consentimento `segmentedPush` vigente, uma linha por token, o token de outro titular troca de dono) e revogação de `segmentedPush` apaga os tokens do titular. No app, `PushTokenSource` (padrão `NoPushTokenSource`, sem Firebase) registra o aparelho depois do login, do onboarding e ao conceder "Avisos da equipe", em silêncio: recusa ou falha nunca atrasa a home nem o alerta.
+
+**Ficou de fora, de propósito:**
+- Envio segmentado (`notices.sendSegmented`), tela de avisos do ACS e o SDK `firebase_messaging`: bloqueio externo do §3.2 (sem projeto Firebase).
+- Apagar tokens ao atender o pedido de exclusão: pertence ao backoffice que atende os pedidos, ainda inexistente.
+- Aviso de 15 dias de mudança dos termos e revisão jurídica do texto 2026.1.
+- O erro de um pedido em "Meus dados" aparece no topo da lista, fora da tela para quem rolou até o botão (anterior a esta rodada).
+- Baseline do `dart analyze` do backend: 44 infos (eram 41), os três novos são o mesmo `prefer_initializing_formals` que o resto dos serviços já tem.
+- Contagens de teste: backend 359, paciente 190, ACS 172.

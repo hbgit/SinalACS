@@ -170,7 +170,7 @@ documento de decisão, não implementação:
 | RF10 (mapa) | Geocélula arredondada, não posição exata (§1) | Não |
 | RF02 + LGPD-RF02 (onboarding/consentimento) | Token de convite de uso único + consentimento por finalidade (§2) | Não |
 | RF06 (lembretes) | Local ao dispositivo, sem endpoint (§3.1) | Não |
-| RF14 (avisos push) | Contrato FCM definido (§3.2) | **Sim** — sem projeto Firebase provisionado |
+| RF14 (avisos push) | Contrato FCM definido (§3.2); lado do paciente pronto (`devices.registerPushToken`, `push_tokens`, `PushTokenSource`); envio e SDK pendentes | **Sim** — sem projeto Firebase provisionado |
 | RF12 (geofencing) | Geofence atrelado a visita ativa, sem rastreamento contínuo (§4) | Parcial — submissão à loja pendente |
 | RF15 (sync central→dispositivo) | Pull incremental por cursor (§5) | Não |
 | RNF03 (criptografia Postgres) | AES-256-GCM em nível de aplicação (§6) | Não |

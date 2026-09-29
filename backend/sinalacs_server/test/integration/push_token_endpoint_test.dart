@@ -1,11 +1,6 @@
 import 'package:serverpod/serverpod.dart';
-import 'package:sinalacs_server/src/application/onboarding/consent_signature.dart';
-import 'package:sinalacs_server/src/application/onboarding/onboarding_service.dart' show ConsentLogEntry, consentPolicyVersion;
 import 'package:sinalacs_server/src/config/app_config.dart';
-import 'package:sinalacs_server/src/application/patients/patient_data_overview_service.dart'
-    show ConsentRecordSnapshot, DataSubjectRequestSnapshot;
 import 'package:sinalacs_server/src/generated/protocol.dart';
-import 'package:sinalacs_server/src/infrastructure/database/orm_data_subject_rights_store.dart';
 import 'package:sinalacs_server/src/runtime/alert_runtime.dart';
 import 'package:test/test.dart';
 
