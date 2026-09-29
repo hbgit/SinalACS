@@ -173,6 +173,30 @@ class PatientsEndpoint extends AuthenticatedEndpoint {
     }
   }
 
+  /// Aviso de mudança dos termos ativo agora (LGPD-RF18, 15 dias de antecedência),
+  /// ou `null`. Só paciente. Sem leitura de banco e sem linha de auditoria: a
+  /// agenda é uma constante do repositório e nada do titular é lido nem gravado.
+  Future<TermsChangeNotice?> termsChangeNotice(
+    Session session, {
+    required String accessToken,
+  }) async {
+    final user = authenticate(accessToken);
+
+    try {
+      final notice =
+          AlertRuntime.instance.dataSubjectRightsServiceFor(session).termsChangeNotice(user);
+      return notice == null
+          ? null
+          : TermsChangeNotice(
+              version: notice.version,
+              effectiveFrom: notice.effectiveFrom,
+              summary: notice.summary,
+            );
+    } on StateError catch (error) {
+      throw AlertPermissionException(message: error.message);
+    }
+  }
+
   /// Pedido de exclusão/anonimização dos próprios dados (LGPD-RF08).
   /// Idempotente enquanto houver um pedido de exclusão em aberto.
   Future<PatientDataSubjectRequestRecord> requestDataDeletion(

@@ -5,6 +5,7 @@ import 'package:sinalacs_server/src/application/onboarding/onboarding_service.da
     show ConsentLogEntry, consentPolicyVersion;
 import 'package:sinalacs_server/src/application/patients/patient_data_overview_service.dart'
     show ConsentRecordSnapshot, DataSubjectRequestSnapshot;
+import 'package:sinalacs_server/src/application/patients/terms_change_schedule.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
 
 /// Persistência das operações do titular sobre os próprios dados. Interface
@@ -49,6 +50,19 @@ abstract interface class DataSubjectRightsStore {
   });
 }
 
+/// O aviso de mudança dos termos, como o serviço o entrega ao endpoint.
+class TermsChangeNoticeSnapshot {
+  const TermsChangeNoticeSnapshot({
+    required this.version,
+    required this.effectiveFrom,
+    required this.summary,
+  });
+
+  final String version;
+  final DateTime effectiveFrom;
+  final String summary;
+}
+
 /// A regra do aceite vigente, num lugar só: a linha mais recente é um `granted`
 /// na [version] em vigor. Usada pela consulta do login e pela gravação atômica.
 bool isCurrentAcceptance(ConsentRecordSnapshot? latest, {required String version}) =>
@@ -72,13 +86,16 @@ class DataSubjectRightsService {
     required DataSubjectRightsStore store,
     required AuditTrail audit,
     DateTime Function()? clock,
+    TermsChangeSchedule? termsChange,
   })  : _store = store,
         _audit = audit,
+        _termsChange = termsChange ?? upcomingTermsChange,
         _clock = clock ?? DateTime.now;
 
   final DataSubjectRightsStore _store;
   final AuditTrail _audit;
   final DateTime Function() _clock;
+  final TermsChangeSchedule? _termsChange;
 
   /// Concede ou revoga uma finalidade opcional. `healthDataProcessing` é
   /// recusado nas duas direções: é a base legal do app inteiro — inclusive do
@@ -136,6 +153,19 @@ class DataSubjectRightsService {
       action: 'granted',
       version: consentPolicyVersion,
       timestamp: now,
+    );
+  }
+
+  /// Aviso de mudança dos termos ativo agora, ou `null` (LGPD-RF18, 15 dias de
+  /// antecedência). Sem I/O: a agenda é uma constante do repositório.
+  TermsChangeNoticeSnapshot? termsChangeNotice(AuthenticatedUser user) {
+    _requirePatient(user);
+    final schedule = _termsChange;
+    if (schedule == null || !schedule.isActiveAt(_clock().toUtc())) return null;
+    return TermsChangeNoticeSnapshot(
+      version: schedule.version,
+      effectiveFrom: schedule.effectiveFrom,
+      summary: schedule.summary,
     );
   }
 

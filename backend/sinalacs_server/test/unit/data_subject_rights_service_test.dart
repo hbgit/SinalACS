@@ -3,6 +3,7 @@ import 'package:sinalacs_server/src/application/auth/development_auth_service.da
 import 'package:sinalacs_server/src/application/onboarding/onboarding_service.dart';
 import 'package:sinalacs_server/src/application/patients/data_subject_rights_service.dart';
 import 'package:sinalacs_server/src/application/patients/patient_data_overview_service.dart';
+import 'package:sinalacs_server/src/application/patients/terms_change_schedule.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
 import 'package:test/test.dart';
 
@@ -153,6 +154,55 @@ void main() {
       expect(store.consents.last.action, 'denied');
       expect(store.consents.last.purpose, ConsentPurpose.segmentedPush);
       expect(audit.events.last.resourceType, 'consent_log');
+    });
+  });
+
+  group('termsChangeNotice (LGPD-RF18, aviso de 15 dias)', () {
+    final agenda = TermsChangeSchedule(
+      version: '2026.2',
+      publishedAt: _now.subtract(const Duration(days: 1)),
+      effectiveFrom: _now.add(const Duration(days: 14)),
+      summary: 'Novo canal de dúvidas.',
+    );
+
+    DataSubjectRightsService comAgenda(DateTime Function() clock) => DataSubjectRightsService(
+          store: store,
+          audit: audit,
+          clock: clock,
+          termsChange: agenda,
+        );
+
+    test('sem agenda, não há aviso', () {
+      expect(service.termsChangeNotice(_patient), isNull);
+    });
+
+    test('com agenda ativa, devolve versão, vigência e resumo', () {
+      final notice = comAgenda(() => _now).termsChangeNotice(_patient)!;
+      expect(notice.version, '2026.2');
+      expect(notice.effectiveFrom, agenda.effectiveFrom);
+      expect(notice.summary, 'Novo canal de dúvidas.');
+    });
+
+    test('exatamente na vigência não há mais aviso', () {
+      expect(comAgenda(() => agenda.effectiveFrom).termsChangeNotice(_patient), isNull);
+    });
+
+    test('antes da publicação não há aviso', () {
+      expect(
+        comAgenda(() => agenda.publishedAt.subtract(const Duration(seconds: 1)))
+            .termsChangeNotice(_patient),
+        isNull,
+      );
+    });
+
+    test('só paciente', () {
+      expect(() => comAgenda(() => _now).termsChangeNotice(_acs), throwsA(isA<StateError>()));
+    });
+
+    test('não grava nada nem audita (leitura sem I/O)', () {
+      comAgenda(() => _now).termsChangeNotice(_patient);
+      expect(store.consents, isEmpty);
+      expect(audit.events, isEmpty);
     });
   });
 

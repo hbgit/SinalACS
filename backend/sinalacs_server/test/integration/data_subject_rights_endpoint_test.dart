@@ -278,6 +278,31 @@ void main() {
       expect(await endpoints.patients.hasAcceptedCurrentTerms(sessionBuilder, accessToken: token), isTrue);
     });
 
+    test('termsChangeNotice sem agenda devolve null e não grava auditoria', () async {
+      final session = sessionBuilder.build();
+      await _seed(session);
+      final token = await patientToken();
+      final before = await AuditLog.db.count(session);
+
+      expect(await endpoints.patients.termsChangeNotice(sessionBuilder, accessToken: token), isNull);
+      expect(await AuditLog.db.count(session), before);
+    });
+
+    test('termsChangeNotice recusa token de ACS e token inválido', () async {
+      final session = sessionBuilder.build();
+      await _seed(session);
+      final acsToken =
+          (await endpoints.auth.developmentLogin(sessionBuilder, role: 'acs')).accessToken;
+      await expectLater(
+        endpoints.patients.termsChangeNotice(sessionBuilder, accessToken: acsToken),
+        throwsA(isA<AlertPermissionException>()),
+      );
+      await expectLater(
+        endpoints.patients.termsChangeNotice(sessionBuilder, accessToken: 'lixo'),
+        throwsA(isA<AlertPermissionException>()),
+      );
+    });
+
     test('hasAcceptedCurrentTerms recusa token de ACS', () async {
       final session = sessionBuilder.build();
       await _seed(session);

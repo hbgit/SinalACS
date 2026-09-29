@@ -34,13 +34,15 @@ import 'package:sinalacs_client/src/protocol/api/patient_consent_record.dart'
     as _i13;
 import 'package:sinalacs_client/src/protocol/enums/consent_purpose.dart'
     as _i14;
-import 'package:sinalacs_client/src/protocol/api/patient_data_subject_request_record.dart'
+import 'package:sinalacs_client/src/protocol/api/terms_change_notice.dart'
     as _i15;
-import 'package:sinalacs_client/src/protocol/api/triage_result.dart' as _i16;
+import 'package:sinalacs_client/src/protocol/api/patient_data_subject_request_record.dart'
+    as _i16;
+import 'package:sinalacs_client/src/protocol/api/triage_result.dart' as _i17;
 import 'package:sinalacs_client/src/protocol/api/visit_sync_result.dart'
-    as _i17;
-import 'package:sinalacs_client/src/protocol/api/visit_sync_entry.dart' as _i18;
-import 'protocol.dart' as _i19;
+    as _i18;
+import 'package:sinalacs_client/src/protocol/api/visit_sync_entry.dart' as _i19;
+import 'protocol.dart' as _i20;
 
 /// Ciclo do alerta vermelho.
 ///
@@ -444,11 +446,22 @@ class EndpointPatients extends EndpointAuthenticated {
         {'accessToken': accessToken},
       );
 
+  /// Aviso de mudança dos termos ativo agora (LGPD-RF18, 15 dias de antecedência),
+  /// ou `null`. Só paciente. Sem leitura de banco e sem linha de auditoria: a
+  /// agenda é uma constante do repositório e nada do titular é lido nem gravado.
+  _i2.Future<_i15.TermsChangeNotice?> termsChangeNotice({
+    required String accessToken,
+  }) => caller.callServerEndpoint<_i15.TermsChangeNotice?>(
+    'patients',
+    'termsChangeNotice',
+    {'accessToken': accessToken},
+  );
+
   /// Pedido de exclusão/anonimização dos próprios dados (LGPD-RF08).
   /// Idempotente enquanto houver um pedido de exclusão em aberto.
-  _i2.Future<_i15.PatientDataSubjectRequestRecord> requestDataDeletion({
+  _i2.Future<_i16.PatientDataSubjectRequestRecord> requestDataDeletion({
     required String accessToken,
-  }) => caller.callServerEndpoint<_i15.PatientDataSubjectRequestRecord>(
+  }) => caller.callServerEndpoint<_i16.PatientDataSubjectRequestRecord>(
     'patients',
     'requestDataDeletion',
     {'accessToken': accessToken},
@@ -457,10 +470,10 @@ class EndpointPatients extends EndpointAuthenticated {
   /// Pedido de correção de um dado (LGPD-RF08). [details] é texto livre do
   /// titular, gravado cifrado; vazio ou acima de 500 caracteres volta como
   /// [DataRightsException].
-  _i2.Future<_i15.PatientDataSubjectRequestRecord> requestDataCorrection({
+  _i2.Future<_i16.PatientDataSubjectRequestRecord> requestDataCorrection({
     required String accessToken,
     required String details,
-  }) => caller.callServerEndpoint<_i15.PatientDataSubjectRequestRecord>(
+  }) => caller.callServerEndpoint<_i16.PatientDataSubjectRequestRecord>(
     'patients',
     'requestDataCorrection',
     {
@@ -487,7 +500,7 @@ class EndpointTriage extends EndpointAuthenticated {
   @override
   String get name => 'triage';
 
-  _i2.Future<_i16.TriageResult> evaluate({
+  _i2.Future<_i17.TriageResult> evaluate({
     required String accessToken,
     required bool chestPain,
     required bool difficultyBreathing,
@@ -495,7 +508,7 @@ class EndpointTriage extends EndpointAuthenticated {
     required bool persistentVomiting,
     required bool bleeding,
     required bool severeWeakness,
-  }) => caller.callServerEndpoint<_i16.TriageResult>(
+  }) => caller.callServerEndpoint<_i17.TriageResult>(
     'triage',
     'evaluate',
     {
@@ -526,10 +539,10 @@ class EndpointVisits extends EndpointAuthenticated {
   @override
   String get name => 'visits';
 
-  _i2.Future<List<_i17.VisitSyncResult>> sync({
+  _i2.Future<List<_i18.VisitSyncResult>> sync({
     required String accessToken,
-    required List<_i18.VisitSyncEntry> visits,
-  }) => caller.callServerEndpoint<List<_i17.VisitSyncResult>>(
+    required List<_i19.VisitSyncEntry> visits,
+  }) => caller.callServerEndpoint<List<_i18.VisitSyncResult>>(
     'visits',
     'sync',
     {
@@ -541,10 +554,10 @@ class EndpointVisits extends EndpointAuthenticated {
   /// Sincronização central→dispositivo: visitas da microárea do ACS
   /// autenticado alteradas após `since`, para reconciliar um device que
   /// ficou offline ou foi reinstalado.
-  _i2.Future<List<_i18.VisitSyncEntry>> pull({
+  _i2.Future<List<_i19.VisitSyncEntry>> pull({
     required String accessToken,
     required DateTime since,
-  }) => caller.callServerEndpoint<List<_i18.VisitSyncEntry>>(
+  }) => caller.callServerEndpoint<List<_i19.VisitSyncEntry>>(
     'visits',
     'pull',
     {
@@ -574,7 +587,7 @@ class Client extends _i1.ServerpodClientShared {
     bool? disconnectStreamsOnLostInternetConnection,
   }) : super(
          host,
-         _i19.Protocol(),
+         _i20.Protocol(),
          securityContext: securityContext,
          streamingConnectionTimeout: streamingConnectionTimeout,
          connectionTimeout: connectionTimeout,
