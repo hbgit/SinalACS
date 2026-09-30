@@ -25,7 +25,10 @@ UpcomingLegalDocuments _textoNovoDe(String versao) => UpcomingLegalDocuments(
         effectiveDate: '20/10/2026',
         summary: privacyPolicy.summary,
         sections: privacyPolicy.sections,
-        history: privacyPolicy.history,
+        history: [
+          LegalVersion(version: versao, date: '20/10/2026', changes: 'Texto novo.'),
+          ...privacyPolicy.history,
+        ],
       ),
       terms: LegalDocument(
         id: 'terms',
@@ -34,7 +37,10 @@ UpcomingLegalDocuments _textoNovoDe(String versao) => UpcomingLegalDocuments(
         effectiveDate: '20/10/2026',
         summary: termsOfUse.summary,
         sections: termsOfUse.sections,
-        history: termsOfUse.history,
+        history: [
+          LegalVersion(version: versao, date: '20/10/2026', changes: 'Texto novo.'),
+          ...termsOfUse.history,
+        ],
       ),
     );
 
@@ -170,6 +176,36 @@ void main() {
 
     expect(find.text('Termos que passam a valer'), findsOneWidget);
     expect(find.textContaining('Versão 2026.2'), findsWidgets);
+  });
+
+  testWidgets('o detalhe do texto novo diz que ele AINDA NÃO vale, com a data', (tester) async {
+    final backend = FakePatientBackend()..termsNotice = _aviso; // vigência 20/10/2026
+    await tester.pumpWidget(SinalAcsApp(backend: backend, upcomingDocuments: _textoNovo));
+    await login(tester);
+    await tester.tap(find.byKey(const Key('terms_change_notice_read_new')));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('legal_open_terms')));
+    await tester.pumpAndSettle();
+
+    final versao = tester.widget<Text>(find.byKey(const Key('legal_version'))).data!;
+    expect(versao, contains('passa a valer em 20/10/2026'));
+    expect(versao, isNot(contains('vigente desde')));
+    // O histórico também não pode chamar a versão futura de vigente.
+    await tester.scrollUntilVisible(find.byKey(const Key('legal_history')), 300);
+    expect(find.textContaining('2026.2 · passa a valer em 20/10/2026'), findsOneWidget);
+    expect(find.textContaining('2026.2 · vigente desde'), findsNothing);
+  });
+
+  testWidgets('o detalhe do texto vigente continua dizendo "vigente desde"', (tester) async {
+    final backend = FakePatientBackend()..termsNotice = _aviso;
+    await tester.pumpWidget(SinalAcsApp(backend: backend));
+    await login(tester);
+    await tester.tap(find.byKey(const Key('terms_change_notice_read')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('legal_open_terms')));
+    await tester.pumpAndSettle();
+    expect(tester.widget<Text>(find.byKey(const Key('legal_version'))).data!, contains('vigente desde'));
   });
 
   testWidgets('aviso de versão que o app não conhece: só o texto vigente, sem erro', (tester) async {

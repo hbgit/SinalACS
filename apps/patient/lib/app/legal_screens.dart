@@ -48,7 +48,10 @@ class LegalDocumentsScreen extends StatelessWidget {
                   trailing: const Icon(Icons.chevron_right),
                   onTap: () => Navigator.of(context).push(
                     MaterialPageRoute(
-                      builder: (_) => LegalDocumentScreen(document: document),
+                      builder: (_) => LegalDocumentScreen(
+                        document: document,
+                        effectiveLabel: upcoming == null ? null : (effectiveLabel ?? document.effectiveDate),
+                      ),
                     ),
                   ),
                 ),
@@ -64,9 +67,23 @@ class LegalDocumentsScreen extends StatelessWidget {
 /// em que o dado circula — LGPD-RF10), depois a versão completa em seções
 /// expansíveis e, por fim, o histórico de versões (LGPD-RF18/RF19).
 class LegalDocumentScreen extends StatelessWidget {
-  const LegalDocumentScreen({super.key, required this.document});
+  const LegalDocumentScreen({super.key, required this.document, this.effectiveLabel});
 
   final LegalDocument document;
+
+  /// Presente só para o texto que ainda **não vale** (aviso de 15 dias): a data em
+  /// que passa a valer (`dd/mm/aaaa`). Sem ela, o documento é o vigente.
+  final String? effectiveLabel;
+
+  /// A versão do documento é a que "vigora" — exceto o texto futuro, que só "passa
+  /// a valer".
+  String _historyVerb(LegalVersion entry) {
+    if (entry.version != document.version) return 'de';
+    return effectiveLabel == null ? 'vigente desde' : 'passa a valer em';
+  }
+
+  String _historyDate(LegalVersion entry) =>
+      entry.version == document.version && effectiveLabel != null ? effectiveLabel! : entry.date;
 
   @override
   Widget build(BuildContext context) {
@@ -77,7 +94,9 @@ class LegalDocumentScreen extends StatelessWidget {
           padding: const EdgeInsets.all(16),
           children: [
             Text(
-              'Versão ${document.version} · vigente desde ${document.effectiveDate}',
+              effectiveLabel == null
+                  ? 'Versão ${document.version} · vigente desde ${document.effectiveDate}'
+                  : 'Versão ${document.version} · passa a valer em $effectiveLabel',
               key: const Key('legal_version'),
               style: const TextStyle(color: Colors.white70),
             ),
@@ -136,7 +155,7 @@ class LegalDocumentScreen extends StatelessWidget {
                   ListTile(
                     contentPadding: EdgeInsets.zero,
                     title: Text(
-                      '${entry.version} · ${entry.version == document.version ? 'vigente desde' : 'de'} ${entry.date}',
+                      '${entry.version} · ${_historyVerb(entry)} ${_historyDate(entry)}',
                     ),
                     subtitle: Text(entry.changes),
                   ),

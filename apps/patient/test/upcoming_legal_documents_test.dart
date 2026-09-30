@@ -3,28 +3,60 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sinalacs_patient/core/legal/legal_documents.dart';
 
-/// Versão anunciada no backend, ou `null` quando `upcomingTermsChange = null`.
+/// Versão anunciada no backend: `null` só quando a declaração é `= null`; a versão
+/// quando há uma agenda com `version:` literal; qualquer outra forma **lança** —
+/// "não entendi a agenda" nunca pode passar por "sem agenda".
 String? backendUpcomingVersion(String source) {
-  if (RegExp(r'upcomingTermsChange\s*=\s*null').hasMatch(source)) return null;
-  final match = RegExp(
-    r"upcomingTermsChange[^;]*version:\s*'([^']+)'",
-    dotAll: true,
-  ).firstMatch(source);
-  return match?.group(1);
+  final semComentarios = source.replaceAll(RegExp(r'//[^\n]*'), '');
+  final declaracao = RegExp(
+    r'final\s+TermsChangeSchedule\?\s+upcomingTermsChange\s*=\s*',
+  ).firstMatch(semComentarios);
+  if (declaracao == null) {
+    throw StateError('declaração de upcomingTermsChange não encontrada');
+  }
+  final resto = semComentarios.substring(declaracao.end);
+  if (RegExp(r'^null\s*;').hasMatch(resto)) return null;
+  final versao = RegExp(r'^TermsChangeSchedule\([^]*?version:\s*([\x27"])([^\x27"]+)\1').firstMatch(resto);
+  if (versao == null) {
+    throw StateError('não consegui ler a versão da agenda (use um literal em version:)');
+  }
+  return versao.group(2);
 }
 
 /// Passa pelo tipo declarado: o analisador enxerga a constante como `null` fixo.
 UpcomingLegalDocuments? _atual() => upcomingLegalDocuments;
 
 void main() {
-  test('o leitor devolve null com a agenda vazia e a versão quando há agenda', () {
-    expect(backendUpcomingVersion('final TermsChangeSchedule? upcomingTermsChange = null;'), isNull);
+  const decl = 'final TermsChangeSchedule? upcomingTermsChange';
+
+  test('o leitor devolve null só para "= null" e a versão para uma agenda literal', () {
+    expect(backendUpcomingVersion('$decl = null;'), isNull);
+    expect(backendUpcomingVersion('$decl =\n    null;'), isNull);
     expect(
-      backendUpcomingVersion(
-        "final TermsChangeSchedule? upcomingTermsChange = TermsChangeSchedule(version: '2026.2', publishedAt: x);",
-      ),
+      backendUpcomingVersion("$decl = TermsChangeSchedule(version: '2026.2', publishedAt: x);"),
       '2026.2',
     );
+  });
+
+  test('o leitor aceita aspas duplas, ponto e vírgula no resumo e comentário enganoso', () {
+    expect(backendUpcomingVersion('$decl = TermsChangeSchedule(version: "2026.3", x: 1);'), '2026.3');
+    expect(
+      backendUpcomingVersion("$decl = TermsChangeSchedule(summary: 'a; b', version: '2026.4');"),
+      '2026.4',
+    );
+    expect(
+      backendUpcomingVersion("// upcomingTermsChange = null;\n$decl = TermsChangeSchedule(version: '2026.5');"),
+      '2026.5',
+    );
+  });
+
+  test('o leitor NÃO trata "não entendi" como "sem agenda": lança', () {
+    expect(
+      () => backendUpcomingVersion('$decl = TermsChangeSchedule(version: proximaVersao);'),
+      throwsStateError,
+    );
+    expect(() => backendUpcomingVersion('nada aqui'), throwsStateError);
+    expect(() => backendUpcomingVersion('$decl = criaAgenda();'), throwsStateError);
   });
 
   test('agenda do backend e texto do app andam juntos', () {
