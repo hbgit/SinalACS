@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sinalacs_client/sinalacs_client.dart' show TermsChangeNotice;
 import 'package:sinalacs_patient/app/app.dart';
+import 'package:sinalacs_patient/core/legal/legal_documents.dart';
 import 'package:sinalacs_patient/core/network/backend_client.dart';
 
 import 'support/fake_patient_backend.dart';
@@ -14,6 +15,30 @@ final _aviso = TermsChangeNotice(
   effectiveFrom: DateTime.utc(2026, 10, 20, 12),
   summary: 'Novo canal de dúvidas.',
 );
+
+UpcomingLegalDocuments _textoNovoDe(String versao) => UpcomingLegalDocuments(
+      version: versao,
+      privacy: LegalDocument(
+        id: 'privacy',
+        title: 'Política de Privacidade',
+        version: versao,
+        effectiveDate: '20/10/2026',
+        summary: privacyPolicy.summary,
+        sections: privacyPolicy.sections,
+        history: privacyPolicy.history,
+      ),
+      terms: LegalDocument(
+        id: 'terms',
+        title: 'Termo de Uso',
+        version: versao,
+        effectiveDate: '20/10/2026',
+        summary: termsOfUse.summary,
+        sections: termsOfUse.sections,
+        history: termsOfUse.history,
+      ),
+    );
+
+final _textoNovo = _textoNovoDe('2026.2');
 
 Future<void> login(WidgetTester tester) async {
   await tester.enterText(find.byKey(const Key('cpf_field')), '123.456.789-09');
@@ -133,5 +158,43 @@ void main() {
     await tester.tap(find.text('Status'));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('terms_change_notice_card')), findsOneWidget);
+  });
+
+  testWidgets('com o texto novo embarcado na mesma versão do aviso, oferece "Ler o texto novo"', (tester) async {
+    final backend = FakePatientBackend()..termsNotice = _aviso; // versão 2026.2
+    await tester.pumpWidget(SinalAcsApp(backend: backend, upcomingDocuments: _textoNovo));
+    await login(tester);
+
+    await tester.tap(find.byKey(const Key('terms_change_notice_read_new')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Termos que passam a valer'), findsOneWidget);
+    expect(find.textContaining('Versão 2026.2'), findsWidgets);
+  });
+
+  testWidgets('aviso de versão que o app não conhece: só o texto vigente, sem erro', (tester) async {
+    final backend = FakePatientBackend()..termsNotice = _aviso;
+    await tester.pumpWidget(SinalAcsApp(backend: backend)); // sem texto novo embarcado
+    await login(tester);
+    expect(find.byKey(const Key('terms_change_notice_read_new')), findsNothing);
+    expect(find.byKey(const Key('terms_change_notice_read')), findsOneWidget);
+  });
+
+  testWidgets('texto novo de OUTRA versão que a do aviso não é oferecido', (tester) async {
+    final backend = FakePatientBackend()..termsNotice = _aviso; // 2026.2
+    await tester.pumpWidget(SinalAcsApp(backend: backend, upcomingDocuments: _textoNovoDe('2026.3')));
+    await login(tester);
+    expect(find.byKey(const Key('terms_change_notice_read_new')), findsNothing);
+  });
+
+  testWidgets('o título do cartão é um cabeçalho semântico', (tester) async {
+    final handle = tester.ensureSemantics();
+    final backend = FakePatientBackend()..termsNotice = _aviso;
+    await tester.pumpWidget(SinalAcsApp(backend: backend));
+    await login(tester);
+    final data = tester.getSemantics(find.text('Os termos vão mudar')).getSemanticsData();
+    expect(data.flagsCollection.isHeader, isTrue);
+    expect(data.label, contains('Os termos vão mudar'));
+    handle.dispose();
   });
 }

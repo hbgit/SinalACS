@@ -47,6 +47,7 @@ class SinalAcsApp extends StatefulWidget {
     this.consentPreferences,
     this.qrScanner,
     this.pushTokens,
+    this.upcomingDocuments,
   });
 
   /// Backend do app. **Obrigatório, e construído em `main.dart`.**
@@ -86,6 +87,10 @@ class SinalAcsApp extends StatefulWidget {
   /// projeto Firebase (RF14, decisão §3.2) o aparelho não tem token, e o
   /// registro fica inerte até a implementação do FCM entrar aqui.
   final PushTokenSource? pushTokens;
+
+  /// Injetável para teste. Em execução normal é [upcomingLegalDocuments]: o texto
+  /// da versão dos termos já anunciada (aviso de 15 dias) e ainda não vigente.
+  final UpcomingLegalDocuments? upcomingDocuments;
 
   @override
   State<SinalAcsApp> createState() => _SinalAcsAppState();
@@ -134,13 +139,16 @@ class _SinalAcsAppState extends State<SinalAcsApp> {
           consentPreferences: _consentPreferences,
           child: PushTokenScope(
             source: _pushTokens,
-            child: QrScannerScope(
-              scanner: _qrScanner,
-              child: MaterialApp(
-                title: 'SinalACS Paciente',
-                debugShowCheckedModeBanner: false,
-                theme: buildPatientTheme(),
-                home: const PatientLoginScreen(),
+            child: UpcomingDocumentsScope(
+              documents: widget.upcomingDocuments ?? upcomingLegalDocuments,
+              child: QrScannerScope(
+                scanner: _qrScanner,
+                child: MaterialApp(
+                  title: 'SinalACS Paciente',
+                  debugShowCheckedModeBanner: false,
+                  theme: buildPatientTheme(),
+                  home: const PatientLoginScreen(),
+                ),
               ),
             ),
           ),
@@ -148,6 +156,21 @@ class _SinalAcsAppState extends State<SinalAcsApp> {
       ),
     );
   }
+}
+
+/// Disponibiliza o texto dos termos já anunciados (aviso de 15 dias), ou `null`.
+/// Mesmo padrão de `QrScannerScope`; sem escopo, `maybeOf` devolve `null` e o
+/// cartão oferece só o texto vigente.
+class UpcomingDocumentsScope extends InheritedWidget {
+  const UpcomingDocumentsScope({required this.documents, required super.child, super.key});
+
+  final UpcomingLegalDocuments? documents;
+
+  static UpcomingLegalDocuments? maybeOf(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<UpcomingDocumentsScope>()?.documents;
+
+  @override
+  bool updateShouldNotify(UpcomingDocumentsScope oldWidget) => documents != oldWidget.documents;
 }
 
 /// Disponibiliza o [LocationReader] para a árvore de widgets.
@@ -1089,13 +1112,30 @@ class _PatientHomeShellState extends State<PatientHomeShell> {
             // Nunca na aba de urgência: o cartão desce o botão de pânico (e um aviso que
             // chega de forma assíncrona o moveria sob o dedo). Volta nas outras abas.
             if (_notice != null && !_noticeDismissed && _destination != PatientDestination.emergency)
-              TermsChangeNoticeCard(
-                notice: _notice!,
-                onDismiss: () => setState(() => _noticeDismissed = true),
-                onRead: () => Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const LegalDocumentsScreen()),
-                ),
-              ),
+              Builder(builder: (context) {
+                final notice = _notice!;
+                final docs = UpcomingDocumentsScope.maybeOf(context);
+                // O texto novo só é oferecido se o app carrega EXATAMENTE a versão que
+                // o servidor anunciou; senão, o cartão fica só com o texto vigente.
+                final novo = docs != null && docs.version == notice.version ? docs : null;
+                return TermsChangeNoticeCard(
+                  notice: notice,
+                  onDismiss: () => setState(() => _noticeDismissed = true),
+                  onRead: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const LegalDocumentsScreen()),
+                  ),
+                  onReadNew: novo == null
+                      ? null
+                      : () => Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => LegalDocumentsScreen(
+                                upcoming: novo,
+                                effectiveLabel: TermsChangeNoticeCard.formatDate(notice.effectiveFrom),
+                              ),
+                            ),
+                          ),
+                );
+              }),
             Expanded(child: content),
           ],
         ),

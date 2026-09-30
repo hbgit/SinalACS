@@ -11,12 +11,15 @@ void main() {
   const normalText = 4.5;
   const largeTextOrUi = 3.0;
 
-  const cases = <(String, Color, Color, double)>[
+  // Pares que o cartão de aviso de mudança dos termos usa e que o tema gera a
+  // partir do seed (não são tokens fixos), medidos contra o `Card` em que renderizam.
+  final scheme = buildPatientTheme().colorScheme;
+  final cases = <(String, Color, Color, double)>[
     ('branco sobre scaffold', Colors.white, PatientColors.background, normalText),
     ('branco sobre card', Colors.white, PatientColors.surfaceRaised, normalText),
     // Achado A do relatório antigo era falso positivo: passa com folga.
     ('white54 sobre card (rodapé da triagem)', Colors.white54, PatientColors.surfaceRaised, normalText),
-    ('yellow #E0A800 sobre card (risco amarelo)', Color(0xFFE0A800), PatientColors.surfaceRaised, normalText),
+    ('yellow #E0A800 sobre card (risco amarelo)', const Color(0xFFE0A800), PatientColors.surfaceRaised, normalText),
     // Variantes de texto que o app usa em vez do fill puro (ver os testes de
     // documentação abaixo para a prova de que o fill sozinho falha).
     ('dangerOnSurface sobre card', PatientColors.dangerOnSurface, PatientColors.surfaceRaised, normalText),
@@ -24,6 +27,9 @@ void main() {
     ('accentOnSurface sobre card', PatientColors.accentOnSurface, PatientColors.surfaceRaised, normalText),
     // Círculo numerado do resumo da Política/Termo (`legal_screens.dart`).
     ('branco sobre accentDark (passos do resumo legal)', Colors.white, PatientColors.accentDark, normalText),
+    ('texto do cartão de aviso (onSurface) sobre card', scheme.onSurface, PatientColors.surfaceRaised, normalText),
+    ('TextButton do cartão de aviso (primary) sobre card', scheme.primary, PatientColors.surfaceRaised, normalText),
+    ('ícone de fechar do cartão de aviso (onSurfaceVariant) sobre card', scheme.onSurfaceVariant, PatientColors.surfaceRaised, largeTextOrUi),
     // Preenchimento de botão: continua correto sem token novo.
     ('branco sobre botão de pânico (danger fill)', Colors.white, PatientColors.danger, largeTextOrUi),
   ];

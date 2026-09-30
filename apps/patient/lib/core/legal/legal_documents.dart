@@ -67,6 +67,28 @@ class LegalDocument {
   final List<LegalVersion> history;
 }
 
+/// Texto da versão que **ainda não vale** e já foi anunciada (LGPD-RF18, 15 dias).
+///
+/// O app embarca o texto ANTES de o servidor publicar o aviso: publique uma versão
+/// do app com este valor, só depois troque `upcomingTermsChange` no backend, e na
+/// vigência mude `legalDocumentsVersion` e `consentPolicyVersion`, mova o texto
+/// para [privacyPolicy]/[termsOfUse] e volte as duas constantes para `null`.
+/// `test/upcoming_legal_documents_test.dart` falha se as duas pontas divergirem.
+class UpcomingLegalDocuments {
+  const UpcomingLegalDocuments({
+    required this.version,
+    required this.privacy,
+    required this.terms,
+  });
+
+  final String version;
+  final LegalDocument privacy;
+  final LegalDocument terms;
+}
+
+/// Nada anunciado hoje.
+const UpcomingLegalDocuments? upcomingLegalDocuments = null;
+
 const _history2026_1 = [
   LegalVersion(
     version: '2026.1',

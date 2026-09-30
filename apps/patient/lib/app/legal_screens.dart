@@ -9,19 +9,27 @@ import 'package:sinalacs_patient/core/network/backend_scope.dart';
 /// documento, três toques (painel de privacidade em até 3 cliques,
 /// LGPD-RF03).
 class LegalDocumentsScreen extends StatelessWidget {
-  const LegalDocumentsScreen({super.key});
+  const LegalDocumentsScreen({super.key, this.upcoming, this.effectiveLabel});
+
+  /// Quando presente, lista o texto que ainda **não vale** (aviso de 15 dias).
+  final UpcomingLegalDocuments? upcoming;
+
+  /// Data em que o texto novo passa a valer (`dd/mm/aaaa`), para o subtítulo.
+  final String? effectiveLabel;
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Privacidade e termos')),
+      appBar: AppBar(
+        title: Text(upcoming == null ? 'Privacidade e termos' : 'Termos que passam a valer'),
+      ),
       body: SafeArea(
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
-            for (final (key, document) in const [
-              ('legal_open_privacy', privacyPolicy),
-              ('legal_open_terms', termsOfUse),
+            for (final (key, document) in [
+              ('legal_open_privacy', upcoming?.privacy ?? privacyPolicy),
+              ('legal_open_terms', upcoming?.terms ?? termsOfUse),
             ])
               Card(
                 child: ListTile(
@@ -33,7 +41,9 @@ class LegalDocumentsScreen extends StatelessWidget {
                   ),
                   title: Text(document.title),
                   subtitle: Text(
-                    'Versão ${document.version} · vigente desde ${document.effectiveDate}',
+                    upcoming == null
+                        ? 'Versão ${document.version} · vigente desde ${document.effectiveDate}'
+                        : 'Versão ${document.version} · passa a valer em ${effectiveLabel ?? document.effectiveDate}',
                   ),
                   trailing: const Icon(Icons.chevron_right),
                   onTap: () => Navigator.of(context).push(
