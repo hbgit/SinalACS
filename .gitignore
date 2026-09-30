@@ -43,3 +43,7 @@ apps/patient/assets/certs/
 # Estado local do proxy headroom (PID e timestamps), reescrito a cada sessão
 .claude/.headroom_wrap_*.json
 infra/docker/gorush/credentials/
+
+# Google services
+google-services.json
+fcm-service-account.json
