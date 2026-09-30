@@ -70,3 +70,20 @@ Com a chave real do projeto `sinal-acs` e um token **falso** (nada é entregue a
 - Renovação do token (`onNewToken`) e abrir uma tela ao tocar na notificação.
 - A string de erro de outros casos do FCM (cota, mensagem malformada) além do token inválido.
 - Gorush hospedado fora do Compose local.
+
+## Na CI (GitHub Actions)
+
+O job `android-e2e` usa dois secrets, cada um o arquivo em base64 (`base64 -w0 arquivo`):
+
+| Secret | Arquivo | Onde vai no runner |
+|---|---|---|
+| `FCM_CREDENTIALS_BASE64` | `fcm-service-account.json` | arquivo `0600` em `$RUNNER_TEMP`; `GOOGLE_APPLICATION_CREDENTIALS` aponta para ele; `ci_push_e2e.sh` o instala em `infra/docker/gorush/credentials/` (o que o Gorush monta) |
+| `GOOGLE_SERVICES_JSON_BASE64` | `google-services.json` | `apps/patient/android/app/` (o build do paciente o procura ali) |
+
+Com os dois, o job roda o `push_e2e.sh` (caminho feliz) depois do smoke: o aviso do ACS chega
+à bandeja do emulador pelo Gorush e FCM reais. Sem eles (PR de fork, secret apagado) os passos
+só avisam e o job roda como antes. O emulador do CI usa a imagem `google_apis` (Play Services):
+a imagem padrão da action é AOSP e o FCM não entrega token nela.
+
+Os arquivos são apagados por um passo `if: always()`; `scripts/ci/decode_secret_file.sh` nunca
+imprime o conteúdo e não sobrescreve nem apaga arquivos de um desenvolvedor fora do CI.
