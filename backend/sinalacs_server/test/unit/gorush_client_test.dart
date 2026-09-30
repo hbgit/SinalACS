@@ -55,6 +55,19 @@ class FakeGorush {
 
 const _msg = PushMessage(title: 't', body: 'b');
 
+/// `HttpClient` cuja conexão nunca se completa: é o que o Docker faz quando o
+/// container do Gorush está parado (o nome não resolve e a chamada fica pendurada).
+class _NeverConnectsHttpClient implements HttpClient {
+  @override
+  Future<HttpClientRequest> postUrl(Uri url) => Completer<HttpClientRequest>().future;
+
+  @override
+  void close({bool force = false}) {}
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
 void main() {
   test('agrupa por plataforma e usa os códigos do Gorush (1 iOS, 2 Android)', () async {
     final gw = await FakeGorush.start(response: {'counts': 3, 'logs': []});
@@ -154,6 +167,24 @@ void main() {
       client.send(_msg, const [PushTarget(token: 'a', platform: 'android')]),
       throwsA(isA<PushGatewayException>().having((e) => e.outcomeUnknown, 'outcomeUnknown', isTrue)),
     );
+  });
+
+  test('estourar ANTES de conectar não é "resultado desconhecido": nada foi enviado', () async {
+    final client = GorushClient(
+      baseUrl: 'http://gorush:8088',
+      timeout: const Duration(seconds: 5),
+      connectTimeout: const Duration(milliseconds: 200),
+      httpClient: _NeverConnectsHttpClient(),
+    );
+    final watch = Stopwatch()..start();
+
+    await expectLater(
+      client.send(_msg, const [PushTarget(token: 'a', platform: 'android')]),
+      throwsA(isA<PushGatewayException>().having((e) => e.outcomeUnknown, 'outcomeUnknown', isFalse)),
+    );
+
+    expect(watch.elapsed, lessThan(const Duration(seconds: 2)),
+        reason: 'falha no tempo da conexão, não no tempo total do envio');
   });
 
   test('servidor fora do ar vira PushGatewayException sem vazar o token', () async {

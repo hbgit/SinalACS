@@ -54,13 +54,23 @@ abstract interface class PushSender {
 /// Cliente HTTP do Gorush (`POST /api/push`). Usa `dart:io`: o backend não tem o
 /// pacote `http`, e uma chamada só não justifica a dependência.
 class GorushClient implements PushSender {
-  GorushClient({required String baseUrl, required Duration timeout, HttpClient? httpClient})
-      : _baseUrl = baseUrl,
+  GorushClient({
+    required String baseUrl,
+    required Duration timeout,
+    this.connectTimeout = const Duration(seconds: 2),
+    HttpClient? httpClient,
+  })  : _baseUrl = baseUrl,
         _timeout = timeout,
         _http = httpClient ?? HttpClient();
 
   final String _baseUrl;
   final Duration _timeout;
+
+  /// Teto da fase de CONEXÃO. Estourar aqui significa que nada foi enviado (com o
+  /// container do Gorush parado o nome nem resolve e a chamada fica pendurada), então
+  /// é "inacessível, tente de novo" — e não "resultado desconhecido", que só vale
+  /// depois que o pedido saiu e a resposta não voltou.
+  final Duration connectTimeout;
   final HttpClient _http;
 
   /// Encerra as conexões. Um `send` depois disso falha com [PushGatewayException].
@@ -106,7 +116,8 @@ class GorushClient implements PushSender {
     });
 
     try {
-      return await _post(body, targets.length, {for (final t in targets) t.token}).timeout(_timeout);
+      return await _post(body, targets.length, {for (final t in targets) t.token})
+          .timeout(_timeout);
     } on PushGatewayException {
       rethrow;
     } on TimeoutException {
@@ -130,7 +141,13 @@ class GorushClient implements PushSender {
   }
 
   Future<PushSendReport> _post(String body, int total, Set<String> sent) async {
-    final request = await _http.postUrl(Uri.parse('$_baseUrl/api/push'));
+    final HttpClientRequest request;
+    try {
+      request = await _http.postUrl(Uri.parse('$_baseUrl/api/push')).timeout(connectTimeout);
+    } on TimeoutException {
+      // Nada saiu: é o mesmo desfecho de uma conexão recusada.
+      throw const PushGatewayException('O Gorush está inacessível.');
+    }
     request.headers.contentType = ContentType.json;
     request.write(body);
     final response = await request.close();

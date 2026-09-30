@@ -21,10 +21,18 @@ Future<List<int>?> _devRpcCaBytes() async {
   }
 }
 
+/// Quanto segurar o app instalado depois do registro (`--dart-define=PUSH_HOLD_SECONDS=N`).
+///
+/// O `flutter test integration_test` DESINSTALA o app ao terminar, e o token FCM
+/// morre junto (o FCM passa a responder `NotRegistered`). Para provar a ENTREGA o
+/// app precisa continuar instalado enquanto `tool/send_notice.dart` envia, então
+/// `scripts/qa/push_e2e.sh` usa este intervalo. O padrão, 0, não espera nada.
+const _holdSeconds = int.fromEnvironment('PUSH_HOLD_SECONDS');
+
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
-  test('registra no backend o token FCM real do aparelho, com consentimento', () async {
+  test('registra no backend o token FCM real do aparelho, com consentimento', timeout: const Timeout(Duration(minutes: 6)), () async {
     final caBytes = await _devRpcCaBytes();
     if (caBytes == null) {
       fail('A CA do RPC não está no bundle (${BackendConfig.rpcCaAsset}). '
@@ -50,5 +58,12 @@ void main() {
 
     await backend.updateConsent(purpose: ConsentPurpose.segmentedPush, granted: true);
     await backend.registerPushToken(token: device.token, platform: device.platform); // não lança
+
+    if (_holdSeconds > 0) {
+      // Sinal para o script: o registro terminou e o app fica instalado daqui em diante.
+      // ignore: avoid_print
+      print('PUSH_E2E_REGISTERED');
+      await Future<void>.delayed(const Duration(seconds: _holdSeconds));
+    }
   });
 }
