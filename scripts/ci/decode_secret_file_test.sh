@@ -90,6 +90,21 @@ t_service_account_invalido_nao_vaza() {
   done
 }
 
+t_base64_invalido_da_dica_sem_vazar() {
+  novo_ambiente
+  export FCM_SECRET="$(sa_json)"   # o JSON em claro, colado no lugar do base64
+  out="$(sa 2>&1)"; rc=$?
+  afirma "JSON em claro: exit 1 e a dica diz que parece JSON, não base64" '[[ $rc -eq 1 ]] && grep -q "parece o JSON em claro" <<<"$out"'
+  afirma "JSON em claro: a dica não vaza o conteúdo" '! grep -q "$FAKE_KEY" <<<"$out" && ! grep -q "client_email" <<<"$out"'
+  export FCM_SECRET="$(sa_json | base64 -w0 | tr '+/' '-_')A-_-_"
+  out="$(sa 2>&1)"
+  afirma "base64url: a dica aponta o alfabeto e traz contagens" 'grep -q "tamanho=" <<<"$out" && grep -q "fora do alfabeto" <<<"$out"'
+  export FCM_SECRET="$(sa_json | base64 -w0 | head -c 41)"   # base64 truncado: tamanho que não fecha em múltiplo de 4
+  out="$(sa 2>&1)"
+  afirma "truncado: a dica mostra o resto do tamanho por 4" 'grep -q "resto=1" <<<"$out"'
+  afirma "truncado: nada do conteúdo na saída" '! grep -q "$FAKE_KEY" <<<"$out"'
+}
+
 t_google_services_grava_no_destino() {
   novo_ambiente
   export GS_SECRET="$(gs_json | base64 -w0)"
@@ -171,6 +186,7 @@ t_service_account_uma_linha
 t_service_account_quebrado_com_crlf
 t_preserva_o_que_ja_estava_em_github_env
 t_service_account_invalido_nao_vaza
+t_base64_invalido_da_dica_sem_vazar
 t_google_services_grava_no_destino
 t_google_services_invalido
 t_nao_sobrescreve_fora_do_ci

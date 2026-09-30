@@ -79,7 +79,16 @@ falhar() {
 # base64 do `base64 -w0`, do `base64` com quebra em 76 colunas, com CRLF ou espaço
 # final: tudo que é espaço em branco sai antes de decodificar.
 if ! printf '%s' "$segredo" | tr -d '[:space:]' | base64 -d >"$tmp" 2>/dev/null; then
-  falhar "$env_nome não é um base64 válido."
+  # Diagnóstico SEM valores: só tamanho, contagens e o formato geral. Sem ele, um secret
+  # cadastrado errado (JSON em claro, base64url, truncado) é impossível de diagnosticar, já
+  # que o GitHub o mascara no log.
+  limpo="$(printf '%s' "$segredo" | tr -d '[:space:]')"
+  fora="$(printf '%s' "$limpo" | tr -d 'A-Za-z0-9+/=' | wc -c | tr -d ' ')"
+  dica=''
+  [[ "$limpo" == \{* ]] && dica+=" O valor começa com '{': parece o JSON em claro, e não o base64 (use: base64 -w0 arquivo.json)."
+  [[ "$limpo" == \"* || "$limpo" == \'* ]] && dica+=' O valor começa com aspas: cadastre-o sem aspas.'
+  [[ "$limpo" == *[-_]* ]] && dica+=' Tem "-" ou "_": parece base64url; o secret usa o base64 padrão (base64 -w0).'
+  falhar "$env_nome não é um base64 válido (tamanho=${#limpo}; resto=$(( ${#limpo} % 4 )) por 4; caracteres fora do alfabeto base64=$fora).$dica"
 fi
 
 # Só confirma a FORMA. Saída e erro descartados: um traceback do Python imprimiria o dado.
