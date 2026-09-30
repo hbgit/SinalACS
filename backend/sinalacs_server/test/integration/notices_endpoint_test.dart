@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:serverpod/serverpod.dart';
 import 'package:sinalacs_server/src/config/app_config.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
@@ -20,6 +22,7 @@ const _otherMicroAreaId = '00000000-0000-4000-8000-000000000013';
 const _revokedId = '00000000-0000-4000-8000-000000000021';
 const _outsiderId = '00000000-0000-4000-8000-000000000022';
 const _plainId = '00000000-0000-4000-8000-000000000023';
+const _noClinicalId = '00000000-0000-4000-8000-000000000024';
 const _chainSecret = 'test-audit-chain-secret';
 
 AppConfig _config() => AppConfig(
@@ -127,6 +130,7 @@ Future<void> _addPatient(
   required String id,
   required String microAreaId,
   required bool chronic,
+  bool withPatientRow = true,
 }) async {
   final now = DateTime.now().toUtc();
   await User.db.insertRow(
@@ -142,6 +146,7 @@ Future<void> _addPatient(
       updatedAt: now,
     ),
   );
+  if (!withPatientRow) return;
   await Patient.db.insertRow(
     session,
     await encryptedPatient(
@@ -281,7 +286,7 @@ void main() {
       expect(await PushToken.db.count(session, where: (t) => t.token.equals('tok-a3')), 1);
     });
 
-    test('grava uma linha community_notice sem o texto do aviso', () async {
+    test('grava uma linha community_notice só com ACS e microárea', () async {
       final session = await seedAll();
       final before = await AuditLog.db.count(session);
       await send(await tokenOf('acs'));
@@ -290,6 +295,49 @@ void main() {
       expect(rows.single.resourceType, 'community_notice');
       expect(rows.single.result, 'granted');
       expect(rows.single.resourceId, UuidValue.fromString(_microAreaId));
+      expect(jsonEncode(rows.single.toJson()).contains('Amanhã, das 8h'), isFalse);
+    });
+
+    test('paciente sem linha clínica recebe "para todos" e fica fora do filtro de crônicos', () async {
+      final session = await seedAll();
+      await _addPatient(session,
+          id: _noClinicalId, microAreaId: _microAreaId, chronic: false, withPatientRow: false);
+      await _consent(session, _noClinicalId, 'granted', DateTime.utc(2026, 9, 1));
+      await _token(session, _noClinicalId, 'tok-sem-clinica', _microAreaId);
+
+      await send(await tokenOf('acs'));
+      expect(sender.lastTargets.map((t) => t.token), contains('tok-sem-clinica'));
+
+      sender.lastTargets = const []; // o filtro pode não deixar ninguém: o relé nem é chamado
+      await send(await tokenOf('acs'), audience: 'chronic');
+      expect(sender.lastTargets.map((t) => t.token), isNot(contains('tok-sem-clinica')));
+    });
+
+    test('consentimentos com o mesmo timestamp: o de id maior decide', () async {
+      final session = await seedAll();
+      final at = DateTime.utc(2026, 9, 2);
+      Future<void> linha(String id, String action) => ConsentLog.db.insertRow(
+            session,
+            ConsentLog(
+              id: UuidValue.fromString(id),
+              userId: UuidValue.fromString(_plainId),
+              purpose: ConsentPurpose.segmentedPush.name,
+              action: action,
+              version: '2026.1',
+              timestamp: at,
+              ipHash: 'nao-aplicavel-teste',
+              userAgent: 'nao-aplicavel-teste',
+              signature: 'assinatura-de-teste',
+            ),
+          );
+      // `_plainId` já tem um 'granted' de t0 em `seedAll`; estas duas linhas empatam
+      // entre si e são as mais recentes. O 'granted' tem o id MENOR.
+      await linha('00000000-0000-4000-8000-0000000000c1', 'granted');
+      await linha('00000000-0000-4000-8000-0000000000c2', 'denied');
+
+      await send(await tokenOf('acs'));
+
+      expect(sender.lastTargets.map((t) => t.token), isNot(contains('tok-a3')));
     });
 
     test('paciente e token inválido são recusados', () async {

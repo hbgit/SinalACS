@@ -117,9 +117,13 @@ class NoticeService {
       );
     }
     if (report.invalidTokens.isNotEmpty) {
-      await _store.deleteTokens(report.invalidTokens);
+      try {
+        await _store.deleteTokens(report.invalidTokens);
+      } catch (_) {
+        // A poda é higiene: o aviso já saiu, e um erro aqui levaria o ACS a reenviar.
+      }
     }
-    await _record(user, microAreaId, 'granted');
+    await _record(user, microAreaId, report.accepted > 0 ? 'granted' : 'not_delivered');
     return NoticeSendSnapshot(recipients: targets.length, accepted: report.accepted);
   }
 

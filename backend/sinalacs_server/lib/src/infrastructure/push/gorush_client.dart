@@ -63,6 +63,9 @@ class GorushClient implements PushSender {
   final Duration _timeout;
   final HttpClient _http;
 
+  /// Encerra as conexões. Um `send` depois disso falha com [PushGatewayException].
+  void close() => _http.close(force: true);
+
   /// Códigos de plataforma do Gorush.
   static const _ios = 1;
   static const _android = 2;
@@ -114,7 +117,13 @@ class GorushClient implements PushSender {
     } on HttpException {
       throw const PushGatewayException('Falha de HTTP ao falar com o Gorush.');
     } on FormatException {
-      throw const PushGatewayException('O Gorush respondeu algo ilegível.');
+      // A resposta era 2xx: o Gorush pode ter entregue. Não é "tente de novo".
+      throw const PushGatewayException(
+        'O Gorush respondeu algo ilegível.',
+        outcomeUnknown: true,
+      );
+    } on StateError {
+      throw const PushGatewayException('O cliente do Gorush foi encerrado.');
     }
   }
 
@@ -127,8 +136,15 @@ class GorushClient implements PushSender {
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw PushGatewayException('O Gorush respondeu com status ${response.statusCode}.');
     }
-    final json = raw.isEmpty ? <String, dynamic>{} : jsonDecode(raw) as Map<String, dynamic>;
-    final logs = (json['logs'] as List?) ?? const [];
+    final decoded = raw.isEmpty ? <String, dynamic>{} : jsonDecode(raw);
+    if (decoded is! Map<String, dynamic>) {
+      throw const PushGatewayException(
+        'O Gorush respondeu algo ilegível.',
+        outcomeUnknown: true,
+      );
+    }
+    final json = decoded;
+    final logs = json['logs'] is List ? json['logs'] as List : const [];
     final invalid = <String>[];
     var failed = 0;
     for (final log in logs.whereType<Map<String, dynamic>>()) {

@@ -52,6 +52,11 @@ class AlertRuntime {
 
   AppConfig? _config;
   PushSender? Function()? _noticeSenderOverride;
+
+  /// Um único [GorushClient] por processo (e por URL): um `HttpClient` novo por
+  /// requisição nunca era fechado.
+  GorushClient? _gorush;
+  String? _gorushUrl;
   MqttAlertDispatcher? _dispatcher;
   DevelopmentAuthService? _auth;
   HealthDataCipher? _healthDataCipher;
@@ -139,6 +144,9 @@ class AlertRuntime {
   @visibleForTesting
   void overrideConfig(AppConfig? value) {
     _config = value;
+    _gorush?.close();
+    _gorush = null;
+    _gorushUrl = null;
     // O serviço de auth deriva do segredo, então precisa ser reconstruído.
     _auth = null;
     // Idem para a cifra: ela guarda a chave AES derivada de
@@ -235,9 +243,18 @@ class AlertRuntime {
       store: OrmNoticeRecipientStore(session: () => session),
       sender: override != null
           ? override()
-          : (url == null ? null : GorushClient(baseUrl: url, timeout: config.gorushTimeout)),
+          : (url == null ? null : _gorushClientFor(url)),
       audit: auditTrailFor(session),
     );
+  }
+
+  GorushClient _gorushClientFor(String url) {
+    if (_gorush == null || _gorushUrl != url) {
+      _gorush?.close();
+      _gorush = GorushClient(baseUrl: url, timeout: config.gorushTimeout);
+      _gorushUrl = url;
+    }
+    return _gorush!;
   }
 
   /// Registro do aparelho para avisos segmentados (RF14).

@@ -12,7 +12,10 @@ class OrmNoticeRecipientStore implements NoticeRecipientStore {
   /// A segmentação acontece aqui, no banco (decisão §3.2). O consentimento
   /// decisivo é a linha **mais recente** de `segmentedPush` de cada titular:
   /// quem revogou depois de registrar o token fica de fora mesmo que o token
-  /// ainda esteja na tabela. Parâmetros sempre nomeados, nunca interpolados.
+  /// ainda esteja na tabela. Empate de `timestamp` decide o `id` maior. `LEFT JOIN`
+  /// com `patients`: quem tem token e consentimento mas não tem linha clínica
+  /// recebe o aviso "para todos" e só fica fora do filtro de crônicos. Parâmetros
+  /// sempre nomeados, nunca interpolados.
   @override
   Future<List<PushTarget>> consentedTargets({
     required String microAreaId,
@@ -23,14 +26,14 @@ class OrmNoticeRecipientStore implements NoticeRecipientStore {
       SELECT pt."token" AS token, pt."platform" AS platform
       FROM push_tokens pt
       JOIN users u ON u."id" = pt."userId"
-      JOIN patients p ON p."id" = u."id"
+      LEFT JOIN patients p ON p."id" = u."id"
       WHERE u."microAreaId" = @micro::uuid
         AND u."role" = 'patient'
-        AND (NOT @chronic OR p."isChronic")
+        AND (NOT @chronic OR COALESCE(p."isChronic", false))
         AND COALESCE((
               SELECT c."action" FROM consent_logs c
               WHERE c."userId" = pt."userId" AND c."purpose" = 'segmentedPush'
-              ORDER BY c."timestamp" DESC LIMIT 1
+              ORDER BY c."timestamp" DESC, c."id" DESC LIMIT 1
             ), 'denied') = 'granted'
       ORDER BY pt."token"
       ''',

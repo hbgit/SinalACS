@@ -8,7 +8,7 @@ import 'package:test/test.dart';
 /// Gorush de mentira: um `HttpServer` local que grava o que recebe e responde o
 /// que o teste mandar. É o que dá para provar sem credenciais FCM/APNs.
 class FakeGorush {
-  FakeGorush._(this._server, this.status, this.response, this.hang) {
+  FakeGorush._(this._server, this.status, this.response, this.hang, this.rawBody) {
     _server.listen((request) async {
       requests++;
       final raw = await utf8.decoder.bind(request).join();
@@ -18,7 +18,7 @@ class FakeGorush {
       request.response
         ..statusCode = status
         ..headers.contentType = ContentType.json
-        ..write(jsonEncode(response));
+        ..write(rawBody ?? jsonEncode(response));
       await request.response.close();
     });
   }
@@ -27,13 +27,23 @@ class FakeGorush {
     int status = 200,
     Map<String, dynamic> response = const {},
     bool hang = false,
+    String? rawBody,
   }) async =>
-      FakeGorush._(await HttpServer.bind(InternetAddress.loopbackIPv4, 0), status, response, hang);
+      FakeGorush._(
+        await HttpServer.bind(InternetAddress.loopbackIPv4, 0),
+        status,
+        response,
+        hang,
+        rawBody,
+      );
 
   final HttpServer _server;
   final int status;
   final Map<String, dynamic> response;
   final bool hang;
+
+  /// Se presente, é escrito no corpo no lugar do JSON de [response].
+  final String? rawBody;
   int requests = 0;
   String lastPath = '';
   Map<String, dynamic> lastBody = {};
@@ -172,6 +182,38 @@ void main() {
       PushTarget(token: 'a2', platform: 'android'),
     ]);
     expect(report.accepted, 1);
+  });
+
+  test('corpo 2xx ilegível: resultado desconhecido, nunca "tente de novo"', () async {
+    for (final raw in ['isto não é json', '[1,2,3]']) {
+      final gw = await FakeGorush.start(rawBody: raw);
+      addTearDown(gw.close);
+      final client = GorushClient(baseUrl: gw.url, timeout: const Duration(seconds: 2));
+      await expectLater(
+        client.send(_msg, const [PushTarget(token: 'a', platform: 'android')]),
+        throwsA(isA<PushGatewayException>().having((e) => e.outcomeUnknown, 'outcomeUnknown', isTrue)),
+        reason: raw,
+      );
+    }
+  });
+
+  test('"logs" que não é lista é tolerado: sem falhas relatadas', () async {
+    final gw = await FakeGorush.start(rawBody: '{"logs":"não-é-lista"}');
+    addTearDown(gw.close);
+    final client = GorushClient(baseUrl: gw.url, timeout: const Duration(seconds: 2));
+    final report = await client.send(_msg, const [PushTarget(token: 'a', platform: 'android')]);
+    expect(report.accepted, 1);
+    expect(report.invalidTokens, isEmpty);
+  });
+
+  test('depois de close(), send falha com PushGatewayException e não com StateError', () async {
+    final gw = await FakeGorush.start(response: {});
+    addTearDown(gw.close);
+    final client = GorushClient(baseUrl: gw.url, timeout: const Duration(seconds: 2))..close();
+    await expectLater(
+      client.send(_msg, const [PushTarget(token: 'a', platform: 'android')]),
+      throwsA(isA<PushGatewayException>()),
+    );
   });
 
   test('lista vazia não chama o Gorush', () async {

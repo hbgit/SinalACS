@@ -29,6 +29,7 @@ class _FakeRecipientStore implements NoticeRecipientStore {
   String? lastMicroAreaId;
   bool? lastChronicOnly;
   final deleted = <String>[];
+  Object? deleteFailure;
 
   @override
   Future<List<PushTarget>> consentedTargets({
@@ -42,6 +43,8 @@ class _FakeRecipientStore implements NoticeRecipientStore {
 
   @override
   Future<int> deleteTokens(List<String> tokens) async {
+    final failure = deleteFailure;
+    if (failure != null) throw failure;
     deleted.addAll(tokens);
     return tokens.length;
   }
@@ -145,6 +148,21 @@ void main() {
           .having((e) => e.message, 'message', contains('Confira antes de reenviar'))),
     );
     expect(audit.events.single.result, 'unknown');
+  });
+
+  test('falha ao apagar tokens inválidos não vira erro: o envio já aconteceu', () async {
+    sender.report = const PushSendReport(accepted: 1, invalidTokens: ['tok-b']);
+    store.deleteFailure = StateError('banco fora do ar');
+    final r = await service.sendSegmented(_acs, title: 't', message: 'm', audience: 'everyone');
+    expect((r.recipients, r.accepted), (2, 1));
+    expect(audit.events.single.result, 'granted');
+  });
+
+  test('nenhum aceito: não audita "granted"', () async {
+    sender.report = const PushSendReport(accepted: 0, invalidTokens: []);
+    final r = await service.sendSegmented(_acs, title: 't', message: 'm', audience: 'everyone');
+    expect(r.accepted, 0);
+    expect(audit.events.single.result, 'not_delivered');
   });
 
   test('sem Gorush configurado o envio é recusado com mensagem clara', () async {
