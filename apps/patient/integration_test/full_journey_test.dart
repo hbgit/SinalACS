@@ -1,6 +1,6 @@
 /// Jornada completa do paciente, pela TELA, contra a stack de e2e (banco de
 /// teste, sem login de desenvolvimento): OTP real, termos, triagem, alerta,
-/// status e "Meus dados". Só roda com as fixtures
+/// status e "Meus dados" (o território do ACS é `tool/territory_check.dart`, no host). Só roda com as fixtures
 /// (`--dart-define=E2E_FIXTURES=...`, ver `scripts/qa/patient_full_e2e.sh`); sem
 /// elas o grupo é pulado, então `e2e.sh --full` não quebra.
 ///
@@ -13,13 +13,10 @@
 /// impressos.
 library;
 
-import 'dart:io' show SecurityContext;
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
-import 'package:sinalacs_client/sinalacs_client.dart' as rpc;
 import 'package:sinalacs_patient/app/app.dart';
 import 'package:sinalacs_patient/core/network/backend_client.dart';
 import 'package:sinalacs_patient/core/network/backend_config.dart';
@@ -73,7 +70,7 @@ void main() {
   Future<int> pedirCodigo(WidgetTester tester, E2ePatientFixture p) async {
     await tester.enterText(find.byKey(const Key('cpf_field')), p.cpf);
     await tester.enterText(find.byKey(const Key('birth_date_field')), _ddmmyyyy(p.birthDate));
-    final pedidoEm = DateTime.now().toUtc().millisecondsSinceEpoch;
+    final pedidoEm = await relayNow(_relay);
     await tapKey(tester, 'enter_button');
     await pumpUntil(tester, find.byKey(const Key('otp_code_field')));
     return pedidoEm;
@@ -164,24 +161,6 @@ void main() {
         expect(find.textContaining('ipertens'), findsWidgets);
         expect(find.text(config.patient('main').name), findsNothing);
         expect(find.text(config.patient('outsider').name), findsNothing);
-      });
-
-      test('território (API): o ACS da microárea lista os pacientes dela e não o de outra área', () async {
-        final ca = (await rootBundle.load(BackendConfig.rpcCaAsset)).buffer.asUint8List();
-        final client = rpc.Client(
-          BackendClient.resolveHost(null),
-          securityContext: SecurityContext()..setTrustedCertificatesBytes(ca),
-        )..connectivityMonitor = null;
-        addTearDown(client.close);
-
-        final session = await client.auth.loginInstitutional(
-          matricula: config!.acsMatricula,
-          password: config.acsPassword,
-        );
-        final names = (await client.patients.listMicroArea(accessToken: session.accessToken)).map((p) => p.name).toSet();
-
-        expect(names, containsAll([config.patient('main').name, config.patient('chronic').name]));
-        expect(names, isNot(contains(config.patient('outsider').name)));
       });
     },
   );

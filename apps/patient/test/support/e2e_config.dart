@@ -44,7 +44,9 @@ class E2eConfig {
   static E2eConfig? fromMap(Map<String, Object?> map) {
     final list = map['patients'];
     if (list is! List) return null;
-    final acs = (map['acs']! as Map).cast<String, Object?>();
+    // O manifesto que vai ao aparelho (`--dart-define`) NÃO traz o bloco `acs`: a
+    // senha nunca vai para o argv do `flutter test` nem para o APK.
+    final acs = (map['acs'] as Map?)?.cast<String, Object?>() ?? const <String, Object?>{};
     return E2eConfig(
       patients: [
         for (final raw in list.cast<Map>())
@@ -57,8 +59,8 @@ class E2eConfig {
           ),
       ],
       microAreaId: map['microAreaId']! as String,
-      acsMatricula: acs['matricula']! as String,
-      acsPassword: acs['password']! as String,
+      acsMatricula: (acs['matricula'] as String?) ?? '',
+      acsPassword: (acs['password'] as String?) ?? '',
     );
   }
 

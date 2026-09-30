@@ -13,6 +13,9 @@ pg() { docker exec -e PGPASSWORD="$TEST_DATABASE_PASSWORD" sinalacs-postgres-tes
 
 case "${1:-}" in
   up)
+    if docker ps --format '{{.Names}}' | grep -qx sinalacs-serverpod; then
+      echo 'aviso: o backend em execução (sinalacs-serverpod) será substituído pelo de e2e; ao final, rode `docker compose up -d` para voltar à stack de desenvolvimento.' >&2
+    fi
     dc up -d postgres-test >/dev/null 2>&1
     until docker exec sinalacs-postgres-test pg_isready -U postgres -d sinalacs_test >/dev/null 2>&1; do sleep 1; done
     # Recria o banco: cada execução parte de um banco vazio.
@@ -33,9 +36,11 @@ case "${1:-}" in
       SERVERPOD_DATABASE_PASSWORD="$TEST_DATABASE_PASSWORD" \
       dart run bin/seed_e2e_fixtures.dart ../../.e2e/fixtures.json ) ;;
   down)
+    # O manifesto (com a senha do ACS) sai primeiro: se o drop falhar, ele não sobra.
+    rm -f .e2e/fixtures.json
     dc stop serverpod >/dev/null 2>&1 || true
     pg "drop database if exists $db with (force)" postgres >/dev/null
-    rm -f .e2e/fixtures.json ;;   # descreve pacientes de um banco que não existe mais
+    echo 'A stack de e2e parou (o container sinalacs-serverpod é o mesmo da de desenvolvimento): rode `docker compose up -d` para voltar à de desenvolvimento.' ;;
   psql) pg "$2" ;;
   *) echo 'uso: e2e_stack.sh up|seed|down|psql "<sql>"'; exit 2 ;;
 esac

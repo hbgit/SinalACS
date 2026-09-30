@@ -20,6 +20,11 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         url = urlparse(self.path)
+        if url.path == "/now":
+            # Relógio do host: o corte do código usa ESTE, não o do aparelho.
+            self.send_response(200); self.send_header("Content-Type", "text/plain"); self.end_headers()
+            self.wfile.write(str(int(time.time() * 1000)).encode())
+            return
         if url.path != "/code":
             self.send_error(404); return
         since_ms = int(parse_qs(url.query).get("since", ["0"])[0])

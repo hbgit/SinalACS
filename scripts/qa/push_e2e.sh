@@ -76,6 +76,20 @@ adb -s "$dev" get-state >/dev/null 2>&1 || { echo "emulador $dev não encontrado
 
 # -- stack -------------------------------------------------------------------
 relay_pid=""
+# O relé precisa ser ESTE processo: um relé antigo esquecido na porta responderia com código velho.
+iniciar_rele() {
+  if ss -ltn 2>/dev/null | grep -q '127.0.0.1:8765 '; then
+    echo 'erro: a porta 8765 já está ocupada (relé antigo?). Encerre-o: pkill -f scripts/qa/otp_relay.py' >&2
+    exit 1
+  fi
+  iniciar_rele
+  for _ in $(seq 1 20); do
+    curl -fs http://127.0.0.1:8765/now >/dev/null 2>&1 && kill -0 "$relay_pid" 2>/dev/null && return 0
+    sleep 0.25
+  done
+  echo 'erro: o relé do OTP não subiu' >&2
+  exit 1
+}
 if [[ "$e2e_db" -eq 1 ]]; then
   echo "== stack de e2e (banco de teste) com o Gorush"
   ./scripts/qa/e2e_stack.sh up
@@ -85,7 +99,8 @@ if [[ "$e2e_db" -eq 1 ]]; then
   export ACS_MATRICULA ACS_PASSWORD E2E_FIXTURES_FILE="$repo_root/.e2e/fixtures.json"
   ACS_MATRICULA="$(python3 -c "import json;print(json.load(open('.e2e/fixtures.json'))['acs']['matricula'])")"
   ACS_PASSWORD="$(python3 -c "import json;print(json.load(open('.e2e/fixtures.json'))['acs']['password'])")"
-  e2e_fixtures="$(cat .e2e/fixtures.json)"
+  # Sem o bloco `acs`: a senha do ACS vai por ambiente, nunca pelo argv do flutter test.
+  e2e_fixtures="$(python3 -c "import json,sys;d=json.load(open('.e2e/fixtures.json'));d.pop('acs',None);print(json.dumps(d))")"
 else
   echo "== stack com o perfil push"
   docker compose --profile push up -d --build >/dev/null 2>&1
@@ -106,7 +121,10 @@ cleanup() {
   docker compose --profile push start gorush >/dev/null 2>&1 || true
   psql_q 'delete from push_tokens' >/dev/null 2>&1 || true
   # O banco de e2e e o manifesto (com a senha do ACS) não sobram depois do teste.
-  [[ "$e2e_db" -eq 1 ]] && ./scripts/qa/e2e_stack.sh down >/dev/null 2>&1 || true
+  if [[ "$e2e_db" -eq 1 ]]; then
+    rm -f .e2e/fixtures.json
+    ./scripts/qa/e2e_stack.sh down >/dev/null 2>&1 || echo 'aviso: e2e_stack.sh down falhou; o banco sinalacs_e2e pode ter sobrado (docker exec sinalacs-postgres-test psql -U postgres -c "drop database sinalacs_e2e")' >&2
+  fi
 }
 trap cleanup EXIT
 

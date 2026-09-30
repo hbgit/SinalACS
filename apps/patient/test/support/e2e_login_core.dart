@@ -23,10 +23,30 @@ Future<AuthSession> loginPatientWith(
 }) async {
   if (config == null) return backend.developmentLogin(role: 'patient');
   final fixture = config.patient(role);
-  final pedidoEm = DateTime.now().toUtc().millisecondsSinceEpoch;
+  final pedidoEm = await relayNow(relayUrl);
   await backend.requestOtp(cpf: fixture.cpf, birthDate: fixture.birthDate);
   final code = await codeFromRelay(relayUrl, pedidoEm, retryDelay: retryDelay, attempts: attempts);
   return backend.verifyOtp(cpf: fixture.cpf, code: code);
+}
+
+/// O instante (epoch, ms) no relógio do HOST, que é quem lê o log do servidor.
+///
+/// O corte do código nunca usa o relógio do aparelho: um emulador adiantado
+/// (snapshot restaurado, host suspenso) faria o relé negar o código do pedido
+/// recém-feito, e atrasado devolveria um código velho.
+Future<int> relayNow(String relayUrl) async {
+  final client = HttpClient();
+  try {
+    final request = await client.getUrl(Uri.parse(relayUrl).replace(path: '/now', query: ''));
+    final response = await request.close();
+    final body = await utf8.decodeStream(response);
+    if (response.statusCode != 200) throw StateError('o relé respondeu ${response.statusCode} a /now');
+    return int.parse(body.trim());
+  } on SocketException {
+    throw StateError('o relé não está no ar: rode scripts/qa/otp_relay.py e, no emulador, adb reverse tcp:8765 tcp:8765');
+  } finally {
+    client.close(force: true);
+  }
 }
 
 /// O código mais recente escrito DEPOIS de [sinceMs] (epoch, ms).
