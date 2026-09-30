@@ -24,6 +24,7 @@ patients:
   - updateConsent:
   - acceptTermsOfUse:
   - hasAcceptedCurrentTerms:
+  - hasGrantedConsent:
   - termsChangeNotice:
   - requestDataDeletion:
   - requestDataCorrection:

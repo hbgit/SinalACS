@@ -1060,10 +1060,13 @@ void main() {
       await login(tester);
       await openMyData(tester);
       backend.pushRegistrations.clear(); // o login também registra
+      final consultasAntes = backend.hasGrantedConsentCalls;
 
       await tapSwitch(tester, ConsentPurpose.segmentedPush);
       expect(backend.updateConsentCalls.last.granted, isTrue);
       expect(backend.pushRegistrations, [('tok-9', 'ios')]);
+      expect(backend.hasGrantedConsentCalls, consultasAntes,
+          reason: 'quem acabou de gravar a concessão não precisa perguntar de novo');
 
       await tapSwitch(tester, ConsentPurpose.segmentedPush);
       await tester.tap(find.byKey(const Key('consent_revoke_confirm')));
@@ -1308,10 +1311,9 @@ void main() {
       final backend = FakePatientBackend()..myDataResult = overview();
       await tester.pumpWidget(SinalAcsApp(backend: backend));
       await login(tester);
-      final depoisDoLogin = backend.myDataCallCount; // o login consulta o consentimento de avisos
       await openMyData(tester);
 
-      expect(backend.myDataCallCount - depoisDoLogin, 1);
+      expect(backend.myDataCallCount, 1);
       expect(find.text('Fulano de Tal'), findsOneWidget);
       expect(find.textContaining('10/03/1975'), findsOneWidget);
       expect(find.textContaining('Ciclana, (11) 90000-0000'), findsOneWidget);

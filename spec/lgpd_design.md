@@ -75,14 +75,21 @@ titular (não a existência do token) antes de montar a lista, e
 foi provado de ponta a ponta num emulador Android em 2026-09-30 (ver PROGRESS.md,
 "RF14: Gorush e FCM provados no emulador").
 
-**Aparelho (2026-09-30):** o app só pede o token ao FCM depois de `patients.myData`
-mostrar a decisão vigente de `segmentedPush` como `granted` (teto de 3 s; falha,
-estouro ou "nunca decidiu" = não pergunta). Ao conceder em "Meus dados" o registro
-segue direto, sem nova leitura. O auto-init do FCM, que falaria com o Google em toda
-abertura, está desligado no manifesto. Custo aceito: `myData` grava uma linha de
-auditoria de leitura por login de quem tem fonte de token; um endpoint leve de
-consentimento evitaria isso. O texto do aviso também passa pelo FCM (Google):
-decisão de produto da §3.2, não tratada aqui.
+**Aparelho (2026-09-30):** o app só pede o token ao FCM depois de
+`patients.hasGrantedConsent(segmentedPush)` devolver `true` (um `bool`, teto de 3 s;
+falha, estouro ou "nunca decidiu" = não pergunta; resposta tardia é descartada).
+A consulta **não** lê o painel "Meus dados" e não grava auditoria de leitura: a
+primeira versão usava `myData`, que decifra e devolve o dossiê clínico e grava uma
+linha "titular abriu o painel" a cada login — trocada na revisão independente. Quem
+acabou de gravar a concessão (onboarding ou interruptor em "Meus dados") registra
+sem perguntar. O auto-init do FCM, que falaria com o Google em toda abertura, está
+desligado no manifesto.
+
+**Limite conhecido:** se o consentimento for revogado (neste ou em outro aparelho)
+entre a resposta do servidor e o pedido do token, o aparelho pode falar com o
+Google uma vez depois da revogação. O servidor continua certo: `registerPushToken`
+relê o consentimento sob lock e não guarda token sem base legal. O texto do aviso
+também passa pelo FCM (Google): decisão de produto da §3.2, não tratada aqui.
 
 ### LGPD-RF03 - Gerenciamento de Preferências de Privacidade
 

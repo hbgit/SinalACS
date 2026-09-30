@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:sinalacs_client/sinalacs_client.dart';
+import 'package:sinalacs_patient/core/consent/consent_decisions.dart';
 import 'package:sinalacs_patient/core/legal/legal_documents.dart';
 import 'package:sinalacs_patient/core/network/auth_session.dart';
 import 'package:sinalacs_patient/core/network/backend_client.dart';
@@ -57,8 +58,6 @@ class FakePatientBackend implements PatientBackend {
   BackendFailure? myDataFailure;
   int myDataCallCount = 0;
 
-  /// Definido, segura [myData] até ser completado — backend lento ou pendurado.
-  Completer<void>? myDataGate;
 
   /// Acrescenta ao histórico uma decisão sobre [purpose] (`granted` ou
   /// `revoked`), como o servidor faria ao gravar em `consent_logs`.
@@ -125,6 +124,22 @@ class FakePatientBackend implements PatientBackend {
     final failure = termsStatusFailure;
     if (failure != null) throw failure;
     return termsAccepted;
+  }
+
+  /// Como no servidor: a decisão mais recente do histórico para [purpose].
+  int hasGrantedConsentCalls = 0;
+  BackendFailure? hasGrantedConsentFailure;
+
+  /// Definido, segura [hasGrantedConsent] até ser completado — backend lento.
+  Completer<void>? hasGrantedConsentGate;
+
+  @override
+  Future<bool> hasGrantedConsent(ConsentPurpose purpose) async {
+    hasGrantedConsentCalls++;
+    await hasGrantedConsentGate?.future;
+    final failure = hasGrantedConsentFailure;
+    if (failure != null) throw failure;
+    return currentConsentDecisions(myDataResult.consents)[purpose] == true;
   }
 
   /// Chamadas a [acceptTermsOfUse].
@@ -381,7 +396,6 @@ class FakePatientBackend implements PatientBackend {
   @override
   Future<PatientDataOverview> myData() async {
     myDataCallCount++;
-    await myDataGate?.future;
     final failure = myDataFailure;
     if (failure != null) throw failure;
     return myDataResult;

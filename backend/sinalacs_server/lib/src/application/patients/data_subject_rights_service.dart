@@ -181,6 +181,16 @@ class DataSubjectRightsService {
     );
   }
 
+  /// `true` quando a decisão mais recente do titular para [purpose] é
+  /// `granted`. Um `bool`, sem ler o painel "Meus dados" e sem auditoria de
+  /// leitura: o app pergunta isto a cada login antes de falar com o provedor de
+  /// push, e essa pergunta não é o titular abrindo o próprio painel.
+  Future<bool> hasGrantedConsent(AuthenticatedUser user, ConsentPurpose purpose) async {
+    _requirePatient(user);
+    final latest = await _store.latestConsent(user.id, purpose);
+    return latest != null && latest.action == 'granted';
+  }
+
   Future<ConsentRecordSnapshot> _record(
     AuthenticatedUser user, {
     required ConsentPurpose purpose,

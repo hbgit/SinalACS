@@ -6,6 +6,7 @@ import 'package:sinalacs_patient/app/app.dart';
 import 'package:sinalacs_patient/app/legal_screens.dart';
 import 'package:sinalacs_patient/core/consent/consent_preferences.dart';
 import 'package:sinalacs_patient/core/network/backend_client.dart';
+import 'package:sinalacs_patient/core/push/push_token_source.dart';
 
 import 'support/fake_patient_backend.dart';
 import 'support/semantics_scan.dart';
@@ -38,6 +39,25 @@ Future<void> tapKey(WidgetTester tester, String key) async {
   await tester.pumpAndSettle();
   await tester.tap(finder);
   await tester.pumpAndSettle();
+}
+
+class _FonteDeToken implements PushTokenSource {
+  int calls = 0;
+
+  @override
+  Future<PushDevice?> currentDevice() async {
+    calls++;
+    return const PushDevice(token: 'tok-onb', platform: 'android');
+  }
+}
+
+Future<void> concluirCadastro(WidgetTester tester, {required bool avisos}) async {
+  await openOnboarding(tester);
+  await tester.enterText(find.byKey(const Key('onboarding_token_field')), 'convite-123');
+  await tapKey(tester, 'onboarding_consent_health');
+  await tapKey(tester, 'onboarding_terms_accept');
+  if (avisos) await tapKey(tester, 'onboarding_consent_push');
+  await tapKey(tester, 'complete_enrollment_button');
 }
 
 /// Token sintético no formato real (43 caracteres base64url).
@@ -122,6 +142,30 @@ void main() {
       'pushConsent': false,
       'termsAccepted': true,
     });
+    expect(find.text('Triagem rápida'), findsOneWidget);
+  });
+
+  testWidgets('cadastro com "Avisos da equipe" marcado registra o token sem consultar o servidor',
+      (tester) async {
+    final backend = FakePatientBackend();
+    final fonte = _FonteDeToken();
+    await tester.pumpWidget(SinalAcsApp(backend: backend, pushTokens: fonte));
+    await concluirCadastro(tester, avisos: true);
+
+    expect(backend.pushRegistrations, [('tok-onb', 'android')]);
+    expect(backend.hasGrantedConsentCalls, 0);
+    expect(backend.myDataCallCount, 0);
+  });
+
+  testWidgets('cadastro sem "Avisos da equipe": o aparelho nem é consultado', (tester) async {
+    final backend = FakePatientBackend();
+    final fonte = _FonteDeToken();
+    await tester.pumpWidget(SinalAcsApp(backend: backend, pushTokens: fonte));
+    await concluirCadastro(tester, avisos: false);
+
+    expect(fonte.calls, 0);
+    expect(backend.pushRegistrations, isEmpty);
+    expect(backend.hasGrantedConsentCalls, 0);
     expect(find.text('Triagem rápida'), findsOneWidget);
   });
 

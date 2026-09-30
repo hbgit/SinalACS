@@ -94,7 +94,7 @@ void main() {
       (tester) async {
     final backend = FakePatientBackend()
       ..addConsentRecord('segmentedPush', 'granted', DateTime.utc(2026, 9, 1))
-      ..addConsentRecord('segmentedPush', 'revoked', DateTime.utc(2026, 9, 2));
+      ..addConsentRecord('segmentedPush', 'denied', DateTime.utc(2026, 9, 2));
     final source = _CountingSource();
     await tester.pumpWidget(SinalAcsApp(backend: backend, pushTokens: source));
     await login(tester);
@@ -102,10 +102,10 @@ void main() {
     expect(source.calls, 0);
   });
 
-  testWidgets('myData falhando no login fecha: nada é pedido nem registrado', (tester) async {
+  testWidgets('consulta de consentimento falhando no login fecha: nada é pedido nem registrado', (tester) async {
     final backend = FakePatientBackend()
       ..grantPushConsent()
-      ..myDataFailure = const BackendFailure('falha');
+      ..hasGrantedConsentFailure = const BackendFailure('falha');
     final source = _CountingSource();
     await tester.pumpWidget(SinalAcsApp(backend: backend, pushTokens: source));
     await login(tester);
@@ -114,17 +114,30 @@ void main() {
     expect(find.byType(PatientHomeShell), findsOneWidget);
   });
 
-  testWidgets('myData que nunca responde não atrasa a home e nada é pedido', (tester) async {
+  testWidgets('consulta que nunca responde não atrasa a home; a resposta tardia é descartada',
+      (tester) async {
     final backend = FakePatientBackend()..grantPushConsent();
     final gate = Completer<void>();
-    backend.myDataGate = gate;
+    backend.hasGrantedConsentGate = gate;
     final source = _CountingSource();
     await tester.pumpWidget(SinalAcsApp(backend: backend, pushTokens: source));
     await login(tester);
 
     expect(find.byType(PatientHomeShell), findsOneWidget);
-    await tester.pump(const Duration(seconds: 4));
+    await tester.pump(const Duration(seconds: 4)); // estoura o teto de 3 s
+    gate.complete(); // a resposta chega tarde, dizendo "concedido"
+    await tester.pumpAndSettle();
     expect(source.calls, 0);
+    expect(backend.pushRegistrations, isEmpty);
+  });
+
+  testWidgets('o login não lê o painel "Meus dados" só para decidir o push', (tester) async {
+    final backend = FakePatientBackend()..grantPushConsent();
+    await tester.pumpWidget(SinalAcsApp(backend: backend, pushTokens: _CountingSource()));
+    await login(tester);
+
+    expect(backend.hasGrantedConsentCalls, 1);
+    expect(backend.myDataCallCount, 0, reason: 'myData grava auditoria de leitura e devolve o dossiê');
   });
 
   testWidgets('com consentimento vigente, o login registra o token', (tester) async {

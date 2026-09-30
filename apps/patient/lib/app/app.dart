@@ -812,7 +812,12 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         // Intencionalmente silencioso — ver comentário acima.
       }
       if (!mounted) return;
-      unawaited(registerPushDevice(BackendScope.of(context), PushTokenScope.maybeOf(context)));
+      // O cadastro acabou de gravar a decisão: sem consentimento, nem chega ao
+      // provedor; com ele, dispensa a consulta ao servidor.
+      if (_pushConsent) {
+        unawaited(registerPushDevice(BackendScope.of(context), PushTokenScope.maybeOf(context),
+            consentKnownGranted: true));
+      }
       // Mesmo caminho que `_PatientLoginScreenState._enter()` já usa para
       // entrar na navegação principal — a sessão já está em `BackendScope`,
       // não há estado novo para duplicar aqui.

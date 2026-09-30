@@ -316,6 +316,42 @@ void main() {
     });
   });
 
+  group('hasGrantedConsent (LGPD-RF05, RF14)', () {
+    ConsentLogEntry linha(String action, int minutos, {ConsentPurpose purpose = ConsentPurpose.segmentedPush}) =>
+        ConsentLogEntry(
+          userId: _patientId,
+          purpose: purpose,
+          action: action,
+          version: consentPolicyVersion,
+          timestamp: _now.add(Duration(minutes: minutos)),
+        );
+
+    test('sem nenhuma linha da finalidade, não concedeu (nem com outra finalidade concedida)', () async {
+      expect(await service.hasGrantedConsent(_patient, ConsentPurpose.segmentedPush), isFalse);
+      store.consents.add(linha('granted', 0, purpose: ConsentPurpose.localReminders));
+      expect(await service.hasGrantedConsent(_patient, ConsentPurpose.segmentedPush), isFalse);
+    });
+
+    test('a linha mais recente "granted" conta, qualquer que seja a ordem de gravação', () async {
+      store.consents.add(linha('granted', 5));
+      store.consents.add(linha('denied', 0));
+      expect(await service.hasGrantedConsent(_patient, ConsentPurpose.segmentedPush), isTrue);
+    });
+
+    test('revogado depois de concedido não conta', () async {
+      store.consents.add(linha('granted', 0));
+      store.consents.add(linha('denied', 5));
+      expect(await service.hasGrantedConsent(_patient, ConsentPurpose.segmentedPush), isFalse);
+    });
+
+    test('só paciente consulta: ACS é recusado', () async {
+      await expectLater(
+        service.hasGrantedConsent(_acs, ConsentPurpose.segmentedPush),
+        throwsA(isA<StateError>()),
+      );
+    });
+  });
+
   group('updateConsent (LGPD-RF05)', () {
     test('a linha de auditoria aponta para a linha de consentimento gravada', () async {
       await service.updateConsent(_patient, purpose: ConsentPurpose.localReminders, granted: false);

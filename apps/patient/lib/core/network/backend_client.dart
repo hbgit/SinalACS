@@ -151,6 +151,11 @@ abstract class PatientBackend {
   /// mostra o convite ao aceite.
   Future<bool> hasAcceptedCurrentTerms();
 
+  /// Se a decisão mais recente do titular para [purpose] é `granted`. Um `bool`
+  /// vindo do servidor, sem o painel "Meus Dados" e sem auditoria de leitura: o
+  /// app pergunta isto a cada login antes de falar com o provedor de push.
+  Future<bool> hasGrantedConsent(ConsentPurpose purpose);
+
   /// Pede a exclusão dos próprios dados (LGPD-RF08). Pedir de novo com um
   /// pedido aberto devolve o mesmo.
   Future<PatientDataSubjectRequestRecord> requestDataDeletion();
@@ -260,6 +265,9 @@ class MisconfiguredBackend implements PatientBackend {
 
   @override
   Future<bool> hasAcceptedCurrentTerms() async => _recusar();
+
+  @override
+  Future<bool> hasGrantedConsent(ConsentPurpose purpose) async => _recusar();
 
   @override
   Future<TermsChangeNotice?> termsChangeNotice() async => _recusar();
@@ -576,6 +584,12 @@ class BackendClient implements PatientBackend {
   Future<bool> hasAcceptedCurrentTerms() async {
     final token = await _requireToken();
     return _guard(() => _client.patients.hasAcceptedCurrentTerms(accessToken: token));
+  }
+
+  @override
+  Future<bool> hasGrantedConsent(ConsentPurpose purpose) async {
+    final token = await _requireToken();
+    return _guard(() => _client.patients.hasGrantedConsent(accessToken: token, purpose: purpose));
   }
 
   @override

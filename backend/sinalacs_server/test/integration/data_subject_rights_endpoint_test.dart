@@ -315,6 +315,37 @@ void main() {
       );
     });
 
+    test('hasGrantedConsent: acompanha a decisão mais recente e não grava auditoria', () async {
+      final session = sessionBuilder.build();
+      await _seed(session);
+      final token = await patientToken();
+      Future<bool> consulta() => endpoints.patients
+          .hasGrantedConsent(sessionBuilder, accessToken: token, purpose: ConsentPurpose.segmentedPush);
+
+      expect(await consulta(), isFalse);
+      await endpoints.patients
+          .updateConsent(sessionBuilder, accessToken: token, purpose: ConsentPurpose.segmentedPush, granted: true);
+      final auditoriaAntes = await AuditLog.db.count(session);
+      expect(await consulta(), isTrue);
+      expect(await AuditLog.db.count(session), auditoriaAntes);
+      await endpoints.patients
+          .updateConsent(sessionBuilder, accessToken: token, purpose: ConsentPurpose.segmentedPush, granted: false);
+      expect(await consulta(), isFalse);
+    });
+
+    test('hasGrantedConsent recusa token de ACS', () async {
+      final session = sessionBuilder.build();
+      await _seed(session);
+      final acsToken =
+          (await endpoints.auth.developmentLogin(sessionBuilder, role: 'acs')).accessToken;
+
+      await expectLater(
+        endpoints.patients.hasGrantedConsent(
+            sessionBuilder, accessToken: acsToken, purpose: ConsentPurpose.segmentedPush),
+        throwsA(isA<AlertPermissionException>()),
+      );
+    });
+
     test('acceptTermsOfUse duas vezes grava uma linha só', () async {
       final session = sessionBuilder.build();
       await _seed(session);

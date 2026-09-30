@@ -605,6 +605,31 @@ class Endpoints extends _i1.EndpointDispatch {
                     accessToken: params['accessToken'],
                   ),
         ),
+        'hasGrantedConsent': _i1.MethodConnector(
+          name: 'hasGrantedConsent',
+          params: {
+            'accessToken': _i1.ParameterDescription(
+              name: 'accessToken',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'purpose': _i1.ParameterDescription(
+              name: 'purpose',
+              type: _i1.getType<_i11.ConsentPurpose>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async => (endpoints['patients'] as _i8.PatientsEndpoint)
+                  .hasGrantedConsent(
+                    session,
+                    accessToken: params['accessToken'],
+                    purpose: params['purpose'],
+                  ),
+        ),
         'termsChangeNotice': _i1.MethodConnector(
           name: 'termsChangeNotice',
           params: {

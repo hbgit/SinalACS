@@ -446,6 +446,22 @@ class EndpointPatients extends EndpointAuthenticated {
         {'accessToken': accessToken},
       );
 
+  /// Se a decisão mais recente do titular para [purpose] é `granted` — um
+  /// `bool`, sem ler o painel "Meus Dados" e sem linha de auditoria de leitura.
+  /// O app pergunta isto a cada login antes de pedir o token ao provedor de
+  /// push (RF14).
+  _i2.Future<bool> hasGrantedConsent({
+    required String accessToken,
+    required _i14.ConsentPurpose purpose,
+  }) => caller.callServerEndpoint<bool>(
+    'patients',
+    'hasGrantedConsent',
+    {
+      'accessToken': accessToken,
+      'purpose': purpose,
+    },
+  );
+
   /// Aviso de mudança dos termos ativo agora (LGPD-RF18, 15 dias de antecedência),
   /// ou `null`. Só paciente. Sem leitura de banco e sem linha de auditoria: a
   /// agenda é uma constante do repositório e nada do titular é lido nem gravado.

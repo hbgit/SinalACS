@@ -953,6 +953,41 @@ class _PatientsEndpoint {
     });
   }
 
+  _i3.Future<bool> hasGrantedConsent(
+    _i1.TestSessionBuilder sessionBuilder, {
+    required String accessToken,
+    required _i15.ConsentPurpose purpose,
+  }) async {
+    return _i1.callAwaitableFunctionAndHandleExceptions(() async {
+      var _localUniqueSession =
+          (sessionBuilder as _i1.InternalTestSessionBuilder).internalBuild(
+            endpoint: 'patients',
+            method: 'hasGrantedConsent',
+          );
+      try {
+        var _localCallContext = await _endpointDispatch.getMethodCallContext(
+          createSessionCallback: (_) => _localUniqueSession,
+          endpointPath: 'patients',
+          methodName: 'hasGrantedConsent',
+          parameters: _i1.testObjectToJson({
+            'accessToken': accessToken,
+            'purpose': purpose,
+          }),
+          serializationManager: _serializationManager,
+        );
+        var _localReturnValue =
+            await (_localCallContext.method.call(
+                  _localUniqueSession,
+                  _localCallContext.arguments,
+                )
+                as _i3.Future<bool>);
+        return _localReturnValue;
+      } finally {
+        await _localUniqueSession.close();
+      }
+    });
+  }
+
   _i3.Future<_i16.TermsChangeNotice?> termsChangeNotice(
     _i1.TestSessionBuilder sessionBuilder, {
     required String accessToken,
