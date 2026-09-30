@@ -1094,9 +1094,9 @@ O que **não** foi feito, de propósito:
   `pg_advisory_xact_lock` por titular, já que o Serverpod não declara `WHERE` em
   índice e um índice único parcial não é possível); ver "Fechamento das
   pendências do paciente".
-- **`segmentedPush` tem leitor no código, mas nenhum aviso chega a um aparelho ainda**:
-  `notices.sendSegmented` respeita o consentimento, mas não há Gorush hospedado, credenciais
-  FCM/APNs nem lado nativo do token (RF14, ver "RF14: envio de avisos segmentados com Gorush").
+- **`segmentedPush` tem leitor no código e o aviso chega a um emulador Android** (RF14, ver
+  "RF14: Gorush e FCM provados no emulador"): falta hospedar o Gorush fora do Compose local,
+  iOS/APNs e um teste em aparelho físico.
 
 ## QR Code do onboarding e documentos legais (2026-09-29)
 
@@ -1161,7 +1161,7 @@ Plano: `docs/superpowers/plans/2026-09-29-menores-adiados-e-push-do-paciente.md`
 - ~~Revogar grava o `denied` e apaga os tokens em duas operações~~ — resolvido na rodada "Menores do push e aviso de 15 dias": as duas coisas são uma transação só.
 - `devices.registerPushToken` só grava auditoria na **troca de dono** do token (`push_token`); registrar e repetir não, porque a revogação já deixa `consent_log`.
 - ~~Sem teto de tokens por titular; sem teste da fonte que nunca completa; `PushTokenScope.of` sem `maybeOf`~~ — resolvidos na rodada "Menores do push e aviso de 15 dias".
-- Envio segmentado, tela de avisos do ACS e captura do token nativo: **o código do envio e a tela foram feitos depois**, ver "RF14: envio de avisos segmentados com Gorush". Continuam pendentes o Gorush hospedado, as credenciais FCM/APNs e o lado nativo do token (§3.2, revisado em 2026-09-29).
+- Envio segmentado, tela de avisos do ACS e captura do token nativo: **o código do envio e a tela foram feitos depois**, ver "RF14: envio de avisos segmentados com Gorush". Depois disso o lado nativo Android do token e a entrega real foram provados no emulador (ver "RF14: Gorush e FCM provados no emulador"); continuam pendentes o Gorush hospedado fora do Compose local e iOS/APNs (§3.2, revisado em 2026-09-29).
 - Apagar tokens ao atender o pedido de exclusão: pertence ao backoffice que atende os pedidos, ainda inexistente.
 - ~~Aviso de 15 dias de mudança dos termos~~ — feito na rodada "Menores do push e aviso de 15 dias" (a agenda está vazia); revisão jurídica do texto 2026.1 segue pendente.
 - O erro de um pedido em "Meus dados" aparece no topo da lista, fora da tela para quem rolou até o botão (anterior a esta rodada).
@@ -1189,9 +1189,9 @@ Plano: `docs/superpowers/plans/2026-09-29-rf14-gorush-avisos-segmentados.md`, br
 - **Paciente:** `pushTokenSourceProvider` (único uso de `flutter_riverpod`, ^3.4.3) e `NativePushTokenSource` sobre o canal `sinalacs/push_token`.
 - Contagens de teste: backend 390, paciente 197, ACS 178.
 
-**O que NÃO está provado nem pronto:**
-- **Nenhum teste fala com um Gorush ou com o FCM/APNs de verdade.** O cliente é provado contra um servidor HTTP falso; nunca se viu um push chegar a um aparelho.
-- **O lado nativo do canal (Kotlin/Swift) não existe:** o app do paciente nunca obtém um token real, então `push_tokens` só tem linhas de teste.
+**O que NÃO estava provado nessa rodada (superado pela seção "RF14: Gorush e FCM provados no emulador", abaixo):**
+- ~~Nenhum teste fala com um Gorush ou com o FCM/APNs de verdade~~ — provado em 2026-09-30 no emulador Android.
+- ~~O lado nativo do canal (Kotlin/Swift) não existe~~ — o lado Android existe; o iOS (Swift) continua inexistente.
 - As credenciais FCM (conta de serviço) e APNs (chave `.p8`) são da organização e não estão no repositório; o `config.yml` foi escrito sem conferir os nomes das chaves contra uma tag fixa do `appleboy/gorush`, e o Compose usa `:latest`.
 - O `async` do app do paciente subiu de 2.11.0 para 2.13.1 por causa do Riverpod 3.
 
@@ -1238,3 +1238,26 @@ Plano: `docs/superpowers/plans/2026-09-30-menores-do-rf14-e-texto-novo-dos-termo
 
 **Achados do revisor final, corrigidos:** o detalhe do texto novo (`LegalDocumentScreen`) dizia "vigente desde" e o histórico chamava a versão futura de vigente, 15 dias antes da data — agora diz "passa a valer em <data>", com teste; o teste de amarração backend×app passava em silêncio quando não entendia a agenda (aspas duplas, constante, `;` no resumo, comentário enganoso) — agora o leitor tem três estados e **lança** em vez de tratar "não entendi" como "sem agenda". **Deferido:** a linha `lost` grava o dono anterior como `userId` de um `write` que ele não fez (documentado em `spec/lgpd_data_audit.md`); o registro recusado apaga o vínculo do dono anterior sem rastro; o desempate por id é estável mas arbitrário (e o painel "Meus dados" ordena só por timestamp); corrida da poda contra outra troca de dono pode gerar um 500 no registro; `catch (_)` sem log na poda de tokens do envio; `on StateError` no `GorushClient` cobre mais do que o `postUrl`; `failed` inflado por `failed-push` repetido do mesmo token; o `FilledButton.tonal` "Ler o texto novo" sem contraste medido; a poda sem desempate final por `id`.
 
+
+## RF14: Gorush e FCM provados no emulador (2026-09-30)
+
+Plano: `docs/superpowers/plans/2026-09-30-gorush-fcm-e2e-emulador.md`, branch `fix/patient`. **Provado no `emulator-5554` (Android 16, Google Play, projeto Firebase `sinal-acs`, Gorush 1.22.0 no Compose local), pelo `scripts/qa/push_e2e.sh --negativos`, que saiu com 0:**
+
+- Um aviso enviado pelo ACS (`notices.sendSegmented`) atravessa backend → Gorush → FCM → Play Services e **aparece na bandeja do aparelho** com o título e o texto enviados (`recipients=1 accepted=1`, auditoria `granted`).
+- O app obtém um **token FCM real** pelo canal `sinalacs/push_token` (`MainActivity.kt`, `firebase-messaging`, plugin do Google Services aplicado **só** quando `google-services.json` existe: sem o arquivo o APK compila e o app degrada para "sem push").
+- **Casos negativos observados contra o FCM real:** token falso podado e token real mantido; linha `ios` mantida (não é erro de token) e sem derrubar o Android; Gorush parado falha em ~3 s com "Tente de novo" e nenhum token apagado; revogar apaga os tokens e o envio seguinte tem `recipients=0`; app desinstalado devolve `NotRegistered` e o token é podado.
+
+**O que a execução real corrigiu (nenhum teste com servidor falso pegaria):**
+- `ios.enabled: true` sem a chave APNs derrubava o boot do Gorush (código 1), e `access_log/error_log: "-"` calava todo log: o erro do boot ficava invisível.
+- O Gorush devolve o token **mascarado** por padrão (`log.hide_token`), então a poda nunca casava; o `config.yml` usa `hide_token: false` e o cliente só poda tokens que ele enviou. A string de erro do FCM v1 (`The registration token is not a valid FCM registration token`) não estava na lista.
+- O `GorushClient` tratava todo estouro de tempo como "resultado desconhecido": com o Gorush parado isso dizia "alguns pacientes podem já ter recebido" e nada tinha sido enviado. A conexão agora tem tempo próprio (2 s): estourar ali é "inacessível, tente de novo".
+- O ambiente do shell trazia `GORUSH_CREDENTIALS_DIR` apontando para um **arquivo**; o Compose o prioriza sobre o `.env` e montou o arquivo como `/credentials` (o Gorush caía). `push_e2e.sh` ignora o valor do ambiente, com aviso.
+
+**Limites (o que continua sem prova):**
+- **iOS/APNs:** sem app iOS, sem chave APNs, `ios.enabled: false`. **`accepted` superconta tokens `ios` enquanto o iOS está desligado** (o Gorush os descarta sem log e eles entram como aceitos): sem app iOS não há token `ios`, então só aparece em teste.
+- **Aparelho físico:** só emulador. A entrega com o celular bloqueado, em modo economia de bateria ou sem Play Services não foi exercida.
+- O registro foi feito por `developmentLogin` dentro de um teste de integração, **não** pelo fluxo de tela (login OTP → `registerPushDevice`), que só tem testes de widget com backend falso. O app também não trata renovação de token (`onNewToken`) nem abre tela ao tocar na notificação.
+- O teste de registro **segura o app instalado** por `PUSH_HOLD_SECONDS`: o `flutter test` desinstala o app ao terminar e o token morre. Sem a permissão `POST_NOTIFICATIONS` (Android 13+) o token registra mas o aviso não aparece; o teste concede a permissão por `adb`, e no app real quem a pede é o `main.dart`.
+- Com FCM em primeiro plano a mensagem de notificação não vai para a bandeja: o teste manda o app para segundo plano.
+- `hide_token: false` faz o `docker logs` do Gorush imprimir tokens de aparelho; o teste deixou um token **já morto** aparecer na saída. Em produção, restringir o acesso ao log do Gorush.
+- Gorush hospedado fora do Compose local, rotação da chave da conta de serviço e a chave em modo `644` em `/opt/apps_android/` (cópia fora do repositório, legível por outros usuários da máquina).

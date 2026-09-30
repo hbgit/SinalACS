@@ -41,8 +41,32 @@ Com a chave real do projeto `sinal-acs` e um token **falso** (nada é entregue a
   (`/bin/gorush --ping`) e roda como `gorush` (uid 1000). A chave deve ter modo `600` e ser
   legível por esse uid; se o uid do dono da chave for outro, use `chown`/grupo, não `644`.
 
+## Entrega real, observada no emulador Android (2026-09-30)
+
+`scripts/qa/push_e2e.sh --negativos` (precisa da chave e do emulador; não roda na CI):
+
+- Um aviso do ACS chega à **bandeja** do aparelho com o título e o texto enviados; o FCM
+  devolve `NotRegistered` para o token de um app desinstalado (já na lista de erros
+  reconhecidos), e o token é podado.
+- Token falso (150 caracteres) é podado; uma linha `ios` com `ios.enabled: false` **não é
+  apagada** e **não derruba** o Android. `accepted` **superconta** tokens `ios` nessa
+  situação (o Gorush os descarta sem log).
+- Gorush parado: o nome `gorush` não resolve e a conexão fica pendurada; o backend agora
+  tem tempo de conexão próprio (2 s) e responde "inacessível, tente de novo" em ~3 s, sem
+  apagar token algum. Um estouro **depois** de o pedido sair continua sendo "resultado
+  desconhecido".
+- Sem a permissão `POST_NOTIFICATIONS` (Android 13+) o token registra mas o aviso não
+  aparece; com o app em primeiro plano o FCM não mostra a mensagem de notificação.
+- **Cuidado com `GORUSH_CREDENTIALS_DIR`:** precisa ser um **diretório**. O ambiente do shell
+  prevalece sobre o `.env`; um valor apontando para um arquivo monta esse arquivo como
+  `/credentials` e o Gorush cai no boot.
+- **`hide_token: false` imprime tokens de aparelho em `docker logs`.** Restrinja o acesso ao
+  log do Gorush.
+
 ## O que ainda não foi verificado
 
-- Entrega real a um aparelho (Task 4 do plano `2026-09-30-gorush-fcm-e2e-emulador.md`).
-- iOS/APNs: sem app iOS e sem chave APNs.
+- iOS/APNs: sem app iOS e sem chave APNs (`ios.enabled: false`).
+- Aparelho físico, celular bloqueado, economia de bateria e aparelho sem Play Services.
+- Renovação do token (`onNewToken`) e abrir uma tela ao tocar na notificação.
 - A string de erro de outros casos do FCM (cota, mensagem malformada) além do token inválido.
+- Gorush hospedado fora do Compose local.

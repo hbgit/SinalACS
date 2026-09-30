@@ -226,8 +226,11 @@ específico já decidido em §2.
 (`devices.registerPushToken`, tabela `push_tokens`, só com o consentimento
 `segmentedPush` vigente), o backend envia (`notices.sendSegmented`, cliente do
 Gorush, restrito ao ACS — o perfil admin não existe ainda) e a tela de avisos do
-ACS chama esse endpoint. Falta hospedar o Gorush, as credenciais FCM/APNs e o
-lado nativo do token no app. Nenhum push real foi visto chegando a um aparelho.
+ACS chama esse endpoint. **Provado em 2026-09-30 no emulador Android** (projeto
+Firebase `sinal-acs`, Gorush 1.22.0 no Compose local): o aviso do ACS chega à
+bandeja do aparelho, com o lado nativo Android do token implementado. Faltam
+iOS/APNs, um teste em aparelho físico e hospedar o Gorush fora do Compose local
+(ver PROGRESS.md, "RF14: Gorush e FCM provados no emulador").
 
 **Decisão aprovada (revisada em 2026-09-29: Gorush no lugar de um SDK/console
 Firebase como ponto de integração):**

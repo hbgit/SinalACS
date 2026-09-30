@@ -44,8 +44,7 @@ onboarding e consentimento (§2, RF02) e a metade central→dispositivo da
 sincronização (§5, RF15 — pull incremental; a leitura fica do lado do ACS,
 não há geração de mudança do lado do paciente ainda). Lembretes locais
 (§3.1, RF06) também têm implementação no app do paciente. Ainda **não**
-implementados de ponta a ponta: push segmentado (§3.2, RF14 — o código do envio existe, com Gorush; falta hospedá-lo e
-provisionar as credenciais FCM/APNs) e geofencing (§4, RF12 — só o contrato de dados
+implementados de ponta a ponta: push segmentado (§3.2, RF14 — provado no emulador Android em 2026-09-30, com Gorush; faltam iOS/APNs, aparelho físico e hospedar o Gorush fora do Compose local) e geofencing (§4, RF12 — só o contrato de dados
 `arrivalMethod` foi desenhado, sem o serviço de geofence em primeiro plano):
 
 * **Criptografia de colunas no PostgreSQL (RNF03/INV-04, §6 — implementada):**
@@ -66,9 +65,9 @@ provisionar as credenciais FCM/APNs) e geofencing (§4, RF12 — só o contrato 
   restrita a quem consentiu (`segmentedPush`); o backend entrega a lista de
   tokens ao Gorush, que fala com o FCM/APNs. O app do paciente adota
   `flutter_riverpod` **somente** na captura e no registro do token
-  (`pushTokenSourceProvider`); o resto da injeção segue por `InheritedWidget`. O Gorush ainda precisa de credencial FCM (Android) e chave
-  APNs (iOS), então a pendência passa de "projeto Firebase" para "hospedar o
-  Gorush e provisionar essas credenciais" — decisão de infra, não de código.
+  (`pushTokenSourceProvider`); o resto da injeção segue por `InheritedWidget`. O Gorush precisa de credencial FCM (Android, já usada no teste) e chave
+  APNs (iOS, ainda inexistente): a pendência é hospedar o Gorush e provisionar a
+  chave APNs — decisão de infra, não de código.
 * **Geofencing (RF12):** rejeitado rastreamento contínuo em segundo plano do
   ACS; adotado geofence único atrelado a uma visita ativa, com serviço em
   primeiro plano e notificação persistente, para evitar a política mais
