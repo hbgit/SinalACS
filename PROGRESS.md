@@ -1216,3 +1216,22 @@ Plano: `docs/superpowers/plans/2026-09-29-menores-do-push-e-aviso-de-mudanca-dos
 - O cartão só aparece quando a home abre; quem já está com o app aberto não o vê até reabrir.
 
 **Achados do revisor final, corrigidos:** o cartão de aviso descia o botão de pânico (e, chegando de forma assíncrona, o moveria sob o dedo), então **não aparece mais na aba de urgência** (teste em tela 360x640); a regra dos 15 dias usava `assert`, que não roda em release, e passou a `ArgumentError`; `spec/lgpd_design.md` ainda listava o aviso como pendente. **Deferido:** poda do teto por `id` sem `userId` (corrida rara com troca de dono), empate de `updatedAt` na poda, injeção de "sem agenda" no serviço, contraste do texto/botão/ícone de fechar do cartão, auditoria da troca de dono sem o dono anterior, `Semantics(header)` do cartão. **Limite conhecido:** a regra dos 15 dias compara datas declaradas; um `publishedAt` retroativo passa.
+
+## Menores do RF14 e texto novo dos termos (2026-09-30)
+
+Plano: `docs/superpowers/plans/2026-09-30-menores-do-rf14-e-texto-novo-dos-termos.md`, branch `fix/patient`.
+
+**O que foi fechado:**
+- **Registro de token:** a poda do teto apaga por id **e** titular e poupa o token recém-gravado (um relógio que voltou o faria parecer o mais antigo); o consentimento mais recente desempata por `id` (no registro, na consulta do login e na gravação do aceite); a troca de dono audita também o **dono anterior** (`push_token`, `result = lost`); `DataSubjectRightsService` aceita um leitor de agenda injetável (`termsChangeReader`).
+- **Envio de avisos:** `GorushClient` encerrável e um só por processo; corpo 2xx ilegível é "resultado desconhecido" (nunca "tente de novo"); `logs` fora de forma é tolerado; falha ao apagar tokens inválidos depois do envio não vira erro; auditoria `not_delivered` quando nenhum aparelho aceitou; `LEFT JOIN` com `patients` (quem não tem linha clínica recebe "para todos" e só fica fora do filtro de crônicos).
+- **Texto novo dos termos durante os 15 dias (LGPD-RF18):** `UpcomingLegalDocuments`/`upcomingLegalDocuments` (hoje `null`), `UpcomingDocumentsScope` e "Ler o texto novo" no cartão, oferecido só quando o app carrega exatamente a versão que o servidor anunciou. Um teste (`upcoming_legal_documents_test.dart`) lê a agenda do backend e falha se as duas pontas divergirem.
+- Cartão de aviso: `Semantics(header)` no título e os três pares de contraste que o tema gera (texto, botão e ícone de fechar) medidos contra o `Card`.
+- Contagens de teste: backend 423, paciente 219, ACS 178. Analyze do backend em 51 infos.
+
+**Ficou de fora, de propósito:**
+- Nenhuma mudança real foi agendada: `upcomingTermsChange` e `upcomingLegalDocuments` seguem `null`, então o cartão e o texto novo só são provados com agendas de teste.
+- Um app antigo, sem o texto embarcado, vê só "Ler os termos atuais" durante os 15 dias. Não há marcação do que mudou (diff) nem aviso a quem já está com o app aberto.
+- A amarração backend×app só é provada por mutação temporária: sem agenda real, o teste passa com os dois `null`.
+- O teste "a poda só apaga tokens do próprio titular" é de caracterização: em execução sequencial ele não reproduz a corrida.
+- Lado nativo do token de push, credenciais FCM/APNs e Gorush real seguem pendentes.
+
