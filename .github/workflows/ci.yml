@@ -219,32 +219,6 @@ jobs:
       GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
     steps:
       - uses: actions/checkout@v7
-      # Credenciais do FCM para o push e2e (Gorush e FCM reais). Cada secret é um arquivo em
-      # base64 (`base64 -w0 arquivo`). A chave da conta de serviço vai para um arquivo
-      # temporário (0600) e GOOGLE_APPLICATION_CREDENTIALS aponta para ele; o
-      # google-services.json vai para onde o build do paciente o procura (sem ele o APK
-      # compila e degrada para "sem push"). Sem os secrets (PR de fork) os passos só avisam
-      # e o job roda como sempre. Cada secret entra por `env:` do PASSO: nunca em `run:`
-      # (injeção de script) e nunca no `env:` do job (toda ação de terceiros o veria) —
-      # ci_invariants.sh vigia as duas coisas.
-      - name: Decodifica a credencial do FCM
-        env:
-          FCM_CREDENTIALS_BASE64: ${{ secrets.FCM_CREDENTIALS_BASE64 }}
-        run: |
-          ./scripts/ci/decode_secret_file.sh --env FCM_CREDENTIALS_BASE64 \
-            --kind service_account --temp-export GOOGLE_APPLICATION_CREDENTIALS
-      - name: Decodifica o google-services.json
-        env:
-          GOOGLE_SERVICES_JSON_BASE64: ${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}
-        run: |
-          ./scripts/ci/decode_secret_file.sh --env GOOGLE_SERVICES_JSON_BASE64 \
-            --kind google_services --package br.com.prismrr.sinalacs.patient \
-            --to apps/patient/android/app/google-services.json
-      # Sem isto o emulador roda por emulação de CPU em software: medido, o log
-      # dizia "ProbeKVM: This user doesn't have permissions to use KVM", o boot
-      # levava ~12 min e cada `adb install` de 45 a 95 s. O runner tem
-      # /dev/kvm, só não para o usuário do job — a regra do udev abre o
-      # dispositivo. É o passo documentado pelo android-emulator-runner.
       - name: Habilita KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
@@ -307,6 +281,34 @@ jobs:
           (cd apps/patient && flutter pub get) & p2=$!
           (cd apps/acs && flutter pub get) & p3=$!
           wait $p1 && wait $p2 && wait $p3
+      # Credenciais do FCM para o push e2e (Gorush e FCM reais). Cada secret é um arquivo em
+      # base64 (`base64 -w0 arquivo`). A chave da conta de serviço vai para um arquivo
+      # temporário (0600) e GOOGLE_APPLICATION_CREDENTIALS aponta para ele; o
+      # google-services.json vai para onde o build do paciente o procura (sem ele o APK
+      # compila e degrada para "sem push"). Sem os secrets (PR de fork) os passos só avisam
+      # e o job roda como sempre. Cada secret entra por `env:` do PASSO: nunca em `run:`
+      # (injeção de script) e nunca no `env:` do job (toda ação de terceiros o veria) —
+      # ci_invariants.sh vigia as duas coisas. Ficam LOGO ANTES do E2E (e depois do
+      # setup de Java/Flutter/caches/AVD): as credenciais só existem em disco quando quem as usa roda,
+      # e nenhuma ação de terceiros que não precisa delas as lê — o guarda também exige isso.
+      - name: Decodifica a credencial do FCM
+        env:
+          FCM_CREDENTIALS_BASE64: ${{ secrets.FCM_CREDENTIALS_BASE64 }}
+        run: |
+          ./scripts/ci/decode_secret_file.sh --env FCM_CREDENTIALS_BASE64 \
+            --kind service_account --temp-export GOOGLE_APPLICATION_CREDENTIALS
+      - name: Decodifica o google-services.json
+        env:
+          GOOGLE_SERVICES_JSON_BASE64: ${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}
+        run: |
+          ./scripts/ci/decode_secret_file.sh --env GOOGLE_SERVICES_JSON_BASE64 \
+            --kind google_services --package br.com.prismrr.sinalacs.patient \
+            --to apps/patient/android/app/google-services.json
+      # Sem isto o emulador roda por emulação de CPU em software: medido, o log
+      # dizia "ProbeKVM: This user doesn't have permissions to use KVM", o boot
+      # levava ~12 min e cada `adb install` de 45 a 95 s. O runner tem
+      # /dev/kvm, só não para o usuário do job — a regra do udev abre o
+      # dispositivo. É o passo documentado pelo android-emulator-runner.
       - name: E2E no emulador Android
         uses: reactivecircus/android-emulator-runner@v2
         with:

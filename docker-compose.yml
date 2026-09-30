@@ -89,6 +89,11 @@ services:
     profiles: [push]
     restart: unless-stopped
     command: ["-c", "/config.yml"]
+    # A chave da conta de serviço tem de ser 0600 (push_e2e.sh exige) e, portanto, só o dono a
+    # lê. A imagem roda como uid 1000; no runner do CI o dono é o usuário `runner` (uid 1001),
+    # e o Gorush cairia com EACCES. O container roda com o uid/gid de quem montou a chave
+    # (ci_push_e2e.sh os exporta); fora do CI o padrão 1000 é o da imagem.
+    user: "${GORUSH_UID:-1000}:${GORUSH_GID:-1000}"
     environment:
       GORUSH_IOS_KEY_ID: ${GORUSH_IOS_KEY_ID:-}
       GORUSH_IOS_TEAM_ID: ${GORUSH_IOS_TEAM_ID:-}

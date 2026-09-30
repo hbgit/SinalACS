@@ -47,6 +47,8 @@ muta limpeza_sem_chave_do_gorush \
   "t.replace('--cleanup-file infra/docker/gorush/credentials/fcm-service-account.json', 'true', 1)"
 muta decodifica_depois_do_e2e \
   "t.replace('      - name: Decodifica o google-services.json', '      - name: Decodifica o google-services.json (movido)', 1)"
+muta credencial_em_disco_durante_acao_de_terceiros \
+  "t.replace('      - name: E2E no emulador Android\n', '      - uses: actions/setup-java@v6\n      - name: E2E no emulador Android\n', 1)"
 muta emulador_sem_play_services \
   "t.replace('          target: google_apis\n', '', 1)"
 muta cache_do_avd_sem_o_target \

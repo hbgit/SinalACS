@@ -23,4 +23,9 @@ if [[ -z "$origem" || ! -f "$origem" || ! -f "$google_services" ]]; then
 fi
 
 install -D -m 600 "$origem" "$destino"
+# O Gorush (imagem com uid 1000) precisa ler esta chave 0600, que pertence ao usuário do
+# runner (uid 1001): o container roda com o uid/gid de quem a instalou (docker-compose.yml).
+export GORUSH_UID GORUSH_GID
+GORUSH_UID="$(id -u)"
+GORUSH_GID="$(id -g)"
 exec "$push"

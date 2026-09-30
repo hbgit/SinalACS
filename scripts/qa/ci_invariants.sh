@@ -230,6 +230,14 @@ def check_credenciais_fcm():
             falhas.append(f'FCM: o passo {nome_passo!r} precisa chamar scripts/ci/decode_secret_file.sh')
         if indice_e2e is not None and i > indice_e2e:
             falhas.append(f'FCM: {nome_passo!r} vem DEPOIS do E2E; o arquivo não existiria nele')
+    # As credenciais só podem existir em disco quando o passo do E2E (que as usa) roda: entre a
+    # primeira decodificação e ele não pode haver ação de terceiros (setup-java, flutter-action,
+    # cache...), que leria os arquivos sem precisar deles. Só passos `run:` ficam no meio.
+    decodificados = [nomes.index(n) for n in SEGREDOS_FCM.values() if n in nomes]
+    if decodificados and indice_e2e is not None:
+        for passo in passos[min(decodificados) + 1:indice_e2e]:
+            if passo.get('uses'):
+                falhas.append(f"FCM: a ação {passo['uses']!r} roda com as credenciais já em disco; decodifique logo antes de 'E2E no emulador Android'")
     limpeza = [p for p in passos[ultimo + 1:] if p.get('name') == LIMPEZA_FCM]
     if not limpeza:
         falhas.append(f'FCM: nenhum passo {LIMPEZA_FCM!r} depois das decodificações')

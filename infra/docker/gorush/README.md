@@ -87,3 +87,10 @@ a imagem padrão da action é AOSP e o FCM não entrega token nela.
 
 Os arquivos são apagados por um passo `if: always()`; `scripts/ci/decode_secret_file.sh` nunca
 imprime o conteúdo e não sobrescreve nem apaga arquivos de um desenvolvedor fora do CI.
+
+**Dono da chave no runner.** A chave precisa ser `0600` (o `push_e2e.sh` exige) e a imagem do
+Gorush roda como uid 1000, mas no runner o dono é o usuário `runner` (uid 1001): o Gorush cairia
+com `cannot read credentials file … permission denied`. Por isso o serviço `gorush` do
+`docker-compose.yml` roda com `user: ${GORUSH_UID:-1000}:${GORUSH_GID:-1000}` e o
+`ci_push_e2e.sh` exporta o uid/gid de quem instalou a chave. Fora do CI o padrão 1000 é o da imagem.
+

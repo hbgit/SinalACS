@@ -3,6 +3,7 @@
 set -uo pipefail
 cd "$(dirname "$0")/../.."
 orig="$PWD/scripts/qa/ci_push_e2e.sh"
+repo="$PWD"
 raiz="$(mktemp -d)"; trap 'rm -rf "$raiz"' EXIT
 marcador="$raiz/falhas"; : >"$marcador"
 afirma() { if eval "$2"; then echo "ok: $1"; else echo "FALHOU: $1"; echo x >>"$marcador"; fi; }
@@ -14,6 +15,7 @@ nova_arvore() {
 #!/usr/bin/env bash
 echo "chamado" >>"$(dirname "$0")/chamadas"
 [[ -f infra/docker/gorush/credentials/fcm-service-account.json ]] && stat -c %a infra/docker/gorush/credentials/fcm-service-account.json >"$(dirname "$0")/modo_da_chave"
+echo "${GORUSH_UID:-}:${GORUSH_GID:-}" >"$(dirname "$0")/uid_gid"
 exit "${STUB_RC:-0}"
 STUB
   chmod +x "$R/stub_push.sh" "$R/scripts/qa/ci_push_e2e.sh"
@@ -50,6 +52,8 @@ out="$(roda)"; rc=$?
 cofre="$R/infra/docker/gorush/credentials/fcm-service-account.json"
 afirma "com os dois: instala a chave idêntica em 0600" '[[ "$(cat "$cofre")" == "$(cat "$raiz/chave.json")" && "$(cat "$R/modo_da_chave")" == 600 ]]'
 afirma "com os dois: chama o push e2e uma vez" '[[ "$(wc -l <"$R/chamadas")" -eq 1 ]]'
+afirma "o container do Gorush roda com o uid/gid do host (a chave 0600 é do usuário do runner)" '[[ "$(cat "$R/uid_gid")" == "$(id -u):$(id -g)" ]]'
+afirma "o docker-compose.yml usa GORUSH_UID/GORUSH_GID no serviço gorush" 'sed -n "/^  gorush:/,/^  serverpod:/p" "$repo/docker-compose.yml" | grep -q "GORUSH_UID" && sed -n "/^  gorush:/,/^  serverpod:/p" "$repo/docker-compose.yml" | grep -q "GORUSH_GID"'
 afirma "a saída não imprime o conteúdo da chave" '! grep -q "FAKE" <<<"$out"'
 
 nova_arvore
