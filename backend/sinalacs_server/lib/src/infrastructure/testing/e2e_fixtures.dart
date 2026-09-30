@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:math';
 
 /// Dados SINTÉTICOS de uma execução de e2e. Nada aqui é estável entre
@@ -188,4 +189,48 @@ E2eFixtures generateE2eFixtures(Random random) {
       patient('outsider', 'Paciente E2E Outra Área', chronic: false, microAreaId: otherMicroAreaId),
     ],
   );
+}
+
+/// Por que o seed de e2e deve RECUSAR rodar neste ambiente, ou `null` se pode.
+///
+/// Só escreve no banco `sinalacs_e2e` do `postgres-test` local (publicado em
+/// `localhost:9090`): o nome sozinho não basta, porque um banco de mesmo nome em
+/// outro servidor passaria. Exigir host local e a porta do `postgres-test` fecha
+/// esse caminho (o banco de desenvolvimento fica em `postgres:5432`).
+String? e2eSeedRefusal(Map<String, String> env) {
+  if ((env['APP_ENV'] ?? 'development') != 'development') {
+    return 'APP_ENV=${env['APP_ENV']}; este seed é só de desenvolvimento.';
+  }
+  if (env['SERVERPOD_DATABASE_NAME'] != 'sinalacs_e2e') {
+    return 'este seed só escreve no banco sinalacs_e2e.';
+  }
+  final host = (env['SERVERPOD_DATABASE_HOST'] ?? 'localhost').toLowerCase();
+  if (host != 'localhost' && host != '127.0.0.1') {
+    return 'o host do banco deve ser local (localhost ou 127.0.0.1), e não "$host".';
+  }
+  if ((env['SERVERPOD_DATABASE_PORT'] ?? '9090') != '9090') {
+    return 'a porta do banco deve ser a 9090 do postgres-test.';
+  }
+  if ((env['SERVERPOD_DATABASE_PASSWORD'] ?? '').isEmpty) {
+    return 'SERVERPOD_DATABASE_PASSWORD não definida.';
+  }
+  return null;
+}
+
+/// Grava o manifesto já PRIVADO: o diretório em 0700 e o arquivo em 0600 ANTES de
+/// receber o conteúdo (criar com o umask e só depois restringir deixaria uma
+/// janela em que a senha do ACS é legível por outros usuários da máquina).
+void writeManifestPrivately(File file, String content) {
+  file.parent.createSync(recursive: true);
+  _chmod('700', file.parent.path);
+  if (!file.existsSync()) file.createSync();
+  _chmod('600', file.path);
+  file.writeAsStringSync(content);
+}
+
+void _chmod(String mode, String path) {
+  final result = Process.runSync('chmod', [mode, path]);
+  if (result.exitCode != 0) {
+    throw StateError('chmod $mode falhou em $path: ${result.stderr}'.trim());
+  }
 }

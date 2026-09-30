@@ -23,6 +23,12 @@ Future<(HttpServer, List<String>)> _rele({required String codigo, int naoRespond
   final desdes = <String>[];
   var chamadas = 0;
   server.listen((request) async {
+    if (request.uri.path == '/count') {
+      desdes.add('count:${request.uri.queryParameters['since']}');
+      request.response.write('2');
+      await request.response.close();
+      return;
+    }
     if (request.uri.path == '/now') {
       request.response.write('$relogioDoHost');
       await request.response.close();
@@ -97,6 +103,15 @@ void main() {
     // adiantado ou atrasado não pode fazer o relé negar o código do pedido.
     expect(desdes, hasLength(3));
     expect(desdes.every((d) => d == '1700000000000'), isTrue);
+  });
+
+  test('relayCount devolve quantos códigos o relé viu depois do corte', () async {
+    final (server, desdes) = await _rele(codigo: '123456');
+
+    final n = await relayCount('http://127.0.0.1:${server.port}/code', 42);
+
+    expect(n, 2);
+    expect(desdes, ['count:42']);
   });
 
   test('relé mudo: falha com a dica de subir o relé, sem chamar o verifyOtp', () async {

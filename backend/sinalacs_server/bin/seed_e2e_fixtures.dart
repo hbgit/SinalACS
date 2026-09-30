@@ -20,19 +20,12 @@ import 'package:sinalacs_server/src/infrastructure/testing/e2e_fixtures.dart';
 /// `sinalacs_test` do `dart test`. CPF, senha e token nunca vão para a saída.
 Future<void> main(List<String> args) async {
   final env = Platform.environment;
-  if ((env['APP_ENV'] ?? 'development') != 'development') {
-    stderr.writeln('Recusando rodar: APP_ENV=${env['APP_ENV']}; este seed é só de desenvolvimento.');
+  final refusal = e2eSeedRefusal(env);
+  if (refusal != null) {
+    stderr.writeln('Recusando rodar: $refusal');
     exit(2);
   }
-  if (env['SERVERPOD_DATABASE_NAME'] != 'sinalacs_e2e') {
-    stderr.writeln('Recusando rodar: este seed só escreve no banco sinalacs_e2e.');
-    exit(2);
-  }
-  final password = env['SERVERPOD_DATABASE_PASSWORD'];
-  if (password == null || password.isEmpty) {
-    stderr.writeln('SERVERPOD_DATABASE_PASSWORD não definida.');
-    exit(2);
-  }
+  final password = env['SERVERPOD_DATABASE_PASSWORD']!;
 
   final config = AppConfig.fromEnvironment();
   // A MESMA chave e o MESMO pepper que o servidor usa (vêm do mesmo .env).
@@ -110,8 +103,6 @@ Future<void> main(List<String> args) async {
   }
 
   final out = File(args.isNotEmpty ? args.first : '.e2e/fixtures.json');
-  out.parent.createSync(recursive: true);
-  out.writeAsStringSync(jsonEncode(fixtures.toJson()));
-  Process.runSync('chmod', ['600', out.path]);
+  writeManifestPrivately(out, jsonEncode(fixtures.toJson()));
   stdout.writeln('Fixtures de e2e gravadas (${fixtures.patients.length} pacientes, 1 ACS) em ${out.path}.');
 }

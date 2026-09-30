@@ -49,6 +49,21 @@ Future<int> relayNow(String relayUrl) async {
   }
 }
 
+/// Quantos códigos o gateway emitiu depois de [sinceMs] (relógio do HOST).
+/// Serve para provar que um erro de digitação não gastou outro pedido de SMS.
+Future<int> relayCount(String relayUrl, int sinceMs) async {
+  final client = HttpClient();
+  try {
+    final request = await client.getUrl(Uri.parse(relayUrl).replace(path: '/count', query: 'since=$sinceMs'));
+    final response = await request.close();
+    final body = await utf8.decodeStream(response);
+    if (response.statusCode != 200) throw StateError('o relé respondeu ${response.statusCode} a /count');
+    return int.parse(body.trim());
+  } finally {
+    client.close(force: true);
+  }
+}
+
 /// O código mais recente escrito DEPOIS de [sinceMs] (epoch, ms).
 Future<String> codeFromRelay(
   String relayUrl,

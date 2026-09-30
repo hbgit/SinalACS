@@ -171,9 +171,12 @@ grep -q 'recipients=1 accepted=1' <<<"$saida" || { echo 'FALHOU: esperado recipi
 # A entrega pelo FCM leva de 1 a dezenas de segundos: espera o texto aparecer em vez de
 # dormir um tempo fixo (um `sleep` curto é uma corrida com a rede do emulador).
 na_bandeja() { # $1 = texto que deve estar na bandeja do app; espera até 45 s
-  local _
+  local _ dump
   for _ in $(seq 1 45); do
-    adb -s "$dev" shell dumpsys notification --noredact 2>/dev/null | grep -A30 "pkg=$app" | grep -q "$1" && return 0
+    # Captura antes de filtrar: `grep -q` fecha o pipe no 1º achado, e sob `pipefail` o
+    # SIGPIPE do `grep -A` viraria um "não achou" falso.
+    dump="$(adb -s "$dev" shell dumpsys notification --noredact 2>/dev/null || true)"
+    grep -A30 "pkg=$app" <<<"$dump" | grep -q "$1" && return 0
     sleep 1
   done
   return 1

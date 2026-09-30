@@ -116,6 +116,8 @@ void main() {
         await digitarCodigo(tester, await codeFromRelay(_relay, pedidoEm));
         await aceitarTermosSePedido(tester);
         expect(find.text('Urgência'), findsOneWidget);
+        // E de fato foi UM pedido: errar o código não pode ter gasto outro SMS.
+        expect(await relayCount(_relay, pedidoEm), 1);
       });
 
       testWidgets('triagem vermelha, alerta, status e Meus dados do próprio paciente', (tester) async {

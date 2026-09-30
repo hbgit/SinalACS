@@ -9,26 +9,42 @@ unset GORUSH_CREDENTIALS_DIR   # o Compose o prioriza sobre o .env (ver PROGRESS
 export GORUSH_CREDENTIALS_DIR="$PWD/infra/docker/gorush/credentials"
 dc() { docker compose --profile test --profile push -f docker-compose.yml -f docker-compose.e2e.yml "$@"; }
 db=sinalacs_e2e
-pg() { docker exec -e PGPASSWORD="$TEST_DATABASE_PASSWORD" sinalacs-postgres-test psql -U postgres -d "${2:-$db}" -Atc "$1"; }
+# `-e PGPASSWORD` sem valor herda do ambiente: a senha não aparece no argv (`ps`).
+export PGPASSWORD="$TEST_DATABASE_PASSWORD"
+pg() { docker exec -e PGPASSWORD sinalacs-postgres-test psql -U postgres -d "${2:-$db}" -Atc "$1"; }
 
 case "${1:-}" in
   up)
     if docker ps --format '{{.Names}}' | grep -qx sinalacs-serverpod; then
       echo 'aviso: o backend em execução (sinalacs-serverpod) será substituído pelo de e2e; ao final, rode `docker compose up -d` para voltar à stack de desenvolvimento.' >&2
     fi
-    dc up -d postgres-test >/dev/null 2>&1
-    until docker exec sinalacs-postgres-test pg_isready -U postgres -d sinalacs_test >/dev/null 2>&1; do sleep 1; done
+    log="$(mktemp)"; trap 'rm -f "$log"' EXIT
+    falhou() { echo "erro: $1" >&2; tail -n 25 "$log" >&2; exit 1; }
+    dc up -d postgres-test >"$log" 2>&1 || falhou 'o postgres-test não subiu'
+    ok=0
+    for _ in $(seq 1 60); do
+      docker exec sinalacs-postgres-test pg_isready -U postgres -d sinalacs_test >/dev/null 2>&1 && { ok=1; break; }
+      sleep 1
+    done
+    [[ "$ok" -eq 1 ]] || falhou 'o postgres-test não ficou pronto em 60 s' 
     # Recria o banco: cada execução parte de um banco vazio.
     dc stop serverpod >/dev/null 2>&1 || true
     pg "drop database if exists $db with (force)" postgres >/dev/null
     pg "create database $db" postgres >/dev/null
     # Só o backend e o relé; os seeds de desenvolvimento NÃO sobem (as fixtures vêm do `seed`).
-    dc up -d --build --force-recreate --no-deps serverpod gorush traefik mosquitto >/dev/null 2>&1
+    # Sem `--no-deps` o Compose sobe também o postgres de desenvolvimento; COM ele, os
+    # certificados do Traefik e o passwordfile do Mosquitto precisam existir de uma subida
+    # anterior da stack normal — a falta aparece aqui em vez de sumir.
+    for f in infra/docker/traefik/runtime/certs/ca.crt; do
+      [[ -f "$f" ]] || falhou "falta $f: suba a stack normal uma vez (docker compose up -d) para gerar os certificados"
+    done
+    dc up -d --build --force-recreate --no-deps serverpod gorush traefik mosquitto >"$log" 2>&1 \
+      || falhou 'a subida do backend falhou'
     for _ in $(seq 1 90); do
       [[ "$(docker inspect -f '{{.State.Health.Status}}' sinalacs-serverpod 2>/dev/null)" == healthy ]] && exit 0
       sleep 2
     done
-    echo 'erro: serverpod não ficou saudável'; dc logs --tail 40 serverpod; exit 1 ;;
+    echo 'erro: serverpod não ficou saudável' >&2; dc logs --tail 40 serverpod >&2; exit 1 ;;
   seed)
     ( cd backend/sinalacs_server && \
       SERVERPOD_DATABASE_HOST=localhost SERVERPOD_DATABASE_PORT=9090 \

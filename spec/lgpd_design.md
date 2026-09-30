@@ -260,6 +260,18 @@ também passa pelo FCM (Google): decisão de produto da §3.2, não tratada aqui
 
 ---
 
+### Dados sintéticos em teste e2e (CPF gerado)
+
+A stack de e2e (`docker-compose.e2e.yml`, `bin/seed_e2e_fixtures.dart`) gera CPFs
+aleatórios **com dígito verificador válido**, porque o login exige essa validade. Não
+existe faixa de CPF reconhecidamente fictícia: um valor gerado pode, por acaso,
+coincidir com o CPF de uma pessoa real. O risco é aceito porque o valor nunca aparece
+sozinho: vem com nome, nascimento e contato inventados, vive só num banco efêmero
+(apagado ao final), só é gravado como HMAC (`users.cpfHash`), o manifesto que o guarda
+é `0600` e apagado ao final, e nenhum log, mensagem de erro ou `toString` o imprime.
+Se a coincidência virar preocupação, a saída é trocar a geração por uma lista fixa de
+CPFs de documentação (como faz `seed_cpf_hashes.dart` para a stack de desenvolvimento).
+
 ## 2. Requisitos para Termo de Uso e Política de Privacidade
 
 ### LGPD-RF18 - Termo de Uso

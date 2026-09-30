@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:math';
 
 import 'package:sinalacs_server/src/application/auth/cpf.dart';
@@ -56,5 +57,45 @@ void main() {
       expect(texto.contains(p.cpf), isFalse);
     }
     expect(texto.contains(f.acs.password), isFalse);
+  });
+
+  group('guarda do seeder (e2eSeedRefusal)', () {
+    const ok = {
+      'APP_ENV': 'development',
+      'SERVERPOD_DATABASE_NAME': 'sinalacs_e2e',
+      'SERVERPOD_DATABASE_HOST': 'localhost',
+      'SERVERPOD_DATABASE_PORT': '9090',
+      'SERVERPOD_DATABASE_PASSWORD': 'x',
+    };
+
+    test('o ambiente esperado passa', () => expect(e2eSeedRefusal(ok), isNull));
+
+    test('recusa outro APP_ENV, outro banco e senha ausente', () {
+      expect(e2eSeedRefusal({...ok, 'APP_ENV': 'production'}), contains('APP_ENV'));
+      expect(e2eSeedRefusal({...ok, 'SERVERPOD_DATABASE_NAME': 'sinalacs_db'}), contains('sinalacs_e2e'));
+      expect(e2eSeedRefusal({...ok}..remove('SERVERPOD_DATABASE_PASSWORD')), contains('PASSWORD'));
+    });
+
+    test('recusa um banco de mesmo nome em OUTRO servidor, e a porta do banco de desenvolvimento', () {
+      expect(e2eSeedRefusal({...ok, 'SERVERPOD_DATABASE_HOST': 'db.exemplo.interno'}), contains('host'));
+      expect(e2eSeedRefusal({...ok, 'SERVERPOD_DATABASE_HOST': 'postgres'}), contains('host'));
+      expect(e2eSeedRefusal({...ok, 'SERVERPOD_DATABASE_PORT': '5432'}), contains('9090'));
+    });
+
+    test('aceita 127.0.0.1 além de localhost', () {
+      expect(e2eSeedRefusal({...ok, 'SERVERPOD_DATABASE_HOST': '127.0.0.1'}), isNull);
+    });
+  });
+
+  test('o manifesto nasce privado: arquivo 600 e diretório 700, nunca legível por outros', () {
+    final dir = Directory.systemTemp.createTempSync('e2e_manifest_');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    final file = File('${dir.path}/sub/fixtures.json');
+
+    writeManifestPrivately(file, '{"a":1}');
+
+    expect(file.readAsStringSync(), '{"a":1}');
+    expect(file.statSync().mode & 0x1ff, 384, reason: '0600');
+    expect(file.parent.statSync().mode & 0x1ff, 448, reason: '0700');
   });
 }
