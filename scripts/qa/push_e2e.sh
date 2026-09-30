@@ -150,10 +150,18 @@ echo "== envio do ACS"
 saida="$(send 'Teste do Gorush')"
 echo "$saida"
 grep -q 'recipients=1 accepted=1' <<<"$saida" || { echo 'FALHOU: esperado recipients=1 accepted=1'; exit 1; }
-sleep 10
-dump="$(adb -s "$dev" shell dumpsys notification --noredact 2>/dev/null)"
-grep -A30 "pkg=$app" <<<"$dump" | grep -q 'SinalACS e2e' || { echo 'FALHOU: título não está na bandeja'; exit 1; }
-grep -A30 "pkg=$app" <<<"$dump" | grep -q 'Teste do Gorush' || { echo 'FALHOU: texto não está na bandeja'; exit 1; }
+# A entrega pelo FCM leva de 1 a dezenas de segundos: espera o texto aparecer em vez de
+# dormir um tempo fixo (um `sleep` curto é uma corrida com a rede do emulador).
+na_bandeja() { # $1 = texto que deve estar na bandeja do app; espera até 45 s
+  local _
+  for _ in $(seq 1 45); do
+    adb -s "$dev" shell dumpsys notification --noredact 2>/dev/null | grep -A30 "pkg=$app" | grep -q "$1" && return 0
+    sleep 1
+  done
+  return 1
+}
+na_bandeja 'SinalACS e2e' || { echo 'FALHOU: título não está na bandeja'; exit 1; }
+na_bandeja 'Teste do Gorush' || { echo 'FALHOU: texto não está na bandeja'; exit 1; }
 [[ "$(psql_q "select result from audit_logs where \"resourceType\"='community_notice' order by timestamp desc limit 1" | head -1)" == granted ]] \
   || { echo 'FALHOU: auditoria não é granted'; exit 1; }
 echo 'caminho feliz: OK'
@@ -167,7 +175,7 @@ if [[ "$negativos" -eq 1 ]]; then
   saida="$(send 'Mistura real falso ios')"; echo "$saida"; sleep 8
   [[ "$(psql_q "select count(*) from push_tokens where token=repeat('x',150)" | head -1)" == 0 ]] || { echo 'FALHOU: o token falso não foi podado'; exit 1; }
   [[ "$(psql_q "select count(*) from push_tokens where platform='ios'" | head -1)" == 1 ]] || { echo 'FALHOU: a linha ios foi apagada'; exit 1; }
-  adb -s "$dev" shell dumpsys notification --noredact 2>/dev/null | grep -q 'Mistura real falso ios' || { echo 'FALHOU: o token real não recebeu'; exit 1; }
+  na_bandeja 'Mistura real falso ios' || { echo 'FALHOU: o token real não recebeu'; exit 1; }
   echo 'token falso podado, ios mantido, token real recebeu: OK'
 
   echo "== Gorush parado, com tokens no banco"
