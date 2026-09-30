@@ -5,6 +5,12 @@
 #
 #   ./scripts/qa/push_e2e.sh              # caminho feliz
 #   ./scripts/qa/push_e2e.sh --negativos  # + token falso/ios, revogação e Gorush parado
+#   ./scripts/qa/push_e2e.sh --e2e-db --negativos  # idem, contra o banco de TESTE (sinalacs_e2e)
+#
+# Com --e2e-db a stack sobe por scripts/qa/e2e_stack.sh (banco de teste efêmero, sem
+# login de desenvolvimento): o paciente entra por OTP real (relé local do código) e o
+# ACS por matrícula e senha, ambos de fixtures geradas na hora. Nada é escrito no
+# banco de desenvolvimento.
 #
 # Pré-requisitos: emulador `emulator-5554` (Google Play, com internet), a chave da conta
 # de serviço em infra/docker/gorush/credentials/fcm-service-account.json e o
@@ -19,9 +25,11 @@ cd "$repo_root"
 export PATH="$PATH:$HOME/Android/Sdk/platform-tools:$HOME/flutter/bin"
 
 negativos=0
+e2e_db=0
 for arg in "$@"; do
   case "$arg" in
     --negativos) negativos=1 ;;
+    --e2e-db) e2e_db=1 ;;
     *) echo "argumento desconhecido: $arg" >&2; exit 2 ;;
   esac
 done
@@ -57,14 +65,31 @@ export GORUSH_URL=http://gorush:8088
 
 pg_user="$(grep '^POSTGRES_USER=' .env | cut -d= -f2)"
 pg_db="$(grep '^POSTGRES_DB=' .env | cut -d= -f2)"
-psql_q() { docker exec sinalacs-postgres psql -U "$pg_user" -d "$pg_db" -Atc "$1"; }
+if [[ "$e2e_db" -eq 1 ]]; then
+  psql_q() { ./scripts/qa/e2e_stack.sh psql "$1"; }
+else
+  psql_q() { docker exec sinalacs-postgres psql -U "$pg_user" -d "$pg_db" -Atc "$1"; }
+fi
 app=br.com.prismrr.sinalacs.patient
 dev=emulator-5554
 adb -s "$dev" get-state >/dev/null 2>&1 || { echo "emulador $dev não encontrado (adb devices)"; exit 4; }
 
 # -- stack -------------------------------------------------------------------
-echo "== stack com o perfil push"
-docker compose --profile push up -d --build >/dev/null 2>&1
+relay_pid=""
+if [[ "$e2e_db" -eq 1 ]]; then
+  echo "== stack de e2e (banco de teste) com o Gorush"
+  ./scripts/qa/e2e_stack.sh up
+  ./scripts/qa/e2e_stack.sh seed
+  python3 scripts/qa/otp_relay.py >/dev/null 2>&1 &
+  relay_pid=$!
+  export ACS_MATRICULA ACS_PASSWORD E2E_FIXTURES_FILE="$repo_root/.e2e/fixtures.json"
+  ACS_MATRICULA="$(python3 -c "import json;print(json.load(open('.e2e/fixtures.json'))['acs']['matricula'])")"
+  ACS_PASSWORD="$(python3 -c "import json;print(json.load(open('.e2e/fixtures.json'))['acs']['password'])")"
+  e2e_fixtures="$(cat .e2e/fixtures.json)"
+else
+  echo "== stack com o perfil push"
+  docker compose --profile push up -d --build >/dev/null 2>&1
+fi
 for _ in $(seq 1 60); do
   [[ "$(docker compose --profile push ps serverpod gorush --format '{{.Status}}' 2>/dev/null | grep -c healthy)" -ge 2 ]] && break
   sleep 3
@@ -73,11 +98,15 @@ done
   || { echo 'erro: serverpod e gorush não ficaram saudáveis'; docker compose --profile push ps; exit 1; }
 
 adb -s "$dev" reverse tcp:8443 tcp:443 >/dev/null
+adb -s "$dev" reverse tcp:8765 tcp:8765 >/dev/null
 hold_pid=""
 cleanup() {
   [[ -n "$hold_pid" ]] && kill "$hold_pid" 2>/dev/null || true
+  [[ -n "$relay_pid" ]] && kill "$relay_pid" 2>/dev/null || true
   docker compose --profile push start gorush >/dev/null 2>&1 || true
   psql_q 'delete from push_tokens' >/dev/null 2>&1 || true
+  # O banco de e2e e o manifesto (com a senha do ACS) não sobram depois do teste.
+  [[ "$e2e_db" -eq 1 ]] && ./scripts/qa/e2e_stack.sh down >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 
@@ -90,6 +119,7 @@ echo "== registro do token FCM real (segura o app por 240 s)"
 psql_q 'delete from push_tokens' >/dev/null
 ( cd apps/patient && flutter test integration_test/push_register_test.dart -d "$dev" \
     --dart-define=SINALACS_HOST=https://localhost:8443/ --dart-define=PUSH_HOLD_SECONDS=240 --dart-define=PUSH_E2E=1 \
+    ${e2e_fixtures:+--dart-define=E2E_FIXTURES="$e2e_fixtures"} \
     > /tmp/push_e2e_hold.txt 2>&1 ) &
 hold_pid=$!
 for _ in $(seq 1 120); do
@@ -99,6 +129,15 @@ done
 [[ "$(psql_q 'select count(*) from push_tokens' | head -1)" -ge 1 ]] \
   || { echo 'erro: o token não foi registrado (veja /tmp/push_e2e_hold.txt)'; exit 1; }
 echo "tokens no banco: $(psql_q 'select count(*) from push_tokens' | head -1)"
+# O servidor impõe 60 s entre dois pedidos de OTP do MESMO paciente: o registro acabou de
+# pedir um, e as chamadas de consentimento abaixo precisam esperar a janela passar.
+otp_last="$(date +%s)"
+esperar_otp() {
+  [[ "$e2e_db" -eq 1 ]] || return 0
+  local falta=$(( otp_last + 65 - $(date +%s) ))
+  (( falta > 0 )) && { echo "(aguardando ${falta}s: intervalo mínimo entre dois OTP do mesmo paciente)"; sleep "$falta"; }
+  otp_last="$(date +%s)"
+}
 
 adb -s "$dev" shell pm grant "$app" android.permission.POST_NOTIFICATIONS >/dev/null 2>&1 || true
 adb -s "$dev" shell cmd notification cancel_all >/dev/null 2>&1 || true
@@ -142,10 +181,12 @@ if [[ "$negativos" -eq 1 ]]; then
   echo 'Gorush parado: OK'
 
   echo "== revogar zera os destinatários"
+  esperar_otp
   ( cd apps/patient && dart run tool/push_consent.dart --revoke 2>&1 | head -1 )
   [[ "$(psql_q 'select count(*) from push_tokens' | head -1)" == 0 ]] || { echo 'FALHOU: a revogação não apagou os tokens'; exit 1; }
   saida="$(send 'Depois de revogar')"; echo "$saida"
   grep -q 'recipients=0' <<<"$saida" || { echo 'FALHOU: esperado recipients=0'; exit 1; }
+  esperar_otp
   ( cd apps/patient && dart run tool/push_consent.dart --grant 2>&1 | head -1 )
   echo 'revogação: OK'
 fi

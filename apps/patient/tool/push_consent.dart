@@ -40,7 +40,7 @@ Future<void> main(List<String> args) async {
   }
   final backend = BackendClient(host: host, trustedCaBytes: await caFile.readAsBytes());
   try {
-    await loginPatientOnHost(backend);
+    await loginPatientOnHost(backend, role: 'push');
     await backend.updateConsent(purpose: ConsentPurpose.segmentedPush, granted: grant);
     stdout.writeln('consent=${grant ? 'granted' : 'revoked'}');
   } on BackendFailure catch (failure) {

@@ -3,7 +3,8 @@
 ///   dart run tool/send_notice.dart --title "SinalACS e2e" --message "Teste do Gorush" \
 ///       [--chronic] [--host https://localhost/]
 ///
-/// Precisa da stack de pé com `ENABLE_DEV_LOGIN=true`. Nunca imprime token nem
+/// Entra com `ACS_MATRICULA` e `ACS_PASSWORD` (login institucional, RF07) quando
+/// definidas; sem elas, precisa da stack de pé com `ENABLE_DEV_LOGIN=true`. Nunca imprime token nem
 /// destinatários. Saída: `recipients=<n> accepted=<m>` e código 0; uma recusa ou
 /// falha de envio imprime a MENSAGEM e sai com 2 (para um script distinguir "falhou"
 /// de "0 destinatários", que sai com 0).
@@ -12,6 +13,8 @@ library;
 import 'dart:io';
 
 import 'package:sinalacs_acs/core/network/backend_client.dart';
+
+import 'send_notice_login.dart';
 
 String _arg(List<String> args, String name, String fallback) {
   final index = args.indexOf('--$name');
@@ -45,6 +48,14 @@ Future<void> main(List<String> args) async {
     exitCode = 2;
     return;
   }
+  final AcsCredentials? credentials;
+  try {
+    credentials = acsCredentialsFromEnv(Platform.environment);
+  } on ArgumentError catch (error) {
+    stderr.writeln('erro: ${error.message}');
+    exitCode = 2;
+    return;
+  }
   final caFile = _devRpcCaFile();
   if (!await caFile.exists()) {
     stderr.writeln('erro: a CA do RPC não existe em ${caFile.path}. Suba a stack.');
@@ -54,7 +65,11 @@ Future<void> main(List<String> args) async {
 
   final backend = BackendClient(host: host, trustedCaBytes: await caFile.readAsBytes());
   try {
-    await backend.developmentLogin(role: 'acs');
+    if (credentials == null) {
+      await backend.developmentLogin(role: 'acs');
+    } else {
+      await backend.login(matricula: credentials.matricula, senha: credentials.password);
+    }
     final result = await backend.sendNotice(
       title: title,
       message: message,
