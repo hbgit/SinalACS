@@ -38,6 +38,12 @@ void main() {
     }
   });
 
+  test('há um paciente por consumidor: jornada, api, push e forasteiro', () {
+    final f = generateE2eFixtures(Random(5));
+    expect(f.patients.map((p) => p.role).toSet(), {'main', 'chronic', 'api', 'push', 'outsider'});
+    expect(f.patients.singleWhere((p) => p.role == 'chronic').chronic, isTrue);
+  });
+
   test('o manifesto ida e volta é idêntico', () {
     final f = generateE2eFixtures(Random(9));
     expect(E2eFixtures.fromJson(f.toJson()).toJson(), f.toJson());

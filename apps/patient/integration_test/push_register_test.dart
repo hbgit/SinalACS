@@ -48,7 +48,7 @@ void main() {
     }
     final backend = BackendClient(trustedCaBytes: caBytes);
     addTearDown(backend.close);
-    await loginPatient(backend);
+    await loginPatient(backend, role: 'push');
 
     final device = await const NativePushTokenSource()
         .currentDevice()

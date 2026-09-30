@@ -24,7 +24,7 @@ E2eConfig? e2eConfig() => _fixtures.isEmpty
     : E2eConfig.fromMap((jsonDecode(_fixtures) as Map).cast<String, Object?>());
 
 /// Microárea que a sessão do paciente [role] deve trazer.
-String expectedMicroArea({String role = 'main'}) {
+String expectedMicroArea({String role = 'api'}) {
   final config = e2eConfig();
   return config == null
       ? developmentMicroAreaId
@@ -35,5 +35,5 @@ String expectedMicroArea({String role = 'main'}) {
 /// login de desenvolvimento. Ver [loginPatientWith].
 Future<AuthSession> loginPatient(
   BackendClient backend, {
-  String role = 'main',
+  String role = 'api',
 }) => loginPatientWith(backend, e2eConfig(), relayUrl: _otpRelay, role: role);

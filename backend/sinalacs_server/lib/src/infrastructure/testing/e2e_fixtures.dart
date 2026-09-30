@@ -16,7 +16,8 @@ class E2ePatient {
 
   final String id;
 
-  /// `main`, `chronic` ou `outsider` (outra microárea).
+  /// `main` e `chronic` (jornada pela tela), `api` (testes sem tela), `push`
+  /// (testes de push) ou `outsider` (outra microárea).
   final String role;
   final String name;
 
@@ -180,6 +181,10 @@ E2eFixtures generateE2eFixtures(Random random) {
     patients: [
       patient('main', 'Paciente E2E Principal', chronic: false, microAreaId: microAreaId),
       patient('chronic', 'Paciente E2E Crônico', chronic: true, microAreaId: microAreaId),
+      // Um paciente por consumidor: o OTP impõe 60 s entre dois pedidos do MESMO
+      // paciente, então testes que rodam em sequência não podem dividir um.
+      patient('api', 'Paciente E2E API', chronic: false, microAreaId: microAreaId),
+      patient('push', 'Paciente E2E Push', chronic: false, microAreaId: microAreaId),
       patient('outsider', 'Paciente E2E Outra Área', chronic: false, microAreaId: otherMicroAreaId),
     ],
   );
