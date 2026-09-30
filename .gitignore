@@ -47,3 +47,6 @@ infra/docker/gorush/credentials/
 # Google services
 google-services.json
 fcm-service-account.json
+
+# Fixtures e segredos da stack de e2e (gerados por scripts/qa/e2e_stack.sh seed)
+.e2e/
