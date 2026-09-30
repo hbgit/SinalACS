@@ -67,17 +67,21 @@ locais quando o consentimento espelhado no aparelho
 (`core/consent/consent_preferences.dart`) é `true`, com padrão de recusa
 (`false`) quando não há registro local.
 
-**Aviso — `ConsentPurpose.segmentedPush` continua sem leitor.** RF14 (avisos
-segmentados por push) não tem nenhum código de envio no repositório ainda —
-tem hoje um leitor: `notices.sendSegmented` (RF14) consulta a linha de
-consentimento mais recente de cada titular antes de montar a lista de
-destinatários. O envio real ainda depende de hospedar o Gorush e provisionar
-credenciais FCM/APNs (§3.2 do mesmo documento de decisões). Não há
-o que "respeitar" hoje porque nada envia. Quando `notices.sendSegmented` for
-implementado, ele **deve** consultar o consentimento de `segmentedPush`
-antes de enviar, com o mesmo padrão de recusa por omissão adotado aqui para
-`localReminders` — tratar isso como parte da implementação de RF14, não
-como um item separado a lembrar depois.
+**`ConsentPurpose.segmentedPush` tem leitor, com uma lacuna no aparelho.** RF14
+(avisos segmentados por push) respeita o consentimento no **servidor**:
+`notices.sendSegmented` usa a linha de consentimento **mais recente** de cada
+titular (não a existência do token) antes de montar a lista, e
+`devices.registerPushToken` só guarda o token com o consentimento vigente. O envio
+foi provado de ponta a ponta num emulador Android em 2026-09-30 (ver PROGRESS.md,
+"RF14: Gorush e FCM provados no emulador").
+
+**Lacuna:** no **aparelho**, o app ainda pede o token ao FCM depois de todo login,
+mesmo sem consentimento (o servidor recusa e não o guarda, mas o aparelho já falou
+com o Google). O auto-init do FCM, que o faria em toda abertura do app, antes do
+login, está desligado no manifesto. Fechar a lacuna exige que o app conheça o
+consentimento antes de pedir o token (espelho local, como `localReminders`), o que
+não foi feito. O texto do aviso também passa pelo FCM (Google): decisão de produto da
+§3.2, não tratada aqui.
 
 ### LGPD-RF03 - Gerenciamento de Preferências de Privacidade
 

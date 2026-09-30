@@ -29,10 +29,16 @@ Future<List<int>?> _devRpcCaBytes() async {
 /// `scripts/qa/push_e2e.sh` usa este intervalo. O padrão, 0, não espera nada.
 const _holdSeconds = int.fromEnvironment('PUSH_HOLD_SECONDS');
 
+/// Só roda com `--dart-define=PUSH_E2E=1` (o `scripts/qa/push_e2e.sh` passa). Precisa do
+/// `google-services.json` (ignorado pelo git) e de um Google Play Services: sem ele a
+/// bateria `e2e.sh --emulator --full` ficaria vermelha para quem não tem as credenciais.
+// `String`, e não `bool.fromEnvironment`: este só aceita o texto `true`, e o script passa `=1`.
+const _pushE2e = String.fromEnvironment('PUSH_E2E') == '1';
+
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
-  test('registra no backend o token FCM real do aparelho, com consentimento', timeout: const Timeout(Duration(minutes: 6)), () async {
+  test('registra no backend o token FCM real do aparelho, com consentimento', skip: !_pushE2e ? 'defina --dart-define=PUSH_E2E=1' : false, timeout: const Timeout(Duration(minutes: 6)), () async {
     final caBytes = await _devRpcCaBytes();
     if (caBytes == null) {
       fail('A CA do RPC não está no bundle (${BackendConfig.rpcCaAsset}). '

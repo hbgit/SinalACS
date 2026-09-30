@@ -89,7 +89,7 @@ send() { ( cd apps/acs && dart run tool/send_notice.dart --title "SinalACS e2e" 
 echo "== registro do token FCM real (segura o app por 240 s)"
 psql_q 'delete from push_tokens' >/dev/null
 ( cd apps/patient && flutter test integration_test/push_register_test.dart -d "$dev" \
-    --dart-define=SINALACS_HOST=https://localhost:8443/ --dart-define=PUSH_HOLD_SECONDS=240 \
+    --dart-define=SINALACS_HOST=https://localhost:8443/ --dart-define=PUSH_HOLD_SECONDS=240 --dart-define=PUSH_E2E=1 \
     > /tmp/push_e2e_hold.txt 2>&1 ) &
 hold_pid=$!
 for _ in $(seq 1 120); do
