@@ -67,7 +67,7 @@ locais quando o consentimento espelhado no aparelho
 (`core/consent/consent_preferences.dart`) é `true`, com padrão de recusa
 (`false`) quando não há registro local.
 
-**`ConsentPurpose.segmentedPush` tem leitor, com uma lacuna no aparelho.** RF14
+**`ConsentPurpose.segmentedPush` tem leitor, no servidor e no aparelho.** RF14
 (avisos segmentados por push) respeita o consentimento no **servidor**:
 `notices.sendSegmented` usa a linha de consentimento **mais recente** de cada
 titular (não a existência do token) antes de montar a lista, e
@@ -75,13 +75,14 @@ titular (não a existência do token) antes de montar a lista, e
 foi provado de ponta a ponta num emulador Android em 2026-09-30 (ver PROGRESS.md,
 "RF14: Gorush e FCM provados no emulador").
 
-**Lacuna:** no **aparelho**, o app ainda pede o token ao FCM depois de todo login,
-mesmo sem consentimento (o servidor recusa e não o guarda, mas o aparelho já falou
-com o Google). O auto-init do FCM, que o faria em toda abertura do app, antes do
-login, está desligado no manifesto. Fechar a lacuna exige que o app conheça o
-consentimento antes de pedir o token (espelho local, como `localReminders`), o que
-não foi feito. O texto do aviso também passa pelo FCM (Google): decisão de produto da
-§3.2, não tratada aqui.
+**Aparelho (2026-09-30):** o app só pede o token ao FCM depois de `patients.myData`
+mostrar a decisão vigente de `segmentedPush` como `granted` (teto de 3 s; falha,
+estouro ou "nunca decidiu" = não pergunta). Ao conceder em "Meus dados" o registro
+segue direto, sem nova leitura. O auto-init do FCM, que falaria com o Google em toda
+abertura, está desligado no manifesto. Custo aceito: `myData` grava uma linha de
+auditoria de leitura por login de quem tem fonte de token; um endpoint leve de
+consentimento evitaria isso. O texto do aviso também passa pelo FCM (Google):
+decisão de produto da §3.2, não tratada aqui.
 
 ### LGPD-RF03 - Gerenciamento de Preferências de Privacidade
 

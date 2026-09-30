@@ -1,4 +1,8 @@
+import 'dart:async';
+
 import 'package:flutter/widgets.dart';
+import 'package:sinalacs_client/sinalacs_client.dart' show ConsentPurpose;
+import 'package:sinalacs_patient/core/consent/consent_decisions.dart';
 import 'package:sinalacs_patient/core/network/backend_client.dart';
 
 /// Aparelho apto a receber push: o token do provedor e a plataforma.
@@ -33,8 +37,24 @@ class NoPushTokenSource implements PushTokenSource {
 /// não pediu isto na tela, e uma recusa (consentimento desligado), uma falha de
 /// rede ou um provedor sem token nunca podem atrasar a home nem o botão de
 /// urgência. Tenta de novo no próximo login ou ao conceder o consentimento.
-Future<void> registerPushDevice(PatientBackend backend, PushTokenSource source) async {
+const _consentLookupTimeout = Duration(seconds: 3);
+
+Future<void> registerPushDevice(
+  PatientBackend backend,
+  PushTokenSource source, {
+  bool consentKnownGranted = false,
+}) async {
+  // Sem fonte de token não há o que perguntar ao provedor, e a consulta ao
+  // painel (`myData`) grava uma linha de auditoria de leitura a cada login.
+  if (source is NoPushTokenSource) return;
   try {
+    // LGPD: o aparelho só fala com o provedor (Google/Apple) depois de o
+    // servidor confirmar o consentimento vigente de avisos. Na dúvida (falha,
+    // teto estourado, nunca decidiu) não pergunta: fecha, não abre.
+    if (!consentKnownGranted) {
+      final overview = await backend.myData().timeout(_consentLookupTimeout);
+      if (currentConsentDecisions(overview.consents)[ConsentPurpose.segmentedPush] != true) return;
+    }
     final device = await source.currentDevice();
     if (device == null) return;
     await backend.registerPushToken(token: device.token, platform: device.platform);

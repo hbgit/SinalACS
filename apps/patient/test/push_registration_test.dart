@@ -32,7 +32,7 @@ Future<void> login(WidgetTester tester) async {
 
 void main() {
   testWidgets('depois do login registra o token do aparelho', (tester) async {
-    final backend = FakePatientBackend();
+    final backend = FakePatientBackend()..grantPushConsent();
     await tester.pumpWidget(SinalAcsApp(backend: backend, pushTokens: const _FakeSource(_aparelho)));
     await login(tester);
 
@@ -50,6 +50,7 @@ void main() {
 
   testWidgets('recusa do servidor não afeta a home nem mostra erro', (tester) async {
     final backend = FakePatientBackend()
+      ..grantPushConsent()
       ..pushRegistrationFailure = const BackendFailure('sem consentimento');
     await tester.pumpWidget(SinalAcsApp(backend: backend, pushTokens: const _FakeSource(_aparelho)));
     await login(tester);
@@ -78,6 +79,64 @@ void main() {
     expect(find.byType(PatientHomeShell), findsOneWidget);
   });
 
+  testWidgets('sem consentimento de avisos, nem pergunta o token ao provedor', (tester) async {
+    final backend = FakePatientBackend();
+    final source = _CountingSource();
+    await tester.pumpWidget(SinalAcsApp(backend: backend, pushTokens: source));
+    await login(tester);
+
+    expect(source.calls, 0);
+    expect(backend.pushRegistrations, isEmpty);
+    expect(find.byType(PatientHomeShell), findsOneWidget);
+  });
+
+  testWidgets('concedido e depois revogado: vale o mais recente e o provedor não é consultado',
+      (tester) async {
+    final backend = FakePatientBackend()
+      ..addConsentRecord('segmentedPush', 'granted', DateTime.utc(2026, 9, 1))
+      ..addConsentRecord('segmentedPush', 'revoked', DateTime.utc(2026, 9, 2));
+    final source = _CountingSource();
+    await tester.pumpWidget(SinalAcsApp(backend: backend, pushTokens: source));
+    await login(tester);
+
+    expect(source.calls, 0);
+  });
+
+  testWidgets('myData falhando no login fecha: nada é pedido nem registrado', (tester) async {
+    final backend = FakePatientBackend()
+      ..grantPushConsent()
+      ..myDataFailure = const BackendFailure('falha');
+    final source = _CountingSource();
+    await tester.pumpWidget(SinalAcsApp(backend: backend, pushTokens: source));
+    await login(tester);
+
+    expect(source.calls, 0);
+    expect(find.byType(PatientHomeShell), findsOneWidget);
+  });
+
+  testWidgets('myData que nunca responde não atrasa a home e nada é pedido', (tester) async {
+    final backend = FakePatientBackend()..grantPushConsent();
+    final gate = Completer<void>();
+    backend.myDataGate = gate;
+    final source = _CountingSource();
+    await tester.pumpWidget(SinalAcsApp(backend: backend, pushTokens: source));
+    await login(tester);
+
+    expect(find.byType(PatientHomeShell), findsOneWidget);
+    await tester.pump(const Duration(seconds: 4));
+    expect(source.calls, 0);
+  });
+
+  testWidgets('com consentimento vigente, o login registra o token', (tester) async {
+    final backend = FakePatientBackend()..grantPushConsent();
+    final source = _CountingSource();
+    await tester.pumpWidget(SinalAcsApp(backend: backend, pushTokens: source));
+    await login(tester);
+
+    expect(source.calls, 1);
+    expect(backend.pushRegistrations, [('tok-1', 'android')]);
+  });
+
   testWidgets('sem PushTokenScope, maybeOf devolve a fonte inerte', (tester) async {
     PushTokenSource? achada;
     await tester.pumpWidget(Builder(builder: (context) {
@@ -86,6 +145,16 @@ void main() {
     }));
     expect(achada, isA<NoPushTokenSource>());
   });
+}
+
+class _CountingSource implements PushTokenSource {
+  int calls = 0;
+
+  @override
+  Future<PushDevice?> currentDevice() async {
+    calls++;
+    return _aparelho;
+  }
 }
 
 class _ThrowingSource implements PushTokenSource {

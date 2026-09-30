@@ -1268,3 +1268,12 @@ Plano: `docs/superpowers/plans/2026-09-30-gorush-fcm-e2e-emulador.md`, branch `f
 - Docs que contradiziam o código: `spec/lgpd_design.md` (parágrafo truncado que dizia "nada envia") foi reescrito; dois resquícios deste arquivo foram marcados como superados.
 
 **Lacuna que continua aberta (LGPD):** o aparelho ainda pede o token ao FCM depois de **todo login**, mesmo sem consentimento; o servidor recusa e não o guarda, mas o Google já foi contatado. Fechar isso exige o app conhecer o consentimento antes de pedir o token (espelho local, como `localReminders`). **Deferido:** `hide_token: false` tem alternativa que não imprime token no log (casar a máscara por comprimento + sufixo só quando única) e o comentário "não liga a nenhuma pessoa sem o banco" subestima o risco (o token é identificador pseudônimo e o Google o liga ao aparelho); usar `HttpClient.connectionTimeout` em vez do `timeout` sobre `postUrl`; `accepted` superconta `ios` e um cliente adulterado pode registrar `ios`; `push_e2e.sh` apaga `push_tokens` do dev e termina com o consentimento `granted`, e o `kill` pode deixar o `flutter test` órfão; `appleboy/gorush:1.22.0` por tag e não por digest; o build da CI com `firebase-messaging` no classpath ainda não foi observado (a branch não tem execução de CI).
+
+
+## Token de push só com consentimento (2026-09-30)
+
+Plano: `docs/superpowers/plans/2026-09-30-finalizacao-app-paciente.md`, branch `fix/patient`.
+
+- `registerPushDevice` consulta `myData` antes de perguntar o token ao FCM e fecha na dúvida (sem consentimento vigente, falha ou mais de 3 s). Conceder em "Meus dados" registra sem nova leitura. Fecha a lacuna LGPD de "pede o token depois de todo login".
+- **Custo:** `myData` grava uma linha de auditoria de leitura por login (só com fonte de token real). Alternativa: endpoint leve `hasGrantedConsent`.
+- Testes do paciente: 230.

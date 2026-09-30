@@ -38,7 +38,7 @@ void _mockCanal(Future<Object?> Function(MethodCall call)? handler) {
 
 void main() {
   testWidgets('o provider entrega o token da fonte e o registro chega ao backend', (tester) async {
-    final backend = FakePatientBackend();
+    final backend = FakePatientBackend()..grantPushConsent();
     await tester.pumpWidget(ProviderScope(
       overrides: [
         pushTokenSourceProvider
@@ -61,7 +61,7 @@ void main() {
   });
 
   testWidgets('a fonte injetada por parâmetro tem precedência sobre o provider', (tester) async {
-    final backend = FakePatientBackend();
+    final backend = FakePatientBackend()..grantPushConsent();
     await tester.pumpWidget(ProviderScope(
       overrides: [
         pushTokenSourceProvider

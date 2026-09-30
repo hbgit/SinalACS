@@ -1867,7 +1867,7 @@ class _MyDataScreenState extends State<MyDataScreen> {
     try {
       final record = await backend.updateConsent(purpose: purpose, granted: granted);
       if (purpose == ConsentPurpose.segmentedPush && granted && mounted) {
-        unawaited(registerPushDevice(backend, PushTokenScope.maybeOf(context)));
+        unawaited(registerPushDevice(backend, PushTokenScope.maybeOf(context), consentKnownGranted: true));
       }
       // A decisão já está gravada no servidor: aplicar no aparelho aqui, sem
       // depender do recarregamento abaixo — se ele falhar, um lembrete

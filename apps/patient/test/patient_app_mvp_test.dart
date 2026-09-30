@@ -1308,9 +1308,10 @@ void main() {
       final backend = FakePatientBackend()..myDataResult = overview();
       await tester.pumpWidget(SinalAcsApp(backend: backend));
       await login(tester);
+      final depoisDoLogin = backend.myDataCallCount; // o login consulta o consentimento de avisos
       await openMyData(tester);
 
-      expect(backend.myDataCallCount, 1);
+      expect(backend.myDataCallCount - depoisDoLogin, 1);
       expect(find.text('Fulano de Tal'), findsOneWidget);
       expect(find.textContaining('10/03/1975'), findsOneWidget);
       expect(find.textContaining('Ciclana, (11) 90000-0000'), findsOneWidget);

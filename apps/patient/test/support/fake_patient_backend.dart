@@ -57,6 +57,24 @@ class FakePatientBackend implements PatientBackend {
   BackendFailure? myDataFailure;
   int myDataCallCount = 0;
 
+  /// Definido, segura [myData] até ser completado — backend lento ou pendurado.
+  Completer<void>? myDataGate;
+
+  /// Acrescenta ao histórico uma decisão sobre [purpose] (`granted` ou
+  /// `revoked`), como o servidor faria ao gravar em `consent_logs`.
+  void addConsentRecord(String purpose, String action, DateTime timestamp) {
+    final record = PatientConsentRecord(
+      purpose: purpose,
+      action: action,
+      version: legalDocumentsVersion,
+      timestamp: timestamp,
+    );
+    myDataResult = myDataResult.copyWith(consents: [...myDataResult.consents, record]);
+  }
+
+  /// Atalho: o paciente já concedeu "Avisos da equipe".
+  void grantPushConsent() => addConsentRecord('segmentedPush', 'granted', DateTime.utc(2026, 9, 1));
+
   /// Chamadas a [updateConsent], na ordem.
   final List<({ConsentPurpose purpose, bool granted})> updateConsentCalls =
       <({ConsentPurpose purpose, bool granted})>[];
@@ -363,6 +381,7 @@ class FakePatientBackend implements PatientBackend {
   @override
   Future<PatientDataOverview> myData() async {
     myDataCallCount++;
+    await myDataGate?.future;
     final failure = myDataFailure;
     if (failure != null) throw failure;
     return myDataResult;
