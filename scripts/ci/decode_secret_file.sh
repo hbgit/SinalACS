@@ -14,8 +14,13 @@
 # Regras: NUNCA imprime o conteúdo (sem `set -x`, sem eco, erros genéricos); sem o secret
 # (PR de fork) sai com 0 e não cria nada; com o secret inválido sai com 1; fora do CI não
 # sobrescreve nem apaga arquivo que já existia (é o `google-services.json` de um dev).
+# Um xtrace herdado do ambiente (SHELLOPTS=xtrace, `bash -x`) imprimiria o secret: desliga já.
+set +x
 set -euo pipefail
 umask 077
+
+# Os nomes viram expansão indireta (${!nome}): um nome como `a[$(cmd)]` executaria `cmd`.
+nome_valido() { [[ "$1" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; }
 
 uso() { echo 'uso: decode_secret_file.sh --env VAR --kind service_account|google_services (--temp-export NOME | --to ARQUIVO) [--package ID] | --cleanup-temp NOME | --cleanup-file ARQUIVO' >&2; exit 2; }
 
@@ -34,11 +39,17 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ "$modo" == limpar_temp ]]; then
+  nome_valido "$alvo" || uso
   arquivo="${!alvo:-}"
   # Só apaga o que este script criou: sob $RUNNER_TEMP. Outro passo pode ter
-  # redefinido a variável para um arquivo que não é nosso.
-  if [[ -n "$arquivo" && -n "${RUNNER_TEMP:-}" && "$arquivo" == "$RUNNER_TEMP"/* ]]; then
-    rm -f -- "$arquivo"
+  # redefinido a variável para um arquivo que não é nosso. O caminho é normalizado antes da
+  # comparação: `$RUNNER_TEMP/../x` começa pelo prefixo certo e sai do diretório.
+  if [[ -n "$arquivo" && -n "${RUNNER_TEMP:-}" ]]; then
+    resolvido="$(realpath -m -- "$arquivo")"
+    base="$(realpath -m -- "$RUNNER_TEMP")"
+    if [[ "$resolvido" == "$base"/* ]]; then
+      rm -f -- "$resolvido"
+    fi
   fi
   exit 0
 fi
@@ -54,6 +65,8 @@ fi
 
 # -- decodificar -------------------------------------------------------------
 [[ -n "$env_nome" && -n "$tipo" ]] || uso
+nome_valido "$env_nome" || uso
+[[ -z "$temp_export" ]] || nome_valido "$temp_export" || uso
 [[ "$tipo" == service_account || "$tipo" == google_services ]] || uso
 if [[ -n "$temp_export" && -n "$destino" ]] || [[ -z "$temp_export" && -z "$destino" ]]; then uso; fi
 
@@ -70,6 +83,8 @@ fi
 
 dir="${RUNNER_TEMP:-$(mktemp -d)}"
 tmp="$(mktemp --suffix=.json "$dir/secret.XXXXXX")"
+# Qualquer saída antes do fim (chmod, mkdir ou mv que falham, sinal) apaga o temporário.
+trap 'rm -f -- "$tmp"' EXIT
 falhar() {
   rm -f -- "$tmp"
   echo "::error title=secret::$1"
@@ -116,10 +131,12 @@ chmod 600 "$tmp"
 if [[ -n "$destino" ]]; then
   mkdir -p "$(dirname "$destino")"
   mv -f -- "$tmp" "$destino"
+  trap - EXIT
   echo "::notice title=secret::$env_nome decodificado em $destino (conteúdo não impresso)."
 else
   if [[ -n "${GITHUB_ENV:-}" ]]; then
     echo "$temp_export=$tmp" >>"$GITHUB_ENV"
   fi
+  trap - EXIT   # este arquivo é o resultado: fica até o --cleanup-temp
   echo "::notice title=secret::$env_nome decodificado em $tmp ($temp_export definida para os próximos passos; conteúdo não impresso)."
 fi

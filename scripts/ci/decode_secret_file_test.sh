@@ -105,6 +105,36 @@ t_base64_invalido_da_dica_sem_vazar() {
   afirma "truncado: nada do conteúdo na saída" '! grep -q "$FAKE_KEY" <<<"$out"'
 }
 
+t_endurecimento_do_script() {
+  novo_ambiente
+  # M4: um xtrace herdado do ambiente (SHELLOPTS=xtrace) imprimiria o secret no log.
+  export FCM_SECRET="$(sa_json | base64 -w0)"
+  out="$(env SHELLOPTS=xtrace "$script" --env FCM_SECRET --kind service_account --temp-export GOOGLE_APPLICATION_CREDENTIALS 2>&1)"
+  afirma "M4 o xtrace herdado realmente está ligado neste teste (sem isso ele seria vácuo)" 'grep -q "^+" <<<"$out"'
+  afirma "M4 xtrace herdado: o secret não aparece na saída" '! grep -qF "$FCM_SECRET" <<<"$out" && ! grep -q "$FAKE_KEY" <<<"$out"'
+  # M5: o nome da variável vira expansão indireta; um nome hostil não pode executar código.
+  novo_ambiente
+  marca="$T/EXECUTOU"
+  "$script" --env "a[\$(touch $marca)]" --kind service_account --temp-export X >/dev/null 2>&1; rc=$?
+  afirma "M5 --env com nome hostil: exit 2 e nada executado" '[[ $rc -eq 2 && ! -e "$marca" ]]'
+  GOOGLE_APPLICATION_CREDENTIALS='x' "$script" --cleanup-temp "a[\$(touch $marca)]" >/dev/null 2>&1; rc=$?
+  afirma "M5 --cleanup-temp com nome hostil: exit 2 e nada executado" '[[ $rc -eq 2 && ! -e "$marca" ]]'
+  "$script" --env A --kind service_account --temp-export '1x;y' >/dev/null 2>&1; rc=$?
+  afirma "M5 --temp-export com nome inválido: exit 2" '[[ $rc -eq 2 ]]'
+  # M6: um caminho que só COMEÇA por RUNNER_TEMP mas sai dele por ".." não pode ser apagado.
+  novo_ambiente
+  alheio="$T/alheio.json"; echo x >"$alheio"
+  GOOGLE_APPLICATION_CREDENTIALS="$RUNNER_TEMP/../alheio.json" "$script" --cleanup-temp GOOGLE_APPLICATION_CREDENTIALS
+  afirma "M6 cleanup-temp com '..': não apaga fora do RUNNER_TEMP" '[[ -e "$alheio" ]]'
+  # M7: se algo falha DEPOIS de decodificar, o temporário não pode sobrar.
+  novo_ambiente
+  export GS_SECRET="$(gs_json | base64 -w0)"
+  echo x >"$T/arquivo"            # um ARQUIVO no lugar do diretório pai: o mkdir -p do destino falha
+  out="$("$script" --env GS_SECRET --kind google_services --to "$T/arquivo/sub/google-services.json" 2>&1)"; rc=$?
+  afirma "M7 falha no mkdir: exit != 0 e nenhum temporário sobra" '[[ $rc -ne 0 ]] && vazio_em "$RUNNER_TEMP"'
+  afirma "M7 a falha não vaza o conteúdo" '! grep -q "$FAKE_KEY" <<<"$out" && ! grep -q "fake-proj" <<<"$out"'
+}
+
 t_google_services_grava_no_destino() {
   novo_ambiente
   export GS_SECRET="$(gs_json | base64 -w0)"
@@ -178,7 +208,8 @@ t_uso_incorreto() {
 }
 
 t_nao_usa_set_x() {
-  afirma "o script não liga set -x (vazaria o secret no log)" '! grep -Eq "^[[:space:]]*set [-+a-z]*x|set -o xtrace" "$script"'
+  afirma "o script não liga set -x (vazaria o secret no log)" '! grep -Eq "^[[:space:]]*set -[a-z]*x|set -o xtrace" "$script"'
+  afirma "o script desliga um xtrace herdado antes de qualquer outra coisa" '[[ "$(grep -v "^[[:space:]]*#" "$script" | grep -v "^[[:space:]]*$" | head -1)" == "set +x" ]]'
 }
 
 t_sem_secret_termina_bem_e_nao_cria_nada
@@ -187,6 +218,7 @@ t_service_account_quebrado_com_crlf
 t_preserva_o_que_ja_estava_em_github_env
 t_service_account_invalido_nao_vaza
 t_base64_invalido_da_dica_sem_vazar
+t_endurecimento_do_script
 t_google_services_grava_no_destino
 t_google_services_invalido
 t_nao_sobrescreve_fora_do_ci
