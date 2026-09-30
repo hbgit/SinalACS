@@ -46,7 +46,21 @@ muta limpeza_sem_google_services \
 muta limpeza_sem_chave_do_gorush \
   "t.replace('--cleanup-file infra/docker/gorush/credentials/fcm-service-account.json', 'true', 1)"
 muta decodifica_depois_do_e2e \
-  "t.replace('      - name: Decodifica o google-services.json', '      - name: Decodifica o google-services.json (movido)', 1)"
+  "(lambda m: t.replace(m.group(0), '', 1).replace('      # Apaga as credenciais mesmo se o E2E falhar', m.group(0) + '      # Apaga as credenciais mesmo se o E2E falhar', 1))(__import__('re').search(r'      # Credenciais do FCM para o push e2e.*?(?=      - name: E2E no emulador Android)', t, __import__('re').S))"
+muta limpeza_antes_do_e2e \
+  "(lambda m: t.replace(m.group(0), '', 1).replace('      - name: E2E no emulador Android\n', m.group(0) + '      - name: E2E no emulador Android\n', 1))(__import__('re').search(r'      # Apaga as credenciais mesmo se o E2E falhar.*?(?=      - name: Remove pg_data)', t, __import__('re').S))"
+muta passo_do_e2e_renomeado \
+  "t.replace('      - name: E2E no emulador Android\n', '      - name: Android E2E\n', 1)"
+muta secret_no_env_do_workflow \
+  "t.replace('\njobs:\n', '\nenv:\n  VAZA: \${{ secrets.FCM_CREDENTIALS_BASE64 }}\njobs:\n', 1)"
+muta secret_em_with_de_acao \
+  "t.replace('          name: android-e2e-metrics\n', '          name: android-e2e-metrics\n          token: \${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}\n', 1)"
+muta secret_por_tojson \
+  "t.replace('          name: android-e2e-metrics\n', '          name: android-e2e-metrics\n          token: \${{ toJSON(secrets) }}\n', 1)"
+muta secret_por_colchetes \
+  "t.replace('          name: android-e2e-metrics\n', '          name: android-e2e-metrics\n          token: \${{ secrets[\'FCM_CREDENTIALS_BASE64\'] }}\n', 1)"
+muta secret_no_env_de_outro_passo \
+  "t.replace('      - name: Remove pg_data/ do workspace\n', '      - name: Remove pg_data/ do workspace\n        env:\n          OUTRO: \${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}\n', 1)"
 muta credencial_em_disco_durante_acao_de_terceiros \
   "t.replace('      - name: E2E no emulador Android\n', '      - uses: actions/setup-java@v6\n      - name: E2E no emulador Android\n', 1)"
 muta emulador_sem_play_services \

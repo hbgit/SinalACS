@@ -19,6 +19,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 exec python3 - "${CI_WORKFLOW_PATH:-$repo_root/.github/workflows/ci.yml}" "$@" <<'PY'
 import json
+import re
 import sys
 
 import yaml
@@ -206,6 +207,21 @@ TARGET_EMULADOR = 'google_apis'
 
 
 def check_credenciais_fcm():
+    # Varredura do TEXTO bruto (sem as linhas de comentário): os secrets só podem aparecer UMA
+    # vez cada, na linha `env:` do passo que os decodifica. Isso cobre os contornos que a
+    # leitura estrutural não vê: `env:` de workflow, `with:` de uma ação, `env:` de outro
+    # passo/job, `secrets['NOME']` e `toJSON(secrets)` (que entrega TODOS os secrets).
+    with open(caminho, encoding='utf-8') as arquivo:
+        texto = '\n'.join(l for l in arquivo.read().splitlines() if not l.lstrip().startswith('#'))
+    for segredo in SEGREDOS_FCM:
+        usos = (len(re.findall(r'secrets\s*\.\s*' + segredo + r'\b', texto))
+                + len(re.findall(r'secrets\s*\[\s*[\'"]' + segredo + r'[\'"]\s*\]', texto)))
+        if usos != 1:
+            falhas.append(f'FCM: {segredo} aparece {usos}x no workflow; só pode aparecer 1x, no env: do passo que o decodifica')
+    if re.search(r'toJSON\(\s*secrets\s*\)', texto):
+        falhas.append('FCM: toJSON(secrets) entrega todos os secrets, inclusive os do FCM; não use')
+    if re.search(r'secrets\s*\[\s*[^\'"\s]', texto):
+        falhas.append('FCM: secrets[<expressão>] é dinâmico e poderia alcançar os secrets do FCM; use o nome literal')
     for nome_job, job in jobs.items():
         for segredo in SEGREDOS_FCM:
             if segredo in (job.get('env') or {}):
@@ -216,6 +232,8 @@ def check_credenciais_fcm():
     passos = (jobs.get('android-e2e') or {}).get('steps') or []
     nomes = [p.get('name', '') for p in passos]
     indice_e2e = nomes.index('E2E no emulador Android') if 'E2E no emulador Android' in nomes else None
+    if indice_e2e is None:
+        falhas.append("FCM: android-e2e sem o passo 'E2E no emulador Android'; a ordem das credenciais não pode ser conferida")
     ultimo = -1
     for segredo, nome_passo in SEGREDOS_FCM.items():
         if nome_passo not in nomes:
@@ -243,6 +261,8 @@ def check_credenciais_fcm():
         falhas.append(f'FCM: nenhum passo {LIMPEZA_FCM!r} depois das decodificações')
     else:
         passo = limpeza[0]
+        if indice_e2e is not None and passos.index(passo) < indice_e2e:
+            falhas.append(f'FCM: o passo {LIMPEZA_FCM!r} vem ANTES do E2E; apagaria as credenciais que ele usa')
         if passo.get('if') != 'always()':
             falhas.append(f'FCM: o passo {LIMPEZA_FCM!r} precisa de if: always()')
         for trecho in LIMPEZAS_ESPERADAS:
