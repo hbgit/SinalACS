@@ -16,6 +16,10 @@
          obrigatória para instalar — sem ela, a pessoa digita o código. -->
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <!-- Android 13+: sem esta permissão o token ainda é obtido e registrado, mas a
+         notificação do aviso comunitário não é exibida (RF14). Quem a pede em tempo
+         de execução é `main.dart`, por `requestNotificationsPermission()`. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <application
         android:label="sinalacs_patient"
         android:name="${applicationName}"
