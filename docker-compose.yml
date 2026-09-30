@@ -85,7 +85,7 @@ services:
   # do Compose, fala com ele. As credenciais FCM/APNs são arquivos fornecidos pela
   # organização e nunca são versionados (ver infra/docker/gorush/README.md).
   gorush:
-    image: appleboy/gorush:latest
+    image: appleboy/gorush:1.22.0
     profiles: [push]
     restart: unless-stopped
     command: ["-c", "/config.yml"]

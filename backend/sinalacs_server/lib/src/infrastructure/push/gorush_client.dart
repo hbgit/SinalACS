@@ -77,7 +77,9 @@ class GorushClient implements PushSender {
     'notregistered',
     'unregistered',
     'invalidregistration',
-    'requested entity was not found', // FCM v1 (firebase-admin-go)
+    'requested entity was not found', // FCM v1: UNREGISTERED
+    // FCM v1: INVALID_ARGUMENT sobre o token (texto medido contra o FCM real)
+    'not a valid fcm registration token',
     'baddevicetoken',
     'devicetokennotfortopic',
   ];
@@ -104,7 +106,7 @@ class GorushClient implements PushSender {
     });
 
     try {
-      return await _post(body, targets.length).timeout(_timeout);
+      return await _post(body, targets.length, {for (final t in targets) t.token}).timeout(_timeout);
     } on PushGatewayException {
       rethrow;
     } on TimeoutException {
@@ -127,7 +129,7 @@ class GorushClient implements PushSender {
     }
   }
 
-  Future<PushSendReport> _post(String body, int total) async {
+  Future<PushSendReport> _post(String body, int total, Set<String> sent) async {
     final request = await _http.postUrl(Uri.parse('$_baseUrl/api/push'));
     request.headers.contentType = ContentType.json;
     request.write(body);
@@ -152,7 +154,12 @@ class GorushClient implements PushSender {
       failed++;
       final error = '${log['error']}'.toLowerCase();
       final token = log['token'];
-      if (token is String && _invalidTokenErrors.any(error.contains)) invalid.add(token);
+      // Só devolve para a poda um token que NÓS enviamos: com `log.hide_token` do
+      // Gorush ligado ele volta mascarado (`***…xx`), e apagar por um valor que não
+      // reconhecemos seria apagar às cegas.
+      if (token is String && sent.contains(token) && _invalidTokenErrors.any(error.contains)) {
+        invalid.add(token);
+      }
     }
     // `counts` do Gorush não é confiável como "aceitos" (conta notificações
     // enfileiradas, não entregas): o número que vai para o ACS é o total menos as

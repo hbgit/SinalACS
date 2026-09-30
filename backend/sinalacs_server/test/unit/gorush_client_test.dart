@@ -216,6 +216,56 @@ void main() {
     );
   });
 
+  Map<String, dynamic> fixture(String nome) =>
+      jsonDecode(File('test/unit/fixtures/$nome').readAsStringSync()) as Map<String, dynamic>;
+
+  Future<FakeGorush> fakeDa(Map<String, dynamic> f) {
+    final body = f['body'];
+    return FakeGorush.start(
+      status: f['status'] as int,
+      rawBody: body is String ? body : jsonEncode(body),
+    );
+  }
+
+  test('resposta REAL do Gorush/FCM a um token inválido: o token é reconhecido e podado', () async {
+    final gw = await fakeDa(fixture('gorush_invalid_token.json'));
+    addTearDown(gw.close);
+    final client = GorushClient(baseUrl: gw.url, timeout: const Duration(seconds: 2));
+    final falso = 'x' * 152;
+
+    final report = await client.send(_msg, [
+      PushTarget(token: falso, platform: 'android'),
+      const PushTarget(token: 'tok-bom', platform: 'android'),
+    ]);
+
+    // O erro do FCM é sobre o TOKEN: só ele pode ser apagado, e nunca o bom.
+    expect(report.invalidTokens, [falso]);
+    expect(report.accepted, 1); // total 2 menos 1 falha; `counts: 1` da resposta não conta
+  });
+
+  test('resposta REAL com o token MASCARADO (hide_token padrão): nada é apagado', () async {
+    final gw = await fakeDa(fixture('gorush_invalid_token_masked.json'));
+    addTearDown(gw.close);
+    final client = GorushClient(baseUrl: gw.url, timeout: const Duration(seconds: 2));
+
+    final report = await client.send(_msg, [PushTarget(token: 'x' * 152, platform: 'android')]);
+
+    // `***…xx` não é um token que enviamos: devolvê-lo à poda seria apagar às cegas.
+    expect(report.invalidTokens, isEmpty);
+  });
+
+  test('só devolve para a poda tokens que foram ENVIADOS', () async {
+    final gw = await FakeGorush.start(response: {
+      'logs': [
+        {'type': 'failed-push', 'token': 'nunca-enviado', 'error': 'NotRegistered'},
+      ],
+    });
+    addTearDown(gw.close);
+    final client = GorushClient(baseUrl: gw.url, timeout: const Duration(seconds: 2));
+    final report = await client.send(_msg, const [PushTarget(token: 'a', platform: 'android')]);
+    expect(report.invalidTokens, isEmpty);
+  });
+
   test('lista vazia não chama o Gorush', () async {
     final gw = await FakeGorush.start();
     addTearDown(gw.close);

@@ -19,19 +19,30 @@ Nada disso é versionado nem gerado por `bootstrap_env.sh` (a decisão §3.2 fal
 "padrão `bootstrap_env.sh`" para o que for segredo aleatório; credenciais de provedor
 não são aleatórias, são emitidas por ele).
 
-## O que ainda não foi verificado contra um Gorush real
+## O que foi verificado contra o Gorush 1.22.0 e o FCM reais (2026-09-30)
 
-O cliente do backend foi provado só contra um servidor HTTP falso. Confira, antes de
-ligar em produção: (1) se `counts` e `logs` da resposta síncrona têm o formato assumido;
-(2) se o `log.hide_token` padrão mascara o token na resposta — nesse caso a poda de
-tokens inválidos não casa com `push_tokens.token`; (3) as strings de erro do FCM v1 e do
-APNs; (4) se o Gorush sobe sem credenciais (com o `restart: unless-stopped`, pode entrar
-em loop); (5) fixe uma tag em vez de `:latest`.
+Com a chave real do projeto `sinal-acs` e um token **falso** (nada é entregue a ninguém;
+`scripts/qa/gorush_smoke.sh`):
 
-## Ligar o backend
+- **A chave e a API FCM V1 funcionam:** o FCM respondeu com um erro de *token* (`The
+  registration token is not a valid FCM registration token`), não de autenticação.
+- **Forma da resposta:** HTTP 200, `{"counts": 1, "logs": [{"type": "failed-push",
+  "platform": "android", "token": …, "message": "(message redacted)", "error": …}],
+  "success": "ok"}`. **`counts` conta notificações enfileiradas, não entregas** (vale `1`
+  mesmo com a falha): o backend calcula "aceitos" como alvos menos falhas.
+- **`log.hide_token` (padrão `true`) mascara o token na resposta** (`***…xx`): com isso a
+  poda de tokens inválidos nunca casaria com `push_tokens.token`. O `config.yml` define
+  `hide_token: false`; o custo é o token de aparelho aparecer no log do Gorush. O backend
+  só apaga um token que ele mesmo enviou.
+- **`ios.enabled: true` sem `apns-key.p8` faz o Gorush encerrar no boot com código 1**, e
+  `log.access_log`/`error_log` com `"-"` faz o Gorush não escrever log nenhum (o erro do
+  boot fica invisível): o `config.yml` usa `ios.enabled: false` e `stdout`/`stderr`.
+- **Imagem:** fixada em `appleboy/gorush:1.22.0`, que já traz `HEALTHCHECK`
+  (`/bin/gorush --ping`) e roda como `gorush` (uid 1000). A chave deve ter modo `600` e ser
+  legível por esse uid; se o uid do dono da chave for outro, use `chown`/grupo, não `644`.
 
-No `.env`: `GORUSH_URL=http://gorush:8088`. Vazio desliga o envio: o backend sobe
-normalmente e `notices.sendSegmented` recusa com uma mensagem clara.
+## O que ainda não foi verificado
 
-O `config.yml` deste diretório usa a imagem `appleboy/gorush`; fixe a tag testada
-no `docker-compose.yml` e confira os nomes das chaves no README dela.
+- Entrega real a um aparelho (Task 4 do plano `2026-09-30-gorush-fcm-e2e-emulador.md`).
+- iOS/APNs: sem app iOS e sem chave APNs.
+- A string de erro de outros casos do FCM (cota, mensagem malformada) além do token inválido.
