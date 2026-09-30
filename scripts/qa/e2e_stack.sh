@@ -34,7 +34,8 @@ case "${1:-}" in
       dart run bin/seed_e2e_fixtures.dart ../../.e2e/fixtures.json ) ;;
   down)
     dc stop serverpod >/dev/null 2>&1 || true
-    pg "drop database if exists $db with (force)" postgres >/dev/null ;;
+    pg "drop database if exists $db with (force)" postgres >/dev/null
+    rm -f .e2e/fixtures.json ;;   # descreve pacientes de um banco que não existe mais
   psql) pg "$2" ;;
   *) echo 'uso: e2e_stack.sh up|seed|down|psql "<sql>"'; exit 2 ;;
 esac

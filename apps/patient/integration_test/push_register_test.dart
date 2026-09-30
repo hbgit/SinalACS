@@ -12,6 +12,8 @@ import 'package:sinalacs_patient/core/network/backend_client.dart';
 import 'package:sinalacs_patient/core/network/backend_config.dart';
 import 'package:sinalacs_patient/core/push/native_push_token_source.dart';
 
+import 'support/e2e_login.dart';
+
 Future<List<int>?> _devRpcCaBytes() async {
   try {
     final data = await rootBundle.load(BackendConfig.rpcCaAsset);
@@ -46,7 +48,7 @@ void main() {
     }
     final backend = BackendClient(trustedCaBytes: caBytes);
     addTearDown(backend.close);
-    await backend.developmentLogin(role: 'patient');
+    await loginPatient(backend);
 
     final device = await const NativePushTokenSource()
         .currentDevice()

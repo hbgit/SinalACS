@@ -12,6 +12,8 @@ import 'dart:io';
 import 'package:sinalacs_client/sinalacs_client.dart' show ConsentPurpose;
 import 'package:sinalacs_patient/core/network/backend_client.dart';
 
+import 'support/host_login.dart';
+
 Future<void> main(List<String> args) async {
   final grant = args.contains('--grant');
   if (grant == args.contains('--revoke')) {
@@ -38,7 +40,7 @@ Future<void> main(List<String> args) async {
   }
   final backend = BackendClient(host: host, trustedCaBytes: await caFile.readAsBytes());
   try {
-    await backend.developmentLogin(role: 'patient');
+    await loginPatientOnHost(backend);
     await backend.updateConsent(purpose: ConsentPurpose.segmentedPush, granted: grant);
     stdout.writeln('consent=${grant ? 'granted' : 'revoked'}');
   } on BackendFailure catch (failure) {
