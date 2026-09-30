@@ -62,5 +62,42 @@ echo '{}' >"$R/apps/patient/android/app/google-services.json"
 out="$(roda)"; rc=$?
 afirma "o exit do push e2e é propagado (7)" '[[ $rc -eq 7 ]]'
 
+# ---- M3: uma falha do `docker compose down` no trap não pode trocar o código de saída ----------
+stub="$raiz/stub_bin"; mkdir -p "$stub"; printf '#!/bin/sh\nexit 1\n' >"$stub/docker"; chmod +x "$stub/docker"
+linha_trap="$(grep '^trap ' "$repo/scripts/qa/run_android_e2e.sh")"
+PATH="$stub:$PATH" bash -c "set -e; $linha_trap; exit 7"; rc=$?
+afirma "M3 o trap de down que falha preserva o exit do script (7)" '[[ $rc -eq 7 ]]'
+PATH="$stub:$PATH" bash -c "set -e; $linha_trap; exit 0"; rc=$?
+afirma "M3 o trap de down que falha não transforma sucesso em falha" '[[ $rc -eq 0 ]]'
+
+# ---- M8: o cabeçalho do push_e2e.sh não pode mais dizer que NÃO roda na CI ----------------------
+afirma "M8 o cabeçalho do push_e2e.sh não afirma 'NÃO roda na CI'" '! sed -n 1,25p "$repo/scripts/qa/push_e2e.sh" | grep -q "NÃO roda na CI"'
+
+# ---- M9: no CI o log é público — o project_id não pode ser impresso ------------------------------
+guarda="$raiz/guarda.py"
+sed -n "/^python3 - <<'PYEOF'/,/^PYEOF/p" "$repo/scripts/qa/push_e2e.sh" | sed '1d;$d' >"$guarda"
+mkdir -p "$raiz/g/infra/docker/gorush/credentials" "$raiz/g/apps/patient/android/app"
+echo '{"type":"service_account","project_id":"proj-secreto-123","client_email":"x@y","private_key":"k"}' >"$raiz/g/infra/docker/gorush/credentials/fcm-service-account.json"
+echo '{"project_info":{"project_id":"proj-secreto-123"},"client":[{"client_info":{"android_client_info":{"package_name":"br.com.prismrr.sinalacs.patient"}}}]}' >"$raiz/g/apps/patient/android/app/google-services.json"
+out_ci="$(cd "$raiz/g" && GITHUB_ACTIONS=true python3 "$guarda" 2>&1)"; rc_ci=$?
+out_local="$(cd "$raiz/g" && env -u GITHUB_ACTIONS python3 "$guarda" 2>&1)"
+afirma "M9 a guarda roda com chaves válidas (exit 0)" '[[ $rc_ci -eq 0 ]]'
+afirma "M9 no CI o project_id não é impresso" '! grep -q "proj-secreto-123" <<<"$out_ci" && grep -q "chave ok" <<<"$out_ci"'
+afirma "M9 fora do CI o project_id continua aparecendo (útil ao dev)" 'grep -q "proj-secreto-123" <<<"$out_local"'
+
+# ---- M10: parar o push e2e tem de matar o `flutter test` (neto do subshell), não só o subshell --
+fn="$(sed -n '/^parar_arvore()/,/^}/p' "$repo/scripts/qa/push_e2e.sh")"
+afirma "M10 push_e2e.sh define parar_arvore e liga o controle de jobs (set -m)" '[[ -n "$fn" ]] && grep -q "^set -m" "$repo/scripts/qa/push_e2e.sh"'
+marca="$raiz/neto.pid"
+bash -c "set -m; $fn
+( sh -c 'echo \$\$ >$marca; exec sleep 300' & wait ) &
+hold=\$!
+for _ in 1 2 3 4 5 6 7 8 9 10; do [ -s $marca ] && break; sleep 0.2; done
+parar_arvore \$hold
+sleep 0.5" 2>/dev/null
+neto="$(cat "$marca" 2>/dev/null || echo 0)"
+afirma "M10 o neto (flutter test) morre junto" '[[ "$neto" != 0 ]] && ! kill -0 "$neto" 2>/dev/null'
+kill "$neto" 2>/dev/null || true
+
 n="$(wc -l <"$marcador")"
 echo; [[ "$n" -eq 0 ]] && echo "OK — ci_push_e2e.sh" || { echo "$n asserção(ões) falharam"; exit 1; }

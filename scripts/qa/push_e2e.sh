@@ -12,13 +12,23 @@
 # ACS por matrícula e senha, ambos de fixtures geradas na hora. Nada é escrito no
 # banco de desenvolvimento.
 #
-# Pré-requisitos: emulador `emulator-5554` (Google Play, com internet), a chave da conta
-# de serviço em infra/docker/gorush/credentials/fcm-service-account.json e o
-# google-services.json em apps/patient/android/app/. NÃO roda na CI: precisa de
-# credenciais reais do projeto Firebase. Sai com 3 quando falta a chave.
+# Pré-requisitos: emulador `emulator-5554` (com Play Services e internet: Google Play ou
+# `google_apis`), a chave da conta de serviço em
+# infra/docker/gorush/credentials/fcm-service-account.json e o google-services.json em
+# apps/patient/android/app/. Precisa de credenciais reais do projeto Firebase, então só roda
+# onde elas existem: na máquina de quem as tem e no job `android-e2e` da CI, que as decodifica
+# dos secrets (ver scripts/qa/ci_push_e2e.sh). Sai com 3 quando falta a chave.
 #
 # Nunca imprime a chave nem o token FCM.
 set -euo pipefail
+# Controle de jobs: cada processo em segundo plano vira um grupo próprio, e `parar_arvore` mata o
+# grupo inteiro (o `flutter test` é NETO do subshell que o lança; matar só o subshell o deixava vivo).
+set -m
+parar_arvore() {
+  local pid="${1:-}"
+  [[ -n "$pid" ]] || return 0
+  kill -- -"$pid" 2>/dev/null || kill "$pid" 2>/dev/null || true
+}
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$repo_root"
@@ -52,7 +62,9 @@ except FileNotFoundError as e:
 assert k.get('type') == 'service_account', 'não é chave de conta de serviço'
 assert k.get('project_id') == g['project_info']['project_id'], 'project_id difere do google-services.json'
 assert k.get('client_email') and k.get('private_key'), 'chave incompleta'
-print('chave ok para o projeto', k['project_id'])   # nunca imprime a chave
+# No CI o log é público: o project_id não é impresso lá. Nunca imprime a chave.
+import os
+print('chave ok para o projeto', '(oculto no CI)' if os.environ.get('GITHUB_ACTIONS') == 'true' else k['project_id'])
 PYEOF
 
 # O ambiente do shell pode trazer um GORUSH_CREDENTIALS_DIR que é um ARQUIVO (o Compose
@@ -116,7 +128,7 @@ adb -s "$dev" reverse tcp:8443 tcp:443 >/dev/null
 adb -s "$dev" reverse tcp:8765 tcp:8765 >/dev/null
 hold_pid=""
 cleanup() {
-  [[ -n "$hold_pid" ]] && kill "$hold_pid" 2>/dev/null || true
+  parar_arvore "$hold_pid"
   [[ -n "$relay_pid" ]] && kill "$relay_pid" 2>/dev/null || true
   docker compose --profile push start gorush >/dev/null 2>&1 || true
   psql_q 'delete from push_tokens' >/dev/null 2>&1 || true
