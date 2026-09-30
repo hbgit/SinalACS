@@ -17,7 +17,7 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
-exec python3 - "$repo_root/.github/workflows/ci.yml" "$@" <<'PY'
+exec python3 - "${CI_WORKFLOW_PATH:-$repo_root/.github/workflows/ci.yml}" "$@" <<'PY'
 import json
 import sys
 
@@ -181,9 +181,81 @@ def check_checks_obrigatorios():
             falhas.append(f'FINDING-5: {nome} tem if: no nível do job; pode nunca reportar')
 
 
+# Credenciais do FCM (chave de conta de serviço e google-services.json) no android-e2e.
+# Os secrets valem acesso ao projeto Firebase; estas propriedades têm de sobreviver a
+# edições:
+#  1. cada secret entra por `env:` do PASSO — nunca dentro de `run:` (injeção de script, e
+#     um `echo` o vazaria) nem no `env:` do JOB (toda ação de terceiros o veria);
+#  2. os passos que os decodificam vêm ANTES do E2E (o build do paciente e o push e2e os
+#     leem);
+#  3. um passo `if: always()` apaga os três arquivos depois;
+#  4. o push só entrega com Play Services: o emulador precisa de `target: google_apis` (o
+#     padrão da action é a imagem AOSP, sem ele), e a chave do cache do AVD precisa
+#     conter o target, senão um AVD antigo seria restaurado em cima do novo.
+SEGREDOS_FCM = {
+    'FCM_CREDENTIALS_BASE64': 'Decodifica a credencial do FCM',
+    'GOOGLE_SERVICES_JSON_BASE64': 'Decodifica o google-services.json',
+}
+LIMPEZA_FCM = 'Remove as credenciais do FCM'
+LIMPEZAS_ESPERADAS = (
+    'decode_secret_file.sh --cleanup-temp GOOGLE_APPLICATION_CREDENTIALS',
+    '--cleanup-file apps/patient/android/app/google-services.json',
+    '--cleanup-file infra/docker/gorush/credentials/fcm-service-account.json',
+)
+TARGET_EMULADOR = 'google_apis'
+
+
+def check_credenciais_fcm():
+    for nome_job, job in jobs.items():
+        for segredo in SEGREDOS_FCM:
+            if segredo in (job.get('env') or {}):
+                falhas.append(f'FCM: {nome_job} declara {segredo} no env: do job; declare só no passo')
+            for passo in job.get('steps') or []:
+                if f'secrets.{segredo}' in (passo.get('run') or ''):
+                    falhas.append(f"FCM: o passo {passo.get('name')!r} de {nome_job} usa secrets.{segredo} dentro de run:; passe por env: do passo")
+    passos = (jobs.get('android-e2e') or {}).get('steps') or []
+    nomes = [p.get('name', '') for p in passos]
+    indice_e2e = nomes.index('E2E no emulador Android') if 'E2E no emulador Android' in nomes else None
+    ultimo = -1
+    for segredo, nome_passo in SEGREDOS_FCM.items():
+        if nome_passo not in nomes:
+            falhas.append(f'FCM: android-e2e sem o passo {nome_passo!r}')
+            continue
+        i = nomes.index(nome_passo)
+        ultimo = max(ultimo, i)
+        passo = passos[i]
+        if (passo.get('env') or {}).get(segredo) != '${{ secrets.' + segredo + ' }}':
+            falhas.append(f'FCM: o passo {nome_passo!r} precisa de env: {segredo}: ${{{{ secrets.{segredo} }}}}')
+        if 'decode_secret_file.sh' not in (passo.get('run') or ''):
+            falhas.append(f'FCM: o passo {nome_passo!r} precisa chamar scripts/ci/decode_secret_file.sh')
+        if indice_e2e is not None and i > indice_e2e:
+            falhas.append(f'FCM: {nome_passo!r} vem DEPOIS do E2E; o arquivo não existiria nele')
+    limpeza = [p for p in passos[ultimo + 1:] if p.get('name') == LIMPEZA_FCM]
+    if not limpeza:
+        falhas.append(f'FCM: nenhum passo {LIMPEZA_FCM!r} depois das decodificações')
+    else:
+        passo = limpeza[0]
+        if passo.get('if') != 'always()':
+            falhas.append(f'FCM: o passo {LIMPEZA_FCM!r} precisa de if: always()')
+        for trecho in LIMPEZAS_ESPERADAS:
+            if trecho not in (passo.get('run') or ''):
+                falhas.append(f'FCM: o passo {LIMPEZA_FCM!r} não roda {trecho!r}')
+    # Emulador com Play Services e cache do AVD coerente.
+    emuladores = [p for p in passos if str(p.get('uses', '')).startswith('reactivecircus/android-emulator-runner')]
+    if not emuladores:
+        falhas.append('FCM: android-e2e sem passo reactivecircus/android-emulator-runner')
+    for passo in emuladores:
+        if (passo.get('with') or {}).get('target') != TARGET_EMULADOR:
+            falhas.append(f"FCM: o passo {passo.get('name')!r} precisa de target: {TARGET_EMULADOR} (sem Play Services o FCM não entrega token)")
+    for passo in passos:
+        chave = str((passo.get('with') or {}).get('key', ''))
+        if chave.startswith('avd-') and f'-{TARGET_EMULADOR}-' not in chave:
+            falhas.append(f'FCM: a chave do cache do AVD {chave!r} não contém o target {TARGET_EMULADOR!r}')
+
+
 CHECKS = [check_jobs, check_gatilhos, check_sem_filtro_de_paths, check_concorrencia,
           check_limpeza_do_workspace, check_versoes_de_acoes,
-          check_runner, check_checks_obrigatorios]
+          check_runner, check_checks_obrigatorios, check_credenciais_fcm]
 
 for check in CHECKS:
     check()
