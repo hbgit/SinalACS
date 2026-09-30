@@ -15,7 +15,7 @@ class OrmPushTokenStore implements PushTokenStore {
   /// virar atualização). Só se espera pela trava do token com a do titular na
   /// mão, e quem a segura a solta no fim da própria transação: não há ciclo.
   @override
-  Future<PushRegistration> registerIfConsented({
+  Future<PushRegistrationResult> registerIfConsented({
     required String userId,
     required String? microAreaId,
     required String token,
@@ -32,8 +32,12 @@ class OrmPushTokenStore implements PushTokenStore {
         session,
         where: (t) =>
             t.userId.equals(userUuid) & t.purpose.equals(ConsentPurpose.segmentedPush.name),
-        orderBy: (t) => t.timestamp,
-        orderDescending: true,
+        // Desempate por id: dois consentimentos no mesmo instante não podem deixar
+        // a leitura não determinística.
+        orderByList: (t) => [
+          Order(column: t.timestamp, orderDescending: true),
+          Order(column: t.id, orderDescending: true),
+        ],
         transaction: transaction,
       );
       final existing = await PushToken.db.findFirstRow(
@@ -45,9 +49,10 @@ class OrmPushTokenStore implements PushTokenStore {
         if (existing != null && existing.userId != userUuid) {
           await PushToken.db.deleteRow(session, existing, transaction: transaction);
         }
-        return PushRegistration.refused;
+        return const PushRegistrationResult(PushRegistration.refused);
       }
       final ownerChanged = existing != null && existing.userId != userUuid;
+      final previousOwnerId = ownerChanged ? existing.userId.uuid : null;
       if (existing != null) {
         await PushToken.db.updateRow(
           session,
@@ -73,18 +78,30 @@ class OrmPushTokenStore implements PushTokenStore {
           transaction: transaction,
         );
       }
-      // Teto por titular: os mais antigos saem, nunca o que acabou de entrar.
+      // Teto por titular. Poupa sempre o token que acabou de entrar (um relógio que
+      // voltou o faria parecer o mais antigo) e apaga por id E titular: se outro
+      // registro roubou um desses tokens entre a leitura e o apagamento, a linha
+      // já é de outro e não pode ser levada por esta poda.
       final mine = await PushToken.db.find(
         session,
-        where: (t) => t.userId.equals(userUuid),
-        orderBy: (t) => t.updatedAt,
-        orderDescending: true,
+        where: (t) => t.userId.equals(userUuid) & t.token.notEquals(token),
+        orderByList: (t) => [
+          Order(column: t.updatedAt, orderDescending: true),
+          Order(column: t.createdAt, orderDescending: true),
+        ],
         transaction: transaction,
       );
-      for (final old in mine.skip(maxPushTokensPerUser)) {
-        await PushToken.db.deleteRow(session, old, transaction: transaction);
+      final doomed = mine.skip(maxPushTokensPerUser - 1).map((t) => t.id!).toSet();
+      if (doomed.isNotEmpty) {
+        await PushToken.db.deleteWhere(
+          session,
+          where: (t) => t.id.inSet(doomed) & t.userId.equals(userUuid),
+          transaction: transaction,
+        );
       }
-      return ownerChanged ? PushRegistration.ownerChanged : PushRegistration.registered;
+      return ownerChanged
+          ? PushRegistrationResult(PushRegistration.ownerChanged, previousOwnerId: previousOwnerId)
+          : const PushRegistrationResult(PushRegistration.registered);
     });
   }
 }

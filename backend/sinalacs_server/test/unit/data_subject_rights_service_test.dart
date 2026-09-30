@@ -169,8 +169,18 @@ void main() {
           store: store,
           audit: audit,
           clock: clock,
-          termsChange: agenda,
+          termsChangeReader: () => agenda,
         );
+
+    test('um leitor que devolve null vence a constante do repositório', () {
+      final svc = DataSubjectRightsService(
+        store: store,
+        audit: audit,
+        clock: () => _now,
+        termsChangeReader: () => null,
+      );
+      expect(svc.termsChangeNotice(_patient), isNull);
+    });
 
     test('sem agenda, não há aviso', () {
       expect(service.termsChangeNotice(_patient), isNull);

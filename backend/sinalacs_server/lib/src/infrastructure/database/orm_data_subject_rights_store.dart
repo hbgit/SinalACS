@@ -97,8 +97,10 @@ class OrmDataSubjectRightsStore implements DataSubjectRightsStore {
       final latest = await ConsentLog.db.findFirstRow(
         session,
         where: (t) => t.userId.equals(userUuid) & t.purpose.equals(entry.purpose.name),
-        orderBy: (t) => t.timestamp,
-        orderDescending: true,
+        orderByList: (t) => [
+          Order(column: t.timestamp, orderDescending: true),
+          Order(column: t.id, orderDescending: true),
+        ],
         transaction: transaction,
       );
       final snapshot = latest == null
@@ -126,8 +128,10 @@ class OrmDataSubjectRightsStore implements DataSubjectRightsStore {
     final row = await ConsentLog.db.findFirstRow(
       _session(),
       where: (t) => t.userId.equals(UuidValue.fromString(userId)) & t.purpose.equals(purpose.name),
-      orderBy: (t) => t.timestamp,
-      orderDescending: true,
+      orderByList: (t) => [
+        Order(column: t.timestamp, orderDescending: true),
+        Order(column: t.id, orderDescending: true),
+      ],
     );
     return row == null
         ? null

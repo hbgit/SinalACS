@@ -1,6 +1,6 @@
 import 'package:serverpod/serverpod.dart';
 import 'package:sinalacs_server/src/application/patients/push_token_service.dart'
-    show PushRegistration, maxPushTokensPerUser;
+    show PushRegistration, PushRegistrationResult, maxPushTokensPerUser;
 import 'package:sinalacs_server/src/config/app_config.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
 import 'package:sinalacs_server/src/application/onboarding/onboarding_service.dart'
@@ -282,8 +282,8 @@ void main() {
 
       test('depois de registrar × revogar em paralelo, denied nunca convive com token', () async {
         final session = sessionBuilder.build();
-        await _seedRaceLean(session);
         try {
+          await _seedRaceLean(session);
           final consents = OrmDataSubjectRightsStore(
             session: () => sessionBuilder.build(),
             chainSecret: _chainSecret,
@@ -331,8 +331,8 @@ void main() {
 
       test('aparelho de outro titular sem consentimento perde o vínculo do dono antigo', () async {
         final session = sessionBuilder.build();
-        await _seedRaceLean(session);
         try {
+          await _seedRaceLean(session);
           final consents = OrmDataSubjectRightsStore(
             session: () => sessionBuilder.build(),
             chainSecret: _chainSecret,
@@ -347,13 +347,14 @@ void main() {
             timestamp: DateTime.now().toUtc(),
           ));
           expect(
-            await tokens.registerIfConsented(
+            (await tokens.registerIfConsented(
               userId: _racePatientId,
               microAreaId: _raceMicroAreaId,
               token: 'tok-compartilhado',
               platform: 'android',
               now: DateTime.now().toUtc(),
-            ),
+            ))
+                .outcome,
             PushRegistration.registered,
           );
 
@@ -366,7 +367,7 @@ void main() {
             now: DateTime.now().toUtc(),
           );
 
-          expect(registered, PushRegistration.refused);
+          expect(registered.outcome, PushRegistration.refused);
           expect(
             await PushToken.db.count(session, where: (t) => t.token.equals('tok-compartilhado')),
             0,
@@ -396,8 +397,8 @@ void main() {
 
       test('revogação atômica: falha depois de apagar os tokens desfaz tudo', () async {
         final session = sessionBuilder.build();
-        await _seedRaceLean(session);
         try {
+          await _seedRaceLean(session);
           await grant(consentStore(), _racePatientId);
           final tokens = OrmPushTokenStore(session: () => sessionBuilder.build());
           await tokens.registerIfConsented(
@@ -436,8 +437,8 @@ void main() {
 
       test('passou do teto, o token mais antigo sai e o novo entra', () async {
         final session = sessionBuilder.build();
-        await _seedRaceLean(session);
         try {
+          await _seedRaceLean(session);
           await grant(consentStore(), _racePatientId);
           final tokens = OrmPushTokenStore(session: () => sessionBuilder.build());
           final base = DateTime.now().toUtc();
@@ -465,13 +466,13 @@ void main() {
 
       test('troca de dono devolve ownerChanged; repetir devolve registered', () async {
         final session = sessionBuilder.build();
-        await _seedRaceLean(session);
         try {
+          await _seedRaceLean(session);
           final consents = consentStore();
           await grant(consents, _racePatientId);
           await grant(consents, _raceAcsId);
           final tokens = OrmPushTokenStore(session: () => sessionBuilder.build());
-          Future<PushRegistration> register(String userId) => tokens.registerIfConsented(
+          Future<PushRegistrationResult> register(String userId) => tokens.registerIfConsented(
                 userId: userId,
                 microAreaId: _raceMicroAreaId,
                 token: 'tok-dono',
@@ -479,10 +480,130 @@ void main() {
                 now: DateTime.now().toUtc(),
               );
 
-          expect(await register(_racePatientId), PushRegistration.registered);
-          expect(await register(_raceAcsId), PushRegistration.ownerChanged);
-          expect(await register(_raceAcsId), PushRegistration.registered);
+          expect((await register(_racePatientId)).outcome, PushRegistration.registered);
+          final trocado = await register(_raceAcsId);
+          expect(trocado.outcome, PushRegistration.ownerChanged);
+          expect(trocado.previousOwnerId, _racePatientId);
+          expect((await register(_raceAcsId)).outcome, PushRegistration.registered);
           expect(await PushToken.db.count(session, where: (t) => t.token.equals('tok-dono')), 1);
+        } finally {
+          await cleanup(session);
+        }
+      });
+
+      test('a poda do teto só apaga tokens do próprio titular', () async {
+        final session = sessionBuilder.build();
+        try {
+          await _seedRaceLean(session);
+          final consents = consentStore();
+          await grant(consents, _racePatientId);
+          await grant(consents, _raceAcsId);
+          final tokens = OrmPushTokenStore(session: () => sessionBuilder.build());
+          final base = DateTime.now().toUtc();
+          // B (_raceAcsId) está no teto; o token mais antigo dele é 'tok-b-0'.
+          for (var i = 0; i < maxPushTokensPerUser; i++) {
+            await tokens.registerIfConsented(
+              userId: _raceAcsId,
+              microAreaId: _raceMicroAreaId,
+              token: 'tok-b-$i',
+              platform: 'android',
+              now: base.add(Duration(seconds: i)),
+            );
+          }
+          // C (_racePatientId) recebe o token mais antigo de B: troca de dono.
+          await tokens.registerIfConsented(
+            userId: _racePatientId,
+            microAreaId: _raceMicroAreaId,
+            token: 'tok-b-0',
+            platform: 'android',
+            now: base.add(const Duration(minutes: 1)),
+          );
+          // B registra o 11º token: a poda dele NÃO pode levar o 'tok-b-0' que agora é de C.
+          await tokens.registerIfConsented(
+            userId: _raceAcsId,
+            microAreaId: _raceMicroAreaId,
+            token: 'tok-b-novo',
+            platform: 'android',
+            now: base.add(const Duration(minutes: 2)),
+          );
+          final dono = await PushToken.db.findFirstRow(session, where: (t) => t.token.equals('tok-b-0'));
+          expect(dono?.userId, UuidValue.fromString(_racePatientId));
+        } finally {
+          await cleanup(session);
+        }
+      });
+
+      test('relógio que voltou: o token recém-gravado nunca é o podado', () async {
+        final session = sessionBuilder.build();
+        try {
+          await _seedRaceLean(session);
+          await grant(consentStore(), _racePatientId);
+          final tokens = OrmPushTokenStore(session: () => sessionBuilder.build());
+          final futuro = DateTime.now().toUtc().add(const Duration(hours: 1));
+          for (var i = 0; i < maxPushTokensPerUser; i++) {
+            await tokens.registerIfConsented(
+              userId: _racePatientId,
+              microAreaId: _raceMicroAreaId,
+              token: 'tok-f-$i',
+              platform: 'android',
+              now: futuro,
+            );
+          }
+          // `now` MENOR que o de todos os outros: por updatedAt ele seria o mais antigo.
+          final result = await tokens.registerIfConsented(
+            userId: _racePatientId,
+            microAreaId: _raceMicroAreaId,
+            token: 'tok-agora',
+            platform: 'android',
+            now: DateTime.now().toUtc(),
+          );
+          expect(result.outcome, PushRegistration.registered);
+          expect(await PushToken.db.count(session, where: (t) => t.token.equals('tok-agora')), 1);
+          expect(
+            await PushToken.db.count(
+              session,
+              where: (t) => t.userId.equals(UuidValue.fromString(_racePatientId)),
+            ),
+            maxPushTokensPerUser,
+          );
+        } finally {
+          await cleanup(session);
+        }
+      });
+
+      test('consentimentos com o MESMO timestamp: o de id maior decide', () async {
+        final session = sessionBuilder.build();
+        try {
+          await _seedRaceLean(session);
+          final at = DateTime.utc(2026, 9, 1);
+          Future<void> linha(String id, String action) => ConsentLog.db.insertRow(
+                session,
+                ConsentLog(
+                  id: UuidValue.fromString(id),
+                  userId: UuidValue.fromString(_racePatientId),
+                  purpose: ConsentPurpose.segmentedPush.name,
+                  action: action,
+                  version: '2026.1',
+                  timestamp: at,
+                  ipHash: 'nao-aplicavel-teste',
+                  userAgent: 'nao-aplicavel-teste',
+                  signature: 'assinatura-de-teste',
+                ),
+              );
+          // O 'granted' tem o id MENOR e entra primeiro; o 'denied' tem o id maior.
+          await linha('00000000-0000-4000-9200-0000000000a1', 'granted');
+          await linha('00000000-0000-4000-9200-0000000000a2', 'denied');
+          final tokens = OrmPushTokenStore(session: () => sessionBuilder.build());
+
+          final result = await tokens.registerIfConsented(
+            userId: _racePatientId,
+            microAreaId: _raceMicroAreaId,
+            token: 'tok-empate',
+            platform: 'android',
+            now: DateTime.now().toUtc(),
+          );
+
+          expect(result.outcome, PushRegistration.refused);
         } finally {
           await cleanup(session);
         }

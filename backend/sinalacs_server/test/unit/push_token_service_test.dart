@@ -32,19 +32,19 @@ class _FakePushTokenStore implements PushTokenStore {
   final rows = <String, ({String userId, String platform})>{};
 
   @override
-  Future<PushRegistration> registerIfConsented({
+  Future<PushRegistrationResult> registerIfConsented({
     required String userId,
     required String? microAreaId,
     required String token,
     required String platform,
     required DateTime now,
   }) async {
-    if (!consent) return PushRegistration.refused;
+    if (!consent) return const PushRegistrationResult(PushRegistration.refused);
     final previous = rows[token];
     rows[token] = (userId: userId, platform: platform);
     return previous != null && previous.userId != userId
-        ? PushRegistration.ownerChanged
-        : PushRegistration.registered;
+        ? PushRegistrationResult(PushRegistration.ownerChanged, previousOwnerId: previous.userId)
+        : const PushRegistrationResult(PushRegistration.registered);
   }
 }
 
@@ -104,15 +104,19 @@ void main() {
     );
   });
 
-  test('troca de dono é auditada; primeiro registro e repetição não', () async {
+  test('troca de dono audita o novo dono E o anterior, sem o token', () async {
     await service.register(_patient, token: 'tok-1', platform: 'android');
     await service.register(_patient, token: 'tok-1', platform: 'android');
     expect(audit.events, isEmpty);
 
     await service.register(_otherPatient, token: 'tok-1', platform: 'android');
-    expect(audit.events.single.resourceType, 'push_token');
-    expect(audit.events.single.userId, _otherPatient.id);
-    expect('${audit.events.single.resourceId} ${audit.events.single.result}'.contains('tok-1'), isFalse);
+
+    expect(audit.events.map((e) => e.userId).toSet(), {_otherPatient.id, _patient.id});
+    for (final e in audit.events) {
+      expect(e.resourceType, 'push_token');
+      expect('${e.resourceId} ${e.result}'.contains('tok-1'), isFalse);
+    }
+    expect(audit.events.map((e) => e.result), containsAll(['granted', 'lost']));
   });
 
   test('recusa por falta de consentimento lança e não audita', () async {

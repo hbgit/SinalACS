@@ -20,7 +20,7 @@ abstract interface class PushTokenStore {
   ///
   /// Depois de gravar, o titular nunca fica com mais de [maxPushTokensPerUser]
   /// tokens: os mais antigos (por `updatedAt`) saem.
-  Future<PushRegistration> registerIfConsented({
+  Future<PushRegistrationResult> registerIfConsented({
     required String userId,
     required String? microAreaId,
     required String token,
@@ -31,6 +31,15 @@ abstract interface class PushTokenStore {
 
 /// Desfecho de [PushTokenStore.registerIfConsented].
 enum PushRegistration { registered, ownerChanged, refused }
+
+/// O desfecho mais, quando o token mudou de dono, quem era o dono anterior — para
+/// o titular que perdeu o vínculo sem agir também ter rastro (LGPD-RF08).
+class PushRegistrationResult {
+  const PushRegistrationResult(this.outcome, {this.previousOwnerId});
+
+  final PushRegistration outcome;
+  final String? previousOwnerId;
+}
 
 /// Teto de aparelhos por titular. Passou do teto, o token mais antigo sai: quem
 /// troca de celular nunca é recusado por causa de aparelhos velhos.
@@ -75,14 +84,14 @@ class PushTokenService {
         !pushPlatforms.contains(platform)) {
       throw DataRightsException(message: 'Aparelho inválido para receber avisos.');
     }
-    final outcome = await _store.registerIfConsented(
+    final result = await _store.registerIfConsented(
       userId: user.id,
       microAreaId: user.microAreaId,
       token: trimmed,
       platform: platform,
       now: _clock().toUtc(),
     );
-    if (outcome == PushRegistration.refused) {
+    if (result.outcome == PushRegistration.refused) {
       throw DataRightsException(
         message: 'Ative "Avisos da equipe de saúde" em Meus Dados para receber avisos.',
       );
@@ -90,13 +99,22 @@ class PushTokenService {
     // Só a troca de dono deixa rastro: é o único evento que move um vínculo
     // aparelho↔titular sem ação do titular anterior. Registrar e repetir não
     // auditam, para não gravar uma linha por login; o token nunca entra na trilha.
-    if (outcome == PushRegistration.ownerChanged) {
+    if (result.outcome == PushRegistration.ownerChanged) {
       await _audit.recordSafely(AuditEvent(
         userId: user.id,
         actionType: 'write',
         resourceType: 'push_token',
         result: 'granted',
       ));
+      final previous = result.previousOwnerId;
+      if (previous != null) {
+        await _audit.recordSafely(AuditEvent(
+          userId: previous,
+          actionType: 'write',
+          resourceType: 'push_token',
+          result: 'lost',
+        ));
+      }
     }
   }
 }

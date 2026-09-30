@@ -86,16 +86,16 @@ class DataSubjectRightsService {
     required DataSubjectRightsStore store,
     required AuditTrail audit,
     DateTime Function()? clock,
-    TermsChangeSchedule? termsChange,
+    TermsChangeSchedule? Function()? termsChangeReader,
   })  : _store = store,
         _audit = audit,
-        _termsChange = termsChange ?? upcomingTermsChange,
+        _termsChangeReader = termsChangeReader ?? (() => upcomingTermsChange),
         _clock = clock ?? DateTime.now;
 
   final DataSubjectRightsStore _store;
   final AuditTrail _audit;
   final DateTime Function() _clock;
-  final TermsChangeSchedule? _termsChange;
+  final TermsChangeSchedule? Function() _termsChangeReader;
 
   /// Concede ou revoga uma finalidade opcional. `healthDataProcessing` é
   /// recusado nas duas direções: é a base legal do app inteiro — inclusive do
@@ -160,7 +160,7 @@ class DataSubjectRightsService {
   /// antecedência). Sem I/O: a agenda é uma constante do repositório.
   TermsChangeNoticeSnapshot? termsChangeNotice(AuthenticatedUser user) {
     _requirePatient(user);
-    final schedule = _termsChange;
+    final schedule = _termsChangeReader();
     if (schedule == null || !schedule.isActiveAt(_clock().toUtc())) return null;
     return TermsChangeNoticeSnapshot(
       version: schedule.version,
