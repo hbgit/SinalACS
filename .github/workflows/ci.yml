@@ -37,6 +37,11 @@ jobs:
         run: |
           python3 -c 'import yaml' 2>/dev/null || { sudo apt-get update && sudo apt-get install -y python3-yaml; }
           ./scripts/qa/ci_invariants.sh
+      - name: Testes dos scripts de CI
+        run: |
+          ./scripts/ci/decode_secret_file_test.sh
+          ./scripts/qa/ci_push_e2e_test.sh
+          ./scripts/qa/ci_invariants_fcm_test.sh
   serverpod-backend:
     runs-on: ubuntu-24.04
     defaults:
@@ -214,6 +219,27 @@ jobs:
       GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
     steps:
       - uses: actions/checkout@v7
+      # Credenciais do FCM para o push e2e (Gorush e FCM reais). Cada secret é um arquivo em
+      # base64 (`base64 -w0 arquivo`). A chave da conta de serviço vai para um arquivo
+      # temporário (0600) e GOOGLE_APPLICATION_CREDENTIALS aponta para ele; o
+      # google-services.json vai para onde o build do paciente o procura (sem ele o APK
+      # compila e degrada para "sem push"). Sem os secrets (PR de fork) os passos só avisam
+      # e o job roda como sempre. Cada secret entra por `env:` do PASSO: nunca em `run:`
+      # (injeção de script) e nunca no `env:` do job (toda ação de terceiros o veria) —
+      # ci_invariants.sh vigia as duas coisas.
+      - name: Decodifica a credencial do FCM
+        env:
+          FCM_CREDENTIALS_BASE64: ${{ secrets.FCM_CREDENTIALS_BASE64 }}
+        run: |
+          ./scripts/ci/decode_secret_file.sh --env FCM_CREDENTIALS_BASE64 \
+            --kind service_account --temp-export GOOGLE_APPLICATION_CREDENTIALS
+      - name: Decodifica o google-services.json
+        env:
+          GOOGLE_SERVICES_JSON_BASE64: ${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}
+        run: |
+          ./scripts/ci/decode_secret_file.sh --env GOOGLE_SERVICES_JSON_BASE64 \
+            --kind google_services --package br.com.prismrr.sinalacs.patient \
+            --to apps/patient/android/app/google-services.json
       # Sem isto o emulador roda por emulação de CPU em software: medido, o log
       # dizia "ProbeKVM: This user doesn't have permissions to use KVM", o boot
       # levava ~12 min e cada `adb install` de 45 a 95 s. O runner tem
@@ -254,12 +280,15 @@ jobs:
           path: |
             ~/.android/avd/*
             ~/.android/adb*
-          key: avd-36-x86_64-pixel_7-ubuntu-24.04
+          # target no nome: o push e2e precisa de Play Services (a imagem padrão da action é
+          # AOSP, sem ele); trocar o target sem trocar a chave restauraria o AVD antigo.
+          key: avd-36-google_apis-x86_64-pixel_7-ubuntu-24.04
       - name: Gera o snapshot do AVD para o cache
         if: steps.avd-cache.outputs.cache-hit != 'true'
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 36
+          target: google_apis
           arch: x86_64
           profile: pixel_7
           force-avd-creation: false
@@ -282,6 +311,7 @@ jobs:
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 36
+          target: google_apis
           arch: x86_64
           profile: pixel_7
           force-avd-creation: false
@@ -296,6 +326,15 @@ jobs:
       # container. O pós-passo do flutter-action faz hashFiles('**/pubspec.lock')
       # sobre o workspace inteiro, não consegue ler pg_data/ e derruba o job
       # depois de o E2E ter passado — medido no run 36494654391.
+      # Apaga as credenciais mesmo se o E2E falhar. Num runner hospedado o disco é descartado
+      # ao fim do job, mas o passo mantém a regra verdadeira em qualquer runner (inclusive um
+      # autohospedado no futuro) e tira o google-services.json e a chave do Gorush do workspace.
+      - name: Remove as credenciais do FCM
+        if: always()
+        run: |
+          ./scripts/ci/decode_secret_file.sh --cleanup-temp GOOGLE_APPLICATION_CREDENTIALS
+          ./scripts/ci/decode_secret_file.sh --cleanup-file apps/patient/android/app/google-services.json
+          ./scripts/ci/decode_secret_file.sh --cleanup-file infra/docker/gorush/credentials/fcm-service-account.json
       - name: Remove pg_data/ do workspace
         if: always()
         run: sudo rm -rf pg_data
