@@ -86,9 +86,8 @@ sincronização em segundo plano assim que a rede volta.
 
 <div class="split">
   <div class="frame-col">
-    <div class="placeholder">
-      <div class="icon">📸</div>
-      Capturar: <code>docs/screenshots/patient/02-autenticacao.png</code>
+    <div class="phone-frame">
+      <img src="images/paciente-autenticacao.png" alt="Login do paciente com CPF e data de nascimento" />
     </div>
   </div>
   <div class="info-col">
@@ -109,7 +108,7 @@ sincronização em segundo plano assim que a rede volta.
 <div class="split">
   <div class="frame-col">
     <div class="phone-frame">
-      <img src="../screenshots/patient/01-emergencia.png" alt="Alerta de urgência" />
+      <img src="images/paciente-emergencia.png" alt="Alerta de urgência" />
     </div>
   </div>
   <div class="info-col">
@@ -130,10 +129,8 @@ sincronização em segundo plano assim que a rede volta.
 
 <div class="split">
   <div class="frame-col">
-    <div class="placeholder">
-      <div class="icon">📸</div>
-      Capturar: <code>docs/screenshots/patient/03-triagem.png</code>
-      <br />(recomendado: passo 3, com <code>Risco: Vermelho</code> já visível)
+    <div class="phone-frame">
+      <img src="images/paciente-triagem.png" alt="Triagem com resultado de risco" />
     </div>
   </div>
   <div class="info-col">
@@ -155,23 +152,27 @@ sincronização em segundo plano assim que a rede volta.
 
 <h2>Paciente — Acompanhamento, lembretes e meus dados</h2>
 
-<div class="placeholder-row" style="margin-top: 24px;">
-  <div class="placeholder">
-    <div class="icon">📸</div>
-    <code>patient/04-acompanhamento.png</code>
-    <br />Enviado → Visualizado → Em análise → Agendado
-  </div>
-  <div class="placeholder">
-    <div class="icon">📸</div>
-    <code>patient/05-lembretes.png</code>
-    <br />Medicamentos e rotina, com ativação
-  </div>
-  <div class="placeholder">
-    <div class="icon">📸</div>
-    <code>patient/06-perfil.png</code>
-    <br />Condições crônicas — "meus dados"
-  </div>
+<div style="display: flex; justify-content: center; gap: 48px; margin-top: 16px;">
+  <figure style="margin: 0; text-align: center;">
+    <div class="phone-frame" style="width: 170px;">
+      <img src="images/paciente-acompanhamento.png" alt="Status da solicitação" />
+    </div>
+    <figcaption style="margin-top: 10px; font-size: 14px; color: var(--text-muted);">Status da solicitação</figcaption>
+  </figure>
+  <figure style="margin: 0; text-align: center;">
+    <div class="phone-frame" style="width: 170px;">
+      <img src="images/paciente-lembretes.png" alt="Lembretes de medicamentos e rotina" />
+    </div>
+    <figcaption style="margin-top: 10px; font-size: 14px; color: var(--text-muted);">Lembretes</figcaption>
+  </figure>
+  <figure style="margin: 0; text-align: center;">
+    <div class="phone-frame" style="width: 170px;">
+      <img src="images/paciente-perfil.png" alt="Perfil clínico e meus dados" />
+    </div>
+    <figcaption style="margin-top: 10px; font-size: 14px; color: var(--text-muted);">Perfil clínico · meus dados</figcaption>
+  </figure>
 </div>
+
 
 <span class="app-tag patient">Paciente</span>
 
@@ -180,7 +181,7 @@ sincronização em segundo plano assim que a rede volta.
 <div class="split">
   <div class="frame-col">
     <div class="phone-frame">
-      <img src="../screenshots/acs/01-login.png" alt="Login institucional do ACS" />
+      <img src="images/acs-login.png" alt="Login institucional do ACS" />
     </div>
   </div>
   <div class="info-col">
@@ -200,7 +201,7 @@ sincronização em segundo plano assim que a rede volta.
 <div class="split">
   <div class="frame-col">
     <div class="phone-frame">
-      <img src="../screenshots/acs/03-territorializacao.png" alt="Territorialização" />
+      <img src="images/acs-territorializacao.png" alt="Territorialização" />
     </div>
   </div>
   <div class="info-col">
@@ -221,7 +222,7 @@ sincronização em segundo plano assim que a rede volta.
 <div class="split">
   <div class="frame-col">
     <div class="phone-frame">
-      <img src="../screenshots/acs/02-dashboard.png" alt="Fila priorizada por risco" />
+      <img src="images/acs-dashboard.png" alt="Fila priorizada por risco" />
     </div>
   </div>
   <div class="info-col">
@@ -243,7 +244,7 @@ sincronização em segundo plano assim que a rede volta.
 <div class="split">
   <div class="frame-col">
     <div class="phone-frame">
-      <img src="../screenshots/acs/05-visita.png" alt="Registro de visita offline" />
+      <img src="images/acs-visita.png" alt="Registro de visita offline" />
     </div>
   </div>
   <div class="info-col">
@@ -262,9 +263,8 @@ sincronização em segundo plano assim que a rede volta.
 
 <div class="split">
   <div class="frame-col">
-    <div class="placeholder">
-      <div class="icon">📸</div>
-      Capturar: <code>docs/screenshots/acs/06-acionamento.png</code>
+    <div class="phone-frame">
+      <img src="images/acs-acionamento.png" alt="Tela de acionamento e escalonamento" />
     </div>
   </div>
   <div class="info-col">
@@ -283,13 +283,13 @@ sincronização em segundo plano assim que a rede volta.
 ---
 
 <div class="split">
-  <div class="frame-col">
+  <div class="frame-col" style="flex-basis: 48%;">
     <div class="phone-pair">
-      <div class="phone-frame">
-        <img src="../screenshots/admin/02-indicadores.png" alt="Painel de indicadores" />
+      <div class="phone-frame" style="width: 240px;">
+        <img src="images/admin-indicadores.png" alt="Painel de indicadores" />
       </div>
-      <div class="phone-frame">
-        <img src="../screenshots/admin/03-microareas.png" alt="Microáreas e vínculo ACS" />
+      <div class="phone-frame" style="width: 240px;">
+        <img src="images/admin-microarea.png" alt="Microáreas e vínculo ACS" />
       </div>
     </div>
   </div>
@@ -309,13 +309,13 @@ sincronização em segundo plano assim que a rede volta.
 ---
 
 <div class="split">
-  <div class="frame-col">
+  <div class="frame-col" style="flex-basis: 48%;">
     <div class="phone-pair">
-      <div class="phone-frame">
-        <img src="../screenshots/admin/04-alertas.png" alt="Alertas da UBS" />
+      <div class="phone-frame" style="width: 240px;">
+        <img src="images/admin-alertas.png" alt="Alertas da UBS" />
       </div>
-      <div class="phone-frame">
-        <img src="../screenshots/admin/05-auditoria.png" alt="Logs de auditoria" />
+      <div class="phone-frame" style="width: 240px;">
+        <img src="images/admin-auditoria.png" alt="Logs de auditoria" />
       </div>
     </div>
   </div>
