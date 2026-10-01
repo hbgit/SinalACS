@@ -1,0 +1,22 @@
+### Pedido do titular sobre os próprios dados (LGPD-RF08): exclusão ou
+### correção, com prazo de resposta de 15 dias (spec/lgpd_design.md 596-597).
+###
+### `details` é texto livre do titular e pode citar condição de saúde — por
+### isso é cifrado na aplicação (AES-256-GCM), pelo mesmo motivo e com o
+### mesmo `HealthDataCipher` de `visits.notes` (RNF03/INV-04). Num pedido de
+### exclusão guarda o JSON `null` cifrado.
+class: DataSubjectRequest
+table: data_subject_requests
+fields:
+  id: UuidValue?, defaultPersist=random
+  userId: UuidValue, relation(parent=users)
+  requestType: DataSubjectRequestType
+  detailsEncrypted: String
+  detailsKeyVersion: int
+  status: DataSubjectRequestStatus
+  createdAt: DateTime
+  ### Prazo de resposta: `createdAt` + 15 dias.
+  dueAt: DateTime
+indexes:
+  data_subject_requests_user_id_type_idx:
+    fields: userId, requestType

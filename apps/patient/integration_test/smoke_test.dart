@@ -14,7 +14,10 @@
 ///
 /// Mesmos pré-requisitos e `--dart-define` de `backend_connection_test.dart`.
 ///
-/// PRIVACIDADE: só os UUIDs sintéticos do seed; o token nunca é impresso.
+/// Login: com `--dart-define=E2E_FIXTURES=...` entra pelo OTP real de uma fixture
+/// (ver `scripts/qa/patient_full_e2e.sh`); sem ele, pelo login de desenvolvimento.
+///
+/// PRIVACIDADE: só dados sintéticos; o token nunca é impresso.
 library;
 
 import 'package:flutter/services.dart' show rootBundle;
@@ -26,7 +29,7 @@ import 'package:sinalacs_patient/core/network/backend_config.dart';
 import 'package:sinalacs_patient/core/network/idempotency.dart';
 import 'package:sinalacs_patient/core/privacy/location_hash.dart';
 
-const seedMicroAreaId = '00000000-0000-4000-8000-000000000003';
+import 'support/e2e_login.dart';
 
 /// Mesma leitura de `backend_connection_test.dart`: sem a CA no bundle o
 /// handshake falha, e o sintoma culparia a rede.
@@ -58,9 +61,9 @@ void main() {
     expect(health.dbConnected, isTrue,
         reason: 'sem banco, createRedAlert falha por chave estrangeira');
 
-    final session = await backend.developmentLogin(role: 'patient');
+    final session = await loginPatient(backend);
     expect(session.role, 'patient');
-    expect(session.microAreaId, seedMicroAreaId);
+    expect(session.microAreaId, expectedMicroArea());
 
     final risk = await backend.evaluateTriage(
       chestPain: true,

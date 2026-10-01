@@ -222,38 +222,69 @@ específico já decidido em §2.
 
 ### 3.2 RF14 — Avisos segmentados à comunidade (push)
 
-**Estado atual:** `NoticesScreen` descarta a entrada. Não há FCM/APNs, não há
-tabela de token de dispositivo, não há endpoint de envio segmentado por
-microárea/UBS.
+**Estado atual:** o lado do paciente registra o token do aparelho
+(`devices.registerPushToken`, tabela `push_tokens`, só com o consentimento
+`segmentedPush` vigente), o backend envia (`notices.sendSegmented`, cliente do
+Gorush, restrito ao ACS — o perfil admin não existe ainda) e a tela de avisos do
+ACS chama esse endpoint. **Provado em 2026-09-30 no emulador Android** (projeto
+Firebase `sinal-acs`, Gorush 1.22.0 no Compose local): o aviso do ACS chega à
+bandeja do aparelho, com o lado nativo Android do token implementado. Faltam
+iOS/APNs, um teste em aparelho físico e hospedar o Gorush fora do Compose local
+(ver PROGRESS.md, "RF14: Gorush e FCM provados no emulador").
 
-**Decisão aprovada (contrato, não implementação):**
-- Provedor: **Firebase Cloud Messaging (FCM)**, por ser o caminho padrão para
-  Android (plataforma primária hoje — os três apps só têm build Android) e
-  compatível com iOS via APNs através do mesmo SDK, evitando manter dois
-  backends de push.
-- Contrato de backend: um endpoint de registro de token
-  (`devices.registerPushToken`, tabela nova `push_tokens` associando
-  `userId`/`microAreaId`/token/plataforma) e um endpoint de envio segmentado
-  (`notices.sendSegmented`, restrito a ACS/admin da UBS/microárea alvo,
-  auditado como os demais endpoints sensíveis).
+**Decisão aprovada (revisada em 2026-09-29: Gorush no lugar de um SDK/console
+Firebase como ponto de integração):**
+- Envio por **Gorush** (servidor de push open-source em Go, auto-hospedado no
+  mesmo Docker Compose/host do backend), que mantém as conexões com o FCM
+  (Android) e o APNs (iOS). O backend não fala com o provedor: entrega ao
+  Gorush a lista de tokens e o conteúdo, e o Gorush faz o envio. Isso evita
+  manter dois clientes de push no backend e mantém a lógica de segmentação
+  onde já estão os dados.
+- **Segmentação no PostgreSQL:** a consulta de destinatários é um `JOIN` entre
+  `push_tokens` e `users`/`patients` filtrando por microárea (e, quando houver,
+  por outro atributo do titular), sempre restrita a titulares com o
+  consentimento `segmentedPush` vigente. Nada de segmentação no provedor.
+- **Contrato de backend:** `devices.registerPushToken` (implementado) e
+  `notices.sendSegmented` (restrito a ACS/admin da UBS/microárea alvo, auditado
+  como os demais endpoints sensíveis, e que consulta o consentimento antes de
+  montar a lista). A tabela segue como `push_tokens` (uma linha por token,
+  `userId`, `microAreaId`, `platform`, `createdAt`, `updatedAt`); o nome
+  `user_push_tokens` cogitado na revisão não foi adotado porque a tabela já
+  existe com este nome.
+- **App do paciente:** a captura do token nativo (FCM no Android, APNs no iOS)
+  fica atrás da interface `PushTokenSource` (`core/push/push_token_source.dart`),
+  que o app já injeta por `PushTokenScope`. O app adota `flutter_riverpod`
+  **somente** para a captura e o registro do token (`pushTokenSourceProvider`);
+  o restante da injeção segue por `InheritedWidget` (`BackendScope`,
+  `QrScannerScope`, `PushTokenScope`). Migrar o resto para Riverpod fica fora do
+  RF14 (decisão do produto em 2026-09-29). O
+  token também é guardado no SQLite local só se um consumidor local vier a
+  precisar dele; hoje o servidor é a única fonte.
 - Conteúdo do aviso não deve carregar dado de saúde identificável — só o
   necessário para abrir o app na tela correta (mesma lógica de minimização já
   aplicada ao alerta).
 
-**Bloqueio externo — este item está bloqueado, não só pendente de
-implementação:**
-- Não existe projeto Firebase configurado no repositório (sem
-  `google-services.json`, sem `GoogleService-Info.plist`, sem chave de
-  servidor FCM em `.env.example`).
-- Criar esse projeto é uma decisão de produto/infra sobre qual conta
-  organizacional o hospeda, quem tem acesso administrativo e qual orçamento
-  cobre o uso em produção — decisão que este repositório não pode tomar
-  sozinho.
+**O que a mudança destrava e o que não destrava:**
+- Sai o bloqueio "provisionar e administrar um projeto Firebase como
+  plataforma do produto": o envio passa a ser infraestrutura própria (Gorush).
+- **Continua exigindo credenciais de provedor.** O Gorush é um relé: para
+  Android ele precisa de uma credencial FCM (conta de serviço) e para iOS de
+  uma chave APNs. Ter essa credencial de FCM implica uma conta/projeto no
+  Google, embora sem a dependência do SDK de análise e sem o backend falar com
+  ele. Quem hospeda essa conta e quem a administra segue sendo decisão de
+  produto/infra que este repositório não toma sozinho.
+- **Ponto em aberto:** obter o token FCM no Android normalmente exige o SDK
+  `firebase_messaging` (ou um canal nativo equivalente) e o `google-services.json`;
+  o iOS pode usar um pacote leve de APNs. A escolha do pacote de cada
+  plataforma fica para a implementação de `PushTokenSource`, com a exigência
+  de que o registro continue silencioso e nunca bloqueie o login, a home ou o
+  alerta de urgência.
 
-**Plano derivado (após o bloqueio externo ser resolvido):** provisionar o
-projeto Firebase, declarar as credenciais como segredo (padrão
-`bootstrap_env.sh`), implementar os dois endpoints acima e a tela real de
-avisos nos apps ACS (emissor) e paciente (receptor).
+**Plano derivado:** subir o Gorush no `docker-compose.yml` (perfil próprio,
+credenciais FCM/APNs como segredos no padrão `bootstrap_env.sh`, porta não
+publicada fora da rede do Compose), implementar `notices.sendSegmented` com a
+consulta segmentada e o consentimento, a tela de avisos do ACS (emissor) e a
+implementação real de `PushTokenSource` no paciente (receptor).
 
 ---
 
@@ -461,7 +492,7 @@ como decisão futura, não uma dependência que bloqueia esta decisão.
 | Mapa/localização | RF10, L-05 | Aprovado (geocélula) | Não |
 | Onboarding/consentimento | RF02, LGPD-RF02 | Aprovado | Não |
 | Lembretes locais | RF06 | Aprovado | Não |
-| Avisos push | RF14 | Contrato aprovado | **Sim** — projeto FCM inexistente |
+| Avisos push | RF14 | Contrato aprovado (Gorush, revisado 2026-09-29) | **Parcial** — falta hospedar o Gorush e provisionar credenciais FCM/APNs |
 | Geofencing | RF12 | Aprovado (atrelado a visita ativa) | Parcial — submissão à loja pendente de revisão |
 | Sync central→dispositivo | RF15 (leitura), RF05, INV-05 | Aprovado (pull incremental) | Não |
 | Criptografia Postgres | RNF03, INV-04 | Aprovado (app-level AES-256-GCM) | Não (KMS de produção é melhoria futura) |

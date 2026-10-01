@@ -80,6 +80,27 @@ services:
       - ./infra/docker/mosquitto/runtime:/mosquitto/runtime
     entrypoint: ["/bin/sh", "-c", "apk add --no-cache openssl && sh /init.sh"]
 
+  # Relé de push para FCM/APNs (RF14, decisão §3.2). Opcional: só sobe com
+  # `docker compose --profile push up`. Não publica porta — só o backend, na rede
+  # do Compose, fala com ele. As credenciais FCM/APNs são arquivos fornecidos pela
+  # organização e nunca são versionados (ver infra/docker/gorush/README.md).
+  gorush:
+    image: appleboy/gorush:1.22.0
+    profiles: [push]
+    restart: unless-stopped
+    command: ["-c", "/config.yml"]
+    # A chave da conta de serviço tem de ser 0600 (push_e2e.sh exige) e, portanto, só o dono a
+    # lê. A imagem roda como uid 1000; no runner do CI o dono é o usuário `runner` (uid 1001),
+    # e o Gorush cairia com EACCES. O container roda com o uid/gid de quem montou a chave
+    # (ci_push_e2e.sh os exporta); fora do CI o padrão 1000 é o da imagem.
+    user: "${GORUSH_UID:-1000}:${GORUSH_GID:-1000}"
+    environment:
+      GORUSH_IOS_KEY_ID: ${GORUSH_IOS_KEY_ID:-}
+      GORUSH_IOS_TEAM_ID: ${GORUSH_IOS_TEAM_ID:-}
+    volumes:
+      - ./infra/docker/gorush/config.yml:/config.yml:ro
+      - ${GORUSH_CREDENTIALS_DIR:-./infra/docker/gorush/credentials}:/credentials:ro
+
   serverpod:
     build:
       context: ./backend
@@ -124,6 +145,9 @@ services:
       # fora dele. PRECISA ser a mesma do health-data-seed abaixo, ou o
       # diretório de pacientes não decifra o que o seed gravou.
       HEALTH_DATA_ENCRYPTION_KEY: ${HEALTH_DATA_ENCRYPTION_KEY:-}
+      # Relé de push (RF14). Vazio desliga o envio de avisos; com o perfil `push`
+      # ativo, use GORUSH_URL=http://gorush:8088 no .env.
+      GORUSH_URL: ${GORUSH_URL:-}
       # Pepper do HMAC de `users.cpfHash` (RF01). PRECISA ser o mesmo valor que o
       # `cpf-hash-seed` recebe, pela mesma razão do
       # HEALTH_DATA_ENCRYPTION_KEY acima: o seed deriva o hash e o servidor o

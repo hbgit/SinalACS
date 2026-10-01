@@ -44,8 +44,7 @@ onboarding e consentimento (§2, RF02) e a metade central→dispositivo da
 sincronização (§5, RF15 — pull incremental; a leitura fica do lado do ACS,
 não há geração de mudança do lado do paciente ainda). Lembretes locais
 (§3.1, RF06) também têm implementação no app do paciente. Ainda **não**
-implementados: push segmentado (§3.2, RF14 — bloqueado externamente, sem
-projeto Firebase) e geofencing (§4, RF12 — só o contrato de dados
+implementados de ponta a ponta: push segmentado (§3.2, RF14 — provado no emulador Android em 2026-09-30, com Gorush; faltam iOS/APNs, aparelho físico e hospedar o Gorush fora do Compose local) e geofencing (§4, RF12 — só o contrato de dados
 `arrivalMethod` foi desenhado, sem o serviço de geofence em primeiro plano):
 
 * **Criptografia de colunas no PostgreSQL (RNF03/INV-04, §6 — implementada):**
@@ -58,9 +57,17 @@ projeto Firebase) e geofencing (§4, RF12 — só o contrato de dados
   `scripts/dev/bootstrap_env.sh`, opcional em `development` (cai num valor
   público conhecido) e obrigatória fora dele —, sem introduzir um KMS externo
   nesta fase.
-* **Push segmentado (RF14):** Firebase Cloud Messaging é o provedor
-  escolhido, mas a decisão está **bloqueada externamente** — não existe
-  projeto Firebase provisionado neste repositório.
+* **Push segmentado (RF14):** o envio é feito por **Gorush**, servidor de
+  push open-source em Go, auto-hospedado no Docker Compose ao lado do backend
+  (revisão de 2026-09-29, no lugar de integrar o Firebase). O app captura o
+  token nativo (FCM no Android, APNs no iOS) atrás de `PushTokenSource` e o
+  registra em `push_tokens` (PostgreSQL); a segmentação é uma consulta SQL
+  restrita a quem consentiu (`segmentedPush`); o backend entrega a lista de
+  tokens ao Gorush, que fala com o FCM/APNs. O app do paciente adota
+  `flutter_riverpod` **somente** na captura e no registro do token
+  (`pushTokenSourceProvider`); o resto da injeção segue por `InheritedWidget`. O Gorush precisa de credencial FCM (Android, já usada no teste) e chave
+  APNs (iOS, ainda inexistente): a pendência é hospedar o Gorush e provisionar a
+  chave APNs — decisão de infra, não de código.
 * **Geofencing (RF12):** rejeitado rastreamento contínuo em segundo plano do
   ACS; adotado geofence único atrelado a uma visita ativa, com serviço em
   primeiro plano e notificação persistente, para evitar a política mais

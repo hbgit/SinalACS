@@ -1,0 +1,16 @@
+# Stack de e2e: o mesmo backend, mas com o banco de TESTE (postgres-test,
+# efêmero, sem volume) e sem login de desenvolvimento. Uso:
+#   ./scripts/qa/e2e_stack.sh up
+# O banco `sinalacs_e2e` é separado de `sinalacs_test` (do `dart test`) para que
+# a suíte do backend e a jornada no emulador não pisem uma na outra.
+services:
+  serverpod:
+    environment:
+      SERVERPOD_DATABASE_HOST: postgres-test
+      SERVERPOD_DATABASE_PORT: "5432"
+      SERVERPOD_DATABASE_NAME: sinalacs_e2e
+      SERVERPOD_DATABASE_USER: postgres
+      SERVERPOD_DATABASE_PASSWORD: ${TEST_DATABASE_PASSWORD:?defina em .env — rode ./scripts/dev/bootstrap_env.sh}
+      ENABLE_DEV_LOGIN: "false"
+      SMS_GATEWAY: log
+      GORUSH_URL: http://gorush:8088

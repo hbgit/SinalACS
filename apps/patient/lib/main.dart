@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart' show ProviderScope;
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:sinalacs_patient/app/app.dart';
@@ -65,7 +66,7 @@ Future<void> main({String? defaultHost}) async {
   // O cliente é construído aqui, e não dentro de `SinalAcsApp`, porque só aqui
   // a CA já foi lida: `BackendConfig` não importa `rootBundle` de propósito —
   // `tool/live_check.dart` o importa fora do Flutter, onde `dart:ui` não existe.
-  runApp(SinalAcsApp(backend: backend));
+  runApp(ProviderScope(child: SinalAcsApp(backend: backend)));
 }
 
 /// Os bytes da CA de desenvolvimento do RPC, ou `null` quando ela não pode ser

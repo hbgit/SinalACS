@@ -1,0 +1,7 @@
+### Tipo de pedido do titular sobre os próprios dados (LGPD-RF08, Art. 18):
+### exclusão/anonimização ou correção. Ver spec/lgpd_design.md linhas 583-597.
+enum: DataSubjectRequestType
+serialized: byName
+values:
+  - deletion
+  - correction

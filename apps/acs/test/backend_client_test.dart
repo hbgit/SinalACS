@@ -124,6 +124,36 @@ void main() {
   /// mediu que o `network_security_config.xml` não bloqueia o cleartext do
   /// `dart:io`, então esta validação é a única barreira que sobrou — e é aqui
   /// que ela fica vermelha se alguém a apagar.
+  test('generateInvite pede o convite do paciente com o token da sessão', () async {
+    await backend.login(matricula: 'ACS-001', senha: 'senha-sintetica');
+
+    final invite = await backend.generateInvite(
+      patientId: '00000000-0000-4000-8000-000000000005',
+    );
+
+    expect(invite.token, 'convite-sintetico');
+    expect(invite.expiresAt, DateTime.utc(2026, 9, 29, 10, 15));
+    final request = server.requests.last;
+    expect(request.endpoint, 'onboarding');
+    expect(request.method, 'generateEnrollmentToken');
+    expect(request.args['patientId'], '00000000-0000-4000-8000-000000000005');
+    expect(request.args['accessToken'], isNotEmpty);
+  });
+
+  test('generateInvite recusado por território vira mensagem de paciente fora da microárea', () async {
+    await backend.login(matricula: 'ACS-001', senha: 'senha-sintetica');
+    server.rejectInviteWithPermission = true;
+
+    await expectLater(
+      backend.generateInvite(patientId: '00000000-0000-4000-8000-000000000009'),
+      throwsA(
+        isA<BackendFailure>()
+            .having((f) => f.message, 'message', 'Este paciente não pertence à sua microárea.')
+            .having((f) => f.isRecoverable, 'isRecoverable', isFalse),
+      ),
+    );
+  });
+
   group('host do RPC', () {
     test('recusa http — a porta em texto claro não existe mais', () {
       expect(

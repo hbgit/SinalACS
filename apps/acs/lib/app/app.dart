@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:sinalacs_acs/app/acs_theme.dart';
+import 'package:sinalacs_acs/app/invite_screen.dart';
 import 'package:sinalacs_acs/core/database/sqlcipher_visit_store.dart';
 import 'package:sinalacs_acs/core/geo/location_cell.dart';
 import 'package:sinalacs_acs/core/network/backend_client.dart';
@@ -274,7 +275,7 @@ class _LoginScreenState extends State<LoginScreen> {
   );
 }
 
-enum AcsDestination { area, queue, map, visit, escalation, geofencing, notices, settings }
+enum AcsDestination { area, queue, map, visit, escalation, geofencing, notices, invite, settings }
 
 /// Aviso de infraestrutura: o que quebrou e a consequência prática.
 ///
@@ -783,6 +784,7 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
           }),
         ),
       AcsDestination.notices => const NoticesScreen(),
+      AcsDestination.invite => const InviteScreen(),
       AcsDestination.settings => ThemeSettingsScreen(controller: widget.themeController),
     }),
     bottomNavigationBar: NavigationBar(
@@ -795,6 +797,7 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
     _moreItem(sheet, Icons.call_outlined, 'Acionamento', AcsDestination.escalation),
     _moreItem(sheet, Icons.location_searching, 'Geofencing', AcsDestination.geofencing),
     _moreItem(sheet, Icons.campaign_outlined, 'Avisos à comunidade', AcsDestination.notices),
+    _moreItem(sheet, Icons.qr_code_2, 'Convidar paciente', AcsDestination.invite),
     _moreItem(sheet, Icons.tune_outlined, 'Preferências', AcsDestination.settings),
   ])));
   Widget _moreItem(BuildContext sheet, IconData icon, String label, AcsDestination value) => ListTile(leading: Icon(icon), title: Text(label), onTap: () { Navigator.pop(sheet); setState(() => destination = value); });
@@ -2031,6 +2034,109 @@ class GeofencingScreen extends StatelessWidget {
         },
       );
 }
+/// Aviso comunitário do ACS aos pacientes da própria microárea (RF14).
+///
+/// Só chega a quem aceitou receber avisos: o servidor consulta o consentimento
+/// mais recente de cada titular antes de montar a lista. O texto nunca deve
+/// citar paciente nem condição de saúde — o aviso vai para o aparelho de várias
+/// pessoas e aparece na tela bloqueada.
+class NoticesScreen extends StatefulWidget {
+  const NoticesScreen({super.key});
+
+  @override
+  State<NoticesScreen> createState() => _NoticesScreenState();
+}
+
+class _NoticesScreenState extends State<NoticesScreen> {
+  final _title = TextEditingController();
+  final _messageController = TextEditingController();
+  bool _chronicOnly = false;
+  bool _busy = false;
+  String? _error;
+  String? _result;
+
+  @override
+  void dispose() {
+    _title.dispose();
+    _messageController.dispose();
+    super.dispose();
+  }
+
+  bool get _canSend =>
+      !_busy && _title.text.trim().isNotEmpty && _messageController.text.trim().isNotEmpty;
+
+  Future<void> _send() async {
+    if (!_canSend) return;
+    setState(() {
+      _busy = true;
+      _error = null;
+      _result = null;
+    });
+    try {
+      final r = await BackendScope.of(context).sendNotice(
+        title: _title.text.trim(),
+        message: _messageController.text.trim(),
+        chronicOnly: _chronicOnly,
+      );
+      if (!mounted) return;
+      setState(() => _result = r.recipients == 0
+          ? 'Nenhum paciente da sua microárea aceitou receber avisos ainda.'
+          : 'Aviso enviado a ${r.accepted} de ${r.recipients} pacientes.');
+    } on BackendFailure catch (failure) {
+      if (!mounted) return;
+      setState(() => _error = failure.message);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => _page([
+        const Text('Aviso comunitário', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 8),
+        const Text(
+          'Só chega a quem aceitou receber avisos. Não escreva nome nem condição de saúde na mensagem.',
+        ),
+        const SizedBox(height: 16),
+        TextField(
+          key: const Key('notice_title_field'),
+          controller: _title,
+          maxLength: 60,
+          onChanged: (_) => setState(() {}),
+          decoration: const InputDecoration(labelText: 'Título'),
+        ),
+        const SizedBox(height: 8),
+        TextField(
+          key: const Key('notice_message_field'),
+          controller: _messageController,
+          maxLength: 240,
+          maxLines: 4,
+          onChanged: (_) => setState(() {}),
+          decoration: const InputDecoration(labelText: 'Mensagem'),
+        ),
+        SwitchListTile(
+          key: const Key('notice_chronic_switch'),
+          contentPadding: EdgeInsets.zero,
+          title: const Text('Só pacientes com condição crônica'),
+          value: _chronicOnly,
+          onChanged: _busy ? null : (value) => setState(() => _chronicOnly = value),
+        ),
+        const SizedBox(height: 12),
+        FilledButton(
+          key: const Key('notice_send_button'),
+          onPressed: _canSend ? _send : null,
+          child: Text(_busy ? 'Enviando…' : 'Enviar aviso'),
+        ),
+        if (_error != null) ...[
+          const SizedBox(height: 12),
+          Text(_error!, key: const Key('notice_error'), style: TextStyle(color: context.acsRisk.redOnSurface)),
+        ],
+        if (_result != null) ...[
+          const SizedBox(height: 12),
+          Text(_result!, key: const Key('notice_result')),
+        ],
+      ]);
+}
 class ThemeSettingsScreen extends StatelessWidget {
   const ThemeSettingsScreen({required this.controller, super.key});
 
@@ -2056,8 +2162,6 @@ class ThemeSettingsScreen extends StatelessWidget {
     ]),
   );
 }
-class NoticesScreen extends StatefulWidget { const NoticesScreen({super.key}); @override State<NoticesScreen> createState() => _NoticesScreenState(); }
-class _NoticesScreenState extends State<NoticesScreen> { final notice = TextEditingController(); @override void dispose() { notice.dispose(); super.dispose(); } @override Widget build(BuildContext context) => _page([const Text('Aviso comunitário', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)), const SizedBox(height: 16), const TextField(decoration: InputDecoration(labelText: 'Público-alvo', hintText: 'Pacientes com condições crônicas')), const SizedBox(height: 16), TextField(controller: notice, maxLines: 4, decoration: const InputDecoration(labelText: 'Mensagem')), const SizedBox(height: 20), FilledButton(onPressed: () => _message(context, 'Envio depende da integração de notificações push.'), child: const Text('Preparar aviso'))]); }
 
 Widget _page(List<Widget> children) => ListView(padding: const EdgeInsets.all(20), children: [Card(child: Padding(padding: const EdgeInsets.all(20), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: children)))]);
 

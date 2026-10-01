@@ -13,3 +13,4 @@ fields:
   chronicConditions: List<String>
   consents: List<PatientConsentRecord>
   riskHistory: List<PatientRiskEvent>
+  requests: List<PatientDataSubjectRequestRecord>

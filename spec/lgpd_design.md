@@ -67,15 +67,29 @@ locais quando o consentimento espelhado no aparelho
 (`core/consent/consent_preferences.dart`) é `true`, com padrão de recusa
 (`false`) quando não há registro local.
 
-**Aviso — `ConsentPurpose.segmentedPush` continua sem leitor.** RF14 (avisos
-segmentados por push) não tem nenhum código de envio no repositório ainda —
-está bloqueado externamente na provisão de um projeto Firebase (§3.2 do
-mesmo documento de decisões), não apenas pendente de implementação. Não há
-o que "respeitar" hoje porque nada envia. Quando `notices.sendSegmented` for
-implementado, ele **deve** consultar o consentimento de `segmentedPush`
-antes de enviar, com o mesmo padrão de recusa por omissão adotado aqui para
-`localReminders` — tratar isso como parte da implementação de RF14, não
-como um item separado a lembrar depois.
+**`ConsentPurpose.segmentedPush` tem leitor, no servidor e no aparelho.** RF14
+(avisos segmentados por push) respeita o consentimento no **servidor**:
+`notices.sendSegmented` usa a linha de consentimento **mais recente** de cada
+titular (não a existência do token) antes de montar a lista, e
+`devices.registerPushToken` só guarda o token com o consentimento vigente. O envio
+foi provado de ponta a ponta num emulador Android em 2026-09-30 (ver PROGRESS.md,
+"RF14: Gorush e FCM provados no emulador").
+
+**Aparelho (2026-09-30):** o app só pede o token ao FCM depois de
+`patients.hasGrantedConsent(segmentedPush)` devolver `true` (um `bool`, teto de 3 s;
+falha, estouro ou "nunca decidiu" = não pergunta; resposta tardia é descartada).
+A consulta **não** lê o painel "Meus dados" e não grava auditoria de leitura: a
+primeira versão usava `myData`, que decifra e devolve o dossiê clínico e grava uma
+linha "titular abriu o painel" a cada login — trocada na revisão independente. Quem
+acabou de gravar a concessão (onboarding ou interruptor em "Meus dados") registra
+sem perguntar. O auto-init do FCM, que falaria com o Google em toda abertura, está
+desligado no manifesto.
+
+**Limite conhecido:** se o consentimento for revogado (neste ou em outro aparelho)
+entre a resposta do servidor e o pedido do token, o aparelho pode falar com o
+Google uma vez depois da revogação. O servidor continua certo: `registerPushToken`
+relê o consentimento sob lock e não guarda token sem base legal. O texto do aviso
+também passa pelo FCM (Google): decisão de produto da §3.2, não tratada aqui.
 
 ### LGPD-RF03 - Gerenciamento de Preferências de Privacidade
 
@@ -165,6 +179,8 @@ como um item separado a lembrar depois.
 | **Artigos LGPD** | 6º, VI; 9º |
 | **Critério de Aceite** | ✓ Política de Privacidade com linguagem clara e acessível<br>✓ Resumo visual do fluxo de dados no app<br>✓ Notificações sobre mudanças nas políticas<br>✓ Canal de dúvidas sobre tratamento de dados |
 
+> **Estado (2026-09-29):** implementado no app paciente — ver PROGRESS.md "QR Code do onboarding e documentos legais". Pendentes: revisão jurídica do texto e canal digital de dúvidas. O aviso com 15 dias de antecedência existe (`TermsChangeSchedule`, `patients.termsChangeNotice` e um cartão dispensável na home), mas a agenda está vazia e o canal é só dentro do app.
+
 ### LGPD-RF11 - Controle de Acesso e RBAC
 
 | Propriedade | Descrição |
@@ -244,6 +260,18 @@ como um item separado a lembrar depois.
 
 ---
 
+### Dados sintéticos em teste e2e (CPF gerado)
+
+A stack de e2e (`docker-compose.e2e.yml`, `bin/seed_e2e_fixtures.dart`) gera CPFs
+aleatórios **com dígito verificador válido**, porque o login exige essa validade. Não
+existe faixa de CPF reconhecidamente fictícia: um valor gerado pode, por acaso,
+coincidir com o CPF de uma pessoa real. O risco é aceito porque o valor nunca aparece
+sozinho: vem com nome, nascimento e contato inventados, vive só num banco efêmero
+(apagado ao final), só é gravado como HMAC (`users.cpfHash`), o manifesto que o guarda
+é `0600` e apagado ao final, e nenhum log, mensagem de erro ou `toString` o imprime.
+Se a coincidência virar preocupação, a saída é trocar a geração por uma lista fixa de
+CPFs de documentação (como faz `seed_cpf_hashes.dart` para a stack de desenvolvimento).
+
 ## 2. Requisitos para Termo de Uso e Política de Privacidade
 
 ### LGPD-RF18 - Termo de Uso
@@ -256,6 +284,8 @@ como um item separado a lembrar depois.
 | **Conteúdo Mínimo** | Regras de uso, responsabilidades, proibições, propriedade intelectual, limitação de responsabilidade, jurisdição, alterações no termo. |
 | **Critério de Aceite** | ✓ Texto em linguagem simples (acessibilidade para idosos e baixo letramento)<br>✓ Disponibilizado no app e no site<br>✓ Aceite explícito no cadastro<br>✓ Controle de versões disponível para consulta |
 
+> **Estado (2026-09-29):** implementado no app paciente — ver PROGRESS.md "QR Code do onboarding e documentos legais". Pacientes que entram por OTP sem onboarding são convidados a aceitar no primeiro login (`patients.acceptTermsOfUse`), e de novo quando a versão mudar; o convite não é obrigatório para acessar o alerta de emergência. Pendentes: revisão jurídica do texto. O aviso com 15 dias de antecedência existe (`TermsChangeSchedule`, `patients.termsChangeNotice`, cartão dispensável na home, fora da aba de urgência; agenda vazia. Quando o app já embarca o texto da versão anunciada, o cartão também oferece lê-lo antes de valer).
+
 ### LGPD-RF19 - Política de Privacidade
 
 | Propriedade | Descrição |
@@ -265,6 +295,8 @@ como um item separado a lembrar depois.
 | **Objetivo** | Garantir transparência total sobre o tratamento de dados, cumprindo o Art. 9º da LGPD. |
 | **Conteúdo Mínimo** | Identificação do controlador, dados coletados (por funcionalidade), finalidades específicas, bases legais, compartilhamento, transferências, retenção, direitos, medidas de segurança, DPO/encarregado. |
 | **Critério de Aceite** | ✓ Linguagem acessível para leigos (recomendado: Nível de leitura 8º ano)<br>✓ Tópicos claros e organizados<br>✓ Versão resumida (sumário visual) e versão completa<br>✓ Atualização comunicada com no mínimo 15 dias de antecedência |
+
+> **Estado (2026-09-29):** implementado no app paciente — ver PROGRESS.md "QR Code do onboarding e documentos legais". Pendentes: revisão jurídica do texto. O aviso com 15 dias de antecedência existe (`TermsChangeSchedule`, `patients.termsChangeNotice`, cartão dispensável na home, fora da aba de urgência; agenda vazia. Quando o app já embarca o texto da versão anunciada, o cartão também oferece lê-lo antes de valer) e o reaceite a cada nova versão também (`hasAcceptedCurrentTerms`).
 
 ### LGPD-RF20 - Aviso de Consentimento (Banner/Modal)
 

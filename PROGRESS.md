@@ -988,6 +988,8 @@ ambiente do delta que se quer medir.
 
 ### Um defeito do RF02 que esta entrega mediu — com dono (2026-09-19)
 
+> **Resolvido:** `completeEnrollment` já emite `patientSessionLifetime`; `onboarding_endpoint_test.dart` prende o valor. Esta seção descreve o defeito como foi medido.
+
 `onboarding_endpoint.dart:62` faz `issueToken(user)` — o default de **15 minutos** — para
 `role: UserRole.patient`, e o app consome esse token como sessão
 (`apps/patient/lib/core/network/backend_client.dart:259-273`). Ou seja: **há dois caminhos de
@@ -1058,3 +1060,251 @@ ainda: revogar consentimento a partir deste painel (já existe em `RemindersScre
 SLA de 15 dias para pedidos que exigem intervenção humana — isso é processo, não código. Endurecimento
 de segurança do RF01 (rate limit por IP, canal de tempo, retenção de `otp_challenges`, refresh token)
 continua como já registrado acima, sem dono novo.
+
+## Direitos do titular no app paciente — LGPD-RF05 e LGPD-RF08 (2026-09-28)
+
+"Meus dados" deixou de ser só leitura. O paciente agora:
+
+- **concede ou revoga** por conta própria as duas finalidades opcionais
+  (`localReminders`, `segmentedPush`) — `patients.updateConsent` grava uma
+  linha nova assinada em `consent_logs` (append-only; a assinatura sai de
+  `signedConsentLog`, a mesma função do onboarding). Revogar pede confirmação
+  explícita. Revogar lembretes cancela na hora os lembretes agendados no
+  aparelho, e o espelho local (`ConsentPreferences`) passa a ser alinhado ao
+  servidor sempre que "Meus dados" carrega — o que também resolve o aparelho que
+  entrou pelo login OTP sem passar pelo onboarding;
+- **pede exclusão** (`patients.requestDataDeletion`, idempotente enquanto houver
+  uma aberta) ou **correção** (`patients.requestDataCorrection`, texto livre de
+  até 500 caracteres, cifrado com AES-256-GCM em `data_subject_requests`), e vê
+  a situação e o prazo (15 dias) de cada pedido.
+
+O que **não** foi feito, de propósito:
+
+- **Ninguém atende os pedidos.** `status` só é escrito como `open`: o backoffice
+  (`apps/admin`) ainda roda sobre `MockAdminDataSource`. O prazo de 15 dias é
+  exibido mas não é cumprido por sistema nenhum. **Dono:** quem der backend ao
+  admin.
+- **`healthDataProcessing` não tem interruptor.** É a base legal do app inteiro,
+  inclusive do alerta de emergência; `updateConsent` recusa essa finalidade com
+  `DataRightsException` e aponta para o pedido de exclusão. Parar o tratamento
+  depois da exclusão atendida (LGPD-RF07, "em até 15 dias") depende do mesmo
+  atendimento acima.
+- **Corrida de dois pedidos de exclusão simultâneos — resolvida (2026-09-29).**
+  A criação passou a ser atômica (`createDeletionRequestIfNoneOpen`, com
+  `pg_advisory_xact_lock` por titular, já que o Serverpod não declara `WHERE` em
+  índice e um índice único parcial não é possível); ver "Fechamento das
+  pendências do paciente".
+- **`segmentedPush` tem leitor no código e o aviso chega a um emulador Android** (RF14, ver
+  "RF14: Gorush e FCM provados no emulador"): falta hospedar o Gorush fora do Compose local,
+  iOS/APNs e um teste em aparelho físico.
+
+## QR Code do onboarding e documentos legais (2026-09-29)
+
+Plano: `docs/superpowers/plans/2026-09-29-qr-onboarding-e-documentos-legais.md`, branch `fix/patient`.
+
+**RF02 de ponta a ponta.** O ACS ganhou "Mais › Convidar paciente": escolhe um paciente da própria microárea, gera o convite (`onboarding.generateEnrollmentToken`, que existia sem nenhum chamador) e mostra o QR Code (`qr_flutter`), com validade de 15 minutos e o código em texto para digitação. O paciente lê com "Ler QR Code com a câmera" (`mobile_scanner`, permissão `CAMERA`, câmera opcional na instalação), que preenche o mesmo campo do código; QR que não tem o formato do convite (43 caracteres base64url) é recusado sem sobrescrever o campo. O PRD citava `qr_code_scanner`, pacote descontinuado — trocado por `mobile_scanner`.
+
+**LGPD-RF18/RF19/RF10.** Termo de Uso e Política de Privacidade versão 2026.1 no app paciente (`lib/core/legal/legal_documents.dart`): resumo visual em passos (fluxo do dado), texto completo em seções, histórico de versões. Abrem antes do cadastro (link no login e no onboarding) e depois em "Mais › Privacidade e termos". O aceite é explícito, desmarcado por padrão e obrigatório; vira `ConsentPurpose.termsOfUse` em `consent_logs`, na mesma transação dos outros consentimentos, com `version = consentPolicyVersion`. `updateConsent` recusa alterá-lo. Um teste do app falha se a versão exibida divergir da carimbada pelo backend.
+
+**Ficou de fora, de propósito:**
+- O texto 2026.1 precisa de revisão jurídica e dos dados reais do controlador e do encarregado (hoje genéricos: "Secretaria Municipal de Saúde do seu município").
+- Aviso de mudança com 15 dias de antecedência e novo aceite quando a versão mudar: só existe uma versão; não há mecanismo de reaceite no login. — **reaceite resolvido**, ver "Aceite do termo no login OTP" (o aviso de 15 dias segue pendente).
+- Pacientes que entram por CPF + OTP (RF01) sem ter passado pelo onboarding nunca aceitaram o termo — o seed inclusive. Falta um aceite no primeiro login. — **resolvido**, ver "Aceite do termo no login OTP".
+- Canal de dúvidas é "fale com o ACS ou a UBS", sem canal digital próprio.
+- A página da câmera (`_CameraScanPage`) só roda no aparelho; os testes cobrem o fluxo com um leitor duplo. Validar no emulador com um QR gerado pelo app do ACS.
+- Contagens de teste depois desta entrega: backend 329, paciente 167, ACS 168.
+
+## Aceite do termo no login OTP (2026-09-29)
+
+Plano: `docs/superpowers/plans/2026-09-29-aceite-do-termo-no-login-otp.md`, branch `fix/patient`.
+
+**O que existe.** `patients.acceptTermsOfUse` (só paciente) grava `termsOfUse` `granted` com `consentPolicyVersion` em `consent_logs`, pela mesma trilha assinada de `updateConsent`, que continua recusando esse propósito. No app, depois de `verifyOtp` o login (hoje consulta `hasAcceptedCurrentTerms`; ver "Fechamento das pendências do paciente") lê o status; se a linha mais recente de `termsOfUse` não for `granted` na versão `legalDocumentsVersion` (`needsTermsAcceptance`), abre `TermsAcceptanceScreen`. Isso cobre pacientes do seed e de OTP sem onboarding, e o reaceite quando a versão mudar. A sessão do onboarding de 1 hora, que estava no escopo pedido, já estava no código; só os comentários e docs foram corrigidos.
+
+**Ficou de fora, de propósito:**
+- O aceite **não é portão duro**: "Agora não" e uma falha de `hasAcceptedCurrentTerms` entram direto, porque o alerta de urgência nunca pode ficar atrás de uma tela de aceite. Consequência: quem pula pode seguir sem aceite registrado, e o aviso volta no próximo login.
+- Aviso de mudança com 15 dias de antecedência: feito depois (ver "Menores do push e aviso de 15 dias"); revisão jurídica do texto segue pendente.
+- ~~`acceptTermsOfUse` grava uma linha nova a cada chamada~~ — resolvido na rodada "Menores adiados e push do paciente": o aceite é idempotente e atômico.
+- Contagens de teste depois desta entrega: backend 333, paciente 182, ACS 168.
+
+## Fechamento das pendências do paciente (2026-09-29)
+
+Plano: `docs/superpowers/plans/2026-09-29-fechamento-de-pendencias-do-paciente.md`, branch `fix/patient`.
+
+**O que foi fechado:**
+- O login por OTP consulta `patients.hasAcceptedCurrentTerms` (um `bool`) em vez de ler o painel "Meus dados" inteiro: menos dados no aparelho e nenhuma linha de auditoria de leitura por login. A consulta tem teto de 3 s.
+- `acceptTermsOfUse` ficou idempotente: com o aceite vigente já gravado, devolve a linha existente e não cresce o histórico.
+- Pedidos de exclusão simultâneos deixam uma só linha aberta (lock por titular). A repetição agora também é auditada, com `result: repeated`.
+- A linha de auditoria de consentimento passou a levar o `resourceId` da linha gravada.
+- Câmera do onboarding: o toque duplo em "Ler QR Code" abre uma leitura só, e o aviso de QR inválido some quando a pessoa volta a digitar.
+- O texto de uma correção que falhou volta ao reabrir o diálogo; é descartado ao enviar ou cancelar.
+- ACS: o convite expirado some da tela e pede um novo.
+
+**Ficou de fora, de propósito:**
+- `ipHash` e `userAgent` `nao-aplicavel-painel-titular` em `consent_logs` seguem como estão: é um marcador deliberado de ausência (o request HTTP já é auditado em `audit_logs`), documentado em `signed_consent_log.dart`. Guardar o IP do titular ali é uma decisão de privacidade, não um conserto.
+- A prova da corrida cobre o store ORM, não o endpoint: o endpoint grava `audit_logs`, que tem FK para `users` e cadeia de hash, e a limpeza manual do grupo sem rollback quebraria os dois.
+- Backoffice que atende os pedidos e o push (RF14) seguem pendentes; o aviso de 15 dias foi feito depois, ver "Menores do push e aviso de 15 dias".
+- Contagens de teste depois desta entrega: backend 346, paciente 182, ACS 172.
+
+## Menores adiados e push do paciente (2026-09-29)
+
+Plano: `docs/superpowers/plans/2026-09-29-menores-adiados-e-push-do-paciente.md`, branch `fix/patient`.
+
+**O que foi fechado:**
+- `patients.acceptTermsOfUse` é atômico: `recordConsentUnlessCurrent` grava sob advisory lock por titular, então duas chamadas simultâneas deixam uma linha só (teste de corrida contra Postgres real, três chamadas).
+- Os advisory locks por titular usam a forma de duas chaves (`lockPerSubject`, namespaces em `subject_lock.dart`), que não divide espaço com a chave única da cadeia de auditoria.
+- O diálogo de correção não fecha mais ao tocar fora (`barrierDismissible: false`); só "Cancelar" descarta o rascunho. Dois testes de caracterização entraram: cancelar limpa o rascunho e o botão de ler QR volta a funcionar depois que o leitor lança.
+- **RF14, lado do paciente:** tabela `push_tokens`, `devices.registerPushToken` (só paciente, só com o consentimento `segmentedPush` vigente, uma linha por token, o token de outro titular troca de dono) e revogação de `segmentedPush` apaga os tokens do titular. No app, `PushTokenSource` (padrão `NoPushTokenSource`, sem Firebase) registra o aparelho depois do login, do onboarding e ao conceder "Avisos da equipe", em silêncio: recusa ou falha nunca atrasa a home nem o alerta.
+
+**Achados do revisor final, corrigidos:** o consentimento era lido fora da transação do registro, então registrar × revogar em paralelo deixava um token ligado a um titular que já tinha revogado; hoje `registerIfConsented` lê e grava sob um lock por titular, e a revogação (`deleteAllFor`) espera o mesmo lock (teste de corrida de 40 iterações contra Postgres real). E um aparelho apresentado por quem não consentiu perde o vínculo do titular anterior, porque o token prova que o aparelho está na mão de outra pessoa.
+
+**Ficou de fora, de propósito:**
+- ~~Revogar grava o `denied` e apaga os tokens em duas operações~~ — resolvido na rodada "Menores do push e aviso de 15 dias": as duas coisas são uma transação só.
+- `devices.registerPushToken` só grava auditoria na **troca de dono** do token (`push_token`); registrar e repetir não, porque a revogação já deixa `consent_log`.
+- ~~Sem teto de tokens por titular; sem teste da fonte que nunca completa; `PushTokenScope.of` sem `maybeOf`~~ — resolvidos na rodada "Menores do push e aviso de 15 dias".
+- Envio segmentado, tela de avisos do ACS e captura do token nativo: **o código do envio e a tela foram feitos depois**, ver "RF14: envio de avisos segmentados com Gorush". Depois disso o lado nativo Android do token e a entrega real foram provados no emulador (ver "RF14: Gorush e FCM provados no emulador"); continuam pendentes o Gorush hospedado fora do Compose local e iOS/APNs (§3.2, revisado em 2026-09-29).
+- Apagar tokens ao atender o pedido de exclusão: pertence ao backoffice que atende os pedidos, ainda inexistente.
+- ~~Aviso de 15 dias de mudança dos termos~~ — feito na rodada "Menores do push e aviso de 15 dias" (a agenda está vazia); revisão jurídica do texto 2026.1 segue pendente.
+- O erro de um pedido em "Meus dados" aparece no topo da lista, fora da tela para quem rolou até o botão (anterior a esta rodada).
+- Baseline do `dart analyze` do backend: 44 infos (eram 41), os três novos são o mesmo `prefer_initializing_formals` que o resto dos serviços já tem.
+- Contagens de teste: backend 359, paciente 190, ACS 172.
+
+## Revisão do RF14: Gorush no lugar do Firebase (2026-09-29)
+
+Só especificação; nenhum código mudou. `spec/stack.md`, `spec/PRD_system.md`, `spec/lgpd_design.md`, `spec/validation_report.md` e o §3.2 de `docs/superpowers/specs/2026-09-16-decisoes-produto-pos-validacao.md` passaram a descrever o envio por **Gorush** (auto-hospedado), com segmentação em SQL restrita a quem consentiu.
+
+- A tabela continua `push_tokens` (já existe); o nome `user_push_tokens` não foi adotado.
+- **Riverpod só no push do paciente** (decisão de 2026-09-29): `flutter_riverpod` na captura e no registro do token; o resto segue por `InheritedWidget`.
+- **O Gorush não elimina as credenciais:** é relé para FCM/APNs, então Android ainda precisa de uma credencial FCM e iOS de uma chave APNs. A pendência muda de "projeto Firebase" para "hospedar o Gorush e provisionar credenciais".
+- Em aberto: o pacote que captura o token nativo em cada plataforma (`firebase_messaging` ou canal nativo no Android; pacote leve de APNs no iOS).
+- O plano `2026-09-29-menores-do-push-e-aviso-de-mudanca-dos-termos.md` não é afetado: não toca envio nem provedor.
+
+## RF14: envio de avisos segmentados com Gorush (2026-09-29)
+
+Plano: `docs/superpowers/plans/2026-09-29-rf14-gorush-avisos-segmentados.md`, branch `fix/patient`.
+
+**O que existe:**
+- **Infra:** serviço `gorush` no `docker-compose.yml` sob o perfil `push` (sem porta publicada), `GORUSH_URL` no `AppConfig` (vazio desliga o envio), `infra/docker/gorush/` com `config.yml` e README.
+- **Backend:** `GorushClient` (`dart:io`, 5 s, poda de tokens inválidos), `NoticeService` e `notices.sendSegmented` (só ACS; microárea do token; consentimento `segmentedPush` mais recente por titular; filtro opcional de crônicos; 0 destinatários não chama o Gorush; auditoria `community_notice` sem o texto).
+- **ACS:** `NoticesScreen` real (título 60, mensagem 240, público, resultado "X de Y pacientes").
+- **Paciente:** `pushTokenSourceProvider` (único uso de `flutter_riverpod`, ^3.4.3) e `NativePushTokenSource` sobre o canal `sinalacs/push_token`.
+- Contagens de teste: backend 390, paciente 197, ACS 178.
+
+**O que NÃO estava provado nessa rodada (superado pela seção "RF14: Gorush e FCM provados no emulador", abaixo):**
+- ~~Nenhum teste fala com um Gorush ou com o FCM/APNs de verdade~~ — provado em 2026-09-30 no emulador Android.
+- ~~O lado nativo do canal (Kotlin/Swift) não existe~~ — o lado Android existe; o iOS (Swift) continua inexistente.
+- As credenciais FCM (conta de serviço) e APNs (chave `.p8`) são da organização e não estão no repositório; o `config.yml` foi escrito sem conferir os nomes das chaves contra uma tag fixa do `appleboy/gorush`, e o Compose usa `:latest` — _superado em 2026-09-30: imagem fixada em `1.22.0` e configuração conferida contra o FCM real_.
+- O `async` do app do paciente subiu de 2.11.0 para 2.13.1 por causa do Riverpod 3.
+
+**Fora de escopo:** migrar o resto do paciente para Riverpod, salvar o token no SQLite local, histórico ou agendamento de avisos.
+
+**Achados do revisor final do RF14, corrigidos:** timeout do envio agora é "resultado desconhecido" (mensagem manda conferir antes de reenviar, auditoria `unknown`), porque o Gorush com `sync: true` pode entregar depois do limite de 5 s e o "tente de novo" duplicaria o aviso; "aceitos" passou a ser alvos menos falhas, sem confiar em `counts`; `MismatchSenderId` deixou de apagar tokens (é erro de configuração do servidor e esvaziaria a microárea) e a string de erro do FCM v1 entrou; `hide_messages: true` no `config.yml`. **Deferido:** `HttpClient` sem `close()`, resposta JSON de forma inesperada fora do erro tipado, desempate por timestamp igual, `INNER JOIN` com `patients`, Gorush em loop sem credenciais, auditoria `granted` com 0 aceitos, nome do teste de auditoria que promete mais do que verifica.
+
+## Menores do push e aviso de 15 dias (2026-09-29)
+
+Plano: `docs/superpowers/plans/2026-09-29-menores-do-push-e-aviso-de-mudanca-dos-termos.md`, branch `fix/patient`.
+
+**O que foi fechado:**
+- A revogação de `segmentedPush` grava o `denied` e apaga os tokens do titular numa transação só, sob o lock por titular (`recordConsentRevokingPush`); um teste com falha injetada depois de apagar os tokens prova que nada fica pela metade.
+- A troca de dono de um token de push é auditada (`push_token`, sem o token); cada titular fica com no máximo 10 tokens (o mais antigo sai); a regra do aceite vigente existe num lugar só (`isCurrentAcceptance`).
+- **Aviso de 15 dias (LGPD-RF18):** `TermsChangeSchedule` (recusa vigência a menos de 15 dias da publicação), `patients.termsChangeNotice` e um cartão dispensável na home do paciente. A agenda real (`upcomingTermsChange`) está **vazia**: nenhuma mudança de termos está anunciada, então o cartão nunca aparece em produção até alguém agendar uma. O canal do aviso é só dentro do app (push ainda não chega a aparelhos; SMS é só de OTP).
+- `PushTokenScope.maybeOf` e o teste da fonte de token que nunca completa.
+- Contagens de teste: backend 411, paciente 207, ACS 178. Analyze do backend em 51 infos.
+
+**Ficou de fora, de propósito:**
+- O contraste do texto do cartão não foi medido contra a superfície em que ele renderiza.
+- O caso "agenda ativa" só é provado no serviço e no app com um backend falso; nenhum teste de integração exercita uma agenda ativa porque a constante do repositório é `null`.
+- O cartão só aparece quando a home abre; quem já está com o app aberto não o vê até reabrir.
+
+**Achados do revisor final, corrigidos:** o cartão de aviso descia o botão de pânico (e, chegando de forma assíncrona, o moveria sob o dedo), então **não aparece mais na aba de urgência** (teste em tela 360x640); a regra dos 15 dias usava `assert`, que não roda em release, e passou a `ArgumentError`; `spec/lgpd_design.md` ainda listava o aviso como pendente. **Deferido:** poda do teto por `id` sem `userId` (corrida rara com troca de dono), empate de `updatedAt` na poda, injeção de "sem agenda" no serviço, contraste do texto/botão/ícone de fechar do cartão, auditoria da troca de dono sem o dono anterior, `Semantics(header)` do cartão. **Limite conhecido:** a regra dos 15 dias compara datas declaradas; um `publishedAt` retroativo passa.
+
+## Menores do RF14 e texto novo dos termos (2026-09-30)
+
+Plano: `docs/superpowers/plans/2026-09-30-menores-do-rf14-e-texto-novo-dos-termos.md`, branch `fix/patient`.
+
+**O que foi fechado:**
+- **Registro de token:** a poda do teto apaga por id **e** titular e poupa o token recém-gravado (um relógio que voltou o faria parecer o mais antigo); o consentimento mais recente desempata por `id` (no registro, na consulta do login e na gravação do aceite); a troca de dono audita também o **dono anterior** (`push_token`, `result = lost`); `DataSubjectRightsService` aceita um leitor de agenda injetável (`termsChangeReader`).
+- **Envio de avisos:** `GorushClient` encerrável e um só por processo; corpo 2xx ilegível é "resultado desconhecido" (nunca "tente de novo"); `logs` fora de forma é tolerado; falha ao apagar tokens inválidos depois do envio não vira erro; auditoria `not_delivered` quando nenhum aparelho aceitou; `LEFT JOIN` com `patients` (quem não tem linha clínica recebe "para todos" e só fica fora do filtro de crônicos).
+- **Texto novo dos termos durante os 15 dias (LGPD-RF18):** `UpcomingLegalDocuments`/`upcomingLegalDocuments` (hoje `null`), `UpcomingDocumentsScope` e "Ler o texto novo" no cartão, oferecido só quando o app carrega exatamente a versão que o servidor anunciou. Um teste (`upcoming_legal_documents_test.dart`) lê a agenda do backend e falha se as duas pontas divergirem.
+- Cartão de aviso: `Semantics(header)` no título e os três pares de contraste que o tema gera (texto, botão e ícone de fechar) medidos contra o `Card`.
+- Contagens de teste: backend 423, paciente 219, ACS 178. Analyze do backend em 51 infos.
+
+**Ficou de fora, de propósito:**
+- Nenhuma mudança real foi agendada: `upcomingTermsChange` e `upcomingLegalDocuments` seguem `null`, então o cartão e o texto novo só são provados com agendas de teste.
+- Um app antigo, sem o texto embarcado, vê só "Ler os termos atuais" durante os 15 dias. Não há marcação do que mudou (diff) nem aviso a quem já está com o app aberto.
+- A amarração backend×app só é provada por mutação temporária: sem agenda real, o teste passa com os dois `null`.
+- O teste "a poda só apaga tokens do próprio titular" é de caracterização: em execução sequencial ele não reproduz a corrida.
+- ~~Lado nativo do token de push, credenciais FCM/APNs e Gorush real seguem pendentes.~~ — superado em 2026-09-30 para Android (ver "RF14: Gorush e FCM provados no emulador"); iOS/APNs, aparelho físico e Gorush hospedado seguem pendentes.
+- O atendimento do pedido de exclusão (backoffice, ainda inexistente) precisa apagar `push_tokens` e gravar `denied` em `segmentedPush`: `requestDataDeletion` hoje não faz nenhum dos dois, e o `LEFT JOIN` com `patients` deixa de servir de rede de segurança quando a exclusão apagar a linha clínica e mantiver `users`.
+
+**Achados do revisor final, corrigidos:** o detalhe do texto novo (`LegalDocumentScreen`) dizia "vigente desde" e o histórico chamava a versão futura de vigente, 15 dias antes da data — agora diz "passa a valer em <data>", com teste; o teste de amarração backend×app passava em silêncio quando não entendia a agenda (aspas duplas, constante, `;` no resumo, comentário enganoso) — agora o leitor tem três estados e **lança** em vez de tratar "não entendi" como "sem agenda". **Deferido:** a linha `lost` grava o dono anterior como `userId` de um `write` que ele não fez (documentado em `spec/lgpd_data_audit.md`); o registro recusado apaga o vínculo do dono anterior sem rastro; o desempate por id é estável mas arbitrário (e o painel "Meus dados" ordena só por timestamp); corrida da poda contra outra troca de dono pode gerar um 500 no registro; `catch (_)` sem log na poda de tokens do envio; `on StateError` no `GorushClient` cobre mais do que o `postUrl`; `failed` inflado por `failed-push` repetido do mesmo token; o `FilledButton.tonal` "Ler o texto novo" sem contraste medido; a poda sem desempate final por `id`.
+
+
+## RF14: Gorush e FCM provados no emulador (2026-09-30)
+
+Plano: `docs/superpowers/plans/2026-09-30-gorush-fcm-e2e-emulador.md`, branch `fix/patient`. **Provado no `emulator-5554` (Android 16, Google Play, projeto Firebase `sinal-acs`, Gorush 1.22.0 no Compose local), pelo `scripts/qa/push_e2e.sh --negativos`, que saiu com 0:**
+
+- Um aviso enviado pelo ACS (`notices.sendSegmented`) atravessa backend → Gorush → FCM → Play Services e **aparece na bandeja do aparelho** com o título e o texto enviados (`recipients=1 accepted=1`, auditoria `granted`).
+- O app obtém um **token FCM real** pelo canal `sinalacs/push_token` (`MainActivity.kt`, `firebase-messaging`, plugin do Google Services aplicado **só** quando `google-services.json` existe: sem o arquivo o APK compila e o app degrada para "sem push").
+- **Casos negativos observados contra o FCM real:** token falso podado e token real mantido; linha `ios` mantida (não é erro de token) e sem derrubar o Android; Gorush parado falha em ~3 s com "Tente de novo" e nenhum token apagado; revogar apaga os tokens e o envio seguinte tem `recipients=0`; app desinstalado devolve `NotRegistered` e o token é podado.
+
+**O que a execução real corrigiu (nenhum teste com servidor falso pegaria):**
+- `ios.enabled: true` sem a chave APNs derrubava o boot do Gorush (código 1), e `access_log/error_log: "-"` calava todo log: o erro do boot ficava invisível.
+- O Gorush devolve o token **mascarado** por padrão (`log.hide_token`), então a poda nunca casava; o `config.yml` usa `hide_token: false` e o cliente só poda tokens que ele enviou. A string de erro do FCM v1 (`The registration token is not a valid FCM registration token`) não estava na lista.
+- O `GorushClient` tratava todo estouro de tempo como "resultado desconhecido": com o Gorush parado isso dizia "alguns pacientes podem já ter recebido" e nada tinha sido enviado. A conexão agora tem tempo próprio (2 s): estourar ali é "inacessível, tente de novo".
+- O ambiente do shell trazia `GORUSH_CREDENTIALS_DIR` apontando para um **arquivo**; o Compose o prioriza sobre o `.env` e montou o arquivo como `/credentials` (o Gorush caía). `push_e2e.sh` ignora o valor do ambiente, com aviso.
+
+**Limites (o que continua sem prova):**
+- **iOS/APNs:** sem app iOS, sem chave APNs, `ios.enabled: false`. **`accepted` superconta tokens `ios` enquanto o iOS está desligado** (o Gorush os descarta sem log e eles entram como aceitos): sem app iOS não há token `ios`, então só aparece em teste.
+- **Aparelho físico:** só emulador. A entrega com o celular bloqueado, em modo economia de bateria ou sem Play Services não foi exercida.
+- O registro foi feito por `developmentLogin` dentro de um teste de integração, **não** pelo fluxo de tela (login OTP → `registerPushDevice`), que só tem testes de widget com backend falso. O app também não trata renovação de token (`onNewToken`) nem abre tela ao tocar na notificação.
+- O teste de registro **segura o app instalado** por `PUSH_HOLD_SECONDS`: o `flutter test` desinstala o app ao terminar e o token morre. Sem a permissão `POST_NOTIFICATIONS` (Android 13+) o token registra mas o aviso não aparece; o teste concede a permissão por `adb`, e no app real quem a pede é o `main.dart`.
+- Com FCM em primeiro plano a mensagem de notificação não vai para a bandeja: o teste manda o app para segundo plano.
+- `hide_token: false` faz o `docker logs` do Gorush imprimir tokens de aparelho; o teste deixou um token **já morto** aparecer na saída. Em produção, restringir o acesso ao log do Gorush.
+- Gorush hospedado fora do Compose local, rotação da chave da conta de serviço e a chave em modo `644` em `/opt/apps_android/` (cópia fora do repositório, legível por outros usuários da máquina).
+
+**Achados do revisor final do e2e, corrigidos:**
+- **Auto-init do FCM:** com o `google-services.json` no build, o `firebase-messaging` gerava o token e falava com o Google em **toda abertura do app**, antes do login e sem consentimento `segmentedPush`. O manifesto agora traz `firebase_messaging_auto_init_enabled=false` (teste `android_push_manifest_test.dart` lê o manifesto; o APK foi conferido com `aapt2`; o `getToken()` explícito **continua trazendo token** com o auto-init desligado, provado no emulador, e a entrega ponta a ponta repetida passou).
+- **`e2e.sh --full` vermelho para quem não tem as credenciais:** `push_native_token_test` e `push_register_test` só rodam com `--dart-define=PUSH_E2E=1` (o `push_e2e.sh` passa); sem o define são pulados. Um bug meu apareceu ao provar isso no emulador: `bool.fromEnvironment` só aceita o texto `true`, então `=1` teria **pulado o próprio teste do e2e**; a comparação passou a ser `String.fromEnvironment('PUSH_E2E') == '1'`.
+- Docs que contradiziam o código: `spec/lgpd_design.md` (parágrafo truncado que dizia "nada envia") foi reescrito; dois resquícios deste arquivo foram marcados como superados.
+
+**Lacuna que continua aberta (LGPD):** o aparelho ainda pede o token ao FCM depois de **todo login**, mesmo sem consentimento; o servidor recusa e não o guarda, mas o Google já foi contatado. Fechar isso exige o app conhecer o consentimento antes de pedir o token (espelho local, como `localReminders`). **Deferido:** `hide_token: false` tem alternativa que não imprime token no log (casar a máscara por comprimento + sufixo só quando única) e o comentário "não liga a nenhuma pessoa sem o banco" subestima o risco (o token é identificador pseudônimo e o Google o liga ao aparelho); usar `HttpClient.connectionTimeout` em vez do `timeout` sobre `postUrl`; `accepted` superconta `ios` e um cliente adulterado pode registrar `ios`; `push_e2e.sh` apaga `push_tokens` do dev e termina com o consentimento `granted`, e o `kill` pode deixar o `flutter test` órfão; `appleboy/gorush:1.22.0` por tag e não por digest; o build da CI com `firebase-messaging` no classpath ainda não foi observado (a branch não tem execução de CI).
+
+
+## Token de push só com consentimento (2026-09-30)
+
+Plano: `docs/superpowers/plans/2026-09-30-finalizacao-app-paciente.md`, branch `fix/patient`.
+
+- `registerPushDevice` pergunta ao servidor (`patients.hasGrantedConsent`, `bool`, sem auditoria de leitura, sem ler o painel) antes de falar com o FCM e fecha na dúvida (sem consentimento vigente, falha ou mais de 3 s; resposta tardia descartada). Onboarding (só com a caixa marcada) e o interruptor de "Meus dados" registram sem perguntar. Fecha a lacuna LGPD de "pede o token depois de todo login".
+- **Revisão independente (subagente, 2026-09-30):** a primeira versão lia `myData` a cada login (dossiê decifrado + linha de auditoria falsa, inclusive onde nunca viria token); trocada pelo endpoint novo. Também: teste de que conceder não consulta de novo, teste do teto de 3 s (a resposta tardia é descartada), onboarding sem leitura à toa, comentário da constante no lugar certo. **Deferido:** empate exato de `timestamp` em `consent_logs` (o painel ordena só por tempo; o endpoint novo usa o desempate do servidor); revogação no intervalo entre resposta e token (ver `spec/lgpd_design.md`).
+- Testes: paciente 233, backend 433.
+- **Provado em 2026-09-30 no `emulator-5554` (AVD `Medium_Phone`):** `tool/live_check.dart` OK; `e2e.sh --keep --emulator` (smoke paciente e ACS) OK; `backend_connection_test` 7/7; `push_e2e.sh --negativos` saiu com 0 (entrega, token falso podado, Gorush parado, revogação). `ci_invariants.sh` OK e `flutter build apk --debug` sem `google-services.json` OK. A conferência do login OTP de paciente sem consentimento é coberta por teste de widget, não por execução no aparelho.
+- **Segue aberto:** iOS/APNs, aparelho físico, Gorush hospedado, revisão jurídica dos termos 2026.1, backoffice que atende exclusão/correção, MFA/refresh token, menores deferidos do RF14, endpoint leve de consentimento (evita a auditoria de leitura por login).
+
+
+## Teste completo do paciente contra o banco de teste (2026-09-30)
+
+Plano: `docs/superpowers/plans/2026-09-30-teste-completo-paciente-banco-de-teste.md`, branch `fix/patient`.
+
+- **Stack de e2e** (`docker-compose.e2e.yml` + `scripts/qa/e2e_stack.sh up|seed|down|psql`): o mesmo backend e o Gorush apontados para `sinalacs_e2e` dentro do `postgres-test` (efêmero), com `ENABLE_DEV_LOGIN=false`. Os seeds de desenvolvimento não sobem. O container do `serverpod` tem nome fixo: a stack de e2e e a de desenvolvimento não coexistem.
+- **Dados fixos substituídos:** UUIDs `0000…000N` e CPFs do seed, `developmentLogin` (paciente e ACS), `seedMicroAreaId`. Em vez deles, fixtures geradas por execução (`bin/seed_e2e_fixtures.dart`, 7 testes do gerador; backend 440, paciente 238), login do paciente por OTP real (relé `scripts/qa/otp_relay.py`) e do ACS por matrícula e senha. Sem manifesto os helpers caem no login de desenvolvimento (a CI segue igual). **Não mudam:** os widget tests com `FakePatientBackend` (herméticos), `development.sql` e `developmentLogin` (a stack de desenvolvimento e o `android-e2e` dependem deles).
+- **Provado em `emulator-5554`:** `full_journey_test` 3/3 (código errado não entra e o certo entra; termos; triagem vermelha; alerta; status; "Meus dados" só do próprio paciente; o ACS da microárea lista os dela e não o da outra), `backend_connection_test`, e `push_e2e.sh --e2e-db --negativos` (aviso na bandeja pelo Gorush e FCM reais, token falso podado, Gorush parado, revogação), com o banco de desenvolvimento idêntico antes e depois. O banco de e2e mostrou `denied_code`, `otp_requested`, um alerta do paciente crônico e **uma** leitura de `patient_data_overview` (só "Meus dados"; o login não lê mais o painel).
+- **O que a execução real achou:** o teste de jornada errou por dois detalhes do teste (faltava `terms_gate_checkbox`; o texto é `Risco: Vermelho`); um manifesto esquecido fazia o `live_check` tentar OTP contra a stack de desenvolvimento (agora só com `E2E_FIXTURES_FILE`, e `down` apaga o manifesto); o OTP impõe 60 s entre pedidos do mesmo paciente, o que pediu um paciente por consumidor e uma espera no `push_e2e.sh`.
+- **Limites:** só emulador; o GPS é um leitor fixo (o diálogo de permissão do sistema não é alcançável pelo `flutter test`); a CI não roda isto (precisa do relé e, para o push, das credenciais do FCM); migrar o `android-e2e` para a stack de e2e é outro plano.
+- **Flaky achado e corrigido:** na 1ª execução completa, `push_e2e.sh` falhou com "título não está na bandeja" (um `sleep 10` fixo contra a entrega do FCM); passou a esperar até 45 s pelo texto na bandeja. Depois disso `patient_full_e2e.sh` saiu com 0 e `--sem-push` também; o banco de desenvolvimento ficou idêntico.
+- **Revisão independente do e2e (subagente):** 0 Critical, 4 Important, corrigidos — (I1) a senha do ACS ia no `--dart-define` (argv e APK): o manifesto do aparelho não traz mais o bloco `acs` e o território virou `tool/territory_check.dart` no host; (I2) o `down` apaga o manifesto antes do `drop` e o cleanup avisa se falhar; (I3) `up`/`down` avisam que o `sinalacs-serverpod` da stack de desenvolvimento é substituído e como voltá-lo; (I4) o corte do código do OTP usa o relógio do host (`/now`). A reexecução achou ainda um relé órfão ocupando a porta 8765 e devolvendo código velho: os runners agora recusam subir nesse caso. **Adiado (Minor):** `.pyc` versionado em `scripts/qa/__pycache__`; relé sem checagem de `Host`; o seeder confia em host/porta do ambiente; manifesto criado com umask antes do `chmod 600`; `PGPASSWORD` no argv do `docker exec`; CPFs sintéticos com DV válido podem coincidir com CPFs reais; o teste não prova que o erro de código não gasta outro pedido; `na_bandeja` sob `pipefail`; `up` depende de certificados/mosquitto já inicializados e esconde a causa.
+- **Minors do e2e fechados (2026-09-30):** `.pyc` fora do git; relé recusa `Host` alheio (403) e se encerra em 45 min; seeder exige host local e a porta 9090 (`e2eSeedRefusal`); manifesto criado 0600/0700 antes de receber o conteúdo; `PGPASSWORD` herdado do ambiente; `up` mostra a causa da falha e tem timeout; `na_bandeja` sem SIGPIPE; o relé conta os códigos (`/count`) e a jornada exige exatamente um pedido; risco do CPF sintético registrado em `spec/lgpd_design.md`. Testes: backend 440→445, paciente 239→240.
+
+
+## Credenciais do FCM e Gorush no CI (2026-09-30)
+
+Plano: `docs/superpowers/plans/2026-09-30-ci-credencial-fcm.md`, branch `fix/patient`.
+
+- `scripts/ci/decode_secret_file.sh` decodifica `FCM_CREDENTIALS_BASE64` (arquivo `0600` em `$RUNNER_TEMP` + `GOOGLE_APPLICATION_CREDENTIALS`) e `GOOGLE_SERVICES_JSON_BASE64` (`apps/patient/android/app/google-services.json`, conferindo o pacote), sempre por `env:` do passo, sem imprimir conteúdo, sem sobrescrever nem apagar arquivo de dev fora do CI, e sem falhar em PR de fork (secret ausente = `::notice`). 53 asserções; 4 mutações mortas.
+- `scripts/qa/ci_push_e2e.sh` instala a chave no diretório que o Gorush monta e roda o `push_e2e.sh` (caminho feliz) por último no `run_android_e2e.sh`, propagando o resultado. O emulador do CI passou para `target: google_apis` (a imagem padrão da action é AOSP, sem Play Services).
+- `ci_invariants.sh` ganhou `check_credenciais_fcm` (9 grupos); 12 mutações do `ci.yml` são reprovadas; os três testes de shell rodam no `workflow-lint`.
+- **Não provado:** o primeiro run no runner. A imagem `google_apis` não foi exercitada aqui (o emulador local é a Google Play); se o FCM não entregar token, trocar para `google_apis_playstore` (ver o plano, Task 5). O push adiciona ~6 min ao `android-e2e` (limite 60 min).
+- **Política em aberto:** qualquer PR de dentro do repositório recebe os secrets; um autor com escrita poderia imprimi-los editando o `ci.yml`. Saída: Environment do GitHub com revisores obrigatórios.
+- **Revisão independente (CI do FCM):** 1 Critical e 1 Important, corrigidos. (C1) o Gorush (uid 1000) não lia a chave `0600` do usuário `runner` (uid 1001): o serviço roda agora com `GORUSH_UID/GORUSH_GID` (provado no Docker real: uid do dono = `healthy`; outro uid = `permission denied`). (I1) as credenciais existiam em disco durante ações de terceiros: a decodificação foi para logo antes do E2E e o guarda exige que não haja `uses:` entre elas e o E2E (13 mutações). **Adiado (Minor):** `check_credenciais_fcm` não cobre `env:` de workflow, `with:` de ação nem `toJSON(secrets)`; a mutação de ordem só testa a ausência do passo; `set -e` com falha no `trap ... down` troca o código de saída (já era assim); `SHELLOPTS=xtrace` herdado imprimiria o secret (falta `set +x`); `${!nome}` executa código se o nome da variável for hostil (hoje são constantes); `--cleanup-temp` compara só o prefixo; o `tmp` pode sobrar se `chmod`/`mv` falharem; o cabeçalho de `push_e2e.sh` ainda diz "NÃO roda na CI"; `project_id` no log público; o push soma ~6 min ao limite de 60.
+- **Provado no runner (2026-09-30, run `36790685752`, commit `32e6e88`):** 9/9 jobs verdes. No `android-e2e`: as duas decodificações passaram; o emulador `google_apis` deu token FCM; o Gorush subiu com o uid do runner; `push_e2e.sh` saiu com `chave ok para o projeto sinal-acs`, `tokens no banco: 1`, `recipients=1 accepted=1` e `OK — o aviso chegou ao emulador`. O log não contém chave, `private_key` nem `api_key` (0 ocorrências). Isto fecha o risco da imagem `google_apis` e o do uid do container.
+- **A 1ª execução do mesmo run falhou** em "FCM_CREDENTIALS_BASE64 não é um base64 válido": o valor cadastrado estava errado (o guarda recusou e nada vazou). Refeito o secret, a re-execução (`gh run rerun --failed`) passou. O erro de base64 agora traz diagnóstico sem valores (tamanho, alfabeto, JSON em claro, base64url).
+- **Minors da revisão do CI do FCM fechados (2026-09-30):** (M1/M2) o `check_credenciais_fcm` varre o texto bruto (cada secret só 1x, no `env:` do passo que o decodifica: cobre `env:` de workflow, `with:`, `toJSON(secrets)`, `secrets[...]`), exige o passo do E2E e a limpeza DEPOIS dele, e a mutação de ordem agora move o bloco de verdade (20 mutações); (M3) `trap ... down || true` preserva o exit do script; (M4–M7) `decode_secret_file.sh`: `set +x` primeiro, nomes de variável validados (`[A-Za-z_][A-Za-z0-9_]*`), `--cleanup-temp` normaliza o caminho (`..`) e um `trap` apaga o temporário se algo falhar (67 asserções); (M8) cabeçalho do `push_e2e.sh` corrigido; (M9) o `project_id` não é impresso no CI; (M10) `set -m` + `parar_arvore` matam o `flutter test` (neto do subshell), provado no emulador sem órfãos, e o tempo medido no run `36790685752` foi 13 min 19 s de 60 (passo do E2E 8 min 24 s). Sem Minors abertos deste trabalho.

@@ -271,7 +271,7 @@ void main() {
     });
 
     test(
-        'completeEnrollment com token válido grava 3 consent_logs e devolve sessão do paciente',
+        'completeEnrollment com token válido grava 4 consent_logs e devolve sessão do paciente',
         () async {
       final session = sessionBuilder.build();
       await _seed(session);
@@ -289,18 +289,20 @@ void main() {
         healthDataConsent: true,
         remindersConsent: false,
         pushConsent: true,
+        termsAccepted: true,
       );
 
       final rows = await ConsentLog.db.find(
         session,
         where: (t) => t.userId.equals(UuidValue.fromString(_patientId)),
       );
-      expect(rows, hasLength(3));
+      expect(rows, hasLength(4));
       expect(rows.every((r) => r.version == '2026.1'), isTrue);
       final byPurpose = {for (final r in rows) r.purpose: r.action};
       expect(byPurpose['healthDataProcessing'], 'granted');
       expect(byPurpose['localReminders'], 'denied');
       expect(byPurpose['segmentedPush'], 'granted');
+      expect(byPurpose['termsOfUse'], 'granted');
 
       final user = AlertRuntime.instance.auth.verifyToken(result.accessToken);
       expect(user, isNotNull);
@@ -335,6 +337,7 @@ void main() {
         healthDataConsent: true,
         remindersConsent: true,
         pushConsent: true,
+        termsAccepted: true,
       );
 
       await expectLater(
@@ -344,6 +347,7 @@ void main() {
           healthDataConsent: true,
           remindersConsent: true,
           pushConsent: true,
+          termsAccepted: true,
         ),
         throwsA(isA<EnrollmentException>()),
       );
@@ -369,6 +373,7 @@ void main() {
           healthDataConsent: false,
           remindersConsent: true,
           pushConsent: true,
+          termsAccepted: true,
         ),
         throwsA(isA<EnrollmentException>()),
       );
@@ -378,6 +383,46 @@ void main() {
         where: (t) => t.userId.equals(UuidValue.fromString(_patientId)),
       );
       expect(rows, isEmpty);
+    });
+
+    test('recusa do Termo de Uso falha, não grava nada e não consome o convite', () async {
+      final session = sessionBuilder.build();
+      await _seed(session);
+
+      final login = await endpoints.auth.developmentLogin(sessionBuilder, role: 'acs');
+      final generated = await endpoints.onboarding.generateEnrollmentToken(
+        sessionBuilder,
+        accessToken: login.accessToken,
+        patientId: _patientId,
+      );
+
+      await expectLater(
+        endpoints.onboarding.completeEnrollment(
+          sessionBuilder,
+          token: generated.token,
+          healthDataConsent: true,
+          remindersConsent: true,
+          pushConsent: true,
+          termsAccepted: false,
+        ),
+        throwsA(isA<EnrollmentException>()),
+      );
+      final rows = await ConsentLog.db.find(
+        session,
+        where: (t) => t.userId.equals(UuidValue.fromString(_patientId)),
+      );
+      expect(rows, isEmpty);
+
+      // O mesmo convite ainda serve: a recusa foi antes do consumo.
+      final result = await endpoints.onboarding.completeEnrollment(
+        sessionBuilder,
+        token: generated.token,
+        healthDataConsent: true,
+        remindersConsent: true,
+        pushConsent: true,
+        termsAccepted: true,
+      );
+      expect(result.accessToken, isNotEmpty);
     });
   });
 
@@ -436,6 +481,7 @@ void main() {
                 healthDataConsent: true,
                 remindersConsent: true,
                 pushConsent: true,
+                termsAccepted: true,
               );
             } catch (error) {
               return error;
@@ -451,12 +497,12 @@ void main() {
           expect(failures, hasLength(1),
               reason: 'a outra deve falhar de forma auditável, não silenciosa');
 
-          // 3 linhas, não 6: a chamada perdedora nunca chega a gravar consentimento.
+          // 4 linhas, não 8: a chamada perdedora nunca chega a gravar consentimento.
           final rows = await ConsentLog.db.find(
             session,
             where: (t) => t.userId.equals(UuidValue.fromString(_racePatientId)),
           );
-          expect(rows, hasLength(3));
+          expect(rows, hasLength(4));
         } finally {
           // Sem rollback automático neste grupo: a limpeza é manual, e roda
           // mesmo se uma asserção acima falhar, para o teste ficar repetível.

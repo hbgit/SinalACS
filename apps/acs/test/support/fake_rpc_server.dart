@@ -53,6 +53,10 @@ class FakeRpcServer {
   /// formato que o backend real usa (`AuthenticationFailedException`).
   String? rejectWith;
 
+  /// Faz `generateEnrollmentToken` recusar como o backend recusa paciente de
+  /// outra microárea (`AlertPermissionException`, INV-01).
+  bool rejectInviteWithPermission = false;
+
   /// Endereço para passar a `BackendClient(host: ...)`. Porta efêmera do SO:
   /// dois testes em paralelo não brigam por porta.
   String get host => 'http://127.0.0.1:${_server.port}/';
@@ -89,6 +93,14 @@ class FakeRpcServer {
       return;
     }
 
+    if (method == 'generateEnrollmentToken' && rejectInviteWithPermission) {
+      await _respond(request, HttpStatus.badRequest, {
+        'className': 'AlertPermissionException',
+        'data': {'message': 'Paciente fora da microárea do ACS.'},
+      });
+      return;
+    }
+
     final payload = switch (method) {
       'loginInstitutional' || 'developmentLogin' => <String, Object?>{
           'accessToken': _token(),
@@ -97,6 +109,12 @@ class FakeRpcServer {
       // Corpo de `patients.listMicroArea`: uma lista vazia basta para o teste
       // de renovação — o que importa é que a chamada autenticada aconteceu.
       'listMicroArea' => const <Object?>[],
+      // Corpo de `onboarding.generateEnrollmentToken`. Token sintético: o real
+      // tem 43 caracteres base64url, mas o cliente não valida o formato.
+      'generateEnrollmentToken' => <String, Object?>{
+          'token': 'convite-sintetico',
+          'expiresAt': '2026-09-29T10:15:00.000Z',
+        },
       _ => null,
     };
 

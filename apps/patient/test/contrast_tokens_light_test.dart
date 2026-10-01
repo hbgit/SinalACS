@@ -16,6 +16,8 @@ void main() {
   const normalText = 4.5;
   const largeTextOrUi = 3.0;
   const risk = PatientRiskColors.light;
+  // Cartão de aviso de mudança dos termos: cores geradas pelo tema a partir do seed.
+  final scheme = buildPatientLightTheme().colorScheme;
 
   final cases = <(String, Color, Color, double)>[
     ('texto principal sobre scaffold', const Color(0xFF111827), PatientLightColors.background, normalText),
@@ -26,6 +28,10 @@ void main() {
     ('accentOnSurface sobre scaffold', risk.accentOnSurface, PatientLightColors.background, normalText),
     ('yellowOnSurface sobre card', risk.yellowOnSurface, PatientLightColors.surfaceRaised, normalText),
     ('yellowOnSurface sobre scaffold', risk.yellowOnSurface, PatientLightColors.background, normalText),
+    ('texto do cartão de aviso (onSurface) sobre card', scheme.onSurface, PatientLightColors.surfaceRaised, normalText),
+    ('TextButton do cartão de aviso (primary) sobre card', scheme.primary, PatientLightColors.surfaceRaised, normalText),
+    ('ícone de fechar do cartão de aviso (onSurfaceVariant) sobre card', scheme.onSurfaceVariant, PatientLightColors.surfaceRaised, largeTextOrUi),
+    ('branco sobre accentDark (passos do resumo legal)', Colors.white, PatientColors.accentDark, normalText),
     // Preenchimento de botão: continua correto sem token novo.
     ('branco sobre botão de pânico (danger fill)', Colors.white, PatientColors.danger, largeTextOrUi),
   ];

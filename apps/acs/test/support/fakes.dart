@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:sinalacs_acs/core/network/auth_session.dart';
 import 'package:sinalacs_acs/core/network/backend_client.dart';
 import 'package:sinalacs_acs/core/services/alert_feed.dart';
@@ -138,6 +139,57 @@ class FakeAcsBackend implements AcsBackend {
     final failure = listPatientsFailure;
     if (failure != null) throw failure;
     return patients;
+  }
+
+  /// patientIds pedidos em `generateInvite`, na ordem.
+  final List<String> inviteCalls = <String>[];
+
+  /// Falha da geração do convite, como paciente fora da microárea.
+  BackendFailure? inviteFailure;
+
+  /// Quando definido, `generateInvite` só responde depois que ele completa —
+  /// simula a rede lenta de campo.
+  Completer<void>? inviteGate;
+
+  /// Validade do convite devolvido por `generateInvite`, contada de agora.
+  Duration inviteLifetime = const Duration(minutes: 15);
+
+  @override
+  Future<EnrollmentTokenResult> generateInvite({required String patientId}) async {
+    inviteCalls.add(patientId);
+    await inviteGate?.future;
+    final failure = inviteFailure;
+    if (failure != null) throw failure;
+    return EnrollmentTokenResult(
+      token: 'convite-sintetico-${inviteCalls.length}',
+      expiresAt: DateTime.now().toUtc().add(inviteLifetime),
+    );
+  }
+
+  /// Avisos pedidos em `sendNotice`, na ordem: (título, mensagem, só crônicos).
+  final List<(String, String, bool)> notices = <(String, String, bool)>[];
+
+  /// Falha do envio, como o relé de push fora do ar.
+  BackendFailure? noticeFailure;
+
+  /// Quando definido, `sendNotice` só responde depois que ele completa —
+  /// simula a rede lenta de campo.
+  Completer<void>? noticeGate;
+
+  /// Resultado devolvido por `sendNotice`.
+  NoticeSendResult noticeResult = NoticeSendResult(recipients: 3, accepted: 2);
+
+  @override
+  Future<NoticeSendResult> sendNotice({
+    required String title,
+    required String message,
+    required bool chronicOnly,
+  }) async {
+    notices.add((title, message, chronicOnly));
+    await noticeGate?.future;
+    final failure = noticeFailure;
+    if (failure != null) throw failure;
+    return noticeResult;
   }
 
   /// Entradas que `pullVisits` devolve. Vazio por padrão.
