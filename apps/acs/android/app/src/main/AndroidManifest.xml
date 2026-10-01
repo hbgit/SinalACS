@@ -1,4 +1,11 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Declaradas (e não herdadas de plugin) porque o app as usa direto:
+         INTERNET para o RPC e o MQTT; localização para o mapa e o check-in
+         passivo (RF12). Só primeiro plano: a decisão de 2026-09-16 (§4)
+         rejeita ACCESS_BACKGROUND_LOCATION. -->
+    <uses-permission android:name="android.permission.INTERNET"/>
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
     <application
         android:label="sinalacs_acs"
         android:name="${applicationName}"
