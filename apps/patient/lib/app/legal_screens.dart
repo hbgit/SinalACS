@@ -253,7 +253,7 @@ class _TermsAcceptanceScreenState extends State<TermsAcceptanceScreen> {
                 child: Text(
                   _error!,
                   key: const Key('terms_gate_error'),
-                  style: const TextStyle(color: PatientColors.dangerOnSurface),
+                  style: TextStyle(color: context.patientRisk.dangerOnSurface),
                 ),
               ),
             const SizedBox(height: 16),

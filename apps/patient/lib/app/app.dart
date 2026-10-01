@@ -36,6 +36,7 @@ import 'package:sinalacs_patient/core/reminders/reminder.dart';
 import 'package:sinalacs_patient/core/reminders/reminder_scheduler.dart';
 import 'package:sinalacs_patient/core/reminders/reminder_store.dart';
 import 'package:sinalacs_patient/core/reminders/sqflite_reminder_store.dart';
+import 'package:sinalacs_patient/core/services/theme_controller.dart';
 
 class SinalAcsApp extends StatefulWidget {
   const SinalAcsApp({
@@ -48,6 +49,7 @@ class SinalAcsApp extends StatefulWidget {
     this.qrScanner,
     this.pushTokens,
     this.upcomingDocuments,
+    this.themeController,
   });
 
   /// Backend do app. **Obrigatório, e construído em `main.dart`.**
@@ -91,6 +93,7 @@ class SinalAcsApp extends StatefulWidget {
   /// Injetável para teste. Em execução normal é [upcomingLegalDocuments]: o texto
   /// da versão dos termos já anunciada (aviso de 15 dias) e ainda não vigente.
   final UpcomingLegalDocuments? upcomingDocuments;
+  final ThemeController? themeController;
 
   @override
   State<SinalAcsApp> createState() => _SinalAcsAppState();
@@ -122,10 +125,19 @@ class _SinalAcsAppState extends State<SinalAcsApp> {
       return const NoPushTokenSource();
     }
   }
+  late final ThemeController _themeController = widget.themeController ?? ThemeController();
 
-  // Sem `dispose`: este widget não cria mais cliente nenhum (o `main` é quem
-  // constrói e injeta), então não há o que fechar — fechar um backend injetado
-  // seria fechar o de quem injetou.
+  @override
+  void initState() {
+    super.initState();
+    _themeController.restore();
+  }
+
+  @override
+  void dispose() {
+    if (widget.themeController == null) _themeController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -143,11 +155,16 @@ class _SinalAcsAppState extends State<SinalAcsApp> {
               documents: widget.upcomingDocuments ?? upcomingLegalDocuments,
               child: QrScannerScope(
                 scanner: _qrScanner,
-                child: MaterialApp(
-                  title: 'SinalACS Paciente',
-                  debugShowCheckedModeBanner: false,
-                  theme: buildPatientTheme(),
-                  home: const PatientLoginScreen(),
+                child: ValueListenableBuilder<ThemeMode>(
+                  valueListenable: _themeController,
+                  builder: (context, mode, _) => MaterialApp(
+                    title: 'SinalACS Paciente',
+                    debugShowCheckedModeBanner: false,
+                    theme: buildPatientLightTheme(),
+                    darkTheme: buildPatientDarkTheme(),
+                    themeMode: mode,
+                    home: PatientLoginScreen(themeController: _themeController),
+                  ),
                 ),
               ),
             ),
@@ -230,7 +247,9 @@ class RemindersScope extends InheritedWidget {
 }
 
 class PatientLoginScreen extends StatefulWidget {
-  const PatientLoginScreen({super.key});
+  const PatientLoginScreen({required this.themeController, super.key});
+
+  final ThemeController themeController;
 
   @override
   State<PatientLoginScreen> createState() => _PatientLoginScreenState();
@@ -463,7 +482,10 @@ class _PatientLoginScreenState extends State<PatientLoginScreen> {
       final needsTerms = await _needsTerms();
       if (!mounted) return;
       MaterialPageRoute<void> home() => MaterialPageRoute<void>(
-            builder: (_) => const PatientHomeShell(initialDestination: PatientDestination.triage),
+            builder: (_) => PatientHomeShell(
+              initialDestination: PatientDestination.triage,
+              themeController: widget.themeController,
+            ),
           );
       Navigator.of(context).pushReplacement(
         needsTerms
@@ -530,7 +552,7 @@ class _PatientLoginScreenState extends State<PatientLoginScreen> {
                               // telefone cadastrado, e afirmar isso seria inventar.
                               : 'Digite o código de 6 dígitos enviado pela sua unidade de saúde.',
                           textAlign: TextAlign.center,
-                          style: const TextStyle(color: Colors.white70),
+                          style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
                         ),
                         const SizedBox(height: 24),
                         if (_step == _LoginStep.credenciais) ..._camposDeCredenciais() else ..._camposDoCodigo(),
@@ -546,8 +568,8 @@ class _PatientLoginScreenState extends State<PatientLoginScreen> {
                                 key: const Key('login_error'),
                                 _error!,
                                 textAlign: TextAlign.center,
-                                style: const TextStyle(
-                                  color: PatientColors.dangerOnSurface,
+                                style: TextStyle(
+                                  color: context.patientRisk.dangerOnSurface,
                                   fontWeight: FontWeight.bold,
                                 ),
                               ),
@@ -560,7 +582,9 @@ class _PatientLoginScreenState extends State<PatientLoginScreen> {
                             child: OutlinedButton.icon(
                               key: const Key('start_onboarding_button'),
                               onPressed: () => Navigator.of(context).push(
-                                MaterialPageRoute(builder: (_) => const OnboardingScreen()),
+                                MaterialPageRoute(
+                                  builder: (_) => OnboardingScreen(themeController: widget.themeController),
+                                ),
                               ),
                               icon: const Icon(Icons.qr_code_scanner_outlined),
                               label: const Text('Escanear QR Code do ACS'),
@@ -701,7 +725,9 @@ class _PatientLoginScreenState extends State<PatientLoginScreen> {
 /// câmera ("Ler QR Code com a câmera") preenche o mesmo campo — digitar
 /// continua possível para quem não tem câmera ou negou a permissão.
 class OnboardingScreen extends StatefulWidget {
-  const OnboardingScreen({super.key});
+  const OnboardingScreen({required this.themeController, super.key});
+
+  final ThemeController themeController;
 
   @override
   State<OnboardingScreen> createState() => _OnboardingScreenState();
@@ -823,7 +849,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       // não há estado novo para duplicar aqui.
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(
-          builder: (_) => const PatientHomeShell(
+          builder: (_) => PatientHomeShell(
+            themeController: widget.themeController,
             initialDestination: PatientDestination.triage,
           ),
         ),
@@ -984,8 +1011,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                                 key: const Key('onboarding_error'),
                                 _error!,
                                 textAlign: TextAlign.center,
-                                style: const TextStyle(
-                                  color: PatientColors.dangerOnSurface,
+                                style: TextStyle(
+                                  color: context.patientRisk.dangerOnSurface,
                                   fontWeight: FontWeight.bold,
                                 ),
                               ),
@@ -1004,12 +1031,17 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   }
 }
 
-enum PatientDestination { emergency, triage, profile, status, reminders, myData }
+enum PatientDestination { emergency, triage, profile, status, reminders, myData, settings }
 
 class PatientHomeShell extends StatefulWidget {
-  const PatientHomeShell({super.key, this.initialDestination = PatientDestination.emergency});
+  const PatientHomeShell({
+    required this.themeController,
+    super.key,
+    this.initialDestination = PatientDestination.emergency,
+  });
 
   final PatientDestination initialDestination;
+  final ThemeController themeController;
 
   @override
   State<PatientHomeShell> createState() => _PatientHomeShellState();
@@ -1082,7 +1114,7 @@ class _PatientHomeShellState extends State<PatientHomeShell> {
 
   void _reenter() {
     Navigator.of(context).pushReplacement(
-      MaterialPageRoute(builder: (_) => const PatientLoginScreen()),
+      MaterialPageRoute(builder: (_) => PatientLoginScreen(themeController: widget.themeController)),
     );
   }
 
@@ -1098,6 +1130,7 @@ class _PatientHomeShellState extends State<PatientHomeShell> {
       PatientDestination.myData => const MyDataScreen(),
       PatientDestination.status => StatusScreen(onFailure: _reportFailure),
       PatientDestination.reminders => const RemindersScreen(),
+      PatientDestination.settings => ThemeSettingsScreen(controller: widget.themeController),
     };
     final title = switch (_destination) {
       PatientDestination.emergency => 'Alerta de urgência',
@@ -1106,6 +1139,7 @@ class _PatientHomeShellState extends State<PatientHomeShell> {
       PatientDestination.myData => 'Meus dados',
       PatientDestination.status => 'Acompanhamento',
       PatientDestination.reminders => 'Lembretes',
+      PatientDestination.settings => 'Preferências',
     };
 
     return Scaffold(
@@ -1366,7 +1400,7 @@ class _EmergencyScreenState extends State<EmergencyScreen> {
           // anunciar sem depender de a pessoa varrer a tela de novo.
           Semantics(
             liveRegion: true,
-            child: Text(_state, style: const TextStyle(color: PatientColors.accentOnSurface, fontWeight: FontWeight.bold)),
+            child: Text(_state, style: TextStyle(color: context.patientRisk.accentOnSurface, fontWeight: FontWeight.bold)),
           ),
         ]))),
       ],
@@ -1473,7 +1507,7 @@ class _TriageScreenState extends State<TriageScreen> {
       children: [
         Text(
           'Passo ${_step + 1} de ${_symptoms.length}',
-          style: const TextStyle(color: PatientColors.accent, fontWeight: FontWeight.bold),
+          style: TextStyle(color: context.patientRisk.accentOnSurface, fontWeight: FontWeight.bold),
         ),
         const SizedBox(height: 8),
         LinearProgressIndicator(value: (_step + 1) / _symptoms.length),
@@ -1520,7 +1554,7 @@ class _TriageScreenState extends State<TriageScreen> {
                 key: const Key('triage_error'),
                 _error!,
                 textAlign: TextAlign.center,
-                style: const TextStyle(color: PatientColors.dangerOnSurface, fontWeight: FontWeight.bold),
+                style: TextStyle(color: context.patientRisk.dangerOnSurface, fontWeight: FontWeight.bold),
               ),
             ),
           ),
@@ -1542,24 +1576,25 @@ class _TriageResult extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     // `color` só é usada como texto/ícone sobre o card (nenhum botão herda
-    // este tom), por isso a variante `OnSurface` entra direto na tupla —
-    // `PatientColors.danger` e `PatientColors.accent` caem para 3.03:1 e
-    // 3.91:1 sobre `surfaceRaised`, abaixo de 4.5:1 (WCAG 1.4.3).
+    // este tom), por isso a variante `OnSurface` do tema ativo entra direto
+    // na tupla — o fill puro (`PatientColors.danger`/`accent`) falha como
+    // texto em ambos os temas (ver `PatientRiskColors` em `patient_theme.dart`).
+    final riskColors = context.patientRisk;
     final (label, color, guidance) = switch (risk) {
       RiskLevel.red => (
           'Risco: Vermelho',
-          PatientColors.dangerOnSurface,
+          riskColors.dangerOnSurface,
           'Sua equipe de saúde foi avisada com prioridade máxima. '
               'Se piorar, ligue para o SAMU (192).',
         ),
       RiskLevel.yellow => (
           'Risco: Amarelo',
-          const Color(0xFFE0A800),
+          riskColors.yellowOnSurface,
           'Sua solicitação foi priorizada. O agente de saúde entrará em contato.',
         ),
       RiskLevel.green => (
           'Risco: Verde',
-          PatientColors.accentOnSurface,
+          riskColors.accentOnSurface,
           'Sem sinais de urgência. Sua solicitação entrou na fila de rotina.',
         ),
     };
@@ -1582,10 +1617,10 @@ class _TriageResult extends StatelessWidget {
                 const SizedBox(height: 12),
                 Text(guidance, textAlign: TextAlign.center),
                 const SizedBox(height: 8),
-                const Text(
+                Text(
                   'Classificação feita pelo protocolo da equipe de saúde.',
                   textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 12, color: Colors.white54),
+                  style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
                 ),
               ],
             ),
@@ -1707,7 +1742,7 @@ class _ClinicalProfileScreenState extends State<ClinicalProfileScreen> {
               child: Text(
                 _error!,
                 key: const Key('clinical_profile_error'),
-                style: const TextStyle(color: PatientColors.dangerOnSurface, fontWeight: FontWeight.bold),
+                style: TextStyle(color: context.patientRisk.dangerOnSurface, fontWeight: FontWeight.bold),
               ),
             ),
           ),
@@ -2091,7 +2126,7 @@ class _MyDataScreenState extends State<MyDataScreen> {
               child: Text(
                 _error!,
                 key: const Key('my_data_error'),
-                style: const TextStyle(color: PatientColors.dangerOnSurface, fontWeight: FontWeight.bold),
+                style: TextStyle(color: context.patientRisk.dangerOnSurface, fontWeight: FontWeight.bold),
               ),
             ),
           ),
@@ -2412,7 +2447,7 @@ class _StatusScreenBodyState extends State<_StatusScreenBody> with WidgetsBindin
               child: Text(
                 key: const Key('status_error'),
                 _error!,
-                style: const TextStyle(color: PatientColors.dangerOnSurface, fontWeight: FontWeight.bold),
+                style: TextStyle(color: context.patientRisk.dangerOnSurface, fontWeight: FontWeight.bold),
               ),
             ),
           ),
@@ -2471,9 +2506,9 @@ class _StatusCard extends StatelessWidget {
     // Mesma disciplina de cor de `_TriageResult`: `OnSurface` porque o tom
     // aparece como texto sobre `Card`, não como preenchimento.
     final (riskLabel, riskColor) = switch (status.riskLevel) {
-      RiskLevel.red => ('Vermelho', PatientColors.dangerOnSurface),
+      RiskLevel.red => ('Vermelho', context.patientRisk.dangerOnSurface),
       RiskLevel.yellow => ('Amarelo', const Color(0xFFE0A800)),
-      RiskLevel.green => ('Verde', PatientColors.accentOnSurface),
+      RiskLevel.green => ('Verde', context.patientRisk.accentOnSurface),
       null => ('Não classificado', Colors.white70),
     };
     final statusLabel = switch (status.status) {
@@ -2745,7 +2780,7 @@ class _RemindersScreenState extends State<RemindersScreen> {
               child: Text(
                 _error!,
                 key: const Key('reminders_error'),
-                style: const TextStyle(color: PatientColors.dangerOnSurface, fontWeight: FontWeight.bold),
+                style: TextStyle(color: context.patientRisk.dangerOnSurface, fontWeight: FontWeight.bold),
               ),
             ),
           ),
@@ -2885,12 +2920,41 @@ class _ReminderFormDialogState extends State<_ReminderFormDialog> {
   }
 }
 
+class ThemeSettingsScreen extends StatelessWidget {
+  const ThemeSettingsScreen({required this.controller, super.key});
+
+  final ThemeController controller;
+
+  @override
+  Widget build(BuildContext context) => ValueListenableBuilder<ThemeMode>(
+    valueListenable: controller,
+    builder: (context, mode, _) => ListView(
+      padding: const EdgeInsets.all(20),
+      children: [
+        const Text('Aparência', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 4),
+        const Text('Escolha como o app deve se apresentar neste aparelho.'),
+        const SizedBox(height: 16),
+        RadioGroup<ThemeMode>(
+          groupValue: mode,
+          onChanged: (value) { if (value != null) controller.setThemeMode(value); },
+          child: const Column(children: [
+            Card(child: RadioListTile<ThemeMode>(key: Key('theme_light'), value: ThemeMode.light, title: Text('Claro'))),
+            Card(child: RadioListTile<ThemeMode>(key: Key('theme_dark'), value: ThemeMode.dark, title: Text('Escuro'))),
+            Card(child: RadioListTile<ThemeMode>(key: Key('theme_system'), value: ThemeMode.system, title: Text('Automático (segue o sistema)'))),
+          ]),
+        ),
+      ],
+    ),
+  );
+}
+
 class _PatientHeader extends StatelessWidget implements PreferredSizeWidget {
   const _PatientHeader({required this.eyebrow, required this.title}); final String eyebrow; final String title;
   @override Size get preferredSize => const Size.fromHeight(72);
-  @override Widget build(BuildContext context) => AppBar(title: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(eyebrow.toUpperCase(), style: const TextStyle(fontSize: 10, color: PatientColors.accent, fontWeight: FontWeight.bold)), Text(title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold))]), actions: const [Padding(padding: EdgeInsets.only(right: 16), child: CircleAvatar(child: Icon(Icons.person_outline)))]) ;
+  @override Widget build(BuildContext context) => AppBar(title: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(eyebrow.toUpperCase(), style: TextStyle(fontSize: 10, color: context.patientRisk.accentOnSurface, fontWeight: FontWeight.bold)), Text(title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold))]), actions: const [Padding(padding: EdgeInsets.only(right: 16), child: CircleAvatar(child: Icon(Icons.person_outline)))]) ;
 }
 
 void _showMoreDestinations(BuildContext context, ValueChanged<PatientDestination> select) {
-  showModalBottomSheet<void>(context: context, builder: (sheetContext) => SafeArea(child: Column(mainAxisSize: MainAxisSize.min, children: [ListTile(leading: const Icon(Icons.person_outline), title: const Text('Perfil clínico'), onTap: () { Navigator.pop(sheetContext); select(PatientDestination.profile); }), ListTile(leading: const Icon(Icons.alarm_outlined), title: const Text('Lembretes'), onTap: () { Navigator.pop(sheetContext); select(PatientDestination.reminders); }), ListTile(leading: const Icon(Icons.privacy_tip_outlined), title: const Text('Meus dados'), onTap: () { Navigator.pop(sheetContext); select(PatientDestination.myData); }), ListTile(key: const Key('more_legal'), leading: const Icon(Icons.gavel_outlined), title: const Text('Privacidade e termos'), onTap: () { Navigator.pop(sheetContext); Navigator.of(context).push(MaterialPageRoute(builder: (_) => const LegalDocumentsScreen())); })])));
+  showModalBottomSheet<void>(context: context, builder: (sheetContext) => SafeArea(child: Column(mainAxisSize: MainAxisSize.min, children: [ListTile(leading: const Icon(Icons.person_outline), title: const Text('Perfil clínico'), onTap: () { Navigator.pop(sheetContext); select(PatientDestination.profile); }), ListTile(leading: const Icon(Icons.alarm_outlined), title: const Text('Lembretes'), onTap: () { Navigator.pop(sheetContext); select(PatientDestination.reminders); }), ListTile(leading: const Icon(Icons.privacy_tip_outlined), title: const Text('Meus dados'), onTap: () { Navigator.pop(sheetContext); select(PatientDestination.myData); }), ListTile(key: const Key('more_legal'), leading: const Icon(Icons.gavel_outlined), title: const Text('Privacidade e termos'), onTap: () { Navigator.pop(sheetContext); Navigator.of(context).push(MaterialPageRoute(builder: (_) => const LegalDocumentsScreen())); }), ListTile(leading: const Icon(Icons.tune_outlined), title: const Text('Preferências'), onTap: () { Navigator.pop(sheetContext); select(PatientDestination.settings); })])));
 }

@@ -188,9 +188,9 @@ class _InviteScreenState extends State<InviteScreen> {
                   ? null
                   : Text(patient.chronicConditions.join(', ')),
               trailing: _selected?.patientId == patient.patientId
-                  ? const Icon(
+                  ? Icon(
                       Icons.check_circle,
-                      color: AcsColors.accentOnSurface,
+                      color: context.acsRisk.accentOnSurface,
                     )
                   : null,
               onTap: () => _select(patient),
@@ -214,8 +214,8 @@ class _InviteScreenState extends State<InviteScreen> {
               child: Text(
                 _error!,
                 key: const Key('invite_error'),
-                style: const TextStyle(
-                  color: AcsColors.redOnSurface,
+                style: TextStyle(
+                  color: context.acsRisk.redOnSurface,
                   fontWeight: FontWeight.bold,
                 ),
               ),

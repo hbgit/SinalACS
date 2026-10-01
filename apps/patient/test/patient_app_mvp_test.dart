@@ -25,6 +25,7 @@ import 'package:sinalacs_patient/core/network/backend_client.dart';
 import 'package:sinalacs_patient/core/push/push_token_source.dart';
 import 'package:sinalacs_patient/core/network/backend_scope.dart';
 import 'package:sinalacs_patient/core/privacy/location_hash.dart';
+import 'package:sinalacs_patient/core/services/theme_controller.dart';
 import 'package:sinalacs_patient/core/reminders/reminder.dart';
 import 'package:sinalacs_patient/core/reminders/reminder_scheduler.dart';
 import 'package:sinalacs_patient/core/reminders/reminder_store.dart';
@@ -539,7 +540,10 @@ void main() {
           store: store,
           scheduler: scheduler,
           consentPreferences: consentPreferences ?? _FixedConsentPreferences(),
-          child: const PatientHomeShell(initialDestination: PatientDestination.reminders),
+          child: PatientHomeShell(
+            themeController: ThemeController(),
+            initialDestination: PatientDestination.reminders,
+          ),
         ),
       );
     }

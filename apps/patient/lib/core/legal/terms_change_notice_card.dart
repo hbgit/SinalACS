@@ -41,7 +41,7 @@ class TermsChangeNoticeCard extends StatelessWidget {
           children: [
             Row(
               children: [
-                const Icon(Icons.info_outline, color: PatientColors.accentOnSurface),
+                Icon(Icons.info_outline, color: context.patientRisk.accentOnSurface),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Semantics(

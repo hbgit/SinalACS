@@ -17,6 +17,7 @@ import 'package:sinalacs_acs/core/services/offline_visit_queue.dart';
 import 'package:sinalacs_client/sinalacs_client.dart' show MicroAreaPatient;
 import 'package:sinalacs_acs/core/services/reconnect_schedule.dart';
 import 'package:sinalacs_acs/core/services/route_service.dart';
+import 'package:sinalacs_acs/core/services/theme_controller.dart';
 import 'package:sinalacs_acs/core/services/visit_pull_service.dart';
 import 'package:sinalacs_acs/core/services/visit_pull_service_factory.dart';
 import 'package:sinalacs_acs/core/services/visit_queue_factory.dart';
@@ -30,6 +31,7 @@ class SinalAcsApp extends StatefulWidget {
     this.visitPullService,
     this.initialAlert,
     this.currentPosition,
+    this.themeController,
     this.syncInterval,
   });
 
@@ -48,6 +50,7 @@ class SinalAcsApp extends StatefulWidget {
   final VisitPullService? visitPullService;
   final PrioritizedAlert? initialAlert;
   final LatLng? currentPosition;
+  final ThemeController? themeController;
 
   /// Intervalo da sincronização periódica em segundo plano (visitas +
   /// pacientes da microárea). `null` usa `AcsHomeShell.defaultSyncInterval`
@@ -85,30 +88,46 @@ class _SinalAcsAppState extends State<SinalAcsApp> {
   OfflineVisitQueue _persistentQueue() =>
       buildVisitQueue(backend: widget.backend, store: _visitStore);
 
+  late final ThemeController _themeController = widget.themeController ?? ThemeController();
+
   /// Serviço de pull central→dispositivo (RF15, decisão §5).
   ///
   /// Usa o MESMO `_visitStore` da fila — ver o comentário acima.
   late final VisitPullService _visitPullService = widget.visitPullService ??
       buildVisitPullService(backend: widget.backend, localVisits: _visitStore);
 
-  // Sem `dispose`: este widget não cria mais cliente nenhum (o `main` é quem
-  // constrói e injeta), então não há o que fechar — fechar um backend injetado
-  // seria fechar o de quem injetou.
+  @override
+  void initState() {
+    super.initState();
+    _themeController.restore();
+  }
+
+  @override
+  void dispose() {
+    if (widget.themeController == null) _themeController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) => BackendScope(
         backend: widget.backend,
-        child: MaterialApp(
-          title: 'SinalACS ACS',
-          debugShowCheckedModeBanner: false,
-          theme: buildAcsTheme(),
-          home: LoginScreen(
-            feedBuilder: widget.feedBuilder,
-            visitQueue: _visitQueue,
-            visitPullService: _visitPullService,
-            initialAlert: widget.initialAlert,
-            initialPosition: widget.currentPosition,
-            syncInterval: widget.syncInterval,
+        child: ValueListenableBuilder<ThemeMode>(
+          valueListenable: _themeController,
+          builder: (context, mode, _) => MaterialApp(
+            title: 'SinalACS ACS',
+            debugShowCheckedModeBanner: false,
+            theme: buildAcsLightTheme(),
+            darkTheme: buildAcsDarkTheme(),
+            themeMode: mode,
+            home: LoginScreen(
+              feedBuilder: widget.feedBuilder,
+              visitQueue: _visitQueue,
+              visitPullService: _visitPullService,
+              initialAlert: widget.initialAlert,
+              initialPosition: widget.currentPosition,
+              themeController: _themeController,
+              syncInterval: widget.syncInterval,
+            ),
           ),
         ),
       );
@@ -117,6 +136,7 @@ class _SinalAcsAppState extends State<SinalAcsApp> {
 class LoginScreen extends StatefulWidget {
   const LoginScreen({
     required this.visitQueue,
+    required this.themeController,
     required this.visitPullService,
     super.key,
     this.feedBuilder,
@@ -130,6 +150,7 @@ class LoginScreen extends StatefulWidget {
   final VisitPullService visitPullService;
   final PrioritizedAlert? initialAlert;
   final LatLng? initialPosition;
+  final ThemeController themeController;
   final Duration? syncInterval;
 
   @override
@@ -190,6 +211,7 @@ class _LoginScreenState extends State<LoginScreen> {
           visitPullService: widget.visitPullService,
           initialAlert: widget.initialAlert,
           initialPosition: widget.initialPosition,
+          themeController: widget.themeController,
           syncInterval: widget.syncInterval,
         ),
       ));
@@ -244,7 +266,7 @@ class _LoginScreenState extends State<LoginScreen> {
             padding: const EdgeInsets.only(top: 16),
             child: Semantics(
               liveRegion: true,
-              child: Text(key: const Key('login_error'), _error!, textAlign: TextAlign.center, style: const TextStyle(color: AcsColors.redOnSurface, fontWeight: FontWeight.bold)),
+              child: Text(key: const Key('login_error'), _error!, textAlign: TextAlign.center, style: TextStyle(color: context.acsRisk.redOnSurface, fontWeight: FontWeight.bold)),
             ),
           ),
         ]))),
@@ -253,7 +275,7 @@ class _LoginScreenState extends State<LoginScreen> {
   );
 }
 
-enum AcsDestination { area, queue, map, visit, escalation, geofencing, notices, invite }
+enum AcsDestination { area, queue, map, visit, escalation, geofencing, notices, invite, settings }
 
 /// Aviso de infraestrutura: o que quebrou e a consequência prática.
 ///
@@ -267,6 +289,7 @@ class AcsHomeShell extends StatefulWidget {
     required this.microAreaId,
     required this.acsId,
     required this.visitQueue,
+    required this.themeController,
     required this.visitPullService,
     super.key,
     this.feedBuilder,
@@ -280,6 +303,7 @@ class AcsHomeShell extends StatefulWidget {
   final AlertFeed Function(AlertQueue queue)? feedBuilder;
   final PrioritizedAlert? initialAlert;
   final LatLng? initialPosition;
+  final ThemeController themeController;
 
   /// Intervalo entre sincronizações automáticas com a central (visitas +
   /// pacientes da microárea), além do disparo ao abrir o painel e do botão
@@ -761,6 +785,7 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
         ),
       AcsDestination.notices => const NoticesScreen(),
       AcsDestination.invite => const InviteScreen(),
+      AcsDestination.settings => ThemeSettingsScreen(controller: widget.themeController),
     }),
     bottomNavigationBar: NavigationBar(
       selectedIndex: destination.index <= 3 ? destination.index : 4,
@@ -773,6 +798,7 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
     _moreItem(sheet, Icons.location_searching, 'Geofencing', AcsDestination.geofencing),
     _moreItem(sheet, Icons.campaign_outlined, 'Avisos à comunidade', AcsDestination.notices),
     _moreItem(sheet, Icons.qr_code_2, 'Convidar paciente', AcsDestination.invite),
+    _moreItem(sheet, Icons.tune_outlined, 'Preferências', AcsDestination.settings),
   ])));
   Widget _moreItem(BuildContext sheet, IconData icon, String label, AcsDestination value) => ListTile(leading: Icon(icon), title: Text(label), onTap: () { Navigator.pop(sheet); setState(() => destination = value); });
 }
@@ -1014,7 +1040,7 @@ class _InfraBanner extends StatelessWidget {
           child: Card(
             color: AcsColors.accent.withValues(alpha: 0.15),
             child: ListTile(
-              leading: Icon(icon, color: AcsColors.accentOnSurface),
+              leading: Icon(icon, color: context.acsRisk.accentOnSurface),
               title: Text(notice.title, style: const TextStyle(fontWeight: FontWeight.bold)),
               subtitle: Text(notice.detail),
               trailing: onRetry == null ? null : TextButton(
@@ -1041,18 +1067,21 @@ class _AlertCard extends StatelessWidget {
   ///
   /// `color` é o preenchimento (borda esquerda, fundo do botão de
   /// confirmação); `textColor` é a variante ajustada para ≥4.5:1 como texto
-  /// sobre o card (`AcsColors.surfaceRaised`) — `color` sozinho falha nisso
-  /// para vermelho (3.04:1) e para o fallback azul (2.84:1).
-  (Color, Color, String) get _risk => switch (alert.riskLevel.toLowerCase()) {
-        'red' || 'vermelho' => (AcsColors.red, AcsColors.redOnSurface, 'Risco: Vermelho'),
-        'yellow' || 'amarelo' => (AcsColors.yellow, AcsColors.yellow, 'Risco: Amarelo'),
-        'green' || 'verde' => (AcsColors.green, AcsColors.green, 'Risco: Verde'),
-        _ => (AcsColors.accent, AcsColors.accentOnSurface, 'Risco: não classificado'),
-      };
+  /// sobre o card — a variante certa depende do tema ativo, por isso vem de
+  /// [AcsRiskColors] em vez de `AcsColors` direto (ver `acs_theme.dart`).
+  (Color, Color, String) _risk(BuildContext context) {
+    final risk = context.acsRisk;
+    return switch (alert.riskLevel.toLowerCase()) {
+      'red' || 'vermelho' => (AcsColors.red, risk.redOnSurface, 'Risco: Vermelho'),
+      'yellow' || 'amarelo' => (AcsColors.yellow, risk.yellowOnSurface, 'Risco: Amarelo'),
+      'green' || 'verde' => (AcsColors.green, risk.greenOnSurface, 'Risco: Verde'),
+      _ => (AcsColors.accent, risk.accentOnSurface, 'Risco: não classificado'),
+    };
+  }
 
   @override
   Widget build(BuildContext context) {
-    final (color, textColor, label) = _risk;
+    final (color, textColor, label) = _risk(context);
     final isRed = alert.riskLevel.toLowerCase() == 'red' || alert.riskLevel.toLowerCase() == 'vermelho';
 
     return Card(
@@ -1080,12 +1109,12 @@ class _AlertCard extends StatelessWidget {
               Text(label, style: TextStyle(color: textColor, fontWeight: FontWeight.bold)),
               const SizedBox(height: 6),
               Text('Recebido às ${_time(alert.triggeredAt)} • local ${alert.locationHash}'),
-              if (alert.acknowledged) const Padding(
-                padding: EdgeInsets.only(top: 8),
+              if (alert.acknowledged) Padding(
+                padding: const EdgeInsets.only(top: 8),
                 child: Row(children: [
-                  Icon(Icons.check_circle, size: 16, color: AcsColors.green),
-                  SizedBox(width: 6),
-                  Text('Recebimento confirmado', style: TextStyle(color: AcsColors.green)),
+                  Icon(Icons.check_circle, size: 16, color: context.acsRisk.greenOnSurface),
+                  const SizedBox(width: 6),
+                  Text('Recebimento confirmado', style: TextStyle(color: context.acsRisk.greenOnSurface)),
                 ]),
               ),
             ]),
@@ -1241,9 +1270,9 @@ class _MapScreenState extends State<MapScreen> {
                 )
               : Container(
                   height: 260,
-                  decoration: const BoxDecoration(
-                    color: AcsColors.surface,
-                    borderRadius: BorderRadius.all(Radius.circular(12)),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                    borderRadius: const BorderRadius.all(Radius.circular(12)),
                   ),
                   child: const Center(
                     child: Padding(
@@ -1275,13 +1304,13 @@ class _MapScreenState extends State<MapScreen> {
                   RouteStatus.complete => 'Rota concluída • ${_routePlan!.distanceKm.toStringAsFixed(1)} km • ETA ${_routePlan!.etaMinutes} min',
                   _ => 'Rota ativa • ${_routePlan!.distanceKm.toStringAsFixed(1)} km • ETA ${_routePlan!.etaMinutes} min',
                 },
-                style: const TextStyle(color: AcsColors.accentOnSurface, fontWeight: FontWeight.bold),
+                style: TextStyle(color: context.acsRisk.accentOnSurface, fontWeight: FontWeight.bold),
               ),
               if (_routePlan!.status == RouteStatus.complete && _selectedAlert != null) ...[
                 const SizedBox(height: 8),
-                const Text(
+                Text(
                   'Local alcançado. Você pode abrir o registro de visita agora.',
-                  style: TextStyle(color: AcsColors.green, fontWeight: FontWeight.bold),
+                  style: TextStyle(color: context.acsRisk.greenOnSurface, fontWeight: FontWeight.bold),
                 ),
               ],
             ],
@@ -1328,7 +1357,7 @@ class _MapScreenState extends State<MapScreen> {
             children: [
               Text('Paciente ${alert.patientId.substring(0, 8)}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
               const SizedBox(height: 8),
-              Text('$riskLabel • ${_time(alert.triggeredAt)}', style: TextStyle(color: _riskColor(alert.riskLevel))),
+              Text('$riskLabel • ${_time(alert.triggeredAt)}', style: TextStyle(color: _riskColor(sheetContext, alert.riskLevel))),
               const SizedBox(height: 8),
               Text('Microárea: ${alert.microAreaId.substring(0, 8)}'),
               const SizedBox(height: 16),
@@ -1387,12 +1416,15 @@ class _MapScreenState extends State<MapScreen> {
     }
   }
 
-  Color _riskColor(String riskLevel) => switch (riskLevel.toLowerCase()) {
-        'red' || 'vermelho' => AcsColors.red,
-        'yellow' || 'amarelo' => AcsColors.yellow,
-        'green' || 'verde' => AcsColors.green,
-        _ => AcsColors.accent,
-      };
+  Color _riskColor(BuildContext context, String riskLevel) {
+    final risk = context.acsRisk;
+    return switch (riskLevel.toLowerCase()) {
+      'red' || 'vermelho' => risk.redOnSurface,
+      'yellow' || 'amarelo' => risk.yellowOnSurface,
+      'green' || 'verde' => risk.greenOnSurface,
+      _ => risk.accentOnSurface,
+    };
+  }
 
   /// Preenchimento do círculo de incerteza — deriva de [riskLevel], não do
   /// `BitmapDescriptor` do marcador (aquele é opaco, não dá para extrair cor
@@ -1446,7 +1478,7 @@ class _AlertMapSummary extends StatelessWidget {
       ),
       child: Row(
         children: [
-          Icon(Icons.location_on, color: acsOnSurface(color)),
+          Icon(Icons.location_on, color: acsOnSurface(context, color)),
           const SizedBox(width: 8),
           Expanded(
             child: Text(
@@ -1675,7 +1707,7 @@ class _VisitRegistrationScreenState extends State<VisitRegistrationScreen> {
   /// aba simplesmente dizia "selecione um alerta" e não havia outro caminho —
   /// e como o único produtor de alertas publica só risco vermelho (emergência,
   /// SAMU), a visita de rotina do PRD (≥ 8/dia) nunca tinha de onde partir.
-  List<Widget> _buildPatientPicker() {
+  List<Widget> _buildPatientPicker(BuildContext context) {
     if (_loadingPatients) {
       return const [
         Padding(
@@ -1695,7 +1727,7 @@ class _VisitRegistrationScreenState extends State<VisitRegistrationScreen> {
             child: Text(
               key: const Key('patient_directory_error'),
               error.message,
-              style: const TextStyle(color: AcsColors.accentOnSurface, fontWeight: FontWeight.bold),
+              style: TextStyle(color: context.acsRisk.accentOnSurface, fontWeight: FontWeight.bold),
             ),
           ),
         ),
@@ -1706,14 +1738,14 @@ class _VisitRegistrationScreenState extends State<VisitRegistrationScreen> {
 
     final all = _patients ?? const [];
     if (all.isEmpty) {
-      return const [
+      return [
         Padding(
-          padding: EdgeInsets.only(top: 8),
+          padding: const EdgeInsets.only(top: 8),
           child: Text(
-            key: Key('visit_needs_alert'),
+            key: const Key('visit_needs_alert'),
             'Nenhum paciente cadastrado na sua microárea ainda. Selecione um '
             'alerta na fila para registrar a visita.',
-            style: TextStyle(color: AcsColors.accentOnSurface),
+            style: TextStyle(color: context.acsRisk.accentOnSurface),
           ),
         ),
       ];
@@ -1768,7 +1800,7 @@ class _VisitRegistrationScreenState extends State<VisitRegistrationScreen> {
 
     return _page([
       Text(_patientLabel, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-      if (semAlerta && selected == null) ..._buildPatientPicker(),
+      if (semAlerta && selected == null) ..._buildPatientPicker(context),
       if (semAlerta && selected != null) Padding(
         padding: const EdgeInsets.only(top: 8),
         child: TextButton.icon(
@@ -1784,11 +1816,11 @@ class _VisitRegistrationScreenState extends State<VisitRegistrationScreen> {
         padding: const EdgeInsets.only(top: 8),
         child: Semantics(
           liveRegion: true,
-          child: const Text(
-            key: Key('visit_storage_error'),
+          child: Text(
+            key: const Key('visit_storage_error'),
             'As visitas não estão sendo salvas neste aparelho — elas só existem '
             'na memória até sincronizar.',
-            style: TextStyle(color: AcsColors.accentOnSurface, fontWeight: FontWeight.bold),
+            style: TextStyle(color: context.acsRisk.accentOnSurface, fontWeight: FontWeight.bold),
           ),
         ),
       ),
@@ -1822,9 +1854,9 @@ class _VisitRegistrationScreenState extends State<VisitRegistrationScreen> {
       ),
       if (hasPatient && _arrivalConfirmed) ...[
         const SizedBox(height: 12),
-        const Text(
+        Text(
           'Local alcançado. Você pode registrar a visita agora.',
-          style: TextStyle(color: AcsColors.green, fontWeight: FontWeight.bold),
+          style: TextStyle(color: context.acsRisk.greenOnSurface, fontWeight: FontWeight.bold),
         ),
       ],
       const Divider(height: 32),
@@ -1839,7 +1871,7 @@ class _VisitRegistrationScreenState extends State<VisitRegistrationScreen> {
           key: const Key('conflict_visits_count'),
           'Em conflito: ${queue.conflictCount}',
           // Conflito de sincronização é operacional, não gravidade clínica.
-          style: const TextStyle(color: AcsColors.accentOnSurface, fontWeight: FontWeight.bold),
+          style: TextStyle(color: context.acsRisk.accentOnSurface, fontWeight: FontWeight.bold),
         ),
       ),
       if (queue.rejectedCount > 0) ...[
@@ -1853,7 +1885,7 @@ class _VisitRegistrationScreenState extends State<VisitRegistrationScreen> {
               '${queue.rejectedVisits.map((v) => v.rejectionReason).whereType<String>().toSet().join('; ')}',
               // Recusa de sync é operacional, não gravidade clínica — mesma cor
               // do contador de conflito.
-              style: const TextStyle(color: AcsColors.accentOnSurface, fontWeight: FontWeight.bold),
+              style: TextStyle(color: context.acsRisk.accentOnSurface, fontWeight: FontWeight.bold),
             ),
           ),
         ),
@@ -1922,9 +1954,9 @@ class EscalationScreen extends StatelessWidget {
           label: const Text('Iniciar rota de visita'),
         ),
         const SizedBox(height: 8),
-        const Text(
+        Text(
           'A visita é acompanhamento do caso e não substitui o acionamento do SAMU.',
-          style: TextStyle(color: AcsColors.accentOnSurface),
+          style: TextStyle(color: context.acsRisk.accentOnSurface),
         ),
       ],
     ]);
@@ -1987,7 +2019,7 @@ class GeofencingScreen extends StatelessWidget {
               },
               key: const Key('geofence_status'),
               style: TextStyle(
-                color: status == ArrivalStatus.arrived ? AcsColors.green : AcsColors.accentOnSurface,
+                color: status == ArrivalStatus.arrived ? context.acsRisk.greenOnSurface : context.acsRisk.accentOnSurface,
                 fontWeight: FontWeight.bold,
               ),
             ),
@@ -2097,13 +2129,38 @@ class _NoticesScreenState extends State<NoticesScreen> {
         ),
         if (_error != null) ...[
           const SizedBox(height: 12),
-          Text(_error!, key: const Key('notice_error'), style: const TextStyle(color: AcsColors.redOnSurface)),
+          Text(_error!, key: const Key('notice_error'), style: TextStyle(color: context.acsRisk.redOnSurface)),
         ],
         if (_result != null) ...[
           const SizedBox(height: 12),
           Text(_result!, key: const Key('notice_result')),
         ],
       ]);
+}
+class ThemeSettingsScreen extends StatelessWidget {
+  const ThemeSettingsScreen({required this.controller, super.key});
+
+  final ThemeController controller;
+
+  @override
+  Widget build(BuildContext context) => ValueListenableBuilder<ThemeMode>(
+    valueListenable: controller,
+    builder: (context, mode, _) => _page([
+      const Text('Aparência', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+      const SizedBox(height: 4),
+      const Text('Escolha como o app deve se apresentar neste aparelho.'),
+      const SizedBox(height: 16),
+      RadioGroup<ThemeMode>(
+        groupValue: mode,
+        onChanged: (value) { if (value != null) controller.setThemeMode(value); },
+        child: const Column(children: [
+          Card(child: RadioListTile<ThemeMode>(key: Key('theme_light'), value: ThemeMode.light, title: Text('Claro'))),
+          Card(child: RadioListTile<ThemeMode>(key: Key('theme_dark'), value: ThemeMode.dark, title: Text('Escuro'))),
+          Card(child: RadioListTile<ThemeMode>(key: Key('theme_system'), value: ThemeMode.system, title: Text('Automático (segue o sistema)'))),
+        ]),
+      ),
+    ]),
+  );
 }
 
 Widget _page(List<Widget> children) => ListView(padding: const EdgeInsets.all(20), children: [Card(child: Padding(padding: const EdgeInsets.all(20), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: children)))]);
@@ -2136,7 +2193,7 @@ class _Header extends StatelessWidget implements PreferredSizeWidget {
   @override
   Widget build(BuildContext context) => AppBar(
     title: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Text(eyebrow.toUpperCase(), style: const TextStyle(fontSize: 10, color: AcsColors.accentOnSurface, fontWeight: FontWeight.bold)),
+      Text(eyebrow.toUpperCase(), style: TextStyle(fontSize: 10, color: context.acsRisk.accentOnSurface, fontWeight: FontWeight.bold)),
       Text(title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
     ]),
     actions: [
@@ -2147,7 +2204,7 @@ class _Header extends StatelessWidget implements PreferredSizeWidget {
           avatar: connected == null ? null : Icon(
             connected! ? Icons.cloud_done_outlined : Icons.cloud_off_outlined,
             size: 18,
-            color: connected! ? AcsColors.green : AcsColors.red,
+            color: connected! ? context.acsRisk.greenOnSurface : context.acsRisk.redOnSurface,
           ),
           label: Text(switch (connected) {
             null => 'Offline ready',

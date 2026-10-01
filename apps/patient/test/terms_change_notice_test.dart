@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sinalacs_client/sinalacs_client.dart' show TermsChangeNotice;
+import 'package:sinalacs_patient/core/services/theme_controller.dart';
 import 'package:sinalacs_patient/app/app.dart';
 import 'package:sinalacs_patient/core/legal/legal_documents.dart';
 import 'package:sinalacs_patient/core/network/backend_client.dart';
@@ -119,8 +120,13 @@ void main() {
   });
 
   testWidgets('o shell montado sem BackendScope não quebra (teste de Lembretes)', (tester) async {
-    await tester.pumpWidget(const MaterialApp(
-      home: PatientHomeShell(initialDestination: PatientDestination.reminders),
+    final themeController = ThemeController();
+    addTearDown(themeController.dispose);
+    await tester.pumpWidget(MaterialApp(
+      home: PatientHomeShell(
+        initialDestination: PatientDestination.reminders,
+        themeController: themeController,
+      ),
     ));
     expect(tester.takeException(), isNull);
   });
