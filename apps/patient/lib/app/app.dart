@@ -666,7 +666,7 @@ class _PatientLoginScreenState extends State<PatientLoginScreen> {
             key: const Key('otp_cooldown_message'),
             'Você pode pedir um novo código em ${restante.inSeconds}s.',
             textAlign: TextAlign.center,
-            style: const TextStyle(color: Colors.white70),
+            style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
           ),
         ),
       ],
@@ -885,11 +885,11 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        const Text(
+                        Text(
                           'Leia o QR Code do convite mostrado pelo agente '
                           'comunitário de saúde, ou digite o código.',
                           textAlign: TextAlign.center,
-                          style: TextStyle(color: Colors.white70),
+                          style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
                         ),
                         const SizedBox(height: 20),
                         SizedBox(
@@ -1231,11 +1231,11 @@ class _SessionExpiredBanner extends StatelessWidget {
               // de responder ao servidor nem que existe um botão para voltar.
               Semantics(
                 liveRegion: true,
-                child: const Text(
-                  key: Key('session_expired_notice'),
+                child: Text(
+                  key: const Key('session_expired_notice'),
                   'Sua sessão expirou. Entre novamente com o código de acesso.',
                   textAlign: TextAlign.center,
-                  style: TextStyle(color: Colors.white70),
+                  style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
                 ),
               ),
               const SizedBox(height: 12),
@@ -2182,9 +2182,9 @@ class _MyDataScreenState extends State<MyDataScreen> {
           const SizedBox(height: 16),
           const Text('Histórico de consentimentos', style: TextStyle(fontWeight: FontWeight.bold)),
           if (data.consents.isEmpty)
-            const Padding(
-              padding: EdgeInsets.only(top: 8),
-              child: Text('Nenhum consentimento registrado.', style: TextStyle(color: Colors.white54)),
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text('Nenhum consentimento registrado.', style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
             )
           else
             ...data.consents.map(
@@ -2199,9 +2199,9 @@ class _MyDataScreenState extends State<MyDataScreen> {
           const SizedBox(height: 16),
           const Text('Histórico de classificação de risco', style: TextStyle(fontWeight: FontWeight.bold)),
           if (data.riskHistory.isEmpty)
-            const Padding(
-              padding: EdgeInsets.only(top: 8),
-              child: Text('Nenhum evento registrado.', style: TextStyle(color: Colors.white54)),
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text('Nenhum evento registrado.', style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
             )
           else
             ...data.riskHistory.map(
@@ -2215,9 +2215,9 @@ class _MyDataScreenState extends State<MyDataScreen> {
           const SizedBox(height: 16),
           const Text('Pedidos sobre seus dados', style: TextStyle(fontWeight: FontWeight.bold)),
           if (data.requests.isEmpty)
-            const Padding(
-              padding: EdgeInsets.only(top: 8),
-              child: Text('Nenhum pedido feito.', style: TextStyle(color: Colors.white54)),
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text('Nenhum pedido feito.', style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
             )
           else
             ...data.requests.map(
@@ -2464,9 +2464,9 @@ class _StatusScreenBodyState extends State<_StatusScreenBody> with WidgetsBindin
                     style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                   ),
                   const SizedBox(height: 8),
-                  const Text(
+                  Text(
                     'Um alerta de urgência ou uma triagem concluída aparece aqui assim que a equipe recebe.',
-                    style: TextStyle(color: Colors.white70),
+                    style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
                   ),
                 ],
               ),
@@ -2488,7 +2488,7 @@ class _StatusScreenBodyState extends State<_StatusScreenBody> with WidgetsBindin
             padding: const EdgeInsets.only(top: 8),
             child: Text(
               'Verificado às ${_formatTime(_checkedAt!)}',
-              style: const TextStyle(fontSize: 12, color: Colors.white54),
+              style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
             ),
           ),
       ],
@@ -2509,7 +2509,7 @@ class _StatusCard extends StatelessWidget {
       RiskLevel.red => ('Vermelho', context.patientRisk.dangerOnSurface),
       RiskLevel.yellow => ('Amarelo', const Color(0xFFE0A800)),
       RiskLevel.green => ('Verde', context.patientRisk.accentOnSurface),
-      null => ('Não classificado', Colors.white70),
+      null => ('Não classificado', Theme.of(context).colorScheme.onSurfaceVariant),
     };
     final statusLabel = switch (status.status) {
       AlertStatus.pending => 'Enviado — aguardando confirmação da equipe',
@@ -2759,12 +2759,12 @@ class _RemindersScreenState extends State<RemindersScreen> {
                 key: const Key('reminders_consent_denied_banner'),
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  border: Border.all(color: Colors.white24),
+                  border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Text(
                   _consentDeniedMessage(_remindersConsentGranted),
-                  style: const TextStyle(color: Colors.white70),
+                  style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
                 ),
               ),
             ),
@@ -2796,14 +2796,14 @@ class _RemindersScreenState extends State<RemindersScreen> {
             child: Center(child: CircularProgressIndicator()),
           )
         else if (reminders != null && reminders.isEmpty)
-          const Padding(
-            key: Key('reminders_empty_state'),
-            padding: EdgeInsets.only(top: 40),
+          Padding(
+            key: const Key('reminders_empty_state'),
+            padding: const EdgeInsets.only(top: 40),
             child: Center(
               child: Text(
                 'Você ainda não tem lembretes. Toque em "+" para criar o primeiro.',
                 textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.white54),
+                style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
               ),
             ),
           )

@@ -258,10 +258,10 @@ class _InviteScreenState extends State<InviteScreen> {
             textAlign: TextAlign.center,
           ),
           const SizedBox(height: 8),
-          const Text(
+          Text(
             'Se a câmera do paciente não funcionar, ele pode digitar este código:',
             textAlign: TextAlign.center,
-            style: TextStyle(color: Colors.white70),
+            style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
           ),
           SelectableText(
             invite.token,
