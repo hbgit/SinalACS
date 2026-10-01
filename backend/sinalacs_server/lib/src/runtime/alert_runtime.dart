@@ -10,6 +10,7 @@ import 'package:sinalacs_server/src/application/auth/password_hasher.dart';
 import 'package:sinalacs_server/src/application/auth/passwordless_auth_service.dart';
 import 'package:sinalacs_server/src/application/auth/sms_gateway.dart';
 import 'package:sinalacs_server/src/application/onboarding/onboarding_service.dart';
+import 'package:sinalacs_server/src/application/patients/data_subject_rights_service.dart';
 import 'package:sinalacs_server/src/application/patients/patient_data_overview_service.dart';
 import 'package:sinalacs_server/src/application/patients/patient_directory_service.dart';
 import 'package:sinalacs_server/src/application/triage/triage_session_service.dart';
@@ -24,6 +25,12 @@ import 'package:sinalacs_server/src/infrastructure/database/orm_alert_store.dart
 import 'package:sinalacs_server/src/infrastructure/database/orm_audit_trail.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_onboarding_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_otp_challenge_store.dart';
+import 'package:sinalacs_server/src/infrastructure/database/orm_data_subject_rights_store.dart';
+import 'package:sinalacs_server/src/infrastructure/database/orm_notice_recipient_store.dart';
+import 'package:sinalacs_server/src/infrastructure/database/orm_push_token_store.dart';
+import 'package:sinalacs_server/src/infrastructure/push/gorush_client.dart';
+import 'package:sinalacs_server/src/application/notices/notice_service.dart';
+import 'package:sinalacs_server/src/application/patients/push_token_service.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_patient_data_overview_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_patient_directory_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_triage_session_store.dart';
@@ -44,6 +51,12 @@ class AlertRuntime {
   static final AlertRuntime instance = AlertRuntime._();
 
   AppConfig? _config;
+  PushSender? Function()? _noticeSenderOverride;
+
+  /// Um único [GorushClient] por processo (e por URL): um `HttpClient` novo por
+  /// requisição nunca era fechado.
+  GorushClient? _gorush;
+  String? _gorushUrl;
   MqttAlertDispatcher? _dispatcher;
   DevelopmentAuthService? _auth;
   HealthDataCipher? _healthDataCipher;
@@ -116,6 +129,13 @@ class AlertRuntime {
 
   bool get isMqttConnected => _dispatcher?.isConnected ?? false;
 
+  /// Troca o relé de push dos avisos comunitários (RF14) por um duplo de teste.
+  /// `null` volta a montar o [GorushClient] a partir de `GORUSH_URL`.
+  @visibleForTesting
+  void overrideNoticeSender(PushSender? Function()? factory) {
+    _noticeSenderOverride = factory;
+  }
+
   /// Substitui a configuração lida do ambiente.
   ///
   /// Existe para os testes de integração, que precisam exercitar o caminho com
@@ -124,6 +144,9 @@ class AlertRuntime {
   @visibleForTesting
   void overrideConfig(AppConfig? value) {
     _config = value;
+    _gorush?.close();
+    _gorush = null;
+    _gorushUrl = null;
     // O serviço de auth deriva do segredo, então precisa ser reconstruído.
     _auth = null;
     // Idem para a cifra: ela guarda a chave AES derivada de
@@ -196,6 +219,48 @@ class AlertRuntime {
           session: () => session,
           cipher: healthDataCipher,
         ),
+        audit: auditTrailFor(session),
+      );
+
+  /// Constrói o serviço de direitos do titular (LGPD-RF05/RF08) para uma
+  /// requisição.
+  DataSubjectRightsService dataSubjectRightsServiceFor(Session session) =>
+      DataSubjectRightsService(
+        store: OrmDataSubjectRightsStore(
+          session: () => session,
+          chainSecret: config.auditChainSecret,
+          cipher: healthDataCipher,
+        ),
+        audit: auditTrailFor(session),
+      );
+
+  /// Aviso comunitário do ACS (RF14). Sem `GORUSH_URL` o serviço nasce sem relé e
+  /// recusa o envio com uma mensagem clara.
+  NoticeService noticeServiceFor(Session session) {
+    final override = _noticeSenderOverride;
+    final url = config.gorushUrl;
+    return NoticeService(
+      store: OrmNoticeRecipientStore(session: () => session),
+      sender: override != null
+          ? override()
+          : (url == null ? null : _gorushClientFor(url)),
+      audit: auditTrailFor(session),
+    );
+  }
+
+  GorushClient _gorushClientFor(String url) {
+    if (_gorush == null || _gorushUrl != url) {
+      _gorush?.close();
+      _gorush = GorushClient(baseUrl: url, timeout: config.gorushTimeout);
+      _gorushUrl = url;
+    }
+    return _gorush!;
+  }
+
+  /// Registro do aparelho para avisos segmentados (RF14).
+  PushTokenService pushTokenServiceFor(Session session) =>
+      PushTokenService(
+        store: OrmPushTokenStore(session: () => session),
         audit: auditTrailFor(session),
       );
 

@@ -21,19 +21,29 @@ import 'package:sinalacs_server/src/generated/api/alert_status_result.dart'
 import 'package:sinalacs_server/src/generated/api/development_login_result.dart'
     as _i7;
 import 'package:sinalacs_server/src/generated/api/service_health.dart' as _i8;
-import 'package:sinalacs_server/src/generated/api/enrollment_token_result.dart'
+import 'package:sinalacs_server/src/generated/api/notice_send_result.dart'
     as _i9;
-import 'package:sinalacs_server/src/generated/api/enrollment_result.dart'
+import 'package:sinalacs_server/src/generated/api/enrollment_token_result.dart'
     as _i10;
-import 'package:sinalacs_server/src/generated/api/micro_area_patient.dart'
+import 'package:sinalacs_server/src/generated/api/enrollment_result.dart'
     as _i11;
-import 'package:sinalacs_server/src/generated/api/patient_data_overview.dart'
+import 'package:sinalacs_server/src/generated/api/micro_area_patient.dart'
     as _i12;
-import 'package:sinalacs_server/src/generated/api/triage_result.dart' as _i13;
-import 'package:sinalacs_server/src/generated/api/visit_sync_result.dart'
+import 'package:sinalacs_server/src/generated/api/patient_data_overview.dart'
+    as _i13;
+import 'package:sinalacs_server/src/generated/api/patient_consent_record.dart'
     as _i14;
-import 'package:sinalacs_server/src/generated/api/visit_sync_entry.dart'
+import 'package:sinalacs_server/src/generated/enums/consent_purpose.dart'
     as _i15;
+import 'package:sinalacs_server/src/generated/api/terms_change_notice.dart'
+    as _i16;
+import 'package:sinalacs_server/src/generated/api/patient_data_subject_request_record.dart'
+    as _i17;
+import 'package:sinalacs_server/src/generated/api/triage_result.dart' as _i18;
+import 'package:sinalacs_server/src/generated/api/visit_sync_result.dart'
+    as _i19;
+import 'package:sinalacs_server/src/generated/api/visit_sync_entry.dart'
+    as _i20;
 import 'package:sinalacs_server/src/generated/protocol.dart';
 import 'package:sinalacs_server/src/generated/endpoints.dart';
 export 'package:serverpod_test/serverpod_test_public_exports.dart';
@@ -152,7 +162,11 @@ class TestEndpoints {
 
   late final _AuthEndpoint auth;
 
+  late final _DevicesEndpoint devices;
+
   late final _HealthEndpoint health;
+
+  late final _NoticesEndpoint notices;
 
   late final _OnboardingEndpoint onboarding;
 
@@ -178,7 +192,15 @@ class _InternalTestEndpoints extends TestEndpoints
       endpoints,
       serializationManager,
     );
+    devices = _DevicesEndpoint(
+      endpoints,
+      serializationManager,
+    );
     health = _HealthEndpoint(
+      endpoints,
+      serializationManager,
+    );
+    notices = _NoticesEndpoint(
       endpoints,
       serializationManager,
     );
@@ -468,6 +490,54 @@ class _AuthEndpoint {
   }
 }
 
+class _DevicesEndpoint {
+  _DevicesEndpoint(
+    this._endpointDispatch,
+    this._serializationManager,
+  );
+
+  final _i2.EndpointDispatch _endpointDispatch;
+
+  final _i2.SerializationManager _serializationManager;
+
+  _i3.Future<void> registerPushToken(
+    _i1.TestSessionBuilder sessionBuilder, {
+    required String accessToken,
+    required String token,
+    required String platform,
+  }) async {
+    return _i1.callAwaitableFunctionAndHandleExceptions(() async {
+      var _localUniqueSession =
+          (sessionBuilder as _i1.InternalTestSessionBuilder).internalBuild(
+            endpoint: 'devices',
+            method: 'registerPushToken',
+          );
+      try {
+        var _localCallContext = await _endpointDispatch.getMethodCallContext(
+          createSessionCallback: (_) => _localUniqueSession,
+          endpointPath: 'devices',
+          methodName: 'registerPushToken',
+          parameters: _i1.testObjectToJson({
+            'accessToken': accessToken,
+            'token': token,
+            'platform': platform,
+          }),
+          serializationManager: _serializationManager,
+        );
+        var _localReturnValue =
+            await (_localCallContext.method.call(
+                  _localUniqueSession,
+                  _localCallContext.arguments,
+                )
+                as _i3.Future<void>);
+        return _localReturnValue;
+      } finally {
+        await _localUniqueSession.close();
+      }
+    });
+  }
+}
+
 class _HealthEndpoint {
   _HealthEndpoint(
     this._endpointDispatch,
@@ -509,6 +579,56 @@ class _HealthEndpoint {
   }
 }
 
+class _NoticesEndpoint {
+  _NoticesEndpoint(
+    this._endpointDispatch,
+    this._serializationManager,
+  );
+
+  final _i2.EndpointDispatch _endpointDispatch;
+
+  final _i2.SerializationManager _serializationManager;
+
+  _i3.Future<_i9.NoticeSendResult> sendSegmented(
+    _i1.TestSessionBuilder sessionBuilder, {
+    required String accessToken,
+    required String title,
+    required String message,
+    required String audience,
+  }) async {
+    return _i1.callAwaitableFunctionAndHandleExceptions(() async {
+      var _localUniqueSession =
+          (sessionBuilder as _i1.InternalTestSessionBuilder).internalBuild(
+            endpoint: 'notices',
+            method: 'sendSegmented',
+          );
+      try {
+        var _localCallContext = await _endpointDispatch.getMethodCallContext(
+          createSessionCallback: (_) => _localUniqueSession,
+          endpointPath: 'notices',
+          methodName: 'sendSegmented',
+          parameters: _i1.testObjectToJson({
+            'accessToken': accessToken,
+            'title': title,
+            'message': message,
+            'audience': audience,
+          }),
+          serializationManager: _serializationManager,
+        );
+        var _localReturnValue =
+            await (_localCallContext.method.call(
+                  _localUniqueSession,
+                  _localCallContext.arguments,
+                )
+                as _i3.Future<_i9.NoticeSendResult>);
+        return _localReturnValue;
+      } finally {
+        await _localUniqueSession.close();
+      }
+    });
+  }
+}
+
 class _OnboardingEndpoint {
   _OnboardingEndpoint(
     this._endpointDispatch,
@@ -519,7 +639,7 @@ class _OnboardingEndpoint {
 
   final _i2.SerializationManager _serializationManager;
 
-  _i3.Future<_i9.EnrollmentTokenResult> generateEnrollmentToken(
+  _i3.Future<_i10.EnrollmentTokenResult> generateEnrollmentToken(
     _i1.TestSessionBuilder sessionBuilder, {
     required String accessToken,
     required String patientId,
@@ -546,7 +666,7 @@ class _OnboardingEndpoint {
                   _localUniqueSession,
                   _localCallContext.arguments,
                 )
-                as _i3.Future<_i9.EnrollmentTokenResult>);
+                as _i3.Future<_i10.EnrollmentTokenResult>);
         return _localReturnValue;
       } finally {
         await _localUniqueSession.close();
@@ -554,12 +674,13 @@ class _OnboardingEndpoint {
     });
   }
 
-  _i3.Future<_i10.EnrollmentResult> completeEnrollment(
+  _i3.Future<_i11.EnrollmentResult> completeEnrollment(
     _i1.TestSessionBuilder sessionBuilder, {
     required String token,
     required bool healthDataConsent,
     required bool remindersConsent,
     required bool pushConsent,
+    required bool termsAccepted,
   }) async {
     return _i1.callAwaitableFunctionAndHandleExceptions(() async {
       var _localUniqueSession =
@@ -577,6 +698,7 @@ class _OnboardingEndpoint {
             'healthDataConsent': healthDataConsent,
             'remindersConsent': remindersConsent,
             'pushConsent': pushConsent,
+            'termsAccepted': termsAccepted,
           }),
           serializationManager: _serializationManager,
         );
@@ -585,7 +707,7 @@ class _OnboardingEndpoint {
                   _localUniqueSession,
                   _localCallContext.arguments,
                 )
-                as _i3.Future<_i10.EnrollmentResult>);
+                as _i3.Future<_i11.EnrollmentResult>);
         return _localReturnValue;
       } finally {
         await _localUniqueSession.close();
@@ -604,7 +726,7 @@ class _PatientsEndpoint {
 
   final _i2.SerializationManager _serializationManager;
 
-  _i3.Future<List<_i11.MicroAreaPatient>> listMicroArea(
+  _i3.Future<List<_i12.MicroAreaPatient>> listMicroArea(
     _i1.TestSessionBuilder sessionBuilder, {
     required String accessToken,
   }) async {
@@ -627,7 +749,7 @@ class _PatientsEndpoint {
                   _localUniqueSession,
                   _localCallContext.arguments,
                 )
-                as _i3.Future<List<_i11.MicroAreaPatient>>);
+                as _i3.Future<List<_i12.MicroAreaPatient>>);
         return _localReturnValue;
       } finally {
         await _localUniqueSession.close();
@@ -701,7 +823,7 @@ class _PatientsEndpoint {
     });
   }
 
-  _i3.Future<_i12.PatientDataOverview> myData(
+  _i3.Future<_i13.PatientDataOverview> myData(
     _i1.TestSessionBuilder sessionBuilder, {
     required String accessToken,
   }) async {
@@ -724,7 +846,238 @@ class _PatientsEndpoint {
                   _localUniqueSession,
                   _localCallContext.arguments,
                 )
-                as _i3.Future<_i12.PatientDataOverview>);
+                as _i3.Future<_i13.PatientDataOverview>);
+        return _localReturnValue;
+      } finally {
+        await _localUniqueSession.close();
+      }
+    });
+  }
+
+  _i3.Future<_i14.PatientConsentRecord> updateConsent(
+    _i1.TestSessionBuilder sessionBuilder, {
+    required String accessToken,
+    required _i15.ConsentPurpose purpose,
+    required bool granted,
+  }) async {
+    return _i1.callAwaitableFunctionAndHandleExceptions(() async {
+      var _localUniqueSession =
+          (sessionBuilder as _i1.InternalTestSessionBuilder).internalBuild(
+            endpoint: 'patients',
+            method: 'updateConsent',
+          );
+      try {
+        var _localCallContext = await _endpointDispatch.getMethodCallContext(
+          createSessionCallback: (_) => _localUniqueSession,
+          endpointPath: 'patients',
+          methodName: 'updateConsent',
+          parameters: _i1.testObjectToJson({
+            'accessToken': accessToken,
+            'purpose': purpose,
+            'granted': granted,
+          }),
+          serializationManager: _serializationManager,
+        );
+        var _localReturnValue =
+            await (_localCallContext.method.call(
+                  _localUniqueSession,
+                  _localCallContext.arguments,
+                )
+                as _i3.Future<_i14.PatientConsentRecord>);
+        return _localReturnValue;
+      } finally {
+        await _localUniqueSession.close();
+      }
+    });
+  }
+
+  _i3.Future<_i14.PatientConsentRecord> acceptTermsOfUse(
+    _i1.TestSessionBuilder sessionBuilder, {
+    required String accessToken,
+  }) async {
+    return _i1.callAwaitableFunctionAndHandleExceptions(() async {
+      var _localUniqueSession =
+          (sessionBuilder as _i1.InternalTestSessionBuilder).internalBuild(
+            endpoint: 'patients',
+            method: 'acceptTermsOfUse',
+          );
+      try {
+        var _localCallContext = await _endpointDispatch.getMethodCallContext(
+          createSessionCallback: (_) => _localUniqueSession,
+          endpointPath: 'patients',
+          methodName: 'acceptTermsOfUse',
+          parameters: _i1.testObjectToJson({'accessToken': accessToken}),
+          serializationManager: _serializationManager,
+        );
+        var _localReturnValue =
+            await (_localCallContext.method.call(
+                  _localUniqueSession,
+                  _localCallContext.arguments,
+                )
+                as _i3.Future<_i14.PatientConsentRecord>);
+        return _localReturnValue;
+      } finally {
+        await _localUniqueSession.close();
+      }
+    });
+  }
+
+  _i3.Future<bool> hasAcceptedCurrentTerms(
+    _i1.TestSessionBuilder sessionBuilder, {
+    required String accessToken,
+  }) async {
+    return _i1.callAwaitableFunctionAndHandleExceptions(() async {
+      var _localUniqueSession =
+          (sessionBuilder as _i1.InternalTestSessionBuilder).internalBuild(
+            endpoint: 'patients',
+            method: 'hasAcceptedCurrentTerms',
+          );
+      try {
+        var _localCallContext = await _endpointDispatch.getMethodCallContext(
+          createSessionCallback: (_) => _localUniqueSession,
+          endpointPath: 'patients',
+          methodName: 'hasAcceptedCurrentTerms',
+          parameters: _i1.testObjectToJson({'accessToken': accessToken}),
+          serializationManager: _serializationManager,
+        );
+        var _localReturnValue =
+            await (_localCallContext.method.call(
+                  _localUniqueSession,
+                  _localCallContext.arguments,
+                )
+                as _i3.Future<bool>);
+        return _localReturnValue;
+      } finally {
+        await _localUniqueSession.close();
+      }
+    });
+  }
+
+  _i3.Future<bool> hasGrantedConsent(
+    _i1.TestSessionBuilder sessionBuilder, {
+    required String accessToken,
+    required _i15.ConsentPurpose purpose,
+  }) async {
+    return _i1.callAwaitableFunctionAndHandleExceptions(() async {
+      var _localUniqueSession =
+          (sessionBuilder as _i1.InternalTestSessionBuilder).internalBuild(
+            endpoint: 'patients',
+            method: 'hasGrantedConsent',
+          );
+      try {
+        var _localCallContext = await _endpointDispatch.getMethodCallContext(
+          createSessionCallback: (_) => _localUniqueSession,
+          endpointPath: 'patients',
+          methodName: 'hasGrantedConsent',
+          parameters: _i1.testObjectToJson({
+            'accessToken': accessToken,
+            'purpose': purpose,
+          }),
+          serializationManager: _serializationManager,
+        );
+        var _localReturnValue =
+            await (_localCallContext.method.call(
+                  _localUniqueSession,
+                  _localCallContext.arguments,
+                )
+                as _i3.Future<bool>);
+        return _localReturnValue;
+      } finally {
+        await _localUniqueSession.close();
+      }
+    });
+  }
+
+  _i3.Future<_i16.TermsChangeNotice?> termsChangeNotice(
+    _i1.TestSessionBuilder sessionBuilder, {
+    required String accessToken,
+  }) async {
+    return _i1.callAwaitableFunctionAndHandleExceptions(() async {
+      var _localUniqueSession =
+          (sessionBuilder as _i1.InternalTestSessionBuilder).internalBuild(
+            endpoint: 'patients',
+            method: 'termsChangeNotice',
+          );
+      try {
+        var _localCallContext = await _endpointDispatch.getMethodCallContext(
+          createSessionCallback: (_) => _localUniqueSession,
+          endpointPath: 'patients',
+          methodName: 'termsChangeNotice',
+          parameters: _i1.testObjectToJson({'accessToken': accessToken}),
+          serializationManager: _serializationManager,
+        );
+        var _localReturnValue =
+            await (_localCallContext.method.call(
+                  _localUniqueSession,
+                  _localCallContext.arguments,
+                )
+                as _i3.Future<_i16.TermsChangeNotice?>);
+        return _localReturnValue;
+      } finally {
+        await _localUniqueSession.close();
+      }
+    });
+  }
+
+  _i3.Future<_i17.PatientDataSubjectRequestRecord> requestDataDeletion(
+    _i1.TestSessionBuilder sessionBuilder, {
+    required String accessToken,
+  }) async {
+    return _i1.callAwaitableFunctionAndHandleExceptions(() async {
+      var _localUniqueSession =
+          (sessionBuilder as _i1.InternalTestSessionBuilder).internalBuild(
+            endpoint: 'patients',
+            method: 'requestDataDeletion',
+          );
+      try {
+        var _localCallContext = await _endpointDispatch.getMethodCallContext(
+          createSessionCallback: (_) => _localUniqueSession,
+          endpointPath: 'patients',
+          methodName: 'requestDataDeletion',
+          parameters: _i1.testObjectToJson({'accessToken': accessToken}),
+          serializationManager: _serializationManager,
+        );
+        var _localReturnValue =
+            await (_localCallContext.method.call(
+                  _localUniqueSession,
+                  _localCallContext.arguments,
+                )
+                as _i3.Future<_i17.PatientDataSubjectRequestRecord>);
+        return _localReturnValue;
+      } finally {
+        await _localUniqueSession.close();
+      }
+    });
+  }
+
+  _i3.Future<_i17.PatientDataSubjectRequestRecord> requestDataCorrection(
+    _i1.TestSessionBuilder sessionBuilder, {
+    required String accessToken,
+    required String details,
+  }) async {
+    return _i1.callAwaitableFunctionAndHandleExceptions(() async {
+      var _localUniqueSession =
+          (sessionBuilder as _i1.InternalTestSessionBuilder).internalBuild(
+            endpoint: 'patients',
+            method: 'requestDataCorrection',
+          );
+      try {
+        var _localCallContext = await _endpointDispatch.getMethodCallContext(
+          createSessionCallback: (_) => _localUniqueSession,
+          endpointPath: 'patients',
+          methodName: 'requestDataCorrection',
+          parameters: _i1.testObjectToJson({
+            'accessToken': accessToken,
+            'details': details,
+          }),
+          serializationManager: _serializationManager,
+        );
+        var _localReturnValue =
+            await (_localCallContext.method.call(
+                  _localUniqueSession,
+                  _localCallContext.arguments,
+                )
+                as _i3.Future<_i17.PatientDataSubjectRequestRecord>);
         return _localReturnValue;
       } finally {
         await _localUniqueSession.close();
@@ -743,7 +1096,7 @@ class _TriageEndpoint {
 
   final _i2.SerializationManager _serializationManager;
 
-  _i3.Future<_i13.TriageResult> evaluate(
+  _i3.Future<_i18.TriageResult> evaluate(
     _i1.TestSessionBuilder sessionBuilder, {
     required String accessToken,
     required bool chestPain,
@@ -780,7 +1133,7 @@ class _TriageEndpoint {
                   _localUniqueSession,
                   _localCallContext.arguments,
                 )
-                as _i3.Future<_i13.TriageResult>);
+                as _i3.Future<_i18.TriageResult>);
         return _localReturnValue;
       } finally {
         await _localUniqueSession.close();
@@ -799,10 +1152,10 @@ class _VisitsEndpoint {
 
   final _i2.SerializationManager _serializationManager;
 
-  _i3.Future<List<_i14.VisitSyncResult>> sync(
+  _i3.Future<List<_i19.VisitSyncResult>> sync(
     _i1.TestSessionBuilder sessionBuilder, {
     required String accessToken,
-    required List<_i15.VisitSyncEntry> visits,
+    required List<_i20.VisitSyncEntry> visits,
   }) async {
     return _i1.callAwaitableFunctionAndHandleExceptions(() async {
       var _localUniqueSession =
@@ -826,7 +1179,7 @@ class _VisitsEndpoint {
                   _localUniqueSession,
                   _localCallContext.arguments,
                 )
-                as _i3.Future<List<_i14.VisitSyncResult>>);
+                as _i3.Future<List<_i19.VisitSyncResult>>);
         return _localReturnValue;
       } finally {
         await _localUniqueSession.close();
@@ -834,7 +1187,7 @@ class _VisitsEndpoint {
     });
   }
 
-  _i3.Future<List<_i15.VisitSyncEntry>> pull(
+  _i3.Future<List<_i20.VisitSyncEntry>> pull(
     _i1.TestSessionBuilder sessionBuilder, {
     required String accessToken,
     required DateTime since,
@@ -861,7 +1214,7 @@ class _VisitsEndpoint {
                   _localUniqueSession,
                   _localCallContext.arguments,
                 )
-                as _i3.Future<List<_i15.VisitSyncEntry>>);
+                as _i3.Future<List<_i20.VisitSyncEntry>>);
         return _localReturnValue;
       } finally {
         await _localUniqueSession.close();

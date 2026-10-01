@@ -81,6 +81,20 @@ abstract class AcsBackend {
   /// partir fora do caminho reativo.
   Future<List<MicroAreaPatient>> listPatients();
 
+  /// Convite de onboarding de um paciente da própria microárea (RF02). O
+  /// token em claro volta só nesta resposta e vira o QR Code da tela
+  /// "Convidar paciente" — nunca é gravado no aparelho.
+  Future<EnrollmentTokenResult> generateInvite({required String patientId});
+
+  /// Envia um aviso comunitário aos pacientes da microárea do ACS que aceitaram
+  /// receber avisos (RF14). A microárea vem do token, nunca de parâmetro;
+  /// [chronicOnly] restringe a quem tem condição crônica.
+  Future<NoticeSendResult> sendNotice({
+    required String title,
+    required String message,
+    required bool chronicOnly,
+  });
+
   void close();
 }
 
@@ -133,6 +147,17 @@ class MisconfiguredBackend implements AcsBackend {
 
   @override
   Future<List<MicroAreaPatient>> listPatients() async => _recusar();
+
+  @override
+  Future<EnrollmentTokenResult> generateInvite({required String patientId}) async => _recusar();
+
+  @override
+  Future<NoticeSendResult> sendNotice({
+    required String title,
+    required String message,
+    required bool chronicOnly,
+  }) async =>
+      _recusar();
 
   /// Fechar **não** é uma chamada ao backend: não há o que fechar, e um `close`
   /// que lançasse derrubaria o `finally` de quem só queria encerrar.
@@ -334,6 +359,38 @@ class BackendClient implements AcsBackend {
   }
 
   @override
+  Future<EnrollmentTokenResult> generateInvite({required String patientId}) async {
+    final token = await _requireToken();
+    return _guard(
+      () => _client.onboarding.generateEnrollmentToken(
+        accessToken: token,
+        patientId: patientId,
+      ),
+      // O servidor recusa com `AlertPermissionException` quando o paciente
+      // não é da microárea do ACS (INV-01) — "este alerta" não faria sentido.
+      permissionMessage: 'Este paciente não pertence à sua microárea.',
+    );
+  }
+
+  @override
+  Future<NoticeSendResult> sendNotice({
+    required String title,
+    required String message,
+    required bool chronicOnly,
+  }) async {
+    final token = await _requireToken();
+    return _guard(
+      () => _client.notices.sendSegmented(
+        accessToken: token,
+        title: title,
+        message: message,
+        audience: chronicOnly ? 'chronic' : 'everyone',
+      ),
+      permissionMessage: 'Somente o ACS pode enviar avisos à comunidade.',
+    );
+  }
+
+  @override
   void close() => _client.close();
 
   /// Traduz as exceções tipadas do backend para [BackendFailure].
@@ -366,6 +423,12 @@ class BackendClient implements AcsBackend {
       );
     } on AlertValidationException catch (error) {
       throw BackendFailure(error.message, isRecoverable: false);
+    } on DataRightsException catch (error) {
+      // Recusa de negócio com texto pronto (aviso vazio ou longo demais).
+      throw BackendFailure(error.message, isRecoverable: false);
+    } on NoticeDeliveryException catch (error) {
+      // O relé de push está fora do ar: tentar de novo faz sentido.
+      throw BackendFailure(error.message);
     } on AlertDispatchUnavailableException {
       throw const BackendFailure(
         'Registrado. A rede está instável e a confirmação será entregue assim '

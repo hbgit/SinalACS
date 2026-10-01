@@ -7,8 +7,12 @@ auth:
   - loginInstitutional:
   - requestOtp:
   - verifyOtp:
+devices:
+  - registerPushToken:
 health:
   - check:
+notices:
+  - sendSegmented:
 onboarding:
   - generateEnrollmentToken:
   - completeEnrollment:
@@ -17,6 +21,13 @@ patients:
   - myChronicConditions:
   - updateChronicConditions:
   - myData:
+  - updateConsent:
+  - acceptTermsOfUse:
+  - hasAcceptedCurrentTerms:
+  - hasGrantedConsent:
+  - termsChangeNotice:
+  - requestDataDeletion:
+  - requestDataCorrection:
 triage:
   - evaluate:
 visits:

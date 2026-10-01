@@ -132,7 +132,7 @@ events:
 | ID | Requisito | Ator | Complexidade | Risco | Dependência |
 |----|-----------|------|--------------|-------|-------------|
 | **RF01** | Autenticação Passwordless (CPF + Data Nasc + OTP) | Paciente | M | Médio | SMS Gateway |
-| **RF02** | Onboarding via QR Code (ACS gera, paciente escaneia) | Paciente | M | Médio | Câmera, `qr_code_scanner` |
+| **RF02** | Onboarding via QR Code (ACS gera, paciente escaneia) | Paciente | M | Médio | Câmera, `mobile_scanner` (paciente) e `qr_flutter` (ACS) |
 | **RF03** | Botão de Alerta de Urgência (MQTT) | Paciente | M | **Crítico** | Mosquitto, GPS |
 | **RF04** | Formulário de Triagem Estruturada (árvore de decisão) | Paciente | S | Médio | Nenhuma (local) |
 | **RF05** | Painel de Status de Solicitação | Paciente | S | Baixo | API HTTP do backend |
@@ -144,7 +144,7 @@ events:
 | **RF11** | Registro Rápido de Visitas (Offline-first) | ACS | M | **Crítico** | `sqflite`, `connectivity_plus` |
 | **RF12** | Geofencing (Check-in Passivo) | ACS | M | Médio | GPS em segundo plano |
 | **RF13** | Escalonamento para SAMU/UBS (`url_launcher`) | ACS | S | Baixo | `url_launcher` |
-| **RF14** | Avisos Segmentados à Comunidade (Push) | ACS | M | Médio | FCM/APNs |
+| **RF14** | Avisos Segmentados à Comunidade (Push) | ACS | M | Médio | Gorush (relé para FCM/APNs) |
 | **RF15** | Sincronização Bidirecional (Local ↔ Central) | Sistema | **L** | **Crítico** | Driver `postgres` no backend (sem ORM); ainda não conectado ao cliente |
 | **RF16** | Motor de Triagem Determinístico (Manchester) | Sistema | **L** | **Crítico** | Nenhuma (local) |
 | **RF17** | Logs de Auditoria e Conformidade (LGPD) | Sistema | M | Alto | PostgreSQL |
@@ -170,7 +170,7 @@ documento de decisão, não implementação:
 | RF10 (mapa) | Geocélula arredondada, não posição exata (§1) | Não |
 | RF02 + LGPD-RF02 (onboarding/consentimento) | Token de convite de uso único + consentimento por finalidade (§2) | Não |
 | RF06 (lembretes) | Local ao dispositivo, sem endpoint (§3.1) | Não |
-| RF14 (avisos push) | Contrato FCM definido (§3.2) | **Sim** — sem projeto Firebase provisionado |
+| RF14 (avisos push) | Contrato com Gorush definido (§3.2, revisado 2026-09-29); lado do paciente e envio prontos em código (`devices.registerPushToken`, `push_tokens`, `PushTokenSource`, `notices.sendSegmented`, tela de avisos do ACS); entrega provada no emulador Android (2026-09-30); iOS/APNs, aparelho físico e Gorush hospedado fora do Compose local pendentes | **Parcial** — Android provado em emulador; faltam iOS/APNs e hospedagem |
 | RF12 (geofencing) | Geofence atrelado a visita ativa, sem rastreamento contínuo (§4) | Parcial — submissão à loja pendente |
 | RF15 (sync central→dispositivo) | Pull incremental por cursor (§5) | Não |
 | RNF03 (criptografia Postgres) | AES-256-GCM em nível de aplicação (§6) | Não |

@@ -2,22 +2,41 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart' show ProviderScope;
 import 'package:flutter/services.dart'
     show Clipboard, ClipboardData, TextEditingValue, TextInputFormatter, TextSelection;
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:sinalacs_client/sinalacs_client.dart'
-    show AlertStatus, AlertStatusResult, PatientDataOverview, RiskLevel;
+    show
+        AlertStatus,
+        AlertStatusResult,
+        ConsentPurpose,
+        DataSubjectRequestStatus,
+        DataSubjectRequestType,
+        PatientDataOverview,
+        PatientDataSubjectRequestRecord,
+        TermsChangeNotice,
+        RiskLevel;
+import 'package:sinalacs_patient/app/legal_screens.dart';
 import 'package:sinalacs_patient/app/patient_theme.dart';
+import 'package:sinalacs_patient/app/qr_scanner.dart';
+import 'package:sinalacs_patient/core/consent/consent_decisions.dart';
+import 'package:sinalacs_patient/core/legal/legal_documents.dart';
+import 'package:sinalacs_patient/core/legal/terms_change_notice_card.dart';
 import 'package:sinalacs_patient/core/consent/consent_preferences.dart';
 import 'package:sinalacs_patient/core/consent/sqflite_consent_preferences.dart';
 import 'package:sinalacs_patient/core/network/backend_client.dart';
+import 'package:sinalacs_patient/core/push/push_token_provider.dart';
+import 'package:sinalacs_patient/core/push/push_token_source.dart';
 import 'package:sinalacs_patient/core/network/backend_scope.dart';
 import 'package:sinalacs_patient/core/network/idempotency.dart';
+import 'package:sinalacs_patient/core/onboarding/enrollment_qr.dart';
 import 'package:sinalacs_patient/core/privacy/location_hash.dart';
 import 'package:sinalacs_patient/core/reminders/reminder.dart';
 import 'package:sinalacs_patient/core/reminders/reminder_scheduler.dart';
 import 'package:sinalacs_patient/core/reminders/reminder_store.dart';
 import 'package:sinalacs_patient/core/reminders/sqflite_reminder_store.dart';
+import 'package:sinalacs_patient/core/services/theme_controller.dart';
 
 class SinalAcsApp extends StatefulWidget {
   const SinalAcsApp({
@@ -27,6 +46,10 @@ class SinalAcsApp extends StatefulWidget {
     this.reminderStore,
     this.reminderScheduler,
     this.consentPreferences,
+    this.qrScanner,
+    this.pushTokens,
+    this.upcomingDocuments,
+    this.themeController,
   });
 
   /// Backend do app. **Obrigatório, e construído em `main.dart`.**
@@ -58,6 +81,20 @@ class SinalAcsApp extends StatefulWidget {
   /// real.
   final ConsentPreferences? consentPreferences;
 
+  /// Injetável para teste. Em execução normal é [scanQrWithCamera], que abre
+  /// a câmera do aparelho.
+  final QrScanner? qrScanner;
+
+  /// Injetável para teste. Em execução normal é [NoPushTokenSource]: sem
+  /// projeto Firebase (RF14, decisão §3.2) o aparelho não tem token, e o
+  /// registro fica inerte até a implementação do FCM entrar aqui.
+  final PushTokenSource? pushTokens;
+
+  /// Injetável para teste. Em execução normal é [upcomingLegalDocuments]: o texto
+  /// da versão dos termos já anunciada (aviso de 15 dias) e ainda não vigente.
+  final UpcomingLegalDocuments? upcomingDocuments;
+  final ThemeController? themeController;
+
   @override
   State<SinalAcsApp> createState() => _SinalAcsAppState();
 }
@@ -70,10 +107,37 @@ class _SinalAcsAppState extends State<SinalAcsApp> {
       widget.reminderScheduler ?? LocalNotificationsReminderScheduler(FlutterLocalNotificationsPlugin());
   late final ConsentPreferences _consentPreferences =
       widget.consentPreferences ?? SqfliteConsentPreferences();
+  late final QrScanner _qrScanner = widget.qrScanner ?? scanQrWithCamera;
+  // O parâmetro (teste) tem precedência; senão, o provider Riverpod, se houver um
+  // `ProviderScope` acima; senão, sem push. Lido em `didChangeDependencies`.
+  PushTokenSource _pushTokens = const NoPushTokenSource();
 
-  // Sem `dispose`: este widget não cria mais cliente nenhum (o `main` é quem
-  // constrói e injeta), então não há o que fechar — fechar um backend injetado
-  // seria fechar o de quem injetou.
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _pushTokens = widget.pushTokens ?? _providerSource();
+  }
+
+  PushTokenSource _providerSource() {
+    try {
+      return ProviderScope.containerOf(context, listen: false).read(pushTokenSourceProvider);
+    } catch (_) {
+      return const NoPushTokenSource();
+    }
+  }
+  late final ThemeController _themeController = widget.themeController ?? ThemeController();
+
+  @override
+  void initState() {
+    super.initState();
+    _themeController.restore();
+  }
+
+  @override
+  void dispose() {
+    if (widget.themeController == null) _themeController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -85,16 +149,45 @@ class _SinalAcsAppState extends State<SinalAcsApp> {
           store: _reminderStore,
           scheduler: _reminderScheduler,
           consentPreferences: _consentPreferences,
-          child: MaterialApp(
-            title: 'SinalACS Paciente',
-            debugShowCheckedModeBanner: false,
-            theme: buildPatientTheme(),
-            home: const PatientLoginScreen(),
+          child: PushTokenScope(
+            source: _pushTokens,
+            child: UpcomingDocumentsScope(
+              documents: widget.upcomingDocuments ?? upcomingLegalDocuments,
+              child: QrScannerScope(
+                scanner: _qrScanner,
+                child: ValueListenableBuilder<ThemeMode>(
+                  valueListenable: _themeController,
+                  builder: (context, mode, _) => MaterialApp(
+                    title: 'SinalACS Paciente',
+                    debugShowCheckedModeBanner: false,
+                    theme: buildPatientLightTheme(),
+                    darkTheme: buildPatientDarkTheme(),
+                    themeMode: mode,
+                    home: PatientLoginScreen(themeController: _themeController),
+                  ),
+                ),
+              ),
+            ),
           ),
         ),
       ),
     );
   }
+}
+
+/// Disponibiliza o texto dos termos já anunciados (aviso de 15 dias), ou `null`.
+/// Mesmo padrão de `QrScannerScope`; sem escopo, `maybeOf` devolve `null` e o
+/// cartão oferece só o texto vigente.
+class UpcomingDocumentsScope extends InheritedWidget {
+  const UpcomingDocumentsScope({required this.documents, required super.child, super.key});
+
+  final UpcomingLegalDocuments? documents;
+
+  static UpcomingLegalDocuments? maybeOf(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<UpcomingDocumentsScope>()?.documents;
+
+  @override
+  bool updateShouldNotify(UpcomingDocumentsScope oldWidget) => documents != oldWidget.documents;
 }
 
 /// Disponibiliza o [LocationReader] para a árvore de widgets.
@@ -154,7 +247,9 @@ class RemindersScope extends InheritedWidget {
 }
 
 class PatientLoginScreen extends StatefulWidget {
-  const PatientLoginScreen({super.key});
+  const PatientLoginScreen({required this.themeController, super.key});
+
+  final ThemeController themeController;
 
   @override
   State<PatientLoginScreen> createState() => _PatientLoginScreenState();
@@ -216,6 +311,9 @@ class _CpfInputFormatter extends TextInputFormatter {
     );
   }
 }
+
+/// Quanto o login espera pela checagem do aceite do termo antes de entrar sem ela.
+const _termsCheckTimeout = Duration(seconds: 3);
 
 class _PatientLoginScreenState extends State<PatientLoginScreen> {
   final _cpf = TextEditingController();
@@ -341,6 +439,23 @@ class _PatientLoginScreenState extends State<PatientLoginScreen> {
     }
   }
 
+  /// Quem entrou por OTP sem onboarding, ou com aceite de versão anterior,
+  /// recebe o convite ao aceite (LGPD-RF18). Falhou a leitura → entra direto:
+  /// o alerta de emergência não espera por um aceite.
+  Future<bool> _needsTerms() async {
+    try {
+      // Teto curto: a espera padrão do cliente é de 20 s, e esta checagem não
+      // pode ficar entre um login já verificado e o alerta de urgência.
+      final accepted =
+          await BackendScope.of(context).hasAcceptedCurrentTerms().timeout(_termsCheckTimeout);
+      return !accepted;
+    } on BackendFailure {
+      return false;
+    } on TimeoutException {
+      return false;
+    }
+  }
+
   /// Verifica o código e só navega em caso de sucesso.
   ///
   /// Antes a tela navegava incondicionalmente, ignorando o que era digitado —
@@ -363,12 +478,23 @@ class _PatientLoginScreenState extends State<PatientLoginScreen> {
     try {
       await BackendScope.of(context).verifyOtp(cpf: cpf, code: _codigo.text.trim());
       if (!mounted) return;
+      unawaited(registerPushDevice(BackendScope.of(context), PushTokenScope.maybeOf(context)));
+      final needsTerms = await _needsTerms();
+      if (!mounted) return;
+      MaterialPageRoute<void> home() => MaterialPageRoute<void>(
+            builder: (_) => PatientHomeShell(
+              initialDestination: PatientDestination.triage,
+              themeController: widget.themeController,
+            ),
+          );
       Navigator.of(context).pushReplacement(
-        MaterialPageRoute(
-          builder: (_) => const PatientHomeShell(
-            initialDestination: PatientDestination.triage,
-          ),
-        ),
+        needsTerms
+            ? MaterialPageRoute<void>(
+                builder: (routeContext) => TermsAcceptanceScreen(
+                  onContinue: () => Navigator.of(routeContext).pushReplacement(home()),
+                ),
+              )
+            : home(),
       );
     } on BackendFailure catch (failure) {
       if (!mounted) return;
@@ -426,7 +552,7 @@ class _PatientLoginScreenState extends State<PatientLoginScreen> {
                               // telefone cadastrado, e afirmar isso seria inventar.
                               : 'Digite o código de 6 dígitos enviado pela sua unidade de saúde.',
                           textAlign: TextAlign.center,
-                          style: const TextStyle(color: Colors.white70),
+                          style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
                         ),
                         const SizedBox(height: 24),
                         if (_step == _LoginStep.credenciais) ..._camposDeCredenciais() else ..._camposDoCodigo(),
@@ -442,8 +568,8 @@ class _PatientLoginScreenState extends State<PatientLoginScreen> {
                                 key: const Key('login_error'),
                                 _error!,
                                 textAlign: TextAlign.center,
-                                style: const TextStyle(
-                                  color: PatientColors.dangerOnSurface,
+                                style: TextStyle(
+                                  color: context.patientRisk.dangerOnSurface,
                                   fontWeight: FontWeight.bold,
                                 ),
                               ),
@@ -456,11 +582,21 @@ class _PatientLoginScreenState extends State<PatientLoginScreen> {
                             child: OutlinedButton.icon(
                               key: const Key('start_onboarding_button'),
                               onPressed: () => Navigator.of(context).push(
-                                MaterialPageRoute(builder: (_) => const OnboardingScreen()),
+                                MaterialPageRoute(
+                                  builder: (_) => OnboardingScreen(themeController: widget.themeController),
+                                ),
                               ),
                               icon: const Icon(Icons.qr_code_scanner_outlined),
                               label: const Text('Escanear QR Code do ACS'),
                             ),
+                          ),
+                          const SizedBox(height: 4),
+                          TextButton(
+                            key: const Key('login_legal_link'),
+                            onPressed: () => Navigator.of(context).push(
+                              MaterialPageRoute(builder: (_) => const LegalDocumentsScreen()),
+                            ),
+                            child: const Text('Política de Privacidade e Termo de Uso'),
                           ),
                         ],
                       ],
@@ -530,7 +666,7 @@ class _PatientLoginScreenState extends State<PatientLoginScreen> {
             key: const Key('otp_cooldown_message'),
             'Você pode pedir um novo código em ${restante.inSeconds}s.',
             textAlign: TextAlign.center,
-            style: const TextStyle(color: Colors.white70),
+            style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
           ),
         ),
       ],
@@ -585,11 +721,13 @@ class _PatientLoginScreenState extends State<PatientLoginScreen> {
 /// grava os 3 consentimentos por finalidade (LGPD-RF02) antes de ativar a
 /// sessão do paciente (RF02).
 ///
-/// O campo de texto recebe o valor do token do QR Code — a leitura por
-/// câmera é apenas um jeito alternativo de preencher o mesmo campo, não uma
-/// dependência nova desta tela (fora de escopo aqui).
+/// O campo de texto recebe o token do convite. A leitura do QR Code pela
+/// câmera ("Ler QR Code com a câmera") preenche o mesmo campo — digitar
+/// continua possível para quem não tem câmera ou negou a permissão.
 class OnboardingScreen extends StatefulWidget {
-  const OnboardingScreen({super.key});
+  const OnboardingScreen({required this.themeController, super.key});
+
+  final ThemeController themeController;
 
   @override
   State<OnboardingScreen> createState() => _OnboardingScreenState();
@@ -603,14 +741,52 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   bool _healthDataConsent = false;
   bool _remindersConsent = false;
   bool _pushConsent = false;
+  // Aceite do Termo de Uso e da Política de Privacidade (LGPD-RF18): também
+  // desmarcado por padrão e obrigatório, gravado pelo servidor com a versão
+  // vigente dos documentos.
+  bool _termsAccepted = false;
 
   bool _busy = false;
+  bool _scanning = false;
   String? _error;
 
   @override
   void dispose() {
     _tokenController.dispose();
     super.dispose();
+  }
+
+  Future<void> _scan() async {
+    if (_scanning) return;
+    setState(() => _scanning = true);
+    try {
+      await _readQr();
+    } finally {
+      if (mounted) setState(() => _scanning = false);
+    }
+  }
+
+  Future<void> _readQr() async {
+    final scanner = QrScannerScope.of(context);
+    final String? raw;
+    try {
+      raw = await scanner(context);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _error = 'Não foi possível usar a câmera. Digite o código do convite.');
+      return;
+    }
+    if (!mounted || raw == null) return;
+    final token = parseEnrollmentQr(raw);
+    setState(() {
+      if (token == null) {
+        _error = 'Este QR Code não é um convite do SinalACS. Peça ao agente de '
+            'saúde para mostrar o convite de novo.';
+      } else {
+        _tokenController.text = token;
+        _error = null;
+      }
+    });
   }
 
   Future<void> _complete() async {
@@ -626,6 +802,12 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       });
       return;
     }
+    if (!_termsAccepted) {
+      setState(() {
+        _error = 'É preciso aceitar o Termo de Uso e a Política de Privacidade.';
+      });
+      return;
+    }
 
     setState(() {
       _busy = true;
@@ -638,6 +820,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         healthDataConsent: _healthDataConsent,
         remindersConsent: _remindersConsent,
         pushConsent: _pushConsent,
+        termsAccepted: _termsAccepted,
       );
       if (!mounted) return;
       // Espelha localmente a resposta já enviada ao backend — é o único
@@ -655,12 +838,19 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         // Intencionalmente silencioso — ver comentário acima.
       }
       if (!mounted) return;
+      // O cadastro acabou de gravar a decisão: sem consentimento, nem chega ao
+      // provedor; com ele, dispensa a consulta ao servidor.
+      if (_pushConsent) {
+        unawaited(registerPushDevice(BackendScope.of(context), PushTokenScope.maybeOf(context),
+            consentKnownGranted: true));
+      }
       // Mesmo caminho que `_PatientLoginScreenState._enter()` já usa para
       // entrar na navegação principal — a sessão já está em `BackendScope`,
       // não há estado novo para duplicar aqui.
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(
-          builder: (_) => const PatientHomeShell(
+          builder: (_) => PatientHomeShell(
+            themeController: widget.themeController,
             initialDestination: PatientDestination.triage,
           ),
         ),
@@ -695,18 +885,28 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        const Text(
-                          'Cole ou digite o código do convite recebido do agente '
-                          'comunitário de saúde. A leitura do QR Code preenche o '
-                          'mesmo campo.',
+                        Text(
+                          'Leia o QR Code do convite mostrado pelo agente '
+                          'comunitário de saúde, ou digite o código.',
                           textAlign: TextAlign.center,
-                          style: TextStyle(color: Colors.white70),
+                          style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+                        ),
+                        const SizedBox(height: 20),
+                        SizedBox(
+                          width: double.infinity,
+                          child: OutlinedButton.icon(
+                            key: const Key('scan_qr_button'),
+                            onPressed: _busy || _scanning ? null : _scan,
+                            style: OutlinedButton.styleFrom(minimumSize: const Size(48, 52)),
+                            icon: const Icon(Icons.qr_code_scanner_outlined),
+                            label: const Text('Ler QR Code com a câmera'),
+                          ),
                         ),
                         const SizedBox(height: 20),
                         TextField(
                           key: const Key('onboarding_token_field'),
                           controller: _tokenController,
-                          onChanged: (_) => setState(() {}),
+                          onChanged: (_) => setState(() => _error = null),
                           decoration: const InputDecoration(labelText: 'Código do convite'),
                         ),
                         const SizedBox(height: 20),
@@ -736,6 +936,40 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                           onChanged: (value) => setState(() => _pushConsent = value ?? false),
                           controlAffinity: ListTileControlAffinity.leading,
                           title: const Text('Recebimento de avisos segmentados por push'),
+                        ),
+                        const SizedBox(height: 12),
+                        const Align(
+                          alignment: Alignment.centerLeft,
+                          child: Text('Termo de Uso e Privacidade', style: TextStyle(fontWeight: FontWeight.bold)),
+                        ),
+                        Wrap(
+                          spacing: 8,
+                          children: [
+                            TextButton(
+                              key: const Key('onboarding_open_terms'),
+                              onPressed: () => Navigator.of(context).push(
+                                MaterialPageRoute(builder: (_) => const LegalDocumentScreen(document: termsOfUse)),
+                              ),
+                              child: const Text('Ler o Termo de Uso'),
+                            ),
+                            TextButton(
+                              key: const Key('onboarding_open_privacy'),
+                              onPressed: () => Navigator.of(context).push(
+                                MaterialPageRoute(builder: (_) => const LegalDocumentScreen(document: privacyPolicy)),
+                              ),
+                              child: const Text('Ler a Política de Privacidade'),
+                            ),
+                          ],
+                        ),
+                        CheckboxListTile(
+                          key: const Key('onboarding_terms_accept'),
+                          value: _termsAccepted,
+                          onChanged: (value) => setState(() => _termsAccepted = value ?? false),
+                          controlAffinity: ListTileControlAffinity.leading,
+                          title: const Text(
+                            'Li e aceito o Termo de Uso e a Política de Privacidade '
+                            '(versão $legalDocumentsVersion) (obrigatório)',
+                          ),
                         ),
                         const SizedBox(height: 20),
                         // `MergeSemantics`, mesma correção do botão de EMERGÊNCIA e dos
@@ -777,8 +1011,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                                 key: const Key('onboarding_error'),
                                 _error!,
                                 textAlign: TextAlign.center,
-                                style: const TextStyle(
-                                  color: PatientColors.dangerOnSurface,
+                                style: TextStyle(
+                                  color: context.patientRisk.dangerOnSurface,
                                   fontWeight: FontWeight.bold,
                                 ),
                               ),
@@ -797,12 +1031,17 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   }
 }
 
-enum PatientDestination { emergency, triage, profile, status, reminders, myData }
+enum PatientDestination { emergency, triage, profile, status, reminders, myData, settings }
 
 class PatientHomeShell extends StatefulWidget {
-  const PatientHomeShell({super.key, this.initialDestination = PatientDestination.emergency});
+  const PatientHomeShell({
+    required this.themeController,
+    super.key,
+    this.initialDestination = PatientDestination.emergency,
+  });
 
   final PatientDestination initialDestination;
+  final ThemeController themeController;
 
   @override
   State<PatientHomeShell> createState() => _PatientHomeShellState();
@@ -820,10 +1059,40 @@ class _PatientHomeShellState extends State<PatientHomeShell> {
   /// devolve "sua sessão expirou".
   bool _sessionExpired = false;
 
+  /// Aviso de mudança dos termos (LGPD-RF18), buscado uma vez ao abrir a home.
+  /// Nunca bloqueia: falha, lentidão ou ausência de `BackendScope` = sem cartão.
+  TermsChangeNotice? _notice;
+  bool _noticeDismissed = false;
+
   @override
   void initState() {
     super.initState();
     _destination = widget.initialDestination;
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (!_noticeRequested) {
+      _noticeRequested = true;
+      unawaited(_loadNotice());
+    }
+  }
+
+  bool _noticeRequested = false;
+
+  Future<void> _loadNotice() async {
+    // `getInheritedWidgetOfExactType` e não `BackendScope.of`: um shell montado
+    // sem `BackendScope` (o teste de Lembretes) não pode quebrar por causa de um
+    // aviso acessório.
+    final backend = context.getInheritedWidgetOfExactType<BackendScope>()?.backend;
+    if (backend == null) return;
+    try {
+      final notice = await backend.termsChangeNotice().timeout(_termsCheckTimeout);
+      if (mounted) setState(() => _notice = notice);
+    } catch (_) {
+      // Sem aviso: a home segue como estava.
+    }
   }
 
   void _select(PatientDestination destination) => setState(() => _destination = destination);
@@ -845,7 +1114,7 @@ class _PatientHomeShellState extends State<PatientHomeShell> {
 
   void _reenter() {
     Navigator.of(context).pushReplacement(
-      MaterialPageRoute(builder: (_) => const PatientLoginScreen()),
+      MaterialPageRoute(builder: (_) => PatientLoginScreen(themeController: widget.themeController)),
     );
   }
 
@@ -861,6 +1130,7 @@ class _PatientHomeShellState extends State<PatientHomeShell> {
       PatientDestination.myData => const MyDataScreen(),
       PatientDestination.status => StatusScreen(onFailure: _reportFailure),
       PatientDestination.reminders => const RemindersScreen(),
+      PatientDestination.settings => ThemeSettingsScreen(controller: widget.themeController),
     };
     final title = switch (_destination) {
       PatientDestination.emergency => 'Alerta de urgência',
@@ -869,6 +1139,7 @@ class _PatientHomeShellState extends State<PatientHomeShell> {
       PatientDestination.myData => 'Meus dados',
       PatientDestination.status => 'Acompanhamento',
       PatientDestination.reminders => 'Lembretes',
+      PatientDestination.settings => 'Preferências',
     };
 
     return Scaffold(
@@ -877,6 +1148,33 @@ class _PatientHomeShellState extends State<PatientHomeShell> {
         child: Column(
           children: [
             if (_sessionExpired) _SessionExpiredBanner(onReenter: _reenter),
+            // Nunca na aba de urgência: o cartão desce o botão de pânico (e um aviso que
+            // chega de forma assíncrona o moveria sob o dedo). Volta nas outras abas.
+            if (_notice != null && !_noticeDismissed && _destination != PatientDestination.emergency)
+              Builder(builder: (context) {
+                final notice = _notice!;
+                final docs = UpcomingDocumentsScope.maybeOf(context);
+                // O texto novo só é oferecido se o app carrega EXATAMENTE a versão que
+                // o servidor anunciou; senão, o cartão fica só com o texto vigente.
+                final novo = docs != null && docs.version == notice.version ? docs : null;
+                return TermsChangeNoticeCard(
+                  notice: notice,
+                  onDismiss: () => setState(() => _noticeDismissed = true),
+                  onRead: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const LegalDocumentsScreen()),
+                  ),
+                  onReadNew: novo == null
+                      ? null
+                      : () => Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => LegalDocumentsScreen(
+                                upcoming: novo,
+                                effectiveLabel: TermsChangeNoticeCard.formatDate(notice.effectiveFrom),
+                              ),
+                            ),
+                          ),
+                );
+              }),
             Expanded(child: content),
           ],
         ),
@@ -933,11 +1231,11 @@ class _SessionExpiredBanner extends StatelessWidget {
               // de responder ao servidor nem que existe um botão para voltar.
               Semantics(
                 liveRegion: true,
-                child: const Text(
-                  key: Key('session_expired_notice'),
+                child: Text(
+                  key: const Key('session_expired_notice'),
                   'Sua sessão expirou. Entre novamente com o código de acesso.',
                   textAlign: TextAlign.center,
-                  style: TextStyle(color: Colors.white70),
+                  style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
                 ),
               ),
               const SizedBox(height: 12),
@@ -1102,7 +1400,7 @@ class _EmergencyScreenState extends State<EmergencyScreen> {
           // anunciar sem depender de a pessoa varrer a tela de novo.
           Semantics(
             liveRegion: true,
-            child: Text(_state, style: const TextStyle(color: PatientColors.accentOnSurface, fontWeight: FontWeight.bold)),
+            child: Text(_state, style: TextStyle(color: context.patientRisk.accentOnSurface, fontWeight: FontWeight.bold)),
           ),
         ]))),
       ],
@@ -1209,7 +1507,7 @@ class _TriageScreenState extends State<TriageScreen> {
       children: [
         Text(
           'Passo ${_step + 1} de ${_symptoms.length}',
-          style: const TextStyle(color: PatientColors.accent, fontWeight: FontWeight.bold),
+          style: TextStyle(color: context.patientRisk.accentOnSurface, fontWeight: FontWeight.bold),
         ),
         const SizedBox(height: 8),
         LinearProgressIndicator(value: (_step + 1) / _symptoms.length),
@@ -1256,7 +1554,7 @@ class _TriageScreenState extends State<TriageScreen> {
                 key: const Key('triage_error'),
                 _error!,
                 textAlign: TextAlign.center,
-                style: const TextStyle(color: PatientColors.dangerOnSurface, fontWeight: FontWeight.bold),
+                style: TextStyle(color: context.patientRisk.dangerOnSurface, fontWeight: FontWeight.bold),
               ),
             ),
           ),
@@ -1278,24 +1576,25 @@ class _TriageResult extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     // `color` só é usada como texto/ícone sobre o card (nenhum botão herda
-    // este tom), por isso a variante `OnSurface` entra direto na tupla —
-    // `PatientColors.danger` e `PatientColors.accent` caem para 3.03:1 e
-    // 3.91:1 sobre `surfaceRaised`, abaixo de 4.5:1 (WCAG 1.4.3).
+    // este tom), por isso a variante `OnSurface` do tema ativo entra direto
+    // na tupla — o fill puro (`PatientColors.danger`/`accent`) falha como
+    // texto em ambos os temas (ver `PatientRiskColors` em `patient_theme.dart`).
+    final riskColors = context.patientRisk;
     final (label, color, guidance) = switch (risk) {
       RiskLevel.red => (
           'Risco: Vermelho',
-          PatientColors.dangerOnSurface,
+          riskColors.dangerOnSurface,
           'Sua equipe de saúde foi avisada com prioridade máxima. '
               'Se piorar, ligue para o SAMU (192).',
         ),
       RiskLevel.yellow => (
           'Risco: Amarelo',
-          const Color(0xFFE0A800),
+          riskColors.yellowOnSurface,
           'Sua solicitação foi priorizada. O agente de saúde entrará em contato.',
         ),
       RiskLevel.green => (
           'Risco: Verde',
-          PatientColors.accentOnSurface,
+          riskColors.accentOnSurface,
           'Sem sinais de urgência. Sua solicitação entrou na fila de rotina.',
         ),
     };
@@ -1318,10 +1617,10 @@ class _TriageResult extends StatelessWidget {
                 const SizedBox(height: 12),
                 Text(guidance, textAlign: TextAlign.center),
                 const SizedBox(height: 8),
-                const Text(
+                Text(
                   'Classificação feita pelo protocolo da equipe de saúde.',
                   textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 12, color: Colors.white54),
+                  style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
                 ),
               ],
             ),
@@ -1443,7 +1742,7 @@ class _ClinicalProfileScreenState extends State<ClinicalProfileScreen> {
               child: Text(
                 _error!,
                 key: const Key('clinical_profile_error'),
-                style: const TextStyle(color: PatientColors.dangerOnSurface, fontWeight: FontWeight.bold),
+                style: TextStyle(color: context.patientRisk.dangerOnSurface, fontWeight: FontWeight.bold),
               ),
             ),
           ),
@@ -1505,7 +1804,11 @@ class _MyDataScreenState extends State<MyDataScreen> {
   PatientDataOverview? _data;
   String? _error;
   String? _confirmation;
+
+  /// Texto de uma correção ainda não aceita pelo servidor.
+  String? _pendingCorrection;
   bool _requestedLoad = false;
+  bool _busy = false;
 
   @override
   void didChangeDependencies() {
@@ -1519,18 +1822,219 @@ class _MyDataScreenState extends State<MyDataScreen> {
   }
 
   Future<void> _load() async {
+    final backend = BackendScope.of(context);
+    final reminders = RemindersScope.of(context);
     try {
-      final data = await BackendScope.of(context).myData();
+      final data = await backend.myData();
       if (!mounted) return;
       setState(() {
         _data = data;
         _error = null;
       });
+      await _alignLocalRemindersMirror(reminders, data);
     } on BackendFailure catch (failure) {
       if (!mounted) return;
       setState(() => _error = failure.message);
     }
   }
+
+  /// O servidor é a fonte da decisão de lembretes (`consent_logs`); o store
+  /// local é só o espelho que `RemindersScreen` consulta (ver
+  /// `ConsentPreferences`). Alinhar aqui cobre a revogação feita nesta tela e
+  /// também o aparelho que entrou pelo login OTP (RF01) sem passar pelo
+  /// onboarding, que nunca teve espelho. Sem decisão de lembretes no servidor,
+  /// não mexe em nada.
+  Future<void> _alignLocalRemindersMirror(RemindersScope scope, PatientDataOverview data) async {
+    final granted = currentConsentDecisions(data.consents)[ConsentPurpose.localReminders];
+    if (granted == null) return;
+    await _applyLocalRemindersDecision(scope, granted);
+  }
+
+  Future<void> _applyLocalRemindersDecision(RemindersScope scope, bool granted) async {
+    try {
+      if (await scope.consentPreferences.localRemindersGranted() != granted) {
+        await scope.consentPreferences.saveLocalRemindersConsent(granted);
+      }
+      if (!granted) await deactivateAllReminders(scope);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _error =
+          'Sua escolha foi registrada, mas os lembretes deste aparelho não puderam ser atualizados.');
+    }
+  }
+
+  Future<bool> _confirmRevocation(ConsentPurpose purpose) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Revogar consentimento?'),
+        content: Text(
+          '${consentPurposeLabel(purpose)}: seus dados deixam de ser usados para esta '
+          'finalidade a partir de agora. Você pode conceder de novo quando quiser.'
+          '${purpose == ConsentPurpose.localReminders ? ' Os lembretes agendados neste aparelho serão desativados.' : ''}',
+        ),
+        actions: [
+          TextButton(
+            key: const Key('consent_revoke_cancel'),
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            key: const Key('consent_revoke_confirm'),
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Revogar'),
+          ),
+        ],
+      ),
+    );
+    return confirmed == true;
+  }
+
+  /// LGPD-RF05: revogar pede confirmação explícita; conceder, não. O
+  /// interruptor segue a decisão devolvida pelo servidor no recarregamento,
+  /// então uma falha o deixa exatamente como estava.
+  Future<void> _changeConsent(ConsentPurpose purpose, bool granted) async {
+    if (_busy) return;
+    if (!granted && !await _confirmRevocation(purpose)) return;
+    if (!mounted) return;
+    final backend = BackendScope.of(context);
+    final reminders = RemindersScope.of(context);
+    setState(() {
+      _busy = true;
+      _error = null;
+      _confirmation = null;
+    });
+    try {
+      final record = await backend.updateConsent(purpose: purpose, granted: granted);
+      if (purpose == ConsentPurpose.segmentedPush && granted && mounted) {
+        unawaited(registerPushDevice(backend, PushTokenScope.maybeOf(context), consentKnownGranted: true));
+      }
+      // A decisão já está gravada no servidor: aplicar no aparelho aqui, sem
+      // depender do recarregamento abaixo — se ele falhar, um lembrete
+      // agendado continuaria disparando depois de uma revogação confirmada.
+      if (purpose == ConsentPurpose.localReminders) {
+        await _applyLocalRemindersDecision(reminders, granted);
+      }
+      if (!mounted) return;
+      setState(() => _confirmation = '${consentPurposeLabel(purpose)}: consentimento '
+          '${granted ? 'concedido' : 'revogado'} em ${_formatDate(record.timestamp.toLocal())}.');
+      await _load();
+    } on BackendFailure catch (failure) {
+      if (!mounted) return;
+      setState(() => _error = failure.message);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  /// Envia um pedido e recarrega. Mesmo formato de [_changeConsent]: `_busy`
+  /// desabilita os controles enquanto a chamada está em voo, e é isso que
+  /// impede o segundo toque de virar segundo pedido.
+  /// `true` quando o servidor aceitou o pedido.
+  Future<bool> _submitRequest(
+    Future<PatientDataSubjectRequestRecord> Function(PatientBackend backend) call,
+    String done,
+  ) async {
+    final backend = BackendScope.of(context);
+    setState(() {
+      _busy = true;
+      _error = null;
+      _confirmation = null;
+    });
+    try {
+      final record = await call(backend);
+      if (!mounted) return true;
+      setState(() => _confirmation = '$done. Resposta até ${_formatDate(record.dueAt.toLocal())}.');
+      await _load();
+      return true;
+    } on BackendFailure catch (failure) {
+      if (!mounted) return false;
+      setState(() => _error = failure.message);
+      return false;
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _requestDeletion() async {
+    if (_busy) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Solicitar exclusão dos seus dados?'),
+        content: const Text(
+          'A equipe da UBS analisa o pedido em até 15 dias e a resposta aparece aqui. '
+          'Registros de saúde (alertas, triagens e visitas) podem ser mantidos pelo prazo '
+          'legal de 5 anos e anonimizados depois, em vez de apagados. Enquanto o pedido '
+          'estiver em análise, o app continua funcionando — inclusive o botão de emergência.',
+        ),
+        actions: [
+          TextButton(
+            key: const Key('deletion_request_cancel'),
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            key: const Key('deletion_request_confirm'),
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Solicitar exclusão'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    await _submitRequest((backend) => backend.requestDataDeletion(), 'Pedido de exclusão registrado');
+  }
+
+  Future<void> _requestCorrection() async {
+    if (_busy) return;
+    // Sem `barrierDismissible`: tocar fora fecharia o diálogo com `null` e
+    // apagaria o rascunho. Só "Cancelar" descarta de propósito.
+    final details = await showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => _CorrectionRequestDialog(initialText: _pendingCorrection),
+    );
+    if (details == null || !mounted) {
+      // Cancelou de propósito: o rascunho não fica para trás.
+      _pendingCorrection = null;
+      return;
+    }
+    // Guardado até o servidor aceitar: se o envio falhar, o texto volta quando
+    // a pessoa reabrir o diálogo, em vez de ser digitado de novo.
+    _pendingCorrection = details;
+    final ok = await _submitRequest(
+      (backend) => backend.requestDataCorrection(details),
+      'Pedido de correção registrado',
+    );
+    if (ok) _pendingCorrection = null;
+  }
+
+  String _requestTypeLabel(DataSubjectRequestType type) => switch (type) {
+        DataSubjectRequestType.deletion => 'Exclusão dos dados',
+        DataSubjectRequestType.correction => 'Correção de dados',
+      };
+
+  String _requestStatusLabel(DataSubjectRequestStatus status) => switch (status) {
+        DataSubjectRequestStatus.open => 'Em análise',
+        DataSubjectRequestStatus.completed => 'Atendido',
+        DataSubjectRequestStatus.rejected => 'Recusado',
+      };
+
+  /// dd/mm/aaaa. Não converte fuso: quem passa um instante (consentimento,
+  /// pedido) chama `.toLocal()` antes; a data de nascimento é meia-noite UTC e
+  /// passa como está, senão cairia no dia anterior no Brasil.
+  String _formatDate(DateTime date) => '${date.day.toString().padLeft(2, '0')}/'
+      '${date.month.toString().padLeft(2, '0')}/${date.year}';
+
+  String _purposeDescription(ConsentPurpose purpose) => switch (purpose) {
+        ConsentPurpose.localReminders =>
+          'Notificações de remédios e cuidados que você agenda em "Lembretes".',
+        ConsentPurpose.segmentedPush =>
+          'Avisos da UBS para a sua microárea. Ainda não são enviados nesta versão.',
+        ConsentPurpose.healthDataProcessing => 'Obrigatório para usar o app.',
+        ConsentPurpose.termsOfUse => 'Aceito no cadastro.',
+      };
 
   /// JSON da "exportação" pedida por spec/lgpd_design.md — não há
   /// infraestrutura de e-mail/arquivo nesta etapa, então a saída é a área de
@@ -1556,6 +2060,16 @@ class _MyDataScreenState extends State<MyDataScreen> {
               'origem': event.source,
               'risco': event.riskLevel.name,
               'data': event.recordedAt.toIso8601String(),
+            },
+        ],
+        'pedidos': [
+          for (final request in data.requests)
+            {
+              'tipo': request.type.name,
+              'situacao': request.status.name,
+              if (request.details != null) 'detalhes': request.details,
+              'data': request.createdAt.toIso8601String(),
+              'prazo': request.dueAt.toIso8601String(),
             },
         ],
       };
@@ -1584,6 +2098,13 @@ class _MyDataScreenState extends State<MyDataScreen> {
   @override
   Widget build(BuildContext context) {
     final data = _data;
+    final decisions = data == null
+        ? const <ConsentPurpose, bool>{}
+        : currentConsentDecisions(data.consents);
+    final openDeletion = data?.requests.any((r) =>
+            r.type == DataSubjectRequestType.deletion &&
+            r.status == DataSubjectRequestStatus.open) ??
+        false;
     return ListView(
       padding: const EdgeInsets.all(20),
       children: [
@@ -1591,7 +2112,8 @@ class _MyDataScreenState extends State<MyDataScreen> {
         const SizedBox(height: 8),
         const Text(
           'Confirmação de que seus dados pessoais estão sendo tratados pelo '
-          'SinalACS, o que está cadastrado, e uma cópia para guardar.',
+          'SinalACS, o que está cadastrado, suas escolhas de consentimento, '
+          'pedidos de correção ou exclusão, e uma cópia para guardar.',
         ),
         const SizedBox(height: 16),
         if (_error != null)
@@ -1604,7 +2126,7 @@ class _MyDataScreenState extends State<MyDataScreen> {
               child: Text(
                 _error!,
                 key: const Key('my_data_error'),
-                style: const TextStyle(color: PatientColors.dangerOnSurface, fontWeight: FontWeight.bold),
+                style: TextStyle(color: context.patientRisk.dangerOnSurface, fontWeight: FontWeight.bold),
               ),
             ),
           ),
@@ -1613,7 +2135,7 @@ class _MyDataScreenState extends State<MyDataScreen> {
             padding: const EdgeInsets.only(bottom: 16),
             child: Semantics(
               liveRegion: true,
-              child: Text(_confirmation!, key: const Key('my_data_export_confirmation')),
+              child: Text(_confirmation!, key: const Key('my_data_confirmation')),
             ),
           ),
         if (data == null && _error == null)
@@ -1629,8 +2151,7 @@ class _MyDataScreenState extends State<MyDataScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(data.name, style: const TextStyle(fontWeight: FontWeight.bold)),
-                  Text('Data de nascimento: ${data.birthDate.day.toString().padLeft(2, '0')}/'
-                      '${data.birthDate.month.toString().padLeft(2, '0')}/${data.birthDate.year}'),
+                  Text('Data de nascimento: ${_formatDate(data.birthDate)}'),
                   Text('Contato de emergência: ${data.emergencyContact}'),
                   Text('Condição crônica: ${data.isChronic ? 'Sim' : 'Não'}'),
                   if (data.chronicConditions.isNotEmpty)
@@ -1640,28 +2161,47 @@ class _MyDataScreenState extends State<MyDataScreen> {
             ),
           ),
           const SizedBox(height: 16),
-          const Text('Consentimentos', style: TextStyle(fontWeight: FontWeight.bold)),
+          const Text('Suas escolhas de consentimento', style: TextStyle(fontWeight: FontWeight.bold)),
+          const SizedBox(height: 8),
+          Text(
+            decisions[ConsentPurpose.healthDataProcessing] == true
+                ? '${consentPurposeLabel(ConsentPurpose.healthDataProcessing)}: concedido — '
+                    'obrigatório para usar o app. Para retirá-lo, solicite a exclusão dos seus dados abaixo.'
+                : '${consentPurposeLabel(ConsentPurpose.healthDataProcessing)}: sem registro de consentimento.',
+            key: const Key('consent_health_data_notice'),
+          ),
+          for (final purpose in const [ConsentPurpose.localReminders, ConsentPurpose.segmentedPush])
+            SwitchListTile(
+              key: Key('consent_switch_${purpose.name}'),
+              contentPadding: EdgeInsets.zero,
+              title: Text(consentPurposeLabel(purpose)),
+              subtitle: Text(_purposeDescription(purpose)),
+              value: decisions[purpose] ?? false,
+              onChanged: _busy ? null : (value) => _changeConsent(purpose, value),
+            ),
+          const SizedBox(height: 16),
+          const Text('Histórico de consentimentos', style: TextStyle(fontWeight: FontWeight.bold)),
           if (data.consents.isEmpty)
-            const Padding(
-              padding: EdgeInsets.only(top: 8),
-              child: Text('Nenhum consentimento registrado.', style: TextStyle(color: Colors.white54)),
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text('Nenhum consentimento registrado.', style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
             )
           else
             ...data.consents.map(
               (consent) => ListTile(
                 dense: true,
                 contentPadding: EdgeInsets.zero,
-                title: Text(consent.purpose),
+                title: Text(consentRecordLabel(consent.purpose)),
                 subtitle: Text('${consent.action == 'granted' ? 'Concedido' : 'Recusado'} · '
-                    'v${consent.version} · ${consent.timestamp.toIso8601String().split('T').first}'),
+                    'v${consent.version} · ${_formatDate(consent.timestamp.toLocal())}'),
               ),
             ),
           const SizedBox(height: 16),
           const Text('Histórico de classificação de risco', style: TextStyle(fontWeight: FontWeight.bold)),
           if (data.riskHistory.isEmpty)
-            const Padding(
-              padding: EdgeInsets.only(top: 8),
-              child: Text('Nenhum evento registrado.', style: TextStyle(color: Colors.white54)),
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text('Nenhum evento registrado.', style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
             )
           else
             ...data.riskHistory.map(
@@ -1673,6 +2213,40 @@ class _MyDataScreenState extends State<MyDataScreen> {
               ),
             ),
           const SizedBox(height: 16),
+          const Text('Pedidos sobre seus dados', style: TextStyle(fontWeight: FontWeight.bold)),
+          if (data.requests.isEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text('Nenhum pedido feito.', style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
+            )
+          else
+            ...data.requests.map(
+              (request) => ListTile(
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                title: Text('${_requestTypeLabel(request.type)} · ${_requestStatusLabel(request.status)}'),
+                subtitle: Text([
+                  'Pedido em ${_formatDate(request.createdAt.toLocal())} · '
+                      'resposta até ${_formatDate(request.dueAt.toLocal())}',
+                  if (request.details != null) '"${request.details}"',
+                ].join('\n')),
+              ),
+            ),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            key: const Key('request_deletion_button'),
+            onPressed: _busy || openDeletion ? null : _requestDeletion,
+            icon: const Icon(Icons.delete_outline),
+            label: Text(openDeletion ? 'Exclusão já solicitada — em análise' : 'Solicitar exclusão dos dados'),
+          ),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            key: const Key('request_correction_button'),
+            onPressed: _busy ? null : _requestCorrection,
+            icon: const Icon(Icons.edit_note_outlined),
+            label: const Text('Solicitar correção'),
+          ),
+          const SizedBox(height: 16),
           FilledButton.icon(
             key: const Key('export_my_data_button'),
             onPressed: _export,
@@ -1680,6 +2254,61 @@ class _MyDataScreenState extends State<MyDataScreen> {
             label: const Text('Copiar meus dados (JSON)'),
           ),
         ],
+      ],
+    );
+  }
+}
+
+/// Pede o texto de uma correção (LGPD-RF08). Devolve o texto já sem espaços
+/// nas pontas, ou `null` se a pessoa cancelar. O limite de 500 é o mesmo que o
+/// servidor impõe (`correctionDetailsMaxLength`); o servidor revalida, porque
+/// o app não é a única origem possível da chamada.
+class _CorrectionRequestDialog extends StatefulWidget {
+  const _CorrectionRequestDialog({this.initialText});
+
+  final String? initialText;
+
+  @override
+  State<_CorrectionRequestDialog> createState() => _CorrectionRequestDialogState();
+}
+
+class _CorrectionRequestDialogState extends State<_CorrectionRequestDialog> {
+  late final _controller = TextEditingController(text: widget.initialText);
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final details = _controller.text.trim();
+    return AlertDialog(
+      title: const Text('Solicitar correção'),
+      content: TextField(
+        key: const Key('correction_details_field'),
+        controller: _controller,
+        maxLength: 500,
+        maxLines: 4,
+        onChanged: (_) => setState(() {}),
+        decoration: const InputDecoration(
+          labelText: 'O que precisa ser corrigido?',
+          helperText: 'Condições crônicas você mesmo atualiza em "Perfil clínico".',
+          helperMaxLines: 2,
+        ),
+      ),
+      actions: [
+        TextButton(
+          key: const Key('correction_request_cancel'),
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancelar'),
+        ),
+        FilledButton(
+          key: const Key('correction_request_submit'),
+          onPressed: details.isEmpty ? null : () => Navigator.pop(context, details),
+          child: const Text('Enviar pedido'),
+        ),
       ],
     );
   }
@@ -1818,7 +2447,7 @@ class _StatusScreenBodyState extends State<_StatusScreenBody> with WidgetsBindin
               child: Text(
                 key: const Key('status_error'),
                 _error!,
-                style: const TextStyle(color: PatientColors.dangerOnSurface, fontWeight: FontWeight.bold),
+                style: TextStyle(color: context.patientRisk.dangerOnSurface, fontWeight: FontWeight.bold),
               ),
             ),
           ),
@@ -1835,9 +2464,9 @@ class _StatusScreenBodyState extends State<_StatusScreenBody> with WidgetsBindin
                     style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                   ),
                   const SizedBox(height: 8),
-                  const Text(
+                  Text(
                     'Um alerta de urgência ou uma triagem concluída aparece aqui assim que a equipe recebe.',
-                    style: TextStyle(color: Colors.white70),
+                    style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
                   ),
                 ],
               ),
@@ -1859,7 +2488,7 @@ class _StatusScreenBodyState extends State<_StatusScreenBody> with WidgetsBindin
             padding: const EdgeInsets.only(top: 8),
             child: Text(
               'Verificado às ${_formatTime(_checkedAt!)}',
-              style: const TextStyle(fontSize: 12, color: Colors.white54),
+              style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
             ),
           ),
       ],
@@ -1877,10 +2506,10 @@ class _StatusCard extends StatelessWidget {
     // Mesma disciplina de cor de `_TriageResult`: `OnSurface` porque o tom
     // aparece como texto sobre `Card`, não como preenchimento.
     final (riskLabel, riskColor) = switch (status.riskLevel) {
-      RiskLevel.red => ('Vermelho', PatientColors.dangerOnSurface),
+      RiskLevel.red => ('Vermelho', context.patientRisk.dangerOnSurface),
       RiskLevel.yellow => ('Amarelo', const Color(0xFFE0A800)),
-      RiskLevel.green => ('Verde', PatientColors.accentOnSurface),
-      null => ('Não classificado', Colors.white70),
+      RiskLevel.green => ('Verde', context.patientRisk.accentOnSurface),
+      null => ('Não classificado', Theme.of(context).colorScheme.onSurfaceVariant),
     };
     final statusLabel = switch (status.status) {
       AlertStatus.pending => 'Enviado — aguardando confirmação da equipe',
@@ -1929,6 +2558,22 @@ String _formatTime(DateTime value) {
   return '${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}';
 }
 
+/// Cancela no sistema operacional e desativa no store todo lembrete ativo.
+///
+/// É o que acontece quando o consentimento de lembretes não está (ou deixou de
+/// estar) concedido: `RemindersScreen` chama ao abrir, e "Meus dados" chama ao
+/// saber de uma revogação — sem isso, um lembrete agendado antes continuaria
+/// disparando até a pessoa abrir "Lembretes" (LGPD-RF05). Devolve se algum
+/// lembrete foi alterado.
+Future<bool> deactivateAllReminders(RemindersScope scope) async {
+  final stillActive = (await scope.store.list()).where((r) => r.active).toList();
+  for (final r in stillActive) {
+    await scope.scheduler.cancel(r.id);
+    await scope.store.save(r.copyWith(active: false));
+  }
+  return stillActive.isNotEmpty;
+}
+
 /// Lembretes locais de saúde (medicamento, pesagem, etc.), RF06 §3.1.
 ///
 /// Carrega do [ReminderStore] injetado via [RemindersScope]; abre vazia
@@ -1974,12 +2619,7 @@ class _RemindersScreenState extends State<RemindersScreen> {
         // segurança): nenhum lembrete pode continuar agendado no sistema
         // operacional depois disso — sem isso, um lembrete criado antes da
         // recusa continuaria disparando mesmo depois dela (LGPD-RF05).
-        final stillActive = reminders.where((r) => r.active).toList();
-        for (final r in stillActive) {
-          await scope.scheduler.cancel(r.id);
-          await scope.store.save(r.copyWith(active: false));
-        }
-        if (stillActive.isNotEmpty) {
+        if (await deactivateAllReminders(scope)) {
           reminders = await scope.store.list();
         }
       }
@@ -2006,8 +2646,8 @@ class _RemindersScreenState extends State<RemindersScreen> {
 
   String _consentDeniedMessage(bool? granted) {
     if (granted == false) {
-      return 'Você recusou o consentimento para lembretes locais no cadastro — '
-          'não é possível agendar notificações.';
+      return 'Você recusou ou revogou o consentimento para lembretes locais — '
+          'reative em "Meus dados" para agendar notificações.';
     }
     return 'Não encontramos seu consentimento para lembretes locais neste '
         'aparelho — conclua o cadastro para ativar notificações.';
@@ -2119,12 +2759,12 @@ class _RemindersScreenState extends State<RemindersScreen> {
                 key: const Key('reminders_consent_denied_banner'),
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  border: Border.all(color: Colors.white24),
+                  border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Text(
                   _consentDeniedMessage(_remindersConsentGranted),
-                  style: const TextStyle(color: Colors.white70),
+                  style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
                 ),
               ),
             ),
@@ -2140,7 +2780,7 @@ class _RemindersScreenState extends State<RemindersScreen> {
               child: Text(
                 _error!,
                 key: const Key('reminders_error'),
-                style: const TextStyle(color: PatientColors.dangerOnSurface, fontWeight: FontWeight.bold),
+                style: TextStyle(color: context.patientRisk.dangerOnSurface, fontWeight: FontWeight.bold),
               ),
             ),
           ),
@@ -2156,14 +2796,14 @@ class _RemindersScreenState extends State<RemindersScreen> {
             child: Center(child: CircularProgressIndicator()),
           )
         else if (reminders != null && reminders.isEmpty)
-          const Padding(
-            key: Key('reminders_empty_state'),
-            padding: EdgeInsets.only(top: 40),
+          Padding(
+            key: const Key('reminders_empty_state'),
+            padding: const EdgeInsets.only(top: 40),
             child: Center(
               child: Text(
                 'Você ainda não tem lembretes. Toque em "+" para criar o primeiro.',
                 textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.white54),
+                style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
               ),
             ),
           )
@@ -2280,12 +2920,41 @@ class _ReminderFormDialogState extends State<_ReminderFormDialog> {
   }
 }
 
+class ThemeSettingsScreen extends StatelessWidget {
+  const ThemeSettingsScreen({required this.controller, super.key});
+
+  final ThemeController controller;
+
+  @override
+  Widget build(BuildContext context) => ValueListenableBuilder<ThemeMode>(
+    valueListenable: controller,
+    builder: (context, mode, _) => ListView(
+      padding: const EdgeInsets.all(20),
+      children: [
+        const Text('Aparência', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 4),
+        const Text('Escolha como o app deve se apresentar neste aparelho.'),
+        const SizedBox(height: 16),
+        RadioGroup<ThemeMode>(
+          groupValue: mode,
+          onChanged: (value) { if (value != null) controller.setThemeMode(value); },
+          child: const Column(children: [
+            Card(child: RadioListTile<ThemeMode>(key: Key('theme_light'), value: ThemeMode.light, title: Text('Claro'))),
+            Card(child: RadioListTile<ThemeMode>(key: Key('theme_dark'), value: ThemeMode.dark, title: Text('Escuro'))),
+            Card(child: RadioListTile<ThemeMode>(key: Key('theme_system'), value: ThemeMode.system, title: Text('Automático (segue o sistema)'))),
+          ]),
+        ),
+      ],
+    ),
+  );
+}
+
 class _PatientHeader extends StatelessWidget implements PreferredSizeWidget {
   const _PatientHeader({required this.eyebrow, required this.title}); final String eyebrow; final String title;
   @override Size get preferredSize => const Size.fromHeight(72);
-  @override Widget build(BuildContext context) => AppBar(title: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(eyebrow.toUpperCase(), style: const TextStyle(fontSize: 10, color: PatientColors.accent, fontWeight: FontWeight.bold)), Text(title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold))]), actions: const [Padding(padding: EdgeInsets.only(right: 16), child: CircleAvatar(child: Icon(Icons.person_outline)))]) ;
+  @override Widget build(BuildContext context) => AppBar(title: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(eyebrow.toUpperCase(), style: TextStyle(fontSize: 10, color: context.patientRisk.accentOnSurface, fontWeight: FontWeight.bold)), Text(title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold))]), actions: const [Padding(padding: EdgeInsets.only(right: 16), child: CircleAvatar(child: Icon(Icons.person_outline)))]) ;
 }
 
 void _showMoreDestinations(BuildContext context, ValueChanged<PatientDestination> select) {
-  showModalBottomSheet<void>(context: context, builder: (sheetContext) => SafeArea(child: Column(mainAxisSize: MainAxisSize.min, children: [ListTile(leading: const Icon(Icons.person_outline), title: const Text('Perfil clínico'), onTap: () { Navigator.pop(sheetContext); select(PatientDestination.profile); }), ListTile(leading: const Icon(Icons.alarm_outlined), title: const Text('Lembretes'), onTap: () { Navigator.pop(sheetContext); select(PatientDestination.reminders); }), ListTile(leading: const Icon(Icons.privacy_tip_outlined), title: const Text('Meus dados'), onTap: () { Navigator.pop(sheetContext); select(PatientDestination.myData); })])));
+  showModalBottomSheet<void>(context: context, builder: (sheetContext) => SafeArea(child: Column(mainAxisSize: MainAxisSize.min, children: [ListTile(leading: const Icon(Icons.person_outline), title: const Text('Perfil clínico'), onTap: () { Navigator.pop(sheetContext); select(PatientDestination.profile); }), ListTile(leading: const Icon(Icons.alarm_outlined), title: const Text('Lembretes'), onTap: () { Navigator.pop(sheetContext); select(PatientDestination.reminders); }), ListTile(leading: const Icon(Icons.privacy_tip_outlined), title: const Text('Meus dados'), onTap: () { Navigator.pop(sheetContext); select(PatientDestination.myData); }), ListTile(key: const Key('more_legal'), leading: const Icon(Icons.gavel_outlined), title: const Text('Privacidade e termos'), onTap: () { Navigator.pop(sheetContext); Navigator.of(context).push(MaterialPageRoute(builder: (_) => const LegalDocumentsScreen())); }), ListTile(leading: const Icon(Icons.tune_outlined), title: const Text('Preferências'), onTap: () { Navigator.pop(sheetContext); select(PatientDestination.settings); })])));
 }

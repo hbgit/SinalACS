@@ -93,9 +93,23 @@ A tabela abaixo consolida o mapeamento exaustivo de dados persistidos pelo backe
 | | `action` | `text` | Metadado Legal | Enum textual (`GRANT`, `REVOKE`, etc.) | Ação exercida sobre o consentimento pelo titular. |
 | | `version` | `text` | Metadado Legal | String de versão semântica | Versão dos termos aceita no momento da ação (LGPD-RT04). |
 | | `timestamp` | `timestamp without time zone` | Metadado Legal | Timestamp de registro | Comprovação temporal imutável da manifestação de vontade. |
-| | `ipHash` | `text` | Pseudonimizado | Hash SHA-256 do IP | Se gerado para IPv4 sem salt ($2^{32}$ combinações), é reversível por força bruta imediata; requer salt rotativo. |
+| | `ipHash` | `text` | Pseudonimizado | Hash SHA-256 do IP | Se gerado para IPv4 sem salt ($2^{32}$ combinações), é reversível por força bruta imediata; requer salt rotativo. Linhas gravadas pelo painel "Meus Dados" (LGPD-RF05) usam o marcador `nao-aplicavel-painel-titular`. |
 | | `userAgent` | `text` | Metadado Técnico / Fingerprint | String de cabeçalho User-Agent | Auxilia na caracterização do dispositivo utilizado. |
 | | `signature` | `text` | Metadado Legal / Prova Criptográfica | Assinatura digital/hash | Garantia de não repúdio e integridade do consentimento (LGPD-RT05). |
+| **data_subject_requests** | `id` | `uuid` | Pseudonimizado | UUID v4 (`gen_random_uuid()`) | Identificador do pedido do titular (LGPD-RF08). |
+| | `userId` | `uuid` | Pseudonimizado | Chave estrangeira (`users.id`) | Titular que fez o pedido — sempre o do token, nunca parâmetro (INV-05). |
+| | `requestType` | `text` | Metadado de Conformidade | `deletion` \| `correction` | — |
+| | `detailsEncrypted` / `detailsKeyVersion` | `text` / `bigint` | Potencialmente Sensível (texto livre do titular) | AES-256-GCM na aplicação, mesma `HEALTH_DATA_ENCRYPTION_KEY` do §2.3 | O pedido de correção é texto livre e pode citar condição de saúde; cifrado pelo mesmo motivo de `visits.notes`. Num pedido de exclusão guarda o JSON `null` cifrado. Nunca copiado para `audit_logs`. |
+| | `status` | `text` | Metadado de Conformidade | `open` \| `completed` \| `rejected` | Só `open` tem escritor nesta versão — quem atende o pedido (backoffice) ainda não existe (ver `PROGRESS.md`). |
+| | `createdAt` / `dueAt` | `timestamp without time zone` | Metadado de Conformidade | `dueAt` = `createdAt` + 15 dias | Prazo de resposta do Art. 18 (spec/lgpd_design.md, linhas 596-597). |
+| **push_tokens** | `id` | `uuid` | Pseudonimizado | UUID v4 (`gen_random_uuid()`) | Identificador da linha do token de push (RF14). |
+| | `userId` | `uuid` | Pseudonimizado | Chave estrangeira (`users.id`) | Liga o aparelho ao titular; apagado quando o consentimento `segmentedPush` é revogado. |
+| | `microAreaId` | `uuid` | Pseudonimizado | Copiado do token de acesso | Segmentação dos avisos por microárea. |
+| | `token` | `text` | Identificador de aparelho | Emitido pelo FCM/APNs | Identifica um aparelho, não uma pessoa; junto de `userId` liga os dois. Índice único: o mesmo token nunca tem dois donos. No máximo 10 linhas por titular (`maxPushTokensPerUser`). |
+| | `platform` | `text` | Metadado Técnico | `android` \| `ios` | Escolhe o provedor do envio. |
+| | `createdAt` / `updatedAt` | `timestamp without time zone` | Metadado Técnico | Relógio do servidor | Primeiro registro e última confirmação do token. |
+| | (`audit_logs`) | — | Metadado Técnico | `resourceType = push_token` | Só a troca de dono de um token de push: uma linha com o `userId` do novo dono (`result = granted`) e outra com o do dono anterior (`result = lost`), para quem perdeu o vínculo sem agir também ter rastro. **Atenção à leitura:** na linha `lost`, `userId` é o titular **afetado**, não o autor da ação (quem agiu foi o novo dono); um relatório "o que o titular X fez" precisa excluir `result = lost`. As duas linhas gravadas no mesmo instante ligam os dois titulares como donos do mesmo aparelho. Sem consentimento, o registro recusado também apaga o vínculo do dono anterior e **não** grava rastro (lacuna conhecida). O token nunca é gravado na trilha. |
+| | (`audit_logs`) | — | Metadado Técnico | `resourceType = community_notice` | Uma linha por aviso comunitário enviado: `userId` do ACS, `resourceId` = microárea, `result` = `granted` (algum aparelho aceitou), `not_delivered` (nenhum aceitou), `unknown` (o relé não respondeu a tempo) ou `no_recipients`. O texto do aviso nunca é gravado. |
 | **audit_logs** | `id` | `uuid` | Pseudonimizado | UUID v4 (`gen_random_uuid()`) | Identificador do registro de auditoria (LGPD-RF11). |
 | | `userId` | `uuid` | Pseudonimizado | Chave estrangeira (`users.id`) | Identifica o operador que executou a ação auditada. |
 | | `actionType` | `text` | Metadado Técnico | Enum textual (`READ`, `WRITE`, `DELETE`, etc.) | Operação registrada. |

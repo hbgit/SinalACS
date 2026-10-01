@@ -3,12 +3,15 @@ import 'package:sinalacs_server/src/application/patients/patient_data_overview_s
 import 'package:sinalacs_server/src/generated/protocol.dart';
 import 'package:sinalacs_server/src/infrastructure/crypto/encrypted_json.dart';
 import 'package:sinalacs_server/src/infrastructure/crypto/health_data_cipher.dart';
+import 'package:sinalacs_server/src/infrastructure/database/orm_data_subject_rights_store.dart';
 
 /// Implementação de [PatientDataOverviewStore] sobre o ORM do Serverpod.
 ///
-/// Agrega quatro consultas independentes — `patients`, `users`,
-/// `consent_logs` e o histórico de risco de `triage_sessions`/`alerts` — num
-/// único snapshot. Só decifra `chronicConditionsEncrypted`; o conteúdo bruto
+/// Agrega cinco consultas independentes — `patients`, `users`,
+/// `consent_logs`, o histórico de risco de `triage_sessions`/`alerts` e
+/// `data_subject_requests` — num único snapshot. Decifra
+/// `chronicConditionsEncrypted` e o `detailsEncrypted` dos pedidos, texto que o
+/// próprio titular escreveu; o conteúdo bruto
 /// de uma triagem (`answersEncrypted`) e a localização de um alerta nunca
 /// entram no snapshot, por minimização (spec/lgpd_design.md).
 class OrmPatientDataOverviewStore implements PatientDataOverviewStore {
@@ -52,6 +55,15 @@ class OrmPatientDataOverviewStore implements PatientDataOverviewStore {
       where: (t) => t.patientId.equals(id),
       orderBy: (t) => t.triggeredAt,
     );
+    final requestRows = await DataSubjectRequest.db.find(
+      session,
+      where: (t) => t.userId.equals(id),
+      orderBy: (t) => t.createdAt,
+      orderDescending: true,
+    );
+    final requests = [
+      for (final row in requestRows) await dataSubjectRequestSnapshotOf(row, _cipher),
+    ];
 
     final riskHistory = <RiskEventSnapshot>[
       for (final row in triageRows)
@@ -80,6 +92,7 @@ class OrmPatientDataOverviewStore implements PatientDataOverviewStore {
           ),
       ],
       riskHistory: riskHistory,
+      requests: requests,
     );
   }
 }

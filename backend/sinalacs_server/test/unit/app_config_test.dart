@@ -383,4 +383,29 @@ void main() {
       expect(AppConfig.fromMap(const {'ENABLE_DEV_LOGIN': '1'}).enableDevLogin, isFalse);
     });
   });
+
+  group('GORUSH_URL (RF14)', () {
+    AppConfig comGorush(String? url) => AppConfig.fromMap({
+          'APP_ENV': 'development',
+          'GORUSH_URL': ?url,
+        });
+
+    test('ausente desliga o envio', () {
+      expect(comGorush(null).gorushUrl, isNull);
+      expect(comGorush('   ').gorushUrl, isNull);
+    });
+
+    test('presente é lida sem espaços e sem barra final', () {
+      expect(comGorush(' http://gorush:8088/ ').gorushUrl, 'http://gorush:8088');
+    });
+
+    test('fora de http(s) é recusada', () {
+      expect(() => comGorush('ftp://x'), throwsA(isA<StateError>()));
+      expect(() => comGorush('gorush:8088'), throwsA(isA<StateError>()));
+    });
+
+    test('o tempo limite do envio é de 5 segundos', () {
+      expect(comGorush(null).gorushTimeout, const Duration(seconds: 5));
+    });
+  });
 }

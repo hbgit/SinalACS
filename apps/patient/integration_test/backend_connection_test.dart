@@ -38,7 +38,8 @@ import 'package:sinalacs_patient/core/network/backend_config.dart';
 import 'package:sinalacs_patient/core/network/idempotency.dart';
 import 'package:sinalacs_patient/core/privacy/location_hash.dart';
 
-const seedMicroAreaId = '00000000-0000-4000-8000-000000000003';
+import 'support/e2e_login.dart';
+
 
 /// Bytes da CA de desenvolvimento do RPC, lidos do bundle do app.
 ///
@@ -61,7 +62,10 @@ void main() {
 
   late BackendClient backend;
 
-  setUp(() async {
+  // Uma sessão para o arquivo inteiro: o servidor impõe 60 s entre dois pedidos de
+  // OTP do mesmo paciente, então logar de novo a cada teste só funciona com o
+  // login de desenvolvimento. O teste de sessão confere o que esta obteve.
+  setUpAll(() async {
     final caBytes = await _devRpcCaBytes();
     if (caBytes == null) {
       fail(
@@ -71,8 +75,9 @@ void main() {
       );
     }
     backend = BackendClient(trustedCaBytes: caBytes);
+    await loginPatient(backend);
   });
-  tearDown(() => backend.close());
+  tearDownAll(() => backend.close());
 
   test('a stack responde à sonda de saúde', () async {
     final health = await backend.health();
@@ -83,18 +88,16 @@ void main() {
   });
 
   test('o login devolve uma sessão com a microárea do seed', () async {
-    final session = await backend.developmentLogin(role: 'patient');
+    final session = backend.session!;
 
     expect(session.role, 'patient');
     // A microárea sai do payload do token; é o que define o tópico que o ACS
     // assina, então tem de casar com o seed.
-    expect(session.microAreaId, seedMicroAreaId);
+    expect(session.microAreaId, expectedMicroArea());
     expect(session.isExpired(), isFalse);
   });
 
   test('a triagem é classificada pelo motor do servidor', () async {
-    await backend.developmentLogin(role: 'patient');
-
     final red = await backend.evaluateTriage(
       chestPain: true,
       difficultyBreathing: false,
@@ -126,8 +129,6 @@ void main() {
   });
 
   test('a mesma resposta produz sempre o mesmo risco', () async {
-    await backend.developmentLogin(role: 'patient');
-
     // Determinismo é invariante (INV-02): a classificação não pode variar entre
     // chamadas idênticas.
     final results = <RiskLevel>[];
@@ -146,7 +147,6 @@ void main() {
   });
 
   test('o alerta vermelho é criado e o reenvio não duplica', () async {
-    await backend.developmentLogin(role: 'patient');
     final key = newIdempotencyKey();
     final hash = locationHashFrom(-23.55052, -46.633308);
 
@@ -161,7 +161,6 @@ void main() {
   });
 
   test('a chave de idempotência reusada com outra localização é recusada', () async {
-    await backend.developmentLogin(role: 'patient');
     final key = newIdempotencyKey();
 
     await backend.createRedAlert(

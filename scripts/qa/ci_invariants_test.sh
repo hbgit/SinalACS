@@ -62,10 +62,10 @@ espera_ok() {
 
 # Workflow mínimo que passa por TODAS as outras checagens do ci_invariants.sh
 # (jobs documentados, gatilhos, concurrency, versões de ação, runner, limpeza
-# do pg_data) — assim, o único jeito de uma fixture derivada daqui falhar por
-# causa das checagens desta issue é ela mesma ter o defeito que existe para
-# provar. $1, se dado, substitui a linha `    # EXTRA` dentro do job
-# admin-app (indentação de 4 espaços já incluída no marcador).
+# do pg_data, credenciais do FCM) — assim, o único jeito de uma fixture
+# derivada daqui falhar por causa das checagens desta issue é ela mesma ter o
+# defeito que existe para provar. $1, se dado, substitui a linha `    # EXTRA`
+# dentro do job admin-app (indentação de 4 espaços já incluída no marcador).
 workflow_base() {
   local extra_admin_app="${1:-}"
   cat <<YAML
@@ -96,8 +96,25 @@ ${extra_admin_app}
   android-e2e:
     runs-on: ubuntu-24.04
     steps:
+      - name: Decodifica a credencial do FCM
+        env:
+          FCM_CREDENTIALS_BASE64: \${{ secrets.FCM_CREDENTIALS_BASE64 }}
+        run: ./scripts/ci/decode_secret_file.sh --env FCM_CREDENTIALS_BASE64 --kind service_account --temp-export GOOGLE_APPLICATION_CREDENTIALS
+      - name: Decodifica o google-services.json
+        env:
+          GOOGLE_SERVICES_JSON_BASE64: \${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}
+        run: ./scripts/ci/decode_secret_file.sh --env GOOGLE_SERVICES_JSON_BASE64 --kind google_services --to apps/patient/android/app/google-services.json
       - name: E2E no emulador Android
-        run: "true"
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          target: google_apis
+          script: "true"
+      - name: Remove as credenciais do FCM
+        if: always()
+        run: |
+          ./scripts/ci/decode_secret_file.sh --cleanup-temp GOOGLE_APPLICATION_CREDENTIALS
+          ./scripts/ci/decode_secret_file.sh --cleanup-file apps/patient/android/app/google-services.json
+          ./scripts/ci/decode_secret_file.sh --cleanup-file infra/docker/gorush/credentials/fcm-service-account.json
       - name: Remove pg_data/ do workspace
         if: always()
         run: sudo rm -rf pg_data

@@ -1,0 +1,8 @@
+### Situação de um pedido do titular. Nesta versão só `open` tem escritor:
+### quem atende o pedido (backoffice) ainda não existe — ver PROGRESS.md.
+enum: DataSubjectRequestStatus
+serialized: byName
+values:
+  - open
+  - completed
+  - rejected

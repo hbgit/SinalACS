@@ -14,13 +14,15 @@
 # Não precisa de rede nem da stack; só python3 com PyYAML. Roda no job
 # workflow-lint do próprio CI.
 #
-# CI_INVARIANTS_WORKFLOW aponta para um workflow diferente do real — só para
-# scripts/qa/ci_invariants_test.sh testar as checagens contra fixtures
-# sintéticas, sem tocar em .github/workflows/ci.yml.
+# CI_WORKFLOW_PATH aponta para um workflow diferente do real — só para
+# scripts/qa/ci_invariants_test.sh e ci_invariants_fcm_test.sh testarem as
+# checagens contra fixtures sintéticas, sem tocar em .github/workflows/ci.yml.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-caminho_workflow="${CI_INVARIANTS_WORKFLOW:-$repo_root/.github/workflows/ci.yml}"
+# CI_WORKFLOW_PATH é o nome usado por ci_invariants_fcm_test.sh; CI_INVARIANTS_WORKFLOW
+# continua aceito (nome anterior, usado por ci_invariants_test.sh).
+caminho_workflow="${CI_WORKFLOW_PATH:-${CI_INVARIANTS_WORKFLOW:-$repo_root/.github/workflows/ci.yml}}"
 
 # Sem isto, o Python usa a codificação do locale do host para stdout/stderr —
 # em runners Linux normalmente já é UTF-8, mas não é garantido (e não é, por
@@ -30,18 +32,53 @@ export PYTHONIOENCODING=utf-8
 
 exec python3 - "$caminho_workflow" "$@" <<'PY'
 import json
+import re
 import sys
 
 import yaml
+
+# Valida os argumentos ANTES de fazer qualquer trabalho — uma flag digitada
+# errada (ex.: --checks-obrigatorio, sem o S) não pode sair calada com "ok"/
+# exit 0: quem chama este script com --checks-obrigatorios normalmente
+# alimenta a saída direto num PUT da API de proteção de branch, e "ok" sem o
+# JSON esperado quebra ali, longe da causa real (issue #22).
+FLAGS_CONHECIDAS = {'--checks-obrigatorios'}
+flags_desconhecidas = [a for a in sys.argv[2:] if a not in FLAGS_CONHECIDAS]
+if flags_desconhecidas:
+    print(f'uso: ci_invariants.sh [{" | ".join(sorted(FLAGS_CONHECIDAS))}]', file=sys.stderr)
+    print(f'flag(s) desconhecida(s): {flags_desconhecidas}', file=sys.stderr)
+    sys.exit(2)
 
 caminho = sys.argv[1]
 with open(caminho, encoding='utf-8') as f:
     wf = yaml.safe_load(f)
 
-# PyYAML segue o YAML 1.1, em que a chave `on` é lida como o booleano True.
-gatilhos = wf.get('on', wf.get(True)) or {}
-jobs = wf.get('jobs') or {}
 falhas = []
+
+
+def _normaliza_gatilhos(bruto):
+    # PyYAML segue o YAML 1.1, em que a chave `on` é lida como o booleano
+    # True. E `on:` aceita três formas no GitHub Actions: dict (a única que
+    # os checks abaixo sabem ler), string solta (`on: push`) e lista
+    # (`on: [push, pull_request]`) — as duas últimas não carregam
+    # sub-configuração nenhuma (não dá para expressar `branches:` nelas), e
+    # sem normalizar viravam `str`/`list` aqui e quebravam com AttributeError
+    # no primeiro `.get()` de check_gatilhos, longe da causa (issue #22).
+    valor = bruto.get('on', bruto.get(True))
+    if valor is None:
+        return {}
+    if isinstance(valor, dict):
+        return valor
+    if isinstance(valor, str):
+        return {valor: None}
+    if isinstance(valor, list):
+        return {evento: None for evento in valor}
+    falhas.append(f'on: tem tipo inesperado ({type(valor).__name__}): {valor!r}')
+    return {}
+
+
+gatilhos = _normaliza_gatilhos(wf)
+jobs = wf.get('jobs') or {}
 
 # Os jobs que CLAUDE.md e AGENTS.md enumeram. Mudou aqui, muda lá no mesmo
 # commit — foi exatamente essa enumeração que envelheceu (FINDING-1).
@@ -225,9 +262,108 @@ def check_checks_obrigatorios():
                 )
 
 
+# Credenciais do FCM (chave de conta de serviço e google-services.json) no android-e2e.
+# Os secrets valem acesso ao projeto Firebase; estas propriedades têm de sobreviver a
+# edições:
+#  1. cada secret entra por `env:` do PASSO — nunca dentro de `run:` (injeção de script, e
+#     um `echo` o vazaria) nem no `env:` do JOB (toda ação de terceiros o veria);
+#  2. os passos que os decodificam vêm ANTES do E2E (o build do paciente e o push e2e os
+#     leem);
+#  3. um passo `if: always()` apaga os três arquivos depois;
+#  4. o push só entrega com Play Services: o emulador precisa de `target: google_apis` (o
+#     padrão da action é a imagem AOSP, sem ele), e a chave do cache do AVD precisa
+#     conter o target, senão um AVD antigo seria restaurado em cima do novo.
+SEGREDOS_FCM = {
+    'FCM_CREDENTIALS_BASE64': 'Decodifica a credencial do FCM',
+    'GOOGLE_SERVICES_JSON_BASE64': 'Decodifica o google-services.json',
+}
+LIMPEZA_FCM = 'Remove as credenciais do FCM'
+LIMPEZAS_ESPERADAS = (
+    'decode_secret_file.sh --cleanup-temp GOOGLE_APPLICATION_CREDENTIALS',
+    '--cleanup-file apps/patient/android/app/google-services.json',
+    '--cleanup-file infra/docker/gorush/credentials/fcm-service-account.json',
+)
+TARGET_EMULADOR = 'google_apis'
+
+
+def check_credenciais_fcm():
+    # Varredura do TEXTO bruto (sem as linhas de comentário): os secrets só podem aparecer UMA
+    # vez cada, na linha `env:` do passo que os decodifica. Isso cobre os contornos que a
+    # leitura estrutural não vê: `env:` de workflow, `with:` de uma ação, `env:` de outro
+    # passo/job, `secrets['NOME']` e `toJSON(secrets)` (que entrega TODOS os secrets).
+    with open(caminho, encoding='utf-8') as arquivo:
+        texto = '\n'.join(l for l in arquivo.read().splitlines() if not l.lstrip().startswith('#'))
+    for segredo in SEGREDOS_FCM:
+        usos = (len(re.findall(r'secrets\s*\.\s*' + segredo + r'\b', texto))
+                + len(re.findall(r'secrets\s*\[\s*[\'"]' + segredo + r'[\'"]\s*\]', texto)))
+        if usos != 1:
+            falhas.append(f'FCM: {segredo} aparece {usos}x no workflow; só pode aparecer 1x, no env: do passo que o decodifica')
+    if re.search(r'toJSON\(\s*secrets\s*\)', texto):
+        falhas.append('FCM: toJSON(secrets) entrega todos os secrets, inclusive os do FCM; não use')
+    if re.search(r'secrets\s*\[\s*[^\'"\s]', texto):
+        falhas.append('FCM: secrets[<expressão>] é dinâmico e poderia alcançar os secrets do FCM; use o nome literal')
+    for nome_job, job in jobs.items():
+        for segredo in SEGREDOS_FCM:
+            if segredo in (job.get('env') or {}):
+                falhas.append(f'FCM: {nome_job} declara {segredo} no env: do job; declare só no passo')
+            for passo in job.get('steps') or []:
+                if f'secrets.{segredo}' in (passo.get('run') or ''):
+                    falhas.append(f"FCM: o passo {passo.get('name')!r} de {nome_job} usa secrets.{segredo} dentro de run:; passe por env: do passo")
+    passos = (jobs.get('android-e2e') or {}).get('steps') or []
+    nomes = [p.get('name', '') for p in passos]
+    indice_e2e = nomes.index('E2E no emulador Android') if 'E2E no emulador Android' in nomes else None
+    if indice_e2e is None:
+        falhas.append("FCM: android-e2e sem o passo 'E2E no emulador Android'; a ordem das credenciais não pode ser conferida")
+    ultimo = -1
+    for segredo, nome_passo in SEGREDOS_FCM.items():
+        if nome_passo not in nomes:
+            falhas.append(f'FCM: android-e2e sem o passo {nome_passo!r}')
+            continue
+        i = nomes.index(nome_passo)
+        ultimo = max(ultimo, i)
+        passo = passos[i]
+        if (passo.get('env') or {}).get(segredo) != '${{ secrets.' + segredo + ' }}':
+            falhas.append(f'FCM: o passo {nome_passo!r} precisa de env: {segredo}: ${{{{ secrets.{segredo} }}}}')
+        if 'decode_secret_file.sh' not in (passo.get('run') or ''):
+            falhas.append(f'FCM: o passo {nome_passo!r} precisa chamar scripts/ci/decode_secret_file.sh')
+        if indice_e2e is not None and i > indice_e2e:
+            falhas.append(f'FCM: {nome_passo!r} vem DEPOIS do E2E; o arquivo não existiria nele')
+    # As credenciais só podem existir em disco quando o passo do E2E (que as usa) roda: entre a
+    # primeira decodificação e ele não pode haver ação de terceiros (setup-java, flutter-action,
+    # cache...), que leria os arquivos sem precisar deles. Só passos `run:` ficam no meio.
+    decodificados = [nomes.index(n) for n in SEGREDOS_FCM.values() if n in nomes]
+    if decodificados and indice_e2e is not None:
+        for passo in passos[min(decodificados) + 1:indice_e2e]:
+            if passo.get('uses'):
+                falhas.append(f"FCM: a ação {passo['uses']!r} roda com as credenciais já em disco; decodifique logo antes de 'E2E no emulador Android'")
+    limpeza = [p for p in passos[ultimo + 1:] if p.get('name') == LIMPEZA_FCM]
+    if not limpeza:
+        falhas.append(f'FCM: nenhum passo {LIMPEZA_FCM!r} depois das decodificações')
+    else:
+        passo = limpeza[0]
+        if indice_e2e is not None and passos.index(passo) < indice_e2e:
+            falhas.append(f'FCM: o passo {LIMPEZA_FCM!r} vem ANTES do E2E; apagaria as credenciais que ele usa')
+        if passo.get('if') != 'always()':
+            falhas.append(f'FCM: o passo {LIMPEZA_FCM!r} precisa de if: always()')
+        for trecho in LIMPEZAS_ESPERADAS:
+            if trecho not in (passo.get('run') or ''):
+                falhas.append(f'FCM: o passo {LIMPEZA_FCM!r} não roda {trecho!r}')
+    # Emulador com Play Services e cache do AVD coerente.
+    emuladores = [p for p in passos if str(p.get('uses', '')).startswith('reactivecircus/android-emulator-runner')]
+    if not emuladores:
+        falhas.append('FCM: android-e2e sem passo reactivecircus/android-emulator-runner')
+    for passo in emuladores:
+        if (passo.get('with') or {}).get('target') != TARGET_EMULADOR:
+            falhas.append(f"FCM: o passo {passo.get('name')!r} precisa de target: {TARGET_EMULADOR} (sem Play Services o FCM não entrega token)")
+    for passo in passos:
+        chave = str((passo.get('with') or {}).get('key', ''))
+        if chave.startswith('avd-') and f'-{TARGET_EMULADOR}-' not in chave:
+            falhas.append(f'FCM: a chave do cache do AVD {chave!r} não contém o target {TARGET_EMULADOR!r}')
+
+
 CHECKS = [check_jobs, check_gatilhos, check_sem_filtro_de_paths, check_concorrencia,
           check_limpeza_do_workspace, check_versoes_de_acoes,
-          check_runner, check_checks_obrigatorios]
+          check_runner, check_checks_obrigatorios, check_credenciais_fcm]
 
 for check in CHECKS:
     check()

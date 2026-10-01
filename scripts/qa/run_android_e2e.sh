@@ -12,7 +12,9 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$repo_root"
 
-trap 'docker compose down' EXIT
+# `|| true`: com `set -e`, um `down` que falha trocaria o código de saída do script (um sucesso
+# viraria falha, e o exit do push e2e viraria 1).
+trap 'docker compose --profile push down || true' EXIT
 
 # GOOGLE_MAPS_API_KEY não é mais obrigatória: a CI roda só o smoke de cada app
 # (e2e.sh --emulator, sem --full), e o map_flow_test.dart ficou fora dele. Se
@@ -29,3 +31,10 @@ set +a
 dart run scripts/qa/measure_latency.dart \
   --mqtt-password "$MQTT_ACS_PASSWORD" \
   --output build/qa/latency/metrics.json
+
+# Push e2e (Gorush e FCM reais) por ÚLTIMO: uma falha do FCM não pode esconder o resultado
+# do smoke nem impedir o artefato de latência, mas o job TEM de falhar quando o push falha.
+# Sem as credenciais (PR de fork) o script avisa e sai com 0.
+push_rc=0
+./scripts/qa/ci_push_e2e.sh || push_rc=$?
+exit "$push_rc"

@@ -34,6 +34,28 @@ class RiskEventSnapshot {
   final DateTime recordedAt;
 }
 
+/// Um pedido do próprio titular (LGPD-RF08: exclusão ou correção), do jeito
+/// que a store enxerga — `details` já decifrado.
+class DataSubjectRequestSnapshot {
+  const DataSubjectRequestSnapshot({
+    required this.id,
+    required this.type,
+    required this.status,
+    required this.details,
+    required this.createdAt,
+    required this.dueAt,
+  });
+
+  final String id;
+  final DataSubjectRequestType type;
+  final DataSubjectRequestStatus status;
+
+  /// Texto do pedido de correção; `null` num pedido de exclusão.
+  final String? details;
+  final DateTime createdAt;
+  final DateTime dueAt;
+}
+
 /// Tudo que o painel "Meus Dados" mostra sobre o próprio paciente.
 class PatientDataSnapshot {
   const PatientDataSnapshot({
@@ -44,6 +66,7 @@ class PatientDataSnapshot {
     required this.chronicConditions,
     required this.consents,
     required this.riskHistory,
+    this.requests = const [],
   });
 
   final String name;
@@ -53,6 +76,9 @@ class PatientDataSnapshot {
   final List<String> chronicConditions;
   final List<ConsentRecordSnapshot> consents;
   final List<RiskEventSnapshot> riskHistory;
+
+  /// Mais recente primeiro.
+  final List<DataSubjectRequestSnapshot> requests;
 }
 
 /// Consulta a tudo que compõe o painel "Meus Dados" de um único paciente.

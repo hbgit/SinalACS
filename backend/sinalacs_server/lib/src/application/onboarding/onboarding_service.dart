@@ -79,7 +79,10 @@ abstract interface class OnboardingStore {
 /// Versão do texto de política vigente. Mesmo padrão que
 /// `spec/lgpd_design.md` define para a política de privacidade — trocar
 /// exige nova versão publicada, não incrementar este literal sem mudança de
-/// texto real.
+/// texto real. É também a versão do Termo de Uso e da Política de Privacidade
+/// que o app paciente exibe (`legalDocumentsVersion` em
+/// `apps/patient/lib/core/legal/legal_documents.dart`); o teste
+/// `apps/patient/test/legal_documents_test.dart` falha se as duas divergirem.
 const String consentPolicyVersion = '2026.1';
 
 const _tokenLifetime = Duration(minutes: 15);
@@ -131,7 +134,7 @@ class OnboardingService {
     return EnrollmentTokenResult(token: token, expiresAt: expiresAt);
   }
 
-  /// Consome o convite, exige o consentimento obrigatório, grava as 3
+  /// Consome o convite, exige o consentimento obrigatório, grava as 4
   /// finalidades em `consent_logs` (aceite ou recusa) e emite a sessão do
   /// paciente. Tudo ou nada: se o consentimento obrigatório for recusado,
   /// o token permanece válido (a pessoa pode tentar de novo lendo o mesmo
@@ -144,6 +147,15 @@ class OnboardingService {
     if (mandatory != true) {
       throw EnrollmentException(
         message: 'O consentimento para processamento de dados de saúde é obrigatório.',
+      );
+    }
+    // O aceite do Termo de Uso e da Política de Privacidade é a outra
+    // condição de uso (LGPD-RF18: "aceite explícito no cadastro"). Checado
+    // antes de consumir o convite, pelo mesmo motivo do consentimento de
+    // saúde: a recusa não pode queimar o QR.
+    if (consents[ConsentPurpose.termsOfUse] != true) {
+      throw EnrollmentException(
+        message: 'É preciso aceitar o Termo de Uso e a Política de Privacidade.',
       );
     }
 
