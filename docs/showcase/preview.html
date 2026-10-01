@@ -2,18 +2,18 @@
 </style></head><body><div class="bespoke-marp-osc"><button data-bespoke-marp-osc="prev" tabindex="-1" title="Previous slide">Previous slide</button><span data-bespoke-marp-osc="page"></span><button data-bespoke-marp-osc="next" tabindex="-1" title="Next slide">Next slide</button><button data-bespoke-marp-osc="fullscreen" tabindex="-1" title="Toggle fullscreen (f)">Toggle fullscreen</button><button data-bespoke-marp-osc="overview" tabindex="-1" title="Toggle overview view (o)">Toggle overview view</button><button data-bespoke-marp-osc="presenter" tabindex="-1" title="Open presenter view (p)">Open presenter view</button></div><div id=":$p"><svg data-marpit-svg="" viewBox="0 0 1280 720"><foreignObject width="1280" height="720"><section id="1" data-paginate="true" data-class="cover" data-theme="sinalacs" data-lang="pt-BR" lang="pt-BR" class="cover" data-marpit-pagination="1" style="--paginate:true;--class:cover;--theme:sinalacs;--lang:pt-BR;" data-marpit-pagination-total="18">
 <h1 id="sinalacs">SinalACS</h1>
 <p class="tagline">Priorização clínica de visitas domiciliares na Atenção Primária à Saúde</p>
-<p><span class="kicker">Showcase — protótipo</span></p>
+<p><span class="kicker">Showcase protótipo</span></p>
 </section>
 </foreignObject></svg><svg data-marpit-svg="" viewBox="0 0 1280 720"><foreignObject width="1280" height="720"><section id="2" data-paginate="true" data-class="statement" data-theme="sinalacs" data-lang="pt-BR" lang="pt-BR" class="statement" data-marpit-pagination="2" style="--paginate:true;--class:statement;--theme:sinalacs;--lang:pt-BR;" data-marpit-pagination-total="18">
 <h1 id="a-doen%C3%A7a-n%C3%A3o-segue-o-mapa">A doença não segue o mapa.</h1>
-<p>O Agente Comunitário de Saúde visita as casas na ordem do roteiro geográfico —<br />
-rua por rua, sempre igual. Quem está pior pode ser a última visita do dia,<br />
+<p>O Agente Comunitário de Saúde visita as casas na ordem do roteiro geográfico rua por rua, sempre igual. <br />
+ Quem está pior pode ser a última visita do dia,<br />
 simplesmente por morar no fim da rua.</p>
 </section>
 </foreignObject></svg><svg data-marpit-svg="" viewBox="0 0 1280 720"><foreignObject width="1280" height="720"><section id="3" data-paginate="true" data-class="statement" data-theme="sinalacs" data-lang="pt-BR" lang="pt-BR" class="statement" data-marpit-pagination="3" style="--paginate:true;--class:statement;--theme:sinalacs;--lang:pt-BR;" data-marpit-pagination-total="18">
 <h1 id="sinais-cl%C3%ADnicos-estruturados-%E2%86%92-fila-ranqueada-por-risco">Sinais clínicos estruturados → fila ranqueada por risco</h1>
 <p>Uma triagem de três perguntas, com regra determinística inspirada no<br />
-Protocolo de Manchester — sem inteligência artificial, sem campo editável.<br />
+Protocolo de Manchester sem inteligência artificial, sem campo editável.<br />
 A mesma resposta produz sempre a mesma cor, de forma auditável.</p>
 <div class="card-grid cols-3" style="margin-top: 32px;">
   <div class="card">
@@ -22,7 +22,7 @@ A mesma resposta produz sempre a mesma cor, de forma auditável.</p>
   </div>
   <div class="card">
     <h3>WhatsApp</h3>
-    <p>Desorganiza — comunicação sem estrutura nem prioridade.</p>
+    <p>Desorganiza comunicação sem estrutura nem prioridade.</p>
   </div>
   <div class="card" style="border-color: var(--acs-fill);">
     <h3 style="color: var(--acs-text);">SinalACS</h3>
@@ -35,11 +35,11 @@ A mesma resposta produz sempre a mesma cor, de forma auditável.</p>
 <div class="card-grid cols-4" style="margin-top: 24px;">
   <div class="card">
     <h3>3 apps Flutter</h3>
-    <p>Paciente, ACS e Admin — isomorfismo Dart de ponta a ponta com o backend.</p>
+    <p>Paciente, ACS e Admin isomorfismo Dart de ponta a ponta com o backend.</p>
   </div>
   <div class="card">
     <h3>Backend Dart/Serverpod</h3>
-    <p>RPC tipado, ORM e migrações geradas — não é REST.</p>
+    <p>RPC tipado, ORM e migrações geradas não é REST.</p>
   </div>
   <div class="card">
     <h3>PostgreSQL + MQTT/TLS</h3>
@@ -63,7 +63,7 @@ sincronização em segundo plano assim que a rede volta.
     </div>
   </div>
   <div class="info-col">
-    <h2>Paciente — Autenticação inclusiva</h2>
+    <h2>Paciente: Autenticação inclusiva</h2>
     <ul>
       <li>Acesso com CPF e data de nascimento, sem senha</li>
       <li>Atalho de QR Code visível na tela (leitura ainda depende de integração)</li>
@@ -81,11 +81,11 @@ sincronização em segundo plano assim que a rede volta.
     </div>
   </div>
   <div class="info-col">
-    <h2>Paciente — Alerta de urgência</h2>
+    <h2>Paciente: Alerta de urgência</h2>
     <ul>
       <li>Botão circular de emergência domina a hierarquia visual</li>
       <li>Confirmação explícita antes de qualquer mudança de estado</li>
-      <li>O alerta é <strong>registrado e enfileirado</strong> — a entrega ponta a
+      <li>O alerta é <strong>registrado e enfileirado</strong> a entrega ponta a
         ponta com confirmação (ACK) é a prova técnica do próximo bloco</li>
     </ul>
   </div>
@@ -100,10 +100,10 @@ sincronização em segundo plano assim que a rede volta.
     </div>
   </div>
   <div class="info-col">
-    <h2>Paciente — Triagem rápida</h2>
+    <h2>Paciente: Triagem rápida</h2>
     <ul>
       <li>Três perguntas, uma resposta por vez, com indicador de progresso</li>
-      <li>Classificação <strong>determinística</strong>, sem campo editável —
+      <li>Classificação <strong>determinística</strong>, sem campo editável 
         nem para o paciente, nem para o ACS</li>
       <li>Mesma resposta → mesma cor, sempre. Regra fechada e auditável</li>
     </ul>
@@ -113,7 +113,7 @@ sincronização em segundo plano assim que a rede volta.
 <p><span class="app-tag patient">Paciente</span></p>
 </section>
 </foreignObject></svg><svg data-marpit-svg="" viewBox="0 0 1280 720"><foreignObject width="1280" height="720"><section id="8" data-paginate="true" data-theme="sinalacs" data-lang="pt-BR" lang="pt-BR" data-marpit-pagination="8" style="--paginate:true;--theme:sinalacs;--lang:pt-BR;" data-marpit-pagination-total="18">
-<h2>Paciente — Acompanhamento, lembretes e meus dados</h2>
+<h2>Paciente: Acompanhamento, lembretes e meus dados</h2>
 <div style="display: flex; justify-content: center; gap: 48px; margin-top: 16px;">
   <figure style="margin: 0; text-align: center;">
     <div class="phone-frame" style="width: 170px;">
@@ -144,7 +144,7 @@ sincronização em segundo plano assim que a rede volta.
     </div>
   </div>
   <div class="info-col">
-    <h2>ACS — Login institucional</h2>
+    <h2>ACS: Login institucional</h2>
     <ul>
       <li>Matrícula/CNS e senha, com indicador de operação offline</li>
       <li>Mesmo padrão visual do login do Admin</li>
@@ -162,10 +162,10 @@ sincronização em segundo plano assim que a rede volta.
     </div>
   </div>
   <div class="info-col">
-    <h2>ACS — Territorialização</h2>
+    <h2>ACS: Territorialização</h2>
     <ul>
       <li>Microárea, quantidade de pacientes e status do cache local</li>
-      <li><strong>O ACS só acessa dados do próprio território</strong> —
+      <li><strong>O ACS só acessa dados do próprio território</strong>
         invariante do sistema, não uma configuração (INV-01)</li>
       <li>Cache territorial via <code>sqflite</code>, para operar sem rede</li>
     </ul>
@@ -181,10 +181,10 @@ sincronização em segundo plano assim que a rede volta.
     </div>
   </div>
   <div class="info-col">
-    <h2>ACS — Fila de priorização</h2>
+    <h2>ACS: Fila de priorização</h2>
     <ul>
       <li>Ordem por gravidade clínica: vermelho → amarelo → verde</li>
-      <li>Cor é <strong>exclusiva</strong> da classificação de risco — avisos
+      <li>Cor é <strong>exclusiva</strong> da classificação de risco avisos
         técnicos (sem conexão, falha ao salvar) usam azul, nunca vermelho/amarelo</li>
       <li>Falha transitória ganha botão "Tentar agora", mesmo com reconexão
         automática já em curso</li>
@@ -201,7 +201,7 @@ sincronização em segundo plano assim que a rede volta.
     </div>
   </div>
   <div class="info-col">
-    <h2>ACS — Registro de visita offline</h2>
+    <h2>ACS: Registro de visita offline</h2>
     <ul>
       <li>Desfecho e observações registrados na porta da casa, com ou sem sinal</li>
       <li>Enfileiramento local; sincronização automática ao voltar a rede</li>
@@ -219,7 +219,7 @@ sincronização em segundo plano assim que a rede volta.
     </div>
   </div>
   <div class="info-col">
-    <h2>ACS — Acionamento e escalonamento</h2>
+    <h2>ACS: Acionamento e escalonamento</h2>
     <ul>
       <li>Resume paciente, risco e endereço para acionar SAMU ou UBS</li>
       <li>Botões deixam explícito que discagem e encaminhamento reais ainda não
@@ -243,7 +243,7 @@ sincronização em segundo plano assim que a rede volta.
     </div>
   </div>
   <div class="info-col">
-    <h2>Admin — Indicadores e microáreas</h2>
+    <h2>Admin: Indicadores e microáreas</h2>
     <ul>
       <li>Contadores por risco, alertas abertos vs. reconhecidos e o TMRAV</li>
       <li>Listagem somente leitura das microáreas e do ACS vinculado</li>
@@ -267,9 +267,9 @@ sincronização em segundo plano assim que a rede volta.
     </div>
   </div>
   <div class="info-col">
-    <h2>Admin — Alertas, auditoria e layout responsivo</h2>
+    <h2>Admin: Alertas, auditoria e layout responsivo</h2>
     <ul>
-      <li>Alertas filtráveis por microárea e status — sem controle de
+      <li>Alertas filtráveis por microárea e status sem controle de
         reclassificação (a classificação não é alterável por humano, INV-02)</li>
       <li>Log de auditoria somente leitura; toda visita às telas sensíveis
         também é registrada</li>
@@ -288,12 +288,12 @@ sincronização em segundo plano assim que a rede volta.
   </div>
   <div class="card">
     <h3>Restrição por microárea</h3>
-    <p>INV-01 reforçada no backend, não só na interface — um ACS nunca lê dados
+    <p>INV-01 reforçada no backend, não só na interface um ACS nunca lê dados
       fora do próprio território.</p>
   </div>
   <div class="card">
     <h3>Trilha de auditoria</h3>
-    <p>Acesso a dado sensível registrado com quem, quando e o quê — inclusive
+    <p>Acesso a dado sensível registrado com quem, quando e o quê inclusive
       no backoffice Admin.</p>
   </div>
 </div>
@@ -304,27 +304,27 @@ cibersegurança baseada em NIST CSF 2.0 em <code>spec/security_assessment.md</co
 </section>
 </foreignObject></svg><svg data-marpit-svg="" viewBox="0 0 1280 720"><foreignObject width="1280" height="720"><section id="17" data-paginate="true" data-theme="sinalacs" data-lang="pt-BR" lang="pt-BR" data-marpit-pagination="17" style="--paginate:true;--theme:sinalacs;--lang:pt-BR;" data-marpit-pagination-total="18">
 <h1 id="estado-atual-e-roadmap">Estado atual e roadmap</h1>
-<p>Protótipo validado localmente — ciclo de alerta vermelho roda ponta a ponta
+<p>Protótipo validado localmente ciclo de alerta vermelho roda ponta a ponta
 com confirmação de entrega, CI verde nos quatro trilhos.</p>
 <div class="roadmap">
   <div class="phase done">
     <div class="status">Concluída</div>
-    <strong>Fase 1 — Prova de conceito</strong>
+    <strong>Fase 1 Prova de conceito</strong>
   </div>
   <div class="phase done">
     <div class="status">Concluída</div>
-    <strong>Fase 2 — Alpha/Beta</strong>
+    <strong>Fase 2 Alpha/Beta</strong>
   </div>
   <div class="phase pending">
     <div class="status">Em curso</div>
-    <strong>Fase 3 — Disponibilidade geral</strong>
+    <strong>Fase 3 Disponibilidade geral</strong>
     <p style="font-size: 14px; margin-top: 8px;">Deploy monitorado, teste de
       carga e auditoria de conformidade LGPD</p>
   </div>
 </div>
 <p style="margin-top: 20px; font-size: 16px;">
 Mapa interativo, geofencing, integração SAMU e avisos push
-<span class="badge-roadmap">roadmap v1.5</span> — hoje são stubs no protótipo,
+<span class="badge-roadmap">roadmap v1.5</span> hoje são stubs no protótipo,
 não capacidades ativas.
 </p>
 </section>
