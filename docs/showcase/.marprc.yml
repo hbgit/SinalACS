@@ -1,0 +1,6 @@
+# Configuração do Marp CLI para o deck de showcase.
+# Sem isto, `marp slides.md` ignora o tema `sinalacs` (cai no tema default)
+# e descarta o HTML inline (cards, grids e mockups de celular).
+themeSet: ./sinalacs.css
+html: true
+allowLocalFiles: true
