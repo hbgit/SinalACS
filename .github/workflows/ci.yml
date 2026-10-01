@@ -37,6 +37,7 @@ jobs:
         run: |
           python3 -c 'import yaml' 2>/dev/null || { sudo apt-get update && sudo apt-get install -y python3-yaml; }
           ./scripts/qa/ci_invariants.sh
+          ./scripts/qa/ci_invariants_test.sh
       - name: Testes dos scripts de CI
         run: |
           ./scripts/ci/decode_secret_file_test.sh
