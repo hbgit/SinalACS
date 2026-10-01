@@ -13,6 +13,7 @@ import 'package:sinalacs_acs/core/network/backend_scope.dart';
 import 'package:sinalacs_acs/core/security/database_key_store.dart';
 import 'package:sinalacs_acs/core/services/alert_feed.dart';
 import 'package:sinalacs_acs/core/services/alert_queue.dart';
+import 'package:sinalacs_acs/core/services/emergency_dialer.dart';
 import 'package:sinalacs_acs/core/services/offline_visit_queue.dart';
 import 'package:sinalacs_client/sinalacs_client.dart' show MicroAreaPatient;
 import 'package:sinalacs_acs/core/services/reconnect_schedule.dart';
@@ -1912,15 +1913,46 @@ class _VisitRegistrationScreenState extends State<VisitRegistrationScreen> {
   }
 }
 
-class EscalationScreen extends StatelessWidget {
-  const EscalationScreen({super.key, this.alert, this.onVisit});
+class EscalationScreen extends StatefulWidget {
+  const EscalationScreen({
+    super.key,
+    this.alert,
+    this.onVisit,
+    this.dialer = const UrlLauncherEmergencyDialer(),
+  });
 
   final PrioritizedAlert? alert;
   final void Function(PrioritizedAlert alert)? onVisit;
+  final EmergencyDialer dialer;
+
+  @override
+  State<EscalationScreen> createState() => _EscalationScreenState();
+}
+
+class _EscalationScreenState extends State<EscalationScreen> {
+  /// Trava o toque duplo: dois `launchUrl` seguidos empilham dois discadores.
+  bool _dialing = false;
+
+  Future<void> _callSamu() async {
+    if (_dialing) return;
+    setState(() => _dialing = true);
+    var opened = false;
+    try {
+      opened = await widget.dialer.dial(samuNumber);
+    } catch (_) {
+      opened = false;
+    }
+    if (!mounted) return;
+    setState(() => _dialing = false);
+    if (!opened) {
+      _message(context, 'Não foi possível abrir o discador. Ligue manualmente para $samuNumber.');
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    final current = alert;
+    final current = widget.alert;
+    final onVisit = widget.onVisit;
     return _page([
       const Text('Escalonamento rápido', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
       const SizedBox(height: 16),
@@ -1930,7 +1962,7 @@ class EscalationScreen extends StatelessWidget {
       _InfoRow('Local (hash)', current?.locationHash ?? '—'),
       const SizedBox(height: 20),
       FilledButton.icon(
-        onPressed: () => _message(context, 'Discagem não está integrada neste protótipo.'),
+        onPressed: _dialing ? null : _callSamu,
         // Alvo de toque de 60x60 (padrão de emergência do PRD): o default do
         // Material 3 para `FilledButton.icon` fica em 40dp de altura visual,
         // abaixo do exigido para uma ação de acionar o SAMU.
@@ -1948,7 +1980,7 @@ class EscalationScreen extends StatelessWidget {
         const SizedBox(height: 12),
         OutlinedButton.icon(
           key: const Key('escalation_visit'),
-          onPressed: onVisit == null ? null : () => onVisit!(current),
+          onPressed: onVisit == null ? null : () => onVisit(current),
           style: OutlinedButton.styleFrom(minimumSize: const Size(48, 52)),
           icon: const Icon(Icons.alt_route_outlined),
           label: const Text('Iniciar rota de visita'),

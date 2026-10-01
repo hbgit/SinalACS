@@ -24,6 +24,15 @@ void main() {
     expect(declares('INTERNET'), isTrue);
   });
 
+  test('declara a consulta ao discador (tel:) para o botão do SAMU (RF13)', () {
+    // Android 11+: sem <queries>, `canLaunchUrl(tel:)` devolve false mesmo com discador.
+    expect(
+      RegExp(r'<action\s+android:name="android\.intent\.action\.DIAL"\s*/>\s*<data\s+android:scheme="tel"\s*/>')
+          .hasMatch(manifest),
+      isTrue,
+    );
+  });
+
   test('NÃO pede localização em segundo plano (decisão §4 de 2026-09-16)', () {
     expect(declares('ACCESS_BACKGROUND_LOCATION'), isFalse,
         reason: 'o geofence é só em primeiro plano; background exigiria revisão da loja e LGPD');

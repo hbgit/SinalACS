@@ -1,3 +1,4 @@
+import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
@@ -117,5 +118,13 @@ void main() {
 
     await tester.tap(find.byKey(const Key('escalation_visit')));
     expect(selected?.alertId, alert.alertId);
+  });
+
+  testWidgets('o discador do aparelho resolve tel:192 (RF13)', (tester) async {
+    // Prova o que o widget test não alcança: <queries> declarada e um
+    // handler de `tel:` presente no aparelho. Não abre a chamada.
+    final available = await canLaunchUrl(Uri(scheme: 'tel', path: '192'));
+    expect(available, isTrue,
+        reason: 'sem <queries> para tel: (Android 11+) ou sem discador no emulador');
   });
 }
