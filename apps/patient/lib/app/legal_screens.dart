@@ -98,7 +98,7 @@ class LegalDocumentScreen extends StatelessWidget {
                   ? 'Versão ${document.version} · vigente desde ${document.effectiveDate}'
                   : 'Versão ${document.version} · passa a valer em $effectiveLabel',
               key: const Key('legal_version'),
-              style: const TextStyle(color: Colors.white70),
+              style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
             ),
             const SizedBox(height: 16),
             const Text(
