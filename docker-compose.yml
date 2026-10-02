@@ -134,6 +134,9 @@ services:
       MQTT_PASSWORD: ${MQTT_BACKEND_PASSWORD:?defina em .env — rode ./scripts/dev/bootstrap_env.sh}
       MQTT_USE_TLS: "true"
       MQTT_CA_CERT_PATH: /app/certs/ca.crt
+      # mTLS: o broker exige certificado de cliente (CN = usuário MQTT).
+      MQTT_CLIENT_CERT_PATH: /app/certs/backend.crt
+      MQTT_CLIENT_KEY_PATH: /app/certs/backend.key
       # Sem esta variável o servidor caía num segredo de desenvolvimento fixo e
       # público, com o qual qualquer pessoa forjaria um token de ACS.
       JWT_SECRET: ${JWT_SECRET:?defina em .env — rode ./scripts/dev/bootstrap_env.sh}
