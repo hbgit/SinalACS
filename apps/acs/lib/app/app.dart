@@ -224,7 +224,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: const _Header('Segurança e rastreabilidade', 'Acesso institucional'),
+    appBar: _Header('Segurança e rastreabilidade', 'Acesso institucional', height: acsHeaderHeight(context)),
     body: Center(child: ConstrainedBox(
       constraints: const BoxConstraints(maxWidth: 600),
       child: ListView(padding: const EdgeInsets.all(24), children: [
@@ -737,7 +737,7 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: _Header('ACS • ${_brokerConnected ? 'em linha' : 'sem conexão'}', 'Painel operacional', connected: _brokerConnected),
+    appBar: _Header('ACS • ${_brokerConnected ? 'em linha' : 'sem conexão'}', 'Painel operacional', height: acsHeaderHeight(context), connected: _brokerConnected),
     body: SafeArea(child: switch (destination) {
       AcsDestination.area => TerritorializationScreen(
           pulling: _pullingVisits,
@@ -798,13 +798,13 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
       destinations: const [NavigationDestination(icon: Icon(Icons.storage_outlined), label: 'Área'), NavigationDestination(icon: Icon(Icons.grid_view_outlined), label: 'Fila'), NavigationDestination(icon: Icon(Icons.map_outlined), label: 'Mapa'), NavigationDestination(icon: Icon(Icons.assignment_outlined), label: 'Visita'), NavigationDestination(icon: Icon(Icons.more_horiz), label: 'Mais')],
     ),
   );
-  void _more(BuildContext context) => showModalBottomSheet<void>(context: context, builder: (sheet) => SafeArea(child: Column(mainAxisSize: MainAxisSize.min, children: [
+  void _more(BuildContext context) => showModalBottomSheet<void>(context: context, builder: (sheet) => SafeArea(child: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
     _moreItem(sheet, Icons.call_outlined, 'Acionamento', AcsDestination.escalation),
     _moreItem(sheet, Icons.location_searching, 'Geofencing', AcsDestination.geofencing),
     _moreItem(sheet, Icons.campaign_outlined, 'Avisos à comunidade', AcsDestination.notices),
     _moreItem(sheet, Icons.qr_code_2, 'Convidar paciente', AcsDestination.invite),
     _moreItem(sheet, Icons.tune_outlined, 'Preferências', AcsDestination.settings),
-  ])));
+  ]))));
   Widget _moreItem(BuildContext sheet, IconData icon, String label, AcsDestination value) => ListTile(leading: Icon(icon), title: Text(label), onTap: () { Navigator.pop(sheet); setState(() => destination = value); });
 }
 
@@ -899,7 +899,7 @@ class TerritorializationScreen extends StatelessWidget {
                 const SizedBox(height: 22, width: 22, child: CircularProgressIndicator(strokeWidth: 2)),
                 const SizedBox(width: 8),
               ],
-              const Text('Atualizar dados da microárea'),
+              const Flexible(child: Text('Atualizar dados da microárea', textAlign: TextAlign.center)),
             ]),
           ),
         ),
@@ -1838,7 +1838,7 @@ class _VisitRegistrationScreenState extends State<VisitRegistrationScreen> {
         contentPadding: EdgeInsets.zero,
       ),
       const SizedBox(height: 8),
-      DropdownButtonFormField<String>(initialValue: outcome, decoration: const InputDecoration(labelText: 'Status do atendimento'), items: const ['Realizada com sucesso', 'Paciente ausente', 'Recusou atendimento'].map((v) => DropdownMenuItem(value: v, child: Text(v))).toList(), onChanged: !hasPatient || !_arrivalConfirmed ? null : (v) => setState(() => outcome = v!)),
+      DropdownButtonFormField<String>(isExpanded: true, initialValue: outcome, decoration: const InputDecoration(labelText: 'Status do atendimento'), items: const ['Realizada com sucesso', 'Paciente ausente', 'Recusou atendimento'].map((v) => DropdownMenuItem(value: v, child: Text(v))).toList(), onChanged: !hasPatient || !_arrivalConfirmed ? null : (v) => setState(() => outcome = v!)),
       const SizedBox(height: 16),
       TextField(
         controller: notes,
@@ -2210,12 +2210,23 @@ String _riskLabelPt(String riskLevel) => switch (riskLevel.toLowerCase()) {
       'green' || 'verde' => 'Verde',
       _ => 'Não classificado',
     };
-class _InfoRow extends StatelessWidget { const _InfoRow(this.label, this.value); final String label; final String value; @override Widget build(BuildContext context) => Padding(padding: const EdgeInsets.symmetric(vertical: 5), child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text(label), Flexible(child: Text(value, textAlign: TextAlign.end, style: const TextStyle(fontWeight: FontWeight.bold)))])); }
+class _InfoRow extends StatelessWidget { const _InfoRow(this.label, this.value); final String label; final String value; @override Widget build(BuildContext context) => Padding(padding: const EdgeInsets.symmetric(vertical: 5), child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, crossAxisAlignment: CrossAxisAlignment.start, children: [Flexible(child: Text(label)), const SizedBox(width: 12), Flexible(child: Text(value, textAlign: TextAlign.end, style: const TextStyle(fontWeight: FontWeight.bold)))])); }
+/// Altura do cabeçalho, crescendo com a escala de fonte.
+///
+/// `preferredSize` não tem acesso ao `BuildContext`, então quem monta o
+/// `Scaffold` calcula e entrega. O teto de 132 existe para que fonte a 200% não
+/// coma metade da tela de um celular; o título já usa elipse.
+double acsHeaderHeight(BuildContext context) =>
+    MediaQuery.textScalerOf(context).scale(72).clamp(72.0, 132.0);
+
 class _Header extends StatelessWidget implements PreferredSizeWidget {
-  const _Header(this.eyebrow, this.title, {this.connected});
+  const _Header(this.eyebrow, this.title, {required this.height, this.connected});
 
   final String eyebrow;
   final String title;
+
+  /// Calculada por quem monta o Scaffold, via [acsHeaderHeight].
+  final double height;
 
   /// Estado da conexão com o broker. `null` fora do painel.
   ///
@@ -2224,29 +2235,37 @@ class _Header extends StatelessWidget implements PreferredSizeWidget {
   final bool? connected;
 
   @override
-  Size get preferredSize => const Size.fromHeight(72);
+  Size get preferredSize => Size.fromHeight(height);
 
   @override
   Widget build(BuildContext context) => AppBar(
+    toolbarHeight: height,
     title: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Text(eyebrow.toUpperCase(), style: TextStyle(fontSize: 10, color: context.acsRisk.accentOnSurface, fontWeight: FontWeight.bold)),
-      Text(title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+      Text(eyebrow.toUpperCase(), maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 10, color: context.acsRisk.accentOnSurface, fontWeight: FontWeight.bold)),
+      Text(title, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
     ]),
     actions: [
       Padding(
         padding: const EdgeInsets.only(right: 12),
-        child: Chip(
-          key: const Key('broker_status'),
-          avatar: connected == null ? null : Icon(
-            connected! ? Icons.cloud_done_outlined : Icons.cloud_off_outlined,
-            size: 18,
-            color: connected! ? context.acsRisk.greenOnSurface : context.acsRisk.redOnSurface,
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width * 0.5),
+          child: Chip(
+            key: const Key('broker_status'),
+            avatar: connected == null ? null : Icon(
+              connected! ? Icons.cloud_done_outlined : Icons.cloud_off_outlined,
+              size: 18,
+              color: connected! ? context.acsRisk.greenOnSurface : context.acsRisk.redOnSurface,
+            ),
+            label: Text(
+              switch (connected) {
+                null => 'Offline ready',
+                true => 'Alertas em tempo real',
+                false => 'Sem central',
+              },
+              overflow: TextOverflow.ellipsis,
+              maxLines: 1,
+            ),
           ),
-          label: Text(switch (connected) {
-            null => 'Offline ready',
-            true => 'Alertas em tempo real',
-            false => 'Sem central',
-          }),
         ),
       ),
     ],
