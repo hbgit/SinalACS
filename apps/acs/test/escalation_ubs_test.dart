@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sinalacs_acs/app/app.dart';
@@ -76,5 +78,34 @@ void main() {
 
     expect(dialer.discados, isEmpty);
     expect(find.text('Sem conexão.'), findsOneWidget);
+  });
+
+  testWidgets('SAMU continua ativo enquanto a consulta da UBS está pendente', (tester) async {
+    final backend = FakeAcsBackend()..ubsContactGate = Completer<void>();
+    final dialer = _Dialer();
+    await _abrir(tester, backend, dialer);
+
+    await tester.tap(find.byKey(const Key('escalation_ubs')));
+    await tester.pump();
+    await tester.tap(find.text('Ligar para o SAMU (192)'));
+    await tester.pump();
+
+    expect(dialer.discados, ['192']);
+
+    backend.ubsContactGate!.complete();
+    await tester.pumpAndSettle();
+    expect(dialer.discados, ['192', '+551155500100']);
+  });
+
+  testWidgets('telefone sem dígitos (n/d) vale como não cadastrado e não disca', (tester) async {
+    final backend = FakeAcsBackend()..ubsContactResult = UbsContact(name: 'UBS X', phone: 'n/d');
+    final dialer = _Dialer();
+    await _abrir(tester, backend, dialer);
+
+    await tester.tap(find.byKey(const Key('escalation_ubs')));
+    await tester.pumpAndSettle();
+
+    expect(dialer.discados, isEmpty);
+    expect(find.textContaining('UBS X ainda não cadastrou um telefone'), findsOneWidget);
   });
 }

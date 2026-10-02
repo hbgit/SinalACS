@@ -1937,6 +1937,9 @@ class _EscalationScreenState extends State<EscalationScreen> {
   /// Trava o toque duplo: dois `launchUrl` seguidos empilham dois discadores.
   bool _dialing = false;
 
+  /// Trava própria da consulta da UBS: nunca pode desabilitar o botão do SAMU.
+  bool _fetchingUbs = false;
+
   Future<void> _callSamu() async {
     if (_dialing) return;
     setState(() => _dialing = true);
@@ -1955,17 +1958,17 @@ class _EscalationScreenState extends State<EscalationScreen> {
 
   /// Liga para a UBS do ACS (RF13). O telefone vem do servidor; sem ele, avisa.
   Future<void> _callUbs() async {
-    if (_dialing) return;
-    setState(() => _dialing = true);
+    if (_fetchingUbs) return;
+    setState(() => _fetchingUbs = true);
     String? aviso;
     try {
       final contato = await BackendScope.of(context).ubsContact();
-      final telefone = contato.phone?.trim();
-      if (telefone == null || telefone.isEmpty) {
+      final telefone = contato.phone?.trim() ?? '';
+      // O discador recebe só dígitos e `+`: espaço e hífen viram %20 no `tel:`.
+      final numero = telefone.replaceAll(RegExp(r'[^0-9+]'), '');
+      if (numero.isEmpty) {
         aviso = '${contato.name} ainda não cadastrou um telefone. Acione a coordenação.';
       } else {
-        // O discador recebe só dígitos e `+`: espaço e hífen viram %20 no `tel:`.
-        final numero = telefone.replaceAll(RegExp(r'[^0-9+]'), '');
         if (!await widget.dialer.dial(numero)) {
           aviso = 'Não foi possível abrir o discador. Ligue manualmente para $telefone.';
         }
@@ -1976,7 +1979,7 @@ class _EscalationScreenState extends State<EscalationScreen> {
       aviso = 'Não foi possível obter o contato da UBS.';
     }
     if (!mounted) return;
-    setState(() => _dialing = false);
+    setState(() => _fetchingUbs = false);
     if (aviso != null) _message(context, aviso);
   }
 
@@ -2004,7 +2007,7 @@ class _EscalationScreenState extends State<EscalationScreen> {
       const SizedBox(height: 12),
       OutlinedButton.icon(
         key: const Key('escalation_ubs'),
-        onPressed: _dialing ? null : _callUbs,
+        onPressed: _fetchingUbs ? null : _callUbs,
         style: OutlinedButton.styleFrom(minimumSize: const Size(48, 52)),
         icon: const Icon(Icons.local_hospital_outlined),
         label: const Text('Ligar para a UBS'),

@@ -133,9 +133,13 @@ class FakeAcsBackend implements AcsBackend {
 
   int ubsContactCount = 0;
 
+  /// Se definido, `ubsContact()` espera por ele (simula rede lenta).
+  Completer<void>? ubsContactGate;
+
   @override
   Future<UbsContact> ubsContact() async {
     ubsContactCount++;
+    await ubsContactGate?.future;
     final falha = ubsContactFailure;
     if (falha != null) throw falha;
     return ubsContactResult;
