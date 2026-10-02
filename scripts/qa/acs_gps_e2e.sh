@@ -3,7 +3,7 @@
 # Permissão de localização do ACS (RF12) no emulador-5554.
 #
 #   ./scripts/qa/acs_gps_e2e.sh                  # concedida: o app a enxerga (whileInUse)
-#   ./scripts/qa/acs_gps_e2e.sh --sem-permissao  # negada DE VEZ (USER_FIXED): "indisponível", sem travar
+#   ./scripts/qa/acs_gps_e2e.sh --sem-permissao  # negada DE VEZ (o Geolocator reporta deniedForever): "indisponível", sem travar
 #   ... --reinstalar                             # autoriza apagar um app já instalado
 #
 # O diálogo de permissão é do sistema e o integration_test não o toca: o APK é
@@ -57,12 +57,20 @@ toques=""
 amostrador=""
 instalamos=0
 limpar() {
+  # Mata e ESPERA o tocador antes de apagar: o laço dele recria o arquivo de toques com `>>`.
+  if [[ -n "$amostrador" ]]; then
+    kill "$amostrador" 2>/dev/null || true
+    wait "$amostrador" 2>/dev/null || true
+  fi
   rm -f "$log" "$amostras" "$toques"
-  if [[ -n "$amostrador" ]]; then kill "$amostrador" 2>/dev/null || true; fi
   if [[ "$instalamos" -eq 1 ]]; then adb -s "$dev" uninstall "$pkg" >/dev/null 2>&1 || true; fi
 }
 trap limpar EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
+# O EXPECT_PERMISSION é fixado AQUI, no build: o `flutter drive` abaixo usa o APK pronto
+# (--use-application-binary) e não recompila, então um dart-define no drive não teria efeito.
 if ! flutter build apk --debug --target=integration_test/geofence_gps_e2e.dart \
     --dart-define=SINALACS_MQTT_PASSWORD="$MQTT_ACS_PASSWORD" \
     --dart-define=EXPECT_PERMISSION="$expect" >"$log" 2>&1; then
@@ -100,15 +108,19 @@ fi
 
 # O teste de widget do Flutter injeta toques no próprio Flutter e NÃO percebe um diálogo
 # do sistema aberto por cima do app. Quem percebe é o foco da janela, amostrado durante a execução.
-# No cenário `denied_forever` o diálogo é ESPERADO (é o que o teste recusa para fixar a negação),
-# então lá o que se confere é o número de toques do tocador: no máximo 2 (as duas recusas).
+# No cenário `denied_forever` o diálogo é ESPERADO: o tocador abaixo o recusa. A prova principal de
+# que a negação ficou fixada é do próprio teste (checkPermission() == deniedForever depois de abrir
+# o painel). A contagem de toques é só uma trava complementar: no máximo $max_toques (as duas
+# recusas); um 3º toque indica que o diálogo continuou aparecendo. Ela NÃO confere a flag USER_FIXED.
+intervalo="${GPS_E2E_INTERVALO:-1}"
+max_toques=2
 amostras="$(mktemp)"
 toques="$(mktemp)"
 amostrar() { adb -s "$dev" shell dumpsys window 2>/dev/null | grep -m1 mCurrentFocus >>"$amostras" || true; }
 if [[ "$expect" == granted ]]; then
-  ( while true; do amostrar; sleep 1; done ) &
+  ( while true; do amostrar; sleep "$intervalo"; done ) &
 else
-  ( while true; do tocar_recusar; sleep 1; done ) &
+  ( while true; do tocar_recusar; sleep "$intervalo"; done ) &
 fi
 amostrador=$!
 
@@ -116,16 +128,15 @@ drive_rc=0
 limite="${GPS_E2E_TIMEOUT:-300}"
 timeout "$limite" flutter drive --driver=test_driver/integration_test.dart \
   --target=integration_test/geofence_gps_e2e.dart -d "$dev" \
-  --use-application-binary="$apk" \
-  --dart-define=EXPECT_PERMISSION="$expect" || drive_rc=$?
+  --use-application-binary="$apk" || drive_rc=$?
 if [[ "$expect" == granted ]]; then amostrar; fi   # uma leitura final garante ao menos uma amostra
-kill "$amostrador" 2>/dev/null || true; amostrador=""
+kill "$amostrador" 2>/dev/null || true; wait "$amostrador" 2>/dev/null || true; amostrador=""
 if grep -q permissioncontroller "$amostras"; then
   echo "erro: o diálogo de permissão do sistema apareceu por cima do app durante o teste." >&2
   exit 1
 fi
-if [[ "$(wc -l <"$toques")" -gt 2 ]]; then
-  echo "erro: o diálogo de permissão apareceu mais de 2 vezes: a permissão não ficou negada de vez." >&2
+if [[ "$(wc -l <"$toques")" -gt "$max_toques" ]]; then
+  echo "erro: o diálogo de permissão apareceu mais de $max_toques vezes: a permissão não ficou negada de vez." >&2
   exit 1
 fi
 if [[ "$drive_rc" -eq 124 ]]; then
