@@ -36,4 +36,15 @@ for f in acs_full_e2e.sh patient_full_e2e.sh push_e2e.sh; do
   confere grep -q "porta_ocupada 8765" "scripts/qa/$f"
 done
 
+# `iniciar_rele` (onde existe) não pode chamar a si mesma e precisa ser chamada de fora:
+# no push_e2e.sh ela era recursiva e nunca rodava, então a checagem de porta nunca valia.
+for f in push_e2e.sh patient_full_e2e.sh; do
+  arq="scripts/qa/$f"
+  corpo="$(awk '/^[[:space:]]*iniciar_rele\(\) \{/{d=1;next} d&&/^[[:space:]]*\}/{d=0} d' "$arq")"
+  chamada='^[[:space:]]*iniciar_rele[[:space:]]*$'
+  nega grep -qE "$chamada" <<<"$corpo"
+  total="$(grep -cE "$chamada" "$arq" || true)"; dentro="$(grep -cE "$chamada" <<<"$corpo" || true)"
+  confere test $((total - dentro)) -ge 1
+done
+
 [[ "$falhas" -eq 0 ]] && echo "ok: lib_rele" || { echo "$falhas falha(s)"; exit 1; }

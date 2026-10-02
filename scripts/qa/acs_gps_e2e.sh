@@ -77,18 +77,14 @@ instalamos=1
 tocar_recusar() {
   local xml xy
   xml="$(adb -s "$dev" exec-out uiautomator dump /dev/tty 2>/dev/null || true)"
-  xy="$(python3 - "$xml" <<'PY'
-import re, sys
-xml = sys.argv[1]
-for rid in ("permission_deny_and_dont_ask_again_button", "permission_deny_button"):
-    m = re.search(r'resource-id="com\.android\.permissioncontroller:id/%s"[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"' % rid, xml)
-    if m:
-        x1, y1, x2, y2 = map(int, m.groups())
-        print((x1 + x2) // 2, (y1 + y2) // 2)
-        break
-PY
-)"
-  if [[ -n "$xy" ]]; then echo tap >>"$toques"; adb -s "$dev" shell input tap $xy; fi
+  # O XML vai por stdin (um dump grande estoura o argv) e toda falha aqui é engolida: o tocador
+  # roda num subshell com `set -e`, e se ele morrer em silêncio o diálogo fica sem ninguém e o
+  # teste espera para sempre.
+  xy="$(printf '%s' "$xml" | python3 "$repo_root/scripts/qa/acha_botao_recusar.py" 2>/dev/null || true)"
+  if [[ -n "$xy" ]]; then
+    echo tap >>"$toques"
+    adb -s "$dev" shell input tap $xy || true
+  fi
   return 0
 }
 
@@ -117,7 +113,8 @@ fi
 amostrador=$!
 
 drive_rc=0
-flutter drive --driver=test_driver/integration_test.dart \
+limite="${GPS_E2E_TIMEOUT:-300}"
+timeout "$limite" flutter drive --driver=test_driver/integration_test.dart \
   --target=integration_test/geofence_gps_e2e.dart -d "$dev" \
   --use-application-binary="$apk" \
   --dart-define=EXPECT_PERMISSION="$expect" || drive_rc=$?
@@ -130,6 +127,9 @@ fi
 if [[ "$(wc -l <"$toques")" -gt 2 ]]; then
   echo "erro: o diálogo de permissão apareceu mais de 2 vezes: a permissão não ficou negada de vez." >&2
   exit 1
+fi
+if [[ "$drive_rc" -eq 124 ]]; then
+  echo "erro: o flutter drive excedeu ${limite}s (um diálogo de permissão sem ninguém para recusá-lo?)." >&2
 fi
 if [[ "$drive_rc" -ne 0 ]]; then exit "$drive_rc"; fi
 echo "OK — permissão de localização em runtime ($expect); fix de GPS não verificado"

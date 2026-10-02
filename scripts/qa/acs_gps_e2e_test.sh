@@ -22,7 +22,7 @@ cat >"$tmp/bin/flutter" <<'FIM'
 echo "flutter $*" >>"$FAKE_LOG"
 case "$1" in
   build) [[ "${FAKE_BUILD_FALHA:-0}" == 1 ]] && { echo "ERRO-FALSO-DO-GRADLE: sem espaço" >&2; exit 1; } ;;
-  drive) [[ "${FAKE_DRIVE_FALHA:-0}" == 1 ]] && exit 1 ;;
+  drive) [[ "${FAKE_DRIVE_FALHA:-0}" == 1 ]] && exit 1; [[ "${FAKE_DRIVE_TRAVA:-0}" == 1 ]] && sleep 30 ;;
 esac
 exit 0
 FIM
@@ -74,5 +74,10 @@ verifica '[[ $codigo -eq 0 ]]'
 verifica '[[ $(conta "pm revoke") -eq 2 ]]'
 verifica 'grep -q "EXPECT_PERMISSION=denied_forever" "$FAKE_LOG"'
 verifica '[[ $(conta "^flutter drive") -eq 1 ]]'   # uma rodada só: o teste fixa a negação sozinho
+
+caso drive_trava FAKE_DRIVE_TRAVA=1 GPS_E2E_TIMEOUT=1 --
+verifica '[[ $codigo -eq 124 ]]'
+verifica 'grep -q "excedeu" <<<"$saida"'
+verifica '[[ $(conta uninstall) -eq 1 ]]'   # e o app de teste não fica instalado
 
 [[ "$falhas" -eq 0 ]] && echo "ok: acs_gps_e2e" || { echo "$falhas falha(s)"; exit 1; }

@@ -95,7 +95,8 @@ iniciar_rele() {
     echo 'erro: a porta 8765 já está ocupada (relé antigo?). Encerre-o: pkill -f scripts/qa/otp_relay.py' >&2
     exit 1
   fi
-  iniciar_rele
+  python3 scripts/qa/otp_relay.py >/dev/null 2>&1 &
+  relay_pid=$!
   for _ in $(seq 1 20); do
     curl -fs http://127.0.0.1:8765/now >/dev/null 2>&1 && kill -0 "$relay_pid" 2>/dev/null && return 0
     sleep 0.25
@@ -107,8 +108,7 @@ if [[ "$e2e_db" -eq 1 ]]; then
   echo "== stack de e2e (banco de teste) com o Gorush"
   ./scripts/qa/e2e_stack.sh up
   ./scripts/qa/e2e_stack.sh seed
-  python3 scripts/qa/otp_relay.py >/dev/null 2>&1 &
-  relay_pid=$!
+  iniciar_rele
   export ACS_MATRICULA ACS_PASSWORD E2E_FIXTURES_FILE="$repo_root/.e2e/fixtures.json"
   ACS_MATRICULA="$(python3 -c "import json;print(json.load(open('.e2e/fixtures.json'))['acs']['matricula'])")"
   ACS_PASSWORD="$(python3 -c "import json;print(json.load(open('.e2e/fixtures.json'))['acs']['password'])")"
