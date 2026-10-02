@@ -2,10 +2,12 @@ import 'dart:async';
 import 'dart:developer' as developer;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show FilteringTextInputFormatter;
 import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:sinalacs_acs/app/acs_theme.dart';
 import 'package:sinalacs_acs/app/invite_screen.dart';
+import 'package:sinalacs_acs/app/mfa_enrollment_screen.dart';
 import 'package:sinalacs_acs/core/database/sqlcipher_visit_store.dart';
 import 'package:sinalacs_acs/core/geo/location_cell.dart';
 import 'package:sinalacs_acs/core/network/backend_client.dart';
@@ -174,11 +176,20 @@ class _LoginScreenState extends State<LoginScreen> {
   // '123456' embutidos, e o botão navegava sem olhar para nenhum dos dois.
   final _matricula = TextEditingController();
   final _senha = TextEditingController();
+  final _totp = TextEditingController();
+  bool _pedeCodigo = false;
   bool _busy = false;
   String? _error;
 
   @override
-  void dispose() { _matricula.dispose(); _senha.dispose(); super.dispose(); }
+  void dispose() { _matricula.dispose(); _senha.dispose(); _totp.dispose(); super.dispose(); }
+
+  /// O código pertence à sessão que o pediu: mudar matrícula ou senha o descarta.
+  void _credencialMudou(String _) {
+    if (!_pedeCodigo) return;
+    setState(() => _pedeCodigo = false);
+    _totp.clear();
+  }
 
   /// Autentica contra `auth.loginInstitutional` (RF07) e só então abre o
   /// painel.
@@ -201,6 +212,7 @@ class _LoginScreenState extends State<LoginScreen> {
       final session = await BackendScope.of(context).login(
         matricula: matricula,
         senha: senha,
+        totpCode: _pedeCodigo ? _totp.text.trim() : null,
       );
       final microAreaId = session.microAreaId;
       if (microAreaId == null) {
@@ -228,6 +240,22 @@ class _LoginScreenState extends State<LoginScreen> {
           syncInterval: widget.syncInterval,
         ),
       ));
+    } on MfaCodeRequired {
+      if (!mounted) return;
+      setState(() { _pedeCodigo = true; _error = null; _busy = false; });
+    } on MfaEnrollmentRequired {
+      if (!mounted) return;
+      setState(() => _busy = false);
+      final ativou = await Navigator.of(context).push<bool>(MaterialPageRoute(
+        builder: (_) => MfaEnrollmentScreen(
+          backend: BackendScope.of(context),
+          matricula: matricula,
+          senha: senha,
+        ),
+      ));
+      if (ativou == true && mounted) {
+        setState(() => _pedeCodigo = true);
+      }
     } on BackendFailure catch (failure) {
       if (!mounted) return;
       setState(() { _busy = false; _error = failure.message; });
@@ -250,6 +278,7 @@ class _LoginScreenState extends State<LoginScreen> {
           TextField(
             key: const Key('matricula_field'),
             controller: _matricula,
+            onChanged: _credencialMudou,
             autofillHints: const [AutofillHints.username],
             decoration: const InputDecoration(labelText: 'Matrícula / CNS'),
           ),
@@ -257,10 +286,24 @@ class _LoginScreenState extends State<LoginScreen> {
           TextField(
             key: const Key('senha_field'),
             controller: _senha,
+            onChanged: _credencialMudou,
             obscureText: true,
             autofillHints: const [AutofillHints.password],
             decoration: const InputDecoration(labelText: 'Senha de acesso'),
           ),
+          if (_pedeCodigo) ...[
+            const SizedBox(height: 16),
+            TextField(
+              key: const Key('totp_field'),
+              controller: _totp,
+              keyboardType: TextInputType.number,
+              maxLength: 6,
+              autofillHints: const [AutofillHints.oneTimeCode],
+              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+              decoration: const InputDecoration(labelText: 'Código do autenticador (6 dígitos)'),
+              onSubmitted: (_) => _enter(),
+            ),
+          ],
           const SizedBox(height: 20),
           // Sem `Semantics` em volta, pelo mesmo motivo do login do paciente:
           // o `Text` do botão já é o nome acessível ("Entrar com credenciais")

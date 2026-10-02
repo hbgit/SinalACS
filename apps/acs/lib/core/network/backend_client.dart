@@ -20,6 +20,16 @@ class BackendFailure implements Exception {
   String toString() => message;
 }
 
+/// O ACS tem MFA ativa e a senha conferiu: falta o código do autenticador.
+class MfaCodeRequired extends BackendFailure {
+  const MfaCodeRequired() : super('Informe o código do aplicativo autenticador.');
+}
+
+/// O servidor exige MFA e este ACS ainda não a ativou.
+class MfaEnrollmentRequired extends BackendFailure {
+  const MfaEnrollmentRequired() : super('Ative a verificação em duas etapas antes de entrar.', isRecoverable: false);
+}
+
 /// Recusa um host de RPC que não esteja em **HTTPS** (RNF04/L-08).
 ///
 /// Existe porque a rede do sistema operacional **não** segura mais nada: a Task
@@ -59,7 +69,17 @@ abstract class AcsBackend {
   /// A credencial fica **apenas em memória** — ver `_credentials` em
   /// [BackendClient] — para a reautenticação silenciosa que o app já fazia
   /// quando o token de 15 minutos expirava. Nada é gravado em disco.
-  Future<AuthSession> login({required String matricula, required String senha});
+  ///
+  /// [totpCode] é o código do autenticador (MFA); sem ele, um ACS com MFA ativa
+  /// recebe [MfaCodeRequired].
+  Future<AuthSession> login({required String matricula, required String senha, String? totpCode});
+
+  /// Começa a ativação da verificação em duas etapas. Sem token: vale a
+  /// matrícula e a senha.
+  Future<TotpEnrollmentStart> beginTotpEnrollment({required String matricula, required String senha});
+
+  /// Conclui a ativação com o primeiro código do autenticador.
+  Future<void> confirmTotpEnrollment({required String matricula, required String senha, required String code});
 
   /// Login de DESENVOLVIMENTO, para `tool/` e `integration_test/` contra a
   /// stack local. Só funciona com `ENABLE_DEV_LOGIN=true`; **não** é o caminho
@@ -133,7 +153,15 @@ class MisconfiguredBackend implements AcsBackend {
   Never _recusar() => throw failure;
 
   @override
-  Future<AuthSession> login({required String matricula, required String senha}) async =>
+  Future<AuthSession> login({required String matricula, required String senha, String? totpCode}) async =>
+      _recusar();
+
+  @override
+  Future<TotpEnrollmentStart> beginTotpEnrollment({required String matricula, required String senha}) async =>
+      _recusar();
+
+  @override
+  Future<void> confirmTotpEnrollment({required String matricula, required String senha, required String code}) async =>
       _recusar();
 
   @override
@@ -251,11 +279,13 @@ class BackendClient implements AcsBackend {
   Future<AuthSession> login({
     required String matricula,
     required String senha,
+    String? totpCode,
   }) async {
     final result = await _guard(
       () => _client.auth.loginInstitutional(
         matricula: matricula,
         password: senha,
+        totpCode: totpCode,
       ),
     );
 
@@ -271,6 +301,23 @@ class BackendClient implements AcsBackend {
     _session = session;
     return session;
   }
+
+  /// Ativação da MFA: sem `_requireToken()` (ainda não há token) e sem gravar
+  /// a credencial — ela só vai para `_credentials` num [login] bem-sucedido.
+  @override
+  Future<TotpEnrollmentStart> beginTotpEnrollment({
+    required String matricula,
+    required String senha,
+  }) =>
+      _guard(() => _client.auth.beginTotpEnrollment(matricula: matricula, password: senha));
+
+  @override
+  Future<void> confirmTotpEnrollment({
+    required String matricula,
+    required String senha,
+    required String code,
+  }) =>
+      _guard(() => _client.auth.confirmTotpEnrollment(matricula: matricula, password: senha, code: code));
 
   /// Reautentica usando a credencial em memória.
   ///
@@ -420,6 +467,10 @@ class BackendClient implements AcsBackend {
         'O acesso de desenvolvimento está desativado neste servidor.',
         isRecoverable: false,
       );
+    } on MfaRequiredException {
+      throw const MfaCodeRequired();
+    } on MfaEnrollmentRequiredException {
+      throw const MfaEnrollmentRequired();
     } on AuthenticationFailedException catch (error) {
       // A mensagem vem do servidor de propósito: é ela que diferencia "senha
       // inválida" de "acesso bloqueado por tentativas" — e é igual para

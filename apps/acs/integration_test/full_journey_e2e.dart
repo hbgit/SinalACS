@@ -34,6 +34,7 @@ import 'package:sinalacs_acs/core/services/offline_visit_queue.dart';
 import 'package:sinalacs_client/sinalacs_client.dart' as api;
 
 import 'support/e2e_acs.dart';
+import 'support/totp.dart';
 
 Future<void> _pumpUntil(WidgetTester tester, bool Function() done,
     {Duration timeout = const Duration(seconds: 30)}) async {
@@ -191,5 +192,48 @@ void main() {
         reason: 'o nome do paciente não pode estar legível no arquivo do banco');
     expect(String.fromCharCodes(bytes.take(16)), isNot(startsWith('SQLite format 3')));
     await store.clear();
+  });
+
+  testWidgets('MFA: com a verificação ativa, o login pela tela pede e aceita o código', (tester) async {
+    final ca = (await rootBundle.load(BackendConfig.rpcCaAsset)).buffer.asUint8List();
+    final backend = BackendClient(trustedCaBytes: ca);
+    addTearDown(backend.close);
+    const host = String.fromEnvironment('SINALACS_HOST', defaultValue: 'https://10.0.2.2/');
+    final cliente = api.Client(host, securityContext: SecurityContext()..setTrustedCertificatesBytes(ca))
+      ..connectivityMonitor = null;
+    addTearDown(cliente.close);
+    final cred = await acsCredentialFromRelay();
+
+    // 1) Liga a MFA pelo RPC: matrícula + senha + o código do segredo recém-sorteado.
+    final inicio = await cliente.auth.beginTotpEnrollment(matricula: cred.matricula, password: cred.senha);
+    final segredo = base32Decode(inicio.secretBase32);
+    await cliente.auth.confirmTotpEnrollment(
+      matricula: cred.matricula,
+      password: cred.senha,
+      code: totpCode(segredo, DateTime.now()),
+    );
+
+    // 2) Login pela tela: matrícula + senha -> o app pede o código e o painel NÃO abre.
+    await tester.pumpWidget(SinalAcsApp(backend: backend));
+    await tester.enterText(find.byKey(const Key('matricula_field')), cred.matricula);
+    await tester.enterText(find.byKey(const Key('senha_field')), cred.senha);
+    await tester.tap(find.byKey(const Key('login_button')));
+    await _pumpUntil(tester, () => find.byKey(const Key('totp_field')).evaluate().isNotEmpty);
+    expect(find.byKey(const Key('login_button')), findsOneWidget, reason: 'o painel não pode abrir sem o código');
+
+    // 3) O código da ativação já foi usado (replay barrado): entra com o do PASSO SEGUINTE,
+    //    que a janela de ±1 aceita.
+    await tester.enterText(
+      find.byKey(const Key('totp_field')),
+      totpCode(segredo, DateTime.now().add(const Duration(seconds: 30))),
+    );
+    await tester.tap(find.byKey(const Key('login_button')));
+    await _pumpUntil(tester, () =>
+        find.byKey(const Key('login_button')).evaluate().isEmpty || find.byKey(const Key('login_error')).evaluate().isNotEmpty);
+    final erro = find.byKey(const Key('login_error'));
+    expect(erro, findsNothing, reason: erro.evaluate().isEmpty ? '' : (tester.widget<Text>(erro).data ?? ''));
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(seconds: 1));
   });
 }

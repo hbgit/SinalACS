@@ -55,13 +55,36 @@ class FakeAcsBackend implements AcsBackend {
   /// branco não chamou nada".
   ({String matricula, String senha})? lastCredentials;
 
+  /// Simula o servidor com MFA ativa: sem [totpCode] igual a [expectedTotpCode], levanta [MfaCodeRequired].
+  String? expectedTotpCode;
+  bool mfaEnrollmentRequired = false;
+  String? lastTotpCode;
+  TotpEnrollmentStart enrollmentStart =
+      TotpEnrollmentStart(secretBase32: 'GEZDGNBVGY3TQOJQ', otpauthUri: 'otpauth://totp/SinalACS:ACS-001?secret=GEZDGNBVGY3TQOJQ');
+  String? confirmedCode;
+
+  @override
+  Future<void> confirmTotpEnrollment({required String matricula, required String senha, required String code}) async {
+    confirmedCode = code;
+  }
+
+  @override
+  Future<TotpEnrollmentStart> beginTotpEnrollment({required String matricula, required String senha}) async =>
+      enrollmentStart;
+
   @override
   Future<AuthSession> login({
     required String matricula,
     required String senha,
+    String? totpCode,
   }) async {
     loginCount++;
     lastCredentials = (matricula: matricula, senha: senha);
+    lastTotpCode = totpCode;
+    if (mfaEnrollmentRequired) throw const MfaEnrollmentRequired();
+    if (expectedTotpCode != null && totpCode != expectedTotpCode) {
+      throw totpCode == null ? const MfaCodeRequired() : const BackendFailure('Código de verificação inválido.', isRecoverable: false);
+    }
     return _issueSession();
   }
 
