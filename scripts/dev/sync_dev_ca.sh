@@ -124,6 +124,27 @@ for par in "${pares[@]}"; do
     "$label"
 done
 
+# mTLS do broker: o ACS também apresenta um certificado de CLIENTE
+# (acs-area-12, emitido pelo init.sh do Mosquitto). Mesma prova da CA: a folha
+# tem de ser assinada pela CA do broker que está em runtime/, senão o handshake
+# falha no app sem nada vermelho em lugar nenhum. **Só desenvolvimento**: a
+# chave privada vira asset gitignorado (o guard do Gradle barra um release com
+# ela dentro).
+mqtt_certs="$repo_root/infra/docker/mosquitto/runtime/certs"
+acs_assets="$repo_root/apps/acs/assets/certs"
+for f in acs-area-12.crt acs-area-12.key; do
+  if [[ ! -f "$mqtt_certs/$f" ]]; then
+    echo "erro: $mqtt_certs/$f não existe — nada foi copiado." >&2
+    echo "Suba a stack primeiro (docker compose up) para que o certificado de cliente seja gerado." >&2
+    exit 1
+  fi
+done
+if ! verify_err="$(openssl verify -CAfile "$mqtt_certs/ca.crt" "$mqtt_certs/acs-area-12.crt" 2>&1)"; then
+  echo "erro: a CA do broker não assina o certificado de cliente $mqtt_certs/acs-area-12.crt — nada foi copiado." >&2
+  echo "$verify_err" >&2
+  exit 1
+fi
+
 # Fase 2 — preparar os quatro (nada visível ainda para quem lê o asset).
 for app in acs patient; do
   for par in "${pares[@]}"; do
@@ -135,6 +156,13 @@ for app in acs patient; do
   done
 done
 
+# Cliente do ACS: temporário + mv, igual às CAs. A chave nasce 600 (umask) e
+# o chmod é explícito para não depender dele.
+mkdir -p "$acs_assets"
+(umask 077; cp "$mqtt_certs/acs-area-12.key" "$acs_assets/acs_client.key.tmp")
+chmod 600 "$acs_assets/acs_client.key.tmp"
+cp "$mqtt_certs/acs-area-12.crt" "$acs_assets/acs_client.crt.tmp"
+
 # Fase 3 — publicar os quatro.
 for app in acs patient; do
   for par in "${pares[@]}"; do
@@ -144,3 +172,8 @@ for app in acs patient; do
       "$label"
   done
 done
+
+mv "$acs_assets/acs_client.crt.tmp" "$acs_assets/acs_client.crt"
+mv "$acs_assets/acs_client.key.tmp" "$acs_assets/acs_client.key"
+echo "Certificado de cliente do ACS (mTLS) copiado para $acs_assets/acs_client.{crt,key}"
+openssl x509 -in "$acs_assets/acs_client.crt" -noout -subject -dates

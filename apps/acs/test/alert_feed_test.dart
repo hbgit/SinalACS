@@ -37,4 +37,17 @@ void main() {
       );
     });
   });
+
+  group('certificado de cliente (mTLS)', () {
+    test('falta do certificado de cliente é uma falha própria e não transitória', () {
+      expect(AlertFeedFailureKind.values,
+          contains(AlertFeedFailureKind.missingClientCertificate));
+      const falha = AlertFeedFailure(
+        AlertFeedFailureKind.missingClientCertificate,
+        title: 'Falta o certificado de cliente da central neste aplicativo.',
+        detail: 'Sem ele o broker recusa a conexão.',
+      );
+      expect(falha.transient, isFalse);
+    });
+  });
 }

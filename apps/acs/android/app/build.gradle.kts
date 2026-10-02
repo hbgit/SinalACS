@@ -175,4 +175,19 @@ gradle.taskGraph.whenReady {
             """.trimMargin()
         )
     }
+
+    // A chave privada de CLIENTE do broker de desenvolvimento (assets/certs/acs_client.key)
+    // não pode ir dentro de um APK de release: qualquer pessoa com o APK a extrairia.
+    val chaveDeDev = rootProject.file("../assets/certs/acs_client.key")
+    if (buildaRelease && chaveDeDev.exists() && !project.hasProperty("sinalacs.allowDevClientKey")) {
+        throw GradleException(
+            """
+            |O release levaria a chave privada de desenvolvimento do broker (assets/certs/acs_client.key).
+            |
+            |Remova o arquivo antes de gerar o release (em produção o certificado de cliente é
+            |provisionado por aparelho — ainda não implementado). Para um release de TESTE LOCAL,
+            |acrescente -Psinalacs.allowDevClientKey=true.
+            """.trimMargin()
+        )
+    }
 }

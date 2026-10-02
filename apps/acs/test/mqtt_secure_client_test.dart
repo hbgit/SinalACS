@@ -1,3 +1,6 @@
+import 'dart:io';
+import 'dart:typed_data';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mqtt_client/mqtt_client.dart';
 import 'package:sinalacs_acs/core/services/mqtt_secure_client.dart';
@@ -157,6 +160,79 @@ void main() {
       expect(mqttRefusalIsTransient(MqttConnectReturnCode.identifierRejected), isFalse);
       expect(mqttRefusalIsTransient(MqttConnectReturnCode.unacceptedProtocolVersion), isFalse);
       expect(mqttRefusalIsTransient(null), isFalse);
+    });
+  });
+
+  group('mTLS: certificado de cliente', () {
+    test('a config guarda certificado e chave de cliente quando informados', () {
+      final cert = Uint8List.fromList([1, 2, 3]);
+      final chave = Uint8List.fromList([4, 5, 6]);
+      final config = SecureMqttConfig(
+        brokerHost: 'localhost',
+        port: 8883,
+        clientId: 'x',
+        topic: 't',
+        clientCertificate: cert,
+        clientPrivateKey: chave,
+      );
+      expect(config.clientCertificate, cert);
+      expect(config.clientPrivateKey, chave);
+    });
+
+    test('sem certificado de cliente os dois campos ficam nulos', () {
+      const config = SecureMqttConfig(
+        brokerHost: 'localhost',
+        port: 8883,
+        clientId: 'x',
+        topic: 't',
+      );
+      expect(config.clientCertificate, isNull);
+      expect(config.clientPrivateKey, isNull);
+    });
+
+    final temOpenssl = () {
+      try {
+        return Process.runSync('openssl', ['version']).exitCode == 0;
+      } on ProcessException {
+        return false;
+      }
+    }();
+
+    test('buildMqttSecurityContext monta com um par PEM válido', () {
+      final dir = Directory.systemTemp.createTempSync('mqtt_ctx_');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final r = Process.runSync('openssl', [
+        'req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '1',
+        '-subj', '/CN=teste', '-keyout', '${dir.path}/k.pem',
+        '-out', '${dir.path}/c.pem',
+      ]);
+      expect(r.exitCode, 0);
+      final cert = File('${dir.path}/c.pem').readAsBytesSync();
+      final chave = File('${dir.path}/k.pem').readAsBytesSync();
+      final config = SecureMqttConfig(
+        brokerHost: 'localhost',
+        port: 8883,
+        clientId: 'x',
+        topic: 't',
+        caCertificate: cert,
+        clientCertificate: cert,
+        clientPrivateKey: chave,
+      );
+      expect(() => buildMqttSecurityContext(config), returnsNormally);
+    }, skip: temOpenssl ? false : 'openssl ausente');
+
+    test('buildMqttSecurityContext recusa bytes que não são PEM', () {
+      final lixo = Uint8List.fromList(List.filled(32, 7));
+      final config = SecureMqttConfig(
+        brokerHost: 'localhost',
+        port: 8883,
+        clientId: 'x',
+        topic: 't',
+        caCertificate: lixo,
+        clientCertificate: lixo,
+        clientPrivateKey: lixo,
+      );
+      expect(() => buildMqttSecurityContext(config), throwsA(isA<TlsException>()));
     });
   });
 }
