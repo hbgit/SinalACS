@@ -25,6 +25,8 @@ import 'package:integration_test/integration_test.dart';
 import 'package:sinalacs_acs/app/app.dart';
 import 'package:sinalacs_acs/core/network/backend_client.dart';
 import 'package:sinalacs_acs/core/network/backend_config.dart';
+import 'package:sinalacs_acs/core/services/backend_visit_synchronizer.dart';
+import 'package:sinalacs_acs/core/services/offline_visit_queue.dart';
 import 'package:sinalacs_client/sinalacs_client.dart' as api;
 
 import 'support/e2e_acs.dart';
@@ -105,5 +107,46 @@ void main() {
     // desmonte automático do fim do teste os pegava em meio ao descarte.
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump(const Duration(seconds: 1));
+  });
+
+  testWidgets('100 visitas offline sobem em menos de 5 s (M2.4)', (tester) async {
+    final ca = (await rootBundle.load(BackendConfig.rpcCaAsset)).buffer.asUint8List();
+    final backend = BackendClient(trustedCaBytes: ca);
+    addTearDown(backend.close);
+    final cred = await acsCredentialFromRelay();
+    final main = e2ePatient('main');
+    await backend.login(matricula: cred.matricula, senha: cred.senha);
+
+    final fila = OfflineVisitQueue(synchronizer: BackendVisitSynchronizer(backend: backend));
+    final base = DateTime.now().toUtc().subtract(const Duration(days: 1));
+    for (var n = 0; n < 100; n++) {
+      // `localId` fica no padrão (um UUID novo): o protocolo o tipa como
+      // `UuidValue` e o servidor recusa o que não for UUID.
+      await fila.add(OfflineVisitRecord(
+        patientId: main.id,
+        risk: 'green',
+        status: 'PENDENTE',
+        createdAt: base.add(Duration(minutes: n)),
+      ));
+    }
+    final enviados = {for (final v in fila.pendingVisits) v.localId.toLowerCase()};
+    expect(enviados, hasLength(100));
+
+    final relogio = Stopwatch()..start();
+    final resultado = await fila.sync();
+    relogio.stop();
+
+    expect(resultado.kind, SyncOutcomeKind.synced, reason: resultado.message);
+    expect(fila.syncedCount, 100);
+    expect(fila.pendingCount, 0);
+    // ignore: avoid_print
+    print('rajada: 100 visitas em ${relogio.elapsedMilliseconds} ms');
+    expect(relogio.elapsed, lessThan(const Duration(seconds: 5)),
+        reason: 'PRD M2.4: 100 registros offline sincronizam em < 5 s');
+
+    final remotas = await backend.pullVisits(since: DateTime.fromMillisecondsSinceEpoch(0));
+    final noServidor = {for (final v in remotas) v.localId.toString().toLowerCase()};
+    expect(noServidor.containsAll(enviados), isTrue,
+        reason: 'as 100 visitas estão no servidor, conferidas por pull');
   });
 }

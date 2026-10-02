@@ -61,7 +61,16 @@ Future<String> _get(String path, {String query = ''}) async {
 }
 
 /// Matrícula e senha do ACS da fixture, servidas pelo relé (opt-in).
-Future<({String matricula, String senha})> acsCredentialFromRelay() async {
+///
+/// O relé entrega `/acs` **uma única vez** por execução (a senha sintética não
+/// fica servida), mas vários testes do mesmo arquivo precisam dela: a primeira
+/// chamada busca e as seguintes reaproveitam. Todos rodam no mesmo processo.
+Future<({String matricula, String senha})> acsCredentialFromRelay() =>
+    _acsCredential ??= _buscarCredencialDoAcs();
+
+Future<({String matricula, String senha})>? _acsCredential;
+
+Future<({String matricula, String senha})> _buscarCredencialDoAcs() async {
   final json = jsonDecode(await _get('/acs')) as Map;
   return (matricula: json['matricula'] as String, senha: json['senha'] as String);
 }
