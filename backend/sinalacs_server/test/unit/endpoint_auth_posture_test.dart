@@ -42,6 +42,13 @@ const _publicMethodsByDesign = <String, String>{
       'login por desenho: quem pede o código ainda não tem sessão',
   'AuthEndpoint.verifyOtp':
       'login por desenho: é esta chamada que emite a sessão do paciente',
+  'AuthEndpoint.beginTotpEnrollment':
+      'ativação da MFA (RF07) acontece ANTES do primeiro token: com '
+      'REQUIRE_ACS_MFA o ACS sem MFA não recebe sessão — matrícula e senha SÃO '
+      'a credencial, e a tentativa errada conta no bloqueio como no login',
+  'AuthEndpoint.confirmTotpEnrollment':
+      'mesma razão de beginTotpEnrollment: matrícula + senha + código válido '
+      'do segredo pendente são a credencial; não há token a exigir ainda',
 };
 
 /// A classe que o teste protege — e cuja declaração ele precisa ignorar.

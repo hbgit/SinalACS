@@ -1,7 +1,31 @@
+import 'dart:math';
+import 'dart:typed_data';
+
 import 'package:sinalacs_server/src/application/audit/audit_trail.dart';
 import 'package:sinalacs_server/src/application/auth/development_auth_service.dart';
 import 'package:sinalacs_server/src/application/auth/password_hasher.dart';
+import 'package:sinalacs_server/src/application/auth/totp.dart';
+import 'package:sinalacs_server/src/application/auth/totp_secret_vault.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
+
+/// Estado da MFA de um ACS, como está gravado.
+class TotpEnrollment {
+  const TotpEnrollment({required this.sealed, required this.enabled, required this.lastStep});
+
+  final SealedSecret sealed;
+
+  /// `false` = a ativação começou e não foi confirmada: a MFA ainda NÃO vale.
+  final bool enabled;
+  final int? lastStep;
+}
+
+/// Escrita do estado da MFA. Interface à parte de [AcsCredentialStore] de
+/// propósito: quem só lê credencial (e os fakes que já existem) não muda.
+abstract interface class TotpStore {
+  Future<void> saveSecret(String acsId, SealedSecret secret, DateTime at);
+  Future<void> enable(String acsId, int step, DateTime at);
+  Future<void> registerStep(String acsId, int step);
+}
 
 /// O que o login precisa saber sobre uma credencial, sem `application/`
 /// conhecer o ORM.
@@ -13,6 +37,7 @@ class AcsCredentialRecord {
     required this.digest,
     required this.failedAttempts,
     required this.lockedUntil,
+    this.totp,
   });
 
   final String acsId;
@@ -25,6 +50,9 @@ class AcsCredentialRecord {
   final PasswordDigest digest;
   final int failedAttempts;
   final DateTime? lockedUntil;
+
+  /// Estado da MFA. `null` = nenhum segredo gravado (sem MFA).
+  final TotpEnrollment? totp;
 }
 
 /// Acesso à credencial do ACS e ao estado de bloqueio.
@@ -88,11 +116,28 @@ class InstitutionalAuthService {
     required this.store,
     required this.hasher,
     required this.audit,
-  });
+    this.totpStore,
+    this.vault,
+    this.requireMfa = false,
+    Random? random,
+  }) : _random = random ?? Random.secure();
 
   final AcsCredentialStore store;
   final PasswordHasher hasher;
   final AuditTrail audit;
+
+  /// Escrita do estado da MFA. Obrigatório quando algum ACS tem MFA (ou para
+  /// ativá-la); a falta dele com MFA ativa é erro de montagem ([StateError]).
+  final TotpStore? totpStore;
+
+  /// Cofre do segredo TOTP. Mesma regra de [totpStore].
+  final TotpSecretVault? vault;
+
+  /// `REQUIRE_ACS_MFA`: ACS sem MFA ativa não entra; precisa ativá-la antes.
+  final bool requireMfa;
+
+  /// Sorteia o segredo TOTP. `Random.secure()` fora dos testes.
+  final Random _random;
 
   static const maxFailedAttempts = 5;
   static const lockDuration = Duration(minutes: 15);
@@ -103,15 +148,124 @@ class InstitutionalAuthService {
 
   static const _invalidCredentials = 'Matrícula ou senha inválidos.';
 
+  static const _invalidCode = 'Código de verificação inválido.';
+
   /// Só chega a quem provou conhecer a senha (a ordem do `login` garante isso).
-  static const _lockMessage = 'Acesso temporariamente bloqueado por tentativas '
+  static const _lockMessage =
+      'Acesso temporariamente bloqueado por tentativas '
       'inválidas. Tente novamente em alguns minutos.';
 
   Future<AuthenticatedUser> login({
     required String matricula,
     required String password,
     String? deviceId,
+    String? totpCode,
     DateTime? now,
+  }) async {
+    final at = (now ?? DateTime.now()).toUtc();
+    final record = await _authenticatePassword(
+      matricula: matricula,
+      password: password,
+      at: at,
+    );
+
+    // Só depois da senha: quem não a conhece recebe a mensagem única e nunca
+    // fica sabendo se a conta tem MFA.
+    final totp = record.totp;
+    if (totp != null && totp.enabled) {
+      final codigo = totpCode?.trim() ?? '';
+      if (codigo.isEmpty) {
+        // A senha conferiu; falta o código. Não é falha: não conta tentativa.
+        throw MfaRequiredException(message: 'Informe o código do aplicativo autenticador.');
+      }
+      final segredo = await _vault().open(totp.sealed);
+      final passo = Totp.verify(segredo, codigo, at, lastStep: totp.lastStep);
+      if (passo == null) {
+        await _registrarFalha(record, at);
+        await _recordAudit(record.acsId, 'denied_totp');
+        throw AuthenticationFailedException(message: _invalidCode);
+      }
+      await _totpStore().registerStep(record.acsId, passo);
+    } else if (requireMfa) {
+      await _recordAudit(record.acsId, 'denied_mfa_not_enrolled');
+      throw MfaEnrollmentRequiredException(
+        message: 'Ative a verificação em duas etapas antes de entrar.',
+      );
+    }
+
+    await store.registerSuccessfulLogin(record.acsId, at);
+    await _recordAudit(record.acsId, 'granted');
+
+    return AuthenticatedUser(
+      id: record.acsId,
+      role: UserRole.acs,
+      // `_authenticatePassword` só devolve linha com território.
+      microAreaId: record.microAreaId!,
+      deviceId: deviceId ?? deviceIdAbsent,
+    );
+  }
+
+  /// Começa a ativação da MFA. Exige matrícula **e senha** (o ACS ainda não tem
+  /// token) e conta tentativa errada como o login. Só grava o segredo como
+  /// "pendente": a MFA vale depois de [confirmTotpEnrollment].
+  Future<TotpEnrollmentStart> beginTotpEnrollment({
+    required String matricula,
+    required String password,
+    DateTime? now,
+  }) async {
+    final at = (now ?? DateTime.now()).toUtc();
+    final record = await _authenticatePassword(matricula: matricula, password: password, at: at);
+    if (record.totp?.enabled ?? false) {
+      throw AuthenticationFailedException(
+        message: 'A verificação em duas etapas já está ativa. Peça a redefinição à coordenação.',
+      );
+    }
+    final bytes = Uint8List.fromList(List<int>.generate(20, (_) => _random.nextInt(256)));
+    await _totpStore().saveSecret(record.acsId, await _vault().seal(bytes), at);
+    final base32 = Totp.base32(bytes);
+    return TotpEnrollmentStart(
+      secretBase32: base32,
+      otpauthUri: Totp.otpauthUri(secretBase32: base32, account: matricula.trim()),
+    );
+  }
+
+  /// Confirma a ativação com um código válido do segredo pendente.
+  Future<void> confirmTotpEnrollment({
+    required String matricula,
+    required String password,
+    required String code,
+    DateTime? now,
+  }) async {
+    final at = (now ?? DateTime.now()).toUtc();
+    final record = await _authenticatePassword(matricula: matricula, password: password, at: at);
+    final totp = record.totp;
+    if (totp == null || totp.enabled) {
+      throw AuthenticationFailedException(message: 'Não há ativação pendente para esta matrícula.');
+    }
+    final passo = Totp.verify(await _vault().open(totp.sealed), code, at);
+    if (passo == null) {
+      await _registrarFalha(record, at);
+      await _recordAudit(record.acsId, 'denied_totp_enrollment');
+      throw AuthenticationFailedException(message: _invalidCode);
+    }
+    await _totpStore().enable(record.acsId, passo, at);
+    await _recordAudit(record.acsId, 'mfa_enabled');
+  }
+
+  TotpSecretVault _vault() => vault ?? (throw StateError('MFA ativa sem cofre configurado'));
+
+  TotpStore _totpStore() => totpStore ?? (throw StateError('MFA ativa sem cofre configurado'));
+
+  /// Tudo o que o login decide antes de abrir a sessão: entrada em branco,
+  /// matrícula inexistente, senha errada (com a contagem e o bloqueio),
+  /// bloqueio ativo, acesso inativo e ausência de território. Devolve a linha
+  /// só quando a senha confere e nada disso recusa; nos outros casos lança
+  /// exatamente o que o `login` sempre lançou. A ativação da MFA reaproveita
+  /// este caminho: provar a senha ali custa o mesmo que no login.
+  Future<AcsCredentialRecord> _authenticatePassword({
+    required String matricula,
+    required String password,
+    required DateTime at,
   }) async {
     final enrollmentId = matricula.trim();
     if (enrollmentId.isEmpty || password.isEmpty) {
@@ -120,7 +274,6 @@ class InstitutionalAuthService {
       );
     }
 
-    final at = (now ?? DateTime.now()).toUtc();
     final record = await store.findByEnrollmentId(enrollmentId);
 
     if (record == null) {
@@ -189,14 +342,7 @@ class InstitutionalAuthService {
       // O reinício viaja como decisão (`restartCounter`) porque quem aplica a
       // contagem é o store, numa única instrução: somar aqui, sobre o valor
       // lido acima, perderia tentativas concorrentes.
-      final lockExpirou = lockedUntil != null && !lockedUntil.isAfter(at);
-      await store.registerFailedAttempt(
-        record.acsId,
-        restartCounter: lockExpirou,
-        maxFailedAttempts: maxFailedAttempts,
-        lockUntil: at.add(lockDuration),
-        at: at,
-      );
+      await _registrarFalha(record, at);
       await _recordAudit(record.acsId, 'denied_credentials');
       throw AuthenticationFailedException(message: _invalidCredentials);
     }
@@ -221,25 +367,32 @@ class InstitutionalAuthService {
       );
     }
 
-    await store.registerSuccessfulLogin(record.acsId, at);
-    await _recordAudit(record.acsId, 'granted');
+    return record;
+  }
 
-    return AuthenticatedUser(
-      id: record.acsId,
-      role: UserRole.acs,
-      microAreaId: microAreaId,
-      deviceId: deviceId ?? deviceIdAbsent,
+  /// Conta uma tentativa falha (senha errada ou código TOTP errado).
+  /// Bloqueio vencido recomeça o contador — a mesma regra do ramo da senha
+  /// errada, num lugar só.
+  Future<void> _registrarFalha(AcsCredentialRecord record, DateTime at) {
+    final lockedUntil = record.lockedUntil;
+    final lockExpirou = lockedUntil != null && !lockedUntil.isAfter(at);
+    return store.registerFailedAttempt(
+      record.acsId,
+      restartCounter: lockExpirou,
+      maxFailedAttempts: maxFailedAttempts,
+      lockUntil: at.add(lockDuration),
+      at: at,
     );
   }
 
   /// Best-effort, como toda auditoria deste repositório: uma trilha fora do ar
   /// não pode impedir um ACS de entrar.
   Future<void> _recordAudit(String userId, String result) => audit.recordSafely(
-        AuditEvent(
-          userId: userId,
-          actionType: 'login',
-          resourceType: 'session',
-          result: result,
-        ),
-      );
+    AuditEvent(
+      userId: userId,
+      actionType: 'login',
+      resourceType: 'session',
+      result: result,
+    ),
+  );
 }

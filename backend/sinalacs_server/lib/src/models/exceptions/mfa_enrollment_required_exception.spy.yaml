@@ -1,0 +1,5 @@
+### O servidor exige MFA e este ACS ainda não a ativou: a pessoa precisa
+### ativar (auth.beginTotpEnrollment) antes de entrar.
+exception: MfaEnrollmentRequiredException
+fields:
+  message: String

@@ -18,6 +18,7 @@ import 'package:sinalacs_server/src/application/ubs/ubs_contact_service.dart';
 import 'package:sinalacs_server/src/application/visits/visit_sync_service.dart';
 import 'package:sinalacs_server/src/config/app_config.dart';
 import 'package:sinalacs_server/src/infrastructure/crypto/argon2_password_hasher.dart';
+import 'package:sinalacs_server/src/infrastructure/crypto/health_cipher_totp_vault.dart';
 import 'package:sinalacs_server/src/infrastructure/crypto/health_data_cipher.dart';
 import 'package:sinalacs_server/src/infrastructure/crypto/hmac_cpf_hasher.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_acs_credential_store.dart';
@@ -301,12 +302,17 @@ class AlertRuntime {
   /// chamada e a trilha de auditoria é a da requisição, para que cada
   /// tentativa (granted, denied_credentials, denied_locked…) vire uma linha
   /// encadeada em `audit_logs`.
-  InstitutionalAuthService institutionalAuthServiceFor(Session session) =>
-      InstitutionalAuthService(
-        store: OrmAcsCredentialStore(session: () => session),
-        hasher: passwordHasher,
-        audit: auditTrailFor(session),
-      );
+  InstitutionalAuthService institutionalAuthServiceFor(Session session) {
+    final store = OrmAcsCredentialStore(session: () => session);
+    return InstitutionalAuthService(
+      store: store,
+      hasher: passwordHasher,
+      audit: auditTrailFor(session),
+      totpStore: store,
+      vault: HealthCipherTotpVault(healthDataCipher),
+      requireMfa: config.requireAcsMfa,
+    );
+  }
 
   /// Serviço de login passwordless do paciente (RF01) para uma requisição.
   ///

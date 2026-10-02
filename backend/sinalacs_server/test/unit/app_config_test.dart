@@ -408,4 +408,30 @@ void main() {
       expect(comGorush(null).gorushTimeout, const Duration(seconds: 5));
     });
   });
+
+  group('REQUIRE_ACS_MFA (RF07)', () {
+    // Fora de `development` nenhuma configuração inteira pode ser montada
+    // (ver o cabeçalho: `SMS_GATEWAY`), então a regra de produção é provada
+    // no resolvedor que o `fromMap` usa; o caso de development, pelo `fromMap`.
+    test('development sem a variável: desligado', () {
+      expect(AppConfig.fromMap(const {'APP_ENV': 'development'}).requireAcsMfa, isFalse);
+      expect(AppConfig.resolveRequireAcsMfa(value: null, appEnv: 'development'), isFalse);
+    });
+
+    test('production (ou qualquer ambiente fora de development) sem a variável: ligado', () {
+      expect(AppConfig.resolveRequireAcsMfa(value: null, appEnv: 'production'), isTrue);
+      expect(AppConfig.resolveRequireAcsMfa(value: null, appEnv: 'staging'), isTrue);
+    });
+
+    test('REQUIRE_ACS_MFA=false explícito desliga mesmo em produção', () {
+      expect(AppConfig.resolveRequireAcsMfa(value: 'false', appEnv: 'production'), isFalse);
+    });
+
+    test('REQUIRE_ACS_MFA=true explícito liga em development', () {
+      expect(
+        AppConfig.fromMap(const {'APP_ENV': 'development', 'REQUIRE_ACS_MFA': 'true'}).requireAcsMfa,
+        isTrue,
+      );
+    });
+  });
 }

@@ -219,6 +219,11 @@ class Endpoints extends _i1.EndpointDispatch {
               type: _i1.getType<String?>(),
               nullable: true,
             ),
+            'totpCode': _i1.ParameterDescription(
+              name: 'totpCode',
+              type: _i1.getType<String?>(),
+              nullable: true,
+            ),
           },
           call:
               (
@@ -230,6 +235,63 @@ class Endpoints extends _i1.EndpointDispatch {
                     matricula: params['matricula'],
                     password: params['password'],
                     deviceId: params['deviceId'],
+                    totpCode: params['totpCode'],
+                  ),
+        ),
+        'beginTotpEnrollment': _i1.MethodConnector(
+          name: 'beginTotpEnrollment',
+          params: {
+            'matricula': _i1.ParameterDescription(
+              name: 'matricula',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'password': _i1.ParameterDescription(
+              name: 'password',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async =>
+                  (endpoints['auth'] as _i3.AuthEndpoint).beginTotpEnrollment(
+                    session,
+                    matricula: params['matricula'],
+                    password: params['password'],
+                  ),
+        ),
+        'confirmTotpEnrollment': _i1.MethodConnector(
+          name: 'confirmTotpEnrollment',
+          params: {
+            'matricula': _i1.ParameterDescription(
+              name: 'matricula',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'password': _i1.ParameterDescription(
+              name: 'password',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'code': _i1.ParameterDescription(
+              name: 'code',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async =>
+                  (endpoints['auth'] as _i3.AuthEndpoint).confirmTotpEnrollment(
+                    session,
+                    matricula: params['matricula'],
+                    password: params['password'],
+                    code: params['code'],
                   ),
         ),
         'requestOtp': _i1.MethodConnector(

@@ -68,11 +68,17 @@ class AuthEndpoint extends Endpoint {
   /// `AuthenticationFailedException`, com a mensagem que o serviço escolheu:
   /// mensagem idêntica para matrícula inexistente e senha errada (ver
   /// `InstitutionalAuthService`).
+  ///
+  /// MFA: com a verificação em duas etapas ativa, a senha certa sem
+  /// [totpCode] recebe `MfaRequiredException` (o app pede o código e repete a
+  /// chamada); com `REQUIRE_ACS_MFA` ligado e a MFA não ativada, recebe
+  /// `MfaEnrollmentRequiredException` (o app chama `beginTotpEnrollment`).
   Future<DevelopmentLoginResult> loginInstitutional(
     Session session, {
     required String matricula,
     required String password,
     String? deviceId,
+    String? totpCode,
   }) async {
     final runtime = AlertRuntime.instance;
 
@@ -80,6 +86,7 @@ class AuthEndpoint extends Endpoint {
           matricula: matricula,
           password: password,
           deviceId: deviceId,
+          totpCode: totpCode,
         );
 
     return DevelopmentLoginResult(
@@ -87,6 +94,27 @@ class AuthEndpoint extends Endpoint {
       tokenType: 'Bearer',
     );
   }
+
+  /// Começa a ativação da MFA do ACS (RF07). Sem token: o ACS prova matrícula e senha.
+  Future<TotpEnrollmentStart> beginTotpEnrollment(
+    Session session, {
+    required String matricula,
+    required String password,
+  }) =>
+      AlertRuntime.instance
+          .institutionalAuthServiceFor(session)
+          .beginTotpEnrollment(matricula: matricula, password: password);
+
+  /// Confirma a ativação com o primeiro código do autenticador.
+  Future<void> confirmTotpEnrollment(
+    Session session, {
+    required String matricula,
+    required String password,
+    required String code,
+  }) =>
+      AlertRuntime.instance
+          .institutionalAuthServiceFor(session)
+          .confirmTotpEnrollment(matricula: matricula, password: password, code: code);
 
   /// Pedido do código de acesso (RF01). Público por definição: quem chama
   /// ainda não tem sessão. A resposta é sempre a mesma — não revela se o CPF

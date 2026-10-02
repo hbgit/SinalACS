@@ -160,6 +160,9 @@ services:
       CPF_HASH_PEPPER: ${CPF_HASH_PEPPER:-}
       APP_ENV: ${APP_ENV:-development}
       ENABLE_DEV_LOGIN: "${ENABLE_DEV_LOGIN:-true}"
+      # MFA (TOTP) obrigatória no login institucional do ACS. Em produção o
+      # padrão é `true`; este default é só da stack local.
+      REQUIRE_ACS_MFA: "${REQUIRE_ACS_MFA:-false}"
     # O RPC só é alcançável por HTTPS em :443. A publicação de 8080 foi
     # REMOVIDA de propósito: enquanto ela existisse, o TLS seria decorativo —
     # RNF04 pede TLS em todas as comunicações, e um caminho em texto claro ao

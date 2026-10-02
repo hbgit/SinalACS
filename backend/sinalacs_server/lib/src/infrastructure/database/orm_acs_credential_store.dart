@@ -1,6 +1,7 @@
 import 'package:serverpod/serverpod.dart';
 import 'package:sinalacs_server/src/application/auth/institutional_auth_service.dart';
 import 'package:sinalacs_server/src/application/auth/password_hasher.dart';
+import 'package:sinalacs_server/src/application/auth/totp_secret_vault.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
 
 /// Implementação sobre o ORM do Serverpod.
@@ -31,7 +32,7 @@ import 'package:sinalacs_server/src/generated/protocol.dart';
 /// `lockUntil`). Mesmo arranjo de `OrmOnboardingStore.consumeIfValid`, que
 /// também resolve no `SET`/`WHERE` do Postgres o que o ORM não expressa — o
 /// ORM não tem `UPDATE ... SET col = col + 1`.
-class OrmAcsCredentialStore implements AcsCredentialStore {
+class OrmAcsCredentialStore implements AcsCredentialStore, TotpStore {
   OrmAcsCredentialStore({required Session Function() session}) : _session = session;
 
   final Session Function() _session;
@@ -83,6 +84,74 @@ class OrmAcsCredentialStore implements AcsCredentialStore {
       ),
       failedAttempts: credential.failedAttempts,
       lockedUntil: credential.lockedUntil,
+      totp: _totpOf(credential),
+    );
+  }
+
+  /// Estado da MFA como está na linha. Segredo sem versão de chave é linha
+  /// corrompida: vira erro de servidor, não "sem MFA" — tratar como ausente
+  /// deixaria entrar só com a senha quem tem MFA ativa.
+  static TotpEnrollment? _totpOf(UserCredential credential) {
+    final cifrado = credential.totpSecretEncrypted;
+    if (cifrado == null) return null;
+    final versao = credential.totpKeyVersion;
+    if (versao == null) {
+      throw StateError('Segredo TOTP sem versão de chave em user_credentials.');
+    }
+    return TotpEnrollment(
+      sealed: SealedSecret(ciphertextBase64: cifrado, keyVersion: versao),
+      enabled: credential.totpEnabledAt != null,
+      lastStep: credential.totpLastStep,
+    );
+  }
+
+  /// Grava um segredo **pendente**: zera `totpEnabledAt` e `totpLastStep`, de
+  /// modo que a MFA só passa a valer com `enable`. Quem impede de sobrescrever
+  /// uma MFA já ativa é o serviço (`beginTotpEnrollment` recusa).
+  @override
+  Future<void> saveSecret(String acsId, SealedSecret secret, DateTime at) async {
+    await _setColumns(
+      acsId,
+      (t) => [
+        t.totpSecretEncrypted(secret.ciphertextBase64),
+        t.totpKeyVersion(secret.keyVersion),
+        t.totpEnabledAt(null),
+        t.totpLastStep(null),
+        t.updatedAt(at),
+      ],
+    );
+  }
+
+  @override
+  Future<void> enable(String acsId, int step, DateTime at) async {
+    await _setColumns(
+      acsId,
+      (t) => [t.totpEnabledAt(at), t.totpLastStep(step), t.updatedAt(at)],
+    );
+  }
+
+  /// Grava o passo aceito. O `WHERE` só deixa o passo **avançar**: duas
+  /// requisições cruzadas não fazem o último passo voltar para trás (o que
+  /// reabriria a janela de replay de um código já usado).
+  @override
+  Future<void> registerStep(String acsId, int step) async {
+    await UserCredential.db.updateWhere(
+      _session(),
+      columnValues: (t) => [t.totpLastStep(step)],
+      where: (t) =>
+          t.userId.equals(UuidValue.fromString(acsId)) &
+          (t.totpLastStep.equals(null) | (t.totpLastStep < step)),
+    );
+  }
+
+  Future<void> _setColumns(
+    String acsId,
+    List<ColumnValue> Function(UserCredentialUpdateTable t) columns,
+  ) async {
+    await UserCredential.db.updateWhere(
+      _session(),
+      columnValues: columns,
+      where: (t) => t.userId.equals(UuidValue.fromString(acsId)),
     );
   }
 

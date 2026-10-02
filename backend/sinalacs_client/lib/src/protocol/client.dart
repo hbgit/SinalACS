@@ -19,31 +19,33 @@ import 'package:sinalacs_client/src/protocol/api/alert_status_result.dart'
     as _i5;
 import 'package:sinalacs_client/src/protocol/api/development_login_result.dart'
     as _i6;
-import 'package:sinalacs_client/src/protocol/api/service_health.dart' as _i7;
+import 'package:sinalacs_client/src/protocol/api/totp_enrollment_start.dart'
+    as _i7;
+import 'package:sinalacs_client/src/protocol/api/service_health.dart' as _i8;
 import 'package:sinalacs_client/src/protocol/api/notice_send_result.dart'
-    as _i8;
-import 'package:sinalacs_client/src/protocol/api/enrollment_token_result.dart'
     as _i9;
-import 'package:sinalacs_client/src/protocol/api/enrollment_result.dart'
+import 'package:sinalacs_client/src/protocol/api/enrollment_token_result.dart'
     as _i10;
-import 'package:sinalacs_client/src/protocol/api/micro_area_patient.dart'
+import 'package:sinalacs_client/src/protocol/api/enrollment_result.dart'
     as _i11;
-import 'package:sinalacs_client/src/protocol/api/patient_data_overview.dart'
+import 'package:sinalacs_client/src/protocol/api/micro_area_patient.dart'
     as _i12;
-import 'package:sinalacs_client/src/protocol/api/patient_consent_record.dart'
+import 'package:sinalacs_client/src/protocol/api/patient_data_overview.dart'
     as _i13;
-import 'package:sinalacs_client/src/protocol/enums/consent_purpose.dart'
+import 'package:sinalacs_client/src/protocol/api/patient_consent_record.dart'
     as _i14;
-import 'package:sinalacs_client/src/protocol/api/terms_change_notice.dart'
+import 'package:sinalacs_client/src/protocol/enums/consent_purpose.dart'
     as _i15;
-import 'package:sinalacs_client/src/protocol/api/patient_data_subject_request_record.dart'
+import 'package:sinalacs_client/src/protocol/api/terms_change_notice.dart'
     as _i16;
-import 'package:sinalacs_client/src/protocol/api/triage_result.dart' as _i17;
-import 'package:sinalacs_client/src/protocol/api/ubs_contact.dart' as _i18;
+import 'package:sinalacs_client/src/protocol/api/patient_data_subject_request_record.dart'
+    as _i17;
+import 'package:sinalacs_client/src/protocol/api/triage_result.dart' as _i18;
+import 'package:sinalacs_client/src/protocol/api/ubs_contact.dart' as _i19;
 import 'package:sinalacs_client/src/protocol/api/visit_sync_result.dart'
-    as _i19;
-import 'package:sinalacs_client/src/protocol/api/visit_sync_entry.dart' as _i20;
-import 'protocol.dart' as _i21;
+    as _i20;
+import 'package:sinalacs_client/src/protocol/api/visit_sync_entry.dart' as _i21;
+import 'protocol.dart' as _i22;
 
 /// Ciclo do alerta vermelho.
 ///
@@ -134,10 +136,16 @@ class EndpointAuth extends _i1.EndpointRef {
   /// `AuthenticationFailedException`, com a mensagem que o serviço escolheu:
   /// mensagem idêntica para matrícula inexistente e senha errada (ver
   /// `InstitutionalAuthService`).
+  ///
+  /// MFA: com a verificação em duas etapas ativa, a senha certa sem
+  /// [totpCode] recebe `MfaRequiredException` (o app pede o código e repete a
+  /// chamada); com `REQUIRE_ACS_MFA` ligado e a MFA não ativada, recebe
+  /// `MfaEnrollmentRequiredException` (o app chama `beginTotpEnrollment`).
   _i2.Future<_i6.DevelopmentLoginResult> loginInstitutional({
     required String matricula,
     required String password,
     String? deviceId,
+    String? totpCode,
   }) => caller.callServerEndpoint<_i6.DevelopmentLoginResult>(
     'auth',
     'loginInstitutional',
@@ -145,6 +153,35 @@ class EndpointAuth extends _i1.EndpointRef {
       'matricula': matricula,
       'password': password,
       'deviceId': deviceId,
+      'totpCode': totpCode,
+    },
+  );
+
+  /// Começa a ativação da MFA do ACS (RF07). Sem token: o ACS prova matrícula e senha.
+  _i2.Future<_i7.TotpEnrollmentStart> beginTotpEnrollment({
+    required String matricula,
+    required String password,
+  }) => caller.callServerEndpoint<_i7.TotpEnrollmentStart>(
+    'auth',
+    'beginTotpEnrollment',
+    {
+      'matricula': matricula,
+      'password': password,
+    },
+  );
+
+  /// Confirma a ativação com o primeiro código do autenticador.
+  _i2.Future<void> confirmTotpEnrollment({
+    required String matricula,
+    required String password,
+    required String code,
+  }) => caller.callServerEndpoint<void>(
+    'auth',
+    'confirmTotpEnrollment',
+    {
+      'matricula': matricula,
+      'password': password,
+      'code': code,
     },
   );
 
@@ -260,8 +297,8 @@ class EndpointHealth extends _i1.EndpointRef {
   @override
   String get name => 'health';
 
-  _i2.Future<_i7.ServiceHealth> check() =>
-      caller.callServerEndpoint<_i7.ServiceHealth>(
+  _i2.Future<_i8.ServiceHealth> check() =>
+      caller.callServerEndpoint<_i8.ServiceHealth>(
         'health',
         'check',
         {},
@@ -280,12 +317,12 @@ class EndpointNotices extends EndpointAuthenticated {
   /// consentiram com `segmentedPush`. A microárea vem do token, nunca de
   /// parâmetro. Auditoria: uma linha `community_notice` com quem enviou e a
   /// microárea; o texto do aviso nunca entra na trilha.
-  _i2.Future<_i8.NoticeSendResult> sendSegmented({
+  _i2.Future<_i9.NoticeSendResult> sendSegmented({
     required String accessToken,
     required String title,
     required String message,
     required String audience,
-  }) => caller.callServerEndpoint<_i8.NoticeSendResult>(
+  }) => caller.callServerEndpoint<_i9.NoticeSendResult>(
     'notices',
     'sendSegmented',
     {
@@ -314,10 +351,10 @@ class EndpointOnboarding extends _i1.EndpointRef {
   String get name => 'onboarding';
 
   /// Chamado pelo app do ACS. Exige sessão de ACS.
-  _i2.Future<_i9.EnrollmentTokenResult> generateEnrollmentToken({
+  _i2.Future<_i10.EnrollmentTokenResult> generateEnrollmentToken({
     required String accessToken,
     required String patientId,
-  }) => caller.callServerEndpoint<_i9.EnrollmentTokenResult>(
+  }) => caller.callServerEndpoint<_i10.EnrollmentTokenResult>(
     'onboarding',
     'generateEnrollmentToken',
     {
@@ -328,13 +365,13 @@ class EndpointOnboarding extends _i1.EndpointRef {
 
   /// Chamado pelo app do paciente. Não exige sessão prévia — é a própria
   /// conclusão do onboarding que emite a primeira sessão.
-  _i2.Future<_i10.EnrollmentResult> completeEnrollment({
+  _i2.Future<_i11.EnrollmentResult> completeEnrollment({
     required String token,
     required bool healthDataConsent,
     required bool remindersConsent,
     required bool pushConsent,
     required bool termsAccepted,
-  }) => caller.callServerEndpoint<_i10.EnrollmentResult>(
+  }) => caller.callServerEndpoint<_i11.EnrollmentResult>(
     'onboarding',
     'completeEnrollment',
     {
@@ -363,9 +400,9 @@ class EndpointPatients extends EndpointAuthenticated {
   @override
   String get name => 'patients';
 
-  _i2.Future<List<_i11.MicroAreaPatient>> listMicroArea({
+  _i2.Future<List<_i12.MicroAreaPatient>> listMicroArea({
     required String accessToken,
-  }) => caller.callServerEndpoint<List<_i11.MicroAreaPatient>>(
+  }) => caller.callServerEndpoint<List<_i12.MicroAreaPatient>>(
     'patients',
     'listMicroArea',
     {'accessToken': accessToken},
@@ -398,8 +435,8 @@ class EndpointPatients extends EndpointAuthenticated {
   /// Painel "Meus Dados" do próprio paciente autenticado (LGPD,
   /// spec/lgpd_design.md linhas 417/581-595): confirmação de existência de
   /// tratamento e acesso aos dados pessoais.
-  _i2.Future<_i12.PatientDataOverview> myData({required String accessToken}) =>
-      caller.callServerEndpoint<_i12.PatientDataOverview>(
+  _i2.Future<_i13.PatientDataOverview> myData({required String accessToken}) =>
+      caller.callServerEndpoint<_i13.PatientDataOverview>(
         'patients',
         'myData',
         {'accessToken': accessToken},
@@ -409,11 +446,11 @@ class EndpointPatients extends EndpointAuthenticated {
   /// consentimento (LGPD-RF05): uma linha nova em `consent_logs`, nunca a
   /// edição da anterior. `healthDataProcessing` volta como
   /// [DataRightsException] — retirá-lo passa pelo pedido de exclusão.
-  _i2.Future<_i13.PatientConsentRecord> updateConsent({
+  _i2.Future<_i14.PatientConsentRecord> updateConsent({
     required String accessToken,
-    required _i14.ConsentPurpose purpose,
+    required _i15.ConsentPurpose purpose,
     required bool granted,
-  }) => caller.callServerEndpoint<_i13.PatientConsentRecord>(
+  }) => caller.callServerEndpoint<_i14.PatientConsentRecord>(
     'patients',
     'updateConsent',
     {
@@ -427,9 +464,9 @@ class EndpointPatients extends EndpointAuthenticated {
   /// por quem entrou por OTP sem passar pelo onboarding, ou aceitou uma versão
   /// anterior. Só paciente; grava uma linha assinada em `consent_logs` só se a
   /// versão vigente ainda não foi aceita — repetir devolve a existente.
-  _i2.Future<_i13.PatientConsentRecord> acceptTermsOfUse({
+  _i2.Future<_i14.PatientConsentRecord> acceptTermsOfUse({
     required String accessToken,
-  }) => caller.callServerEndpoint<_i13.PatientConsentRecord>(
+  }) => caller.callServerEndpoint<_i14.PatientConsentRecord>(
     'patients',
     'acceptTermsOfUse',
     {'accessToken': accessToken},
@@ -453,7 +490,7 @@ class EndpointPatients extends EndpointAuthenticated {
   /// push (RF14).
   _i2.Future<bool> hasGrantedConsent({
     required String accessToken,
-    required _i14.ConsentPurpose purpose,
+    required _i15.ConsentPurpose purpose,
   }) => caller.callServerEndpoint<bool>(
     'patients',
     'hasGrantedConsent',
@@ -466,9 +503,9 @@ class EndpointPatients extends EndpointAuthenticated {
   /// Aviso de mudança dos termos ativo agora (LGPD-RF18, 15 dias de antecedência),
   /// ou `null`. Só paciente. Sem leitura de banco e sem linha de auditoria: a
   /// agenda é uma constante do repositório e nada do titular é lido nem gravado.
-  _i2.Future<_i15.TermsChangeNotice?> termsChangeNotice({
+  _i2.Future<_i16.TermsChangeNotice?> termsChangeNotice({
     required String accessToken,
-  }) => caller.callServerEndpoint<_i15.TermsChangeNotice?>(
+  }) => caller.callServerEndpoint<_i16.TermsChangeNotice?>(
     'patients',
     'termsChangeNotice',
     {'accessToken': accessToken},
@@ -476,9 +513,9 @@ class EndpointPatients extends EndpointAuthenticated {
 
   /// Pedido de exclusão/anonimização dos próprios dados (LGPD-RF08).
   /// Idempotente enquanto houver um pedido de exclusão em aberto.
-  _i2.Future<_i16.PatientDataSubjectRequestRecord> requestDataDeletion({
+  _i2.Future<_i17.PatientDataSubjectRequestRecord> requestDataDeletion({
     required String accessToken,
-  }) => caller.callServerEndpoint<_i16.PatientDataSubjectRequestRecord>(
+  }) => caller.callServerEndpoint<_i17.PatientDataSubjectRequestRecord>(
     'patients',
     'requestDataDeletion',
     {'accessToken': accessToken},
@@ -487,10 +524,10 @@ class EndpointPatients extends EndpointAuthenticated {
   /// Pedido de correção de um dado (LGPD-RF08). [details] é texto livre do
   /// titular, gravado cifrado; vazio ou acima de 500 caracteres volta como
   /// [DataRightsException].
-  _i2.Future<_i16.PatientDataSubjectRequestRecord> requestDataCorrection({
+  _i2.Future<_i17.PatientDataSubjectRequestRecord> requestDataCorrection({
     required String accessToken,
     required String details,
-  }) => caller.callServerEndpoint<_i16.PatientDataSubjectRequestRecord>(
+  }) => caller.callServerEndpoint<_i17.PatientDataSubjectRequestRecord>(
     'patients',
     'requestDataCorrection',
     {
@@ -517,7 +554,7 @@ class EndpointTriage extends EndpointAuthenticated {
   @override
   String get name => 'triage';
 
-  _i2.Future<_i17.TriageResult> evaluate({
+  _i2.Future<_i18.TriageResult> evaluate({
     required String accessToken,
     required bool chestPain,
     required bool difficultyBreathing,
@@ -525,7 +562,7 @@ class EndpointTriage extends EndpointAuthenticated {
     required bool persistentVomiting,
     required bool bleeding,
     required bool severeWeakness,
-  }) => caller.callServerEndpoint<_i17.TriageResult>(
+  }) => caller.callServerEndpoint<_i18.TriageResult>(
     'triage',
     'evaluate',
     {
@@ -548,8 +585,8 @@ class EndpointUbs extends EndpointAuthenticated {
   @override
   String get name => 'ubs';
 
-  _i2.Future<_i18.UbsContact> myContact({required String accessToken}) =>
-      caller.callServerEndpoint<_i18.UbsContact>(
+  _i2.Future<_i19.UbsContact> myContact({required String accessToken}) =>
+      caller.callServerEndpoint<_i19.UbsContact>(
         'ubs',
         'myContact',
         {'accessToken': accessToken},
@@ -572,10 +609,10 @@ class EndpointVisits extends EndpointAuthenticated {
   @override
   String get name => 'visits';
 
-  _i2.Future<List<_i19.VisitSyncResult>> sync({
+  _i2.Future<List<_i20.VisitSyncResult>> sync({
     required String accessToken,
-    required List<_i20.VisitSyncEntry> visits,
-  }) => caller.callServerEndpoint<List<_i19.VisitSyncResult>>(
+    required List<_i21.VisitSyncEntry> visits,
+  }) => caller.callServerEndpoint<List<_i20.VisitSyncResult>>(
     'visits',
     'sync',
     {
@@ -587,10 +624,10 @@ class EndpointVisits extends EndpointAuthenticated {
   /// Sincronização central→dispositivo: visitas da microárea do ACS
   /// autenticado alteradas após `since`, para reconciliar um device que
   /// ficou offline ou foi reinstalado.
-  _i2.Future<List<_i20.VisitSyncEntry>> pull({
+  _i2.Future<List<_i21.VisitSyncEntry>> pull({
     required String accessToken,
     required DateTime since,
-  }) => caller.callServerEndpoint<List<_i20.VisitSyncEntry>>(
+  }) => caller.callServerEndpoint<List<_i21.VisitSyncEntry>>(
     'visits',
     'pull',
     {
@@ -620,7 +657,7 @@ class Client extends _i1.ServerpodClientShared {
     bool? disconnectStreamsOnLostInternetConnection,
   }) : super(
          host,
-         _i21.Protocol(),
+         _i22.Protocol(),
          securityContext: securityContext,
          streamingConnectionTimeout: streamingConnectionTimeout,
          connectionTimeout: connectionTimeout,

@@ -19,6 +19,7 @@ class AppConfig {
     required this.mqttCaCertificatePath,
     required this.appEnv,
     required this.enableDevLogin,
+    this.requireAcsMfa = false,
     this.gorushUrl,
   });
 
@@ -86,6 +87,12 @@ class AppConfig {
   final String? mqttCaCertificatePath;
   final String appEnv;
   final bool enableDevLogin;
+
+  /// `REQUIRE_ACS_MFA`: ACS sem MFA (TOTP) ativa não entra pelo login
+  /// institucional; precisa ativá-la antes. Padrão **ligado fora de
+  /// `development`** ([resolveRequireAcsMfa]). O default do construtor é
+  /// `false` só para as configurações montadas à mão nos testes.
+  final bool requireAcsMfa;
 
   bool get isProduction => appEnv == 'production';
 
@@ -199,9 +206,19 @@ class AppConfig {
       mqttCaCertificatePath: environment['MQTT_CA_CERT_PATH'],
       appEnv: appEnv,
       enableDevLogin: environment['ENABLE_DEV_LOGIN'] == 'true',
+      requireAcsMfa: resolveRequireAcsMfa(
+        value: environment['REQUIRE_ACS_MFA'],
+        appEnv: appEnv,
+      ),
       gorushUrl: _resolveGorushUrl(environment['GORUSH_URL']),
     );
   }
+
+  /// Com a variável presente, só a string exata `true` liga (mesma regra de
+  /// `ENABLE_DEV_LOGIN`). Ausente, vale `true` em todo ambiente que não seja
+  /// `development`: esquecer a variável em produção não pode desligar a MFA.
+  static bool resolveRequireAcsMfa({required String? value, required String appEnv}) =>
+      value != null ? value == 'true' : appEnv != 'development';
 
   static String? _resolveGorushUrl(String? value) {
     var url = value?.trim() ?? '';

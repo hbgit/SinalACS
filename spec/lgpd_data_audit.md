@@ -21,6 +21,10 @@ A tabela abaixo consolida o mapeamento exaustivo de dados persistidos pelo backe
 | | `memoryKb` / `iterations` / `parallelism` | `bigint` | Metadado Técnico | Parâmetros do Argon2id vigentes na gravação | Gravados junto do hash para que subir o custo não invalide credencial antiga. |
 | | `failedAttempts` | `bigint` | Metadado de Segurança | Tentativas falhas desde o último sucesso | Base do bloqueio (achado F6). |
 | | `lockedUntil` | `timestamp without time zone` | Metadado de Segurança | Fim do bloqueio; `NULL` = não bloqueado | — |
+| | `totpSecretEncrypted` | `text` | **Crítico** — segredo de autenticação | AES-256-GCM (`HealthCipherTotpVault`, mesma chave `HEALTH_DATA_ENCRYPTION_KEY` dos dados clínicos); `NULL` = sem MFA | Segredo TOTP da MFA do ACS (RF07). Nunca em claro: volta ao ACS uma única vez, na resposta de `auth.beginTotpEnrollment`. Perder a chave invalida também as MFAs (redefinição manual). |
+| | `totpKeyVersion` | `bigint` | Metadado de Segurança | Versão da chave que cifrou o segredo | — |
+| | `totpEnabledAt` | `timestamp without time zone` | Metadado de Segurança | Confirmação da ativação; `NULL` = ativação pendente (MFA ainda não vale) | — |
+| | `totpLastStep` | `bigint` | Metadado de Segurança | Último passo de 30 s aceito | Barra o replay de um código já usado dentro da janela. |
 | | `createdAt` / `updatedAt` | `timestamp without time zone` | Metadado Técnico | Timestamps | — |
 | **otp_challenges** | `id` | `uuid` | Pseudonimizado | UUID da linha | — |
 | | `userId` | `uuid` | Pseudonimizado | Chave estrangeira (`users.id`) | — |
