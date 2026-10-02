@@ -30,6 +30,11 @@ class _Store implements AcsCredentialStore, TotpStore {
   AcsCredentialRecord record;
   int enabledCalls = 0;
   int? lastRegisteredStep;
+  int successfulLogins = 0;
+
+  /// Simula a requisição concorrente que gravou antes: o `UPDATE` condicional
+  /// do store real não altera linha nenhuma e devolve `false`.
+  bool perdeCorrida = false;
 
   @override
   Future<AcsCredentialRecord?> findByEnrollmentId(String enrollmentId) async =>
@@ -48,6 +53,7 @@ class _Store implements AcsCredentialStore, TotpStore {
 
   @override
   Future<void> registerSuccessfulLogin(String acsId, DateTime at) async {
+    successfulLogins++;
     record = _copia(failedAttempts: 0, lockedUntil: null);
   }
 
@@ -55,22 +61,28 @@ class _Store implements AcsCredentialStore, TotpStore {
   Future<void> saveCredential(String acsId, PasswordDigest digest, DateTime at) async {}
 
   @override
-  Future<void> saveSecret(String acsId, SealedSecret s, DateTime at) async {
+  Future<bool> saveSecret(String acsId, SealedSecret s, DateTime at) async {
+    if (perdeCorrida) return false;
     record = _copia(totp: TotpEnrollment(sealed: s, enabled: false, lastStep: null));
+    return true;
   }
 
   @override
-  Future<void> enable(String acsId, int step, DateTime at) async {
+  Future<bool> enable(String acsId, SealedSecret pending, int step, DateTime at) async {
+    if (perdeCorrida) return false;
     enabledCalls++;
     final t = record.totp!;
     record = _copia(totp: TotpEnrollment(sealed: t.sealed, enabled: true, lastStep: step));
+    return true;
   }
 
   @override
-  Future<void> registerStep(String acsId, int step) async {
+  Future<bool> registerStep(String acsId, int step) async {
+    if (perdeCorrida) return false;
     lastRegisteredStep = step;
     final t = record.totp!;
     record = _copia(totp: TotpEnrollment(sealed: t.sealed, enabled: t.enabled, lastStep: step));
+    return true;
   }
 
   AcsCredentialRecord _copia({int? failedAttempts, DateTime? lockedUntil, TotpEnrollment? totp}) =>
@@ -189,6 +201,20 @@ void main() {
       expect(user.id, _acsId);
     });
 
+    test('o store não avançou o passo (outra requisição gravou antes) → recusa', () async {
+      // Duas requisições com o mesmo código leram o mesmo lastStep e as duas
+      // passaram no verify; só a primeira avança a linha. A segunda não pode
+      // receber sessão (RFC 6238 §5.2: código já validado não vale de novo).
+      final m = await montar();
+      m.store.perdeCorrida = true;
+      await expectLater(
+        m.servico.login(matricula: 'ACS-001', password: _senha, totpCode: Totp.code(segredo, t0), now: t0),
+        throwsA(isA<AuthenticationFailedException>()),
+      );
+      expect(m.store.successfulLogins, 0);
+      expect(m.store.record.failedAttempts, 1);
+    });
+
     test('senha errada continua dando a mensagem única, com ou sem código', () async {
       final m = await montar();
       await expectLater(
@@ -246,6 +272,33 @@ void main() {
       );
       expect(m.store.enabledCalls, 0);
       expect(m.store.record.failedAttempts, 1);
+    });
+
+    test('confirm que perdeu a corrida (ativação já gravada por outra) é recusado', () async {
+      final m = await montar(comMfa: false);
+      await m.servico.beginTotpEnrollment(matricula: 'ACS-001', password: _senha);
+      final segredoSorteado = await cofre.open(m.store.record.totp!.sealed);
+      m.store.perdeCorrida = true;
+      await expectLater(
+        m.servico.confirmTotpEnrollment(
+          matricula: 'ACS-001',
+          password: _senha,
+          code: Totp.code(segredoSorteado, t0),
+          now: t0,
+        ),
+        throwsA(isA<AuthenticationFailedException>()),
+      );
+      expect(m.store.enabledCalls, 0);
+      expect(m.store.record.failedAttempts, 1);
+    });
+
+    test('begin que perdeu a corrida para uma ativação concorrente é recusado', () async {
+      final m = await montar(comMfa: false);
+      m.store.perdeCorrida = true;
+      await expectLater(
+        m.servico.beginTotpEnrollment(matricula: 'ACS-001', password: _senha),
+        throwsA(isA<AuthenticationFailedException>()),
+      );
     });
 
     test('begin com senha errada é recusado como o login (mensagem única)', () async {

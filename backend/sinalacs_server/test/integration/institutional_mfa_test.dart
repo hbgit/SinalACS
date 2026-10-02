@@ -2,8 +2,10 @@ import 'dart:typed_data';
 
 import 'package:serverpod/serverpod.dart';
 import 'package:sinalacs_server/src/application/audit/audit_trail.dart';
+import 'package:sinalacs_server/src/application/auth/development_auth_service.dart';
 import 'package:sinalacs_server/src/application/auth/institutional_auth_service.dart';
 import 'package:sinalacs_server/src/application/auth/totp.dart';
+import 'package:sinalacs_server/src/application/auth/totp_secret_vault.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
 import 'package:sinalacs_server/src/infrastructure/crypto/health_cipher_totp_vault.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_acs_credential_store.dart';
@@ -215,14 +217,39 @@ void main() {
       final session = sessionBuilder.build();
       final store = OrmAcsCredentialStore(session: () => session);
 
-      await store.registerStep(_acsId, 100);
+      expect(await store.registerStep(_acsId, 100), isTrue);
       expect((await _linha(session)).totpLastStep, 100);
 
-      await store.registerStep(_acsId, 99);
+      // Mesmo passo e passo menor: nada muda, e o store diz que não gravou.
+      expect(await store.registerStep(_acsId, 100), isFalse);
+      expect(await store.registerStep(_acsId, 99), isFalse);
       expect((await _linha(session)).totpLastStep, 100);
 
-      await store.registerStep(_acsId, 101);
+      expect(await store.registerStep(_acsId, 101), isTrue);
       expect((await _linha(session)).totpLastStep, 101);
+    });
+
+    test('saveSecret não sobrescreve MFA ativa; enable só ativa o segredo pendente que conferiu',
+        () async {
+      final session = sessionBuilder.build();
+      final store = OrmAcsCredentialStore(session: () => session);
+      const a = SealedSecret(ciphertextBase64: 'cifra-sintetica-a', keyVersion: 1);
+      const b = SealedSecret(ciphertextBase64: 'cifra-sintetica-b', keyVersion: 1);
+      final at = DateTime.now().toUtc();
+
+      expect(await store.saveSecret(_acsId, a, at), isTrue);
+      // Um novo início trocou o segredo: o código do antigo não ativa o novo.
+      expect(await store.saveSecret(_acsId, b, at), isTrue);
+      expect(await store.enable(_acsId, a, 10, at), isFalse);
+      expect((await _linha(session)).totpEnabledAt, isNull);
+
+      expect(await store.enable(_acsId, b, 10, at), isTrue);
+      // Ativa: segunda confirmação e novo início são recusados pela linha.
+      expect(await store.enable(_acsId, b, 11, at), isFalse);
+      expect(await store.saveSecret(_acsId, a, at), isFalse);
+      final linha = await _linha(session);
+      expect(linha.totpSecretEncrypted, b.ciphertextBase64);
+      expect(linha.totpLastStep, 10);
     });
 
     test('com requireMfa ligado, ACS sem MFA ativa recebe MfaEnrollmentRequiredException',
@@ -246,4 +273,163 @@ void main() {
       expect((await _linha(session)).failedAttempts, 0);
     });
   });
+
+  // Concorrência de verdade exige o rollback DESLIGADO: com ele, todas as
+  // `Session` do harness dividem o mesmo `TransactionManager` e chamadas
+  // simultâneas são recusadas (ver o grupo "rajada" de
+  // `institutional_login_test.dart`). Sem rollback, cada tentativa abre a sua
+  // conexão. Pelo serviço com store ORM e cofre reais, e trilha de mentira:
+  // auditoria commitada quebraria a cadeia que outras suítes conferem.
+  withServerpod(
+    'Dada a MFA por TOTP, sem rollback automático (concorrência)',
+    (sessionBuilder, endpoints) {
+      test('o mesmo código válido em requisições simultâneas abre UMA sessão só', () async {
+        await _seedCorrida(sessionBuilder.build());
+        try {
+          final segredo = await _ativarMfaCorrida(sessionBuilder);
+          final codigo = Totp.code(
+            segredo,
+            DateTime.now().toUtc().add(const Duration(seconds: Totp.period)),
+          );
+
+          final resultados = await Future.wait([
+            for (var i = 0; i < _concorrentes; i++)
+              _servicoCorrida(sessionBuilder)
+                  .login(matricula: _corridaMatricula, password: _senha, totpCode: codigo)
+                  .then<Object?>((u) => u, onError: (Object e) => e),
+          ]);
+
+          expect(resultados.whereType<AuthenticatedUser>(), hasLength(1),
+              reason: 'RFC 6238 §5.2: um código validado não vale de novo');
+          expect(
+            resultados.where((r) => r is! AuthenticatedUser),
+            everyElement(isA<AuthenticationFailedException>()),
+          );
+        } finally {
+          await _limparCorrida(sessionBuilder.build());
+        }
+      });
+
+      test('a mesma confirmação em requisições simultâneas ativa UMA vez só', () async {
+        await _seedCorrida(sessionBuilder.build());
+        try {
+          final inicio = await _servicoCorrida(sessionBuilder)
+              .beginTotpEnrollment(matricula: _corridaMatricula, password: _senha);
+          final codigo = Totp.code(_deBase32(inicio.secretBase32), DateTime.now().toUtc());
+
+          final resultados = await Future.wait([
+            for (var i = 0; i < _concorrentes; i++)
+              _servicoCorrida(sessionBuilder)
+                  .confirmTotpEnrollment(matricula: _corridaMatricula, password: _senha, code: codigo)
+                  .then<Object?>((_) => 'ativou', onError: (Object e) => e),
+          ]);
+
+          expect(resultados.where((r) => r == 'ativou'), hasLength(1));
+          expect(
+            resultados.where((r) => r != 'ativou'),
+            everyElement(isA<AuthenticationFailedException>()),
+          );
+        } finally {
+          await _limparCorrida(sessionBuilder.build());
+        }
+      });
+    },
+    rollbackDatabase: RollbackDatabase.disabled,
+  );
+}
+
+const _concorrentes = 5;
+const _corridaAcsId = '00000000-0000-4000-8000-000000000091';
+const _corridaMicroAreaId = '00000000-0000-4000-8000-000000000092';
+const _corridaUbsId = '00000000-0000-4000-8000-000000000093';
+const _corridaMatricula = 'ACS-MFA-CORRIDA-001';
+
+/// Uma `Session` por chamada, como no servidor: conexões independentes.
+InstitutionalAuthService _servicoCorrida(TestSessionBuilder sessionBuilder) {
+  final store = OrmAcsCredentialStore(session: () => sessionBuilder.build());
+  return InstitutionalAuthService(
+    store: store,
+    hasher: AlertRuntimeHarness.hasher,
+    audit: _SemAuditoria(),
+    totpStore: store,
+    vault: HealthCipherTotpVault(AlertRuntime.instance.healthDataCipher),
+  );
+}
+
+/// Ativa a MFA (begin + confirm, em sequência) e devolve o segredo.
+Future<Uint8List> _ativarMfaCorrida(TestSessionBuilder sessionBuilder) async {
+  final inicio = await _servicoCorrida(sessionBuilder)
+      .beginTotpEnrollment(matricula: _corridaMatricula, password: _senha);
+  final segredo = _deBase32(inicio.secretBase32);
+  await _servicoCorrida(sessionBuilder).confirmTotpEnrollment(
+    matricula: _corridaMatricula,
+    password: _senha,
+    code: Totp.code(segredo, DateTime.now().toUtc()),
+  );
+  return segredo;
+}
+
+/// Idempotente: limpa primeiro, para uma execução que morreu no meio não
+/// deixar chave duplicada.
+Future<void> _seedCorrida(Session session) async {
+  await _limparCorrida(session);
+  await Ubs.db.insertRow(
+    session,
+    Ubs(
+      id: UuidValue.fromString(_corridaUbsId),
+      name: 'UBS MFA Corrida',
+      address: 'Endereço local',
+      city: 'São Paulo',
+      state: 'SP',
+    ),
+  );
+  await MicroArea.db.insertRow(
+    session,
+    MicroArea(
+      id: UuidValue.fromString(_corridaMicroAreaId),
+      name: 'Microárea MFA Corrida',
+      ubsId: UuidValue.fromString(_corridaUbsId),
+      geoJsonBoundary: '{}',
+    ),
+  );
+  final now = DateTime.now().toUtc();
+  await User.db.insertRow(
+    session,
+    User(
+      id: UuidValue.fromString(_corridaAcsId),
+      cpfHash: 'development-acs-mfa-corrida',
+      name: 'ACS de desenvolvimento (MFA corrida)',
+      birthDate: DateTime.utc(1980),
+      role: UserRole.acs,
+      microAreaId: UuidValue.fromString(_corridaMicroAreaId),
+      createdAt: now,
+      updatedAt: now,
+    ),
+  );
+  await Acs.db.insertRow(
+    session,
+    Acs(
+      id: UuidValue.fromString(_corridaAcsId),
+      enrollmentId: _corridaMatricula,
+      ubsId: UuidValue.fromString(_corridaUbsId),
+      active: true,
+    ),
+  );
+  await AlertRuntimeHarness.store(session).saveCredential(
+        _corridaAcsId,
+        await AlertRuntimeHarness.hasher.derive(_senha),
+        now,
+      );
+}
+
+Future<void> _limparCorrida(Session session) async {
+  final id = UuidValue.fromString(_corridaAcsId);
+  await UserCredential.db.deleteWhere(session, where: (t) => t.userId.equals(id));
+  await Acs.db.deleteWhere(session, where: (t) => t.id.equals(id));
+  await User.db.deleteWhere(session, where: (t) => t.id.equals(id));
+  await MicroArea.db.deleteWhere(
+    session,
+    where: (t) => t.id.equals(UuidValue.fromString(_corridaMicroAreaId)),
+  );
+  await Ubs.db.deleteWhere(session, where: (t) => t.id.equals(UuidValue.fromString(_corridaUbsId)));
 }

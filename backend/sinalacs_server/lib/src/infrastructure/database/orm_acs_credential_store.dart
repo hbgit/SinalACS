@@ -106,53 +106,58 @@ class OrmAcsCredentialStore implements AcsCredentialStore, TotpStore {
   }
 
   /// Grava um segredo **pendente**: zera `totpEnabledAt` e `totpLastStep`, de
-  /// modo que a MFA só passa a valer com `enable`. Quem impede de sobrescrever
-  /// uma MFA já ativa é o serviço (`beginTotpEnrollment` recusa).
+  /// modo que a MFA só passa a valer com `enable`. O `WHERE totpEnabledAt IS
+  /// NULL` recusa sobrescrever uma MFA já ativa mesmo quando o serviço leu a
+  /// linha antes de uma confirmação concorrente gravar: sem ele, quem só tem a
+  /// senha poderia trocar o segredo de uma MFA recém-ativada.
   @override
-  Future<void> saveSecret(String acsId, SealedSecret secret, DateTime at) async {
-    await _setColumns(
-      acsId,
-      (t) => [
+  Future<bool> saveSecret(String acsId, SealedSecret secret, DateTime at) async {
+    final linhas = await UserCredential.db.updateWhere(
+      _session(),
+      columnValues: (t) => [
         t.totpSecretEncrypted(secret.ciphertextBase64),
         t.totpKeyVersion(secret.keyVersion),
         t.totpEnabledAt(null),
         t.totpLastStep(null),
         t.updatedAt(at),
       ],
+      where: (t) => t.userId.equals(UuidValue.fromString(acsId)) & t.totpEnabledAt.equals(null),
     );
+    return linhas.isNotEmpty;
   }
 
+  /// Ativa só se a linha ainda está pendente **com o mesmo segredo** que o
+  /// código conferiu: duas confirmações concorrentes ativam uma vez só, e um
+  /// novo início no meio (segredo trocado) não é ativado por um código do
+  /// segredo antigo.
   @override
-  Future<void> enable(String acsId, int step, DateTime at) async {
-    await _setColumns(
-      acsId,
-      (t) => [t.totpEnabledAt(at), t.totpLastStep(step), t.updatedAt(at)],
+  Future<bool> enable(String acsId, SealedSecret pending, int step, DateTime at) async {
+    final linhas = await UserCredential.db.updateWhere(
+      _session(),
+      columnValues: (t) => [t.totpEnabledAt(at), t.totpLastStep(step), t.updatedAt(at)],
+      where: (t) =>
+          t.userId.equals(UuidValue.fromString(acsId)) &
+          t.totpEnabledAt.equals(null) &
+          t.totpSecretEncrypted.equals(pending.ciphertextBase64),
     );
+    return linhas.isNotEmpty;
   }
 
-  /// Grava o passo aceito. O `WHERE` só deixa o passo **avançar**: duas
-  /// requisições cruzadas não fazem o último passo voltar para trás (o que
-  /// reabriria a janela de replay de um código já usado).
+  /// Grava o passo aceito e diz se gravou. O `WHERE` só deixa o passo
+  /// **avançar**; sob READ COMMITTED, a segunda de duas requisições com o
+  /// mesmo código espera o lock da linha, reavalia o `WHERE` contra o passo
+  /// que a primeira gravou e não altera nada — devolve `false`, e o serviço
+  /// recusa a sessão (replay).
   @override
-  Future<void> registerStep(String acsId, int step) async {
-    await UserCredential.db.updateWhere(
+  Future<bool> registerStep(String acsId, int step) async {
+    final linhas = await UserCredential.db.updateWhere(
       _session(),
       columnValues: (t) => [t.totpLastStep(step)],
       where: (t) =>
           t.userId.equals(UuidValue.fromString(acsId)) &
           (t.totpLastStep.equals(null) | (t.totpLastStep < step)),
     );
-  }
-
-  Future<void> _setColumns(
-    String acsId,
-    List<ColumnValue> Function(UserCredentialUpdateTable t) columns,
-  ) async {
-    await UserCredential.db.updateWhere(
-      _session(),
-      columnValues: columns,
-      where: (t) => t.userId.equals(UuidValue.fromString(acsId)),
-    );
+    return linhas.isNotEmpty;
   }
 
   @override

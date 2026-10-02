@@ -22,9 +22,20 @@ class TotpEnrollment {
 /// Escrita do estado da MFA. Interface à parte de [AcsCredentialStore] de
 /// propósito: quem só lê credencial (e os fakes que já existem) não muda.
 abstract interface class TotpStore {
-  Future<void> saveSecret(String acsId, SealedSecret secret, DateTime at);
-  Future<void> enable(String acsId, int step, DateTime at);
-  Future<void> registerStep(String acsId, int step);
+  /// Grava um segredo **pendente**. Devolve `false` sem escrever quando a MFA
+  /// já está ativa na linha: uma ativação concorrente que confirmou antes não
+  /// pode ser sobrescrita por quem só conhece a senha.
+  Future<bool> saveSecret(String acsId, SealedSecret secret, DateTime at);
+
+  /// Ativa a MFA com [pending], o segredo que o código conferiu. Devolve
+  /// `false` sem escrever quando a linha já não está pendente com esse mesmo
+  /// segredo (outra confirmação ganhou, ou um novo início trocou o segredo).
+  Future<bool> enable(String acsId, SealedSecret pending, int step, DateTime at);
+
+  /// Avança o último passo aceito para [step]. Devolve `true` só se a linha
+  /// avançou; `false` = outra requisição já gravou este passo (ou um maior):
+  /// o código é um replay e a sessão **não** pode ser emitida.
+  Future<bool> registerStep(String acsId, int step);
 }
 
 /// O que o login precisa saber sobre uma credencial, sem `application/`
@@ -185,7 +196,14 @@ class InstitutionalAuthService {
         await _recordAudit(record.acsId, 'denied_totp');
         throw AuthenticationFailedException(message: _invalidCode);
       }
-      await _totpStore().registerStep(record.acsId, passo);
+      // O `verify` acima leu `lastStep` antes; duas requisições com o mesmo
+      // código passam as duas por ele. Quem decide é o `UPDATE` condicional:
+      // só uma avança a linha, e a outra é replay (RFC 6238 §5.2).
+      if (!await _totpStore().registerStep(record.acsId, passo)) {
+        await _registrarFalha(record, at);
+        await _recordAudit(record.acsId, 'denied_totp_replay');
+        throw AuthenticationFailedException(message: _invalidCode);
+      }
     } else if (requireMfa) {
       await _recordAudit(record.acsId, 'denied_mfa_not_enrolled');
       throw MfaEnrollmentRequiredException(
@@ -221,7 +239,14 @@ class InstitutionalAuthService {
       );
     }
     final bytes = Uint8List.fromList(List<int>.generate(20, (_) => _random.nextInt(256)));
-    await _totpStore().saveSecret(record.acsId, await _vault().seal(bytes), at);
+    if (!await _totpStore().saveSecret(record.acsId, await _vault().seal(bytes), at)) {
+      // Uma confirmação concorrente ativou a MFA entre a leitura e a escrita.
+      throw AuthenticationFailedException(
+        message: 'A verificação em duas etapas já está ativa. Peça a redefinição à coordenação.',
+      );
+    }
+    // Sobrescreve qualquer segredo pendente anterior: fica na trilha.
+    await _recordAudit(record.acsId, 'mfa_enrollment_started');
     final base32 = Totp.base32(bytes);
     return TotpEnrollmentStart(
       secretBase32: base32,
@@ -248,13 +273,18 @@ class InstitutionalAuthService {
       await _recordAudit(record.acsId, 'denied_totp_enrollment');
       throw AuthenticationFailedException(message: _invalidCode);
     }
-    await _totpStore().enable(record.acsId, passo, at);
+    if (!await _totpStore().enable(record.acsId, totp.sealed, passo, at)) {
+      await _registrarFalha(record, at);
+      await _recordAudit(record.acsId, 'denied_totp_enrollment_race');
+      throw AuthenticationFailedException(message: 'Não há ativação pendente para esta matrícula.');
+    }
     await _recordAudit(record.acsId, 'mfa_enabled');
   }
 
   TotpSecretVault _vault() => vault ?? (throw StateError('MFA ativa sem cofre configurado'));
 
-  TotpStore _totpStore() => totpStore ?? (throw StateError('MFA ativa sem cofre configurado'));
+  TotpStore _totpStore() =>
+      totpStore ?? (throw StateError('MFA ativa sem store de TOTP configurado'));
 
   /// Tudo o que o login decide antes de abrir a sessão: entrada em branco,
   /// matrícula inexistente, senha errada (com a contagem e o bloqueio),
