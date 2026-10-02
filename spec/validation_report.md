@@ -93,7 +93,7 @@ cliente · **`parcial`** = existe, mas alimentado por dado fabricado ·
 | RF17 | Logs de auditoria e conformidade | **backend** | `audit_logs` encadeado por HMAC; gravou `granted` e `denied_territory` nesta validação; cadeia verificada íntegra. |
 | RF18 | Dark mode nativo | **app-only** | Tema único dark nos três apps, com matriz de contraste testada. |
 
-**Contagem:** 7 `backend` · 2 `backend + app` · 1 `app-only` · 3 `parcial` · 5 `ausente`.
+**Contagem:** 7 `backend` · 2 `backend + app` · 1 `app-only` · 4 `parcial` · 4 `ausente`.
 
 ### Requisitos não funcionais
 
