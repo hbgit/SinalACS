@@ -81,7 +81,7 @@ cliente · **`parcial`** = existe, mas alimentado por dado fabricado ·
 | RF05 | Painel de status da solicitação | **backend** | `alerts.statusFor` lê o status do alerta mais recente do paciente autenticado pelo próprio token — sem `patientId` como parâmetro, então um token só pode ler o próprio status (INV-05). A tela deixou de ser `const` e consome o endpoint (fecha L-03). |
 | RF06 | Lembretes de saúde | **ausente** | `RemindersScreen` tem lista fixa; salvar descarta. Sem `flutter_local_notifications`. |
 | RF07 | Login institucional (matrícula/senha) | **backend + app** | `auth.loginInstitutional` verifica a senha com Argon2id contra `user_credentials`, bloqueia após 5 tentativas por 15 min (F6) e audita cada desfecho; o app ACS envia o que a pessoa digita. A credencial nasce do seed de desenvolvimento (`bin/seed_acs_credentials.dart`, o único caminho pelo qual uma credencial passa a existir — depois dele a tabela só é escrita para contar tentativas, em `OrmAcsCredentialStore` —, e que se recusa a rodar fora de `APP_ENV=development`), então um deploy que não rode esse seed sobe **sem nenhum caminho de login**. MFA/TOTP e refresh token seguem ausentes por decisão de escopo — ver `docs/superpowers/plans/2026-09-18-rf07-login-institucional-acs.md`. |
-| RF08 | Territorialização (cache da microárea) | **parcial** | `patients.listMicroArea` é real, territorializado, e a tela "Área" agora mostra o número real de pacientes (L-06 fechado). Continua parcial: a chamada é ao vivo a cada abertura/ciclo periódico, não um cache `sqflite` persistido em disco que sobrevive offline — esse é o trabalho que falta para RF08 completo. |
+| RF08 | Territorialização (cache da microárea) | **backend + app** | `patients.listMicroArea` é real e territorializado pelo token. O app do ACS guarda a última lista na base SQLCipher do aparelho (`micro_area_cache`, schema v6) por dono `userId\|microAreaId`, com validade de 72 h, e só a serve no lugar de uma falha **recuperável** de rede, avisando de quando é. Decisão em `spec/lgpd_design.md` §5.11. Provado no emulador: o arquivo no disco não contém o nome do paciente em claro. |
 | RF09 | Dashboard de priorização dinâmica | **backend** | Fila real alimentada por MQTT, ordenada por risco e idade; valida rejeição de alerta de outra microárea. |
 | RF10 | Mapa interativo | **parcial** | Coordenadas são **fabricadas** a partir do hash — ver L-05. |
 | RF11 | Registro rápido de visitas offline-first | **backend** | `visits.sync` com dedupe por `localId`, versionamento, conflito e território. Fila SQLCipher no dispositivo. |
@@ -93,7 +93,7 @@ cliente · **`parcial`** = existe, mas alimentado por dado fabricado ·
 | RF17 | Logs de auditoria e conformidade | **backend** | `audit_logs` encadeado por HMAC; gravou `granted` e `denied_territory` nesta validação; cadeia verificada íntegra. |
 | RF18 | Dark mode nativo | **app-only** | Tema único dark nos três apps, com matriz de contraste testada. |
 
-**Contagem:** 7 `backend` · 2 `backend + app` · 1 `app-only` · 4 `parcial` · 4 `ausente`.
+**Contagem:** 7 `backend` · 3 `backend + app` · 1 `app-only` · 3 `parcial` · 4 `ausente`.
 
 ### Requisitos não funcionais
 
@@ -271,7 +271,7 @@ mesmo vale para a TMRAV segmentada por risco, que é a métrica *North Star* do 
   contagem real de pacientes da microárea, atualizada ao abrir a tela e em
   ciclo periódico. Ver
   `docs/superpowers/plans/2026-09-18-sync-periodica-rf05-l06.md`. RF08
-  continua `parcial` — ver linha RF08 acima.
+  foi fechado depois, com cache persistido e cifrado — ver linha RF08 acima.
 - **L-07 · ~~Escalonamento SAMU não funciona.~~ (SAMU fechado em 2026-10-01; a UBS continua sem contato)** O botão mais crítico da UI de
   emergência é um snackbar.
 - **L-08 · ~~RPC sem TLS. O backend fala HTTP puro na 8080; só o broker usa

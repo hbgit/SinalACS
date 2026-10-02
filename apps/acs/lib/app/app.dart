@@ -14,6 +14,7 @@ import 'package:sinalacs_acs/core/security/database_key_store.dart';
 import 'package:sinalacs_acs/core/services/alert_feed.dart';
 import 'package:sinalacs_acs/core/services/alert_queue.dart';
 import 'package:sinalacs_acs/core/services/emergency_dialer.dart';
+import 'package:sinalacs_acs/core/services/micro_area_directory.dart';
 import 'package:sinalacs_acs/core/services/offline_visit_queue.dart';
 import 'package:sinalacs_client/sinalacs_client.dart' show MicroAreaPatient;
 import 'package:sinalacs_acs/core/services/reconnect_schedule.dart';
@@ -30,6 +31,7 @@ class SinalAcsApp extends StatefulWidget {
     this.feedBuilder,
     this.visitQueue,
     this.visitPullService,
+    this.microAreaDirectory,
     this.initialAlert,
     this.currentPosition,
     this.themeController,
@@ -49,6 +51,12 @@ class SinalAcsApp extends StatefulWidget {
   final AlertFeed Function(AlertQueue queue)? feedBuilder;
   final OfflineVisitQueue? visitQueue;
   final VisitPullService? visitPullService;
+
+  /// Lista da microárea com cache no aparelho (RF08). `null` lê direto do
+  /// backend, sem cache: quem monta o de produção é o `main.dart`
+  /// (`buildMicroAreaDirectory`). O padrão não monta um sozinho porque o
+  /// Keystore não existe no `flutter test` e a carga ficaria pendurada.
+  final MicroAreaDirectory? microAreaDirectory;
   final PrioritizedAlert? initialAlert;
   final LatLng? currentPosition;
   final ThemeController? themeController;
@@ -124,6 +132,7 @@ class _SinalAcsAppState extends State<SinalAcsApp> {
               feedBuilder: widget.feedBuilder,
               visitQueue: _visitQueue,
               visitPullService: _visitPullService,
+              directory: widget.microAreaDirectory,
               initialAlert: widget.initialAlert,
               initialPosition: widget.currentPosition,
               themeController: _themeController,
@@ -140,6 +149,7 @@ class LoginScreen extends StatefulWidget {
     required this.themeController,
     required this.visitPullService,
     super.key,
+    this.directory,
     this.feedBuilder,
     this.initialAlert,
     this.initialPosition,
@@ -149,6 +159,7 @@ class LoginScreen extends StatefulWidget {
   final AlertFeed Function(AlertQueue queue)? feedBuilder;
   final OfflineVisitQueue visitQueue;
   final VisitPullService visitPullService;
+  final MicroAreaDirectory? directory;
   final PrioritizedAlert? initialAlert;
   final LatLng? initialPosition;
   final ThemeController themeController;
@@ -210,6 +221,7 @@ class _LoginScreenState extends State<LoginScreen> {
           feedBuilder: widget.feedBuilder,
           visitQueue: widget.visitQueue,
           visitPullService: widget.visitPullService,
+          directory: widget.directory,
           initialAlert: widget.initialAlert,
           initialPosition: widget.initialPosition,
           themeController: widget.themeController,
@@ -293,6 +305,7 @@ class AcsHomeShell extends StatefulWidget {
     required this.themeController,
     required this.visitPullService,
     super.key,
+    this.directory,
     this.feedBuilder,
     this.initialAlert,
     this.initialPosition,
@@ -325,6 +338,9 @@ class AcsHomeShell extends StatefulWidget {
   /// motivo de [visitQueue]: construir um substituto aqui dentro, silencioso,
   /// já foi o defeito de outra fila neste mesmo arquivo.
   final VisitPullService visitPullService;
+
+  /// Lista da microárea com cache no aparelho (RF08); `null` lê direto do backend.
+  final MicroAreaDirectory? directory;
 
   @override
   State<AcsHomeShell> createState() => _AcsHomeShellState();
@@ -389,6 +405,9 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
   /// Quando a última carga bem-sucedida terminou.
   DateTime? _microAreaPatientsLoadedAt;
 
+  /// `true` quando a lista veio do cache do aparelho (RF08), não da central.
+  bool _microAreaFromCache = false;
+
   /// Presente quando a última tentativa falhou.
   InfraNotice? _microAreaPatientsError;
 
@@ -435,14 +454,18 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
 
   Future<void> _loadMicroAreaPatients() async {
     final backend = BackendScope.of(context);
-    setState(() { _loadingMicroAreaPatients = true; _microAreaPatientsError = null; });
+    setState(() { _loadingMicroAreaPatients = true; _microAreaPatientsError = null; _microAreaFromCache = false; });
 
     try {
-      final patients = await backend.listPatients();
+      final snapshot = widget.directory == null
+          ? null
+          : await widget.directory!.load();
+      final patients = snapshot?.patients ?? await backend.listPatients();
       if (!mounted) return;
       setState(() {
         _microAreaPatients = patients;
-        _microAreaPatientsLoadedAt = DateTime.now();
+        _microAreaPatientsLoadedAt = snapshot?.fetchedAt ?? DateTime.now();
+        _microAreaFromCache = snapshot?.fromCache ?? false;
       });
     } on BackendFailure catch (failure) {
       if (!mounted) return;
@@ -748,6 +771,7 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
           loadingPatients: _loadingMicroAreaPatients,
           patientCount: _microAreaPatients?.length,
           patientsLoadedAt: _microAreaPatientsLoadedAt,
+          patientsFromCache: _microAreaFromCache,
           patientsError: _microAreaPatientsError,
         ),
       AcsDestination.queue => DashboardScreen(
@@ -769,6 +793,7 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
           }),
         ),
       AcsDestination.visit => VisitRegistrationScreen(
+          directory: widget.directory,
           alert: _selected,
           queue: widget.visitQueue,
           currentPosition: _currentPosition,
@@ -823,6 +848,7 @@ class TerritorializationScreen extends StatelessWidget {
     this.loadingPatients = false,
     this.patientCount,
     this.patientsLoadedAt,
+    this.patientsFromCache = false,
     this.patientsError,
   });
 
@@ -852,6 +878,9 @@ class TerritorializationScreen extends StatelessWidget {
   /// Quando a última carga bem-sucedida terminou.
   final DateTime? patientsLoadedAt;
 
+  /// `true` quando a contagem veio do cache do aparelho (RF08).
+  final bool patientsFromCache;
+
   /// Presente quando a última tentativa falhou.
   final InfraNotice? patientsError;
 
@@ -861,6 +890,8 @@ class TerritorializationScreen extends StatelessWidget {
         const SizedBox(height: 12),
         _InfoRow('Pacientes sincronizados', _patientCountText()),
         _InfoRow('Cache local', _cacheFreshnessText()),
+        if (patientsFromCache && patientsLoadedAt != null)
+          _cacheNotice(context, const Key('micro_area_cache_notice_area'), patientsLoadedAt!),
         // A linha acima diz que falhou; este banner diz por quê. Sem ele o
         // `detail` de `patientsError` (a mensagem do servidor) nunca chegava à
         // tela — o `InfraNotice` inteiro era reduzido a "Não foi possível
@@ -1521,14 +1552,37 @@ class _LegendChip extends StatelessWidget {
       );
 }
 
+String _formatarDataHora(DateTime utc) {
+  final d = utc.toLocal();
+  String dois(int n) => n.toString().padLeft(2, '0');
+  return '${dois(d.day)}/${dois(d.month)} às ${dois(d.hour)}:${dois(d.minute)}';
+}
+
+/// Aviso de que a lista da microárea é a guardada no aparelho (RF08, §5.11 de
+/// `spec/lgpd_design.md`): o ACS precisa saber que não é a lista da central.
+Widget _cacheNotice(BuildContext context, Key key, DateTime fetchedAt) => Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Semantics(
+        liveRegion: true,
+        child: Text(
+          key: key,
+          'Sem conexão com a central: lista salva em ${_formatarDataHora(fetchedAt)}.',
+          style: TextStyle(color: context.acsRisk.accentOnSurface, fontWeight: FontWeight.bold),
+        ),
+      ),
+    );
+
 class VisitRegistrationScreen extends StatefulWidget {
-  const VisitRegistrationScreen({required this.queue, super.key, this.alert, this.currentPosition});
+  const VisitRegistrationScreen({required this.queue, super.key, this.alert, this.currentPosition, this.directory});
 
   /// A fila é recebida pronta, não construída aqui: uma instância por gravação
   /// descartava a visita assim que o callback retornava.
   final OfflineVisitQueue queue;
   final PrioritizedAlert? alert;
   final LatLng? currentPosition;
+
+  /// Lista da microárea com cache no aparelho (RF08); `null` lê direto do backend.
+  final MicroAreaDirectory? directory;
 
   @override
   State<VisitRegistrationScreen> createState() => _VisitRegistrationScreenState();
@@ -1554,6 +1608,8 @@ class _VisitRegistrationScreenState extends State<VisitRegistrationScreen> {
   List<MicroAreaPatient>? _patients;
   BackendFailure? _patientsError;
   bool _loadingPatients = false;
+  bool _patientsFromCache = false;
+  DateTime? _patientsFetchedAt;
   bool _patientsRequested = false;
 
   @override
@@ -1600,11 +1656,18 @@ class _VisitRegistrationScreenState extends State<VisitRegistrationScreen> {
   /// funcionando mesmo sem rede (o app é offline-first), então o erro vira
   /// aviso com um jeito de tentar de novo, nunca uma tela presa.
   Future<void> _loadPatients() async {
-    setState(() { _loadingPatients = true; _patientsError = null; });
+    final backend = BackendScope.of(context);
+    setState(() { _loadingPatients = true; _patientsError = null; _patientsFromCache = false; });
     try {
-      final result = await BackendScope.of(context).listPatients();
+      final snapshot = widget.directory == null ? null : await widget.directory!.load();
+      final result = snapshot?.patients ?? await backend.listPatients();
       if (!mounted) return;
-      setState(() { _patients = result; _loadingPatients = false; });
+      setState(() {
+        _patients = result;
+        _patientsFromCache = snapshot?.fromCache ?? false;
+        _patientsFetchedAt = snapshot?.fetchedAt;
+        _loadingPatients = false;
+      });
     } on BackendFailure catch (failure) {
       if (!mounted) return;
       setState(() { _patientsError = failure; _loadingPatients = false; });
@@ -1762,6 +1825,8 @@ class _VisitRegistrationScreenState extends State<VisitRegistrationScreen> {
         : all.where((p) => p.name.toLowerCase().contains(query)).toList();
 
     return [
+      if (_patientsFromCache && _patientsFetchedAt != null)
+        _cacheNotice(context, const Key('micro_area_cache_notice'), _patientsFetchedAt!),
       const SizedBox(height: 8),
       TextField(
         key: const Key('patient_search'),

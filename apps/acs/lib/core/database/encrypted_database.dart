@@ -22,8 +22,10 @@ class EncryptedLocalDatabase {
   /// ficar visível no aparelho em vez de retentar para sempre. v5 acrescenta
   /// `sync_cursor`, para o cursor de `visits.pull` (`SyncCursorStore`) — dado
   /// operacional do dispositivo, não uma visita, mas vive no mesmo banco
-  /// criptografado por estar sob a mesma política de proteção.
-  static const schemaVersion = 5;
+  /// criptografado por estar sob a mesma política de proteção. v6 acrescenta
+  /// `micro_area_cache` e `micro_area_cache_meta`, o cache da microárea (RF08,
+  /// `spec/lgpd_design.md` §5.11).
+  static const schemaVersion = 6;
 
   /// Visitas registradas offline, aguardando sincronização.
   ///
@@ -53,7 +55,24 @@ CREATE TABLE IF NOT EXISTS sync_cursor (
   value TEXT NOT NULL
 )''';
 
-  /// Migração v1 → v2, v2 → v3, v3 → v4 e v4 → v5.
+  /// Cache da microárea (RF08, §5.11 de spec/lgpd_design.md): a última lista que
+  /// o servidor devolveu, de um dono (`userId|microAreaId`), com a data do
+  /// download. Sob a mesma criptografia das visitas.
+  static const createMicroAreaCache = '''
+CREATE TABLE IF NOT EXISTS micro_area_cache (
+  patient_id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  is_chronic INTEGER NOT NULL,
+  chronic_conditions TEXT NOT NULL
+)''';
+
+  static const createMicroAreaCacheMeta = '''
+CREATE TABLE IF NOT EXISTS micro_area_cache_meta (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+)''';
+
+  /// Migração v1 → v2, v2 → v3, v3 → v4, v4 → v5 e v5 → v6.
   ///
   /// Nenhuma das duas formas de v1 guarda o UUID do paciente: `patient_name`
   /// era `'Paciente ' + 8 dos 32 dígitos hex`, irreversível. Sem UUID,
@@ -103,6 +122,12 @@ CREATE TABLE IF NOT EXISTS sync_cursor (
       // Aditiva: `CREATE TABLE IF NOT EXISTS` não toca em `offline_visits`,
       // então nenhuma visita pendente ou recusada existente é perdida.
       await db.execute(createSyncCursor);
+    }
+
+    if (from < 6) {
+      // Aditiva: `CREATE TABLE IF NOT EXISTS` não toca em nada que já existe.
+      await db.execute(createMicroAreaCache);
+      await db.execute(createMicroAreaCacheMeta);
     }
   }
 
@@ -156,6 +181,8 @@ CREATE TABLE IF NOT EXISTS sync_cursor (
         onCreate: (db, version) async {
           await db.execute(createOfflineVisits);
           await db.execute(createSyncCursor);
+          await db.execute(createMicroAreaCache);
+          await db.execute(createMicroAreaCacheMeta);
         },
         onUpgrade: _upgrade,
         // Um rollback de APK abriria um arquivo v2 pedindo v1 e lançaria,
@@ -171,6 +198,8 @@ CREATE TABLE IF NOT EXISTS sync_cursor (
         onCreate: (db, version) async {
           await db.execute(createOfflineVisits);
           await db.execute(createSyncCursor);
+          await db.execute(createMicroAreaCache);
+          await db.execute(createMicroAreaCacheMeta);
         },
         onUpgrade: _upgrade,
         onDowngrade: onDatabaseDowngradeDelete,

@@ -24,8 +24,12 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:sinalacs_acs/app/app.dart';
 import 'package:sinalacs_acs/core/network/backend_client.dart';
+import 'package:sinalacs_acs/core/database/encrypted_database.dart';
+import 'package:sinalacs_acs/core/database/micro_area_cache_store.dart';
 import 'package:sinalacs_acs/core/network/backend_config.dart';
+import 'package:sinalacs_acs/core/security/database_key_store.dart';
 import 'package:sinalacs_acs/core/services/backend_visit_synchronizer.dart';
+import 'package:sinalacs_acs/core/services/micro_area_directory.dart';
 import 'package:sinalacs_acs/core/services/offline_visit_queue.dart';
 import 'package:sinalacs_client/sinalacs_client.dart' as api;
 
@@ -153,5 +157,39 @@ void main() {
     final noServidor = {for (final v in remotas) v.localId.toString().toLowerCase()};
     expect(noServidor.containsAll(enviados), isTrue,
         reason: 'as 100 visitas estão no servidor, conferidas por pull');
+  });
+
+  testWidgets('RF08: a microárea fica no aparelho, sobrevive à queda de rede e está cifrada', (tester) async {
+    final ca = (await rootBundle.load(BackendConfig.rpcCaAsset)).buffer.asUint8List();
+    final backend = BackendClient(trustedCaBytes: ca);
+    addTearDown(backend.close);
+    final cred = await acsCredentialFromRelay();
+    final main = e2ePatient('main');
+    await backend.login(matricula: cred.matricula, senha: cred.senha);
+
+    // O `keyStore` de PRODUÇÃO (Keystore do aparelho), numa base própria deste teste.
+    await EncryptedLocalDatabase.deleteDatabaseFile('rf08_e2e.db');
+    final store = MicroAreaCacheStore(keyStore: SecureStorageDatabaseKeyStore(), databaseName: 'rf08_e2e.db');
+    final online = MicroAreaDirectory(fetch: backend.listPatients, session: () => backend.session, store: store);
+    final primeira = await online.load();
+    expect(primeira.fromCache, isFalse);
+    expect(primeira.patients.any((p) => p.patientId == main.id), isTrue);
+
+    // Rede caída: a central "não responde", o aparelho serve o que guardou.
+    final offline = MicroAreaDirectory(
+      fetch: () async => throw const BackendFailure('Sem conexão.'),
+      session: () => backend.session,
+      store: store,
+    );
+    final segunda = await offline.load();
+    expect(segunda.fromCache, isTrue);
+    expect(segunda.patients.any((p) => p.patientId == main.id), isTrue);
+
+    // O arquivo no disco NÃO contém o nome do paciente em texto claro (SQLCipher no aparelho).
+    final bytes = await File(await EncryptedLocalDatabase.pathFor('rf08_e2e.db')).readAsBytes();
+    expect(String.fromCharCodes(bytes).contains(main.name), isFalse,
+        reason: 'o nome do paciente não pode estar legível no arquivo do banco');
+    expect(String.fromCharCodes(bytes.take(16)), isNot(startsWith('SQLite format 3')));
+    await store.clear();
   });
 }

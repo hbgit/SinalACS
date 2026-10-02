@@ -604,6 +604,20 @@ CPFs de documentação (como faz `seed_cpf_hashes.dart` para a stack de desenvol
 | **Implementação** | Análise estática de código (SAST) no CI/CD; testes de penetração anuais; scanner de vulnerabilidades em dependências; processo de disclosure responsável; atualização regular de bibliotecas e frameworks. |
 | **Riscos Mitigados** | Exploração de vulnerabilidades conhecidas, zero-days, falhas de segurança introduzidas por dependências. |
 
+### 5.11 Cache local da microárea (RF08)
+
+| | |
+|---|---|
+| **Decisão** | O ACS guarda no aparelho a última lista da microárea (`patients.listMicroArea`) para registrar visita **sem rede**. |
+| **O que guarda** | Só o que a tela de visita já mostra: `patientId`, nome, `isChronic` e condições crônicas — o mesmo conjunto da retenção no aparelho (§5.6). Nada de contato de emergência, endereço, histórico ou triagem. |
+| **Onde** | Tabelas `micro_area_cache` e `micro_area_cache_meta` na **mesma base SQLCipher** das visitas offline (INV-04; chave no Keystore, §5.1). |
+| **Dono** | A lista pertence a `userId\|microAreaId` da sessão que a baixou. Outro usuário ou outra microárea **apaga** o cache e não o serve (RNF06). |
+| **Validade** | 72 horas desde o último download bem-sucedido. Vencida, **não é usada e é apagada**. |
+| **Quando entra** | Só no lugar de uma falha **recuperável** de rede. Uma recusa do servidor (sessão inválida, território negado, `isRecoverable: false`) nunca cai no cache. |
+| **Transparência** | A tela diz que a lista é do cache e de quando. |
+| **Retenção** | Some pela validade, pela troca de dono e com a desinstalação; nunca é enviada a lugar nenhum. |
+| **Se for revisto** | Reduzir `microAreaCacheMaxAge` ou apagar a tabela v6 é migração aditiva reversível. |
+
 ---
 
 ## 6. Direitos dos Titulares dos Dados
