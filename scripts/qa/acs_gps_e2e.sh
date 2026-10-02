@@ -3,7 +3,7 @@
 # Permissão de localização do ACS (RF12) no emulador-5554.
 #
 #   ./scripts/qa/acs_gps_e2e.sh                  # concedida: o app a enxerga (whileInUse)
-#   ./scripts/qa/acs_gps_e2e.sh --sem-permissao  # negada: "indisponível", sem travar
+#   ./scripts/qa/acs_gps_e2e.sh --sem-permissao  # negada DE VEZ (USER_FIXED): "indisponível", sem travar
 #   ... --reinstalar                             # autoriza apagar um app já instalado
 #
 # O diálogo de permissão é do sistema e o integration_test não o toca: o APK é
@@ -36,7 +36,7 @@ expect=granted
 reinstalar=0
 for arg in "$@"; do
   case "$arg" in
-    --sem-permissao) expect=denied ;;
+    --sem-permissao) expect=denied_forever ;;
     --reinstalar) reinstalar=1 ;;
     *) echo "argumento desconhecido: $arg" >&2; exit 2 ;;
   esac
@@ -52,9 +52,13 @@ if instalado && [[ "$reinstalar" -eq 0 ]]; then
 fi
 
 log="$(mktemp)"
+amostras=""
+toques=""
+amostrador=""
 instalamos=0
 limpar() {
-  rm -f "$log"
+  rm -f "$log" "$amostras" "$toques"
+  if [[ -n "$amostrador" ]]; then kill "$amostrador" 2>/dev/null || true; fi
   if [[ "$instalamos" -eq 1 ]]; then adb -s "$dev" uninstall "$pkg" >/dev/null 2>&1 || true; fi
 }
 trap limpar EXIT
@@ -69,16 +73,63 @@ fi
 if instalado; then adb -s "$dev" uninstall "$pkg" >/dev/null 2>&1 || true; fi
 adb -s "$dev" install -r "$apk" >/dev/null
 instalamos=1
-for p in ACCESS_FINE_LOCATION ACCESS_COARSE_LOCATION; do
-  if [[ "$expect" == granted ]]; then
-    adb -s "$dev" shell pm grant "$pkg" "android.permission.$p"
-  else
-    adb -s "$dev" shell pm revoke "$pkg" "android.permission.$p" || true
-  fi
-done
+# Toca em "Não permitir" no diálogo de permissão do sistema, se ele estiver na tela.
+tocar_recusar() {
+  local xml xy
+  xml="$(adb -s "$dev" exec-out uiautomator dump /dev/tty 2>/dev/null || true)"
+  xy="$(python3 - "$xml" <<'PY'
+import re, sys
+xml = sys.argv[1]
+for rid in ("permission_deny_and_dont_ask_again_button", "permission_deny_button"):
+    m = re.search(r'resource-id="com\.android\.permissioncontroller:id/%s"[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"' % rid, xml)
+    if m:
+        x1, y1, x2, y2 = map(int, m.groups())
+        print((x1 + x2) // 2, (y1 + y2) // 2)
+        break
+PY
+)"
+  if [[ -n "$xy" ]]; then echo tap >>"$toques"; adb -s "$dev" shell input tap $xy; fi
+  return 0
+}
 
+if [[ "$expect" == granted ]]; then
+  for p in ACCESS_FINE_LOCATION ACCESS_COARSE_LOCATION; do
+    adb -s "$dev" shell pm grant "$pkg" "android.permission.$p"
+  done
+else
+  for p in ACCESS_FINE_LOCATION ACCESS_COARSE_LOCATION; do
+    adb -s "$dev" shell pm revoke "$pkg" "android.permission.$p" || true
+  done
+fi
+
+# O teste de widget do Flutter injeta toques no próprio Flutter e NÃO percebe um diálogo
+# do sistema aberto por cima do app. Quem percebe é o foco da janela, amostrado durante a execução.
+# No cenário `denied_forever` o diálogo é ESPERADO (é o que o teste recusa para fixar a negação),
+# então lá o que se confere é o número de toques do tocador: no máximo 2 (as duas recusas).
+amostras="$(mktemp)"
+toques="$(mktemp)"
+amostrar() { adb -s "$dev" shell dumpsys window 2>/dev/null | grep -m1 mCurrentFocus >>"$amostras" || true; }
+if [[ "$expect" == granted ]]; then
+  ( while true; do amostrar; sleep 1; done ) &
+else
+  ( while true; do tocar_recusar; sleep 1; done ) &
+fi
+amostrador=$!
+
+drive_rc=0
 flutter drive --driver=test_driver/integration_test.dart \
   --target=integration_test/geofence_gps_e2e.dart -d "$dev" \
   --use-application-binary="$apk" \
-  --dart-define=EXPECT_PERMISSION="$expect"
+  --dart-define=EXPECT_PERMISSION="$expect" || drive_rc=$?
+if [[ "$expect" == granted ]]; then amostrar; fi   # uma leitura final garante ao menos uma amostra
+kill "$amostrador" 2>/dev/null || true; amostrador=""
+if grep -q permissioncontroller "$amostras"; then
+  echo "erro: o diálogo de permissão do sistema apareceu por cima do app durante o teste." >&2
+  exit 1
+fi
+if [[ "$(wc -l <"$toques")" -gt 2 ]]; then
+  echo "erro: o diálogo de permissão apareceu mais de 2 vezes: a permissão não ficou negada de vez." >&2
+  exit 1
+fi
+if [[ "$drive_rc" -ne 0 ]]; then exit "$drive_rc"; fi
 echo "OK — permissão de localização em runtime ($expect); fix de GPS não verificado"

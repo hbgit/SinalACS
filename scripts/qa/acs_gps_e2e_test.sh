@@ -14,7 +14,6 @@ case "$*" in
   *get-state*) echo device ;;
   *"pm list packages"*) [[ "${FAKE_INSTALADO:-0}" == 1 ]] && echo "package:br.com.prismrr.sinalacs.acs" ;;
   *"dumpsys window"*) [[ "${FAKE_DIALOGO:-0}" == 1 ]] && echo "mCurrentFocus=Window{1 u0 com.google.android.permissioncontroller/x.GrantPermissionsActivity}" ;;
-  *"dumpsys package"*) [[ "${FAKE_FIXADA:-0}" == 1 ]] && echo "android.permission.ACCESS_FINE_LOCATION: granted=false, flags=[ USER_SET|USER_FIXED ]" ;;
 esac
 exit 0
 FIM
@@ -65,5 +64,15 @@ verifica 'grep -q "fix de GPS não verificado" <<<"$saida"'
 
 caso argumento_invalido -- --nao-existe
 verifica '[[ $codigo -eq 2 ]]'
+
+caso dialogo FAKE_DIALOGO=1 --
+verifica '[[ $codigo -ne 0 ]]'
+verifica 'grep -q "diálogo de permissão" <<<"$saida"'
+
+caso sem_permissao --  --sem-permissao
+verifica '[[ $codigo -eq 0 ]]'
+verifica '[[ $(conta "pm revoke") -eq 2 ]]'
+verifica 'grep -q "EXPECT_PERMISSION=denied_forever" "$FAKE_LOG"'
+verifica '[[ $(conta "^flutter drive") -eq 1 ]]'   # uma rodada só: o teste fixa a negação sozinho
 
 [[ "$falhas" -eq 0 ]] && echo "ok: acs_gps_e2e" || { echo "$falhas falha(s)"; exit 1; }

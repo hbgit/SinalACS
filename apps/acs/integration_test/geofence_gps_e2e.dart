@@ -1,6 +1,6 @@
 /// RF12 no aparelho: a PERMISSÃO de localização em runtime e o que a tela faz
 /// com ela. Cenário e pré-requisitos em `scripts/qa/acs_gps_e2e.sh` (concede ou
-/// revoga a permissão por `pm` antes de rodar). `--dart-define=EXPECT_PERMISSION=granted|denied`.
+/// revoga a permissão por `pm` antes de rodar). `--dart-define=EXPECT_PERMISSION=granted|denied_forever`.
 ///
 /// O que isto prova: `pm grant` só funciona se o manifesto DECLARA a permissão
 /// (o defeito que o `android_manifest_test.dart` guarda), e o app, com ela,
@@ -36,7 +36,16 @@ void main() {
       expect(permission, anyOf(LocationPermission.whileInUse, LocationPermission.always),
           reason: 'o manifesto precisa declarar ACCESS_FINE_LOCATION para a permissão existir');
     } else {
-      expect(permission, LocationPermission.denied);
+      // Leva a permissão a negada-de-vez NA MESMA SESSÃO (o `flutter drive` desinstala o app ao
+      // terminar, então o estado não sobrevive entre rodadas). Enquanto não está fixada, cada
+      // `requestPermission()` abre o diálogo do sistema, que o script do emulador recusa; a
+      // segunda recusa a torna permanente e o pedido passa a voltar na hora, sem diálogo.
+      expect(permission, isNot(anyOf(LocationPermission.whileInUse, LocationPermission.always)));
+      var resposta = await Geolocator.requestPermission();
+      for (var i = 0; i < 2 && resposta != LocationPermission.deniedForever; i++) {
+        resposta = await Geolocator.requestPermission();
+      }
+      expect(resposta, LocationPermission.deniedForever);
     }
 
     await tester.pumpWidget(SinalAcsApp(
@@ -58,7 +67,7 @@ void main() {
     await tester.tap(find.text('Geofencing'));
     await _pumpFor(tester, const Duration(seconds: 3));
 
-    if (_expect == 'denied') {
+    if (_expect == 'denied_forever') {
       // Review Focus 1: permissão negada nunca trava o ACS.
       expect(find.textContaining('Localização atual indisponível'), findsOneWidget);
       expect(find.byKey(const Key('geofence_visit')), findsOneWidget);
