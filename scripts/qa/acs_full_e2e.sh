@@ -10,6 +10,7 @@
 # integration_test/full_journey_e2e.dart no emulador. Nada é escrito no banco
 # de desenvolvimento; o banco e o manifesto são apagados ao final.
 set -euo pipefail
+source "$(dirname "${BASH_SOURCE[0]}")/lib_rele.sh"
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$repo_root"
@@ -28,7 +29,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-if ss -ltn 2>/dev/null | grep -q '127.0.0.1:8765 '; then
+if porta_ocupada 8765; then
   echo 'erro: a porta 8765 já está ocupada (relé antigo?). Encerre-o: pkill -f scripts/qa/otp_relay.py' >&2
   exit 1
 fi

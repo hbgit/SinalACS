@@ -21,6 +21,7 @@
 #
 # Nunca imprime a chave nem o token FCM.
 set -euo pipefail
+source "$(dirname "${BASH_SOURCE[0]}")/lib_rele.sh"
 # Controle de jobs: cada processo em segundo plano vira um grupo próprio, e `parar_arvore` mata o
 # grupo inteiro (o `flutter test` é NETO do subshell que o lança; matar só o subshell o deixava vivo).
 set -m
@@ -90,7 +91,7 @@ adb -s "$dev" get-state >/dev/null 2>&1 || { echo "emulador $dev não encontrado
 relay_pid=""
 # O relé precisa ser ESTE processo: um relé antigo esquecido na porta responderia com código velho.
 iniciar_rele() {
-  if ss -ltn 2>/dev/null | grep -q '127.0.0.1:8765 '; then
+  if porta_ocupada 8765; then
     echo 'erro: a porta 8765 já está ocupada (relé antigo?). Encerre-o: pkill -f scripts/qa/otp_relay.py' >&2
     exit 1
   fi
