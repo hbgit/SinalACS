@@ -30,5 +30,18 @@ class HostTest(unittest.TestCase):
         for h in (None, "", "evil.example:8765", "localhost:9999", "127.0.0.1", "localhost.evil.example:8765"):
             self.assertFalse(host_permitido(h, 8765), h)
 
+class AcsTest(unittest.TestCase):
+    def test_le_matricula_e_senha_do_manifesto(self):
+        import json, tempfile
+        from otp_relay import acs_do_manifesto
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+            json.dump({"acs": {"matricula": "E2E-1234", "password": "s3nha"}}, f)
+        self.assertEqual(acs_do_manifesto(f.name), {"matricula": "E2E-1234", "senha": "s3nha"})
+
+    def test_sem_arquivo_nao_serve_nada(self):
+        from otp_relay import acs_do_manifesto
+        self.assertIsNone(acs_do_manifesto(None))
+        self.assertIsNone(acs_do_manifesto("/nao/existe.json"))
+
 if __name__ == "__main__":
     unittest.main()

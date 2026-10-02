@@ -726,6 +726,10 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
     _reconnectTimer?.cancel();
     _periodicSyncTimer?.cancel();
     WidgetsBinding.instance.removeObserver(this);
+    // Solta o callback ANTES de parar: `stop()` desconecta o MQTT, que avisa
+    // `onConnectionChanged(false)`, e `mounted` ainda é `true` durante o
+    // `dispose` — o `setState` caía num elemento já defunct (assertion).
+    _feed.onConnectionChanged = null;
     _feed.stop();
     _queue.dispose();
     super.dispose();
