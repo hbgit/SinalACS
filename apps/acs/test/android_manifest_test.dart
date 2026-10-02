@@ -37,4 +37,21 @@ void main() {
     expect(declares('ACCESS_BACKGROUND_LOCATION'), isFalse,
         reason: 'o geofence é só em primeiro plano; background exigiria revisão da loja e LGPD');
   });
+
+  test('NÃO deixa o Android copiar o app para a nuvem (INV-04 / LGPD)', () {
+    // allowBackup é `true` por padrão. Sem `false` explícito, o backup
+    // automático leva para a conta Google da pessoa o `shared_preferences` e o
+    // banco local da fila de visitas — dado de saúde fora do controle do
+    // sistema. A chave do SQLCipher vive no Keystore e não migra, então o
+    // backup também não restauraria nada que prestasse: só vazaria.
+    expect(
+      RegExp(r'<application[^>]*android:allowBackup="false"', dotAll: true).hasMatch(manifest),
+      isTrue,
+    );
+  });
+
+  test('o nome na gaveta do aparelho é legível, não o identificador do pacote', () {
+    expect(manifest, isNot(contains('android:label="sinalacs_acs"')));
+    expect(manifest, contains('android:label="SinalACS ACS"'));
+  });
 }
