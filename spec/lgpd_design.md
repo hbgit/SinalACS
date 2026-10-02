@@ -519,6 +519,8 @@ CPFs de documentação (como faz `seed_cpf_hashes.dart` para a stack de desenvol
 | **Limite conhecido** | Num aparelho comprometido (root) com o usuário autenticado, a chave é alcançável. Proteger contra isso exigiria o fator de posse do PIN. |
 | **Verificação** | `apps/acs/integration_test/encrypted_storage_test.dart` lê o arquivo do banco e afirma que ele não contém o conteúdo em texto plano. Roda em dispositivo — no CI (Linux) o caminho é o FFI, que não criptografa, e por isso a abertura fora de Android/iOS lança por padrão. |
 
+**Captura de tela (2026-10-02).** A janela do app do ACS é `FLAG_SECURE`: o sistema não permite captura de tela, gravação nem miniatura nos apps recentes. Decisão: a janela inteira, porque a lista da microárea (nome e condições crônicas) aparece em mais de uma tela. Consequência aceita: `adb screencap` do ACS sai preto. Provado por `scripts/qa/acs_secure_window.sh`.
+
 ### 5.2 Controle de Acesso por Perfil (RBAC)
 
 | Propriedade | Descrição |
