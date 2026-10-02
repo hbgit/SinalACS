@@ -156,8 +156,11 @@ class LoginScreen extends StatefulWidget {
     this.initialAlert,
     this.initialPosition,
     this.syncInterval,
+    this.aviso,
   });
 
+  /// Aviso fixo no topo do formulário (ex.: sessão expirada).
+  final String? aviso;
   final AlertFeed Function(AlertQueue queue)? feedBuilder;
   final OfflineVisitQueue visitQueue;
   final VisitPullService visitPullService;
@@ -180,6 +183,13 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _pedeCodigo = false;
   bool _busy = false;
   String? _error;
+  String? _aviso;
+
+  @override
+  void initState() {
+    super.initState();
+    _aviso = widget.aviso;
+  }
 
   @override
   void dispose() { _matricula.dispose(); _senha.dispose(); _totp.dispose(); super.dispose(); }
@@ -206,7 +216,7 @@ class _LoginScreenState extends State<LoginScreen> {
       return;
     }
 
-    setState(() { _busy = true; _error = null; });
+    setState(() { _busy = true; _error = null; _aviso = null; });
 
     try {
       final session = await BackendScope.of(context).login(
@@ -254,7 +264,7 @@ class _LoginScreenState extends State<LoginScreen> {
         ),
       ));
       if (ativou == true && mounted) {
-        setState(() => _pedeCodigo = true);
+        setState(() { _pedeCodigo = true; _aviso = 'Aguarde o próximo código do autenticador.'; });
       }
     } on BackendFailure catch (failure) {
       if (!mounted) return;
@@ -290,6 +300,10 @@ class _LoginScreenState extends State<LoginScreen> {
             obscureText: true,
             autofillHints: const [AutofillHints.password],
             decoration: const InputDecoration(labelText: 'Senha de acesso'),
+          ),
+          if (_aviso != null) Padding(
+            padding: const EdgeInsets.only(top: 16),
+            child: Semantics(liveRegion: true, child: Text(_aviso!, key: const Key('login_aviso'), textAlign: TextAlign.center)),
           ),
           if (_pedeCodigo) ...[
             const SizedBox(height: 16),
@@ -491,8 +505,34 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
     // mesmo motivo de VisitRegistrationScreen._patientsRequested.
     if (!_patientsRequested) {
       _patientsRequested = true;
+      _backend = BackendScope.of(context);
+      _backend!.onSessionExpired = _sessionExpired;
       _loadMicroAreaPatients();
     }
+  }
+
+  AcsBackend? _backend;
+
+  /// A sessão venceu e não renova sozinha (MFA, sem refresh token): volta ao
+  /// login. A fila offline é a mesma instância e segue com as visitas pendentes.
+  void _sessionExpired() {
+    if (!mounted) return;
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(
+        builder: (_) => LoginScreen(
+          visitQueue: widget.visitQueue,
+          themeController: widget.themeController,
+          visitPullService: widget.visitPullService,
+          directory: widget.directory,
+          feedBuilder: widget.feedBuilder,
+          initialAlert: widget.initialAlert,
+          initialPosition: widget.initialPosition,
+          syncInterval: widget.syncInterval,
+          aviso: 'Sua sessão expirou. Entre novamente com o código do autenticador.',
+        ),
+      ),
+      (_) => false,
+    );
   }
 
   Future<void> _loadMicroAreaPatients() async {
@@ -789,6 +829,7 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
 
   @override
   void dispose() {
+    if (_backend?.onSessionExpired == _sessionExpired) _backend!.onSessionExpired = null;
     _reconnectTimer?.cancel();
     _periodicSyncTimer?.cancel();
     WidgetsBinding.instance.removeObserver(this);

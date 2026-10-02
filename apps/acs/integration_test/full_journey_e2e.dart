@@ -207,6 +207,8 @@ void main() {
     // 1) Liga a MFA pelo RPC: matrícula + senha + o código do segredo recém-sorteado.
     final inicio = await cliente.auth.beginTotpEnrollment(matricula: cred.matricula, password: cred.senha);
     final segredo = base32Decode(inicio.secretBase32);
+    int passo(DateTime t) => t.toUtc().millisecondsSinceEpoch ~/ 1000 ~/ 30;
+    final passoDaAtivacao = passo(DateTime.now());
     await cliente.auth.confirmTotpEnrollment(
       matricula: cred.matricula,
       password: cred.senha,
@@ -221,17 +223,21 @@ void main() {
     await _pumpUntil(tester, () => find.byKey(const Key('totp_field')).evaluate().isNotEmpty);
     expect(find.byKey(const Key('login_button')), findsOneWidget, reason: 'o painel não pode abrir sem o código');
 
-    // 3) O código da ativação já foi usado (replay barrado): entra com o do PASSO SEGUINTE,
-    //    que a janela de ±1 aceita.
-    await tester.enterText(
-      find.byKey(const Key('totp_field')),
-      totpCode(segredo, DateTime.now().add(const Duration(seconds: 30))),
-    );
+    // 3) O código da ativação já foi usado (replay barrado). Espera o relógio do
+    //    aparelho passar para um passo MAIOR que o da ativação e entra com o código
+    //    do passo ATUAL: fica dentro da janela de +-1 do servidor para defasagem
+    //    de relógio nos dois sentidos, sem apostar no passo seguinte.
+    await _pumpUntil(tester, () => passo(DateTime.now()) > passoDaAtivacao, timeout: const Duration(seconds: 40));
+    final agora = DateTime.now();
+    final codigo = totpCode(segredo, agora);
+    await tester.enterText(find.byKey(const Key('totp_field')), codigo);
     await tester.tap(find.byKey(const Key('login_button')));
     await _pumpUntil(tester, () =>
         find.byKey(const Key('login_button')).evaluate().isEmpty || find.byKey(const Key('login_error')).evaluate().isNotEmpty);
     final erro = find.byKey(const Key('login_error'));
-    expect(erro, findsNothing, reason: erro.evaluate().isEmpty ? '' : (tester.widget<Text>(erro).data ?? ''));
+    expect(erro, findsNothing,
+        reason: '${erro.evaluate().isEmpty ? '' : (tester.widget<Text>(erro).data ?? '')} '
+            '(relógio do aparelho ${agora.toUtc().toIso8601String()}, passo ${passo(agora)}, ativação no passo $passoDaAtivacao)');
 
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump(const Duration(seconds: 1));

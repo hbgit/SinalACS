@@ -64,6 +64,11 @@ abstract class AcsBackend {
 
   bool get isAuthenticated;
 
+  /// Chamado quando a sessão venceu e **não** dá para renová-la sozinho (MFA:
+  /// o código do autenticador não se reaproveita e não há refresh token). A UI
+  /// leva a pessoa de volta ao login.
+  void Function()? onSessionExpired;
+
   /// Autentica o ACS com matrícula e senha (RF07).
   ///
   /// A credencial fica **apenas em memória** — ver `_credentials` em
@@ -141,6 +146,12 @@ class MisconfiguredBackend implements AcsBackend {
 
   /// O motivo, como [requireSecureHost] o produziu.
   final BackendFailure failure;
+
+  @override
+  void Function()? get onSessionExpired => null;
+
+  @override
+  set onSessionExpired(void Function()? _) {}
 
   @override
   AuthSession? get session => null;
@@ -251,6 +262,9 @@ class BackendClient implements AcsBackend {
   AuthSession? get session => _session;
 
   @override
+  void Function()? onSessionExpired;
+
+  @override
   bool get isAuthenticated {
     final current = _session;
     return current != null && !current.isExpired();
@@ -331,10 +345,23 @@ class BackendClient implements AcsBackend {
         isRecoverable: false,
       );
     }
-    return login(
-      matricula: credentials.matricula,
-      senha: credentials.senha,
-    );
+    try {
+      return await login(
+        matricula: credentials.matricula,
+        senha: credentials.senha,
+      );
+    } on MfaCodeRequired {
+      // Com MFA a renovação silenciosa é impossível (o código TOTP é de uso
+      // único e ainda não há refresh token): esquece a credencial em vez de
+      // insistir e manda a pessoa entrar de novo. As visitas seguem pendentes.
+      _credentials = null;
+      _session = null;
+      onSessionExpired?.call();
+      throw const BackendFailure(
+        'Sua sessão expirou. Entre novamente com o código do autenticador.',
+        isRecoverable: false,
+      );
+    }
   }
 
   /// Login de desenvolvimento, para `tool/` e `integration_test/`.

@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sinalacs_acs/app/app.dart';
+import 'package:sinalacs_acs/core/services/offline_visit_queue.dart';
 
 import 'support/fakes.dart';
+import 'support/layout_harness.dart' show assentar;
 
 Future<void> entrar(WidgetTester tester) async {
   await tester.enterText(find.byKey(const Key('matricula_field')), 'ACS-001');
@@ -67,6 +69,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(backend.confirmedCode, '654321');
+    expect(find.text('Aguarde o próximo código do autenticador.'), findsOneWidget);
     // Voltou ao login, pronto para entrar de novo (agora com MFA).
     expect(find.byKey(const Key('login_button')), findsOneWidget);
   });
@@ -83,5 +86,42 @@ void main() {
     final campo = tester.widget<TextField>(find.byKey(const Key('totp_field')));
     expect(campo.controller!.text, '123456', reason: 'letras caem fora e o 7º dígito não entra');
     expect(campo.keyboardType, TextInputType.number);
+  });
+
+  testWidgets('falha ao iniciar a ativação mostra o erro e deixa tentar de novo', (tester) async {
+    final backend = FakeAcsBackend()
+      ..mfaEnrollmentRequired = true
+      ..enrollmentFailuresLeft = 1;
+    await tester.pumpWidget(SinalAcsApp(backend: backend, feedBuilder: (q) => FakeAlertFeed(q)));
+    await entrar(tester);
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('mfa_error')), findsOneWidget);
+    expect(find.byKey(const Key('mfa_secret')), findsNothing);
+
+    await tester.tap(find.byKey(const Key('mfa_retry_button')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('mfa_secret')), findsOneWidget);
+    expect(find.byKey(const Key('mfa_error')), findsNothing);
+  });
+
+  testWidgets('o painel volta ao login com o aviso, sem perder a fila', (tester) async {
+    final fake = FakeAcsBackend();
+    final fila = OfflineVisitQueue();
+    await fila.add(OfflineVisitRecord(patientId: seedPatientId, risk: 'red', status: 'PENDENTE'));
+    await tester.pumpWidget(SinalAcsApp(backend: fake, visitQueue: fila, feedBuilder: (q) => FakeAlertFeed(q)));
+    await tester.enterText(find.byKey(const Key('matricula_field')), 'ACS-001');
+    await tester.enterText(find.byKey(const Key('senha_field')), 'senha-sintetica');
+    await tester.tap(find.byKey(const Key('login_button')));
+    await assentar(tester);
+    expect(find.byKey(const Key('login_button')), findsNothing, reason: 'o painel abriu');
+
+    fake.onSessionExpired!();
+    await assentar(tester);
+
+    expect(find.byKey(const Key('login_button')), findsOneWidget);
+    expect(find.text('Sua sessão expirou. Entre novamente com o código do autenticador.'), findsOneWidget);
+    expect(fila.pendingCount, 1);
   });
 }

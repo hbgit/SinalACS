@@ -53,6 +53,10 @@ class FakeRpcServer {
   /// formato que o backend real usa (`AuthenticationFailedException`).
   String? rejectWith;
 
+  /// Simula um ACS com MFA ativa: `loginInstitutional` sem `totpCode` recusa
+  /// com `MfaRequiredException`, como o backend real.
+  bool mfaRequired = false;
+
   /// Faz `generateEnrollmentToken` recusar como o backend recusa paciente de
   /// outra microárea (`AlertPermissionException`, INV-01).
   bool rejectInviteWithPermission = false;
@@ -89,6 +93,14 @@ class FakeRpcServer {
       await _respond(request, HttpStatus.badRequest, {
         'className': 'AuthenticationFailedException',
         'data': {'message': rejectWith},
+      });
+      return;
+    }
+
+    if (method == 'loginInstitutional' && mfaRequired && decoded['totpCode'] == null) {
+      await _respond(request, HttpStatus.badRequest, {
+        'className': 'MfaRequiredException',
+        'data': {'message': 'Informe o código do autenticador.'},
       });
       return;
     }

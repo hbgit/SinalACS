@@ -55,6 +55,9 @@ class FakeAcsBackend implements AcsBackend {
   /// branco não chamou nada".
   ({String matricula, String senha})? lastCredentials;
 
+  @override
+  void Function()? onSessionExpired;
+
   /// Simula o servidor com MFA ativa: sem [totpCode] igual a [expectedTotpCode], levanta [MfaCodeRequired].
   String? expectedTotpCode;
   bool mfaEnrollmentRequired = false;
@@ -69,8 +72,16 @@ class FakeAcsBackend implements AcsBackend {
   }
 
   @override
-  Future<TotpEnrollmentStart> beginTotpEnrollment({required String matricula, required String senha}) async =>
-      enrollmentStart;
+  Future<TotpEnrollmentStart> beginTotpEnrollment({required String matricula, required String senha}) async {
+    if (enrollmentFailuresLeft > 0) {
+      enrollmentFailuresLeft--;
+      throw const BackendFailure('Sem conexão com o servidor.');
+    }
+    return enrollmentStart;
+  }
+
+  /// Quantas chamadas a [beginTotpEnrollment] ainda falham antes de funcionar.
+  int enrollmentFailuresLeft = 0;
 
   @override
   Future<AuthSession> login({

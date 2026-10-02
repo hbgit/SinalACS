@@ -43,6 +43,7 @@ class _MfaEnrollmentScreenState extends State<MfaEnrollmentScreen> {
   }
 
   Future<void> _iniciar() async {
+    setState(() => _erro = null);
     try {
       final inicio = await widget.backend.beginTotpEnrollment(matricula: widget.matricula, senha: widget.senha);
       if (mounted) setState(() => _inicio = inicio);
@@ -86,6 +87,15 @@ class _MfaEnrollmentScreenState extends State<MfaEnrollmentScreen> {
           if (_erro != null)
             Semantics(liveRegion: true, child: Text(_erro!, key: const Key('mfa_error'),
                 style: TextStyle(color: Theme.of(context).colorScheme.error))),
+          if (inicio == null && _erro != null)
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton(
+                key: const Key('mfa_retry_button'),
+                onPressed: _iniciar,
+                child: const Text('Tentar de novo'),
+              ),
+            ),
           const SizedBox(height: 16),
           TextField(
             key: const Key('mfa_code_field'),
