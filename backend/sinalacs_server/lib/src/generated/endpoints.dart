@@ -20,11 +20,12 @@ import '../endpoints/notices_endpoint.dart' as _i6;
 import '../endpoints/onboarding_endpoint.dart' as _i7;
 import '../endpoints/patients_endpoint.dart' as _i8;
 import '../endpoints/triage_endpoint.dart' as _i9;
-import '../endpoints/visits_endpoint.dart' as _i10;
+import '../endpoints/ubs_endpoint.dart' as _i10;
+import '../endpoints/visits_endpoint.dart' as _i11;
 import 'package:sinalacs_server/src/generated/enums/consent_purpose.dart'
-    as _i11;
-import 'package:sinalacs_server/src/generated/api/visit_sync_entry.dart'
     as _i12;
+import 'package:sinalacs_server/src/generated/api/visit_sync_entry.dart'
+    as _i13;
 
 class Endpoints extends _i1.EndpointDispatch {
   @override
@@ -78,7 +79,13 @@ class Endpoints extends _i1.EndpointDispatch {
           'triage',
           null,
         ),
-      'visits': _i10.VisitsEndpoint()
+      'ubs': _i10.UbsEndpoint()
+        ..initialize(
+          server,
+          'ubs',
+          null,
+        ),
+      'visits': _i11.VisitsEndpoint()
         ..initialize(
           server,
           'visits',
@@ -546,7 +553,7 @@ class Endpoints extends _i1.EndpointDispatch {
             ),
             'purpose': _i1.ParameterDescription(
               name: 'purpose',
-              type: _i1.getType<_i11.ConsentPurpose>(),
+              type: _i1.getType<_i12.ConsentPurpose>(),
               nullable: false,
             ),
             'granted': _i1.ParameterDescription(
@@ -615,7 +622,7 @@ class Endpoints extends _i1.EndpointDispatch {
             ),
             'purpose': _i1.ParameterDescription(
               name: 'purpose',
-              type: _i1.getType<_i11.ConsentPurpose>(),
+              type: _i1.getType<_i12.ConsentPurpose>(),
               nullable: false,
             ),
           },
@@ -755,6 +762,30 @@ class Endpoints extends _i1.EndpointDispatch {
         ),
       },
     );
+    connectors['ubs'] = _i1.EndpointConnector(
+      name: 'ubs',
+      endpoint: endpoints['ubs']!,
+      methodConnectors: {
+        'myContact': _i1.MethodConnector(
+          name: 'myContact',
+          params: {
+            'accessToken': _i1.ParameterDescription(
+              name: 'accessToken',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async => (endpoints['ubs'] as _i10.UbsEndpoint).myContact(
+                session,
+                accessToken: params['accessToken'],
+              ),
+        ),
+      },
+    );
     connectors['visits'] = _i1.EndpointConnector(
       name: 'visits',
       endpoint: endpoints['visits']!,
@@ -769,7 +800,7 @@ class Endpoints extends _i1.EndpointDispatch {
             ),
             'visits': _i1.ParameterDescription(
               name: 'visits',
-              type: _i1.getType<List<_i12.VisitSyncEntry>>(),
+              type: _i1.getType<List<_i13.VisitSyncEntry>>(),
               nullable: false,
             ),
           },
@@ -777,7 +808,7 @@ class Endpoints extends _i1.EndpointDispatch {
               (
                 _i1.Session session,
                 Map<String, dynamic> params,
-              ) async => (endpoints['visits'] as _i10.VisitsEndpoint).sync(
+              ) async => (endpoints['visits'] as _i11.VisitsEndpoint).sync(
                 session,
                 accessToken: params['accessToken'],
                 visits: params['visits'],
@@ -801,7 +832,7 @@ class Endpoints extends _i1.EndpointDispatch {
               (
                 _i1.Session session,
                 Map<String, dynamic> params,
-              ) async => (endpoints['visits'] as _i10.VisitsEndpoint).pull(
+              ) async => (endpoints['visits'] as _i11.VisitsEndpoint).pull(
                 session,
                 accessToken: params['accessToken'],
                 since: params['since'],

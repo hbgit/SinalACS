@@ -97,6 +97,11 @@ void main() {
     final daMicroarea = await acsClient.patients.listMicroArea(accessToken: acs.accessToken);
     expect(daMicroarea.any((p) => p.patientId == main.id), isTrue);
     expect(daMicroarea.any((p) => p.patientId == outsider.id), isFalse, reason: 'outra microárea');
+    // RF13: o contato da UBS chega pelo servidor real, escopado pelo token do ACS.
+    final contato = await acsClient.ubs.myContact(accessToken: acs.accessToken);
+    expect(contato.name, 'UBS E2E');
+    expect(contato.phone, '+55 11 5550-0199');
+
     final remotas = await acsClient.visits.pull(
       accessToken: acs.accessToken,
       since: DateTime.fromMillisecondsSinceEpoch(0),

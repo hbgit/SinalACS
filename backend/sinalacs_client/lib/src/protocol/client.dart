@@ -39,10 +39,11 @@ import 'package:sinalacs_client/src/protocol/api/terms_change_notice.dart'
 import 'package:sinalacs_client/src/protocol/api/patient_data_subject_request_record.dart'
     as _i16;
 import 'package:sinalacs_client/src/protocol/api/triage_result.dart' as _i17;
+import 'package:sinalacs_client/src/protocol/api/ubs_contact.dart' as _i18;
 import 'package:sinalacs_client/src/protocol/api/visit_sync_result.dart'
-    as _i18;
-import 'package:sinalacs_client/src/protocol/api/visit_sync_entry.dart' as _i19;
-import 'protocol.dart' as _i20;
+    as _i19;
+import 'package:sinalacs_client/src/protocol/api/visit_sync_entry.dart' as _i20;
+import 'protocol.dart' as _i21;
 
 /// Ciclo do alerta vermelho.
 ///
@@ -539,6 +540,22 @@ class EndpointTriage extends EndpointAuthenticated {
   );
 }
 
+/// Contato da UBS do ACS (RF13).
+/// {@category Endpoint}
+class EndpointUbs extends EndpointAuthenticated {
+  EndpointUbs(_i1.EndpointCaller caller) : super(caller);
+
+  @override
+  String get name => 'ubs';
+
+  _i2.Future<_i18.UbsContact> myContact({required String accessToken}) =>
+      caller.callServerEndpoint<_i18.UbsContact>(
+        'ubs',
+        'myContact',
+        {'accessToken': accessToken},
+      );
+}
+
 /// Sincronização das visitas domiciliares registradas offline.
 ///
 /// É a contraparte da fila offline do app do ACS: o dispositivo grava a visita
@@ -555,10 +572,10 @@ class EndpointVisits extends EndpointAuthenticated {
   @override
   String get name => 'visits';
 
-  _i2.Future<List<_i18.VisitSyncResult>> sync({
+  _i2.Future<List<_i19.VisitSyncResult>> sync({
     required String accessToken,
-    required List<_i19.VisitSyncEntry> visits,
-  }) => caller.callServerEndpoint<List<_i18.VisitSyncResult>>(
+    required List<_i20.VisitSyncEntry> visits,
+  }) => caller.callServerEndpoint<List<_i19.VisitSyncResult>>(
     'visits',
     'sync',
     {
@@ -570,10 +587,10 @@ class EndpointVisits extends EndpointAuthenticated {
   /// Sincronização central→dispositivo: visitas da microárea do ACS
   /// autenticado alteradas após `since`, para reconciliar um device que
   /// ficou offline ou foi reinstalado.
-  _i2.Future<List<_i19.VisitSyncEntry>> pull({
+  _i2.Future<List<_i20.VisitSyncEntry>> pull({
     required String accessToken,
     required DateTime since,
-  }) => caller.callServerEndpoint<List<_i19.VisitSyncEntry>>(
+  }) => caller.callServerEndpoint<List<_i20.VisitSyncEntry>>(
     'visits',
     'pull',
     {
@@ -603,7 +620,7 @@ class Client extends _i1.ServerpodClientShared {
     bool? disconnectStreamsOnLostInternetConnection,
   }) : super(
          host,
-         _i20.Protocol(),
+         _i21.Protocol(),
          securityContext: securityContext,
          streamingConnectionTimeout: streamingConnectionTimeout,
          connectionTimeout: connectionTimeout,
@@ -620,6 +637,7 @@ class Client extends _i1.ServerpodClientShared {
     onboarding = EndpointOnboarding(this);
     patients = EndpointPatients(this);
     triage = EndpointTriage(this);
+    ubs = EndpointUbs(this);
     visits = EndpointVisits(this);
   }
 
@@ -639,6 +657,8 @@ class Client extends _i1.ServerpodClientShared {
 
   late final EndpointTriage triage;
 
+  late final EndpointUbs ubs;
+
   late final EndpointVisits visits;
 
   @override
@@ -651,6 +671,7 @@ class Client extends _i1.ServerpodClientShared {
     'onboarding': onboarding,
     'patients': patients,
     'triage': triage,
+    'ubs': ubs,
     'visits': visits,
   };
 

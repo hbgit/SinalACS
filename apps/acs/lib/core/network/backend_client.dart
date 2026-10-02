@@ -81,6 +81,9 @@ abstract class AcsBackend {
   /// partir fora do caminho reativo.
   Future<List<MicroAreaPatient>> listPatients();
 
+  /// Contato da UBS do ACS (RF13): nome e telefone, que pode não estar cadastrado.
+  Future<UbsContact> ubsContact();
+
   /// Convite de onboarding de um paciente da própria microárea (RF02). O
   /// token em claro volta só nesta resposta e vira o QR Code da tela
   /// "Convidar paciente" — nunca é gravado no aparelho.
@@ -147,6 +150,9 @@ class MisconfiguredBackend implements AcsBackend {
 
   @override
   Future<List<MicroAreaPatient>> listPatients() async => _recusar();
+
+  @override
+  Future<UbsContact> ubsContact() async => _recusar();
 
   @override
   Future<EnrollmentTokenResult> generateInvite({required String patientId}) async => _recusar();
@@ -356,6 +362,12 @@ class BackendClient implements AcsBackend {
     return _guard(
       () => _client.patients.listMicroArea(accessToken: token),
     );
+  }
+
+  @override
+  Future<UbsContact> ubsContact() async {
+    final token = await _requireToken();
+    return _guard(() => _client.ubs.myContact(accessToken: token));
   }
 
   @override

@@ -30,6 +30,8 @@ patients:
   - requestDataCorrection:
 triage:
   - evaluate:
+ubs:
+  - myContact:
 visits:
   - sync:
   - pull:

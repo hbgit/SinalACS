@@ -1953,6 +1953,33 @@ class _EscalationScreenState extends State<EscalationScreen> {
     }
   }
 
+  /// Liga para a UBS do ACS (RF13). O telefone vem do servidor; sem ele, avisa.
+  Future<void> _callUbs() async {
+    if (_dialing) return;
+    setState(() => _dialing = true);
+    String? aviso;
+    try {
+      final contato = await BackendScope.of(context).ubsContact();
+      final telefone = contato.phone?.trim();
+      if (telefone == null || telefone.isEmpty) {
+        aviso = '${contato.name} ainda não cadastrou um telefone. Acione a coordenação.';
+      } else {
+        // O discador recebe só dígitos e `+`: espaço e hífen viram %20 no `tel:`.
+        final numero = telefone.replaceAll(RegExp(r'[^0-9+]'), '');
+        if (!await widget.dialer.dial(numero)) {
+          aviso = 'Não foi possível abrir o discador. Ligue manualmente para $telefone.';
+        }
+      }
+    } on BackendFailure catch (falha) {
+      aviso = falha.message;
+    } catch (_) {
+      aviso = 'Não foi possível obter o contato da UBS.';
+    }
+    if (!mounted) return;
+    setState(() => _dialing = false);
+    if (aviso != null) _message(context, aviso);
+  }
+
   @override
   Widget build(BuildContext context) {
     final current = widget.alert;
@@ -1975,10 +2002,12 @@ class _EscalationScreenState extends State<EscalationScreen> {
         label: const Text('Ligar para o SAMU (192)'),
       ),
       const SizedBox(height: 12),
-      OutlinedButton(
-        onPressed: () => _message(context, 'Encaminhamento será integrado à UBS.'),
+      OutlinedButton.icon(
+        key: const Key('escalation_ubs'),
+        onPressed: _dialing ? null : _callUbs,
         style: OutlinedButton.styleFrom(minimumSize: const Size(48, 52)),
-        child: const Text('Encaminhar para UBS Central'),
+        icon: const Icon(Icons.local_hospital_outlined),
+        label: const Text('Ligar para a UBS'),
       ),
       if (current != null) ...[
         const SizedBox(height: 12),

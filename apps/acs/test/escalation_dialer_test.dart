@@ -96,13 +96,4 @@ void main() {
 
     expect(dialed, ['192']);
   });
-
-  testWidgets('o botão da UBS continua sendo o aviso honesto (sem contato cadastrado)', (tester) async {
-    await _pump(tester, _FakeDialer());
-
-    await tester.tap(find.text('Encaminhar para UBS Central'));
-    await tester.pump();
-
-    expect(find.text('Encaminhamento será integrado à UBS.'), findsOneWidget);
-  });
 }

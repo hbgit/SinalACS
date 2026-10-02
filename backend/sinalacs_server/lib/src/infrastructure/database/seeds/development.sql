@@ -12,6 +12,10 @@ INSERT INTO "ubs" ("id", "name", "address", "city", "state")
 VALUES ('00000000-0000-4000-8000-000000000004', 'UBS Desenvolvimento', 'Endereço local', 'São Paulo', 'SP')
 ON CONFLICT ("id") DO NOTHING;
 
+-- Telefone sintético (RF13). O UPDATE cobre bancos de dev criados antes da coluna.
+UPDATE "ubs" SET "contactPhone" = '+55 11 5550-0100'
+WHERE "id" = '00000000-0000-4000-8000-000000000004' AND "contactPhone" IS NULL;
+
 INSERT INTO "micro_areas" ("id", "name", "ubsId", "geoJsonBoundary")
 VALUES ('00000000-0000-4000-8000-000000000003', 'Microárea 12', '00000000-0000-4000-8000-000000000004', '{}')
 ON CONFLICT ("id") DO NOTHING;

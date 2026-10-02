@@ -125,6 +125,22 @@ class FakeAcsBackend implements AcsBackend {
     ];
   }
 
+  /// Contato que `ubsContact()` devolve; `UbsContact(name: ...)` sem telefone simula uma UBS sem número.
+  UbsContact ubsContactResult = UbsContact(name: 'UBS Teste', phone: '+55 11 5550-0100');
+
+  /// Falha da chamada, como uma queda de rede.
+  BackendFailure? ubsContactFailure;
+
+  int ubsContactCount = 0;
+
+  @override
+  Future<UbsContact> ubsContact() async {
+    ubsContactCount++;
+    final falha = ubsContactFailure;
+    if (falha != null) throw falha;
+    return ubsContactResult;
+  }
+
   /// Falha não classificada (não é `BackendFailure`), para exercitar o ramo
   /// `catch (error, ...)` genérico de `_loadMicroAreaPatients` em `app.dart` —
   /// algo que nenhum `BackendFailure` simula. Checada antes de
