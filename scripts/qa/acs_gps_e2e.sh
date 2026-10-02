@@ -47,4 +47,4 @@ flutter drive --driver=test_driver/integration_test.dart \
   --target=integration_test/geofence_gps_e2e.dart -d "$dev" \
   --use-application-binary="$apk" \
   --dart-define=EXPECT_PERMISSION="$expect"
-echo "OK — check-in por GPS real ($expect)"
+echo "OK — permissão de localização em runtime ($expect); fix de GPS não verificado"

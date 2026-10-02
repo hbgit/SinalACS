@@ -10,6 +10,20 @@
 
 **Spec:** `spec/PRD_system.md` (RF07–RF13, §2.2), `docs/superpowers/specs/2026-09-16-decisoes-produto-pos-validacao.md` (§4 geofencing: só em primeiro plano, sem localização em background), `spec/lgpd_design.md`, `apps/CLAUDE.md`.
 
+> **Desvios da execução (2026-10-01) — leia antes do resto.** O plano abaixo é o que
+> foi escrito; o que foi entregue difere em dois pontos, ambos medidos:
+> 1. **Task 3 não prova o fix de GPS.** Neste AVD (Android 16, Play Services) nem
+>    `adb emu geo fix`, nem provider de teste, nem `forceLocationManager` entregam
+>    posição ao app. O e2e prova a **permissão** em runtime (e falha com o manifesto
+>    antigo); "Local alcançado" com posição segue coberto só por testes com posição
+>    injetada. Onde o texto abaixo diz "GPS real"/`adb emu geo fix`, leia isto.
+> 2. **Task 4 não cobre MQTT/ACK.** O `aclfile` do broker só libera o UUID de
+>    microárea do seed de dev e as fixtures de e2e são aleatórias. Onde o texto
+>    diz "alerta MQTT"/"ACK" no e2e do banco de teste, leia isto; o alerta pelo
+>    broker segue provado por `smoke`/`red_alert_cycle` na stack de dev.
+> Também mudaram: nomes `*_e2e.dart`, `flutter drive` na Task 3, e um defeito do
+> `dispose` do painel corrigido na Task 4. Os `Ruling:` completos estão no PROGRESS.md.
+
 ## Estado verificado em 2026-10-01
 
 Medido nesta sessão, não herdado de documento:
