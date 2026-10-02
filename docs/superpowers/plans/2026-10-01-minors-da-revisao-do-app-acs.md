@@ -10,6 +10,15 @@
 
 **Spec:** `docs/superpowers/plans/2026-10-01-finalizacao-app-acs.md` (seção "Desvios da execução" e Tasks 3–4, que criaram o que aqui se corrige). A revisão que originou os 7 itens não está em disco; a tabela abaixo a resume.
 
+> **Desvio da execução (Task 6) — leia antes dela.** O desenho de "priming em rodadas
+> separadas" (`negar_de_vez`, modo `prime`, exit 5, checagem de `USER_FIXED` por `dumpsys`)
+> **não funciona**: `flutter drive` desinstala o app ao terminar (medido), então o estado de
+> permissão não sobrevive entre rodadas, e o `--dart-define` passado ao `drive` é ignorado com
+> `--use-application-binary`. O que foi entregue: **uma rodada só**; o teste `denied_forever`
+> chama `requestPermission()` até 2 vezes na mesma sessão enquanto um tocador (`uiautomator` +
+> `input tap`) recusa cada diálogo; o script limita os toques a 2. O amostrador de foco da janela
+> fica só no cenário `granted`. O id do botão medido foi `permission_deny_button`.
+
 ## Os 7 itens e onde são fechados
 
 | # | Achado da revisão | Task |
