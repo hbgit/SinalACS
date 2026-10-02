@@ -5,7 +5,7 @@ import 'package:sinalacs_acs/core/network/auth_session.dart';
 import 'package:sinalacs_acs/core/network/backend_client.dart';
 import 'package:sinalacs_client/sinalacs_client.dart' show MicroAreaPatient;
 
-/// Validade do cache da microárea (spec/lgpd_design.md §5.7).
+/// Validade do cache da microárea (spec/lgpd_design.md §5.11).
 const microAreaCacheMaxAge = Duration(hours: 72);
 
 class MicroAreaSnapshot {

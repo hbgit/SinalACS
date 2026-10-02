@@ -88,6 +88,8 @@ Configurar como variáveis de ambiente secretas (nunca commitadas):
 | `APP_ENV` | `production` |
 | `ENABLE_DEV_LOGIN` | `true` (decisão consciente — é o único mecanismo de auth do piloto) |
 
+> Com `APP_ENV=production` e `MQTT_USE_TLS=true` o servidor agora exige `MQTT_CLIENT_CERT_PATH` e `MQTT_CLIENT_KEY_PATH` (mTLS). Com `ENABLE_DEV_LOGIN=true` a MFA do ACS é contornada neste caminho de demonstração (decisão preexistente).
+
 > **TLS (RNF04).** O container **não** atende RNF04 sozinho: o Serverpod continua
 > escutando em **texto claro** na porta que o Render injeta em `PORT`, e quem
 > termina TLS é o proxy do Render, na borda — por isso a URL do serviço é

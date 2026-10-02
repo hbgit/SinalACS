@@ -92,10 +92,12 @@ class FakeAcsBackend implements AcsBackend {
     loginCount++;
     lastCredentials = (matricula: matricula, senha: senha);
     lastTotpCode = totpCode;
+    if (sessionExpired && expectedTotpCode != null && totpCode == null) throw const MfaCodeRequired();
     if (mfaEnrollmentRequired) throw const MfaEnrollmentRequired();
     if (expectedTotpCode != null && totpCode != expectedTotpCode) {
       throw totpCode == null ? const MfaCodeRequired() : const BackendFailure('Código de verificação inválido.', isRecoverable: false);
     }
+    sessionExpired = false;
     return _issueSession();
   }
 
@@ -113,7 +115,7 @@ class FakeAcsBackend implements AcsBackend {
     final session = AuthSession(
       accessToken: 'token-de-teste',
       tokenType: 'Bearer',
-      userId: seedAcsId,
+      userId: nextUserId,
       role: 'acs',
       microAreaId: microAreaId,
       expiresAt: DateTime.now().toUtc().add(const Duration(minutes: 15)),
@@ -122,8 +124,29 @@ class FakeAcsBackend implements AcsBackend {
     return session;
   }
 
+  /// Sessão vencida com MFA: toda chamada autenticada falha como o
+  /// `BackendClient` real (não recuperável) e avisa a UI uma única vez.
+  bool sessionExpired = false;
+
+  /// `userId` da próxima sessão emitida (padrão: o ACS do seed).
+  String nextUserId = seedAcsId;
+
+  /// Vence a sessão agora, como a renovação que recebeu `MfaRequiredException`.
+  void expireSession() {
+    sessionExpired = true;
+    _session = null;
+    onSessionExpired?.call();
+  }
+
   @override
   Future<AlertAckResult> acknowledge({required String alertId}) async {
+    if (sessionExpired) {
+      onSessionExpired?.call();
+      throw const BackendFailure(
+        'Sua sessão expirou. Entre novamente com o código do autenticador.',
+        isRecoverable: false,
+      );
+    }
     acknowledgedAlertIds.add(alertId);
     return AlertAckResult(
       alertId: alertId,

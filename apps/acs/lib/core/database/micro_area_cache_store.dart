@@ -14,7 +14,7 @@ class CachedMicroArea {
 
 /// Última lista da microárea no aparelho (RF08), na base SQLCipher das visitas.
 ///
-/// Política em `spec/lgpd_design.md` §5.7: a lista pertence a um dono
+/// Política em `spec/lgpd_design.md` §5.11: a lista pertence a um dono
 /// (`userId|microAreaId`); [read] de **outro** dono apaga o cache em vez de
 /// só escondê-lo — dado de outro território não fica no disco esperando uma
 /// confusão.

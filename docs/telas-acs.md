@@ -53,3 +53,7 @@ Permite preparar público-alvo e mensagem comunitária. O envio depende da futur
 - [Implementação Flutter](../apps/acs/lib/app/app.dart)
 - [Protótipos de referência](../spec/ui_acs)
 - [Guia visual](../spec/ui_design.md)
+
+## Captura de tela
+
+A janela do ACS é `FLAG_SECURE`: `adb screencap` e `screenrecord` saem pretos (inclusive `video/capture/lib.sh`). Não há opt-out de debug por enquanto (decisão pendente); para regenerar capturas é preciso retirar a flag temporariamente da `MainActivity`.

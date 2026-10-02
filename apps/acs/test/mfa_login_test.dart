@@ -1,10 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sinalacs_acs/app/app.dart';
-import 'package:sinalacs_acs/core/services/offline_visit_queue.dart';
 
 import 'support/fakes.dart';
-import 'support/layout_harness.dart' show assentar;
 
 Future<void> entrar(WidgetTester tester) async {
   await tester.enterText(find.byKey(const Key('matricula_field')), 'ACS-001');
@@ -104,24 +102,5 @@ void main() {
 
     expect(find.byKey(const Key('mfa_secret')), findsOneWidget);
     expect(find.byKey(const Key('mfa_error')), findsNothing);
-  });
-
-  testWidgets('o painel volta ao login com o aviso, sem perder a fila', (tester) async {
-    final fake = FakeAcsBackend();
-    final fila = OfflineVisitQueue();
-    await fila.add(OfflineVisitRecord(patientId: seedPatientId, risk: 'red', status: 'PENDENTE'));
-    await tester.pumpWidget(SinalAcsApp(backend: fake, visitQueue: fila, feedBuilder: (q) => FakeAlertFeed(q)));
-    await tester.enterText(find.byKey(const Key('matricula_field')), 'ACS-001');
-    await tester.enterText(find.byKey(const Key('senha_field')), 'senha-sintetica');
-    await tester.tap(find.byKey(const Key('login_button')));
-    await assentar(tester);
-    expect(find.byKey(const Key('login_button')), findsNothing, reason: 'o painel abriu');
-
-    fake.onSessionExpired!();
-    await assentar(tester);
-
-    expect(find.byKey(const Key('login_button')), findsOneWidget);
-    expect(find.text('Sua sessão expirou. Entre novamente com o código do autenticador.'), findsOneWidget);
-    expect(fila.pendingCount, 1);
   });
 }

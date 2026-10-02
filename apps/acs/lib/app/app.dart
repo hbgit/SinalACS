@@ -157,7 +157,15 @@ class LoginScreen extends StatefulWidget {
     this.initialPosition,
     this.syncInterval,
     this.aviso,
+    this.reauthUserId,
   });
+
+  /// Preenchido quando a tela é empilhada SOBRE o painel porque a sessão venceu
+  /// (MFA, sem refresh token): é o `userId` da sessão que o painel guarda. Mesmo
+  /// usuário: a tela só dá `pop` e o painel (fila de alertas, feed MQTT, fila de
+  /// visitas, formulários) segue vivo. Outro usuário: o painel antigo é
+  /// descartado (RNF06 — nada do território anterior aparece).
+  final String? reauthUserId;
 
   /// Aviso fixo no topo do formulário (ex.: sessão expirada).
   final String? aviso;
@@ -236,7 +244,12 @@ class _LoginScreenState extends State<LoginScreen> {
       }
       if (!mounted) return;
 
-      Navigator.of(context).pushReplacement(MaterialPageRoute(
+      if (widget.reauthUserId != null && session.userId == widget.reauthUserId) {
+        Navigator.of(context).pop(true);
+        return;
+      }
+
+      final shellRoute = MaterialPageRoute<void>(
         builder: (_) => AcsHomeShell(
           microAreaId: microAreaId,
           acsId: session.userId,
@@ -249,7 +262,13 @@ class _LoginScreenState extends State<LoginScreen> {
           themeController: widget.themeController,
           syncInterval: widget.syncInterval,
         ),
-      ));
+      );
+      if (widget.reauthUserId != null) {
+        // Outro usuário: o painel de baixo é do território anterior.
+        Navigator.of(context).pushAndRemoveUntil(shellRoute, (_) => false);
+      } else {
+        Navigator.of(context).pushReplacement(shellRoute);
+      }
     } on MfaCodeRequired {
       if (!mounted) return;
       setState(() { _pedeCodigo = true; _error = null; _busy = false; });
@@ -273,7 +292,10 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
+  Widget build(BuildContext context) => PopScope(
+   // Reautenticação não é descartável: sem sessão o painel não renova nada.
+   canPop: widget.reauthUserId == null,
+   child: Scaffold(
     appBar: _Header('Segurança e rastreabilidade', 'Acesso institucional', height: acsHeaderHeight(context)),
     body: Center(child: ConstrainedBox(
       constraints: const BoxConstraints(maxWidth: 600),
@@ -342,7 +364,7 @@ class _LoginScreenState extends State<LoginScreen> {
         ]))),
       ]),
     )),
-  );
+  ));
 }
 
 enum AcsDestination { area, queue, map, visit, escalation, geofencing, notices, invite, settings }
@@ -513,12 +535,19 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
 
   AcsBackend? _backend;
 
-  /// A sessão venceu e não renova sozinha (MFA, sem refresh token): volta ao
-  /// login. A fila offline é a mesma instância e segue com as visitas pendentes.
-  void _sessionExpired() {
-    if (!mounted) return;
-    Navigator.of(context).pushAndRemoveUntil(
-      MaterialPageRoute(
+  /// Só uma tela de reautenticação por vez (duas expirações seguidas não empilham).
+  bool _reauthAberta = false;
+
+  /// A sessão venceu e não renova sozinha (MFA, sem refresh token). NÃO derruba o
+  /// painel: a reautenticação é empilhada por cima, e a fila de alertas, o feed
+  /// MQTT (autentica pelo broker, não pelo JWT), a fila de visitas e qualquer
+  /// formulário em andamento seguem vivos por baixo. Um alerta já recebido por
+  /// MQTT não é reentregue pelo broker; descartá-lo seria perdê-lo em silêncio.
+  Future<void> _sessionExpired() async {
+    if (!mounted || _reauthAberta) return;
+    _reauthAberta = true;
+    try {
+      await Navigator.of(context).push<bool>(MaterialPageRoute(
         builder: (_) => LoginScreen(
           visitQueue: widget.visitQueue,
           themeController: widget.themeController,
@@ -529,10 +558,12 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
           initialPosition: widget.initialPosition,
           syncInterval: widget.syncInterval,
           aviso: 'Sua sessão expirou. Entre novamente com o código do autenticador.',
+          reauthUserId: widget.acsId,
         ),
-      ),
-      (_) => false,
-    );
+      ));
+    } finally {
+      _reauthAberta = false;
+    }
   }
 
   Future<void> _loadMicroAreaPatients() async {
@@ -814,16 +845,20 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
   }
 
   Future<void> _acknowledge(PrioritizedAlert alert) async {
+    // O messenger vem do MaterialApp: sobrevive à troca de rota e ao painel.
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    void aviso(String texto) => messenger
+      ?..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(texto)));
     try {
       final result = await BackendScope.of(context).acknowledge(alertId: alert.alertId);
-      if (!mounted) return;
-      if (result.acknowledged) _queue.markAcknowledged(alert.alertId);
-      _message(context, result.acknowledged
+      if (result.acknowledged && mounted) _queue.markAcknowledged(alert.alertId);
+      aviso(result.acknowledged
           ? 'Recebimento confirmado à central.'
           : 'A central não reconheceu este alerta.');
     } on BackendFailure catch (failure) {
-      if (!mounted) return;
-      _message(context, failure.message);
+      // Nunca engolir: o alerta segue na fila, sem confirmação, e a pessoa vê por quê.
+      aviso(failure.message);
     }
   }
 
