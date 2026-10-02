@@ -70,6 +70,10 @@ void main() {
     await tester.tap(find.text('Visita'));
     await _pumpUntil(tester, () => find.byKey(const Key('patient_picker')).evaluate().isNotEmpty);
     expect(find.byKey(Key('patient_${main.id}')), findsOneWidget);
+    // O seletor não pode estar filtrado: sem isto, "o de fora não aparece"
+    // poderia ser só um filtro por nome escondendo tudo o que não casa.
+    final busca = tester.widget<TextField>(find.byKey(const Key('patient_search')));
+    expect(busca.controller!.text, isEmpty, reason: 'o seletor deve abrir sem filtro de busca');
     expect(find.byKey(Key('patient_${outsider.id}')), findsNothing, reason: 'outra microárea');
 
     await tester.tap(find.byKey(Key('patient_${main.id}')));
@@ -85,6 +89,12 @@ void main() {
     final acsClient = novoCliente();
     addTearDown(acsClient.close);
     final acs = await acsClient.auth.loginInstitutional(matricula: cred.matricula, password: cred.senha);
+
+    // RNF06 no servidor: a lista da microárea nunca traz o paciente de fora.
+    // Quem garante é o backend, não o filtro do seletor.
+    final daMicroarea = await acsClient.patients.listMicroArea(accessToken: acs.accessToken);
+    expect(daMicroarea.any((p) => p.patientId == main.id), isTrue);
+    expect(daMicroarea.any((p) => p.patientId == outsider.id), isFalse, reason: 'outra microárea');
     final remotas = await acsClient.visits.pull(
       accessToken: acs.accessToken,
       since: DateTime.fromMillisecondsSinceEpoch(0),
