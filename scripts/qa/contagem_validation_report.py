@@ -4,7 +4,8 @@
 A linha foi escrita à mão e ficou para trás quando RF13 mudou de status; este
 conferidor recalcula a partir das linhas `| RFnn | ... | **status** | ... |`.
 Status fora da lista conhecida é erro (exit 2), não linha ignorada: ignorar
-deixaria a contagem errada de novo, em silêncio.
+deixaria a contagem errada de novo, em silêncio. Linha de RF sem o status em
+negrito também é erro (exit 2): ela sairia da contagem sem ninguém perceber.
 """
 import pathlib
 import re
@@ -12,12 +13,17 @@ import sys
 
 ORDEM = ["backend", "backend + app", "app-only", "parcial", "ausente"]
 LINHA_RF = re.compile(r"^\| RF\d+ \|[^|]*\| \*\*([^*]+)\*\* \|", re.M)
+LINHA_QUALQUER_RF = re.compile(r"^\| RF\d+ \|.*$", re.M)
 LINHA_CONTAGEM = re.compile(r"^\*\*Contagem:\*\* (.+)\.$", re.M)
 
 
 def contar(texto):
     contagem = {chave: 0 for chave in ORDEM}
-    for status in LINHA_RF.findall(texto):
+    for linha in LINHA_QUALQUER_RF.findall(texto):
+        achado = LINHA_RF.match(linha)
+        if achado is None:
+            raise ValueError(f"linha de RF sem status em negrito: {linha[:60]!r}")
+        status = achado.group(1)
         if status not in contagem:
             raise ValueError(f"status desconhecido na tabela de RF: {status!r}")
         contagem[status] += 1

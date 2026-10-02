@@ -25,6 +25,14 @@ class ContagemTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             contar("| RF09 | Z | **quase** | x |\n")
 
+    def test_status_sem_negrito_e_erro(self):
+        with self.assertRaises(ValueError):
+            contar("| RF05 | X | parcial | x |\n")
+
+    def test_linha_de_rf_malformada_e_erro(self):
+        with self.assertRaises(ValueError):
+            contar("| RF05 | X |\n")
+
     def test_sem_linha_de_contagem_e_erro(self):
         with self.assertRaises(ValueError):
             conferir("| RF01 | A | **backend** | x |\n")
