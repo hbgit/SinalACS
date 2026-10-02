@@ -35,18 +35,43 @@ openssl x509 -req -days 2 -in "$tmp/fora.csr" -CA "$tmp/fora-ca.crt" -CAkey "$tm
   -CAcreateserial -extfile "$tmp/fora.ext" -out "$tmp/fora.crt" >/dev/null 2>&1
 chmod 644 "$tmp"/*
 
-publicar() { # publicar <senha> [--cert X --key Y]   (devolve o código de saída)
+# Pré-condição: o broker responde a um handshake TLS. Sem isso, "recusado" nos
+# casos abaixo seria vácuo (broker parado, porta errada).
+if ! openssl s_client -connect localhost:8883 -CAfile "$certs/ca.crt" </dev/null >/dev/null 2>&1; then
+  echo "erro: o broker não respondeu ao handshake TLS em localhost:8883 (docker compose up -d?)." >&2
+  exit 4
+fi
+
+# publicar <senha> [--cert X --key Y]
+# Códigos: 0 = aceito; 1 = recusado pelo broker (mosquitto_pub rodou e a saída
+# traz a marca de recusa: conexão perdida no handshake TLS ou CONNACK negado);
+# 2 = erro de infraestrutura (docker, timeout, imagem) — NUNCA conta como recusa.
+# A senha vai pelo ambiente do processo do docker (`-e MQTT_PW`, só o nome), não
+# pelo argv; a saída do mosquitto_pub é guardada, nunca impressa.
+publicar() {
   local senha="$1"; shift
-  timeout 20 docker run --rm --network host \
-    -v "$certs:/c:ro" -v "$tmp:/f:ro" -e MQTT_PW="$senha" eclipse-mosquitto:2 \
+  local saida rc=0
+  saida="$(MQTT_PW="$senha" timeout 20 docker run --rm --network host \
+    -v "$certs:/c:ro" -v "$tmp:/f:ro" -e MQTT_PW eclipse-mosquitto:2 \
     sh -c 'mosquitto_pub -h localhost -p 8883 --cafile /c/ca.crt -u backend -P "$MQTT_PW" \
-           -t sinalacs/v1/mtls/probe -m x '"$*" >/dev/null 2>&1
+           -t sinalacs/v1/mtls/probe -m x '"$*" 2>&1)" || rc=$?
+  [[ "$rc" -eq 0 ]] && return 0
+  if [[ "$rc" -eq 5 || "$rc" -eq 7 ]] \
+     && grep -qiE 'connection was lost|connection was refused|connection refused|not authori[sz]ed' <<<"$saida"; then
+    return 1
+  fi
+  return 2
 }
 
 falhas=0
 esperar() { # esperar <aceito|recusado> <nome> <comando...>
-  local quer="$1" nome="$2"; shift 2
-  if "$@"; then got=aceito; else got=recusado; fi
+  local quer="$1" nome="$2" rc=0; shift 2
+  "$@" || rc=$?
+  case "$rc" in
+    0) got=aceito ;;
+    1) got=recusado ;;
+    *) echo "erro: $nome — falha de infraestrutura (código $rc), não é recusa do broker." >&2; exit 4 ;;
+  esac
   if [[ "$got" == "$quer" ]]; then echo "ok:    $nome ($got)"; else echo "FALHOU: $nome — esperava $quer, foi $got"; falhas=$((falhas + 1)); fi
 }
 
