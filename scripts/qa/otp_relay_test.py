@@ -43,5 +43,55 @@ class AcsTest(unittest.TestCase):
         self.assertIsNone(acs_do_manifesto(None))
         self.assertIsNone(acs_do_manifesto("/nao/existe.json"))
 
+class AcsEntregaUnicaTest(unittest.TestCase):
+    """Qualquer app do emulador alcança localhost:8765 (adb reverse): a senha
+    sintética do ACS só pode sair uma vez por execução do relé."""
+
+    def setUp(self):
+        import json
+        import os
+        import tempfile
+        import threading
+        from http.server import HTTPServer
+
+        import otp_relay
+
+        self.otp_relay = otp_relay
+        arquivo = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False)
+        json.dump({"acs": {"matricula": "E2E-1", "password": "s"}}, arquivo)
+        arquivo.close()
+        self.caminho = arquivo.name
+        os.environ["E2E_FIXTURES_FILE"] = self.caminho
+        otp_relay.Handler.acs_entregue = False
+        self.servidor = HTTPServer(("127.0.0.1", 0), otp_relay.Handler)
+        otp_relay.Handler.porta = self.servidor.server_address[1]
+        threading.Thread(target=self.servidor.serve_forever, daemon=True).start()
+
+    def tearDown(self):
+        import os
+
+        self.servidor.shutdown()
+        self.servidor.server_close()
+        os.environ.pop("E2E_FIXTURES_FILE", None)
+        os.unlink(self.caminho)
+        self.otp_relay.Handler.porta = 8765
+        self.otp_relay.Handler.acs_entregue = False
+
+    def _get(self):
+        import urllib.error
+        import urllib.request
+
+        url = f"http://127.0.0.1:{self.servidor.server_address[1]}/acs"
+        try:
+            with urllib.request.urlopen(url) as resposta:
+                return resposta.status
+        except urllib.error.HTTPError as erro:
+            return erro.code
+
+    def test_serve_uma_vez_e_depois_404(self):
+        self.assertEqual(self._get(), 200)
+        self.assertEqual(self._get(), 404)
+
+
 if __name__ == "__main__":
     unittest.main()

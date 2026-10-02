@@ -4,6 +4,11 @@
 O gateway de log escreve o código no stdout do servidor; o emulador não lê
 `docker logs`. Este servidor expõe só o código mais recente, sem destino nem CPF
 (o log não os tem). Escuta em 127.0.0.1; o emulador chega por `adb reverse`.
+
+`/acs` (só com E2E_FIXTURES_FILE) entrega a matrícula e a senha SINTÉTICAS do ACS
+da execução, **uma única vez por processo**: qualquer app do emulador que alcance
+localhost:8765 (adb reverse) poderia lê-las, então depois do primeiro pedido bem
+sucedido — o do teste, no começo — a rota responde 404. O relé é por execução.
 """
 import json, os, re, subprocess, sys, time
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -44,6 +49,7 @@ def acs_do_manifesto(caminho):
 class Handler(BaseHTTPRequestHandler):
     porta = 8765
     container = "sinalacs-serverpod"
+    acs_entregue = False
 
     def do_GET(self):
         if not host_permitido(self.headers.get("Host"), self.porta):
@@ -56,8 +62,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         if url.path == "/acs":
             credencial = acs_do_manifesto(os.environ.get("E2E_FIXTURES_FILE"))
-            if credencial is None:
+            if credencial is None or Handler.acs_entregue:
                 self.send_error(404); return
+            Handler.acs_entregue = True
             self.send_response(200); self.send_header("Content-Type", "application/json"); self.end_headers()
             self.wfile.write(json.dumps(credencial).encode())
             return
