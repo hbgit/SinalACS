@@ -86,7 +86,7 @@ cliente · **`parcial`** = existe, mas alimentado por dado fabricado ·
 | RF10 | Mapa interativo | **parcial** | Coordenadas são **fabricadas** a partir do hash — ver L-05. |
 | RF11 | Registro rápido de visitas offline-first | **backend** | `visits.sync` com dedupe por `localId`, versionamento, conflito e território. Fila SQLCipher no dispositivo. |
 | RF12 | Geofencing (check-in passivo) | **ausente** | `RouteService` calcula chegada localmente, mas não há GPS em segundo plano. |
-| RF13 | Escalonamento para SAMU/UBS | **ausente** | Ambos os botões são snackbars — ver L-07. |
+| RF13 | Escalonamento para SAMU/UBS | **parcial** | O botão do SAMU abre o discador com 192 (`EmergencyDialer`, sem ligar sozinho; 2026-10-01). O da UBS segue sendo um aviso: não há fonte de contato da UBS. L-07 fechado só para o SAMU. |
 | RF14 | Avisos segmentados (push) | **ausente** | `NoticesScreen` descarta a entrada. Sem envio; contrato revisado para Gorush (ver `docs/superpowers/specs/2026-09-16-decisoes-produto-pos-validacao.md` §3.2). |
 | RF15 | Sincronização bidirecional | **backend** | Dispositivo → central e central → dispositivo funcionam e são testados dos dois lados: ACS (`visits.pull`) e paciente (`alerts.statusFor`, RF05). Ambos rodam automaticamente ao abrir a tela, em ciclo periódico enquanto o app está em primeiro plano (ACS, em qualquer aba) ou enquanto a tela de Status está aberta (paciente), e por botão manual. Do lado ACS, o pull continua sendo só referência somente leitura (contagem exibida na tela), sem gravar as visitas puxadas na fila offline local — persistir esse resultado como registro local segue como trabalho futuro (ver nota em `VisitPullService`), fora do escopo deste plano. |
 | RF16 | Motor de triagem determinístico | **backend** | `TriageEngine`, determinismo verificado em teste de integração. INV-02 preservado. |
@@ -272,7 +272,7 @@ mesmo vale para a TMRAV segmentada por risco, que é a métrica *North Star* do 
   ciclo periódico. Ver
   `docs/superpowers/plans/2026-09-18-sync-periodica-rf05-l06.md`. RF08
   continua `parcial` — ver linha RF08 acima.
-- **L-07 · Escalonamento SAMU não funciona.** O botão mais crítico da UI de
+- **L-07 · ~~Escalonamento SAMU não funciona.~~ (SAMU fechado em 2026-10-01; a UBS continua sem contato)** O botão mais crítico da UI de
   emergência é um snackbar.
 - **L-08 · ~~RPC sem TLS. O backend fala HTTP puro na 8080; só o broker usa
   TLS. RNF04 não é atendido.~~** RESOLVIDO em desenvolvimento — o RPC só é

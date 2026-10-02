@@ -150,7 +150,7 @@ Todos disparam um `SnackBar` de "não integrado" e queimam a demonstração na f
 | Tela | Controle | Mensagem que aparece |
 |------|----------|----------------------|
 | `MapScreen` | "Traçar rota eficiente" | "Traçado de rota depende da integração de mapas." — e a própria tela imprime **"Mapa demonstrativo"** |
-| `EscalationScreen` | "Ligar para o SAMU (192)" | "Discagem não está integrada neste protótipo." |
+| `EscalationScreen` | "Ligar para o SAMU (192)" | abre o discador do aparelho com 192 (sem discador: "Ligue manualmente para 192") |
 | `EscalationScreen` | "Encaminhar para UBS Central" | "Encaminhamento será integrado à UBS." |
 | `GeofencingScreen` | "Abrir formulário da visita" | "Use a tela Visita para registrar o atendimento." |
 | `NoticesScreen` | "Preparar aviso" | "Envio depende da integração de notificações push." |

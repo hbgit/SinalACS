@@ -558,6 +558,17 @@ Atenção: o código atual já valida a operação crítica de alerta vermelho e
 
 ---
 
+## Finalização do app ACS (2026-10-01)
+
+Plano: `docs/superpowers/plans/2026-10-01-finalizacao-app-acs.md`. Medido no `emulator-5554`.
+
+- **RF12 — permissão de localização.** O manifesto do ACS não declarava `ACCESS_FINE_LOCATION`/`ACCESS_COARSE_LOCATION` (nem `INTERNET`, que só vinha de plugin): sem elas o GPS do check-in nunca chegava, e os testes passavam porque injetam a posição. Declaradas e guardadas por `test/android_manifest_test.dart`. `./scripts/qa/acs_gps_e2e.sh [--sem-permissao]` prova a permissão em runtime e falha com o manifesto antigo. **Não prova a chegada de um fix de GPS**: neste AVD (Android 16, Play Services) nem `adb emu geo fix`, nem provider de teste, nem `forceLocationManager` entregam posição ao app; GPS real em aparelho físico segue sem prova em dispositivo.
+- **RF13 — SAMU.** O botão abre o discador com 192 (`core/services/emergency_dialer.dart`, `url_launcher`, `<queries>` para `tel:`), sem ligar sozinho e sem `CALL_PHONE`; sem discador mostra o número em texto; trava de toque duplo. "Encaminhar para UBS Central" segue sendo um aviso (sem fonte de contato da UBS: decisão de produto).
+- **E2E do ACS no banco de teste.** `./scripts/qa/acs_full_e2e.sh`: login institucional real (senha errada e certa), seletor restrito à microárea, visita sincronizada e conferida no servidor. A senha do ACS chega pelo relé `otp_relay.py` (`/acs`, opt-in por `E2E_FIXTURES_FILE`), fora do `--dart-define` e do APK. **Não cobre MQTT/ACK**: o `aclfile` do broker só libera o UUID de microárea do seed de dev, e as fixtures são aleatórias; isso segue provado por `smoke`/`red_alert_cycle` na stack de dev.
+- **Defeito do app achado pelo e2e:** `AcsHomeShell.dispose()` parava o feed MQTT com `onConnectionChanged` ainda ligado, e o `setState` caía em elemento defunct. Corrigido (`test/shell_dispose_test.dart`).
+- **Fora:** RF08 (cache persistido da microárea offline — exige desenho de LGPD antes), MFA/refresh token, iOS (`apps/acs/ios/` não existe), botão da UBS.
+- **Aberto fora do ACS:** `apps/patient` — manifesto `main` sem `INTERNET` explícito (hoje herdado de dependência); medir com `aapt2 dump permissions` no APK de release antes de mexer.
+
 ## Migração para Serverpod
 
 Trabalho posterior às Fases 1 e 2, fora da numeração M1.x/M2.x/M3.x do PRD. O
