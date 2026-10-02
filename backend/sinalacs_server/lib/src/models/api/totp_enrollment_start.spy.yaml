@@ -1,0 +1,6 @@
+### Início da ativação da MFA: o segredo para o autenticador (base32) e a URI
+### `otpauth://` que vira o QR. Volta só nesta resposta; nunca é gravado em claro.
+class: TotpEnrollmentStart
+fields:
+  secretBase32: String
+  otpauthUri: String

@@ -5,6 +5,7 @@ import 'package:flutter/services.dart' show rootBundle;
 import 'package:sinalacs_acs/app/app.dart';
 import 'package:sinalacs_acs/core/network/backend_client.dart';
 import 'package:sinalacs_acs/core/network/backend_config.dart';
+import 'package:sinalacs_acs/core/services/micro_area_directory_factory.dart';
 
 /// Sobe o app do ACS.
 ///
@@ -45,7 +46,13 @@ Future<void> main({String? defaultHost}) async {
   // O cliente é construído aqui, e não dentro de `SinalAcsApp`, porque só aqui
   // a CA já foi lida: `BackendConfig` não importa `rootBundle` de propósito —
   // `tool/live_check.dart` o importa fora do Flutter, onde `dart:ui` não existe.
-  runApp(SinalAcsApp(backend: backend));
+  //
+  // O cache da microárea (RF08) também nasce aqui: é a única montagem que usa o
+  // Keystore do aparelho.
+  runApp(SinalAcsApp(
+    backend: backend,
+    microAreaDirectory: buildMicroAreaDirectory(backend: backend),
+  ));
 }
 
 /// Os bytes da CA de desenvolvimento do RPC, ou `null` quando ela não pode ser

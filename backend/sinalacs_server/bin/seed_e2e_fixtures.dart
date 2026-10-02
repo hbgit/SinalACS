@@ -49,8 +49,8 @@ Future<void> main(List<String> args) async {
   try {
     await connection.runTx((tx) async {
       await tx.execute(
-        Sql.named('INSERT INTO "ubs" ("id","name","address","city","state") '
-            "VALUES (@id, 'UBS E2E', 'Endereço de teste', 'São Paulo', 'SP')"),
+        Sql.named('INSERT INTO "ubs" ("id","name","address","city","state","contactPhone") '
+            "VALUES (@id, 'UBS E2E', 'Endereço de teste', 'São Paulo', 'SP', '+55 11 5550-0199')"),
         parameters: {'id': fixtures.ubsId},
       );
       for (final entry in {fixtures.microAreaId: 'Microárea E2E', fixtures.otherMicroAreaId: 'Outra Microárea E2E'}.entries) {

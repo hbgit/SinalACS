@@ -1,5 +1,19 @@
 package br.com.prismrr.sinalacs.acs
 
+import android.os.Bundle
+import android.view.WindowManager
 import io.flutter.embedding.android.FlutterActivity
 
-class MainActivity : FlutterActivity()
+class MainActivity : FlutterActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        // A lista da microárea mostra nome e condições crônicas. FLAG_SECURE
+        // bloqueia captura de tela, gravação e a miniatura nos apps recentes,
+        // na janela INTEIRA: Área, Visita e o seletor de paciente a exibem, e
+        // proteger tela por tela deixaria uma de fora.
+        window.setFlags(
+            WindowManager.LayoutParams.FLAG_SECURE,
+            WindowManager.LayoutParams.FLAG_SECURE,
+        )
+    }
+}

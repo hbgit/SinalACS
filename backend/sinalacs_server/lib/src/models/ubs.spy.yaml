@@ -7,3 +7,6 @@ fields:
   address: String
   city: String
   state: String
+  ### Telefone de contato da UBS para o ACS escalar um caso (RF13). Dado da
+  ### unidade, não de pessoa. `null` = ainda não cadastrado: o app avisa, não liga.
+  contactPhone: String?

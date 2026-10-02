@@ -20,6 +20,16 @@ class BackendFailure implements Exception {
   String toString() => message;
 }
 
+/// O ACS tem MFA ativa e a senha conferiu: falta o código do autenticador.
+class MfaCodeRequired extends BackendFailure {
+  const MfaCodeRequired() : super('Informe o código do aplicativo autenticador.');
+}
+
+/// O servidor exige MFA e este ACS ainda não a ativou.
+class MfaEnrollmentRequired extends BackendFailure {
+  const MfaEnrollmentRequired() : super('Ative a verificação em duas etapas antes de entrar.', isRecoverable: false);
+}
+
 /// Recusa um host de RPC que não esteja em **HTTPS** (RNF04/L-08).
 ///
 /// Existe porque a rede do sistema operacional **não** segura mais nada: a Task
@@ -54,12 +64,27 @@ abstract class AcsBackend {
 
   bool get isAuthenticated;
 
+  /// Chamado quando a sessão venceu e **não** dá para renová-la sozinho (MFA:
+  /// o código do autenticador não se reaproveita e não há refresh token). A UI
+  /// leva a pessoa de volta ao login.
+  void Function()? onSessionExpired;
+
   /// Autentica o ACS com matrícula e senha (RF07).
   ///
   /// A credencial fica **apenas em memória** — ver `_credentials` em
   /// [BackendClient] — para a reautenticação silenciosa que o app já fazia
   /// quando o token de 15 minutos expirava. Nada é gravado em disco.
-  Future<AuthSession> login({required String matricula, required String senha});
+  ///
+  /// [totpCode] é o código do autenticador (MFA); sem ele, um ACS com MFA ativa
+  /// recebe [MfaCodeRequired].
+  Future<AuthSession> login({required String matricula, required String senha, String? totpCode});
+
+  /// Começa a ativação da verificação em duas etapas. Sem token: vale a
+  /// matrícula e a senha.
+  Future<TotpEnrollmentStart> beginTotpEnrollment({required String matricula, required String senha});
+
+  /// Conclui a ativação com o primeiro código do autenticador.
+  Future<void> confirmTotpEnrollment({required String matricula, required String senha, required String code});
 
   /// Login de DESENVOLVIMENTO, para `tool/` e `integration_test/` contra a
   /// stack local. Só funciona com `ENABLE_DEV_LOGIN=true`; **não** é o caminho
@@ -80,6 +105,9 @@ abstract class AcsBackend {
   /// (emergência, com SAMU): sem esta lista, a aba "Visita" não tinha de onde
   /// partir fora do caminho reativo.
   Future<List<MicroAreaPatient>> listPatients();
+
+  /// Contato da UBS do ACS (RF13): nome e telefone, que pode não estar cadastrado.
+  Future<UbsContact> ubsContact();
 
   /// Convite de onboarding de um paciente da própria microárea (RF02). O
   /// token em claro volta só nesta resposta e vira o QR Code da tela
@@ -120,6 +148,12 @@ class MisconfiguredBackend implements AcsBackend {
   final BackendFailure failure;
 
   @override
+  void Function()? get onSessionExpired => null;
+
+  @override
+  set onSessionExpired(void Function()? _) {}
+
+  @override
   AuthSession? get session => null;
 
   @override
@@ -130,7 +164,15 @@ class MisconfiguredBackend implements AcsBackend {
   Never _recusar() => throw failure;
 
   @override
-  Future<AuthSession> login({required String matricula, required String senha}) async =>
+  Future<AuthSession> login({required String matricula, required String senha, String? totpCode}) async =>
+      _recusar();
+
+  @override
+  Future<TotpEnrollmentStart> beginTotpEnrollment({required String matricula, required String senha}) async =>
+      _recusar();
+
+  @override
+  Future<void> confirmTotpEnrollment({required String matricula, required String senha, required String code}) async =>
       _recusar();
 
   @override
@@ -147,6 +189,9 @@ class MisconfiguredBackend implements AcsBackend {
 
   @override
   Future<List<MicroAreaPatient>> listPatients() async => _recusar();
+
+  @override
+  Future<UbsContact> ubsContact() async => _recusar();
 
   @override
   Future<EnrollmentTokenResult> generateInvite({required String patientId}) async => _recusar();
@@ -217,6 +262,9 @@ class BackendClient implements AcsBackend {
   AuthSession? get session => _session;
 
   @override
+  void Function()? onSessionExpired;
+
+  @override
   bool get isAuthenticated {
     final current = _session;
     return current != null && !current.isExpired();
@@ -245,11 +293,13 @@ class BackendClient implements AcsBackend {
   Future<AuthSession> login({
     required String matricula,
     required String senha,
+    String? totpCode,
   }) async {
     final result = await _guard(
       () => _client.auth.loginInstitutional(
         matricula: matricula,
         password: senha,
+        totpCode: totpCode,
       ),
     );
 
@@ -266,6 +316,23 @@ class BackendClient implements AcsBackend {
     return session;
   }
 
+  /// Ativação da MFA: sem `_requireToken()` (ainda não há token) e sem gravar
+  /// a credencial — ela só vai para `_credentials` num [login] bem-sucedido.
+  @override
+  Future<TotpEnrollmentStart> beginTotpEnrollment({
+    required String matricula,
+    required String senha,
+  }) =>
+      _guard(() => _client.auth.beginTotpEnrollment(matricula: matricula, password: senha));
+
+  @override
+  Future<void> confirmTotpEnrollment({
+    required String matricula,
+    required String senha,
+    required String code,
+  }) =>
+      _guard(() => _client.auth.confirmTotpEnrollment(matricula: matricula, password: senha, code: code));
+
   /// Reautentica usando a credencial em memória.
   ///
   /// Sem credencial guardada não há como renovar: quem chama recebe uma falha
@@ -278,10 +345,23 @@ class BackendClient implements AcsBackend {
         isRecoverable: false,
       );
     }
-    return login(
-      matricula: credentials.matricula,
-      senha: credentials.senha,
-    );
+    try {
+      return await login(
+        matricula: credentials.matricula,
+        senha: credentials.senha,
+      );
+    } on MfaCodeRequired {
+      // Com MFA a renovação silenciosa é impossível (o código TOTP é de uso
+      // único e ainda não há refresh token): esquece a credencial em vez de
+      // insistir e manda a pessoa entrar de novo. As visitas seguem pendentes.
+      _credentials = null;
+      _session = null;
+      onSessionExpired?.call();
+      throw const BackendFailure(
+        'Sua sessão expirou. Entre novamente com o código do autenticador.',
+        isRecoverable: false,
+      );
+    }
   }
 
   /// Login de desenvolvimento, para `tool/` e `integration_test/`.
@@ -359,6 +439,12 @@ class BackendClient implements AcsBackend {
   }
 
   @override
+  Future<UbsContact> ubsContact() async {
+    final token = await _requireToken();
+    return _guard(() => _client.ubs.myContact(accessToken: token));
+  }
+
+  @override
   Future<EnrollmentTokenResult> generateInvite({required String patientId}) async {
     final token = await _requireToken();
     return _guard(
@@ -408,6 +494,10 @@ class BackendClient implements AcsBackend {
         'O acesso de desenvolvimento está desativado neste servidor.',
         isRecoverable: false,
       );
+    } on MfaRequiredException {
+      throw const MfaCodeRequired();
+    } on MfaEnrollmentRequiredException {
+      throw const MfaEnrollmentRequired();
     } on AuthenticationFailedException catch (error) {
       // A mensagem vem do servidor de propósito: é ela que diferencia "senha
       // inválida" de "acesso bloqueado por tentativas" — e é igual para

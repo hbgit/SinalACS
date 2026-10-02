@@ -58,8 +58,16 @@ class MqttAlertDispatcher implements AlertPublisher {
           .withWillQos(MqttQos.atLeastOnce);
 
     if (_config.mqttUseTls && _config.mqttCaCertificatePath != null) {
-      client.securityContext = SecurityContext(withTrustedRoots: false)
+      final contexto = SecurityContext(withTrustedRoots: false)
         ..setTrustedCertificates(_config.mqttCaCertificatePath!);
+      final cert = _config.mqttClientCertificatePath;
+      final chave = _config.mqttClientKeyPath;
+      if (cert != null && chave != null) {
+        contexto
+          ..useCertificateChain(cert)
+          ..usePrivateKey(chave);
+      }
+      client.securityContext = contexto;
     }
 
     await client.connect(_config.mqttUsername, _config.mqttPassword);

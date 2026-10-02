@@ -2,10 +2,12 @@ import 'dart:async';
 import 'dart:developer' as developer;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show FilteringTextInputFormatter;
 import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:sinalacs_acs/app/acs_theme.dart';
 import 'package:sinalacs_acs/app/invite_screen.dart';
+import 'package:sinalacs_acs/app/mfa_enrollment_screen.dart';
 import 'package:sinalacs_acs/core/database/sqlcipher_visit_store.dart';
 import 'package:sinalacs_acs/core/geo/location_cell.dart';
 import 'package:sinalacs_acs/core/network/backend_client.dart';
@@ -13,6 +15,8 @@ import 'package:sinalacs_acs/core/network/backend_scope.dart';
 import 'package:sinalacs_acs/core/security/database_key_store.dart';
 import 'package:sinalacs_acs/core/services/alert_feed.dart';
 import 'package:sinalacs_acs/core/services/alert_queue.dart';
+import 'package:sinalacs_acs/core/services/emergency_dialer.dart';
+import 'package:sinalacs_acs/core/services/micro_area_directory.dart';
 import 'package:sinalacs_acs/core/services/offline_visit_queue.dart';
 import 'package:sinalacs_client/sinalacs_client.dart' show MicroAreaPatient;
 import 'package:sinalacs_acs/core/services/reconnect_schedule.dart';
@@ -29,6 +33,7 @@ class SinalAcsApp extends StatefulWidget {
     this.feedBuilder,
     this.visitQueue,
     this.visitPullService,
+    this.microAreaDirectory,
     this.initialAlert,
     this.currentPosition,
     this.themeController,
@@ -48,6 +53,12 @@ class SinalAcsApp extends StatefulWidget {
   final AlertFeed Function(AlertQueue queue)? feedBuilder;
   final OfflineVisitQueue? visitQueue;
   final VisitPullService? visitPullService;
+
+  /// Lista da microárea com cache no aparelho (RF08). `null` lê direto do
+  /// backend, sem cache: quem monta o de produção é o `main.dart`
+  /// (`buildMicroAreaDirectory`). O padrão não monta um sozinho porque o
+  /// Keystore não existe no `flutter test` e a carga ficaria pendurada.
+  final MicroAreaDirectory? microAreaDirectory;
   final PrioritizedAlert? initialAlert;
   final LatLng? currentPosition;
   final ThemeController? themeController;
@@ -123,6 +134,7 @@ class _SinalAcsAppState extends State<SinalAcsApp> {
               feedBuilder: widget.feedBuilder,
               visitQueue: _visitQueue,
               visitPullService: _visitPullService,
+              directory: widget.microAreaDirectory,
               initialAlert: widget.initialAlert,
               initialPosition: widget.currentPosition,
               themeController: _themeController,
@@ -139,15 +151,28 @@ class LoginScreen extends StatefulWidget {
     required this.themeController,
     required this.visitPullService,
     super.key,
+    this.directory,
     this.feedBuilder,
     this.initialAlert,
     this.initialPosition,
     this.syncInterval,
+    this.aviso,
+    this.reauthUserId,
   });
 
+  /// Preenchido quando a tela é empilhada SOBRE o painel porque a sessão venceu
+  /// (MFA, sem refresh token): é o `userId` da sessão que o painel guarda. Mesmo
+  /// usuário: a tela só dá `pop` e o painel (fila de alertas, feed MQTT, fila de
+  /// visitas, formulários) segue vivo. Outro usuário: o painel antigo é
+  /// descartado (RNF06 — nada do território anterior aparece).
+  final String? reauthUserId;
+
+  /// Aviso fixo no topo do formulário (ex.: sessão expirada).
+  final String? aviso;
   final AlertFeed Function(AlertQueue queue)? feedBuilder;
   final OfflineVisitQueue visitQueue;
   final VisitPullService visitPullService;
+  final MicroAreaDirectory? directory;
   final PrioritizedAlert? initialAlert;
   final LatLng? initialPosition;
   final ThemeController themeController;
@@ -162,11 +187,27 @@ class _LoginScreenState extends State<LoginScreen> {
   // '123456' embutidos, e o botão navegava sem olhar para nenhum dos dois.
   final _matricula = TextEditingController();
   final _senha = TextEditingController();
+  final _totp = TextEditingController();
+  bool _pedeCodigo = false;
   bool _busy = false;
   String? _error;
+  String? _aviso;
 
   @override
-  void dispose() { _matricula.dispose(); _senha.dispose(); super.dispose(); }
+  void initState() {
+    super.initState();
+    _aviso = widget.aviso;
+  }
+
+  @override
+  void dispose() { _matricula.dispose(); _senha.dispose(); _totp.dispose(); super.dispose(); }
+
+  /// O código pertence à sessão que o pediu: mudar matrícula ou senha o descarta.
+  void _credencialMudou(String _) {
+    if (!_pedeCodigo) return;
+    setState(() => _pedeCodigo = false);
+    _totp.clear();
+  }
 
   /// Autentica contra `auth.loginInstitutional` (RF07) e só então abre o
   /// painel.
@@ -183,12 +224,13 @@ class _LoginScreenState extends State<LoginScreen> {
       return;
     }
 
-    setState(() { _busy = true; _error = null; });
+    setState(() { _busy = true; _error = null; _aviso = null; });
 
     try {
       final session = await BackendScope.of(context).login(
         matricula: matricula,
         senha: senha,
+        totpCode: _pedeCodigo ? _totp.text.trim() : null,
       );
       final microAreaId = session.microAreaId;
       if (microAreaId == null) {
@@ -202,19 +244,47 @@ class _LoginScreenState extends State<LoginScreen> {
       }
       if (!mounted) return;
 
-      Navigator.of(context).pushReplacement(MaterialPageRoute(
+      if (widget.reauthUserId != null && session.userId == widget.reauthUserId) {
+        Navigator.of(context).pop(true);
+        return;
+      }
+
+      final shellRoute = MaterialPageRoute<void>(
         builder: (_) => AcsHomeShell(
           microAreaId: microAreaId,
           acsId: session.userId,
           feedBuilder: widget.feedBuilder,
           visitQueue: widget.visitQueue,
           visitPullService: widget.visitPullService,
+          directory: widget.directory,
           initialAlert: widget.initialAlert,
           initialPosition: widget.initialPosition,
           themeController: widget.themeController,
           syncInterval: widget.syncInterval,
         ),
+      );
+      if (widget.reauthUserId != null) {
+        // Outro usuário: o painel de baixo é do território anterior.
+        Navigator.of(context).pushAndRemoveUntil(shellRoute, (_) => false);
+      } else {
+        Navigator.of(context).pushReplacement(shellRoute);
+      }
+    } on MfaCodeRequired {
+      if (!mounted) return;
+      setState(() { _pedeCodigo = true; _error = null; _busy = false; });
+    } on MfaEnrollmentRequired {
+      if (!mounted) return;
+      setState(() => _busy = false);
+      final ativou = await Navigator.of(context).push<bool>(MaterialPageRoute(
+        builder: (_) => MfaEnrollmentScreen(
+          backend: BackendScope.of(context),
+          matricula: matricula,
+          senha: senha,
+        ),
       ));
+      if (ativou == true && mounted) {
+        setState(() { _pedeCodigo = true; _aviso = 'Aguarde o próximo código do autenticador.'; });
+      }
     } on BackendFailure catch (failure) {
       if (!mounted) return;
       setState(() { _busy = false; _error = failure.message; });
@@ -222,8 +292,11 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-    appBar: const _Header('Segurança e rastreabilidade', 'Acesso institucional'),
+  Widget build(BuildContext context) => PopScope(
+   // Reautenticação não é descartável: sem sessão o painel não renova nada.
+   canPop: widget.reauthUserId == null,
+   child: Scaffold(
+    appBar: _Header('Segurança e rastreabilidade', 'Acesso institucional', height: acsHeaderHeight(context)),
     body: Center(child: ConstrainedBox(
       constraints: const BoxConstraints(maxWidth: 600),
       child: ListView(padding: const EdgeInsets.all(24), children: [
@@ -237,6 +310,7 @@ class _LoginScreenState extends State<LoginScreen> {
           TextField(
             key: const Key('matricula_field'),
             controller: _matricula,
+            onChanged: _credencialMudou,
             autofillHints: const [AutofillHints.username],
             decoration: const InputDecoration(labelText: 'Matrícula / CNS'),
           ),
@@ -244,10 +318,28 @@ class _LoginScreenState extends State<LoginScreen> {
           TextField(
             key: const Key('senha_field'),
             controller: _senha,
+            onChanged: _credencialMudou,
             obscureText: true,
             autofillHints: const [AutofillHints.password],
             decoration: const InputDecoration(labelText: 'Senha de acesso'),
           ),
+          if (_aviso != null) Padding(
+            padding: const EdgeInsets.only(top: 16),
+            child: Semantics(liveRegion: true, child: Text(_aviso!, key: const Key('login_aviso'), textAlign: TextAlign.center)),
+          ),
+          if (_pedeCodigo) ...[
+            const SizedBox(height: 16),
+            TextField(
+              key: const Key('totp_field'),
+              controller: _totp,
+              keyboardType: TextInputType.number,
+              maxLength: 6,
+              autofillHints: const [AutofillHints.oneTimeCode],
+              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+              decoration: const InputDecoration(labelText: 'Código do autenticador (6 dígitos)'),
+              onSubmitted: (_) => _enter(),
+            ),
+          ],
           const SizedBox(height: 20),
           // Sem `Semantics` em volta, pelo mesmo motivo do login do paciente:
           // o `Text` do botão já é o nome acessível ("Entrar com credenciais")
@@ -272,7 +364,7 @@ class _LoginScreenState extends State<LoginScreen> {
         ]))),
       ]),
     )),
-  );
+  ));
 }
 
 enum AcsDestination { area, queue, map, visit, escalation, geofencing, notices, invite, settings }
@@ -292,6 +384,7 @@ class AcsHomeShell extends StatefulWidget {
     required this.themeController,
     required this.visitPullService,
     super.key,
+    this.directory,
     this.feedBuilder,
     this.initialAlert,
     this.initialPosition,
@@ -324,6 +417,9 @@ class AcsHomeShell extends StatefulWidget {
   /// motivo de [visitQueue]: construir um substituto aqui dentro, silencioso,
   /// já foi o defeito de outra fila neste mesmo arquivo.
   final VisitPullService visitPullService;
+
+  /// Lista da microárea com cache no aparelho (RF08); `null` lê direto do backend.
+  final MicroAreaDirectory? directory;
 
   @override
   State<AcsHomeShell> createState() => _AcsHomeShellState();
@@ -388,6 +484,9 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
   /// Quando a última carga bem-sucedida terminou.
   DateTime? _microAreaPatientsLoadedAt;
 
+  /// `true` quando a lista veio do cache do aparelho (RF08), não da central.
+  bool _microAreaFromCache = false;
+
   /// Presente quando a última tentativa falhou.
   InfraNotice? _microAreaPatientsError;
 
@@ -428,20 +527,59 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
     // mesmo motivo de VisitRegistrationScreen._patientsRequested.
     if (!_patientsRequested) {
       _patientsRequested = true;
+      _backend = BackendScope.of(context);
+      _backend!.onSessionExpired = _sessionExpired;
       _loadMicroAreaPatients();
+    }
+  }
+
+  AcsBackend? _backend;
+
+  /// Só uma tela de reautenticação por vez (duas expirações seguidas não empilham).
+  bool _reauthAberta = false;
+
+  /// A sessão venceu e não renova sozinha (MFA, sem refresh token). NÃO derruba o
+  /// painel: a reautenticação é empilhada por cima, e a fila de alertas, o feed
+  /// MQTT (autentica pelo broker, não pelo JWT), a fila de visitas e qualquer
+  /// formulário em andamento seguem vivos por baixo. Um alerta já recebido por
+  /// MQTT não é reentregue pelo broker; descartá-lo seria perdê-lo em silêncio.
+  Future<void> _sessionExpired() async {
+    if (!mounted || _reauthAberta) return;
+    _reauthAberta = true;
+    try {
+      await Navigator.of(context).push<bool>(MaterialPageRoute(
+        builder: (_) => LoginScreen(
+          visitQueue: widget.visitQueue,
+          themeController: widget.themeController,
+          visitPullService: widget.visitPullService,
+          directory: widget.directory,
+          feedBuilder: widget.feedBuilder,
+          initialAlert: widget.initialAlert,
+          initialPosition: widget.initialPosition,
+          syncInterval: widget.syncInterval,
+          aviso: 'Sua sessão expirou. Entre novamente com o código do autenticador.',
+          reauthUserId: widget.acsId,
+        ),
+      ));
+    } finally {
+      _reauthAberta = false;
     }
   }
 
   Future<void> _loadMicroAreaPatients() async {
     final backend = BackendScope.of(context);
-    setState(() { _loadingMicroAreaPatients = true; _microAreaPatientsError = null; });
+    setState(() { _loadingMicroAreaPatients = true; _microAreaPatientsError = null; _microAreaFromCache = false; });
 
     try {
-      final patients = await backend.listPatients();
+      final snapshot = widget.directory == null
+          ? null
+          : await widget.directory!.load();
+      final patients = snapshot?.patients ?? await backend.listPatients();
       if (!mounted) return;
       setState(() {
         _microAreaPatients = patients;
-        _microAreaPatientsLoadedAt = DateTime.now();
+        _microAreaPatientsLoadedAt = snapshot?.fetchedAt ?? DateTime.now();
+        _microAreaFromCache = snapshot?.fromCache ?? false;
       });
     } on BackendFailure catch (failure) {
       if (!mounted) return;
@@ -707,24 +845,33 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
   }
 
   Future<void> _acknowledge(PrioritizedAlert alert) async {
+    // O messenger vem do MaterialApp: sobrevive à troca de rota e ao painel.
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    void aviso(String texto) => messenger
+      ?..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(texto)));
     try {
       final result = await BackendScope.of(context).acknowledge(alertId: alert.alertId);
-      if (!mounted) return;
-      if (result.acknowledged) _queue.markAcknowledged(alert.alertId);
-      _message(context, result.acknowledged
+      if (result.acknowledged && mounted) _queue.markAcknowledged(alert.alertId);
+      aviso(result.acknowledged
           ? 'Recebimento confirmado à central.'
           : 'A central não reconheceu este alerta.');
     } on BackendFailure catch (failure) {
-      if (!mounted) return;
-      _message(context, failure.message);
+      // Nunca engolir: o alerta segue na fila, sem confirmação, e a pessoa vê por quê.
+      aviso(failure.message);
     }
   }
 
   @override
   void dispose() {
+    if (_backend?.onSessionExpired == _sessionExpired) _backend!.onSessionExpired = null;
     _reconnectTimer?.cancel();
     _periodicSyncTimer?.cancel();
     WidgetsBinding.instance.removeObserver(this);
+    // Solta o callback ANTES de parar: `stop()` desconecta o MQTT, que avisa
+    // `onConnectionChanged(false)`, e `mounted` ainda é `true` durante o
+    // `dispose` — o `setState` caía num elemento já defunct (assertion).
+    _feed.onConnectionChanged = null;
     _feed.stop();
     _queue.dispose();
     super.dispose();
@@ -732,7 +879,7 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: _Header('ACS • ${_brokerConnected ? 'em linha' : 'sem conexão'}', 'Painel operacional', connected: _brokerConnected),
+    appBar: _Header('ACS • ${_brokerConnected ? 'em linha' : 'sem conexão'}', 'Painel operacional', height: acsHeaderHeight(context), connected: _brokerConnected),
     body: SafeArea(child: switch (destination) {
       AcsDestination.area => TerritorializationScreen(
           pulling: _pullingVisits,
@@ -743,6 +890,7 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
           loadingPatients: _loadingMicroAreaPatients,
           patientCount: _microAreaPatients?.length,
           patientsLoadedAt: _microAreaPatientsLoadedAt,
+          patientsFromCache: _microAreaFromCache,
           patientsError: _microAreaPatientsError,
         ),
       AcsDestination.queue => DashboardScreen(
@@ -764,6 +912,7 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
           }),
         ),
       AcsDestination.visit => VisitRegistrationScreen(
+          directory: widget.directory,
           alert: _selected,
           queue: widget.visitQueue,
           currentPosition: _currentPosition,
@@ -793,13 +942,13 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
       destinations: const [NavigationDestination(icon: Icon(Icons.storage_outlined), label: 'Área'), NavigationDestination(icon: Icon(Icons.grid_view_outlined), label: 'Fila'), NavigationDestination(icon: Icon(Icons.map_outlined), label: 'Mapa'), NavigationDestination(icon: Icon(Icons.assignment_outlined), label: 'Visita'), NavigationDestination(icon: Icon(Icons.more_horiz), label: 'Mais')],
     ),
   );
-  void _more(BuildContext context) => showModalBottomSheet<void>(context: context, builder: (sheet) => SafeArea(child: Column(mainAxisSize: MainAxisSize.min, children: [
+  void _more(BuildContext context) => showModalBottomSheet<void>(context: context, builder: (sheet) => SafeArea(child: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
     _moreItem(sheet, Icons.call_outlined, 'Acionamento', AcsDestination.escalation),
     _moreItem(sheet, Icons.location_searching, 'Geofencing', AcsDestination.geofencing),
     _moreItem(sheet, Icons.campaign_outlined, 'Avisos à comunidade', AcsDestination.notices),
     _moreItem(sheet, Icons.qr_code_2, 'Convidar paciente', AcsDestination.invite),
     _moreItem(sheet, Icons.tune_outlined, 'Preferências', AcsDestination.settings),
-  ])));
+  ]))));
   Widget _moreItem(BuildContext sheet, IconData icon, String label, AcsDestination value) => ListTile(leading: Icon(icon), title: Text(label), onTap: () { Navigator.pop(sheet); setState(() => destination = value); });
 }
 
@@ -818,6 +967,7 @@ class TerritorializationScreen extends StatelessWidget {
     this.loadingPatients = false,
     this.patientCount,
     this.patientsLoadedAt,
+    this.patientsFromCache = false,
     this.patientsError,
   });
 
@@ -847,6 +997,9 @@ class TerritorializationScreen extends StatelessWidget {
   /// Quando a última carga bem-sucedida terminou.
   final DateTime? patientsLoadedAt;
 
+  /// `true` quando a contagem veio do cache do aparelho (RF08).
+  final bool patientsFromCache;
+
   /// Presente quando a última tentativa falhou.
   final InfraNotice? patientsError;
 
@@ -856,6 +1009,8 @@ class TerritorializationScreen extends StatelessWidget {
         const SizedBox(height: 12),
         _InfoRow('Pacientes sincronizados', _patientCountText()),
         _InfoRow('Cache local', _cacheFreshnessText()),
+        if (patientsFromCache && patientsLoadedAt != null)
+          _cacheNotice(context, const Key('micro_area_cache_notice_area'), patientsLoadedAt!),
         // A linha acima diz que falhou; este banner diz por quê. Sem ele o
         // `detail` de `patientsError` (a mensagem do servidor) nunca chegava à
         // tela — o `InfraNotice` inteiro era reduzido a "Não foi possível
@@ -894,7 +1049,7 @@ class TerritorializationScreen extends StatelessWidget {
                 const SizedBox(height: 22, width: 22, child: CircularProgressIndicator(strokeWidth: 2)),
                 const SizedBox(width: 8),
               ],
-              const Text('Atualizar dados da microárea'),
+              const Flexible(child: Text('Atualizar dados da microárea', textAlign: TextAlign.center)),
             ]),
           ),
         ),
@@ -1516,14 +1671,37 @@ class _LegendChip extends StatelessWidget {
       );
 }
 
+String _formatarDataHora(DateTime utc) {
+  final d = utc.toLocal();
+  String dois(int n) => n.toString().padLeft(2, '0');
+  return '${dois(d.day)}/${dois(d.month)} às ${dois(d.hour)}:${dois(d.minute)}';
+}
+
+/// Aviso de que a lista da microárea é a guardada no aparelho (RF08, §5.11 de
+/// `spec/lgpd_design.md`): o ACS precisa saber que não é a lista da central.
+Widget _cacheNotice(BuildContext context, Key key, DateTime fetchedAt) => Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Semantics(
+        liveRegion: true,
+        child: Text(
+          key: key,
+          'Sem conexão com a central: lista salva em ${_formatarDataHora(fetchedAt)}.',
+          style: TextStyle(color: context.acsRisk.accentOnSurface, fontWeight: FontWeight.bold),
+        ),
+      ),
+    );
+
 class VisitRegistrationScreen extends StatefulWidget {
-  const VisitRegistrationScreen({required this.queue, super.key, this.alert, this.currentPosition});
+  const VisitRegistrationScreen({required this.queue, super.key, this.alert, this.currentPosition, this.directory});
 
   /// A fila é recebida pronta, não construída aqui: uma instância por gravação
   /// descartava a visita assim que o callback retornava.
   final OfflineVisitQueue queue;
   final PrioritizedAlert? alert;
   final LatLng? currentPosition;
+
+  /// Lista da microárea com cache no aparelho (RF08); `null` lê direto do backend.
+  final MicroAreaDirectory? directory;
 
   @override
   State<VisitRegistrationScreen> createState() => _VisitRegistrationScreenState();
@@ -1549,6 +1727,8 @@ class _VisitRegistrationScreenState extends State<VisitRegistrationScreen> {
   List<MicroAreaPatient>? _patients;
   BackendFailure? _patientsError;
   bool _loadingPatients = false;
+  bool _patientsFromCache = false;
+  DateTime? _patientsFetchedAt;
   bool _patientsRequested = false;
 
   @override
@@ -1595,11 +1775,18 @@ class _VisitRegistrationScreenState extends State<VisitRegistrationScreen> {
   /// funcionando mesmo sem rede (o app é offline-first), então o erro vira
   /// aviso com um jeito de tentar de novo, nunca uma tela presa.
   Future<void> _loadPatients() async {
-    setState(() { _loadingPatients = true; _patientsError = null; });
+    final backend = BackendScope.of(context);
+    setState(() { _loadingPatients = true; _patientsError = null; _patientsFromCache = false; });
     try {
-      final result = await BackendScope.of(context).listPatients();
+      final snapshot = widget.directory == null ? null : await widget.directory!.load();
+      final result = snapshot?.patients ?? await backend.listPatients();
       if (!mounted) return;
-      setState(() { _patients = result; _loadingPatients = false; });
+      setState(() {
+        _patients = result;
+        _patientsFromCache = snapshot?.fromCache ?? false;
+        _patientsFetchedAt = snapshot?.fetchedAt;
+        _loadingPatients = false;
+      });
     } on BackendFailure catch (failure) {
       if (!mounted) return;
       setState(() { _patientsError = failure; _loadingPatients = false; });
@@ -1757,6 +1944,8 @@ class _VisitRegistrationScreenState extends State<VisitRegistrationScreen> {
         : all.where((p) => p.name.toLowerCase().contains(query)).toList();
 
     return [
+      if (_patientsFromCache && _patientsFetchedAt != null)
+        _cacheNotice(context, const Key('micro_area_cache_notice'), _patientsFetchedAt!),
       const SizedBox(height: 8),
       TextField(
         key: const Key('patient_search'),
@@ -1833,7 +2022,7 @@ class _VisitRegistrationScreenState extends State<VisitRegistrationScreen> {
         contentPadding: EdgeInsets.zero,
       ),
       const SizedBox(height: 8),
-      DropdownButtonFormField<String>(initialValue: outcome, decoration: const InputDecoration(labelText: 'Status do atendimento'), items: const ['Realizada com sucesso', 'Paciente ausente', 'Recusou atendimento'].map((v) => DropdownMenuItem(value: v, child: Text(v))).toList(), onChanged: !hasPatient || !_arrivalConfirmed ? null : (v) => setState(() => outcome = v!)),
+      DropdownButtonFormField<String>(isExpanded: true, initialValue: outcome, decoration: const InputDecoration(labelText: 'Status do atendimento'), items: const ['Realizada com sucesso', 'Paciente ausente', 'Recusou atendimento'].map((v) => DropdownMenuItem(value: v, child: Text(v))).toList(), onChanged: !hasPatient || !_arrivalConfirmed ? null : (v) => setState(() => outcome = v!)),
       const SizedBox(height: 16),
       TextField(
         controller: notes,
@@ -1912,15 +2101,76 @@ class _VisitRegistrationScreenState extends State<VisitRegistrationScreen> {
   }
 }
 
-class EscalationScreen extends StatelessWidget {
-  const EscalationScreen({super.key, this.alert, this.onVisit});
+class EscalationScreen extends StatefulWidget {
+  const EscalationScreen({
+    super.key,
+    this.alert,
+    this.onVisit,
+    this.dialer = const UrlLauncherEmergencyDialer(),
+  });
 
   final PrioritizedAlert? alert;
   final void Function(PrioritizedAlert alert)? onVisit;
+  final EmergencyDialer dialer;
+
+  @override
+  State<EscalationScreen> createState() => _EscalationScreenState();
+}
+
+class _EscalationScreenState extends State<EscalationScreen> {
+  /// Trava o toque duplo: dois `launchUrl` seguidos empilham dois discadores.
+  bool _dialing = false;
+
+  /// Trava própria da consulta da UBS: nunca pode desabilitar o botão do SAMU.
+  bool _fetchingUbs = false;
+
+  Future<void> _callSamu() async {
+    if (_dialing) return;
+    setState(() => _dialing = true);
+    var opened = false;
+    try {
+      opened = await widget.dialer.dial(samuNumber);
+    } catch (_) {
+      opened = false;
+    }
+    if (!mounted) return;
+    setState(() => _dialing = false);
+    if (!opened) {
+      _message(context, 'Não foi possível abrir o discador. Ligue manualmente para $samuNumber.');
+    }
+  }
+
+  /// Liga para a UBS do ACS (RF13). O telefone vem do servidor; sem ele, avisa.
+  Future<void> _callUbs() async {
+    if (_fetchingUbs) return;
+    setState(() => _fetchingUbs = true);
+    String? aviso;
+    try {
+      final contato = await BackendScope.of(context).ubsContact();
+      final telefone = contato.phone?.trim() ?? '';
+      // O discador recebe só dígitos e `+`: espaço e hífen viram %20 no `tel:`.
+      final numero = telefone.replaceAll(RegExp(r'[^0-9+]'), '');
+      if (numero.isEmpty) {
+        aviso = '${contato.name} ainda não cadastrou um telefone. Acione a coordenação.';
+      } else {
+        if (!await widget.dialer.dial(numero)) {
+          aviso = 'Não foi possível abrir o discador. Ligue manualmente para $telefone.';
+        }
+      }
+    } on BackendFailure catch (falha) {
+      aviso = falha.message;
+    } catch (_) {
+      aviso = 'Não foi possível obter o contato da UBS.';
+    }
+    if (!mounted) return;
+    setState(() => _fetchingUbs = false);
+    if (aviso != null) _message(context, aviso);
+  }
 
   @override
   Widget build(BuildContext context) {
-    final current = alert;
+    final current = widget.alert;
+    final onVisit = widget.onVisit;
     return _page([
       const Text('Escalonamento rápido', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
       const SizedBox(height: 16),
@@ -1930,7 +2180,7 @@ class EscalationScreen extends StatelessWidget {
       _InfoRow('Local (hash)', current?.locationHash ?? '—'),
       const SizedBox(height: 20),
       FilledButton.icon(
-        onPressed: () => _message(context, 'Discagem não está integrada neste protótipo.'),
+        onPressed: _dialing ? null : _callSamu,
         // Alvo de toque de 60x60 (padrão de emergência do PRD): o default do
         // Material 3 para `FilledButton.icon` fica em 40dp de altura visual,
         // abaixo do exigido para uma ação de acionar o SAMU.
@@ -1939,16 +2189,18 @@ class EscalationScreen extends StatelessWidget {
         label: const Text('Ligar para o SAMU (192)'),
       ),
       const SizedBox(height: 12),
-      OutlinedButton(
-        onPressed: () => _message(context, 'Encaminhamento será integrado à UBS.'),
+      OutlinedButton.icon(
+        key: const Key('escalation_ubs'),
+        onPressed: _fetchingUbs ? null : _callUbs,
         style: OutlinedButton.styleFrom(minimumSize: const Size(48, 52)),
-        child: const Text('Encaminhar para UBS Central'),
+        icon: const Icon(Icons.local_hospital_outlined),
+        label: const Text('Ligar para a UBS'),
       ),
       if (current != null) ...[
         const SizedBox(height: 12),
         OutlinedButton.icon(
           key: const Key('escalation_visit'),
-          onPressed: onVisit == null ? null : () => onVisit!(current),
+          onPressed: onVisit == null ? null : () => onVisit(current),
           style: OutlinedButton.styleFrom(minimumSize: const Size(48, 52)),
           icon: const Icon(Icons.alt_route_outlined),
           label: const Text('Iniciar rota de visita'),
@@ -2174,12 +2426,23 @@ String _riskLabelPt(String riskLevel) => switch (riskLevel.toLowerCase()) {
       'green' || 'verde' => 'Verde',
       _ => 'Não classificado',
     };
-class _InfoRow extends StatelessWidget { const _InfoRow(this.label, this.value); final String label; final String value; @override Widget build(BuildContext context) => Padding(padding: const EdgeInsets.symmetric(vertical: 5), child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text(label), Flexible(child: Text(value, textAlign: TextAlign.end, style: const TextStyle(fontWeight: FontWeight.bold)))])); }
+class _InfoRow extends StatelessWidget { const _InfoRow(this.label, this.value); final String label; final String value; @override Widget build(BuildContext context) => Padding(padding: const EdgeInsets.symmetric(vertical: 5), child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, crossAxisAlignment: CrossAxisAlignment.start, children: [Flexible(child: Text(label)), const SizedBox(width: 12), Flexible(child: Text(value, textAlign: TextAlign.end, style: const TextStyle(fontWeight: FontWeight.bold)))])); }
+/// Altura do cabeçalho, crescendo com a escala de fonte.
+///
+/// `preferredSize` não tem acesso ao `BuildContext`, então quem monta o
+/// `Scaffold` calcula e entrega. O teto de 132 existe para que fonte a 200% não
+/// coma metade da tela de um celular; o título já usa elipse.
+double acsHeaderHeight(BuildContext context) =>
+    MediaQuery.textScalerOf(context).scale(72).clamp(72.0, 132.0);
+
 class _Header extends StatelessWidget implements PreferredSizeWidget {
-  const _Header(this.eyebrow, this.title, {this.connected});
+  const _Header(this.eyebrow, this.title, {required this.height, this.connected});
 
   final String eyebrow;
   final String title;
+
+  /// Calculada por quem monta o Scaffold, via [acsHeaderHeight].
+  final double height;
 
   /// Estado da conexão com o broker. `null` fora do painel.
   ///
@@ -2188,29 +2451,37 @@ class _Header extends StatelessWidget implements PreferredSizeWidget {
   final bool? connected;
 
   @override
-  Size get preferredSize => const Size.fromHeight(72);
+  Size get preferredSize => Size.fromHeight(height);
 
   @override
   Widget build(BuildContext context) => AppBar(
+    toolbarHeight: height,
     title: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Text(eyebrow.toUpperCase(), style: TextStyle(fontSize: 10, color: context.acsRisk.accentOnSurface, fontWeight: FontWeight.bold)),
-      Text(title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+      Text(eyebrow.toUpperCase(), maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 10, color: context.acsRisk.accentOnSurface, fontWeight: FontWeight.bold)),
+      Text(title, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
     ]),
     actions: [
       Padding(
         padding: const EdgeInsets.only(right: 12),
-        child: Chip(
-          key: const Key('broker_status'),
-          avatar: connected == null ? null : Icon(
-            connected! ? Icons.cloud_done_outlined : Icons.cloud_off_outlined,
-            size: 18,
-            color: connected! ? context.acsRisk.greenOnSurface : context.acsRisk.redOnSurface,
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width * 0.5),
+          child: Chip(
+            key: const Key('broker_status'),
+            avatar: connected == null ? null : Icon(
+              connected! ? Icons.cloud_done_outlined : Icons.cloud_off_outlined,
+              size: 18,
+              color: connected! ? context.acsRisk.greenOnSurface : context.acsRisk.redOnSurface,
+            ),
+            label: Text(
+              switch (connected) {
+                null => 'Offline ready',
+                true => 'Alertas em tempo real',
+                false => 'Sem central',
+              },
+              overflow: TextOverflow.ellipsis,
+              maxLines: 1,
+            ),
           ),
-          label: Text(switch (connected) {
-            null => 'Offline ready',
-            true => 'Alertas em tempo real',
-            false => 'Sem central',
-          }),
         ),
       ),
     ],

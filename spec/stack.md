@@ -72,3 +72,5 @@ implementados de ponta a ponta: push segmentado (§3.2, RF14 — provado no emul
   ACS; adotado geofence único atrelado a uma visita ativa, com serviço em
   primeiro plano e notificação persistente, para evitar a política mais
   restritiva de "background location" da Play Store.
+
+> **Broker com mTLS (2026-10-02):** `require_certificate true`; certificado de cliente por usuário MQTT (`backend`, `acs-area-12`), emitido pela CA de desenvolvimento pelo `mosquitto-init`; senha e ACL mantidos (sem `use_identity_as_username`); prova de recusa em `scripts/qa/mtls_invariants.sh`. Produção exige provisionamento por aparelho (aberto).

@@ -5,6 +5,8 @@ alerts:
 auth:
   - developmentLogin:
   - loginInstitutional:
+  - beginTotpEnrollment:
+  - confirmTotpEnrollment:
   - requestOtp:
   - verifyOtp:
 devices:
@@ -30,6 +32,8 @@ patients:
   - requestDataCorrection:
 triage:
   - evaluate:
+ubs:
+  - myContact:
 visits:
   - sync:
   - pull:

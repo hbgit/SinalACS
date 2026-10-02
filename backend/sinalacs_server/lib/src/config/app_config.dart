@@ -17,8 +17,11 @@ class AppConfig {
     required this.mqttPassword,
     required this.mqttUseTls,
     required this.mqttCaCertificatePath,
+    this.mqttClientCertificatePath,
+    this.mqttClientKeyPath,
     required this.appEnv,
     required this.enableDevLogin,
+    this.requireAcsMfa = false,
     this.gorushUrl,
   });
 
@@ -84,8 +87,20 @@ class AppConfig {
   final String? mqttPassword;
   final bool mqttUseTls;
   final String? mqttCaCertificatePath;
+
+  /// Certificado e chave de CLIENTE para o mTLS do broker (`MQTT_CLIENT_CERT_PATH`
+  /// e `MQTT_CLIENT_KEY_PATH`). Vêm sempre juntos; fora de `development` com
+  /// TLS são obrigatórios.
+  final String? mqttClientCertificatePath;
+  final String? mqttClientKeyPath;
   final String appEnv;
   final bool enableDevLogin;
+
+  /// `REQUIRE_ACS_MFA`: ACS sem MFA (TOTP) ativa não entra pelo login
+  /// institucional; precisa ativá-la antes. Padrão **ligado fora de
+  /// `development`** ([resolveRequireAcsMfa]). O default do construtor é
+  /// `false` só para as configurações montadas à mão nos testes.
+  final bool requireAcsMfa;
 
   bool get isProduction => appEnv == 'production';
 
@@ -157,6 +172,9 @@ class AppConfig {
   factory AppConfig.fromEnvironment() =>
       AppConfig.fromMap(Platform.environment);
 
+  static String? _blankToNull(String? value) =>
+      (value == null || value.trim().isEmpty) ? null : value;
+
   /// Mesma leitura, a partir de um mapa qualquer.
   ///
   /// `Platform.environment` não é substituível dentro do processo, então as
@@ -164,6 +182,21 @@ class AppConfig {
   /// atalho para o ambiente real.
   factory AppConfig.fromMap(Map<String, String> environment) {
     final appEnv = environment['APP_ENV'] ?? 'development';
+
+    final mqttUseTls = environment['MQTT_USE_TLS'] == 'true';
+    final mqttClientCert = _blankToNull(environment['MQTT_CLIENT_CERT_PATH']);
+    final mqttClientKey = _blankToNull(environment['MQTT_CLIENT_KEY_PATH']);
+    if ((mqttClientCert == null) != (mqttClientKey == null)) {
+      throw StateError(
+        'MQTT_CLIENT_CERT_PATH e MQTT_CLIENT_KEY_PATH devem vir juntos.',
+      );
+    }
+    if (appEnv != 'development' && mqttUseTls && mqttClientCert == null) {
+      throw StateError(
+        'MQTT_CLIENT_CERT_PATH e MQTT_CLIENT_KEY_PATH são obrigatórios '
+        'fora de development com MQTT_USE_TLS=true (mTLS do broker).',
+      );
+    }
 
     return AppConfig(
       mqttBroker: environment['MQTT_BROKER'] ?? 'localhost:1883',
@@ -195,13 +228,25 @@ class AppConfig {
       ),
       mqttUsername: environment['MQTT_USERNAME'],
       mqttPassword: environment['MQTT_PASSWORD'],
-      mqttUseTls: environment['MQTT_USE_TLS'] == 'true',
+      mqttUseTls: mqttUseTls,
       mqttCaCertificatePath: environment['MQTT_CA_CERT_PATH'],
+      mqttClientCertificatePath: mqttClientCert,
+      mqttClientKeyPath: mqttClientKey,
       appEnv: appEnv,
       enableDevLogin: environment['ENABLE_DEV_LOGIN'] == 'true',
+      requireAcsMfa: resolveRequireAcsMfa(
+        value: environment['REQUIRE_ACS_MFA'],
+        appEnv: appEnv,
+      ),
       gorushUrl: _resolveGorushUrl(environment['GORUSH_URL']),
     );
   }
+
+  /// Com a variável presente, só a string exata `true` liga (mesma regra de
+  /// `ENABLE_DEV_LOGIN`). Ausente, vale `true` em todo ambiente que não seja
+  /// `development`: esquecer a variável em produção não pode desligar a MFA.
+  static bool resolveRequireAcsMfa({required String? value, required String appEnv}) =>
+      value != null ? value == 'true' : appEnv != 'development';
 
   static String? _resolveGorushUrl(String? value) {
     var url = value?.trim() ?? '';

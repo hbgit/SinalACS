@@ -109,6 +109,8 @@ Future<void> main(List<String> args) async {
   // CA do BROKER (MQTT). A do RPC é a de [_devRpcCaBytes], e continuam sendo
   // duas: apontar esta para a CA do Traefik derruba a leg do MQTT.
   final caPath = _arg(args, 'ca', '../../infra/docker/mosquitto/runtime/certs/ca.crt');
+  final clientCertPath = _arg(args, 'client-cert', '../../infra/docker/mosquitto/runtime/certs/acs-area-12.crt');
+  final clientKeyPath = _arg(args, 'client-key', '../../infra/docker/mosquitto/runtime/certs/acs-area-12.key');
   final emitMetrics = args.contains('--emit-metrics');
   final visitCount = _intArg(args, 'visit-count', 1).clamp(1, 1000);
 
@@ -201,6 +203,9 @@ Future<void> main(List<String> args) async {
         username: _arg(args, 'mqtt-user', BackendConfig.mqttUsername),
         password: mqttPassword,
         caCertificate: File(caPath).readAsBytesSync(),
+        // mTLS: o broker exige certificado de cliente (Task 7).
+        clientCertificate: File(clientCertPath).readAsBytesSync(),
+        clientPrivateKey: File(clientKeyPath).readAsBytesSync(),
       ),
     );
 

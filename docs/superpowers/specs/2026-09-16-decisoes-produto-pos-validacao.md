@@ -297,6 +297,13 @@ implementação real de `PushTokenSource` no paciente (receptor).
 plano, não há geofence nativo registrado, e a permissão declarada no
 `AndroidManifest.xml` não inclui localização em background.
 
+> **Correção (2026-10-01):** a permissão de localização em primeiro plano
+> (`ACCESS_FINE_LOCATION`/`ACCESS_COARSE_LOCATION`) **não estava** declarada no
+> manifesto do ACS — medido com `aapt2` nos APKs de debug e de release —, então o
+> GPS nunca chegava ao check-in num aparelho. Passou a estar, e
+> `apps/acs/test/android_manifest_test.dart` impede a volta (e proíbe
+> `ACCESS_BACKGROUND_LOCATION`).
+
 ### Decisão aprovada
 
 **Rejeitar rastreamento contínuo em segundo plano do ACS.** Em vez de manter

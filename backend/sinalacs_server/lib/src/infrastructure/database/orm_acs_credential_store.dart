@@ -1,6 +1,7 @@
 import 'package:serverpod/serverpod.dart';
 import 'package:sinalacs_server/src/application/auth/institutional_auth_service.dart';
 import 'package:sinalacs_server/src/application/auth/password_hasher.dart';
+import 'package:sinalacs_server/src/application/auth/totp_secret_vault.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
 
 /// Implementação sobre o ORM do Serverpod.
@@ -31,7 +32,7 @@ import 'package:sinalacs_server/src/generated/protocol.dart';
 /// `lockUntil`). Mesmo arranjo de `OrmOnboardingStore.consumeIfValid`, que
 /// também resolve no `SET`/`WHERE` do Postgres o que o ORM não expressa — o
 /// ORM não tem `UPDATE ... SET col = col + 1`.
-class OrmAcsCredentialStore implements AcsCredentialStore {
+class OrmAcsCredentialStore implements AcsCredentialStore, TotpStore {
   OrmAcsCredentialStore({required Session Function() session}) : _session = session;
 
   final Session Function() _session;
@@ -83,7 +84,80 @@ class OrmAcsCredentialStore implements AcsCredentialStore {
       ),
       failedAttempts: credential.failedAttempts,
       lockedUntil: credential.lockedUntil,
+      totp: _totpOf(credential),
     );
+  }
+
+  /// Estado da MFA como está na linha. Segredo sem versão de chave é linha
+  /// corrompida: vira erro de servidor, não "sem MFA" — tratar como ausente
+  /// deixaria entrar só com a senha quem tem MFA ativa.
+  static TotpEnrollment? _totpOf(UserCredential credential) {
+    final cifrado = credential.totpSecretEncrypted;
+    if (cifrado == null) return null;
+    final versao = credential.totpKeyVersion;
+    if (versao == null) {
+      throw StateError('Segredo TOTP sem versão de chave em user_credentials.');
+    }
+    return TotpEnrollment(
+      sealed: SealedSecret(ciphertextBase64: cifrado, keyVersion: versao),
+      enabled: credential.totpEnabledAt != null,
+      lastStep: credential.totpLastStep,
+    );
+  }
+
+  /// Grava um segredo **pendente**: zera `totpEnabledAt` e `totpLastStep`, de
+  /// modo que a MFA só passa a valer com `enable`. O `WHERE totpEnabledAt IS
+  /// NULL` recusa sobrescrever uma MFA já ativa mesmo quando o serviço leu a
+  /// linha antes de uma confirmação concorrente gravar: sem ele, quem só tem a
+  /// senha poderia trocar o segredo de uma MFA recém-ativada.
+  @override
+  Future<bool> saveSecret(String acsId, SealedSecret secret, DateTime at) async {
+    final linhas = await UserCredential.db.updateWhere(
+      _session(),
+      columnValues: (t) => [
+        t.totpSecretEncrypted(secret.ciphertextBase64),
+        t.totpKeyVersion(secret.keyVersion),
+        t.totpEnabledAt(null),
+        t.totpLastStep(null),
+        t.updatedAt(at),
+      ],
+      where: (t) => t.userId.equals(UuidValue.fromString(acsId)) & t.totpEnabledAt.equals(null),
+    );
+    return linhas.isNotEmpty;
+  }
+
+  /// Ativa só se a linha ainda está pendente **com o mesmo segredo** que o
+  /// código conferiu: duas confirmações concorrentes ativam uma vez só, e um
+  /// novo início no meio (segredo trocado) não é ativado por um código do
+  /// segredo antigo.
+  @override
+  Future<bool> enable(String acsId, SealedSecret pending, int step, DateTime at) async {
+    final linhas = await UserCredential.db.updateWhere(
+      _session(),
+      columnValues: (t) => [t.totpEnabledAt(at), t.totpLastStep(step), t.updatedAt(at)],
+      where: (t) =>
+          t.userId.equals(UuidValue.fromString(acsId)) &
+          t.totpEnabledAt.equals(null) &
+          t.totpSecretEncrypted.equals(pending.ciphertextBase64),
+    );
+    return linhas.isNotEmpty;
+  }
+
+  /// Grava o passo aceito e diz se gravou. O `WHERE` só deixa o passo
+  /// **avançar**; sob READ COMMITTED, a segunda de duas requisições com o
+  /// mesmo código espera o lock da linha, reavalia o `WHERE` contra o passo
+  /// que a primeira gravou e não altera nada — devolve `false`, e o serviço
+  /// recusa a sessão (replay).
+  @override
+  Future<bool> registerStep(String acsId, int step) async {
+    final linhas = await UserCredential.db.updateWhere(
+      _session(),
+      columnValues: (t) => [t.totpLastStep(step)],
+      where: (t) =>
+          t.userId.equals(UuidValue.fromString(acsId)) &
+          (t.totpLastStep.equals(null) | (t.totpLastStep < step)),
+    );
+    return linhas.isNotEmpty;
   }
 
   @override

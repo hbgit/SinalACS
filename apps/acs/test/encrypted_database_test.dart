@@ -245,6 +245,45 @@ CREATE TABLE IF NOT EXISTS offline_visits (
       expect(linhas.single['rejection_reason'], isNull);
       await atual.close();
     });
+
+    test('a v5 ganha as tabelas do cache da microárea sem perder a visita pendente', () async {
+      sqfliteFfiInit();
+      final legado = await databaseFactoryFfi.openDatabase(
+        await EncryptedLocalDatabase.pathFor(nome),
+        options: OpenDatabaseOptions(
+          version: 5,
+          onCreate: (db, version) async {
+            await db.execute(EncryptedLocalDatabase.createOfflineVisits);
+            await db.execute(EncryptedLocalDatabase.createSyncCursor);
+          },
+        ),
+      );
+      await legado.insert('offline_visits', {
+        'local_id': '00000000-0000-4000-8000-00000000000c',
+        'patient_id': seedPatientId,
+        'risk': 'red',
+        'status': 'PENDENTE',
+        'outcome': '',
+        'notes': '',
+        'created_at': DateTime.utc(2026).toIso8601String(),
+        'version': 1,
+      });
+      await legado.close();
+
+      final atual = await EncryptedLocalDatabase.open(
+        databaseName: nome,
+        passphrase: chave,
+        allowUnencryptedForTesting: true,
+      );
+
+      final novas = await atual.rawQuery(
+        "SELECT name FROM sqlite_master WHERE name IN ('micro_area_cache','micro_area_cache_meta')",
+      );
+      expect(novas, hasLength(2));
+      expect(await atual.query('offline_visits'), hasLength(1));
+      expect(EncryptedLocalDatabase.schemaVersion, 6);
+      await atual.close();
+    });
   });
 
   group('SqlCipherVisitStore', () {

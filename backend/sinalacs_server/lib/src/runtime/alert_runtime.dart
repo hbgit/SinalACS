@@ -14,9 +14,11 @@ import 'package:sinalacs_server/src/application/patients/data_subject_rights_ser
 import 'package:sinalacs_server/src/application/patients/patient_data_overview_service.dart';
 import 'package:sinalacs_server/src/application/patients/patient_directory_service.dart';
 import 'package:sinalacs_server/src/application/triage/triage_session_service.dart';
+import 'package:sinalacs_server/src/application/ubs/ubs_contact_service.dart';
 import 'package:sinalacs_server/src/application/visits/visit_sync_service.dart';
 import 'package:sinalacs_server/src/config/app_config.dart';
 import 'package:sinalacs_server/src/infrastructure/crypto/argon2_password_hasher.dart';
+import 'package:sinalacs_server/src/infrastructure/crypto/health_cipher_totp_vault.dart';
 import 'package:sinalacs_server/src/infrastructure/crypto/health_data_cipher.dart';
 import 'package:sinalacs_server/src/infrastructure/crypto/hmac_cpf_hasher.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_acs_credential_store.dart';
@@ -34,6 +36,7 @@ import 'package:sinalacs_server/src/application/patients/push_token_service.dart
 import 'package:sinalacs_server/src/infrastructure/database/orm_patient_data_overview_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_patient_directory_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_triage_session_store.dart';
+import 'package:sinalacs_server/src/infrastructure/database/orm_ubs_contact_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_visit_store.dart';
 import 'package:sinalacs_server/src/infrastructure/mqtt/mqtt_alert_dispatcher.dart';
 
@@ -202,6 +205,10 @@ class AlertRuntime {
         audit: auditTrailFor(session),
       );
 
+  /// Contato da UBS do ACS (RF13), para uma requisição.
+  UbsContactService ubsContactServiceFor(Session session) =>
+      UbsContactService(store: OrmUbsContactStore(session));
+
   /// Constrói o diretório de pacientes da microárea para uma requisição.
   PatientDirectoryService patientDirectoryServiceFor(Session session) =>
       PatientDirectoryService(
@@ -295,12 +302,17 @@ class AlertRuntime {
   /// chamada e a trilha de auditoria é a da requisição, para que cada
   /// tentativa (granted, denied_credentials, denied_locked…) vire uma linha
   /// encadeada em `audit_logs`.
-  InstitutionalAuthService institutionalAuthServiceFor(Session session) =>
-      InstitutionalAuthService(
-        store: OrmAcsCredentialStore(session: () => session),
-        hasher: passwordHasher,
-        audit: auditTrailFor(session),
-      );
+  InstitutionalAuthService institutionalAuthServiceFor(Session session) {
+    final store = OrmAcsCredentialStore(session: () => session);
+    return InstitutionalAuthService(
+      store: store,
+      hasher: passwordHasher,
+      audit: auditTrailFor(session),
+      totpStore: store,
+      vault: HealthCipherTotpVault(healthDataCipher),
+      requireMfa: config.requireAcsMfa,
+    );
+  }
 
   /// Serviço de login passwordless do paciente (RF01) para uma requisição.
   ///

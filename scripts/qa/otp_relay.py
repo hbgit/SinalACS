@@ -4,8 +4,13 @@
 O gateway de log escreve o código no stdout do servidor; o emulador não lê
 `docker logs`. Este servidor expõe só o código mais recente, sem destino nem CPF
 (o log não os tem). Escuta em 127.0.0.1; o emulador chega por `adb reverse`.
+
+`/acs` (só com E2E_FIXTURES_FILE) entrega a matrícula e a senha SINTÉTICAS do ACS
+da execução, **uma única vez por processo**: qualquer app do emulador que alcance
+localhost:8765 (adb reverse) poderia lê-las, então depois do primeiro pedido bem
+sucedido — o do teste, no começo — a rota responde 404. O relé é por execução.
 """
-import re, subprocess, sys, time
+import json, os, re, subprocess, sys, time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import urlparse, parse_qs
 
@@ -27,9 +32,24 @@ VIDA_MAXIMA_S = 45 * 60
 def count_codes(log_text):
     return len(PADRAO.findall(log_text))
 
+def acs_do_manifesto(caminho):
+    """Matrícula e senha sintéticas do ACS do manifesto de e2e, ou None.
+
+    Só existe para o e2e de TELA do ACS. Opt-in: sem E2E_FIXTURES_FILE o relé
+    não serve credencial nenhuma, e o e2e do paciente segue exatamente como era."""
+    if not caminho:
+        return None
+    try:
+        with open(caminho) as f:
+            acs = json.load(f)["acs"]
+        return {"matricula": acs["matricula"], "senha": acs["password"]}
+    except (OSError, KeyError, ValueError):
+        return None
+
 class Handler(BaseHTTPRequestHandler):
     porta = 8765
     container = "sinalacs-serverpod"
+    acs_entregue = False
 
     def do_GET(self):
         if not host_permitido(self.headers.get("Host"), self.porta):
@@ -39,6 +59,14 @@ class Handler(BaseHTTPRequestHandler):
             # Relógio do host: o corte do código usa ESTE, não o do aparelho.
             self.send_response(200); self.send_header("Content-Type", "text/plain"); self.end_headers()
             self.wfile.write(str(int(time.time() * 1000)).encode())
+            return
+        if url.path == "/acs":
+            credencial = acs_do_manifesto(os.environ.get("E2E_FIXTURES_FILE"))
+            if credencial is None or Handler.acs_entregue:
+                self.send_error(404); return
+            Handler.acs_entregue = True
+            self.send_response(200); self.send_header("Content-Type", "application/json"); self.end_headers()
+            self.wfile.write(json.dumps(credencial).encode())
             return
         if url.path not in ("/code", "/count"):
             self.send_error(404); return

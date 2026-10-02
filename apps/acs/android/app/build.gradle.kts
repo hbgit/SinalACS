@@ -1,4 +1,6 @@
+import java.io.FileInputStream
 import java.util.Base64
+import java.util.Properties
 
 fun dartDefineValue(name: String): String? {
     val encoded = project.findProperty("dart-defines")?.toString() ?: return null
@@ -8,6 +10,29 @@ fun dartDefineValue(name: String): String? {
         }.getOrNull()?.takeIf { it.startsWith("$name=") }?.substringAfter('=')
     }
 }
+
+// Chave de release: de `apps/acs/android/key.properties` (gitignorado) ou, para
+// CI e shell, das variáveis SINALACS_KEYSTORE_*. Nenhum valor mora no repositório.
+//   storeFile=/caminho/para/release.jks
+//   storePassword=...
+//   keyAlias=...
+//   keyPassword=...
+val keyProperties = Properties().apply {
+    val arquivo = rootProject.file("key.properties")
+    if (arquivo.exists()) FileInputStream(arquivo).use { load(it) }
+}
+
+fun assinatura(propriedade: String, ambiente: String): String? =
+    keyProperties.getProperty(propriedade)?.takeIf { it.isNotBlank() }
+        ?: System.getenv(ambiente)?.takeIf { it.isNotBlank() }
+
+val releaseStoreFile = assinatura("storeFile", "SINALACS_KEYSTORE_PATH")
+val releaseStorePassword = assinatura("storePassword", "SINALACS_KEYSTORE_PASSWORD")
+val releaseKeyAlias = assinatura("keyAlias", "SINALACS_KEY_ALIAS")
+val releaseKeyPassword = assinatura("keyPassword", "SINALACS_KEY_PASSWORD")
+val temChaveDeRelease = listOf(
+    releaseStoreFile, releaseStorePassword, releaseKeyAlias, releaseKeyPassword,
+).all { it != null }
 
 plugins {
     id("com.android.application")
@@ -37,11 +62,22 @@ android {
         manifestPlaceholders["GOOGLE_MAPS_API_KEY"] = dartDefineValue("GOOGLE_MAPS_API_KEY") ?: ""
     }
 
+    signingConfigs {
+        if (temChaveDeRelease) {
+            create("release") {
+                storeFile = file(releaseStoreFile!!)
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            // Sem chave, a configuração continua carregável (sync da IDE, debug):
+            // quem barra a build de RELEASE é o guard `taskGraph.whenReady` abaixo.
+            signingConfig = signingConfigs.getByName(if (temChaveDeRelease) "release" else "debug")
         }
     }
 }
@@ -111,6 +147,46 @@ tasks.configureEach {
             |Para compilar de propósito sem a senha — por exemplo, para reproduzir na tela
             |o aviso "compilado sem a senha" —, acrescente:
             |  -Psinalacs.allowMissingMqttPassword=true
+            """.trimMargin()
+        )
+    }
+}
+
+// Guard de release: só quando uma tarefa de release está no grafo (o sync da IDE
+// e `flutter run` em debug não passam por aqui). Sem chave de release, assinar
+// com a de debug exige pedir (-Psinalacs.allowDebugSigning=true).
+gradle.taskGraph.whenReady {
+    val buildaRelease = allTasks.any {
+        it.path.endsWith(":assembleRelease") ||
+            it.path.endsWith(":bundleRelease") ||
+            it.path.endsWith(":packageRelease")
+    }
+    if (buildaRelease && !temChaveDeRelease && !project.hasProperty("sinalacs.allowDebugSigning")) {
+        throw GradleException(
+            """
+            |Sem chave de assinatura de release: esta build sairia assinada com a chave de debug.
+            |
+            |Informe a chave por apps/acs/android/key.properties (storeFile, storePassword,
+            |keyAlias, keyPassword) ou pelas variáveis SINALACS_KEYSTORE_PATH,
+            |SINALACS_KEYSTORE_PASSWORD, SINALACS_KEY_ALIAS e SINALACS_KEY_PASSWORD.
+            |
+            |Para assinar com a chave de debug DE PROPÓSITO (teste local, nunca distribuição):
+            |  flutter build apk --release -Psinalacs.allowDebugSigning=true
+            """.trimMargin()
+        )
+    }
+
+    // A chave privada de CLIENTE do broker de desenvolvimento (assets/certs/acs_client.key)
+    // não pode ir dentro de um APK de release: qualquer pessoa com o APK a extrairia.
+    val chaveDeDev = rootProject.file("../assets/certs/acs_client.key")
+    if (buildaRelease && chaveDeDev.exists() && !project.hasProperty("sinalacs.allowDevClientKey")) {
+        throw GradleException(
+            """
+            |O release levaria a chave privada de desenvolvimento do broker (assets/certs/acs_client.key).
+            |
+            |Remova o arquivo antes de gerar o release (em produção o certificado de cliente é
+            |provisionado por aparelho — ainda não implementado). Para um release de TESTE LOCAL,
+            |acrescente -Psinalacs.allowDevClientKey=true.
             """.trimMargin()
         )
     }

@@ -75,6 +75,12 @@ class BackendConfig {
   /// mosquitto-init e não é versionada.
   static const String mqttCaAsset = 'assets/certs/dev_ca.crt';
 
+  /// Certificado e chave de CLIENTE para o mTLS do broker (spec/stack.md).
+  /// **Só desenvolvimento**: a chave privada num asset serve para a stack local; em
+  /// produção o certificado é provisionado por aparelho (aberto).
+  static const mqttClientCertAsset = 'assets/certs/acs_client.crt';
+  static const mqttClientKeyAsset = 'assets/certs/acs_client.key';
+
   /// CA que assina o certificado do Traefik em :443 (RNF04).
   ///
   /// Não confundir com [mqttCaAsset], que é a CA do broker. São duas, e o

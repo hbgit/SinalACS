@@ -21,6 +21,10 @@ A tabela abaixo consolida o mapeamento exaustivo de dados persistidos pelo backe
 | | `memoryKb` / `iterations` / `parallelism` | `bigint` | Metadado Técnico | Parâmetros do Argon2id vigentes na gravação | Gravados junto do hash para que subir o custo não invalide credencial antiga. |
 | | `failedAttempts` | `bigint` | Metadado de Segurança | Tentativas falhas desde o último sucesso | Base do bloqueio (achado F6). |
 | | `lockedUntil` | `timestamp without time zone` | Metadado de Segurança | Fim do bloqueio; `NULL` = não bloqueado | — |
+| | `totpSecretEncrypted` | `text` | **Crítico** — segredo de autenticação | AES-256-GCM (`HealthCipherTotpVault`, mesma chave `HEALTH_DATA_ENCRYPTION_KEY` dos dados clínicos); `NULL` = sem MFA | Segredo TOTP da MFA do ACS (RF07). Nunca em claro: volta ao ACS uma única vez, na resposta de `auth.beginTotpEnrollment`. Perder a chave invalida também as MFAs (redefinição manual). |
+| | `totpKeyVersion` | `bigint` | Metadado de Segurança | Versão da chave que cifrou o segredo | — |
+| | `totpEnabledAt` | `timestamp without time zone` | Metadado de Segurança | Confirmação da ativação; `NULL` = ativação pendente (MFA ainda não vale) | — |
+| | `totpLastStep` | `bigint` | Metadado de Segurança | Último passo de 30 s aceito | Barra o replay de um código já usado dentro da janela. |
 | | `createdAt` / `updatedAt` | `timestamp without time zone` | Metadado Técnico | Timestamps | — |
 | **otp_challenges** | `id` | `uuid` | Pseudonimizado | UUID da linha | — |
 | | `userId` | `uuid` | Pseudonimizado | Chave estrangeira (`users.id`) | — |
@@ -132,6 +136,12 @@ A tabela abaixo consolida o mapeamento exaustivo de dados persistidos pelo backe
 | | `address` | `text` | Dado Institucional Público | String de endereço | Endereço físico do equipamento de saúde pública. |
 | | `city` | `text` | Dado Territorial Público | String de município | Município de lotação da UBS. |
 | | `state` | `text` | Dado Territorial Público | String UF | Estado da federação de lotação da UBS. |
+| | `contactPhone` | `text` (nullable) | Dado da unidade (não pessoal) | Telefone para escalonamento (RF13) | Nullable: sem telefone, o app avisa e não liga. Entregue ao ACS por `ubs.myContact`. |
+| **micro_area_cache** (local, aparelho do ACS, sob SQLCipher) | `patient_id` | `text` | Pseudonimizado | UUID do paciente | Chave da linha. Cache RF08 (`spec/lgpd_design.md` §5.11); só no aparelho, nunca enviado. |
+| | `name` | `text` | Identificável Pessoal | Nome do paciente em texto claro **dentro** da base SQLCipher | Mesma classificação de `patients.name`; no aparelho, sob SQLCipher (INV-04). Validade de 72 h, por dono. |
+| | `is_chronic` | `integer` | Dado Sensível de Saúde (derivado) | 0/1 | Mesma classificação de `patients.isChronic`. |
+| | `chronic_conditions` | `text` | **Dado Sensível de Saúde** | Lista JSON de condições crônicas | Mesma classificação de `patients.chronicConditions`; no aparelho, sob SQLCipher. |
+| **micro_area_cache_meta** (local, aparelho do ACS, sob SQLCipher) | `owner` / `fetched_at` | `text` | Metadado Técnico | Linhas `key`/`value`: dono (`userId\|microAreaId`) e data do download | Decide a quem o cache serve e quando vence. Não identifica titular. |
 | **serverpod_query_log** | `query` | `text` | **Risco Crítico de Fuga Indireta** | Texto SQL completo de queries lentas/falhas | **Atualizado:** ainda crítico para `name`/`emergencyContact` (texto claro). Para `chronicConditions`/`answers`/`notes`, a cifragem acontece na aplicação **antes** de a query ser montada (§2.3), então o valor que chegaria a esta tabela — se o log for reativado — já é ciphertext, não texto claro; risco rebaixado para esses três campos especificamente (ver §3.2.2). |
 | | Demais colunas | Vários | Metadados de Sistema | Timestamps, durações e IDs numéricos | Métricas de telemetria e depuração de queries do banco de dados. |
 | **serverpod_message_log** | `error` / `stackTrace` | `text` | Risco Moderado de Vazamento | Dump de exceções não tratadas | Risco de exposição de payloads RPC contendo dados clínicos sensíveis ou identificadores em stacktraces não sanitizados. |

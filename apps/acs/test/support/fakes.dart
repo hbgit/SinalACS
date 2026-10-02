@@ -56,12 +56,48 @@ class FakeAcsBackend implements AcsBackend {
   ({String matricula, String senha})? lastCredentials;
 
   @override
+  void Function()? onSessionExpired;
+
+  /// Simula o servidor com MFA ativa: sem [totpCode] igual a [expectedTotpCode], levanta [MfaCodeRequired].
+  String? expectedTotpCode;
+  bool mfaEnrollmentRequired = false;
+  String? lastTotpCode;
+  TotpEnrollmentStart enrollmentStart =
+      TotpEnrollmentStart(secretBase32: 'GEZDGNBVGY3TQOJQ', otpauthUri: 'otpauth://totp/SinalACS:ACS-001?secret=GEZDGNBVGY3TQOJQ');
+  String? confirmedCode;
+
+  @override
+  Future<void> confirmTotpEnrollment({required String matricula, required String senha, required String code}) async {
+    confirmedCode = code;
+  }
+
+  @override
+  Future<TotpEnrollmentStart> beginTotpEnrollment({required String matricula, required String senha}) async {
+    if (enrollmentFailuresLeft > 0) {
+      enrollmentFailuresLeft--;
+      throw const BackendFailure('Sem conexão com o servidor.');
+    }
+    return enrollmentStart;
+  }
+
+  /// Quantas chamadas a [beginTotpEnrollment] ainda falham antes de funcionar.
+  int enrollmentFailuresLeft = 0;
+
+  @override
   Future<AuthSession> login({
     required String matricula,
     required String senha,
+    String? totpCode,
   }) async {
     loginCount++;
     lastCredentials = (matricula: matricula, senha: senha);
+    lastTotpCode = totpCode;
+    if (sessionExpired && expectedTotpCode != null && totpCode == null) throw const MfaCodeRequired();
+    if (mfaEnrollmentRequired) throw const MfaEnrollmentRequired();
+    if (expectedTotpCode != null && totpCode != expectedTotpCode) {
+      throw totpCode == null ? const MfaCodeRequired() : const BackendFailure('Código de verificação inválido.', isRecoverable: false);
+    }
+    sessionExpired = false;
     return _issueSession();
   }
 
@@ -79,7 +115,7 @@ class FakeAcsBackend implements AcsBackend {
     final session = AuthSession(
       accessToken: 'token-de-teste',
       tokenType: 'Bearer',
-      userId: seedAcsId,
+      userId: nextUserId,
       role: 'acs',
       microAreaId: microAreaId,
       expiresAt: DateTime.now().toUtc().add(const Duration(minutes: 15)),
@@ -88,8 +124,29 @@ class FakeAcsBackend implements AcsBackend {
     return session;
   }
 
+  /// Sessão vencida com MFA: toda chamada autenticada falha como o
+  /// `BackendClient` real (não recuperável) e avisa a UI uma única vez.
+  bool sessionExpired = false;
+
+  /// `userId` da próxima sessão emitida (padrão: o ACS do seed).
+  String nextUserId = seedAcsId;
+
+  /// Vence a sessão agora, como a renovação que recebeu `MfaRequiredException`.
+  void expireSession() {
+    sessionExpired = true;
+    _session = null;
+    onSessionExpired?.call();
+  }
+
   @override
   Future<AlertAckResult> acknowledge({required String alertId}) async {
+    if (sessionExpired) {
+      onSessionExpired?.call();
+      throw const BackendFailure(
+        'Sua sessão expirou. Entre novamente com o código do autenticador.',
+        isRecoverable: false,
+      );
+    }
     acknowledgedAlertIds.add(alertId);
     return AlertAckResult(
       alertId: alertId,
@@ -123,6 +180,26 @@ class FakeAcsBackend implements AcsBackend {
           serverVersion: visit.version + 1,
         ),
     ];
+  }
+
+  /// Contato que `ubsContact()` devolve; `UbsContact(name: ...)` sem telefone simula uma UBS sem número.
+  UbsContact ubsContactResult = UbsContact(name: 'UBS Teste', phone: '+55 11 5550-0100');
+
+  /// Falha da chamada, como uma queda de rede.
+  BackendFailure? ubsContactFailure;
+
+  int ubsContactCount = 0;
+
+  /// Se definido, `ubsContact()` espera por ele (simula rede lenta).
+  Completer<void>? ubsContactGate;
+
+  @override
+  Future<UbsContact> ubsContact() async {
+    ubsContactCount++;
+    await ubsContactGate?.future;
+    final falha = ubsContactFailure;
+    if (falha != null) throw falha;
+    return ubsContactResult;
   }
 
   /// Falha não classificada (não é `BackendFailure`), para exercitar o ramo

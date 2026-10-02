@@ -12,5 +12,8 @@ services:
       SERVERPOD_DATABASE_USER: postgres
       SERVERPOD_DATABASE_PASSWORD: ${TEST_DATABASE_PASSWORD:?defina em .env — rode ./scripts/dev/bootstrap_env.sh}
       ENABLE_DEV_LOGIN: "false"
+      # Explícito: o e2e entra com matrícula + senha sem ativar MFA. Não herdar
+      # o valor do .env impede que um REQUIRE_ACS_MFA=true local derrube a jornada.
+      REQUIRE_ACS_MFA: "false"
       SMS_GATEWAY: log
       GORUSH_URL: http://gorush:8088
