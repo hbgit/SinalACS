@@ -36,13 +36,15 @@ void main() {
       expect(permission, anyOf(LocationPermission.whileInUse, LocationPermission.always),
           reason: 'o manifesto precisa declarar ACCESS_FINE_LOCATION para a permissão existir');
     } else {
-      // Leva a permissão a negada-de-vez NA MESMA SESSÃO (o `flutter drive` desinstala o app ao
+      // Leva a permissão a negada de vez (o Geolocator reporta `deniedForever`) NA MESMA SESSÃO (o `flutter drive` desinstala o app ao
       // terminar, então o estado não sobrevive entre rodadas). Enquanto não está fixada, cada
       // `requestPermission()` abre o diálogo do sistema, que o script do emulador recusa; a
       // segunda recusa a torna permanente e o pedido passa a voltar na hora, sem diálogo.
       expect(permission, isNot(anyOf(LocationPermission.whileInUse, LocationPermission.always)));
+      // No máximo 2 pedidos: o script do emulador recusa o 1º diálogo e o 2º, e a 2ª recusa
+      // faz o Android parar de perguntar. Um 3º pedido seria só um pedido que já volta na hora.
       var resposta = await Geolocator.requestPermission();
-      for (var i = 0; i < 2 && resposta != LocationPermission.deniedForever; i++) {
+      if (resposta != LocationPermission.deniedForever) {
         resposta = await Geolocator.requestPermission();
       }
       expect(resposta, LocationPermission.deniedForever);
@@ -68,6 +70,12 @@ void main() {
     await _pumpFor(tester, const Duration(seconds: 3));
 
     if (_expect == 'denied_forever') {
+      // `checkPermission()` NÃO serve de prova aqui: no Android ele devolve `denied` mesmo com a
+      // negação fixada (só o resultado de `requestPermission()` carrega `deniedForever`). Com ela
+      // fixada, um novo pedido depois de abrir o painel volta `deniedForever` sem diálogo; se o
+      // diálogo reaparecesse, o tocador do script o recusaria e estouraria o teto de toques.
+      expect(await Geolocator.requestPermission(), LocationPermission.deniedForever,
+          reason: 'a permissão já fixada não pode voltar a abrir o diálogo');
       // Review Focus 1: permissão negada nunca trava o ACS.
       expect(find.textContaining('Localização atual indisponível'), findsOneWidget);
       expect(find.byKey(const Key('geofence_visit')), findsOneWidget);
