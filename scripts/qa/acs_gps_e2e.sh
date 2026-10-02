@@ -108,10 +108,11 @@ fi
 
 # O teste de widget do Flutter injeta toques no próprio Flutter e NÃO percebe um diálogo
 # do sistema aberto por cima do app. Quem percebe é o foco da janela, amostrado durante a execução.
-# No cenário `denied_forever` o diálogo é ESPERADO: o tocador abaixo o recusa. A prova principal de
-# que a negação ficou fixada é do próprio teste (checkPermission() == deniedForever depois de abrir
-# o painel). A contagem de toques é só uma trava complementar: no máximo $max_toques (as duas
-# recusas); um 3º toque indica que o diálogo continuou aparecendo. Ela NÃO confere a flag USER_FIXED.
+# No cenário `denied_forever` o diálogo é ESPERADO: o tocador abaixo o recusa, 2 vezes (as duas
+# recusas que fixam a negação). O teste ainda faz um 3º pedido depois de abrir o painel, que com a
+# negação fixada volta na hora, sem diálogo: se o diálogo reaparecesse, o tocador o recusaria de novo
+# e a contagem passaria de $max_toques. A contagem é o que detecta isso; ela NÃO confere a flag
+# USER_FIXED do Android.
 intervalo="${GPS_E2E_INTERVALO:-1}"
 max_toques=2
 amostras="$(mktemp)"
