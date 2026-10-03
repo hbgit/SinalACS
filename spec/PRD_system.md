@@ -137,7 +137,7 @@ events:
 | **RF04** | Formulário de Triagem Estruturada (árvore de decisão) | Paciente | S | Médio | Nenhuma (local) |
 | **RF05** | Painel de Status de Solicitação | Paciente | S | Baixo | API HTTP do backend |
 | **RF06** | Lembretes de Saúde (Local Notifications) | Paciente | S | Médio | `flutter_local_notifications` |
-| **RF07** | Login Institucional (Matrícula/Senha) | ACS | S | Médio | Auth própria no backend (`auth.loginInstitutional`); MFA/TOTP e refresh token pendentes |
+| **RF07** | Login Institucional (Matrícula/Senha) | ACS | S | Médio | Auth própria no backend (`auth.loginInstitutional`); MFA por TOTP (2026-10-02) e refresh token rotativo com desbloqueio biométrico no app (2026-10-03) entregues — ver `PROGRESS.md` |
 | **RF08** | Territorialização (Download de Microárea para cache) | ACS | M | Médio | `sqflite`, API |
 | **RF09** | Dashboard de Priorização Dinâmica (FSM de fila) | ACS | M | Alto | Motor de Triagem |
 | **RF10** | Mapa Interativo (Google Maps) | ACS | M | Médio | `google_maps_flutter` |
