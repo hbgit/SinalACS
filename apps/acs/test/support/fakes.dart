@@ -88,9 +88,13 @@ class FakeAcsBackend implements AcsBackend {
     return _issueSession();
   }
 
+  /// Se definido, `logout()` espera por ele (rede lenta).
+  Completer<void>? logoutGate;
+
   @override
   Future<void> logout() async {
     logoutCount++;
+    await logoutGate?.future;
     storedRefreshToken = null;
     _session = null;
   }
@@ -488,6 +492,9 @@ class FakeBiometricGate implements BiometricGate {
   int calls = 0;
   final List<String> reasons = <String>[];
 
+  /// Se definido, `authenticate` só responde quando ele completar.
+  Completer<UnlockResult>? pending;
+
   @override
   Future<bool> get isAvailable async => available;
 
@@ -495,6 +502,8 @@ class FakeBiometricGate implements BiometricGate {
   Future<UnlockResult> authenticate({required String reason}) async {
     calls++;
     reasons.add(reason);
+    final wait = pending;
+    if (wait != null) return wait.future;
     return result;
   }
 }

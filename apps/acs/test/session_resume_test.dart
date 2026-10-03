@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -84,6 +85,8 @@ void main() {
       expect(painel(), findsNothing);
       expect(find.byKey(const Key('login_aviso')), findsNothing);
       expect(tester.widget<FilledButton>(formulario()).onPressed, isNotNull, reason: 'formulário utilizável');
+      expect(tester.widget<TextField>(find.byKey(const Key('matricula_field'))).controller!.text, isEmpty,
+          reason: 'nada da sessão guardada aparece no formulário');
     });
 
     testWidgets('partida sem token salvo → tela de login normal, sem prompt biométrico', (tester) async {
@@ -124,6 +127,33 @@ void main() {
       expect(gate.calls, 2, reason: 'a nova tentativa pede o desbloqueio de novo');
       expect(painel(), findsOneWidget);
     });
+  });
+
+  testWidgets('toque duplo em "Tentar de novo" faz UMA retomada só', (tester) async {
+    final backend = FakeAcsBackend()
+      ..storedRefreshToken = 'refresh-salvo'
+      ..resumeOffline = true;
+    await abrirApp(tester, backend);
+    expect(gate.calls, 1);
+    backend.resumeOffline = false;
+
+    final tentar = find.byKey(const Key('resume_retry'));
+    await tester.ensureVisible(tentar);
+    await tester.pump();
+    final prompt = Completer<UnlockResult>();
+    gate.pending = prompt;
+    final botao = tester.widget<OutlinedButton>(tentar);
+    botao.onPressed!();
+    botao.onPressed!();
+    await tester.pump();
+    expect(tester.widget<FilledButton>(formulario()).onPressed, isNull, reason: 'login desligado durante a retomada');
+    expect(find.byKey(const Key('resume_retry')), findsNothing, reason: 'sem segundo toque possível');
+    prompt.complete(UnlockResult.unlocked);
+    await assentar(tester);
+
+    expect(gate.calls, 2, reason: 'um prompt a mais, não dois');
+    expect(backend.resumeCount, 2, reason: 'a primeira (offline) e UMA nova');
+    expect(painel(), findsOneWidget);
   });
 
   group('cliente real contra servidor local', () {
@@ -269,6 +299,87 @@ void main() {
       expect(find.text('Aplicativo bloqueado'), findsOneWidget);
     });
 
+    testWidgets('"Entrar com senha": o painel nunca fica à vista, tocável ou na semântica em quadro algum', (tester) async {
+      final semantics = tester.ensureSemantics();
+      await abrirPainel(tester);
+      await irParaDaBarra(tester, 'Visita');
+      gate.result = UnlockResult.cancelled;
+      await irEVoltar(tester);
+      expect(find.text('Aplicativo bloqueado'), findsOneWidget);
+
+      void semPainel(String quadro) {
+        expect(find.byKey(const Key('patient_search')), findsNothing, reason: 'visível no $quadro');
+        expect(find.byKey(const Key('patient_search'), skipOffstage: false).hitTestable(), findsNothing,
+            reason: 'tocável no $quadro');
+        expect(find.bySemanticsLabel('Buscar paciente pelo nome'), findsNothing, reason: 'na semântica no $quadro');
+      }
+
+      await tester.tap(find.text('Entrar com senha'));
+      await tester.pump();
+      semPainel('1º quadro');
+      for (var i = 2; i <= 6; i++) {
+        await tester.pump(const Duration(milliseconds: 16));
+        semPainel('quadro $i');
+      }
+      await tester.pump(const Duration(milliseconds: 150));
+      semPainel('meio da transição');
+      await assentar(tester);
+      semPainel('fim');
+      expect(formulario(), findsOneWidget);
+      semantics.dispose();
+    });
+
+    testWidgets('"Entrar com senha" limpa senha e código digitados antes do bloqueio', (tester) async {
+      backend = FakeAcsBackend()..expectedTotpCode = '123456';
+      gate.result = UnlockResult.cancelled;
+      await abrirApp(tester, backend, lockAfter: Duration.zero);
+      await entrarComSenha(tester); // pede o código
+      await tester.enterText(find.byKey(const Key('totp_field')), '654');
+      await irEVoltar(tester);
+      expect(find.text('Aplicativo bloqueado'), findsOneWidget);
+
+      await tester.tap(find.text('Entrar com senha'));
+      await assentar(tester);
+
+      expect(find.text('Aplicativo bloqueado'), findsNothing);
+      expect(tester.widget<TextField>(find.byKey(const Key('senha_field'))).controller!.text, isEmpty);
+      expect(find.byKey(const Key('totp_field')), findsNothing);
+    });
+
+    testWidgets('"Entrar com senha" descarta a tela de ativação da MFA (segredo)', (tester) async {
+      backend = FakeAcsBackend()..mfaEnrollmentRequired = true;
+      gate.result = UnlockResult.cancelled;
+      await abrirApp(tester, backend, lockAfter: Duration.zero);
+      await entrarComSenha(tester);
+      expect(find.byKey(const Key('mfa_secret')), findsOneWidget);
+      await irEVoltar(tester);
+
+      await tester.tap(find.text('Entrar com senha'));
+      await assentar(tester);
+
+      expect(find.byKey(const Key('mfa_secret'), skipOffstage: false), findsNothing);
+      expect(formulario(), findsOneWidget);
+      expect(tester.widget<TextField>(find.byKey(const Key('senha_field'))).controller!.text, isEmpty);
+      expect(navKey.currentState!.canPop(), isFalse);
+    });
+
+    testWidgets('"Entrar com senha" e outro usuário entra: o painel anterior é descartado (RNF06)', (tester) async {
+      await abrirPainel(tester);
+      gate.result = UnlockResult.cancelled;
+      await irEVoltar(tester);
+      await tester.tap(find.text('Entrar com senha'));
+      await assentar(tester);
+
+      final feedAnterior = feed;
+      backend.nextUserId = '00000000-0000-4000-8000-0000000000ff';
+      await entrarComSenha(tester);
+
+      expect(painel(), findsOneWidget);
+      expect(find.byKey(const Key('alert_alerta-antes'), skipOffstage: false), findsNothing);
+      expect(feedAnterior.stopped, isTrue);
+      expect(navKey.currentState!.canPop(), isFalse);
+    });
+
     testWidgets('"Sair" em Ajustes pede confirmação, chama logout e volta ao login', (tester) async {
       await abrirPainel(tester);
       await irParaDoMais(tester, 'Preferências');
@@ -287,7 +398,14 @@ void main() {
 
       await tester.tap(sair);
       await assentar(tester);
+      final saida = Completer<void>();
+      backend.logoutGate = saida;
       await tester.tap(find.byKey(const Key('logout_confirm')));
+      await tester.pump();
+      await tester.pump();
+      expect(find.byKey(const Key('logout_progress')), findsOneWidget, reason: 'progresso enquanto sai');
+      expect(tester.widget<FilledButton>(sair).onPressed, isNull);
+      saida.complete();
       await assentar(tester);
 
       expect(backend.logoutCount, 1);

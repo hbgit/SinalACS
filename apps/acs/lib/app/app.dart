@@ -149,21 +149,37 @@ class _SinalAcsAppState extends State<SinalAcsApp> {
 
   /// "Entrar com senha" na cobertura do bloqueio.
   ///
-  /// Com painel aberto, empilha a reautenticação por senha (a mesma da sessão
-  /// vencida, provada por `session_reauth_test.dart`) e SÓ ENTÃO recria o
-  /// gate. A tela empurrada é opaca e não descartável (`PopScope(canPop:
-  /// false)`): tirar a cobertura mostra o formulário de login, nunca o painel,
-  /// que segue montado por baixo (feed MQTT, fila de alertas, fila de visitas,
-  /// formulários) até a senha do MESMO usuário dar `pop`. Esperar o `pop` para
-  /// recriar o gate não funciona: a tela empurrada durante o bloqueio fica sob
-  /// a cobertura opaca (contrato (e)), e o login seria invisível.
-  ///
-  /// Sem painel (bloqueou na própria tela de login), não há o que proteger: a
-  /// tela já é o formulário de senha.
+  /// 1. Toda tela de login montada descarta senha e código digitados antes do
+  ///    bloqueio, e a ativação da MFA (com o segredo) sai da pilha.
+  /// 2. Com painel aberto, ele empilha a reautenticação por senha (a mesma da
+  ///    sessão vencida) com transição INSTANTÂNEA e opaca, e só avisa
+  ///    ([_AppLockHooks.openPasswordReauth] chama `onCovered`) quando a rota já
+  ///    está opaca e pintada. Só então o gate é recriado (nova `key`; ele não
+  ///    tem API de desbloqueio pela senha). Em quadro algum o painel fica à
+  ///    vista, tocável ou na semântica: antes, a cobertura; depois, o
+  ///    formulário opaco e não descartável. O painel (feed MQTT, filas,
+  ///    formulários) segue montado por baixo até a senha do MESMO usuário.
+  ///    Esperar o `pop` da reautenticação para recriar o gate não funciona: a
+  ///    tela empurrada durante o bloqueio fica sob a cobertura (contrato (e)).
+  /// 3. Sem painel (bloqueou numa tela de login), a tela já é o formulário.
   void _usePassword() {
-    _lockHooks.openPasswordReauth?.call();
-    if (mounted) setState(() => _gateGeneration++);
+    if (_unlockingByPassword) return;
+    _unlockingByPassword = true;
+    _lockHooks.passwordRequests.value++;
+    void unlock() {
+      _unlockingByPassword = false;
+      if (mounted) setState(() => _gateGeneration++);
+    }
+
+    final open = _lockHooks.openPasswordReauth;
+    if (open == null) {
+      unlock();
+    } else {
+      open(unlock);
+    }
   }
+
+  bool _unlockingByPassword = false;
 
   @override
   Widget build(BuildContext context) => BackendScope(
@@ -209,8 +225,13 @@ class _SinalAcsAppState extends State<SinalAcsApp> {
 /// Ponte entre o app (dono do [AppLockGate]) e o painel aberto (dono das
 /// rotas e do estado que a reautenticação precisa preservar).
 class _AppLockHooks {
-  /// Registrado pelo [AcsHomeShell] montado; `null` sem painel.
-  VoidCallback? openPasswordReauth;
+  /// Registrado pelo [AcsHomeShell] montado; `null` sem painel. Chama
+  /// `onCovered` quando o formulário de senha já cobre o painel.
+  void Function(VoidCallback onCovered)? openPasswordReauth;
+
+  /// Incrementado a cada "Entrar com senha": as telas de login limpam o que
+  /// foi digitado antes do bloqueio.
+  final ValueNotifier<int> passwordRequests = ValueNotifier<int>(0);
 }
 
 class _AppLockScope extends InheritedWidget {
@@ -287,6 +308,14 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _resumeOffline = false;
   bool _resumeRequested = false;
 
+  /// `true` depois que achou token e vai pedir o desbloqueio: só então o
+  /// "Retomando a sessão…" aparece.
+  bool _resumePrompting = false;
+
+  /// Ativação da MFA empilhada por esta tela (mostra o segredo TOTP).
+  Route<bool>? _enrollmentRoute;
+  ValueNotifier<int>? _passwordRequests;
+
   @override
   void initState() {
     super.initState();
@@ -296,6 +325,11 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    final requests = _AppLockScope.maybeOf(context)?.passwordRequests;
+    if (requests != _passwordRequests) {
+      _passwordRequests?.removeListener(_discardTyped);
+      _passwordRequests = requests?..addListener(_discardTyped);
+    }
     // BackendScope.of só é seguro a partir daqui, não em initState.
     if (!_resumeRequested && widget.reauthUserId == null && widget.biometricGate != null) {
       _resumeRequested = true;
@@ -303,19 +337,43 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
+  /// "Entrar com senha" no bloqueio: o que foi digitado antes dele não fica
+  /// para quem desbloquear, e a ativação da MFA (segredo à vista) sai da
+  /// pilha. Roda sob a cobertura; `removeRoute` não é um `pop` pelo voltar.
+  void _discardTyped() {
+    if (!mounted) return;
+    _senha.clear();
+    _totp.clear();
+    final enrollment = _enrollmentRoute;
+    _enrollmentRoute = null;
+    if (enrollment != null && enrollment.navigator != null) {
+      enrollment.navigator!.removeRoute(enrollment);
+    }
+    setState(() { _pedeCodigo = false; _busy = false; _error = null; });
+  }
+
+  void _retryResume() {
+    _tryResume();
+    setState(() {});
+  }
+
   /// Partida a frio com refresh token salvo: só retoma depois do desbloqueio
   /// local. Qualquer outro desfecho deixa o formulário completo, sem dado
   /// algum da sessão guardada na tela.
   Future<void> _tryResume() async {
+    // Síncrono, antes de qualquer `await`: dois toques em "Tentar de novo"
+    // não abrem duas retomadas (dois prompts, duas renovações, dois painéis).
+    if (_resuming) return;
+    _resuming = true;
     final backend = BackendScope.of(context);
     final gate = widget.biometricGate!;
-    // Sem token não há prompt biométrico (nem chamada à plataforma).
-    if (!await backend.hasStoredSession) return;
-    // P5: aparelho sem biometria nem bloqueio de tela não retoma sessão — quem
-    // pega o aparelho entraria direto no painel.
-    if (!await gate.isAvailable || !mounted) return;
-    setState(() { _resuming = true; _resumeOffline = false; _error = null; });
     try {
+      // Sem token não há prompt biométrico (nem chamada à plataforma).
+      if (!await backend.hasStoredSession) return;
+      // P5: aparelho sem biometria nem bloqueio de tela não retoma sessão —
+      // quem pega o aparelho entraria direto no painel.
+      if (!await gate.isAvailable || !mounted) return;
+      setState(() { _resumePrompting = true; _resumeOffline = false; _error = null; });
       UnlockResult unlock;
       try {
         unlock = await gate.authenticate(reason: 'Entrar no SinalACS');
@@ -344,12 +402,16 @@ class _LoginScreenState extends State<LoginScreen> {
         }
       });
     } finally {
-      if (mounted) setState(() => _resuming = false);
+      _resuming = false;
+      if (mounted) setState(() => _resumePrompting = false);
     }
   }
 
   @override
-  void dispose() { _matricula.dispose(); _senha.dispose(); _totp.dispose(); super.dispose(); }
+  void dispose() {
+    _passwordRequests?.removeListener(_discardTyped);
+    _matricula.dispose(); _senha.dispose(); _totp.dispose(); super.dispose();
+  }
 
   /// O código pertence à sessão que o pediu: mudar matrícula ou senha o descarta.
   void _credencialMudou(String _) {
@@ -404,13 +466,16 @@ class _LoginScreenState extends State<LoginScreen> {
     } on MfaEnrollmentRequired {
       if (!mounted) return;
       setState(() => _busy = false);
-      final ativou = await Navigator.of(context).push<bool>(MaterialPageRoute(
+      final route = MaterialPageRoute<bool>(
         builder: (_) => MfaEnrollmentScreen(
           backend: BackendScope.of(context),
           matricula: matricula,
           senha: senha,
         ),
-      ));
+      );
+      _enrollmentRoute = route;
+      final ativou = await Navigator.of(context).push<bool>(route);
+      if (_enrollmentRoute == route) _enrollmentRoute = null;
       if (ativou == true && mounted) {
         setState(() { _pedeCodigo = true; _aviso = 'Aguarde o próximo código do autenticador.'; });
       }
@@ -507,7 +572,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 ? const SizedBox(height: 22, width: 22, child: CircularProgressIndicator(strokeWidth: 2))
                 : const Text('Entrar com credenciais'),
           )),
-          if (_resuming) Padding(
+          if (_resumePrompting) Padding(
             padding: const EdgeInsets.only(top: 16),
             child: Semantics(liveRegion: true, child: const Text('Retomando a sessão…', key: Key('resume_progress'), textAlign: TextAlign.center)),
           ),
@@ -524,7 +589,7 @@ class _LoginScreenState extends State<LoginScreen> {
             SizedBox(width: double.infinity, child: OutlinedButton(
               key: const Key('resume_retry'),
               style: OutlinedButton.styleFrom(minimumSize: const Size(48, 52)),
-              onPressed: _tryResume,
+              onPressed: _resuming ? null : _retryResume,
               child: const Text('Tentar de novo'),
             )),
           ],
@@ -728,16 +793,22 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
   /// "Entrar com senha" na cobertura do bloqueio: o mesmo login empilhado da
   /// sessão vencida. Se ele já está aberto, basta o app tirar a cobertura —
   /// o que fica à vista é o formulário, não o painel.
-  void _reauthForLock() {
-    if (!mounted || _reauthAberta) return;
-    _openReauth('Entre com matrícula e senha para desbloquear o aplicativo.');
+  ///
+  /// A rota entra SEM transição e opaca, e [onCovered] só é chamado no quadro
+  /// seguinte ao que a pintou: a cobertura do bloqueio só sai quando o
+  /// formulário já esconde o painel (nenhum quadro de transição com o painel
+  /// à vista, tocável ou na semântica).
+  void _reauthForLock(VoidCallback onCovered) {
+    if (!mounted || _reauthAberta) {
+      onCovered();
+      return;
+    }
+    _openReauth('Entre com matrícula e senha para desbloquear o aplicativo.', onCovered: onCovered);
   }
 
-  Future<void> _openReauth(String aviso) async {
+  Future<void> _openReauth(String aviso, {VoidCallback? onCovered}) async {
     _reauthAberta = true;
-    try {
-      await Navigator.of(context).push<bool>(MaterialPageRoute(
-        builder: (_) => LoginScreen(
+    Widget page(BuildContext _) => LoginScreen(
           visitQueue: widget.visitQueue,
           themeController: widget.themeController,
           visitPullService: widget.visitPullService,
@@ -748,11 +819,50 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
           syncInterval: widget.syncInterval,
           aviso: aviso,
           reauthUserId: widget.acsId,
-        ),
-      ));
+        );
+    final Route<bool> route = onCovered == null
+        ? MaterialPageRoute<bool>(builder: page)
+        : PageRouteBuilder<bool>(
+            opaque: true,
+            transitionDuration: Duration.zero,
+            reverseTransitionDuration: Duration.zero,
+            pageBuilder: (context, _, __) => page(context),
+          );
+    try {
+      final done = Navigator.of(context).push<bool>(route);
+      if (onCovered != null) _whenOpaque(route as ModalRoute<bool>, onCovered);
+      await done;
     } finally {
       _reauthAberta = false;
     }
+  }
+
+  /// Chama [then] no quadro depois de a [route] terminar de entrar (opaca e
+  /// pintada).
+  void _whenOpaque(ModalRoute<bool> route, VoidCallback then) {
+    var called = false;
+    void fire() {
+      if (called) return;
+      called = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) => then());
+      WidgetsBinding.instance.scheduleFrame();
+    }
+
+    final animation = route.animation;
+    if (animation == null || animation.status == AnimationStatus.completed) {
+      fire();
+      return;
+    }
+    void listener(AnimationStatus status) {
+      if (status == AnimationStatus.completed) {
+        animation.removeStatusListener(listener);
+        fire();
+      } else if (status == AnimationStatus.dismissed) {
+        animation.removeStatusListener(listener);
+        then(); // rota saiu antes de entrar: não deixa o app preso
+      }
+    }
+    animation.addStatusListener(listener);
   }
 
   Future<void> _loadMicroAreaPatients() async {
@@ -1168,7 +1278,7 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
         ),
       AcsDestination.notices => const NoticesScreen(),
       AcsDestination.invite => const InviteScreen(),
-      AcsDestination.settings => ThemeSettingsScreen(controller: widget.themeController, onLogout: _saindo ? null : _logout),
+      AcsDestination.settings => ThemeSettingsScreen(controller: widget.themeController, onLogout: _saindo ? null : _logout, loggingOut: _saindo),
     }),
     bottomNavigationBar: NavigationBar(
       selectedIndex: destination.index <= 3 ? destination.index : 4,
@@ -2624,7 +2734,10 @@ class _NoticesScreenState extends State<NoticesScreen> {
       ]);
 }
 class ThemeSettingsScreen extends StatelessWidget {
-  const ThemeSettingsScreen({required this.controller, super.key, this.onLogout});
+  const ThemeSettingsScreen({required this.controller, super.key, this.onLogout, this.loggingOut = false});
+
+  /// Saída em andamento: o botão mostra progresso.
+  final bool loggingOut;
 
   final ThemeController controller;
 
@@ -2657,7 +2770,9 @@ class ThemeSettingsScreen extends StatelessWidget {
         key: const Key('logout_button'),
         style: FilledButton.styleFrom(minimumSize: const Size(48, 52)),
         onPressed: onLogout,
-        child: const Text('Sair e encerrar o turno'),
+        child: loggingOut
+            ? const SizedBox(key: Key('logout_progress'), height: 22, width: 22, child: CircularProgressIndicator(strokeWidth: 2))
+            : const Text('Sair e encerrar o turno'),
       )),
     ]),
   );

@@ -34,6 +34,17 @@ void main() {
     esperarSemEstouro(tester, 'cabeçalho com fonte a 200%');
   });
 
+  testWidgets('Preferências com "Sair e encerrar o turno" não estoura a 200% em 360x800', (tester) async {
+    await abrirPainel(tester, tamanho: const Size(360, 800), escalaDeFonte: 2.0);
+    await irParaDoMais(tester, 'Preferências');
+    await percorrerTelaInteira(tester, 'Preferências a 200%');
+    final sair = find.byKey(const Key('logout_button'));
+    await tester.ensureVisible(sair);
+    await assentar(tester);
+    expect(sair.hitTestable(), findsOneWidget);
+    esperarSemEstouro(tester, 'botão Sair a 200%');
+  });
+
   // Telas novas da MFA: o campo de código no login e a ativação (QR + chave + campo).
   for (final escala in const [1.3, 2.0]) {
     final rotulo = '${(escala * 100).toInt()}%';
