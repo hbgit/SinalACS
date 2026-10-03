@@ -1,0 +1,6 @@
+### O refresh token não vale mais (expirado, revogado, reusado, de outro
+### aparelho ou de conta desativada). Mensagem única de propósito: o motivo
+### real fica só em audit_logs.
+exception: SessionExpiredException
+fields:
+  message: String

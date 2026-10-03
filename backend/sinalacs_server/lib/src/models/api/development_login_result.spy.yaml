@@ -3,3 +3,6 @@ class: DevelopmentLoginResult
 fields:
   accessToken: String
   tokenType: String
+  ### Só no `loginInstitutional` e no `refreshSession`. `null` nos demais
+  ### emissores (paciente, `developmentLogin`).
+  refreshToken: String?

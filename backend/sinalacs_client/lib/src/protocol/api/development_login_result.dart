@@ -18,11 +18,13 @@ abstract class DevelopmentLoginResult implements _i1.SerializableModel {
   DevelopmentLoginResult._({
     required this.accessToken,
     required this.tokenType,
+    this.refreshToken,
   });
 
   factory DevelopmentLoginResult({
     required String accessToken,
     required String tokenType,
+    String? refreshToken,
   }) = _DevelopmentLoginResultImpl;
 
   factory DevelopmentLoginResult.fromJson(
@@ -31,6 +33,7 @@ abstract class DevelopmentLoginResult implements _i1.SerializableModel {
     return DevelopmentLoginResult(
       accessToken: jsonSerialization['accessToken'] as String,
       tokenType: jsonSerialization['tokenType'] as String,
+      refreshToken: jsonSerialization['refreshToken'] as String?,
     );
   }
 
@@ -38,12 +41,17 @@ abstract class DevelopmentLoginResult implements _i1.SerializableModel {
 
   String tokenType;
 
+  /// Só no `loginInstitutional` e no `refreshSession`. `null` nos demais
+  /// emissores (paciente, `developmentLogin`).
+  String? refreshToken;
+
   /// Returns a shallow copy of this [DevelopmentLoginResult]
   /// with some or all fields replaced by the given arguments.
   @_i1.useResult
   DevelopmentLoginResult copyWith({
     String? accessToken,
     String? tokenType,
+    String? refreshToken,
   });
   @override
   Map<String, dynamic> toJson() {
@@ -51,6 +59,7 @@ abstract class DevelopmentLoginResult implements _i1.SerializableModel {
       '__className__': 'DevelopmentLoginResult',
       'accessToken': accessToken,
       'tokenType': tokenType,
+      if (refreshToken != null) 'refreshToken': refreshToken,
     };
   }
 
@@ -60,13 +69,17 @@ abstract class DevelopmentLoginResult implements _i1.SerializableModel {
   }
 }
 
+class _Undefined {}
+
 class _DevelopmentLoginResultImpl extends DevelopmentLoginResult {
   _DevelopmentLoginResultImpl({
     required String accessToken,
     required String tokenType,
+    String? refreshToken,
   }) : super._(
          accessToken: accessToken,
          tokenType: tokenType,
+         refreshToken: refreshToken,
        );
 
   /// Returns a shallow copy of this [DevelopmentLoginResult]
@@ -76,10 +89,12 @@ class _DevelopmentLoginResultImpl extends DevelopmentLoginResult {
   DevelopmentLoginResult copyWith({
     String? accessToken,
     String? tokenType,
+    Object? refreshToken = _Undefined,
   }) {
     return DevelopmentLoginResult(
       accessToken: accessToken ?? this.accessToken,
       tokenType: tokenType ?? this.tokenType,
+      refreshToken: refreshToken is String? ? refreshToken : this.refreshToken,
     );
   }
 }

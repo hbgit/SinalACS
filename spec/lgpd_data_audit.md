@@ -137,6 +137,13 @@ A tabela abaixo consolida o mapeamento exaustivo de dados persistidos pelo backe
 | | `city` | `text` | Dado Territorial Público | String de município | Município de lotação da UBS. |
 | | `state` | `text` | Dado Territorial Público | String UF | Estado da federação de lotação da UBS. |
 | | `contactPhone` | `text` (nullable) | Dado da unidade (não pessoal) | Telefone para escalonamento (RF13) | Nullable: sem telefone, o app avisa e não liga. Entregue ao ACS por `ubs.myContact`. |
+| **acs_refresh_tokens** | `id` | `uuid` | Pseudonimizado | UUID v4 (`gen_random_uuid()`) | Identificador da linha do refresh token do ACS (LGPD-RT06). |
+| | `userId` | `uuid` | Pseudonimizado | Chave estrangeira (`users.id`) | Identificador pessoal do ACS, pseudonimizado por UUID; liga o token ao agente. |
+| | `familyId` | `uuid` | Metadado Técnico | UUID de todos os tokens nascidos do mesmo login por senha+TOTP | Permite revogar a família inteira na reutilização. |
+| | `tokenHash` | `text` | **Crítico** — credencial | SHA-256 em hex do token; o token em claro nunca é persistido | Hash não reversível. O token são 256 bits aleatórios, então não há espaço de busca a enumerar (o parecer do §2.1 não se aplica). Índice único. |
+| | `deviceId` | `text` | Identificador de aparelho | Texto informado pelo app | Mesma classificação do §2.4; token apresentado por outro aparelho revoga a família. |
+| | `issuedAt` / `idleExpiresAt` / `absoluteExpiresAt` | `timestamp without time zone` | Metadado Técnico | Datas de emissão e de expiração (ociosa e teto do turno) | Sem dado de saúde. |
+| | `rotatedAt` / `revokedAt` | `timestamp without time zone` | Metadado Técnico | `null` até a rotação ou a revogação | Rastreabilidade do ciclo de vida; sem dado de saúde. |
 | **micro_area_cache** (local, aparelho do ACS, sob SQLCipher) | `patient_id` | `text` | Pseudonimizado | UUID do paciente | Chave da linha. Cache RF08 (`spec/lgpd_design.md` §5.11); só no aparelho, nunca enviado. |
 | | `name` | `text` | Identificável Pessoal | Nome do paciente em texto claro **dentro** da base SQLCipher | Mesma classificação de `patients.name`; no aparelho, sob SQLCipher (INV-04). Validade de 72 h, por dono. |
 | | `is_chronic` | `integer` | Dado Sensível de Saúde (derivado) | 0/1 | Mesma classificação de `patients.isChronic`. |
