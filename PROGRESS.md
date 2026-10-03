@@ -568,7 +568,7 @@ Plano: `docs/superpowers/plans/2026-10-01-finalizacao-app-acs.md`. Medido no `em
 - **Defeito do app achado pelo e2e:** `AcsHomeShell.dispose()` parava o feed MQTT com `onConnectionChanged` ainda ligado, e o `setState` caía em elemento defunct. Corrigido (`test/shell_dispose_test.dart`).
 - **Minors da revisão — fechados (2026-10-01).** Plano: `docs/superpowers/plans/2026-10-01-minors-da-revisao-do-app-acs.md`. (1) A contagem do `validation_report.md` foi corrigida e passou a ter conferidor (`scripts/qa/contagem_validation_report.py`). (2) `deniedForever`: `acs_gps_e2e.sh --sem-permissao` leva a permissão a negada-de-vez recusando o diálogo do sistema numa rodada só (`pm set-permission-flags` não existe no Android 16; `flutter drive` desinstala o app ao terminar). (3)(4) O script de GPS aborta se o app já está instalado (`--reinstalar` autoriza; reinstalar apaga a fila SQLCipher e o Keystore de dev), mostra o erro do build e remove o app de teste ao sair. (5) RNF06 também conferido por `patients.listMicroArea`, e o seletor deve abrir sem filtro. (6) O relé serve `/acs` uma única vez por execução. (7) A checagem da porta 8765 enxerga qualquer endereço (`scripts/qa/lib_rele.sh`). Os novos testes de shell/Python (`lib_rele_test.sh`, `acs_gps_e2e_test.sh`, `contagem_validation_report_test.py`) **não** estão ligados à CI (exigiria mexer no workflow vigiado por `ci_invariants.sh`).
 - **Revisão do app ACS e fechamento (2026-10-02).** Plano: `docs/superpowers/plans/2026-10-02-revisao-e-fechamento-do-app-acs.md`. (1) **Fonte ampliada (RNF05/WCAG 1.4.4):** o ACS estourava o layout a 130% e 200% de fonte; corrigidos o chip de conexão e o título do cabeçalho (altura agora cresce com a escala, `acsHeaderHeight`), o `_InfoRow`, o botão "Atualizar dados da microárea", o dropdown "Status do atendimento" da aba Visita (`isExpanded`) e a folha "Mais" (agora rola); guardado por `test/support/layout_harness.dart` e `test/text_scale_test.dart`, que percorrem as quatro abas e os cinco itens de "Mais". (2) **Manifesto:** `android:allowBackup="false"` (o padrão era `true`: o backup automático podia levar o banco local e as preferências para a nuvem) e nome legível "SinalACS ACS"; o APK de release foi medido (`aapt2`: INTERNET, localização em primeiro plano e ACCESS_NETWORK_STATE do `connectivity_plus`; sem `debuggable`, sem localização em segundo plano) e abriu no emulador sem `FATAL`. (3) **M2.4/RNF02:** 100 visitas offline provadas na fila (`test/offline_burst_test.dart`) e contra o servidor real no emulador: **118 ms** (meta < 5000), conferidas por `pull`. (4) **Tema:** `ThemeController` coberto (`test/theme_controller_test.dart`) e `spec/ui_design.md` corrigido (dizia tema fixo escuro). **Continua aberto:** assinatura de release com chave própria (ainda a de debug), `FLAG_SECURE` (decisão de produto/LGPD: a lista da microárea mostra nome e condições crônicas), RF08 persistido, refresh token, iOS, botão da UBS. **(fechado depois — ver a seção Pendências do ACS (2026-10-02): RF08, `FLAG_SECURE`, assinatura de release e botão da UBS estão fechados; refresh token e iOS seguem abertos.)**
-- **Fora:** refresh token, iOS (`apps/acs/ios/` não existe).
+- **Fora:** iOS (`apps/acs/ios/` não existe). (Refresh token estava aqui; entregue em 2026-10-03.)
 - **RF08 — cache persistido e cifrado (72 h, por dono) (2026-10-02).** `MicroAreaDirectory` + `MicroAreaCacheStore` guardam a última lista da microárea na base SQLCipher do ACS (schema v6, tabelas `micro_area_cache`/`micro_area_cache_meta`), chaveada por `userId|microAreaId`, validade de 72 h, só no lugar de falha recuperável de rede; a tela avisa de quando é a lista. Decisão de LGPD em `spec/lgpd_design.md` §5.11, escrita antes do código. Provado no emulador (`full_journey_e2e.dart`): serve sem rede e o arquivo do banco não contém o nome do paciente.
 - **MFA do ACS (2026-10-02).** MFA/TOTP do ACS entregue (RF07, LGPD-RT06): TOTP no `loginInstitutional`, ativação por matrícula+senha+código, replay barrado, exigida fora de `development` (`REQUIRE_ACS_MFA`); refresh token e redefinição por coordenador seguem abertos. **Com MFA ligada, o ACS precisa se autenticar de novo (matrícula + senha + código) mais ou menos a cada 15 minutos**, porque ainda não existe refresh token e o código TOTP é de uso único: `renewSession` recebe `MfaRequiredException`, esquece a credencial em memória e falha de forma não recuperável, e `AcsBackend.onSessionExpired` faz o painel EMPILHAR a tela de reautenticação por cima (uma só por vez). O painel não é desmontado: fila de alertas já recebidos por MQTT (o broker não reentrega o que foi confirmado com PUBACK), feed MQTT (autentica por senha+certificado, não pelo JWT), fila de visitas e formulários em andamento sobrevivem; login do MESMO usuário só dá `pop`, de OUTRO usuário descarta o painel (RNF06). Confirmar um alerta com a sessão vencida mostra a mensagem e o alerta segue sem confirmação. No app: o login ganha o campo `totp_field` (só dígitos, 6) quando o servidor responde `MfaRequiredException`; `MfaEnrollmentRequiredException` abre `MfaEnrollmentScreen` (QR + chave + código; o segredo não é gravado no aparelho). Provas: `test/mfa_login_test.dart` (5), `test/totp_support_test.dart`, casos de fonte ampliada em `test/text_scale_test.dart` e o último teste de `integration_test/full_journey_e2e.dart` (liga a MFA pelo RPC e entra pela tela com o código do passo atual, depois de esperar o passo avançar); `test/session_reauth_test.dart` (5: alerta e formulário preservados, ACK com mensagem, outro usuário, sem rota dupla). Ruling: a tela de ativação é provada por teste de widget, não no emulador (o e2e mantém `REQUIRE_ACS_MFA=false` para os outros testes).
 - **mTLS do broker (2026-10-02).** Entregue **na stack local**: `require_certificate true`, certificado de cliente para o backend e para o ACS (asset de desenvolvimento `assets/certs/acs_client.*`, copiado por `sync_dev_ca.sh`, gitignorado), senha e ACL mantidos; `scripts/qa/mtls_invariants.sh` prova os quatro casos. **Aberto:** provisionamento por aparelho em produção (CSR no cadastro, chave no Keystore); o release com a chave de dev é barrado pelo Gradle (`-Psinalacs.allowDevClientKey=true` só para teste local).
@@ -595,17 +595,17 @@ Plano: `docs/superpowers/plans/2026-10-02-pendencias-do-acs-flag-secure-ubs-rf08
 - **D3:** telefone da UBS em `ubs.contactPhone` nullable, via `ubs.myContact`; sem número o botão avisa; o cadastro é do backoffice.
 - **D4:** o cache de RF08 guarda só o que a tela de visita já mostra, na base SQLCipher, 72 h, chave `userId|microAreaId`, apagado ao mudar o dono ou vencer, só no lugar de falha recuperável de rede.
 - **D5:** MFA = TOTP RFC 6238 (SHA-1, 6 dígitos, 30 s, janela ±1), segredo cifrado com a chave dos dados clínicos, ativação sem token (matrícula + senha + código), `REQUIRE_ACS_MFA` falsa em `development` e verdadeira fora.
-- **D6:** refresh token e redefinição de MFA por coordenador ficam fora.
+- **D6:** ~~refresh token e redefinição de MFA por coordenador ficam fora.~~ **Superado em 2026-10-03** quanto ao refresh token (ver "Refresh token e desbloqueio biométrico do ACS" abaixo); a redefinição de MFA por coordenador segue fora.
 - **D7:** mTLS mantém a senha MQTT (`require_certificate true` sem `use_identity_as_username`): certificado e senha.
 - **D8:** o certificado de cliente do ACS vem de asset de desenvolvimento; a chave privada no APK serve só ao dev e o release com ela falha; o mTLS fica entregue na stack local e aberto para produção.
 
-### Consequência de produto a decidir
+### Consequência de produto — resolvida em 2026-10-03
 
-Com MFA ligada e sem refresh token, a sessão do ACS (15 min) não pode ser renovada em silêncio (o código TOTP é de uso único): **o ACS reautentica com matrícula + senha + código cerca de a cada 15 minutos**; o painel, os alertas e os formulários são preservados (a tela de login é empilhada por cima). Refresh token continua aberto; a decisão é do usuário: implementá-lo ou alongar a sessão do ACS.
+*Histórico (superado pelo refresh token, seção abaixo).* Com MFA ligada e sem refresh token, a sessão do ACS (15 min) não pode ser renovada em silêncio (o código TOTP é de uso único): **o ACS reautentica com matrícula + senha + código cerca de a cada 15 minutos**; o painel, os alertas e os formulários são preservados (a tela de login é empilhada por cima). A decisão foi implementar o refresh token.
 
 ### Continua aberto
 
-Refresh token; redefinição de MFA por coordenador (hoje manual: zerar as quatro colunas `totp*` do ACS); provisionamento de certificado por aparelho em produção; keystore de release como segredo na CI; cadastro do telefone da UBS pelo backoffice; iOS.
+(Refresh token: fechado em 2026-10-03.) Redefinição de MFA por coordenador (hoje manual: zerar as quatro colunas `totp*` do ACS); provisionamento de certificado por aparelho em produção; keystore de release como segredo na CI; cadastro do telefone da UBS pelo backoffice; iOS.
 
 - **Adivinhação de TOTP:** para quem já tem a senha, o orçamento é o bloqueio fixo de 5 tentativas por 15 min (cerca de 0,14% por dia); precisa de bloqueio progressivo antes de qualquer implantação fora do desenvolvimento.
 - **Cadastro da MFA é trust-on-first-use:** quem souber a senha primeiro pode ativá-la; não há redefinição pelo próprio ACS e a redefinição por coordenador é manual.
@@ -736,6 +736,17 @@ O backend `dart:io` foi removido da árvore; o histórico do git o preserva.
 
 ---
 
+## Refresh token e desbloqueio biométrico do ACS (2026-10-03)
+
+Plano: `docs/superpowers/plans/2026-10-03-refresh-token-e-biometria-do-acs.md`. Fecha o "reautentica a cada 15 minutos" que a MFA tinha criado e supera a D6 do plano de 2026-10-02.
+
+- **Backend.** Tabela `acs_refresh_tokens` (migração `20261003151950052`; hash SHA-256, família, aparelho). Janela ociosa de 2 h, teto absoluto de 8 h desde o login por senha + TOTP, tolerância de reuso de 30 s. Reuso fora da tolerância, aparelho diferente e conta inativa ou sem microárea revogam a família; a mensagem é uma só, `Sessão expirada. Entre novamente.`. A microárea é relida do banco a cada refresh. INSERT condicional atômico e revogação em duas passagens contra a corrida. Auditoria `session_refresh` (`refresh_granted`, `refresh_granted_grace`, `denied_*`). `auth.refreshSession` e `auth.logout` são públicos por desenho e estão na allowlist de `endpoint_auth_posture_test.dart`. `loginInstitutional` só emite o token com `deviceId` não-branco. O JWT do ACS segue em 15 min; o paciente segue sem refresh (OTP, 1 h).
+- **App.** Não retém mais a senha. Refresh token e `deviceId` (UUID aleatório) no Keystore (`secure_session_token_store.dart`); renovação single-flight. `AppLockGate` (`local_auth` 3.0.2) acima do Navigator bloqueia após 30 s em segundo plano; painel, MQTT, filas e formulários continuam montados. A partida a frio exige biometria ou bloqueio de tela antes de retomar a sessão (aparelho sem bloqueio de tela: login completo). "Entrar com senha" empilha a reautenticação opaca de duração zero. "Sair e encerrar o turno" revoga a família e **não** apaga a fila de visitas. `MainActivity` virou `FlutterFragmentActivity` e mantém `FLAG_SECURE`; `USE_BIOMETRIC` no manifesto.
+- **Limite de desenho.** A biometria é portão de **interface**: não amarra a chave do SQLCipher nem o refresh token ao `BiometricPrompt`. O ganho contra o roubo vem do portão somado ao token no Keystore, à janela de 2 h / teto de 8 h e à revogação (reuso, "Sair").
+- **Prova.** Suítes: backend 536, ACS 336. Emulador `emulator-5554` (API 36, `google_apis_playstore`): `acs_full_e2e.sh` 4/4, e `--esperar-jwt` com renovação silenciosa após a expiração real do JWT (871 s), sem tela de reautenticação, `refresh_granted` em `audit_logs` e zero `denied*`; o bloqueio com BiometricPrompt real após mais de 30 s em segundo plano, desbloqueado por PIN e por digital (digital errada ou cancelamento não desbloqueiam); `FLAG_SECURE` intacto (`acs_secure_window.sh`). O e2e automatizado usa um `BiometricGate` de teste na retomada da partida a frio. Na rodada achou-se e corrigiu-se `e2e.sh` quebrado no branch (`live_check.dart` importava `dart:ui` pelo Keystore).
+- **Não provado:** API 24–26 (o tema herda `@android:style/Theme.*.NoTitleBar`, e o README do `local_auth_android` pede AppCompat para Android 8 ou anterior; `minSdk` é 24), aparelho físico, `lockedOut` por tentativas, iOS, o prompt real na partida a frio com sessão guardada (só o do bloqueio por inatividade foi exercitado à mão por adb; `KEYCODE_HOME` no lugar de `SLEEP`/`WAKEUP`).
+- **Aberto:** (a) biometria ligada ao Keystore (`setUserAuthenticationRequired`) em vez de portão de UI; (b) revogação de todas as famílias de um ACS e redefinição de MFA pela coordenação (hoje manual); (c) limpeza periódica de `acs_refresh_tokens` (hoje o login só poda os tokens vencidos do próprio usuário); (d) iOS não existe; (e) refresh token do **paciente** (OTP segue em 1 h); (f) tema Android/AppCompat em API 24–26; (g) **a fila de visitas do app não é escopada por dono**: depois de "Sair" ou de outro usuário entrar, as visitas pendentes do ACS anterior sincronizam com o token do novo (RNF06); (h) pops programáticos enquanto o app está bloqueado não são interceptados (limitação documentada no `AppLockGate`); (i) resta uma janela estreita de logout concorrente com renovação (o app espera a renovação em voo antes de revogar, mas o caso não foi exercitado contra o servidor real).
+
 ## Login institucional do ACS (RF07) — o que ficou de fora (2026-09-18)
 
 O login do ACS deixou de ser o token HMAC de desenvolvimento: o app envia
@@ -752,7 +763,8 @@ plano **não** fez:
   enrollment de TOTP em nenhum dos apps.
 - **Refresh token rotativo, e o TTL de 1h/8h.** Exigidos por LGPD-RT06. Na
   prática a sessão dura 15 minutos e a renovação depende da credencial mantida
-  em memória.
+  em memória. *(Superado em 2026-10-03: refresh token do ACS entregue; o app não
+  guarda mais a senha.)*
 - **Limite de tentativas por origem (IP).** O bloqueio é por conta, não por
   origem: um atacante com muitas matrículas válidas distribui as tentativas.
 - **Amplificação anônima no caminho da matrícula inexistente.** Toda tentativa
@@ -792,7 +804,7 @@ defeito:
 2. **A credencial vive até o processo morrer, sem caminho de limpeza.** Não há
    logout: o record fica acessível pela instância de `BackendClient` enquanto o
    app viver. É consequência direta de adiar o refresh token; some quando ele
-   existir.
+   existir. *(Fechado em 2026-10-03: a senha não é mais retida e há "Sair".)*
 3. **`autofillHints` sem `AutofillGroup`** provavelmente não faz nada no
    aparelho: o gerenciador de senhas do Android precisa do grupo (e de
    `finishAutofillContext()`) para oferecer preenchimento.
@@ -823,10 +835,10 @@ nascimento e o código de 6 dígitos recebido, e o servidor só emite a sessão 
 - **A sessão do paciente passou a 1 hora** (`AuthEndpoint.patientSessionLifetime`), e não aos 15
   minutos do padrão, aplicando LGPD-RT06. O motivo: o código OTP não pode ser reapresentado como
   a senha do ACS pode, então **não há renovação silenciosa** para o paciente — com 15 minutos
-  ele receberia um SMS novo a cada 15 minutos. O ACS continua com 15 minutos e renovação pela
-  credencial mantida em memória (RF07). A assimetria é deliberada e está escrita em
+  ele receberia um SMS novo a cada 15 minutos. O ACS continua com 15 minutos e renovação pelo
+  refresh token (desde 2026-10-03; antes, credencial mantida em memória, RF07). A assimetria é deliberada e está escrita em
   `spec/lgpd_design.md`.
-- **Refresh token rotativo continua ausente** (LGPD-RT06) — é o que permitiria voltar o TTL do
+- **Refresh token rotativo continua ausente para o paciente** (LGPD-RT06; o do ACS existe desde 2026-10-03) — é o que permitiria voltar o TTL do
   paciente aos 15 minutos sem quebrar a experiência.
 - **MFA/TOTP do ACS: entregue em 2026-10-02** (achado F5 de `spec/security_assessment.md`; ver a entrada "MFA do ACS" do app).
 - **Sem limite de tentativas por origem (IP).** O teto de 5 verificações é por desafio e o
