@@ -90,8 +90,13 @@ class AuthEndpoint extends Endpoint {
           totpCode: totpCode,
         );
 
-    final refreshToken =
-        await runtime.refreshTokenServiceFor(session).issue(user);
+    // Sem `deviceId` real não há aparelho a que amarrar o refresh token: o
+    // valor sentinela de `InstitutionalAuthService` é público e qualquer um o
+    // apresentaria, anulando a amarração. Então o login só devolve o JWT.
+    final temAparelho = deviceId != null && deviceId.trim().isNotEmpty;
+    final refreshToken = temAparelho
+        ? await runtime.refreshTokenServiceFor(session).issue(user)
+        : null;
     return DevelopmentLoginResult(
       accessToken: runtime.auth.issueToken(user),
       tokenType: 'Bearer',
@@ -120,7 +125,9 @@ class AuthEndpoint extends Endpoint {
 
   /// Encerra o turno: revoga a família inteira. Idempotente.
   Future<void> logout(Session session, {required String refreshToken}) =>
-      AlertRuntime.instance.refreshTokenServiceFor(session).revoke(refreshToken);
+      AlertRuntime.instance
+          .refreshTokenServiceFor(session)
+          .revoke(refreshToken);
 
   /// Começa a ativação da MFA do ACS (RF07). Sem token: o ACS prova matrícula e senha.
   Future<TotpEnrollmentStart> beginTotpEnrollment(

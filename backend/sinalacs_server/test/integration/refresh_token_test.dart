@@ -529,6 +529,66 @@ void endpointTests() {
         ),
         throwsA(isA<SessionExpiredException>()),
       );
+      // A recusa revogou a família: reativar o ACS não reabre o token.
+      acs.active = true;
+      await Acs.db.updateRow(session, acs);
+      await expectLater(
+        endpoints.auth.refreshSession(
+          sessionBuilder,
+          refreshToken: login.refreshToken!,
+          deviceId: _aparelho,
+        ),
+        throwsA(isA<SessionExpiredException>()),
+      );
+    });
+
+    test('login sem deviceId (ausente ou em branco) não emite refresh token',
+        () async {
+      for (final id in <String?>[null, '', '   ']) {
+        // O passo do TOTP só avança: zera o último usado para repetir o login.
+        final cred = (await UserCredential.db.findFirstRow(
+          session,
+          where: (t) => t.userId.equals(UuidValue.fromString(_acsId)),
+        ))!;
+        cred.totpLastStep = null;
+        await UserCredential.db.updateRow(session, cred);
+        final codigo = Totp.code(segredo, DateTime.now().toUtc());
+        final login = await endpoints.auth.loginInstitutional(
+          sessionBuilder,
+          matricula: _matricula,
+          password: _senha,
+          deviceId: id,
+          totpCode: codigo,
+        );
+        expect(login.accessToken, isNotEmpty, reason: 'deviceId=$id');
+        expect(login.refreshToken, isNull, reason: 'deviceId=$id');
+      }
+    });
+
+    test('refreshSession de outro aparelho é recusado e revoga a família',
+        () async {
+      final login = await entrar();
+      final filho = await endpoints.auth.refreshSession(
+        sessionBuilder,
+        refreshToken: login.refreshToken!,
+        deviceId: _aparelho,
+      );
+      await expectLater(
+        endpoints.auth.refreshSession(
+          sessionBuilder,
+          refreshToken: filho.refreshToken!,
+          deviceId: 'aparelho-do-ladrao',
+        ),
+        throwsA(isA<SessionExpiredException>()),
+      );
+      await expectLater(
+        endpoints.auth.refreshSession(
+          sessionBuilder,
+          refreshToken: filho.refreshToken!,
+          deviceId: _aparelho,
+        ),
+        throwsA(isA<SessionExpiredException>()),
+      );
     });
 
     test('logout revoga o token; token desconhecido não lança', () async {
