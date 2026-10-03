@@ -339,6 +339,10 @@ class BackendClient implements AcsBackend {
       );
     }
 
+    // A partir daqui a sessão é esta: uma renovação ainda em voo (talvez de
+    // OUTRO ACS, "Entrar com senha" no bloqueio) fica obsoleta e não grava
+    // nada por cima deste login (INV-01/RNF06).
+    _invalidateRenewal();
     // Grava o refresh token ANTES de expor a sessão. Sem token na resposta,
     // não deixa um token velho de outra conta para trás.
     final refreshToken = result.refreshToken;
@@ -374,13 +378,44 @@ class BackendClient implements AcsBackend {
 
   Future<AuthSession>? _renewal;
 
+  /// Geração da sessão. Login e logout a incrementam; uma renovação que
+  /// começou numa geração anterior é **obsoleta** e, ao terminar, não grava o
+  /// token, não expõe a sessão e não avisa a UI. Sem isto, a renovação lenta
+  /// do ACS A terminava depois do login do ACS B e sobrescrevia o token e a
+  /// sessão de B: o painel de B passava a usar o JWT de A (INV-01/RNF06).
+  int _epoch = 0;
+
+  /// Torna obsoleta qualquer renovação em voo. A próxima chamada a
+  /// [renewSession] não se junta a ela: abre uma nova, na geração atual.
+  void _invalidateRenewal() {
+    _epoch++;
+    _renewal = null;
+  }
+
+  /// A renovação obsoleta termina assim: recuperável (repetir usa a sessão
+  /// atual), sem `onSessionExpired` e sem tocar no token de quem entrou depois.
+  /// A família rotacionada por ela fica abandonada no servidor (vence sozinha
+  /// ou cai junto no logout).
+  static const _staleRenewal = BackendFailure('A sessão mudou neste aparelho. Tente de novo.');
+
   /// Renova o JWT com o refresh token guardado. **Single-flight**: chamadas
   /// simultâneas compartilham UMA renovação (o token rotativo só vale uma vez).
-  Future<AuthSession> renewSession({bool notify = true}) =>
-      _renewal ??= _doRenew(notify: notify).whenComplete(() => _renewal = null);
+  Future<AuthSession> renewSession({bool notify = true}) {
+    final pending = _renewal;
+    if (pending != null) return pending;
+    late final Future<AuthSession> flight;
+    flight = _doRenew(notify: notify).whenComplete(() {
+      // Só limpa se ainda é ela: um login no meio já trocou (ou zerou) o voo.
+      if (identical(_renewal, flight)) _renewal = null;
+    });
+    return _renewal = flight;
+  }
 
   Future<AuthSession> _doRenew({required bool notify}) async {
+    final epoch = _epoch;
+    bool stale() => epoch != _epoch;
     final token = await _storage(_tokenStore.read);
+    if (stale()) throw _staleRenewal;
     if (token == null) {
       _expire(notify);
       throw const BackendFailure('Sua sessão expirou. Entre novamente.', isRecoverable: false);
@@ -396,6 +431,9 @@ class BackendClient implements AcsBackend {
         return null;
       }
     });
+    // Obsoleta: o token guardado agora é de outro login (ou foi apagado pelo
+    // logout). Nem a recusa nem o filho podem mexer nele.
+    if (stale()) throw _staleRenewal;
     // Falha de rede/timeout já saiu pelo `_guard` como recuperável, sem apagar
     // o token: a repetição cai na tolerância de 30 s do servidor.
     if (result == null) {
@@ -418,6 +456,7 @@ class BackendClient implements AcsBackend {
       try {
         await _tokenStore.write(next);
       } catch (_) {
+        if (stale()) throw _staleRenewal;
         // O token novo se perdeu e o antigo já foi gasto: sessão acabou.
         try {
           await _tokenStore.clear();
@@ -426,6 +465,8 @@ class BackendClient implements AcsBackend {
         throw _storeLost;
       }
     }
+    // Um login durante a gravação acima gravou depois dela: o token é o dele.
+    if (stale()) throw _staleRenewal;
     final session = AuthSession.tryParse(result.accessToken, result.tokenType);
     if (session == null || !hasNext) {
       throw const BackendFailure(
@@ -480,14 +521,10 @@ class BackendClient implements AcsBackend {
 
   @override
   Future<void> logout() async {
-    // Uma renovação em voo, ao terminar, regravaria o token e ressuscitaria a
-    // sessão: espera-a acabar (ignorando o resultado) e só então encerra.
-    final pending = _renewal;
-    if (pending != null) {
-      try {
-        await pending;
-      } catch (_) {}
-    }
+    // ANTES da chamada de rede: a renovação em voo fica obsoleta e não regrava
+    // o token nem ressuscita a sessão quando terminar.
+    _invalidateRenewal();
+    _session = null;
     String? token;
     try {
       token = await _tokenStore.read();
@@ -501,6 +538,9 @@ class BackendClient implements AcsBackend {
       }
     }
     _session = null;
+    // De novo DEPOIS da rede: uma renovação que começou durante a chamada de
+    // logout (ainda achou o token guardado) também fica obsoleta.
+    _invalidateRenewal();
     await _storage(_tokenStore.clear);
   }
 
@@ -525,6 +565,7 @@ class BackendClient implements AcsBackend {
       );
     }
 
+    _invalidateRenewal();
     _session = session;
     return session;
   }

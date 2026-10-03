@@ -243,8 +243,10 @@ void main() {
     });
   });
 
-  test('logout espera a renovação em voo: nada é regravado nem ressuscitado', () async {
+  test('logout com renovação em voo: nada é regravado nem ressuscitado', () async {
     server.tokenLifetime = const Duration(minutes: -1);
+    var avisos = 0;
+    backend.onSessionExpired = () => avisos++;
     await entrar();
     server.refreshDelay = const Duration(milliseconds: 200);
 
@@ -255,6 +257,49 @@ void main() {
 
     expect(await store.read(), isNull);
     expect(backend.session, isNull);
+    expect(avisos, 0, reason: 'renovação obsoleta não manda a UI para o login');
+  });
+
+  test('renovação em voo + login de OUTRO usuário: vale o login, não a renovação (INV-01)', () async {
+    server.tokenLifetime = const Duration(minutes: -1);
+    var avisos = 0;
+    backend.onSessionExpired = () => avisos++;
+    await entrar(); // ACS A, refresh-0
+    server.refreshDelay = const Duration(milliseconds: 200);
+
+    final renovacao = backend.listPatients().then<Object?>((_) => null, onError: (Object e) => e);
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+    server
+      ..userId = '00000000-0000-4000-8000-0000000000bb'
+      ..tokenLifetime = const Duration(minutes: 15);
+    final sessaoB = await backend.login(matricula: 'ACS-002', senha: 'senha-sintetica-b');
+    expect(await store.read(), 'refresh-0');
+    final resultado = await renovacao;
+
+    expect(resultado, isA<BackendFailure>(), reason: 'a renovação obsoleta não entrega sessão a ninguém');
+    expect(identical(backend.session, sessaoB), isTrue, reason: 'o painel de B segue com o JWT de B');
+    expect(await store.read(), 'refresh-0', reason: 'o filho da renovação de A não sobrescreve o token de B');
+    expect(avisos, 0);
+  });
+
+  test('renovação iniciada durante a chamada de logout não regrava o token', () async {
+    server.tokenLifetime = const Duration(minutes: -1);
+    var avisos = 0;
+    backend.onSessionExpired = () => avisos++;
+    await entrar();
+    server
+      ..logoutDelay = const Duration(milliseconds: 100)
+      ..refreshDelay = const Duration(milliseconds: 300);
+
+    final saida = backend.logout();
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+    final renovacao = backend.listPatients().then<Object?>((_) => null, onError: (Object e) => e);
+    await saida;
+    await renovacao;
+
+    expect(await store.read(), isNull);
+    expect(backend.session, isNull);
+    expect(avisos, 0);
   });
 
   test('refresh token novo vazio é tratado como ausente (e o JWT ilegível ainda persiste o filho)', () async {

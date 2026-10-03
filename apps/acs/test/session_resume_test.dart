@@ -417,5 +417,62 @@ void main() {
       expect(gate.calls, 0, reason: 'a tela depois de Sair não tenta retomar a sessão');
       expect(navKey.currentState!.canPop(), isFalse);
     });
+
+    Future<void> abrirSair(WidgetTester tester) async {
+      await irParaDoMais(tester, 'Preferências');
+      final sair = find.byKey(const Key('logout_button'));
+      await tester.ensureVisible(sair);
+      await tester.pump();
+      await tester.tap(sair);
+      await assentar(tester);
+    }
+
+    testWidgets('"Sair" sem alerta pendente: texto e botão originais', (tester) async {
+      await abrirPainel(tester);
+      // O único alerta do painel já foi confirmado.
+      await irParaDaBarra(tester, 'Fila');
+      final ack = find.byKey(const Key('ack_alerta-antes'));
+      await tester.ensureVisible(ack);
+      await tester.pump();
+      await tester.tap(ack);
+      await assentar(tester);
+      expect(backend.acknowledgedAlertIds, ['alerta-antes']);
+      await abrirSair(tester);
+
+      expect(find.text('As visitas ainda não sincronizadas continuam salvas neste aparelho.'), findsOneWidget);
+      expect(find.byKey(const Key('logout_pending_alerts')), findsNothing);
+      expect(find.descendant(of: find.byKey(const Key('logout_confirm')), matching: find.text('Sair')), findsOneWidget);
+    });
+
+    testWidgets('"Sair" com 2 alertas não confirmados: diz quantos e o botão explicita a perda', (tester) async {
+      await abrirPainel(tester);
+      feed.deliver(testAlert(alertId: 'alerta-dois'));
+      await assentar(tester);
+      await abrirSair(tester);
+
+      expect(find.text('As visitas ainda não sincronizadas continuam salvas neste aparelho.'), findsOneWidget);
+      expect(
+        find.text('Há 2 alertas ainda não confirmados. Eles saem deste aparelho, mas continuam pendentes no servidor.'),
+        findsOneWidget,
+      );
+      expect(find.descendant(of: find.byKey(const Key('logout_confirm')), matching: find.text('Sair mesmo assim')),
+          findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('logout_confirm')));
+      await assentar(tester);
+
+      expect(backend.logoutCount, 1, reason: 'a saída não é bloqueada');
+      expect(formulario(), findsOneWidget);
+      expect(fila.pendingCount, 1, reason: 'a visita não sincronizada continua no aparelho');
+    });
+
+    testWidgets('"Sair" com 1 alerta não confirmado usa o singular', (tester) async {
+      await abrirPainel(tester);
+      await abrirSair(tester);
+      expect(
+        find.text('Há 1 alerta ainda não confirmado. Ele sai deste aparelho, mas continua pendente no servidor.'),
+        findsOneWidget,
+      );
+    });
   });
 }

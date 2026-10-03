@@ -171,11 +171,21 @@ class _SinalAcsAppState extends State<SinalAcsApp> {
       if (mounted) setState(() => _gateGeneration++);
     }
 
+    // A reautenticação não abriu (o `push` lançou): a cobertura FICA — tirá-la
+    // sem o formulário por cima mostraria o painel sem senha —, mas a flag
+    // volta, e "Entrar com senha" e "Desbloquear" seguem tocáveis. Nunca uma
+    // cobertura presa sem saída.
+    void failed() => _unlockingByPassword = false;
+
     final open = _lockHooks.openPasswordReauth;
     if (open == null) {
       unlock();
-    } else {
-      open(unlock);
+      return;
+    }
+    try {
+      open(unlock, failed);
+    } catch (_) {
+      failed();
     }
   }
 
@@ -226,8 +236,9 @@ class _SinalAcsAppState extends State<SinalAcsApp> {
 /// rotas e do estado que a reautenticação precisa preservar).
 class _AppLockHooks {
   /// Registrado pelo [AcsHomeShell] montado; `null` sem painel. Chama
-  /// `onCovered` quando o formulário de senha já cobre o painel.
-  void Function(VoidCallback onCovered)? openPasswordReauth;
+  /// `onCovered` quando o formulário de senha já cobre o painel, ou `onFailed`
+  /// se ele não pôde ser aberto (a cobertura do bloqueio continua).
+  void Function(VoidCallback onCovered, VoidCallback onFailed)? openPasswordReauth;
 
   /// Incrementado a cada "Entrar com senha": as telas de login limpam o que
   /// foi digitado antes do bloqueio.
@@ -365,9 +376,11 @@ class _LoginScreenState extends State<LoginScreen> {
     // não abrem duas retomadas (dois prompts, duas renovações, dois painéis).
     if (_resuming) return;
     _resuming = true;
-    final backend = BackendScope.of(context);
-    final gate = widget.biometricGate!;
     try {
+      // Dentro do `try`: se qualquer um lançar, o `finally` ainda solta
+      // `_resuming` e o botão de login não fica desligado para sempre.
+      final backend = BackendScope.of(context);
+      final gate = widget.biometricGate!;
       // Sem token não há prompt biométrico (nem chamada à plataforma).
       if (!await backend.hasStoredSession) return;
       // P5: aparelho sem biometria nem bloqueio de tela não retoma sessão —
@@ -798,15 +811,15 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
   /// seguinte ao que a pintou: a cobertura do bloqueio só sai quando o
   /// formulário já esconde o painel (nenhum quadro de transição com o painel
   /// à vista, tocável ou na semântica).
-  void _reauthForLock(VoidCallback onCovered) {
+  void _reauthForLock(VoidCallback onCovered, VoidCallback onFailed) {
     if (!mounted || _reauthAberta) {
       onCovered();
       return;
     }
-    _openReauth('Entre com matrícula e senha para desbloquear o aplicativo.', onCovered: onCovered);
+    _openReauth('Entre com matrícula e senha para desbloquear o aplicativo.', onCovered: onCovered, onFailed: onFailed);
   }
 
-  Future<void> _openReauth(String aviso, {VoidCallback? onCovered}) async {
+  Future<void> _openReauth(String aviso, {VoidCallback? onCovered, VoidCallback? onFailed}) async {
     _reauthAberta = true;
     Widget page(BuildContext _) => LoginScreen(
           visitQueue: widget.visitQueue,
@@ -829,7 +842,16 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
             pageBuilder: (context, _, __) => page(context),
           );
     try {
-      final done = Navigator.of(context).push<bool>(route);
+      final Future<bool?> done;
+      try {
+        done = Navigator.of(context).push<bool>(route);
+      } catch (_) {
+        // Sem formulário por cima: quem pediu (o bloqueio) não pode tirar a
+        // cobertura, mas também não pode ficar esperando para sempre.
+        onFailed?.call();
+        if (onFailed == null) rethrow;
+        return;
+      }
       if (onCovered != null) _whenOpaque(route as ModalRoute<bool>, onCovered);
       await done;
     } finally {
@@ -1167,16 +1189,41 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
   /// também sai) e volta ao login. NÃO apaga a fila de visitas nem o banco
   /// (offline-first): a visita ainda não sincronizada continua no aparelho. O
   /// feed MQTT e os timers param no `dispose` deste painel.
+  ///
+  /// Alerta não confirmado NÃO sobrevive à saída: a fila de alertas é deste
+  /// painel e o broker não reentrega o que já entregou. Por isso a confirmação
+  /// diz quantos são e o botão explicita a perda ("Sair mesmo assim") — a
+  /// saída não é bloqueada, mas também não descarta alerta em silêncio.
   Future<void> _logout() async {
     if (_saindo) return;
+    final pendentes = _queue.unacknowledgedCount;
     final confirmou = await showDialog<bool>(
       context: context,
       builder: (dialog) => AlertDialog(
         title: const Text('Encerrar o turno?'),
-        content: const Text('As visitas ainda não sincronizadas continuam salvas neste aparelho.'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (pendentes > 0) ...[
+              Text(
+                pendentes == 1
+                    ? 'Há 1 alerta ainda não confirmado. Ele sai deste aparelho, mas continua pendente no servidor.'
+                    : 'Há $pendentes alertas ainda não confirmados. Eles saem deste aparelho, mas continuam pendentes no servidor.',
+                key: const Key('logout_pending_alerts'),
+              ),
+              const SizedBox(height: 12),
+            ],
+            const Text('As visitas ainda não sincronizadas continuam salvas neste aparelho.'),
+          ],
+        ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(dialog, false), child: const Text('Cancelar')),
-          FilledButton(key: const Key('logout_confirm'), onPressed: () => Navigator.pop(dialog, true), child: const Text('Sair')),
+          FilledButton(
+            key: const Key('logout_confirm'),
+            onPressed: () => Navigator.pop(dialog, true),
+            child: Text(pendentes > 0 ? 'Sair mesmo assim' : 'Sair'),
+          ),
         ],
       ),
     );

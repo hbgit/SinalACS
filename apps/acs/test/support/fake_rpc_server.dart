@@ -93,6 +93,9 @@ class FakeRpcServer {
   /// Tokens que `logout` recebeu.
   final List<String> loggedOut = <String>[];
 
+  /// Atraso antes de responder `logout` (rede lenta na saída).
+  Duration logoutDelay = Duration.zero;
+
   /// Endereço para passar a `BackendClient(host: ...)`. Porta efêmera do SO:
   /// dois testes em paralelo não brigam por porta.
   String get host => 'http://127.0.0.1:${_server.port}/';
@@ -160,6 +163,7 @@ class FakeRpcServer {
 
     if (method == 'logout') {
       loggedOut.add(decoded['refreshToken'] as String? ?? '');
+      if (logoutDelay > Duration.zero) await Future<void>.delayed(logoutDelay);
       await _respond(request, HttpStatus.ok, null);
       return;
     }
