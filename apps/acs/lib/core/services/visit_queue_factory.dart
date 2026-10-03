@@ -19,6 +19,11 @@ OfflineVisitQueue buildVisitQueue({
   VisitStore? store,
 }) =>
     OfflineVisitQueue(
-      store: store ?? SqlCipherVisitStore(keyStore: SecureStorageDatabaseKeyStore()),
+      store: store ??
+          SqlCipherVisitStore(
+            keyStore: SecureStorageDatabaseKeyStore(),
+            // TRANSITÓRIO (tarefas 3/4): o dono real vem da sessão do ACS.
+            owner: 'acs-transitorio',
+          ),
       synchronizer: BackendVisitSynchronizer(backend: backend),
     );

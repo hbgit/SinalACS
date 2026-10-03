@@ -175,6 +175,68 @@ class InMemoryVisitStore implements VisitStore {
   }
 }
 
+/// Fábrica de armazenamento por dono. [VisitStore] continua sendo load/save,
+/// mas agora SEMPRE de um único dono (id do ACS).
+abstract interface class VisitStorage {
+  VisitStore forOwner(String ownerId);
+
+  /// Quarentena (D2): as visitas legadas, sem dono.
+  LegacyVisitStore get legacy;
+}
+
+/// Quarentena (D2): as linhas com `owner IS NULL`. Nenhum dono as enxerga.
+abstract interface class LegacyVisitStore {
+  Future<List<OfflineVisitRecord>> load();
+
+  /// Remove só estes `localId`s legados (depois do 200 do servidor).
+  Future<void> remove(Iterable<String> localIds);
+}
+
+/// Lançada quando um dono tenta gravar um `localId` que já pertence a outro
+/// dono (ou à quarentena). `local_id` é chave primária global: a visita do
+/// outro NUNCA é sobrescrita nem apagada, e a gravação inteira é desfeita.
+class VisitLocalIdConflict implements Exception {
+  VisitLocalIdConflict(this.localId);
+
+  final String localId;
+
+  @override
+  String toString() =>
+      'VisitLocalIdConflict: localId $localId já pertence a outro dono';
+}
+
+/// [VisitStorage] em memória: um [InMemoryVisitStore] por dono.
+class InMemoryVisitStorage implements VisitStorage {
+  InMemoryVisitStorage({Iterable<OfflineVisitRecord> legacyVisits = const []})
+      : _legacy = _InMemoryLegacyVisitStore(legacyVisits);
+
+  final Map<String, InMemoryVisitStore> _stores = {};
+  final _InMemoryLegacyVisitStore _legacy;
+
+  @override
+  VisitStore forOwner(String ownerId) =>
+      _stores.putIfAbsent(ownerId, InMemoryVisitStore.new);
+
+  @override
+  LegacyVisitStore get legacy => _legacy;
+}
+
+class _InMemoryLegacyVisitStore implements LegacyVisitStore {
+  _InMemoryLegacyVisitStore(Iterable<OfflineVisitRecord> visits)
+      : _visits = List.of(visits);
+
+  final List<OfflineVisitRecord> _visits;
+
+  @override
+  Future<List<OfflineVisitRecord>> load() async => List.of(_visits);
+
+  @override
+  Future<void> remove(Iterable<String> localIds) async {
+    final ids = localIds.toSet();
+    _visits.removeWhere((visit) => ids.contains(visit.localId));
+  }
+}
+
 /// Fila offline-first de visitas domiciliares.
 ///
 /// Preserva a semântica da `SyncFsm` do backend

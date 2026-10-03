@@ -257,6 +257,7 @@ void main() {
     await backend.developmentLogin(role: 'acs');
 
     final store = SqlCipherVisitStore(
+      owner: 'acs-teste',
       keyStore: InMemoryDatabaseKeyStore(),
       databaseName: nome,
     );

@@ -24,8 +24,10 @@ class EncryptedLocalDatabase {
   /// operacional do dispositivo, não uma visita, mas vive no mesmo banco
   /// criptografado por estar sob a mesma política de proteção. v6 acrescenta
   /// `micro_area_cache` e `micro_area_cache_meta`, o cache da microárea (RF08,
-  /// `spec/lgpd_design.md` §5.11).
-  static const schemaVersion = 6;
+  /// `spec/lgpd_design.md` §5.11). v7 acrescenta `offline_visits.owner`, o dono
+  /// da visita (id do ACS); nulo = visita legada em QUARENTENA, que nenhum dono
+  /// enxerga e que só sai pelo envio legado (`visits.syncLegacy`).
+  static const schemaVersion = 7;
 
   /// Visitas registradas offline, aguardando sincronização.
   ///
@@ -44,8 +46,13 @@ CREATE TABLE IF NOT EXISTS offline_visits (
   notes TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL,
   version INTEGER NOT NULL,
-  rejection_reason TEXT
+  rejection_reason TEXT,
+  owner TEXT
 )''';
+
+  /// Índice por dono: toda leitura/escrita de visitas filtra por `owner`.
+  static const createOfflineVisitsOwnerIndex =
+      'CREATE INDEX IF NOT EXISTS offline_visits_owner_idx ON offline_visits(owner)';
 
   /// Cursor de sincronização central→dispositivo (`visits.pull`), por
   /// instalação do app — ver `SyncCursorStore`.
@@ -72,7 +79,7 @@ CREATE TABLE IF NOT EXISTS micro_area_cache_meta (
   value TEXT NOT NULL
 )''';
 
-  /// Migração v1 → v2, v2 → v3, v3 → v4, v4 → v5 e v5 → v6.
+  /// Migração v1 → v2, v2 → v3, v3 → v4, v4 → v5, v5 → v6 e v6 → v7.
   ///
   /// Nenhuma das duas formas de v1 guarda o UUID do paciente: `patient_name`
   /// era `'Paciente ' + 8 dos 32 dígitos hex`, irreversível. Sem UUID,
@@ -90,6 +97,7 @@ CREATE TABLE IF NOT EXISTS micro_area_cache_meta (
       await db.execute('DROP TABLE IF EXISTS local_queue');
       await db.execute('DROP TABLE IF EXISTS offline_visits');
       await db.execute(createOfflineVisits);
+      await db.execute(createOfflineVisitsOwnerIndex);
       return;
     }
 
@@ -128,6 +136,19 @@ CREATE TABLE IF NOT EXISTS micro_area_cache_meta (
       // Aditiva: `CREATE TABLE IF NOT EXISTS` não toca em nada que já existe.
       await db.execute(createMicroAreaCache);
       await db.execute(createMicroAreaCacheMeta);
+    }
+
+    if (from < 7) {
+      // Aditiva: as linhas existentes ficam com `owner` nulo = quarentena (D2).
+      // Nenhum dono as adota; só o envio legado as retira.
+      final columns = await db.rawQuery(
+        "PRAGMA table_info('offline_visits')",
+      );
+      final hasOwner = columns.any((column) => column['name'] == 'owner');
+      if (!hasOwner) {
+        await db.execute('ALTER TABLE offline_visits ADD COLUMN owner TEXT;');
+      }
+      await db.execute(createOfflineVisitsOwnerIndex);
     }
   }
 
@@ -180,6 +201,7 @@ CREATE TABLE IF NOT EXISTS micro_area_cache_meta (
         version: schemaVersion,
         onCreate: (db, version) async {
           await db.execute(createOfflineVisits);
+          await db.execute(createOfflineVisitsOwnerIndex);
           await db.execute(createSyncCursor);
           await db.execute(createMicroAreaCache);
           await db.execute(createMicroAreaCacheMeta);
@@ -197,6 +219,7 @@ CREATE TABLE IF NOT EXISTS micro_area_cache_meta (
         version: schemaVersion,
         onCreate: (db, version) async {
           await db.execute(createOfflineVisits);
+          await db.execute(createOfflineVisitsOwnerIndex);
           await db.execute(createSyncCursor);
           await db.execute(createMicroAreaCache);
           await db.execute(createMicroAreaCacheMeta);

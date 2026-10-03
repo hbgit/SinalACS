@@ -42,6 +42,7 @@ void main() {
 
   test('o arquivo do banco não contém o conteúdo da visita em texto plano', () async {
     final store = SqlCipherVisitStore(
+      owner: 'acs-teste',
       keyStore: InMemoryDatabaseKeyStore(),
       databaseName: databaseName,
     );
@@ -96,6 +97,7 @@ void main() {
   test('o banco não abre com a chave errada', () async {
     // Se abrisse, a criptografia não estaria protegendo nada.
     final store = SqlCipherVisitStore(
+      owner: 'acs-teste',
       keyStore: InMemoryDatabaseKeyStore(initialKey: generateDatabaseKey()),
       databaseName: databaseName,
     );
@@ -136,6 +138,7 @@ void main() {
     await legado.close();
 
     final store = SqlCipherVisitStore(
+      owner: 'acs-teste',
       keyStore: InMemoryDatabaseKeyStore(initialKey: key),
       databaseName: databaseName,
     );
@@ -157,6 +160,7 @@ void main() {
     // correspondente. Sem recuperação, o app ficaria travado para sempre.
     final keyStore = InMemoryDatabaseKeyStore();
     final first = SqlCipherVisitStore(
+      owner: 'acs-teste',
       keyStore: keyStore,
       databaseName: databaseName,
     );
@@ -169,6 +173,7 @@ void main() {
     await keyStore.delete();
 
     final second = SqlCipherVisitStore(
+      owner: 'acs-teste',
       keyStore: keyStore,
       databaseName: databaseName,
     );
@@ -177,6 +182,66 @@ void main() {
     expect(await second.load(), isEmpty);
     await second.close();
 
+    await EncryptedLocalDatabase.deleteDatabaseFile(databaseName);
+  });
+
+  test('dono: cada ACS vê só as próprias visitas e a quarentena fica isolada', () async {
+    // Mesma lógica de test/visit_storage_owner_test.dart, mas sobre SQLCipher
+    // de verdade (o caminho de upgrade/ALTER é o do sqflite_sqlcipher).
+    final storage = SqlCipherVisitStorage(
+      keyStore: InMemoryDatabaseKeyStore(),
+      databaseName: databaseName,
+    );
+    final a = storage.forOwner('acs-a');
+    final b = storage.forOwner('acs-b');
+    await a.save([
+      OfflineVisitRecord(patientId: seedPatientId, risk: 'red', status: 'PENDENTE'),
+    ]);
+
+    expect(await b.load(), isEmpty);
+    await b.save([]);
+    expect(await a.load(), hasLength(1));
+    expect(await storage.legacy.load(), isEmpty);
+
+    await storage.close();
+    await EncryptedLocalDatabase.deleteDatabaseFile(databaseName);
+  });
+
+  test('v6 → v7 cifrado: linhas sem dono ficam em quarentena', () async {
+    final key = generateDatabaseKey();
+    final path = await EncryptedLocalDatabase.pathFor(databaseName);
+
+    final legado = await sqlcipher.openDatabase(
+      path,
+      password: key,
+      version: 6,
+      onCreate: (db, version) => db.execute('''
+CREATE TABLE offline_visits (
+  local_id TEXT PRIMARY KEY, patient_id TEXT NOT NULL, risk TEXT NOT NULL,
+  status TEXT NOT NULL, outcome TEXT NOT NULL, notes TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL, version INTEGER NOT NULL, rejection_reason TEXT
+)'''),
+    );
+    await legado.insert('offline_visits', {
+      'local_id': 'local-v6-1',
+      'patient_id': seedPatientId,
+      'risk': 'red',
+      'status': 'PENDENTE',
+      'outcome': '',
+      'notes': '',
+      'created_at': DateTime.utc(2026).toIso8601String(),
+      'version': 1,
+    });
+    await legado.close();
+
+    final storage = SqlCipherVisitStorage(
+      keyStore: InMemoryDatabaseKeyStore(initialKey: key),
+      databaseName: databaseName,
+    );
+    expect(await storage.forOwner('acs-a').load(), isEmpty);
+    expect((await storage.legacy.load()).map((v) => v.localId), ['local-v6-1']);
+
+    await storage.close();
     await EncryptedLocalDatabase.deleteDatabaseFile(databaseName);
   });
 }

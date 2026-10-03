@@ -99,7 +99,12 @@ class _SinalAcsAppState extends State<SinalAcsApp> {
   /// `SqlCipherVisitStore` apontando para o mesmo arquivo até funcionariam,
   /// mas por acaso — uma só instância é o que garante que o pull enxerga
   /// exatamente o que a fila gravou por último.
-  late final VisitStore _visitStore = SqlCipherVisitStore(keyStore: SecureStorageDatabaseKeyStore());
+  late final VisitStore _visitStore = SqlCipherVisitStore(
+    keyStore: SecureStorageDatabaseKeyStore(),
+    // TRANSITÓRIO (tarefas 3/4 do plano da fila por dono): o dono real passa a
+    // ser o id do ACS da sessão, via VisitStorage.forOwner.
+    owner: 'acs-transitorio',
+  );
 
   /// Uma única fila por execução do app.
   ///

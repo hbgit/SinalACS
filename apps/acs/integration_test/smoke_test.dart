@@ -135,6 +135,7 @@ void main() {
     await EncryptedLocalDatabase.deleteDatabaseFile(databaseName);
     addTearDown(() => EncryptedLocalDatabase.deleteDatabaseFile(databaseName));
     final store = SqlCipherVisitStore(
+      owner: 'acs-teste',
       keyStore: InMemoryDatabaseKeyStore(),
       databaseName: databaseName,
     );
