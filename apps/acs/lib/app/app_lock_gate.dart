@@ -8,15 +8,23 @@ import 'acs_theme.dart';
 ///
 /// Contrato para o chamador (Task 7):
 /// (a) colocar em `MaterialApp.builder`, ACIMA do Navigator, para cobrir também
-///     as rotas empilhadas;
+///     as rotas empilhadas; [navigatorKey] é OBRIGATÓRIA e deve ser a mesma do
+///     MaterialApp (sem ela o botão voltar do Android não seria engolido);
 /// (b) o estado de bloqueio vive só na memória: numa partida a frio o gate
 ///     nasce desbloqueado, então o chamador deve exigir `authenticate()` (ou a
 ///     senha) antes de mostrar dados quando houver sessão restaurada;
-/// (d) passar `navigatorKey` (a mesma do MaterialApp) para o botão voltar do
-///     Android ficar engolido enquanto bloqueado;
 /// (c) `authenticate()` que falha, lança, ou volta `lockedOut`/`unavailable`
-///     NUNCA desbloqueia: falha fechada, e a saída é "Entrar com senha"
-///     (`onUsePassword`).
+///     NUNCA desbloqueia: falha fechada;
+/// (d) [onUsePassword] deve SEMPRE ser ligado: com `null` o botão "Entrar com
+///     senha" não faz nada e lockedOut/unavailable ficam sem saída. O gate não
+///     tem API de desbloqueio pela senha: ao concluir o login por senha, o
+///     chamador deve substituir/recriar o gate (nova `key`) ou encerrar a
+///     sessão, o que descarta o bloqueio;
+/// (e) enquanto bloqueado, o código do app NÃO deve fazer pop programático (a
+///     cobertura bloqueia toda entrada do usuário, mas `pop()` por código não
+///     passa pelo `PopScope`). Uma tela empurrada durante o bloqueio (ex.:
+///     reautenticação por `onSessionExpired`) fica ACIMA da rota-bloqueio, mas
+///     continua sob a cobertura opaca.
 class AppLockGate extends StatefulWidget {
   const AppLockGate({
     super.key,
@@ -25,7 +33,7 @@ class AppLockGate extends StatefulWidget {
     this.lockAfter = const Duration(seconds: 30),
     this.clock,
     this.onUsePassword,
-    this.navigatorKey,
+    required this.navigatorKey,
   });
 
   final BiometricGate gate;
@@ -37,7 +45,7 @@ class AppLockGate extends StatefulWidget {
   /// Navigator do app. Como o gate fica ACIMA do Navigator, um `PopScope` aqui
   /// não intercepta o botão voltar do Android; com a chave, o gate empurra uma
   /// rota invisível com `canPop: false` enquanto bloqueado, que engole o voltar.
-  final GlobalKey<NavigatorState>? navigatorKey;
+  final GlobalKey<NavigatorState> navigatorKey;
 
   @override
   State<AppLockGate> createState() => _AppLockGateState();
@@ -61,6 +69,7 @@ class _AppLockGateState extends State<AppLockGate> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _unblockBack();
     super.dispose();
   }
 
@@ -88,8 +97,15 @@ class _AppLockGateState extends State<AppLockGate> with WidgetsBindingObserver {
   }
 
   void _blockBack() {
-    final nav = widget.navigatorKey?.currentState;
-    if (nav == null || _backBlocker != null) return;
+    if (!_locked || _backBlocker != null) return;
+    final nav = widget.navigatorKey.currentState;
+    if (nav == null) {
+      // Navigator ainda não montado: tenta de novo no próximo quadro.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _blockBack();
+      });
+      return;
+    }
     final route = PageRouteBuilder<void>(
       opaque: false,
       barrierDismissible: false,
@@ -136,35 +152,32 @@ class _AppLockGateState extends State<AppLockGate> with WidgetsBindingObserver {
   Widget build(BuildContext context) {
     final blockedOut =
         _last == UnlockResult.lockedOut || _last == UnlockResult.unavailable;
-    return PopScope(
-      canPop: !_locked,
-      child: Stack(
-        children: [
-          ExcludeSemantics(
+    return Stack(
+      children: [
+        ExcludeSemantics(
+          excluding: _locked,
+          child: ExcludeFocus(
             excluding: _locked,
-            child: ExcludeFocus(
-              excluding: _locked,
-              child: IgnorePointer(ignoring: _locked, child: widget.child),
+            child: IgnorePointer(ignoring: _locked, child: widget.child),
+          ),
+        ),
+        if (_locked)
+          Positioned.fill(
+            child: _LockCover(
+              message: switch (_last) {
+                UnlockResult.lockedOut =>
+                  'Biometria bloqueada por tentativas. Entre com a senha.',
+                UnlockResult.unavailable =>
+                  'Desbloqueio do aparelho indisponível. Entre com a senha.',
+                _ =>
+                  'Alertas continuam chegando; eles estarão no painel ao desbloquear.',
+              },
+              canRetry: !blockedOut,
+              onRetry: _prompt,
+              onUsePassword: widget.onUsePassword,
             ),
           ),
-          if (_locked)
-            Positioned.fill(
-              child: _LockCover(
-                message: switch (_last) {
-                  UnlockResult.lockedOut =>
-                    'Biometria bloqueada por tentativas. Entre com a senha.',
-                  UnlockResult.unavailable =>
-                    'Desbloqueio do aparelho indisponível. Entre com a senha.',
-                  _ =>
-                    'Alertas continuam chegando; eles estarão no painel ao desbloquear.',
-                },
-                canRetry: !blockedOut,
-                onRetry: _prompt,
-                onUsePassword: widget.onUsePassword,
-              ),
-            ),
-        ],
-      ),
+      ],
     );
   }
 }

@@ -24,44 +24,55 @@ class FakeBiometricGate implements BiometricGate {
   }
 }
 
+class _Painel extends StatefulWidget {
+  const _Painel({required this.focus});
+  final FocusNode focus;
+  @override
+  State<_Painel> createState() => _PainelState();
+}
+
+class _PainelState extends State<_Painel> {
+  int n = 0;
+  @override
+  Widget build(BuildContext context) => Column(
+    children: [
+      TextField(key: const Key('campo'), focusNode: widget.focus),
+      Text('n=$n'),
+      TextButton(
+        onPressed: () => setState(() => n++),
+        child: const Text('mais'),
+      ),
+    ],
+  );
+}
+
 void main() {
   late FakeBiometricGate gate;
   late DateTime now;
   late FocusNode focus;
-  var counter = 0;
+  late GlobalKey<NavigatorState> navKey;
   var passwordTaps = 0;
 
   setUp(() {
     gate = FakeBiometricGate();
     now = DateTime(2026, 10, 3, 12);
     focus = FocusNode();
-    counter = 0;
+    navKey = GlobalKey<NavigatorState>();
     passwordTaps = 0;
   });
 
   Future<void> pump(WidgetTester t) => t.pumpWidget(
     MaterialApp(
+      navigatorKey: navKey,
       theme: buildAcsDarkTheme(),
       builder: (context, child) => AppLockGate(
+        navigatorKey: navKey,
         gate: gate,
         clock: () => now,
         onUsePassword: () => passwordTaps++,
         child: child!,
       ),
-      home: Scaffold(
-        body: StatefulBuilder(
-          builder: (c, set) => Column(
-            children: [
-              TextField(key: const Key('campo'), focusNode: focus),
-              Text('n=$counter'),
-              TextButton(
-                onPressed: () => set(() => counter++),
-                child: const Text('mais'),
-              ),
-            ],
-          ),
-        ),
-      ),
+      home: Scaffold(body: _Painel(focus: focus)),
     ),
   );
 
@@ -157,7 +168,7 @@ void main() {
       final sem = t.ensureSemantics();
       await t.tap(find.text('mais', skipOffstage: false), warnIfMissed: false);
       await t.pump();
-      expect(counter, 0);
+      expect(find.text('n=0', skipOffstage: false), findsOneWidget);
       expect(find.semantics.byLabel('mais'), findsNothing);
       sem.dispose();
     },
@@ -276,8 +287,82 @@ void main() {
         await background(t, const Duration(minutes: 1));
         expect(find.text('Desbloquear'), findsNothing, reason: '$r');
         await t.pumpWidget(const SizedBox());
-        gate.calls = 0;
       }
+      gate.result = UnlockResult.cancelled;
+      await pump(t);
+      await background(t, const Duration(minutes: 1));
+      expect(find.text('Desbloquear'), findsOneWidget);
+    },
+  );
+
+  testWidgets('dispose do gate bloqueado remove o bloqueio do voltar', (
+    t,
+  ) async {
+    gate.result = UnlockResult.cancelled;
+    await pump(t);
+    navKey.currentState!.push(
+      MaterialPageRoute<void>(
+        builder: (_) => const Scaffold(body: Text('segunda')),
+      ),
+    );
+    await t.pumpAndSettle();
+    await background(t, const Duration(minutes: 1));
+    // tira o gate da árvore (chave diferente) com o Navigator preservado
+    await t.pumpWidget(
+      MaterialApp(
+        navigatorKey: navKey,
+        home: const Scaffold(body: Text('raiz')),
+      ),
+    );
+    await t.pumpAndSettle();
+    await t.binding.handlePopRoute();
+    await t.pumpAndSettle();
+    expect(find.text('segunda'), findsNothing);
+  });
+
+  testWidgets(
+    'Navigator que aparece depois de bloquear recebe o bloqueio do voltar',
+    (t) async {
+      gate.result = UnlockResult.cancelled;
+      final key = GlobalKey<NavigatorState>();
+      var mostrar = false;
+      late StateSetter set;
+      await t.pumpWidget(
+        Directionality(
+          textDirection: TextDirection.ltr,
+          child: StatefulBuilder(
+            builder: (c, s) {
+              set = s;
+              return AppLockGate(
+                gate: gate,
+                clock: () => now,
+                navigatorKey: key,
+                child: mostrar
+                    ? Navigator(
+                        key: key,
+                        onGenerateRoute: (_) => MaterialPageRoute<void>(
+                          builder: (_) => const Text('raiz'),
+                        ),
+                      )
+                    : const SizedBox(),
+              );
+            },
+          ),
+        ),
+      );
+      await background(t, const Duration(minutes: 1));
+      expect(key.currentState, isNull);
+      set(() => mostrar = true);
+      await t.pumpAndSettle();
+      expect(key.currentState, isNotNull);
+      await t.binding.handlePopRoute();
+      await t.pumpAndSettle();
+      // com o bloqueio instalado o pop é engolido; sem ele o app sairia (rota única)
+      expect(find.text('raiz', skipOffstage: false), findsOneWidget);
+      expect(
+        key.currentState!.canPop(),
+        isTrue,
+      ); // há a rota-bloqueio empilhada
     },
   );
 
@@ -332,9 +417,14 @@ void main() {
         });
         await t.pumpWidget(
           MaterialApp(
+            navigatorKey: navKey,
             theme: tema,
-            builder: (context, child) =>
-                AppLockGate(gate: gate, clock: () => now, child: child!),
+            builder: (context, child) => AppLockGate(
+              gate: gate,
+              clock: () => now,
+              navigatorKey: navKey,
+              child: child!,
+            ),
             home: const Scaffold(body: Text('x')),
           ),
         );
