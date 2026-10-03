@@ -1,17 +1,25 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sinalacs_acs/app/acs_theme.dart';
 import 'package:sinalacs_acs/app/app_lock_gate.dart';
 import 'package:sinalacs_acs/core/security/biometric_gate.dart';
 
+import 'support/layout_harness.dart' show redimensionar;
+
 class FakeBiometricGate implements BiometricGate {
   UnlockResult result = UnlockResult.unlocked;
   int calls = 0;
+  bool throwOnAuth = false;
+  Completer<UnlockResult>? pending;
   @override
   Future<bool> get isAvailable async => true;
   @override
   Future<UnlockResult> authenticate({required String reason}) async {
     calls++;
+    if (throwOnAuth) throw StateError('boom');
+    if (pending != null) return pending!.future;
     return result;
   }
 }
@@ -19,28 +27,49 @@ class FakeBiometricGate implements BiometricGate {
 void main() {
   late FakeBiometricGate gate;
   late DateTime now;
-  late TextEditingController controller;
+  late FocusNode focus;
+  var counter = 0;
   var passwordTaps = 0;
 
   setUp(() {
     gate = FakeBiometricGate();
     now = DateTime(2026, 10, 3, 12);
-    controller = TextEditingController();
+    focus = FocusNode();
+    counter = 0;
     passwordTaps = 0;
   });
 
-  Future<void> pump(WidgetTester t) => t.pumpWidget(MaterialApp(
-        theme: buildAcsDarkTheme(),
-        builder: (context, child) => AppLockGate(
-          gate: gate,
-          clock: () => now,
-          onUsePassword: () => passwordTaps++,
-          child: child!,
+  Future<void> pump(WidgetTester t) => t.pumpWidget(
+    MaterialApp(
+      theme: buildAcsDarkTheme(),
+      builder: (context, child) => AppLockGate(
+        gate: gate,
+        clock: () => now,
+        onUsePassword: () => passwordTaps++,
+        child: child!,
+      ),
+      home: Scaffold(
+        body: StatefulBuilder(
+          builder: (c, set) => Column(
+            children: [
+              TextField(key: const Key('campo'), focusNode: focus),
+              Text('n=$counter'),
+              TextButton(
+                onPressed: () => set(() => counter++),
+                child: const Text('mais'),
+              ),
+            ],
+          ),
         ),
-        home: Scaffold(body: TextField(controller: controller)),
-      ));
+      ),
+    ),
+  );
 
-  Future<void> background(WidgetTester t, Duration away, {bool settle = true}) async {
+  Future<void> background(
+    WidgetTester t,
+    Duration away, {
+    bool settle = true,
+  }) async {
     t.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
     t.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
     t.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
@@ -51,14 +80,18 @@ void main() {
     if (settle) await t.pumpAndSettle();
   }
 
-  testWidgets('fica desbloqueado se voltar do segundo plano antes do prazo', (t) async {
+  testWidgets('fica desbloqueado se voltar do segundo plano antes do prazo', (
+    t,
+  ) async {
     await pump(t);
     await background(t, const Duration(seconds: 10));
     expect(find.text('Aplicativo bloqueado'), findsNothing);
     expect(gate.calls, 0);
   });
 
-  testWidgets('bloqueia ao voltar depois do prazo e mostra "Desbloquear"', (t) async {
+  testWidgets('bloqueia ao voltar depois do prazo e mostra "Desbloquear"', (
+    t,
+  ) async {
     gate.result = UnlockResult.cancelled;
     await pump(t);
     await background(t, const Duration(seconds: 31));
@@ -66,17 +99,22 @@ void main() {
     expect(find.text('Desbloquear'), findsOneWidget);
   });
 
-  testWidgets('o filho continua MONTADO e com o mesmo estado enquanto bloqueado', (t) async {
-    gate.result = UnlockResult.cancelled;
-    await pump(t);
-    await t.enterText(find.byType(TextField), 'rascunho');
-    final navigator = t.state(find.byType(Navigator));
-    await background(t, const Duration(minutes: 2));
-    expect(find.text('Aplicativo bloqueado'), findsOneWidget);
-    expect(find.byType(TextField, skipOffstage: false), findsOneWidget);
-    expect(controller.text, 'rascunho');
-    expect(t.state(find.byType(Navigator)), same(navigator));
-  });
+  testWidgets(
+    'o filho continua MONTADO e com o mesmo estado enquanto bloqueado',
+    (t) async {
+      gate.result = UnlockResult.cancelled;
+      await pump(t);
+      await t.enterText(find.byKey(const Key('campo')), 'rascunho');
+      await t.tap(find.text('mais'));
+      await t.pump();
+      final navigator = t.state(find.byType(Navigator));
+      await background(t, const Duration(minutes: 2));
+      expect(find.text('Aplicativo bloqueado'), findsOneWidget);
+      expect(find.text('n=1', skipOffstage: false), findsOneWidget);
+      expect(find.text('rascunho', skipOffstage: false), findsOneWidget);
+      expect(t.state(find.byType(Navigator)), same(navigator));
+    },
+  );
 
   testWidgets('desbloqueio bem-sucedido remove a cobertura', (t) async {
     await pump(t);
@@ -110,16 +148,20 @@ void main() {
     });
   }
 
-  testWidgets('a cobertura não expõe o conteúdo ao leitor de tela nem a toques', (t) async {
-    gate.result = UnlockResult.cancelled;
-    await pump(t);
-    await background(t, const Duration(minutes: 1));
-    final field = find.byType(TextField, skipOffstage: false);
-    final excludes = find.ancestor(of: field, matching: find.byType(ExcludeSemantics)).evaluate();
-    expect(excludes.any((e) => (e.widget as ExcludeSemantics).excluding), isTrue);
-    final ignores = find.ancestor(of: field, matching: find.byType(IgnorePointer)).evaluate();
-    expect(ignores.any((e) => (e.widget as IgnorePointer).ignoring), isTrue);
-  });
+  testWidgets(
+    'a cobertura não expõe o conteúdo ao leitor de tela nem a toques',
+    (t) async {
+      gate.result = UnlockResult.cancelled;
+      await pump(t);
+      await background(t, const Duration(minutes: 1));
+      final sem = t.ensureSemantics();
+      await t.tap(find.text('mais', skipOffstage: false), warnIfMissed: false);
+      await t.pump();
+      expect(counter, 0);
+      expect(find.semantics.byLabel('mais'), findsNothing);
+      sem.dispose();
+    },
+  );
 
   testWidgets('abre o prompt sozinho ao bloquear', (t) async {
     gate.result = UnlockResult.cancelled;
@@ -137,4 +179,169 @@ void main() {
     expect(find.text('Aplicativo bloqueado'), findsNothing);
     expect(gate.calls, 0);
   });
+
+  testWidgets(
+    'bloquear tira o foco e o campo não recebe foco nem texto enquanto bloqueado',
+    (t) async {
+      gate.result = UnlockResult.cancelled;
+      await pump(t);
+      await t.tap(find.byKey(const Key('campo')));
+      await t.pump();
+      expect(focus.hasFocus, isTrue);
+      await background(t, const Duration(minutes: 1));
+      expect(focus.hasFocus, isFalse);
+      await t.tap(
+        find.byKey(const Key('campo'), skipOffstage: false),
+        warnIfMissed: false,
+      );
+      await t.pump();
+      expect(focus.hasFocus, isFalse);
+      await t
+          .showKeyboard(find.byKey(const Key('campo'), skipOffstage: false))
+          .catchError((_) {});
+      expect(focus.hasFocus, isFalse);
+    },
+  );
+
+  testWidgets(
+    'voltar fica engolido enquanto bloqueado e funciona desbloqueado',
+    (t) async {
+      gate.result = UnlockResult.cancelled;
+      final nav = GlobalKey<NavigatorState>();
+      await t.pumpWidget(
+        MaterialApp(
+          navigatorKey: nav,
+          theme: buildAcsDarkTheme(),
+          builder: (context, child) => AppLockGate(
+            gate: gate,
+            clock: () => now,
+            navigatorKey: nav,
+            child: child!,
+          ),
+          home: const Scaffold(body: Text('raiz')),
+        ),
+      );
+      nav.currentState!.push(
+        MaterialPageRoute<void>(
+          builder: (_) => const Scaffold(body: Text('segunda')),
+        ),
+      );
+      await t.pumpAndSettle();
+      await t.binding.handlePopRoute();
+      await t.pumpAndSettle();
+      expect(find.text('segunda'), findsNothing); // desbloqueado: voltou
+
+      nav.currentState!.push(
+        MaterialPageRoute<void>(
+          builder: (_) => const Scaffold(body: Text('segunda')),
+        ),
+      );
+      await t.pumpAndSettle();
+      await background(t, const Duration(minutes: 1));
+      await t.binding.handlePopRoute();
+      await t.pumpAndSettle();
+      expect(
+        find.text('segunda', skipOffstage: false),
+        findsOneWidget,
+      ); // bloqueado: engolido
+    },
+  );
+
+  testWidgets('relógio que anda para trás bloqueia', (t) async {
+    gate.result = UnlockResult.cancelled;
+    await pump(t);
+    await background(t, const Duration(hours: -1));
+    expect(find.text('Aplicativo bloqueado'), findsOneWidget);
+  });
+
+  testWidgets(
+    'gate que lança falha fechada: continua bloqueado e oferece senha',
+    (t) async {
+      gate.throwOnAuth = true;
+      await pump(t);
+      await background(t, const Duration(minutes: 1));
+      expect(find.text('Aplicativo bloqueado'), findsOneWidget);
+      expect(find.text('Entrar com senha'), findsOneWidget);
+      // _prompting foi liberado: o próximo toque não fica preso (botão de retry some em unavailable)
+      expect(find.text('Desbloquear'), findsNothing);
+    },
+  );
+
+  testWidgets(
+    '"Desbloquear" some em lockedOut e unavailable; aparece após cancelar',
+    (t) async {
+      for (final r in [UnlockResult.lockedOut, UnlockResult.unavailable]) {
+        gate.result = r;
+        await pump(t);
+        await background(t, const Duration(minutes: 1));
+        expect(find.text('Desbloquear'), findsNothing, reason: '$r');
+        await t.pumpWidget(const SizedBox());
+        gate.calls = 0;
+      }
+    },
+  );
+
+  testWidgets('descartar o gate com authenticate pendente não chama setState', (
+    t,
+  ) async {
+    gate.pending = Completer<UnlockResult>();
+    await pump(t);
+    await background(t, const Duration(minutes: 1), settle: false);
+    await t.pump();
+    expect(gate.calls, 1);
+    await t.pumpWidget(const SizedBox());
+    gate.pending!.complete(UnlockResult.unlocked);
+    await t.pump();
+    expect(t.takeException(), isNull);
+  });
+
+  testWidgets('a cobertura não mostra dado de paciente', (t) async {
+    gate.result = UnlockResult.cancelled;
+    await pump(t);
+    await background(t, const Duration(minutes: 1));
+    final textos = find
+        .descendant(
+          of: find
+              .ancestor(
+                of: find.text('Aplicativo bloqueado'),
+                matching: find.byType(SafeArea),
+              )
+              .first,
+          matching: find.byType(Text),
+        )
+        .evaluate()
+        .map((e) => (e.widget as Text).data)
+        .toSet();
+    expect(textos, {
+      'Aplicativo bloqueado',
+      'Alertas continuam chegando; eles estarão no painel ao desbloquear.',
+      'Desbloquear',
+      'Entrar com senha',
+    });
+  });
+
+  for (final tema in [buildAcsDarkTheme(), buildAcsLightTheme()]) {
+    testWidgets(
+      'cobertura com fonte 2.0 não estoura (${tema.brightness.name})',
+      (t) async {
+        gate.result = UnlockResult.cancelled;
+        redimensionar(t, const Size(320, 480), escalaDeFonte: 2.0);
+        addTearDown(() {
+          t.view.reset();
+          t.platformDispatcher.clearTextScaleFactorTestValue();
+        });
+        await t.pumpWidget(
+          MaterialApp(
+            theme: tema,
+            builder: (context, child) =>
+                AppLockGate(gate: gate, clock: () => now, child: child!),
+            home: const Scaffold(body: Text('x')),
+          ),
+        );
+        await background(t, const Duration(minutes: 1));
+        expect(find.text('Aplicativo bloqueado'), findsOneWidget);
+        expect(t.takeException(), isNull);
+      },
+    );
+  }
 }
