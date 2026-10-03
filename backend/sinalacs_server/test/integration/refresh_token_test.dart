@@ -1,12 +1,15 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
 import 'package:serverpod/serverpod.dart';
 import 'package:sinalacs_server/src/application/auth/refresh_token_service.dart';
+import 'package:sinalacs_server/src/application/auth/totp.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_refresh_token_store.dart';
 import 'package:test/test.dart';
 
+import 'test_tools/runtime_harness.dart';
 import 'test_tools/serverpod_test_tools.dart';
 
 /// Store do refresh token (LGPD-RT06) contra Postgres real: prova a rotação
@@ -104,6 +107,7 @@ OrmRefreshTokenStore _store(Session s) =>
     OrmRefreshTokenStore(session: () => s);
 
 void main() {
+  endpointTests();
   withServerpod('Dado o store do refresh token do ACS', (
     sessionBuilder,
     endpoints,
@@ -355,4 +359,193 @@ void main() {
     },
     rollbackDatabase: RollbackDatabase.disabled,
   );
+}
+
+const _matricula = 'ACS-REFRESH-001';
+const _senha = 'senha-sintetica-de-teste';
+const _aparelho = 'aparelho-refresh-1';
+const _outraMicroArea = '00000000-0000-4000-8000-0000000000a6';
+
+Uint8List _deBase32(String texto) {
+  const alfabeto = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+  var bits = 0;
+  var valor = 0;
+  final saida = <int>[];
+  for (final c in texto.split('')) {
+    valor = (valor << 5) | alfabeto.indexOf(c);
+    bits += 5;
+    if (bits >= 8) {
+      saida.add((valor >> (bits - 8)) & 0xff);
+      bits -= 8;
+    }
+  }
+  return Uint8List.fromList(saida);
+}
+
+/// Endpoints `auth.loginInstitutional`, `refreshSession` e `logout` contra
+/// Postgres real. O relógio do endpoint não é injetável: o envelhecimento do
+/// token é feito reescrevendo `rotatedAt` pelo ORM.
+void endpointTests() {
+  withServerpod('Dado o refresh token do ACS nos endpoints de auth', (
+    sessionBuilder,
+    endpoints,
+  ) {
+    late Session session;
+    late Uint8List segredo;
+    var passo = 0;
+
+    setUp(() async {
+      session = sessionBuilder.build();
+      await _seed(session);
+      await AlertRuntimeHarness.store(session).saveCredential(
+        _acsId,
+        await AlertRuntimeHarness.hasher.derive(_senha),
+        DateTime.now().toUtc(),
+      );
+      final inicio = await endpoints.auth.beginTotpEnrollment(
+        sessionBuilder,
+        matricula: _matricula,
+        password: _senha,
+      );
+      segredo = _deBase32(inicio.secretBase32);
+      final agora = DateTime.now().toUtc();
+      await endpoints.auth.confirmTotpEnrollment(
+        sessionBuilder,
+        matricula: _matricula,
+        password: _senha,
+        code: Totp.code(segredo, agora),
+      );
+      passo = 1;
+    });
+
+    Future<DevelopmentLoginResult> entrar() {
+      final codigo = Totp.code(
+        segredo,
+        DateTime.now().toUtc().add(Duration(seconds: Totp.period * passo++)),
+      );
+      return endpoints.auth.loginInstitutional(
+        sessionBuilder,
+        matricula: _matricula,
+        password: _senha,
+        deviceId: _aparelho,
+        totpCode: codigo,
+      );
+    }
+
+    test('o login com MFA devolve refresh token e o device_id do JWT', () async {
+      final login = await entrar();
+      expect(login.refreshToken, isNotEmpty);
+      final user = AlertRuntimeHarness.verify(login.accessToken);
+      expect(user?.deviceId, _aparelho);
+    });
+
+    test('refreshSession troca o token sem senha nem TOTP', () async {
+      final login = await entrar();
+      final renovado = await endpoints.auth.refreshSession(
+        sessionBuilder,
+        refreshToken: login.refreshToken!,
+        deviceId: _aparelho,
+      );
+      final user = AlertRuntimeHarness.verify(renovado.accessToken);
+      expect(user, isNotNull);
+      expect(user!.id, _acsId);
+      expect(user.microAreaId, _microAreaId);
+      expect(renovado.refreshToken, isNotEmpty);
+      expect(renovado.refreshToken, isNot(login.refreshToken));
+    });
+
+    test('reuso do token antigo além da tolerância revoga a família', () async {
+      final login = await entrar();
+      final filho = await endpoints.auth.refreshSession(
+        sessionBuilder,
+        refreshToken: login.refreshToken!,
+        deviceId: _aparelho,
+      );
+      // Envelhece a rotação do pai: o relógio do endpoint não é injetável.
+      final hash = sha256.convert(utf8.encode(login.refreshToken!)).toString();
+      final pai = (await AcsRefreshToken.db.findFirstRow(
+        session,
+        where: (t) => t.tokenHash.equals(hash),
+      ))!;
+      pai.rotatedAt = DateTime.now().toUtc().subtract(
+            const Duration(minutes: 5),
+          );
+      await AcsRefreshToken.db.updateRow(session, pai);
+
+      await expectLater(
+        endpoints.auth.refreshSession(
+          sessionBuilder,
+          refreshToken: login.refreshToken!,
+          deviceId: _aparelho,
+        ),
+        throwsA(isA<SessionExpiredException>()),
+      );
+      await expectLater(
+        endpoints.auth.refreshSession(
+          sessionBuilder,
+          refreshToken: filho.refreshToken!,
+          deviceId: _aparelho,
+        ),
+        throwsA(isA<SessionExpiredException>()),
+      );
+    });
+
+    test('a microárea nova do banco chega ao JWT seguinte', () async {
+      final login = await entrar();
+      await MicroArea.db.insertRow(
+        session,
+        MicroArea(
+          id: UuidValue.fromString(_outraMicroArea),
+          name: 'Outra microárea',
+          ubsId: UuidValue.fromString(_ubsId),
+          geoJsonBoundary: '{}',
+        ),
+      );
+      final u = (await User.db.findById(session, UuidValue.fromString(_acsId)))!;
+      u.microAreaId = UuidValue.fromString(_outraMicroArea);
+      await User.db.updateRow(session, u);
+
+      final renovado = await endpoints.auth.refreshSession(
+        sessionBuilder,
+        refreshToken: login.refreshToken!,
+        deviceId: _aparelho,
+      );
+      expect(
+        AlertRuntimeHarness.verify(renovado.accessToken)?.microAreaId,
+        _outraMicroArea,
+      );
+    });
+
+    test('ACS desativado recebe SessionExpiredException', () async {
+      final login = await entrar();
+      final acs = (await Acs.db.findById(session, UuidValue.fromString(_acsId)))!;
+      acs.active = false;
+      await Acs.db.updateRow(session, acs);
+      await expectLater(
+        endpoints.auth.refreshSession(
+          sessionBuilder,
+          refreshToken: login.refreshToken!,
+          deviceId: _aparelho,
+        ),
+        throwsA(isA<SessionExpiredException>()),
+      );
+    });
+
+    test('logout revoga o token; token desconhecido não lança', () async {
+      final login = await entrar();
+      await endpoints.auth.logout(
+        sessionBuilder,
+        refreshToken: login.refreshToken!,
+      );
+      await expectLater(
+        endpoints.auth.refreshSession(
+          sessionBuilder,
+          refreshToken: login.refreshToken!,
+          deviceId: _aparelho,
+        ),
+        throwsA(isA<SessionExpiredException>()),
+      );
+      await endpoints.auth.logout(sessionBuilder, refreshToken: 'inexistente');
+    });
+  });
 }

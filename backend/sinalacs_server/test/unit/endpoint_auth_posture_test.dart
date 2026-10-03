@@ -35,6 +35,12 @@ const _publicMethodsByDesign = <String, String>{
   'AuthEndpoint.loginInstitutional':
       'é o próprio emissor de token: quem chama o login institucional (RF07) '
       'ainda não tem credencial — a matrícula e a senha SÃO a credencial',
+  'AuthEndpoint.refreshSession':
+      'renovação por refresh token (LGPD-RT06): quem chama já perdeu o JWT; o '
+      'token opaco, rotativo e amarrado ao aparelho É a credencial',
+  'AuthEndpoint.logout':
+      'revoga pela posse do refresh token; idempotente e sem efeito sobre '
+      'token desconhecido',
   'OnboardingEndpoint.completeEnrollment':
       'público por desenho: quem conclui o onboarding ainda não tem sessão — o '
       'convite de uso único é a credencial',

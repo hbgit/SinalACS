@@ -157,6 +157,29 @@ class EndpointAuth extends _i1.EndpointRef {
     },
   );
 
+  /// Renova a sessão do ACS sem pedir senha nem TOTP (LGPD-RT06). Público por
+  /// desenho: quem chama já perdeu o JWT de 15 min — o refresh token, opaco e de
+  /// uso único, é a credencial. Toda recusa é a mesma `SessionExpiredException`.
+  _i2.Future<_i6.DevelopmentLoginResult> refreshSession({
+    required String refreshToken,
+    required String deviceId,
+  }) => caller.callServerEndpoint<_i6.DevelopmentLoginResult>(
+    'auth',
+    'refreshSession',
+    {
+      'refreshToken': refreshToken,
+      'deviceId': deviceId,
+    },
+  );
+
+  /// Encerra o turno: revoga a família inteira. Idempotente.
+  _i2.Future<void> logout({required String refreshToken}) =>
+      caller.callServerEndpoint<void>(
+        'auth',
+        'logout',
+        {'refreshToken': refreshToken},
+      );
+
   /// Começa a ativação da MFA do ACS (RF07). Sem token: o ACS prova matrícula e senha.
   _i2.Future<_i7.TotpEnrollmentStart> beginTotpEnrollment({
     required String matricula,

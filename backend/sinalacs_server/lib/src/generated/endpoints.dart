@@ -238,6 +238,48 @@ class Endpoints extends _i1.EndpointDispatch {
                     totpCode: params['totpCode'],
                   ),
         ),
+        'refreshSession': _i1.MethodConnector(
+          name: 'refreshSession',
+          params: {
+            'refreshToken': _i1.ParameterDescription(
+              name: 'refreshToken',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'deviceId': _i1.ParameterDescription(
+              name: 'deviceId',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async => (endpoints['auth'] as _i3.AuthEndpoint).refreshSession(
+                session,
+                refreshToken: params['refreshToken'],
+                deviceId: params['deviceId'],
+              ),
+        ),
+        'logout': _i1.MethodConnector(
+          name: 'logout',
+          params: {
+            'refreshToken': _i1.ParameterDescription(
+              name: 'refreshToken',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async => (endpoints['auth'] as _i3.AuthEndpoint).logout(
+                session,
+                refreshToken: params['refreshToken'],
+              ),
+        ),
         'beginTotpEnrollment': _i1.MethodConnector(
           name: 'beginTotpEnrollment',
           params: {

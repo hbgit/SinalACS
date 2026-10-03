@@ -17,7 +17,8 @@ class AuthEndpoint extends Endpoint {
   bool get requireLogin => false;
 
   /// TTL da sessão do paciente (LGPD-RT06). O ACS continua nos 15 minutos
-  /// padrão — a renovação dele é silenciosa, por credencial em memória.
+  /// padrão, e a renovação dele é o refresh token rotativo (`refreshSession`):
+  /// sem senha nem TOTP, mas só para quem ainda guarda o token opaco do aparelho.
   static const patientSessionLifetime = Duration(hours: 1);
 
   /// UUIDs fixos do seed de desenvolvimento. Dados sintéticos.
@@ -89,11 +90,37 @@ class AuthEndpoint extends Endpoint {
           totpCode: totpCode,
         );
 
+    final refreshToken =
+        await runtime.refreshTokenServiceFor(session).issue(user);
     return DevelopmentLoginResult(
       accessToken: runtime.auth.issueToken(user),
       tokenType: 'Bearer',
+      refreshToken: refreshToken,
     );
   }
+
+  /// Renova a sessão do ACS sem pedir senha nem TOTP (LGPD-RT06). Público por
+  /// desenho: quem chama já perdeu o JWT de 15 min — o refresh token, opaco e de
+  /// uso único, é a credencial. Toda recusa é a mesma `SessionExpiredException`.
+  Future<DevelopmentLoginResult> refreshSession(
+    Session session, {
+    required String refreshToken,
+    required String deviceId,
+  }) async {
+    final runtime = AlertRuntime.instance;
+    final renewed = await runtime
+        .refreshTokenServiceFor(session)
+        .refresh(refreshToken: refreshToken, deviceId: deviceId);
+    return DevelopmentLoginResult(
+      accessToken: runtime.auth.issueToken(renewed.user),
+      tokenType: 'Bearer',
+      refreshToken: renewed.refreshToken,
+    );
+  }
+
+  /// Encerra o turno: revoga a família inteira. Idempotente.
+  Future<void> logout(Session session, {required String refreshToken}) =>
+      AlertRuntime.instance.refreshTokenServiceFor(session).revoke(refreshToken);
 
   /// Começa a ativação da MFA do ACS (RF07). Sem token: o ACS prova matrícula e senha.
   Future<TotpEnrollmentStart> beginTotpEnrollment(
