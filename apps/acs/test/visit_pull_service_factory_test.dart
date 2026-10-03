@@ -1,8 +1,10 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sinalacs_acs/core/database/encrypted_database.dart';
+import 'package:sinalacs_acs/core/database/sqlcipher_visit_store.dart';
 import 'package:sinalacs_acs/core/database/sync_cursor_store.dart';
 import 'package:sinalacs_acs/core/security/database_key_store.dart';
 import 'package:sinalacs_acs/core/services/offline_visit_queue.dart';
+import 'package:sinalacs_acs/core/services/visit_pull_service.dart';
 import 'package:sinalacs_acs/core/services/visit_pull_service_factory.dart';
 import 'package:sinalacs_client/sinalacs_client.dart';
 
@@ -34,7 +36,8 @@ void main() {
           ),
         ];
       final cursorStore = SyncCursorStore(
-        keyStore: InMemoryDatabaseKeyStore(), owner: 'acs-a',
+        keyStore: InMemoryDatabaseKeyStore(),
+        owner: 'acs-a',
         databaseName: dbName,
         allowUnencryptedForTesting: true,
       );
@@ -66,4 +69,44 @@ void main() {
       expect(service.lastPulled, isEmpty);
     },
   );
+
+  test('sem cursorStore injetado, o cursor é gravado na chave do cursorOwner', () async {
+    final keyStore = InMemoryDatabaseKeyStore();
+    VisitPullService build(String owner, FakeAcsBackend backend) => buildVisitPullService(
+          backend: backend,
+          localVisits: InMemoryVisitStore(),
+          cursorOwner: owner,
+          keyStore: keyStore,
+          databaseName: dbName,
+          allowUnencryptedForTesting: true,
+        );
+    final backendA = FakeAcsBackend()
+      ..pullEntries = [
+        VisitSyncEntry(
+          localId: 'x',
+          patientId: seedPatientId,
+          scheduledAt: DateTime.utc(2026, 9, 12, 9),
+          status: 'realizada',
+          riskLevelBefore: RiskLevel.green,
+          notes: const {},
+          version: 1,
+          syncAt: DateTime.utc(2026, 9, 12, 10),
+          arrivalMethod: ArrivalMethod.manual,
+        ),
+      ];
+    await build('acs-a', backendA).pullAndMerge();
+
+    final db = VisitDatabase(
+      keyStore: keyStore,
+      databaseName: dbName,
+      allowUnencryptedForTesting: true,
+    );
+    addTearDown(db.close);
+    final rows = await (await db.open()).query('sync_cursor');
+    expect(rows.map((r) => r['key']), ['visits_pull|acs-a']);
+
+    final backendB = FakeAcsBackend();
+    await build('acs-b', backendB).pullAndMerge();
+    expect(backendB.pullSinceCalls.single, DateTime.utc(2000));
+  });
 }

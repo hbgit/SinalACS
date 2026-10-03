@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:sinalacs_acs/core/database/sync_cursor_store.dart';
 import 'package:sinalacs_acs/core/network/backend_client.dart';
 import 'package:sinalacs_acs/core/security/database_key_store.dart';
@@ -24,13 +25,18 @@ VisitPullService buildVisitPullService({
   required VisitStore localVisits,
   required String cursorOwner,
   SyncCursorStore? cursorStore,
+  @visibleForTesting DatabaseKeyStore? keyStore,
+  @visibleForTesting String databaseName = 'sinalacs_acs.db',
+  @visibleForTesting bool allowUnencryptedForTesting = false,
 }) =>
     VisitPullService(
       backend: backend,
       cursorStore: cursorStore ??
           SyncCursorStore(
-            keyStore: SecureStorageDatabaseKeyStore(),
+            keyStore: keyStore ?? SecureStorageDatabaseKeyStore(),
             owner: cursorOwner,
+            databaseName: databaseName,
+            allowUnencryptedForTesting: allowUnencryptedForTesting,
           ),
       localVisits: localVisits,
     );

@@ -18,7 +18,8 @@ void main() {
 
     test('sem cursor gravado, read() devolve null', () async {
       final store = SyncCursorStore(
-        keyStore: InMemoryDatabaseKeyStore(), owner: 'acs-a',
+        keyStore: InMemoryDatabaseKeyStore(),
+        owner: 'acs-a',
         databaseName: nome,
         allowUnencryptedForTesting: true,
       );
@@ -28,7 +29,8 @@ void main() {
 
     test('write grava e um read seguinte devolve o mesmo valor', () async {
       final store = SyncCursorStore(
-        keyStore: InMemoryDatabaseKeyStore(), owner: 'acs-a',
+        keyStore: InMemoryDatabaseKeyStore(),
+        owner: 'acs-a',
         databaseName: nome,
         allowUnencryptedForTesting: true,
       );
@@ -42,7 +44,8 @@ void main() {
     test('uma nova instância apontando para o mesmo arquivo lê o cursor gravado pela anterior', () async {
       final keyStore = InMemoryDatabaseKeyStore();
       final first = SyncCursorStore(
-        keyStore: keyStore, owner: 'acs-a',
+        keyStore: keyStore,
+        owner: 'acs-a',
         databaseName: nome,
         allowUnencryptedForTesting: true,
       );
@@ -50,7 +53,8 @@ void main() {
       await first.write(since);
 
       final second = SyncCursorStore(
-        keyStore: keyStore, owner: 'acs-a',
+        keyStore: keyStore,
+        owner: 'acs-a',
         databaseName: nome,
         allowUnencryptedForTesting: true,
       );
@@ -60,7 +64,8 @@ void main() {
 
     test('escrever de novo substitui o cursor anterior', () async {
       final store = SyncCursorStore(
-        keyStore: InMemoryDatabaseKeyStore(), owner: 'acs-a',
+        keyStore: InMemoryDatabaseKeyStore(),
+        owner: 'acs-a',
         databaseName: nome,
         allowUnencryptedForTesting: true,
       );
