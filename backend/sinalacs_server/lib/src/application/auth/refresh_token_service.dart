@@ -37,7 +37,9 @@ class RefreshTokenRecord {
 }
 
 abstract interface class RefreshTokenStore {
-  Future<void> insert(RefreshTokenRecord record, String tokenHash);
+  /// Insere **só se** a família não estiver revogada. `false` = a família foi
+  /// revogada e nada foi gravado (fecha a corrida com `revokeFamily`).
+  Future<bool> insert(RefreshTokenRecord record, String tokenHash);
   Future<RefreshTokenRecord?> findByHash(String tokenHash);
 
   /// Marca `rotatedAt` **só se** a linha ainda não foi rotacionada nem
@@ -67,20 +69,32 @@ class RefreshTokenService {
 
   static const idleWindow = Duration(hours: 2);
   static const absoluteWindow = Duration(hours: 8);
+  /// Tolerância de rede: a resposta de um refresh pode se perder e o app
+  /// reapresenta o token antigo. Dentro deste prazo emitimos um filho novo sem
+  /// revogar. Troca aceita: dois filhos da mesma família podem coexistir por
+  /// até este prazo (um ladrão com o token roubado também se beneficia), por
+  /// isso o desfecho é auditado à parte como `refresh_granted_grace`.
   static const reuseGrace = Duration(seconds: 30);
   static const deniedMessage = 'Sessão expirada. Entre novamente.';
 
   /// Primeiro token de uma família nova (login por senha+TOTP).
   Future<String> issue(AuthenticatedUser user, {DateTime? now}) async {
     final at = (now ?? DateTime.now()).toUtc();
+    if (user.role != UserRole.acs) {
+      throw ArgumentError.value(user.role, 'user.role', 'só o ACS tem refresh');
+    }
     await store.deleteExpiredFor(user.id, at);
-    return _insert(
+    final token = await _insert(
       userId: user.id,
       familyId: _uuid(),
       deviceId: user.deviceId,
       at: at,
       absoluteExpiresAt: at.add(absoluteWindow),
     );
+    if (token == null) {
+      throw StateError('Família nova não pode estar revogada.');
+    }
+    return token;
   }
 
   Future<RefreshedSession> refresh({
@@ -101,16 +115,16 @@ class RefreshTokenService {
       await _audit(record.userId, 'denied_device');
       throw _denied();
     }
-    if (!at.isBefore(record.absoluteExpiresAt) ||
-        !at.isBefore(record.idleExpiresAt)) {
-      await _audit(record.userId, 'denied_expired');
-      throw _denied();
-    }
-
     final rotatedAt = record.rotatedAt;
     if (rotatedAt != null && at.difference(rotatedAt) > reuseGrace) {
       await store.revokeFamily(record.familyId, at);
       await _audit(record.userId, 'denied_reuse');
+      throw _denied();
+    }
+
+    if (!at.isBefore(record.absoluteExpiresAt) ||
+        !at.isBefore(record.idleExpiresAt)) {
+      await _audit(record.userId, 'denied_expired');
       throw _denied();
     }
 
@@ -123,8 +137,15 @@ class RefreshTokenService {
     }
 
     // Quem perde a corrida do UPDATE é uma chamada concorrente com o mesmo
-    // token, no mesmo instante: cai na mesma tolerância do reuso, não é roubo.
-    if (rotatedAt == null) await store.markRotated(record.id, at);
+    // token: se a linha só foi rotacionada, segue na tolerância do reuso; se
+    // foi revogada nesse meio-tempo, recusa.
+    if (rotatedAt == null && !await store.markRotated(record.id, at)) {
+      final fresh = await store.findByHash(_hash(refreshToken));
+      if (fresh == null || fresh.revokedAt != null) {
+        await _audit(record.userId, 'denied_revoked');
+        throw _denied();
+      }
+    }
 
     final child = await _insert(
       userId: record.userId,
@@ -133,7 +154,12 @@ class RefreshTokenService {
       at: at,
       absoluteExpiresAt: record.absoluteExpiresAt,
     );
-    await _audit(record.userId, 'refresh_granted');
+    if (child == null) {
+      await _audit(record.userId, 'denied_revoked');
+      throw _denied();
+    }
+    await _audit(record.userId,
+        rotatedAt != null ? 'refresh_granted_grace' : 'refresh_granted');
     return RefreshedSession(
       user: AuthenticatedUser(
         id: record.userId,
@@ -153,7 +179,7 @@ class RefreshTokenService {
     await _audit(record.userId, 'logout');
   }
 
-  Future<String> _insert({
+  Future<String?> _insert({
     required String userId,
     required String familyId,
     required String deviceId,
@@ -164,7 +190,7 @@ class RefreshTokenService {
         .encode(List<int>.generate(32, (_) => _random.nextInt(256)))
         .replaceAll('=', '');
     final idle = at.add(idleWindow);
-    await store.insert(
+    final stored = await store.insert(
       RefreshTokenRecord(
         id: _uuid(),
         userId: userId,
@@ -176,7 +202,7 @@ class RefreshTokenService {
       ),
       _hash(token),
     );
-    return token;
+    return stored ? token : null;
   }
 
   String _hash(String token) => sha256.convert(utf8.encode(token)).toString();

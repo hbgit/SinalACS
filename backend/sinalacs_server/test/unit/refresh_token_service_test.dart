@@ -16,11 +16,19 @@ class _MemoryStore implements RefreshTokenStore {
   final Map<String, RefreshTokenRecord> byId = {};
   final Map<String, String> hashToId = {};
   final Map<String, RefreshAccount> accounts = {};
+  Future<void> Function(String id)? onMarkRotated;
+  bool rejectInsert = false;
 
   @override
-  Future<void> insert(RefreshTokenRecord record, String tokenHash) async {
+  Future<bool> insert(RefreshTokenRecord record, String tokenHash) async {
+    if (rejectInsert ||
+        byId.values
+        .any((r) => r.familyId == record.familyId && r.revokedAt != null)) {
+      return false;
+    }
     byId[record.id] = record;
     hashToId[tokenHash] = record.id;
+    return true;
   }
 
   @override
@@ -31,6 +39,8 @@ class _MemoryStore implements RefreshTokenStore {
 
   @override
   Future<bool> markRotated(String id, DateTime at) async {
+    final hook = onMarkRotated;
+    if (hook != null) await hook(id);
     final r = byId[id]!;
     if (r.rotatedAt != null || r.revokedAt != null) return false;
     byId[id] = _copy(r, rotatedAt: at);
@@ -182,23 +192,27 @@ void main() {
         refreshToken: token,
         deviceId: 'aparelho-A',
         now: t0.add(const Duration(hours: 2, minutes: 1))));
+    expect(audit.results, contains('denied_expired'));
   });
 
   test('teto absoluto vencido mesmo com rotação recente: recusa', () async {
-    var token = await service.issue(_user, now: t0);
-    var at = t0;
-    // rotaciona a cada 1h50 até passar do teto de 8h
-    for (var i = 0; i < 4; i++) {
-      at = at.add(const Duration(hours: 1, minutes: 50));
-      token = (await service.refresh(
-              refreshToken: token, deviceId: 'aparelho-A', now: at))
-          .refreshToken;
-    }
-    // at = 7h20; a próxima, em 8h01, está dentro da janela ociosa mas fora do teto
+    // idle no futuro, teto absoluto no passado: isola a checagem do teto.
+    await store.insert(
+        RefreshTokenRecord(
+          id: '00000000-0000-4000-8000-0000000000a1',
+          userId: _acsId,
+          familyId: '00000000-0000-4000-8000-0000000000a2',
+          deviceId: 'aparelho-A',
+          issuedAt: t0,
+          idleExpiresAt: t0.add(const Duration(hours: 10)),
+          absoluteExpiresAt: t0.add(const Duration(hours: 8)),
+        ),
+        sha256.convert(utf8.encode('token-no-teto')).toString());
     await _expectDenied(() => service.refresh(
-        refreshToken: token,
+        refreshToken: 'token-no-teto',
         deviceId: 'aparelho-A',
         now: t0.add(const Duration(hours: 8, minutes: 1))));
+    expect(audit.results, contains('denied_expired'));
   });
 
   test('filho nunca passa do teto absoluto do pai', () async {
@@ -234,12 +248,81 @@ void main() {
     final first = await service.issue(_user, now: t0);
     final at = t0.add(const Duration(minutes: 5));
     await service.refresh(refreshToken: first, deviceId: 'aparelho-A', now: at);
+    final later = at.add(const Duration(seconds: 10));
     final s = await service.refresh(
+        refreshToken: first, deviceId: 'aparelho-A', now: later);
+    expect(store.byId.values.every((r) => r.revokedAt == null), isTrue);
+    expect(audit.results, isNot(contains('denied_reuse')));
+    expect(audit.results, contains('refresh_granted_grace'));
+    final parent =
+        await store.findByHash(sha256.convert(utf8.encode(first)).toString());
+    final child = await store
+        .findByHash(sha256.convert(utf8.encode(s.refreshToken)).toString());
+    expect(child!.absoluteExpiresAt, parent!.absoluteExpiresAt);
+    await service.refresh(
+        refreshToken: s.refreshToken,
+        deviceId: 'aparelho-A',
+        now: later.add(const Duration(seconds: 1)));
+  });
+
+  test('reuso após a janela ociosa: revoga a família (reuso vence expiração)',
+      () async {
+    final first = await service.issue(_user, now: t0);
+    final at = t0.add(const Duration(minutes: 5));
+    final s = await service.refresh(
+        refreshToken: first, deviceId: 'aparelho-A', now: at);
+    await _expectDenied(() => service.refresh(
         refreshToken: first,
         deviceId: 'aparelho-A',
-        now: at.add(const Duration(seconds: 10)));
-    expect(s.refreshToken, isNotEmpty);
-    expect(store.byId.values.every((r) => r.revokedAt == null), isTrue);
+        now: t0.add(const Duration(hours: 3))));
+    expect(audit.results, contains('denied_reuse'));
+    final child = await store
+        .findByHash(sha256.convert(utf8.encode(s.refreshToken)).toString());
+    expect(child!.revokedAt, isNotNull);
+  });
+
+  test('revogada entre a leitura e o markRotated: recusa e não deixa filho vivo',
+      () async {
+    final first = await service.issue(_user, now: t0);
+    store.onMarkRotated = (id) async {
+      await store.revokeFamily(store.byId[id]!.familyId, t0);
+    };
+    await _expectDenied(() => service.refresh(
+        refreshToken: first,
+        deviceId: 'aparelho-A',
+        now: t0.add(const Duration(minutes: 1))));
+    expect(store.byId.values.every((r) => r.revokedAt != null), isTrue);
+    expect(audit.results, contains('denied_revoked'));
+  });
+
+  test('insert recusado (família revogada): recusa', () async {
+    final first = await service.issue(_user, now: t0);
+    store.rejectInsert = true;
+    await _expectDenied(() => service.refresh(
+        refreshToken: first,
+        deviceId: 'aparelho-A',
+        now: t0.add(const Duration(minutes: 1))));
+    expect(audit.results, contains('denied_revoked'));
+  });
+
+  test('token já revogado: recusa com denied_revoked', () async {
+    final first = await service.issue(_user, now: t0);
+    await service.revoke(first, now: t0);
+    await _expectDenied(() => service.refresh(
+        refreshToken: first, deviceId: 'aparelho-A', now: t0));
+    expect(audit.results, containsAll(['logout', 'denied_revoked']));
+  });
+
+  test('issue recusa papel que não é ACS', () async {
+    expect(
+        () => service.issue(
+            const AuthenticatedUser(
+                id: _acsId,
+                role: UserRole.patient,
+                microAreaId: _area,
+                deviceId: 'x'),
+            now: t0),
+        throwsArgumentError);
   });
 
   test('reuso fora da tolerância: revoga a família inteira e recusa', () async {
