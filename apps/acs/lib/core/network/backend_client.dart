@@ -317,7 +317,7 @@ class BackendClient implements AcsBackend {
     required String senha,
     String? totpCode,
   }) async {
-    final deviceId = await _deviceIds.readOrCreate();
+    final deviceId = await _storage(_deviceIds.readOrCreate);
     final result = await _guard(
       () => _client.auth.loginInstitutional(
         matricula: matricula,
@@ -339,10 +339,14 @@ class BackendClient implements AcsBackend {
     // Grava o refresh token ANTES de expor a sessão. Sem token na resposta,
     // não deixa um token velho de outra conta para trás.
     final refreshToken = result.refreshToken;
-    if (refreshToken == null || refreshToken.isEmpty) {
-      await _tokenStore.clear();
-    } else {
-      await _tokenStore.write(refreshToken);
+    try {
+      if (refreshToken == null || refreshToken.isEmpty) {
+        await _tokenStore.clear();
+      } else {
+        await _tokenStore.write(refreshToken);
+      }
+    } catch (_) {
+      throw _storeLost;
     }
     _session = session;
     return session;
@@ -373,19 +377,18 @@ class BackendClient implements AcsBackend {
       _renewal ??= _doRenew(notify: notify).whenComplete(() => _renewal = null);
 
   Future<AuthSession> _doRenew({required bool notify}) async {
-    final token = await _tokenStore.read();
+    final token = await _storage(_tokenStore.read);
     if (token == null) {
       _expire(notify);
       throw const BackendFailure('Sua sessão expirou. Entre novamente.', isRecoverable: false);
     }
+    // Fora do `_guard`: falha do armazenamento não é "sem conexão".
+    final deviceId = await _storage(_deviceIds.readOrCreate);
     // `null` = o servidor recusou o refresh token. Tratado aqui, antes de o
     // `_guard` transformar a exceção em "sem conexão".
     final result = await _guard(() async {
       try {
-        return await _client.auth.refreshSession(
-          refreshToken: token,
-          deviceId: await _deviceIds.readOrCreate(),
-        );
+        return await _client.auth.refreshSession(refreshToken: token, deviceId: deviceId);
       } on SessionExpiredException {
         return null;
       }
@@ -393,24 +396,59 @@ class BackendClient implements AcsBackend {
     // Falha de rede/timeout já saiu pelo `_guard` como recuperável, sem apagar
     // o token: a repetição cai na tolerância de 30 s do servidor.
     if (result == null) {
-      await _tokenStore.clear();
+      try {
+        await _tokenStore.clear();
+      } catch (_) {
+        // Best-effort: a sessão acabou de qualquer jeito.
+      }
       _expire(notify);
       throw const BackendFailure(
         'Sua sessão expirou. Entre novamente com o código do autenticador.',
         isRecoverable: false,
       );
     }
-    final session = AuthSession.tryParse(result.accessToken, result.tokenType);
     final next = result.refreshToken;
-    if (session == null || next == null) {
+    final hasNext = next != null && next.isNotEmpty;
+    // Grava o filho ANTES de qualquer outra coisa: o servidor já rotacionou, e
+    // perder o filho é perder o turno — mesmo se o JWT não puder ser lido.
+    if (hasNext) {
+      try {
+        await _tokenStore.write(next);
+      } catch (_) {
+        // O token novo se perdeu e o antigo já foi gasto: sessão acabou.
+        try {
+          await _tokenStore.clear();
+        } catch (_) {}
+        _expire(notify);
+        throw _storeLost;
+      }
+    }
+    final session = AuthSession.tryParse(result.accessToken, result.tokenType);
+    if (session == null || !hasNext) {
       throw const BackendFailure(
         'O servidor devolveu um token que o aplicativo não entendeu.',
         isRecoverable: false,
       );
     }
-    // Grava o filho ANTES de expor a sessão: perder o filho é perder o turno.
-    await _tokenStore.write(next);
     return _session = session;
+  }
+
+  static const _storeLost = BackendFailure(
+    'Não foi possível guardar a sessão neste aparelho. Entre novamente.',
+    isRecoverable: false,
+  );
+
+  /// Executa uma operação do armazenamento seguro; qualquer exceção vira
+  /// [BackendFailure] (nunca uma `PlatformException` crua na UI).
+  Future<T> _storage<T>(Future<T> Function() op) async {
+    try {
+      return await op();
+    } catch (_) {
+      throw const BackendFailure(
+        'Não foi possível acessar o armazenamento seguro deste aparelho.',
+        isRecoverable: false,
+      );
+    }
   }
 
   void _expire(bool notify) {
@@ -419,21 +457,38 @@ class BackendClient implements AcsBackend {
   }
 
   @override
-  Future<bool> get hasStoredSession async => await _tokenStore.read() != null;
+  Future<bool> get hasStoredSession async {
+    try {
+      return await _tokenStore.read() != null;
+    } catch (_) {
+      return false;
+    }
+  }
 
   @override
   Future<AuthSession?> resumeSession() async {
-    if (await _tokenStore.read() == null) return null;
     try {
+      if (await _tokenStore.read() == null) return null;
       return await renewSession(notify: false);
-    } on BackendFailure {
+    } catch (_) {
       return null;
     }
   }
 
   @override
   Future<void> logout() async {
-    final token = await _tokenStore.read();
+    // Uma renovação em voo, ao terminar, regravaria o token e ressuscitaria a
+    // sessão: espera-a acabar (ignorando o resultado) e só então encerra.
+    final pending = _renewal;
+    if (pending != null) {
+      try {
+        await pending;
+      } catch (_) {}
+    }
+    String? token;
+    try {
+      token = await _tokenStore.read();
+    } catch (_) {}
     if (token != null) {
       try {
         await _client.auth.logout(refreshToken: token);
@@ -442,16 +497,16 @@ class BackendClient implements AcsBackend {
         // qualquer jeito.
       }
     }
-    await _tokenStore.clear();
     _session = null;
+    await _storage(_tokenStore.clear);
   }
 
   /// Login de desenvolvimento, para `tool/` e `integration_test/`.
   ///
   /// É a versão antiga de [login], preservada porque as ferramentas rodam
   /// contra a stack local com `ENABLE_DEV_LOGIN=true` e não têm — nem devem ter
-  /// — a senha institucional embutida. Não guarda `_credentials`: sem
-  /// credencial não há renovação, e quem usar isto em produção recebe a falha
+  /// — a senha institucional embutida. Não grava refresh token: sem
+  /// ele não há renovação, e quem usar isto em produção recebe a falha
   /// não recuperável de [renewSession] quando o token expirar.
   @override
   Future<AuthSession> developmentLogin({required String role}) async {

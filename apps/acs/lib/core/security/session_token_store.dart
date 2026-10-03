@@ -84,7 +84,19 @@ class SecureStorageDeviceIdStore implements DeviceIdStore {
   final FlutterSecureStorage _storage;
 
   @override
-  Future<String> readOrCreate() async {
+  Future<String> readOrCreate() {
+    // Memoiza o Future: chamadas concorrentes na 1ª vez devolvem o mesmo id.
+    // Uma falha não fica memorizada (a próxima chamada tenta de novo).
+    final pending = _pending ??= _load();
+    return pending.catchError((Object e) {
+      _pending = null;
+      throw e;
+    });
+  }
+
+  Future<String>? _pending;
+
+  Future<String> _load() async {
     final existing = await _storage.read(key: _key);
     if (existing != null && existing.isNotEmpty) return existing;
     final created = generateDeviceId();

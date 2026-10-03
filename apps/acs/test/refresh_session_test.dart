@@ -1,3 +1,8 @@
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:flutter/services.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sinalacs_acs/core/network/backend_client.dart';
 import 'package:sinalacs_acs/core/security/session_token_store.dart';
@@ -171,4 +176,159 @@ void main() {
     expect(ids, hasLength(1));
     expect(ids.single, isNotEmpty);
   });
+
+  test('a segunda renovação envia o filho rotacionado, não o token do login', () async {
+    server.tokenLifetime = const Duration(minutes: -1);
+    await entrar();
+    await backend.listPatients();
+    await backend.listPatients();
+    expect(server.refreshTokensSeen, ['refresh-0', 'refresh-1']);
+  });
+
+  test('login com deviceId em branco não recebe refreshToken (como o backend real)', () async {
+    final r = await HttpClientProbe.login(server, deviceId: '  ');
+    expect(r.containsKey('refreshToken'), isFalse);
+  });
+
+  group('falhas do armazenamento seguro', () {
+    test('login: falha ao gravar vira BackendFailure, não PlatformException', () async {
+      final b = BackendClient(host: server.host, tokenStore: ThrowingStore(failWrite: true), deviceIds: devices);
+      addTearDown(b.close);
+      await expectLater(b.login(matricula: 'ACS-001', senha: 'x'), throwsA(isA<BackendFailure>()));
+    });
+
+    test('renovação: falha ao gravar o filho => sessão perdida, avisa a UI, não é "sem conexão"', () async {
+      server.tokenLifetime = const Duration(minutes: -1);
+      final inner = ThrowingStore();
+      final b = BackendClient(host: server.host, tokenStore: inner, deviceIds: devices);
+      addTearDown(b.close);
+      var avisos = 0;
+      b.onSessionExpired = () => avisos++;
+      await b.login(matricula: 'ACS-001', senha: 'x');
+      inner.failWrite = true;
+      await expectLater(
+        b.listPatients(),
+        throwsA(isA<BackendFailure>()
+            .having((f) => f.isRecoverable, 'isRecoverable', isFalse)
+            .having((f) => f.message, 'message', contains('guardar a sessão'))),
+      );
+      expect(avisos, 1);
+      expect(b.session, isNull);
+    });
+
+    test('renovação: falha ao ler o deviceId não vira "Sem conexão"', () async {
+      server.tokenLifetime = const Duration(minutes: -1);
+      final b = BackendClient(host: server.host, tokenStore: store, deviceIds: ThrowingDevices());
+      addTearDown(b.close);
+      await store.write('refresh-0');
+      await expectLater(
+        b.listPatients(),
+        throwsA(isA<BackendFailure>().having((f) => f.message, 'message', isNot(contains('Sem conexão')))),
+      );
+    });
+
+    test('resumeSession com leitura falhando devolve null', () async {
+      final b = BackendClient(host: server.host, tokenStore: ThrowingStore(failRead: true), deviceIds: devices);
+      addTearDown(b.close);
+      expect(await b.resumeSession(), isNull);
+      expect(await b.hasStoredSession, isFalse);
+    });
+
+    test('logout com clear falhando lança BackendFailure, mas sessão em memória cai', () async {
+      final b = BackendClient(host: server.host, tokenStore: ThrowingStore(failClear: true), deviceIds: devices);
+      addTearDown(b.close);
+      await b.login(matricula: 'ACS-001', senha: 'x');
+      await expectLater(b.logout(), throwsA(isA<BackendFailure>()));
+      expect(b.session, isNull);
+    });
+  });
+
+  test('logout espera a renovação em voo: nada é regravado nem ressuscitado', () async {
+    server.tokenLifetime = const Duration(minutes: -1);
+    await entrar();
+    server.refreshDelay = const Duration(milliseconds: 200);
+
+    final renovacao = backend.listPatients().then<Object?>((_) => null, onError: (Object e) => e);
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+    await backend.logout();
+    await renovacao;
+
+    expect(await store.read(), isNull);
+    expect(backend.session, isNull);
+  });
+
+  test('refresh token novo vazio é tratado como ausente (e o JWT ilegível ainda persiste o filho)', () async {
+    server.tokenLifetime = const Duration(minutes: -1);
+    await entrar();
+    server.emptyRefreshToken = true;
+    await expectLater(backend.listPatients(), throwsA(isA<BackendFailure>()));
+    expect(await store.read(), 'refresh-0', reason: 'vazio não sobrescreve');
+  });
+
+  test('JWT ilegível não perde o filho rotacionado', () async {
+    server.tokenLifetime = const Duration(minutes: -1);
+    await entrar();
+    server.garbageAccessToken = true;
+    await expectLater(backend.listPatients(), throwsA(isA<BackendFailure>()));
+    expect(await store.read(), 'refresh-1');
+  });
+
+  test('SecureStorageDeviceIdStore: chamadas concorrentes na 1ª vez devolvem o mesmo id', () async {
+    final storage = SlowStorage();
+    final ids = SecureStorageDeviceIdStore(storage: storage);
+    final r = await Future.wait([ids.readOrCreate(), ids.readOrCreate(), ids.readOrCreate()]);
+    expect(r.toSet(), hasLength(1));
+    expect(storage.writes, 1);
+  });
+}
+
+class HttpClientProbe {
+  static Future<Map<String, dynamic>> login(FakeRpcServer s, {required String deviceId}) async {
+    final c = HttpClient();
+    try {
+      final req = await c.postUrl(Uri.parse('${s.host}auth'));
+      req.headers.contentType = ContentType.json;
+      req.write(jsonEncode({'method': 'loginInstitutional', 'matricula': 'a', 'password': 'b', 'deviceId': deviceId}));
+      final res = await req.close();
+      return jsonDecode(await utf8.decoder.bind(res).join()) as Map<String, dynamic>;
+    } finally {
+      c.close(force: true);
+    }
+  }
+}
+
+class ThrowingStore implements SessionTokenStore {
+  ThrowingStore({this.failRead = false, this.failWrite = false, this.failClear = false});
+  bool failRead, failWrite, failClear;
+  String? _t;
+  @override
+  Future<String?> read() async => failRead ? throw PlatformException(code: 'x') : _t;
+  @override
+  Future<void> write(String token) async => failWrite ? throw PlatformException(code: 'x') : _t = token;
+  @override
+  Future<void> clear() async => failClear ? throw PlatformException(code: 'x') : _t = null;
+}
+
+class ThrowingDevices implements DeviceIdStore {
+  @override
+  Future<String> readOrCreate() async => throw PlatformException(code: 'x');
+}
+
+class SlowStorage implements FlutterSecureStorage {
+  final Map<String, String> data = {};
+  int writes = 0;
+  @override
+  Future<String?> read({required String key, IOSOptions? iOptions, AndroidOptions? aOptions, LinuxOptions? lOptions, WebOptions? webOptions, MacOsOptions? mOptions, WindowsOptions? wOptions}) async {
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    return data[key];
+  }
+
+  @override
+  Future<void> write({required String key, required String? value, IOSOptions? iOptions, AndroidOptions? aOptions, LinuxOptions? lOptions, WebOptions? webOptions, MacOsOptions? mOptions, WindowsOptions? wOptions}) async {
+    writes++;
+    data[key] = value!;
+  }
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }

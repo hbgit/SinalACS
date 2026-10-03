@@ -78,6 +78,18 @@ class FakeRpcServer {
   /// Faz o login responder sem `refreshToken` (cliente sem deviceId).
   bool omitRefreshToken = false;
 
+  /// `refreshToken` recebido em cada `refreshSession`, na ordem.
+  List<String> get refreshTokensSeen => requests
+      .where((r) => r.method == 'refreshSession')
+      .map((r) => r.args['refreshToken'] as String)
+      .toList();
+
+  /// Faz `refreshSession` devolver um accessToken ilegível.
+  bool garbageAccessToken = false;
+
+  /// Faz `refreshSession` devolver um refresh token vazio.
+  bool emptyRefreshToken = false;
+
   /// Tokens que `logout` recebeu.
   final List<String> loggedOut = <String>[];
 
@@ -164,12 +176,12 @@ class FakeRpcServer {
       'loginInstitutional' => <String, Object?>{
           'accessToken': _token(),
           'tokenType': 'Bearer',
-          if (!omitRefreshToken) 'refreshToken': 'refresh-${_refreshSeq = 0}',
+          if (!omitRefreshToken && ((decoded['deviceId'] as String?)?.trim().isNotEmpty ?? false)) 'refreshToken': 'refresh-${_refreshSeq = 0}',
         },
       'refreshSession' => <String, Object?>{
-          'accessToken': _token(),
+          'accessToken': garbageAccessToken ? 'lixo' : _token(),
           'tokenType': 'Bearer',
-          'refreshToken': 'refresh-${++_refreshSeq}',
+          'refreshToken': emptyRefreshToken ? '' : 'refresh-${++_refreshSeq}',
         },
       'developmentLogin' => <String, Object?>{
           'accessToken': _token(),
