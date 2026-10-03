@@ -61,9 +61,23 @@ class FakeRpcServer {
   /// outra microárea (`AlertPermissionException`, INV-01).
   bool rejectInviteWithPermission = false;
 
-  /// Contador do refresh token rotativo: o login emite `refresh-0`, cada
-  /// renovação o próximo.
+  /// Contador do refresh token rotativo: cada renovação emite o próximo
+  /// `refresh-<n>`; um login zera o contador.
   int _refreshSeq = 0;
+
+  /// Refresh tokens emitidos pelos logins, na ordem. O primeiro login emite
+  /// `refresh-0` (os testes antigos dependem do nome); os seguintes emitem
+  /// `login-<n>`, distintos entre si — é o que deixa um teste saber se o token
+  /// guardado é o do login novo ou o de uma renovação da conta anterior.
+  final List<String> loginTokens = <String>[];
+
+  String _nextLoginToken() {
+    _refreshSeq = 0;
+    final n = loginTokens.length;
+    final token = n == 0 ? 'refresh-0' : 'login-$n';
+    loginTokens.add(token);
+    return token;
+  }
 
   /// Faz `refreshSession` recusar com `SessionExpiredException`.
   bool rejectRefresh = false;
@@ -180,7 +194,7 @@ class FakeRpcServer {
       'loginInstitutional' => <String, Object?>{
           'accessToken': _token(),
           'tokenType': 'Bearer',
-          if (!omitRefreshToken && ((decoded['deviceId'] as String?)?.trim().isNotEmpty ?? false)) 'refreshToken': 'refresh-${_refreshSeq = 0}',
+          if (!omitRefreshToken && ((decoded['deviceId'] as String?)?.trim().isNotEmpty ?? false)) 'refreshToken': _nextLoginToken(),
         },
       'refreshSession' => <String, Object?>{
           'accessToken': garbageAccessToken ? 'lixo' : _token(),

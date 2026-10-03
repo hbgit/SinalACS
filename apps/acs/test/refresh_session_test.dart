@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -8,6 +9,7 @@ import 'package:sinalacs_acs/core/network/backend_client.dart';
 import 'package:sinalacs_acs/core/security/secure_session_token_store.dart';
 
 import 'support/fake_rpc_server.dart';
+import 'support/gated_session_token_store.dart';
 
 /// Renovação silenciosa por refresh token rotativo (LGPD-RT06). Credenciais
 /// sintéticas, servidor local.
@@ -273,12 +275,14 @@ void main() {
       ..userId = '00000000-0000-4000-8000-0000000000bb'
       ..tokenLifetime = const Duration(minutes: 15);
     final sessaoB = await backend.login(matricula: 'ACS-002', senha: 'senha-sintetica-b');
-    expect(await store.read(), 'refresh-0');
+    final tokenB = server.loginTokens.last;
+    expect(tokenB, isNot('refresh-0'), reason: 'o login de B emite um token próprio');
+    expect(await store.read(), tokenB);
     final resultado = await renovacao;
 
     expect(resultado, isA<BackendFailure>(), reason: 'a renovação obsoleta não entrega sessão a ninguém');
     expect(identical(backend.session, sessaoB), isTrue, reason: 'o painel de B segue com o JWT de B');
-    expect(await store.read(), 'refresh-0', reason: 'o filho da renovação de A não sobrescreve o token de B');
+    expect(await store.read(), tokenB, reason: 'o filho da renovação de A não sobrescreve o token de B');
     expect(avisos, 0);
   });
 
@@ -316,6 +320,96 @@ void main() {
     server.garbageAccessToken = true;
     await expectLater(backend.listPatients(), throwsA(isA<BackendFailure>()));
     expect(await store.read(), 'refresh-1');
+  });
+
+  group('corrida do login (janela da gravação)', () {
+    /// Espera, em tempo real, até [condicao] valer: a requisição passa por um
+    /// socket de verdade, então `pumpEventQueue` sozinho não basta.
+    Future<void> esperarAte(bool Function() condicao, {String? motivo}) async {
+      final limite = DateTime.now().add(const Duration(seconds: 5));
+      while (!condicao()) {
+        if (DateTime.now().isAfter(limite)) fail(motivo ?? 'condição não chegou a valer');
+        await Future<void>.delayed(const Duration(milliseconds: 5));
+      }
+    }
+
+    test('renovação iniciada com o login parado na gravação ESPERA e usa o token NOVO', () async {
+      final gated = GatedSessionTokenStore();
+      final b = BackendClient(host: server.host, tokenStore: gated, deviceIds: MemoryDeviceIdStore('aparelho-1'));
+      addTearDown(b.close);
+      await b.login(matricula: 'ACS-A', senha: 'senha-sintetica'); // token do login #0, gravado
+      server.tokenLifetime = const Duration(minutes: 15);
+
+      gated.writeGate = Completer<void>();
+      final login = b.login(matricula: 'ACS-B', senha: 'senha-sintetica'); // para na escrita
+      await esperarAte(() => gated.writes == 2, motivo: 'o login B não chegou à escrita');
+      await pumpEventQueue();
+      expect(gated.writes, 2, reason: 'o login B chegou à escrita e está parado nela');
+
+      final renovacao = b.renewSession(); // começa DENTRO da janela
+      await pumpEventQueue();
+      // Tempo real para uma requisição indevida chegar ao servidor.
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      expect(server.refreshTokensSeen, isEmpty, reason: 'a renovação não pode ler o token antes de o login confirmar');
+
+      gated.writeGate!.complete();
+      await login;
+      await renovacao;
+
+      // Leu o token do login de B, não o de A:
+      expect(server.refreshTokensSeen, [server.loginTokens.last]);
+      expect(await gated.read(), isNot(server.loginTokens.first));
+      expect(b.session!.userId, isNotNull);
+    });
+
+    test('renovação que começou ANTES do login e termina DEPOIS da gravação continua obsoleta', () async {
+      final gated = GatedSessionTokenStore();
+      final b = BackendClient(host: server.host, tokenStore: gated, deviceIds: MemoryDeviceIdStore('aparelho-1'));
+      addTearDown(b.close);
+      server.tokenLifetime = const Duration(minutes: -1);
+      var avisos = 0;
+      b.onSessionExpired = () => avisos++;
+      await b.login(matricula: 'ACS-A', senha: 'senha-sintetica');
+      server.refreshDelay = const Duration(milliseconds: 300);
+
+      final renovacao = b.listPatients().then<Object?>((_) => null, onError: (Object e) => e);
+      await esperarAte(() => server.refreshCount == 1, motivo: 'a renovação de A não saiu');
+      server
+        ..userId = '00000000-0000-4000-8000-0000000000bb'
+        ..tokenLifetime = const Duration(minutes: 15);
+      final sessaoB = await b.login(matricula: 'ACS-B', senha: 'senha-sintetica-b');
+      final resultado = await renovacao;
+
+      expect(resultado, isA<BackendFailure>().having((f) => f.isRecoverable, 'isRecoverable', isTrue));
+      expect(identical(b.session, sessaoB), isTrue, reason: 'a sessão é a de B');
+      expect(await gated.read(), server.loginTokens.last, reason: 'o token é o do login de B');
+      expect(server.refreshTokensSeen, [server.loginTokens.first]);
+      expect(avisos, 0);
+    });
+
+    test('logout: renovação iniciada durante a rede do logout não ressuscita a sessão', () async {
+      final gated = GatedSessionTokenStore();
+      final b = BackendClient(host: server.host, tokenStore: gated, deviceIds: MemoryDeviceIdStore('aparelho-1'));
+      addTearDown(b.close);
+      server.tokenLifetime = const Duration(minutes: -1);
+      var avisos = 0;
+      b.onSessionExpired = () => avisos++;
+      await b.login(matricula: 'ACS-A', senha: 'senha-sintetica');
+      server
+        ..logoutDelay = const Duration(milliseconds: 150)
+        ..refreshDelay = const Duration(milliseconds: 300);
+
+      final saida = b.logout();
+      await esperarAte(() => server.loggedOut.isNotEmpty, motivo: 'o logout não chegou ao servidor');
+      final renovacao = b.listPatients().then<Object?>((_) => null, onError: (Object e) => e);
+      await saida;
+      final resultado = await renovacao;
+
+      expect(resultado, isA<BackendFailure>());
+      expect(await gated.read(), isNull);
+      expect(b.session, isNull);
+      expect(avisos, 0);
+    });
   });
 
   test('SecureStorageDeviceIdStore: chamadas concorrentes na 1ª vez devolvem o mesmo id', () async {

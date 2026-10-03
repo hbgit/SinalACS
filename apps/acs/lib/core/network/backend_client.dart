@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:sinalacs_acs/core/network/auth_session.dart';
@@ -339,23 +340,28 @@ class BackendClient implements AcsBackend {
       );
     }
 
-    // A partir daqui a sessão é esta: uma renovação ainda em voo (talvez de
-    // OUTRO ACS, "Entrar com senha" no bloqueio) fica obsoleta e não grava
-    // nada por cima deste login (INV-01/RNF06).
-    _invalidateRenewal();
-    // Grava o refresh token ANTES de expor a sessão. Sem token na resposta,
-    // não deixa um token velho de outra conta para trás.
     final refreshToken = result.refreshToken;
-    try {
-      if (refreshToken == null || refreshToken.isEmpty) {
-        await _tokenStore.clear();
-      } else {
-        await _tokenStore.write(refreshToken);
+    // Incremento da época, gravação do token e troca da sessão numa só seção
+    // crítica: uma renovação (talvez de OUTRO ACS, "Entrar com senha" no
+    // bloqueio) que já estava em voo fica obsoleta e não grava nada por cima
+    // deste login (INV-01/RNF06); uma que comece agora espera a seção acabar e
+    // lê o token NOVO — antes, ela lia o token antigo na janela entre o
+    // incremento e a troca da sessão e terminava "não obsoleta".
+    await _exclusive(() async {
+      _invalidateRenewal();
+      // Grava o refresh token ANTES de expor a sessão. Sem token na resposta,
+      // não deixa um token velho de outra conta para trás.
+      try {
+        if (refreshToken == null || refreshToken.isEmpty) {
+          await _tokenStore.clear();
+        } else {
+          await _tokenStore.write(refreshToken);
+        }
+      } catch (_) {
+        throw _storeLost;
       }
-    } catch (_) {
-      throw _storeLost;
-    }
-    _session = session;
+      _session = session;
+    });
     return session;
   }
 
@@ -387,9 +393,27 @@ class BackendClient implements AcsBackend {
 
   /// Torna obsoleta qualquer renovação em voo. A próxima chamada a
   /// [renewSession] não se junta a ela: abre uma nova, na geração atual.
+  ///
+  /// Só pode ser chamada dentro de [_exclusive].
   void _invalidateRenewal() {
     _epoch++;
     _renewal = null;
+  }
+
+  /// Cauda da fila de seções críticas. Sempre completa sem erro.
+  Future<void> _commitTail = Future<void>.value();
+
+  /// Seção crítica **serial e não reentrante**: só uma por vez mexe em
+  /// `_session`, no token do Keystore e em `_epoch`. Dentro dela: apenas E/S
+  /// local e atribuições. Nunca rede, nunca `renewSession()`, nunca outro
+  /// `_exclusive` (deadlock). Fecha a corrida em que uma renovação do usuário
+  /// anterior, iniciada entre o incremento da época do login e a troca da
+  /// sessão, lia o token antigo e sobrescrevia o login novo.
+  Future<T> _exclusive<T>(Future<T> Function() body) {
+    final done = Completer<void>();
+    final previous = _commitTail;
+    _commitTail = done.future;
+    return previous.then((_) => body()).whenComplete(done.complete);
   }
 
   /// A renovação obsoleta termina assim: recuperável (repetir usa a sessão
@@ -412,69 +436,78 @@ class BackendClient implements AcsBackend {
   }
 
   Future<AuthSession> _doRenew({required bool notify}) async {
-    final epoch = _epoch;
+    // Época e token lidos JUNTOS, dentro da seção: um login que esteja no meio
+    // (época já incrementada, token novo ainda não gravado) termina antes, e
+    // esta renovação lê o token dele — nunca o da conta anterior.
+    late final int epoch;
+    late final String? token;
+    await _exclusive(() async {
+      epoch = _epoch;
+      token = await _storage(_tokenStore.read);
+      if (token == null) {
+        _expire(notify);
+        throw const BackendFailure('Sua sessão expirou. Entre novamente.', isRecoverable: false);
+      }
+    });
     bool stale() => epoch != _epoch;
-    final token = await _storage(_tokenStore.read);
-    if (stale()) throw _staleRenewal;
-    if (token == null) {
-      _expire(notify);
-      throw const BackendFailure('Sua sessão expirou. Entre novamente.', isRecoverable: false);
-    }
-    // Fora do `_guard`: falha do armazenamento não é "sem conexão".
+    final refreshToken = token!;
+    // Fora do `_guard`: falha do armazenamento não é "sem conexão". Fora da
+    // seção também, como a rede abaixo: nada disto mexe em sessão ou token.
     final deviceId = await _storage(_deviceIds.readOrCreate);
     // `null` = o servidor recusou o refresh token. Tratado aqui, antes de o
     // `_guard` transformar a exceção em "sem conexão".
+    // Falha de rede/timeout sai pelo `_guard` como recuperável, sem apagar o
+    // token: a repetição cai na tolerância de 30 s do servidor.
     final result = await _guard(() async {
       try {
-        return await _client.auth.refreshSession(refreshToken: token, deviceId: deviceId);
+        return await _client.auth.refreshSession(refreshToken: refreshToken, deviceId: deviceId);
       } on SessionExpiredException {
         return null;
       }
     });
-    // Obsoleta: o token guardado agora é de outro login (ou foi apagado pelo
-    // logout). Nem a recusa nem o filho podem mexer nele.
-    if (stale()) throw _staleRenewal;
-    // Falha de rede/timeout já saiu pelo `_guard` como recuperável, sem apagar
-    // o token: a repetição cai na tolerância de 30 s do servidor.
-    if (result == null) {
-      try {
-        await _tokenStore.clear();
-      } catch (_) {
-        // Best-effort: a sessão acabou de qualquer jeito.
-      }
-      _expire(notify);
-      throw const BackendFailure(
-        'Sua sessão expirou. Entre novamente com o código do autenticador.',
-        isRecoverable: false,
-      );
-    }
-    final next = result.refreshToken;
-    final hasNext = next != null && next.isNotEmpty;
-    // Grava o filho ANTES de qualquer outra coisa: o servidor já rotacionou, e
-    // perder o filho é perder o turno — mesmo se o JWT não puder ser lido.
-    if (hasNext) {
-      try {
-        await _tokenStore.write(next);
-      } catch (_) {
-        if (stale()) throw _staleRenewal;
-        // O token novo se perdeu e o antigo já foi gasto: sessão acabou.
+    // Confirmação dentro da seção: a checagem de obsolescência é definitiva
+    // (ninguém intercala entre ela e as gravações abaixo).
+    return _exclusive(() async {
+      // Obsoleta: o token guardado agora é de outro login (ou foi apagado pelo
+      // logout). Nem a recusa nem o filho podem mexer nele.
+      if (stale()) throw _staleRenewal;
+      if (result == null) {
         try {
           await _tokenStore.clear();
-        } catch (_) {}
+        } catch (_) {
+          // Best-effort: a sessão acabou de qualquer jeito.
+        }
         _expire(notify);
-        throw _storeLost;
+        throw const BackendFailure(
+          'Sua sessão expirou. Entre novamente com o código do autenticador.',
+          isRecoverable: false,
+        );
       }
-    }
-    // Um login durante a gravação acima gravou depois dela: o token é o dele.
-    if (stale()) throw _staleRenewal;
-    final session = AuthSession.tryParse(result.accessToken, result.tokenType);
-    if (session == null || !hasNext) {
-      throw const BackendFailure(
-        'O servidor devolveu um token que o aplicativo não entendeu.',
-        isRecoverable: false,
-      );
-    }
-    return _session = session;
+      final next = result.refreshToken;
+      final hasNext = next != null && next.isNotEmpty;
+      // Grava o filho ANTES de qualquer outra coisa: o servidor já rotacionou,
+      // e perder o filho é perder o turno — mesmo se o JWT não puder ser lido.
+      if (hasNext) {
+        try {
+          await _tokenStore.write(next);
+        } catch (_) {
+          // O token novo se perdeu e o antigo já foi gasto: sessão acabou.
+          try {
+            await _tokenStore.clear();
+          } catch (_) {}
+          _expire(notify);
+          throw _storeLost;
+        }
+      }
+      final session = AuthSession.tryParse(result.accessToken, result.tokenType);
+      if (session == null || !hasNext) {
+        throw const BackendFailure(
+          'O servidor devolveu um token que o aplicativo não entendeu.',
+          isRecoverable: false,
+        );
+      }
+      return _session = session;
+    });
   }
 
   static const _storeLost = BackendFailure(
@@ -521,14 +554,19 @@ class BackendClient implements AcsBackend {
 
   @override
   Future<void> logout() async {
-    // ANTES da chamada de rede: a renovação em voo fica obsoleta e não regrava
-    // o token nem ressuscita a sessão quando terminar.
-    _invalidateRenewal();
-    _session = null;
-    String? token;
-    try {
-      token = await _tokenStore.read();
-    } catch (_) {}
+    // Primeira seção, ANTES da chamada de rede: a renovação em voo fica
+    // obsoleta e não regrava o token nem ressuscita a sessão quando terminar.
+    final token = await _exclusive<String?>(() async {
+      _invalidateRenewal();
+      _session = null;
+      try {
+        return await _tokenStore.read();
+      } catch (_) {
+        return null;
+      }
+    });
+    // A rede fica fora da seção: uma renovação pode começar enquanto isto
+    // espera — e ainda achar o token guardado.
     if (token != null) {
       try {
         await _client.auth.logout(refreshToken: token);
@@ -537,11 +575,14 @@ class BackendClient implements AcsBackend {
         // qualquer jeito.
       }
     }
-    _session = null;
-    // De novo DEPOIS da rede: uma renovação que começou durante a chamada de
-    // logout (ainda achou o token guardado) também fica obsoleta.
-    _invalidateRenewal();
-    await _storage(_tokenStore.clear);
+    // Segunda seção, DEPOIS da rede: uma renovação que começou durante a
+    // chamada de logout (ainda achou o token guardado) também fica obsoleta, e
+    // a confirmação dela, que só roda depois desta seção, vê isso.
+    await _exclusive(() async {
+      _session = null;
+      _invalidateRenewal();
+      await _storage(_tokenStore.clear);
+    });
   }
 
   /// Login de desenvolvimento, para `tool/` e `integration_test/`.
@@ -565,8 +606,10 @@ class BackendClient implements AcsBackend {
       );
     }
 
-    _invalidateRenewal();
-    _session = session;
+    await _exclusive(() async {
+      _invalidateRenewal();
+      _session = session;
+    });
     return session;
   }
 
