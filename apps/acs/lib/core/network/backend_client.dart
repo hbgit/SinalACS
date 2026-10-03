@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:sinalacs_acs/core/network/auth_session.dart';
 import 'package:sinalacs_acs/core/network/backend_config.dart';
+import 'package:sinalacs_acs/core/security/session_token_store.dart';
 import 'package:sinalacs_client/sinalacs_client.dart';
 
 /// Falha já traduzida para a pessoa que está usando o app.
@@ -64,16 +65,28 @@ abstract class AcsBackend {
 
   bool get isAuthenticated;
 
-  /// Chamado quando a sessão venceu e **não** dá para renová-la sozinho (MFA:
-  /// o código do autenticador não se reaproveita e não há refresh token). A UI
-  /// leva a pessoa de volta ao login.
+  /// Chamado quando a sessão venceu e **não** dá para renová-la sozinho (o
+  /// refresh token foi recusado ou não existe mais). A UI leva a pessoa de
+  /// volta ao login.
   void Function()? onSessionExpired;
+
+  /// `true` se há um refresh token guardado no aparelho (a UI pode tentar
+  /// [resumeSession] na partida).
+  Future<bool> get hasStoredSession;
+
+  /// Tenta abrir uma sessão com o refresh token guardado. `null` se não há
+  /// token ou se ele foi recusado/não pôde ser usado agora. Não chama
+  /// [onSessionExpired]: na partida a UI já é a tela de login.
+  Future<AuthSession?> resumeSession();
+
+  /// Encerra a sessão: revoga o refresh token no servidor (best-effort) e
+  /// apaga o token local.
+  Future<void> logout();
 
   /// Autentica o ACS com matrícula e senha (RF07).
   ///
-  /// A credencial fica **apenas em memória** — ver `_credentials` em
-  /// [BackendClient] — para a reautenticação silenciosa que o app já fazia
-  /// quando o token de 15 minutos expirava. Nada é gravado em disco.
+  /// A senha **não** é retida: a renovação silenciosa usa o refresh token
+  /// rotativo guardado no Keystore.
   ///
   /// [totpCode] é o código do autenticador (MFA); sem ele, um ACS com MFA ativa
   /// recebe [MfaCodeRequired].
@@ -159,6 +172,15 @@ class MisconfiguredBackend implements AcsBackend {
   @override
   bool get isAuthenticated => false;
 
+  @override
+  Future<bool> get hasStoredSession async => false;
+
+  @override
+  Future<AuthSession?> resumeSession() async => null;
+
+  @override
+  Future<void> logout() async {}
+
   /// Recusa uma chamada. `Never` avisa o analisador de que nada abaixo disto
   /// executa, então cada método abaixo é uma linha só.
   Never _recusar() => throw failure;
@@ -218,8 +240,14 @@ class BackendClient implements AcsBackend {
   /// aceita às cegas. Nunca instale um `badCertificateCallback` que aceite tudo:
   /// este app já faz verificação de hostname no MQTT e ceder aqui anularia
   /// RNF04 no ponto onde ele mais importa.
-  BackendClient({String? host, List<int>? trustedCaBytes})
-      : _client = Client(
+  BackendClient({
+    String? host,
+    List<int>? trustedCaBytes,
+    SessionTokenStore? tokenStore,
+    DeviceIdStore? deviceIds,
+  })  : _tokenStore = tokenStore ?? SecureStorageSessionTokenStore(),
+        _deviceIds = deviceIds ?? SecureStorageDeviceIdStore(),
+        _client = Client(
           // Só o host que veio do `--dart-define` (o default de compilação) é
           // validado. Um host **explícito** passa como veio: é o caminho dos
           // testes herméticos, que apontam para servidores fake em
@@ -249,14 +277,8 @@ class BackendClient implements AcsBackend {
 
   AuthSession? _session;
 
-  /// Credencial em memória, para reautenticar quando o token de 15 min expira.
-  ///
-  /// **Só em memória, nunca em disco.** É o que preserva o comportamento que o
-  /// app já tinha (reauth silencioso, que antes chamava `developmentLogin`) sem
-  /// persistir senha nenhuma. A correção durável é o refresh token rotativo que
-  /// `spec/lgpd_design.md` LGPD-RT06 exige e que este plano deliberadamente não
-  /// implementa — ver a lacuna registrada no plano.
-  ({String matricula, String senha})? _credentials;
+  final SessionTokenStore _tokenStore;
+  final DeviceIdStore _deviceIds;
 
   @override
   AuthSession? get session => _session;
@@ -295,11 +317,14 @@ class BackendClient implements AcsBackend {
     required String senha,
     String? totpCode,
   }) async {
+    final deviceId = await _deviceIds.readOrCreate();
     final result = await _guard(
       () => _client.auth.loginInstitutional(
         matricula: matricula,
         password: senha,
         totpCode: totpCode,
+        // O servidor só emite refresh token a quem informa o aparelho.
+        deviceId: deviceId,
       ),
     );
 
@@ -311,13 +336,20 @@ class BackendClient implements AcsBackend {
       );
     }
 
-    _credentials = (matricula: matricula, senha: senha);
+    // Grava o refresh token ANTES de expor a sessão. Sem token na resposta,
+    // não deixa um token velho de outra conta para trás.
+    final refreshToken = result.refreshToken;
+    if (refreshToken == null || refreshToken.isEmpty) {
+      await _tokenStore.clear();
+    } else {
+      await _tokenStore.write(refreshToken);
+    }
     _session = session;
     return session;
   }
 
-  /// Ativação da MFA: sem `_requireToken()` (ainda não há token) e sem gravar
-  /// a credencial — ela só vai para `_credentials` num [login] bem-sucedido.
+  /// Ativação da MFA: sem `_requireToken()` (ainda não há token) e sem reter a
+  /// senha.
   @override
   Future<TotpEnrollmentStart> beginTotpEnrollment({
     required String matricula,
@@ -333,35 +365,85 @@ class BackendClient implements AcsBackend {
   }) =>
       _guard(() => _client.auth.confirmTotpEnrollment(matricula: matricula, password: senha, code: code));
 
-  /// Reautentica usando a credencial em memória.
-  ///
-  /// Sem credencial guardada não há como renovar: quem chama recebe uma falha
-  /// não recuperável e a tela precisa mandar a pessoa entrar de novo.
-  Future<AuthSession> renewSession() async {
-    final credentials = _credentials;
-    if (credentials == null) {
-      throw const BackendFailure(
-        'Sua sessão expirou. Entre novamente.',
-        isRecoverable: false,
-      );
+  Future<AuthSession>? _renewal;
+
+  /// Renova o JWT com o refresh token guardado. **Single-flight**: chamadas
+  /// simultâneas compartilham UMA renovação (o token rotativo só vale uma vez).
+  Future<AuthSession> renewSession({bool notify = true}) =>
+      _renewal ??= _doRenew(notify: notify).whenComplete(() => _renewal = null);
+
+  Future<AuthSession> _doRenew({required bool notify}) async {
+    final token = await _tokenStore.read();
+    if (token == null) {
+      _expire(notify);
+      throw const BackendFailure('Sua sessão expirou. Entre novamente.', isRecoverable: false);
     }
-    try {
-      return await login(
-        matricula: credentials.matricula,
-        senha: credentials.senha,
-      );
-    } on MfaCodeRequired {
-      // Com MFA a renovação silenciosa é impossível (o código TOTP é de uso
-      // único e ainda não há refresh token): esquece a credencial em vez de
-      // insistir e manda a pessoa entrar de novo. As visitas seguem pendentes.
-      _credentials = null;
-      _session = null;
-      onSessionExpired?.call();
+    // `null` = o servidor recusou o refresh token. Tratado aqui, antes de o
+    // `_guard` transformar a exceção em "sem conexão".
+    final result = await _guard(() async {
+      try {
+        return await _client.auth.refreshSession(
+          refreshToken: token,
+          deviceId: await _deviceIds.readOrCreate(),
+        );
+      } on SessionExpiredException {
+        return null;
+      }
+    });
+    // Falha de rede/timeout já saiu pelo `_guard` como recuperável, sem apagar
+    // o token: a repetição cai na tolerância de 30 s do servidor.
+    if (result == null) {
+      await _tokenStore.clear();
+      _expire(notify);
       throw const BackendFailure(
         'Sua sessão expirou. Entre novamente com o código do autenticador.',
         isRecoverable: false,
       );
     }
+    final session = AuthSession.tryParse(result.accessToken, result.tokenType);
+    final next = result.refreshToken;
+    if (session == null || next == null) {
+      throw const BackendFailure(
+        'O servidor devolveu um token que o aplicativo não entendeu.',
+        isRecoverable: false,
+      );
+    }
+    // Grava o filho ANTES de expor a sessão: perder o filho é perder o turno.
+    await _tokenStore.write(next);
+    return _session = session;
+  }
+
+  void _expire(bool notify) {
+    _session = null;
+    if (notify) onSessionExpired?.call();
+  }
+
+  @override
+  Future<bool> get hasStoredSession async => await _tokenStore.read() != null;
+
+  @override
+  Future<AuthSession?> resumeSession() async {
+    if (await _tokenStore.read() == null) return null;
+    try {
+      return await renewSession(notify: false);
+    } on BackendFailure {
+      return null;
+    }
+  }
+
+  @override
+  Future<void> logout() async {
+    final token = await _tokenStore.read();
+    if (token != null) {
+      try {
+        await _client.auth.logout(refreshToken: token);
+      } catch (_) {
+        // Best-effort: o aparelho pode estar sem rede. O token local sai de
+        // qualquer jeito.
+      }
+    }
+    await _tokenStore.clear();
+    _session = null;
   }
 
   /// Login de desenvolvimento, para `tool/` e `integration_test/`.

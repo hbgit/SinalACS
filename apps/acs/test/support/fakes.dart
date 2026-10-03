@@ -58,6 +58,15 @@ class FakeAcsBackend implements AcsBackend {
   @override
   void Function()? onSessionExpired;
 
+  @override
+  Future<bool> get hasStoredSession async => false;
+
+  @override
+  Future<AuthSession?> resumeSession() async => null;
+
+  @override
+  Future<void> logout() async => _session = null;
+
   /// Simula o servidor com MFA ativa: sem [totpCode] igual a [expectedTotpCode], levanta [MfaCodeRequired].
   String? expectedTotpCode;
   bool mfaEnrollmentRequired = false;
