@@ -13,17 +13,24 @@ import 'package:sinalacs_acs/core/services/visit_pull_service.dart';
 /// documentação da própria classe). Passar um store diferente perde essa
 /// garantia sem lançar nenhum erro visível.
 ///
+/// [cursorOwner] é o dono do cursor (`visits_pull|<dono>`): o cursor de um ACS
+/// nunca vale para outro.
+///
 /// [cursorStore] existe só para o teste poder inspecionar o cursor gravado;
 /// em produção a chamada não passa nada e usa o padrão, respaldado pelo
 /// Keystore/Keychain do aparelho.
 VisitPullService buildVisitPullService({
   required AcsBackend backend,
   required VisitStore localVisits,
+  required String cursorOwner,
   SyncCursorStore? cursorStore,
 }) =>
     VisitPullService(
       backend: backend,
       cursorStore: cursorStore ??
-          SyncCursorStore(keyStore: SecureStorageDatabaseKeyStore()),
+          SyncCursorStore(
+            keyStore: SecureStorageDatabaseKeyStore(),
+            owner: cursorOwner,
+          ),
       localVisits: localVisits,
     );

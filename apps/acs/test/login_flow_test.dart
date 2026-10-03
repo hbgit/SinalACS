@@ -1412,7 +1412,7 @@ void main() {
         VisitPullService(
           backend: backend,
           cursorStore: SyncCursorStore(
-            keyStore: InMemoryDatabaseKeyStore(),
+            keyStore: InMemoryDatabaseKeyStore(), owner: 'acs-a',
             databaseName: dbName,
             allowUnencryptedForTesting: true,
           ),
@@ -1550,7 +1550,7 @@ void main() {
         VisitPullService(
           backend: backend,
           cursorStore: SyncCursorStore(
-            keyStore: InMemoryDatabaseKeyStore(),
+            keyStore: InMemoryDatabaseKeyStore(), owner: 'acs-a',
             databaseName: dbName,
             allowUnencryptedForTesting: true,
           ),

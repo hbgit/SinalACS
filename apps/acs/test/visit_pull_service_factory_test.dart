@@ -34,7 +34,7 @@ void main() {
           ),
         ];
       final cursorStore = SyncCursorStore(
-        keyStore: InMemoryDatabaseKeyStore(),
+        keyStore: InMemoryDatabaseKeyStore(), owner: 'acs-a',
         databaseName: dbName,
         allowUnencryptedForTesting: true,
       );
@@ -54,6 +54,7 @@ void main() {
       final service = buildVisitPullService(
         backend: backend,
         localVisits: localVisits,
+        cursorOwner: 'acs-a',
         cursorStore: cursorStore,
       );
       await service.pullAndMerge();

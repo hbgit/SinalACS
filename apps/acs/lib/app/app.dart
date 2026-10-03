@@ -128,7 +128,12 @@ class _SinalAcsAppState extends State<SinalAcsApp> {
   ///
   /// Usa o MESMO `_visitStore` da fila — ver o comentário acima.
   late final VisitPullService _visitPullService = widget.visitPullService ??
-      buildVisitPullService(backend: widget.backend, localVisits: _visitStore);
+      buildVisitPullService(
+        backend: widget.backend,
+        localVisits: _visitStore,
+        // TRANSITÓRIO — Task 4: o dono real passa a ser o id do ACS da sessão.
+        cursorOwner: 'acs-transitorio',
+      );
 
   late final BiometricGate _gate = widget.biometricGate ?? LocalAuthBiometricGate();
   late final GlobalKey<NavigatorState> _navigatorKey = widget.navigatorKey ?? GlobalKey<NavigatorState>();
