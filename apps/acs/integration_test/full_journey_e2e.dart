@@ -38,7 +38,7 @@ import 'package:sinalacs_acs/core/database/micro_area_cache_store.dart';
 import 'package:sinalacs_acs/core/network/backend_config.dart';
 import 'package:sinalacs_acs/core/security/biometric_gate.dart';
 import 'package:sinalacs_acs/core/security/database_key_store.dart';
-import 'package:sinalacs_acs/core/security/session_token_store.dart';
+import 'package:sinalacs_acs/core/security/secure_session_token_store.dart';
 import 'package:sinalacs_acs/core/services/backend_visit_synchronizer.dart';
 import 'package:sinalacs_acs/core/services/micro_area_directory.dart';
 import 'package:sinalacs_acs/core/services/offline_visit_queue.dart';
@@ -73,6 +73,13 @@ Future<void> _tocarEntrar(WidgetTester tester) async {
   await tester.tap(botao);
 }
 
+/// Cliente com o refresh token e o id do aparelho no Keystore, como o `main.dart`.
+BackendClient _clienteComKeystore(List<int> ca) => BackendClient(
+      trustedCaBytes: ca,
+      tokenStore: SecureStorageSessionTokenStore(),
+      deviceIds: SecureStorageDeviceIdStore(),
+    );
+
 /// Espera o JWT vencer de verdade (15 min) em vez de forçar a renovação.
 const _esperarJwt = bool.fromEnvironment('E2E_ESPERAR_JWT');
 
@@ -99,7 +106,7 @@ void main() {
 
   testWidgets('login real, seletor por microárea, visita e sincronização', (tester) async {
     final ca = (await rootBundle.load(BackendConfig.rpcCaAsset)).buffer.asUint8List();
-    final backend = BackendClient(trustedCaBytes: ca);
+    final backend = _clienteComKeystore(ca);
     addTearDown(backend.close);
     const host = String.fromEnvironment('SINALACS_HOST', defaultValue: 'https://10.0.2.2/');
     api.Client novoCliente() => api.Client(host, securityContext: SecurityContext()..setTrustedCertificatesBytes(ca))
@@ -170,7 +177,7 @@ void main() {
 
   testWidgets('100 visitas offline sobem em menos de 5 s (M2.4)', (tester) async {
     final ca = (await rootBundle.load(BackendConfig.rpcCaAsset)).buffer.asUint8List();
-    final backend = BackendClient(trustedCaBytes: ca);
+    final backend = _clienteComKeystore(ca);
     addTearDown(backend.close);
     final cred = await acsCredentialFromRelay();
     final main = e2ePatient('main');
@@ -211,7 +218,7 @@ void main() {
 
   testWidgets('RF08: a microárea fica no aparelho, sobrevive à queda de rede e está cifrada', (tester) async {
     final ca = (await rootBundle.load(BackendConfig.rpcCaAsset)).buffer.asUint8List();
-    final backend = BackendClient(trustedCaBytes: ca);
+    final backend = _clienteComKeystore(ca);
     addTearDown(backend.close);
     final cred = await acsCredentialFromRelay();
     final main = e2ePatient('main');
@@ -246,7 +253,7 @@ void main() {
   testWidgets('MFA: com a verificação ativa, o login pela tela pede e aceita o código; '
       'o refresh token renova sem reautenticação e retoma a sessão na partida', (tester) async {
     final ca = (await rootBundle.load(BackendConfig.rpcCaAsset)).buffer.asUint8List();
-    final backend = BackendClient(trustedCaBytes: ca);
+    final backend = _clienteComKeystore(ca);
     addTearDown(backend.close);
     const host = String.fromEnvironment('SINALACS_HOST', defaultValue: 'https://10.0.2.2/');
     final cliente = api.Client(host, securityContext: SecurityContext()..setTrustedCertificatesBytes(ca))
@@ -348,7 +355,7 @@ void main() {
 
     // 6) Partida a frio: cliente novo (nada em memória), o mesmo Keystore e um
     //    desbloqueio local que aceita. O painel abre sem matrícula/senha/código.
-    final frio = BackendClient(trustedCaBytes: ca);
+    final frio = _clienteComKeystore(ca);
     addTearDown(frio.close);
     final desbloqueio = _DesbloqueioDeTeste(available: true);
     await tester.pumpWidget(SinalAcsApp(

@@ -245,8 +245,11 @@ class BackendClient implements AcsBackend {
     List<int>? trustedCaBytes,
     SessionTokenStore? tokenStore,
     DeviceIdStore? deviceIds,
-  })  : _tokenStore = tokenStore ?? SecureStorageSessionTokenStore(),
-        _deviceIds = deviceIds ?? SecureStorageDeviceIdStore(),
+  // Sem store, só memória: o Keystore (`secure_session_token_store.dart`)
+  // depende do Flutter e este arquivo roda também na VM (`tool/live_check.dart`).
+  // Quem liga o Keystore é o `main.dart`; sem ele, nada sobrevive ao app fechar.
+  })  : _tokenStore = tokenStore ?? MemorySessionTokenStore(),
+        _deviceIds = deviceIds ?? MemoryDeviceIdStore(),
         _client = Client(
           // Só o host que veio do `--dart-define` (o default de compilação) é
           // validado. Um host **explícito** passa como veio: é o caminho dos
