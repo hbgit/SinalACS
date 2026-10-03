@@ -54,4 +54,17 @@ void main() {
     expect(manifest, isNot(contains('android:label="sinalacs_acs"')));
     expect(manifest, contains('android:label="SinalACS ACS"'));
   });
+
+  test('declara USE_BIOMETRIC para o desbloqueio por digital', () {
+    expect(declares('USE_BIOMETRIC'), isTrue);
+  });
+
+  test('MainActivity usa FlutterFragmentActivity e mantém FLAG_SECURE', () {
+    // local_auth falha em tempo de execução com FlutterActivity; e o
+    // FLAG_SECURE (captura/miniatura) não pode regredir.
+    final activity =
+        File('android/app/src/main/kotlin/br/com/prismrr/sinalacs/acs/MainActivity.kt').readAsStringSync();
+    expect(activity, contains('class MainActivity : FlutterFragmentActivity()'));
+    expect(activity, contains('FLAG_SECURE'));
+  });
 }
