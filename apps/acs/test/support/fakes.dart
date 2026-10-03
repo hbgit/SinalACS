@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:sinalacs_acs/core/network/auth_session.dart';
 import 'package:sinalacs_acs/core/network/backend_client.dart';
+import 'package:sinalacs_acs/core/security/biometric_gate.dart';
 import 'package:sinalacs_acs/core/services/alert_feed.dart';
 import 'package:sinalacs_acs/core/services/alert_queue.dart';
 import 'package:sinalacs_acs/core/services/offline_visit_queue.dart';
@@ -58,14 +59,41 @@ class FakeAcsBackend implements AcsBackend {
   @override
   void Function()? onSessionExpired;
 
-  @override
-  Future<bool> get hasStoredSession async => false;
+  /// Refresh token "no Keystore". O login por senha grava um novo; a recusa
+  /// e o logout apagam; a falta de rede mantém — como o `BackendClient`.
+  String? storedRefreshToken;
+  int _refreshSeq = 0;
+
+  /// Retomada sem rede: devolve `null` e MANTÉM o token.
+  bool resumeOffline = false;
+
+  /// Servidor recusa o refresh token: devolve `null` e APAGA o token.
+  bool rejectResume = false;
+
+  int resumeCount = 0;
+  int logoutCount = 0;
 
   @override
-  Future<AuthSession?> resumeSession() async => null;
+  Future<bool> get hasStoredSession async => storedRefreshToken != null;
 
   @override
-  Future<void> logout() async => _session = null;
+  Future<AuthSession?> resumeSession() async {
+    resumeCount++;
+    if (storedRefreshToken == null || resumeOffline) return null;
+    if (rejectResume) {
+      storedRefreshToken = null;
+      return null;
+    }
+    storedRefreshToken = 'refresh-${++_refreshSeq}';
+    return _issueSession();
+  }
+
+  @override
+  Future<void> logout() async {
+    logoutCount++;
+    storedRefreshToken = null;
+    _session = null;
+  }
 
   /// Simula o servidor com MFA ativa: sem [totpCode] igual a [expectedTotpCode], levanta [MfaCodeRequired].
   String? expectedTotpCode;
@@ -107,7 +135,9 @@ class FakeAcsBackend implements AcsBackend {
       throw totpCode == null ? const MfaCodeRequired() : const BackendFailure('Código de verificação inválido.', isRecoverable: false);
     }
     sessionExpired = false;
-    return _issueSession();
+    final session = await _issueSession();
+    storedRefreshToken = 'refresh-${++_refreshSeq}';
+    return session;
   }
 
   /// Ferramenta de desenvolvimento (`tool/`, `integration_test/`). Sem
@@ -447,4 +477,24 @@ PrioritizedAlert testAlert({
     locationCell: locationCell,
     triggeredAt: triggeredAt ?? DateTime.utc(2026, 9, 11, 12),
   );
+}
+
+/// Desbloqueio local controlado pelo teste.
+class FakeBiometricGate implements BiometricGate {
+  FakeBiometricGate({this.available = true, this.result = UnlockResult.unlocked});
+
+  bool available;
+  UnlockResult result;
+  int calls = 0;
+  final List<String> reasons = <String>[];
+
+  @override
+  Future<bool> get isAvailable async => available;
+
+  @override
+  Future<UnlockResult> authenticate({required String reason}) async {
+    calls++;
+    reasons.add(reason);
+    return result;
+  }
 }

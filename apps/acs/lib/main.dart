@@ -5,6 +5,8 @@ import 'package:flutter/services.dart' show rootBundle;
 import 'package:sinalacs_acs/app/app.dart';
 import 'package:sinalacs_acs/core/network/backend_client.dart';
 import 'package:sinalacs_acs/core/network/backend_config.dart';
+import 'package:sinalacs_acs/core/security/biometric_gate.dart';
+import 'package:sinalacs_acs/core/security/session_token_store.dart';
 import 'package:sinalacs_acs/core/services/micro_area_directory_factory.dart';
 
 /// Sobe o app do ACS.
@@ -34,6 +36,9 @@ Future<void> main({String? defaultHost}) async {
     backend = BackendClient(
       host: requireSecureHost(defaultHost ?? BackendConfig.host),
       trustedCaBytes: caBytes,
+      // Refresh token e id do aparelho no Keystore/Keychain, nunca em texto.
+      tokenStore: SecureStorageSessionTokenStore(),
+      deviceIds: SecureStorageDeviceIdStore(),
     );
   } on BackendFailure catch (failure) {
     debugPrint(
@@ -52,6 +57,9 @@ Future<void> main({String? defaultHost}) async {
   runApp(SinalAcsApp(
     backend: backend,
     microAreaDirectory: buildMicroAreaDirectory(backend: backend),
+    // Digital/rosto ou bloqueio de tela: retomada na partida e bloqueio por
+    // inatividade.
+    biometricGate: LocalAuthBiometricGate(),
   ));
 }
 
