@@ -154,4 +154,173 @@ CREATE TABLE offline_visits (
     expect(identical(mem.forOwner('a'), mem.forOwner('a')), isTrue);
     expect(await mem.legacy.load(), isEmpty);
   });
+
+  group('VisitDatabase single-flight', () {
+    test('N open() concorrentes abrem UMA só conexão', () async {
+      var aberturas = 0;
+      final db = VisitDatabase(
+        keyStore: InMemoryDatabaseKeyStore(),
+        databaseName: nome,
+        allowUnencryptedForTesting: true,
+        opener: (n, p, u) async {
+          aberturas++;
+          return EncryptedLocalDatabase.open(
+            databaseName: n,
+            passphrase: p,
+            allowUnencryptedForTesting: u,
+          );
+        },
+      );
+      final todos = await Future.wait([for (var i = 0; i < 8; i++) db.open()]);
+      expect(aberturas, 1);
+      expect(todos.every((d) => identical(d, todos.first)), isTrue);
+      await db.close();
+    });
+
+    test('no caminho de recuperação (chave errada) também abre uma só vez', () async {
+      // Arquivo criado com outra chave: a 1ª abertura falha e dispara apagar+recriar.
+      final antigo = await EncryptedLocalDatabase.open(
+        databaseName: nome,
+        passphrase: 'b' * 64,
+        allowUnencryptedForTesting: true,
+      );
+      await antigo.close();
+
+      var aberturas = 0;
+      var falhou = false;
+      final db = VisitDatabase(
+        keyStore: InMemoryDatabaseKeyStore(),
+        databaseName: nome,
+        allowUnencryptedForTesting: true,
+        opener: (n, p, u) async {
+          aberturas++;
+          if (!falhou) {
+            falhou = true;
+            throw StateError('chave não abre o arquivo');
+          }
+          return EncryptedLocalDatabase.open(
+            databaseName: n,
+            passphrase: p,
+            allowUnencryptedForTesting: u,
+          );
+        },
+      );
+      final todos = await Future.wait([for (var i = 0; i < 8; i++) db.open()]);
+      expect(aberturas, 2, reason: 'uma falha + uma recriação, não por chamador');
+      expect(todos.every((d) => identical(d, todos.first)), isTrue);
+      await db.close();
+    });
+
+    test('falha de abertura não fica memoizada: a próxima chamada tenta de novo', () async {
+      var aberturas = 0;
+      final db = VisitDatabase(
+        keyStore: InMemoryDatabaseKeyStore(),
+        databaseName: nome,
+        allowUnencryptedForTesting: true,
+        opener: (n, p, u) async {
+          aberturas++;
+          if (aberturas <= 2) throw UnsupportedError('sem sqlcipher');
+          return EncryptedLocalDatabase.open(
+            databaseName: n,
+            passphrase: p,
+            allowUnencryptedForTesting: u,
+          );
+        },
+      );
+      await expectLater(db.open(), throwsA(isA<UnsupportedError>()));
+      await expectLater(db.open(), throwsA(isA<UnsupportedError>()));
+      expect((await db.open()).isOpen, isTrue);
+      await db.close();
+    });
+  });
+
+  group('dono inválido', () {
+    for (final ruim in ['', '   ', '\t\n']) {
+      test('"${ruim.trim()}" (${ruim.length} chars) é recusado em todos os pontos', () {
+        expect(() => storage.forOwner(ruim), throwsArgumentError);
+        expect(
+          () => SqlCipherVisitStore(
+            keyStore: InMemoryDatabaseKeyStore(),
+            owner: ruim,
+            databaseName: nome,
+            allowUnencryptedForTesting: true,
+          ),
+          throwsArgumentError,
+        );
+        expect(
+          () => SqlCipherVisitStore.on(storage.database, owner: ruim),
+          throwsArgumentError,
+        );
+        expect(() => InMemoryVisitStorage().forOwner(ruim), throwsArgumentError);
+      });
+    }
+  });
+
+  group('unicidade global de local_id', () {
+    test('colisão com localId em QUARENTENA: o save lança e a linha legada fica', () async {
+      final db = await storage.database.open();
+      await db.insert('offline_visits', {
+        'local_id': 'leg-1',
+        'patient_id': seedPatientId,
+        'risk': 'red',
+        'status': 'PENDENTE',
+        'outcome': '',
+        'notes': '',
+        'created_at': DateTime.utc(2026).toIso8601String(),
+        'version': 1,
+      });
+      final a = storage.forOwner('acs-a');
+      await a.save([_visita('a-1')]);
+
+      await expectLater(
+        a.save([_visita('a-2'), _visita('leg-1')]),
+        throwsA(isA<VisitLocalIdConflict>()),
+      );
+      expect((await storage.legacy.load()).map((v) => v.localId), ['leg-1']);
+      expect((await a.load()).map((v) => v.localId), ['a-1']);
+    });
+
+    test('localId repetido na mesma lista: conflito com mensagem exata (SQLCipher)', () async {
+      final a = storage.forOwner('acs-a');
+      await a.save([_visita('a-1')]);
+      await expectLater(
+        a.save([_visita('x'), _visita('x')]),
+        throwsA(isA<VisitLocalIdConflict>()
+            .having((e) => e.repeatedInList, 'repeatedInList', isTrue)
+            .having((e) => e.toString(), 'msg', contains('repetido'))),
+      );
+      expect((await a.load()).map((v) => v.localId), ['a-1']);
+    });
+
+    test('InMemory: mesma unicidade, tudo ou nada', () async {
+      final mem = InMemoryVisitStorage(legacyVisits: [_visita('leg-1')]);
+      final a = mem.forOwner('a'), b = mem.forOwner('b');
+      await a.save([_visita('x')]);
+      await b.save([_visita('b-1')]);
+
+      await expectLater(
+        b.save([_visita('b-2'), _visita('x')]),
+        throwsA(isA<VisitLocalIdConflict>()
+            .having((e) => e.repeatedInList, 'repeatedInList', isFalse)),
+      );
+      await expectLater(
+        b.save([_visita('leg-1')]),
+        throwsA(isA<VisitLocalIdConflict>()),
+      );
+      expect((await a.load()).map((v) => v.localId), ['x']);
+      expect((await b.load()).map((v) => v.localId), ['b-1']);
+      expect((await mem.legacy.load()).map((v) => v.localId), ['leg-1']);
+
+      await expectLater(
+        b.save([_visita('y'), _visita('y')]),
+        throwsA(isA<VisitLocalIdConflict>()
+            .having((e) => e.repeatedInList, 'repeatedInList', isTrue)),
+      );
+      expect((await b.load()).map((v) => v.localId), ['b-1']);
+
+      // o próprio dono pode regravar os seus
+      await b.save([_visita('b-1'), _visita('b-3')]);
+      expect((await b.load()).length, 2);
+    });
+  });
 }

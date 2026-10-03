@@ -192,33 +192,88 @@ abstract interface class LegacyVisitStore {
   Future<void> remove(Iterable<String> localIds);
 }
 
-/// Lançada quando um dono tenta gravar um `localId` que já pertence a outro
-/// dono (ou à quarentena). `local_id` é chave primária global: a visita do
-/// outro NUNCA é sobrescrita nem apagada, e a gravação inteira é desfeita.
+/// Lançada quando um `localId` não pode ser gravado: ou ele já pertence a
+/// outro dono (ou à quarentena), ou aparece repetido na própria lista. `local_id`
+/// é chave primária global: a visita alheia NUNCA é sobrescrita nem apagada, e a
+/// gravação inteira é desfeita (tudo ou nada).
 class VisitLocalIdConflict implements Exception {
-  VisitLocalIdConflict(this.localId);
+  VisitLocalIdConflict(this.localId, {this.repeatedInList = false});
 
   final String localId;
 
+  /// true quando o `localId` se repete dentro do mesmo `save`.
+  final bool repeatedInList;
+
   @override
-  String toString() =>
-      'VisitLocalIdConflict: localId $localId já pertence a outro dono';
+  String toString() => repeatedInList
+      ? 'VisitLocalIdConflict: localId $localId repetido na mesma gravação'
+      : 'VisitLocalIdConflict: localId $localId já pertence a outro dono';
 }
 
-/// [VisitStorage] em memória: um [InMemoryVisitStore] por dono.
+/// Valida o id de dono: vazio ou só espaços é erro de programação (sem dono, a
+/// visita cairia na quarentena ou numa visão compartilhada).
+String requireOwnerId(String ownerId) {
+  if (ownerId.trim().isEmpty) {
+    throw ArgumentError.value(ownerId, 'ownerId', 'não pode ser vazio');
+  }
+  return ownerId;
+}
+
+/// Falha com [VisitLocalIdConflict] se [visits] repete algum `localId`.
+void ensureNoRepeatedLocalIds(List<OfflineVisitRecord> visits) {
+  final seen = <String>{};
+  for (final visit in visits) {
+    if (!seen.add(visit.localId)) {
+      throw VisitLocalIdConflict(visit.localId, repeatedInList: true);
+    }
+  }
+}
+
+/// [VisitStorage] em memória: uma visão por dono sobre um registro único, com a
+/// mesma unicidade global de `localId` do SQLCipher.
 class InMemoryVisitStorage implements VisitStorage {
   InMemoryVisitStorage({Iterable<OfflineVisitRecord> legacyVisits = const []})
       : _legacy = _InMemoryLegacyVisitStore(legacyVisits);
 
-  final Map<String, InMemoryVisitStore> _stores = {};
+  final Map<String, List<OfflineVisitRecord>> _byOwner = {};
   final _InMemoryLegacyVisitStore _legacy;
+  final Map<String, VisitStore> _views = {};
 
   @override
-  VisitStore forOwner(String ownerId) =>
-      _stores.putIfAbsent(ownerId, InMemoryVisitStore.new);
+  VisitStore forOwner(String ownerId) => _views.putIfAbsent(
+        requireOwnerId(ownerId),
+        () => _InMemoryOwnerVisitStore(this, ownerId),
+      );
 
   @override
   LegacyVisitStore get legacy => _legacy;
+}
+
+class _InMemoryOwnerVisitStore implements VisitStore {
+  _InMemoryOwnerVisitStore(this._storage, this._owner);
+
+  final InMemoryVisitStorage _storage;
+  final String _owner;
+
+  @override
+  Future<List<OfflineVisitRecord>> load() async =>
+      List.of(_storage._byOwner[_owner] ?? const <OfflineVisitRecord>[]);
+
+  @override
+  Future<void> save(List<OfflineVisitRecord> visits) async {
+    ensureNoRepeatedLocalIds(visits);
+    final taken = <String>{
+      for (final entry in _storage._byOwner.entries)
+        if (entry.key != _owner) ...entry.value.map((v) => v.localId),
+      ..._storage._legacy._visits.map((v) => v.localId),
+    };
+    for (final visit in visits) {
+      if (taken.contains(visit.localId)) {
+        throw VisitLocalIdConflict(visit.localId);
+      }
+    }
+    _storage._byOwner[_owner] = List.of(visits);
+  }
 }
 
 class _InMemoryLegacyVisitStore implements LegacyVisitStore {

@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:sinalacs_acs/core/database/encrypted_database.dart';
 import 'package:sinalacs_acs/core/security/database_key_store.dart';
 import 'package:sinalacs_acs/core/services/offline_visit_queue.dart';
@@ -11,8 +12,24 @@ class VisitDatabase {
     required DatabaseKeyStore keyStore,
     this.databaseName = 'sinalacs_acs.db',
     this.allowUnencryptedForTesting = false,
-  }) : _keyStore = keyStore;
+    @visibleForTesting
+    Future<Database> Function(String databaseName, String passphrase, bool allowUnencrypted)?
+        opener,
+  })  : _keyStore = keyStore,
+        _opener = opener ?? _defaultOpener;
 
+  static Future<Database> _defaultOpener(
+    String databaseName,
+    String passphrase,
+    bool allowUnencrypted,
+  ) =>
+      EncryptedLocalDatabase.open(
+        databaseName: databaseName,
+        passphrase: passphrase,
+        allowUnencryptedForTesting: allowUnencrypted,
+      );
+
+  final Future<Database> Function(String, String, bool) _opener;
   final DatabaseKeyStore _keyStore;
   final String databaseName;
 
@@ -20,23 +37,36 @@ class VisitDatabase {
   final bool allowUnencryptedForTesting;
 
   Database? _database;
+  Future<Database>? _opening;
 
   /// Abre preguiçosamente, na primeira leitura ou escrita.
   ///
   /// É o que permite a fila continuar sendo construída de forma síncrona pela
   /// UI, sem espalhar `await` pela montagem do app.
-  Future<Database> open() async {
+  ///
+  /// Single-flight: chamadas concorrentes compartilham a MESMA abertura (duas
+  /// conexões ao mesmo arquivo, ou duas recuperações apagando o arquivo, são
+  /// o que isto evita). Se a abertura falha, o próximo `open()` tenta de novo.
+  Future<Database> open() {
     final existing = _database;
-    if (existing != null && existing.isOpen) return existing;
+    if (existing != null && existing.isOpen) return Future.value(existing);
 
+    final inFlight = _opening;
+    if (inFlight != null) return inFlight;
+
+    final attempt = _openOnce();
+    _opening = attempt;
+    return attempt.whenComplete(() {
+      if (identical(_opening, attempt)) _opening = null;
+    }).then((_) => attempt);
+  }
+
+  Future<Database> _openOnce() async {
     final passphrase = await _keyStore.readOrCreate();
 
     try {
-      return _database = await EncryptedLocalDatabase.open(
-        databaseName: databaseName,
-        passphrase: passphrase,
-        allowUnencryptedForTesting: allowUnencryptedForTesting,
-      );
+      return _database =
+          await _opener(databaseName, passphrase, allowUnencryptedForTesting);
     } on UnsupportedError {
       // Plataforma sem SQLCipher: quem chamou precisa saber, não receber um
       // banco em texto plano por baixo dos panos.
@@ -50,10 +80,10 @@ class VisitDatabase {
       await EncryptedLocalDatabase.deleteDatabaseFile(databaseName);
       await _keyStore.delete();
 
-      return _database = await EncryptedLocalDatabase.open(
-        databaseName: databaseName,
-        passphrase: await _keyStore.readOrCreate(),
-        allowUnencryptedForTesting: allowUnencryptedForTesting,
+      return _database = await _opener(
+        databaseName,
+        await _keyStore.readOrCreate(),
+        allowUnencryptedForTesting,
       );
     }
   }
@@ -92,7 +122,7 @@ class SqlCipherVisitStorage implements VisitStorage {
 
   @override
   VisitStore forOwner(String ownerId) =>
-      SqlCipherVisitStore.on(database, owner: ownerId);
+      SqlCipherVisitStore.on(database, owner: requireOwnerId(ownerId));
 
   @override
   LegacyVisitStore get legacy => SqlCipherLegacyVisitStore(database);
@@ -143,10 +173,11 @@ class SqlCipherVisitStore implements VisitStore {
   /// Cria o próprio [VisitDatabase].
   SqlCipherVisitStore({
     required DatabaseKeyStore keyStore,
-    required this.owner,
+    required String owner,
     String databaseName = 'sinalacs_acs.db',
     bool allowUnencryptedForTesting = false,
-  })  : _database = VisitDatabase(
+  })  : owner = requireOwnerId(owner),
+        _database = VisitDatabase(
           keyStore: keyStore,
           databaseName: databaseName,
           allowUnencryptedForTesting: allowUnencryptedForTesting,
@@ -154,8 +185,9 @@ class SqlCipherVisitStore implements VisitStore {
         _ownsDatabase = true;
 
   /// Visão de [owner] sobre um banco compartilhado.
-  SqlCipherVisitStore.on(VisitDatabase database, {required this.owner})
-      : _database = database,
+  SqlCipherVisitStore.on(VisitDatabase database, {required String owner})
+      : owner = requireOwnerId(owner),
+        _database = database,
         _ownsDatabase = false;
 
   final VisitDatabase _database;
@@ -191,6 +223,7 @@ class SqlCipherVisitStore implements VisitStore {
   /// transação inteira é desfeita — a linha alheia fica intacta.
   @override
   Future<void> save(List<OfflineVisitRecord> visits) async {
+    ensureNoRepeatedLocalIds(visits);
     final database = await _database.open();
 
     await database.transaction((transaction) async {

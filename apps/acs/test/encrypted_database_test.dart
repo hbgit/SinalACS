@@ -330,6 +330,72 @@ CREATE TABLE offline_visits (
       await atual.close();
     });
 
+    Future<bool> temIndiceOwner(Database db) async => (await db.rawQuery(
+          "SELECT name FROM sqlite_master WHERE type='index' AND name='offline_visits_owner_idx'",
+        ))
+            .isNotEmpty;
+
+    Future<void> abrirVersaoAntigaEAtualizar(int versao, String create) async {
+      sqfliteFfiInit();
+      final legado = await databaseFactoryFfi.openDatabase(
+        await EncryptedLocalDatabase.pathFor(nome),
+        options: OpenDatabaseOptions(
+          version: versao,
+          onCreate: (db, v) => db.execute(create),
+        ),
+      );
+      await legado.close();
+    }
+
+    const base = '''
+CREATE TABLE offline_visits (
+  local_id TEXT PRIMARY KEY, patient_id TEXT NOT NULL, risk TEXT NOT NULL,
+  status TEXT NOT NULL, outcome TEXT NOT NULL, notes TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL, version INTEGER NOT NULL, rejection_reason TEXT
+)''';
+
+    for (final versao in [3, 5, 6]) {
+      test('upgrade v$versao → v7 cria owner e offline_visits_owner_idx', () async {
+        await abrirVersaoAntigaEAtualizar(versao, base);
+        final atual = await EncryptedLocalDatabase.open(
+          databaseName: nome,
+          passphrase: chave,
+          allowUnencryptedForTesting: true,
+        );
+        expect(await temIndiceOwner(atual), isTrue);
+        await atual.close();
+      });
+    }
+
+    test('v1 → v7 recria com owner e offline_visits_owner_idx', () async {
+      final legado = await abrirV1(
+        'CREATE TABLE IF NOT EXISTS local_queue (id TEXT PRIMARY KEY)',
+      );
+      await legado.close();
+      final atual = await EncryptedLocalDatabase.open(
+        databaseName: nome,
+        passphrase: chave,
+        allowUnencryptedForTesting: true,
+      );
+      final colunas = [
+        for (final row in await atual.rawQuery('PRAGMA table_info(offline_visits)'))
+          row['name']! as String,
+      ];
+      expect(colunas, contains('owner'));
+      expect(await temIndiceOwner(atual), isTrue);
+      await atual.close();
+    });
+
+    test('criação limpa tem offline_visits_owner_idx', () async {
+      final atual = await EncryptedLocalDatabase.open(
+        databaseName: nome,
+        passphrase: chave,
+        allowUnencryptedForTesting: true,
+      );
+      expect(await temIndiceOwner(atual), isTrue);
+      await atual.close();
+    });
+
     test('criação limpa já tem a coluna owner', () async {
       final atual = await EncryptedLocalDatabase.open(
         databaseName: nome,
