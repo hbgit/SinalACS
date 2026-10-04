@@ -208,7 +208,9 @@ CREATE TABLE IF NOT EXISTS micro_area_cache_meta (
         },
         onUpgrade: _upgrade,
         // Um rollback de APK abriria um arquivo v2 pedindo v1 e lançaria,
-        // deixando o app travado a cada abertura.
+        // deixando o app travado a cada abertura. ATENÇÃO: o preço é APAGAR o
+        // banco — voltar o APK para uma build anterior à v7 (fila por dono)
+        // descarta as visitas não enviadas, o cursor e o cache da microárea.
         onDowngrade: onDatabaseDowngradeDelete,
       );
     }

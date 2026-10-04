@@ -14,6 +14,14 @@ import 'support/fake_rpc_server.dart';
 /// Credenciais e ids sintéticos.
 void main() {
   group('MemoryUploadTokenStore', () {
+    test('compareAndClear só apaga o valor esperado', () async {
+      final store = MemoryUploadTokenStore({'acs-a': 'upload-a'});
+      expect(await store.compareAndClear('acs-a', 'outro'), isFalse);
+      expect(await store.read('acs-a'), 'upload-a');
+      expect(await store.compareAndClear('acs-a', 'upload-a'), isTrue);
+      expect(await store.read('acs-a'), isNull);
+    });
+
     test('clearAll esvazia', () async {
       final store = MemoryUploadTokenStore({'acs-a': 'upload-a', 'acs-b': 'upload-b'});
       await store.clearAll();
@@ -78,6 +86,30 @@ void main() {
         expect(await store.owners(), ['acs-a'], reason: 'rodada $rodada');
         expect(await store.read('acs-b'), isNull);
       }
+    });
+
+    test('compareAndClear(velho) concorrente com write(novo): o token NOVO sobrevive', () async {
+      for (var rodada = 0; rodada < 5; rodada++) {
+        final keystore = _KeystoreFalso()..latencia = const Duration(milliseconds: 5);
+        final store = SecureStorageUploadTokenStore(storage: keystore);
+        await store.write('acs-a', 'upload-velho');
+
+        final resultados = await Future.wait([
+          store.compareAndClear('acs-a', 'upload-velho'),
+          store.write('acs-a', 'upload-novo').then((_) => true),
+        ]);
+
+        expect(resultados.first, isTrue, reason: 'rodada $rodada: o velho foi apagado');
+        expect(await store.read('acs-a'), 'upload-novo', reason: 'rodada $rodada');
+        expect(await store.owners(), ['acs-a'], reason: 'rodada $rodada');
+      }
+    });
+
+    test('compareAndClear com outro valor não apaga', () async {
+      final store = SecureStorageUploadTokenStore(storage: _KeystoreFalso());
+      await store.write('acs-a', 'upload-novo');
+      expect(await store.compareAndClear('acs-a', 'upload-velho'), isFalse);
+      expect(await store.read('acs-a'), 'upload-novo');
     });
 
     test('repairIndex recoloca no índice um dono cujo token existe; sem token, nada', () async {

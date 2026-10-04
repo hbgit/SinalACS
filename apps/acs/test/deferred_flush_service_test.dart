@@ -544,6 +544,9 @@ class _TokensQueFalham implements UploadTokenStore {
 
   @override
   Future<void> clearAll({Iterable<String> alsoOwners = const <String>[]}) => Future.error(StateError('Keystore'));
+
+  @override
+  Future<bool> compareAndClear(String ownerId, String expected) => Future.error(StateError('Keystore'));
 }
 
 /// Tokens guardados cujo ÍNDICE se perdeu: `owners()` não lista ninguém, mas
@@ -575,4 +578,11 @@ class _IndicePerdido implements UploadTokenStore {
 
   @override
   Future<void> clearAll({Iterable<String> alsoOwners = const <String>[]}) async => _tokens.clear();
+
+  @override
+  Future<bool> compareAndClear(String ownerId, String expected) async {
+    if (_tokens[ownerId] != expected) return false;
+    _tokens.remove(ownerId);
+    return true;
+  }
 }

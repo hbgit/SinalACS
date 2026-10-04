@@ -429,7 +429,29 @@ class OfflineVisitQueue {
     }
   }
 
-  Future<SyncOutcome> sync({bool forceConflict = false}) async {
+  Future<SyncOutcome>? _syncing;
+
+  /// `true` enquanto um [sync] está em voo (o lote pode estar no servidor).
+  /// Quem descarta filas (o app, ao trocar de dono) não pode descartar esta:
+  /// uma segunda fila sobre o mesmo dono seria regravada às cegas por esta
+  /// quando o envio terminasse.
+  bool get isSyncing => _syncing != null;
+
+  /// Envia o que está pendente. **Single-flight**: chamar de novo com um envio
+  /// em voo devolve o resultado DESSE envio (o lote nunca sai duas vezes, nem
+  /// é contado duas vezes); o que foi registrado depois da captura do lote
+  /// fica para o próximo `sync()`.
+  Future<SyncOutcome> sync({bool forceConflict = false}) {
+    final inFlight = _syncing;
+    if (inFlight != null) return inFlight;
+    late final Future<SyncOutcome> run;
+    run = _syncOnce(forceConflict: forceConflict).whenComplete(() {
+      if (identical(_syncing, run)) _syncing = null;
+    });
+    return _syncing = run;
+  }
+
+  Future<SyncOutcome> _syncOnce({required bool forceConflict}) async {
     if (_pending.isEmpty) {
       return const SyncOutcome(kind: SyncOutcomeKind.empty, processed: 0);
     }
@@ -530,9 +552,16 @@ class OfflineVisitQueue {
       }
     }
 
+    // `add()` pode ter entrado com o lote no servidor: quem não estava no lote
+    // capturado continua pendente, depois dos que voltaram para a fila. Refazer
+    // `_pending` só com o lote apagava essa visita da memória e, no `_persist`
+    // abaixo, do disco.
+    final inBatch = {for (final visit in batch) visit.localId};
+    final arrived = [for (final visit in _pending) if (!inBatch.contains(visit.localId)) visit];
     _pending
       ..clear()
-      ..addAll(stillPending);
+      ..addAll(stillPending)
+      ..addAll(arrived);
     await _persist();
 
     // Precedência: recusado > conflito > erro > sincronizado. Recusado é

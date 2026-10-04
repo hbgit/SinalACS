@@ -199,6 +199,12 @@ typedef UnsentOnDevice = ({int own, int elsewhere, int unsent, int review, int n
 bool _onlyInMemory(OfflineVisitQueue queue) =>
     queue.persistenceFailed && (queue.pendingCount > 0 || queue.rejectedCount > 0);
 
+/// Fila que não pode sair da memória: só em RAM, ou com um envio em voo
+/// (`isSyncing`). A segunda, descartada, faria o próximo login do dono montar
+/// OUTRA fila sobre o mesmo disco — e o fim do envio antigo regravaria esse
+/// disco às cegas, apagando o que a fila nova registrou.
+bool _mustKeep(OfflineVisitQueue queue) => _onlyInMemory(queue) || queue.isSyncing;
+
 class _SinalAcsAppState extends State<SinalAcsApp> with WidgetsBindingObserver implements _DeviceCare {
   /// Armazenamento de visitas do aparelho: UM banco, uma visão por dono.
   ///
@@ -243,8 +249,8 @@ class _SinalAcsAppState extends State<SinalAcsApp> with WidgetsBindingObserver i
     // EXCETO a fila que não conseguiu gravar (`persistenceFailed`) e ainda tem
     // visita: essas visitas existem só em RAM, e descartá-la as perderia — o
     // próximo login do dono precisa reencontrá-las.
-    _queues.removeWhere((owner, queue) => owner != session.userId && !_onlyInMemory(queue));
-    _scopes.removeWhere((key, scope) => !key.startsWith('${session.userId}|') && !_onlyInMemory(scope.queue));
+    _queues.removeWhere((owner, queue) => owner != session.userId && !_mustKeep(queue));
+    _scopes.removeWhere((key, scope) => !key.startsWith('${session.userId}|') && !_mustKeep(scope.queue));
     return _scopes.putIfAbsent(visitCursorOwner(session), () {
       final built = buildOwnerVisitScope(
         backend: widget.backend,
@@ -373,9 +379,9 @@ class _SinalAcsAppState extends State<SinalAcsApp> with WidgetsBindingObserver i
   void release(String owner, {required bool settled}) {
     if (!settled) return;
     final queue = _queues[owner];
-    if (queue != null && _onlyInMemory(queue)) return;
+    if (queue != null && _mustKeep(queue)) return;
     _queues.remove(owner);
-    _scopes.removeWhere((key, scope) => key.startsWith('$owner|') && !_onlyInMemory(scope.queue));
+    _scopes.removeWhere((key, scope) => key.startsWith('$owner|') && !_mustKeep(scope.queue));
   }
 
   @override
@@ -1577,6 +1583,10 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
   bool _saindo = false;
   bool _limpando = false;
 
+  /// "Sair" está na etapa de envio (até 2 × [sessionEndSendTimeout]): a tela
+  /// explica a espera debaixo do indicador.
+  bool _enviandoAntesDeSair = false;
+
   _DeviceCare? get _care => _DeviceCareScope.maybeOf(context);
 
   /// Antes de sair ou limpar: (1) a fila do painel (o envio diferido pula o
@@ -1603,7 +1613,8 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
   /// "Sair e encerrar o turno": envia antes o que puder ([_sendBeforeLeaving])
   /// e então revoga o refresh token (best-effort, sem rede também sai) e volta
   /// ao login. O que não subiu NÃO é apagado (offline-first): continua no
-  /// aparelho e sobe sozinho quando a conexão voltar (pelo token de envio do
+  /// aparelho e sobe sozinho quando o app estiver aberto com conexão, em até
+  /// 7 dias (validade do token de envio do
   /// dono, D7). O feed MQTT e os timers param no `dispose` deste painel.
   ///
   /// Alerta não confirmado NÃO sobrevive à saída: a fila de alertas é deste
@@ -1613,9 +1624,10 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
   /// mesmo vale para visitas que ficaram no aparelho.
   Future<void> _logout() async {
     if (_saindo || _limpando) return;
-    setState(() => _saindo = true);
+    setState(() { _saindo = true; _enviandoAntesDeSair = true; });
     final envio = await _sendBeforeLeaving();
     if (!mounted) return;
+    setState(() => _enviandoAntesDeSair = false);
     final fila = widget.visitQueue;
     final recusadas = fila.rejectedCount;
     final proprias = fila.pendingCount + recusadas;
@@ -1646,8 +1658,8 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
             else ...[
               Text(
                 ficam == 1
-                    ? '1 visita ainda não enviada continua neste aparelho. Ela segue protegida e sobe sozinha quando a conexão voltar.'
-                    : '$ficam visitas ainda não enviadas continuam neste aparelho. Elas seguem protegidas e sobem sozinhas quando a conexão voltar.',
+                    ? '1 visita ainda não enviada continua neste aparelho. Ela segue protegida e sobe sozinha quando o aplicativo estiver aberto com conexão (em até 7 dias).'
+                    : '$ficam visitas ainda não enviadas continuam neste aparelho. Elas seguem protegidas e sobem sozinhas quando o aplicativo estiver aberto com conexão (em até 7 dias).',
                 key: const Key('logout_pending_visits'),
               ),
               if (outras > 0 && proprias > 0) ...[
@@ -1946,6 +1958,7 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
           controller: widget.themeController,
           onLogout: _saindo || _limpando ? null : _logout,
           loggingOut: _saindo,
+          logoutStatus: _enviandoAntesDeSair ? 'Enviando as visitas pendentes antes de sair…' : null,
           onWipe: _saindo || _limpando ? null : _limparAparelho,
           wiping: _limpando,
         ),
@@ -3409,12 +3422,17 @@ class ThemeSettingsScreen extends StatelessWidget {
     super.key,
     this.onLogout,
     this.loggingOut = false,
+    this.logoutStatus,
     this.onWipe,
     this.wiping = false,
   });
 
   /// Saída em andamento: o botão mostra progresso.
   final bool loggingOut;
+
+  /// Linha curta debaixo do botão "Sair" enquanto ele trabalha (ex.: o envio
+  /// antes de sair). `null` não mostra nada.
+  final String? logoutStatus;
 
   /// "Limpar este aparelho". `null` desliga o botão.
   final VoidCallback? onWipe;
@@ -3448,7 +3466,7 @@ class ThemeSettingsScreen extends StatelessWidget {
       const Text('Turno', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
       const SizedBox(height: 4),
       const Text('Sair envia antes o que estiver pendente e encerra a sessão neste aparelho. '
-          'O que não puder ser enviado continua salvo e protegido, e sobe sozinho quando a conexão voltar.'),
+          'O que não puder ser enviado continua salvo e protegido, e sobe sozinho quando o aplicativo estiver aberto com conexão (em até 7 dias).'),
       const SizedBox(height: 16),
       SizedBox(width: double.infinity, child: FilledButton(
         key: const Key('logout_button'),
@@ -3458,6 +3476,10 @@ class ThemeSettingsScreen extends StatelessWidget {
             ? const SizedBox(key: Key('logout_progress'), height: 22, width: 22, child: CircularProgressIndicator(strokeWidth: 2))
             : const Text('Sair e encerrar o turno'),
       )),
+      if (logoutStatus != null) Padding(
+        padding: const EdgeInsets.only(top: 8),
+        child: Semantics(liveRegion: true, child: Text(logoutStatus!, key: const Key('logout_status'))),
+      ),
       const SizedBox(height: 24),
       const Text('Aparelho', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
       const SizedBox(height: 4),

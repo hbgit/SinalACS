@@ -453,7 +453,7 @@ void main() {
       await assentar(tester);
       await abrirSair(tester);
 
-      expect(find.text('1 visita ainda não enviada continua neste aparelho. Ela segue protegida e sobe sozinha quando a conexão voltar.'),
+      expect(find.text('1 visita ainda não enviada continua neste aparelho. Ela segue protegida e sobe sozinha quando o aplicativo estiver aberto com conexão (em até 7 dias).'),
           findsOneWidget);
       expect(
         find.text('Há 2 alertas ainda não confirmados. Eles saem deste aparelho, mas continuam pendentes no servidor.'),
@@ -492,6 +492,29 @@ void main() {
       expect(formulario(), findsOneWidget);
     });
 
+    testWidgets('"Sair" explica a espera enquanto envia as pendentes', (tester) async {
+      backend = FakeAcsBackend()..syncGate = Completer<void>();
+      fila = OfflineVisitQueue(synchronizer: BackendVisitSynchronizer(backend: backend, ownerId: seedAcsId));
+      await fila.add(OfflineVisitRecord(localId: 'local-lenta', patientId: seedPatientId, risk: 'red', status: 'PENDENTE'));
+      await abrirApp(tester, backend);
+      await entrarComSenha(tester);
+      await irParaDoMais(tester, 'Preferências');
+      final sair = find.byKey(const Key('logout_button'));
+      await tester.ensureVisible(sair);
+      await tester.pump();
+      await tester.tap(sair);
+      await tester.pump();
+      await tester.pump();
+
+      expect(find.byKey(const Key('logout_progress')), findsOneWidget);
+      expect(find.text('Enviando as visitas pendentes antes de sair…'), findsOneWidget);
+
+      backend.syncGate!.complete();
+      await assentar(tester);
+      expect(find.text('Enviando as visitas pendentes antes de sair…'), findsNothing, reason: 'some quando o diálogo abre');
+      expect(find.byKey(const Key('logout_confirm')), findsOneWidget);
+    });
+
     testWidgets('"Sair" sem rede: diz quantas ficam, "Sair mesmo assim", e sai do mesmo jeito', (tester) async {
       backend = FakeAcsBackend()..syncFailure = const BackendFailure('Sem conexão com o servidor.');
       fila = OfflineVisitQueue(synchronizer: BackendVisitSynchronizer(backend: backend, ownerId: seedAcsId));
@@ -504,7 +527,7 @@ void main() {
 
       expect(backend.callLog, ['syncVisits'], reason: 'tentou enviar antes');
       expect(
-        find.text('2 visitas ainda não enviadas continuam neste aparelho. Elas seguem protegidas e sobem sozinhas quando a conexão voltar.'),
+        find.text('2 visitas ainda não enviadas continuam neste aparelho. Elas seguem protegidas e sobem sozinhas quando o aplicativo estiver aberto com conexão (em até 7 dias).'),
         findsOneWidget,
       );
       expect(find.byKey(const Key('logout_pending_alerts')), findsNothing);

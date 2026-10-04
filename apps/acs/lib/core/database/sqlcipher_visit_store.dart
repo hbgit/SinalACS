@@ -2,7 +2,7 @@ import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:sinalacs_acs/core/database/encrypted_database.dart';
 import 'package:sinalacs_acs/core/security/database_key_store.dart';
 import 'package:sinalacs_acs/core/services/offline_visit_queue.dart';
-import 'package:sqflite_common_ffi/sqflite_ffi.dart' show Database;
+import 'package:sqflite_common_ffi/sqflite_ffi.dart' show Database, DatabaseException;
 
 const _table = 'offline_visits';
 
@@ -71,7 +71,12 @@ class VisitDatabase {
       // Plataforma sem SQLCipher: quem chamou precisa saber, não receber um
       // banco em texto plano por baixo dos panos.
       rethrow;
-    } catch (_) {
+    } catch (error) {
+      // SÓ a chave errada recomeça o arquivo. Qualquer outro erro (migração,
+      // E/S, canal da plataforma) sobe: apagar ali destruiria visitas legíveis
+      // por um problema passageiro. Quem chama segue em RAM
+      // (`persistenceFailed`) e tenta de novo na próxima abertura.
+      if (!isWrongDatabaseKeyError(error)) rethrow;
       // A chave não abre este arquivo — tipicamente reinstalação ou restauração
       // de backup, onde o banco veio e a chave do keystore não. Sem isso o app
       // ficaria travado num estado irrecuperável a cada abertura. Descartar o
@@ -114,6 +119,24 @@ class VisitDatabase {
       await transaction.delete('micro_area_cache_meta');
     });
   }
+}
+
+/// O erro que o SQLCipher dá quando a chave não abre o arquivo.
+///
+/// - `SQLITE_NOTADB` (código 26, "file is not a database"): iOS e FFI.
+/// - `open_failed <caminho>`: o `sqflite_sqlcipher` (3.2.0) no Android
+///   converte o "file is not a database" da abertura nisso
+///   (`SqfliteSqlCipherPlugin.handleException`), sem o código. A mesma
+///   tradução cobre "could not open database"; é o mais estreito que o plugin
+///   permite distinguir.
+///
+/// Erro de migração (SQL), de E/S, `PlatformException` ou qualquer outro tipo
+/// NÃO é chave errada.
+bool isWrongDatabaseKeyError(Object error) {
+  if (error is! DatabaseException) return false;
+  if (error.getResultCode() == 26) return true;
+  final message = error.toString().toLowerCase();
+  return message.contains('file is not a database') || error.isOpenFailedError();
 }
 
 OfflineVisitRecord _recordFrom(Map<String, Object?> row) => OfflineVisitRecord(

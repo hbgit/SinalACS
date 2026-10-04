@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sinalacs_acs/app/app.dart';
@@ -267,6 +269,61 @@ void main() {
 
       expect(await pendentesNaTela(tester), 'Pendentes de sincronização: 1 (em memória)',
           reason: 'a visita só existia em RAM: a fila de A não pode ser descartada');
+    });
+
+    testWidgets('A sai com o envio preso além do teto, B entra, A volta: a MESMA fila; a visita nova de A sobrevive ao fim do envio antigo',
+        (tester) async {
+      late FakeAlertFeed feed;
+      await tester.pumpWidget(SinalAcsApp(
+        backend: backend,
+        visitStorage: storage,
+        biometricGate: gate,
+        navigatorKey: navKey,
+        feedBuilder: (q) => feed = FakeAlertFeed(q),
+      ));
+      await assentar(tester);
+      await storage.forOwner(acsA).save([pendente('local-a1')]);
+      await entrarComo(tester, acsA);
+
+      // "Sair": o lote de A fica preso no servidor além do teto de 20 s.
+      backend.syncGate = Completer<void>();
+      await irParaDoMais(tester, 'Preferências');
+      final botao = find.byKey(const Key('logout_button'));
+      await tester.ensureVisible(botao);
+      await tester.pump();
+      await tester.tap(botao);
+      await tester.pump(const Duration(seconds: 21));
+      await assentar(tester);
+      await tester.tap(find.byKey(const Key('logout_confirm')));
+      await assentar(tester);
+      expect(formulario(), findsOneWidget);
+
+      await entrarComo(tester, acsB);
+      await sair(tester);
+      await entrarComo(tester, acsA);
+
+      // A registra uma visita nova com o envio antigo ainda em voo.
+      feed.deliver(testAlert(alertId: 'alerta-volta', riskLevel: 'yellow'));
+      await assentar(tester);
+      await tester.tap(find.text('Iniciar rota de visita'));
+      await assentar(tester);
+      await tester.tap(find.byKey(const Key('arrival_confirmation')));
+      await assentar(tester);
+      final salvar = find.byKey(const Key('save_visit'));
+      await tester.ensureVisible(salvar);
+      await tester.pump();
+      await tester.tap(salvar);
+      await assentar(tester);
+      final antes = (await storage.forOwner(acsA).load()).map((v) => v.localId).toSet();
+      expect(antes, hasLength(2), reason: 'local-a1 (em voo) e a nova');
+
+      // O envio antigo termina (local-a1 confirmada).
+      backend.syncGate!.complete();
+      await assentar(tester);
+
+      final depois = (await storage.forOwner(acsA).load()).map((v) => v.localId).toList();
+      expect(depois, hasLength(1), reason: 'a visita nova não pode ser apagada pela gravação da fila antiga');
+      expect(depois.single, isNot('local-a1'));
     });
 
     testWidgets('a quarentena (linhas sem dono) não aparece para ninguém', (tester) async {

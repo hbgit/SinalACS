@@ -212,6 +212,9 @@ class FakeAcsBackend implements AcsBackend {
   /// Falha da chamada inteira, como uma queda de rede.
   BackendFailure? syncFailure;
 
+  /// Se definido, `syncVisits` espera por ele (lote no servidor, rede lenta).
+  Completer<void>? syncGate;
+
   /// Resultado por visita; ausente significa `synced`.
   VisitSyncResult Function(VisitSyncEntry entry)? syncResultFor;
 
@@ -223,6 +226,7 @@ class FakeAcsBackend implements AcsBackend {
     syncedVisitBatches.add(List.of(visits));
     final failure = syncFailure;
     if (failure != null) throw failure;
+    await syncGate?.future;
 
     final custom = syncResultFor;
     if (custom != null) return [for (final visit in visits) custom(visit)];

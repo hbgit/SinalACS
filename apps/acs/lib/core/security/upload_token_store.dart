@@ -27,6 +27,12 @@ abstract interface class UploadTokenStore {
 
   Future<void> clear(String ownerId);
 
+  /// Apaga o token de [ownerId] SÓ se ainda for [expected], numa operação só
+  /// (ler, comparar e apagar sem outra mutação no meio). Um login que gravou
+  /// um token NOVO entre a leitura e o apagamento não perde o novo. Devolve
+  /// `true` se apagou.
+  Future<bool> compareAndClear(String ownerId, String expected);
+
   /// Donos que têm token guardado neste aparelho. Pode ser um ÍNDICE (ver
   /// `SecureStorageUploadTokenStore`) e, portanto, uma otimização: quem
   /// precisa de certeza para um dono conhecido usa [read].
@@ -58,6 +64,13 @@ class MemoryUploadTokenStore implements UploadTokenStore {
 
   @override
   Future<void> clear(String ownerId) async => _tokens.remove(ownerId);
+
+  @override
+  Future<bool> compareAndClear(String ownerId, String expected) async {
+    if (_tokens[ownerId] != expected) return false;
+    _tokens.remove(ownerId);
+    return true;
+  }
 
   @override
   Future<List<String>> owners() async => _tokens.keys.toList();

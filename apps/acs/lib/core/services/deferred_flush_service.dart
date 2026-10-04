@@ -298,7 +298,7 @@ class DeferredFlushService {
   /// envio gravou um token NOVO, que não pode ser apagado por engano.
   Future<void> _clearIfSame(String owner, String token) async {
     try {
-      if (await _tokens.read(owner) == token) await _tokens.clear(owner);
+      await _tokens.compareAndClear(owner, token);
     } catch (_) {}
   }
 

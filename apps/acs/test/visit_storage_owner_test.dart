@@ -1,3 +1,4 @@
+import 'package:flutter/services.dart' show PlatformException;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sinalacs_acs/core/database/encrypted_database.dart';
 import 'package:sinalacs_acs/core/database/sqlcipher_visit_store.dart';
@@ -214,7 +215,7 @@ CREATE TABLE offline_visits (
           aberturas++;
           if (!falhou) {
             falhou = true;
-            throw StateError('chave não abre o arquivo');
+            throw _ErroDoBanco('open_failed /dados/$n'); // chave errada, como o Android relata
           }
           return EncryptedLocalDatabase.open(
             databaseName: n,
@@ -248,6 +249,85 @@ CREATE TABLE offline_visits (
       await expectLater(db.open(), throwsA(isA<UnsupportedError>()));
       await expectLater(db.open(), throwsA(isA<UnsupportedError>()));
       expect((await db.open()).isOpen, isTrue);
+      await db.close();
+    });
+  });
+
+  group('recuperação (apagar arquivo e chave) só para chave errada', () {
+    /// Abre o banco de verdade depois de [falhas] erros programados.
+    VisitDatabase banco(List<Object> falhas, {required List<String> chamadas, InMemoryDatabaseKeyStore? chaves}) {
+      return VisitDatabase(
+        keyStore: chaves ?? InMemoryDatabaseKeyStore(),
+        databaseName: nome,
+        allowUnencryptedForTesting: true,
+        opener: (n, p, u) async {
+          chamadas.add('abrir');
+          if (falhas.isNotEmpty) throw falhas.removeAt(0);
+          return EncryptedLocalDatabase.open(databaseName: n, passphrase: p, allowUnencryptedForTesting: u);
+        },
+      );
+    }
+
+    Future<void> arquivoComUmaVisita() async {
+      final s = SqlCipherVisitStorage(keyStore: InMemoryDatabaseKeyStore(), databaseName: nome, allowUnencryptedForTesting: true);
+      await s.forOwner('acs-a').save([_visita('sobrevive')]);
+      await s.close();
+    }
+
+    for (final (rotulo, erro) in <(String, Object)>[
+      ('open_failed (Android: SQLCipher sem a chave certa)', _ErroDoBanco('open_failed /dados/x.db')),
+      ('file is not a database (código 26)', _ErroDoBanco('file is not a database (code 26)')),
+    ]) {
+      test('chave errada — $rotulo: recupera UMA vez (arquivo e chave novos)', () async {
+        await arquivoComUmaVisita();
+        final chamadas = <String>[];
+        final chaves = InMemoryDatabaseKeyStore(initialKey: 'c' * 64);
+        final db = banco([erro], chamadas: chamadas, chaves: chaves);
+
+        final aberto = await db.open();
+
+        expect(aberto.isOpen, isTrue);
+        expect(chamadas, ['abrir', 'abrir']);
+        expect(await chaves.readOrCreate(), isNot('c' * 64), reason: 'a chave que não abria foi trocada');
+        expect(await aberto.query('offline_visits'), isEmpty, reason: 'o arquivo ilegível foi recomeçado');
+        await db.close();
+      });
+    }
+
+    for (final (rotulo, erro) in <(String, Object)>[
+      ('falha de migração (SQL)', _ErroDoBanco('duplicate column name: owner')),
+      ('E/S (disco cheio)', _ErroDoBanco('disk I/O error (code 10)')),
+      ('PlatformException do canal', PlatformException(code: 'sqlite_error', message: 'canal indisponível')),
+      ('StateError', StateError('qualquer outra coisa')),
+    ]) {
+      test('outro erro — $rotulo: NÃO apaga nada e o erro sobe', () async {
+        await arquivoComUmaVisita();
+        final chamadas = <String>[];
+        final chaves = InMemoryDatabaseKeyStore(initialKey: 'c' * 64);
+        final db = banco([erro], chamadas: chamadas, chaves: chaves);
+
+        await expectLater(db.open(), throwsA(same(erro)));
+
+        expect(chamadas, ['abrir'], reason: 'sem segunda abertura');
+        expect(await chaves.readOrCreate(), 'c' * 64, reason: 'a chave fica');
+        final depois = SqlCipherVisitStorage(keyStore: InMemoryDatabaseKeyStore(), databaseName: nome, allowUnencryptedForTesting: true);
+        expect((await depois.forOwner('acs-a').load()).map((v) => v.localId), ['sobrevive'], reason: 'o arquivo fica');
+        await depois.close();
+      });
+    }
+
+    test('com o erro subindo, a fila segue na memória (persistenceFailed) e não perde nada', () async {
+      await arquivoComUmaVisita();
+      final storage = SqlCipherVisitStorage(keyStore: InMemoryDatabaseKeyStore(), databaseName: nome, allowUnencryptedForTesting: true);
+      await storage.close();
+      final chamadas = <String>[];
+      final db = banco([_ErroDoBanco('disk I/O error (code 10)')], chamadas: chamadas);
+      final fila = OfflineVisitQueue(store: SqlCipherVisitStore.on(db, owner: 'acs-a'));
+
+      await fila.restore();
+      expect(fila.persistenceFailed, isTrue);
+      await fila.add(_visita('em-campo'));
+      expect(fila.pendingCount, 1);
       await db.close();
     });
   });
@@ -341,4 +421,18 @@ CREATE TABLE offline_visits (
       expect((await b.load()).length, 2);
     });
   });
+}
+
+/// Erro do sqflite como o plugin entrega (mensagem do SQLite/plugin).
+class _ErroDoBanco extends DatabaseException {
+  _ErroDoBanco(super.message);
+
+  @override
+  Object? get result => null;
+
+  @override
+  int? getResultCode() {
+    final m = RegExp(r'code (\d+)').firstMatch(toString());
+    return m == null ? null : int.parse(m.group(1)!);
+  }
 }

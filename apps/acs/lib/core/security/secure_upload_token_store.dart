@@ -66,6 +66,17 @@ class SecureStorageUploadTokenStore implements UploadTokenStore {
         if (index.contains(ownerId)) await _writeIndex([for (final o in index) if (o != ownerId) o]);
       });
 
+  /// Na cadeia [_serial]: nenhum `write` do mesmo store entra entre a
+  /// comparação e o apagamento.
+  @override
+  Future<bool> compareAndClear(String ownerId, String expected) => _serial(() async {
+        if (await read(ownerId) != expected) return false;
+        await _storage.delete(key: uploadTokenKey(ownerId));
+        final index = await _readIndex();
+        if (index.contains(ownerId)) await _writeIndex([for (final o in index) if (o != ownerId) o]);
+        return true;
+      });
+
   @override
   Future<void> repairIndex(String ownerId) => _serial(() async {
         if (await read(ownerId) == null) return;
