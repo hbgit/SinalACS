@@ -11,7 +11,7 @@ import 'package:sinalacs_server/src/infrastructure/crypto/health_data_cipher.dar
 import 'package:sinalacs_server/src/infrastructure/crypto/hmac_cpf_hasher.dart';
 import 'package:sinalacs_server/src/infrastructure/testing/e2e_fixtures.dart';
 
-/// Seed da stack de e2e (`docker-compose.e2e.yml`): UBS, microáreas, ACS com
+/// Seed da stack de e2e (`docker-compose.e2e.yml`): UBS, microáreas, dois ACS com
 /// credencial e pacientes SINTÉTICOS com UUIDs e CPFs novos a cada execução.
 /// Escreve o manifesto (`.e2e/fixtures.json`, modo 600) que os testes leem —
 /// nenhum identificador é fixo no código.
@@ -34,6 +34,7 @@ Future<void> main(List<String> args) async {
 
   final fixtures = generateE2eFixtures(Random.secure());
   final acsDigest = await const Argon2PasswordHasher().derive(fixtures.acs.password);
+  final secondAcsDigest = await const Argon2PasswordHasher().derive(fixtures.secondAcs.password);
 
   final connection = await Connection.open(
     Endpoint(
@@ -74,29 +75,35 @@ Future<void> main(List<String> args) async {
           parameters: {'id': p.id, 'chronic': p.chronic, 'cipher': encrypted.ciphertextBase64, 'ver': encrypted.keyVersion},
         );
       }
-      // O ACS entra por matrícula e senha (RF07), nunca por CPF: o cpfHash é só
-      // um valor único para satisfazer o NOT NULL, e não é um CPF.
-      await tx.execute(
-        Sql.named('INSERT INTO "users" ("id","cpfHash","name","birthDate","role","microAreaId","createdAt","updatedAt") '
-            "VALUES (@id,@hash,'ACS E2E','1985-01-01','acs',@area,NOW(),NOW())"),
-        parameters: {'id': fixtures.acs.id, 'hash': 'e2e-acs-${fixtures.acs.id}', 'area': fixtures.microAreaId},
-      );
-      await tx.execute(
-        Sql.named('INSERT INTO "acs" ("id","enrollmentId","ubsId","active") VALUES (@id,@matricula,@ubs,true)'),
-        parameters: {'id': fixtures.acs.id, 'matricula': fixtures.acs.matricula, 'ubs': fixtures.ubsId},
-      );
-      await tx.execute(
-        Sql.named('INSERT INTO "user_credentials" ("userId","passwordHash","passwordSalt","memoryKb","iterations","parallelism","failedAttempts","createdAt","updatedAt") '
-            'VALUES (@userId,@hash,@salt,@memoryKb,@iterations,@parallelism,0,NOW(),NOW())'),
-        parameters: {
-          'userId': fixtures.acs.id,
-          'hash': acsDigest.hashBase64,
-          'salt': acsDigest.saltBase64,
-          'memoryKb': acsDigest.memoryKb,
-          'iterations': acsDigest.iterations,
-          'parallelism': acsDigest.parallelism,
-        },
-      );
+      // Os ACS entram por matrícula e senha (RF07), nunca por CPF: o cpfHash é
+      // só um valor único para satisfazer o NOT NULL, e não é um CPF. Os dois
+      // ficam na MESMA microárea (fila por dono, envio diferido).
+      for (final (acs, digest, name) in [
+        (fixtures.acs, acsDigest, 'ACS E2E'),
+        (fixtures.secondAcs, secondAcsDigest, 'ACS E2E B'),
+      ]) {
+        await tx.execute(
+          Sql.named('INSERT INTO "users" ("id","cpfHash","name","birthDate","role","microAreaId","createdAt","updatedAt") '
+              "VALUES (@id,@hash,@name,'1985-01-01','acs',@area,NOW(),NOW())"),
+          parameters: {'id': acs.id, 'hash': 'e2e-acs-${acs.id}', 'name': name, 'area': fixtures.microAreaId},
+        );
+        await tx.execute(
+          Sql.named('INSERT INTO "acs" ("id","enrollmentId","ubsId","active") VALUES (@id,@matricula,@ubs,true)'),
+          parameters: {'id': acs.id, 'matricula': acs.matricula, 'ubs': fixtures.ubsId},
+        );
+        await tx.execute(
+          Sql.named('INSERT INTO "user_credentials" ("userId","passwordHash","passwordSalt","memoryKb","iterations","parallelism","failedAttempts","createdAt","updatedAt") '
+              'VALUES (@userId,@hash,@salt,@memoryKb,@iterations,@parallelism,0,NOW(),NOW())'),
+          parameters: {
+            'userId': acs.id,
+            'hash': digest.hashBase64,
+            'salt': digest.saltBase64,
+            'memoryKb': digest.memoryKb,
+            'iterations': digest.iterations,
+            'parallelism': digest.parallelism,
+          },
+        );
+      }
     });
   } finally {
     await connection.close();
@@ -104,5 +111,5 @@ Future<void> main(List<String> args) async {
 
   final out = File(args.isNotEmpty ? args.first : '.e2e/fixtures.json');
   writeManifestPrivately(out, jsonEncode(fixtures.toJson()));
-  stdout.writeln('Fixtures de e2e gravadas (${fixtures.patients.length} pacientes, 1 ACS) em ${out.path}.');
+  stdout.writeln('Fixtures de e2e gravadas (${fixtures.patients.length} pacientes, 2 ACS) em ${out.path}.');
 }

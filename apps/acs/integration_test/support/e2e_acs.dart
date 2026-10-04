@@ -74,3 +74,15 @@ Future<({String matricula, String senha})> _buscarCredencialDoAcs() async {
   final json = jsonDecode(await _get('/acs')) as Map;
   return (matricula: json['matricula'] as String, senha: json['senha'] as String);
 }
+
+/// Matrícula e senha do SEGUNDO ACS da fixture (bloco `acsB`, mesma
+/// microárea), servidas pelo relé em `/acs-b`, também uma única vez.
+Future<({String matricula, String senha})> secondAcsCredentialFromRelay() =>
+    _secondAcsCredential ??= _buscarCredencialDoSegundoAcs();
+
+Future<({String matricula, String senha})>? _secondAcsCredential;
+
+Future<({String matricula, String senha})> _buscarCredencialDoSegundoAcs() async {
+  final json = jsonDecode(await _get('/acs-b')) as Map;
+  return (matricula: json['matricula'] as String, senha: json['senha'] as String);
+}

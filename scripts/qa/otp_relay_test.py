@@ -38,6 +38,15 @@ class AcsTest(unittest.TestCase):
             json.dump({"acs": {"matricula": "E2E-1234", "password": "s3nha"}}, f)
         self.assertEqual(acs_do_manifesto(f.name), {"matricula": "E2E-1234", "senha": "s3nha"})
 
+    def test_le_o_segundo_acs_pela_chave_acsB(self):
+        import json, tempfile
+        from otp_relay import acs_do_manifesto
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+            json.dump({"acs": {"matricula": "E2E-1", "password": "a"},
+                       "acsB": {"matricula": "E2E-2", "password": "b"}}, f)
+        self.assertEqual(acs_do_manifesto(f.name, "acsB"), {"matricula": "E2E-2", "senha": "b"})
+        self.assertEqual(acs_do_manifesto(f.name), {"matricula": "E2E-1", "senha": "a"})
+
     def test_sem_arquivo_nao_serve_nada(self):
         from otp_relay import acs_do_manifesto
         self.assertIsNone(acs_do_manifesto(None))
@@ -58,11 +67,13 @@ class AcsEntregaUnicaTest(unittest.TestCase):
 
         self.otp_relay = otp_relay
         arquivo = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False)
-        json.dump({"acs": {"matricula": "E2E-1", "password": "s"}}, arquivo)
+        json.dump({"acs": {"matricula": "E2E-1", "password": "s"},
+                   "acsB": {"matricula": "E2E-2", "password": "t"}}, arquivo)
         arquivo.close()
         self.caminho = arquivo.name
         os.environ["E2E_FIXTURES_FILE"] = self.caminho
         otp_relay.Handler.acs_entregue = False
+        otp_relay.Handler.acs_b_entregue = False
         self.servidor = HTTPServer(("127.0.0.1", 0), otp_relay.Handler)
         otp_relay.Handler.porta = self.servidor.server_address[1]
         threading.Thread(target=self.servidor.serve_forever, daemon=True).start()
@@ -76,12 +87,13 @@ class AcsEntregaUnicaTest(unittest.TestCase):
         os.unlink(self.caminho)
         self.otp_relay.Handler.porta = 8765
         self.otp_relay.Handler.acs_entregue = False
+        self.otp_relay.Handler.acs_b_entregue = False
 
-    def _get(self):
+    def _get(self, rota="/acs"):
         import urllib.error
         import urllib.request
 
-        url = f"http://127.0.0.1:{self.servidor.server_address[1]}/acs"
+        url = f"http://127.0.0.1:{self.servidor.server_address[1]}{rota}"
         try:
             with urllib.request.urlopen(url) as resposta:
                 return resposta.status
@@ -91,6 +103,11 @@ class AcsEntregaUnicaTest(unittest.TestCase):
     def test_serve_uma_vez_e_depois_404(self):
         self.assertEqual(self._get(), 200)
         self.assertEqual(self._get(), 404)
+
+    def test_segundo_acs_tambem_uma_vez_e_independente_do_primeiro(self):
+        self.assertEqual(self._get("/acs-b"), 200)
+        self.assertEqual(self._get("/acs-b"), 404)
+        self.assertEqual(self._get(), 200)
 
 
 if __name__ == "__main__":

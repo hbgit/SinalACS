@@ -16,8 +16,8 @@ void main() {
   test('duas execuções não compartilham UUID nem CPF', () {
     final a = generateE2eFixtures(Random(1));
     final b = generateE2eFixtures(Random(2));
-    final idsA = {a.microAreaId, a.acs.id, ...a.patients.map((p) => p.id)};
-    final idsB = {b.microAreaId, b.acs.id, ...b.patients.map((p) => p.id)};
+    final idsA = {a.microAreaId, a.acs.id, a.secondAcs.id, ...a.patients.map((p) => p.id)};
+    final idsB = {b.microAreaId, b.acs.id, b.secondAcs.id, ...b.patients.map((p) => p.id)};
     expect(idsA.intersection(idsB), isEmpty);
     expect(a.patients.map((p) => p.cpf).toSet().intersection(b.patients.map((p) => p.cpf).toSet()), isEmpty);
   });
@@ -33,7 +33,7 @@ void main() {
 
   test('nenhum UUID é do formato fixo do seed de desenvolvimento', () {
     final f = generateE2eFixtures(Random(3));
-    for (final id in [f.ubsId, f.microAreaId, f.otherMicroAreaId, f.acs.id, ...f.patients.map((p) => p.id)]) {
+    for (final id in [f.ubsId, f.microAreaId, f.otherMicroAreaId, f.acs.id, f.secondAcs.id, ...f.patients.map((p) => p.id)]) {
       expect(id.startsWith('00000000-0000-4000-8000'), isFalse);
       expect(RegExp(r'^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$').hasMatch(id), isTrue);
     }
@@ -52,11 +52,24 @@ void main() {
 
   test('toString não vaza CPF nem senha', () {
     final f = generateE2eFixtures(Random(4));
-    final texto = '$f ${f.patients.first} ${f.acs}';
+    final texto = '$f ${f.patients.first} ${f.acs} ${f.secondAcs}';
     for (final p in f.patients) {
       expect(texto.contains(p.cpf), isFalse);
     }
     expect(texto.contains(f.acs.password), isFalse);
+    expect(texto.contains(f.secondAcs.password), isFalse);
+  });
+
+  test('há um segundo ACS, distinto do primeiro (id, matrícula e senha), para a fila por dono', () {
+    for (var seed = 0; seed < 200; seed++) {
+      final f = generateE2eFixtures(Random(seed));
+      expect(f.secondAcs.id, isNot(f.acs.id));
+      expect(f.secondAcs.matricula, isNot(f.acs.matricula), reason: 'seed $seed');
+      expect(f.secondAcs.password, isNot(f.acs.password));
+      expect(f.secondAcs.matricula, startsWith('E2E-'));
+    }
+    final f = generateE2eFixtures(Random(11));
+    expect(f.toJson()['acsB'], f.secondAcs.toJson());
   });
 
   group('guarda do seeder (e2eSeedRefusal)', () {

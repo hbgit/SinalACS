@@ -29,7 +29,9 @@ dev=emulator-5554
 adb -s "$dev" get-state >/dev/null 2>&1 || { echo "emulador $dev não encontrado (adb devices)"; exit 4; }
 
 relay_pid=""
+saida_teste="$(mktemp)"
 cleanup() {
+  rm -f "$saida_teste"
   [[ -n "$relay_pid" ]] && kill "$relay_pid" 2>/dev/null || true
   [[ "$esperar_jwt" == true ]] && adb -s "$dev" shell svc power stayon false >/dev/null 2>&1 || true
   rm -f .e2e/fixtures.json   # primeiro: tem a senha do ACS, mesmo se o down falhar
@@ -62,8 +64,9 @@ done
 kill -0 "$relay_pid" 2>/dev/null || { echo 'erro: o relé não subiu' >&2; exit 1; }
 
 # Sem o bloco `acs`: a senha chega pelo relé, nunca pelo argv do flutter test nem no APK.
-fixtures="$(python3 -c "import json;d=json.load(open('.e2e/fixtures.json'));d.pop('acs',None);print(json.dumps(d))")"
+fixtures="$(python3 -c "import json;d=json.load(open('.e2e/fixtures.json'));d.pop('acs',None);d.pop('acsB',None);print(json.dumps(d))")"
 acs_id="$(python3 -c "import json;print(json.load(open('.e2e/fixtures.json'))['acs']['id'])")"
+acs_b_id="$(python3 -c "import json;print(json.load(open('.e2e/fixtures.json'))['acsB']['id'])")"
 
 # A espera real do JWT passa de 15 min: a tela não pode apagar (apagar = app em
 # segundo plano = bloqueio por inatividade no meio do teste).
@@ -77,7 +80,8 @@ echo "== jornada do ACS no emulador"
     --dart-define=SINALACS_MQTT_HOST=localhost \
     --dart-define=SINALACS_MQTT_PASSWORD="$MQTT_ACS_PASSWORD" \
     --dart-define=E2E_FIXTURES="$fixtures" \
-    --dart-define=E2E_ESPERAR_JWT="$esperar_jwt" )
+    --dart-define=E2E_ESPERAR_JWT="$esperar_jwt" ) 2>&1 | tee "$saida_teste"
+[[ "${PIPESTATUS[0]}" -eq 0 ]] || { echo 'erro: a jornada no emulador falhou' >&2; exit 1; }
 
 # Refresh token no SERVIDOR (o teste no aparelho não alcança o banco): a linha
 # com o deviceId do aparelho, a rotação, a revogação do "Sair" e a auditoria
@@ -100,4 +104,37 @@ exigir 'audit_logs refresh_granted' 2 \
 negados="$(sql "select count(*) from audit_logs where \"userId\"='$acs_id' and \"resourceType\"='session_refresh' and result like 'denied%'")"
 echo "  audit_logs session_refresh negados: $negados"
 [[ "$negados" -eq 0 ]] || { echo 'erro: houve renovação negada na jornada' >&2; exit 1; }
+
+# Fila por dono (plano 2026-10-03): a visita que A deixou no aparelho subiu pelo
+# envio diferido COM A AUTORIA DE A; a legada (banco v6 plantado no aparelho)
+# subiu sem autor, transportada por B; a trilha registra os três eventos e os
+# tokens de envio de A (fila zerou) e de B (wipe) foram revogados no servidor.
+echo "== fila por dono, envio diferido e legado no banco de teste"
+linha="$(grep -o 'E2E_FILA_POR_DONO .*' "$saida_teste" | tail -1)"
+[[ -n "$linha" ]] || { echo 'erro: o teste da fila por dono não informou os ids' >&2; exit 1; }
+campo() { sed -n "s/.* $1=\([0-9a-fA-F-]*\).*/\1/p" <<<"$linha"; }
+visita_a="$(campo visita_a)"; legado="$(campo legado)"
+[[ "$(campo acs_a)" == "$acs_id" ]] || { echo 'erro: A no aparelho não é o ACS da fixture' >&2; exit 1; }
+[[ "$(campo acs_b)" == "$acs_b_id" ]] || { echo 'erro: B no aparelho não é o segundo ACS da fixture' >&2; exit 1; }
+igual() { # <descrição> <esperado> <sql>
+  local v; v="$(sql "$3")"
+  echo "  $1: $v"
+  [[ "$v" == "$2" ]] || { echo "erro: esperado '$2' ($1)" >&2; exit 1; }
+}
+igual 'visita de A: acsId|authorship' "$acs_id|acs" \
+  "select \"acsId\" || '|' || authorship from visits where \"localId\"='$visita_a'"
+igual 'visita legada: acsId nulo|authorship|originDeviceId preenchido' 'nulo|legacyUnclaimed|true' \
+  "select coalesce(\"acsId\"::text,'nulo') || '|' || authorship || '|' || (length(coalesce(\"originDeviceId\",'')) > 0)::text from visits where \"localId\"='$legado'"
+exigir 'audit_logs visit_deferred_sync de A' 1 \
+  "select count(*) from audit_logs where \"userId\"='$acs_id' and result='visit_deferred_sync'"
+exigir 'audit_logs visit_legacy_sync (B transportou)' 1 \
+  "select count(*) from audit_logs where \"userId\"='$acs_b_id' and result='visit_legacy_sync'"
+exigir 'audit_logs visit_legacy_sync_item da visita legada' 1 \
+  "select count(*) from audit_logs a join visits v on v.id = a.\"resourceId\" where v.\"localId\"='$legado' and a.result='visit_legacy_sync_item'"
+exigir 'token de envio de A revogado (fila zerou)' 1 \
+  "select count(*) from acs_upload_tokens where \"userId\"='$acs_id' and \"revokedAt\" is not null"
+exigir 'token de envio de B revogado (wipe)' 1 \
+  "select count(*) from acs_upload_tokens where \"userId\"='$acs_b_id' and \"revokedAt\" is not null"
+igual 'tokens de envio de A ou B ainda ativos' 0 \
+  "select count(*) from acs_upload_tokens where \"userId\" in ('$acs_id','$acs_b_id') and \"revokedAt\" is null and \"expiresAt\" > now()"
 echo 'OK — jornada completa do ACS contra o banco de teste'
