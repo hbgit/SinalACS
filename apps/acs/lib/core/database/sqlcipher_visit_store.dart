@@ -103,8 +103,12 @@ class VisitDatabase {
       // de backup, onde o banco veio e a chave do keystore não. Sem isso o app
       // ficaria travado num estado irrecuperável a cada abertura. O arquivo
       // NÃO é apagado: vai para `<nome>.recuperado` (uma cópia só, ainda
-      // cifrada; a chave dela some abaixo, então o app não a lê — serve só ao
-      // suporte). Se mover falhar, o erro sobe ANTES de apagar a chave: o
+      // cifrada; a chave dela some abaixo, então nem o app nem o suporte a
+      // leem — é só um artefato forense, caso a chave antiga um dia volte; as
+      // visitas pendentes dela ficam inacessíveis). No Android, uma falha real
+      // de abertura que persista nas duas tentativas termina assim também
+      // (`open_failed` é indistinguível). Se mover falhar, o erro sobe ANTES
+      // de apagar a chave: o
       // arquivo fica e a fila segue em RAM (`persistenceFailed`).
       await _moveAside(databaseName);
       await _keyStore.delete();

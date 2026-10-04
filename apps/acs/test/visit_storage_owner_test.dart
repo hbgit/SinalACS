@@ -318,7 +318,7 @@ CREATE TABLE offline_visits (
         expect(chamadas, ['abrir', 'abrir', 'abrir'], reason: 'falha + nova tentativa + recriação');
         expect(await chaves.readOrCreate(), isNot('c' * 64), reason: 'a chave que não abria foi trocada');
         expect(await aberto.query('offline_visits'), isEmpty, reason: 'banco novo, vazio');
-        expect(await (await copia()).readAsBytes(), bytesAntigos, reason: 'os bytes antigos ficam na cópia');
+        expect(await (await copia()).readAsBytes(), bytesAntigos, reason: 'os bytes antigos ficam na cópia (artefato forense, ilegível sem a chave antiga)');
         await db.close();
       });
     }

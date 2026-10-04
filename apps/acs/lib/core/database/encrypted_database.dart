@@ -257,8 +257,11 @@ CREATE TABLE IF NOT EXISTS micro_area_cache_meta (
   /// apagá-lo, quando a chave do Keystore não o abre mais.
   ///
   /// A cópia continua cifrada pelo SQLCipher e a chave dela é apagada logo em
-  /// seguida (`VisitDatabase`): o app não consegue lê-la. Ela existe só para o
-  /// suporte tentar uma recuperação. Há UMA cópia: a anterior é sobrescrita. Se
+  /// seguida (`VisitDatabase`): **nem o app nem o suporte conseguem lê-la**.
+  /// Ela é só um artefato forense ilegível — os bytes ficam, caso a chave
+  /// antiga um dia volte (restauração de backup do aparelho ou do Keystore) —
+  /// e as visitas pendentes que estavam nela NÃO são recuperáveis pelo app.
+  /// Há UMA cópia: a anterior é sobrescrita. Se
   /// mover falhar, lança — quem chama não apaga nada e não troca a chave.
   /// "Limpar este aparelho" apaga a cópia ([deleteRecoveryCopy]).
   static Future<void> moveAside(String databaseName) async {
