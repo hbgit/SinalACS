@@ -52,6 +52,14 @@ const _publicMethodsByDesign = <String, String>{
       'ativação da MFA (RF07) acontece ANTES do primeiro token: com '
       'REQUIRE_ACS_MFA o ACS sem MFA não recebe sessão — matrícula e senha SÃO '
       'a credencial, e a tentativa errada conta no bloqueio como no login',
+  'VisitsEndpoint.syncDeferred':
+      'envio diferido (D7 do plano 2026-10-03): roda depois de o ACS sair, sem '
+      'JWT — o token de envio opaco, amarrado ao aparelho, de 7 dias e escopo '
+      'único É a credencial; o usuário vem de UploadTokenService.resolve (dono '
+      'do token, microárea relida do banco), nunca de parâmetro',
+  'VisitsEndpoint.revokeUploadToken':
+      'revoga pela posse do token de envio diferido, como AuthEndpoint.logout; '
+      'idempotente e sem efeito sobre token desconhecido',
   'AuthEndpoint.confirmTotpEnrollment':
       'mesma razão de beginTotpEnrollment: matrícula + senha + código válido '
       'do segredo pendente são a credencial; não há token a exigir ainda',

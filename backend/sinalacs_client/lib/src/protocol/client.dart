@@ -663,6 +663,44 @@ class EndpointVisits extends EndpointAuthenticated {
     },
   );
 
+  /// Envio DIFERIDO (D7 do plano 2026-10-03): sobe as visitas pendentes de um
+  /// ACS que pode já ter saído, autenticado pelo token de envio que o
+  /// `auth.loginInstitutional` emitiu para ele neste aparelho — não pelo JWT.
+  ///
+  /// Público por desenho para o `authenticate(...)`: o token opaco É a
+  /// credencial, e o único poder dele é este envio. O usuário resolvido é o
+  /// DONO do token, com a microárea relida do banco agora, e o lote passa
+  /// pelo MESMO `VisitSyncService.sync` do envio comum: autoria do dono,
+  /// território atual do dono, `localId` de outro agente recusado. Toda recusa
+  /// do token é a mesma `SessionExpiredException`, sem motivo e sem o token.
+  ///
+  /// No máximo `VisitSyncService.maxLegacyBatch` visitas por chamada, checado
+  /// antes de qualquer acesso ao banco. Um evento `visit_deferred_sync` por
+  /// lote gravado vai para `audit_logs`, com o dono e nada clínico.
+  _i2.Future<List<_i20.VisitSyncResult>> syncDeferred({
+    required String uploadToken,
+    required String deviceId,
+    required List<_i21.VisitSyncEntry> visits,
+  }) => caller.callServerEndpoint<List<_i20.VisitSyncResult>>(
+    'visits',
+    'syncDeferred',
+    {
+      'uploadToken': uploadToken,
+      'deviceId': deviceId,
+      'visits': visits,
+    },
+  );
+
+  /// Revoga o token de envio diferido (o app chama quando a fila do dono
+  /// zera). Público pelo mesmo motivo de [syncDeferred]; idempotente, e um
+  /// token desconhecido é ignorado em silêncio.
+  _i2.Future<void> revokeUploadToken({required String uploadToken}) =>
+      caller.callServerEndpoint<void>(
+        'visits',
+        'revokeUploadToken',
+        {'uploadToken': uploadToken},
+      );
+
   /// Sincronização central→dispositivo: visitas da microárea do ACS
   /// autenticado alteradas após `since`, para reconciliar um device que
   /// ficou offline ou foi reinstalado.

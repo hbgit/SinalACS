@@ -949,6 +949,56 @@ class Endpoints extends _i1.EndpointDispatch {
                     visits: params['visits'],
                   ),
         ),
+        'syncDeferred': _i1.MethodConnector(
+          name: 'syncDeferred',
+          params: {
+            'uploadToken': _i1.ParameterDescription(
+              name: 'uploadToken',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'deviceId': _i1.ParameterDescription(
+              name: 'deviceId',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'visits': _i1.ParameterDescription(
+              name: 'visits',
+              type: _i1.getType<List<_i13.VisitSyncEntry>>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async =>
+                  (endpoints['visits'] as _i11.VisitsEndpoint).syncDeferred(
+                    session,
+                    uploadToken: params['uploadToken'],
+                    deviceId: params['deviceId'],
+                    visits: params['visits'],
+                  ),
+        ),
+        'revokeUploadToken': _i1.MethodConnector(
+          name: 'revokeUploadToken',
+          params: {
+            'uploadToken': _i1.ParameterDescription(
+              name: 'uploadToken',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async => (endpoints['visits'] as _i11.VisitsEndpoint)
+                  .revokeUploadToken(
+                    session,
+                    uploadToken: params['uploadToken'],
+                  ),
+        ),
         'pull': _i1.MethodConnector(
           name: 'pull',
           params: {

@@ -141,6 +141,8 @@ void main() {
       expect(result.accessToken, isNotEmpty);
       // Só o ACS tem refresh token (LGPD-RT06); o paciente entra por OTP.
       expect(result.refreshToken, isNull);
+      // Nem token de envio diferido (D7): ele só sai do login institucional.
+      expect(result.uploadToken, isNull);
       final sessao = AlertRuntime.instance.auth.verifyToken(result.accessToken);
       expect(sessao?.role, UserRole.patient);
       // A microárea do token é a do PACIENTE, lida do banco pelo store: é ela

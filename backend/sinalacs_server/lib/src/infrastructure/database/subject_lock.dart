@@ -8,6 +8,8 @@ const int lockNamespaceTerms = 2;
 /// Push: 3 serializa por titular (consentimento × token), 4 por token.
 const int lockNamespacePushToken = 3;
 const int lockNamespacePushTokenRow = 4;
+/// Token de envio diferido: serializa a troca por (usuário, aparelho).
+const int lockNamespaceUploadToken = 5;
 
 /// Serializa, dentro de [transaction], quem disputa a mesma [key] no mesmo
 /// [namespace]. Solta sozinho no fim da transação.

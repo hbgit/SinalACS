@@ -39,4 +39,6 @@ ubs:
 visits:
   - sync:
   - syncLegacy:
+  - syncDeferred:
+  - revokeUploadToken:
   - pull:

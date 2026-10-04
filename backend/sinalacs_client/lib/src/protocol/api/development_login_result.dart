@@ -19,12 +19,14 @@ abstract class DevelopmentLoginResult implements _i1.SerializableModel {
     required this.accessToken,
     required this.tokenType,
     this.refreshToken,
+    this.uploadToken,
   });
 
   factory DevelopmentLoginResult({
     required String accessToken,
     required String tokenType,
     String? refreshToken,
+    String? uploadToken,
   }) = _DevelopmentLoginResultImpl;
 
   factory DevelopmentLoginResult.fromJson(
@@ -34,6 +36,7 @@ abstract class DevelopmentLoginResult implements _i1.SerializableModel {
       accessToken: jsonSerialization['accessToken'] as String,
       tokenType: jsonSerialization['tokenType'] as String,
       refreshToken: jsonSerialization['refreshToken'] as String?,
+      uploadToken: jsonSerialization['uploadToken'] as String?,
     );
   }
 
@@ -45,6 +48,12 @@ abstract class DevelopmentLoginResult implements _i1.SerializableModel {
   /// emissores (paciente, `developmentLogin`).
   String? refreshToken;
 
+  /// Token de envio diferido (D7): só no `loginInstitutional` com `deviceId`
+  /// real. Serve apenas a `visits.syncDeferred`/`visits.revokeUploadToken`.
+  /// `null` em todos os outros emissores (paciente, `developmentLogin`,
+  /// `refreshSession`).
+  String? uploadToken;
+
   /// Returns a shallow copy of this [DevelopmentLoginResult]
   /// with some or all fields replaced by the given arguments.
   @_i1.useResult
@@ -52,6 +61,7 @@ abstract class DevelopmentLoginResult implements _i1.SerializableModel {
     String? accessToken,
     String? tokenType,
     String? refreshToken,
+    String? uploadToken,
   });
   @override
   Map<String, dynamic> toJson() {
@@ -60,6 +70,7 @@ abstract class DevelopmentLoginResult implements _i1.SerializableModel {
       'accessToken': accessToken,
       'tokenType': tokenType,
       if (refreshToken != null) 'refreshToken': refreshToken,
+      if (uploadToken != null) 'uploadToken': uploadToken,
     };
   }
 
@@ -76,10 +87,12 @@ class _DevelopmentLoginResultImpl extends DevelopmentLoginResult {
     required String accessToken,
     required String tokenType,
     String? refreshToken,
+    String? uploadToken,
   }) : super._(
          accessToken: accessToken,
          tokenType: tokenType,
          refreshToken: refreshToken,
+         uploadToken: uploadToken,
        );
 
   /// Returns a shallow copy of this [DevelopmentLoginResult]
@@ -90,11 +103,13 @@ class _DevelopmentLoginResultImpl extends DevelopmentLoginResult {
     String? accessToken,
     String? tokenType,
     Object? refreshToken = _Undefined,
+    Object? uploadToken = _Undefined,
   }) {
     return DevelopmentLoginResult(
       accessToken: accessToken ?? this.accessToken,
       tokenType: tokenType ?? this.tokenType,
       refreshToken: refreshToken is String? ? refreshToken : this.refreshToken,
+      uploadToken: uploadToken is String? ? uploadToken : this.uploadToken,
     );
   }
 }

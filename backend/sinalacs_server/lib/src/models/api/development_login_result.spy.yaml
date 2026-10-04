@@ -6,3 +6,8 @@ fields:
   ### Só no `loginInstitutional` e no `refreshSession`. `null` nos demais
   ### emissores (paciente, `developmentLogin`).
   refreshToken: String?
+  ### Token de envio diferido (D7): só no `loginInstitutional` com `deviceId`
+  ### real. Serve apenas a `visits.syncDeferred`/`visits.revokeUploadToken`.
+  ### `null` em todos os outros emissores (paciente, `developmentLogin`,
+  ### `refreshSession`).
+  uploadToken: String?

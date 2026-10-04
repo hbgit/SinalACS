@@ -1,9 +1,8 @@
-import 'dart:convert';
 import 'dart:math';
 
-import 'package:crypto/crypto.dart';
 import 'package:sinalacs_server/src/application/audit/audit_trail.dart';
 import 'package:sinalacs_server/src/application/auth/development_auth_service.dart';
+import 'package:sinalacs_server/src/application/auth/opaque_token.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
 
 class RefreshAccount {
@@ -186,9 +185,7 @@ class RefreshTokenService {
     required DateTime at,
     required DateTime absoluteExpiresAt,
   }) async {
-    final token = base64Url
-        .encode(List<int>.generate(32, (_) => _random.nextInt(256)))
-        .replaceAll('=', '');
+    final token = OpaqueToken.generate(_random);
     final idle = at.add(idleWindow);
     final stored = await store.insert(
       RefreshTokenRecord(
@@ -205,16 +202,9 @@ class RefreshTokenService {
     return stored ? token : null;
   }
 
-  String _hash(String token) => sha256.convert(utf8.encode(token)).toString();
+  String _hash(String token) => OpaqueToken.hash(token);
 
-  String _uuid() {
-    final b = List<int>.generate(16, (_) => _random.nextInt(256));
-    b[6] = (b[6] & 0x0f) | 0x40;
-    b[8] = (b[8] & 0x3f) | 0x80;
-    final h = b.map((x) => x.toRadixString(16).padLeft(2, '0')).join();
-    return '${h.substring(0, 8)}-${h.substring(8, 12)}-${h.substring(12, 16)}-'
-        '${h.substring(16, 20)}-${h.substring(20)}';
-  }
+  String _uuid() => OpaqueToken.uuid(_random);
 
   SessionExpiredException _denied() =>
       SessionExpiredException(message: deniedMessage);

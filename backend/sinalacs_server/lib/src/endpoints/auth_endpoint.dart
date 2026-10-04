@@ -97,10 +97,18 @@ class AuthEndpoint extends Endpoint {
     final refreshToken = temAparelho
         ? await runtime.refreshTokenServiceFor(session).issue(user)
         : null;
+    // Token de envio diferido (D7 do plano 2026-10-03), pela mesma regra do
+    // aparelho: serve só a `visits.syncDeferred`, com a autoria deste ACS, e
+    // sobrevive ao fim da sessão. Um novo login no mesmo aparelho revoga o
+    // anterior.
+    final uploadToken = temAparelho
+        ? await runtime.uploadTokenServiceFor(session).issue(user)
+        : null;
     return DevelopmentLoginResult(
       accessToken: runtime.auth.issueToken(user),
       tokenType: 'Bearer',
       refreshToken: refreshToken,
+      uploadToken: uploadToken,
     );
   }
 
