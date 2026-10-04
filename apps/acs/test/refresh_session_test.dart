@@ -7,6 +7,8 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sinalacs_acs/core/network/backend_client.dart';
 import 'package:sinalacs_acs/core/security/secure_session_token_store.dart';
+import 'package:sinalacs_acs/core/services/backend_visit_synchronizer.dart';
+import 'package:sinalacs_acs/core/services/offline_visit_queue.dart';
 
 import 'support/fake_rpc_server.dart';
 import 'support/gated_session_token_store.dart';
@@ -385,6 +387,49 @@ void main() {
       expect(await gated.read(), server.loginTokens.last, reason: 'o token é o do login de B');
       expect(server.refreshTokensSeen, [server.loginTokens.first]);
       expect(avisos, 0);
+    });
+
+    test('sync de A com JWT vencido e login de B confirmando no meio: o lote de A NÃO sai com o token de B',
+        () async {
+      const acsB = '00000000-0000-4000-8000-0000000000bb';
+      final gated = GatedSessionTokenStore();
+      final b = BackendClient(host: server.host, tokenStore: gated, deviceIds: MemoryDeviceIdStore('aparelho-1'));
+      addTearDown(b.close);
+      server.tokenLifetime = const Duration(minutes: -1);
+      final sessaoA = await b.login(matricula: 'ACS-A', senha: 'senha-sintetica'); // JWT de A já vencido
+      server
+        ..userId = acsB
+        ..tokenLifetime = const Duration(minutes: 15);
+
+      // Login de B parado na gravação: a sessão exposta ainda é a de A.
+      gated.writeGate = Completer<void>();
+      final login = b.login(matricula: 'ACS-B', senha: 'senha-sintetica-b');
+      await esperarAte(() => gated.writes == 2, motivo: 'o login B não chegou à escrita');
+      expect(b.session!.userId, sessaoA.userId);
+
+      // A fila de A sincroniza: a guarda síncrona passa (sessão de A), a
+      // renovação espera a seção do login de B e leria o token DE B.
+      final fila = OfflineVisitQueue(
+        synchronizer: BackendVisitSynchronizer(backend: b, ownerId: sessaoA.userId),
+      );
+      await fila.add(OfflineVisitRecord(
+        localId: 'local-a1',
+        patientId: '00000000-0000-4000-8000-0000000000a1',
+        risk: 'red',
+        status: 'PENDENTE',
+      ));
+      final envio = fila.sync();
+      await pumpEventQueue();
+
+      gated.writeGate!.complete();
+      await login;
+      final resultado = await envio;
+
+      expect(b.session!.userId, acsB);
+      expect(resultado.kind, SyncOutcomeKind.error);
+      expect(fila.pendingCount, 1, reason: 'o lote de A continua pendente');
+      expect(server.requests.where((r) => r.method == 'sync'), isEmpty,
+          reason: 'nenhum visits.sync saiu com o token de B');
     });
 
     test('logout: renovação iniciada durante a rede do logout não ressuscita a sessão', () async {

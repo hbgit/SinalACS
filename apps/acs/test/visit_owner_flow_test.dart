@@ -224,6 +224,87 @@ void main() {
     });
   });
 
+  group('no app, com o banco real (SQLCipher sem cifra, FFI)', () {
+    const dbName = 'visit_owner_flow_widget_test.db';
+
+    setUp(() => EncryptedLocalDatabase.deleteDatabaseFile(dbName));
+    tearDown(() => EncryptedLocalDatabase.deleteDatabaseFile(dbName));
+
+    testWidgets('o pull de cada ACS usa o cursor DELE, no mesmo banco da fila', (tester) async {
+      final storage = SqlCipherVisitStorage(
+        keyStore: InMemoryDatabaseKeyStore(),
+        databaseName: dbName,
+        allowUnencryptedForTesting: true,
+      );
+      final syncAt = DateTime.utc(2026, 10, 3, 10);
+      final backend = FakeAcsBackend()
+        ..pullEntries = [
+          VisitSyncEntry(
+            localId: 'remota-1',
+            patientId: seedPatientId,
+            scheduledAt: DateTime.utc(2026, 10, 3, 9),
+            status: 'realizada',
+            riskLevelBefore: RiskLevel.green,
+            notes: const {},
+            version: 1,
+            syncAt: syncAt,
+            arrivalMethod: ArrivalMethod.manual,
+          ),
+        ];
+      await tester.pumpWidget(SinalAcsApp(
+        backend: backend,
+        visitStorage: storage,
+        feedBuilder: (q) => FakeAlertFeed(q),
+      ));
+      await assentar(tester);
+
+      Future<void> entrarComo(String userId) async {
+        backend.nextUserId = userId;
+        await tester.enterText(find.byKey(const Key('matricula_field')), 'ACS-001');
+        await tester.enterText(find.byKey(const Key('senha_field')), 'senha-sintetica');
+        await tester.ensureVisible(find.byKey(const Key('login_button')));
+        await tester.pump();
+        await tester.tap(find.byKey(const Key('login_button')));
+        await assentar(tester);
+        expect(find.text('Painel operacional'), findsOneWidget);
+      }
+
+      Future<void> sair() async {
+        await irParaDoMais(tester, 'Preferências');
+        final botao = find.byKey(const Key('logout_button'));
+        await tester.ensureVisible(botao);
+        await tester.pump();
+        await tester.tap(botao);
+        await assentar(tester);
+        await tester.tap(find.byKey(const Key('logout_confirm')));
+        await assentar(tester);
+      }
+
+      await entrarComo(acsA);
+      expect(backend.pullSinceCalls, [VisitPullService.epoch], reason: 'primeiro pull de A');
+      expect(find.byKey(const Key('pull_error'), skipOffstage: false), findsNothing,
+          reason: 'o cursor abriu no banco compartilhado, não num banco à parte pelo Keystore');
+      final chaves = await tester.runAsync(() async {
+        final db = await storage.database.open();
+        return [for (final row in await db.query('sync_cursor')) row['key']! as String];
+      });
+      expect(chaves, contains('visits_pull|$acsA|$seedMicroAreaId'));
+
+      await sair();
+      await entrarComo(acsB);
+      expect(backend.pullSinceCalls, [VisitPullService.epoch, VisitPullService.epoch],
+          reason: 'B não herda o cursor de A');
+
+      await sair();
+      await entrarComo(acsA);
+      expect(backend.pullSinceCalls, [VisitPullService.epoch, VisitPullService.epoch, syncAt],
+          reason: 'A retoma o PRÓPRIO cursor');
+
+      await tester.pumpWidget(const SizedBox());
+      await tester.runAsync(storage.close);
+    });
+  });
+
   group('sincronizador com dono', () {
     test('BackendVisitSynchronizer recusa enviar com a sessão de outro usuário', () async {
       final backend = FakeAcsBackend()..session = sessao(userId: acsB);

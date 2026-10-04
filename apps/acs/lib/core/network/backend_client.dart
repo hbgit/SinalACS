@@ -10,6 +10,13 @@ import 'package:sinalacs_client/sinalacs_client.dart';
 ///
 /// O backend é RPC tipado, então o erro chega como exceção declarada no
 /// `.spy.yaml` — não como código HTTP.
+/// A sessão corrente não é a dona das visitas a enviar. Recuperável: o lote
+/// fica pendente até o dono entrar de novo.
+const sessionOwnerMismatch = BackendFailure(
+  'A sessão atual não é a dona destas visitas. Entre com a conta que '
+  'registrou as visitas.',
+);
+
 class BackendFailure implements Exception {
   const BackendFailure(this.message, {this.isRecoverable = true});
 
@@ -107,7 +114,12 @@ abstract class AcsBackend {
 
   Future<AlertAckResult> acknowledge({required String alertId});
 
-  Future<List<VisitSyncResult>> syncVisits(List<VisitSyncEntry> visits);
+  /// [expectedUserId], quando presente, é o dono do lote: se a sessão que vai
+  /// assinar a chamada — conferida DEPOIS de o token ser resolvido (talvez por
+  /// renovação) e imediatamente antes da rede — não é dele, lança
+  /// [sessionOwnerMismatch] sem enviar nada. O servidor atribui a visita ao ACS
+  /// do token: o lote de A nunca pode sair com o token de B.
+  Future<List<VisitSyncResult>> syncVisits(List<VisitSyncEntry> visits, {String? expectedUserId});
 
   /// Visitas da microárea alteradas desde `since` — reconciliação
   /// central→dispositivo (RF15, decisão §5).
@@ -205,7 +217,8 @@ class MisconfiguredBackend implements AcsBackend {
   Future<AlertAckResult> acknowledge({required String alertId}) async => _recusar();
 
   @override
-  Future<List<VisitSyncResult>> syncVisits(List<VisitSyncEntry> visits) async => _recusar();
+  Future<List<VisitSyncResult>> syncVisits(List<VisitSyncEntry> visits, {String? expectedUserId}) async =>
+      _recusar();
 
   @override
   Future<List<VisitSyncEntry>> pullVisits({required DateTime since}) async => _recusar();
@@ -302,13 +315,18 @@ class BackendClient implements AcsBackend {
   /// Reautentica sozinho quando o token de 15 minutos expirou — sem isso, um
   /// turno de campo longo passa a falhar com erro de permissão, que esconde a
   /// causa real.
-  Future<String> _requireToken() async {
+  Future<String> _requireToken() async => (await _requireSession()).accessToken;
+
+  /// Sessão válida (renovada se preciso). Quem precisa conferir o DONO do token
+  /// usa esta: o token enviado é o desta mesma sessão, sem janela entre a
+  /// conferência e a leitura.
+  Future<AuthSession> _requireSession() async {
     if (!isAuthenticated) await renewSession();
     final current = _session;
     if (current == null) {
       throw const BackendFailure('Sessão não iniciada.', isRecoverable: false);
     }
-    return current.accessToken;
+    return current;
   }
 
   /// Autentica contra `auth.loginInstitutional` (RF07).
@@ -632,8 +650,12 @@ class BackendClient implements AcsBackend {
   /// O lote inteiro roda em uma transação no servidor, e cada visita volta com
   /// o próprio `syncStatus`: o app casa pelo `localId`, nunca pela posição.
   @override
-  Future<List<VisitSyncResult>> syncVisits(List<VisitSyncEntry> visits) async {
-    final token = await _requireToken();
+  Future<List<VisitSyncResult>> syncVisits(List<VisitSyncEntry> visits, {String? expectedUserId}) async {
+    final current = await _requireSession();
+    // Depois da resolução do token (a renovação pode ter esperado o login de
+    // OUTRO ACS e devolvido a sessão dele) e imediatamente antes da rede.
+    if (expectedUserId != null && current.userId != expectedUserId) throw sessionOwnerMismatch;
+    final token = current.accessToken;
     return _guard(
       () => _client.visits.sync(accessToken: token, visits: visits),
       // `visits.sync` reaproveita AlertPermissionException para token inválido

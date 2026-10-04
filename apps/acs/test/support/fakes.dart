@@ -211,7 +211,9 @@ class FakeAcsBackend implements AcsBackend {
   VisitSyncResult Function(VisitSyncEntry entry)? syncResultFor;
 
   @override
-  Future<List<VisitSyncResult>> syncVisits(List<VisitSyncEntry> visits) async {
+  Future<List<VisitSyncResult>> syncVisits(List<VisitSyncEntry> visits, {String? expectedUserId}) async {
+    // Como o BackendClient: a conferência do dono vem antes de qualquer envio.
+    if (expectedUserId != null && _session?.userId != expectedUserId) throw sessionOwnerMismatch;
     syncedVisitBatches.add(List.of(visits));
     final failure = syncFailure;
     if (failure != null) throw failure;

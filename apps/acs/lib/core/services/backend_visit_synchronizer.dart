@@ -12,9 +12,11 @@ import 'package:sinalacs_client/sinalacs_client.dart';
 /// registrou as visitas). `visits.sync` atribui a visita ao ACS do token, então
 /// enviar o lote de A com a sessão de B daria a B um trabalho que não é dele:
 /// [push] confere a sessão NO MOMENTO do envio (não só na construção) e, se ela
-/// não é do dono, recusa sem tocar na rede. A recusa é recuperável — a fila
-/// converte a exceção em `SyncOutcomeKind.error` e o lote continua pendente,
-/// esperando o dono entrar de novo.
+/// não é do dono, recusa sem tocar na rede; o backend confere de novo depois
+/// de resolver o token ([AcsBackend.syncVisits] com `expectedUserId`). A
+/// recusa é recuperável — a fila converte a exceção em
+/// `SyncOutcomeKind.error` e o lote continua pendente, esperando o dono
+/// entrar de novo.
 class BackendVisitSynchronizer implements VisitSynchronizer {
   BackendVisitSynchronizer({required this.backend, required String ownerId})
       : ownerId = requireOwnerId(ownerId);
@@ -26,12 +28,10 @@ class BackendVisitSynchronizer implements VisitSynchronizer {
 
   @override
   Future<List<VisitSyncOutcome>> push(List<OfflineVisitRecord> visits) async {
-    if (backend.session?.userId != ownerId) {
-      throw const BackendFailure(
-        'A sessão atual não é a dona destas visitas. Entre com a conta que '
-        'registrou as visitas.',
-      );
-    }
+    // Checagem cedo (sem sessão do dono, nem monta o lote) e de novo dentro
+    // do backend, depois de o token ser resolvido: uma renovação pode esperar
+    // o login de outro ACS e voltar com a sessão DELE.
+    if (backend.session?.userId != ownerId) throw sessionOwnerMismatch;
     final results = await backend.syncVisits([
       for (final visit in visits)
         VisitSyncEntry(
@@ -53,7 +53,7 @@ class BackendVisitSynchronizer implements VisitSynchronizer {
           // check-in registrado por este app hoje é manual.
           arrivalMethod: ArrivalMethod.manual,
         ),
-    ]);
+    ], expectedUserId: ownerId);
 
     return [
       for (final result in results)
