@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/services.dart' show PlatformException;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sinalacs_acs/core/database/encrypted_database.dart';
@@ -36,12 +38,14 @@ void main() {
 
   setUp(() async {
     await EncryptedLocalDatabase.deleteDatabaseFile(nome);
+    await EncryptedLocalDatabase.deleteRecoveryCopy(nome);
     storage = abrir();
   });
 
   tearDown(() async {
     await storage.close();
     await EncryptedLocalDatabase.deleteDatabaseFile(nome);
+    await EncryptedLocalDatabase.deleteRecoveryCopy(nome);
   });
 
   test('cada dono vê só as próprias visitas', () async {
@@ -206,15 +210,14 @@ CREATE TABLE offline_visits (
       await antigo.close();
 
       var aberturas = 0;
-      var falhou = false;
       final db = VisitDatabase(
         keyStore: InMemoryDatabaseKeyStore(),
         databaseName: nome,
         allowUnencryptedForTesting: true,
+        retryDelay: Duration.zero,
         opener: (n, p, u) async {
           aberturas++;
-          if (!falhou) {
-            falhou = true;
+          if (aberturas <= 2) {
             throw _ErroDoBanco('open_failed /dados/$n'); // chave errada, como o Android relata
           }
           return EncryptedLocalDatabase.open(
@@ -225,7 +228,7 @@ CREATE TABLE offline_visits (
         },
       );
       final todos = await Future.wait([for (var i = 0; i < 8; i++) db.open()]);
-      expect(aberturas, 2, reason: 'uma falha + uma recriação, não por chamador');
+      expect(aberturas, 3, reason: 'falha + nova tentativa + recriação, não por chamador');
       expect(todos.every((d) => identical(d, todos.first)), isTrue);
       await db.close();
     });
@@ -253,13 +256,20 @@ CREATE TABLE offline_visits (
     });
   });
 
-  group('recuperação (apagar arquivo e chave) só para chave errada', () {
+  group('recuperação (arquivo de lado, chave nova) só para chave errada, confirmada', () {
     /// Abre o banco de verdade depois de [falhas] erros programados.
-    VisitDatabase banco(List<Object> falhas, {required List<String> chamadas, InMemoryDatabaseKeyStore? chaves}) {
+    VisitDatabase banco(
+      List<Object> falhas, {
+      required List<String> chamadas,
+      InMemoryDatabaseKeyStore? chaves,
+      Future<void> Function(String databaseName)? moveAside,
+    }) {
       return VisitDatabase(
         keyStore: chaves ?? InMemoryDatabaseKeyStore(),
         databaseName: nome,
         allowUnencryptedForTesting: true,
+        retryDelay: Duration.zero,
+        moveAside: moveAside,
         opener: (n, p, u) async {
           chamadas.add('abrir');
           if (falhas.isNotEmpty) throw falhas.removeAt(0);
@@ -274,11 +284,14 @@ CREATE TABLE offline_visits (
       await s.close();
     }
 
+    Future<String> caminho() => EncryptedLocalDatabase.pathFor(nome);
+    Future<File> copia() async => File('${await caminho()}.recuperado');
+
     for (final (rotulo, erro) in <(String, Object)>[
       ('open_failed (Android: SQLCipher sem a chave certa)', _ErroDoBanco('open_failed /dados/x.db')),
       ('file is not a database (código 26)', _ErroDoBanco('file is not a database (code 26)')),
     ]) {
-      test('chave errada — $rotulo: recupera UMA vez (arquivo e chave novos)', () async {
+      test('chave errada UMA vez ($rotulo) e a nova tentativa abre: NÃO recupera, nada muda', () async {
         await arquivoComUmaVisita();
         final chamadas = <String>[];
         final chaves = InMemoryDatabaseKeyStore(initialKey: 'c' * 64);
@@ -286,13 +299,87 @@ CREATE TABLE offline_visits (
 
         final aberto = await db.open();
 
-        expect(aberto.isOpen, isTrue);
-        expect(chamadas, ['abrir', 'abrir']);
+        expect(chamadas, ['abrir', 'abrir'], reason: 'falha + nova tentativa');
+        expect(await chaves.readOrCreate(), 'c' * 64, reason: 'a chave fica');
+        expect((await aberto.query('offline_visits')).map((r) => r['local_id']), ['sobrevive']);
+        expect((await copia()).existsSync(), isFalse, reason: 'sem cópia de recuperação');
+        await db.close();
+      });
+
+      test('chave errada DUAS vezes ($rotulo): move o arquivo para .recuperado e recomeça', () async {
+        await arquivoComUmaVisita();
+        final bytesAntigos = await File(await caminho()).readAsBytes();
+        final chamadas = <String>[];
+        final chaves = InMemoryDatabaseKeyStore(initialKey: 'c' * 64);
+        final db = banco([erro, erro], chamadas: chamadas, chaves: chaves);
+
+        final aberto = await db.open();
+
+        expect(chamadas, ['abrir', 'abrir', 'abrir'], reason: 'falha + nova tentativa + recriação');
         expect(await chaves.readOrCreate(), isNot('c' * 64), reason: 'a chave que não abria foi trocada');
-        expect(await aberto.query('offline_visits'), isEmpty, reason: 'o arquivo ilegível foi recomeçado');
+        expect(await aberto.query('offline_visits'), isEmpty, reason: 'banco novo, vazio');
+        expect(await (await copia()).readAsBytes(), bytesAntigos, reason: 'os bytes antigos ficam na cópia');
         await db.close();
       });
     }
+
+    test('uma segunda recuperação SOBRESCREVE a cópia anterior (só existe uma)', () async {
+      final chave = _ErroDoBanco('open_failed /dados/x.db');
+      await arquivoComUmaVisita();
+      final primeira = banco([chave, chave], chamadas: []);
+      await primeira.open();
+      final viaPrimeira = SqlCipherVisitStore.on(primeira, owner: 'acs-b');
+      await viaPrimeira.save([_visita('segunda-geracao')]);
+      await primeira.close();
+      final bytesDaSegunda = await File(await caminho()).readAsBytes();
+
+      final segunda = banco([chave, chave], chamadas: []);
+      await segunda.open();
+      await segunda.close();
+
+      expect(await (await copia()).readAsBytes(), bytesDaSegunda);
+      final dir = Directory(File(await caminho()).parent.path);
+      expect(dir.listSync().where((f) => f.path.contains('.recuperado') && !f.path.endsWith('-journal')).length, 1);
+    });
+
+    test('se mover o arquivo falha: o erro sobe, o arquivo e a chave ficam intactos', () async {
+      await arquivoComUmaVisita();
+      final bytesAntigos = await File(await caminho()).readAsBytes();
+      final chave = _ErroDoBanco('open_failed /dados/x.db');
+      final chaves = InMemoryDatabaseKeyStore(initialKey: 'c' * 64);
+      const falhaAoMover = FileSystemException('sem espaço para mover');
+      final chamadas = <String>[];
+      final db = banco(
+        [chave, chave],
+        chamadas: chamadas,
+        chaves: chaves,
+        moveAside: (_) async => throw falhaAoMover,
+      );
+
+      await expectLater(db.open(), throwsA(same(falhaAoMover)));
+
+      expect(chamadas, ['abrir', 'abrir'], reason: 'sem recriação');
+      expect(await chaves.readOrCreate(), 'c' * 64);
+      expect(await File(await caminho()).readAsBytes(), bytesAntigos);
+      expect((await copia()).existsSync(), isFalse);
+    });
+
+    test('"Limpar este aparelho" apaga também a cópia .recuperado; bloqueado, não', () async {
+      final storage = SqlCipherVisitStorage(keyStore: InMemoryDatabaseKeyStore(), databaseName: nome, allowUnencryptedForTesting: true);
+      await storage.forOwner('acs-a').save([_visita('pendente')]);
+      final backup = await copia();
+      await backup.writeAsBytes([1, 2, 3]);
+      await File('${backup.path}-wal').writeAsBytes([4]);
+
+      await expectLater(storage.database.wipeAllData(), throwsA(isA<WipeBlocked>()));
+      expect(backup.existsSync(), isTrue, reason: 'nada é apagado quando o wipe é recusado');
+
+      await storage.forOwner('acs-a').save([]);
+      await storage.database.wipeAllData();
+      expect(backup.existsSync(), isFalse, reason: 'fim da custódia: a cópia também sai');
+      expect(File('${backup.path}-wal').existsSync(), isFalse);
+      await storage.close();
+    });
 
     for (final (rotulo, erro) in <(String, Object)>[
       ('falha de migração (SQL)', _ErroDoBanco('duplicate column name: owner')),

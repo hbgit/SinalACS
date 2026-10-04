@@ -180,9 +180,15 @@ void main() {
       databaseName: databaseName,
     );
 
-    // Não lança: descarta o arquivo ilegível e recomeça vazio.
+    // Não lança: põe o arquivo ilegível de lado (`.recuperado`, ainda
+    // cifrado) e recomeça vazio.
     expect(await second.load(), isEmpty);
     await second.close();
+    final copia = File('${await EncryptedLocalDatabase.pathFor(databaseName)}${EncryptedLocalDatabase.recoverySuffix}');
+    expect(copia.existsSync(), isTrue);
+    expect(String.fromCharCodes((await copia.readAsBytes()).take(15)), isNot('SQLite format 3'),
+        reason: 'a cópia continua cifrada');
+    await EncryptedLocalDatabase.deleteRecoveryCopy(databaseName);
 
     await EncryptedLocalDatabase.deleteDatabaseFile(databaseName);
   });

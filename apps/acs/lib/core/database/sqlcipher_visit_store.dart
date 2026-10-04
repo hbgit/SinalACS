@@ -15,8 +15,20 @@ class VisitDatabase {
     @visibleForTesting
     Future<Database> Function(String databaseName, String passphrase, bool allowUnencrypted)?
         opener,
+    @visibleForTesting Duration retryDelay = const Duration(milliseconds: 500),
+    @visibleForTesting Future<void> Function(String databaseName)? moveAside,
   })  : _keyStore = keyStore,
-        _opener = opener ?? _defaultOpener;
+        _opener = opener ?? _defaultOpener,
+        _retryDelay = retryDelay,
+        _moveAside = moveAside ?? EncryptedLocalDatabase.moveAside;
+
+  /// Espera antes da segunda tentativa de abrir, quando a primeira falhou com
+  /// cara de chave errada: no Android esse erro (`open_failed`) é o mesmo de
+  /// uma falha passageira de abertura.
+  final Duration _retryDelay;
+
+  /// Põe o arquivo ilegível de lado (`EncryptedLocalDatabase.moveAside`).
+  final Future<void> Function(String databaseName) _moveAside;
 
   static Future<Database> _defaultOpener(
     String databaseName,
@@ -77,12 +89,24 @@ class VisitDatabase {
       // por um problema passageiro. Quem chama segue em RAM
       // (`persistenceFailed`) e tenta de novo na próxima abertura.
       if (!isWrongDatabaseKeyError(error)) rethrow;
+      // No Android a chave errada chega como `open_failed`, o mesmo erro de uma
+      // falha passageira de abertura. Uma nova tentativa, com a MESMA chave,
+      // separa os dois: se abrir, nada é tocado.
+      await Future<void>.delayed(_retryDelay);
+      try {
+        return _database =
+            await _opener(databaseName, passphrase, allowUnencryptedForTesting);
+      } catch (second) {
+        if (!isWrongDatabaseKeyError(second)) rethrow;
+      }
       // A chave não abre este arquivo — tipicamente reinstalação ou restauração
       // de backup, onde o banco veio e a chave do keystore não. Sem isso o app
-      // ficaria travado num estado irrecuperável a cada abertura. Descartar o
-      // arquivo perde visitas ainda não sincronizadas, mas elas já eram
-      // ilegíveis; ficar travado perderia as próximas também.
-      await EncryptedLocalDatabase.deleteDatabaseFile(databaseName);
+      // ficaria travado num estado irrecuperável a cada abertura. O arquivo
+      // NÃO é apagado: vai para `<nome>.recuperado` (uma cópia só, ainda
+      // cifrada; a chave dela some abaixo, então o app não a lê — serve só ao
+      // suporte). Se mover falhar, o erro sobe ANTES de apagar a chave: o
+      // arquivo fica e a fila segue em RAM (`persistenceFailed`).
+      await _moveAside(databaseName);
       await _keyStore.delete();
 
       return _database = await _opener(
@@ -106,7 +130,8 @@ class VisitDatabase {
   /// `sync_cursor`, `micro_area_cache` e `micro_area_cache_meta`.
   ///
   /// O arquivo e a chave do Keystore ficam: é limpeza de dados, não troca de
-  /// chave.
+  /// chave. A cópia `<nome>.recuperado` de uma recuperação por chave errada,
+  /// se existir, é apagada depois da transação.
   Future<void> wipeAllData() async {
     final database = await open();
     await database.transaction((transaction) async {
@@ -118,6 +143,9 @@ class VisitDatabase {
       await transaction.delete('micro_area_cache');
       await transaction.delete('micro_area_cache_meta');
     });
+    // Fim da custódia: a cópia de uma recuperação antiga (ilegível ao app)
+    // também sai.
+    await EncryptedLocalDatabase.deleteRecoveryCopy(databaseName);
   }
 }
 

@@ -245,4 +245,41 @@ CREATE TABLE IF NOT EXISTS micro_area_cache_meta (
     }
     return databaseFactoryFfi.deleteDatabase(path);
   }
+
+  /// Sufixo da ÚNICA cópia de recuperação ([moveAside]).
+  static const recoverySuffix = '.recuperado';
+
+  /// Arquivos que acompanham o banco (WAL, memória compartilhada, journal):
+  /// movidos e apagados junto com ele, para nunca misturar gerações.
+  static const _sidecars = ['-wal', '-shm', '-journal'];
+
+  /// Põe o arquivo do banco de lado em `<arquivo>.recuperado`, em vez de
+  /// apagá-lo, quando a chave do Keystore não o abre mais.
+  ///
+  /// A cópia continua cifrada pelo SQLCipher e a chave dela é apagada logo em
+  /// seguida (`VisitDatabase`): o app não consegue lê-la. Ela existe só para o
+  /// suporte tentar uma recuperação. Há UMA cópia: a anterior é sobrescrita. Se
+  /// mover falhar, lança — quem chama não apaga nada e não troca a chave.
+  /// "Limpar este aparelho" apaga a cópia ([deleteRecoveryCopy]).
+  static Future<void> moveAside(String databaseName) async {
+    final path = await pathFor(databaseName);
+    final main = File(path);
+    if (!main.existsSync()) return;
+    final backup = '$path$recoverySuffix';
+    await deleteRecoveryCopy(databaseName);
+    await main.rename(backup);
+    for (final sidecar in _sidecars) {
+      final file = File('$path$sidecar');
+      if (file.existsSync()) await file.rename('$backup$sidecar');
+    }
+  }
+
+  /// Apaga a cópia de recuperação e os arquivos que a acompanham, se houver.
+  static Future<void> deleteRecoveryCopy(String databaseName) async {
+    final backup = '${await pathFor(databaseName)}$recoverySuffix';
+    for (final suffix in ['', ..._sidecars]) {
+      final file = File('$backup$suffix');
+      if (file.existsSync()) await file.delete();
+    }
+  }
 }
