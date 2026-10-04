@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -34,22 +35,43 @@ class SecureStorageUploadTokenStore implements UploadTokenStore {
     return value == null || value.isEmpty ? null : value;
   }
 
-  /// Token primeiro, índice depois: um índice que aponta para um token
-  /// ausente é inofensivo ([read] devolve `null`); o contrário esconderia um
-  /// token de [owners].
-  @override
-  Future<void> write(String ownerId, String token) async {
-    await _storage.write(key: uploadTokenKey(ownerId), value: token);
-    final index = await _readIndex();
-    if (!index.contains(ownerId)) await _writeIndex([...index, ownerId]);
+  /// Cauda da fila das mutações. Sempre completa sem erro.
+  Future<void> _tail = Future<void>.value();
+
+  /// Toda mutação (token + índice) passa por aqui, uma por vez: o índice é
+  /// ler-modificar-gravar, e duas intercaladas (o login gravando A enquanto o
+  /// envio diferido apaga B) perderiam uma das atualizações.
+  Future<T> _serial<T>(Future<T> Function() body) {
+    final done = Completer<void>();
+    final previous = _tail;
+    _tail = done.future;
+    return previous.then((_) => body()).whenComplete(done.complete);
   }
 
+  /// Token primeiro, índice depois: um índice que aponta para um token
+  /// ausente é inofensivo ([read] devolve `null`); o contrário esconderia o
+  /// token de [owners] — e por isso o envio diferido também procura o token
+  /// dos donos que têm visitas no disco ([repairIndex]).
   @override
-  Future<void> clear(String ownerId) async {
-    await _storage.delete(key: uploadTokenKey(ownerId));
-    final index = await _readIndex();
-    if (index.contains(ownerId)) await _writeIndex([for (final o in index) if (o != ownerId) o]);
-  }
+  Future<void> write(String ownerId, String token) => _serial(() async {
+        await _storage.write(key: uploadTokenKey(ownerId), value: token);
+        final index = await _readIndex();
+        if (!index.contains(ownerId)) await _writeIndex([...index, ownerId]);
+      });
+
+  @override
+  Future<void> clear(String ownerId) => _serial(() async {
+        await _storage.delete(key: uploadTokenKey(ownerId));
+        final index = await _readIndex();
+        if (index.contains(ownerId)) await _writeIndex([for (final o in index) if (o != ownerId) o]);
+      });
+
+  @override
+  Future<void> repairIndex(String ownerId) => _serial(() async {
+        if (await read(ownerId) == null) return;
+        final index = await _readIndex();
+        if (!index.contains(ownerId)) await _writeIndex([...index, ownerId]);
+      });
 
   @override
   Future<List<String>> owners() => _readIndex();

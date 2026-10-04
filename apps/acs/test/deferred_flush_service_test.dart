@@ -257,6 +257,28 @@ void main() {
       expect(backend.revokedUploadTokens, isEmpty);
     });
 
+    test('token presente mas fora do índice: o dono com visitas é achado pelo disco e sobe com o token dele',
+        () async {
+      await storage.forOwner(acsA).save([visita('a-1')]);
+      await storage.forOwner(acsB).save([visita('b-1')]);
+      final semIndice = _IndicePerdido({acsA: 'upload-a', acsB: 'upload-b'});
+      backend.session = sessao(acsB);
+
+      final report = await DeferredFlushService(
+        backend: backend,
+        storage: storage,
+        tokens: semIndice,
+        deviceIds: MemoryDeviceIdStore(aparelho),
+      ).flushAll();
+
+      expect(backend.deferredBatches, hasLength(1));
+      expect(backend.deferredBatches.single.uploadToken, 'upload-a');
+      expect(await storage.forOwner(acsA).load(), isEmpty);
+      expect(report.blockedOwners, isEmpty);
+      expect(semIndice.reparados, [acsA], reason: 'o índice é reparado; o dono da sessão não é lido');
+      expect(semIndice.lidos, isNot(contains(acsB)));
+    });
+
     test('dono com visitas e sem token: bloqueado, nada enviado', () async {
       await storage.forOwner(acsA).save([visita('a-1')]);
 
@@ -510,4 +532,35 @@ class _TokensQueFalham implements UploadTokenStore {
 
   @override
   Future<void> write(String ownerId, String token) => Future.error(StateError('Keystore'));
+
+  @override
+  Future<void> repairIndex(String ownerId) => Future.error(StateError('Keystore'));
+}
+
+/// Tokens guardados cujo ÍNDICE se perdeu: `owners()` não lista ninguém, mas
+/// a leitura por chave funciona.
+class _IndicePerdido implements UploadTokenStore {
+  _IndicePerdido(this._tokens);
+
+  final Map<String, String> _tokens;
+  final List<String> lidos = <String>[];
+  final List<String> reparados = <String>[];
+
+  @override
+  Future<List<String>> owners() async => const <String>[];
+
+  @override
+  Future<String?> read(String ownerId) async {
+    lidos.add(ownerId);
+    return _tokens[ownerId];
+  }
+
+  @override
+  Future<void> write(String ownerId, String token) async => _tokens[ownerId] = token;
+
+  @override
+  Future<void> clear(String ownerId) async => _tokens.remove(ownerId);
+
+  @override
+  Future<void> repairIndex(String ownerId) async => reparados.add(ownerId);
 }

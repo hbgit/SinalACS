@@ -14,6 +14,13 @@ import 'support/fake_rpc_server.dart';
 /// Credenciais e ids sintéticos.
 void main() {
   group('MemoryUploadTokenStore', () {
+    test('repairIndex é inofensivo (o índice é o próprio mapa)', () async {
+      final store = MemoryUploadTokenStore({'acs-a': 'upload-a'});
+      await store.repairIndex('acs-a');
+      await store.repairIndex('acs-x');
+      expect(await store.owners(), ['acs-a']);
+    });
+
     test('um token por dono; owners lista só quem tem token', () async {
       final store = MemoryUploadTokenStore();
       await store.write('acs-a', 'upload-a');
@@ -51,6 +58,31 @@ void main() {
       expect(keystore.data['acs_refresh_token'], 'refresh-sintetico');
       expect(keystore.readAllCalls, 0, reason: 'listar donos não carrega os outros segredos do Keystore');
       expect(keystore.keysRead.where((k) => !k.startsWith('acs_upload_token')), isEmpty);
+    });
+
+    test('write(A) e clear(B) concorrentes não perdem atualização do índice', () async {
+      for (var rodada = 0; rodada < 5; rodada++) {
+        final keystore = _KeystoreFalso()..latencia = const Duration(milliseconds: 5);
+        final store = SecureStorageUploadTokenStore(storage: keystore);
+        await store.write('acs-b', 'upload-b');
+
+        await Future.wait([store.write('acs-a', 'upload-a'), store.clear('acs-b')]);
+
+        expect(await store.owners(), ['acs-a'], reason: 'rodada $rodada');
+        expect(await store.read('acs-b'), isNull);
+      }
+    });
+
+    test('repairIndex recoloca no índice um dono cujo token existe; sem token, nada', () async {
+      final keystore = _KeystoreFalso({'acs_upload_token|acs-a': 'upload-a'});
+      final store = SecureStorageUploadTokenStore(storage: keystore);
+      expect(await store.owners(), isEmpty);
+
+      await store.repairIndex('acs-a');
+      await store.repairIndex('acs-sem-token');
+
+      expect(await store.owners(), ['acs-a']);
+      expect(await store.read('acs-a'), 'upload-a', reason: 'o reparo nunca regrava o token');
     });
 
     test('índice ausente ou corrompido vale como vazio, e a próxima gravação o refaz', () async {
@@ -206,6 +238,11 @@ class _KeystoreFalso implements FlutterSecureStorage {
   final List<String> keysRead = <String>[];
   int readAllCalls = 0;
 
+  /// Atraso de cada operação (provoca intercalação entre chamadas).
+  Duration latencia = Duration.zero;
+
+  Future<void> _espera() => latencia > Duration.zero ? Future<void>.delayed(latencia) : Future<void>.value();
+
   @override
   Future<String?> read({
     required String key,
@@ -217,6 +254,7 @@ class _KeystoreFalso implements FlutterSecureStorage {
     WindowsOptions? wOptions,
   }) async {
     keysRead.add(key);
+    await _espera();
     return data[key];
   }
 
@@ -231,6 +269,7 @@ class _KeystoreFalso implements FlutterSecureStorage {
     MacOsOptions? mOptions,
     WindowsOptions? wOptions,
   }) async {
+    await _espera();
     if (value == null) {
       data.remove(key);
     } else {
@@ -247,8 +286,10 @@ class _KeystoreFalso implements FlutterSecureStorage {
     WebOptions? webOptions,
     MacOsOptions? mOptions,
     WindowsOptions? wOptions,
-  }) async =>
-      data.remove(key);
+  }) async {
+    await _espera();
+    data.remove(key);
+  }
 
   @override
   Future<Map<String, String>> readAll({

@@ -27,8 +27,15 @@ abstract interface class UploadTokenStore {
 
   Future<void> clear(String ownerId);
 
-  /// Donos que têm token guardado neste aparelho.
+  /// Donos que têm token guardado neste aparelho. Pode ser um ÍNDICE (ver
+  /// `SecureStorageUploadTokenStore`) e, portanto, uma otimização: quem
+  /// precisa de certeza para um dono conhecido usa [read].
   Future<List<String>> owners();
+
+  /// Recoloca [ownerId] no índice de [owners] se o token dele existe (o
+  /// índice se perdeu, ou a gravação dele falhou depois do token). Nunca
+  /// regrava o token.
+  Future<void> repairIndex(String ownerId);
 }
 
 /// Duplo de teste: só em memória.
@@ -48,4 +55,8 @@ class MemoryUploadTokenStore implements UploadTokenStore {
 
   @override
   Future<List<String>> owners() async => _tokens.keys.toList();
+
+  /// O índice é o próprio mapa: nada a reparar.
+  @override
+  Future<void> repairIndex(String ownerId) async {}
 }

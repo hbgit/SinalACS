@@ -165,11 +165,21 @@ class DeferredFlushService {
         sent += await _flushLegacy(deviceId, '${transporter.userId}|${transporter.microAreaId ?? ''}');
       }
 
-      // (2) e (3): cada dono com token, menos o da sessão atual.
-      for (final owner in await _safe(_tokens.owners) ?? const <String>[]) {
+      // (2) e (3): cada dono com token, menos o da sessão atual. O índice de
+      // `owners()` é só uma otimização: todo dono com visita no disco também
+      // tem o token procurado pela chave dele (nunca `readAll`), para que um
+      // índice perdido não deixe as visitas dele presas para sempre.
+      final indexed = (await _safe(_tokens.owners) ?? const <String>[]).toList();
+      final withRows = (await _safe(_storage.countsByOwner) ?? const <String, int>{})
+          .entries
+          .where((e) => e.value > 0)
+          .map((e) => e.key);
+      final candidates = <String>{...indexed, ...withRows};
+      for (final owner in candidates) {
         if (owner == _backend.session?.userId) continue;
         final token = await _safe(() => _tokens.read(owner));
         if (token == null) continue;
+        if (!indexed.contains(owner)) await _safe(() => _tokens.repairIndex(owner));
 
         if (deviceId != null) {
           final synchronizer = DeferredVisitSynchronizer(backend: _backend, uploadToken: token, deviceId: deviceId);
@@ -267,12 +277,14 @@ class DeferredFlushService {
     final current = _backend.session?.userId;
     final counts = await _safe(_storage.countsByOwner) ?? const <String, int>{};
     final legacy = await _safe(_storage.legacy.load) ?? const <OfflineVisitRecord>[];
-    final withToken = (await _safe(_tokens.owners) ?? const <String>[]).toSet();
     var remaining = legacy.length;
-    counts.forEach((owner, count) {
+    for (final MapEntry(key: owner, value: count) in counts.entries) {
       remaining += count;
-      if (count > 0 && owner != current && !withToken.contains(owner)) blocked.add(owner);
-    });
+      if (count == 0 || owner == current || blocked.contains(owner)) continue;
+      // Leitura por chave, não o índice: um dono fora do índice que tem token
+      // não está bloqueado.
+      if (await _safe(() => _tokens.read(owner)) == null) blocked.add(owner);
+    }
     blocked.remove(current);
     return FlushReport(
       sent: sent,
