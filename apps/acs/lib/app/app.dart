@@ -169,8 +169,14 @@ class _SinalAcsAppState extends State<SinalAcsApp> with WidgetsBindingObserver {
     // voltaria, no próximo login de A, com um retrato anterior a esse envio
     // (contagem errada e reenvio do que já subiu). Sem memo, a fila de A é
     // relida do disco. O painel de quem saiu já foi descartado.
-    _queues.removeWhere((owner, _) => owner != session.userId);
-    _scopes.removeWhere((key, _) => !key.startsWith('${session.userId}|'));
+    //
+    // EXCETO a fila que não conseguiu gravar (`persistenceFailed`) e ainda tem
+    // visita: essas visitas existem só em RAM, e descartá-la as perderia — o
+    // próximo login do dono precisa reencontrá-las.
+    bool soEmMemoria(OfflineVisitQueue queue) =>
+        queue.persistenceFailed && (queue.pendingCount > 0 || queue.rejectedCount > 0);
+    _queues.removeWhere((owner, queue) => owner != session.userId && !soEmMemoria(queue));
+    _scopes.removeWhere((key, scope) => !key.startsWith('${session.userId}|') && !soEmMemoria(scope.queue));
     return _scopes.putIfAbsent(visitCursorOwner(session), () {
       final built = buildOwnerVisitScope(
         backend: widget.backend,

@@ -30,26 +30,38 @@ void main() {
   });
 
   group('SecureStorageUploadTokenStore', () {
-
-    test("chave 'acs_upload_token|<userId>' e owners ignora as outras chaves do Keystore", () async {
-      FlutterSecureStorage.setMockInitialValues({
+    test("chave 'acs_upload_token|<userId>', índice de donos e nunca readAll", () async {
+      final keystore = _KeystoreFalso({
         'acs_refresh_token': 'refresh-sintetico',
         'acs_device_id': 'aparelho-sintetico',
       });
-      final store = SecureStorageUploadTokenStore();
+      final store = SecureStorageUploadTokenStore(storage: keystore);
 
       await store.write('acs-a', 'upload-a');
       await store.write('acs-b', 'upload-b');
+      await store.write('acs-a', 'upload-a2');
 
-      final todas = await const FlutterSecureStorage().readAll();
-      expect(todas['acs_upload_token|acs-a'], 'upload-a');
+      expect(keystore.data['acs_upload_token|acs-a'], 'upload-a2');
       expect(await store.read('acs-b'), 'upload-b');
-      expect(await store.owners(), unorderedEquals(['acs-a', 'acs-b']));
+      expect(await store.owners(), ['acs-a', 'acs-b']);
 
       await store.clear('acs-a');
       expect(await store.read('acs-a'), isNull);
       expect(await store.owners(), ['acs-b']);
-      expect((await const FlutterSecureStorage().readAll())['acs_refresh_token'], 'refresh-sintetico');
+      expect(keystore.data['acs_refresh_token'], 'refresh-sintetico');
+      expect(keystore.readAllCalls, 0, reason: 'listar donos não carrega os outros segredos do Keystore');
+      expect(keystore.keysRead.where((k) => !k.startsWith('acs_upload_token')), isEmpty);
+    });
+
+    test('índice ausente ou corrompido vale como vazio, e a próxima gravação o refaz', () async {
+      for (final corrompido in [null, '', 'não é json', '{"a":1}', '[1, null]']) {
+        final keystore = _KeystoreFalso({if (corrompido != null) 'acs_upload_token_owners': corrompido});
+        final store = SecureStorageUploadTokenStore(storage: keystore);
+
+        expect(await store.owners(), isEmpty, reason: '$corrompido');
+        await store.write('acs-a', 'upload-a');
+        expect(await store.owners(), ['acs-a'], reason: '$corrompido');
+      }
     });
   });
 
@@ -184,4 +196,73 @@ void main() {
     final client = File('lib/core/network/backend_client.dart').readAsStringSync();
     expect(client, isNot(contains('secure_upload_token_store.dart')));
   });
+}
+
+/// Keystore em memória que registra o que foi lido e RECUSA `readAll`.
+class _KeystoreFalso implements FlutterSecureStorage {
+  _KeystoreFalso([Map<String, String>? inicial]) : data = {...?inicial};
+
+  final Map<String, String> data;
+  final List<String> keysRead = <String>[];
+  int readAllCalls = 0;
+
+  @override
+  Future<String?> read({
+    required String key,
+    IOSOptions? iOptions,
+    AndroidOptions? aOptions,
+    LinuxOptions? lOptions,
+    WebOptions? webOptions,
+    MacOsOptions? mOptions,
+    WindowsOptions? wOptions,
+  }) async {
+    keysRead.add(key);
+    return data[key];
+  }
+
+  @override
+  Future<void> write({
+    required String key,
+    required String? value,
+    IOSOptions? iOptions,
+    AndroidOptions? aOptions,
+    LinuxOptions? lOptions,
+    WebOptions? webOptions,
+    MacOsOptions? mOptions,
+    WindowsOptions? wOptions,
+  }) async {
+    if (value == null) {
+      data.remove(key);
+    } else {
+      data[key] = value;
+    }
+  }
+
+  @override
+  Future<void> delete({
+    required String key,
+    IOSOptions? iOptions,
+    AndroidOptions? aOptions,
+    LinuxOptions? lOptions,
+    WebOptions? webOptions,
+    MacOsOptions? mOptions,
+    WindowsOptions? wOptions,
+  }) async =>
+      data.remove(key);
+
+  @override
+  Future<Map<String, String>> readAll({
+    IOSOptions? iOptions,
+    AndroidOptions? aOptions,
+    LinuxOptions? lOptions,
+    WebOptions? webOptions,
+    MacOsOptions? mOptions,
+    WindowsOptions? wOptions,
+  }) async {
+    readAllCalls++;
+    return Map.of(data);
+  }
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => throw UnimplementedError('${invocation.memberName}');
 }

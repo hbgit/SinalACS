@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import 'upload_token_store.dart';
@@ -14,8 +16,15 @@ const FlutterSecureStorage _defaultSecureStorage = FlutterSecureStorage(
 /// Tokens de envio diferido no Keystore, um por dono, sob
 /// `acs_upload_token|<userId>` (D7). Separado de `upload_token_store.dart`
 /// para que `backend_client.dart` (que roda também na VM) não puxe o Flutter.
+///
+/// [owners] lê um ÍNDICE próprio (`acs_upload_token_owners`, lista JSON de
+/// ids) em vez de `readAll()`: listar donos não pode carregar para a memória
+/// do Dart os outros segredos do Keystore (refresh token, chave do banco).
+/// Índice ausente ou corrompido vale como vazio; a próxima gravação o refaz.
 class SecureStorageUploadTokenStore implements UploadTokenStore {
   SecureStorageUploadTokenStore({FlutterSecureStorage? storage}) : _storage = storage ?? _defaultSecureStorage;
+
+  static const ownersIndexKey = 'acs_upload_token_owners';
 
   final FlutterSecureStorage _storage;
 
@@ -25,21 +34,37 @@ class SecureStorageUploadTokenStore implements UploadTokenStore {
     return value == null || value.isEmpty ? null : value;
   }
 
+  /// Token primeiro, índice depois: um índice que aponta para um token
+  /// ausente é inofensivo ([read] devolve `null`); o contrário esconderia um
+  /// token de [owners].
   @override
-  Future<void> write(String ownerId, String token) => _storage.write(key: uploadTokenKey(ownerId), value: token);
-
-  @override
-  Future<void> clear(String ownerId) => _storage.delete(key: uploadTokenKey(ownerId));
-
-  @override
-  Future<List<String>> owners() async {
-    final all = await _storage.readAll();
-    return [
-      for (final entry in all.entries)
-        if (entry.key.startsWith(uploadTokenKeyPrefix) &&
-            entry.key.length > uploadTokenKeyPrefix.length &&
-            entry.value.isNotEmpty)
-          entry.key.substring(uploadTokenKeyPrefix.length),
-    ];
+  Future<void> write(String ownerId, String token) async {
+    await _storage.write(key: uploadTokenKey(ownerId), value: token);
+    final index = await _readIndex();
+    if (!index.contains(ownerId)) await _writeIndex([...index, ownerId]);
   }
+
+  @override
+  Future<void> clear(String ownerId) async {
+    await _storage.delete(key: uploadTokenKey(ownerId));
+    final index = await _readIndex();
+    if (index.contains(ownerId)) await _writeIndex([for (final o in index) if (o != ownerId) o]);
+  }
+
+  @override
+  Future<List<String>> owners() => _readIndex();
+
+  Future<List<String>> _readIndex() async {
+    final raw = await _storage.read(key: ownersIndexKey);
+    if (raw == null || raw.isEmpty) return <String>[];
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! List) return <String>[];
+      return [for (final item in decoded) if (item is String && item.isNotEmpty) item];
+    } on FormatException {
+      return <String>[];
+    }
+  }
+
+  Future<void> _writeIndex(List<String> owners) => _storage.write(key: ownersIndexKey, value: jsonEncode(owners));
 }

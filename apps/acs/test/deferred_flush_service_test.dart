@@ -276,13 +276,48 @@ void main() {
       final primeiro = await servico(sobre: falha).flushAll();
       expect(ids(await storage.forOwner(acsA).load()), ['a-1'], reason: 'o 200 chegou, mas o disco não foi limpo');
       expect(primeiro.remaining, 1);
+      expect(primeiro.sent, 0, reason: 'sent conta só o que saiu do aparelho');
       expect(await tokens.read(acsA), 'upload-a', reason: 'ainda há visita: o token fica');
 
       final segundo = await servico(sobre: falha).flushAll();
       expect([for (final l in backend.deferredBatches) l.visits.single.localId], ['a-1', 'a-1']);
       expect(await storage.forOwner(acsA).load(), isEmpty);
       expect(segundo.remaining, 0);
+      expect(segundo.sent, 1);
       expect(await tokens.read(acsA), isNull);
+    });
+
+    test('token recusado durante novo login de A: o token NOVO de A não é apagado', () async {
+      await storage.forOwner(acsA).save([visita('a-1')]);
+      await tokens.write(acsA, 'upload-a');
+      final gate = backend.deferredGate = Completer<void>();
+
+      final voo = servico().flushAll();
+      await pumpEventQueue();
+      // A entra de novo neste aparelho: o login grava um token novo, e o
+      // servidor revoga o anterior (mesmo usuário + aparelho).
+      await tokens.write(acsA, 'upload-a-novo');
+      backend.refusedUploadTokens.add('upload-a');
+      gate.complete();
+      final report = await voo;
+
+      expect(report.blockedOwners, [acsA]);
+      expect(await tokens.read(acsA), 'upload-a-novo');
+      expect(ids(await storage.forOwner(acsA).load()), ['a-1']);
+    });
+
+    test('fila vazia revogada enquanto A entra de novo: o token NOVO de A não é apagado', () async {
+      await tokens.write(acsA, 'upload-a');
+      final gate = backend.revokeGate = Completer<void>();
+
+      final voo = servico().flushAll();
+      await pumpEventQueue();
+      await tokens.write(acsA, 'upload-a-novo');
+      gate.complete();
+      await voo;
+
+      expect(backend.revokedUploadTokens, ['upload-a']);
+      expect(await tokens.read(acsA), 'upload-a-novo');
     });
 
     test('flushAll nunca envia visita de A com o token de B (verifica o token usado por lote)', () async {

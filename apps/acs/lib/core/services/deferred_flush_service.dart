@@ -176,7 +176,7 @@ class DeferredFlushService {
           final queue = OfflineVisitQueue(store: _MergingOwnerStore(_storage.forOwner(owner)), synchronizer: synchronizer);
           await queue.restore();
           await queue.sync(); // nunca lança: falha vira SyncOutcome.error
-          sent += queue.syncedCount;
+          sent += await _removedFromDevice(owner, queue.syncedVisits);
           if (synchronizer.tokenRefused) {
             // O servidor diz que este token morreu: apagar só o local. As
             // visitas do dono FICAM, para o próximo login dele.
@@ -250,6 +250,17 @@ class DeferredFlushService {
       }
     }
     return removed;
+  }
+
+  /// Quantas das visitas confirmadas pelo servidor de fato saíram do disco do
+  /// dono. Se a gravação que as removeria falhou, elas continuam lá (e serão
+  /// reenviadas, idempotentes) e não contam como enviadas.
+  Future<int> _removedFromDevice(String owner, List<OfflineVisitRecord> synced) async {
+    if (synced.isEmpty) return 0;
+    final rows = await _safe(() => _storage.forOwner(owner).load());
+    if (rows == null) return 0;
+    final onDisk = {for (final row in rows) row.localId};
+    return synced.where((visit) => !onDisk.contains(visit.localId)).length;
   }
 
   Future<FlushReport> _report(int sent, Set<String> blocked) async {

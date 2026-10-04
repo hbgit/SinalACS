@@ -274,9 +274,11 @@ class FakeAcsBackend implements AcsBackend {
     required List<VisitSyncEntry> visits,
   }) async {
     if (visits.length > 200) throw const BackendFailure('lote acima do limite', isRecoverable: false);
-    if (refusedUploadTokens.contains(uploadToken)) throw const UploadTokenRefused();
     deferredBatches.add((uploadToken: uploadToken, deviceId: deviceId, visits: List.of(visits)));
+    // A recusa é decidida quando o servidor responde (depois da espera): o
+    // token pode ter sido revogado enquanto o lote estava em voo.
     await deferredGate?.future;
+    if (refusedUploadTokens.contains(uploadToken)) throw const UploadTokenRefused();
     final failure = deferredFailure;
     if (failure != null) throw failure;
     return [for (final visit in visits) deferredResultFor?.call(visit) ?? _synced(visit)];
@@ -285,8 +287,14 @@ class FakeAcsBackend implements AcsBackend {
   /// Tokens de envio revogados, na ordem.
   final List<String> revokedUploadTokens = <String>[];
 
+  /// Se definido, `revokeUploadToken` espera por ele (revogação em voo).
+  Completer<void>? revokeGate;
+
   @override
-  Future<void> revokeUploadToken(String uploadToken) async => revokedUploadTokens.add(uploadToken);
+  Future<void> revokeUploadToken(String uploadToken) async {
+    revokedUploadTokens.add(uploadToken);
+    await revokeGate?.future;
+  }
 
   /// Reenvio do mesmo `localId` na mesma versão volta `synced` (idempotente).
   static VisitSyncResult _synced(VisitSyncEntry visit) =>

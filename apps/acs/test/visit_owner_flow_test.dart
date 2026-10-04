@@ -214,6 +214,51 @@ void main() {
       expect(await pendentesNaTela(tester), 'Pendentes de sincronização: 2');
     });
 
+    testWidgets('fila de A só em RAM (gravação falhando) sobrevive a B entrar e A voltar', (tester) async {
+      // A visão de A recusa gravar: a visita registrada existe só na memória.
+      final memoria = _GravacaoDeAFalha(storage);
+      late FakeAlertFeed feed;
+      await tester.pumpWidget(SinalAcsApp(
+        backend: backend,
+        visitStorage: memoria,
+        biometricGate: gate,
+        navigatorKey: navKey,
+        feedBuilder: (q) => feed = FakeAlertFeed(q),
+      ));
+      await assentar(tester);
+      await storage.forOwner(acsA).save([]);
+      await entrarComo(tester, acsA);
+
+      feed.deliver(testAlert(alertId: 'alerta-ram', riskLevel: 'yellow'));
+      await assentar(tester);
+      await tester.tap(find.text('Iniciar rota de visita'));
+      await assentar(tester);
+      await tester.tap(find.byKey(const Key('arrival_confirmation')));
+      await assentar(tester);
+      final salvar = find.byKey(const Key('save_visit'));
+      await tester.ensureVisible(salvar);
+      await tester.pump();
+      await tester.tap(salvar);
+      await assentar(tester);
+      if (find.byType(BackButton).evaluate().isNotEmpty) {
+        await tester.tap(find.byType(BackButton).first);
+        await assentar(tester);
+      }
+      expect(await pendentesNaTela(tester), 'Pendentes de sincronização: 1 (em memória)');
+      expect(await storage.forOwner(acsA).load(), isEmpty, reason: 'nada chegou ao disco');
+      // O aviso da gravação (SnackBar) cobre o botão de sair até sumir.
+      await tester.pump(const Duration(seconds: 10));
+      await assentar(tester);
+
+      await sair(tester);
+      await entrarComo(tester, acsB);
+      await sair(tester);
+      await entrarComo(tester, acsA);
+
+      expect(await pendentesNaTela(tester), 'Pendentes de sincronização: 1 (em memória)',
+          reason: 'a visita só existia em RAM: a fila de A não pode ser descartada');
+    });
+
     testWidgets('a quarentena (linhas sem dono) não aparece para ninguém', (tester) async {
       storage = InMemoryVisitStorage(legacyVisits: [pendente('local-legado')]);
       await abrirApp(tester);
@@ -420,4 +465,21 @@ void main() {
       expect(backendB.pullSinceCalls, [VisitPullService.epoch]);
     });
   });
+}
+
+/// Só a visão de `acs-a` recusa gravar (`persistenceFailed` na fila de A).
+class _GravacaoDeAFalha implements VisitStorage {
+  _GravacaoDeAFalha(this._inner);
+
+  final VisitStorage _inner;
+
+  @override
+  LegacyVisitStore get legacy => _inner.legacy;
+
+  @override
+  Future<Map<String, int>> countsByOwner() => _inner.countsByOwner();
+
+  @override
+  VisitStore forOwner(String ownerId) =>
+      ownerId == 'acs-a' ? FailingVisitStore(failOnLoad: false) : _inner.forOwner(ownerId);
 }
