@@ -228,7 +228,7 @@ void main() {
     await backend.developmentLogin(role: 'acs');
 
     final queue = OfflineVisitQueue(
-      synchronizer: BackendVisitSynchronizer(backend: backend),
+      synchronizer: BackendVisitSynchronizer(backend: backend, ownerId: backend.session!.userId),
     );
 
     await queue.add(OfflineVisitRecord(
@@ -263,7 +263,7 @@ void main() {
     );
     final queue = OfflineVisitQueue(
       store: store,
-      synchronizer: BackendVisitSynchronizer(backend: backend),
+      synchronizer: BackendVisitSynchronizer(backend: backend, ownerId: backend.session!.userId),
     );
 
     await queue.add(OfflineVisitRecord(
@@ -298,7 +298,7 @@ void main() {
       outcome: 'realizada',
     );
 
-    final synchronizer = BackendVisitSynchronizer(backend: backend);
+    final synchronizer = BackendVisitSynchronizer(backend: backend, ownerId: backend.session!.userId);
 
     final first = await synchronizer.push([visit]);
     // Mesmo localId, mesma versão: é o retry de quem não viu a resposta.

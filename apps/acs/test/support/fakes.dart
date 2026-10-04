@@ -47,6 +47,10 @@ class FakeAcsBackend implements AcsBackend {
   @override
   AuthSession? get session => _session;
 
+  /// Troca a sessão corrente sem passar pelo login (ex.: outro ACS entrou
+  /// enquanto o lote de um anterior estava em voo).
+  set session(AuthSession? value) => _session = value;
+
   @override
   bool get isAuthenticated => _session != null;
 

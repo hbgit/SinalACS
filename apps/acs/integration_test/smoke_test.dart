@@ -141,7 +141,7 @@ void main() {
     );
     final visitQueue = OfflineVisitQueue(
       store: store,
-      synchronizer: BackendVisitSynchronizer(backend: backend),
+      synchronizer: BackendVisitSynchronizer(backend: backend, ownerId: backend.session!.userId),
     );
     await visitQueue.add(OfflineVisitRecord(
       patientId: seedPatientId,

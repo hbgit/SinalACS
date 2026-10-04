@@ -26,7 +26,6 @@ import 'package:sinalacs_acs/core/services/reconnect_schedule.dart';
 import 'package:sinalacs_acs/core/services/route_service.dart';
 import 'package:sinalacs_acs/core/services/theme_controller.dart';
 import 'package:sinalacs_acs/core/services/visit_pull_service.dart';
-import 'package:sinalacs_acs/core/services/visit_pull_service_factory.dart';
 import 'package:sinalacs_acs/core/services/visit_queue_factory.dart';
 
 class SinalAcsApp extends StatefulWidget {
@@ -36,6 +35,8 @@ class SinalAcsApp extends StatefulWidget {
     this.feedBuilder,
     this.visitQueue,
     this.visitPullService,
+    this.visitStorage,
+    this.visitScopeResolver,
     this.microAreaDirectory,
     this.initialAlert,
     this.currentPosition,
@@ -69,8 +70,21 @@ class SinalAcsApp extends StatefulWidget {
   /// entra no lugar do real.
   final AcsBackend backend;
   final AlertFeed Function(AlertQueue queue)? feedBuilder;
+
+  /// Gancho de teste (D5): fila usada para QUALQUER dono. `null` (produção)
+  /// monta uma fila por `userId` sobre [visitStorage].
   final OfflineVisitQueue? visitQueue;
+
+  /// Gancho de teste (D5): pull usado para QUALQUER dono. `null` (produção)
+  /// monta um por `userId|microAreaId`.
   final VisitPullService? visitPullService;
+
+  /// Armazenamento das visitas, com uma visão por dono. `null` usa o banco
+  /// SQLCipher do aparelho; testes passam `InMemoryVisitStorage`.
+  final VisitStorage? visitStorage;
+
+  /// Substitui inteira a resolução de fila + pull por sessão.
+  final VisitScopeResolver? visitScopeResolver;
 
   /// Lista da microárea com cache no aparelho (RF08). `null` lê direto do
   /// backend, sem cache: quem monta o de produção é o `main.dart`
@@ -91,49 +105,63 @@ class SinalAcsApp extends StatefulWidget {
 }
 
 class _SinalAcsAppState extends State<SinalAcsApp> {
-  /// Compartilhado entre a fila offline e o serviço de pull (RF15).
+  /// Armazenamento de visitas do aparelho: UM banco, uma visão por dono.
   ///
-  /// `VisitPullService` lê deste MESMO store para nunca reintroduzir
-  /// localmente uma visita que já está na fila offline (dedupe por
-  /// `localId`, ver `visit_pull_service.dart`). Duas instâncias separadas de
-  /// `SqlCipherVisitStore` apontando para o mesmo arquivo até funcionariam,
-  /// mas por acaso — uma só instância é o que garante que o pull enxerga
-  /// exatamente o que a fila gravou por último.
-  late final VisitStore _visitStore = SqlCipherVisitStore(
-    keyStore: SecureStorageDatabaseKeyStore(),
-    // TRANSITÓRIO (tarefas 3/4 do plano da fila por dono): o dono real passa a
-    // ser o id do ACS da sessão, via VisitStorage.forOwner.
-    owner: 'acs-transitorio',
-  );
+  /// A fila e o cursor do pull de cada dono são montados sobre este mesmo
+  /// `VisitDatabase` (`buildOwnerVisitScope`): o pull deduplica contra a fila
+  /// do MESMO dono, e o cursor vive no mesmo arquivo, numa só conexão.
+  late final VisitStorage _storage =
+      widget.visitStorage ?? SqlCipherVisitStorage(keyStore: SecureStorageDatabaseKeyStore());
 
-  /// Uma única fila por execução do app.
+  /// Uma fila por `userId`, enquanto o app vive.
   ///
-  /// A tela de visita antes fazia `OfflineVisitQueue()` a cada gravação — uma
-  /// instância nova por visita, descartada no retorno do callback. A visita
-  /// simplesmente sumia.
-  late final OfflineVisitQueue _visitQueue = widget.visitQueue ?? _persistentQueue();
+  /// Nunca a fila de A sobre o armazenamento de B: os registros em memória de
+  /// A seriam regravados na visão de B e todo `save` dali em diante falharia
+  /// (`VisitLocalIdConflict`). Também nunca DUAS filas sobre o mesmo dono — a
+  /// mais antiga regravaria o disco com um retrato velho. Por isso a fila é
+  /// memoizada por usuário, e não por usuário+microárea.
+  final Map<String, OfflineVisitQueue> _queues = {};
 
-  /// Fila respaldada pelo banco criptografado, com o sincronizador ligado.
+  /// Escopo (fila + pull) por `userId|microAreaId`: o mesmo ACS que sai e
+  /// volta, ou que se reautentica, reencontra o seu; outro ACS ganha o dele.
+  final Map<String, OwnerVisitScope> _scopes = {};
+
+  /// Fila e pull do dono de [session].
   ///
-  /// A chave vive no Keystore/Keychain, nunca no código. Deixou de ser `static`
-  /// para enxergar o backend: sem sincronizador, `sync()` caía no ramo sem
-  /// remetente e devolvia erro — as visitas nunca subiam ao servidor e o que já
-  /// estava confirmado nunca era apagado do disco.
-  OfflineVisitQueue _persistentQueue() =>
-      buildVisitQueue(backend: widget.backend, store: _visitStore);
+  /// Ordem: o resolvedor injetado; senão a fila/o pull injetados (gancho de
+  /// teste, D5 — valem para qualquer dono); senão a montagem por dono sobre
+  /// [_storage].
+  OwnerVisitScope _scopeFor(AuthSession session) {
+    final resolver = widget.visitScopeResolver;
+    if (resolver != null) return resolver(session);
+    final injectedQueue = widget.visitQueue;
+    final injectedPull = widget.visitPullService;
+    if (injectedQueue != null && injectedPull != null) {
+      return OwnerVisitScope(queue: injectedQueue, pullService: injectedPull);
+    }
+    return _scopes.putIfAbsent(visitCursorOwner(session), () {
+      final built = buildOwnerVisitScope(
+        backend: widget.backend,
+        storage: _storage,
+        session: session,
+        queue: injectedQueue ??
+            _queues.putIfAbsent(
+              session.userId,
+              () => buildVisitQueue(
+                backend: widget.backend,
+                store: _storage.forOwner(session.userId),
+                ownerId: session.userId,
+              ),
+            ),
+      );
+      return OwnerVisitScope(
+        queue: built.queue,
+        pullService: injectedPull ?? built.pullService,
+      );
+    });
+  }
 
   late final ThemeController _themeController = widget.themeController ?? ThemeController();
-
-  /// Serviço de pull central→dispositivo (RF15, decisão §5).
-  ///
-  /// Usa o MESMO `_visitStore` da fila — ver o comentário acima.
-  late final VisitPullService _visitPullService = widget.visitPullService ??
-      buildVisitPullService(
-        backend: widget.backend,
-        localVisits: _visitStore,
-        // TRANSITÓRIO — Task 4: o dono real passa a ser o id do ACS da sessão.
-        cursorOwner: 'acs-transitorio',
-      );
 
   late final BiometricGate _gate = widget.biometricGate ?? LocalAuthBiometricGate();
   late final GlobalKey<NavigatorState> _navigatorKey = widget.navigatorKey ?? GlobalKey<NavigatorState>();
@@ -227,8 +255,7 @@ class _SinalAcsAppState extends State<SinalAcsApp> {
               ),
               home: LoginScreen(
                 feedBuilder: widget.feedBuilder,
-                visitQueue: _visitQueue,
-                visitPullService: _visitPullService,
+                visitScopeFor: _scopeFor,
                 directory: widget.microAreaDirectory,
                 initialAlert: widget.initialAlert,
                 initialPosition: widget.currentPosition,
@@ -269,9 +296,8 @@ class _AppLockScope extends InheritedWidget {
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({
-    required this.visitQueue,
+    required this.visitScopeFor,
     required this.themeController,
-    required this.visitPullService,
     super.key,
     this.directory,
     this.feedBuilder,
@@ -298,8 +324,10 @@ class LoginScreen extends StatefulWidget {
   /// Aviso fixo no topo do formulário (ex.: sessão expirada).
   final String? aviso;
   final AlertFeed Function(AlertQueue queue)? feedBuilder;
-  final OfflineVisitQueue visitQueue;
-  final VisitPullService visitPullService;
+
+  /// Fila e pull de visitas do dono da sessão que esta tela abrir. O painel
+  /// recebe os DO DONO — nunca os do ACS anterior (RNF06).
+  final VisitScopeResolver visitScopeFor;
   final MicroAreaDirectory? directory;
   final PrioritizedAlert? initialAlert;
   final LatLng? initialPosition;
@@ -510,13 +538,15 @@ class _LoginScreenState extends State<LoginScreen> {
 
   /// Abre o painel com a sessão emitida (login por senha ou retomada).
   void _openShell(AuthSession session) {
+    final scope = widget.visitScopeFor(session);
     final shellRoute = MaterialPageRoute<void>(
       builder: (_) => AcsHomeShell(
         microAreaId: session.microAreaId!,
         acsId: session.userId,
         feedBuilder: widget.feedBuilder,
-        visitQueue: widget.visitQueue,
-        visitPullService: widget.visitPullService,
+        visitQueue: scope.queue,
+        visitPullService: scope.pullService,
+        visitScopeFor: widget.visitScopeFor,
         directory: widget.directory,
         initialAlert: widget.initialAlert,
         initialPosition: widget.initialPosition,
@@ -645,6 +675,7 @@ class AcsHomeShell extends StatefulWidget {
     required this.visitQueue,
     required this.themeController,
     required this.visitPullService,
+    required this.visitScopeFor,
     super.key,
     this.directory,
     this.feedBuilder,
@@ -679,6 +710,10 @@ class AcsHomeShell extends StatefulWidget {
   /// motivo de [visitQueue]: construir um substituto aqui dentro, silencioso,
   /// já foi o defeito de outra fila neste mesmo arquivo.
   final VisitPullService visitPullService;
+
+  /// Repassado às telas de login que este painel empilha (reautenticação,
+  /// "Sair"): quem entrar por elas recebe a fila e o pull DELE.
+  final VisitScopeResolver visitScopeFor;
 
   /// Lista da microárea com cache no aparelho (RF08); `null` lê direto do backend.
   final MicroAreaDirectory? directory;
@@ -832,9 +867,8 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
   Future<void> _openReauth(String aviso, {VoidCallback? onCovered, VoidCallback? onFailed}) async {
     _reauthAberta = true;
     Widget page(BuildContext _) => LoginScreen(
-          visitQueue: widget.visitQueue,
+          visitScopeFor: widget.visitScopeFor,
           themeController: widget.themeController,
-          visitPullService: widget.visitPullService,
           directory: widget.directory,
           feedBuilder: widget.feedBuilder,
           initialAlert: widget.initialAlert,
@@ -1224,7 +1258,10 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
               ),
               const SizedBox(height: 12),
             ],
-            const Text('As visitas ainda não sincronizadas continuam salvas neste aparelho.'),
+            const Text(
+              'As visitas ainda não sincronizadas continuam salvas neste aparelho '
+              'e só aparecem quando esta mesma conta entrar de novo.',
+            ),
           ],
         ),
         actions: [
@@ -1248,9 +1285,8 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
     if (!mounted) return;
     Navigator.of(context).pushAndRemoveUntil(
       MaterialPageRoute<void>(builder: (_) => LoginScreen(
-        visitQueue: widget.visitQueue,
+        visitScopeFor: widget.visitScopeFor,
         themeController: widget.themeController,
-        visitPullService: widget.visitPullService,
         directory: widget.directory,
         feedBuilder: widget.feedBuilder,
         initialAlert: widget.initialAlert,

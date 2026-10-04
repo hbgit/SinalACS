@@ -51,7 +51,7 @@ void main() {
 
   test('visita pendente continua pendente quando a sessão MFA expira', () async {
     await backend.login(matricula: 'ACS-001', senha: 'senha-sintetica', totpCode: '123456');
-    final fila = OfflineVisitQueue(synchronizer: BackendVisitSynchronizer(backend: backend));
+    final fila = OfflineVisitQueue(synchronizer: BackendVisitSynchronizer(backend: backend, ownerId: backend.session!.userId));
     await fila.add(OfflineVisitRecord(patientId: '00000000-0000-4000-8000-0000000000a1', risk: 'red', status: 'PENDENTE'));
 
     final resultado = await fila.sync();

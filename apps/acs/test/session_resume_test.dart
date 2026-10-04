@@ -389,7 +389,7 @@ void main() {
       await tester.pump();
       await tester.tap(sair);
       await assentar(tester);
-      expect(find.text('As visitas ainda não sincronizadas continuam salvas neste aparelho.'), findsOneWidget);
+      expect(find.text('As visitas ainda não sincronizadas continuam salvas neste aparelho e só aparecem quando esta mesma conta entrar de novo.'), findsOneWidget);
 
       await tester.tap(find.text('Cancelar'));
       await assentar(tester);
@@ -439,7 +439,7 @@ void main() {
       expect(backend.acknowledgedAlertIds, ['alerta-antes']);
       await abrirSair(tester);
 
-      expect(find.text('As visitas ainda não sincronizadas continuam salvas neste aparelho.'), findsOneWidget);
+      expect(find.text('As visitas ainda não sincronizadas continuam salvas neste aparelho e só aparecem quando esta mesma conta entrar de novo.'), findsOneWidget);
       expect(find.byKey(const Key('logout_pending_alerts')), findsNothing);
       expect(find.descendant(of: find.byKey(const Key('logout_confirm')), matching: find.text('Sair')), findsOneWidget);
     });
@@ -450,7 +450,7 @@ void main() {
       await assentar(tester);
       await abrirSair(tester);
 
-      expect(find.text('As visitas ainda não sincronizadas continuam salvas neste aparelho.'), findsOneWidget);
+      expect(find.text('As visitas ainda não sincronizadas continuam salvas neste aparelho e só aparecem quando esta mesma conta entrar de novo.'), findsOneWidget);
       expect(
         find.text('Há 2 alertas ainda não confirmados. Eles saem deste aparelho, mas continuam pendentes no servidor.'),
         findsOneWidget,

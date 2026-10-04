@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart' show visibleForTesting;
+import 'package:sinalacs_acs/core/database/sqlcipher_visit_store.dart';
 import 'package:sinalacs_acs/core/database/sync_cursor_store.dart';
 import 'package:sinalacs_acs/core/network/backend_client.dart';
 import 'package:sinalacs_acs/core/security/database_key_store.dart';
@@ -17,26 +18,30 @@ import 'package:sinalacs_acs/core/services/visit_pull_service.dart';
 /// [cursorOwner] é o dono do cursor (`visits_pull|<dono>`): o cursor de um ACS
 /// nunca vale para outro.
 ///
-/// [cursorStore] existe só para o teste poder inspecionar o cursor gravado;
-/// em produção a chamada não passa nada e usa o padrão, respaldado pelo
-/// Keystore/Keychain do aparelho.
+/// [cursorDatabase] é o [VisitDatabase] da fila: o cursor é gravado nele
+/// (`SyncCursorStore.on`), uma só conexão para o arquivo. É o que o app passa.
+///
+/// [cursorStore] existe só para o teste poder inspecionar o cursor gravado.
+/// Sem nenhum dos dois, abre um banco próprio respaldado pelo Keystore/Keychain
+/// do aparelho.
 VisitPullService buildVisitPullService({
   required AcsBackend backend,
   required VisitStore localVisits,
   required String cursorOwner,
+  VisitDatabase? cursorDatabase,
   SyncCursorStore? cursorStore,
   @visibleForTesting DatabaseKeyStore? keyStore,
   @visibleForTesting String databaseName = 'sinalacs_acs.db',
   @visibleForTesting bool allowUnencryptedForTesting = false,
-}) =>
-    VisitPullService(
-      backend: backend,
-      cursorStore: cursorStore ??
-          SyncCursorStore(
-            keyStore: keyStore ?? SecureStorageDatabaseKeyStore(),
-            owner: cursorOwner,
-            databaseName: databaseName,
-            allowUnencryptedForTesting: allowUnencryptedForTesting,
-          ),
-      localVisits: localVisits,
-    );
+}) {
+  final cursor = cursorStore ??
+      (cursorDatabase != null
+          ? SyncCursorStore.on(cursorDatabase, owner: cursorOwner)
+          : SyncCursorStore(
+              keyStore: keyStore ?? SecureStorageDatabaseKeyStore(),
+              owner: cursorOwner,
+              databaseName: databaseName,
+              allowUnencryptedForTesting: allowUnencryptedForTesting,
+            ));
+  return VisitPullService(backend: backend, cursorStore: cursor, localVisits: localVisits);
+}

@@ -7,13 +7,31 @@ import 'package:sinalacs_client/sinalacs_client.dart';
 /// Fica entre a fila (que não conhece o contrato do servidor) e o
 /// [AcsBackend] (que não conhece a fila) — é a tradução entre os dois, no mesmo
 /// espírito das implementações de `infrastructure/` no backend.
+///
+/// Um sincronizador pertence a UM dono ([ownerId], o `userId` do ACS que
+/// registrou as visitas). `visits.sync` atribui a visita ao ACS do token, então
+/// enviar o lote de A com a sessão de B daria a B um trabalho que não é dele:
+/// [push] confere a sessão NO MOMENTO do envio (não só na construção) e, se ela
+/// não é do dono, recusa sem tocar na rede. A recusa é recuperável — a fila
+/// converte a exceção em `SyncOutcomeKind.error` e o lote continua pendente,
+/// esperando o dono entrar de novo.
 class BackendVisitSynchronizer implements VisitSynchronizer {
-  BackendVisitSynchronizer({required this.backend});
+  BackendVisitSynchronizer({required this.backend, required String ownerId})
+      : ownerId = requireOwnerId(ownerId);
 
   final AcsBackend backend;
 
+  /// `userId` do ACS dono das visitas que este sincronizador envia.
+  final String ownerId;
+
   @override
   Future<List<VisitSyncOutcome>> push(List<OfflineVisitRecord> visits) async {
+    if (backend.session?.userId != ownerId) {
+      throw const BackendFailure(
+        'A sessão atual não é a dona destas visitas. Entre com a conta que '
+        'registrou as visitas.',
+      );
+    }
     final results = await backend.syncVisits([
       for (final visit in visits)
         VisitSyncEntry(

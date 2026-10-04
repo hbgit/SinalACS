@@ -183,7 +183,7 @@ void main() {
     final main = e2ePatient('main');
     await backend.login(matricula: cred.matricula, senha: cred.senha);
 
-    final fila = OfflineVisitQueue(synchronizer: BackendVisitSynchronizer(backend: backend));
+    final fila = OfflineVisitQueue(synchronizer: BackendVisitSynchronizer(backend: backend, ownerId: backend.session!.userId));
     final base = DateTime.now().toUtc().subtract(const Duration(days: 1));
     for (var n = 0; n < 100; n++) {
       // `localId` fica no padrão (um UUID novo): o protocolo o tipa como
