@@ -50,34 +50,35 @@ import 'enums/data_subject_request_type.dart' as _i36;
 import 'enums/risk_level.dart' as _i37;
 import 'enums/sync_status.dart' as _i38;
 import 'enums/user_role.dart' as _i39;
-import 'exceptions/alert_dispatch_unavailable_exception.dart' as _i40;
-import 'exceptions/alert_permission_exception.dart' as _i41;
-import 'exceptions/alert_validation_exception.dart' as _i42;
-import 'exceptions/authentication_failed_exception.dart' as _i43;
-import 'exceptions/data_rights_exception.dart' as _i44;
-import 'exceptions/endpoint_disabled_exception.dart' as _i45;
-import 'exceptions/enrollment_exception.dart' as _i46;
-import 'exceptions/mfa_enrollment_required_exception.dart' as _i47;
-import 'exceptions/mfa_required_exception.dart' as _i48;
-import 'exceptions/notice_delivery_exception.dart' as _i49;
-import 'exceptions/otp_request_exception.dart' as _i50;
-import 'exceptions/session_expired_exception.dart' as _i51;
-import 'micro_area.dart' as _i52;
-import 'otp_challenge.dart' as _i53;
-import 'patient.dart' as _i54;
-import 'push_token.dart' as _i55;
-import 'triage_answer.dart' as _i56;
-import 'triage_session.dart' as _i57;
-import 'ubs.dart' as _i58;
-import 'user.dart' as _i59;
-import 'user_credential.dart' as _i60;
-import 'visit.dart' as _i61;
+import 'enums/visit_authorship.dart' as _i40;
+import 'exceptions/alert_dispatch_unavailable_exception.dart' as _i41;
+import 'exceptions/alert_permission_exception.dart' as _i42;
+import 'exceptions/alert_validation_exception.dart' as _i43;
+import 'exceptions/authentication_failed_exception.dart' as _i44;
+import 'exceptions/data_rights_exception.dart' as _i45;
+import 'exceptions/endpoint_disabled_exception.dart' as _i46;
+import 'exceptions/enrollment_exception.dart' as _i47;
+import 'exceptions/mfa_enrollment_required_exception.dart' as _i48;
+import 'exceptions/mfa_required_exception.dart' as _i49;
+import 'exceptions/notice_delivery_exception.dart' as _i50;
+import 'exceptions/otp_request_exception.dart' as _i51;
+import 'exceptions/session_expired_exception.dart' as _i52;
+import 'micro_area.dart' as _i53;
+import 'otp_challenge.dart' as _i54;
+import 'patient.dart' as _i55;
+import 'push_token.dart' as _i56;
+import 'triage_answer.dart' as _i57;
+import 'triage_session.dart' as _i58;
+import 'ubs.dart' as _i59;
+import 'user.dart' as _i60;
+import 'user_credential.dart' as _i61;
+import 'visit.dart' as _i62;
 import 'package:sinalacs_server/src/generated/api/micro_area_patient.dart'
-    as _i62;
-import 'package:sinalacs_server/src/generated/api/visit_sync_result.dart'
     as _i63;
-import 'package:sinalacs_server/src/generated/api/visit_sync_entry.dart'
+import 'package:sinalacs_server/src/generated/api/visit_sync_result.dart'
     as _i64;
+import 'package:sinalacs_server/src/generated/api/visit_sync_entry.dart'
+    as _i65;
 export 'acs.dart';
 export 'acs_refresh_token.dart';
 export 'alert.dart';
@@ -115,6 +116,7 @@ export 'enums/data_subject_request_type.dart';
 export 'enums/risk_level.dart';
 export 'enums/sync_status.dart';
 export 'enums/user_role.dart';
+export 'enums/visit_authorship.dart';
 export 'exceptions/alert_dispatch_unavailable_exception.dart';
 export 'exceptions/alert_permission_exception.dart';
 export 'exceptions/alert_validation_exception.dart';
@@ -1966,8 +1968,21 @@ class Protocol extends _i1.SerializationManagerServer {
         _i2.ColumnDefinition(
           name: 'acsId',
           columnType: _i2.ColumnType.uuid,
+          isNullable: true,
+          dartType: 'UuidValue?',
+        ),
+        _i2.ColumnDefinition(
+          name: 'authorship',
+          columnType: _i2.ColumnType.text,
           isNullable: false,
-          dartType: 'UuidValue',
+          dartType: 'protocol:VisitAuthorship',
+          columnDefault: '\'acs\'::text',
+        ),
+        _i2.ColumnDefinition(
+          name: 'originDeviceId',
+          columnType: _i2.ColumnType.text,
+          isNullable: true,
+          dartType: 'String?',
         ),
         _i2.ColumnDefinition(
           name: 'scheduledAt',
@@ -2244,71 +2259,74 @@ class Protocol extends _i1.SerializationManagerServer {
     if (t == _i39.UserRole) {
       return _i39.UserRole.fromJson(data) as T;
     }
-    if (t == _i40.AlertDispatchUnavailableException) {
-      return _i40.AlertDispatchUnavailableException.fromJson(data) as T;
+    if (t == _i40.VisitAuthorship) {
+      return _i40.VisitAuthorship.fromJson(data) as T;
     }
-    if (t == _i41.AlertPermissionException) {
-      return _i41.AlertPermissionException.fromJson(data) as T;
+    if (t == _i41.AlertDispatchUnavailableException) {
+      return _i41.AlertDispatchUnavailableException.fromJson(data) as T;
     }
-    if (t == _i42.AlertValidationException) {
-      return _i42.AlertValidationException.fromJson(data) as T;
+    if (t == _i42.AlertPermissionException) {
+      return _i42.AlertPermissionException.fromJson(data) as T;
     }
-    if (t == _i43.AuthenticationFailedException) {
-      return _i43.AuthenticationFailedException.fromJson(data) as T;
+    if (t == _i43.AlertValidationException) {
+      return _i43.AlertValidationException.fromJson(data) as T;
     }
-    if (t == _i44.DataRightsException) {
-      return _i44.DataRightsException.fromJson(data) as T;
+    if (t == _i44.AuthenticationFailedException) {
+      return _i44.AuthenticationFailedException.fromJson(data) as T;
     }
-    if (t == _i45.EndpointDisabledException) {
-      return _i45.EndpointDisabledException.fromJson(data) as T;
+    if (t == _i45.DataRightsException) {
+      return _i45.DataRightsException.fromJson(data) as T;
     }
-    if (t == _i46.EnrollmentException) {
-      return _i46.EnrollmentException.fromJson(data) as T;
+    if (t == _i46.EndpointDisabledException) {
+      return _i46.EndpointDisabledException.fromJson(data) as T;
     }
-    if (t == _i47.MfaEnrollmentRequiredException) {
-      return _i47.MfaEnrollmentRequiredException.fromJson(data) as T;
+    if (t == _i47.EnrollmentException) {
+      return _i47.EnrollmentException.fromJson(data) as T;
     }
-    if (t == _i48.MfaRequiredException) {
-      return _i48.MfaRequiredException.fromJson(data) as T;
+    if (t == _i48.MfaEnrollmentRequiredException) {
+      return _i48.MfaEnrollmentRequiredException.fromJson(data) as T;
     }
-    if (t == _i49.NoticeDeliveryException) {
-      return _i49.NoticeDeliveryException.fromJson(data) as T;
+    if (t == _i49.MfaRequiredException) {
+      return _i49.MfaRequiredException.fromJson(data) as T;
     }
-    if (t == _i50.OtpRequestException) {
-      return _i50.OtpRequestException.fromJson(data) as T;
+    if (t == _i50.NoticeDeliveryException) {
+      return _i50.NoticeDeliveryException.fromJson(data) as T;
     }
-    if (t == _i51.SessionExpiredException) {
-      return _i51.SessionExpiredException.fromJson(data) as T;
+    if (t == _i51.OtpRequestException) {
+      return _i51.OtpRequestException.fromJson(data) as T;
     }
-    if (t == _i52.MicroArea) {
-      return _i52.MicroArea.fromJson(data) as T;
+    if (t == _i52.SessionExpiredException) {
+      return _i52.SessionExpiredException.fromJson(data) as T;
     }
-    if (t == _i53.OtpChallenge) {
-      return _i53.OtpChallenge.fromJson(data) as T;
+    if (t == _i53.MicroArea) {
+      return _i53.MicroArea.fromJson(data) as T;
     }
-    if (t == _i54.Patient) {
-      return _i54.Patient.fromJson(data) as T;
+    if (t == _i54.OtpChallenge) {
+      return _i54.OtpChallenge.fromJson(data) as T;
     }
-    if (t == _i55.PushToken) {
-      return _i55.PushToken.fromJson(data) as T;
+    if (t == _i55.Patient) {
+      return _i55.Patient.fromJson(data) as T;
     }
-    if (t == _i56.TriageAnswer) {
-      return _i56.TriageAnswer.fromJson(data) as T;
+    if (t == _i56.PushToken) {
+      return _i56.PushToken.fromJson(data) as T;
     }
-    if (t == _i57.TriageSession) {
-      return _i57.TriageSession.fromJson(data) as T;
+    if (t == _i57.TriageAnswer) {
+      return _i57.TriageAnswer.fromJson(data) as T;
     }
-    if (t == _i58.Ubs) {
-      return _i58.Ubs.fromJson(data) as T;
+    if (t == _i58.TriageSession) {
+      return _i58.TriageSession.fromJson(data) as T;
     }
-    if (t == _i59.User) {
-      return _i59.User.fromJson(data) as T;
+    if (t == _i59.Ubs) {
+      return _i59.Ubs.fromJson(data) as T;
     }
-    if (t == _i60.UserCredential) {
-      return _i60.UserCredential.fromJson(data) as T;
+    if (t == _i60.User) {
+      return _i60.User.fromJson(data) as T;
     }
-    if (t == _i61.Visit) {
-      return _i61.Visit.fromJson(data) as T;
+    if (t == _i61.UserCredential) {
+      return _i61.UserCredential.fromJson(data) as T;
+    }
+    if (t == _i62.Visit) {
+      return _i62.Visit.fromJson(data) as T;
     }
     if (t == _i1.getType<_i3.Acs?>()) {
       return (data != null ? _i3.Acs.fromJson(data) : null) as T;
@@ -2436,95 +2454,98 @@ class Protocol extends _i1.SerializationManagerServer {
     if (t == _i1.getType<_i39.UserRole?>()) {
       return (data != null ? _i39.UserRole.fromJson(data) : null) as T;
     }
-    if (t == _i1.getType<_i40.AlertDispatchUnavailableException?>()) {
+    if (t == _i1.getType<_i40.VisitAuthorship?>()) {
+      return (data != null ? _i40.VisitAuthorship.fromJson(data) : null) as T;
+    }
+    if (t == _i1.getType<_i41.AlertDispatchUnavailableException?>()) {
       return (data != null
-              ? _i40.AlertDispatchUnavailableException.fromJson(data)
+              ? _i41.AlertDispatchUnavailableException.fromJson(data)
               : null)
           as T;
     }
-    if (t == _i1.getType<_i41.AlertPermissionException?>()) {
+    if (t == _i1.getType<_i42.AlertPermissionException?>()) {
       return (data != null
-              ? _i41.AlertPermissionException.fromJson(data)
+              ? _i42.AlertPermissionException.fromJson(data)
               : null)
           as T;
     }
-    if (t == _i1.getType<_i42.AlertValidationException?>()) {
+    if (t == _i1.getType<_i43.AlertValidationException?>()) {
       return (data != null
-              ? _i42.AlertValidationException.fromJson(data)
+              ? _i43.AlertValidationException.fromJson(data)
               : null)
           as T;
     }
-    if (t == _i1.getType<_i43.AuthenticationFailedException?>()) {
+    if (t == _i1.getType<_i44.AuthenticationFailedException?>()) {
       return (data != null
-              ? _i43.AuthenticationFailedException.fromJson(data)
+              ? _i44.AuthenticationFailedException.fromJson(data)
               : null)
           as T;
     }
-    if (t == _i1.getType<_i44.DataRightsException?>()) {
-      return (data != null ? _i44.DataRightsException.fromJson(data) : null)
+    if (t == _i1.getType<_i45.DataRightsException?>()) {
+      return (data != null ? _i45.DataRightsException.fromJson(data) : null)
           as T;
     }
-    if (t == _i1.getType<_i45.EndpointDisabledException?>()) {
+    if (t == _i1.getType<_i46.EndpointDisabledException?>()) {
       return (data != null
-              ? _i45.EndpointDisabledException.fromJson(data)
+              ? _i46.EndpointDisabledException.fromJson(data)
               : null)
           as T;
     }
-    if (t == _i1.getType<_i46.EnrollmentException?>()) {
-      return (data != null ? _i46.EnrollmentException.fromJson(data) : null)
+    if (t == _i1.getType<_i47.EnrollmentException?>()) {
+      return (data != null ? _i47.EnrollmentException.fromJson(data) : null)
           as T;
     }
-    if (t == _i1.getType<_i47.MfaEnrollmentRequiredException?>()) {
+    if (t == _i1.getType<_i48.MfaEnrollmentRequiredException?>()) {
       return (data != null
-              ? _i47.MfaEnrollmentRequiredException.fromJson(data)
+              ? _i48.MfaEnrollmentRequiredException.fromJson(data)
               : null)
           as T;
     }
-    if (t == _i1.getType<_i48.MfaRequiredException?>()) {
-      return (data != null ? _i48.MfaRequiredException.fromJson(data) : null)
+    if (t == _i1.getType<_i49.MfaRequiredException?>()) {
+      return (data != null ? _i49.MfaRequiredException.fromJson(data) : null)
           as T;
     }
-    if (t == _i1.getType<_i49.NoticeDeliveryException?>()) {
-      return (data != null ? _i49.NoticeDeliveryException.fromJson(data) : null)
+    if (t == _i1.getType<_i50.NoticeDeliveryException?>()) {
+      return (data != null ? _i50.NoticeDeliveryException.fromJson(data) : null)
           as T;
     }
-    if (t == _i1.getType<_i50.OtpRequestException?>()) {
-      return (data != null ? _i50.OtpRequestException.fromJson(data) : null)
+    if (t == _i1.getType<_i51.OtpRequestException?>()) {
+      return (data != null ? _i51.OtpRequestException.fromJson(data) : null)
           as T;
     }
-    if (t == _i1.getType<_i51.SessionExpiredException?>()) {
-      return (data != null ? _i51.SessionExpiredException.fromJson(data) : null)
+    if (t == _i1.getType<_i52.SessionExpiredException?>()) {
+      return (data != null ? _i52.SessionExpiredException.fromJson(data) : null)
           as T;
     }
-    if (t == _i1.getType<_i52.MicroArea?>()) {
-      return (data != null ? _i52.MicroArea.fromJson(data) : null) as T;
+    if (t == _i1.getType<_i53.MicroArea?>()) {
+      return (data != null ? _i53.MicroArea.fromJson(data) : null) as T;
     }
-    if (t == _i1.getType<_i53.OtpChallenge?>()) {
-      return (data != null ? _i53.OtpChallenge.fromJson(data) : null) as T;
+    if (t == _i1.getType<_i54.OtpChallenge?>()) {
+      return (data != null ? _i54.OtpChallenge.fromJson(data) : null) as T;
     }
-    if (t == _i1.getType<_i54.Patient?>()) {
-      return (data != null ? _i54.Patient.fromJson(data) : null) as T;
+    if (t == _i1.getType<_i55.Patient?>()) {
+      return (data != null ? _i55.Patient.fromJson(data) : null) as T;
     }
-    if (t == _i1.getType<_i55.PushToken?>()) {
-      return (data != null ? _i55.PushToken.fromJson(data) : null) as T;
+    if (t == _i1.getType<_i56.PushToken?>()) {
+      return (data != null ? _i56.PushToken.fromJson(data) : null) as T;
     }
-    if (t == _i1.getType<_i56.TriageAnswer?>()) {
-      return (data != null ? _i56.TriageAnswer.fromJson(data) : null) as T;
+    if (t == _i1.getType<_i57.TriageAnswer?>()) {
+      return (data != null ? _i57.TriageAnswer.fromJson(data) : null) as T;
     }
-    if (t == _i1.getType<_i57.TriageSession?>()) {
-      return (data != null ? _i57.TriageSession.fromJson(data) : null) as T;
+    if (t == _i1.getType<_i58.TriageSession?>()) {
+      return (data != null ? _i58.TriageSession.fromJson(data) : null) as T;
     }
-    if (t == _i1.getType<_i58.Ubs?>()) {
-      return (data != null ? _i58.Ubs.fromJson(data) : null) as T;
+    if (t == _i1.getType<_i59.Ubs?>()) {
+      return (data != null ? _i59.Ubs.fromJson(data) : null) as T;
     }
-    if (t == _i1.getType<_i59.User?>()) {
-      return (data != null ? _i59.User.fromJson(data) : null) as T;
+    if (t == _i1.getType<_i60.User?>()) {
+      return (data != null ? _i60.User.fromJson(data) : null) as T;
     }
-    if (t == _i1.getType<_i60.UserCredential?>()) {
-      return (data != null ? _i60.UserCredential.fromJson(data) : null) as T;
+    if (t == _i1.getType<_i61.UserCredential?>()) {
+      return (data != null ? _i61.UserCredential.fromJson(data) : null) as T;
     }
-    if (t == _i1.getType<_i61.Visit?>()) {
-      return (data != null ? _i61.Visit.fromJson(data) : null) as T;
+    if (t == _i1.getType<_i62.Visit?>()) {
+      return (data != null ? _i62.Visit.fromJson(data) : null) as T;
     }
     if (t == List<String>) {
       return (data as List).map((e) => deserialize<String>(e)).toList() as T;
@@ -2553,24 +2574,24 @@ class Protocol extends _i1.SerializationManagerServer {
           )
           as T;
     }
-    if (t == List<_i62.MicroAreaPatient>) {
+    if (t == List<_i63.MicroAreaPatient>) {
       return (data as List)
-              .map((e) => deserialize<_i62.MicroAreaPatient>(e))
+              .map((e) => deserialize<_i63.MicroAreaPatient>(e))
               .toList()
           as T;
     }
     if (t == List<String>) {
       return (data as List).map((e) => deserialize<String>(e)).toList() as T;
     }
-    if (t == List<_i63.VisitSyncResult>) {
+    if (t == List<_i64.VisitSyncResult>) {
       return (data as List)
-              .map((e) => deserialize<_i63.VisitSyncResult>(e))
+              .map((e) => deserialize<_i64.VisitSyncResult>(e))
               .toList()
           as T;
     }
-    if (t == List<_i64.VisitSyncEntry>) {
+    if (t == List<_i65.VisitSyncEntry>) {
       return (data as List)
-              .map((e) => deserialize<_i64.VisitSyncEntry>(e))
+              .map((e) => deserialize<_i65.VisitSyncEntry>(e))
               .toList()
           as T;
     }
@@ -2619,29 +2640,30 @@ class Protocol extends _i1.SerializationManagerServer {
       _i37.RiskLevel => 'RiskLevel',
       _i38.SyncStatus => 'SyncStatus',
       _i39.UserRole => 'UserRole',
-      _i40.AlertDispatchUnavailableException =>
+      _i40.VisitAuthorship => 'VisitAuthorship',
+      _i41.AlertDispatchUnavailableException =>
         'AlertDispatchUnavailableException',
-      _i41.AlertPermissionException => 'AlertPermissionException',
-      _i42.AlertValidationException => 'AlertValidationException',
-      _i43.AuthenticationFailedException => 'AuthenticationFailedException',
-      _i44.DataRightsException => 'DataRightsException',
-      _i45.EndpointDisabledException => 'EndpointDisabledException',
-      _i46.EnrollmentException => 'EnrollmentException',
-      _i47.MfaEnrollmentRequiredException => 'MfaEnrollmentRequiredException',
-      _i48.MfaRequiredException => 'MfaRequiredException',
-      _i49.NoticeDeliveryException => 'NoticeDeliveryException',
-      _i50.OtpRequestException => 'OtpRequestException',
-      _i51.SessionExpiredException => 'SessionExpiredException',
-      _i52.MicroArea => 'MicroArea',
-      _i53.OtpChallenge => 'OtpChallenge',
-      _i54.Patient => 'Patient',
-      _i55.PushToken => 'PushToken',
-      _i56.TriageAnswer => 'TriageAnswer',
-      _i57.TriageSession => 'TriageSession',
-      _i58.Ubs => 'Ubs',
-      _i59.User => 'User',
-      _i60.UserCredential => 'UserCredential',
-      _i61.Visit => 'Visit',
+      _i42.AlertPermissionException => 'AlertPermissionException',
+      _i43.AlertValidationException => 'AlertValidationException',
+      _i44.AuthenticationFailedException => 'AuthenticationFailedException',
+      _i45.DataRightsException => 'DataRightsException',
+      _i46.EndpointDisabledException => 'EndpointDisabledException',
+      _i47.EnrollmentException => 'EnrollmentException',
+      _i48.MfaEnrollmentRequiredException => 'MfaEnrollmentRequiredException',
+      _i49.MfaRequiredException => 'MfaRequiredException',
+      _i50.NoticeDeliveryException => 'NoticeDeliveryException',
+      _i51.OtpRequestException => 'OtpRequestException',
+      _i52.SessionExpiredException => 'SessionExpiredException',
+      _i53.MicroArea => 'MicroArea',
+      _i54.OtpChallenge => 'OtpChallenge',
+      _i55.Patient => 'Patient',
+      _i56.PushToken => 'PushToken',
+      _i57.TriageAnswer => 'TriageAnswer',
+      _i58.TriageSession => 'TriageSession',
+      _i59.Ubs => 'Ubs',
+      _i60.User => 'User',
+      _i61.UserCredential => 'UserCredential',
+      _i62.Visit => 'Visit',
       _ => null,
     };
   }
@@ -2730,49 +2752,51 @@ class Protocol extends _i1.SerializationManagerServer {
         return 'SyncStatus';
       case _i39.UserRole():
         return 'UserRole';
-      case _i40.AlertDispatchUnavailableException():
+      case _i40.VisitAuthorship():
+        return 'VisitAuthorship';
+      case _i41.AlertDispatchUnavailableException():
         return 'AlertDispatchUnavailableException';
-      case _i41.AlertPermissionException():
+      case _i42.AlertPermissionException():
         return 'AlertPermissionException';
-      case _i42.AlertValidationException():
+      case _i43.AlertValidationException():
         return 'AlertValidationException';
-      case _i43.AuthenticationFailedException():
+      case _i44.AuthenticationFailedException():
         return 'AuthenticationFailedException';
-      case _i44.DataRightsException():
+      case _i45.DataRightsException():
         return 'DataRightsException';
-      case _i45.EndpointDisabledException():
+      case _i46.EndpointDisabledException():
         return 'EndpointDisabledException';
-      case _i46.EnrollmentException():
+      case _i47.EnrollmentException():
         return 'EnrollmentException';
-      case _i47.MfaEnrollmentRequiredException():
+      case _i48.MfaEnrollmentRequiredException():
         return 'MfaEnrollmentRequiredException';
-      case _i48.MfaRequiredException():
+      case _i49.MfaRequiredException():
         return 'MfaRequiredException';
-      case _i49.NoticeDeliveryException():
+      case _i50.NoticeDeliveryException():
         return 'NoticeDeliveryException';
-      case _i50.OtpRequestException():
+      case _i51.OtpRequestException():
         return 'OtpRequestException';
-      case _i51.SessionExpiredException():
+      case _i52.SessionExpiredException():
         return 'SessionExpiredException';
-      case _i52.MicroArea():
+      case _i53.MicroArea():
         return 'MicroArea';
-      case _i53.OtpChallenge():
+      case _i54.OtpChallenge():
         return 'OtpChallenge';
-      case _i54.Patient():
+      case _i55.Patient():
         return 'Patient';
-      case _i55.PushToken():
+      case _i56.PushToken():
         return 'PushToken';
-      case _i56.TriageAnswer():
+      case _i57.TriageAnswer():
         return 'TriageAnswer';
-      case _i57.TriageSession():
+      case _i58.TriageSession():
         return 'TriageSession';
-      case _i58.Ubs():
+      case _i59.Ubs():
         return 'Ubs';
-      case _i59.User():
+      case _i60.User():
         return 'User';
-      case _i60.UserCredential():
+      case _i61.UserCredential():
         return 'UserCredential';
-      case _i61.Visit():
+      case _i62.Visit():
         return 'Visit';
     }
     className = _i2.Protocol().getClassNameForObject(data);
@@ -2899,71 +2923,74 @@ class Protocol extends _i1.SerializationManagerServer {
     if (dataClassName == 'UserRole') {
       return deserialize<_i39.UserRole>(data['data']);
     }
+    if (dataClassName == 'VisitAuthorship') {
+      return deserialize<_i40.VisitAuthorship>(data['data']);
+    }
     if (dataClassName == 'AlertDispatchUnavailableException') {
-      return deserialize<_i40.AlertDispatchUnavailableException>(data['data']);
+      return deserialize<_i41.AlertDispatchUnavailableException>(data['data']);
     }
     if (dataClassName == 'AlertPermissionException') {
-      return deserialize<_i41.AlertPermissionException>(data['data']);
+      return deserialize<_i42.AlertPermissionException>(data['data']);
     }
     if (dataClassName == 'AlertValidationException') {
-      return deserialize<_i42.AlertValidationException>(data['data']);
+      return deserialize<_i43.AlertValidationException>(data['data']);
     }
     if (dataClassName == 'AuthenticationFailedException') {
-      return deserialize<_i43.AuthenticationFailedException>(data['data']);
+      return deserialize<_i44.AuthenticationFailedException>(data['data']);
     }
     if (dataClassName == 'DataRightsException') {
-      return deserialize<_i44.DataRightsException>(data['data']);
+      return deserialize<_i45.DataRightsException>(data['data']);
     }
     if (dataClassName == 'EndpointDisabledException') {
-      return deserialize<_i45.EndpointDisabledException>(data['data']);
+      return deserialize<_i46.EndpointDisabledException>(data['data']);
     }
     if (dataClassName == 'EnrollmentException') {
-      return deserialize<_i46.EnrollmentException>(data['data']);
+      return deserialize<_i47.EnrollmentException>(data['data']);
     }
     if (dataClassName == 'MfaEnrollmentRequiredException') {
-      return deserialize<_i47.MfaEnrollmentRequiredException>(data['data']);
+      return deserialize<_i48.MfaEnrollmentRequiredException>(data['data']);
     }
     if (dataClassName == 'MfaRequiredException') {
-      return deserialize<_i48.MfaRequiredException>(data['data']);
+      return deserialize<_i49.MfaRequiredException>(data['data']);
     }
     if (dataClassName == 'NoticeDeliveryException') {
-      return deserialize<_i49.NoticeDeliveryException>(data['data']);
+      return deserialize<_i50.NoticeDeliveryException>(data['data']);
     }
     if (dataClassName == 'OtpRequestException') {
-      return deserialize<_i50.OtpRequestException>(data['data']);
+      return deserialize<_i51.OtpRequestException>(data['data']);
     }
     if (dataClassName == 'SessionExpiredException') {
-      return deserialize<_i51.SessionExpiredException>(data['data']);
+      return deserialize<_i52.SessionExpiredException>(data['data']);
     }
     if (dataClassName == 'MicroArea') {
-      return deserialize<_i52.MicroArea>(data['data']);
+      return deserialize<_i53.MicroArea>(data['data']);
     }
     if (dataClassName == 'OtpChallenge') {
-      return deserialize<_i53.OtpChallenge>(data['data']);
+      return deserialize<_i54.OtpChallenge>(data['data']);
     }
     if (dataClassName == 'Patient') {
-      return deserialize<_i54.Patient>(data['data']);
+      return deserialize<_i55.Patient>(data['data']);
     }
     if (dataClassName == 'PushToken') {
-      return deserialize<_i55.PushToken>(data['data']);
+      return deserialize<_i56.PushToken>(data['data']);
     }
     if (dataClassName == 'TriageAnswer') {
-      return deserialize<_i56.TriageAnswer>(data['data']);
+      return deserialize<_i57.TriageAnswer>(data['data']);
     }
     if (dataClassName == 'TriageSession') {
-      return deserialize<_i57.TriageSession>(data['data']);
+      return deserialize<_i58.TriageSession>(data['data']);
     }
     if (dataClassName == 'Ubs') {
-      return deserialize<_i58.Ubs>(data['data']);
+      return deserialize<_i59.Ubs>(data['data']);
     }
     if (dataClassName == 'User') {
-      return deserialize<_i59.User>(data['data']);
+      return deserialize<_i60.User>(data['data']);
     }
     if (dataClassName == 'UserCredential') {
-      return deserialize<_i60.UserCredential>(data['data']);
+      return deserialize<_i61.UserCredential>(data['data']);
     }
     if (dataClassName == 'Visit') {
-      return deserialize<_i61.Visit>(data['data']);
+      return deserialize<_i62.Visit>(data['data']);
     }
     if (dataClassName.startsWith('serverpod.')) {
       data['className'] = dataClassName.substring(10);
@@ -3001,24 +3028,24 @@ class Protocol extends _i1.SerializationManagerServer {
         return _i30.DataSubjectRequest.t;
       case _i31.EnrollmentToken:
         return _i31.EnrollmentToken.t;
-      case _i52.MicroArea:
-        return _i52.MicroArea.t;
-      case _i53.OtpChallenge:
-        return _i53.OtpChallenge.t;
-      case _i54.Patient:
-        return _i54.Patient.t;
-      case _i55.PushToken:
-        return _i55.PushToken.t;
-      case _i57.TriageSession:
-        return _i57.TriageSession.t;
-      case _i58.Ubs:
-        return _i58.Ubs.t;
-      case _i59.User:
-        return _i59.User.t;
-      case _i60.UserCredential:
-        return _i60.UserCredential.t;
-      case _i61.Visit:
-        return _i61.Visit.t;
+      case _i53.MicroArea:
+        return _i53.MicroArea.t;
+      case _i54.OtpChallenge:
+        return _i54.OtpChallenge.t;
+      case _i55.Patient:
+        return _i55.Patient.t;
+      case _i56.PushToken:
+        return _i56.PushToken.t;
+      case _i58.TriageSession:
+        return _i58.TriageSession.t;
+      case _i59.Ubs:
+        return _i59.Ubs.t;
+      case _i60.User:
+        return _i60.User.t;
+      case _i61.UserCredential:
+        return _i61.UserCredential.t;
+      case _i62.Visit:
+        return _i62.Visit.t;
     }
     return null;
   }

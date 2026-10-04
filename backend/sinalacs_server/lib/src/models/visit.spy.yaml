@@ -4,7 +4,14 @@ table: visits
 fields:
   id: UuidValue?, defaultPersist=random
   patientId: UuidValue, relation(parent=patients)
-  acsId: UuidValue, relation(parent=acs)
+  ### Autor da visita. Nulo SÓ quando `authorship == legacyUnclaimed`.
+  acsId: UuidValue?, relation(parent=acs)
+  ### `legacyUnclaimed` = visita gravada no aparelho antes de existir dono (migração v7):
+  ### a autoria é desconhecida e `acsId` é nulo. NUNCA preencher `acsId` com quem transportou.
+  authorship: VisitAuthorship, default=acs
+  ### Instalação do app de onde veio uma visita legada (`visits.syncLegacy`).
+  ### Nulo nas visitas com autor ACS.
+  originDeviceId: String?
   scheduledAt: DateTime
   startedAt: DateTime?
   completedAt: DateTime?

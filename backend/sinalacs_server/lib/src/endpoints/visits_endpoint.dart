@@ -35,6 +35,38 @@ class VisitsEndpoint extends AuthenticatedEndpoint {
     }
   }
 
+  /// Envio das visitas LEGADAS do aparelho (autoria desconhecida, D4 do plano
+  /// 2026-10-03): gravadas antes de existir dono por visita no banco local.
+  ///
+  /// A sessão do ACS é só o transporte — ver `VisitSyncService.syncLegacy`.
+  /// Mesma transação por lote e mesma tradução de erros de [sync].
+  Future<List<VisitSyncResult>> syncLegacy(
+    Session session, {
+    required String accessToken,
+    required String deviceId,
+    required List<VisitSyncEntry> visits,
+  }) async {
+    final user = authenticate(accessToken);
+
+    if (visits.isEmpty) return <VisitSyncResult>[];
+
+    try {
+      return await session.db.transaction((transaction) async {
+        final service =
+            AlertRuntime.instance.visitSyncServiceFor(session, transaction: transaction);
+        return service.syncLegacy(
+          transporter: user,
+          deviceId: deviceId,
+          entries: visits,
+        );
+      });
+    } on ArgumentError catch (error) {
+      throw AlertValidationException(message: '${error.message}');
+    } on StateError catch (error) {
+      throw AlertPermissionException(message: error.message);
+    }
+  }
+
   /// Sincronização central→dispositivo: visitas da microárea do ACS
   /// autenticado alteradas após `since`, para reconciliar um device que
   /// ficou offline ou foi reinstalado.

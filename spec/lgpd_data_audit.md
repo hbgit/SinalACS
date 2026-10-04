@@ -53,7 +53,9 @@ A tabela abaixo consolida o mapeamento exaustivo de dados persistidos pelo backe
 | **triage_answer** *(DTO)* | `questionId`, `value`, `details` | `String` / Estrutura serializada | Sensível (Saúde - Art. 5º, II) | Payload unitário de resposta | Estrutura unitária persistida dentro do campo `triage_sessions.answers`. |
 | **visits** | `id` | `uuid` | Pseudonimizado | UUID v4 (`gen_random_uuid()`) | Identificador do registro de visita domiciliar. |
 | | `patientId` | `uuid` | Pseudonimizado | Chave estrangeira (`patients.id`) | Identifica o titular do atendimento de saúde. |
-| | `acsId` | `uuid` | Pseudonimizado | Chave estrangeira (`acs.id`) | Identifica o profissional responsável pelo atendimento presencial. |
+| | `acsId` | `uuid` (anulável) | Pseudonimizado | Chave estrangeira (`acs.id`) | Identifica o profissional responsável pelo atendimento presencial. **Nulo só quando `authorship = legacyUnclaimed`** (visita legada de autoria desconhecida, `visits.syncLegacy`): nunca é preenchido com o ACS que apenas transportou a visita. |
+| | `authorship` | `text` | Metadado Operacional | Enum textual (`acs`, `legacyUnclaimed`), default `acs` | Diz se a autoria da visita é conhecida. `legacyUnclaimed` marca visita gravada no aparelho antes de existir dono por visita (migração v7 do banco local do app). Não é dado do titular. |
+| | `originDeviceId` | `text` (anulável) | Identificador de Dispositivo | Identificador da instalação do app (UUID aleatório gerado no aparelho, não IMEI/MAC/Android ID) | Preenchido só nas visitas legadas, para restringir o reenvio ao aparelho de origem. Identifica a instalação, não o titular; quem transportou o lote fica em `audit_logs` (`visit_legacy_sync`), sem conteúdo clínico. |
 | | `scheduledAt` | `timestamp without time zone` | Metadado Operacional | Timestamp agendado | Data e horário previstos para o atendimento. |
 | | `startedAt` | `timestamp without time zone` | Metadado Operacional | Timestamp de início | Registro do início da intervenção no domicílio. |
 | | `completedAt` | `timestamp without time zone` | Metadado Operacional | Timestamp de conclusão | Registro da finalização da visita pelo ACS. |

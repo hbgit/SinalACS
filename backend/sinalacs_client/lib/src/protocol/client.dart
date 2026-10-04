@@ -644,6 +644,25 @@ class EndpointVisits extends EndpointAuthenticated {
     },
   );
 
+  /// Envio das visitas LEGADAS do aparelho (autoria desconhecida, D4 do plano
+  /// 2026-10-03): gravadas antes de existir dono por visita no banco local.
+  ///
+  /// A sessão do ACS é só o transporte — ver `VisitSyncService.syncLegacy`.
+  /// Mesma transação por lote e mesma tradução de erros de [sync].
+  _i2.Future<List<_i20.VisitSyncResult>> syncLegacy({
+    required String accessToken,
+    required String deviceId,
+    required List<_i21.VisitSyncEntry> visits,
+  }) => caller.callServerEndpoint<List<_i20.VisitSyncResult>>(
+    'visits',
+    'syncLegacy',
+    {
+      'accessToken': accessToken,
+      'deviceId': deviceId,
+      'visits': visits,
+    },
+  );
+
   /// Sincronização central→dispositivo: visitas da microárea do ACS
   /// autenticado alteradas após `since`, para reconciliar um device que
   /// ficou offline ou foi reinstalado.

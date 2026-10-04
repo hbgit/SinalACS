@@ -110,12 +110,20 @@ class OrmVisitStore implements VisitStore {
     return records;
   }
 
+  @override
+  Future<bool> isActiveAcs(UuidValue acsId) async {
+    final acs = await Acs.db.findById(_session(), acsId, transaction: _transaction);
+    return acs?.active ?? false;
+  }
+
   Future<Visit> _toRow(VisitRecord record) async {
     final encrypted = await _cipher.encryptJson(record.notes);
     return Visit(
       id: record.id,
       patientId: record.patientId,
       acsId: record.acsId,
+      authorship: record.authorship,
+      originDeviceId: record.originDeviceId,
       scheduledAt: record.scheduledAt,
       startedAt: record.startedAt,
       completedAt: record.completedAt,
@@ -141,6 +149,8 @@ class OrmVisitStore implements VisitStore {
       id: row.id,
       patientId: row.patientId,
       acsId: row.acsId,
+      authorship: row.authorship,
+      originDeviceId: row.originDeviceId,
       scheduledAt: row.scheduledAt,
       startedAt: row.startedAt,
       completedAt: row.completedAt,

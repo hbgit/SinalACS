@@ -38,4 +38,5 @@ ubs:
   - myContact:
 visits:
   - sync:
+  - syncLegacy:
   - pull:

@@ -17,6 +17,8 @@ class VisitRecord {
     this.id,
     required this.patientId,
     required this.acsId,
+    this.authorship = VisitAuthorship.acs,
+    this.originDeviceId,
     required this.scheduledAt,
     this.startedAt,
     this.completedAt,
@@ -33,7 +35,16 @@ class VisitRecord {
 
   final UuidValue? id;
   final UuidValue patientId;
-  final UuidValue acsId;
+
+  /// Autor da visita. Nulo **só** quando [authorship] é
+  /// [VisitAuthorship.legacyUnclaimed]: a visita veio do aparelho sem dono
+  /// conhecido (D4), e quem a transportou **não** é o autor.
+  final UuidValue? acsId;
+
+  final VisitAuthorship authorship;
+
+  /// Instalação de onde veio uma visita legada; nulo nas visitas com autor.
+  final String? originDeviceId;
   final DateTime scheduledAt;
   final DateTime? startedAt;
   final DateTime? completedAt;
@@ -58,7 +69,9 @@ class VisitRecord {
   VisitRecord copyWith({
     Object? id = _keep,
     UuidValue? patientId,
-    UuidValue? acsId,
+    Object? acsId = _keep,
+    VisitAuthorship? authorship,
+    Object? originDeviceId = _keep,
     DateTime? scheduledAt,
     Object? startedAt = _keep,
     Object? completedAt = _keep,
@@ -75,7 +88,10 @@ class VisitRecord {
       VisitRecord(
         id: id == _keep ? this.id : id as UuidValue?,
         patientId: patientId ?? this.patientId,
-        acsId: acsId ?? this.acsId,
+        acsId: acsId == _keep ? this.acsId : acsId as UuidValue?,
+        authorship: authorship ?? this.authorship,
+        originDeviceId:
+            originDeviceId == _keep ? this.originDeviceId : originDeviceId as String?,
         scheduledAt: scheduledAt ?? this.scheduledAt,
         startedAt: startedAt == _keep ? this.startedAt : startedAt as DateTime?,
         completedAt: completedAt == _keep ? this.completedAt : completedAt as DateTime?,
@@ -120,6 +136,13 @@ abstract interface class VisitStore {
   /// Visitas da microárea cujo `syncAt` é posterior a `since` — o cursor
   /// incremental de `visits.pull` (RF15, decisão §5).
   Future<List<VisitRecord>> listChangedInMicroArea(UuidValue microAreaId, DateTime since);
+
+  /// `true` se o ACS existe e a conta está ativa (`acs.active`).
+  ///
+  /// Só `syncLegacy` consulta: o token prova quem é o transportador, não que a
+  /// conta continua ativa — e uma visita sem autor só entra pela mão de quem
+  /// ainda responde pelo território.
+  Future<bool> isActiveAcs(UuidValue acsId);
 }
 
 /// Sincronização das visitas registradas offline pelo ACS.
@@ -215,10 +238,67 @@ class VisitSyncService {
     return results;
   }
 
+  /// Envio das visitas LEGADAS do aparelho — gravadas antes de existir dono
+  /// por visita (migração v7 do app), de autoria desconhecida (D4).
+  ///
+  /// A sessão de [transporter] é só o **transporte**: precisa ser de um ACS
+  /// territorializado e ativo, e cada visita passa pela mesma barreira de
+  /// território do `sync` (microárea do paciente × microárea de quem
+  /// transporta, INV-01), mas o transportador **nunca** vira autor —
+  /// `acsId` fica nulo, `authorship` é `legacyUnclaimed` e `originDeviceId`
+  /// guarda [deviceId]. Reenvio do mesmo `localId` é idempotente; um `localId`
+  /// que já existe com autor ACS é recusado (`rejected`) e a autoria original
+  /// fica intacta.
+  ///
+  /// Um evento `visit_legacy_sync` por LOTE vai para `audit_logs`, com o
+  /// transportador e sem paciente, `localId` ou nota.
+  Future<List<VisitSyncResult>> syncLegacy({
+    required AuthenticatedUser transporter,
+    required String deviceId,
+    required List<VisitSyncEntry> entries,
+  }) async {
+    Authorization.require(
+      transporter,
+      roles: {UserRole.acs},
+      onDenied: () => StateError(
+          'Somente ACS territorializados podem enviar visitas legadas.'),
+    );
+    if (deviceId.trim().isEmpty) {
+      throw ArgumentError.value(deviceId, 'deviceId', 'deviceId é obrigatório');
+    }
+    if (!await _store.isActiveAcs(UuidValue.fromString(transporter.id))) {
+      throw StateError('Somente ACS ativos podem enviar visitas legadas.');
+    }
+
+    final results = <VisitSyncResult>[];
+    for (final entry in entries) {
+      results.add(await _syncOne(
+        user: transporter,
+        entry: entry,
+        legacyDeviceId: deviceId,
+      ));
+    }
+
+    // Best-effort, como o `pull`: a trilha fora do ar não pode impedir que o
+    // trabalho de campo suba. O evento é o LOTE — nada clínico, nenhum
+    // identificador de paciente.
+    await _audit.recordSafely(AuditEvent(
+      userId: transporter.id,
+      actionType: 'write',
+      resourceType: 'visit_legacy',
+      result: 'visit_legacy_sync',
+    ));
+    return results;
+  }
+
+  /// Uma visita do lote. Com [legacyDeviceId] nulo é o `sync` comum (o autor
+  /// é [user]); preenchido, é o envio legado (sem autor, [user] só transporta).
   Future<VisitSyncResult> _syncOne({
     required AuthenticatedUser user,
     required VisitSyncEntry entry,
+    String? legacyDeviceId,
   }) async {
+    final legacy = legacyDeviceId != null;
     if (entry.localId.trim().isEmpty) {
       // Terminal: um localId vazio não vira válido reenviando o mesmo lote.
       return VisitSyncResult(
@@ -267,7 +347,7 @@ class VisitSyncService {
       await _audit.recordSafely(AuditEvent(
         userId: user.id,
         actionType: 'write',
-        resourceType: 'visit',
+        resourceType: legacy ? 'visit_legacy' : 'visit',
         resourceId: patientId.uuid,
         result: 'denied_territory',
       ));
@@ -285,7 +365,10 @@ class VisitSyncService {
     if (existing == null) {
       final inserted = await _store.insert(VisitRecord(
         patientId: patientId,
-        acsId: acsId,
+        // Legado: autoria desconhecida. NUNCA gravar quem transportou.
+        acsId: legacy ? null : acsId,
+        authorship: legacy ? VisitAuthorship.legacyUnclaimed : VisitAuthorship.acs,
+        originDeviceId: legacyDeviceId,
         scheduledAt: entry.scheduledAt,
         completedAt: entry.completedAt,
         status: entry.status,
@@ -305,10 +388,38 @@ class VisitSyncService {
       );
     }
 
-    // A visita pertence ao ACS que a registrou. Um ACS não sincroniza a visita
-    // de outro, mesmo conhecendo o localId.
-    if (existing.acsId != acsId) {
-      // Terminal: o dono do registro não muda por retentar.
+    if (legacy) {
+      // O envio legado só alcança visitas SEM autor que vieram do mesmo
+      // aparelho. Uma visita com autor ACS não vira "desconhecida" por um
+      // reenvio, e o localId de outro aparelho não é desta fila.
+      if (existing.authorship != VisitAuthorship.legacyUnclaimed ||
+          existing.acsId != null) {
+        return VisitSyncResult(
+          localId: entry.localId,
+          syncStatus: SyncStatus.rejected,
+          message: 'visita já registrada com autor',
+        );
+      }
+      if (existing.originDeviceId != legacyDeviceId) {
+        return VisitSyncResult(
+          localId: entry.localId,
+          syncStatus: SyncStatus.rejected,
+          message: 'visita legada de outro aparelho',
+        );
+      }
+    } else if (existing.acsId == null) {
+      // Visita sem autor (legado, D4): o `sync` comum NÃO a reivindica — se
+      // reivindicasse, qualquer ACS do território viraria autor de um trabalho
+      // de campo que ninguém sabe de quem é. Terminal: não muda por retentar.
+      return VisitSyncResult(
+        localId: entry.localId,
+        syncStatus: SyncStatus.rejected,
+        message: 'visita sem autor registrado',
+      );
+    } else if (existing.acsId != acsId) {
+      // A visita pertence ao ACS que a registrou. Um ACS não sincroniza a
+      // visita de outro, mesmo conhecendo o localId. Terminal: o dono do
+      // registro não muda por retentar.
       return VisitSyncResult(
         localId: entry.localId,
         syncStatus: SyncStatus.rejected,
@@ -338,6 +449,9 @@ class VisitSyncService {
       );
     }
 
+    // `acsId`, `authorship` e `originDeviceId` também ficam de fora: a autoria
+    // é decidida na criação e nenhuma atualização a muda (nem o envio legado
+    // preenche um autor, nem o `sync` comum chega aqui com visita sem autor).
     // `arrivalMethod` fica de fora deliberadamente: é definido na criação da
     // visita (como `scheduledAt`/`riskLevelBefore`), não numa atualização de
     // conclusão — `copyWith` sem o argumento preserva o valor gravado no

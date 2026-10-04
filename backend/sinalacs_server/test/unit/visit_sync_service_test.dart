@@ -23,6 +23,12 @@ class FakeVisitStore implements VisitStore {
   final Map<String, String?> _microAreaByPatient;
   final Map<String, VisitRecord> rows = <String, VisitRecord>{};
 
+  /// ACS cuja conta está inativa (`acs.active = false`). Vazio = todos ativos.
+  final Set<String> inactiveAcs = <String>{};
+
+  @override
+  Future<bool> isActiveAcs(UuidValue acsId) async => !inactiveAcs.contains(acsId.uuid);
+
   @override
   Future<VisitRecord?> findByLocalId(String localId) async => rows[localId];
 
@@ -429,6 +435,235 @@ void main() {
       final result = await service.pull(user: _acs, since: referencia);
 
       expect(result, isNotNull);
+    });
+  });
+
+  group('syncLegacy (autoria desconhecida, D4)', () {
+    const deviceId = 'aparelho-legado-01';
+
+    setUp(() {
+      store = FakeVisitStore(microAreaByPatient: {
+        _patientId: _microAreaId,
+        _outroTerritorioPatientId: _otherMicroAreaId,
+      });
+      audit = FakeAuditTrail();
+      service = VisitSyncService(
+        store: store,
+        audit: audit,
+        clock: () => DateTime.utc(2026, 10, 3, 12),
+      );
+    });
+
+    test('syncLegacy grava authorship legacyUnclaimed, acsId nulo e originDeviceId', () async {
+      final results = await service.syncLegacy(
+        transporter: _acs,
+        deviceId: deviceId,
+        entries: [entry()],
+      );
+
+      expect(results.single.syncStatus, SyncStatus.synced);
+      expect(results.single.serverVersion, 1);
+      final row = store.rows[_localId]!;
+      expect(row.authorship, VisitAuthorship.legacyUnclaimed);
+      expect(row.acsId, isNull);
+      expect(row.originDeviceId, deviceId);
+      expect(row.syncAt, DateTime.utc(2026, 10, 3, 12));
+    });
+
+    test('syncLegacy NÃO grava o transportador como autor (acsId permanece nulo)', () async {
+      // Duas passagens (gravação + atualização a partir da versão corrente):
+      // em nenhuma delas quem transportou vira autor.
+      await service.syncLegacy(transporter: _acs, deviceId: deviceId, entries: [entry()]);
+      // Atualização: o dispositivo parte de `version = servidor - 1` (mesma
+      // regra do `sync`, ver 'visits.sync expõe synced, conflict e error').
+      final update = await service.syncLegacy(
+        transporter: _acs,
+        deviceId: deviceId,
+        entries: [entry(version: 0, status: 'paciente ausente')],
+      );
+
+      expect(update.single.syncStatus, SyncStatus.synced);
+      expect(update.single.serverVersion, 2);
+      final row = store.rows[_localId]!;
+      expect(row.acsId, isNull);
+      expect(row.authorship, VisitAuthorship.legacyUnclaimed);
+      expect(row.status, 'paciente ausente');
+    });
+
+    test('visita legada de paciente de OUTRA microárea: rejected, nada gravado', () async {
+      final results = await service.syncLegacy(
+        transporter: _acs,
+        deviceId: deviceId,
+        entries: [entry(patientId: _outroTerritorioPatientId)],
+      );
+
+      expect(results.single.syncStatus, SyncStatus.rejected);
+      expect(results.single.message, isNot(contains(_otherMicroAreaId)));
+      expect(store.rows, isEmpty);
+      final denied = audit.events.where((e) => e.result == 'denied_territory');
+      expect(denied.single.resourceType, 'visit_legacy');
+      expect(denied.single.userId, _acsId);
+    });
+
+    test('mesmo localId reenviado: idempotente (synced, sem duplicar, sem mudar autoria)', () async {
+      await service.syncLegacy(transporter: _acs, deviceId: deviceId, entries: [entry()]);
+
+      // Outro ACS do mesmo território reenvia do mesmo aparelho (o primeiro
+      // envio caiu antes da resposta): continua sem autor.
+      const outroAcs = AuthenticatedUser(
+        id: _otherAcsId,
+        role: UserRole.acs,
+        microAreaId: _microAreaId,
+        deviceId: 'acs-device-002',
+      );
+      final retry = await service.syncLegacy(
+        transporter: outroAcs,
+        deviceId: deviceId,
+        entries: [entry(version: 1)],
+      );
+
+      expect(retry.single.syncStatus, SyncStatus.synced);
+      expect(retry.single.serverVersion, 1);
+      expect(store.rows, hasLength(1));
+      expect(store.rows[_localId]!.acsId, isNull);
+      expect(store.rows[_localId]!.authorship, VisitAuthorship.legacyUnclaimed);
+    });
+
+    test('versão divergente de uma visita legada vira conflito, sem sobrescrever', () async {
+      await service.syncLegacy(transporter: _acs, deviceId: deviceId, entries: [entry()]);
+
+      final conflicted = await service.syncLegacy(
+        transporter: _acs,
+        deviceId: deviceId,
+        entries: [entry(version: 7, status: 'recusou atendimento')],
+      );
+
+      expect(conflicted.single.syncStatus, SyncStatus.conflict);
+      expect(conflicted.single.serverVersion, 1);
+      expect(store.rows[_localId]!.status, 'realizada');
+    });
+
+    test('visita legada de OUTRO aparelho com o mesmo localId: rejected', () async {
+      await service.syncLegacy(transporter: _acs, deviceId: deviceId, entries: [entry()]);
+
+      final results = await service.syncLegacy(
+        transporter: _acs,
+        deviceId: 'outro-aparelho',
+        entries: [entry(version: 1, status: 'paciente ausente')],
+      );
+
+      expect(results.single.syncStatus, SyncStatus.rejected);
+      expect(store.rows[_localId]!.originDeviceId, deviceId);
+      expect(store.rows[_localId]!.status, 'realizada');
+    });
+
+    test('localId que já existe como visita COM autor ACS: conflito/rejected, autoria original preservada',
+        () async {
+      await service.sync(user: _acs, entries: [entry()]);
+
+      final results = await service.syncLegacy(
+        transporter: _acs,
+        deviceId: deviceId,
+        entries: [entry(version: 1, status: 'paciente ausente')],
+      );
+
+      expect(results.single.syncStatus, SyncStatus.rejected);
+      final row = store.rows[_localId]!;
+      expect(row.authorship, VisitAuthorship.acs);
+      expect(row.acsId, UuidValue.fromString(_acsId));
+      expect(row.originDeviceId, isNull);
+      expect(row.status, 'realizada');
+    });
+
+    test('ACS comum que reenvia o localId de uma visita sem autor NÃO a reivindica', () async {
+      await service.syncLegacy(transporter: _acs, deviceId: deviceId, entries: [entry()]);
+
+      // Reenvio idêntico (mesma versão) e atualização (versão corrente): os
+      // dois são recusados — senão o `sync` comum viraria a porta para
+      // reivindicar a autoria de uma visita legada.
+      final same = await service.sync(user: _acs, entries: [entry(version: 1)]);
+      final update = await service.sync(
+        user: _acs,
+        entries: [entry(version: 0, status: 'paciente ausente')],
+      );
+
+      expect(same.single.syncStatus, SyncStatus.rejected);
+      expect(update.single.syncStatus, SyncStatus.rejected);
+      final row = store.rows[_localId]!;
+      expect(row.acsId, isNull);
+      expect(row.authorship, VisitAuthorship.legacyUnclaimed);
+      expect(row.status, 'realizada');
+      expect(row.version, 1);
+    });
+
+    test('papel diferente de acs, sem microárea ou conta inativa: StateError (AlertPermissionException no endpoint)',
+        () async {
+      expect(
+        () => service.syncLegacy(transporter: _patient, deviceId: deviceId, entries: [entry()]),
+        throwsA(isA<StateError>()),
+      );
+
+      const acsSemArea = AuthenticatedUser(
+        id: _acsId,
+        role: UserRole.acs,
+        microAreaId: null,
+        deviceId: 'acs-device-001',
+      );
+      expect(
+        () => service.syncLegacy(transporter: acsSemArea, deviceId: deviceId, entries: [entry()]),
+        throwsA(isA<StateError>()),
+      );
+
+      store.inactiveAcs.add(_acsId);
+      await expectLater(
+        service.syncLegacy(transporter: _acs, deviceId: deviceId, entries: [entry()]),
+        throwsA(isA<StateError>()),
+      );
+      expect(store.rows, isEmpty);
+    });
+
+    test('deviceId vazio: ArgumentError, nada gravado', () async {
+      await expectLater(
+        service.syncLegacy(transporter: _acs, deviceId: '  ', entries: [entry()]),
+        throwsA(isA<ArgumentError>()),
+      );
+      expect(store.rows, isEmpty);
+    });
+
+    test('cada lote gera audit_logs visit_legacy_sync com o transportador, sem conteúdo clínico',
+        () async {
+      await service.syncLegacy(transporter: _acs, deviceId: deviceId, entries: [entry()]);
+
+      final events = audit.events.where((e) => e.result == 'visit_legacy_sync').toList();
+      expect(events, hasLength(1));
+      expect(events.single.userId, _acsId);
+      expect(events.single.actionType, 'write');
+      expect(events.single.resourceType, 'visit_legacy');
+      // Nem paciente, nem nota, nem localId: o evento é o LOTE.
+      expect(events.single.resourceId, isNull);
+    });
+
+    test('uma trilha de auditoria fora do ar não impede o envio legado', () async {
+      audit = FakeAuditTrail(failOnRecord: true);
+      service = VisitSyncService(store: store, audit: audit);
+
+      final results =
+          await service.syncLegacy(transporter: _acs, deviceId: deviceId, entries: [entry()]);
+
+      expect(results.single.syncStatus, SyncStatus.synced);
+    });
+
+    test('pull entrega a visita legada à microárea sem expor autor (campo acsId ausente)', () async {
+      await service.syncLegacy(transporter: _acs, deviceId: deviceId, entries: [entry()]);
+
+      final result = await service.pull(user: _acs, since: DateTime.utc(2026, 10, 1));
+
+      expect(result.single.localId, _localId);
+      // `VisitSyncEntry` não tem campo de autor — nem `acsId` nem
+      // `originDeviceId` atravessam o pull.
+      final json = result.single.toJson();
+      expect(json.containsKey('acsId'), isFalse);
+      expect(json.containsKey('originDeviceId'), isFalse);
     });
   });
 }
