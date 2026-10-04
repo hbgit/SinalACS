@@ -1,10 +1,12 @@
 import 'package:serverpod/serverpod.dart';
 import 'package:sinalacs_server/src/application/auth/development_auth_service.dart';
+import 'package:sinalacs_server/src/application/auth/institutional_auth_service.dart';
 import 'package:sinalacs_server/src/application/auth/opaque_token.dart';
 import 'package:sinalacs_server/src/application/auth/upload_token_service.dart';
 import 'package:sinalacs_server/src/application/visits/visit_sync_service.dart';
 import 'package:sinalacs_server/src/config/app_config.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
+import 'package:sinalacs_server/src/infrastructure/database/orm_upload_token_store.dart';
 import 'package:sinalacs_server/src/runtime/alert_runtime.dart';
 import 'package:test/test.dart';
 
@@ -395,5 +397,152 @@ void main() {
         expect(texto, isNot(contains(OpaqueToken.hash(token))));
       }
     });
+    test('login com o sentinela público de deviceId: sem refresh nem upload, e não falha',
+        () async {
+      final login = await entrar(deviceId: InstitutionalAuthService.deviceIdAbsent);
+      expect(login.accessToken, isNotEmpty);
+      expect(login.refreshToken, isNull);
+      expect(login.uploadToken, isNull);
+      expect(await AcsUploadToken.db.find(session), isEmpty);
+      expect(await AcsRefreshToken.db.find(session), isEmpty);
+    });
+
+    test('ordem: token inválido com 201 visitas → AlertValidationException (teto antes do token)',
+        () async {
+      await expectLater(
+        enviar('token-inventado', [
+          for (var i = 0; i <= VisitSyncService.maxLegacyBatch; i++) _entry(_local(400 + i)),
+        ]),
+        throwsA(isA<AlertValidationException>()),
+      );
+    });
+
+    test('escopo: token de envio não serve como JWT nem como refresh; JWT não serve como token de envio',
+        () async {
+      final login = await entrar();
+      final upload = login.uploadToken!;
+
+      // Token de envio no lugar do JWT.
+      await expectLater(
+        endpoints.visits.sync(sessionBuilder, accessToken: upload, visits: [_entry(_local(20))]),
+        throwsA(isA<AlertPermissionException>()),
+      );
+      await expectLater(
+        endpoints.visits.pull(sessionBuilder,
+            accessToken: upload, since: DateTime.utc(2026)),
+        throwsA(isA<AlertPermissionException>()),
+      );
+      await expectLater(
+        endpoints.patients.listMicroArea(sessionBuilder, accessToken: upload),
+        throwsA(isA<AlertPermissionException>()),
+      );
+      // Token de envio no lugar do refresh token.
+      await expectLater(
+        endpoints.auth.refreshSession(sessionBuilder,
+            refreshToken: upload, deviceId: _aparelhoA),
+        throwsA(isA<SessionExpiredException>()),
+      );
+
+      // JWT no lugar do token de envio.
+      await recusado(enviar(login.accessToken, [_entry(_local(21))]));
+      await endpoints.visits.revokeUploadToken(sessionBuilder,
+          uploadToken: login.accessToken); // sem efeito, sem lançar
+
+      // Nada disso gravou visita nem derrubou o token de envio verdadeiro.
+      expect(await _row(session, _local(20)), isNull);
+      expect(await _row(session, _local(21)), isNull);
+      final r = await enviar(upload, [_entry(_local(22))]);
+      expect(r.single.syncStatus, SyncStatus.synced);
+    });
   });
+
+  // Corridas precisam de conexões independentes: sem rollback automático cada
+  // `Session` usa a sua. Só o store (sem trilha de auditoria, que prenderia o
+  // usuário por FK); a limpeza apaga só as linhas deste grupo.
+  withServerpod(
+    'Dado o token de envio diferido, sem rollback (corridas)',
+    (sessionBuilder, endpoints) {
+      const ubs = '00000000-0000-4000-8000-0000000000f1';
+      const area = '00000000-0000-4000-8000-0000000000f2';
+      const acs = '00000000-0000-4000-8000-0000000000f3';
+      const aparelho = 'aparelho-corrida';
+
+      Future<void> limpar() async {
+        final s = sessionBuilder.build();
+        await AcsUploadToken.db.deleteWhere(s,
+            where: (t) => t.userId.equals(UuidValue.fromString(acs)));
+        await User.db.deleteWhere(s, where: (t) => t.id.equals(UuidValue.fromString(acs)));
+        await MicroArea.db
+            .deleteWhere(s, where: (t) => t.id.equals(UuidValue.fromString(area)));
+        await Ubs.db.deleteWhere(s, where: (t) => t.id.equals(UuidValue.fromString(ubs)));
+      }
+
+      Future<void> semear() async {
+        final s = sessionBuilder.build();
+        await Ubs.db.insertRow(
+            s,
+            Ubs(
+                id: UuidValue.fromString(ubs),
+                name: 'UBS Corrida',
+                address: 'Endereço local',
+                city: 'São Paulo',
+                state: 'SP'));
+        await MicroArea.db.insertRow(
+            s,
+            MicroArea(
+                id: UuidValue.fromString(area),
+                name: 'Microárea Corrida',
+                ubsId: UuidValue.fromString(ubs),
+                geoJsonBoundary: '{}'));
+        final now = DateTime.now().toUtc();
+        await User.db.insertRow(
+            s,
+            User(
+                id: UuidValue.fromString(acs),
+                cpfHash: 'development-acs-upload-corrida',
+                name: 'Usuário sintético',
+                birthDate: DateTime.utc(1980),
+                role: UserRole.acs,
+                microAreaId: UuidValue.fromString(area),
+                createdAt: now,
+                updatedAt: now));
+      }
+
+      test('emissões paralelas do mesmo (usuário, aparelho) deixam exatamente UM vigente',
+          () async {
+        await limpar();
+        try {
+          await semear();
+          var n = 0;
+          for (var rodada = 0; rodada < 8; rodada++) {
+            final at = DateTime.utc(2026, 10, 3, 12, rodada);
+            await Future.wait([
+              for (var k = 0; k < 6; k++)
+                OrmUploadTokenStore(session: sessionBuilder.build).replace(
+                  UploadTokenRecord(
+                    id: '00000000-0000-4000-8000-${(0xf00 + n++).toRadixString(16).padLeft(12, '0')}',
+                    userId: acs,
+                    deviceId: aparelho,
+                    issuedAt: at,
+                    expiresAt: at.add(UploadTokenService.lifetime),
+                  ),
+                  OpaqueToken.hash('corrida-$rodada-$k'),
+                ),
+            ]);
+            final vigentes = await AcsUploadToken.db.find(
+              sessionBuilder.build(),
+              where: (t) =>
+                  t.userId.equals(UuidValue.fromString(acs)) &
+                  t.deviceId.equals(aparelho) &
+                  t.revokedAt.equals(null),
+            );
+            expect(vigentes, hasLength(1), reason: 'rodada $rodada');
+          }
+        } finally {
+          await limpar();
+        }
+      });
+    },
+    rollbackDatabase: RollbackDatabase.disabled,
+  );
 }

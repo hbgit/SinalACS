@@ -200,6 +200,18 @@ void main() {
     expect(audit.results, contains('upload_token_denied_expired'));
   });
 
+  test('fronteira exata: em issuedAt + 7 d recusa; 1 s antes aceita', () async {
+    final token = await service.issue(_user, now: t0);
+    final limite = t0.add(UploadTokenService.lifetime);
+    final u = await service.resolve(
+        uploadToken: token,
+        deviceId: 'aparelho-A',
+        now: limite.subtract(const Duration(seconds: 1)));
+    expect(u.id, _acsId);
+    await expectDenied(() =>
+        service.resolve(uploadToken: token, deviceId: 'aparelho-A', now: limite));
+  });
+
   test('aparelho diferente: recusa, audita e revoga o token', () async {
     final token = await service.issue(_user, now: t0);
     await expectDenied(() => service.resolve(

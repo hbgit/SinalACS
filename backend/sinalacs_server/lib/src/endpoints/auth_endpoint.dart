@@ -1,6 +1,7 @@
 import 'package:serverpod/serverpod.dart';
 import 'package:sinalacs_server/src/application/auth/cpf.dart';
 import 'package:sinalacs_server/src/application/auth/development_auth_service.dart';
+import 'package:sinalacs_server/src/application/auth/institutional_auth_service.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
 import 'package:sinalacs_server/src/runtime/alert_runtime.dart';
 
@@ -92,8 +93,13 @@ class AuthEndpoint extends Endpoint {
 
     // Sem `deviceId` real não há aparelho a que amarrar o refresh token: o
     // valor sentinela de `InstitutionalAuthService` é público e qualquer um o
-    // apresentaria, anulando a amarração. Então o login só devolve o JWT.
-    final temAparelho = deviceId != null && deviceId.trim().isNotEmpty;
+    // apresentaria, anulando a amarração. Então o login só devolve o JWT. O
+    // próprio sentinela, enviado pelo cliente, conta como "sem aparelho" pelo
+    // mesmo motivo — e porque `UploadTokenService.issue` o recusaria DEPOIS de
+    // o refresh token já estar gravado.
+    final temAparelho = deviceId != null &&
+        deviceId.trim().isNotEmpty &&
+        deviceId != InstitutionalAuthService.deviceIdAbsent;
     final refreshToken = temAparelho
         ? await runtime.refreshTokenServiceFor(session).issue(user)
         : null;
