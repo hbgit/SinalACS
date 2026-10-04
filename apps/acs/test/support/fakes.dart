@@ -231,6 +231,67 @@ class FakeAcsBackend implements AcsBackend {
     ];
   }
 
+  /// Lotes de `syncLegacyVisits`, com o `userId` da sessão que transportou.
+  final List<({String? transportUserId, String deviceId, List<VisitSyncEntry> visits})> legacyBatches = [];
+
+  /// Falha da chamada legada inteira, como uma queda de rede.
+  BackendFailure? legacyFailure;
+
+  /// Resultado por visita legada; ausente significa `synced`.
+  VisitSyncResult Function(VisitSyncEntry entry)? legacyResultFor;
+
+  @override
+  Future<List<VisitSyncResult>> syncLegacyVisits(List<VisitSyncEntry> visits, {required String deviceId}) async {
+    // Como o BackendClient: sem sessão não há transporte.
+    final transport = _session;
+    if (transport == null) throw const BackendFailure('Sessão não iniciada.', isRecoverable: false);
+    if (visits.length > 200) throw const BackendFailure('lote acima do limite', isRecoverable: false);
+    legacyBatches.add((transportUserId: transport.userId, deviceId: deviceId, visits: List.of(visits)));
+    final failure = legacyFailure;
+    if (failure != null) throw failure;
+    return [for (final visit in visits) legacyResultFor?.call(visit) ?? _synced(visit)];
+  }
+
+  /// Lotes de `syncDeferredVisits`, com o token de envio usado em cada um.
+  final List<({String uploadToken, String deviceId, List<VisitSyncEntry> visits})> deferredBatches = [];
+
+  /// Falha da chamada diferida inteira, como uma queda de rede.
+  BackendFailure? deferredFailure;
+
+  /// Tokens de envio que o "servidor" recusa (vencidos/revogados).
+  final Set<String> refusedUploadTokens = <String>{};
+
+  /// Resultado por visita diferida; ausente significa `synced`.
+  VisitSyncResult Function(VisitSyncEntry entry)? deferredResultFor;
+
+  /// Se definido, `syncDeferredVisits` espera por ele (lote em voo).
+  Completer<void>? deferredGate;
+
+  @override
+  Future<List<VisitSyncResult>> syncDeferredVisits({
+    required String uploadToken,
+    required String deviceId,
+    required List<VisitSyncEntry> visits,
+  }) async {
+    if (visits.length > 200) throw const BackendFailure('lote acima do limite', isRecoverable: false);
+    if (refusedUploadTokens.contains(uploadToken)) throw const UploadTokenRefused();
+    deferredBatches.add((uploadToken: uploadToken, deviceId: deviceId, visits: List.of(visits)));
+    await deferredGate?.future;
+    final failure = deferredFailure;
+    if (failure != null) throw failure;
+    return [for (final visit in visits) deferredResultFor?.call(visit) ?? _synced(visit)];
+  }
+
+  /// Tokens de envio revogados, na ordem.
+  final List<String> revokedUploadTokens = <String>[];
+
+  @override
+  Future<void> revokeUploadToken(String uploadToken) async => revokedUploadTokens.add(uploadToken);
+
+  /// Reenvio do mesmo `localId` na mesma versão volta `synced` (idempotente).
+  static VisitSyncResult _synced(VisitSyncEntry visit) =>
+      VisitSyncResult(localId: visit.localId, syncStatus: SyncStatus.synced, serverVersion: visit.version);
+
   /// Contato que `ubsContact()` devolve; `UbsContact(name: ...)` sem telefone simula uma UBS sem número.
   UbsContact ubsContactResult = UbsContact(name: 'UBS Teste', phone: '+55 11 5550-0100');
 

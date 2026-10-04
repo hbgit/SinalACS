@@ -32,28 +32,10 @@ class BackendVisitSynchronizer implements VisitSynchronizer {
     // do backend, depois de o token ser resolvido: uma renovação pode esperar
     // o login de outro ACS e voltar com a sessão DELE.
     if (backend.session?.userId != ownerId) throw sessionOwnerMismatch;
-    final results = await backend.syncVisits([
-      for (final visit in visits)
-        VisitSyncEntry(
-          localId: visit.localId,
-          patientId: visit.patientId,
-          scheduledAt: visit.createdAt.toUtc(),
-          completedAt: visit.createdAt.toUtc(),
-          status: visit.outcome.isEmpty ? visit.status : visit.outcome,
-          riskLevelBefore: _riskLevel(visit.risk),
-          notes: visit.notes.trim().isEmpty
-              ? const <String, String>{}
-              : <String, String>{'campo': visit.notes.trim()},
-          version: visit.version,
-          // Contrato para geofencing futuro (RF12, decisão §4) — desenho
-          // apenas. Nenhuma API nativa de geofence foi integrada nesta task,
-          // nenhuma permissão de localização em primeiro/segundo plano foi
-          // adicionada ao AndroidManifest.xml, e a escolha de plugin/texto de
-          // divulgação seguem bloqueados por revisão de produto/jurídico. Todo
-          // check-in registrado por este app hoje é manual.
-          arrivalMethod: ArrivalMethod.manual,
-        ),
-    ], expectedUserId: ownerId);
+    final results = await backend.syncVisits(
+      [for (final visit in visits) visitSyncEntryFor(visit)],
+      expectedUserId: ownerId,
+    );
 
     return [
       for (final result in results)
@@ -65,13 +47,36 @@ class BackendVisitSynchronizer implements VisitSynchronizer {
         ),
     ];
   }
-
-  /// Risco é sinal clínico: um valor desconhecido vira `green` só para caber no
-  /// enum, nunca para *rebaixar* um caso — o risco que vale é o do servidor, e
-  /// esta visita já foi realizada.
-  RiskLevel _riskLevel(String value) => switch (value.toLowerCase()) {
-        'red' || 'vermelho' => RiskLevel.red,
-        'yellow' || 'amarelo' => RiskLevel.yellow,
-        _ => RiskLevel.green,
-      };
 }
+
+/// Visita da fila → contrato de `visits.sync`/`syncLegacy`/`syncDeferred`. Um
+/// só mapeamento para os três caminhos: o servidor deduplica pelo `localId` e
+/// confere a versão, então reenviar a mesma visita por outro caminho tem de
+/// produzir exatamente a mesma entrada.
+VisitSyncEntry visitSyncEntryFor(OfflineVisitRecord visit) => VisitSyncEntry(
+      localId: visit.localId,
+      patientId: visit.patientId,
+      scheduledAt: visit.createdAt.toUtc(),
+      completedAt: visit.createdAt.toUtc(),
+      status: visit.outcome.isEmpty ? visit.status : visit.outcome,
+      riskLevelBefore: _riskLevel(visit.risk),
+      notes: visit.notes.trim().isEmpty
+          ? const <String, String>{}
+          : <String, String>{'campo': visit.notes.trim()},
+      version: visit.version,
+      // Contrato para geofencing futuro (RF12, decisão §4) — desenho apenas.
+      // Nenhuma API nativa de geofence foi integrada, nenhuma permissão de
+      // localização em segundo plano foi adicionada, e a escolha de
+      // plugin/texto de divulgação segue bloqueada por revisão de
+      // produto/jurídico. Todo check-in registrado por este app hoje é manual.
+      arrivalMethod: ArrivalMethod.manual,
+    );
+
+/// Risco é sinal clínico: um valor desconhecido vira `green` só para caber no
+/// enum, nunca para *rebaixar* um caso — o risco que vale é o do servidor, e
+/// esta visita já foi realizada.
+RiskLevel _riskLevel(String value) => switch (value.toLowerCase()) {
+      'red' || 'vermelho' => RiskLevel.red,
+      'yellow' || 'amarelo' => RiskLevel.yellow,
+      _ => RiskLevel.green,
+    };

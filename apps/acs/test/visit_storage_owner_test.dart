@@ -61,6 +61,24 @@ void main() {
     expect(await _contar(db, "owner='acs-b'"), 0);
   });
 
+  test('countsByOwner conta por dono (pendentes + recusadas), sem a quarentena', () async {
+    await storage.forOwner('acs-a').save([_visita('local-a1'), _visita('local-a2', rejeitada: true)]);
+    await storage.forOwner('acs-b').save([_visita('local-b1')]);
+    final db = await storage.database.open();
+    await db.insert('offline_visits', {
+      'local_id': 'leg-1',
+      'patient_id': seedPatientId,
+      'risk': 'red',
+      'status': 'PENDENTE',
+      'outcome': '',
+      'notes': '',
+      'created_at': DateTime.utc(2026, 1, 1).toIso8601String(),
+      'version': 1,
+    });
+
+    expect(await storage.countsByOwner(), {'acs-a': 2, 'acs-b': 1});
+  });
+
   test('migração v6 → v7 preserva as linhas em QUARENTENA: nenhum dono as vê', () async {
     sqfliteFfiInit();
     final v6 = await databaseFactoryFfi.openDatabase(

@@ -92,6 +92,27 @@ class FakeRpcServer {
   /// Faz o login responder sem `refreshToken` (cliente sem deviceId).
   bool omitRefreshToken = false;
 
+  /// Tokens de envio diferido emitidos pelos logins, na ordem (D7). Só com
+  /// `deviceId` real — nem em branco, nem o sentinela do servidor.
+  final List<String> uploadTokensIssued = <String>[];
+
+  /// Faz o login responder sem `uploadToken`.
+  bool omitUploadToken = false;
+
+  /// Tokens de envio que `syncDeferred` recusa com `SessionExpiredException`.
+  final Set<String> refusedUploadTokens = <String>{};
+
+  /// Tokens que `revokeUploadToken` recebeu.
+  final List<String> revokedUploadTokens = <String>[];
+
+  String? _nextUploadToken(Map<String, dynamic> decoded) {
+    final deviceId = (decoded['deviceId'] as String?)?.trim() ?? '';
+    if (omitUploadToken || deviceId.isEmpty || deviceId == 'nao-aplicavel-login-institucional') return null;
+    final token = 'upload-${uploadTokensIssued.length}';
+    uploadTokensIssued.add(token);
+    return token;
+  }
+
   /// `refreshToken` recebido em cada `refreshSession`, na ordem.
   List<String> get refreshTokensSeen => requests
       .where((r) => r.method == 'refreshSession')
@@ -182,6 +203,20 @@ class FakeRpcServer {
       return;
     }
 
+    if (method == 'syncDeferred' && refusedUploadTokens.contains(decoded['uploadToken'])) {
+      await _respond(request, HttpStatus.badRequest, {
+        'className': 'SessionExpiredException',
+        'data': {'message': 'Envio não autorizado. Entre novamente.'},
+      });
+      return;
+    }
+
+    if (method == 'revokeUploadToken') {
+      revokedUploadTokens.add(decoded['uploadToken'] as String? ?? '');
+      await _respond(request, HttpStatus.ok, null);
+      return;
+    }
+
     if (method == 'generateEnrollmentToken' && rejectInviteWithPermission) {
       await _respond(request, HttpStatus.badRequest, {
         'className': 'AlertPermissionException',
@@ -195,7 +230,13 @@ class FakeRpcServer {
           'accessToken': _token(),
           'tokenType': 'Bearer',
           if (!omitRefreshToken && ((decoded['deviceId'] as String?)?.trim().isNotEmpty ?? false)) 'refreshToken': _nextLoginToken(),
+          if (_nextUploadToken(decoded) case final upload?) 'uploadToken': upload,
         },
+      // `visits.syncLegacy`/`syncDeferred`: tudo `synced`, mesma versão.
+      'syncLegacy' || 'syncDeferred' => <Object?>[
+          for (final visit in (decoded['visits'] as List).cast<Map<String, dynamic>>())
+            {'localId': visit['localId'], 'syncStatus': 'synced', 'serverVersion': visit['version']},
+        ],
       'refreshSession' => <String, Object?>{
           'accessToken': garbageAccessToken ? 'lixo' : _token(),
           'tokenType': 'Bearer',

@@ -1,0 +1,187 @@
+import 'dart:io';
+
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:sinalacs_acs/core/network/backend_client.dart';
+import 'package:sinalacs_acs/core/security/secure_upload_token_store.dart';
+import 'package:sinalacs_acs/core/security/session_token_store.dart';
+import 'package:sinalacs_client/sinalacs_client.dart';
+
+import 'support/fake_rpc_server.dart';
+
+/// Token de envio diferido (D7): um por dono no Keystore, gravado pelo login
+/// na mesma seção crítica do refresh token, e que SOBREVIVE ao "Sair".
+/// Credenciais e ids sintéticos.
+void main() {
+  group('MemoryUploadTokenStore', () {
+    test('um token por dono; owners lista só quem tem token', () async {
+      final store = MemoryUploadTokenStore();
+      await store.write('acs-a', 'upload-a');
+      await store.write('acs-b', 'upload-b');
+      await store.write('acs-a', 'upload-a2');
+
+      expect(await store.read('acs-a'), 'upload-a2');
+      expect(await store.owners(), unorderedEquals(['acs-a', 'acs-b']));
+
+      await store.clear('acs-a');
+      expect(await store.read('acs-a'), isNull);
+      expect(await store.owners(), ['acs-b']);
+    });
+  });
+
+  group('SecureStorageUploadTokenStore', () {
+
+    test("chave 'acs_upload_token|<userId>' e owners ignora as outras chaves do Keystore", () async {
+      FlutterSecureStorage.setMockInitialValues({
+        'acs_refresh_token': 'refresh-sintetico',
+        'acs_device_id': 'aparelho-sintetico',
+      });
+      final store = SecureStorageUploadTokenStore();
+
+      await store.write('acs-a', 'upload-a');
+      await store.write('acs-b', 'upload-b');
+
+      final todas = await const FlutterSecureStorage().readAll();
+      expect(todas['acs_upload_token|acs-a'], 'upload-a');
+      expect(await store.read('acs-b'), 'upload-b');
+      expect(await store.owners(), unorderedEquals(['acs-a', 'acs-b']));
+
+      await store.clear('acs-a');
+      expect(await store.read('acs-a'), isNull);
+      expect(await store.owners(), ['acs-b']);
+      expect((await const FlutterSecureStorage().readAll())['acs_refresh_token'], 'refresh-sintetico');
+    });
+  });
+
+  group('BackendClient', () {
+    late FakeRpcServer server;
+    late MemorySessionTokenStore refresh;
+    late MemoryUploadTokenStore uploads;
+    late BackendClient backend;
+
+    setUp(() async {
+      server = await FakeRpcServer.start();
+      refresh = MemorySessionTokenStore();
+      uploads = MemoryUploadTokenStore();
+      backend = BackendClient(
+        host: server.host,
+        tokenStore: refresh,
+        deviceIds: MemoryDeviceIdStore('aparelho-sintetico'),
+        uploadTokens: uploads,
+      );
+    });
+
+    tearDown(() async {
+      backend.close();
+      await server.stop();
+    });
+
+    Future<void> entrarComo(String userId) {
+      server.userId = userId;
+      return backend.login(matricula: 'ACS-001', senha: 'senha-sintetica');
+    }
+
+    test('login grava o uploadToken sob o userId do dono; o de outro dono fica', () async {
+      await entrarComo('acs-a');
+      await entrarComo('acs-b');
+
+      expect(await uploads.read('acs-a'), server.uploadTokensIssued[0]);
+      expect(await uploads.read('acs-b'), server.uploadTokensIssued[1]);
+      expect(server.uploadTokensIssued[0], isNot(server.uploadTokensIssued[1]));
+    });
+
+    test('logout NÃO apaga o token de envio (D7: sobrevive ao Sair)', () async {
+      await entrarComo('acs-a');
+      await backend.logout();
+
+      expect(await refresh.read(), isNull);
+      expect(await uploads.read('acs-a'), server.uploadTokensIssued.single);
+    });
+
+    test('sem deviceId (ou com o sentinela) o servidor não emite: nada gravado', () async {
+      for (final semAparelho in ['', 'nao-aplicavel-login-institucional']) {
+        final cliente = BackendClient(
+          host: server.host,
+          deviceIds: MemoryDeviceIdStore(semAparelho),
+          uploadTokens: uploads,
+        );
+        server.userId = 'acs-a';
+        await cliente.login(matricula: 'ACS-001', senha: 'senha-sintetica');
+        cliente.close();
+      }
+
+      expect(server.uploadTokensIssued, isEmpty);
+      expect(await uploads.owners(), isEmpty);
+    });
+
+    test('login sem uploadToken na resposta não apaga o token já guardado do mesmo dono', () async {
+      await entrarComo('acs-a');
+      final antigo = await uploads.read('acs-a');
+      server.omitUploadToken = true;
+      await entrarComo('acs-a');
+
+      expect(await uploads.read('acs-a'), antigo);
+    });
+
+    VisitSyncEntry entrada(String localId) => VisitSyncEntry(
+          localId: localId,
+          patientId: '00000000-0000-4000-8000-000000000001',
+          scheduledAt: DateTime.utc(2026, 10, 3),
+          completedAt: DateTime.utc(2026, 10, 3),
+          status: 'PENDENTE',
+          riskLevelBefore: RiskLevel.green,
+          notes: const <String, String>{},
+          version: 1,
+          arrivalMethod: ArrivalMethod.manual,
+        );
+
+    test('syncDeferredVisits vai com o token de envio, sem accessToken', () async {
+      final results = await backend.syncDeferredVisits(
+        uploadToken: 'upload-sintetico',
+        deviceId: 'aparelho-sintetico',
+        visits: [entrada('a-1')],
+      );
+
+      expect(results.single.syncStatus, SyncStatus.synced);
+      final pedido = server.requests.singleWhere((r) => r.method == 'syncDeferred');
+      expect(pedido.endpoint, 'visits');
+      expect(pedido.args['uploadToken'], 'upload-sintetico');
+      expect(pedido.args['deviceId'], 'aparelho-sintetico');
+      expect(pedido.args.containsKey('accessToken'), isFalse);
+    });
+
+    test('token de envio recusado vira UploadTokenRefused (não "sem conexão")', () async {
+      server.refusedUploadTokens.add('upload-morto');
+
+      await expectLater(
+        backend.syncDeferredVisits(uploadToken: 'upload-morto', deviceId: 'aparelho-sintetico', visits: [entrada('a-1')]),
+        throwsA(isA<UploadTokenRefused>().having((f) => f.isRecoverable, 'isRecoverable', isFalse)),
+      );
+    });
+
+    test('syncLegacyVisits usa a sessão atual como transporte', () async {
+      await entrarComo('acs-b');
+
+      final results = await backend.syncLegacyVisits([entrada('leg-1')], deviceId: 'aparelho-sintetico');
+
+      expect(results.single.localId, 'leg-1');
+      final pedido = server.requests.singleWhere((r) => r.method == 'syncLegacy');
+      expect(pedido.args['accessToken'], isNotNull);
+      expect(pedido.args['deviceId'], 'aparelho-sintetico');
+    });
+
+    test('revokeUploadToken envia o token ao servidor', () async {
+      await backend.revokeUploadToken('upload-sintetico');
+
+      expect(server.revokedUploadTokens, ['upload-sintetico']);
+    });
+  });
+
+  test('o caminho importado pelo backend_client não puxa o Flutter (token de envio)', () {
+    final imports =
+        File('lib/core/security/upload_token_store.dart').readAsLinesSync().where((l) => l.startsWith('import ')).join('\n');
+    expect(imports, isNot(contains('package:flutter')));
+    final client = File('lib/core/network/backend_client.dart').readAsStringSync();
+    expect(client, isNot(contains('secure_upload_token_store.dart')));
+  });
+}

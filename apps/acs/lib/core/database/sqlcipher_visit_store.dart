@@ -127,6 +127,16 @@ class SqlCipherVisitStorage implements VisitStorage {
   @override
   LegacyVisitStore get legacy => SqlCipherLegacyVisitStore(database);
 
+  /// Só `owner` e `COUNT(*)`: nenhuma coluna de conteúdo é lida.
+  @override
+  Future<Map<String, int>> countsByOwner() async {
+    final db = await database.open();
+    final rows = await db.rawQuery(
+      'SELECT owner, COUNT(*) AS total FROM $_table WHERE owner IS NOT NULL GROUP BY owner',
+    );
+    return {for (final row in rows) row['owner']! as String: row['total']! as int};
+  }
+
   Future<void> close() => database.close();
 }
 

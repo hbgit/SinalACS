@@ -12,14 +12,27 @@ void main() {
   test('o main.dart liga o refresh token e o id do aparelho ao Keystore', () {
     final fonte = File('lib/main.dart').readAsStringSync();
     expect(fonte, contains('tokenStore: SecureStorageSessionTokenStore()'));
-    expect(fonte, contains('deviceIds: SecureStorageDeviceIdStore()'));
+    expect(fonte, contains('final deviceIds = SecureStorageDeviceIdStore();'));
+    expect(fonte, contains('deviceIds: deviceIds'));
+  });
+
+  test('o main.dart liga o token de envio diferido ao Keystore, no cliente E no app', () {
+    final fonte = File('lib/main.dart').readAsStringSync();
+    expect(fonte, contains('final uploadTokens = SecureStorageUploadTokenStore();'));
+    expect(RegExp(r'uploadTokens: uploadTokens').allMatches(fonte), hasLength(2));
+    expect(fonte, contains('connectivityChanges: Connectivity()'));
   });
 
   test('o caminho importado pelo backend_client não puxa o Flutter', () {
-    for (final arquivo in ['lib/core/security/session_token_store.dart', 'lib/core/network/backend_client.dart']) {
+    for (final arquivo in [
+      'lib/core/security/session_token_store.dart',
+      'lib/core/security/upload_token_store.dart',
+      'lib/core/network/backend_client.dart',
+    ]) {
       final imports = File(arquivo).readAsLinesSync().where((l) => l.startsWith('import ')).join('\n');
       expect(imports, isNot(contains('package:flutter')), reason: arquivo);
       expect(imports, isNot(contains('secure_session_token_store.dart')), reason: arquivo);
+      expect(imports, isNot(contains('secure_upload_token_store.dart')), reason: arquivo);
     }
   });
 }

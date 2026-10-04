@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:sinalacs_acs/core/network/auth_session.dart';
 import 'package:sinalacs_acs/core/network/backend_config.dart';
 import 'package:sinalacs_acs/core/security/session_token_store.dart';
+import 'package:sinalacs_acs/core/security/upload_token_store.dart';
 import 'package:sinalacs_client/sinalacs_client.dart';
 
 /// Falha já traduzida para a pessoa que está usando o app.
@@ -27,6 +28,14 @@ class BackendFailure implements Exception {
 
   @override
   String toString() => message;
+}
+
+/// O servidor recusou o token de envio diferido (D7): desconhecido, vencido,
+/// revogado, de outro aparelho ou de conta inativa — a recusa é única e não diz
+/// o motivo. Não recuperável: o token morreu, e só um novo login do dono emite
+/// outro. As visitas do dono continuam no aparelho.
+class UploadTokenRefused extends BackendFailure {
+  const UploadTokenRefused() : super('Envio não autorizado. Entre novamente.', isRecoverable: false);
 }
 
 /// O ACS tem MFA ativa e a senha conferiu: falta o código do autenticador.
@@ -120,6 +129,24 @@ abstract class AcsBackend {
   /// [sessionOwnerMismatch] sem enviar nada. O servidor atribui a visita ao ACS
   /// do token: o lote de A nunca pode sair com o token de B.
   Future<List<VisitSyncResult>> syncVisits(List<VisitSyncEntry> visits, {String? expectedUserId});
+
+  /// Envia visitas LEGADAS (sem dono, D4) por `visits.syncLegacy`. A sessão
+  /// atual é só o transporte: o servidor grava autoria desconhecida e confere
+  /// o território do paciente contra o de quem transporta. No máximo 200 por
+  /// chamada (o servidor recusa acima disso).
+  Future<List<VisitSyncResult>> syncLegacyVisits(List<VisitSyncEntry> visits, {required String deviceId});
+
+  /// Envio DIFERIDO (D7) por `visits.syncDeferred`: sem sessão, autenticado
+  /// pelo token de envio do dono — o autor gravado é o dono do token. No máximo
+  /// 200 por chamada. Token recusado: [UploadTokenRefused].
+  Future<List<VisitSyncResult>> syncDeferredVisits({
+    required String uploadToken,
+    required String deviceId,
+    required List<VisitSyncEntry> visits,
+  });
+
+  /// Revoga o token de envio no servidor (a fila do dono zerou). Idempotente.
+  Future<void> revokeUploadToken(String uploadToken);
 
   /// Visitas da microárea alteradas desde `since` — reconciliação
   /// central→dispositivo (RF15, decisão §5).
@@ -221,6 +248,21 @@ class MisconfiguredBackend implements AcsBackend {
       _recusar();
 
   @override
+  Future<List<VisitSyncResult>> syncLegacyVisits(List<VisitSyncEntry> visits, {required String deviceId}) async =>
+      _recusar();
+
+  @override
+  Future<List<VisitSyncResult>> syncDeferredVisits({
+    required String uploadToken,
+    required String deviceId,
+    required List<VisitSyncEntry> visits,
+  }) async =>
+      _recusar();
+
+  @override
+  Future<void> revokeUploadToken(String uploadToken) async => _recusar();
+
+  @override
   Future<List<VisitSyncEntry>> pullVisits({required DateTime since}) async => _recusar();
 
   @override
@@ -259,11 +301,13 @@ class BackendClient implements AcsBackend {
     List<int>? trustedCaBytes,
     SessionTokenStore? tokenStore,
     DeviceIdStore? deviceIds,
+    UploadTokenStore? uploadTokens,
   // Sem store, só memória: o Keystore (`secure_session_token_store.dart`)
   // depende do Flutter e este arquivo roda também na VM (`tool/live_check.dart`).
   // Quem liga o Keystore é o `main.dart`; sem ele, nada sobrevive ao app fechar.
   })  : _tokenStore = tokenStore ?? MemorySessionTokenStore(),
         _deviceIds = deviceIds ?? MemoryDeviceIdStore(),
+        _uploadTokens = uploadTokens ?? MemoryUploadTokenStore(),
         _client = Client(
           // Só o host que veio do `--dart-define` (o default de compilação) é
           // validado. Um host **explícito** passa como veio: é o caminho dos
@@ -296,6 +340,11 @@ class BackendClient implements AcsBackend {
 
   final SessionTokenStore _tokenStore;
   final DeviceIdStore _deviceIds;
+
+  /// Tokens de envio diferido, um por dono (D7). O login grava; o logout NÃO
+  /// apaga — quem revoga e apaga é o envio diferido, quando a fila do dono
+  /// zera.
+  final UploadTokenStore _uploadTokens;
 
   @override
   AuthSession? get session => _session;
@@ -359,6 +408,7 @@ class BackendClient implements AcsBackend {
     }
 
     final refreshToken = result.refreshToken;
+    final uploadToken = result.uploadToken;
     // Incremento da época, gravação do token e troca da sessão numa só seção
     // crítica: uma renovação (talvez de OUTRO ACS, "Entrar com senha" no
     // bloqueio) que já estava em voo fica obsoleta e não grava nada por cima
@@ -377,6 +427,17 @@ class BackendClient implements AcsBackend {
         }
       } catch (_) {
         throw _storeLost;
+      }
+      // Token de envio diferido (D7), na MESMA seção: nunca fica gravado sob
+      // um dono com a sessão de outro. Só grava quando veio (o servidor só
+      // emite com `deviceId` real); resposta sem ele não apaga o do mesmo
+      // dono, que pode ainda ter visitas a subir. Falha do Keystore aqui não
+      // derruba o login: sem o token, as visitas deste dono só sobem pela
+      // sessão dele, como antes.
+      if (uploadToken != null && uploadToken.isNotEmpty) {
+        try {
+          await _uploadTokens.write(session.userId, uploadToken);
+        } catch (_) {}
       }
       _session = session;
     });
@@ -666,6 +727,35 @@ class BackendClient implements AcsBackend {
     );
   }
 
+  @override
+  Future<List<VisitSyncResult>> syncLegacyVisits(List<VisitSyncEntry> visits, {required String deviceId}) async {
+    final token = await _requireToken();
+    return _guard(
+      () => _client.visits.syncLegacy(accessToken: token, deviceId: deviceId, visits: visits),
+      permissionMessage: 'Sua sessão não autoriza sincronizar visitas. Entre novamente.',
+    );
+  }
+
+  /// Sem `_requireToken()`: o dono do token de envio pode já ter saído.
+  @override
+  Future<List<VisitSyncResult>> syncDeferredVisits({
+    required String uploadToken,
+    required String deviceId,
+    required List<VisitSyncEntry> visits,
+  }) =>
+      _guard(() async {
+        try {
+          return await _client.visits.syncDeferred(uploadToken: uploadToken, deviceId: deviceId, visits: visits);
+        } on SessionExpiredException {
+          // A recusa única do servidor para o token de envio.
+          throw const UploadTokenRefused();
+        }
+      });
+
+  @override
+  Future<void> revokeUploadToken(String uploadToken) =>
+      _guard(() => _client.visits.revokeUploadToken(uploadToken: uploadToken));
+
   /// Reconciliação central→dispositivo: visitas da microárea alteradas desde
   /// `since` (RF15, decisão §5). Espelha [syncVisits] na tradução de falhas.
   @override
@@ -735,6 +825,9 @@ class BackendClient implements AcsBackend {
   }) async {
     try {
       return await call();
+    } on BackendFailure {
+      // Já traduzida por quem chamou (ex.: [UploadTokenRefused]).
+      rethrow;
     } on EndpointDisabledException {
       throw const BackendFailure(
         'O acesso de desenvolvimento está desativado neste servidor.',

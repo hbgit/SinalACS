@@ -16,8 +16,11 @@ import 'package:sinalacs_acs/core/network/backend_client.dart';
 import 'package:sinalacs_acs/core/network/backend_scope.dart';
 import 'package:sinalacs_acs/core/security/biometric_gate.dart';
 import 'package:sinalacs_acs/core/security/database_key_store.dart';
+import 'package:sinalacs_acs/core/security/session_token_store.dart';
+import 'package:sinalacs_acs/core/security/upload_token_store.dart';
 import 'package:sinalacs_acs/core/services/alert_feed.dart';
 import 'package:sinalacs_acs/core/services/alert_queue.dart';
+import 'package:sinalacs_acs/core/services/deferred_flush_service.dart';
 import 'package:sinalacs_acs/core/services/emergency_dialer.dart';
 import 'package:sinalacs_acs/core/services/micro_area_directory.dart';
 import 'package:sinalacs_acs/core/services/offline_visit_queue.dart';
@@ -45,7 +48,29 @@ class SinalAcsApp extends StatefulWidget {
     this.biometricGate,
     this.navigatorKey,
     this.lockAfter,
+    this.deferredFlush,
+    this.uploadTokens,
+    this.deviceIds,
+    this.connectivityChanges,
   });
+
+  /// Envio diferido (D4/D7) já montado — gancho de teste. `null` monta um
+  /// sobre o armazenamento de visitas do app quando [uploadTokens] e
+  /// [deviceIds] são dados; sem eles (o padrão dos testes de widget), não há
+  /// envio diferido nenhum e nada sai para a rede por este caminho.
+  final DeferredFlushService? deferredFlush;
+
+  /// Tokens de envio por dono. Em produção, o `main.dart` passa o
+  /// `SecureStorageUploadTokenStore` — a MESMA instância do `BackendClient`.
+  final UploadTokenStore? uploadTokens;
+
+  /// Id da instalação, a MESMA instância do `BackendClient`.
+  final DeviceIdStore? deviceIds;
+
+  /// `true` quando há rede, `false` sem rede (o `main.dart` liga ao
+  /// `connectivity_plus`). Passar a ter rede dispara o envio diferido. `null`:
+  /// sem esse gatilho (o canal de plataforma não existe no `flutter test`).
+  final Stream<bool>? connectivityChanges;
 
   /// Desbloqueio local (digital/rosto ou bloqueio de tela). `null` usa
   /// [LocalAuthBiometricGate]; testes injetam um duplo.
@@ -104,7 +129,7 @@ class SinalAcsApp extends StatefulWidget {
   State<SinalAcsApp> createState() => _SinalAcsAppState();
 }
 
-class _SinalAcsAppState extends State<SinalAcsApp> {
+class _SinalAcsAppState extends State<SinalAcsApp> with WidgetsBindingObserver {
   /// Armazenamento de visitas do aparelho: UM banco, uma visão por dono.
   ///
   /// A fila e o cursor do pull de cada dono são montados sobre este mesmo
@@ -139,6 +164,13 @@ class _SinalAcsAppState extends State<SinalAcsApp> {
     if (injectedQueue != null && injectedPull != null) {
       return OwnerVisitScope(queue: injectedQueue, pullService: injectedPull);
     }
+    // Só o dono da sessão fica memoizado. O envio diferido (D7) sobe e apaga
+    // do disco as visitas de quem saiu; uma fila velha de A guardada aqui
+    // voltaria, no próximo login de A, com um retrato anterior a esse envio
+    // (contagem errada e reenvio do que já subiu). Sem memo, a fila de A é
+    // relida do disco. O painel de quem saiu já foi descartado.
+    _queues.removeWhere((owner, _) => owner != session.userId);
+    _scopes.removeWhere((key, _) => !key.startsWith('${session.userId}|'));
     return _scopes.putIfAbsent(visitCursorOwner(session), () {
       final built = buildOwnerVisitScope(
         backend: widget.backend,
@@ -173,14 +205,58 @@ class _SinalAcsAppState extends State<SinalAcsApp> {
   /// do gate antigo tira a rota que engolia o voltar.
   int _gateGeneration = 0;
 
+  /// Envio do que está preso no aparelho e não é da sessão atual (legado e
+  /// filas de quem saiu). Ver [SinalAcsApp.deferredFlush].
+  late final DeferredFlushService? _flush = widget.deferredFlush ??
+      (widget.uploadTokens != null && widget.deviceIds != null
+          ? DeferredFlushService(
+              backend: widget.backend,
+              storage: _storage,
+              tokens: widget.uploadTokens!,
+              deviceIds: widget.deviceIds!,
+            )
+          : null);
+
+  StreamSubscription<bool>? _connectivity;
+  bool? _online;
+
+  /// Dispara o envio diferido sem esperar: nunca bloqueia a UI e nunca mostra
+  /// nada (nem conteúdo clínico, nem erro) — `flushAll` não lança, é
+  /// single-flight, e o que não subir fica para o próximo gatilho.
+  void _triggerFlush() {
+    final flush = _flush;
+    if (flush != null) unawaited(flush.flushAll());
+  }
+
+  /// Resolve o escopo do painel que vai abrir e dispara o envio diferido
+  /// (gatilho "depois de abrir o painel"). Só `_openShell` chama o resolvedor.
+  OwnerVisitScope _scopeForShell(AuthSession session) {
+    final scope = _scopeFor(session);
+    _triggerFlush();
+    return scope;
+  }
+
   @override
   void initState() {
     super.initState();
     _themeController.restore();
+    WidgetsBinding.instance.addObserver(this);
+    _connectivity = widget.connectivityChanges?.listen((online) {
+      final was = _online;
+      _online = online;
+      if (online && was != true) _triggerFlush();
+    });
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _triggerFlush();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _connectivity?.cancel();
     if (widget.themeController == null) _themeController.dispose();
     super.dispose();
   }
@@ -255,7 +331,7 @@ class _SinalAcsAppState extends State<SinalAcsApp> {
               ),
               home: LoginScreen(
                 feedBuilder: widget.feedBuilder,
-                visitScopeFor: _scopeFor,
+                visitScopeFor: _scopeForShell,
                 directory: widget.microAreaDirectory,
                 initialAlert: widget.initialAlert,
                 initialPosition: widget.currentPosition,

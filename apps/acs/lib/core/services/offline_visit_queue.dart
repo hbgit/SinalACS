@@ -182,6 +182,12 @@ abstract interface class VisitStorage {
 
   /// Quarentena (D2): as visitas legadas, sem dono.
   LegacyVisitStore get legacy;
+
+  /// Quantas visitas (pendentes e recusadas) cada dono tem no aparelho. Só a
+  /// contagem — nenhum conteúdo de visita sai daqui. Não inclui a quarentena.
+  /// Usado pelo envio diferido para achar donos sem token e para dizer quanto
+  /// ainda não subiu.
+  Future<Map<String, int>> countsByOwner();
 }
 
 /// Quarentena (D2): as linhas com `owner IS NULL`. Nenhum dono as enxerga.
@@ -247,6 +253,12 @@ class InMemoryVisitStorage implements VisitStorage {
 
   @override
   LegacyVisitStore get legacy => _legacy;
+
+  @override
+  Future<Map<String, int>> countsByOwner() async => {
+        for (final entry in _byOwner.entries)
+          if (entry.value.isNotEmpty) entry.key: entry.value.length,
+      };
 }
 
 class _InMemoryOwnerVisitStore implements VisitStore {
