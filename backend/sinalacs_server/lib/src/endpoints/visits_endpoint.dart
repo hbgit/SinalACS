@@ -1,4 +1,5 @@
 import 'package:serverpod/serverpod.dart';
+import 'package:sinalacs_server/src/application/visits/visit_sync_service.dart';
 import 'package:sinalacs_server/src/endpoints/authenticated_endpoint.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
 import 'package:sinalacs_server/src/runtime/alert_runtime.dart';
@@ -51,6 +52,8 @@ class VisitsEndpoint extends AuthenticatedEndpoint {
     if (visits.isEmpty) return <VisitSyncResult>[];
 
     try {
+      // Teto do lote ANTES de abrir a transação: nada toca o banco.
+      VisitSyncService.checkLegacyBatchSize(visits.length);
       return await session.db.transaction((transaction) async {
         final service =
             AlertRuntime.instance.visitSyncServiceFor(session, transaction: transaction);

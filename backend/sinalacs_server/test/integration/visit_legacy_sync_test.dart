@@ -174,6 +174,7 @@ void main() {
       expect(results.single.syncStatus, SyncStatus.synced);
       expect(results.single.serverVersion, 1);
       final row = (await _row(session, localId))!;
+      expect(row.acsId, isNull);
       expect(row.authorship, VisitAuthorship.legacyUnclaimed);
       expect(row.originDeviceId, _deviceId);
       expect(row.syncAt, isNotNull);
@@ -259,9 +260,10 @@ void main() {
       final results = await endpoints.visits.syncLegacy(sessionBuilder,
           accessToken: token,
           deviceId: _deviceId,
-          visits: [_entry(localId: localId, version: 1, status: 'paciente ausente')]);
+          visits: [_entry(localId: localId, version: 0, status: 'paciente ausente')]);
 
       expect(results.single.syncStatus, SyncStatus.rejected);
+      expect(results.single.message, 'visita já registrada com autor — versão diferente');
       final row = (await _row(session, localId))!;
       expect(row.acsId, UuidValue.fromString(_acsId));
       expect(row.authorship, VisitAuthorship.acs);
@@ -383,6 +385,78 @@ void main() {
       final json = pulled.single.toJson();
       expect(json.containsKey('acsId'), isFalse);
       expect(json.containsKey('originDeviceId'), isFalse);
+    });
+
+    test('uma linha visit_legacy_sync_item por visita gravada, com o id da visita', () async {
+      final session = sessionBuilder.build();
+      await _seed(session);
+      const a = '00000000-0000-4000-8000-0000000001d1';
+      const b = '00000000-0000-4000-8000-0000000001d2';
+      final token = await acsToken();
+
+      await endpoints.visits.syncLegacy(sessionBuilder, accessToken: token, deviceId: _deviceId, visits: [
+        _entry(localId: a),
+        _entry(localId: b),
+        _entry(localId: '00000000-0000-4000-8000-0000000001d3', patientId: _patientOutsideAreaId),
+      ]);
+      // Reenvio idêntico: no-op, sem item novo.
+      await endpoints.visits.syncLegacy(sessionBuilder,
+          accessToken: token, deviceId: _deviceId, visits: [_entry(localId: a, version: 1)]);
+
+      final itens = await AuditLog.db.find(
+        session,
+        where: (t) => t.result.equals('visit_legacy_sync_item'),
+      );
+      expect(itens, hasLength(2));
+      final ids = {(await _row(session, a))!.id, (await _row(session, b))!.id};
+      expect(itens.map((r) => r.resourceId).toSet(), ids);
+      for (final r in itens) {
+        expect(r.userId, UuidValue.fromString(_acsId));
+        expect(r.resourceType, 'visit_legacy');
+        expect(r.actionType, 'write');
+      }
+      final lotes = await AuditLog.db.find(session, where: (t) => t.result.equals('visit_legacy_sync'));
+      expect(lotes, hasLength(2));
+    });
+
+    test('lote acima de 200 visitas: AlertValidationException, nada gravado', () async {
+      final session = sessionBuilder.build();
+      await _seed(session);
+
+      await expectLater(
+        endpoints.visits.syncLegacy(sessionBuilder,
+            accessToken: await acsToken(),
+            deviceId: _deviceId,
+            visits: [
+              for (var i = 0; i < 201; i++)
+                _entry(localId: '00000000-0000-4000-8000-${(0x300 + i).toRadixString(16).padLeft(12, '0')}'),
+            ]),
+        throwsA(isA<AlertValidationException>()),
+      );
+      expect(await Visit.db.find(session), isEmpty);
+      expect(await AuditLog.db.find(session), isEmpty);
+    });
+
+    test('localId com autor ACS reenviado na MESMA versão: synced, nada muda', () async {
+      final session = sessionBuilder.build();
+      await _seed(session);
+      const localId = '00000000-0000-4000-8000-0000000001e1';
+      final token = await acsToken();
+
+      await endpoints.visits.sync(sessionBuilder, accessToken: token, visits: [_entry(localId: localId)]);
+      final results = await endpoints.visits.syncLegacy(sessionBuilder,
+          accessToken: token, deviceId: _deviceId, visits: [_entry(localId: localId, version: 1)]);
+
+      expect(results.single.syncStatus, SyncStatus.synced);
+      expect(results.single.serverVersion, 1);
+      final row = (await _row(session, localId))!;
+      expect(row.acsId, UuidValue.fromString(_acsId));
+      expect(row.authorship, VisitAuthorship.acs);
+      expect(row.version, 1);
+      expect(
+        await AuditLog.db.find(session, where: (t) => t.result.equals('visit_legacy_sync_item')),
+        isEmpty,
+      );
     });
   });
 }

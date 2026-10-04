@@ -169,6 +169,20 @@ class VisitSyncService {
   final AuditTrail _audit;
   final DateTime Function() _clock;
 
+  /// Teto de visitas por chamada de envio desvinculado do autor (`syncLegacy`;
+  /// a Task 6 reaproveita no `syncDeferred`). O `sync` comum NÃO tem teto.
+  static const int maxLegacyBatch = 200;
+
+  /// Recusa um lote acima de [maxLegacyBatch] com `ArgumentError` (o endpoint
+  /// traduz para `AlertValidationException`). Pública para o endpoint poder
+  /// checar ANTES de abrir a transação.
+  static void checkLegacyBatchSize(int length) {
+    if (length > maxLegacyBatch) {
+      throw ArgumentError.value(length, 'visits',
+          'lote acima do limite de $maxLegacyBatch visitas por envio');
+    }
+  }
+
   /// Sincronização central→dispositivo: visitas da microárea do ACS
   /// alteradas desde `since`, para reconciliar um device que ficou offline ou
   /// foi reinstalado. Território vem sempre do token (INV-01), nunca de
@@ -251,7 +265,10 @@ class VisitSyncService {
   /// fica intacta.
   ///
   /// Um evento `visit_legacy_sync` por LOTE vai para `audit_logs`, com o
-  /// transportador e sem paciente, `localId` ou nota.
+  /// transportador e sem paciente, `localId` ou nota; e um
+  /// `visit_legacy_sync_item` por visita efetivamente criada ou alterada, com
+  /// o id da visita (`resourceId`) — nenhum para recusa ou reenvio sem efeito.
+  /// No máximo [maxLegacyBatch] visitas por chamada.
   Future<List<VisitSyncResult>> syncLegacy({
     required AuthenticatedUser transporter,
     required String deviceId,
@@ -266,6 +283,8 @@ class VisitSyncService {
     if (deviceId.trim().isEmpty) {
       throw ArgumentError.value(deviceId, 'deviceId', 'deviceId é obrigatório');
     }
+    // Antes de qualquer consulta ao store.
+    checkLegacyBatchSize(entries.length);
     if (!await _store.isActiveAcs(UuidValue.fromString(transporter.id))) {
       throw StateError('Somente ACS ativos podem enviar visitas legadas.');
     }
@@ -381,6 +400,7 @@ class VisitSyncService {
         syncAt: _clock().toUtc(),
         version: 1,
       ));
+      if (legacy) await _auditLegacyItem(user, inserted);
       return VisitSyncResult(
         localId: entry.localId,
         syncStatus: SyncStatus.synced,
@@ -389,17 +409,29 @@ class VisitSyncService {
     }
 
     if (legacy) {
-      // O envio legado só alcança visitas SEM autor que vieram do mesmo
+      // O envio legado só ALTERA visitas SEM autor que vieram do mesmo
       // aparelho. Uma visita com autor ACS não vira "desconhecida" por um
-      // reenvio, e o localId de outro aparelho não é desta fila.
+      // reenvio: na mesma versão o reenvio é só a idempotência (a visita já
+      // subiu, possivelmente pelo próprio autor antes da migração v7) e
+      // devolve `synced` sem gravar nada; em outra versão, `rejected`.
       if (existing.authorship != VisitAuthorship.legacyUnclaimed ||
           existing.acsId != null) {
+        if (entry.version == existing.version) {
+          return VisitSyncResult(
+            localId: entry.localId,
+            syncStatus: SyncStatus.synced,
+            serverVersion: existing.version,
+          );
+        }
         return VisitSyncResult(
           localId: entry.localId,
           syncStatus: SyncStatus.rejected,
-          message: 'visita já registrada com autor',
+          message: 'visita já registrada com autor — versão diferente',
         );
       }
+      // Proteção contra palpite errado (um localId colidindo entre aparelhos,
+      // um cliente com bug), NÃO controle de segurança: `deviceId` é declarado
+      // pelo próprio cliente e qualquer portador de sessão pode repeti-lo.
       if (existing.originDeviceId != legacyDeviceId) {
         return VisitSyncResult(
           localId: entry.localId,
@@ -466,10 +498,22 @@ class VisitSyncService {
       version: existing.version + 1,
     ));
 
+    if (legacy) await _auditLegacyItem(user, updated);
     return VisitSyncResult(
       localId: entry.localId,
       syncStatus: SyncStatus.synced,
       serverVersion: updated.version,
     );
   }
+
+  /// Uma linha por visita legada criada ou alterada: quem transportou e QUAL
+  /// visita — só o id, nada clínico. Best-effort como o resto da trilha.
+  Future<void> _auditLegacyItem(AuthenticatedUser transporter, VisitRecord visit) =>
+      _audit.recordSafely(AuditEvent(
+        userId: transporter.id,
+        actionType: 'write',
+        resourceType: 'visit_legacy',
+        resourceId: visit.id?.uuid,
+        result: 'visit_legacy_sync_item',
+      ));
 }

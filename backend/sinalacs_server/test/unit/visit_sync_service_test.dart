@@ -34,9 +34,14 @@ class FakeVisitStore implements VisitStore {
 
   @override
   Future<VisitRecord> insert(VisitRecord visit) async {
-    rows[visit.localId.uuid] = visit;
-    return visit;
+    // Como o `defaultPersist=random` do banco: a linha nasce com id.
+    final row = visit.id == null ? visit.copyWith(id: UuidValue.fromString(_nextId())) : visit;
+    rows[row.localId.uuid] = row;
+    return row;
   }
+
+  int _seq = 0;
+  String _nextId() => '00000000-0000-4000-9000-${(++_seq).toString().padLeft(12, '0')}';
 
   @override
   Future<VisitRecord> update(VisitRecord visit) async {
@@ -564,10 +569,11 @@ void main() {
       final results = await service.syncLegacy(
         transporter: _acs,
         deviceId: deviceId,
-        entries: [entry(version: 1, status: 'paciente ausente')],
+        entries: [entry(version: 0, status: 'paciente ausente')],
       );
 
       expect(results.single.syncStatus, SyncStatus.rejected);
+      expect(results.single.message, 'visita já registrada com autor — versão diferente');
       final row = store.rows[_localId]!;
       expect(row.authorship, VisitAuthorship.acs);
       expect(row.acsId, UuidValue.fromString(_acsId));
@@ -664,6 +670,128 @@ void main() {
       final json = result.single.toJson();
       expect(json.containsKey('acsId'), isFalse);
       expect(json.containsKey('originDeviceId'), isFalse);
+    });
+  });
+
+  group('syncLegacy — fix round 1', () {
+    const deviceId = 'aparelho-legado-01';
+    const localB = '00000000-0000-4000-8000-0000000000b2';
+    const localC = '00000000-0000-4000-8000-0000000000b3';
+
+    VisitSyncEntry legacyEntry(String localId, {int version = 0, String patientId = _patientId}) =>
+        VisitSyncEntry(
+          localId: localId,
+          patientId: patientId,
+          scheduledAt: DateTime.utc(2026, 9, 11, 9),
+          status: 'realizada',
+          riskLevelBefore: RiskLevel.green,
+          notes: const {'campo': 'sem intercorrências'},
+          version: version,
+          arrivalMethod: ArrivalMethod.manual,
+        );
+
+    List<AuditEvent> items() =>
+        audit.events.where((e) => e.result == 'visit_legacy_sync_item').toList();
+
+    setUp(() {
+      store = FakeVisitStore(microAreaByPatient: {
+        _patientId: _microAreaId,
+        _outroTerritorioPatientId: _otherMicroAreaId,
+      });
+      audit = FakeAuditTrail();
+      service = VisitSyncService(store: store, audit: audit, clock: () => DateTime.utc(2026, 10, 3, 12));
+    });
+
+    test('N visitas gravadas → N linhas de item + 1 de lote; nenhuma para rejected/no-op', () async {
+      await service.syncLegacy(
+        transporter: _acs,
+        deviceId: deviceId,
+        entries: [
+          legacyEntry(_localId),
+          legacyEntry(localB),
+          legacyEntry(localC, patientId: _outroTerritorioPatientId),
+        ],
+      );
+
+      expect(items(), hasLength(2));
+      for (final e in items()) {
+        expect(e.userId, _acsId);
+        expect(e.actionType, 'write');
+        expect(e.resourceType, 'visit_legacy');
+      }
+      expect(items().map((e) => e.resourceId).toSet(),
+          {store.rows[_localId]!.id!.uuid, store.rows[localB]!.id!.uuid});
+      expect(audit.events.where((e) => e.result == 'visit_legacy_sync'), hasLength(1));
+
+      // Reenvio idêntico: no-op, nenhuma linha de item a mais.
+      audit.events.clear();
+      await service.syncLegacy(
+          transporter: _acs, deviceId: deviceId, entries: [legacyEntry(_localId, version: 1)]);
+      expect(items(), isEmpty);
+      expect(audit.events.where((e) => e.result == 'visit_legacy_sync'), hasLength(1));
+
+      // Atualização a partir da versão corrente: muda a linha → 1 item.
+      await service.syncLegacy(
+          transporter: _acs, deviceId: deviceId, entries: [legacyEntry(_localId, version: 0)]);
+      expect(items().single.resourceId, store.rows[_localId]!.id!.uuid);
+    });
+
+    test('lote acima de maxLegacyBatch: ArgumentError antes de tocar o store', () async {
+      expect(VisitSyncService.maxLegacyBatch, 200);
+      store.inactiveAcs.add(_acsId); // se o store fosse consultado, viraria StateError
+      final entries = [
+        for (var i = 0; i <= VisitSyncService.maxLegacyBatch; i++)
+          legacyEntry('00000000-0000-4000-8000-${i.toString().padLeft(12, '0')}'),
+      ];
+
+      await expectLater(
+        service.syncLegacy(transporter: _acs, deviceId: deviceId, entries: entries),
+        throwsA(isA<ArgumentError>()),
+      );
+      expect(store.rows, isEmpty);
+      expect(audit.events, isEmpty);
+    });
+
+    test('exatamente maxLegacyBatch visitas: aceito', () async {
+      final entries = [
+        for (var i = 0; i < VisitSyncService.maxLegacyBatch; i++)
+          legacyEntry('00000000-0000-4000-8000-${i.toString().padLeft(12, '0')}'),
+      ];
+      final results =
+          await service.syncLegacy(transporter: _acs, deviceId: deviceId, entries: entries);
+      expect(results, hasLength(VisitSyncService.maxLegacyBatch));
+    });
+
+    test('localId com autor ACS e MESMA versão: synced sem gravar nada', () async {
+      await service.sync(user: _acs, entries: [legacyEntry(_localId)]);
+      final before = store.rows[_localId]!;
+
+      final results = await service.syncLegacy(
+          transporter: _acs, deviceId: deviceId, entries: [legacyEntry(_localId, version: 1)]);
+
+      expect(results.single.syncStatus, SyncStatus.synced);
+      expect(results.single.serverVersion, 1);
+      expect(identical(store.rows[_localId], before), isTrue);
+      expect(store.rows[_localId]!.acsId, UuidValue.fromString(_acsId));
+      expect(items(), isEmpty);
+    });
+
+    test('localId legado de outro aparelho, mesma versão: rejected', () async {
+      await service.syncLegacy(transporter: _acs, deviceId: deviceId, entries: [legacyEntry(_localId)]);
+
+      final results = await service.syncLegacy(
+          transporter: _acs, deviceId: 'outro-aparelho', entries: [legacyEntry(_localId, version: 1)]);
+
+      expect(results.single.syncStatus, SyncStatus.rejected);
+      expect(results.single.message, 'visita legada de outro aparelho');
+    });
+
+    test('recusa territorial mantém a própria mensagem', () async {
+      final results = await service.syncLegacy(
+          transporter: _acs,
+          deviceId: deviceId,
+          entries: [legacyEntry(_localId, patientId: _outroTerritorioPatientId)]);
+      expect(results.single.message, 'paciente fora da sua microárea');
     });
   });
 }
