@@ -12,7 +12,7 @@ Two core flows:
 
 A third app, `apps/admin`, is a read-only backoffice (Indicadores, Microáreas, Alertas, Auditoria) on mock data.
 
-Main RPC endpoints (`backend/sinalacs_server/lib/src/endpoints/`): `auth` (`loginInstitutional`, `requestOtp`, `verifyOtp`, `developmentLogin` — the last only with `ENABLE_DEV_LOGIN`), `onboarding`, `triage.evaluate`, `alerts` (`createRedAlert`, `acknowledge`, `statusFor`), `patients` (`listMicroArea`, `myData`, chronic conditions, `updateConsent`, `requestDataDeletion`, `requestDataCorrection`), `visits` (`sync`, `pull`), `health.check`.
+Main RPC endpoints (`backend/sinalacs_server/lib/src/endpoints/`): `auth` (`loginInstitutional`, `requestOtp`, `verifyOtp`, `developmentLogin` — the last only with `ENABLE_DEV_LOGIN`), `onboarding`, `triage.evaluate`, `alerts` (`createRedAlert`, `acknowledge`, `statusFor`), `patients` (`listMicroArea`, `myData`, chronic conditions, `updateConsent`, `requestDataDeletion`, `requestDataCorrection`), `visits` (`sync` e `pull` com a sessão do ACS; `syncLegacy`, que usa a sessão só como transporte das visitas legadas sem dono; `syncDeferred` e `revokeUploadToken`, autenticados pelo token de envio diferido do dono, não pelo JWT), `health.check`.
 
 `PROGRESS.md` holds milestone status and the open items with owners. `spec/validation_report.md` is stale in both directions (items it lists as open are closed, and its test counts are far below the real ones) — verify against the code before trusting it.
 
