@@ -92,6 +92,28 @@ class VisitDatabase {
     await _database?.close();
     _database = null;
   }
+
+  /// "Limpar este aparelho" (D9), numa só transação: primeiro reconta as
+  /// visitas — de QUALQUER dono, inclusive as sem dono (quarentena) — e, se
+  /// houver alguma, lança [WipeBlocked] sem apagar nada (toda linha de
+  /// `offline_visits` é visita ainda não enviada: a confirmada pelo servidor
+  /// sai do disco). Sem visita, apaga as linhas de `offline_visits`,
+  /// `sync_cursor`, `micro_area_cache` e `micro_area_cache_meta`.
+  ///
+  /// O arquivo e a chave do Keystore ficam: é limpeza de dados, não troca de
+  /// chave.
+  Future<void> wipeAllData() async {
+    final database = await open();
+    await database.transaction((transaction) async {
+      final rows = await transaction.rawQuery('SELECT COUNT(*) AS total FROM $_table');
+      final unsent = rows.single['total']! as int;
+      if (unsent > 0) throw WipeBlocked(unsent);
+      await transaction.delete(_table);
+      await transaction.delete('sync_cursor');
+      await transaction.delete('micro_area_cache');
+      await transaction.delete('micro_area_cache_meta');
+    });
+  }
 }
 
 OfflineVisitRecord _recordFrom(Map<String, Object?> row) => OfflineVisitRecord(
@@ -136,6 +158,9 @@ class SqlCipherVisitStorage implements VisitStorage {
     );
     return {for (final row in rows) row['owner']! as String: row['total']! as int};
   }
+
+  @override
+  Future<void> wipeAllData() => database.wipeAllData();
 
   Future<void> close() => database.close();
 }

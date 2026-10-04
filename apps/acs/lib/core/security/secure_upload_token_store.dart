@@ -73,6 +73,17 @@ class SecureStorageUploadTokenStore implements UploadTokenStore {
         if (!index.contains(ownerId)) await _writeIndex([...index, ownerId]);
       });
 
+  /// Sem `readAll()` nem `deleteAll()`: o Keystore guarda também o refresh
+  /// token, o id do aparelho e a chave do banco, que o wipe mantém.
+  @override
+  Future<void> clearAll({Iterable<String> alsoOwners = const <String>[]}) => _serial(() async {
+        final owners = {...await _readIndex(), ...alsoOwners};
+        for (final owner in owners) {
+          await _storage.delete(key: uploadTokenKey(owner));
+        }
+        await _storage.delete(key: ownersIndexKey);
+      });
+
   @override
   Future<List<String>> owners() => _readIndex();
 

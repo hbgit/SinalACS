@@ -129,7 +129,64 @@ class SinalAcsApp extends StatefulWidget {
   State<SinalAcsApp> createState() => _SinalAcsAppState();
 }
 
-class _SinalAcsAppState extends State<SinalAcsApp> with WidgetsBindingObserver {
+/// Teto de cada etapa de envio do "Sair" e do "Limpar este aparelho" (a fila
+/// do painel e o envio diferido): sem rede que responda, a saída segue — o que
+/// não subiu fica no aparelho, protegido.
+const sessionEndSendTimeout = Duration(seconds: 20);
+
+/// Teto de cada revogação de token de envio no "Limpar este aparelho"
+/// (best-effort: o token apagado do aparelho já não serve a ninguém aqui).
+const wipeRevokeTimeout = Duration(seconds: 5);
+
+/// O que o painel pede ao app ao encerrar o turno ou limpar o aparelho: o app
+/// é dono do armazenamento, das filas memoizadas e do envio diferido.
+abstract interface class _DeviceCare {
+  /// Envio diferido (legado + filas de outros donos), com teto. `null`: sem
+  /// envio diferido montado, ou o teto venceu.
+  Future<FlushReport?> flushOthers();
+
+  /// Visitas de OUTROS donos e da quarentena no disco, mais as que só existem
+  /// na memória de filas de outros donos. Só contagem; 0 se não deu para ler.
+  Future<int> pendingElsewhere(String currentOwner);
+
+  /// Tudo o que ainda não subiu, lido do DISCO (todos os donos + quarentena)
+  /// mais o que só está na memória de alguma fila. `null` se não deu para
+  /// conferir (quem chama trata como bloqueio).
+  Future<({int own, int elsewhere})?> unsentOnDevice(String currentOwner, OfflineVisitQueue current);
+
+  /// Depois do "Sair": tira da memória a fila e o escopo de [owner] para o
+  /// próximo login dele reler o disco. [settled] `false` (o envio da fila
+  /// ainda pode estar em voo) mantém o MESMO objeto, para nunca haver duas
+  /// filas sobre o mesmo dono.
+  void release(String owner, {required bool settled});
+
+  /// Dispara o envio diferido sem esperar (depois do logout, o dono que saiu
+  /// passa a ser "outro dono": fila vazia → token revogado e apagado).
+  void afterLogout();
+
+  /// "Limpar este aparelho". Lança [WipeBlocked] sem apagar nada se alguma
+  /// visita não foi enviada (disco ou memória).
+  Future<void> wipe(String currentOwner, OfflineVisitQueue current);
+}
+
+class _DeviceCareScope extends InheritedWidget {
+  const _DeviceCareScope({required this.care, required super.child});
+
+  final _DeviceCare care;
+
+  static _DeviceCare? maybeOf(BuildContext context) =>
+      context.getInheritedWidgetOfExactType<_DeviceCareScope>()?.care;
+
+  @override
+  bool updateShouldNotify(_DeviceCareScope oldWidget) => care != oldWidget.care;
+}
+
+/// Fila que não conseguiu gravar e ainda tem visita: essas visitas existem só
+/// em RAM, e descartá-la as perderia.
+bool _onlyInMemory(OfflineVisitQueue queue) =>
+    queue.persistenceFailed && (queue.pendingCount > 0 || queue.rejectedCount > 0);
+
+class _SinalAcsAppState extends State<SinalAcsApp> with WidgetsBindingObserver implements _DeviceCare {
   /// Armazenamento de visitas do aparelho: UM banco, uma visão por dono.
   ///
   /// A fila e o cursor do pull de cada dono são montados sobre este mesmo
@@ -173,10 +230,8 @@ class _SinalAcsAppState extends State<SinalAcsApp> with WidgetsBindingObserver {
     // EXCETO a fila que não conseguiu gravar (`persistenceFailed`) e ainda tem
     // visita: essas visitas existem só em RAM, e descartá-la as perderia — o
     // próximo login do dono precisa reencontrá-las.
-    bool soEmMemoria(OfflineVisitQueue queue) =>
-        queue.persistenceFailed && (queue.pendingCount > 0 || queue.rejectedCount > 0);
-    _queues.removeWhere((owner, queue) => owner != session.userId && !soEmMemoria(queue));
-    _scopes.removeWhere((key, scope) => !key.startsWith('${session.userId}|') && !soEmMemoria(scope.queue));
+    _queues.removeWhere((owner, queue) => owner != session.userId && !_onlyInMemory(queue));
+    _scopes.removeWhere((key, scope) => !key.startsWith('${session.userId}|') && !_onlyInMemory(scope.queue));
     return _scopes.putIfAbsent(visitCursorOwner(session), () {
       final built = buildOwnerVisitScope(
         backend: widget.backend,
@@ -197,6 +252,115 @@ class _SinalAcsAppState extends State<SinalAcsApp> with WidgetsBindingObserver {
         pullService: injectedPull ?? built.pullService,
       );
     });
+  }
+
+  @override
+  Future<FlushReport?> flushOthers() async {
+    final flush = _flush;
+    if (flush == null) return null;
+    try {
+      return await flush.flushAll().timeout(sessionEndSendTimeout);
+    } catch (_) {
+      return null; // o envio segue em segundo plano; nada se perde
+    }
+  }
+
+  @override
+  Future<int> pendingElsewhere(String currentOwner) async {
+    var total = 0;
+    try {
+      final flush = _flush;
+      if (flush != null) {
+        total = await flush.pendingElsewhere(currentOwner);
+      } else {
+        total = (await _storage.legacy.load()).length;
+        (await _storage.countsByOwner()).forEach((owner, count) {
+          if (owner != currentOwner) total += count;
+        });
+      }
+      for (final MapEntry(key: owner, value: queue) in _queues.entries) {
+        if (owner != currentOwner) total += await _onlyInRam(owner, queue);
+      }
+    } catch (_) {
+      // Sem leitura do disco: o aviso fica só com a contagem da fila do painel.
+    }
+    return total;
+  }
+
+  /// Visitas de [queue] que não estão no disco de [owner].
+  Future<int> _onlyInRam(String owner, OfflineVisitQueue queue) async {
+    final inQueue = [...queue.pendingVisits, ...queue.rejectedVisits];
+    if (inQueue.isEmpty) return 0;
+    final onDisk = {for (final row in await _storage.forOwner(owner).load()) row.localId};
+    return inQueue.where((visit) => !onDisk.contains(visit.localId)).length;
+  }
+
+  @override
+  Future<({int own, int elsewhere})?> unsentOnDevice(String currentOwner, OfflineVisitQueue current) async {
+    try {
+      final counts = await _storage.countsByOwner();
+      var own = counts[currentOwner] ?? 0;
+      var elsewhere = (await _storage.legacy.load()).length;
+      counts.forEach((owner, count) {
+        if (owner != currentOwner) elsewhere += count;
+      });
+      for (final MapEntry(key: owner, value: queue) in _queues.entries) {
+        if (owner != currentOwner) elsewhere += await _onlyInRam(owner, queue);
+      }
+      own += await _onlyInRam(currentOwner, current);
+      return (own: own, elsewhere: elsewhere);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  @override
+  void release(String owner, {required bool settled}) {
+    if (!settled) return;
+    final queue = _queues[owner];
+    if (queue != null && _onlyInMemory(queue)) return;
+    _queues.remove(owner);
+    _scopes.removeWhere((key, scope) => key.startsWith('$owner|') && !_onlyInMemory(scope.queue));
+  }
+
+  @override
+  void afterLogout() => _triggerFlush();
+
+  @override
+  Future<void> wipe(String currentOwner, OfflineVisitQueue current) async {
+    // A memória primeiro: o disco não enxerga a fila que não conseguiu gravar.
+    final inMemory = {..._queues.values, current}
+        .fold<int>(0, (total, queue) => total + queue.pendingCount + queue.rejectedCount);
+    if (inMemory > 0) throw WipeBlocked(inMemory);
+
+    // Reconta e apaga numa transação; recusa sem apagar nada se sobrou visita.
+    await _storage.wipeAllData();
+
+    final tokens = widget.uploadTokens;
+    if (tokens != null) {
+      Set<String> owners;
+      try {
+        owners = {...await tokens.owners(), currentOwner};
+      } catch (_) {
+        owners = {currentOwner};
+      }
+      for (final owner in owners) {
+        try {
+          final token = await tokens.read(owner);
+          // Best-effort e com teto: sem rede o token só é apagado daqui.
+          if (token != null) await widget.backend.revokeUploadToken(token).timeout(wipeRevokeTimeout);
+        } catch (_) {}
+      }
+      try {
+        await tokens.clearAll(alsoOwners: owners);
+      } catch (_) {
+        // Keystore falhou: os dados já foram apagados. Um token que sobrar
+        // não acha visita nenhuma e é revogado pelo próximo envio diferido.
+      }
+    }
+
+    _queues.clear();
+    _scopes.clear();
   }
 
   late final ThemeController _themeController = widget.themeController ?? ThemeController();
@@ -314,7 +478,9 @@ class _SinalAcsAppState extends State<SinalAcsApp> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) => BackendScope(
         backend: widget.backend,
-        child: _AppLockScope(
+        child: _DeviceCareScope(
+         care: this,
+         child: _AppLockScope(
           hooks: _lockHooks,
           child: ValueListenableBuilder<ThemeMode>(
             valueListenable: _themeController,
@@ -347,6 +513,7 @@ class _SinalAcsAppState extends State<SinalAcsApp> with WidgetsBindingObserver {
               ),
             ),
           ),
+         ),
         ),
       );
 }
@@ -1310,24 +1477,60 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
   }
 
   bool _saindo = false;
+  bool _limpando = false;
 
-  /// "Sair e encerrar o turno": revoga o refresh token (best-effort, sem rede
-  /// também sai) e volta ao login. NÃO apaga a fila de visitas nem o banco
-  /// (offline-first): a visita ainda não sincronizada continua no aparelho. O
-  /// feed MQTT e os timers param no `dispose` deste painel.
+  _DeviceCare? get _care => _DeviceCareScope.maybeOf(context);
+
+  /// Antes de sair ou limpar: (1) a fila do painel (o envio diferido pula o
+  /// dono da sessão atual de propósito, para não haver dois `sync` sobre a
+  /// mesma fila); (2) o envio diferido do legado e dos outros donos. Cada
+  /// etapa tem teto ([sessionEndSendTimeout]) e nenhuma falha bloqueia quem
+  /// chamou. `settled` é `false` quando a fila do painel ainda pode estar
+  /// enviando (o teto venceu).
+  Future<({bool settled, FlushReport? report})> _sendBeforeLeaving() async {
+    var settled = true;
+    try {
+      await widget.visitQueue.sync().timeout(sessionEndSendTimeout);
+    } on TimeoutException {
+      settled = false;
+    } catch (_) {
+      // `sync` não lança; defesa.
+    }
+    final report = await _care?.flushOthers();
+    return (settled: settled, report: report);
+  }
+
+  static String _visitas(int n) => n == 1 ? '1 visita' : '$n visitas';
+
+  /// "Sair e encerrar o turno": envia antes o que puder ([_sendBeforeLeaving])
+  /// e então revoga o refresh token (best-effort, sem rede também sai) e volta
+  /// ao login. O que não subiu NÃO é apagado (offline-first): continua no
+  /// aparelho e sobe sozinho quando a conexão voltar (pelo token de envio do
+  /// dono, D7). O feed MQTT e os timers param no `dispose` deste painel.
   ///
   /// Alerta não confirmado NÃO sobrevive à saída: a fila de alertas é deste
   /// painel e o broker não reentrega o que já entregou. Por isso a confirmação
   /// diz quantos são e o botão explicita a perda ("Sair mesmo assim") — a
-  /// saída não é bloqueada, mas também não descarta alerta em silêncio.
+  /// saída não é bloqueada, mas também não descarta alerta em silêncio. O
+  /// mesmo vale para visitas que ficaram no aparelho.
   Future<void> _logout() async {
-    if (_saindo) return;
+    if (_saindo || _limpando) return;
+    setState(() => _saindo = true);
+    final envio = await _sendBeforeLeaving();
+    if (!mounted) return;
+    final fila = widget.visitQueue;
+    final recusadas = fila.rejectedCount;
+    final proprias = fila.pendingCount + recusadas;
+    final outras = await _care?.pendingElsewhere(widget.acsId) ?? 0;
+    if (!mounted) return;
+    setState(() => _saindo = false);
+    final ficam = proprias + outras;
     final pendentes = _queue.unacknowledgedCount;
     final confirmou = await showDialog<bool>(
       context: context,
       builder: (dialog) => AlertDialog(
         title: const Text('Encerrar o turno?'),
-        content: Column(
+        content: SingleChildScrollView(child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -1340,31 +1543,62 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
               ),
               const SizedBox(height: 12),
             ],
-            const Text(
-              'As visitas ainda não sincronizadas continuam salvas neste aparelho '
-              'e só aparecem quando esta mesma conta entrar de novo.',
-            ),
+            if (ficam == 0)
+              const Text('Tudo foi enviado. Nenhuma visita fica pendente neste aparelho.', key: Key('logout_all_sent'))
+            else ...[
+              Text(
+                ficam == 1
+                    ? '1 visita ainda não enviada continua neste aparelho. Ela segue protegida e sobe sozinha quando a conexão voltar.'
+                    : '$ficam visitas ainda não enviadas continuam neste aparelho. Elas seguem protegidas e sobem sozinhas quando a conexão voltar.',
+                key: const Key('logout_pending_visits'),
+              ),
+              if (outras > 0 && proprias > 0) ...[
+                const SizedBox(height: 8),
+                Text(
+                  'Desta conta: $proprias. De outras contas ou sem autor: $outras.',
+                  key: const Key('logout_pending_breakdown'),
+                ),
+              ],
+              if (recusadas > 0) ...[
+                const SizedBox(height: 8),
+                Text(
+                  recusadas == 1
+                      ? '1 delas foi recusada pela central e aguarda revisão nesta conta.'
+                      : '$recusadas delas foram recusadas pela central e aguardam revisão nesta conta.',
+                  key: const Key('logout_rejected_visits'),
+                ),
+              ],
+            ],
           ],
-        ),
+        )),
         actions: [
           TextButton(onPressed: () => Navigator.pop(dialog, false), child: const Text('Cancelar')),
           FilledButton(
             key: const Key('logout_confirm'),
             onPressed: () => Navigator.pop(dialog, true),
-            child: Text(pendentes > 0 ? 'Sair mesmo assim' : 'Sair'),
+            child: Text(pendentes > 0 || ficam > 0 ? 'Sair mesmo assim' : 'Sair'),
           ),
         ],
       ),
     );
     if (confirmou != true || !mounted) return;
     setState(() => _saindo = true);
+    final care = _care;
     try {
       await BackendScope.of(context).logout();
     } on BackendFailure {
       // Falha do armazenamento seguro: sai do painel do mesmo jeito. A tela de
       // login abaixo não retoma sessão sozinha (sem `biometricGate`).
     }
+    // O próximo login deste ACS relê a fila do disco (o envio diferido pode
+    // tê-la mudado), exceto a fila que só existe em RAM.
+    care?.release(widget.acsId, settled: envio.settled);
+    care?.afterLogout();
     if (!mounted) return;
+    _voltarAoLogin('Turno encerrado neste aparelho.');
+  }
+
+  void _voltarAoLogin(String aviso) {
     Navigator.of(context).pushAndRemoveUntil(
       MaterialPageRoute<void>(builder: (_) => LoginScreen(
         visitScopeFor: widget.visitScopeFor,
@@ -1374,9 +1608,151 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
         initialAlert: widget.initialAlert,
         initialPosition: widget.initialPosition,
         syncInterval: widget.syncInterval,
-        aviso: 'Turno encerrado neste aparelho.',
+        aviso: aviso,
       )),
       (_) => false,
+    );
+  }
+
+  /// "Limpar este aparelho" (D9): envia antes o que puder e só apaga quando
+  /// NADA ficou sem enviar — de nenhum dono, da quarentena nem da memória.
+  /// Se sobrou algo, bloqueia e diz quantas (só contagem). A recontagem final
+  /// é do próprio banco, na transação que apaga ([VisitStorage.wipeAllData]).
+  /// Não existe limpeza forçada por supervisor (não há login de supervisor).
+  Future<void> _limparAparelho() async {
+    if (_saindo || _limpando) return;
+    setState(() => _limpando = true);
+    try {
+      final envio = await _sendBeforeLeaving();
+      if (!mounted) return;
+      final care = _care;
+      final restam = care == null ? null : await care.unsentOnDevice(widget.acsId, widget.visitQueue);
+      if (!mounted) return;
+      final revisao = envio.report?.needsReview ?? 0;
+      final semToken = envio.report?.blockedOwners.isNotEmpty ?? false;
+      if (care == null || restam == null || restam.own + restam.elsewhere > 0 || revisao > 0 || semToken) {
+        setState(() => _limpando = false);
+        await _wipeBloqueado(
+          own: restam?.own,
+          elsewhere: restam?.elsewhere,
+          needsReview: revisao,
+          ownersWithoutToken: semToken,
+        );
+        return;
+      }
+      setState(() => _limpando = false);
+      final alertas = _queue.unacknowledgedCount;
+      final confirmou = await showDialog<bool>(
+        context: context,
+        builder: (dialog) => AlertDialog(
+          title: const Text('Limpar este aparelho?'),
+          content: SingleChildScrollView(child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Todas as visitas deste aparelho já foram enviadas.'),
+              const SizedBox(height: 12),
+              const Text(
+                'Isto apaga neste aparelho as visitas já enviadas, o cache da microárea, '
+                'o cursor de sincronização e as chaves de envio. Não pode ser desfeito.',
+              ),
+              if (alertas > 0) ...[
+                const SizedBox(height: 12),
+                Text(
+                  alertas == 1
+                      ? 'Há 1 alerta ainda não confirmado. Ele sai deste aparelho, mas continua pendente no servidor.'
+                      : 'Há $alertas alertas ainda não confirmados. Eles saem deste aparelho, mas continuam pendentes no servidor.',
+                ),
+              ],
+            ],
+          )),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(dialog, false), child: const Text('Cancelar')),
+            FilledButton(
+              key: const Key('wipe_confirm'),
+              onPressed: () => Navigator.pop(dialog, true),
+              child: const Text('Limpar'),
+            ),
+          ],
+        ),
+      );
+      if (confirmou != true || !mounted) return;
+      setState(() => _limpando = true);
+      try {
+        await care.wipe(widget.acsId, widget.visitQueue);
+      } on WipeBlocked catch (blocked) {
+        // Algo chegou entre a conferência e a transação: nada foi apagado.
+        if (!mounted) return;
+        setState(() => _limpando = false);
+        await _wipeBloqueado(own: null, elsewhere: blocked.unsent, needsReview: 0, ownersWithoutToken: false);
+        return;
+      } catch (error, stackTrace) {
+        developer.log('falha ao limpar o aparelho', name: 'sinalacs.acs.wipe', error: error, stackTrace: stackTrace);
+        if (!mounted) return;
+        ScaffoldMessenger.maybeOf(context)
+          ?..hideCurrentSnackBar()
+          ..showSnackBar(const SnackBar(content: Text('Não foi possível limpar o aparelho. Tente de novo.')));
+        return;
+      }
+      if (!mounted) return;
+      try {
+        await BackendScope.of(context).logout();
+      } on BackendFailure {
+        // Sem rede: a sessão local some do mesmo jeito.
+      }
+      if (!mounted) return;
+      _voltarAoLogin('Os dados deste aparelho foram apagados.');
+    } finally {
+      if (mounted) setState(() => _limpando = false);
+    }
+  }
+
+  /// Bloqueio do wipe: só contagens, nenhum conteúdo clínico.
+  Future<void> _wipeBloqueado({
+    required int? own,
+    required int? elsewhere,
+    required int needsReview,
+    required bool ownersWithoutToken,
+  }) {
+    final total = own == null && elsewhere == null ? null : (own ?? 0) + (elsewhere ?? 0);
+    final String resumo;
+    if (total == null) {
+      resumo = 'Não foi possível conferir as visitas guardadas neste aparelho.';
+    } else if (total == 0) {
+      resumo = 'Há visitas neste aparelho que ainda precisam de revisão.';
+    } else {
+      resumo = total == 1 ? '1 visita ainda não foi enviada.' : '$total visitas ainda não foram enviadas.';
+    }
+    return showDialog<void>(
+      context: context,
+      builder: (dialog) => AlertDialog(
+        key: const Key('wipe_blocked'),
+        title: const Text('Ainda não dá para limpar'),
+        content: SingleChildScrollView(child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(resumo),
+            if (own != null && elsewhere != null && own + elsewhere > 0) ...[
+              const SizedBox(height: 8),
+              Text('Desta conta: ${_visitas(own)}. De outras contas ou sem autor: ${_visitas(elsewhere)}.'),
+            ],
+            if (needsReview > 0) ...[
+              const SizedBox(height: 8),
+              Text('${_visitas(needsReview)} sem autor aguarda${needsReview == 1 ? '' : 'm'} revisão.'),
+            ],
+            if (ownersWithoutToken) ...[
+              const SizedBox(height: 8),
+              const Text('Algumas só sobem quando a conta que as registrou entrar de novo neste aparelho.'),
+            ],
+            const SizedBox(height: 12),
+            const Text('Nada foi apagado: conecte e tente de novo; se não puderem ser enviadas, procure a coordenação.'),
+          ],
+        )),
+        actions: [
+          FilledButton(onPressed: () => Navigator.pop(dialog), child: const Text('Entendi')),
+        ],
+      ),
     );
   }
 
@@ -1453,7 +1829,13 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
         ),
       AcsDestination.notices => const NoticesScreen(),
       AcsDestination.invite => const InviteScreen(),
-      AcsDestination.settings => ThemeSettingsScreen(controller: widget.themeController, onLogout: _saindo ? null : _logout, loggingOut: _saindo),
+      AcsDestination.settings => ThemeSettingsScreen(
+          controller: widget.themeController,
+          onLogout: _saindo || _limpando ? null : _logout,
+          loggingOut: _saindo,
+          onWipe: _saindo || _limpando ? null : _limparAparelho,
+          wiping: _limpando,
+        ),
     }),
     bottomNavigationBar: NavigationBar(
       selectedIndex: destination.index <= 3 ? destination.index : 4,
@@ -2909,10 +3291,23 @@ class _NoticesScreenState extends State<NoticesScreen> {
       ]);
 }
 class ThemeSettingsScreen extends StatelessWidget {
-  const ThemeSettingsScreen({required this.controller, super.key, this.onLogout, this.loggingOut = false});
+  const ThemeSettingsScreen({
+    required this.controller,
+    super.key,
+    this.onLogout,
+    this.loggingOut = false,
+    this.onWipe,
+    this.wiping = false,
+  });
 
   /// Saída em andamento: o botão mostra progresso.
   final bool loggingOut;
+
+  /// "Limpar este aparelho". `null` desliga o botão.
+  final VoidCallback? onWipe;
+
+  /// Limpeza (ou o envio antes dela) em andamento.
+  final bool wiping;
 
   final ThemeController controller;
 
@@ -2939,7 +3334,8 @@ class ThemeSettingsScreen extends StatelessWidget {
       const SizedBox(height: 24),
       const Text('Turno', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
       const SizedBox(height: 4),
-      const Text('Sair encerra a sessão neste aparelho. As visitas ainda não sincronizadas continuam salvas.'),
+      const Text('Sair envia antes o que estiver pendente e encerra a sessão neste aparelho. '
+          'O que não puder ser enviado continua salvo e protegido, e sobe sozinho quando a conexão voltar.'),
       const SizedBox(height: 16),
       SizedBox(width: double.infinity, child: FilledButton(
         key: const Key('logout_button'),
@@ -2948,6 +3344,20 @@ class ThemeSettingsScreen extends StatelessWidget {
         child: loggingOut
             ? const SizedBox(key: Key('logout_progress'), height: 22, width: 22, child: CircularProgressIndicator(strokeWidth: 2))
             : const Text('Sair e encerrar o turno'),
+      )),
+      const SizedBox(height: 24),
+      const Text('Aparelho', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+      const SizedBox(height: 4),
+      const Text('Limpar este aparelho apaga as visitas já enviadas, o cache da microárea e as chaves de envio. '
+          'Só é possível quando todas as visitas, de todas as contas, já foram enviadas.'),
+      const SizedBox(height: 16),
+      SizedBox(width: double.infinity, child: OutlinedButton(
+        key: const Key('wipe_button'),
+        style: OutlinedButton.styleFrom(minimumSize: const Size(48, 52)),
+        onPressed: onWipe,
+        child: wiping
+            ? const SizedBox(key: Key('wipe_progress'), height: 22, width: 22, child: CircularProgressIndicator(strokeWidth: 2))
+            : const Text('Limpar este aparelho'),
       )),
     ]),
   );

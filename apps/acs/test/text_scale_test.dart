@@ -43,6 +43,37 @@ void main() {
     await assentar(tester);
     expect(sair.hitTestable(), findsOneWidget);
     esperarSemEstouro(tester, 'botão Sair a 200%');
+
+    final limpar = find.byKey(const Key('wipe_button'));
+    await tester.ensureVisible(limpar);
+    await assentar(tester);
+    expect(limpar.hitTestable(), findsOneWidget);
+    expect(tester.getSize(limpar).height, greaterThanOrEqualTo(48));
+    esperarSemEstouro(tester, 'botão Limpar este aparelho a 200%');
+  });
+
+  testWidgets('diálogos do "Sair" e do "Limpar este aparelho" não estouram a 200% em 360x800', (tester) async {
+    await abrirPainel(tester, tamanho: const Size(360, 800), escalaDeFonte: 2.0);
+    await irParaDoMais(tester, 'Preferências');
+
+    final sair = find.byKey(const Key('logout_button'));
+    await tester.ensureVisible(sair);
+    await assentar(tester);
+    await tester.tap(sair);
+    await assentar(tester);
+    expect(find.byKey(const Key('logout_confirm')), findsOneWidget);
+    esperarSemEstouro(tester, 'diálogo do Sair a 200%');
+    await tester.tap(find.text('Cancelar'));
+    await assentar(tester);
+
+    // Sem banco legível na VM, a conferência falha fechada: diálogo de bloqueio.
+    final limpar = find.byKey(const Key('wipe_button'));
+    await tester.ensureVisible(limpar);
+    await assentar(tester);
+    await tester.tap(limpar);
+    await assentar(tester);
+    expect(find.byKey(const Key('wipe_blocked')), findsOneWidget);
+    esperarSemEstouro(tester, 'diálogo de bloqueio da limpeza a 200%');
   });
 
   // Telas novas da MFA: o campo de código no login e a ativação (QR + chave + campo).

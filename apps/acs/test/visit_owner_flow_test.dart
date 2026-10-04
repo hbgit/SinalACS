@@ -86,7 +86,12 @@ void main() {
       expect(painel(), findsOneWidget);
     }
 
+    /// "Sair" SEM rede: o "Sair" tenta enviar a fila do dono antes (provado em
+    /// `session_resume_test.dart`); aqui ela precisa ficar no aparelho para
+    /// provar o isolamento entre donos.
     Future<void> sair(WidgetTester tester) async {
+      final antes = backend.syncFailure;
+      backend.syncFailure = const BackendFailure('Sem conexão com o servidor.');
       await irParaDoMais(tester, 'Preferências');
       final botao = find.byKey(const Key('logout_button'));
       await tester.ensureVisible(botao);
@@ -96,6 +101,7 @@ void main() {
       await tester.tap(find.byKey(const Key('logout_confirm')));
       await assentar(tester);
       expect(formulario(), findsOneWidget);
+      backend.syncFailure = antes;
     }
 
     Future<void> irEVoltar(WidgetTester tester) async {
@@ -129,12 +135,16 @@ void main() {
       expect(tester.widget<Text>(find.byKey(const Key('rejected_visits_count'))).data, contains(': 1'));
 
       // "Sincronizar agora" de B: nenhum localId de A sai do aparelho.
+      // (A tentou enviar a própria fila ao sair, sem rede: lote dele, sessão dele.)
+      final lotesAntes = backend.syncedVisitBatches.length;
       final sincronizar = find.byKey(const Key('sync_visits'));
       await tester.ensureVisible(sincronizar);
       await tester.pump();
       await tester.tap(sincronizar);
       await assentar(tester);
-      final enviados = [for (final lote in backend.syncedVisitBatches) ...lote.map((e) => e.localId)];
+      final enviados = [
+        for (final lote in backend.syncedVisitBatches.skip(lotesAntes)) ...lote.map((e) => e.localId),
+      ];
       expect(enviados, unorderedEquals(['local-b2', 'local-b3']));
 
       // Descartar a recusada de B não toca no armazenamento de A.
@@ -478,6 +488,9 @@ class _GravacaoDeAFalha implements VisitStorage {
 
   @override
   Future<Map<String, int>> countsByOwner() => _inner.countsByOwner();
+
+  @override
+  Future<void> wipeAllData() => _inner.wipeAllData();
 
   @override
   VisitStore forOwner(String ownerId) =>

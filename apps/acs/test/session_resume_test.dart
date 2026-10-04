@@ -7,6 +7,8 @@ import 'package:sinalacs_acs/app/app.dart';
 import 'package:sinalacs_acs/core/network/backend_client.dart';
 import 'package:sinalacs_acs/core/security/biometric_gate.dart';
 import 'package:sinalacs_acs/core/security/session_token_store.dart';
+import 'package:sinalacs_acs/core/security/upload_token_store.dart';
+import 'package:sinalacs_acs/core/services/backend_visit_synchronizer.dart';
 import 'package:sinalacs_acs/core/services/offline_visit_queue.dart';
 import 'package:sinalacs_client/sinalacs_client.dart' show MicroAreaPatient;
 
@@ -226,12 +228,12 @@ void main() {
   group('bloqueio com painel aberto', () {
     late FakeAcsBackend backend;
 
-    Future<void> abrirPainel(WidgetTester tester) async {
+    Future<void> abrirPainel(WidgetTester tester, {bool comVisita = true}) async {
       backend = FakeAcsBackend()
         ..patients = [
           MicroAreaPatient(patientId: syntheticPatientId(5), name: 'Paciente Sintético', isChronic: false, chronicConditions: const []),
         ];
-      await fila.add(OfflineVisitRecord(patientId: seedPatientId, risk: 'red', status: 'PENDENTE'));
+      if (comVisita) await fila.add(OfflineVisitRecord(patientId: seedPatientId, risk: 'red', status: 'PENDENTE'));
       await abrirApp(tester, backend, lockAfter: Duration.zero);
       await entrarComSenha(tester);
       expect(painel(), findsOneWidget);
@@ -389,7 +391,7 @@ void main() {
       await tester.pump();
       await tester.tap(sair);
       await assentar(tester);
-      expect(find.text('As visitas ainda não sincronizadas continuam salvas neste aparelho e só aparecem quando esta mesma conta entrar de novo.'), findsOneWidget);
+      expect(find.byKey(const Key('logout_pending_visits')), findsOneWidget);
 
       await tester.tap(find.text('Cancelar'));
       await assentar(tester);
@@ -427,8 +429,8 @@ void main() {
       await assentar(tester);
     }
 
-    testWidgets('"Sair" sem alerta pendente: texto e botão originais', (tester) async {
-      await abrirPainel(tester);
+    testWidgets('"Sair" sem alerta nem visita pendente: "Tudo foi enviado" e botão "Sair"', (tester) async {
+      await abrirPainel(tester, comVisita: false);
       // O único alerta do painel já foi confirmado.
       await irParaDaBarra(tester, 'Fila');
       final ack = find.byKey(const Key('ack_alerta-antes'));
@@ -439,7 +441,8 @@ void main() {
       expect(backend.acknowledgedAlertIds, ['alerta-antes']);
       await abrirSair(tester);
 
-      expect(find.text('As visitas ainda não sincronizadas continuam salvas neste aparelho e só aparecem quando esta mesma conta entrar de novo.'), findsOneWidget);
+      expect(find.text('Tudo foi enviado. Nenhuma visita fica pendente neste aparelho.'), findsOneWidget);
+      expect(find.byKey(const Key('logout_pending_visits')), findsNothing);
       expect(find.byKey(const Key('logout_pending_alerts')), findsNothing);
       expect(find.descendant(of: find.byKey(const Key('logout_confirm')), matching: find.text('Sair')), findsOneWidget);
     });
@@ -450,7 +453,8 @@ void main() {
       await assentar(tester);
       await abrirSair(tester);
 
-      expect(find.text('As visitas ainda não sincronizadas continuam salvas neste aparelho e só aparecem quando esta mesma conta entrar de novo.'), findsOneWidget);
+      expect(find.text('1 visita ainda não enviada continua neste aparelho. Ela segue protegida e sobe sozinha quando a conexão voltar.'),
+          findsOneWidget);
       expect(
         find.text('Há 2 alertas ainda não confirmados. Eles saem deste aparelho, mas continuam pendentes no servidor.'),
         findsOneWidget,
@@ -466,6 +470,55 @@ void main() {
       expect(fila.pendingCount, 1, reason: 'a visita não sincronizada continua no aparelho');
     });
 
+    testWidgets('"Sair" envia a fila do próprio ACS ANTES do logout e diz que tudo foi enviado', (tester) async {
+      backend = FakeAcsBackend();
+      fila = OfflineVisitQueue(synchronizer: BackendVisitSynchronizer(backend: backend, ownerId: seedAcsId));
+      await fila.add(OfflineVisitRecord(localId: 'local-propria', patientId: seedPatientId, risk: 'red', status: 'PENDENTE'));
+      await abrirApp(tester, backend);
+      await entrarComSenha(tester);
+      expect(backend.callLog, isEmpty, reason: 'nada sobe antes do Sair');
+
+      await abrirSair(tester);
+      expect(backend.callLog, ['syncVisits'], reason: 'a fila do painel sobe ao tocar em Sair, antes da confirmação');
+      expect(find.text('Tudo foi enviado. Nenhuma visita fica pendente neste aparelho.'), findsOneWidget);
+      expect(find.descendant(of: find.byKey(const Key('logout_confirm')), matching: find.text('Sair')), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('logout_confirm')));
+      await assentar(tester);
+
+      expect(backend.callLog, ['syncVisits', 'logout']);
+      expect(backend.syncedVisitBatches.single.single.localId, 'local-propria');
+      expect(fila.pendingCount, 0);
+      expect(formulario(), findsOneWidget);
+    });
+
+    testWidgets('"Sair" sem rede: diz quantas ficam, "Sair mesmo assim", e sai do mesmo jeito', (tester) async {
+      backend = FakeAcsBackend()..syncFailure = const BackendFailure('Sem conexão com o servidor.');
+      fila = OfflineVisitQueue(synchronizer: BackendVisitSynchronizer(backend: backend, ownerId: seedAcsId));
+      await fila.add(OfflineVisitRecord(localId: 'local-1', patientId: seedPatientId, risk: 'red', status: 'PENDENTE'));
+      await fila.add(OfflineVisitRecord(localId: 'local-2', patientId: seedPatientId, risk: 'green', status: 'PENDENTE'));
+      await abrirApp(tester, backend);
+      await entrarComSenha(tester);
+      // Nenhum alerta na fila: o "Sair mesmo assim" vem só das visitas.
+      await abrirSair(tester);
+
+      expect(backend.callLog, ['syncVisits'], reason: 'tentou enviar antes');
+      expect(
+        find.text('2 visitas ainda não enviadas continuam neste aparelho. Elas seguem protegidas e sobem sozinhas quando a conexão voltar.'),
+        findsOneWidget,
+      );
+      expect(find.byKey(const Key('logout_pending_alerts')), findsNothing);
+      expect(find.descendant(of: find.byKey(const Key('logout_confirm')), matching: find.text('Sair mesmo assim')),
+          findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('logout_confirm')));
+      await assentar(tester);
+
+      expect(backend.callLog, ['syncVisits', 'logout'], reason: 'a falha de envio não bloqueia a saída');
+      expect(fila.pendingCount, 2, reason: 'nada se perde');
+      expect(formulario(), findsOneWidget);
+    });
+
     testWidgets('"Sair" com 1 alerta não confirmado usa o singular', (tester) async {
       await abrirPainel(tester);
       await abrirSair(tester);
@@ -473,6 +526,84 @@ void main() {
         find.text('Há 1 alerta ainda não confirmado. Ele sai deste aparelho, mas continua pendente no servidor.'),
         findsOneWidget,
       );
+    });
+  });
+
+  group('"Sair" com a fila de cada dono (armazenamento do app)', () {
+    const acsA = 'acs-a';
+    late InMemoryVisitStorage storage;
+    late FakeAcsBackend backend;
+    late MemoryUploadTokenStore tokens;
+
+    OfflineVisitRecord pendente(String localId) =>
+        OfflineVisitRecord(localId: localId, patientId: seedPatientId, risk: 'red', status: 'PENDENTE');
+
+    setUp(() async {
+      storage = InMemoryVisitStorage();
+      await storage.forOwner(acsA).save([pendente('local-a1')]);
+      backend = FakeAcsBackend()..nextUserId = acsA;
+      tokens = MemoryUploadTokenStore({acsA: 'upload-a'});
+    });
+
+    Future<void> abrirApp(WidgetTester tester) async {
+      await tester.pumpWidget(SinalAcsApp(
+        backend: backend,
+        visitStorage: storage,
+        uploadTokens: tokens,
+        deviceIds: MemoryDeviceIdStore('aparelho-sintetico'),
+        feedBuilder: (q) => FakeAlertFeed(q),
+      ));
+      await assentar(tester);
+    }
+
+    Future<String> pendentesNaTela(WidgetTester tester) async {
+      await irParaDaBarra(tester, 'Visita');
+      final contador = find.byKey(const Key('pending_visits_count'));
+      await tester.ensureVisible(contador);
+      await tester.pump();
+      return tester.widget<Text>(contador).data!;
+    }
+
+    Future<void> sair(WidgetTester tester) async {
+      await irParaDoMais(tester, 'Preferências');
+      final botao = find.byKey(const Key('logout_button'));
+      await tester.ensureVisible(botao);
+      await tester.pump();
+      await tester.tap(botao);
+      await assentar(tester);
+      await tester.tap(find.byKey(const Key('logout_confirm')));
+      await assentar(tester);
+      expect(find.byKey(const Key('login_button')), findsOneWidget);
+    }
+
+    testWidgets('depois do "Sair", o próximo login do MESMO ACS relê a fila do disco', (tester) async {
+      backend
+        ..syncFailure = const BackendFailure('Sem conexão com o servidor.')
+        ..deferredFailure = const BackendFailure('Sem conexão com o servidor.');
+      await abrirApp(tester);
+      await entrarComSenha(tester);
+      expect(await pendentesNaTela(tester), 'Pendentes de sincronização: 1');
+
+      await sair(tester);
+      expect(await tokens.read(acsA), 'upload-a', reason: 'D7: o token do dono fica enquanto houver visita dele');
+
+      // Fora do painel, o envio diferido subiu a visita e a tirou do disco.
+      await storage.forOwner(acsA).save([]);
+
+      await entrarComSenha(tester);
+      expect(await pendentesNaTela(tester), 'Pendentes de sincronização: 0',
+          reason: 'a fila memoizada de antes do Sair mostraria a visita que já saiu');
+    });
+
+    testWidgets('"Sair" com tudo enviado: a fila do dono zera e o token de envio dele é revogado', (tester) async {
+      await abrirApp(tester);
+      await entrarComSenha(tester);
+      await sair(tester);
+
+      expect(await storage.forOwner(acsA).load(), isEmpty);
+      expect(backend.callLog.indexOf('syncVisits'), lessThan(backend.callLog.indexOf('logout')));
+      expect(backend.revokedUploadTokens, ['upload-a']);
+      expect(await tokens.read(acsA), isNull);
     });
   });
 }

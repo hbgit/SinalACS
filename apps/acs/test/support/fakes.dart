@@ -77,6 +77,10 @@ class FakeAcsBackend implements AcsBackend {
   int resumeCount = 0;
   int logoutCount = 0;
 
+  /// Ordem das chamadas que importam ao "Sair" e ao "Limpar este aparelho":
+  /// `syncVisits`, `syncLegacy`, `syncDeferred`, `revokeUploadToken`, `logout`.
+  final List<String> callLog = <String>[];
+
   @override
   Future<bool> get hasStoredSession async => storedRefreshToken != null;
 
@@ -98,6 +102,7 @@ class FakeAcsBackend implements AcsBackend {
   @override
   Future<void> logout() async {
     logoutCount++;
+    callLog.add('logout');
     await logoutGate?.future;
     storedRefreshToken = null;
     _session = null;
@@ -214,6 +219,7 @@ class FakeAcsBackend implements AcsBackend {
   Future<List<VisitSyncResult>> syncVisits(List<VisitSyncEntry> visits, {String? expectedUserId}) async {
     // Como o BackendClient: a conferência do dono vem antes de qualquer envio.
     if (expectedUserId != null && _session?.userId != expectedUserId) throw sessionOwnerMismatch;
+    callLog.add('syncVisits');
     syncedVisitBatches.add(List.of(visits));
     final failure = syncFailure;
     if (failure != null) throw failure;
@@ -246,6 +252,7 @@ class FakeAcsBackend implements AcsBackend {
     final transport = _session;
     if (transport == null) throw const BackendFailure('Sessão não iniciada.', isRecoverable: false);
     if (visits.length > 200) throw const BackendFailure('lote acima do limite', isRecoverable: false);
+    callLog.add('syncLegacy');
     legacyBatches.add((transportUserId: transport.userId, deviceId: deviceId, visits: List.of(visits)));
     final failure = legacyFailure;
     if (failure != null) throw failure;
@@ -274,6 +281,7 @@ class FakeAcsBackend implements AcsBackend {
     required List<VisitSyncEntry> visits,
   }) async {
     if (visits.length > 200) throw const BackendFailure('lote acima do limite', isRecoverable: false);
+    callLog.add('syncDeferred');
     deferredBatches.add((uploadToken: uploadToken, deviceId: deviceId, visits: List.of(visits)));
     // A recusa é decidida quando o servidor responde (depois da espera): o
     // token pode ter sido revogado enquanto o lote estava em voo.
@@ -292,6 +300,7 @@ class FakeAcsBackend implements AcsBackend {
 
   @override
   Future<void> revokeUploadToken(String uploadToken) async {
+    callLog.add('revokeUploadToken');
     revokedUploadTokens.add(uploadToken);
     await revokeGate?.future;
   }

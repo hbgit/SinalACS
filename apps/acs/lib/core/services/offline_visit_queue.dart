@@ -188,6 +188,24 @@ abstract interface class VisitStorage {
   /// Usado pelo envio diferido para achar donos sem token e para dizer quanto
   /// ainda não subiu.
   Future<Map<String, int>> countsByOwner();
+
+  /// "Limpar este aparelho" (D9): apaga os dados do app neste aparelho — as
+  /// visitas (que, se existirem, não foram enviadas), o cursor do pull e o
+  /// cache da microárea — numa transação. **Recusa** com [WipeBlocked], sem
+  /// apagar nada, se houver QUALQUER visita no aparelho, de qualquer dono ou
+  /// da quarentena: tudo o que está em `offline_visits` ainda não subiu.
+  Future<void> wipeAllData();
+}
+
+/// "Limpar este aparelho" recusado: ainda há [unsent] visitas não enviadas.
+/// Só a contagem — nenhum conteúdo de visita.
+class WipeBlocked implements Exception {
+  const WipeBlocked(this.unsent);
+
+  final int unsent;
+
+  @override
+  String toString() => 'WipeBlocked: $unsent visita(s) ainda não enviada(s)';
 }
 
 /// Quarentena (D2): as linhas com `owner IS NULL`. Nenhum dono as enxerga.
@@ -259,6 +277,15 @@ class InMemoryVisitStorage implements VisitStorage {
         for (final entry in _byOwner.entries)
           if (entry.value.isNotEmpty) entry.key: entry.value.length,
       };
+
+  /// Não há cursor nem cache em memória: só confere e esvazia as visitas.
+  @override
+  Future<void> wipeAllData() async {
+    final unsent = _byOwner.values.fold<int>(0, (total, visits) => total + visits.length) +
+        _legacy._visits.length;
+    if (unsent > 0) throw WipeBlocked(unsent);
+    _byOwner.clear();
+  }
 }
 
 class _InMemoryOwnerVisitStore implements VisitStore {

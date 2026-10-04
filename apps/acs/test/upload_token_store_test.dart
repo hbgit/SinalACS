@@ -14,6 +14,13 @@ import 'support/fake_rpc_server.dart';
 /// Credenciais e ids sintéticos.
 void main() {
   group('MemoryUploadTokenStore', () {
+    test('clearAll esvazia', () async {
+      final store = MemoryUploadTokenStore({'acs-a': 'upload-a', 'acs-b': 'upload-b'});
+      await store.clearAll();
+      expect(await store.owners(), isEmpty);
+      expect(await store.read('acs-a'), isNull);
+    });
+
     test('repairIndex é inofensivo (o índice é o próprio mapa)', () async {
       final store = MemoryUploadTokenStore({'acs-a': 'upload-a'});
       await store.repairIndex('acs-a');
@@ -83,6 +90,27 @@ void main() {
 
       expect(await store.owners(), ['acs-a']);
       expect(await store.read('acs-a'), 'upload-a', reason: 'o reparo nunca regrava o token');
+    });
+
+    test('clearAll apaga os tokens do índice e os pedidos fora dele, mantém os outros segredos', () async {
+      final keystore = _KeystoreFalso({
+        'acs_refresh_token': 'refresh-sintetico',
+        'acs_device_id': 'aparelho-sintetico',
+        'sinalacs_db_key': 'chave-sintetica',
+        'acs_upload_token|acs-fora-do-indice': 'upload-x',
+      });
+      final store = SecureStorageUploadTokenStore(storage: keystore);
+      await store.write('acs-a', 'upload-a');
+      await store.write('acs-b', 'upload-b');
+
+      await store.clearAll(alsoOwners: ['acs-fora-do-indice']);
+
+      expect(await store.owners(), isEmpty);
+      expect(keystore.data.keys.where((k) => k.startsWith('acs_upload_token')), isEmpty);
+      expect(keystore.data['acs_refresh_token'], 'refresh-sintetico');
+      expect(keystore.data['acs_device_id'], 'aparelho-sintetico');
+      expect(keystore.data['sinalacs_db_key'], 'chave-sintetica', reason: 'o wipe não troca a chave do banco');
+      expect(keystore.readAllCalls, 0);
     });
 
     test('índice ausente ou corrompido vale como vazio, e a próxima gravação o refaz', () async {

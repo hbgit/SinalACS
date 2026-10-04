@@ -462,6 +462,9 @@ class _RemocaoLegadaFalhaUmaVez implements VisitStorage {
 
   @override
   Future<Map<String, int>> countsByOwner() => _inner.countsByOwner();
+
+  @override
+  Future<void> wipeAllData() => _inner.wipeAllData();
 }
 
 class _LegadoFalha implements LegacyVisitStore {
@@ -499,6 +502,9 @@ class _GravacaoDoDonoFalhaUmaVez implements VisitStorage {
 
   @override
   VisitStore forOwner(String ownerId) => _DonoFalha(this, _inner.forOwner(ownerId));
+
+  @override
+  Future<void> wipeAllData() => _inner.wipeAllData();
 }
 
 class _DonoFalha implements VisitStore {
@@ -535,6 +541,9 @@ class _TokensQueFalham implements UploadTokenStore {
 
   @override
   Future<void> repairIndex(String ownerId) => Future.error(StateError('Keystore'));
+
+  @override
+  Future<void> clearAll({Iterable<String> alsoOwners = const <String>[]}) => Future.error(StateError('Keystore'));
 }
 
 /// Tokens guardados cujo ÍNDICE se perdeu: `owners()` não lista ninguém, mas
@@ -563,4 +572,7 @@ class _IndicePerdido implements UploadTokenStore {
 
   @override
   Future<void> repairIndex(String ownerId) async => reparados.add(ownerId);
+
+  @override
+  Future<void> clearAll({Iterable<String> alsoOwners = const <String>[]}) async => _tokens.clear();
 }

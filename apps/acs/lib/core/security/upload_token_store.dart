@@ -36,6 +36,12 @@ abstract interface class UploadTokenStore {
   /// índice se perdeu, ou a gravação dele falhou depois do token). Nunca
   /// regrava o token.
   Future<void> repairIndex(String ownerId);
+
+  /// "Limpar este aparelho": apaga o token de todo dono do índice e de
+  /// [alsoOwners] (donos conhecidos por quem chama, para o caso de o índice
+  /// ter se perdido), e o próprio índice. Não revoga no servidor: isso é de
+  /// quem chama, antes.
+  Future<void> clearAll({Iterable<String> alsoOwners = const <String>[]});
 }
 
 /// Duplo de teste: só em memória.
@@ -59,4 +65,7 @@ class MemoryUploadTokenStore implements UploadTokenStore {
   /// O índice é o próprio mapa: nada a reparar.
   @override
   Future<void> repairIndex(String ownerId) async {}
+
+  @override
+  Future<void> clearAll({Iterable<String> alsoOwners = const <String>[]}) async => _tokens.clear();
 }
