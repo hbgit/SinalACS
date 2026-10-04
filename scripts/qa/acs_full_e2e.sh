@@ -10,6 +10,8 @@
 # novos a cada execução), sobe o relé (OTP + credencial do ACS, opt-in) e roda
 # integration_test/full_journey_e2e.dart no emulador. Nada é escrito no banco
 # de desenvolvimento; o banco e o manifesto são apagados ao final.
+#
+# O "offline" do e2e é SIMULADO: um decorator de teste recusa só as chamadas de envio de visita, e o gatilho de conectividade é alimentado por um StreamController (não é a rede do aparelho caindo).
 set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib_rele.sh"
 
