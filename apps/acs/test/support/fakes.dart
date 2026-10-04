@@ -411,9 +411,13 @@ class FakeAcsBackend implements AcsBackend {
   /// o cursor lido é exatamente o que chega ao backend.
   final List<DateTime> pullSinceCalls = <DateTime>[];
 
+  /// Se definido, `pullVisits` espera por ele (pull em voo).
+  Completer<void>? pullGate;
+
   @override
   Future<List<VisitSyncEntry>> pullVisits({required DateTime since}) async {
     pullSinceCalls.add(since);
+    await pullGate?.future;
     final unclassified = pullUnclassifiedFailure;
     if (unclassified != null) throw unclassified;
     final failure = pullFailure;

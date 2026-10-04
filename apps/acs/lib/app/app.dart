@@ -150,9 +150,15 @@ abstract interface class _DeviceCare {
   Future<int> pendingElsewhere(String currentOwner);
 
   /// Tudo o que ainda não subiu, lido do DISCO (todos os donos + quarentena)
-  /// mais o que só está na memória de alguma fila. `null` se não deu para
-  /// conferir (quem chama trata como bloqueio).
-  Future<({int own, int elsewhere})?> unsentOnDevice(String currentOwner, OfflineVisitQueue current);
+  /// mais o que só está na memória de alguma fila, separado por motivo (só
+  /// contagens). `null` se não deu para conferir (quem chama trata como
+  /// bloqueio).
+  Future<UnsentOnDevice?> unsentOnDevice(
+    String currentOwner,
+    OfflineVisitQueue current, {
+    Set<String> ownersWithoutToken,
+    int legacyNeedsReview,
+  });
 
   /// Depois do "Sair": tira da memória a fila e o escopo de [owner] para o
   /// próximo login dele reler o disco. [settled] `false` (o envio da fila
@@ -180,6 +186,13 @@ class _DeviceCareScope extends InheritedWidget {
   @override
   bool updateShouldNotify(_DeviceCareScope oldWidget) => care != oldWidget.care;
 }
+
+/// O que impede o "Limpar este aparelho", só em contagens. [own] + [elsewhere]
+/// é o total (desta conta / de outras contas e sem autor); [unsent] +
+/// [review] + [noToken] é o mesmo total, por motivo: ainda não enviadas
+/// (dependem de rede), recusadas ou em revisão (dependem do ACS dono), e de
+/// outro dono sem chave de envio neste aparelho (dependem de ele entrar).
+typedef UnsentOnDevice = ({int own, int elsewhere, int unsent, int review, int noToken});
 
 /// Fila que não conseguiu gravar e ainda tem visita: essas visitas existem só
 /// em RAM, e descartá-la as perderia.
@@ -296,19 +309,61 @@ class _SinalAcsAppState extends State<SinalAcsApp> with WidgetsBindingObserver i
   }
 
   @override
-  Future<({int own, int elsewhere})?> unsentOnDevice(String currentOwner, OfflineVisitQueue current) async {
+  Future<UnsentOnDevice?> unsentOnDevice(
+    String currentOwner,
+    OfflineVisitQueue current, {
+    Set<String> ownersWithoutToken = const <String>{},
+    int legacyNeedsReview = 0,
+  }) async {
     try {
-      final counts = await _storage.countsByOwner();
-      var own = counts[currentOwner] ?? 0;
-      var elsewhere = (await _storage.legacy.load()).length;
-      counts.forEach((owner, count) {
-        if (owner != currentOwner) elsewhere += count;
-      });
-      for (final MapEntry(key: owner, value: queue) in _queues.entries) {
-        if (owner != currentOwner) elsewhere += await _onlyInRam(owner, queue);
+      var own = 0, elsewhere = 0, unsent = 0, review = 0, noToken = 0;
+      void conta(String? owner, OfflineVisitRecord visit) {
+        if (owner == currentOwner) {
+          own++;
+        } else {
+          elsewhere++;
+        }
+        if (visit.rejectionReason != null) {
+          review++;
+        } else if (owner != null && owner != currentOwner && ownersWithoutToken.contains(owner)) {
+          noToken++;
+        } else {
+          unsent++;
+        }
       }
-      own += await _onlyInRam(currentOwner, current);
-      return (own: own, elsewhere: elsewhere);
+
+      // Disco: cada dono com linhas e a quarentena. O conteúdo é lido só para
+      // separar recusada de pendente; nada dele sai daqui.
+      final disco = <String, Set<String>>{};
+      for (final owner in (await _storage.countsByOwner()).keys) {
+        final rows = await _storage.forOwner(owner).load();
+        disco[owner] = {for (final row in rows) row.localId};
+        for (final row in rows) {
+          conta(owner, row);
+        }
+      }
+      var revisaoLegada = legacyNeedsReview;
+      for (final row in await _storage.legacy.load()) {
+        if (row.rejectionReason == null && revisaoLegada > 0) {
+          revisaoLegada--;
+          elsewhere++;
+          review++; // recusada pela central nesta execução ('versão diferente')
+        } else {
+          conta(null, row);
+        }
+      }
+
+      // Memória: visitas de filas que não estão no disco do dono delas.
+      final filas = <String, OfflineVisitQueue>{..._queues, currentOwner: current};
+      for (final MapEntry(key: owner, value: queue) in filas.entries) {
+        final naFila = [...queue.pendingVisits, ...queue.rejectedVisits];
+        if (naFila.isEmpty) continue;
+        final noDisco = disco[owner] ?? {for (final row in await _storage.forOwner(owner).load()) row.localId};
+        for (final visit in naFila) {
+          if (!noDisco.contains(visit.localId)) conta(owner, visit);
+        }
+      }
+      return (own: own, elsewhere: elsewhere, unsent: unsent, review: review, noToken: noToken);
     } catch (_) {
       return null;
     }
@@ -1063,6 +1118,7 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
   /// docs/superpowers/plans/2026-09-18-rf15-consumo-acs-pull-visitas.md).
   void _startPeriodicSync() {
     _periodicSyncTimer?.cancel();
+    if (_areaFrozen) return;
     _periodicSyncTimer = Timer.periodic(_syncInterval, (_) => _refreshAreaData());
   }
 
@@ -1180,7 +1236,9 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
     animation.addStatusListener(listener);
   }
 
-  Future<void> _loadMicroAreaPatients() async {
+  Future<void> _loadMicroAreaPatients() => _trackArea(_loadMicroAreaPatientsNow);
+
+  Future<void> _loadMicroAreaPatientsNow() async {
     final backend = BackendScope.of(context);
     setState(() { _loadingMicroAreaPatients = true; _microAreaPatientsError = null; _microAreaFromCache = false; });
 
@@ -1231,6 +1289,44 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
     _loadMicroAreaPatients();
   }
 
+  /// `true` a partir da confirmação do "Limpar este aparelho": nenhuma
+  /// atualização da área (pull de visitas, lista da microárea) começa mais
+  /// neste painel, para nada do território ser regravado no aparelho depois
+  /// de "dados apagados". Volta a `false` só se a limpeza não acontecer.
+  bool _areaFrozen = false;
+
+  /// Atualizações da área em andamento (gravam o cursor do pull e o cache
+  /// da microárea).
+  final Set<Future<void>> _areaInFlight = <Future<void>>{};
+
+  Future<void> _trackArea(Future<void> Function() op) {
+    if (_areaFrozen) return Future<void>.value();
+    final running = op();
+    _areaInFlight.add(running);
+    unawaited(running.catchError((Object _) {}).whenComplete(() => _areaInFlight.remove(running)));
+    return running;
+  }
+
+  /// Para o ciclo periódico, impede novas atualizações e espera as que estão
+  /// em voo (com teto). `false`: alguma não terminou a tempo — limpar agora
+  /// deixaria ela regravar dados depois.
+  Future<bool> _freezeArea() async {
+    _areaFrozen = true;
+    _periodicSyncTimer?.cancel();
+    _periodicSyncTimer = null;
+    try {
+      await Future.wait(_areaInFlight.toList()).timeout(sessionEndSendTimeout);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  void _unfreezeArea() {
+    _areaFrozen = false;
+    _startPeriodicSync();
+  }
+
   /// Recarrega as visitas gravadas em execuções anteriores.
   ///
   /// Sem esta chamada, persistir não serviria para nada — `restore()` existia e
@@ -1261,7 +1357,9 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
   /// Disparado automaticamente ao abrir o painel, mais um botão manual na
   /// própria tela — não um timer de sincronização em segundo plano, decisão
   /// de produto separada e fora do escopo desta task.
-  Future<void> _pullVisits() async {
+  Future<void> _pullVisits() => _trackArea(_pullVisitsNow);
+
+  Future<void> _pullVisitsNow() async {
     setState(() { _pullingVisits = true; _pullError = null; });
 
     try {
@@ -1626,18 +1724,20 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
       final envio = await _sendBeforeLeaving();
       if (!mounted) return;
       final care = _care;
-      final restam = care == null ? null : await care.unsentOnDevice(widget.acsId, widget.visitQueue);
-      if (!mounted) return;
       final revisao = envio.report?.needsReview ?? 0;
-      final semToken = envio.report?.blockedOwners.isNotEmpty ?? false;
-      if (care == null || restam == null || restam.own + restam.elsewhere > 0 || revisao > 0 || semToken) {
+      final semToken = envio.report?.blockedOwners ?? const <String>[];
+      final restam = care == null
+          ? null
+          : await care.unsentOnDevice(
+              widget.acsId,
+              widget.visitQueue,
+              ownersWithoutToken: semToken.toSet(),
+              legacyNeedsReview: revisao,
+            );
+      if (!mounted) return;
+      if (care == null || restam == null || restam.own + restam.elsewhere > 0 || revisao > 0 || semToken.isNotEmpty) {
         setState(() => _limpando = false);
-        await _wipeBloqueado(
-          own: restam?.own,
-          elsewhere: restam?.elsewhere,
-          needsReview: revisao,
-          ownersWithoutToken: semToken,
-        );
+        await _wipeBloqueado(restam);
         return;
       }
       setState(() => _limpando = false);
@@ -1678,20 +1778,34 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
       );
       if (confirmou != true || !mounted) return;
       setState(() => _limpando = true);
+      void naoLimpou() => ScaffoldMessenger.maybeOf(context)
+        ?..hideCurrentSnackBar()
+        ..showSnackBar(const SnackBar(content: Text('Não foi possível limpar o aparelho. Tente de novo.')));
+      // Antes da transação: nenhuma atualização da área pode regravar cache
+      // ou cursor depois da limpeza (LGPD: "apagado" tem de ser verdade).
+      if (!await _freezeArea()) {
+        if (!mounted) return;
+        _unfreezeArea();
+        naoLimpou();
+        return;
+      }
+      if (!mounted) return;
       try {
         await care.wipe(widget.acsId, widget.visitQueue);
       } on WipeBlocked catch (blocked) {
         // Algo chegou entre a conferência e a transação: nada foi apagado.
         if (!mounted) return;
+        _unfreezeArea();
         setState(() => _limpando = false);
-        await _wipeBloqueado(own: null, elsewhere: blocked.unsent, needsReview: 0, ownersWithoutToken: false);
+        await _wipeBloqueado(
+          (own: 0, elsewhere: blocked.unsent, unsent: blocked.unsent, review: 0, noToken: 0),
+        );
         return;
       } catch (error, stackTrace) {
         developer.log('falha ao limpar o aparelho', name: 'sinalacs.acs.wipe', error: error, stackTrace: stackTrace);
         if (!mounted) return;
-        ScaffoldMessenger.maybeOf(context)
-          ?..hideCurrentSnackBar()
-          ..showSnackBar(const SnackBar(content: Text('Não foi possível limpar o aparelho. Tente de novo.')));
+        _unfreezeArea();
+        naoLimpou();
         return;
       }
       if (!mounted) return;
@@ -1707,21 +1821,33 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
     }
   }
 
-  /// Bloqueio do wipe: só contagens, nenhum conteúdo clínico.
-  Future<void> _wipeBloqueado({
-    required int? own,
-    required int? elsewhere,
-    required int needsReview,
-    required bool ownersWithoutToken,
-  }) {
-    final total = own == null && elsewhere == null ? null : (own ?? 0) + (elsewhere ?? 0);
-    final String resumo;
-    if (total == null) {
-      resumo = 'Não foi possível conferir as visitas guardadas neste aparelho.';
-    } else if (total == 0) {
-      resumo = 'Há visitas neste aparelho que ainda precisam de revisão.';
+  /// Bloqueio do wipe: só contagens, nenhum conteúdo clínico, e o motivo de
+  /// cada grupo — o que a pessoa pode fazer muda com ele. [restam] `null`:
+  /// não deu para conferir.
+  Future<void> _wipeBloqueado(UnsentOnDevice? restam) {
+    final linhas = <String>[];
+    if (restam == null) {
+      linhas.add('Não foi possível conferir as visitas guardadas neste aparelho. Tente de novo.');
     } else {
-      resumo = total == 1 ? '1 visita ainda não foi enviada.' : '$total visitas ainda não foram enviadas.';
+      final total = restam.own + restam.elsewhere;
+      if (total > 0) {
+        linhas.add('Desta conta: ${_visitas(restam.own)}. De outras contas ou sem autor: ${_visitas(restam.elsewhere)}.');
+      }
+      if (restam.unsent > 0) {
+        linhas.add('${restam.unsent == 1 ? '1 visita ainda não foi enviada' : '${restam.unsent} visitas ainda não foram enviadas'}: '
+            'conecte e tente de novo; se não puderem ser enviadas, procure a coordenação.');
+      }
+      if (restam.review > 0) {
+        linhas.add('${restam.review == 1 ? '1 visita precisa' : '${restam.review} visitas precisam'} '
+            'de revisão pelo ACS dono (reenvie ou descarte-as ao entrar com a conta dele).');
+      }
+      if (restam.noToken > 0) {
+        linhas.add('${restam.noToken == 1 ? '1 visita é' : '${restam.noToken} visitas são'} de outra conta sem chave de '
+            'envio neste aparelho: entre com a conta do agente para enviar.');
+      }
+      if (restam.unsent + restam.review + restam.noToken == 0) {
+        linhas.add('Ainda há dados que não puderam ser conferidos. Tente de novo.');
+      }
     }
     return showDialog<void>(
       context: context,
@@ -1732,21 +1858,8 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(resumo),
-            if (own != null && elsewhere != null && own + elsewhere > 0) ...[
-              const SizedBox(height: 8),
-              Text('Desta conta: ${_visitas(own)}. De outras contas ou sem autor: ${_visitas(elsewhere)}.'),
-            ],
-            if (needsReview > 0) ...[
-              const SizedBox(height: 8),
-              Text('${_visitas(needsReview)} sem autor aguarda${needsReview == 1 ? '' : 'm'} revisão.'),
-            ],
-            if (ownersWithoutToken) ...[
-              const SizedBox(height: 8),
-              const Text('Algumas só sobem quando a conta que as registrou entrar de novo neste aparelho.'),
-            ],
-            const SizedBox(height: 12),
-            const Text('Nada foi apagado: conecte e tente de novo; se não puderem ser enviadas, procure a coordenação.'),
+            for (final linha in linhas) ...[Text(linha), const SizedBox(height: 8)],
+            const Text('Nada foi apagado.'),
           ],
         )),
         actions: [

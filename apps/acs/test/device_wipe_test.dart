@@ -1,15 +1,19 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sinalacs_acs/app/app.dart';
 import 'package:sinalacs_acs/core/database/encrypted_database.dart';
+import 'package:sinalacs_acs/core/database/micro_area_cache_store.dart';
 import 'package:sinalacs_acs/core/database/sqlcipher_visit_store.dart';
 import 'package:sinalacs_acs/core/network/backend_client.dart';
 import 'package:sinalacs_acs/core/security/database_key_store.dart';
 import 'package:sinalacs_acs/core/security/session_token_store.dart';
 import 'package:sinalacs_acs/core/security/upload_token_store.dart';
+import 'package:sinalacs_acs/core/services/micro_area_directory.dart';
 import 'package:sinalacs_acs/core/services/offline_visit_queue.dart';
+import 'package:sinalacs_client/sinalacs_client.dart';
 
 import 'support/fakes.dart';
 import 'support/layout_harness.dart' show assentar, irParaDaBarra, irParaDoMais;
@@ -33,7 +37,7 @@ void main() {
       );
 
   /// Linha sem dono (quarentena, D2), como um aparelho que veio do schema v6.
-  Future<void> gravarLegada(SqlCipherVisitStorage storage, String localId) async {
+  Future<void> gravarLegada(SqlCipherVisitStorage storage, String localId, {String? rejectionReason}) async {
     final db = await storage.database.open();
     await db.insert('offline_visits', {
       'local_id': localId,
@@ -43,6 +47,7 @@ void main() {
       'outcome': 'PENDENTE',
       'created_at': DateTime.utc(2026, 10, 1).toIso8601String(),
       'version': 1,
+      'rejection_reason': rejectionReason,
     });
   }
 
@@ -95,6 +100,36 @@ void main() {
       await expectLater(storage.database.wipeAllData(), throwsA(isA<WipeBlocked>().having((e) => e.unsent, 'unsent', 1)));
       expect(await contarTabelas(storage), antes);
       expect(await storage.legacy.load(), hasLength(1));
+    });
+
+    test('recusa com só uma visita RECUSADA de um dono e não apaga nada', () async {
+      final storage = abrirBanco(dbName);
+      addTearDown(storage.close);
+      await storage.forOwner(acsA).save([
+        OfflineVisitRecord(
+          localId: 'a-recusada',
+          patientId: seedPatientId,
+          risk: 'red',
+          status: 'PENDENTE',
+          rejectionReason: 'paciente fora da sua microárea',
+        ),
+      ]);
+      await gravarCursorECache(storage);
+      final antes = await contarTabelas(storage);
+
+      await expectLater(storage.database.wipeAllData(), throwsA(isA<WipeBlocked>().having((e) => e.unsent, 'unsent', 1)));
+      expect(await contarTabelas(storage), antes);
+    });
+
+    test('recusa com só uma visita RECUSADA sem dono (quarentena) e não apaga nada', () async {
+      final storage = abrirBanco(dbName);
+      addTearDown(storage.close);
+      await gravarLegada(storage, 'legada-recusada', rejectionReason: 'visita já registrada com autor — versão diferente');
+      await gravarCursorECache(storage);
+      final antes = await contarTabelas(storage);
+
+      await expectLater(storage.database.wipeAllData(), throwsA(isA<WipeBlocked>().having((e) => e.unsent, 'unsent', 1)));
+      expect(await contarTabelas(storage), antes);
     });
 
     test('sem visita pendente apaga cursor e cache; o arquivo continua e reabre', () async {
@@ -165,18 +200,41 @@ void main() {
 
     Future<T> io<T>(WidgetTester tester, Future<T> Function() op) async => (await tester.runAsync(op)) as T;
 
-    /// Bloqueado: diálogo com a contagem, nada apagado, sem logout.
+    /// Bloqueado: diálogo com a contagem e o MOTIVO certo, nada apagado, sem
+    /// logout. [motivo]: 'envio' (não enviada), 'revisao' (recusada) ou
+    /// 'semToken' (dono sem chave de envio). Nunca fala de revisão sem visita
+    /// recusada.
     Future<void> esperarBloqueio(
       WidgetTester tester, {
       required int visitas,
       required Map<String, int> antes,
       bool tokenDeAFica = true,
+      String motivo = 'envio',
     }) async {
       expect(find.byKey(const Key('wipe_blocked')), findsOneWidget);
       expect(find.byKey(const Key('wipe_confirm')), findsNothing);
-      final quantas = visitas == 1 ? '1 visita ainda não foi enviada' : '$visitas visitas ainda não foram enviadas';
-      expect(find.textContaining(quantas), findsOneWidget);
-      expect(find.textContaining('conecte e tente de novo; se não puderem ser enviadas, procure a coordenação'), findsOneWidget);
+      final um = visitas == 1;
+      final conecte = find.textContaining('conecte e tente de novo; se não puderem ser enviadas, procure a coordenação');
+      final revisao = find.textContaining('de revisão pelo ACS dono (reenvie ou descarte-as ao entrar com a conta dele)');
+      final semToken = find.textContaining('entre com a conta do agente para enviar');
+      switch (motivo) {
+        case 'envio':
+          expect(find.textContaining(um ? '1 visita ainda não foi enviada' : '$visitas visitas ainda não foram enviadas'),
+              findsOneWidget);
+          expect(conecte, findsOneWidget);
+          expect(revisao, findsNothing);
+          expect(semToken, findsNothing);
+        case 'revisao':
+          expect(find.textContaining(um ? '1 visita precisa de revisão' : '$visitas visitas precisam de revisão'),
+              findsOneWidget);
+          expect(revisao, findsOneWidget);
+          expect(conecte, findsNothing);
+        case 'semToken':
+          expect(semToken, findsOneWidget);
+          expect(revisao, findsNothing);
+          expect(conecte, findsNothing);
+      }
+      expect(find.textContaining('revisão'), motivo == 'revisao' ? findsWidgets : findsNothing);
       await tester.tap(find.text('Entendi'));
       await assentar(tester);
 
@@ -299,6 +357,152 @@ void main() {
       await tester.ensureVisible(contador);
       await tester.pump();
       expect(tester.widget<Text>(contador).data, 'Pendentes de sincronização: 1 (em memória)');
+    });
+
+    testWidgets('bloqueia com 1 visita RECUSADA do próprio ACS, pedindo revisão (não "conecte")', (tester) async {
+      await io(tester, () async {
+        await storage.forOwner(acsA).save([
+          OfflineVisitRecord(
+            localId: 'a-recusada',
+            patientId: seedPatientId,
+            risk: 'red',
+            status: 'PENDENTE',
+            rejectionReason: 'paciente fora da sua microárea',
+          ),
+        ]);
+        await gravarCursorECache(storage);
+      });
+      final antes = await io(tester, () => contarTabelas(storage));
+      await abrirApp(tester);
+      await entrarComo(tester, acsA);
+
+      await tocarEmLimpar(tester);
+
+      await esperarBloqueio(tester, visitas: 1, antes: antes, motivo: 'revisao');
+    });
+
+    testWidgets('bloqueia com visita de OUTRO ACS sem chave de envio: "entre com a conta do agente"', (tester) async {
+      tokens = MemoryUploadTokenStore({acsA: 'upload-a'});
+      await io(tester, () async {
+        await storage.forOwner(acsB).save([pendente('b-1')]);
+        await gravarCursorECache(storage);
+      });
+      final antes = await io(tester, () => contarTabelas(storage));
+      await abrirApp(tester);
+      await entrarComo(tester, acsA);
+
+      await tocarEmLimpar(tester);
+
+      await esperarBloqueio(tester, visitas: 1, antes: antes, motivo: 'semToken');
+    });
+
+    /// Abre o diálogo de confirmação (tudo enviado até ali).
+    Future<void> ateAConfirmacao(WidgetTester tester) async {
+      await tocarEmLimpar(tester);
+      expect(find.byKey(const Key('wipe_confirm')), findsOneWidget);
+    }
+
+    testWidgets('visita que entra na MEMÓRIA depois da confirmação aberta: a limpeza recusa e nada é apagado', (tester) async {
+      await io(tester, () => gravarCursorECache(storage));
+      // Fila do painel que não grava: o que entrar nela só existe na RAM.
+      final fila = OfflineVisitQueue(store: FailingVisitStore(failOnLoad: false));
+      await tester.pumpWidget(SinalAcsApp(
+        backend: backend,
+        visitStorage: storage,
+        visitQueue: fila,
+        uploadTokens: tokens,
+        deviceIds: MemoryDeviceIdStore('aparelho-sintetico'),
+        feedBuilder: (q) => FakeAlertFeed(q),
+      ));
+      await assentar(tester);
+      await entrarComo(tester, acsA);
+      final antes = await io(tester, () => contarTabelas(storage));
+      await ateAConfirmacao(tester);
+
+      await fila.add(pendente('chegou-depois'));
+      expect(fila.persistenceFailed, isTrue);
+      await tester.tap(find.byKey(const Key('wipe_confirm')));
+      await assentar(tester);
+
+      await esperarBloqueio(tester, visitas: 1, antes: antes);
+      expect(fila.pendingCount, 1);
+    });
+
+    testWidgets('visita que chega ao DISCO depois da confirmação aberta: a transação recusa e nada é apagado', (tester) async {
+      await io(tester, () => gravarCursorECache(storage));
+      await abrirApp(tester);
+      await entrarComo(tester, acsA);
+      await ateAConfirmacao(tester);
+
+      await io(tester, () => storage.forOwner(acsB).save([pendente('b-depois')]));
+      final antes = await io(tester, () => contarTabelas(storage));
+      await tester.tap(find.byKey(const Key('wipe_confirm')));
+      await assentar(tester);
+
+      await esperarBloqueio(tester, visitas: 1, antes: antes);
+      expect(await io(tester, () => storage.forOwner(acsB).load()), hasLength(1));
+    });
+
+    testWidgets('atualização da área em voo na confirmação: nada de cache nem cursor é regravado depois da limpeza',
+        (tester) async {
+      final syncAt = DateTime.utc(2026, 10, 3, 10);
+      backend.pullEntries = [
+        VisitSyncEntry(
+          localId: 'remota-1',
+          patientId: seedPatientId,
+          scheduledAt: DateTime.utc(2026, 10, 3, 9),
+          status: 'realizada',
+          riskLevelBefore: RiskLevel.green,
+          notes: const {},
+          version: 1,
+          syncAt: syncAt,
+          arrivalMethod: ArrivalMethod.manual,
+        ),
+      ];
+      Completer<void>? listaGate;
+      final directory = MicroAreaDirectory(
+        fetch: () async {
+          await listaGate?.future;
+          return [
+            MicroAreaPatient(patientId: syntheticPatientId(5), name: 'Paciente Sintético', isChronic: false, chronicConditions: const []),
+          ];
+        },
+        session: () => backend.session,
+        store: MicroAreaCacheStore(keyStore: InMemoryDatabaseKeyStore(), databaseName: dbName, allowUnencryptedForTesting: true),
+      );
+      await tester.pumpWidget(SinalAcsApp(
+        backend: backend,
+        visitStorage: storage,
+        microAreaDirectory: directory,
+        uploadTokens: tokens,
+        deviceIds: MemoryDeviceIdStore('aparelho-sintetico'),
+        feedBuilder: (q) => FakeAlertFeed(q),
+      ));
+      await assentar(tester);
+      await entrarComo(tester, acsA);
+      final carregado = await io(tester, () => contarTabelas(storage));
+      expect(carregado['micro_area_cache'], 1);
+      expect(carregado['sync_cursor'], 1);
+
+      await ateAConfirmacao(tester);
+      // Volta do segundo plano: atualização da área em voo, presa na rede.
+      listaGate = Completer<void>();
+      backend.pullGate = Completer<void>();
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pump();
+
+      await tester.tap(find.byKey(const Key('wipe_confirm')));
+      await assentar(tester);
+      // A rede responde depois que a pessoa confirmou.
+      listaGate.complete();
+      backend.pullGate!.complete();
+      await assentar(tester);
+      await assentar(tester);
+
+      expect(find.byKey(const Key('login_button')), findsOneWidget);
+      expect(await io(tester, () => contarTabelas(storage)), {for (final t in tabelas) t: 0},
+          reason: 'nada do território é regravado depois de "dados apagados"');
     });
 
     testWidgets('com TUDO enviado: confirma, esvazia as tabelas e as chaves de envio, sai e volta ao login', (tester) async {
