@@ -34,11 +34,16 @@ class FakeVisitStore implements VisitStore {
 
   @override
   Future<VisitRecord> insert(VisitRecord visit) async {
+    if (++_inserts == failOnInsertNumber) throw StateError('falha simulada do banco');
     // Como o `defaultPersist=random` do banco: a linha nasce com id.
     final row = visit.id == null ? visit.copyWith(id: UuidValue.fromString(_nextId())) : visit;
     rows[row.localId.uuid] = row;
     return row;
   }
+
+  /// Lança no N-ésimo insert (1-based), simulando falha de banco no meio do lote.
+  int? failOnInsertNumber;
+  int _inserts = 0;
 
   int _seq = 0;
   String _nextId() => '00000000-0000-4000-9000-${(++_seq).toString().padLeft(12, '0')}';
@@ -791,6 +796,108 @@ void main() {
           transporter: _acs,
           deviceId: deviceId,
           entries: [legacyEntry(_localId, patientId: _outroTerritorioPatientId)]);
+      expect(results.single.message, 'paciente fora da sua microárea');
+    });
+  });
+
+  group('syncLegacy — fix round 2', () {
+    const deviceId = 'aparelho-legado-01';
+    const outroPacienteMesmaArea = '00000000-0000-4000-8000-000000000021';
+    const localB = '00000000-0000-4000-8000-0000000000b2';
+
+    VisitSyncEntry e(String localId, {int version = 0, String patientId = _patientId}) => VisitSyncEntry(
+          localId: localId,
+          patientId: patientId,
+          scheduledAt: DateTime.utc(2026, 9, 11, 9),
+          status: 'realizada',
+          riskLevelBefore: RiskLevel.green,
+          notes: const {},
+          version: version,
+          arrivalMethod: ArrivalMethod.manual,
+        );
+
+    setUp(() {
+      store = FakeVisitStore(microAreaByPatient: {
+        _patientId: _microAreaId,
+        outroPacienteMesmaArea: _microAreaId,
+        _outroTerritorioPatientId: _otherMicroAreaId,
+      });
+      audit = FakeAuditTrail();
+      service = VisitSyncService(store: store, audit: audit, clock: () => DateTime.utc(2026, 10, 3, 12));
+    });
+
+    test('lote cuja 2ª visita lança: nenhuma linha de item nem de lote', () async {
+      store.failOnInsertNumber = 2;
+
+      await expectLater(
+        service.syncLegacy(transporter: _acs, deviceId: deviceId, entries: [e(_localId), e(localB)]),
+        throwsA(isA<StateError>()),
+      );
+      expect(audit.events.where((x) => x.result == 'visit_legacy_sync_item'), isEmpty);
+      expect(audit.events.where((x) => x.result == 'visit_legacy_sync'), isEmpty);
+    });
+
+    test('itens são gravados só depois do laço, logo antes da linha de lote', () async {
+      await service.syncLegacy(transporter: _acs, deviceId: deviceId, entries: [e(_localId), e(localB)]);
+
+      expect(audit.events.map((x) => x.result).toList(),
+          ['visit_legacy_sync_item', 'visit_legacy_sync_item', 'visit_legacy_sync']);
+    });
+
+    test('ACS da microárea X + paciente de Y + localId com autor na mesma versão: '
+        "rejected 'paciente fora da sua microárea'", () async {
+      const acsDeY = AuthenticatedUser(
+        id: _otherAcsId,
+        role: UserRole.acs,
+        microAreaId: _otherMicroAreaId,
+        deviceId: 'acs-device-y',
+      );
+      await service.sync(user: acsDeY, entries: [e(_localId, patientId: _outroTerritorioPatientId)]);
+
+      final results = await service.syncLegacy(
+        transporter: _acs,
+        deviceId: deviceId,
+        entries: [e(_localId, version: 1, patientId: _outroTerritorioPatientId)],
+      );
+
+      expect(results.single.syncStatus, SyncStatus.rejected);
+      expect(results.single.message, 'paciente fora da sua microárea');
+      expect(results.single.serverVersion, isNull);
+    });
+
+    test('paciente da própria microárea mas localId de visita de OUTRO paciente (com autor, '
+        'mesma versão): recusa genérica', () async {
+      await service.sync(user: _acs, entries: [e(_localId, patientId: outroPacienteMesmaArea)]);
+
+      final results = await service.syncLegacy(
+        transporter: _acs,
+        deviceId: deviceId,
+        entries: [e(_localId, version: 1)],
+      );
+
+      expect(results.single.syncStatus, SyncStatus.rejected);
+      expect(results.single.message, 'paciente fora da sua microárea');
+      expect(results.single.serverVersion, isNull);
+      expect(store.rows[_localId]!.patientId, UuidValue.fromString(outroPacienteMesmaArea));
+    });
+
+    test('localId legado de OUTRO paciente, mesmo aparelho e versão: recusa genérica', () async {
+      await service.syncLegacy(
+          transporter: _acs, deviceId: deviceId, entries: [e(_localId, patientId: outroPacienteMesmaArea)]);
+
+      final results =
+          await service.syncLegacy(transporter: _acs, deviceId: deviceId, entries: [e(_localId, version: 1)]);
+
+      expect(results.single.syncStatus, SyncStatus.rejected);
+      expect(results.single.message, 'paciente fora da sua microárea');
+    });
+
+    test('paciente divergente com versão diferente também não revela "versão diferente"', () async {
+      await service.sync(user: _acs, entries: [e(_localId, patientId: outroPacienteMesmaArea)]);
+
+      final results = await service.syncLegacy(
+          transporter: _acs, deviceId: deviceId, entries: [e(_localId, version: 5)]);
+
       expect(results.single.message, 'paciente fora da sua microárea');
     });
   });

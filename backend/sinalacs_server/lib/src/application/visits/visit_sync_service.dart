@@ -290,12 +290,22 @@ class VisitSyncService {
     }
 
     final results = <VisitSyncResult>[];
+    final written = <VisitRecord>[];
     for (final entry in entries) {
       results.add(await _syncOne(
         user: transporter,
         entry: entry,
         legacyDeviceId: deviceId,
+        legacyWritten: written,
       ));
+    }
+
+    // A trilha usa outra conexão, FORA da transação do lote: gravar os itens
+    // dentro do laço deixaria linhas apontando para visitas que nunca
+    // persistiram quando uma entrada posterior lança e o lote é desfeito. Por
+    // isso os itens só saem aqui, depois do laço inteiro, logo antes do lote.
+    for (final visit in written) {
+      await _auditLegacyItem(transporter, visit);
     }
 
     // Best-effort, como o `pull`: a trilha fora do ar não pode impedir que o
@@ -316,6 +326,7 @@ class VisitSyncService {
     required AuthenticatedUser user,
     required VisitSyncEntry entry,
     String? legacyDeviceId,
+    List<VisitRecord>? legacyWritten,
   }) async {
     final legacy = legacyDeviceId != null;
     if (entry.localId.trim().isEmpty) {
@@ -371,11 +382,7 @@ class VisitSyncService {
         result: 'denied_territory',
       ));
       // Terminal: o território não muda por retentar.
-      return VisitSyncResult(
-        localId: entry.localId,
-        syncStatus: SyncStatus.rejected,
-        message: 'paciente fora da sua microárea',
-      );
+      return _outsideTerritory(entry);
     }
 
     final acsId = UuidValue.fromString(user.id);
@@ -400,7 +407,7 @@ class VisitSyncService {
         syncAt: _clock().toUtc(),
         version: 1,
       ));
-      if (legacy) await _auditLegacyItem(user, inserted);
+      legacyWritten?.add(inserted);
       return VisitSyncResult(
         localId: entry.localId,
         syncStatus: SyncStatus.synced,
@@ -409,6 +416,24 @@ class VisitSyncService {
     }
 
     if (legacy) {
+      // Antes de QUALQUER resposta que dependa da linha existente: o `localId`
+      // tem de ser de uma visita do MESMO paciente da entrada (cujo território
+      // já foi conferido acima — logo, a linha também é do território de quem
+      // transporta). Sem isto, `synced`/'versão diferente' viraria um oráculo:
+      // quem chuta um `localId` descobriria que a visita existe, e em que
+      // versão, mesmo sendo de outro paciente ou de outra microárea. A
+      // resposta é a mesma da recusa territorial, para não distinguir os casos.
+      if (existing.patientId != patientId) {
+        await _audit.recordSafely(AuditEvent(
+          userId: user.id,
+          actionType: 'write',
+          resourceType: 'visit_legacy',
+          resourceId: patientId.uuid,
+          result: 'denied_patient_mismatch',
+        ));
+        return _outsideTerritory(entry);
+      }
+
       // O envio legado só ALTERA visitas SEM autor que vieram do mesmo
       // aparelho. Uma visita com autor ACS não vira "desconhecida" por um
       // reenvio: na mesma versão o reenvio é só a idempotência (a visita já
@@ -498,13 +523,21 @@ class VisitSyncService {
       version: existing.version + 1,
     ));
 
-    if (legacy) await _auditLegacyItem(user, updated);
+    legacyWritten?.add(updated);
     return VisitSyncResult(
       localId: entry.localId,
       syncStatus: SyncStatus.synced,
       serverVersion: updated.version,
     );
   }
+
+  /// A recusa territorial, única para fora do território e para `localId` de
+  /// outro paciente: não cita a microárea alheia nem o paciente. Terminal.
+  static VisitSyncResult _outsideTerritory(VisitSyncEntry entry) => VisitSyncResult(
+        localId: entry.localId,
+        syncStatus: SyncStatus.rejected,
+        message: 'paciente fora da sua microárea',
+      );
 
   /// Uma linha por visita legada criada ou alterada: quem transportou e QUAL
   /// visita — só o id, nada clínico. Best-effort como o resto da trilha.

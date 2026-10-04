@@ -458,5 +458,45 @@ void main() {
         isEmpty,
       );
     });
+
+    test('localId com autor de paciente de OUTRO território, mesma versão: recusa genérica, '
+        'sem synced', () async {
+      final session = sessionBuilder.build();
+      await _seed(session);
+      const localId = '00000000-0000-4000-8000-0000000001f1';
+      // Visita com autor de um paciente da microárea vizinha, gravada direto.
+      final notas = await encryptedVisitNotes(const {});
+      await Visit.db.insertRow(
+        session,
+        Visit(
+          patientId: UuidValue.fromString(_patientOutsideAreaId),
+          acsId: UuidValue.fromString(_acsId),
+          scheduledAt: DateTime.utc(2026, 9, 12, 9),
+          status: 'realizada',
+          riskLevelBefore: RiskLevel.green,
+          notesEncrypted: notas.ciphertextBase64,
+          notesKeyVersion: notas.keyVersion,
+          syncStatus: SyncStatus.synced,
+          localId: UuidValue.fromString(localId),
+          syncAt: DateTime.utc(2026, 9, 12, 11),
+          version: 1,
+        ),
+      );
+      final token = await acsToken();
+
+      for (final patientId in [_patientOutsideAreaId, _patientInAreaId]) {
+        final results = await endpoints.visits.syncLegacy(sessionBuilder,
+            accessToken: token,
+            deviceId: _deviceId,
+            visits: [_entry(localId: localId, patientId: patientId, version: 1)]);
+        expect(results.single.syncStatus, SyncStatus.rejected, reason: patientId);
+        expect(results.single.message, 'paciente fora da sua microárea', reason: patientId);
+        expect(results.single.serverVersion, isNull, reason: patientId);
+      }
+      expect(
+        await AuditLog.db.find(session, where: (t) => t.result.equals('visit_legacy_sync_item')),
+        isEmpty,
+      );
+    });
   });
 }
