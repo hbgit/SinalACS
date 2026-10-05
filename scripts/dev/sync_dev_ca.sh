@@ -30,6 +30,17 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# Só o teste (sync_dev_ca_test.sh) sobrescreve: aponta para uma árvore temporária.
+repo_root="${SYNC_DEV_CA_ROOT:-$repo_root}"
+
+# Os seis temporários das fases 2 e 3. `mv` consome o seu; o que sobrar numa
+# falha ou num Ctrl-C (o `trap EXIT` roda nos dois) é apagado aqui, para o asset
+# nunca ficar ao lado de um `.tmp` meio escrito.
+limpar_tmp() {
+  rm -f "$repo_root"/apps/{acs,patient}/assets/certs/{dev_ca.crt,dev_rpc_ca.crt}.tmp \
+        "$repo_root"/apps/acs/assets/certs/acs_client.{crt,key}.tmp
+}
+trap limpar_tmp EXIT
 
 # A propriedade que interessa não é "a CA não expirou": é "esta CA é a que
 # assina a folha que o app vai enfrentar". A guarda antiga
@@ -142,6 +153,16 @@ done
 if ! verify_err="$(openssl verify -CAfile "$mqtt_certs/ca.crt" "$mqtt_certs/acs-area-12.crt" 2>&1)"; then
   echo "erro: a CA do broker não assina o certificado de cliente $mqtt_certs/acs-area-12.crt — nada foi copiado." >&2
   echo "$verify_err" >&2
+  exit 1
+fi
+# O certificado ser da CA não prova que a chave é o par dele: uma chave regerada
+# sem o certificado passaria no `verify` e o handshake mTLS falharia no app sem
+# nada vermelho em lugar nenhum. Compara a chave pública dos dois.
+pub_crt="$(openssl x509 -in "$mqtt_certs/acs-area-12.crt" -noout -pubkey)"
+pub_key="$(openssl pkey -in "$mqtt_certs/acs-area-12.key" -pubout 2>/dev/null || true)"
+if [[ -z "$pub_key" || "$pub_crt" != "$pub_key" ]]; then
+  echo "erro: $mqtt_certs/acs-area-12.key não é o par do certificado acs-area-12.crt — nada foi copiado." >&2
+  echo "Apague infra/docker/mosquitto/runtime e suba a stack de novo para regerar o par." >&2
   exit 1
 fi
 
