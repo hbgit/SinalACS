@@ -48,6 +48,7 @@ class AcsCredentialRecord {
     required this.digest,
     required this.failedAttempts,
     required this.lockedUntil,
+    this.lockStreak = 0,
     this.totp,
   });
 
@@ -61,6 +62,9 @@ class AcsCredentialRecord {
   final PasswordDigest digest;
   final int failedAttempts;
   final DateTime? lockedUntil;
+
+  /// Quantas vezes seguidas a conta bloqueou sem um login válido no meio.
+  final int lockStreak;
 
   /// Estado da MFA. `null` = nenhum segredo gravado (sem MFA).
   final TotpEnrollment? totp;
@@ -109,7 +113,8 @@ abstract interface class AcsCredentialStore {
 ///    **mesma** mensagem; o caminho da inexistente ainda deriva um hash
 ///    descartado, para o tempo de resposta não dizer o que a mensagem cala.
 /// 2. A conta bloqueia depois de [maxFailedAttempts] falhas, por
-///    [lockDuration] — a exigência de "registro de tentativas de acesso" de
+///    [lockDuration] na primeira rodada e o dobro a cada rodada seguinte sem um
+///    login válido no meio (até [maxLockDuration]; ver [lockDurationFor]) — a exigência de "registro de tentativas de acesso" de
 ///    `spec/lgpd_design.md` e o achado F6 de `spec/security_assessment.md`.
 ///    A contagem em si é aplicada pelo store numa única instrução, para não
 ///    perder atualização sob concorrência.
@@ -152,6 +157,20 @@ class InstitutionalAuthService {
 
   static const maxFailedAttempts = 5;
   static const lockDuration = Duration(minutes: 15);
+
+  /// Teto do bloqueio progressivo: bloquear para sempre transformaria o limite
+  /// num ataque ao acesso do próprio ACS.
+  static const maxLockDuration = Duration(hours: 24);
+
+  /// Bloqueio da [streak]-ésima rodada seguida (0 = a primeira): `15 min × 2^streak`,
+  /// no máximo [maxLockDuration]. Sequência negativa vale como zero.
+  static Duration lockDurationFor(int streak) {
+    final n = streak < 0 ? 0 : streak;
+    // 2^7 × 15 min já passa de 24 h; limitar o expoente evita estouro em `<<`.
+    if (n >= 7) return maxLockDuration;
+    final d = lockDuration * (1 << n);
+    return d > maxLockDuration ? maxLockDuration : d;
+  }
 
   /// Marcador de ausência de identificador de aparelho — mesma convenção de
   /// `orm_onboarding_store.dart` ('nao-aplicavel-onboarding').
@@ -410,7 +429,7 @@ class InstitutionalAuthService {
       record.acsId,
       restartCounter: lockExpirou,
       maxFailedAttempts: maxFailedAttempts,
-      lockUntil: at.add(lockDuration),
+      lockUntil: at.add(lockDurationFor(record.lockStreak)),
       at: at,
     );
   }
