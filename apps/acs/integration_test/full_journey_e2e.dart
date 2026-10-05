@@ -134,6 +134,8 @@ class _EnvioDeVisitasForaDoAr implements AcsBackend {
   @override
   Future<bool> get hasStoredSession => _inner.hasStoredSession;
   @override
+  Future<SessionUnlock> unlockStoredSession({required String reason}) => _inner.unlockStoredSession(reason: reason);
+  @override
   Future<AuthSession?> resumeSession() => _inner.resumeSession();
   @override
   Future<void> logout() => _inner.logout();

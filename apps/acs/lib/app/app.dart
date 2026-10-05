@@ -735,13 +735,31 @@ class _LoginScreenState extends State<LoginScreen> {
       // quem pega o aparelho entraria direto no painel.
       if (!await gate.isAvailable || !mounted) return;
       setState(() { _resumePrompting = true; _resumeOffline = false; _error = null; });
-      UnlockResult unlock;
-      try {
-        unlock = await gate.authenticate(reason: 'Entrar no SinalACS');
-      } catch (_) {
-        unlock = UnlockResult.unavailable; // falha fechada
+      var unlocked = false;
+      final stored = await backend.unlockStoredSession(reason: 'Entrar no SinalACS');
+      switch (stored) {
+        case SessionUnlock.unlocked:
+          unlocked = true;
+        case SessionUnlock.notRequired:
+          UnlockResult ui;
+          try {
+            ui = await gate.authenticate(reason: 'Entrar no SinalACS');
+          } catch (_) {
+            ui = UnlockResult.unavailable; // falha fechada
+          }
+          unlocked = ui == UnlockResult.unlocked;
+        case SessionUnlock.cancelled || SessionUnlock.lockedOut || SessionUnlock.unavailable:
+          unlocked = false;
       }
-      if (unlock != UnlockResult.unlocked || !mounted) return;
+      if (!mounted) return;
+      if (!unlocked) {
+        // Chave invalidada (nova digital): o cofre apagou o token. Só então
+        // vale o aviso; cancelar ou bloqueio mantêm o token e ficam quietos.
+        if (stored == SessionUnlock.unavailable && !await backend.hasStoredSession && mounted) {
+          setState(() => _aviso = 'Sua sessão expirou. Entre novamente.');
+        }
+        return;
+      }
       final session = await backend.resumeSession();
       if (!mounted) return;
       if (session != null) {

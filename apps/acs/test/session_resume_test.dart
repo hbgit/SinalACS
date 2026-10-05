@@ -6,6 +6,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:sinalacs_acs/app/app.dart';
 import 'package:sinalacs_acs/core/network/backend_client.dart';
 import 'package:sinalacs_acs/core/security/biometric_gate.dart';
+import 'package:sinalacs_acs/core/security/auth_bound_session_token_store.dart';
+import 'package:sinalacs_acs/core/security/keystore_vault.dart';
 import 'package:sinalacs_acs/core/security/session_token_store.dart';
 import 'package:sinalacs_acs/core/security/upload_token_store.dart';
 import 'package:sinalacs_acs/core/services/backend_visit_synchronizer.dart';
@@ -221,6 +223,80 @@ void main() {
       expect(painel(), findsOneWidget);
       expect(feed.startedTopicMicroArea, otherMicroAreaId, reason: 'o território vem do token novo, não de cache');
       expect(await tester.runAsync(store.read), 'refresh-1', reason: 'token rotacionado');
+      await encerrar(tester);
+    });
+  });
+
+  group('cliente real com token amarrado ao cofre do Keystore', () {
+    late FakeRpcServer server;
+    late FakeKeystoreVault vault;
+    late AuthBoundSessionTokenStore store;
+    late BackendClient backend;
+    HttpOverrides? overridesDoTeste;
+
+    setUp(() async {
+      overridesDoTeste = HttpOverrides.current;
+      HttpOverrides.global = null;
+      server = await FakeRpcServer.start();
+      vault = FakeKeystoreVault()..sealed[AuthBoundSessionTokenStore.alias] = 'tok-1';
+      store = AuthBoundSessionTokenStore(vault: vault, legacy: MemorySessionTokenStore());
+      backend = BackendClient(host: server.host, tokenStore: store, deviceIds: MemoryDeviceIdStore());
+    });
+
+    tearDown(() async {
+      backend.close();
+      await server.stop();
+      HttpOverrides.global = overridesDoTeste;
+    });
+
+    Future<void> encerrar(WidgetTester tester) async {
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump(const Duration(minutes: 5));
+    }
+
+    testWidgets('o cofre desbloqueia e o gate de UI NÃO é chamado', (tester) async {
+      await abrirApp(tester, backend);
+
+      expect(vault.unsealCalls, 1);
+      expect(gate.calls, 0, reason: 'a digital já foi pedida pelo cofre');
+      expect(painel(), findsOneWidget);
+      await encerrar(tester);
+    });
+
+    testWidgets('prompt do cofre cancelado: fica no login, token continua guardado', (tester) async {
+      vault.nextUnsealFailure = VaultFailure.cancelled;
+      await abrirApp(tester, backend);
+
+      expect(vault.unsealCalls, 1);
+      expect(gate.calls, 0);
+      expect(server.refreshCount, 0);
+      expect(formulario(), findsOneWidget);
+      expect(painel(), findsNothing);
+      expect(await tester.runAsync(store.contains), isTrue);
+      await encerrar(tester);
+    });
+
+    for (final falha in [VaultFailure.lockedOut, VaultFailure.unavailable]) {
+      testWidgets('cofre $falha: não retoma a sessão', (tester) async {
+        vault.nextUnsealFailure = falha;
+        await abrirApp(tester, backend);
+
+        expect(server.refreshCount, 0);
+        expect(gate.calls, 0);
+        expect(formulario(), findsOneWidget);
+        expect(painel(), findsNothing);
+        await encerrar(tester);
+      });
+    }
+
+    testWidgets('chave invalidada: aviso de sessão expirada e login completo', (tester) async {
+      vault.nextUnsealFailure = VaultFailure.invalidated;
+      await abrirApp(tester, backend);
+
+      expect(find.text('Sua sessão expirou. Entre novamente.'), findsOneWidget);
+      expect(formulario(), findsOneWidget);
+      expect(server.refreshCount, 0);
+      expect(await tester.runAsync(store.contains), isFalse);
       await encerrar(tester);
     });
   });

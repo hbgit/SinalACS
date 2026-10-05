@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:sinalacs_acs/core/network/auth_session.dart';
 import 'package:sinalacs_acs/core/network/backend_client.dart';
 import 'package:sinalacs_acs/core/security/biometric_gate.dart';
+import 'package:sinalacs_acs/core/security/session_token_store.dart';
 import 'package:sinalacs_acs/core/services/alert_feed.dart';
 import 'package:sinalacs_acs/core/services/alert_queue.dart';
 import 'package:sinalacs_acs/core/services/offline_visit_queue.dart';
@@ -83,6 +84,9 @@ class FakeAcsBackend implements AcsBackend {
 
   @override
   Future<bool> get hasStoredSession async => storedRefreshToken != null;
+
+  @override
+  Future<SessionUnlock> unlockStoredSession({required String reason}) async => SessionUnlock.notRequired;
 
   @override
   Future<AuthSession?> resumeSession() async {

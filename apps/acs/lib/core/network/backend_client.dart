@@ -91,6 +91,10 @@ abstract class AcsBackend {
   /// [resumeSession] na partida).
   Future<bool> get hasStoredSession;
 
+  /// Desbloqueia o refresh token guardado (prompt do Keystore, se o store o
+  /// exige). `notRequired`: o chamador usa o portão de interface.
+  Future<SessionUnlock> unlockStoredSession({required String reason});
+
   /// Tenta abrir uma sessão com o refresh token guardado. `null` se não há
   /// token ou se ele foi recusado/não pôde ser usado agora. Não chama
   /// [onSessionExpired]: na partida a UI já é a tela de login.
@@ -214,6 +218,9 @@ class MisconfiguredBackend implements AcsBackend {
 
   @override
   Future<bool> get hasStoredSession async => false;
+
+  @override
+  Future<SessionUnlock> unlockStoredSession({required String reason}) async => SessionUnlock.notRequired;
 
   @override
   Future<AuthSession?> resumeSession() async => null;
@@ -615,9 +622,18 @@ class BackendClient implements AcsBackend {
   @override
   Future<bool> get hasStoredSession async {
     try {
-      return await _tokenStore.read() != null;
+      return await _tokenStore.contains();
     } catch (_) {
       return false;
+    }
+  }
+
+  @override
+  Future<SessionUnlock> unlockStoredSession({required String reason}) async {
+    try {
+      return await _tokenStore.unlock(reason: reason);
+    } catch (_) {
+      return SessionUnlock.unavailable; // falha fechada
     }
   }
 
