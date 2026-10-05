@@ -7,6 +7,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:sinalacs_acs/app/acs_theme.dart';
 import 'package:sinalacs_acs/app/app_lock_gate.dart';
+import 'package:sinalacs_acs/app/pending_alerts_banner.dart';
 import 'package:sinalacs_acs/app/invite_screen.dart';
 import 'package:sinalacs_acs/app/mfa_enrollment_screen.dart';
 import 'package:sinalacs_acs/core/database/sqlcipher_visit_store.dart';
@@ -1208,16 +1209,29 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
 
   Future<void> _openReauth(String aviso, {VoidCallback? onCovered, VoidCallback? onFailed}) async {
     _reauthAberta = true;
-    Widget page(BuildContext _) => LoginScreen(
-          visitScopeFor: widget.visitScopeFor,
-          themeController: widget.themeController,
-          directory: widget.directory,
-          feedBuilder: widget.feedBuilder,
-          initialAlert: widget.initialAlert,
-          initialPosition: widget.initialPosition,
-          syncInterval: widget.syncInterval,
-          aviso: aviso,
-          reauthUserId: widget.acsId,
+    // O aviso de alertas aguardando fica FORA do `LoginScreen`: a fila segue
+    // viva por baixo da rota opaca e um alerta vermelho não pode esperar o novo
+    // login para ser notado.
+    Widget page(BuildContext _) => Column(
+          children: [
+            SafeArea(
+              bottom: false,
+              child: PendingAlertsBanner(listenable: _queue, count: () => _queue.unacknowledgedCount),
+            ),
+            Expanded(
+              child: LoginScreen(
+                visitScopeFor: widget.visitScopeFor,
+                themeController: widget.themeController,
+                directory: widget.directory,
+                feedBuilder: widget.feedBuilder,
+                initialAlert: widget.initialAlert,
+                initialPosition: widget.initialPosition,
+                syncInterval: widget.syncInterval,
+                aviso: aviso,
+                reauthUserId: widget.acsId,
+              ),
+            ),
+          ],
         );
     final Route<bool> route = onCovered == null
         ? MaterialPageRoute<bool>(builder: page)
