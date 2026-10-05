@@ -3,6 +3,10 @@
 #
 # adb NÃO está no PATH nesta máquina: fica em ~/Android/Sdk/platform-tools/.
 # Todos os scripts fazem `source` deste arquivo em vez de repetir a descoberta.
+#
+# O app do ACS precisa estar instalado a partir de uma build de DEBUG gerada com
+# `./scripts/dev/run_acs.sh --build --captura`: em qualquer outra, a janela é
+# FLAG_SECURE e a captura/gravação sai preta (ver docs/telas-acs.md).
 
 set -euo pipefail
 
@@ -159,5 +163,8 @@ stop_record() {
 screenshot() {
   mkdir -p "$(dirname "$2")"
   "$ADB" exec-out screencap -p > "$2"
+  # FLAG_SECURE faz o screencap voltar vazio: melhor parar aqui do que seguir com
+  # uma "captura" preta que só se descobre na edição.
+  [ -s "$2" ] || { rm -f "$2"; die "captura vazia: o app do ACS está com FLAG_SECURE? Instale a build de debug com ./scripts/dev/run_acs.sh --build --captura"; }
   info "captura salva em $2"
 }
