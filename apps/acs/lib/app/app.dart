@@ -665,6 +665,11 @@ class _LoginScreenState extends State<LoginScreen> {
 
   /// A retomada falhou por falta de rede e o token segue guardado.
   bool _resumeOffline = false;
+
+  /// O desbloqueio local não concluiu (cancelado, bloqueado ou indisponível) e
+  /// o token segue guardado: sem rede o login por senha falharia, então oferece
+  /// "Tentar de novo" em vez de deixar o ACS sem saída.
+  bool _resumeIncomplete = false;
   bool _resumeRequested = false;
 
   /// `true` depois que achou token e vai pedir o desbloqueio: só então o
@@ -734,7 +739,7 @@ class _LoginScreenState extends State<LoginScreen> {
       // P5: aparelho sem biometria nem bloqueio de tela não retoma sessão —
       // quem pega o aparelho entraria direto no painel.
       if (!await gate.isAvailable || !mounted) return;
-      setState(() { _resumePrompting = true; _resumeOffline = false; _error = null; });
+      setState(() { _resumePrompting = true; _resumeOffline = false; _resumeIncomplete = false; _error = null; });
       var unlocked = false;
       final stored = await backend.unlockStoredSession(reason: 'Entrar no SinalACS');
       switch (stored) {
@@ -757,6 +762,8 @@ class _LoginScreenState extends State<LoginScreen> {
         // vale o aviso; cancelar ou bloqueio mantêm o token e ficam quietos.
         if (stored == SessionUnlock.unavailable && !await backend.hasStoredSession && mounted) {
           setState(() => _aviso = 'Sua sessão expirou. Entre novamente.');
+        } else if (stored != SessionUnlock.notRequired && await backend.hasStoredSession && mounted) {
+          setState(() => _resumeIncomplete = true);
         }
         return;
       }
@@ -957,14 +964,20 @@ class _LoginScreenState extends State<LoginScreen> {
             padding: const EdgeInsets.only(top: 16),
             child: Semantics(liveRegion: true, child: const Text('Retomando a sessão…', key: Key('resume_progress'), textAlign: TextAlign.center)),
           ),
-          if (_resumeOffline && !_resuming) ...[
+          if ((_resumeOffline || _resumeIncomplete) && !_resuming) ...[
             Padding(
               padding: const EdgeInsets.only(top: 16),
-              child: Semantics(liveRegion: true, child: const Text(
-                'Sem conexão para retomar a sessão. Tente de novo ou entre com senha.',
-                key: Key('resume_offline'),
-                textAlign: TextAlign.center,
-              )),
+              child: Semantics(liveRegion: true, child: _resumeOffline
+                  ? const Text(
+                      'Sem conexão para retomar a sessão. Tente de novo ou entre com senha.',
+                      key: Key('resume_offline'),
+                      textAlign: TextAlign.center,
+                    )
+                  : const Text(
+                      'Desbloqueio não concluído. Tente de novo ou entre com senha.',
+                      key: Key('resume_incomplete'),
+                      textAlign: TextAlign.center,
+                    )),
             ),
             const SizedBox(height: 8),
             SizedBox(width: double.infinity, child: OutlinedButton(

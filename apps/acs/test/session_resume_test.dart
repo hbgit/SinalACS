@@ -276,6 +276,31 @@ void main() {
       await encerrar(tester);
     });
 
+    testWidgets('cancelado: aparece "Tentar de novo" e, ao tocar, o painel abre', (tester) async {
+      vault.nextUnsealFailure = VaultFailure.cancelled;
+      await abrirApp(tester, backend);
+
+      expect(find.byKey(const Key('resume_incomplete')), findsOneWidget);
+      expect(find.text('Desbloqueio não concluído. Tente de novo ou entre com senha.'), findsOneWidget);
+      expect(find.text('Sua sessão expirou. Entre novamente.'), findsNothing);
+      await tester.ensureVisible(find.byKey(const Key('resume_retry')));
+      await tester.tap(find.byKey(const Key('resume_retry')));
+      await assentar(tester);
+
+      expect(vault.unsealCalls, 2);
+      expect(painel(), findsOneWidget);
+      await encerrar(tester);
+    });
+
+    testWidgets('lockedOut também mostra "Tentar de novo"', (tester) async {
+      vault.nextUnsealFailure = VaultFailure.lockedOut;
+      await abrirApp(tester, backend);
+
+      expect(find.byKey(const Key('resume_retry')), findsOneWidget);
+      expect(find.byKey(const Key('resume_incomplete')), findsOneWidget);
+      await encerrar(tester);
+    });
+
     for (final falha in [VaultFailure.lockedOut, VaultFailure.unavailable]) {
       testWidgets('cofre $falha: não retoma a sessão', (tester) async {
         vault.nextUnsealFailure = falha;
@@ -296,6 +321,7 @@ void main() {
       expect(find.text('Sua sessão expirou. Entre novamente.'), findsOneWidget);
       expect(formulario(), findsOneWidget);
       expect(server.refreshCount, 0);
+      expect(find.byKey(const Key('resume_retry')), findsNothing);
       expect(await tester.runAsync(store.contains), isFalse);
       await encerrar(tester);
     });
