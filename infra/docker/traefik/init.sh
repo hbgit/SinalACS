@@ -170,7 +170,10 @@ rm -f "$server_csr" "$ext_file"
 # alguém puser `user:` no serviço `traefik`, porque quem passar a ler como outro
 # usuário precisa do bit de leitura. Num certificado de produção isto muda.
 chmod 755 "$runtime_dir" "$certs_dir"
-chmod 644 "$certs_dir/ca.crt" "$certs_dir/ca.key" "$certs_dir/server.crt" "$certs_dir/server.key"
+chmod 644 "$certs_dir/ca.crt" "$certs_dir/server.crt" "$certs_dir/server.key"
+# A chave da CA só assina folhas e quem a lê é este init.sh, como root: ninguém
+# mais precisa do bit de leitura (server.key segue em 644 pelo motivo acima).
+chmod 600 "$certs_dir/ca.key"
 
 echo "CA do RPC e certificado do servidor prontos em $certs_dir (SAN: $san)."
 openssl x509 -in "$certs_dir/server.crt" -noout -subject -dates -ext subjectAltName
