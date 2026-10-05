@@ -63,6 +63,8 @@ void main() {
     vault.nextUnsealFailure = VaultFailure.invalidated;
     expect(await cold.unlock(reason: 'x'), SessionUnlock.unavailable);
     expect(await cold.contains(), isFalse);
+    // O fake não remove o blob ao invalidar: quem apagou foi o store.
+    expect(vault.deleteCalls, 1);
     expect(vault.sealed, isEmpty);
   });
 
@@ -89,6 +91,47 @@ void main() {
     expect(await store.read(), isNull);
     expect(await store.contains(), isFalse);
     expect(await legacy.read(), isNull);
+  });
+
+  test('lockedOut mantém o blob (só a invalidação apaga)', () async {
+    vault.sealed[AuthBoundSessionTokenStore.alias] = 'tok-1';
+    final cold = AuthBoundSessionTokenStore(vault: vault, legacy: legacy);
+    vault.nextUnsealFailure = VaultFailure.lockedOut;
+    expect(await cold.unlock(reason: 'x'), SessionUnlock.lockedOut);
+    expect(vault.sealed[AuthBoundSessionTokenStore.alias], 'tok-1');
+    expect(vault.deleteCalls, 0);
+  });
+
+  test('write com falha ao selar não deixa blob velho ressuscitar', () async {
+    vault.sealed[AuthBoundSessionTokenStore.alias] = 'velho';
+    vault.failSeal = true;
+    await store.write('novo');
+    expect(vault.sealed, isEmpty);
+    expect(vault.deleteCalls, 1);
+  });
+
+  test('write em aparelho sem suporte não deixa blob velho', () async {
+    vault.sealed[AuthBoundSessionTokenStore.alias] = 'velho';
+    vault.supported = false;
+    await store.write('novo');
+    expect(vault.sealed, isEmpty);
+    expect(vault.deleteCalls, 1);
+  });
+
+  test('clear (logout) apaga o blob e a chave: cofre vazio e delete chamado', () async {
+    await store.write('tok-1');
+    await store.clear();
+    expect(vault.sealed, isEmpty);
+    expect(vault.deleteCalls, 1);
+    expect(await store.contains(), isFalse);
+    expect(await store.read(), isNull);
+  });
+
+  test('após clear, novo write recria o ciclo normalmente', () async {
+    await store.write('a');
+    await store.clear();
+    await store.write('b');
+    expect(vault.sealed[AuthBoundSessionTokenStore.alias], 'b');
   });
 
   test('desbloqueios concorrentes abrem um único prompt', () async {

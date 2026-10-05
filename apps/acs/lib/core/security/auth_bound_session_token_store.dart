@@ -14,7 +14,9 @@ import 'session_token_store.dart';
 ///
 /// Sem suporte (sem bloqueio de tela, API < 30 sem biometria forte) ou com
 /// falha ao selar, o token fica só em RAM: a próxima partida a frio exige login
-/// completo. Nunca registre o valor em log.
+/// completo. API 24–29 sem biometria forte: o token fica só em RAM e morre com
+/// o processo; a partida a frio exige login completo. É recurso de segurança
+/// para aparelhos antigos, não falha. Nunca registre o valor em log.
 class AuthBoundSessionTokenStore implements SessionTokenStore {
   AuthBoundSessionTokenStore({
     required KeystoreVault vault,

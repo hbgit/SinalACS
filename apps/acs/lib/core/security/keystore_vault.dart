@@ -103,6 +103,7 @@ class FakeKeystoreVault implements KeystoreVault {
   int unsealCalls = 0; // = unlockCalls: quantos prompts foram abertos
   int readCalls =
       0; // quantas vezes `contains` foi consultado (nunca abre prompt)
+  int deleteCalls = 0;
   final Map<String, String> sealed = {};
 
   @override
@@ -126,12 +127,14 @@ class FakeKeystoreVault implements KeystoreVault {
     final failure = nextUnsealFailure;
     if (failure != null) {
       nextUnsealFailure = null;
-      if (failure == VaultFailure.invalidated) sealed.remove(alias);
       throw VaultException(failure);
     }
     return sealed[alias];
   }
 
   @override
-  Future<void> delete(String alias) async => sealed.remove(alias);
+  Future<void> delete(String alias) async {
+    deleteCalls++;
+    sealed.remove(alias);
+  }
 }

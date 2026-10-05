@@ -6,6 +6,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sinalacs_acs/core/network/backend_client.dart';
+import 'package:sinalacs_acs/core/security/auth_bound_session_token_store.dart';
+import 'package:sinalacs_acs/core/security/keystore_vault.dart';
 import 'package:sinalacs_acs/core/security/secure_session_token_store.dart';
 import 'package:sinalacs_acs/core/services/backend_visit_synchronizer.dart';
 import 'package:sinalacs_acs/core/services/offline_visit_queue.dart';
@@ -129,6 +131,22 @@ void main() {
     expect(await backend.resumeSession(), isNull);
     expect(await store.read(), isNull);
     expect(avisos, 0);
+  });
+
+  test('logout com o store vinculado apaga o blob e a chave do cofre', () async {
+    final vault = FakeKeystoreVault();
+    final b = BackendClient(
+      host: server.host,
+      tokenStore: AuthBoundSessionTokenStore(vault: vault, legacy: MemorySessionTokenStore()),
+      deviceIds: devices,
+    );
+    addTearDown(b.close);
+    await b.login(matricula: 'ACS-001', senha: 'senha-sintetica');
+    expect(vault.sealed, isNotEmpty);
+    await b.logout();
+    expect(vault.sealed, isEmpty);
+    expect(vault.deleteCalls, greaterThan(0));
+    expect(await b.hasStoredSession, isFalse);
   });
 
   test('logout revoga no servidor e apaga o token local, mesmo se o servidor estiver fora', () async {
