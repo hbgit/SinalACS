@@ -92,6 +92,12 @@ flutter {
     source = "../.."
 }
 
+dependencies {
+    // BiometricPrompt com CryptoObject para o cofre do refresh token
+    // (KeystoreVault.kt). Fixada na 1.1.0 estável: a 1.2.0 é alpha.
+    implementation("androidx.biometric:biometric:1.1.0")
+}
+
 // Guarda contra o APK silenciosamente inútil: SINALACS_MQTT_PASSWORD é
 // constante de compilação sem default (ver backend_config.dart) porque o
 // broker usa um segredo por máquina — nenhum valor embutido no código

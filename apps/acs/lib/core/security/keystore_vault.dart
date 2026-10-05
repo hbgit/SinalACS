@@ -61,6 +61,10 @@ class MethodChannelKeystoreVault implements KeystoreVault {
       });
     } on PlatformException {
       throw const VaultException(VaultFailure.unavailable);
+    } on MissingPluginException {
+      // Sem o lado nativo (VM, plataforma sem o plugin): falha fechada, nunca
+      // uma exceção crua que o store não sabe tratar.
+      throw const VaultException(VaultFailure.unavailable);
     }
   }
 

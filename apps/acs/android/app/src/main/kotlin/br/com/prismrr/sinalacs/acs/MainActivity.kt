@@ -3,6 +3,8 @@ package br.com.prismrr.sinalacs.acs
 import android.os.Bundle
 import android.view.WindowManager
 import io.flutter.embedding.android.FlutterFragmentActivity
+import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterFragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -15,5 +17,12 @@ class MainActivity : FlutterFragmentActivity() {
             WindowManager.LayoutParams.FLAG_SECURE,
             WindowManager.LayoutParams.FLAG_SECURE,
         )
+    }
+
+    override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
+        super.configureFlutterEngine(flutterEngine)
+        // Cofre do refresh token: decifra só com BiometricPrompt/CryptoObject.
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, KeystoreVault.CHANNEL)
+            .setMethodCallHandler(KeystoreVault(this))
     }
 }
