@@ -86,6 +86,11 @@ void main() {
     expect(vault, contains('.setInvalidatedByBiometricEnrollment(true)'));
     expect(vault, contains('BiometricPrompt.CryptoObject(cipher)'));
     expect(vault, contains('MGF1ParameterSpec.SHA1'));
+    // A biometric 1.1.0 descarta o authenticate em silêncio com o estado já
+    // salvo: sem esta checagem o canal nunca responderia.
+    expect(vault, contains('supportFragmentManager.isStateSaved'));
+    // Blob adulterado (tag GCM) é apagado e vira `invalidated`.
+    expect(vault, contains('catch (e: AEADBadTagException)'));
     for (final code in ['"cancelled"', '"lockedOut"', '"invalidated"', '"unavailable"']) {
       expect(vault, contains(code));
     }

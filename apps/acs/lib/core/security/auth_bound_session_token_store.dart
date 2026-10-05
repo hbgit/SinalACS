@@ -19,10 +19,20 @@ class AuthBoundSessionTokenStore implements SessionTokenStore {
   AuthBoundSessionTokenStore({
     required KeystoreVault vault,
     required SessionTokenStore legacy,
+    Duration unsealTimeout = defaultUnsealTimeout,
   }) : _vault = vault,
-       _legacy = legacy;
+       _legacy = legacy,
+       _unsealTimeout = unsealTimeout;
 
   static const alias = 'acs_refresh_token';
+
+  /// Teto generoso para o prompt: se o lado nativo nunca responder (ex.: o
+  /// BiometricPrompt descartou o pedido em silêncio), `_unlocking` não pode
+  /// ficar preso para sempre — senão todo unlock seguinte esperaria o mesmo
+  /// future e o portão travaria até matar o processo.
+  static const defaultUnsealTimeout = Duration(minutes: 2);
+
+  final Duration _unsealTimeout;
 
   final KeystoreVault _vault;
   final SessionTokenStore _legacy;
@@ -52,7 +62,9 @@ class AuthBoundSessionTokenStore implements SessionTokenStore {
   Future<SessionUnlock> _unlock(String reason) async {
     try {
       await _migrateLegacy();
-      final token = await _vault.unseal(alias, reason: reason);
+      final token = await _vault
+          .unseal(alias, reason: reason)
+          .timeout(_unsealTimeout);
       if (token == null || token.isEmpty) return SessionUnlock.unavailable;
       _cache = token;
       return SessionUnlock.unlocked;
@@ -69,6 +81,10 @@ class AuthBoundSessionTokenStore implements SessionTokenStore {
         case VaultFailure.unavailable:
           return SessionUnlock.unavailable;
       }
+    } on TimeoutException {
+      // Sem resposta do cofre: trata como cancelado e NÃO apaga o token; a
+      // próxima tentativa abre um prompt novo.
+      return SessionUnlock.cancelled;
     }
   }
 

@@ -20,6 +20,7 @@ import java.security.PublicKey
 import java.security.spec.MGF1ParameterSpec
 import java.security.spec.X509EncodedKeySpec
 import java.util.concurrent.atomic.AtomicBoolean
+import javax.crypto.AEADBadTagException
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.spec.GCMParameterSpec
@@ -34,8 +35,9 @@ import javax.crypto.spec.SecretKeySpec
  * não pede prompt. Só o texto cifrado fica em SharedPreferences privado: sem a
  * chave do TEE ele não vale nada. Nunca registre token, chave ou exceção.
  *
- * Falha fechada: qualquer erro inesperado (blob corrompido ou truncado, tag GCM
- * adulterada, Keystore indisponível) vira o código `unavailable`, sem mensagem.
+ * Falha fechada: blob corrompido, truncado ou com tag GCM adulterada nunca vai
+ * decifrar — é apagado (com a chave) e responde `invalidated`, como a chave
+ * invalidada; qualquer outro erro inesperado vira `unavailable`, sem mensagem.
  */
 class KeystoreVault(private val activity: FragmentActivity) : MethodChannel.MethodCallHandler {
     companion object {
@@ -218,7 +220,10 @@ class KeystoreVault(private val activity: FragmentActivity) : MethodChannel.Meth
         }
         val envelope = parse(blob)
         if (envelope == null) {
-            result.error("unavailable", null, null)
+            // Corrompido ou truncado: nunca decifrará. Apaga para não prender o
+            // ACS num "indisponível" eterno; o Dart cai no login completo.
+            delete(alias)
+            result.error("invalidated", null, null)
             return
         }
         val cipher: Cipher
@@ -268,6 +273,9 @@ class KeystoreVault(private val activity: FragmentActivity) : MethodChannel.Meth
                     // GCM só devolve bytes depois de validar a tag: adulterado
                     // lança AEADBadTagException e nunca sai token parcial.
                     result.success(String(aes.doFinal(envelope.body), Charsets.UTF_8))
+                } catch (e: AEADBadTagException) {
+                    // Tag GCM não confere: blob adulterado ou corrompido.
+                    discard(alias, result)
                 } catch (e: Exception) {
                     result.error("unavailable", null, null)
                 } finally {
@@ -291,14 +299,31 @@ class KeystoreVault(private val activity: FragmentActivity) : MethodChannel.Meth
 
         // BiometricPrompt exige a thread principal; onMethodCall já roda nela,
         // e runOnUiThread executa na hora nesse caso. Uma falha ao abrir o
-        // prompt (ex.: estado do FragmentManager já salvo) responde uma vez só.
+        // prompt responde uma vez só.
         activity.runOnUiThread {
+            // Com o estado do FragmentManager já salvo (activity indo para o
+            // fundo), a biometric 1.1.0 NÃO lança: registra e retorna em
+            // silêncio, sem callback nenhum — o Dart esperaria para sempre.
+            if (activity.supportFragmentManager.isStateSaved) {
+                result.error("cancelled", null, null)
+                return@runOnUiThread
+            }
             try {
                 BiometricPrompt(activity, ContextCompat.getMainExecutor(activity), callback)
                     .authenticate(info, BiometricPrompt.CryptoObject(cipher))
             } catch (e: Exception) {
                 result.error("unavailable", null, null)
             }
+        }
+    }
+
+    /** Apaga blob e chave de um envelope que nunca decifrará e responde `invalidated`. */
+    private fun discard(alias: String, result: MethodChannel.Result) {
+        try {
+            delete(alias)
+            result.error("invalidated", null, null)
+        } catch (e: Exception) {
+            result.error("unavailable", null, null)
         }
     }
 }

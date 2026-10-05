@@ -1,4 +1,6 @@
 // apps/acs/test/auth_bound_session_token_store_test.dart
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sinalacs_acs/core/security/auth_bound_session_token_store.dart';
 import 'package:sinalacs_acs/core/security/keystore_vault.dart';
@@ -168,4 +170,48 @@ void main() {
       expect(vault.sealed[AuthBoundSessionTokenStore.alias], 'velho');
     },
   );
+
+  test(
+    'cofre que nunca responde: unlock vira cancelled, não apaga o token e o '
+    'unlock seguinte abre um prompt novo',
+    () async {
+      final hanging = _HangOnceVault();
+      hanging.sealed[AuthBoundSessionTokenStore.alias] = 'tok-1';
+      final cold = AuthBoundSessionTokenStore(
+        vault: hanging,
+        legacy: legacy,
+        unsealTimeout: const Duration(milliseconds: 20),
+      );
+      expect(await cold.unlock(reason: 'x'), SessionUnlock.cancelled);
+      expect(hanging.sealed[AuthBoundSessionTokenStore.alias], 'tok-1');
+      expect(await cold.read(), isNull);
+      // `_unlocking` foi liberado: o segundo unlock chega ao cofre de novo.
+      expect(await cold.unlock(reason: 'x'), SessionUnlock.unlocked);
+      expect(hanging.unsealCalls, 2);
+      expect(await cold.read(), 'tok-1');
+    },
+  );
+
+  test('o teto padrão do prompt é generoso (2 minutos)', () {
+    expect(
+      AuthBoundSessionTokenStore.defaultUnsealTimeout,
+      const Duration(minutes: 2),
+    );
+  });
+}
+
+/// Simula o BiometricPrompt que descarta o pedido em silêncio: a primeira
+/// chamada nunca completa; as seguintes respondem normalmente.
+class _HangOnceVault extends FakeKeystoreVault {
+  bool _hung = false;
+
+  @override
+  Future<String?> unseal(String alias, {required String reason}) {
+    if (!_hung) {
+      _hung = true;
+      unsealCalls++;
+      return Completer<String?>().future;
+    }
+    return super.unseal(alias, reason: reason);
+  }
 }
