@@ -238,8 +238,9 @@ institucional, não como item avulso.
 
 **Estado atual (2026-09-18):** o rate limiting nasceu junto com a autenticação
 institucional, como recomendado. `InstitutionalAuthService` conta tentativas
-falhas por credencial e bloqueia por 15 minutos após 5
-(`maxFailedAttempts`/`lockDuration`), grava cada desfecho em `audit_logs` e
+falhas por credencial e bloqueia após 5 (`maxFailedAttempts`): por 15 minutos na
+primeira rodada e, desde 2026-10-05, pelo dobro a cada rodada seguinte sem um
+login válido no meio, até 24 h (`lockDurationFor`, coluna `lockStreak`), grava cada desfecho em `audit_logs` e
 responde com mensagem idêntica para matrícula inexistente e senha errada,
 executando uma derivação descartada no caminho da inexistente para o tempo de
 resposta não vazar o que a mensagem esconde. **Continua aberto:** o bloqueio é
