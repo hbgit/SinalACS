@@ -25,6 +25,13 @@ void main() {
     expect(vault.unsealCalls, 0);
   });
 
+  test('write: legado que lança no clear não derruba o write (token já selado)', () async {
+    final s = AuthBoundSessionTokenStore(vault: vault, legacy: _ThrowingClearLegacy());
+    await s.write('tok-1');
+    expect(vault.sealed[AuthBoundSessionTokenStore.alias], 'tok-1');
+    expect(await s.read(), 'tok-1');
+  });
+
   test('partida a frio: contains é true, read é null até unlock', () async {
     vault.sealed[AuthBoundSessionTokenStore.alias] = 'tok-1';
     final cold = AuthBoundSessionTokenStore(vault: vault, legacy: legacy);
@@ -241,6 +248,12 @@ void main() {
       const Duration(minutes: 2),
     );
   });
+}
+
+/// Legado cujo `clear` lança: o `write` não pode falhar depois do `seal`.
+class _ThrowingClearLegacy extends MemorySessionTokenStore {
+  @override
+  Future<void> clear() async => throw StateError('legado indisponível');
 }
 
 /// Simula o BiometricPrompt que descarta o pedido em silêncio: a primeira

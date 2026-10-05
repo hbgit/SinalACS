@@ -98,7 +98,10 @@ class AuthBoundSessionTokenStore implements SessionTokenStore {
     try {
       if (await _vault.isSupported) {
         await _vault.seal(alias, token);
-        await _legacy.clear();
+        // Best-effort: o token já está selado; falhar aqui não pode expirar a sessão.
+        try {
+          await _legacy.clear();
+        } catch (_) {}
         return;
       }
     } on VaultException {
