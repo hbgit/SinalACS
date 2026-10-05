@@ -17,4 +17,21 @@ void main() {
     expect(fonte, contains('WindowManager.LayoutParams.FLAG_SECURE'));
     expect(fonte, contains('window.setFlags('));
   });
+
+  test('a flag é aplicada DENTRO de onCreate, não só mencionada no arquivo', () {
+    // Corpo de `onCreate`: da assinatura até o `}` que fecha o método (a classe
+    // é pequena e o método não tem blocos aninhados fora do `window.setFlags(`).
+    final inicio = fonte.indexOf('override fun onCreate');
+    final fim = fonte.indexOf('override fun configureFlutterEngine');
+    expect(inicio, isNonNegative);
+    expect(fim, greaterThan(inicio));
+    final corpo = fonte.substring(inicio, fim);
+    expect(corpo, contains('window.setFlags('));
+    expect(corpo, contains('WindowManager.LayoutParams.FLAG_SECURE'));
+    // E não está comentada: nenhuma linha com a chamada começa por `//`.
+    expect(
+      corpo.split('\n').where((l) => l.contains('window.setFlags(')).any((l) => l.trimLeft().startsWith('//')),
+      isFalse,
+    );
+  });
 }

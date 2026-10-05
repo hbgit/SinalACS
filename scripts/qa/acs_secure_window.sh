@@ -52,12 +52,20 @@ if instalado; then adb -s "$dev" uninstall "$pkg" >/dev/null 2>&1 || true; fi
 adb -s "$dev" install -r apps/acs/build/app/outputs/flutter-apk/app-debug.apk >/dev/null
 instalamos=1
 adb -s "$dev" shell monkey -p "$pkg" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
-sleep 6
+# Espera a janela do app aparecer (até 40 s), em vez de dormir um tempo fixo.
+dump=""
+for _ in $(seq 1 40); do
+  dump="$(adb -s "$dev" shell dumpsys window windows 2>/dev/null || true)"
+  grep -q "^  Window #.*$pkg/" <<<"$dump" && break
+  sleep 1
+done
 
-# Primeiro `fl=` do bloco da janela do app (a linha `pfl=` é de outra coisa).
-flags="$(adb -s "$dev" shell dumpsys window windows | awk -v pkg="$pkg" '
+# Primeiro `fl=` do bloco da janela do app (a linha `pfl=` é de outra coisa). O
+# dumpsys já está numa variável: o awk lê tudo, sem `exit` sobre um pipe (com
+# `pipefail` isso podia matar o adb por SIGPIPE e abortar o script).
+flags="$(awk -v pkg="$pkg" '
   /^  Window #/ { dentro = index($0, pkg "/") > 0 }
-  dentro && /^ +fl=/ { print; exit }')"
+  dentro && /^ +fl=/ && !achou { print; achou = 1 }' <<<"$dump")"
 if [[ -z "$flags" ]]; then
   echo "erro: a janela de $pkg não apareceu em dumpsys window (o app abriu?)." >&2
   exit 4

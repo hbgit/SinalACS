@@ -27,7 +27,9 @@ if [[ -f apps/acs/android/key.properties ]]; then
   echo "erro: apps/acs/android/key.properties existe; ele mudaria o cenário 1. Mova-o para fora e rode de novo." >&2
   exit 3
 fi
-apksigner="$(ls "$HOME"/Android/Sdk/build-tools/*/apksigner | tail -1)"
+# Maior VERSÃO (sort -V), não a maior em ordem de texto: `9.0.0` > `34.0.0` por texto.
+apksigner="$(ls -d "$HOME"/Android/Sdk/build-tools/*/ | sort -V | tail -1)apksigner"
+[[ -x "$apksigner" ]] || { echo "erro: apksigner não encontrado em $HOME/Android/Sdk/build-tools" >&2; exit 4; }
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 apk=apps/acs/build/app/outputs/flutter-apk/app-release.apk
@@ -71,5 +73,12 @@ if saida="$(construir -Psinalacs.allowDebugSigning=true 2>&1)"; then
   exit 1
 fi
 grep -q "chave privada de desenvolvimento" <<<"$saida" || { echo "erro: a falha não explicou o motivo:" >&2; tail -n 15 <<<"$saida" >&2; exit 1; }
+
+echo "== cenário 5: -Psinalacs.allowDebugSigning=false NÃO libera a assinatura de debug =="
+if saida="$(construir -Psinalacs.allowDebugSigning=false -Psinalacs.allowDevClientKey=true 2>&1)"; then
+  echo "erro: allowDebugSigning=false liberou a build de release sem chave." >&2
+  exit 1
+fi
+grep -q "assinatura de release" <<<"$saida" || { echo "erro: a falha não explicou o motivo:" >&2; tail -n 15 <<<"$saida" >&2; exit 1; }
 
 echo "OK — release exige chave própria; debug só com licença explícita; a chave de cliente de dev não vai no APK"

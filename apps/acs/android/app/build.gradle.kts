@@ -26,6 +26,10 @@ fun assinatura(propriedade: String, ambiente: String): String? =
     keyProperties.getProperty(propriedade)?.takeIf { it.isNotBlank() }
         ?: System.getenv(ambiente)?.takeIf { it.isNotBlank() }
 
+// `-Pfoo=false` não pode liberar nada: só o texto "true" vale (`hasProperty`
+// aceitava qualquer valor, inclusive `false`).
+fun licenca(nome: String): Boolean = project.findProperty(nome)?.toString() == "true"
+
 val releaseStoreFile = assinatura("storeFile", "SINALACS_KEYSTORE_PATH")
 val releaseStorePassword = assinatura("storePassword", "SINALACS_KEYSTORE_PASSWORD")
 val releaseKeyAlias = assinatura("keyAlias", "SINALACS_KEY_ALIAS")
@@ -130,7 +134,7 @@ fun hasMqttPassword(): Boolean {
 tasks.configureEach {
     if (!name.startsWith("compileFlutterBuild")) return@configureEach
     doFirst {
-        val allowMissing = project.hasProperty("sinalacs.allowMissingMqttPassword")
+        val allowMissing = licenca("sinalacs.allowMissingMqttPassword")
         if (hasMqttPassword()) return@doFirst
         if (allowMissing) {
             logger.warn("aviso: compilando sem SINALACS_MQTT_PASSWORD — este APK não vai receber alerta nenhum.")
@@ -167,10 +171,17 @@ gradle.taskGraph.whenReady {
             it.path.endsWith(":bundleRelease") ||
             it.path.endsWith(":packageRelease")
     }
-    if (buildaRelease && !temChaveDeRelease && !project.hasProperty("sinalacs.allowDebugSigning")) {
+    if (buildaRelease && !temChaveDeRelease && !licenca("sinalacs.allowDebugSigning")) {
+        val faltam = listOf(
+            "storeFile (SINALACS_KEYSTORE_PATH)" to releaseStoreFile,
+            "storePassword (SINALACS_KEYSTORE_PASSWORD)" to releaseStorePassword,
+            "keyAlias (SINALACS_KEY_ALIAS)" to releaseKeyAlias,
+            "keyPassword (SINALACS_KEY_PASSWORD)" to releaseKeyPassword,
+        ).filter { it.second == null }.joinToString(", ") { it.first }
         throw GradleException(
             """
             |Sem chave de assinatura de release: esta build sairia assinada com a chave de debug.
+            |Faltando: $faltam
             |
             |Informe a chave por apps/acs/android/key.properties (storeFile, storePassword,
             |keyAlias, keyPassword) ou pelas variáveis SINALACS_KEYSTORE_PATH,
@@ -185,7 +196,7 @@ gradle.taskGraph.whenReady {
     // A chave privada de CLIENTE do broker de desenvolvimento (assets/certs/acs_client.key)
     // não pode ir dentro de um APK de release: qualquer pessoa com o APK a extrairia.
     val chaveDeDev = rootProject.file("../assets/certs/acs_client.key")
-    if (buildaRelease && chaveDeDev.exists() && !project.hasProperty("sinalacs.allowDevClientKey")) {
+    if (buildaRelease && chaveDeDev.exists() && !licenca("sinalacs.allowDevClientKey")) {
         throw GradleException(
             """
             |O release levaria a chave privada de desenvolvimento do broker (assets/certs/acs_client.key).
