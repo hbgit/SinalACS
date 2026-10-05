@@ -4,7 +4,11 @@
 # gravação nem miniatura nos recentes). A prova é a flag da janela segundo o
 # WindowManager (`dumpsys window windows`, linha `fl=`), não a leitura do código.
 #
-#   ./scripts/qa/acs_secure_window.sh [--reinstalar]
+#   ./scripts/qa/acs_secure_window.sh [--reinstalar] [--captura]
+#
+# `--captura`: gera o APK de DEBUG com -Psinalacs.allowScreenCapture=true e prova o
+# inverso — a janela SEM FLAG_SECURE (só para QA e demonstração). Sem a opção, o
+# debug continua protegido, que é o padrão.
 #
 # Aborta (exit 3) se o app já está instalado: reinstalar APAGA a fila de visitas
 # offline (SQLCipher) e a chave do Keystore do app de desenvolvimento.
@@ -19,9 +23,11 @@ if [[ -f .env ]]; then set -a; source .env; set +a; fi
 dev=emulator-5554
 pkg=br.com.prismrr.sinalacs.acs
 reinstalar=0
+captura=0
 for arg in "$@"; do
   case "$arg" in
     --reinstalar) reinstalar=1 ;;
+    --captura) captura=1 ;;
     *) echo "argumento desconhecido: $arg" >&2; exit 2 ;;
   esac
 done
@@ -42,7 +48,9 @@ limpar() {
 }
 trap limpar EXIT
 
-if ! (cd apps/acs && flutter build apk --debug \
+extra_gradle=()
+[[ "$captura" -eq 1 ]] && extra_gradle=(-Psinalacs.allowScreenCapture=true)
+if ! (cd apps/acs && flutter build apk --debug "${extra_gradle[@]}" \
       --dart-define=SINALACS_MQTT_PASSWORD="$MQTT_ACS_PASSWORD" >"$log" 2>&1); then
   echo "erro: o build do APK falhou. Últimas linhas:" >&2
   tail -n 30 "$log" >&2
@@ -69,6 +77,14 @@ flags="$(awk -v pkg="$pkg" '
 if [[ -z "$flags" ]]; then
   echo "erro: a janela de $pkg não apareceu em dumpsys window (o app abriu?)." >&2
   exit 4
+fi
+if [[ "$captura" -eq 1 ]]; then
+  if grep -qw SECURE <<<"$flags"; then
+    echo "erro: o build de debug com captura liberada ainda tem FLAG_SECURE: $flags" >&2
+    exit 1
+  fi
+  echo "OK — debug com --captura: janela do ACS SEM FLAG_SECURE (só para demonstração)"
+  exit 0
 fi
 if ! grep -qw SECURE <<<"$flags"; then
   echo "erro: a janela do ACS não tem FLAG_SECURE: $flags" >&2

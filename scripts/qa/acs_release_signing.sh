@@ -81,4 +81,11 @@ if saida="$(construir -Psinalacs.allowDebugSigning=false -Psinalacs.allowDevClie
 fi
 grep -q "assinatura de release" <<<"$saida" || { echo "erro: a falha não explicou o motivo:" >&2; tail -n 15 <<<"$saida" >&2; exit 1; }
 
+echo "== cenário 6: -Psinalacs.allowScreenCapture=true NÃO vale em release =="
+if saida="$(construir -Psinalacs.allowDebugSigning=true -Psinalacs.allowDevClientKey=true -Psinalacs.allowScreenCapture=true 2>&1)"; then
+  echo "erro: o release aceitou allowScreenCapture=true." >&2
+  exit 1
+fi
+grep -q "captura de tela" <<<"$saida" || { echo "erro: a falha não explicou o motivo:" >&2; tail -n 15 <<<"$saida" >&2; exit 1; }
+
 echo "OK — release exige chave própria; debug só com licença explícita; a chave de cliente de dev não vai no APK"

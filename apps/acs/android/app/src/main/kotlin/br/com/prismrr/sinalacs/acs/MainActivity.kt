@@ -13,10 +13,16 @@ class MainActivity : FlutterFragmentActivity() {
         // bloqueia captura de tela, gravação e a miniatura nos apps recentes,
         // na janela INTEIRA: Área, Visita e o seletor de paciente a exibem, e
         // proteger tela por tela deixaria uma de fora.
-        window.setFlags(
-            WindowManager.LayoutParams.FLAG_SECURE,
-            WindowManager.LayoutParams.FLAG_SECURE,
-        )
+        //
+        // A ÚNICA exceção é a constante de compilação abaixo, que o Gradle só liga no
+        // buildType debug por `-Psinalacs.allowScreenCapture=true` e recusa em release:
+        // nenhum menu, intent ou preferência a altera.
+        if (!BuildConfig.ALLOW_SCREEN_CAPTURE) {
+            window.setFlags(
+                WindowManager.LayoutParams.FLAG_SECURE,
+                WindowManager.LayoutParams.FLAG_SECURE,
+            )
+        }
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {

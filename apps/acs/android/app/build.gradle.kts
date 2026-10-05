@@ -54,6 +54,12 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
+    buildFeatures {
+        // AGP 9 desliga a geração de BuildConfig por padrão; a captura de tela do
+        // debug depende dela.
+        buildConfig = true
+    }
+
     defaultConfig {
         // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
         applicationId = "br.com.prismrr.sinalacs.acs"
@@ -64,6 +70,8 @@ android {
         versionCode = flutter.versionCode
         versionName = flutter.versionName
         manifestPlaceholders["GOOGLE_MAPS_API_KEY"] = dartDefineValue("GOOGLE_MAPS_API_KEY") ?: ""
+        // Captura de tela: FECHADA em todo build. Só o buildType debug pode abri-la.
+        buildConfigField("boolean", "ALLOW_SCREEN_CAPTURE", "false")
     }
 
     signingConfigs {
@@ -78,6 +86,12 @@ android {
     }
 
     buildTypes {
+        debug {
+            // Opt-out para QA, vídeo de demonstração e Firebase Test Lab: só aqui e só
+            // com `-Psinalacs.allowScreenCapture=true` (o texto exato `true`). Release
+            // herda o `false` do defaultConfig e não lê a propriedade.
+            buildConfigField("boolean", "ALLOW_SCREEN_CAPTURE", licenca("sinalacs.allowScreenCapture").toString())
+        }
         release {
             // Sem chave, a configuração continua carregável (sync da IDE, debug):
             // quem barra a build de RELEASE é o guard `taskGraph.whenReady` abaixo.
@@ -195,6 +209,16 @@ gradle.taskGraph.whenReady {
 
     // A chave privada de CLIENTE do broker de desenvolvimento (assets/certs/acs_client.key)
     // não pode ir dentro de um APK de release: qualquer pessoa com o APK a extrairia.
+    if (buildaRelease && licenca("sinalacs.allowScreenCapture")) {
+        throw GradleException(
+            """
+            |-Psinalacs.allowScreenCapture=true não vale em build de release: a janela do ACS
+            |(que mostra nome e condições crônicas de pacientes) fica sem captura de tela
+            |liberada SOMENTE em debug. Para gravar a demonstração, gere a build de debug:
+            |  ./scripts/dev/run_acs.sh --build --captura
+            """.trimMargin()
+        )
+    }
     val chaveDeDev = rootProject.file("../assets/certs/acs_client.key")
     if (buildaRelease && chaveDeDev.exists() && !licenca("sinalacs.allowDevClientKey")) {
         throw GradleException(
