@@ -5,6 +5,10 @@ import 'dart:math';
 // existe. As implementações sobre o Keystore ficam em
 // `secure_session_token_store.dart`, montadas só pelo `main.dart`.
 
+/// Resultado do desbloqueio do token guardado. `notRequired`: este store não
+/// tem prompt próprio (o chamador usa o portão de interface).
+enum SessionUnlock { unlocked, notRequired, cancelled, lockedOut, unavailable }
+
 /// Custódia do refresh token rotativo do ACS (LGPD-RT06).
 ///
 /// Fica no Android Keystore / iOS Keychain, como a chave do banco local. É o
@@ -17,6 +21,13 @@ abstract interface class SessionTokenStore {
   Future<void> write(String token);
 
   Future<void> clear();
+
+  /// `true` se há token guardado, **sem** decifrá-lo (nunca abre prompt).
+  Future<bool> contains();
+
+  /// Decifra o token guardado para a memória, abrindo o prompt do sistema se o
+  /// store o exige. `read()` só enxerga o token depois disto.
+  Future<SessionUnlock> unlock({required String reason});
 }
 
 /// Duplo de teste: só em memória.
@@ -33,6 +44,12 @@ class MemorySessionTokenStore implements SessionTokenStore {
 
   @override
   Future<void> clear() async => _token = null;
+
+  @override
+  Future<bool> contains() async => _token != null;
+
+  @override
+  Future<SessionUnlock> unlock({required String reason}) async => SessionUnlock.notRequired;
 }
 
 /// Identificador estável desta instalação. O servidor amarra a família do

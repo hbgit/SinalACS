@@ -25,4 +25,10 @@ class GatedSessionTokenStore implements SessionTokenStore {
 
   @override
   Future<void> clear() => _inner.clear();
+
+  @override
+  Future<bool> contains() => _inner.contains();
+
+  @override
+  Future<SessionUnlock> unlock({required String reason}) => _inner.unlock(reason: reason);
 }

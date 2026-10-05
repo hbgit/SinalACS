@@ -29,6 +29,12 @@ class SecureStorageSessionTokenStore implements SessionTokenStore {
 
   @override
   Future<void> clear() => _storage.delete(key: _key);
+
+  @override
+  Future<bool> contains() async => await read() != null;
+
+  @override
+  Future<SessionUnlock> unlock({required String reason}) async => SessionUnlock.notRequired;
 }
 
 class SecureStorageDeviceIdStore implements DeviceIdStore {

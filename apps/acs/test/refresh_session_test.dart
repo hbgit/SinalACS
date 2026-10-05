@@ -491,6 +491,10 @@ class ThrowingStore implements SessionTokenStore {
   Future<void> write(String token) async => failWrite ? throw PlatformException(code: 'x') : _t = token;
   @override
   Future<void> clear() async => failClear ? throw PlatformException(code: 'x') : _t = null;
+  @override
+  Future<bool> contains() async => await read() != null;
+  @override
+  Future<SessionUnlock> unlock({required String reason}) async => SessionUnlock.notRequired;
 }
 
 class ThrowingDevices implements DeviceIdStore {
