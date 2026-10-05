@@ -753,7 +753,7 @@ class _LoginScreenState extends State<LoginScreen> {
       }
       if (!mounted) return;
       if (!unlocked) {
-        // Chave invalidada (nova digital): o cofre apagou o token. Só então
+        // Chave invalidada (ex.: bloqueio de tela removido): o cofre apagou o token. Só então
         // vale o aviso; cancelar ou bloqueio mantêm o token e ficam quietos.
         if (stored == SessionUnlock.unavailable && !await backend.hasStoredSession && mounted) {
           setState(() => _aviso = 'Sua sessão expirou. Entre novamente.');

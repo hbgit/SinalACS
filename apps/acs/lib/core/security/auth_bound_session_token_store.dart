@@ -77,7 +77,8 @@ class AuthBoundSessionTokenStore implements SessionTokenStore {
         case VaultFailure.lockedOut:
           return SessionUnlock.lockedOut;
         case VaultFailure.invalidated:
-          // Nova digital cadastrada: a chave morreu, o token é irrecuperável.
+          // Chave morta (bloqueio de tela removido; em API < 30 também uma
+          // digital nova) ou blob corrompido: o token é irrecuperável.
           await _vault.delete(alias);
           return SessionUnlock.unavailable;
         case VaultFailure.unavailable:

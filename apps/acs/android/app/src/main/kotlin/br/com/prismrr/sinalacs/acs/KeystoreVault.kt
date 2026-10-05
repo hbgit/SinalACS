@@ -125,6 +125,11 @@ class KeystoreVault(private val activity: FragmentActivity) : MethodChannel.Meth
             .setDigests(KeyProperties.DIGEST_SHA256)
             .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_RSA_OAEP)
             .setUserAuthenticationRequired(true)
+            // Só tem efeito com chave SÓ de biometria (API < 30). Na API 30+,
+            // com DEVICE_CREDENTIAL, a chave inclui o SID do bloqueio de tela,
+            // que o token de autenticação da digital também carrega: uma
+            // digital nova NÃO invalida (provado no emulador API 36,
+            // 2026-10-05). Remover o bloqueio de tela apaga a chave.
             .setInvalidatedByBiometricEnrollment(true)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             builder.setUserAuthenticationParameters(
@@ -141,8 +146,9 @@ class KeystoreVault(private val activity: FragmentActivity) : MethodChannel.Meth
 
     /**
      * Chave privada utilizável, ou `null` se ausente. Lança
-     * [KeyPermanentlyInvalidatedException] quando uma biometria nova (ou a
-     * remoção do bloqueio de tela) invalidou a chave. `init` não pede
+     * [KeyPermanentlyInvalidatedException] quando a chave foi invalidada
+     * (bloqueio de tela removido; na API < 30 também uma biometria nova; o
+     * Android pode apagá-la de vez, e aí volta `null`). `init` não pede
      * autenticação: ela é cobrada no `doFinal`, via CryptoObject.
      */
     private fun initDecrypt(alias: String): Cipher? {
