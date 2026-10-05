@@ -6,7 +6,9 @@ import 'package:flutter/services.dart' show rootBundle;
 import 'package:sinalacs_acs/app/app.dart';
 import 'package:sinalacs_acs/core/network/backend_client.dart';
 import 'package:sinalacs_acs/core/network/backend_config.dart';
+import 'package:sinalacs_acs/core/security/auth_bound_session_token_store.dart';
 import 'package:sinalacs_acs/core/security/biometric_gate.dart';
+import 'package:sinalacs_acs/core/security/keystore_vault.dart';
 import 'package:sinalacs_acs/core/security/secure_session_token_store.dart';
 import 'package:sinalacs_acs/core/security/secure_upload_token_store.dart';
 import 'package:sinalacs_acs/core/services/micro_area_directory_factory.dart';
@@ -45,7 +47,10 @@ Future<void> main({String? defaultHost}) async {
       host: requireSecureHost(defaultHost ?? BackendConfig.host),
       trustedCaBytes: caBytes,
       // Refresh token e id do aparelho no Keystore/Keychain, nunca em texto.
-      tokenStore: SecureStorageSessionTokenStore(),
+      tokenStore: AuthBoundSessionTokenStore(
+        vault: MethodChannelKeystoreVault(),
+        legacy: SecureStorageSessionTokenStore(),
+      ),
       deviceIds: deviceIds,
       // Token de envio diferido por dono (D7), no Keystore.
       uploadTokens: uploadTokens,

@@ -11,7 +11,9 @@ import 'package:flutter_test/flutter_test.dart';
 void main() {
   test('o main.dart liga o refresh token e o id do aparelho ao Keystore', () {
     final fonte = File('lib/main.dart').readAsStringSync();
-    expect(fonte, contains('tokenStore: SecureStorageSessionTokenStore()'));
+    expect(fonte, contains('tokenStore: AuthBoundSessionTokenStore('));
+    expect(fonte, contains('vault: MethodChannelKeystoreVault()'));
+    expect(fonte, contains('legacy: SecureStorageSessionTokenStore()'));
     expect(fonte, contains('final deviceIds = SecureStorageDeviceIdStore();'));
     expect(fonte, contains('deviceIds: deviceIds'));
   });
