@@ -74,8 +74,11 @@ sdk="$(adb -s "$dev" shell getprop ro.build.version.sdk | tr -d '\r')"
 sh_() { adb -s "$dev" shell "$@" | tr -d '\r'; }
 xml="$(mktemp)"
 instalamos=0
+sem_bloqueio=0   # 1 entre o `locksettings clear` e o `set-pin` do --remover-bloqueio
 limpar() {
   rm -f "$xml"
+  # Falhou com o bloqueio removido: devolve o PIN para não deixar o emulador sem tela travada.
+  if [[ "$sem_bloqueio" -eq 1 ]]; then adb -s "$dev" shell locksettings set-pin "$pin" >/dev/null 2>&1 || true; fi
   adb -s "$dev" shell svc power stayon false >/dev/null 2>&1 || true
   if [[ "$instalamos" -eq 1 ]]; then adb -s "$dev" uninstall "$pkg" >/dev/null 2>&1 || true; fi
 }
@@ -281,10 +284,12 @@ if [[ "$remover_bloqueio" -eq 1 ]]; then
   echo '== opcional: remover o bloqueio de tela invalida a chave'
   sh_ am force-stop "$pkg"
   sh_ locksettings clear --old "$pin" >/dev/null
+  sem_bloqueio=1
   abrir_a_frio
   esperar "$LOGIN" 15 || falha 'sem bloqueio: o login não apareceu'
   tem "$PROMPT" && falha 'sem bloqueio: abriu prompt'
   sh_ locksettings set-pin "$pin" >/dev/null
+  sem_bloqueio=0
   abrir_a_frio
   esperar "$AVISO" 15 || falha 'PIN novo: o aviso "Sua sessão expirou" não apareceu'
   tem "$PROMPT" && falha 'PIN novo: abriu prompt (laço)'
