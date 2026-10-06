@@ -38,7 +38,8 @@ repo_root="${SYNC_DEV_CA_ROOT:-$repo_root}"
 # nunca ficar ao lado de um `.tmp` meio escrito.
 limpar_tmp() {
   rm -f "$repo_root"/apps/{acs,patient}/assets/certs/{dev_ca.crt,dev_rpc_ca.crt}.tmp \
-        "$repo_root"/apps/acs/assets/certs/acs_client.{crt,key}.tmp
+        "$repo_root"/apps/acs/assets/certs/acs_client.{crt,key}.tmp \
+        "$repo_root"/apps/admin/assets/certs/dev_rpc_ca.crt.tmp
 }
 trap limpar_tmp EXIT
 
@@ -177,6 +178,13 @@ for app in acs patient; do
   done
 done
 
+# O backoffice (apps/admin) só fala RPC por HTTPS: recebe apenas a CA do RPC,
+# nunca a do broker nem o certificado de cliente do ACS.
+stage_ca \
+  "$repo_root/infra/docker/traefik/runtime/certs/ca.crt" \
+  "$repo_root/apps/admin/assets/certs" \
+  "$repo_root/apps/admin/assets/certs/dev_rpc_ca.crt"
+
 # Cliente do ACS: temporário + mv, igual às CAs. A chave nasce 600 (umask) e
 # o chmod é explícito para não depender dele.
 mkdir -p "$acs_assets"
@@ -193,6 +201,8 @@ for app in acs patient; do
       "$label"
   done
 done
+
+promote_ca "$repo_root/apps/admin/assets/certs/dev_rpc_ca.crt" "RPC (admin)"
 
 mv "$acs_assets/acs_client.crt.tmp" "$acs_assets/acs_client.crt"
 mv "$acs_assets/acs_client.key.tmp" "$acs_assets/acs_client.key"

@@ -4,11 +4,12 @@ import 'package:sinalacs_admin/app/app.dart';
 import 'package:sinalacs_admin/core/data/mock_admin_data_source.dart';
 
 import 'support/failing_admin_data_source.dart';
+import 'support/fake_admin_auth.dart';
+import 'support/layout_harness.dart';
 
 Future<void> _loginTo(WidgetTester tester, FailingAdminDataSource dataSource, String destination) async {
-  await tester.pumpWidget(SinalAdminApp(dataSource: dataSource));
-  await tester.tap(find.byKey(const Key('login_button')));
-  await tester.pumpAndSettle();
+  await tester.pumpWidget(SinalAdminApp(dataSource: dataSource, auth: FakeAdminAuth()));
+  await entrarComCredenciais(tester);
   if (destination != 'Indicadores') {
     await tester.tap(find.text(destination).last);
     await tester.pumpAndSettle();

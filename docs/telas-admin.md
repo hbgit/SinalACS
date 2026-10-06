@@ -6,13 +6,17 @@ Documentação visual do protótipo Flutter do backoffice administrativo (`apps/
 
 O backoffice é desktop-first (`spec/PRD_system.md` §2.1): acima de `AdminBreakpoints.rail` (640dp) a navegação usa `NavigationRail` lateral; abaixo disso, `NavigationBar` inferior — mesmo `ThemeData`, só muda o container de navegação. Os quatro destinos são **Indicadores**, **Microáreas**, **Alertas** e **Auditoria**. Os pontos de quebra são constantes nomeadas em [`apps/admin/lib/app/admin_layout.dart`](../apps/admin/lib/app/admin_layout.dart).
 
-## Login institucional (ambiente de desenvolvimento)
+## Login institucional
 
 ![Login do backoffice](screenshots/admin/01-login.png)
 
-Formulário local (matrícula/CNS e senha pré-preenchidos, não validados — o botão avança independente do que está digitado) no mesmo padrão visual do login do ACS. Um banner fixo deixa explícito que não há autenticação institucional real (SSO/gov.br) nesta etapa.
+Login real do staff (coordenador e administrador): matrícula/CNS e senha vão para `auth.loginStaff`; o painel só abre com a sessão que o servidor devolve, não há atalho de desenvolvimento. A imagem acima é da versão anterior (formulário local) e não foi recapturada. Como a verificação em duas etapas é obrigatória para o staff, o fluxo tem três desfechos:
 
-Paciente e ACS já autenticam de verdade contra `auth.developmentLogin`; o admin não, porque esse endpoint hoje só aceita `role: patient` ou `role: acs` — não existe usuário fixo de desenvolvimento para `admin` (ver `backend/sinalacs_server/lib/src/endpoints/auth_endpoint.dart`). Ligar isso de verdade exige uma mudança no backend, fora do escopo desta issue.
+- **Credencial inválida:** a mensagem genérica "Matrícula ou senha inválidos." (a mesma para matrícula inexistente e senha errada) ou o aviso de bloqueio por tentativas.
+- **Conta sem MFA (primeiro acesso):** o app abre a tela *Verificação em duas etapas* (`MfaEnrollmentScreen`), com o QR e a chave em texto (`mfa_secret`) para o aplicativo autenticador e o campo do código de 6 dígitos; nada é gravado no aparelho. Ao confirmar, volta ao login com o aviso "Verificação ativada. Entre com o código do aplicativo.".
+- **Conta com MFA:** o campo "Código do autenticador (6 dígitos)" aparece depois de matrícula e senha; trocar matrícula ou senha o descarta. Código errado: "Código de verificação inválido.". A sessão dura 15 min e não há refresh token para o staff; ao vencer, volta ao login com "Sessão encerrada. Entre novamente.".
+
+O roteiro desse fluxo está escrito em `apps/admin/integration_test/admin_login_e2e.dart`, executado por `scripts/qa/admin_login_e2e.sh`; a execução no emulador ainda está pendente (ver `PROGRESS.md`).
 
 ## Painel de indicadores
 

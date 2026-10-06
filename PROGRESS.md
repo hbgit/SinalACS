@@ -622,6 +622,16 @@ Plano: `docs/superpowers/plans/2026-10-02-pendencias-do-acs-flag-secure-ubs-rf08
 - T7: *(fechado em parte em 2026-10-05, ver abaixo)* chaves privadas de cliente em modo 644 em dev; o teste "production sem TLS" só verifica a ausência do erro de certificado; cert/chave ignorados em silêncio se o TLS está desligado.
 - T8: `sync_dev_ca.sh` não confere que `acs-area-12.key` é o par do certificado e deixa `.tmp` se interrompido; doc de `alert_feed.dart` passa de 100 colunas; `buildMqttSecurityContext` ignora certificado sem chave em silêncio.
 
+## Login real do backoffice (issue #39, 2026-10-06)
+
+**Entregue (código e testes hermáticos):** `auth.loginStaff`, `auth.beginStaffTotpEnrollment` e `auth.confirmStaffTotpEnrollment` (MFA sempre obrigatória para o staff, JWT com papel `coordinator`/`admin` e sem microárea, `Authorization.staffRoles`), tabela `staff_accounts` (migração aditiva), `ADM-001` no seed de desenvolvimento (senha `DEV_ADMIN_PASSWORD`), `apps/admin` com login real (`LoginScreen`, `MfaEnrollmentScreen`, `BackendAdminAuth`, host só HTTPS, CA de desenvolvimento como asset) e sem `devLoginEnabled` nem atalho. Detalhes em `backend/CLAUDE.md` e `apps/CLAUDE.md`; telas em `docs/telas-admin.md`.
+
+**Suítes rodadas em 2026-10-06:** `dart test` do backend (646 testes, inclui os de integração contra o `postgres-test`) e `flutter test` do admin (95) verdes; `flutter analyze` do admin sem avisos; `scripts/qa/ci_invariants.sh` ok (9 grupos); `scripts/qa/otp_relay_test.py` ok.
+
+**Prova no emulador: NÃO EXECUTADA.** Foram escritos `apps/admin/integration_test/admin_login_e2e.dart` (senha errada com mensagem genérica; primeiro acesso -> ativação da MFA pela tela -> código; código errado recusado; login com o código do passo seguinte até "Painel de Indicadores"), `scripts/qa/admin_login_e2e.sh` (stack de e2e, banco `sinalacs_e2e`, relé em `/admin`, conferência do TOTP ativado no banco) e a extensão das fixtures (`E2eStaff`, bloco `staff` do manifesto, seed e teste unitário), mas a execução exige recriar `sinalacs-serverpod`/`-traefik`/`-mosquitto`/`-gorush-1` da stack de desenvolvimento em uso (`e2e_stack.sh up`) e o ambiente recusou essa ação; nada foi recriado. Falta rodar `./scripts/qa/admin_login_e2e.sh` e registrar aqui o resultado. Até lá, o fluxo completo (RPC real + TLS com a CA do asset + telas) **não** está provado em aparelho; o que existe são testes de widget com `AdminAuthBackend` falso e testes de `BackendAdminAuth` com chamador falso.
+
+**Continua aberto:** refresh token do staff (hoje 15 min e novo login com código); tela de redefinição de MFA e gestão de contas (#43); endpoints de dados do staff com RBAC (#40); trocar o `MockAdminDataSource` (#41); a trilha de auditoria ainda não distingue a audiência; a primeira ativação do TOTP do staff exige só matrícula + senha (trust-on-first-use); screenshot de `docs/telas-admin.md` do login não foi recapturado.
+
 ## Migração para Serverpod
 
 Trabalho posterior às Fases 1 e 2, fora da numeração M1.x/M2.x/M3.x do PRD. O

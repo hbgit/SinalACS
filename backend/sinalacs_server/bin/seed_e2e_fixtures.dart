@@ -34,6 +34,7 @@ Future<void> main(List<String> args) async {
 
   final fixtures = generateE2eFixtures(Random.secure());
   final acsDigest = await const Argon2PasswordHasher().derive(fixtures.acs.password);
+  final staffDigest = await const Argon2PasswordHasher().derive(fixtures.staff.password);
   final secondAcsDigest = await const Argon2PasswordHasher().derive(fixtures.secondAcs.password);
 
   final connection = await Connection.open(
@@ -104,6 +105,31 @@ Future<void> main(List<String> args) async {
           },
         );
       }
+      // Administrador do backoffice (RF07 para o staff): `users` com papel `admin`,
+      // `staff_accounts` e credencial Argon2id, SEM TOTP (a MFA é ativada pela
+      // tela do app admin). Fora de qualquer microárea.
+      final staff = fixtures.staff;
+      await tx.execute(
+        Sql.named('INSERT INTO "users" ("id","cpfHash","name","birthDate","role","microAreaId","createdAt","updatedAt") '
+            "VALUES (@id,@hash,'Admin E2E','1985-01-01','admin',NULL,NOW(),NOW())"),
+        parameters: {'id': staff.id, 'hash': 'e2e-staff-${staff.id}'},
+      );
+      await tx.execute(
+        Sql.named('INSERT INTO "staff_accounts" ("id","enrollmentId","active") VALUES (@id,@matricula,true)'),
+        parameters: {'id': staff.id, 'matricula': staff.matricula},
+      );
+      await tx.execute(
+        Sql.named('INSERT INTO "user_credentials" ("userId","passwordHash","passwordSalt","memoryKb","iterations","parallelism","failedAttempts","createdAt","updatedAt") '
+            'VALUES (@userId,@hash,@salt,@memoryKb,@iterations,@parallelism,0,NOW(),NOW())'),
+        parameters: {
+          'userId': staff.id,
+          'hash': staffDigest.hashBase64,
+          'salt': staffDigest.saltBase64,
+          'memoryKb': staffDigest.memoryKb,
+          'iterations': staffDigest.iterations,
+          'parallelism': staffDigest.parallelism,
+        },
+      );
     });
   } finally {
     await connection.close();
@@ -111,5 +137,5 @@ Future<void> main(List<String> args) async {
 
   final out = File(args.isNotEmpty ? args.first : '.e2e/fixtures.json');
   writeManifestPrivately(out, jsonEncode(fixtures.toJson()));
-  stdout.writeln('Fixtures de e2e gravadas (${fixtures.patients.length} pacientes, 2 ACS) em ${out.path}.');
+  stdout.writeln('Fixtures de e2e gravadas (${fixtures.patients.length} pacientes, 2 ACS, 1 admin) em ${out.path}.');
 }

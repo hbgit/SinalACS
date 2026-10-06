@@ -428,6 +428,115 @@ class _AuthEndpoint {
     });
   }
 
+  _i3.Future<_i7.DevelopmentLoginResult> loginStaff(
+    _i1.TestSessionBuilder sessionBuilder, {
+    required String matricula,
+    required String password,
+    String? totpCode,
+  }) async {
+    return _i1.callAwaitableFunctionAndHandleExceptions(() async {
+      var _localUniqueSession =
+          (sessionBuilder as _i1.InternalTestSessionBuilder).internalBuild(
+            endpoint: 'auth',
+            method: 'loginStaff',
+          );
+      try {
+        var _localCallContext = await _endpointDispatch.getMethodCallContext(
+          createSessionCallback: (_) => _localUniqueSession,
+          endpointPath: 'auth',
+          methodName: 'loginStaff',
+          parameters: _i1.testObjectToJson({
+            'matricula': matricula,
+            'password': password,
+            'totpCode': totpCode,
+          }),
+          serializationManager: _serializationManager,
+        );
+        var _localReturnValue =
+            await (_localCallContext.method.call(
+                  _localUniqueSession,
+                  _localCallContext.arguments,
+                )
+                as _i3.Future<_i7.DevelopmentLoginResult>);
+        return _localReturnValue;
+      } finally {
+        await _localUniqueSession.close();
+      }
+    });
+  }
+
+  _i3.Future<_i8.TotpEnrollmentStart> beginStaffTotpEnrollment(
+    _i1.TestSessionBuilder sessionBuilder, {
+    required String matricula,
+    required String password,
+  }) async {
+    return _i1.callAwaitableFunctionAndHandleExceptions(() async {
+      var _localUniqueSession =
+          (sessionBuilder as _i1.InternalTestSessionBuilder).internalBuild(
+            endpoint: 'auth',
+            method: 'beginStaffTotpEnrollment',
+          );
+      try {
+        var _localCallContext = await _endpointDispatch.getMethodCallContext(
+          createSessionCallback: (_) => _localUniqueSession,
+          endpointPath: 'auth',
+          methodName: 'beginStaffTotpEnrollment',
+          parameters: _i1.testObjectToJson({
+            'matricula': matricula,
+            'password': password,
+          }),
+          serializationManager: _serializationManager,
+        );
+        var _localReturnValue =
+            await (_localCallContext.method.call(
+                  _localUniqueSession,
+                  _localCallContext.arguments,
+                )
+                as _i3.Future<_i8.TotpEnrollmentStart>);
+        return _localReturnValue;
+      } finally {
+        await _localUniqueSession.close();
+      }
+    });
+  }
+
+  _i3.Future<void> confirmStaffTotpEnrollment(
+    _i1.TestSessionBuilder sessionBuilder, {
+    required String matricula,
+    required String password,
+    required String code,
+  }) async {
+    return _i1.callAwaitableFunctionAndHandleExceptions(() async {
+      var _localUniqueSession =
+          (sessionBuilder as _i1.InternalTestSessionBuilder).internalBuild(
+            endpoint: 'auth',
+            method: 'confirmStaffTotpEnrollment',
+          );
+      try {
+        var _localCallContext = await _endpointDispatch.getMethodCallContext(
+          createSessionCallback: (_) => _localUniqueSession,
+          endpointPath: 'auth',
+          methodName: 'confirmStaffTotpEnrollment',
+          parameters: _i1.testObjectToJson({
+            'matricula': matricula,
+            'password': password,
+            'code': code,
+          }),
+          serializationManager: _serializationManager,
+        );
+        var _localReturnValue =
+            await (_localCallContext.method.call(
+                  _localUniqueSession,
+                  _localCallContext.arguments,
+                )
+                as _i3.Future<void>);
+        return _localReturnValue;
+      } finally {
+        await _localUniqueSession.close();
+      }
+    });
+  }
+
   _i3.Future<_i7.DevelopmentLoginResult> refreshSession(
     _i1.TestSessionBuilder sessionBuilder, {
     required String refreshToken,

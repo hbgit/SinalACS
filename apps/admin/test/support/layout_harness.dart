@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sinalacs_admin/app/app.dart';
+import 'package:sinalacs_admin/core/auth/admin_auth_backend.dart';
 import 'package:sinalacs_admin/core/data/admin_data_source.dart';
+
+import 'fake_admin_auth.dart';
 
 /// Ferramentas para provar que uma tela cabe na janela em que foi posta.
 ///
@@ -30,17 +33,33 @@ Future<void> abrirBackoffice(
   required Size tamanho,
   double escalaDeFonte = 1.0,
   AdminDataSource? dataSource,
+  AdminAuthBackend? auth,
 }) async {
   redimensionar(tester, tamanho, escalaDeFonte: escalaDeFonte);
   addTearDown(tester.view.reset);
   addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
 
-  await tester.pumpWidget(SinalAdminApp(dataSource: dataSource, devLoginEnabled: true));
+  await tester.pumpWidget(SinalAdminApp(dataSource: dataSource, auth: auth ?? FakeAdminAuth()));
 
   // `ensureVisible` antes do tap não é zelo: numa janela baixa (celular em
   // paisagem, 360dp de altura) o botão fica abaixo da dobra e `tap` acerta o
   // vazio sem lançar nada — os testes seguiriam medindo a tela de login
   // achando que estavam no backoffice.
+  await entrarComCredenciais(tester);
+}
+
+/// Preenche matrícula e senha e toca em Entrar (o login real não tem atalho).
+///
+/// O `ensureVisible` antes de cada toque vale para o botão e para os campos:
+/// com fonte a 200% o formulário passa da dobra.
+Future<void> entrarComCredenciais(WidgetTester tester) async {
+  await tester.pumpAndSettle();
+  for (final (chave, texto) in const [('matricula_field', 'ADM-001'), ('senha_field', 'senha-de-teste')]) {
+    final campo = find.byKey(Key(chave));
+    await tester.ensureVisible(campo);
+    await tester.pumpAndSettle();
+    await tester.enterText(campo, texto);
+  }
   final entrar = find.byKey(const Key('login_button'));
   await tester.ensureVisible(entrar);
   await tester.pumpAndSettle();

@@ -73,6 +73,27 @@ class E2eAcs {
   String toString() => 'E2eAcs(${id.substring(0, 8)}…)';
 }
 
+/// Conta do backoffice (`staff_accounts`, papel `admin`) SEM TOTP ativado: o e2e
+/// do admin faz a ativação da MFA pela tela. Matrícula e senha novas a cada execução.
+class E2eStaff {
+  const E2eStaff({required this.id, required this.matricula, required this.password});
+
+  final String id;
+  final String matricula;
+  final String password;
+
+  Map<String, Object?> toJson() => {'id': id, 'matricula': matricula, 'password': password};
+
+  factory E2eStaff.fromJson(Map<String, Object?> j) => E2eStaff(
+        id: j['id']! as String,
+        matricula: j['matricula']! as String,
+        password: j['password']! as String,
+      );
+
+  @override
+  String toString() => 'E2eStaff(${id.substring(0, 8)}…)';
+}
+
 class E2eFixtures {
   const E2eFixtures({
     required this.ubsId,
@@ -80,6 +101,7 @@ class E2eFixtures {
     required this.otherMicroAreaId,
     required this.acs,
     required this.secondAcs,
+    required this.staff,
     required this.patients,
   });
 
@@ -92,6 +114,9 @@ class E2eFixtures {
   /// offline é por dono (B não vê nem envia as visitas de A) e que o envio
   /// diferido sobe as visitas de A com a autoria de A.
   final E2eAcs secondAcs;
+
+  /// Administrador do backoffice (sem MFA ativada), para o e2e do app admin.
+  final E2eStaff staff;
   final List<E2ePatient> patients;
 
   E2ePatient byRole(String role) => patients.singleWhere((p) => p.role == role);
@@ -102,6 +127,7 @@ class E2eFixtures {
         'otherMicroAreaId': otherMicroAreaId,
         'acs': acs.toJson(),
         'acsB': secondAcs.toJson(),
+        'staff': staff.toJson(),
         'patients': [for (final p in patients) p.toJson()],
       };
 
@@ -111,6 +137,7 @@ class E2eFixtures {
         otherMicroAreaId: j['otherMicroAreaId']! as String,
         acs: E2eAcs.fromJson((j['acs']! as Map).cast<String, Object?>()),
         secondAcs: E2eAcs.fromJson((j['acsB']! as Map).cast<String, Object?>()),
+        staff: E2eStaff.fromJson((j['staff']! as Map).cast<String, Object?>()),
         patients: [
           for (final p in (j['patients']! as List)) E2ePatient.fromJson((p as Map).cast<String, Object?>()),
         ],
@@ -196,6 +223,11 @@ E2eFixtures generateE2eFixtures(Random random) {
     secondAcs: E2eAcs(
       id: generateUuidV4(random),
       matricula: matriculaB,
+      password: _password(random),
+    ),
+    staff: E2eStaff(
+      id: generateUuidV4(random),
+      matricula: 'E2E-ADM-${1000 + random.nextInt(9000)}',
       password: _password(random),
     ),
     patients: [
