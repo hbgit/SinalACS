@@ -62,8 +62,9 @@ void esperarSemEstouro(WidgetTester tester, String contexto) {
 /// janela de tamanho e escala de fonte fixos. Confere a tela de login ANTES de
 /// entrar: ela também tem cabeçalho.
 ///
-/// Devolve o feed fake, para o teste entregar um alerta depois do login (o
-/// alerta pré-inserido abaixo só aparece no mapa, não na lista da Fila).
+/// Devolve o feed fake, para o teste entregar um alerta de outro risco depois do
+/// login. Os cartões da Fila só são construídos quando rolam até a viewport: use
+/// [rolarAte] para chegar neles, não `ensureVisible`.
 Future<FakeAlertFeed> abrirPainel(
   WidgetTester tester, {
   required Size tamanho,
