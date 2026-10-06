@@ -60,6 +60,57 @@ void main() {
     });
   }
 
+  // O chip de conexão corta o texto com elipse a 200% (`maxLines: 1`): o estado
+  // continua legível pelo ícone e pela cor, e o nome acessível tem de seguir
+  // inteiro para quem usa leitor de tela. WCAG 1.4.1 (não só cor) e 4.1.2.
+  group('chip de conexão a 200% em 320x640', () {
+    const tamanho = Size(320, 640);
+
+    testWidgets('com a central conectada o rótulo semântico é completo', (tester) async {
+      final semantica = tester.ensureSemantics();
+      try {
+        final feed = await abrirPainel(tester, tamanho: tamanho, escalaDeFonte: 2.0);
+        feed.onConnectionChanged?.call(true);
+        await assentar(tester);
+
+        expect(tester.getSemantics(find.byKey(const Key('broker_status'))).label, contains('Alertas em tempo real'));
+        esperarSemEstouro(tester, 'chip conectado a 200%');
+      } finally {
+        semantica.dispose();
+      }
+    });
+
+    testWidgets('sem a central o rótulo semântico é completo', (tester) async {
+      final semantica = tester.ensureSemantics();
+      try {
+        final feed = await abrirPainel(tester, tamanho: tamanho, escalaDeFonte: 2.0);
+        feed.onConnectionChanged?.call(false);
+        await assentar(tester);
+
+        expect(tester.getSemantics(find.byKey(const Key('broker_status'))).label, contains('Sem central'));
+        esperarSemEstouro(tester, 'chip sem central a 200%');
+      } finally {
+        semantica.dispose();
+      }
+    });
+
+    testWidgets('na tela de login (sem estado) o rótulo semântico é "Offline ready"', (tester) async {
+      final semantica = tester.ensureSemantics();
+      try {
+        redimensionar(tester, tamanho, escalaDeFonte: 2.0);
+        addTearDown(tester.view.reset);
+        addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+        await tester.pumpWidget(SinalAcsApp(backend: FakeAcsBackend(), feedBuilder: (q) => FakeAlertFeed(q)));
+        await assentar(tester);
+
+        expect(tester.getSemantics(find.byKey(const Key('broker_status'))).label, contains('Offline ready'));
+        esperarSemEstouro(tester, 'chip no login a 200%');
+      } finally {
+        semantica.dispose();
+      }
+    });
+  });
+
   testWidgets('o cabeçalho cresce quando a escala muda em tempo de execução', (tester) async {
     // No Android a preferência de tamanho de fonte muda em Configurações, com o
     // app já aberto em segundo plano: o cabeçalho tem de acompanhar.
