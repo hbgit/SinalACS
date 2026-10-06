@@ -20,6 +20,8 @@ dependencies:
   qr_flutter: ^4.1.0
 
 dev_dependencies:
+  # Gerador TOTP do e2e (integration_test/support/totp.dart).
+  crypto: ^3.0.0
   flutter_test:
     sdk: flutter
   integration_test:
