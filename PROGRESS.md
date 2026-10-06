@@ -632,6 +632,24 @@ Plano: `docs/superpowers/plans/2026-10-02-pendencias-do-acs-flag-secure-ubs-rf08
 
 **Continua aberto:** refresh token do staff (hoje 15 min e novo login com código); tela de redefinição de MFA e gestão de contas (#43); endpoints de dados do staff com RBAC (#40); trocar o `MockAdminDataSource` (#41); a trilha de auditoria ainda não distingue a audiência; a primeira ativação do TOTP do staff exige só matrícula + senha (trust-on-first-use); screenshot de `docs/telas-admin.md` do login não foi recapturado.
 
+## Minors adiados da #39 (2026-10-06)
+
+**Fechados:**
+- (a) Testes de endpoint de `beginStaffTotpEnrollment`/`confirmStaffTotpEnrollment` contra o Postgres (5 testes, `e4df0de`).
+- (b) A auditoria do login distingue staff (`staff_session`) de ACS (`session`) (`4f4c9bd`); sem backfill das linhas antigas.
+- (c) O cabeçalho do admin mostra o papel da sessão em vez de `admin.dev` fixo (`5da3008`). O rótulo do papel pode ser truncado com reticências a 320 dp + fonte a 200%, mas o leitor de tela o anuncia por inteiro.
+- (d) O contador de bloqueio é por conta e a política é a mesma para ACS e staff, fixada por testes (`57c186a`). O item original estava mal descrito: o contador nunca foi compartilhado.
+- (e) A captura da tela de login foi refeita (`a378318`).
+
+**Continua aberto:**
+- A prova E2E no emulador do login real (`scripts/qa/admin_login_e2e.sh`) nunca foi executada.
+- As capturas 02–08 de `docs/telas-admin.md` ainda mostram o cabeçalho antigo.
+- A primeira ativação de TOTP de uma conta de staff exige só matrícula + senha (TOFU); precisa de follow-up (código de uso único) antes da #40.
+- Refresh token do staff.
+- Minors adiados em revisão, por exemplo ruído de `dart format` em `staff_login_test.dart`, vindo de commit anterior.
+
+**Suítes (2026-10-06):** backend `dart test` 657 verdes; admin `flutter test` 102 verdes, `flutter analyze` sem avisos; `ci_invariants.sh` ok (9 grupos); `check_documentation_links.sh` exit 0.
+
 ## Migração para Serverpod
 
 Trabalho posterior às Fases 1 e 2, fora da numeração M1.x/M2.x/M3.x do PRD. O
