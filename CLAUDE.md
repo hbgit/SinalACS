@@ -51,10 +51,10 @@ reference for every variable.
 
 The script generates random per-machine values for `POSTGRES_PASSWORD`,
 `TEST_DATABASE_PASSWORD`, `MQTT_BACKEND_PASSWORD`, `MQTT_ACS_PASSWORD`,
-`JWT_SECRET`, `AUDIT_CHAIN_SECRET` and `HEALTH_DATA_ENCRYPTION_KEY`, writes
+`JWT_SECRET`, `AUDIT_CHAIN_SECRET`, `HEALTH_DATA_ENCRYPTION_KEY` and `DEV_ADMIN_PASSWORD` (the dev password of the backoffice admin `ADM-001`), writes
 `backend/sinalacs_server/config/passwords.yaml` with the same test-database
 password, and `chmod 600` on both. It never overwrites existing files without
-`--force`, and warns when `pg_data/` predates a rotation: `POSTGRES_PASSWORD`
+`--force` (an existing `.env` that lacks `DEV_ADMIN_PASSWORD` fails every `docker compose` command, `down` included, until `./scripts/dev/bootstrap_env.sh` is run without `--force`, which appends only that variable and touches no other value), and warns when `pg_data/` predates a rotation: `POSTGRES_PASSWORD`
 only takes effect on the volume's first init (old password keeps being
 required, backend won't connect), and a rotated `HEALTH_DATA_ENCRYPTION_KEY`
 doesn't block boot but makes already-encrypted clinical columns unreadable —

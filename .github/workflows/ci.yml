@@ -43,6 +43,7 @@ jobs:
           ./scripts/qa/ci_push_e2e_test.sh
           ./scripts/qa/ci_invariants_fcm_test.sh
           ./scripts/dev/sync_dev_ca_test.sh
+          ./scripts/dev/bootstrap_env_test.sh
           ./scripts/dev/run_acs_captura_test.sh
   serverpod-backend:
     runs-on: ubuntu-24.04

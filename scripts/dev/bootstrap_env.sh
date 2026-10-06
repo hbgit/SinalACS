@@ -49,6 +49,8 @@ if [[ -f "$env_file" && "$force" -eq 0 ]]; then
   # criado (nunca altera valor existente). Hoje: DEV_ADMIN_PASSWORD (#39).
   if ! grep -qE '^DEV_ADMIN_PASSWORD=.' "$env_file"; then
     sed -i '/^DEV_ADMIN_PASSWORD=$/d' "$env_file"
+    # Um .env sem newline final colaria a variável na última linha.
+    if [[ -s "$env_file" && -n "$(tail -c1 "$env_file")" ]]; then echo >> "$env_file"; fi
     printf 'DEV_ADMIN_PASSWORD=%s\n' "$(secret)" >> "$env_file"
     echo "  DEV_ADMIN_PASSWORD acrescentada ao .env (estava ausente)."
   fi
