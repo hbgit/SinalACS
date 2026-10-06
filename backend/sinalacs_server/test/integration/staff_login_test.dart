@@ -406,6 +406,60 @@ void main() {
       },
     );
 
+    // Mesma política para as duas audiências (5 falhas), mas o contador é por
+    // linha de user_credentials: falhas de uma conta não tocam a outra.
+    Future<UserCredential> credencialDe(String userId) async =>
+        (await UserCredential.db.findFirstRow(
+          sessionBuilder.build(),
+          where: (t) => t.userId.equals(UuidValue.fromString(userId)),
+        ))!;
+
+    test(
+      'falhas no login do ACS bloqueiam só o ACS, não o staff (contador por conta)',
+      () async {
+        for (var i = 0; i < InstitutionalAuthService.maxFailedAttempts; i++) {
+          await expectLater(
+            endpoints.auth.loginInstitutional(
+              sessionBuilder,
+              matricula: _acsMatricula,
+              password: 'errada',
+            ),
+            throwsA(isA<AuthenticationFailedException>()),
+          );
+        }
+        // O laço contou de verdade: o ACS está bloqueado.
+        final acs = await credencialDe(_acsId);
+        expect(acs.failedAttempts, InstitutionalAuthService.maxFailedAttempts);
+        expect(acs.lockedUntil, isNotNull);
+        // O admin não foi tocado.
+        final admin = await credencialDe(_adminId);
+        expect(admin.failedAttempts, 0);
+        expect(admin.lockedUntil, isNull);
+      },
+    );
+
+    test(
+      'falhas no login do staff bloqueiam só o staff, não o ACS (contador por conta)',
+      () async {
+        for (var i = 0; i < InstitutionalAuthService.maxFailedAttempts; i++) {
+          await expectLater(
+            endpoints.auth.loginStaff(
+              sessionBuilder,
+              matricula: _adminMatricula,
+              password: 'errada',
+            ),
+            throwsA(isA<AuthenticationFailedException>()),
+          );
+        }
+        final admin = await credencialDe(_adminId);
+        expect(admin.failedAttempts, InstitutionalAuthService.maxFailedAttempts);
+        expect(admin.lockedUntil, isNotNull);
+        final acs = await credencialDe(_acsId);
+        expect(acs.failedAttempts, 0);
+        expect(acs.lockedUntil, isNull);
+      },
+    );
+
     test(
       'token de admin é recusado por um caminho só de ACS (patients.listMicroArea)',
       () async {
