@@ -60,7 +60,10 @@ void esperarSemEstouro(WidgetTester tester, String contexto) {
 /// Abre o painel já logado (login pela tela, contra o `FakeAcsBackend`), numa
 /// janela de tamanho e escala de fonte fixos. Confere a tela de login ANTES de
 /// entrar: ela também tem cabeçalho.
-Future<void> abrirPainel(
+///
+/// Devolve o feed fake, para o teste entregar um alerta depois do login (o
+/// alerta pré-inserido abaixo só aparece no mapa, não na lista da Fila).
+Future<FakeAlertFeed> abrirPainel(
   WidgetTester tester, {
   required Size tamanho,
   double escalaDeFonte = 1.0,
@@ -70,11 +73,12 @@ Future<void> abrirPainel(
   addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
 
   final alerta = testAlert(alertId: 'escala-1', locationCell: testLocationCell);
+  late FakeAlertFeed feed;
   await tester.pumpWidget(SinalAcsApp(
     backend: FakeAcsBackend(),
     feedBuilder: (queue) {
       queue.upsert(alerta); // `initialAlert` só seleciona; a tela lê a fila
-      return FakeAlertFeed(queue);
+      return feed = FakeAlertFeed(queue);
     },
   ));
   await tester.pump();
@@ -89,6 +93,7 @@ Future<void> abrirPainel(
   await tester.pumpAndSettle();
   await tester.tap(entrar);
   await assentar(tester);
+  return feed;
 }
 
 /// Rola a tela até o fim, checando estouro a cada passo.
@@ -104,6 +109,15 @@ Future<void> percorrerTelaInteira(WidgetTester tester, String contexto) async {
     await assentar(tester);
     esperarSemEstouro(tester, '$contexto (rolagem $passo)');
   }
+}
+
+/// Rola a página até [alvo] existir e ficar visível. `ensureVisible` não serve
+/// para item de lista preguiçosa: fora da viewport ele ainda não foi construído
+/// e o finder não acha nada (`Bad state: No element`).
+Future<void> rolarAte(WidgetTester tester, Finder alvo) async {
+  final pagina = find.byWidgetPredicate((w) => w is Scrollable && w.restorationId != 'editable').first;
+  await tester.scrollUntilVisible(alvo, 200, scrollable: pagina, maxScrolls: 60);
+  await assentar(tester);
 }
 
 Future<void> irParaDaBarra(WidgetTester tester, String destino) async {

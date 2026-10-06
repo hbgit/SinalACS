@@ -30,6 +30,36 @@ void main() {
     }
   }
 
+  // Alcançar não é só existir na árvore: o botão que grava a visita precisa estar
+  // habilitado, receber toque (nada o cobre, nem a barra de navegação) e manter
+  // o alvo mínimo de 48 dp. Desabilitado não prova nada, daí a chegada confirmada.
+  for (final janela in janelas.entries) {
+    testWidgets('save_visit fica alcançável a 200% em ${janela.key}', (tester) async {
+      // Alerta amarelo: o vermelho só oferece "Acionar SAMU", e a rota de visita
+      // parte do cartão do alerta na Fila.
+      final feed = await abrirPainel(tester, tamanho: janela.value, escalaDeFonte: 2.0);
+      feed.deliver(testAlert(alertId: 'alerta-visita', riskLevel: 'yellow'));
+      await assentar(tester);
+      await irParaDaBarra(tester, 'Fila');
+      final iniciar = find.text('Iniciar rota de visita');
+      await rolarAte(tester, iniciar);
+      await tester.tap(iniciar);
+      await assentar(tester);
+      final chegada = find.byKey(const Key('arrival_confirmation'));
+      await rolarAte(tester, chegada);
+      await tester.tap(chegada);
+      await assentar(tester);
+
+      final salvar = find.byKey(const Key('save_visit'));
+      await rolarAte(tester, salvar);
+      expect(tester.widget<FilledButton>(salvar).onPressed, isNotNull,
+          reason: 'botão desabilitado não prova alcance');
+      expect(salvar.hitTestable(), findsOneWidget);
+      expect(tester.getSize(salvar).height, greaterThanOrEqualTo(48));
+      esperarSemEstouro(tester, 'botão Salvar a 200% em ${janela.key}');
+    });
+  }
+
   testWidgets('o cabeçalho cresce quando a escala muda em tempo de execução', (tester) async {
     // No Android a preferência de tamanho de fonte muda em Configurações, com o
     // app já aberto em segundo plano: o cabeçalho tem de acompanhar.
