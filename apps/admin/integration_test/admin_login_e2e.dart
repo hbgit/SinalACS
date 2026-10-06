@@ -106,8 +106,11 @@ void main() {
     _segredo = base32Decode(segredoBase32);
     expect(_segredo, isNotEmpty);
 
-    _passoDaAtivacao = _passo(DateTime.now());
-    await _digitar(tester, 'mfa_code_field', totpCode(_segredo!, DateTime.now()));
+    // Um único instante: o passo registrado é o do código enviado (dois
+    // `DateTime.now()` na virada de 30 s dariam passos diferentes).
+    final instanteDaAtivacao = DateTime.now();
+    _passoDaAtivacao = _passo(instanteDaAtivacao);
+    await _digitar(tester, 'mfa_code_field', totpCode(_segredo!, instanteDaAtivacao));
     await _tocar(tester, 'mfa_confirm_button');
 
     // Confirmado: volta ao login, que agora pede o código do autenticador.
@@ -153,7 +156,9 @@ void main() {
     // passar para um passo MAIOR que o da ativação e usa o do passo ATUAL
     // (dentro da janela de +-1 do servidor).
     await _pumpUntil(tester, () => _passo(DateTime.now()) > _passoDaAtivacao!, timeout: const Duration(seconds: 40));
-    await _digitar(tester, 'totp_field', totpCode(_segredo!, DateTime.now()));
+    final instante = DateTime.now();
+    expect(_passo(instante), greaterThan(_passoDaAtivacao!));
+    await _digitar(tester, 'totp_field', totpCode(_segredo!, instante));
     await _tocar(tester, 'login_button');
     await _pumpUntil(tester, () => find.text('Painel de Indicadores').evaluate().isNotEmpty || _existe('login_error'));
 

@@ -16,7 +16,7 @@ Login real do staff (coordenador e administrador): matrícula/CNS e senha vão p
 - **Conta sem MFA (primeiro acesso):** o app abre a tela *Verificação em duas etapas* (`MfaEnrollmentScreen`), com o QR e a chave em texto (`mfa_secret`) para o aplicativo autenticador e o campo do código de 6 dígitos; nada é gravado no aparelho. Ao confirmar, volta ao login com o aviso "Verificação ativada. Entre com o código do aplicativo.".
 - **Conta com MFA:** o campo "Código do autenticador (6 dígitos)" aparece depois de matrícula e senha; trocar matrícula ou senha o descarta. Código errado: "Código de verificação inválido.". A sessão dura 15 min e não há refresh token para o staff; ao vencer, volta ao login com "Sessão encerrada. Entre novamente.".
 
-O fluxo foi exercitado no emulador pelo `scripts/qa/admin_login_e2e.sh` (ver `PROGRESS.md` para o que foi de fato executado).
+O roteiro desse fluxo está escrito em `apps/admin/integration_test/admin_login_e2e.dart`, executado por `scripts/qa/admin_login_e2e.sh`; a execução no emulador ainda está pendente (ver `PROGRESS.md`).
 
 ## Painel de indicadores
 

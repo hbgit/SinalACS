@@ -10,8 +10,8 @@
 # (que entrega a credencial do admin em /admin, uma única vez) e roda
 # apps/admin/integration_test/admin_login_e2e.dart no emulador: senha errada,
 # ativação da MFA pela tela, código errado e login com o código até o painel.
-# Depois confere no banco de teste a conta de staff (TOTP ativado) e a trilha
-# de auditoria. Nada é escrito no banco de desenvolvimento; o banco e o
+# Depois confere no banco de teste a conta de staff (TOTP ativado,
+# passo registrado, tentativas zeradas). Nada é escrito no banco de desenvolvimento; o banco e o
 # manifesto são apagados ao final.
 #
 # Os dados do painel seguem no MockAdminDataSource (#41): só o login é real.
@@ -60,9 +60,12 @@ kill -0 "$relay_pid" 2>/dev/null || { echo 'erro: o relé não subiu' >&2; exit 
 staff_id="$(python3 -c "import json;print(json.load(open('.e2e/fixtures.json'))['staff']['id'])")"
 
 echo "== login do backoffice no emulador"
+# `|| status=$?`: sob `set -e` + `pipefail` uma falha encerraria o script antes
+# da mensagem; assim a mensagem sai e o `trap cleanup` continua rodando.
+status=0
 ( cd apps/admin && flutter pub get >/dev/null && flutter test integration_test/admin_login_e2e.dart -d "$dev" \
-    --dart-define=SINALACS_HOST=https://localhost:8443/ ) 2>&1 | tee /dev/stderr >/dev/null
-[[ "${PIPESTATUS[0]}" -eq 0 ]] || { echo 'erro: o login do backoffice no emulador falhou' >&2; exit 1; }
+    --dart-define=SINALACS_HOST=https://localhost:8443/ ) 2>&1 || status=$?
+[[ "$status" -eq 0 ]] || { echo "erro: o login do backoffice no emulador falhou (código $status)" >&2; exit 1; }
 
 echo "== conta de staff no banco de teste"
 sql() { ./scripts/qa/e2e_stack.sh psql "$1"; }
