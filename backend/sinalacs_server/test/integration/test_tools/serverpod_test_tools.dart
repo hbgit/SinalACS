@@ -428,6 +428,72 @@ class _AuthEndpoint {
     });
   }
 
+  _i3.Future<_i7.DevelopmentLoginResult> refreshSession(
+    _i1.TestSessionBuilder sessionBuilder, {
+    required String refreshToken,
+    required String deviceId,
+  }) async {
+    return _i1.callAwaitableFunctionAndHandleExceptions(() async {
+      var _localUniqueSession =
+          (sessionBuilder as _i1.InternalTestSessionBuilder).internalBuild(
+            endpoint: 'auth',
+            method: 'refreshSession',
+          );
+      try {
+        var _localCallContext = await _endpointDispatch.getMethodCallContext(
+          createSessionCallback: (_) => _localUniqueSession,
+          endpointPath: 'auth',
+          methodName: 'refreshSession',
+          parameters: _i1.testObjectToJson({
+            'refreshToken': refreshToken,
+            'deviceId': deviceId,
+          }),
+          serializationManager: _serializationManager,
+        );
+        var _localReturnValue =
+            await (_localCallContext.method.call(
+                  _localUniqueSession,
+                  _localCallContext.arguments,
+                )
+                as _i3.Future<_i7.DevelopmentLoginResult>);
+        return _localReturnValue;
+      } finally {
+        await _localUniqueSession.close();
+      }
+    });
+  }
+
+  _i3.Future<void> logout(
+    _i1.TestSessionBuilder sessionBuilder, {
+    required String refreshToken,
+  }) async {
+    return _i1.callAwaitableFunctionAndHandleExceptions(() async {
+      var _localUniqueSession =
+          (sessionBuilder as _i1.InternalTestSessionBuilder).internalBuild(
+            endpoint: 'auth',
+            method: 'logout',
+          );
+      try {
+        var _localCallContext = await _endpointDispatch.getMethodCallContext(
+          createSessionCallback: (_) => _localUniqueSession,
+          endpointPath: 'auth',
+          methodName: 'logout',
+          parameters: _i1.testObjectToJson({'refreshToken': refreshToken}),
+          serializationManager: _serializationManager,
+        );
+        var _localReturnValue =
+            await (_localCallContext.method.call(
+                  _localUniqueSession,
+                  _localCallContext.arguments,
+                )
+                as _i3.Future<void>);
+        return _localReturnValue;
+      } finally {
+        await _localUniqueSession.close();
+      }
+    });
+  }
+
   _i3.Future<_i8.TotpEnrollmentStart> beginTotpEnrollment(
     _i1.TestSessionBuilder sessionBuilder, {
     required String matricula,
@@ -1305,6 +1371,111 @@ class _VisitsEndpoint {
                   _localCallContext.arguments,
                 )
                 as _i3.Future<List<_i21.VisitSyncResult>>);
+        return _localReturnValue;
+      } finally {
+        await _localUniqueSession.close();
+      }
+    });
+  }
+
+  _i3.Future<List<_i21.VisitSyncResult>> syncLegacy(
+    _i1.TestSessionBuilder sessionBuilder, {
+    required String accessToken,
+    required String deviceId,
+    required List<_i22.VisitSyncEntry> visits,
+  }) async {
+    return _i1.callAwaitableFunctionAndHandleExceptions(() async {
+      var _localUniqueSession =
+          (sessionBuilder as _i1.InternalTestSessionBuilder).internalBuild(
+            endpoint: 'visits',
+            method: 'syncLegacy',
+          );
+      try {
+        var _localCallContext = await _endpointDispatch.getMethodCallContext(
+          createSessionCallback: (_) => _localUniqueSession,
+          endpointPath: 'visits',
+          methodName: 'syncLegacy',
+          parameters: _i1.testObjectToJson({
+            'accessToken': accessToken,
+            'deviceId': deviceId,
+            'visits': visits,
+          }),
+          serializationManager: _serializationManager,
+        );
+        var _localReturnValue =
+            await (_localCallContext.method.call(
+                  _localUniqueSession,
+                  _localCallContext.arguments,
+                )
+                as _i3.Future<List<_i21.VisitSyncResult>>);
+        return _localReturnValue;
+      } finally {
+        await _localUniqueSession.close();
+      }
+    });
+  }
+
+  _i3.Future<List<_i21.VisitSyncResult>> syncDeferred(
+    _i1.TestSessionBuilder sessionBuilder, {
+    required String uploadToken,
+    required String deviceId,
+    required List<_i22.VisitSyncEntry> visits,
+  }) async {
+    return _i1.callAwaitableFunctionAndHandleExceptions(() async {
+      var _localUniqueSession =
+          (sessionBuilder as _i1.InternalTestSessionBuilder).internalBuild(
+            endpoint: 'visits',
+            method: 'syncDeferred',
+          );
+      try {
+        var _localCallContext = await _endpointDispatch.getMethodCallContext(
+          createSessionCallback: (_) => _localUniqueSession,
+          endpointPath: 'visits',
+          methodName: 'syncDeferred',
+          parameters: _i1.testObjectToJson({
+            'uploadToken': uploadToken,
+            'deviceId': deviceId,
+            'visits': visits,
+          }),
+          serializationManager: _serializationManager,
+        );
+        var _localReturnValue =
+            await (_localCallContext.method.call(
+                  _localUniqueSession,
+                  _localCallContext.arguments,
+                )
+                as _i3.Future<List<_i21.VisitSyncResult>>);
+        return _localReturnValue;
+      } finally {
+        await _localUniqueSession.close();
+      }
+    });
+  }
+
+  _i3.Future<void> revokeUploadToken(
+    _i1.TestSessionBuilder sessionBuilder, {
+    required String uploadToken,
+  }) async {
+    return _i1.callAwaitableFunctionAndHandleExceptions(() async {
+      var _localUniqueSession =
+          (sessionBuilder as _i1.InternalTestSessionBuilder).internalBuild(
+            endpoint: 'visits',
+            method: 'revokeUploadToken',
+          );
+      try {
+        var _localCallContext = await _endpointDispatch.getMethodCallContext(
+          createSessionCallback: (_) => _localUniqueSession,
+          endpointPath: 'visits',
+          methodName: 'revokeUploadToken',
+          parameters: _i1.testObjectToJson({'uploadToken': uploadToken}),
+          serializationManager: _serializationManager,
+        );
+        var _localReturnValue =
+            await (_localCallContext.method.call(
+                  _localUniqueSession,
+                  _localCallContext.arguments,
+                )
+                as _i3.Future<void>);
         return _localReturnValue;
       } finally {
         await _localUniqueSession.close();

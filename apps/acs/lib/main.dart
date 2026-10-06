@@ -1,10 +1,16 @@
 import 'dart:io';
 
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:sinalacs_acs/app/app.dart';
 import 'package:sinalacs_acs/core/network/backend_client.dart';
 import 'package:sinalacs_acs/core/network/backend_config.dart';
+import 'package:sinalacs_acs/core/security/auth_bound_session_token_store.dart';
+import 'package:sinalacs_acs/core/security/biometric_gate.dart';
+import 'package:sinalacs_acs/core/security/keystore_vault.dart';
+import 'package:sinalacs_acs/core/security/secure_session_token_store.dart';
+import 'package:sinalacs_acs/core/security/secure_upload_token_store.dart';
 import 'package:sinalacs_acs/core/services/micro_area_directory_factory.dart';
 
 /// Sobe o app do ACS.
@@ -29,11 +35,25 @@ Future<void> main({String? defaultHost}) async {
   // disfarçada: o `catch` da leitura da CA a capturava, logava *"CA do RPC não
   // pôde ser carregada"* (falso, a CA tinha carregado) e a segunda construção
   // do cliente estourava fora de qualquer guarda, antes do `runApp`.
+  // Uma instância de cada, compartilhada entre o cliente e o envio diferido:
+  // o id do aparelho é criado uma vez só, e o token de envio que o login
+  // grava é o mesmo que o envio diferido lê.
+  final deviceIds = SecureStorageDeviceIdStore();
+  final uploadTokens = SecureStorageUploadTokenStore();
+
   AcsBackend backend;
   try {
     backend = BackendClient(
       host: requireSecureHost(defaultHost ?? BackendConfig.host),
       trustedCaBytes: caBytes,
+      // Refresh token e id do aparelho no Keystore/Keychain, nunca em texto.
+      tokenStore: AuthBoundSessionTokenStore(
+        vault: MethodChannelKeystoreVault(),
+        legacy: SecureStorageSessionTokenStore(),
+      ),
+      deviceIds: deviceIds,
+      // Token de envio diferido por dono (D7), no Keystore.
+      uploadTokens: uploadTokens,
     );
   } on BackendFailure catch (failure) {
     debugPrint(
@@ -52,6 +72,16 @@ Future<void> main({String? defaultHost}) async {
   runApp(SinalAcsApp(
     backend: backend,
     microAreaDirectory: buildMicroAreaDirectory(backend: backend),
+    // Digital/rosto ou bloqueio de tela: retomada na partida e bloqueio por
+    // inatividade.
+    biometricGate: LocalAuthBiometricGate(),
+    // Envio diferido (legado e filas de quem saiu): depois do login, na
+    // retomada e quando a rede volta (D8).
+    uploadTokens: uploadTokens,
+    deviceIds: deviceIds,
+    connectivityChanges: Connectivity()
+        .onConnectivityChanged
+        .map((results) => results.any((r) => r != ConnectivityResult.none)),
   ));
 }
 

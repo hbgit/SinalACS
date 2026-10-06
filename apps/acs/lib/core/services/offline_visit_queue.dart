@@ -175,6 +175,162 @@ class InMemoryVisitStore implements VisitStore {
   }
 }
 
+/// Fábrica de armazenamento por dono. [VisitStore] continua sendo load/save,
+/// mas agora SEMPRE de um único dono (id do ACS).
+abstract interface class VisitStorage {
+  VisitStore forOwner(String ownerId);
+
+  /// Quarentena (D2): as visitas legadas, sem dono.
+  LegacyVisitStore get legacy;
+
+  /// Quantas visitas (pendentes e recusadas) cada dono tem no aparelho. Só a
+  /// contagem — nenhum conteúdo de visita sai daqui. Não inclui a quarentena.
+  /// Usado pelo envio diferido para achar donos sem token e para dizer quanto
+  /// ainda não subiu.
+  Future<Map<String, int>> countsByOwner();
+
+  /// "Limpar este aparelho" (D9): apaga os dados do app neste aparelho — as
+  /// visitas (que, se existirem, não foram enviadas), o cursor do pull e o
+  /// cache da microárea — numa transação. **Recusa** com [WipeBlocked], sem
+  /// apagar nada, se houver QUALQUER visita no aparelho, de qualquer dono ou
+  /// da quarentena: tudo o que está em `offline_visits` ainda não subiu.
+  Future<void> wipeAllData();
+}
+
+/// "Limpar este aparelho" recusado: ainda há [unsent] visitas não enviadas.
+/// Só a contagem — nenhum conteúdo de visita.
+class WipeBlocked implements Exception {
+  const WipeBlocked(this.unsent);
+
+  final int unsent;
+
+  @override
+  String toString() => 'WipeBlocked: $unsent visita(s) ainda não enviada(s)';
+}
+
+/// Quarentena (D2): as linhas com `owner IS NULL`. Nenhum dono as enxerga.
+abstract interface class LegacyVisitStore {
+  Future<List<OfflineVisitRecord>> load();
+
+  /// Remove só estes `localId`s legados (depois do 200 do servidor).
+  Future<void> remove(Iterable<String> localIds);
+}
+
+/// Lançada quando um `localId` não pode ser gravado: ou ele já pertence a
+/// outro dono (ou à quarentena), ou aparece repetido na própria lista. `local_id`
+/// é chave primária global: a visita alheia NUNCA é sobrescrita nem apagada, e a
+/// gravação inteira é desfeita (tudo ou nada).
+class VisitLocalIdConflict implements Exception {
+  VisitLocalIdConflict(this.localId, {this.repeatedInList = false});
+
+  final String localId;
+
+  /// true quando o `localId` se repete dentro do mesmo `save`.
+  final bool repeatedInList;
+
+  @override
+  String toString() => repeatedInList
+      ? 'VisitLocalIdConflict: localId $localId repetido na mesma gravação'
+      : 'VisitLocalIdConflict: localId $localId já pertence a outro dono';
+}
+
+/// Valida o id de dono: vazio ou só espaços é erro de programação (sem dono, a
+/// visita cairia na quarentena ou numa visão compartilhada).
+String requireOwnerId(String ownerId) {
+  if (ownerId.trim().isEmpty) {
+    throw ArgumentError.value(ownerId, 'ownerId', 'não pode ser vazio');
+  }
+  return ownerId;
+}
+
+/// Falha com [VisitLocalIdConflict] se [visits] repete algum `localId`.
+void ensureNoRepeatedLocalIds(List<OfflineVisitRecord> visits) {
+  final seen = <String>{};
+  for (final visit in visits) {
+    if (!seen.add(visit.localId)) {
+      throw VisitLocalIdConflict(visit.localId, repeatedInList: true);
+    }
+  }
+}
+
+/// [VisitStorage] em memória: uma visão por dono sobre um registro único, com a
+/// mesma unicidade global de `localId` do SQLCipher.
+class InMemoryVisitStorage implements VisitStorage {
+  InMemoryVisitStorage({Iterable<OfflineVisitRecord> legacyVisits = const []})
+      : _legacy = _InMemoryLegacyVisitStore(legacyVisits);
+
+  final Map<String, List<OfflineVisitRecord>> _byOwner = {};
+  final _InMemoryLegacyVisitStore _legacy;
+  final Map<String, VisitStore> _views = {};
+
+  @override
+  VisitStore forOwner(String ownerId) => _views.putIfAbsent(
+        requireOwnerId(ownerId),
+        () => _InMemoryOwnerVisitStore(this, ownerId),
+      );
+
+  @override
+  LegacyVisitStore get legacy => _legacy;
+
+  @override
+  Future<Map<String, int>> countsByOwner() async => {
+        for (final entry in _byOwner.entries)
+          if (entry.value.isNotEmpty) entry.key: entry.value.length,
+      };
+
+  /// Não há cursor nem cache em memória: só confere e esvazia as visitas.
+  @override
+  Future<void> wipeAllData() async {
+    final unsent = _byOwner.values.fold<int>(0, (total, visits) => total + visits.length) +
+        _legacy._visits.length;
+    if (unsent > 0) throw WipeBlocked(unsent);
+    _byOwner.clear();
+  }
+}
+
+class _InMemoryOwnerVisitStore implements VisitStore {
+  _InMemoryOwnerVisitStore(this._storage, this._owner);
+
+  final InMemoryVisitStorage _storage;
+  final String _owner;
+
+  @override
+  Future<List<OfflineVisitRecord>> load() async =>
+      List.of(_storage._byOwner[_owner] ?? const <OfflineVisitRecord>[]);
+
+  @override
+  Future<void> save(List<OfflineVisitRecord> visits) async {
+    ensureNoRepeatedLocalIds(visits);
+    final taken = <String>{
+      for (final entry in _storage._byOwner.entries)
+        if (entry.key != _owner) ...entry.value.map((v) => v.localId),
+      ..._storage._legacy._visits.map((v) => v.localId),
+    };
+    for (final visit in visits) {
+      if (taken.contains(visit.localId)) {
+        throw VisitLocalIdConflict(visit.localId);
+      }
+    }
+    _storage._byOwner[_owner] = List.of(visits);
+  }
+}
+
+class _InMemoryLegacyVisitStore implements LegacyVisitStore {
+  _InMemoryLegacyVisitStore(Iterable<OfflineVisitRecord> visits)
+      : _visits = List.of(visits);
+
+  final List<OfflineVisitRecord> _visits;
+
+  @override
+  Future<List<OfflineVisitRecord>> load() async => List.of(_visits);
+
+  @override
+  Future<void> remove(Iterable<String> localIds) async {
+    final ids = localIds.toSet();
+    _visits.removeWhere((visit) => ids.contains(visit.localId));
+  }
+}
+
 /// Fila offline-first de visitas domiciliares.
 ///
 /// Preserva a semântica da `SyncFsm` do backend
@@ -273,7 +429,29 @@ class OfflineVisitQueue {
     }
   }
 
-  Future<SyncOutcome> sync({bool forceConflict = false}) async {
+  Future<SyncOutcome>? _syncing;
+
+  /// `true` enquanto um [sync] está em voo (o lote pode estar no servidor).
+  /// Quem descarta filas (o app, ao trocar de dono) não pode descartar esta:
+  /// uma segunda fila sobre o mesmo dono seria regravada às cegas por esta
+  /// quando o envio terminasse.
+  bool get isSyncing => _syncing != null;
+
+  /// Envia o que está pendente. **Single-flight**: chamar de novo com um envio
+  /// em voo devolve o resultado DESSE envio (o lote nunca sai duas vezes, nem
+  /// é contado duas vezes); o que foi registrado depois da captura do lote
+  /// fica para o próximo `sync()`.
+  Future<SyncOutcome> sync({bool forceConflict = false}) {
+    final inFlight = _syncing;
+    if (inFlight != null) return inFlight;
+    late final Future<SyncOutcome> run;
+    run = _syncOnce(forceConflict: forceConflict).whenComplete(() {
+      if (identical(_syncing, run)) _syncing = null;
+    });
+    return _syncing = run;
+  }
+
+  Future<SyncOutcome> _syncOnce({required bool forceConflict}) async {
     if (_pending.isEmpty) {
       return const SyncOutcome(kind: SyncOutcomeKind.empty, processed: 0);
     }
@@ -374,9 +552,16 @@ class OfflineVisitQueue {
       }
     }
 
+    // `add()` pode ter entrado com o lote no servidor: quem não estava no lote
+    // capturado continua pendente, depois dos que voltaram para a fila. Refazer
+    // `_pending` só com o lote apagava essa visita da memória e, no `_persist`
+    // abaixo, do disco.
+    final inBatch = {for (final visit in batch) visit.localId};
+    final arrived = [for (final visit in _pending) if (!inBatch.contains(visit.localId)) visit];
     _pending
       ..clear()
-      ..addAll(stillPending);
+      ..addAll(stillPending)
+      ..addAll(arrived);
     await _persist();
 
     // Precedência: recusado > conflito > erro > sincronizado. Recusado é

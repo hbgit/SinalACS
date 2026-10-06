@@ -24,8 +24,10 @@ class EncryptedLocalDatabase {
   /// operacional do dispositivo, não uma visita, mas vive no mesmo banco
   /// criptografado por estar sob a mesma política de proteção. v6 acrescenta
   /// `micro_area_cache` e `micro_area_cache_meta`, o cache da microárea (RF08,
-  /// `spec/lgpd_design.md` §5.11).
-  static const schemaVersion = 6;
+  /// `spec/lgpd_design.md` §5.11). v7 acrescenta `offline_visits.owner`, o dono
+  /// da visita (id do ACS); nulo = visita legada em QUARENTENA, que nenhum dono
+  /// enxerga e que só sai pelo envio legado (`visits.syncLegacy`).
+  static const schemaVersion = 7;
 
   /// Visitas registradas offline, aguardando sincronização.
   ///
@@ -44,8 +46,13 @@ CREATE TABLE IF NOT EXISTS offline_visits (
   notes TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL,
   version INTEGER NOT NULL,
-  rejection_reason TEXT
+  rejection_reason TEXT,
+  owner TEXT
 )''';
+
+  /// Índice por dono: toda leitura/escrita de visitas filtra por `owner`.
+  static const createOfflineVisitsOwnerIndex =
+      'CREATE INDEX IF NOT EXISTS offline_visits_owner_idx ON offline_visits(owner)';
 
   /// Cursor de sincronização central→dispositivo (`visits.pull`), por
   /// instalação do app — ver `SyncCursorStore`.
@@ -72,7 +79,7 @@ CREATE TABLE IF NOT EXISTS micro_area_cache_meta (
   value TEXT NOT NULL
 )''';
 
-  /// Migração v1 → v2, v2 → v3, v3 → v4, v4 → v5 e v5 → v6.
+  /// Migração v1 → v2, v2 → v3, v3 → v4, v4 → v5, v5 → v6 e v6 → v7.
   ///
   /// Nenhuma das duas formas de v1 guarda o UUID do paciente: `patient_name`
   /// era `'Paciente ' + 8 dos 32 dígitos hex`, irreversível. Sem UUID,
@@ -90,6 +97,7 @@ CREATE TABLE IF NOT EXISTS micro_area_cache_meta (
       await db.execute('DROP TABLE IF EXISTS local_queue');
       await db.execute('DROP TABLE IF EXISTS offline_visits');
       await db.execute(createOfflineVisits);
+      await db.execute(createOfflineVisitsOwnerIndex);
       return;
     }
 
@@ -128,6 +136,19 @@ CREATE TABLE IF NOT EXISTS micro_area_cache_meta (
       // Aditiva: `CREATE TABLE IF NOT EXISTS` não toca em nada que já existe.
       await db.execute(createMicroAreaCache);
       await db.execute(createMicroAreaCacheMeta);
+    }
+
+    if (from < 7) {
+      // Aditiva: as linhas existentes ficam com `owner` nulo = quarentena (D2).
+      // Nenhum dono as adota; só o envio legado as retira.
+      final columns = await db.rawQuery(
+        "PRAGMA table_info('offline_visits')",
+      );
+      final hasOwner = columns.any((column) => column['name'] == 'owner');
+      if (!hasOwner) {
+        await db.execute('ALTER TABLE offline_visits ADD COLUMN owner TEXT;');
+      }
+      await db.execute(createOfflineVisitsOwnerIndex);
     }
   }
 
@@ -180,13 +201,16 @@ CREATE TABLE IF NOT EXISTS micro_area_cache_meta (
         version: schemaVersion,
         onCreate: (db, version) async {
           await db.execute(createOfflineVisits);
+          await db.execute(createOfflineVisitsOwnerIndex);
           await db.execute(createSyncCursor);
           await db.execute(createMicroAreaCache);
           await db.execute(createMicroAreaCacheMeta);
         },
         onUpgrade: _upgrade,
         // Um rollback de APK abriria um arquivo v2 pedindo v1 e lançaria,
-        // deixando o app travado a cada abertura.
+        // deixando o app travado a cada abertura. ATENÇÃO: o preço é APAGAR o
+        // banco — voltar o APK para uma build anterior à v7 (fila por dono)
+        // descarta as visitas não enviadas, o cursor e o cache da microárea.
         onDowngrade: onDatabaseDowngradeDelete,
       );
     }
@@ -197,6 +221,7 @@ CREATE TABLE IF NOT EXISTS micro_area_cache_meta (
         version: schemaVersion,
         onCreate: (db, version) async {
           await db.execute(createOfflineVisits);
+          await db.execute(createOfflineVisitsOwnerIndex);
           await db.execute(createSyncCursor);
           await db.execute(createMicroAreaCache);
           await db.execute(createMicroAreaCacheMeta);
@@ -219,5 +244,45 @@ CREATE TABLE IF NOT EXISTS micro_area_cache_meta (
       return sqlcipher.deleteDatabase(path);
     }
     return databaseFactoryFfi.deleteDatabase(path);
+  }
+
+  /// Sufixo da ÚNICA cópia de recuperação ([moveAside]).
+  static const recoverySuffix = '.recuperado';
+
+  /// Arquivos que acompanham o banco (WAL, memória compartilhada, journal):
+  /// movidos e apagados junto com ele, para nunca misturar gerações.
+  static const _sidecars = ['-wal', '-shm', '-journal'];
+
+  /// Põe o arquivo do banco de lado em `<arquivo>.recuperado`, em vez de
+  /// apagá-lo, quando a chave do Keystore não o abre mais.
+  ///
+  /// A cópia continua cifrada pelo SQLCipher e a chave dela é apagada logo em
+  /// seguida (`VisitDatabase`): **nem o app nem o suporte conseguem lê-la**.
+  /// Ela é só um artefato forense ilegível — os bytes ficam, caso a chave
+  /// antiga um dia volte (restauração de backup do aparelho ou do Keystore) —
+  /// e as visitas pendentes que estavam nela NÃO são recuperáveis pelo app.
+  /// Há UMA cópia: a anterior é sobrescrita. Se
+  /// mover falhar, lança — quem chama não apaga nada e não troca a chave.
+  /// "Limpar este aparelho" apaga a cópia ([deleteRecoveryCopy]).
+  static Future<void> moveAside(String databaseName) async {
+    final path = await pathFor(databaseName);
+    final main = File(path);
+    if (!main.existsSync()) return;
+    final backup = '$path$recoverySuffix';
+    await deleteRecoveryCopy(databaseName);
+    await main.rename(backup);
+    for (final sidecar in _sidecars) {
+      final file = File('$path$sidecar');
+      if (file.existsSync()) await file.rename('$backup$sidecar');
+    }
+  }
+
+  /// Apaga a cópia de recuperação e os arquivos que a acompanham, se houver.
+  static Future<void> deleteRecoveryCopy(String databaseName) async {
+    final backup = '${await pathFor(databaseName)}$recoverySuffix';
+    for (final suffix in ['', ..._sidecars]) {
+      final file = File('$backup$suffix');
+      if (file.existsSync()) await file.delete();
+    }
   }
 }

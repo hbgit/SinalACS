@@ -258,7 +258,7 @@ Future<void> main(List<String> args) async {
     // O único pedaço fora do caminho real é o store: SQLCipher não abre na VM.
     final queue = OfflineVisitQueue(
       store: InMemoryVisitStore(),
-      synchronizer: BackendVisitSynchronizer(backend: backend),
+      synchronizer: BackendVisitSynchronizer(backend: backend, ownerId: backend.session!.userId),
     );
     for (var index = 0; index < visitCount; index++) {
       await queue.add(OfflineVisitRecord(

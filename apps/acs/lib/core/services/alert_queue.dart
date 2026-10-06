@@ -84,6 +84,10 @@ class AlertQueue extends ChangeNotifier {
 
   bool get isEmpty => _alerts.isEmpty;
 
+  /// Alertas que o ACS ainda não confirmou à central. Conta todos, qualquer
+  /// risco: um risco desconhecido também é um chamado que alguém precisa ver.
+  int get unacknowledgedCount => _alerts.where((a) => !a.acknowledged).length;
+
   /// Insere ou atualiza um alerta.
   ///
   /// Devolve `false` quando o alerta é recusado. São duas razões:

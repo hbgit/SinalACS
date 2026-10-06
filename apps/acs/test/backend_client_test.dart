@@ -1,23 +1,23 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sinalacs_acs/core/network/backend_client.dart';
 import 'package:sinalacs_acs/core/network/backend_config.dart';
+import 'package:sinalacs_acs/core/security/session_token_store.dart';
 
 import 'support/fake_rpc_server.dart';
 
 /// Testes do `BackendClient` de verdade, contra um servidor que fala o
 /// protocolo do cliente gerado — ver `support/fake_rpc_server.dart`.
 ///
-/// É o único lugar onde a decisão de projeto desta task é observável: a
-/// credencial do ACS vive **apenas em memória** e é ela que renova a sessão de
-/// 15 minutos. Nenhum teste daqui usa senha real: as credenciais são sintéticas
-/// e o servidor é local.
+/// A sessão de 15 minutos é renovada pelo refresh token rotativo; a senha não é
+/// retida. Nenhum teste daqui usa senha real: as credenciais são sintéticas e o
+/// servidor é local.
 void main() {
   late FakeRpcServer server;
   late BackendClient backend;
 
   setUp(() async {
     server = await FakeRpcServer.start();
-    backend = BackendClient(host: server.host);
+    backend = BackendClient(host: server.host, tokenStore: MemorySessionTokenStore(), deviceIds: MemoryDeviceIdStore());
   });
 
   tearDown(() async {
@@ -41,6 +41,7 @@ void main() {
     expect(request.method, 'loginInstitutional');
     expect(request.args['matricula'], 'ACS-001');
     expect(request.args['password'], 'senha-sintetica');
+    expect(request.args['deviceId'], isNotEmpty, reason: 'sem deviceId o servidor não emite refresh token');
   });
 
   test('credencial recusada vira falha não recuperável com a mensagem do servidor', () async {
@@ -60,42 +61,25 @@ void main() {
     expect(backend.isAuthenticated, isFalse);
   });
 
-  test('token expirado renova a sessão reenviando a credencial em memória', () async {
-    // O comportamento que o app já tinha e que esta task preserva: um turno de
-    // campo dura mais que o token de 15 minutos, e sem renovação o ACS passa a
-    // ver erro de permissão no meio do trabalho.
+  test('token expirado renova a sessão pelo refresh token, sem reenviar a senha', () async {
+    // Um turno de campo dura mais que o token de 15 minutos.
     server.tokenLifetime = const Duration(minutes: -1);
 
     await backend.login(matricula: 'ACS-001', senha: 'senha-sintetica');
-    expect(
-      backend.isAuthenticated,
-      isFalse,
-      reason: 'o token emitido pelo servidor de teste já nasce vencido',
-    );
+    expect(backend.isAuthenticated, isFalse, reason: 'o token emitido já nasce vencido');
     expect(server.loginCount, 1);
 
-    // Qualquer chamada autenticada passa por `_requireToken` antes de sair.
     await backend.listPatients();
 
-    expect(server.loginCount, 2, reason: 'a sessão tinha de ser renovada');
-    final renewals =
-        server.requests.where((request) => request.method == 'loginInstitutional');
-    final renewal = renewals.last;
-    expect(renewal.args['matricula'], 'ACS-001');
-    expect(renewal.args['password'], 'senha-sintetica');
-    // A chamada que disparou a renovação ainda saiu, depois dela.
+    expect(server.loginCount, 1, reason: 'a senha não é reenviada');
+    expect(server.refreshCount, 1);
     expect(server.requests.last.method, 'listMicroArea');
     expect(server.requests.last.args['accessToken'], isNotEmpty);
-    // E a renovação é a credencial da pessoa, nunca o atalho de
-    // desenvolvimento: era esse o reauth silencioso que a task aposentou.
-    expect(
-      server.requests.map((request) => request.method),
-      isNot(contains('developmentLogin')),
-    );
+    expect(server.requests.map((r) => r.method), isNot(contains('developmentLogin')));
   });
 
-  test('sem credencial em memória a renovação falha de forma não recuperável', () async {
-    // Uma instância que nunca autenticou: não há credencial de onde tirar.
+  test('sem refresh token a renovação falha de forma não recuperável', () async {
+    // Uma instância que nunca autenticou: não há token de onde tirar.
     await expectLater(
       backend.listPatients(),
       throwsA(

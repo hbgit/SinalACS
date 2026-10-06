@@ -71,7 +71,7 @@ iniciar_rele
 
 # Sem o bloco `acs`: a senha do ACS vai por ambiente, nunca pelo argv do flutter test
 # (visível em `ps`) nem compilada no APK.
-fixtures="$(python3 -c "import json,sys;d=json.load(open('.e2e/fixtures.json'));d.pop('acs',None);print(json.dumps(d))")"
+fixtures="$(python3 -c "import json,sys;d=json.load(open('.e2e/fixtures.json'));d.pop('acs',None);d.pop('acsB',None);print(json.dumps(d))")"
 echo "== jornada e conexão no emulador"
 ( cd apps/patient && flutter test integration_test/full_journey_test.dart integration_test/backend_connection_test.dart \
     -d "$dev" --dart-define=SINALACS_HOST=https://localhost:8443/ --dart-define=E2E_FIXTURES="$fixtures" )

@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'package:sinalacs_acs/core/network/auth_session.dart';
 import 'package:sinalacs_acs/core/network/backend_client.dart';
+import 'package:sinalacs_acs/core/security/biometric_gate.dart';
+import 'package:sinalacs_acs/core/security/session_token_store.dart';
 import 'package:sinalacs_acs/core/services/alert_feed.dart';
 import 'package:sinalacs_acs/core/services/alert_queue.dart';
 import 'package:sinalacs_acs/core/services/offline_visit_queue.dart';
@@ -46,6 +48,10 @@ class FakeAcsBackend implements AcsBackend {
   @override
   AuthSession? get session => _session;
 
+  /// Troca a sessão corrente sem passar pelo login (ex.: outro ACS entrou
+  /// enquanto o lote de um anterior estava em voo).
+  set session(AuthSession? value) => _session = value;
+
   @override
   bool get isAuthenticated => _session != null;
 
@@ -57,6 +63,54 @@ class FakeAcsBackend implements AcsBackend {
 
   @override
   void Function()? onSessionExpired;
+
+  /// Refresh token "no Keystore". O login por senha grava um novo; a recusa
+  /// e o logout apagam; a falta de rede mantém — como o `BackendClient`.
+  String? storedRefreshToken;
+  int _refreshSeq = 0;
+
+  /// Retomada sem rede: devolve `null` e MANTÉM o token.
+  bool resumeOffline = false;
+
+  /// Servidor recusa o refresh token: devolve `null` e APAGA o token.
+  bool rejectResume = false;
+
+  int resumeCount = 0;
+  int logoutCount = 0;
+
+  /// Ordem das chamadas que importam ao "Sair" e ao "Limpar este aparelho":
+  /// `syncVisits`, `syncLegacy`, `syncDeferred`, `revokeUploadToken`, `logout`.
+  final List<String> callLog = <String>[];
+
+  @override
+  Future<bool> get hasStoredSession async => storedRefreshToken != null;
+
+  @override
+  Future<SessionUnlock> unlockStoredSession({required String reason}) async => SessionUnlock.notRequired;
+
+  @override
+  Future<AuthSession?> resumeSession() async {
+    resumeCount++;
+    if (storedRefreshToken == null || resumeOffline) return null;
+    if (rejectResume) {
+      storedRefreshToken = null;
+      return null;
+    }
+    storedRefreshToken = 'refresh-${++_refreshSeq}';
+    return _issueSession();
+  }
+
+  /// Se definido, `logout()` espera por ele (rede lenta).
+  Completer<void>? logoutGate;
+
+  @override
+  Future<void> logout() async {
+    logoutCount++;
+    callLog.add('logout');
+    await logoutGate?.future;
+    storedRefreshToken = null;
+    _session = null;
+  }
 
   /// Simula o servidor com MFA ativa: sem [totpCode] igual a [expectedTotpCode], levanta [MfaCodeRequired].
   String? expectedTotpCode;
@@ -98,7 +152,9 @@ class FakeAcsBackend implements AcsBackend {
       throw totpCode == null ? const MfaCodeRequired() : const BackendFailure('Código de verificação inválido.', isRecoverable: false);
     }
     sessionExpired = false;
-    return _issueSession();
+    final session = await _issueSession();
+    storedRefreshToken = 'refresh-${++_refreshSeq}';
+    return session;
   }
 
   /// Ferramenta de desenvolvimento (`tool/`, `integration_test/`). Sem
@@ -160,14 +216,21 @@ class FakeAcsBackend implements AcsBackend {
   /// Falha da chamada inteira, como uma queda de rede.
   BackendFailure? syncFailure;
 
+  /// Se definido, `syncVisits` espera por ele (lote no servidor, rede lenta).
+  Completer<void>? syncGate;
+
   /// Resultado por visita; ausente significa `synced`.
   VisitSyncResult Function(VisitSyncEntry entry)? syncResultFor;
 
   @override
-  Future<List<VisitSyncResult>> syncVisits(List<VisitSyncEntry> visits) async {
+  Future<List<VisitSyncResult>> syncVisits(List<VisitSyncEntry> visits, {String? expectedUserId}) async {
+    // Como o BackendClient: a conferência do dono vem antes de qualquer envio.
+    if (expectedUserId != null && _session?.userId != expectedUserId) throw sessionOwnerMismatch;
+    callLog.add('syncVisits');
     syncedVisitBatches.add(List.of(visits));
     final failure = syncFailure;
     if (failure != null) throw failure;
+    await syncGate?.future;
 
     final custom = syncResultFor;
     if (custom != null) return [for (final visit in visits) custom(visit)];
@@ -181,6 +244,78 @@ class FakeAcsBackend implements AcsBackend {
         ),
     ];
   }
+
+  /// Lotes de `syncLegacyVisits`, com o `userId` da sessão que transportou.
+  final List<({String? transportUserId, String deviceId, List<VisitSyncEntry> visits})> legacyBatches = [];
+
+  /// Falha da chamada legada inteira, como uma queda de rede.
+  BackendFailure? legacyFailure;
+
+  /// Resultado por visita legada; ausente significa `synced`.
+  VisitSyncResult Function(VisitSyncEntry entry)? legacyResultFor;
+
+  @override
+  Future<List<VisitSyncResult>> syncLegacyVisits(List<VisitSyncEntry> visits, {required String deviceId}) async {
+    // Como o BackendClient: sem sessão não há transporte.
+    final transport = _session;
+    if (transport == null) throw const BackendFailure('Sessão não iniciada.', isRecoverable: false);
+    if (visits.length > 200) throw const BackendFailure('lote acima do limite', isRecoverable: false);
+    callLog.add('syncLegacy');
+    legacyBatches.add((transportUserId: transport.userId, deviceId: deviceId, visits: List.of(visits)));
+    final failure = legacyFailure;
+    if (failure != null) throw failure;
+    return [for (final visit in visits) legacyResultFor?.call(visit) ?? _synced(visit)];
+  }
+
+  /// Lotes de `syncDeferredVisits`, com o token de envio usado em cada um.
+  final List<({String uploadToken, String deviceId, List<VisitSyncEntry> visits})> deferredBatches = [];
+
+  /// Falha da chamada diferida inteira, como uma queda de rede.
+  BackendFailure? deferredFailure;
+
+  /// Tokens de envio que o "servidor" recusa (vencidos/revogados).
+  final Set<String> refusedUploadTokens = <String>{};
+
+  /// Resultado por visita diferida; ausente significa `synced`.
+  VisitSyncResult Function(VisitSyncEntry entry)? deferredResultFor;
+
+  /// Se definido, `syncDeferredVisits` espera por ele (lote em voo).
+  Completer<void>? deferredGate;
+
+  @override
+  Future<List<VisitSyncResult>> syncDeferredVisits({
+    required String uploadToken,
+    required String deviceId,
+    required List<VisitSyncEntry> visits,
+  }) async {
+    if (visits.length > 200) throw const BackendFailure('lote acima do limite', isRecoverable: false);
+    callLog.add('syncDeferred');
+    deferredBatches.add((uploadToken: uploadToken, deviceId: deviceId, visits: List.of(visits)));
+    // A recusa é decidida quando o servidor responde (depois da espera): o
+    // token pode ter sido revogado enquanto o lote estava em voo.
+    await deferredGate?.future;
+    if (refusedUploadTokens.contains(uploadToken)) throw const UploadTokenRefused();
+    final failure = deferredFailure;
+    if (failure != null) throw failure;
+    return [for (final visit in visits) deferredResultFor?.call(visit) ?? _synced(visit)];
+  }
+
+  /// Tokens de envio revogados, na ordem.
+  final List<String> revokedUploadTokens = <String>[];
+
+  /// Se definido, `revokeUploadToken` espera por ele (revogação em voo).
+  Completer<void>? revokeGate;
+
+  @override
+  Future<void> revokeUploadToken(String uploadToken) async {
+    callLog.add('revokeUploadToken');
+    revokedUploadTokens.add(uploadToken);
+    await revokeGate?.future;
+  }
+
+  /// Reenvio do mesmo `localId` na mesma versão volta `synced` (idempotente).
+  static VisitSyncResult _synced(VisitSyncEntry visit) =>
+      VisitSyncResult(localId: visit.localId, syncStatus: SyncStatus.synced, serverVersion: visit.version);
 
   /// Contato que `ubsContact()` devolve; `UbsContact(name: ...)` sem telefone simula uma UBS sem número.
   UbsContact ubsContactResult = UbsContact(name: 'UBS Teste', phone: '+55 11 5550-0100');
@@ -284,9 +419,13 @@ class FakeAcsBackend implements AcsBackend {
   /// o cursor lido é exatamente o que chega ao backend.
   final List<DateTime> pullSinceCalls = <DateTime>[];
 
+  /// Se definido, `pullVisits` espera por ele (pull em voo).
+  Completer<void>? pullGate;
+
   @override
   Future<List<VisitSyncEntry>> pullVisits({required DateTime since}) async {
     pullSinceCalls.add(since);
+    await pullGate?.future;
     final unclassified = pullUnclassifiedFailure;
     if (unclassified != null) throw unclassified;
     final failure = pullFailure;
@@ -438,4 +577,29 @@ PrioritizedAlert testAlert({
     locationCell: locationCell,
     triggeredAt: triggeredAt ?? DateTime.utc(2026, 9, 11, 12),
   );
+}
+
+/// Desbloqueio local controlado pelo teste.
+class FakeBiometricGate implements BiometricGate {
+  FakeBiometricGate({this.available = true, this.result = UnlockResult.unlocked});
+
+  bool available;
+  UnlockResult result;
+  int calls = 0;
+  final List<String> reasons = <String>[];
+
+  /// Se definido, `authenticate` só responde quando ele completar.
+  Completer<UnlockResult>? pending;
+
+  @override
+  Future<bool> get isAvailable async => available;
+
+  @override
+  Future<UnlockResult> authenticate({required String reason}) async {
+    calls++;
+    reasons.add(reason);
+    final wait = pending;
+    if (wait != null) return wait.future;
+    return result;
+  }
 }

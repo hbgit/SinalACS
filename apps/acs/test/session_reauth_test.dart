@@ -28,7 +28,7 @@ void main() {
     await tester.pumpWidget(SinalAcsApp(backend: backend, visitQueue: fila, feedBuilder: (q) => feed = FakeAlertFeed(q)));
     await tester.enterText(find.byKey(const Key('matricula_field')), 'ACS-001');
     await tester.enterText(find.byKey(const Key('senha_field')), 'senha-sintetica');
-    await tester.tap(find.byKey(const Key('login_button')));
+    await _tocarEntrar(tester);
     await assentar(tester);
     await _digitarCodigo(tester);
     expect(find.byKey(const Key('login_button')), findsNothing, reason: 'o painel abriu');
@@ -47,7 +47,7 @@ void main() {
 
     await tester.enterText(find.byKey(const Key('matricula_field')), 'ACS-001');
     await tester.enterText(find.byKey(const Key('senha_field')), 'senha-sintetica');
-    await tester.tap(find.byKey(const Key('login_button')));
+    await _tocarEntrar(tester);
     await assentar(tester);
     await _digitarCodigo(tester);
 
@@ -74,7 +74,7 @@ void main() {
     await assentar(tester);
     await tester.enterText(find.byKey(const Key('matricula_field')), 'ACS-001');
     await tester.enterText(find.byKey(const Key('senha_field')), 'senha-sintetica');
-    await tester.tap(find.byKey(const Key('login_button')));
+    await _tocarEntrar(tester);
     await assentar(tester);
     await _digitarCodigo(tester);
     expect(find.text('Confirmar recebimento'), findsOneWidget, reason: 'o alerta não sumiu nem foi confirmado');
@@ -90,11 +90,27 @@ void main() {
     await assentar(tester);
     await tester.enterText(find.byKey(const Key('matricula_field')), 'ACS-001');
     await tester.enterText(find.byKey(const Key('senha_field')), 'senha-sintetica');
-    await tester.tap(find.byKey(const Key('login_button')));
+    await _tocarEntrar(tester);
     await assentar(tester);
     await _digitarCodigo(tester);
 
     expect(tester.widget<TextField>(find.byKey(const Key('patient_search'))).controller!.text, 'busca em andamento');
+  });
+
+  testWidgets('(e) com a reautenticação por cima, o aviso conta os alertas aguardando e acompanha os novos', (tester) async {
+    await abrir(tester);
+
+    backend.expireSession();
+    await assentar(tester);
+    expect(find.byKey(const Key('login_button')), findsOneWidget);
+    expect(find.text('1 alerta vermelho aguardando. Entre para ver.'), findsOneWidget);
+
+    feed.deliver(testAlert(alertId: 'segundo-alerta'));
+    await assentar(tester);
+    expect(find.text('2 alertas vermelhos aguardando. Entre para ver.'), findsOneWidget);
+    // O aviso não cobre o formulário: o campo segue tocável.
+    await tester.enterText(find.byKey(const Key('matricula_field')), 'ACS-001');
+    expect(tester.widget<TextField>(find.byKey(const Key('matricula_field'))).controller!.text, 'ACS-001');
   });
 
   testWidgets('(d) outro usuário entra: a fila do anterior não é mantida', (tester) async {
@@ -105,7 +121,7 @@ void main() {
 
     await tester.enterText(find.byKey(const Key('matricula_field')), 'ACS-002');
     await tester.enterText(find.byKey(const Key('senha_field')), 'senha-sintetica');
-    await tester.tap(find.byKey(const Key('login_button')));
+    await _tocarEntrar(tester);
     await assentar(tester);
     await _digitarCodigo(tester);
 
@@ -131,6 +147,15 @@ void main() {
 /// Depois de matrícula e senha o fake pede o código: digita e entra.
 Future<void> _digitarCodigo(WidgetTester tester) async {
   await tester.enterText(find.byKey(const Key('totp_field')), '123456');
-  await tester.tap(find.byKey(const Key('login_button')));
+  await _tocarEntrar(tester);
   await assentar(tester);
+}
+
+/// Com o aviso de alertas aguardando no topo da reautenticação, o botão pode
+/// ficar abaixo da dobra de 800x600 (o formulário é uma `ListView`): rola até
+/// ele antes de tocar, como a pessoa faria.
+Future<void> _tocarEntrar(WidgetTester tester) async {
+  await tester.ensureVisible(find.byKey(const Key('login_button')));
+  await tester.pump();
+  await tester.tap(find.byKey(const Key('login_button')));
 }

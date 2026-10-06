@@ -126,3 +126,8 @@ mosquitto_passwd -b "$password_file" acs-area-12 "${MQTT_ACS_PASSWORD:?MQTT_ACS_
 
 chmod 755 "$runtime_dir" "$certs_dir"
 chmod 644 "$password_file" "$certs_dir"/*.crt "$certs_dir"/*.key
+# Exceção: a chave da CA só assina folhas, e quem a lê é este init.sh, como root.
+# As demais ficam em 644 porque são lidas por outro uid (o backend roda como uid
+# 1000 e lê backend.key; o sync_dev_ca.sh, como o usuário do host, lê
+# acs-area-12.key) — medido em 2026-10-05; ver PROGRESS.md.
+chmod 600 "$certs_dir/ca.key"

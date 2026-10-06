@@ -37,6 +37,7 @@ dependencies:
   # Preferência de tema (claro/escuro/automático) — dado de UI não sensível,
   # não precisa do Keystore/Keychain do flutter_secure_storage.
   shared_preferences: ^2.3.2
+  local_auth: ^3.0.2
 
 
 dev_dependencies:

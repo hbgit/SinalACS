@@ -61,12 +61,85 @@ class FakeRpcServer {
   /// outra microárea (`AlertPermissionException`, INV-01).
   bool rejectInviteWithPermission = false;
 
+  /// Contador do refresh token rotativo: cada renovação emite o próximo
+  /// `refresh-<n>`; um login zera o contador.
+  int _refreshSeq = 0;
+
+  /// Refresh tokens emitidos pelos logins, na ordem. O primeiro login emite
+  /// `refresh-0` (os testes antigos dependem do nome); os seguintes emitem
+  /// `login-<n>`, distintos entre si — é o que deixa um teste saber se o token
+  /// guardado é o do login novo ou o de uma renovação da conta anterior.
+  final List<String> loginTokens = <String>[];
+
+  String _nextLoginToken() {
+    _refreshSeq = 0;
+    final n = loginTokens.length;
+    final token = n == 0 ? 'refresh-0' : 'login-$n';
+    loginTokens.add(token);
+    return token;
+  }
+
+  /// Faz `refreshSession` recusar com `SessionExpiredException`.
+  bool rejectRefresh = false;
+
+  /// Atraso antes de responder `refreshSession` (provoca concorrência).
+  Duration refreshDelay = Duration.zero;
+
+  /// Derruba a conexão na próxima `refreshSession` (resposta perdida): o
+  /// servidor processa o pedido, mas o cliente não recebe nada.
+  bool failRefreshOnce = false;
+
+  /// Faz o login responder sem `refreshToken` (cliente sem deviceId).
+  bool omitRefreshToken = false;
+
+  /// Tokens de envio diferido emitidos pelos logins, na ordem (D7). Só com
+  /// `deviceId` real — nem em branco, nem o sentinela do servidor.
+  final List<String> uploadTokensIssued = <String>[];
+
+  /// Faz o login responder sem `uploadToken`.
+  bool omitUploadToken = false;
+
+  /// Tokens de envio que `syncDeferred` recusa com `SessionExpiredException`.
+  final Set<String> refusedUploadTokens = <String>{};
+
+  /// Tokens que `revokeUploadToken` recebeu.
+  final List<String> revokedUploadTokens = <String>[];
+
+  String? _nextUploadToken(Map<String, dynamic> decoded) {
+    final deviceId = (decoded['deviceId'] as String?)?.trim() ?? '';
+    if (omitUploadToken || deviceId.isEmpty || deviceId == 'nao-aplicavel-login-institucional') return null;
+    final token = 'upload-${uploadTokensIssued.length}';
+    uploadTokensIssued.add(token);
+    return token;
+  }
+
+  /// `refreshToken` recebido em cada `refreshSession`, na ordem.
+  List<String> get refreshTokensSeen => requests
+      .where((r) => r.method == 'refreshSession')
+      .map((r) => r.args['refreshToken'] as String)
+      .toList();
+
+  /// Faz `refreshSession` devolver um accessToken ilegível.
+  bool garbageAccessToken = false;
+
+  /// Faz `refreshSession` devolver um refresh token vazio.
+  bool emptyRefreshToken = false;
+
+  /// Tokens que `logout` recebeu.
+  final List<String> loggedOut = <String>[];
+
+  /// Atraso antes de responder `logout` (rede lenta na saída).
+  Duration logoutDelay = Duration.zero;
+
   /// Endereço para passar a `BackendClient(host: ...)`. Porta efêmera do SO:
   /// dois testes em paralelo não brigam por porta.
   String get host => 'http://127.0.0.1:${_server.port}/';
 
   int get loginCount =>
       requests.where((r) => r.method == 'loginInstitutional').length;
+
+  int get refreshCount =>
+      requests.where((r) => r.method == 'refreshSession').length;
 
   static Future<FakeRpcServer> start() async {
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
@@ -105,6 +178,45 @@ class FakeRpcServer {
       return;
     }
 
+    if (method == 'refreshSession') {
+      if (refreshDelay > Duration.zero) await Future<void>.delayed(refreshDelay);
+      if (failRefreshOnce) {
+        failRefreshOnce = false;
+        _refreshSeq++; // o servidor rotacionou, mas a resposta se perdeu
+        final socket = await request.response.detachSocket(writeHeaders: false);
+        socket.destroy();
+        return;
+      }
+      if (rejectRefresh) {
+        await _respond(request, HttpStatus.badRequest, {
+          'className': 'SessionExpiredException',
+          'data': {'message': 'Sessão expirada.'},
+        });
+        return;
+      }
+    }
+
+    if (method == 'logout') {
+      loggedOut.add(decoded['refreshToken'] as String? ?? '');
+      if (logoutDelay > Duration.zero) await Future<void>.delayed(logoutDelay);
+      await _respond(request, HttpStatus.ok, null);
+      return;
+    }
+
+    if (method == 'syncDeferred' && refusedUploadTokens.contains(decoded['uploadToken'])) {
+      await _respond(request, HttpStatus.badRequest, {
+        'className': 'SessionExpiredException',
+        'data': {'message': 'Envio não autorizado. Entre novamente.'},
+      });
+      return;
+    }
+
+    if (method == 'revokeUploadToken') {
+      revokedUploadTokens.add(decoded['uploadToken'] as String? ?? '');
+      await _respond(request, HttpStatus.ok, null);
+      return;
+    }
+
     if (method == 'generateEnrollmentToken' && rejectInviteWithPermission) {
       await _respond(request, HttpStatus.badRequest, {
         'className': 'AlertPermissionException',
@@ -114,7 +226,23 @@ class FakeRpcServer {
     }
 
     final payload = switch (method) {
-      'loginInstitutional' || 'developmentLogin' => <String, Object?>{
+      'loginInstitutional' => <String, Object?>{
+          'accessToken': _token(),
+          'tokenType': 'Bearer',
+          if (!omitRefreshToken && ((decoded['deviceId'] as String?)?.trim().isNotEmpty ?? false)) 'refreshToken': _nextLoginToken(),
+          if (_nextUploadToken(decoded) case final upload?) 'uploadToken': upload,
+        },
+      // `visits.syncLegacy`/`syncDeferred`: tudo `synced`, mesma versão.
+      'syncLegacy' || 'syncDeferred' => <Object?>[
+          for (final visit in (decoded['visits'] as List).cast<Map<String, dynamic>>())
+            {'localId': visit['localId'], 'syncStatus': 'synced', 'serverVersion': visit['version']},
+        ],
+      'refreshSession' => <String, Object?>{
+          'accessToken': garbageAccessToken ? 'lixo' : _token(),
+          'tokenType': 'Bearer',
+          'refreshToken': emptyRefreshToken ? '' : 'refresh-${++_refreshSeq}',
+        },
+      'developmentLogin' => <String, Object?>{
           'accessToken': _token(),
           'tokenType': 'Bearer',
         },

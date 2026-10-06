@@ -84,6 +84,7 @@ class OrmAcsCredentialStore implements AcsCredentialStore, TotpStore {
       ),
       failedAttempts: credential.failedAttempts,
       lockedUntil: credential.lockedUntil,
+      lockStreak: credential.lockStreak,
       totp: _totpOf(credential),
     );
   }
@@ -210,6 +211,14 @@ class OrmAcsCredentialStore implements AcsCredentialStore, TotpStore {
                    THEN @lockUntil::timestamp
                  ELSE NULL
                END,
+             -- A escalada sobe só quando o bloqueio é APLICADO nesta escrita; o
+             -- reinício do contador (bloqueio vencido) a preserva. Como o `WHERE`
+             -- recusa a linha já bloqueada, uma rajada concorrente sobe uma vez.
+             "lockStreak" = CASE
+                 WHEN @restart THEN "lockStreak"
+                 WHEN "failedAttempts" + 1 >= @maxFailedAttempts THEN "lockStreak" + 1
+                 ELSE "lockStreak"
+               END,
              "updatedAt" = @at
        WHERE "userId" = @userId::uuid
          AND ("lockedUntil" IS NULL OR "lockedUntil" <= @at);
@@ -236,7 +245,7 @@ class OrmAcsCredentialStore implements AcsCredentialStore, TotpStore {
     // constante — zero) e por isso nem `CASE` nem `RETURNING`.
     await _session().db.unsafeExecute(
       'UPDATE "user_credentials" '
-      'SET "failedAttempts" = 0, "lockedUntil" = NULL, "updatedAt" = @at '
+      'SET "failedAttempts" = 0, "lockedUntil" = NULL, "lockStreak" = 0, "updatedAt" = @at '
       'WHERE "userId" = @userId::uuid;',
       parameters: QueryParameters.named({'at': at, 'userId': acsId}),
     );

@@ -17,6 +17,8 @@ class VisitRecord {
     this.id,
     required this.patientId,
     required this.acsId,
+    this.authorship = VisitAuthorship.acs,
+    this.originDeviceId,
     required this.scheduledAt,
     this.startedAt,
     this.completedAt,
@@ -33,7 +35,16 @@ class VisitRecord {
 
   final UuidValue? id;
   final UuidValue patientId;
-  final UuidValue acsId;
+
+  /// Autor da visita. Nulo **só** quando [authorship] é
+  /// [VisitAuthorship.legacyUnclaimed]: a visita veio do aparelho sem dono
+  /// conhecido (D4), e quem a transportou **não** é o autor.
+  final UuidValue? acsId;
+
+  final VisitAuthorship authorship;
+
+  /// Instalação de onde veio uma visita legada; nulo nas visitas com autor.
+  final String? originDeviceId;
   final DateTime scheduledAt;
   final DateTime? startedAt;
   final DateTime? completedAt;
@@ -58,7 +69,9 @@ class VisitRecord {
   VisitRecord copyWith({
     Object? id = _keep,
     UuidValue? patientId,
-    UuidValue? acsId,
+    Object? acsId = _keep,
+    VisitAuthorship? authorship,
+    Object? originDeviceId = _keep,
     DateTime? scheduledAt,
     Object? startedAt = _keep,
     Object? completedAt = _keep,
@@ -75,7 +88,10 @@ class VisitRecord {
       VisitRecord(
         id: id == _keep ? this.id : id as UuidValue?,
         patientId: patientId ?? this.patientId,
-        acsId: acsId ?? this.acsId,
+        acsId: acsId == _keep ? this.acsId : acsId as UuidValue?,
+        authorship: authorship ?? this.authorship,
+        originDeviceId:
+            originDeviceId == _keep ? this.originDeviceId : originDeviceId as String?,
         scheduledAt: scheduledAt ?? this.scheduledAt,
         startedAt: startedAt == _keep ? this.startedAt : startedAt as DateTime?,
         completedAt: completedAt == _keep ? this.completedAt : completedAt as DateTime?,
@@ -120,6 +136,13 @@ abstract interface class VisitStore {
   /// Visitas da microárea cujo `syncAt` é posterior a `since` — o cursor
   /// incremental de `visits.pull` (RF15, decisão §5).
   Future<List<VisitRecord>> listChangedInMicroArea(UuidValue microAreaId, DateTime since);
+
+  /// `true` se o ACS existe e a conta está ativa (`acs.active`).
+  ///
+  /// Só `syncLegacy` consulta: o token prova quem é o transportador, não que a
+  /// conta continua ativa — e uma visita sem autor só entra pela mão de quem
+  /// ainda responde pelo território.
+  Future<bool> isActiveAcs(UuidValue acsId);
 }
 
 /// Sincronização das visitas registradas offline pelo ACS.
@@ -145,6 +168,20 @@ class VisitSyncService {
   final VisitStore _store;
   final AuditTrail _audit;
   final DateTime Function() _clock;
+
+  /// Teto de visitas por chamada de envio desvinculado do autor (`syncLegacy`;
+  /// a Task 6 reaproveita no `syncDeferred`). O `sync` comum NÃO tem teto.
+  static const int maxLegacyBatch = 200;
+
+  /// Recusa um lote acima de [maxLegacyBatch] com `ArgumentError` (o endpoint
+  /// traduz para `AlertValidationException`). Pública para o endpoint poder
+  /// checar ANTES de abrir a transação.
+  static void checkLegacyBatchSize(int length) {
+    if (length > maxLegacyBatch) {
+      throw ArgumentError.value(length, 'visits',
+          'lote acima do limite de $maxLegacyBatch visitas por envio');
+    }
+  }
 
   /// Sincronização central→dispositivo: visitas da microárea do ACS
   /// alteradas desde `since`, para reconciliar um device que ficou offline ou
@@ -215,10 +252,83 @@ class VisitSyncService {
     return results;
   }
 
+  /// Envio das visitas LEGADAS do aparelho — gravadas antes de existir dono
+  /// por visita (migração v7 do app), de autoria desconhecida (D4).
+  ///
+  /// A sessão de [transporter] é só o **transporte**: precisa ser de um ACS
+  /// territorializado e ativo, e cada visita passa pela mesma barreira de
+  /// território do `sync` (microárea do paciente × microárea de quem
+  /// transporta, INV-01), mas o transportador **nunca** vira autor —
+  /// `acsId` fica nulo, `authorship` é `legacyUnclaimed` e `originDeviceId`
+  /// guarda [deviceId]. Reenvio do mesmo `localId` é idempotente; um `localId`
+  /// que já existe com autor ACS é recusado (`rejected`) e a autoria original
+  /// fica intacta.
+  ///
+  /// Um evento `visit_legacy_sync` por LOTE vai para `audit_logs`, com o
+  /// transportador e sem paciente, `localId` ou nota; e um
+  /// `visit_legacy_sync_item` por visita efetivamente criada ou alterada, com
+  /// o id da visita (`resourceId`) — nenhum para recusa ou reenvio sem efeito.
+  /// No máximo [maxLegacyBatch] visitas por chamada.
+  Future<List<VisitSyncResult>> syncLegacy({
+    required AuthenticatedUser transporter,
+    required String deviceId,
+    required List<VisitSyncEntry> entries,
+  }) async {
+    Authorization.require(
+      transporter,
+      roles: {UserRole.acs},
+      onDenied: () => StateError(
+          'Somente ACS territorializados podem enviar visitas legadas.'),
+    );
+    if (deviceId.trim().isEmpty) {
+      throw ArgumentError.value(deviceId, 'deviceId', 'deviceId é obrigatório');
+    }
+    // Antes de qualquer consulta ao store.
+    checkLegacyBatchSize(entries.length);
+    if (!await _store.isActiveAcs(UuidValue.fromString(transporter.id))) {
+      throw StateError('Somente ACS ativos podem enviar visitas legadas.');
+    }
+
+    final results = <VisitSyncResult>[];
+    final written = <VisitRecord>[];
+    for (final entry in entries) {
+      results.add(await _syncOne(
+        user: transporter,
+        entry: entry,
+        legacyDeviceId: deviceId,
+        legacyWritten: written,
+      ));
+    }
+
+    // A trilha usa outra conexão, FORA da transação do lote: gravar os itens
+    // dentro do laço deixaria linhas apontando para visitas que nunca
+    // persistiram quando uma entrada posterior lança e o lote é desfeito. Por
+    // isso os itens só saem aqui, depois do laço inteiro, logo antes do lote.
+    for (final visit in written) {
+      await _auditLegacyItem(transporter, visit);
+    }
+
+    // Best-effort, como o `pull`: a trilha fora do ar não pode impedir que o
+    // trabalho de campo suba. O evento é o LOTE — nada clínico, nenhum
+    // identificador de paciente.
+    await _audit.recordSafely(AuditEvent(
+      userId: transporter.id,
+      actionType: 'write',
+      resourceType: 'visit_legacy',
+      result: 'visit_legacy_sync',
+    ));
+    return results;
+  }
+
+  /// Uma visita do lote. Com [legacyDeviceId] nulo é o `sync` comum (o autor
+  /// é [user]); preenchido, é o envio legado (sem autor, [user] só transporta).
   Future<VisitSyncResult> _syncOne({
     required AuthenticatedUser user,
     required VisitSyncEntry entry,
+    String? legacyDeviceId,
+    List<VisitRecord>? legacyWritten,
   }) async {
+    final legacy = legacyDeviceId != null;
     if (entry.localId.trim().isEmpty) {
       // Terminal: um localId vazio não vira válido reenviando o mesmo lote.
       return VisitSyncResult(
@@ -267,16 +377,12 @@ class VisitSyncService {
       await _audit.recordSafely(AuditEvent(
         userId: user.id,
         actionType: 'write',
-        resourceType: 'visit',
+        resourceType: legacy ? 'visit_legacy' : 'visit',
         resourceId: patientId.uuid,
         result: 'denied_territory',
       ));
       // Terminal: o território não muda por retentar.
-      return VisitSyncResult(
-        localId: entry.localId,
-        syncStatus: SyncStatus.rejected,
-        message: 'paciente fora da sua microárea',
-      );
+      return _outsideTerritory(entry);
     }
 
     final acsId = UuidValue.fromString(user.id);
@@ -285,7 +391,10 @@ class VisitSyncService {
     if (existing == null) {
       final inserted = await _store.insert(VisitRecord(
         patientId: patientId,
-        acsId: acsId,
+        // Legado: autoria desconhecida. NUNCA gravar quem transportou.
+        acsId: legacy ? null : acsId,
+        authorship: legacy ? VisitAuthorship.legacyUnclaimed : VisitAuthorship.acs,
+        originDeviceId: legacyDeviceId,
         scheduledAt: entry.scheduledAt,
         completedAt: entry.completedAt,
         status: entry.status,
@@ -298,6 +407,7 @@ class VisitSyncService {
         syncAt: _clock().toUtc(),
         version: 1,
       ));
+      legacyWritten?.add(inserted);
       return VisitSyncResult(
         localId: entry.localId,
         syncStatus: SyncStatus.synced,
@@ -305,10 +415,68 @@ class VisitSyncService {
       );
     }
 
-    // A visita pertence ao ACS que a registrou. Um ACS não sincroniza a visita
-    // de outro, mesmo conhecendo o localId.
-    if (existing.acsId != acsId) {
-      // Terminal: o dono do registro não muda por retentar.
+    if (legacy) {
+      // Antes de QUALQUER resposta que dependa da linha existente: o `localId`
+      // tem de ser de uma visita do MESMO paciente da entrada (cujo território
+      // já foi conferido acima — logo, a linha também é do território de quem
+      // transporta). Sem isto, `synced`/'versão diferente' viraria um oráculo:
+      // quem chuta um `localId` descobriria que a visita existe, e em que
+      // versão, mesmo sendo de outro paciente ou de outra microárea. A
+      // resposta é a mesma da recusa territorial, para não distinguir os casos.
+      if (existing.patientId != patientId) {
+        await _audit.recordSafely(AuditEvent(
+          userId: user.id,
+          actionType: 'write',
+          resourceType: 'visit_legacy',
+          resourceId: patientId.uuid,
+          result: 'denied_patient_mismatch',
+        ));
+        return _outsideTerritory(entry);
+      }
+
+      // O envio legado só ALTERA visitas SEM autor que vieram do mesmo
+      // aparelho. Uma visita com autor ACS não vira "desconhecida" por um
+      // reenvio: na mesma versão o reenvio é só a idempotência (a visita já
+      // subiu, possivelmente pelo próprio autor antes da migração v7) e
+      // devolve `synced` sem gravar nada; em outra versão, `rejected`.
+      if (existing.authorship != VisitAuthorship.legacyUnclaimed ||
+          existing.acsId != null) {
+        if (entry.version == existing.version) {
+          return VisitSyncResult(
+            localId: entry.localId,
+            syncStatus: SyncStatus.synced,
+            serverVersion: existing.version,
+          );
+        }
+        return VisitSyncResult(
+          localId: entry.localId,
+          syncStatus: SyncStatus.rejected,
+          message: 'visita já registrada com autor — versão diferente',
+        );
+      }
+      // Proteção contra palpite errado (um localId colidindo entre aparelhos,
+      // um cliente com bug), NÃO controle de segurança: `deviceId` é declarado
+      // pelo próprio cliente e qualquer portador de sessão pode repeti-lo.
+      if (existing.originDeviceId != legacyDeviceId) {
+        return VisitSyncResult(
+          localId: entry.localId,
+          syncStatus: SyncStatus.rejected,
+          message: 'visita legada de outro aparelho',
+        );
+      }
+    } else if (existing.acsId == null) {
+      // Visita sem autor (legado, D4): o `sync` comum NÃO a reivindica — se
+      // reivindicasse, qualquer ACS do território viraria autor de um trabalho
+      // de campo que ninguém sabe de quem é. Terminal: não muda por retentar.
+      return VisitSyncResult(
+        localId: entry.localId,
+        syncStatus: SyncStatus.rejected,
+        message: 'visita sem autor registrado',
+      );
+    } else if (existing.acsId != acsId) {
+      // A visita pertence ao ACS que a registrou. Um ACS não sincroniza a
+      // visita de outro, mesmo conhecendo o localId. Terminal: o dono do
+      // registro não muda por retentar.
       return VisitSyncResult(
         localId: entry.localId,
         syncStatus: SyncStatus.rejected,
@@ -338,6 +506,9 @@ class VisitSyncService {
       );
     }
 
+    // `acsId`, `authorship` e `originDeviceId` também ficam de fora: a autoria
+    // é decidida na criação e nenhuma atualização a muda (nem o envio legado
+    // preenche um autor, nem o `sync` comum chega aqui com visita sem autor).
     // `arrivalMethod` fica de fora deliberadamente: é definido na criação da
     // visita (como `scheduledAt`/`riskLevelBefore`), não numa atualização de
     // conclusão — `copyWith` sem o argumento preserva o valor gravado no
@@ -352,10 +523,30 @@ class VisitSyncService {
       version: existing.version + 1,
     ));
 
+    legacyWritten?.add(updated);
     return VisitSyncResult(
       localId: entry.localId,
       syncStatus: SyncStatus.synced,
       serverVersion: updated.version,
     );
   }
+
+  /// A recusa territorial, única para fora do território e para `localId` de
+  /// outro paciente: não cita a microárea alheia nem o paciente. Terminal.
+  static VisitSyncResult _outsideTerritory(VisitSyncEntry entry) => VisitSyncResult(
+        localId: entry.localId,
+        syncStatus: SyncStatus.rejected,
+        message: 'paciente fora da sua microárea',
+      );
+
+  /// Uma linha por visita legada criada ou alterada: quem transportou e QUAL
+  /// visita — só o id, nada clínico. Best-effort como o resto da trilha.
+  Future<void> _auditLegacyItem(AuthenticatedUser transporter, VisitRecord visit) =>
+      _audit.recordSafely(AuditEvent(
+        userId: transporter.id,
+        actionType: 'write',
+        resourceType: 'visit_legacy',
+        resourceId: visit.id?.uuid,
+        result: 'visit_legacy_sync_item',
+      ));
 }

@@ -6,6 +6,8 @@ import 'package:sinalacs_server/src/application/audit/audit_trail.dart';
 import 'package:sinalacs_server/src/application/auth/development_auth_service.dart';
 import 'package:sinalacs_server/src/application/auth/cpf_hasher.dart';
 import 'package:sinalacs_server/src/application/auth/institutional_auth_service.dart';
+import 'package:sinalacs_server/src/application/auth/refresh_token_service.dart';
+import 'package:sinalacs_server/src/application/auth/upload_token_service.dart';
 import 'package:sinalacs_server/src/application/auth/password_hasher.dart';
 import 'package:sinalacs_server/src/application/auth/passwordless_auth_service.dart';
 import 'package:sinalacs_server/src/application/auth/sms_gateway.dart';
@@ -22,6 +24,8 @@ import 'package:sinalacs_server/src/infrastructure/crypto/health_cipher_totp_vau
 import 'package:sinalacs_server/src/infrastructure/crypto/health_data_cipher.dart';
 import 'package:sinalacs_server/src/infrastructure/crypto/hmac_cpf_hasher.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_acs_credential_store.dart';
+import 'package:sinalacs_server/src/infrastructure/database/orm_refresh_token_store.dart';
+import 'package:sinalacs_server/src/infrastructure/database/orm_upload_token_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_alert_outbox.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_alert_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_audit_trail.dart';
@@ -294,6 +298,22 @@ class AlertRuntime {
           chainSecret: config.auditChainSecret,
           transaction: transaction,
         ),
+      );
+
+  /// Refresh token do ACS (LGPD-RT06): store no ORM da sessão da chamada e a
+  /// trilha de auditoria da requisição.
+  RefreshTokenService refreshTokenServiceFor(Session session) =>
+      RefreshTokenService(
+        store: OrmRefreshTokenStore(session: () => session),
+        audit: auditTrailFor(session),
+      );
+
+  /// Token de envio diferido do ACS (D7 do plano 2026-10-03): mesmo arranjo do
+  /// refresh token, store no ORM da sessão e trilha da requisição.
+  UploadTokenService uploadTokenServiceFor(Session session) =>
+      UploadTokenService(
+        store: OrmUploadTokenStore(session: () => session),
+        audit: auditTrailFor(session),
       );
 
   /// Serviço de login institucional para uma requisição.

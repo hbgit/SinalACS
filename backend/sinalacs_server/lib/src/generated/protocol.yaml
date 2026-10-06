@@ -5,6 +5,8 @@ alerts:
 auth:
   - developmentLogin:
   - loginInstitutional:
+  - refreshSession:
+  - logout:
   - beginTotpEnrollment:
   - confirmTotpEnrollment:
   - requestOtp:
@@ -36,4 +38,7 @@ ubs:
   - myContact:
 visits:
   - sync:
+  - syncLegacy:
+  - syncDeferred:
+  - revokeUploadToken:
   - pull:

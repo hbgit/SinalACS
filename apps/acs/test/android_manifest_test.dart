@@ -54,4 +54,56 @@ void main() {
     expect(manifest, isNot(contains('android:label="sinalacs_acs"')));
     expect(manifest, contains('android:label="SinalACS ACS"'));
   });
+
+  test('declara USE_BIOMETRIC para o desbloqueio por digital', () {
+    expect(declares('USE_BIOMETRIC'), isTrue);
+  });
+
+  test('MainActivity usa FlutterFragmentActivity e mantém FLAG_SECURE', () {
+    // local_auth falha em tempo de execução com FlutterActivity; e o
+    // FLAG_SECURE (captura/miniatura) não pode regredir.
+    final activity =
+        File('android/app/src/main/kotlin/br/com/prismrr/sinalacs/acs/MainActivity.kt').readAsStringSync();
+    expect(activity, contains('class MainActivity : FlutterFragmentActivity()'));
+    expect(activity, contains('FLAG_SECURE'));
+  });
+
+  test('MainActivity registra o cofre do Keystore no canal do Dart', () {
+    final activity =
+        File('android/app/src/main/kotlin/br/com/prismrr/sinalacs/acs/MainActivity.kt').readAsStringSync();
+    expect(activity, contains('override fun configureFlutterEngine'));
+    expect(activity, contains('KeystoreVault.CHANNEL'));
+    expect(activity, contains('KeystoreVault(this)'));
+  });
+
+  test('KeystoreVault exige autenticação a cada uso e não registra nada', () {
+    // flutter test não tem Keystore: a prova real fica no emulador. Aqui se
+    // guarda o que não pode regredir no código-fonte do cofre.
+    final vault =
+        File('android/app/src/main/kotlin/br/com/prismrr/sinalacs/acs/KeystoreVault.kt').readAsStringSync();
+    expect(vault, contains('const val CHANNEL = "br.com.prismrr.sinalacs.acs/keystore_vault"'));
+    expect(vault, contains('.setUserAuthenticationRequired(true)'));
+    expect(vault, contains('.setInvalidatedByBiometricEnrollment(true)'));
+    expect(vault, contains('BiometricPrompt.CryptoObject(cipher)'));
+    expect(vault, contains('MGF1ParameterSpec.SHA1'));
+    // A biometric 1.1.0 descarta o authenticate em silêncio com o estado já
+    // salvo: sem esta checagem o canal nunca responderia.
+    expect(vault, contains('supportFragmentManager.isStateSaved'));
+    // Blob adulterado (tag GCM) é apagado e vira `invalidated`.
+    expect(vault, contains('catch (e: AEADBadTagException)'));
+    for (final code in ['"cancelled"', '"lockedOut"', '"invalidated"', '"unavailable"']) {
+      expect(vault, contains(code));
+    }
+    // Nada de log nem de mensagem de exceção atravessando o canal.
+    expect(vault, isNot(contains('android.util.Log')));
+    expect(vault, isNot(contains('Log.')));
+    expect(vault, isNot(contains('.message')));
+    expect(vault, isNot(contains('printStackTrace')));
+    expect(vault, isNot(contains('localizedMessage')));
+  });
+
+  test('a dependência do BiometricPrompt está fixada na 1.1.0', () {
+    final gradle = File('android/app/build.gradle.kts').readAsStringSync();
+    expect(gradle, contains('implementation("androidx.biometric:biometric:1.1.0")'));
+  });
 }

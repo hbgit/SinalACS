@@ -1,6 +1,7 @@
 import 'package:serverpod/serverpod.dart';
 import 'package:sinalacs_server/src/application/auth/cpf.dart';
 import 'package:sinalacs_server/src/application/auth/development_auth_service.dart';
+import 'package:sinalacs_server/src/application/auth/institutional_auth_service.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
 import 'package:sinalacs_server/src/runtime/alert_runtime.dart';
 
@@ -17,7 +18,8 @@ class AuthEndpoint extends Endpoint {
   bool get requireLogin => false;
 
   /// TTL da sessão do paciente (LGPD-RT06). O ACS continua nos 15 minutos
-  /// padrão — a renovação dele é silenciosa, por credencial em memória.
+  /// padrão, e a renovação dele é o refresh token rotativo (`refreshSession`):
+  /// sem senha nem TOTP, mas só para quem ainda guarda o token opaco do aparelho.
   static const patientSessionLifetime = Duration(hours: 1);
 
   /// UUIDs fixos do seed de desenvolvimento. Dados sintéticos.
@@ -89,11 +91,57 @@ class AuthEndpoint extends Endpoint {
           totpCode: totpCode,
         );
 
+    // Sem `deviceId` real não há aparelho a que amarrar o refresh token: o
+    // valor sentinela de `InstitutionalAuthService` é público e qualquer um o
+    // apresentaria, anulando a amarração. Então o login só devolve o JWT. O
+    // próprio sentinela, enviado pelo cliente, conta como "sem aparelho" pelo
+    // mesmo motivo — e porque `UploadTokenService.issue` o recusaria DEPOIS de
+    // o refresh token já estar gravado.
+    final temAparelho = deviceId != null &&
+        deviceId.trim().isNotEmpty &&
+        deviceId != InstitutionalAuthService.deviceIdAbsent;
+    final refreshToken = temAparelho
+        ? await runtime.refreshTokenServiceFor(session).issue(user)
+        : null;
+    // Token de envio diferido (D7 do plano 2026-10-03), pela mesma regra do
+    // aparelho: serve só a `visits.syncDeferred`, com a autoria deste ACS, e
+    // sobrevive ao fim da sessão. Um novo login no mesmo aparelho revoga o
+    // anterior.
+    final uploadToken = temAparelho
+        ? await runtime.uploadTokenServiceFor(session).issue(user)
+        : null;
     return DevelopmentLoginResult(
       accessToken: runtime.auth.issueToken(user),
       tokenType: 'Bearer',
+      refreshToken: refreshToken,
+      uploadToken: uploadToken,
     );
   }
+
+  /// Renova a sessão do ACS sem pedir senha nem TOTP (LGPD-RT06). Público por
+  /// desenho: quem chama já perdeu o JWT de 15 min — o refresh token, opaco e de
+  /// uso único, é a credencial. Toda recusa é a mesma `SessionExpiredException`.
+  Future<DevelopmentLoginResult> refreshSession(
+    Session session, {
+    required String refreshToken,
+    required String deviceId,
+  }) async {
+    final runtime = AlertRuntime.instance;
+    final renewed = await runtime
+        .refreshTokenServiceFor(session)
+        .refresh(refreshToken: refreshToken, deviceId: deviceId);
+    return DevelopmentLoginResult(
+      accessToken: runtime.auth.issueToken(renewed.user),
+      tokenType: 'Bearer',
+      refreshToken: renewed.refreshToken,
+    );
+  }
+
+  /// Encerra o turno: revoga a família inteira. Idempotente.
+  Future<void> logout(Session session, {required String refreshToken}) =>
+      AlertRuntime.instance
+          .refreshTokenServiceFor(session)
+          .revoke(refreshToken);
 
   /// Começa a ativação da MFA do ACS (RF07). Sem token: o ACS prova matrícula e senha.
   Future<TotpEnrollmentStart> beginTotpEnrollment(

@@ -4,6 +4,7 @@
          passivo (RF12). Só primeiro plano: a decisão de 2026-09-16 (§4)
          rejeita ACCESS_BACKGROUND_LOCATION. -->
     <uses-permission android:name="android.permission.INTERNET"/>
+    <uses-permission android:name="android.permission.USE_BIOMETRIC"/>
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
     <application

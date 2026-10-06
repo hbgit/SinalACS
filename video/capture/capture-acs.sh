@@ -6,8 +6,8 @@
 # não na Territorialização. Por isso há um toque extra na aba "Área".
 #
 # NÃO FILMAR (tabela de guardrails do roteiro): "Atualizar dados da microárea",
-# "Traçar rota eficiente", "Ligar para o SAMU (192)", "Encaminhar para UBS
-# Central", "Abrir formulário da visita", "Preparar aviso", o card verde da Ana
+# "Traçar rota eficiente", "Ligar para o SAMU (192)", "Ligar para a UBS",
+# "Abrir formulário da visita", "Preparar aviso", o card verde da Ana
 # Costa e o card amarelo do João (que abre o formulário com o nome da Maria).
 # Este script não toca em nenhum deles — não acrescente toques sem reler a
 # tabela.

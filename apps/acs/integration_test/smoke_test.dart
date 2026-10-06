@@ -135,12 +135,13 @@ void main() {
     await EncryptedLocalDatabase.deleteDatabaseFile(databaseName);
     addTearDown(() => EncryptedLocalDatabase.deleteDatabaseFile(databaseName));
     final store = SqlCipherVisitStore(
+      owner: 'acs-teste',
       keyStore: InMemoryDatabaseKeyStore(),
       databaseName: databaseName,
     );
     final visitQueue = OfflineVisitQueue(
       store: store,
-      synchronizer: BackendVisitSynchronizer(backend: backend),
+      synchronizer: BackendVisitSynchronizer(backend: backend, ownerId: backend.session!.userId),
     );
     await visitQueue.add(OfflineVisitRecord(
       patientId: seedPatientId,

@@ -1,0 +1,29 @@
+### Token de envio diferido do ACS (D7 do plano 2026-10-03). Deixa o aparelho
+### subir as visitas pendentes de um ACS que já saiu — com a autoria DELE —
+### sem sessão e sem nenhum outro poder: o único uso é `visits.syncDeferred`
+### (e `visits.revokeUploadToken`). Um vigente por (usuário, aparelho): a
+### emissão revoga o anterior. Validade de 7 dias, sem rotação.
+###
+### **Nunca** o token: só o SHA-256 dele em hex. O token é 256 bits aleatórios,
+### então um hash simples basta (não há senha humana para adivinhar).
+class: AcsUploadToken
+table: acs_upload_tokens
+fields:
+  id: UuidValue?, defaultPersist=random
+  userId: UuidValue, relation(parent=users)
+  tokenHash: String
+  ### Instalação que recebeu o token. Token apresentado por outro aparelho é
+  ### recusado e revogado.
+  deviceId: String
+  issuedAt: DateTime
+  ### Teto fixo (`issuedAt` + 7 dias); o uso não o estende.
+  expiresAt: DateTime
+  ### `null` = vigente. Preenchido na revogação (pedido do app, novo login no
+  ### mesmo aparelho, aparelho divergente ou conta inativa/sem microárea).
+  revokedAt: DateTime?
+indexes:
+  acs_upload_tokens_hash_key:
+    fields: tokenHash
+    unique: true
+  acs_upload_tokens_user_device_idx:
+    fields: userId, deviceId

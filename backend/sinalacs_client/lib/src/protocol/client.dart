@@ -157,6 +157,29 @@ class EndpointAuth extends _i1.EndpointRef {
     },
   );
 
+  /// Renova a sessão do ACS sem pedir senha nem TOTP (LGPD-RT06). Público por
+  /// desenho: quem chama já perdeu o JWT de 15 min — o refresh token, opaco e de
+  /// uso único, é a credencial. Toda recusa é a mesma `SessionExpiredException`.
+  _i2.Future<_i6.DevelopmentLoginResult> refreshSession({
+    required String refreshToken,
+    required String deviceId,
+  }) => caller.callServerEndpoint<_i6.DevelopmentLoginResult>(
+    'auth',
+    'refreshSession',
+    {
+      'refreshToken': refreshToken,
+      'deviceId': deviceId,
+    },
+  );
+
+  /// Encerra o turno: revoga a família inteira. Idempotente.
+  _i2.Future<void> logout({required String refreshToken}) =>
+      caller.callServerEndpoint<void>(
+        'auth',
+        'logout',
+        {'refreshToken': refreshToken},
+      );
+
   /// Começa a ativação da MFA do ACS (RF07). Sem token: o ACS prova matrícula e senha.
   _i2.Future<_i7.TotpEnrollmentStart> beginTotpEnrollment({
     required String matricula,
@@ -620,6 +643,63 @@ class EndpointVisits extends EndpointAuthenticated {
       'visits': visits,
     },
   );
+
+  /// Envio das visitas LEGADAS do aparelho (autoria desconhecida, D4 do plano
+  /// 2026-10-03): gravadas antes de existir dono por visita no banco local.
+  ///
+  /// A sessão do ACS é só o transporte — ver `VisitSyncService.syncLegacy`.
+  /// Mesma transação por lote e mesma tradução de erros de [sync].
+  _i2.Future<List<_i20.VisitSyncResult>> syncLegacy({
+    required String accessToken,
+    required String deviceId,
+    required List<_i21.VisitSyncEntry> visits,
+  }) => caller.callServerEndpoint<List<_i20.VisitSyncResult>>(
+    'visits',
+    'syncLegacy',
+    {
+      'accessToken': accessToken,
+      'deviceId': deviceId,
+      'visits': visits,
+    },
+  );
+
+  /// Envio DIFERIDO (D7 do plano 2026-10-03): sobe as visitas pendentes de um
+  /// ACS que pode já ter saído, autenticado pelo token de envio que o
+  /// `auth.loginInstitutional` emitiu para ele neste aparelho — não pelo JWT.
+  ///
+  /// Público por desenho para o `authenticate(...)`: o token opaco É a
+  /// credencial, e o único poder dele é este envio. O usuário resolvido é o
+  /// DONO do token, com a microárea relida do banco agora, e o lote passa
+  /// pelo MESMO `VisitSyncService.sync` do envio comum: autoria do dono,
+  /// território atual do dono, `localId` de outro agente recusado. Toda recusa
+  /// do token é a mesma `SessionExpiredException`, sem motivo e sem o token.
+  ///
+  /// No máximo `VisitSyncService.maxLegacyBatch` visitas por chamada, checado
+  /// antes de qualquer acesso ao banco. Um evento `visit_deferred_sync` por
+  /// lote gravado vai para `audit_logs`, com o dono e nada clínico.
+  _i2.Future<List<_i20.VisitSyncResult>> syncDeferred({
+    required String uploadToken,
+    required String deviceId,
+    required List<_i21.VisitSyncEntry> visits,
+  }) => caller.callServerEndpoint<List<_i20.VisitSyncResult>>(
+    'visits',
+    'syncDeferred',
+    {
+      'uploadToken': uploadToken,
+      'deviceId': deviceId,
+      'visits': visits,
+    },
+  );
+
+  /// Revoga o token de envio diferido (o app chama quando a fila do dono
+  /// zera). Público pelo mesmo motivo de [syncDeferred]; idempotente, e um
+  /// token desconhecido é ignorado em silêncio.
+  _i2.Future<void> revokeUploadToken({required String uploadToken}) =>
+      caller.callServerEndpoint<void>(
+        'visits',
+        'revokeUploadToken',
+        {'uploadToken': uploadToken},
+      );
 
   /// Sincronização central→dispositivo: visitas da microárea do ACS
   /// autenticado alteradas após `since`, para reconciliar um device que

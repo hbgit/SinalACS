@@ -79,6 +79,7 @@ class E2eFixtures {
     required this.microAreaId,
     required this.otherMicroAreaId,
     required this.acs,
+    required this.secondAcs,
     required this.patients,
   });
 
@@ -86,6 +87,11 @@ class E2eFixtures {
   final String microAreaId;
   final String otherMicroAreaId;
   final E2eAcs acs;
+
+  /// Segundo ACS, na MESMA microárea de [acs]: prova no aparelho que a fila
+  /// offline é por dono (B não vê nem envia as visitas de A) e que o envio
+  /// diferido sobe as visitas de A com a autoria de A.
+  final E2eAcs secondAcs;
   final List<E2ePatient> patients;
 
   E2ePatient byRole(String role) => patients.singleWhere((p) => p.role == role);
@@ -95,6 +101,7 @@ class E2eFixtures {
         'microAreaId': microAreaId,
         'otherMicroAreaId': otherMicroAreaId,
         'acs': acs.toJson(),
+        'acsB': secondAcs.toJson(),
         'patients': [for (final p in patients) p.toJson()],
       };
 
@@ -103,6 +110,7 @@ class E2eFixtures {
         microAreaId: j['microAreaId']! as String,
         otherMicroAreaId: j['otherMicroAreaId']! as String,
         acs: E2eAcs.fromJson((j['acs']! as Map).cast<String, Object?>()),
+        secondAcs: E2eAcs.fromJson((j['acsB']! as Map).cast<String, Object?>()),
         patients: [
           for (final p in (j['patients']! as List)) E2ePatient.fromJson((p as Map).cast<String, Object?>()),
         ],
@@ -170,13 +178,24 @@ E2eFixtures generateE2eFixtures(Random random) {
     );
   }
 
+  final acs = E2eAcs(
+    id: generateUuidV4(random),
+    matricula: 'E2E-${1000 + random.nextInt(9000)}',
+    password: _password(random),
+  );
+  String matriculaB;
+  do {
+    matriculaB = 'E2E-${1000 + random.nextInt(9000)}';
+  } while (matriculaB == acs.matricula);
+
   return E2eFixtures(
     ubsId: generateUuidV4(random),
     microAreaId: microAreaId,
     otherMicroAreaId: otherMicroAreaId,
-    acs: E2eAcs(
+    acs: acs,
+    secondAcs: E2eAcs(
       id: generateUuidV4(random),
-      matricula: 'E2E-${1000 + random.nextInt(9000)}',
+      matricula: matriculaB,
       password: _password(random),
     ),
     patients: [
