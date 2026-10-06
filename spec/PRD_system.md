@@ -154,7 +154,7 @@ events:
 | **RNF03** | Criptografia AES-256 em repouso | Sistema | - | **Crítico** | SQLCipher |
 | **RNF04** | TLS 1.3 em todas as comunicações | Sistema | - | **Crítico** | Traefik, cert-manager |
 | **RNF05** | Acessibilidade WCAG 2.1 Nível AA | UI | - | Médio | `accessibility_test` |
-| **RNF06** | RBAC (Role-Based Access Control) | Sistema | - | Alto | Regra única de autorização implementada (`Authorization.require`); papéis institucionais ainda sem caminho de emissão |
+| **RNF06** | RBAC (Role-Based Access Control) | Sistema | - | Alto | Regra única de autorização implementada (`Authorization.require`); `coordinator`/`admin` agora têm caminho de emissão (`auth.loginStaff`, matrícula + senha Argon2id + TOTP obrigatório, tabela `staff_accounts`); o RBAC dos endpoints de dados do staff segue aberto (issue #40) |
 
 ### 2.2.1 Decisões de produto pós-validação (2026-09-16)
 
@@ -593,7 +593,7 @@ Cada registro possui um campo `version` (inteiro incremental). No momento da sin
 
 **Política ABAC (Atribute-Based Access Control):**
 
-Exemplo ilustrativo: não existe hoje uma camada de política ABAC genérica como esta. A checagem de papel — e a de que o token carrega uma microárea — passou a ser feita por uma regra única, `Authorization.require` (`backend/sinalacs_server/lib/src/application/auth/authorization.dart`), chamada pelos casos de uso; a comparação entre a microárea do paciente e a do ACS continua inline em cada caso de uso. Os papéis `admin` e `coordinator` ainda não têm caminho de emissão nem endpoint que os exercite, então o RBAC institucional completo segue pendente (ver RNF06 na seção 2.2). A API usada abaixo também é ilustrativa, não é a do ORM do Serverpod.
+Exemplo ilustrativo: não existe hoje uma camada de política ABAC genérica como esta. A checagem de papel — e a de que o token carrega uma microárea — passou a ser feita por uma regra única, `Authorization.require` (`backend/sinalacs_server/lib/src/application/auth/authorization.dart`), chamada pelos casos de uso; a comparação entre a microárea do paciente e a do ACS continua inline em cada caso de uso. Os papéis `admin` e `coordinator` têm hoje caminho de emissão (`auth.loginStaff`, `Authorization.staffRoles`), mas nenhum endpoint de dados os exercita ainda (issue #40), então o RBAC institucional completo segue pendente (ver RNF06 na seção 2.2). A API usada abaixo também é ilustrativa, não é a do ORM do Serverpod.
 
 ```dart
 // Exemplo ilustrativo — não há camada ABAC genérica no código real;
