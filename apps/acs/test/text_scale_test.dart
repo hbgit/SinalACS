@@ -13,11 +13,21 @@ import 'support/layout_harness.dart';
 /// limitar a escala resolve o estouro desobedecendo à preferência de
 /// acessibilidade de quem precisa dela.
 void main() {
-  for (final escala in const [1.3, 2.0]) {
-    testWidgets('não estoura o layout com fonte a ${(escala * 100).toInt()}% em 360x800', (tester) async {
-      await abrirPainel(tester, tamanho: const Size(360, 800), escalaDeFonte: escala);
-      await percorrerPainelInteiro(tester, 'fonte a ${(escala * 100).toInt()}%');
-    });
+  // 360x800 é o aparelho comum; 320x640 é o piso de largura; 800x360 é a paisagem,
+  // em que a altura útil encolhe justamente quando o cabeçalho cresce com a fonte.
+  const janelas = {
+    '360x800': Size(360, 800),
+    '320x640': Size(320, 640),
+    '800x360 (paisagem)': Size(800, 360),
+  };
+  for (final janela in janelas.entries) {
+    for (final escala in const [1.3, 2.0]) {
+      final rotulo = '${(escala * 100).toInt()}%';
+      testWidgets('não estoura o layout com fonte a $rotulo em ${janela.key}', (tester) async {
+        await abrirPainel(tester, tamanho: janela.value, escalaDeFonte: escala);
+        await percorrerPainelInteiro(tester, 'fonte a $rotulo em ${janela.key}');
+      });
+    }
   }
 
   testWidgets('o cabeçalho cresce quando a escala muda em tempo de execução', (tester) async {

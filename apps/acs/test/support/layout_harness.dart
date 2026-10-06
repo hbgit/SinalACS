@@ -84,7 +84,9 @@ Future<void> abrirPainel(
   await tester.enterText(find.byKey(const Key('senha_field')), 'senha-sintetica');
   final entrar = find.byKey(const Key('login_button'));
   await tester.ensureVisible(entrar); // numa janela baixa o botão fica abaixo da dobra
-  await tester.pump();
+  // Em paisagem a rolagem ainda anima depois do primeiro quadro e o botão não
+  // recebe toque nesse intervalo; a tela de login assenta (a aba Área é que não).
+  await tester.pumpAndSettle();
   await tester.tap(entrar);
   await assentar(tester);
 }
@@ -92,7 +94,10 @@ Future<void> abrirPainel(
 /// Rola a tela até o fim, checando estouro a cada passo.
 Future<void> percorrerTelaInteira(WidgetTester tester, String contexto) async {
   esperarSemEstouro(tester, '$contexto (topo)');
-  final rolaveis = find.byType(Scrollable);
+  // `TextField` também tem um `Scrollable` (restorationId 'editable'), e `.last`
+  // o escolhia nas abas com campo de texto: o arrasto caía fora da tela e a
+  // rolagem não acontecia, esvaziando a varredura justo na aba Visita.
+  final rolaveis = find.byWidgetPredicate((w) => w is Scrollable && w.restorationId != 'editable');
   if (rolaveis.evaluate().isEmpty) return; // ex.: o mapa não rola
   for (var passo = 1; passo <= 8; passo++) {
     await tester.drag(rolaveis.last, const Offset(0, -320));
