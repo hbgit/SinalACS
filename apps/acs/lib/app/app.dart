@@ -2737,7 +2737,8 @@ class _LegendChip extends StatelessWidget {
           children: [
             Container(width: 10, height: 10, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
             const SizedBox(width: 6),
-            Text(label),
+            // `Flexible`: a 200% de fonte em 320 dp o rótulo não cabe numa linha.
+            Flexible(child: Text(label)),
           ],
         ),
       );

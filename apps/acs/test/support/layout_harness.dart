@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sinalacs_acs/app/app.dart';
+import 'package:sinalacs_acs/core/security/biometric_gate.dart';
 
 import 'fakes.dart';
 
@@ -60,21 +61,28 @@ void esperarSemEstouro(WidgetTester tester, String contexto) {
 /// Abre o painel já logado (login pela tela, contra o `FakeAcsBackend`), numa
 /// janela de tamanho e escala de fonte fixos. Confere a tela de login ANTES de
 /// entrar: ela também tem cabeçalho.
-Future<void> abrirPainel(
+///
+/// Devolve o feed fake, para o teste entregar um alerta de outro risco depois do
+/// login. Os cartões da Fila só são construídos quando rolam até a viewport: use
+/// [rolarAte] para chegar neles, não `ensureVisible`.
+Future<FakeAlertFeed> abrirPainel(
   WidgetTester tester, {
   required Size tamanho,
   double escalaDeFonte = 1.0,
+  BiometricGate? biometricGate,
 }) async {
   redimensionar(tester, tamanho, escalaDeFonte: escalaDeFonte);
   addTearDown(tester.view.reset);
   addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
 
   final alerta = testAlert(alertId: 'escala-1', locationCell: testLocationCell);
+  late FakeAlertFeed feed;
   await tester.pumpWidget(SinalAcsApp(
     backend: FakeAcsBackend(),
+    biometricGate: biometricGate,
     feedBuilder: (queue) {
       queue.upsert(alerta); // `initialAlert` só seleciona; a tela lê a fila
-      return FakeAlertFeed(queue);
+      return feed = FakeAlertFeed(queue);
     },
   ));
   await tester.pump();
@@ -82,23 +90,43 @@ Future<void> abrirPainel(
 
   await tester.enterText(find.byKey(const Key('matricula_field')), 'ACS-001');
   await tester.enterText(find.byKey(const Key('senha_field')), 'senha-sintetica');
+  // No aparelho o `enterText` abre o teclado de verdade, e ele come ~300 dp da
+  // janela: a medida de layout seria a de "com teclado". Larga o foco e espera
+  // o sistema recolhê-lo (tempo real; na VM não há teclado e isso é só um quadro).
+  FocusManager.instance.primaryFocus?.unfocus();
+  await assentar(tester);
   final entrar = find.byKey(const Key('login_button'));
   await tester.ensureVisible(entrar); // numa janela baixa o botão fica abaixo da dobra
-  await tester.pump();
+  // Em paisagem a rolagem ainda anima depois do primeiro quadro e o botão não
+  // recebe toque nesse intervalo; a tela de login assenta (a aba Área é que não).
+  await tester.pumpAndSettle();
   await tester.tap(entrar);
   await assentar(tester);
+  return feed;
 }
 
 /// Rola a tela até o fim, checando estouro a cada passo.
 Future<void> percorrerTelaInteira(WidgetTester tester, String contexto) async {
   esperarSemEstouro(tester, '$contexto (topo)');
-  final rolaveis = find.byType(Scrollable);
+  // `TextField` também tem um `Scrollable` (restorationId 'editable'), e `.last`
+  // o escolhia nas abas com campo de texto: o arrasto caía fora da tela e a
+  // rolagem não acontecia, esvaziando a varredura justo na aba Visita.
+  final rolaveis = find.byWidgetPredicate((w) => w is Scrollable && w.restorationId != 'editable');
   if (rolaveis.evaluate().isEmpty) return; // ex.: o mapa não rola
   for (var passo = 1; passo <= 8; passo++) {
     await tester.drag(rolaveis.last, const Offset(0, -320));
     await assentar(tester);
     esperarSemEstouro(tester, '$contexto (rolagem $passo)');
   }
+}
+
+/// Rola a página até [alvo] existir e ficar visível. `ensureVisible` não serve
+/// para item de lista preguiçosa: fora da viewport ele ainda não foi construído
+/// e o finder não acha nada (`Bad state: No element`).
+Future<void> rolarAte(WidgetTester tester, Finder alvo) async {
+  final pagina = find.byWidgetPredicate((w) => w is Scrollable && w.restorationId != 'editable').first;
+  await tester.scrollUntilVisible(alvo, 200, scrollable: pagina, maxScrolls: 60);
+  await assentar(tester);
 }
 
 Future<void> irParaDaBarra(WidgetTester tester, String destino) async {

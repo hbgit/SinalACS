@@ -13,12 +13,103 @@ import 'support/layout_harness.dart';
 /// limitar a escala resolve o estouro desobedecendo à preferência de
 /// acessibilidade de quem precisa dela.
 void main() {
-  for (final escala in const [1.3, 2.0]) {
-    testWidgets('não estoura o layout com fonte a ${(escala * 100).toInt()}% em 360x800', (tester) async {
-      await abrirPainel(tester, tamanho: const Size(360, 800), escalaDeFonte: escala);
-      await percorrerPainelInteiro(tester, 'fonte a ${(escala * 100).toInt()}%');
+  // 360x800 é o aparelho comum; 320x640 é o piso de largura; 800x360 é a paisagem,
+  // em que a altura útil encolhe justamente quando o cabeçalho cresce com a fonte.
+  const janelas = {
+    '360x800': Size(360, 800),
+    '320x640': Size(320, 640),
+    '800x360 (paisagem)': Size(800, 360),
+  };
+  for (final janela in janelas.entries) {
+    for (final escala in const [1.3, 2.0]) {
+      final rotulo = '${(escala * 100).toInt()}%';
+      testWidgets('não estoura o layout com fonte a $rotulo em ${janela.key}', (tester) async {
+        await abrirPainel(tester, tamanho: janela.value, escalaDeFonte: escala);
+        await percorrerPainelInteiro(tester, 'fonte a $rotulo em ${janela.key}');
+      });
+    }
+  }
+
+  // Alcançar não é só existir na árvore: o botão que grava a visita precisa estar
+  // habilitado, receber toque (nada o cobre, nem a barra de navegação) e manter
+  // o alvo mínimo de 48 dp. Desabilitado não prova nada, daí a chegada confirmada.
+  for (final janela in janelas.entries) {
+    testWidgets('save_visit fica alcançável a 200% em ${janela.key}', (tester) async {
+      // Alerta amarelo: o vermelho só oferece "Acionar SAMU", e a rota de visita
+      // parte do cartão do alerta na Fila.
+      final feed = await abrirPainel(tester, tamanho: janela.value, escalaDeFonte: 2.0);
+      feed.deliver(testAlert(alertId: 'alerta-visita', riskLevel: 'yellow'));
+      await assentar(tester);
+      await irParaDaBarra(tester, 'Fila');
+      final iniciar = find.text('Iniciar rota de visita');
+      await rolarAte(tester, iniciar);
+      await tester.tap(iniciar);
+      await assentar(tester);
+      final chegada = find.byKey(const Key('arrival_confirmation'));
+      await rolarAte(tester, chegada);
+      await tester.tap(chegada);
+      await assentar(tester);
+
+      final salvar = find.byKey(const Key('save_visit'));
+      await rolarAte(tester, salvar);
+      expect(tester.widget<FilledButton>(salvar).onPressed, isNotNull,
+          reason: 'botão desabilitado não prova alcance');
+      expect(salvar.hitTestable(), findsOneWidget);
+      expect(tester.getSize(salvar).height, greaterThanOrEqualTo(48));
+      esperarSemEstouro(tester, 'botão Salvar a 200% em ${janela.key}');
     });
   }
+
+  // O chip de conexão corta o texto com elipse a 200% (`maxLines: 1`): o estado
+  // continua legível pelo ícone e pela cor, e o nome acessível tem de seguir
+  // inteiro para quem usa leitor de tela. WCAG 1.4.1 (não só cor) e 4.1.2.
+  group('chip de conexão a 200% em 320x640', () {
+    const tamanho = Size(320, 640);
+
+    testWidgets('com a central conectada o rótulo semântico é completo', (tester) async {
+      final semantica = tester.ensureSemantics();
+      try {
+        final feed = await abrirPainel(tester, tamanho: tamanho, escalaDeFonte: 2.0);
+        feed.onConnectionChanged?.call(true);
+        await assentar(tester);
+
+        expect(tester.getSemantics(find.byKey(const Key('broker_status'))).label, contains('Alertas em tempo real'));
+        esperarSemEstouro(tester, 'chip conectado a 200%');
+      } finally {
+        semantica.dispose();
+      }
+    });
+
+    testWidgets('sem a central o rótulo semântico é completo', (tester) async {
+      final semantica = tester.ensureSemantics();
+      try {
+        final feed = await abrirPainel(tester, tamanho: tamanho, escalaDeFonte: 2.0);
+        feed.onConnectionChanged?.call(false);
+        await assentar(tester);
+
+        expect(tester.getSemantics(find.byKey(const Key('broker_status'))).label, contains('Sem central'));
+        esperarSemEstouro(tester, 'chip sem central a 200%');
+      } finally {
+        semantica.dispose();
+      }
+    });
+
+    testWidgets('na tela de login (sem estado) o rótulo semântico é "Offline ready"', (tester) async {
+      final semantica = tester.ensureSemantics();
+      try {
+        redimensionar(tester, tamanho, escalaDeFonte: 2.0);
+        addTearDown(tester.view.reset);
+        addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+        await tester.pumpWidget(SinalAcsApp(backend: FakeAcsBackend(), feedBuilder: (q) => FakeAlertFeed(q)));
+        await assentar(tester);
+
+        expect(tester.getSemantics(find.byKey(const Key('broker_status'))).label, contains('Offline ready'));
+        esperarSemEstouro(tester, 'chip no login a 200%');
+      } finally {
+        semantica.dispose();
+      }
+    });
+  });
 
   testWidgets('o cabeçalho cresce quando a escala muda em tempo de execução', (tester) async {
     // No Android a preferência de tamanho de fonte muda em Configurações, com o
