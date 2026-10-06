@@ -10,7 +10,7 @@ O backoffice é desktop-first (`spec/PRD_system.md` §2.1): acima de `AdminBreak
 
 ![Login do backoffice](screenshots/admin/01-login.png)
 
-Login real do staff (coordenador e administrador): matrícula/CNS e senha vão para `auth.loginStaff`; o painel só abre com a sessão que o servidor devolve, não há atalho de desenvolvimento. A imagem acima é da versão anterior (formulário local) e não foi recapturada. Como a verificação em duas etapas é obrigatória para o staff, o fluxo tem três desfechos:
+Login real do staff (coordenador e administrador): matrícula/CNS e senha vão para `auth.loginStaff`; o painel só abre com a sessão que o servidor devolve, não há atalho de desenvolvimento. A imagem acima foi recapturada em 2026-10-06 no emulador Android (tema escuro, retrato). As capturas 02 a 08 ainda mostram o texto antigo do cabeçalho ("admin.dev", hoje "Backoffice • Administrador" ou "Backoffice • Coordenador") e o chrome anterior: só podem ser refeitas com uma sessão real, o que depende da prova E2E no emulador ainda pendente da #39. Como a verificação em duas etapas é obrigatória para o staff, o fluxo tem três desfechos:
 
 - **Credencial inválida:** a mensagem genérica "Matrícula ou senha inválidos." (a mesma para matrícula inexistente e senha errada) ou o aviso de bloqueio por tentativas.
 - **Conta sem MFA (primeiro acesso):** o app abre a tela *Verificação em duas etapas* (`MfaEnrollmentScreen`), com o QR e a chave em texto (`mfa_secret`) para o aplicativo autenticador e o campo do código de 6 dígitos; nada é gravado no aparelho. Ao confirmar, volta ao login com o aviso "Verificação ativada. Entre com o código do aplicativo.".
