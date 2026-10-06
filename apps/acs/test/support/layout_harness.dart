@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sinalacs_acs/app/app.dart';
+import 'package:sinalacs_acs/core/security/biometric_gate.dart';
 
 import 'fakes.dart';
 
@@ -67,6 +68,7 @@ Future<FakeAlertFeed> abrirPainel(
   WidgetTester tester, {
   required Size tamanho,
   double escalaDeFonte = 1.0,
+  BiometricGate? biometricGate,
 }) async {
   redimensionar(tester, tamanho, escalaDeFonte: escalaDeFonte);
   addTearDown(tester.view.reset);
@@ -76,6 +78,7 @@ Future<FakeAlertFeed> abrirPainel(
   late FakeAlertFeed feed;
   await tester.pumpWidget(SinalAcsApp(
     backend: FakeAcsBackend(),
+    biometricGate: biometricGate,
     feedBuilder: (queue) {
       queue.upsert(alerta); // `initialAlert` só seleciona; a tela lê a fila
       return feed = FakeAlertFeed(queue);
@@ -86,6 +89,11 @@ Future<FakeAlertFeed> abrirPainel(
 
   await tester.enterText(find.byKey(const Key('matricula_field')), 'ACS-001');
   await tester.enterText(find.byKey(const Key('senha_field')), 'senha-sintetica');
+  // No aparelho o `enterText` abre o teclado de verdade, e ele come ~300 dp da
+  // janela: a medida de layout seria a de "com teclado". Larga o foco e espera
+  // o sistema recolhê-lo (tempo real; na VM não há teclado e isso é só um quadro).
+  FocusManager.instance.primaryFocus?.unfocus();
+  await assentar(tester);
   final entrar = find.byKey(const Key('login_button'));
   await tester.ensureVisible(entrar); // numa janela baixa o botão fica abaixo da dobra
   // Em paisagem a rolagem ainda anima depois do primeiro quadro e o botão não
