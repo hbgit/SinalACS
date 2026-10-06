@@ -471,13 +471,19 @@ class InstitutionalAuthService {
     );
   }
 
+  /// Distingue a audiência na trilha: revisar a atividade do backoffice não
+  /// pode exigir juntar `userId` com `staff_accounts` à mão. Vale para todo
+  /// evento deste serviço (login e ativação da MFA); o ACS continua `session`.
+  String get _recursoDeAuditoria =>
+      audience == CredentialAudience.staff ? 'staff_session' : 'session';
+
   /// Best-effort, como toda auditoria deste repositório: uma trilha fora do ar
   /// não pode impedir um ACS de entrar.
   Future<void> _recordAudit(String userId, String result) => audit.recordSafely(
     AuditEvent(
       userId: userId,
       actionType: 'login',
-      resourceType: 'session',
+      resourceType: _recursoDeAuditoria,
       result: result,
     ),
   );

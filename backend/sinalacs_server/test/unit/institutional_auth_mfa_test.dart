@@ -64,6 +64,20 @@ void main() {
       expect(m.store.lastRegisteredStep, Totp.stepOf(t0));
     });
 
+    test('o login do ACS com MFA continua auditado no recurso session (não staff_session)',
+        () async {
+      final m = await montar();
+      await expectLater(
+        m.servico.login(matricula: 'ACS-001', password: _senha, totpCode: '000000', now: t0),
+        throwsA(isA<AuthenticationFailedException>()),
+      );
+      await m.servico
+          .login(matricula: 'ACS-001', password: _senha, totpCode: Totp.code(segredo, t0), now: t0);
+      final audit = m.servico.audit as RecordingAudit;
+      expect(audit.results, ['denied_totp', 'granted']);
+      expect(audit.resourceTypes, everyElement('session'));
+    });
+
     test('recusa o mesmo código usado duas vezes (replay)', () async {
       final m = await montar();
       final codigo = Totp.code(segredo, t0);

@@ -340,6 +340,26 @@ void main() {
       },
     );
 
+    test(
+      'auth.loginStaff grava em audit_logs o recurso staff_session, não session',
+      () async {
+        await endpoints.auth.loginStaff(
+          sessionBuilder,
+          matricula: _adminMatricula,
+          password: _senha,
+          totpCode: Totp.code(_segredo, DateTime.now().toUtc()),
+        );
+        final linhas = await AuditLog.db.find(
+          sessionBuilder.build(),
+          where: (t) =>
+              t.userId.equals(UuidValue.fromString(_adminId)) &
+              t.actionType.equals('login'),
+        );
+        expect(linhas.map((l) => l.result), contains('granted'));
+        expect(linhas.map((l) => l.resourceType), everyElement('staff_session'));
+      },
+    );
+
     test('auth.loginStaff sem código recebe MfaRequiredException', () async {
       await expectLater(
         endpoints.auth.loginStaff(

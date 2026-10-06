@@ -105,6 +105,23 @@ void main() {
       }
     });
 
+    test('eventos de login do staff gravam o recurso staff_session', () async {
+      final m = await montar();
+      await expectLater(
+        m.servico.login(matricula: _matricula, password: 'outra', now: t0),
+        throwsA(isA<AuthenticationFailedException>()),
+      );
+      await m.servico.login(
+        matricula: _matricula,
+        password: _senha,
+        totpCode: Totp.code(segredo, t0),
+        now: t0,
+      );
+      expect(m.audit.results, ['denied_credentials', 'granted']);
+      expect(m.audit.resourceTypes, everyElement('staff_session'));
+      expect(m.audit.events.map((e) => e.actionType), everyElement('login'));
+    });
+
     test('não exige microárea (staff não tem território)', () async {
       final m = await montar(microAreaId: null);
       final user = await m.servico.login(
@@ -236,6 +253,23 @@ void main() {
       final user = await m.servico.login(matricula: _matricula, password: _senha, now: t0);
       expect(user.role, UserRole.acs);
       expect(user.microAreaId, _microAreaId);
+    });
+
+    test('eventos de login do ACS continuam gravando o recurso session', () async {
+      final m = await montar(
+        audience: CredentialAudience.acs,
+        role: UserRole.acs,
+        microAreaId: _microAreaId,
+        comMfa: false,
+        acsId: _acsId,
+      );
+      await expectLater(
+        m.servico.login(matricula: _matricula, password: 'outra', now: t0),
+        throwsA(isA<AuthenticationFailedException>()),
+      );
+      await m.servico.login(matricula: _matricula, password: _senha, now: t0);
+      expect(m.audit.results, ['denied_credentials', 'granted']);
+      expect(m.audit.resourceTypes, everyElement('session'));
     });
 
     test('a audiência por omissão do serviço é acs', () async {

@@ -105,6 +105,8 @@ class RecordingAudit extends AuditTrail {
 
   List<String> get results => [for (final e in events) e.result];
 
+  List<String> get resourceTypes => [for (final e in events) e.resourceType];
+
   @override
   Future<void> record(AuditEvent event) async => events.add(event);
 }
