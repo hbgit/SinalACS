@@ -630,7 +630,7 @@ Plano: `docs/superpowers/plans/2026-10-02-pendencias-do-acs-flag-secure-ubs-rf08
 
 **Prova no emulador: NÃO EXECUTADA.** Foram escritos `apps/admin/integration_test/admin_login_e2e.dart` (senha errada com mensagem genérica; primeiro acesso -> ativação da MFA pela tela -> código; código errado recusado; login com o código do passo seguinte até "Painel de Indicadores"), `scripts/qa/admin_login_e2e.sh` (stack de e2e, banco `sinalacs_e2e`, relé em `/admin`, conferência do TOTP ativado no banco) e a extensão das fixtures (`E2eStaff`, bloco `staff` do manifesto, seed e teste unitário), mas a execução exige recriar `sinalacs-serverpod`/`-traefik`/`-mosquitto`/`-gorush-1` da stack de desenvolvimento em uso (`e2e_stack.sh up`) e o ambiente recusou essa ação; nada foi recriado. Falta rodar `./scripts/qa/admin_login_e2e.sh` e registrar aqui o resultado. Até lá, o fluxo completo (RPC real + TLS com a CA do asset + telas) **não** está provado em aparelho; o que existe são testes de widget com `AdminAuthBackend` falso e testes de `BackendAdminAuth` com chamador falso.
 
-**Continua aberto:** refresh token do staff (hoje 15 min e novo login com código); tela de redefinição de MFA e gestão de contas (#43); endpoints de dados do staff com RBAC (#40); trocar o `MockAdminDataSource` (#41); a trilha de auditoria ainda não distingue a audiência; a primeira ativação do TOTP do staff exige só matrícula + senha (trust-on-first-use); screenshot de `docs/telas-admin.md` do login não foi recapturado.
+**Continua aberto:** refresh token do staff (hoje 15 min e novo login com código); tela de redefinição de MFA e gestão de contas (#43); endpoints de dados do staff com RBAC (#40); trocar o `MockAdminDataSource` (#41); a trilha de auditoria ainda não distingue a audiência *(fechado em 2026-10-06, ver abaixo)*; a primeira ativação do TOTP do staff exige só matrícula + senha (trust-on-first-use); screenshot de `docs/telas-admin.md` do login não foi recapturado *(fechado em 2026-10-06, ver abaixo)*.
 
 ## Minors adiados da #39 (2026-10-06)
 
@@ -638,7 +638,7 @@ Plano: `docs/superpowers/plans/2026-10-02-pendencias-do-acs-flag-secure-ubs-rf08
 - (a) Testes de endpoint de `beginStaffTotpEnrollment`/`confirmStaffTotpEnrollment` contra o Postgres (5 testes, `e4df0de`).
 - (b) A auditoria do login distingue staff (`staff_session`) de ACS (`session`) (`4f4c9bd`); sem backfill das linhas antigas.
 - (c) O cabeçalho do admin mostra o papel da sessão em vez de `admin.dev` fixo (`5da3008`). O rótulo do papel pode ser truncado com reticências a 320 dp + fonte a 200%, mas o leitor de tela o anuncia por inteiro.
-- (d) O contador de bloqueio é por conta e a política é a mesma para ACS e staff, fixada por testes (`57c186a`). O item original estava mal descrito: o contador nunca foi compartilhado.
+- (d) O contador de bloqueio é por conta e a política é a mesma para ACS e staff (`57c186a`): os testes fixam o limiar de 5 tentativas e o contador por conta; a progressão de 15 min com dobra é compartilhada porque as duas audiências usam o mesmo código `lockDurationFor`, sem teste específico do staff para a duração. O item original estava mal descrito: o contador nunca foi compartilhado.
 - (e) A captura da tela de login foi refeita (`a378318`).
 
 **Continua aberto:**

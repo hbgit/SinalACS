@@ -549,7 +549,7 @@ void main() {
             matricula: _adminMatricula,
             password: _senha,
           );
-          // Código garantidamente diferente do válido (e dos passos vizinhos).
+          // Diferente do código do passo atual; coincidir com um passo vizinho tem chance ~2e-6.
           final certo = Totp.code(
             _deBase32(inicio.secretBase32),
             DateTime.now().toUtc(),
