@@ -129,7 +129,7 @@ class _AdminHomeShellState extends State<AdminHomeShell> {
   Widget build(BuildContext context) => LayoutBuilder(
         builder: (context, constraints) {
           final content = _content();
-          final header = AdminHeader('Backoffice • admin.dev', 'Painel administrativo', height: adminHeaderHeight(context));
+          final header = AdminHeader('Backoffice • ${adminRoleLabel(widget.session.role)}', 'Painel administrativo', height: adminHeaderHeight(context));
           // Backoffice é desktop-first (spec/PRD_system.md §2.1): NavigationRail
           // acima de AdminBreakpoints.rail, NavigationBar abaixo — mesmo
           // ThemeData nos dois.
@@ -183,6 +183,15 @@ class _AdminHomeShellState extends State<AdminHomeShell> {
         },
       );
 }
+
+/// Rótulo do papel para o cabeçalho. Valor desconhecido não quebra a tela nem
+/// aparece cru: o token só chega aqui com papel de staff, mas o cabeçalho não
+/// deve depender disso.
+String adminRoleLabel(String role) => switch (role) {
+      'admin' => 'Administrador',
+      'coordinator' => 'Coordenador',
+      _ => 'Equipe',
+    };
 
 String riskLabel(RiskLevel level) => switch (level) {
       RiskLevel.red => 'Vermelho',

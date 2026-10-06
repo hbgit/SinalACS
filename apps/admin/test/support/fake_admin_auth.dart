@@ -32,6 +32,9 @@ class FakeAdminAuth implements AdminAuthBackend {
   /// Sessão devolvida no sucesso; `null` gera uma de papel `admin` válida por 1 h.
   AdminSession? session;
 
+  /// Papel da sessão gerada quando [session] é `null`.
+  String role = 'admin';
+
   /// Lançada por `login` (e só por ele) quando não for `null`.
   Object? failWith;
 
@@ -70,7 +73,7 @@ class FakeAdminAuth implements AdminAuthBackend {
         AdminSession(
           accessToken: 'token-de-teste',
           userId: 'ADM-001',
-          role: 'admin',
+          role: role,
           expiresAt: DateTime.now().add(const Duration(hours: 1)),
         );
   }
