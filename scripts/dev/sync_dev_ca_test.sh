@@ -35,6 +35,8 @@ SYNC_DEV_CA_ROOT="$tmp/ok" "$script" >/dev/null || falha "o sync falhou numa ár
 [[ -f "$tmp/ok/apps/acs/assets/certs/acs_client.key" ]] || falha "a chave do cliente não foi copiada"
 [[ "$(stat -c %a "$tmp/ok/apps/acs/assets/certs/acs_client.key")" == 600 ]] || falha "a chave do cliente não está em 600"
 sem_tmp "$tmp/ok" || falha "sobrou .tmp no caminho feliz"
+[[ -f "$tmp/ok/apps/admin/assets/certs/dev_rpc_ca.crt" ]] || falha "a CA do RPC não foi copiada para o admin"
+[[ ! -e "$tmp/ok/apps/admin/assets/certs/dev_ca.crt" && ! -e "$tmp/ok/apps/admin/assets/certs/acs_client.key" ]] || falha "o admin recebeu a CA do broker ou o certificado de cliente do ACS"
 
 echo "== caso 2: chave que não é o par do certificado é recusada antes de copiar"
 monta "$tmp/par"

@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sinalacs_admin/app/app.dart';
+import 'support/fake_admin_auth.dart';
+import 'support/layout_harness.dart';
 
 Future<void> _login(WidgetTester tester) async {
-  await tester.pumpWidget(SinalAdminApp());
-  await tester.tap(find.byKey(const Key('login_button')));
-  await tester.pumpAndSettle();
+  await tester.pumpWidget(SinalAdminApp(auth: FakeAdminAuth()));
+  await entrarComCredenciais(tester);
 }
 
 void main() {

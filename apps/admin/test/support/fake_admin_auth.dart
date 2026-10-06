@@ -27,9 +27,30 @@ class FakeEndpointCaller implements EndpointCaller {
 
 /// [AdminAuthBackend] em memória para testes de tela.
 class FakeAdminAuth implements AdminAuthBackend {
-  FakeAdminAuth({this.session, this.failure});
+  FakeAdminAuth({this.session});
+
+  /// Sessão devolvida no sucesso; `null` gera uma de papel `admin` válida por 1 h.
   AdminSession? session;
-  AdminAuthFailure? failure;
+
+  /// Lançada por `login` (e só por ele) quando não for `null`.
+  Object? failWith;
+
+  /// Quando `true`, `login` sem código lança [AdminMfaCodeRequired].
+  bool requiresTotp = false;
+
+  /// Último código TOTP recebido por `login`.
+  String? lastTotpCode;
+
+  /// Última matrícula/senha recebidas por `login`.
+  String? lastMatricula;
+  String? lastSenha;
+
+  int loginCalls = 0;
+
+  /// Lançada por `confirmMfaEnrollment` quando não for `null`.
+  Object? confirmFailWith;
+  String? lastEnrollmentCode;
+  int enrollmentBegins = 0;
 
   @override
   Future<AdminSession> login({
@@ -37,23 +58,42 @@ class FakeAdminAuth implements AdminAuthBackend {
     required String senha,
     String? totpCode,
   }) async {
-    if (failure != null) throw failure!;
-    return session!;
+    loginCalls++;
+    lastMatricula = matricula;
+    lastSenha = senha;
+    lastTotpCode = totpCode;
+    if (failWith != null) throw failWith!;
+    if (requiresTotp && (totpCode == null || totpCode.isEmpty)) {
+      throw const AdminMfaCodeRequired();
+    }
+    return session ??
+        AdminSession(
+          accessToken: 'token-de-teste',
+          userId: 'ADM-001',
+          role: 'admin',
+          expiresAt: DateTime.now().add(const Duration(hours: 1)),
+        );
   }
 
   @override
   Future<({String secret, String otpauthUri})> beginMfaEnrollment({
     required String matricula,
     required String senha,
-  }) async => (
-    secret: 'JBSWY3DPEHPK3PXP',
-    otpauthUri: 'otpauth://totp/x?secret=JBSWY3DPEHPK3PXP',
-  );
+  }) async {
+    enrollmentBegins++;
+    return (
+      secret: 'JBSWY3DPEHPK3PXP',
+      otpauthUri: 'otpauth://totp/x?secret=JBSWY3DPEHPK3PXP',
+    );
+  }
 
   @override
   Future<void> confirmMfaEnrollment({
     required String matricula,
     required String senha,
     required String code,
-  }) async {}
+  }) async {
+    lastEnrollmentCode = code;
+    if (confirmFailWith != null) throw confirmFailWith!;
+  }
 }

@@ -5,6 +5,8 @@ import 'package:sinalacs_admin/app/app.dart';
 import 'package:sinalacs_admin/core/data/mock_admin_data_source.dart';
 
 import '../test/support/failing_admin_data_source.dart';
+import '../test/support/fake_admin_auth.dart';
+import '../test/support/layout_harness.dart' show entrarComCredenciais;
 
 /// Validação do backoffice num dispositivo Android real (ou emulador).
 ///
@@ -23,13 +25,9 @@ void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
   Future<void> entrar(WidgetTester tester, {dynamic dataSource}) async {
-    await tester.pumpWidget(SinalAdminApp(dataSource: dataSource, devLoginEnabled: true));
+    await tester.pumpWidget(SinalAdminApp(dataSource: dataSource, auth: FakeAdminAuth()));
     await tester.pumpAndSettle();
-    final entrar = find.byKey(const Key('login_button'));
-    await tester.ensureVisible(entrar);
-    await tester.pumpAndSettle();
-    await tester.tap(entrar);
-    await tester.pumpAndSettle();
+    await entrarComCredenciais(tester);
   }
 
   Future<void> irPara(WidgetTester tester, String destino) async {

@@ -184,6 +184,10 @@ jobs:
         with:
           flutter-version: '3.44.8'
       - run: flutter pub get
+      # Mesmo motivo do job patient-app: assets/certs/ é gitignored e vem do
+      # scripts/dev/sync_dev_ca.sh, que precisa da stack de pé.
+      - name: Cria o diretório assets/certs/ que o pubspec declara
+        run: mkdir -p assets/certs
       - run: flutter analyze
       - run: flutter test
 
@@ -379,4 +383,7 @@ jobs:
           key: gradle-admin-${{ hashFiles('apps/admin/android/**/*.gradle.kts', 'apps/admin/android/gradle/wrapper/gradle-wrapper.properties') }}
           restore-keys: gradle-admin-
       - run: flutter pub get
+      # Sem a CA o APK sobe fail-closed (só raízes do sistema); aqui só interessa compilar.
+      - name: Cria o diretório assets/certs/ que o pubspec declara
+        run: mkdir -p assets/certs
       - run: flutter build apk --debug

@@ -2,14 +2,17 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sinalacs_admin/app/app.dart';
 
+import 'support/fake_admin_auth.dart';
+import 'support/layout_harness.dart';
+
 void main() {
   testWidgets('deve autenticar e abrir o painel de indicadores', (tester) async {
-    await tester.pumpWidget(SinalAdminApp());
+    await tester.pumpWidget(SinalAdminApp(auth: FakeAdminAuth()));
 
-    expect(find.byKey(const Key('dev_banner')), findsOneWidget);
+    // Sem banner de "ambiente de desenvolvimento": o login agora é real.
+    expect(find.byKey(const Key('dev_banner')), findsNothing);
 
-    await tester.tap(find.byKey(const Key('login_button')));
-    await tester.pumpAndSettle();
+    await entrarComCredenciais(tester);
 
     expect(find.text('Painel de Indicadores'), findsOneWidget);
     expect(find.text('Vermelho'), findsOneWidget);
@@ -19,7 +22,7 @@ void main() {
   });
 
   testWidgets('deve expor rótulo semântico e alvo de toque acessível no login do admin', (tester) async {
-    await tester.pumpWidget(SinalAdminApp());
+    await tester.pumpWidget(SinalAdminApp(auth: FakeAdminAuth()));
 
     final loginButton = tester.widget<FilledButton>(find.byKey(const Key('login_button')));
     final minimumSize = loginButton.style?.minimumSize?.resolve({}) ?? const Size(0, 0);

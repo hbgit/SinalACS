@@ -16,6 +16,8 @@ dependencies:
     path: ../../backend/sinalacs_client
   # Mesma versão que sinalacs_client declara; divergir quebra a resolução.
   serverpod_client: 3.4.13
+  # QR da ativação do MFA; mesma versão do app do ACS.
+  qr_flutter: ^4.1.0
 
 dev_dependencies:
   flutter_test:
@@ -26,3 +28,7 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    # CA do RPC de desenvolvimento, copiada por scripts/dev/sync_dev_ca.sh.
+    # Regenerável e fora do versionamento (como nos outros dois apps).
+    - assets/certs/
