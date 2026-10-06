@@ -53,11 +53,20 @@ Future<void> _seed(Session session) async {
   );
   await StaffAccount.db.insertRow(
     session,
-    StaffAccount(id: UuidValue.fromString(_adminId), enrollmentId: _adminMatricula, active: true),
+    StaffAccount(
+      id: UuidValue.fromString(_adminId),
+      enrollmentId: _adminMatricula,
+      active: true,
+    ),
   );
-  await AlertRuntimeHarness.store(session)
-      .saveCredential(_adminId, await AlertRuntimeHarness.hasher.derive(_senha), now);
-  final sealed = await HealthCipherTotpVault(AlertRuntime.instance.healthDataCipher).seal(_segredo);
+  await AlertRuntimeHarness.store(session).saveCredential(
+    _adminId,
+    await AlertRuntimeHarness.hasher.derive(_senha),
+    now,
+  );
+  final sealed = await HealthCipherTotpVault(
+    AlertRuntime.instance.healthDataCipher,
+  ).seal(_segredo);
   final credencial = (await UserCredential.db.findFirstRow(
     session,
     where: (t) => t.userId.equals(UuidValue.fromString(_adminId)),
@@ -113,8 +122,11 @@ Future<void> _seed(Session session) async {
       active: true,
     ),
   );
-  await AlertRuntimeHarness.store(session)
-      .saveCredential(_acsId, await AlertRuntimeHarness.hasher.derive(_senha), now);
+  await AlertRuntimeHarness.store(session).saveCredential(
+    _acsId,
+    await AlertRuntimeHarness.hasher.derive(_senha),
+    now,
+  );
 }
 
 class _SemAuditoria extends AuditTrail {
@@ -134,9 +146,54 @@ InstitutionalAuthService _servico(Session session, {required bool staff}) {
   );
 }
 
-Map<String, dynamic> _payload(String token) => jsonDecode(
-      utf8.decode(base64Url.decode(base64Url.normalize(token.split('.')[1]))),
-    ) as Map<String, dynamic>;
+/// Decodifica base32 (RFC 4648, sem padding) como o app autenticador faz com
+/// o segredo devolvido por `beginStaffTotpEnrollment`.
+Uint8List _deBase32(String texto) {
+  const alfabeto = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+  var bits = 0;
+  var valor = 0;
+  final saida = <int>[];
+  for (final c in texto.split('')) {
+    valor = (valor << 5) | alfabeto.indexOf(c);
+    bits += 5;
+    if (bits >= 8) {
+      saida.add((valor >> (bits - 8)) & 0xff);
+      bits -= 8;
+    }
+  }
+  return Uint8List.fromList(saida);
+}
+
+/// O seed grava o admin com MFA ativa; a ativação pelo endpoint parte de um
+/// admin sem MFA, então zera as colunas de TOTP.
+Future<void> _semMfa(Session session) async {
+  final credencial = (await UserCredential.db.findFirstRow(
+    session,
+    where: (t) => t.userId.equals(UuidValue.fromString(_adminId)),
+  ))!;
+  await UserCredential.db.updateRow(
+    session,
+    credencial
+      ..totpSecretEncrypted = null
+      ..totpKeyVersion = null
+      ..totpEnabledAt = null
+      ..totpLastStep = null,
+  );
+}
+
+Future<UserCredential> _credencialAdmin(Session session) async =>
+    (await UserCredential.db.findFirstRow(
+      session,
+      where: (t) => t.userId.equals(UuidValue.fromString(_adminId)),
+    ))!;
+
+Map<String, dynamic> _payload(String token) =>
+    jsonDecode(
+          utf8.decode(
+            base64Url.decode(base64Url.normalize(token.split('.')[1])),
+          ),
+        )
+        as Map<String, dynamic>;
 
 void main() {
   withServerpod('Dado o login institucional do staff do backoffice (#39)', (
@@ -145,63 +202,84 @@ void main() {
   ) {
     setUp(() async => _seed(sessionBuilder.build()));
 
-    test('administrador com código válido recebe JWT com role admin e sem microárea', () async {
-      final session = sessionBuilder.build();
-      final agora = DateTime.now().toUtc();
-      final user = await _servico(session, staff: true).login(
-        matricula: _adminMatricula,
-        password: _senha,
-        totpCode: Totp.code(_segredo, agora),
-        now: agora,
-      );
-      expect(user.id, _adminId);
-      expect(user.role, UserRole.admin);
-      expect(user.microAreaId, isNull);
+    test(
+      'administrador com código válido recebe JWT com role admin e sem microárea',
+      () async {
+        final session = sessionBuilder.build();
+        final agora = DateTime.now().toUtc();
+        final user = await _servico(session, staff: true).login(
+          matricula: _adminMatricula,
+          password: _senha,
+          totpCode: Totp.code(_segredo, agora),
+          now: agora,
+        );
+        expect(user.id, _adminId);
+        expect(user.role, UserRole.admin);
+        expect(user.microAreaId, isNull);
 
-      final token = AlertRuntime.instance.auth.issueToken(user);
-      final payload = _payload(token);
-      expect(payload['role'], 'admin');
-      expect(payload.containsKey('micro_area_id'), isTrue);
-      expect(payload['micro_area_id'], isNull);
+        final token = AlertRuntime.instance.auth.issueToken(user);
+        final payload = _payload(token);
+        expect(payload['role'], 'admin');
+        expect(payload.containsKey('micro_area_id'), isTrue);
+        expect(payload['micro_area_id'], isNull);
 
-      final linha = (await UserCredential.db.findFirstRow(
-        session,
-        where: (t) => t.userId.equals(UuidValue.fromString(_adminId)),
-      ))!;
-      expect(linha.totpLastStep, Totp.stepOf(agora));
-    });
+        final linha = (await UserCredential.db.findFirstRow(
+          session,
+          where: (t) => t.userId.equals(UuidValue.fromString(_adminId)),
+        ))!;
+        expect(linha.totpLastStep, Totp.stepOf(agora));
+      },
+    );
 
     test('administrador sem código recebe MfaRequiredException', () async {
       await expectLater(
-        _servico(sessionBuilder.build(), staff: true)
-            .login(matricula: _adminMatricula, password: _senha),
+        _servico(
+          sessionBuilder.build(),
+          staff: true,
+        ).login(matricula: _adminMatricula, password: _senha),
         throwsA(isA<MfaRequiredException>()),
       );
     });
 
-    test('matrícula de ACS no login do staff é recusada com a mensagem genérica', () async {
-      await expectLater(
-        _servico(sessionBuilder.build(), staff: true).login(
-          matricula: _acsMatricula,
-          password: _senha,
-          totpCode: Totp.code(_segredo, DateTime.now().toUtc()),
-        ),
-        throwsA(isA<AuthenticationFailedException>()
-            .having((e) => e.message, 'message', _mensagemGenerica)),
-      );
-    });
+    test(
+      'matrícula de ACS no login do staff é recusada com a mensagem genérica',
+      () async {
+        await expectLater(
+          _servico(sessionBuilder.build(), staff: true).login(
+            matricula: _acsMatricula,
+            password: _senha,
+            totpCode: Totp.code(_segredo, DateTime.now().toUtc()),
+          ),
+          throwsA(
+            isA<AuthenticationFailedException>().having(
+              (e) => e.message,
+              'message',
+              _mensagemGenerica,
+            ),
+          ),
+        );
+      },
+    );
 
-    test('matrícula de staff no login do ACS é recusada com a mensagem genérica', () async {
-      await expectLater(
-        _servico(sessionBuilder.build(), staff: false).login(
-          matricula: _adminMatricula,
-          password: _senha,
-          totpCode: Totp.code(_segredo, DateTime.now().toUtc()),
-        ),
-        throwsA(isA<AuthenticationFailedException>()
-            .having((e) => e.message, 'message', _mensagemGenerica)),
-      );
-    });
+    test(
+      'matrícula de staff no login do ACS é recusada com a mensagem genérica',
+      () async {
+        await expectLater(
+          _servico(sessionBuilder.build(), staff: false).login(
+            matricula: _adminMatricula,
+            password: _senha,
+            totpCode: Totp.code(_segredo, DateTime.now().toUtc()),
+          ),
+          throwsA(
+            isA<AuthenticationFailedException>().having(
+              (e) => e.message,
+              'message',
+              _mensagemGenerica,
+            ),
+          ),
+        );
+      },
+    );
 
     test('usuário admin com linha em acs não entra pelo login do ACS', () async {
       // Um admin que (por erro de cadastro) tem matrícula em `acs`: o store do
@@ -219,12 +297,17 @@ void main() {
       final store = OrmAcsCredentialStore(session: () => session);
       expect(await store.findByEnrollmentId('ACS-ADM-001'), isNull);
       // A matrícula de ACS legítima continua sendo encontrada, com papel acs.
-      expect((await store.findByEnrollmentId(_acsMatricula))?.role, UserRole.acs);
+      expect(
+        (await store.findByEnrollmentId(_acsMatricula))?.role,
+        UserRole.acs,
+      );
     });
 
     test('o store do staff devolve o papel gravado em users', () async {
-      final record = await OrmAcsCredentialStore(session: () => sessionBuilder.build(), staff: true)
-          .findByEnrollmentId(_adminMatricula);
+      final record = await OrmAcsCredentialStore(
+        session: () => sessionBuilder.build(),
+        staff: true,
+      ).findByEnrollmentId(_adminMatricula);
       expect(record, isNotNull);
       expect(record!.role, UserRole.admin);
       expect(record.microAreaId, isNull);
@@ -232,67 +315,228 @@ void main() {
       expect(record.totp?.enabled, isTrue);
     });
 
-    test('auth.loginStaff com credenciais e código certos devolve só o JWT de 15 min', () async {
-      final agora = DateTime.now().toUtc();
-      final result = await endpoints.auth.loginStaff(
-        sessionBuilder,
-        matricula: _adminMatricula,
-        password: _senha,
-        totpCode: Totp.code(_segredo, agora),
-      );
-      expect(result.tokenType, 'Bearer');
-      expect(result.refreshToken, isNull);
-      expect(result.uploadToken, isNull);
-      final user = AlertRuntimeHarness.verify(result.accessToken)!;
-      expect(user.id, _adminId);
-      expect(user.role, UserRole.admin);
-      expect(user.microAreaId, isNull);
-      expect(user.deviceId, InstitutionalAuthService.deviceIdAbsent);
-      expect(AlertRuntimeHarness.tokenLifetime(result.accessToken), const Duration(minutes: 15));
-    });
+    test(
+      'auth.loginStaff com credenciais e código certos devolve só o JWT de 15 min',
+      () async {
+        final agora = DateTime.now().toUtc();
+        final result = await endpoints.auth.loginStaff(
+          sessionBuilder,
+          matricula: _adminMatricula,
+          password: _senha,
+          totpCode: Totp.code(_segredo, agora),
+        );
+        expect(result.tokenType, 'Bearer');
+        expect(result.refreshToken, isNull);
+        expect(result.uploadToken, isNull);
+        final user = AlertRuntimeHarness.verify(result.accessToken)!;
+        expect(user.id, _adminId);
+        expect(user.role, UserRole.admin);
+        expect(user.microAreaId, isNull);
+        expect(user.deviceId, InstitutionalAuthService.deviceIdAbsent);
+        expect(
+          AlertRuntimeHarness.tokenLifetime(result.accessToken),
+          const Duration(minutes: 15),
+        );
+      },
+    );
 
     test('auth.loginStaff sem código recebe MfaRequiredException', () async {
-      await expectLater(
-        endpoints.auth.loginStaff(sessionBuilder, matricula: _adminMatricula, password: _senha),
-        throwsA(isA<MfaRequiredException>()),
-      );
-    });
-
-    test('cinco senhas erradas bloqueiam a conta do staff (reuso do bloqueio)', () async {
-      for (var i = 0; i < InstitutionalAuthService.maxFailedAttempts; i++) {
-        await expectLater(
-          endpoints.auth.loginStaff(sessionBuilder, matricula: _adminMatricula, password: 'errada'),
-          throwsA(isA<AuthenticationFailedException>()),
-        );
-      }
-      final credencial = (await UserCredential.db.findFirstRow(
-        sessionBuilder.build(),
-        where: (t) => t.userId.equals(UuidValue.fromString(_adminId)),
-      ))!;
-      expect(credencial.failedAttempts, InstitutionalAuthService.maxFailedAttempts);
-      expect(credencial.lockedUntil, isNotNull);
-      // Bloqueada: nem a senha certa com o código certo entra.
       await expectLater(
         endpoints.auth.loginStaff(
           sessionBuilder,
           matricula: _adminMatricula,
           password: _senha,
-          totpCode: Totp.code(_segredo, DateTime.now().toUtc()),
         ),
-        throwsA(isA<AuthenticationFailedException>()),
+        throwsA(isA<MfaRequiredException>()),
       );
     });
 
-    test('token de admin é recusado por um caminho só de ACS (patients.listMicroArea)', () async {
-      final result = await endpoints.auth.loginStaff(
-        sessionBuilder,
-        matricula: _adminMatricula,
-        password: _senha,
-        totpCode: Totp.code(_segredo, DateTime.now().toUtc()),
+    test(
+      'cinco senhas erradas bloqueiam a conta do staff (reuso do bloqueio)',
+      () async {
+        for (var i = 0; i < InstitutionalAuthService.maxFailedAttempts; i++) {
+          await expectLater(
+            endpoints.auth.loginStaff(
+              sessionBuilder,
+              matricula: _adminMatricula,
+              password: 'errada',
+            ),
+            throwsA(isA<AuthenticationFailedException>()),
+          );
+        }
+        final credencial = (await UserCredential.db.findFirstRow(
+          sessionBuilder.build(),
+          where: (t) => t.userId.equals(UuidValue.fromString(_adminId)),
+        ))!;
+        expect(
+          credencial.failedAttempts,
+          InstitutionalAuthService.maxFailedAttempts,
+        );
+        expect(credencial.lockedUntil, isNotNull);
+        // Bloqueada: nem a senha certa com o código certo entra.
+        await expectLater(
+          endpoints.auth.loginStaff(
+            sessionBuilder,
+            matricula: _adminMatricula,
+            password: _senha,
+            totpCode: Totp.code(_segredo, DateTime.now().toUtc()),
+          ),
+          throwsA(isA<AuthenticationFailedException>()),
+        );
+      },
+    );
+
+    test(
+      'token de admin é recusado por um caminho só de ACS (patients.listMicroArea)',
+      () async {
+        final result = await endpoints.auth.loginStaff(
+          sessionBuilder,
+          matricula: _adminMatricula,
+          password: _senha,
+          totpCode: Totp.code(_segredo, DateTime.now().toUtc()),
+        );
+        await expectLater(
+          endpoints.patients.listMicroArea(
+            sessionBuilder,
+            accessToken: result.accessToken,
+          ),
+          throwsA(isA<AlertPermissionException>()),
+        );
+      },
+    );
+
+    group('ativação de MFA do staff pelo endpoint', () {
+      test('begin devolve segredo e URI otpauth e não ativa a MFA', () async {
+        final session = sessionBuilder.build();
+        await _semMfa(session);
+
+        final inicio = await endpoints.auth.beginStaffTotpEnrollment(
+          sessionBuilder,
+          matricula: _adminMatricula,
+          password: _senha,
+        );
+
+        expect(inicio.secretBase32, isNotEmpty);
+        expect(inicio.otpauthUri, startsWith('otpauth://totp/'));
+        final cred = await _credencialAdmin(session);
+        expect(
+          cred.totpSecretEncrypted,
+          isNotNull,
+          reason: 'segredo pendente gravado',
+        );
+        expect(
+          cred.totpEnabledAt,
+          isNull,
+          reason: 'MFA só vale depois do confirm',
+        );
+      });
+
+      test(
+        'confirm com código certo ativa; depois disso loginStaff exige o código',
+        () async {
+          final session = sessionBuilder.build();
+          await _semMfa(session);
+          final inicio = await endpoints.auth.beginStaffTotpEnrollment(
+            sessionBuilder,
+            matricula: _adminMatricula,
+            password: _senha,
+          );
+          final codigo = Totp.code(
+            _deBase32(inicio.secretBase32),
+            DateTime.now().toUtc(),
+          );
+
+          await endpoints.auth.confirmStaffTotpEnrollment(
+            sessionBuilder,
+            matricula: _adminMatricula,
+            password: _senha,
+            code: codigo,
+          );
+
+          expect((await _credencialAdmin(session)).totpEnabledAt, isNotNull);
+          await expectLater(
+            endpoints.auth.loginStaff(
+              sessionBuilder,
+              matricula: _adminMatricula,
+              password: _senha,
+            ),
+            throwsA(isA<MfaRequiredException>()),
+          );
+        },
       );
-      await expectLater(
-        endpoints.patients.listMicroArea(sessionBuilder, accessToken: result.accessToken),
-        throwsA(isA<AlertPermissionException>()),
+
+      test(
+        'confirm com código errado não ativa a MFA e conta uma tentativa',
+        () async {
+          final session = sessionBuilder.build();
+          await _semMfa(session);
+          final inicio = await endpoints.auth.beginStaffTotpEnrollment(
+            sessionBuilder,
+            matricula: _adminMatricula,
+            password: _senha,
+          );
+          // Código garantidamente diferente do válido (e dos passos vizinhos).
+          final certo = Totp.code(
+            _deBase32(inicio.secretBase32),
+            DateTime.now().toUtc(),
+          );
+          final errado = certo == '000000' ? '111111' : '000000';
+
+          await expectLater(
+            endpoints.auth.confirmStaffTotpEnrollment(
+              sessionBuilder,
+              matricula: _adminMatricula,
+              password: _senha,
+              code: errado,
+            ),
+            throwsA(isA<AuthenticationFailedException>()),
+          );
+
+          final cred = await _credencialAdmin(session);
+          expect(cred.totpEnabledAt, isNull);
+          expect(cred.failedAttempts, 1);
+        },
+      );
+
+      test(
+        'begin com senha errada é recusado com a mensagem genérica',
+        () async {
+          await _semMfa(sessionBuilder.build());
+          await expectLater(
+            endpoints.auth.beginStaffTotpEnrollment(
+              sessionBuilder,
+              matricula: _adminMatricula,
+              password: 'senha-errada',
+            ),
+            throwsA(
+              isA<AuthenticationFailedException>().having(
+                (e) => e.message,
+                'message',
+                _mensagemGenerica,
+              ),
+            ),
+          );
+        },
+      );
+
+      test(
+        'begin com matrícula de ACS é recusado como matrícula inexistente',
+        () async {
+          await expectLater(
+            endpoints.auth.beginStaffTotpEnrollment(
+              sessionBuilder,
+              matricula: _acsMatricula,
+              password: _senha,
+            ),
+            throwsA(
+              isA<AuthenticationFailedException>().having(
+                (e) => e.message,
+                'message',
+                _mensagemGenerica,
+              ),
+            ),
+          );
+        },
       );
     });
   });
