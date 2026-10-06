@@ -238,6 +238,92 @@ class Endpoints extends _i1.EndpointDispatch {
                     totpCode: params['totpCode'],
                   ),
         ),
+        'loginStaff': _i1.MethodConnector(
+          name: 'loginStaff',
+          params: {
+            'matricula': _i1.ParameterDescription(
+              name: 'matricula',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'password': _i1.ParameterDescription(
+              name: 'password',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'totpCode': _i1.ParameterDescription(
+              name: 'totpCode',
+              type: _i1.getType<String?>(),
+              nullable: true,
+            ),
+          },
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async => (endpoints['auth'] as _i3.AuthEndpoint).loginStaff(
+                session,
+                matricula: params['matricula'],
+                password: params['password'],
+                totpCode: params['totpCode'],
+              ),
+        ),
+        'beginStaffTotpEnrollment': _i1.MethodConnector(
+          name: 'beginStaffTotpEnrollment',
+          params: {
+            'matricula': _i1.ParameterDescription(
+              name: 'matricula',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'password': _i1.ParameterDescription(
+              name: 'password',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async => (endpoints['auth'] as _i3.AuthEndpoint)
+                  .beginStaffTotpEnrollment(
+                    session,
+                    matricula: params['matricula'],
+                    password: params['password'],
+                  ),
+        ),
+        'confirmStaffTotpEnrollment': _i1.MethodConnector(
+          name: 'confirmStaffTotpEnrollment',
+          params: {
+            'matricula': _i1.ParameterDescription(
+              name: 'matricula',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'password': _i1.ParameterDescription(
+              name: 'password',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'code': _i1.ParameterDescription(
+              name: 'code',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async => (endpoints['auth'] as _i3.AuthEndpoint)
+                  .confirmStaffTotpEnrollment(
+                    session,
+                    matricula: params['matricula'],
+                    password: params['password'],
+                    code: params['code'],
+                  ),
+        ),
         'refreshSession': _i1.MethodConnector(
           name: 'refreshSession',
           params: {

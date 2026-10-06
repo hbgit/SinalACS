@@ -35,6 +35,15 @@ const _publicMethodsByDesign = <String, String>{
   'AuthEndpoint.loginInstitutional':
       'é o próprio emissor de token: quem chama o login institucional (RF07) '
       'ainda não tem credencial — a matrícula e a senha SÃO a credencial',
+  'AuthEndpoint.loginStaff':
+      'é o próprio emissor de token do backoffice: quem chama ainda não tem '
+      'credencial — a matrícula e a senha SÃO a credencial (mais o TOTP)',
+  'AuthEndpoint.beginStaffTotpEnrollment':
+      'ativação da MFA do staff: não há token antes da MFA, como a do ACS; '
+      'matrícula e senha são a prova',
+  'AuthEndpoint.confirmStaffTotpEnrollment':
+      'ativação da MFA do staff: não há token antes da MFA, como a do ACS; '
+      'matrícula, senha e o primeiro código são a prova',
   'AuthEndpoint.refreshSession':
       'renovação por refresh token (LGPD-RT06): quem chama já perdeu o JWT; o '
       'token opaco, rotativo e amarrado ao aparelho É a credencial',

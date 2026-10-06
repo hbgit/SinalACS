@@ -231,5 +231,69 @@ void main() {
       expect(record.active, isTrue);
       expect(record.totp?.enabled, isTrue);
     });
+
+    test('auth.loginStaff com credenciais e código certos devolve só o JWT de 15 min', () async {
+      final agora = DateTime.now().toUtc();
+      final result = await endpoints.auth.loginStaff(
+        sessionBuilder,
+        matricula: _adminMatricula,
+        password: _senha,
+        totpCode: Totp.code(_segredo, agora),
+      );
+      expect(result.tokenType, 'Bearer');
+      expect(result.refreshToken, isNull);
+      expect(result.uploadToken, isNull);
+      final user = AlertRuntimeHarness.verify(result.accessToken)!;
+      expect(user.id, _adminId);
+      expect(user.role, UserRole.admin);
+      expect(user.microAreaId, isNull);
+      expect(user.deviceId, InstitutionalAuthService.deviceIdAbsent);
+      expect(AlertRuntimeHarness.tokenLifetime(result.accessToken), const Duration(minutes: 15));
+    });
+
+    test('auth.loginStaff sem código recebe MfaRequiredException', () async {
+      await expectLater(
+        endpoints.auth.loginStaff(sessionBuilder, matricula: _adminMatricula, password: _senha),
+        throwsA(isA<MfaRequiredException>()),
+      );
+    });
+
+    test('cinco senhas erradas bloqueiam a conta do staff (reuso do bloqueio)', () async {
+      for (var i = 0; i < InstitutionalAuthService.maxFailedAttempts; i++) {
+        await expectLater(
+          endpoints.auth.loginStaff(sessionBuilder, matricula: _adminMatricula, password: 'errada'),
+          throwsA(isA<AuthenticationFailedException>()),
+        );
+      }
+      final credencial = (await UserCredential.db.findFirstRow(
+        sessionBuilder.build(),
+        where: (t) => t.userId.equals(UuidValue.fromString(_adminId)),
+      ))!;
+      expect(credencial.failedAttempts, InstitutionalAuthService.maxFailedAttempts);
+      expect(credencial.lockedUntil, isNotNull);
+      // Bloqueada: nem a senha certa com o código certo entra.
+      await expectLater(
+        endpoints.auth.loginStaff(
+          sessionBuilder,
+          matricula: _adminMatricula,
+          password: _senha,
+          totpCode: Totp.code(_segredo, DateTime.now().toUtc()),
+        ),
+        throwsA(isA<AuthenticationFailedException>()),
+      );
+    });
+
+    test('token de admin é recusado por um caminho só de ACS (patients.listMicroArea)', () async {
+      final result = await endpoints.auth.loginStaff(
+        sessionBuilder,
+        matricula: _adminMatricula,
+        password: _senha,
+        totpCode: Totp.code(_segredo, DateTime.now().toUtc()),
+      );
+      await expectLater(
+        endpoints.patients.listMicroArea(sessionBuilder, accessToken: result.accessToken),
+        throwsA(isA<AlertPermissionException>()),
+      );
+    });
   });
 }

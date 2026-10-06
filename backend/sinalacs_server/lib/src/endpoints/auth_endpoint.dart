@@ -118,6 +118,56 @@ class AuthEndpoint extends Endpoint {
     );
   }
 
+  /// Login do backoffice (coordenador/administrador): matrícula + senha + TOTP.
+  ///
+  /// A MFA é obrigatória em todo ambiente (não há `REQUIRE_*_MFA` para o
+  /// staff). Sem refresh token e sem token de envio diferido: a sessão dura os
+  /// 15 minutos do JWT, e o `deviceId` do token é o sentinela de "sem
+  /// aparelho". O token sai com o papel gravado em `users` e **sem** microárea:
+  /// staff não é territorializado, e os caminhos do ACS o recusam por papel.
+  /// As recusas são as de [loginInstitutional]: mensagem única para matrícula
+  /// inexistente e senha errada, `MfaRequiredException` sem o código, e o mesmo
+  /// bloqueio por tentativas.
+  Future<DevelopmentLoginResult> loginStaff(
+    Session session, {
+    required String matricula,
+    required String password,
+    String? totpCode,
+  }) async {
+    final runtime = AlertRuntime.instance;
+    final user = await runtime.staffAuthServiceFor(session).login(
+          matricula: matricula,
+          password: password,
+          totpCode: totpCode,
+        );
+    return DevelopmentLoginResult(
+      accessToken: runtime.auth.issueToken(user),
+      tokenType: 'Bearer',
+    );
+  }
+
+  /// Começa a ativação da MFA do staff. Sem token: o staff prova matrícula e
+  /// senha, e a MFA é obrigatória, então não há login possível antes dela.
+  Future<TotpEnrollmentStart> beginStaffTotpEnrollment(
+    Session session, {
+    required String matricula,
+    required String password,
+  }) =>
+      AlertRuntime.instance
+          .staffAuthServiceFor(session)
+          .beginTotpEnrollment(matricula: matricula, password: password);
+
+  /// Confirma a ativação da MFA do staff com o primeiro código do autenticador.
+  Future<void> confirmStaffTotpEnrollment(
+    Session session, {
+    required String matricula,
+    required String password,
+    required String code,
+  }) =>
+      AlertRuntime.instance
+          .staffAuthServiceFor(session)
+          .confirmTotpEnrollment(matricula: matricula, password: password, code: code);
+
   /// Renova a sessão do ACS sem pedir senha nem TOTP (LGPD-RT06). Público por
   /// desenho: quem chama já perdeu o JWT de 15 min — o refresh token, opaco e de
   /// uso único, é a credencial. Toda recusa é a mesma `SessionExpiredException`.

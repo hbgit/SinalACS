@@ -334,6 +334,20 @@ class AlertRuntime {
     );
   }
 
+  /// Login do backoffice: mesma regra do ACS, outra tabela de matrículas, MFA
+  /// sempre obrigatória e token sem microárea.
+  InstitutionalAuthService staffAuthServiceFor(Session session) {
+    final store = OrmAcsCredentialStore(session: () => session, staff: true);
+    return InstitutionalAuthService(
+      store: store,
+      hasher: passwordHasher,
+      audit: auditTrailFor(session),
+      totpStore: store,
+      vault: HealthCipherTotpVault(healthDataCipher),
+      audience: CredentialAudience.staff,
+    );
+  }
+
   /// Serviço de login passwordless do paciente (RF01) para uma requisição.
   ///
   /// Mesmo arranjo dos outros `*ServiceFor`: o store recebe a sessão por
