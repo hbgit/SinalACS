@@ -1,6 +1,6 @@
 # Telas do Backoffice Admin
 
-Documentação visual do protótipo Flutter do backoffice administrativo (`apps/admin`). Assim como `docs/telas-acs.md` e `docs/telas-paciente.md`, as imagens abaixo foram capturadas rodando o app com dados sintéticos: a 01 num emulador (2026-10-06) e as de 02 a 08 num aparelho físico (Motorola edge 40 neo, Android 15, tema escuro) com sessão real do administrador de teste (`flutter run -d 0087014315`, em 2026-10-07).
+Documentação visual do protótipo Flutter do backoffice administrativo (`apps/admin`). Assim como `docs/telas-acs.md` e `docs/telas-paciente.md`, as imagens abaixo foram capturadas rodando o app com dados sintéticos: a 01 no emulador em 2026-10-06 e a 01b no Motorola edge 40 neo em 2026-10-07; as de 02 a 05 em 2026-10-07 no emulador `emulator-5554` (API 36, tema escuro, com a borda de 5 px recortada), com sessão real do administrador de teste e **dados do backend** (3 alertas semeados no banco de e2e, nenhum dado real); as de 06 a 08 em 2026-10-07 no Motorola edge 40 neo (Android 15), de uma rodada anterior, com o painel ainda sobre o mock (o layout é o mesmo, mas os números mostrados nelas não são os do backend).
 
 ## Navegação
 
