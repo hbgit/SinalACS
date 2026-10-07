@@ -13,7 +13,12 @@ O backoffice é desktop-first (`spec/PRD_system.md` §2.1): acima de `AdminBreak
 Login real do staff (coordenador e administrador): matrícula/CNS e senha vão para `auth.loginStaff`; o painel só abre com a sessão que o servidor devolve, não há atalho de desenvolvimento. A imagem acima foi recapturada em 2026-10-06 no emulador Android (tema escuro, retrato). As capturas 02 a 08 foram refeitas em 2026-10-07 com uma sessão real (login, ativação da MFA e código), e o cabeçalho mostra o papel da sessão ("Backoffice • Administrador"). Os dados do painel seguem no `MockAdminDataSource` (#41): por isso a Auditoria ainda lista `admin.dev` como autor. Como a verificação em duas etapas é obrigatória para o staff, o fluxo tem três desfechos:
 
 - **Credencial inválida:** a mensagem genérica "Matrícula ou senha inválidos." (a mesma para matrícula inexistente e senha errada) ou o aviso de bloqueio por tentativas.
-- **Conta sem MFA (primeiro acesso):** o app abre a tela *Verificação em duas etapas* (`MfaEnrollmentScreen`), com o QR e a chave em texto (`mfa_secret`) para o aplicativo autenticador e o campo do código de 6 dígitos; nada é gravado no aparelho. Ao confirmar, volta ao login com o aviso "Verificação ativada. Entre com o código do aplicativo.".
+- **Conta sem MFA (primeiro acesso):** o app abre a tela *Verificação em duas etapas* (`MfaEnrollmentScreen`) em duas etapas. Primeiro pede o **código de ativação** de uso único (`activation_code_field`), que a coordenação entrega fora de banda e que o operador emite com `bin/issue_staff_activation_code.dart` (issue #48); sem ele, o servidor não devolve o segredo. Só então mostra o QR e a chave em texto (`mfa_secret`) para o aplicativo autenticador e o campo do código de 6 dígitos; nada é gravado no aparelho. Ao confirmar, volta ao login com o aviso "Verificação ativada. Entre com o código do aplicativo.".
+
+  ![Etapa do código de ativação](screenshots/admin/01b-codigo-ativacao.png)
+
+  Captura de 2026-10-07 no Motorola edge 40 neo (Android 15), tema escuro, retrato.
+
 - **Conta com MFA:** o campo "Código do autenticador (6 dígitos)" aparece depois de matrícula e senha; trocar matrícula ou senha o descarta. Código errado: "Código de verificação inválido.". A sessão dura 15 min e não há refresh token para o staff; ao vencer, volta ao login com "Sessão encerrada. Entre novamente.".
 
 O roteiro desse fluxo está escrito em `apps/admin/integration_test/admin_login_e2e.dart`, executado por `scripts/qa/admin_login_e2e.sh`; a prova passou em 2026-10-07 num Motorola edge 40 neo (Android 15) com `DEVICE=0087014315` (ver `PROGRESS.md`).
