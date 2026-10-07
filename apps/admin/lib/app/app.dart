@@ -5,14 +5,23 @@ import 'package:sinalacs_admin/app/admin_header.dart';
 import 'package:sinalacs_admin/app/admin_layout.dart';
 import 'package:sinalacs_admin/app/login_screen.dart';
 import 'package:sinalacs_admin/core/auth/admin_auth_backend.dart';
+import 'package:sinalacs_admin/core/auth/admin_auth_bootstrap.dart';
 import 'package:sinalacs_admin/app/admin_theme.dart';
 import 'package:sinalacs_admin/core/data/admin_data_source.dart';
 import 'package:sinalacs_admin/core/data/mock_admin_data_source.dart';
 
 class SinalAdminApp extends StatelessWidget {
-  SinalAdminApp({super.key, AdminDataSource? dataSource, required this.auth}) : dataSource = dataSource ?? MockAdminDataSource();
+  /// [dataSourceFor] é o caminho de produção: a fonte de dados nasce da sessão
+  /// que o login devolveu (o token vive nela). [dataSource] fixa uma fonte pronta
+  /// e existe para os testes de tela; sem nenhum dos dois, o app cai no
+  /// [MockAdminDataSource] — **só** para teste, `main.dart` sempre passa
+  /// [dataSourceFor].
+  SinalAdminApp({super.key, AdminDataSource? dataSource, AdminDataSourceFactory? dataSourceFor, required this.auth})
+      : dataSourceFor = dataSourceFor ?? _fixa(dataSource ?? MockAdminDataSource());
 
-  final AdminDataSource dataSource;
+  final AdminDataSourceFactory dataSourceFor;
+
+  static AdminDataSourceFactory _fixa(AdminDataSource fonte) => (_) => fonte;
 
   /// A única porta de entrada do painel: sem sessão devolvida por
   /// [AdminAuthBackend.login] não existe caminho que abra [AdminHomeShell].
@@ -23,7 +32,7 @@ class SinalAdminApp extends StatelessWidget {
         title: 'SinalACS Admin',
         debugShowCheckedModeBanner: false,
         theme: buildAdminTheme(),
-        home: LoginScreen(auth: auth, dataSource: dataSource),
+        home: LoginScreen(auth: auth, dataSourceFor: dataSourceFor),
       );
 }
 
@@ -51,6 +60,7 @@ typedef AdminClock = DateTime Function();
 class AdminHomeShell extends StatefulWidget {
   const AdminHomeShell({
     required this.dataSource,
+    required this.dataSourceFor,
     required this.session,
     required this.auth,
     this.now = DateTime.now,
@@ -58,6 +68,10 @@ class AdminHomeShell extends StatefulWidget {
   });
 
   final AdminDataSource dataSource;
+
+  /// Usada só para reconstruir o login quando a sessão vence: a próxima sessão
+  /// tem outro token e portanto outra fonte de dados.
+  final AdminDataSourceFactory dataSourceFor;
 
   /// Sessão devolvida por [AdminAuthBackend.login]. Sem ela o painel não abre.
   final AdminSession session;
@@ -105,7 +119,7 @@ class _AdminHomeShellState extends State<AdminHomeShell> {
       MaterialPageRoute<void>(
         builder: (_) => LoginScreen(
           auth: widget.auth,
-          dataSource: widget.dataSource,
+          dataSourceFor: widget.dataSourceFor,
           aviso: 'Sessão encerrada. Entre novamente.',
         ),
       ),
@@ -319,7 +333,7 @@ class _IndicatorsScreenState extends State<IndicatorsScreen> {
             const SizedBox(height: 8),
             _InfoRow('Abertos (pendentes)', '${data.openRedAlerts}'),
             _InfoRow('Reconhecidos', '${data.acknowledgedRedAlerts}'),
-            _InfoRow('TMRAV (tempo médio de resposta)', '${data.tmravSeconds}s'),
+            _InfoRow('TMRAV (tempo médio de resposta)', data.tmravSeconds == null ? '—' : '${data.tmravSeconds}s'),
           ]);
         },
       );
@@ -468,7 +482,7 @@ class _AlertsList extends StatelessWidget {
   /// no lugar do mock) devolveria alertas para um valor que não existe mais
   /// como opção selecionável (achado da revisão do PR).
   Future<({List<AlertSummary> alerts, List<MicroAreaSummary> microAreas})> _load() async {
-    final alerts = await dataSource.fetchAlerts(microAreaName: microAreaFilter, status: statusFilter);
+    final alerts = await dataSource.fetchAlerts(microAreaId: microAreaFilter, status: statusFilter);
     final microAreas = await dataSource.fetchMicroAreas();
     return (alerts: alerts, microAreas: microAreas);
   }
@@ -502,7 +516,7 @@ class _AlertsList extends StatelessWidget {
                       items: [
                         const DropdownMenuItem(value: null, child: Text('Todas')),
                         for (final area in microAreas)
-                          DropdownMenuItem(value: area.name, child: Text(area.name, overflow: TextOverflow.ellipsis)),
+                          DropdownMenuItem(value: area.id, child: Text(area.name, overflow: TextOverflow.ellipsis)),
                       ],
                       onChanged: (value) => onFilterChanged(value, statusFilter),
                     ),

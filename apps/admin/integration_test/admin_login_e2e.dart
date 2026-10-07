@@ -66,7 +66,8 @@ Future<void> _digitar(WidgetTester tester, String chave, String texto) async {
 
 Future<void> _abrirApp(WidgetTester tester) async {
   final ca = (await rootBundle.load(adminRpcCaAsset)).buffer.asUint8List();
-  await tester.pumpWidget(SinalAdminApp(auth: buildAdminAuth(caBytes: ca)));
+  final fiacao = buildAdminWiring(caBytes: ca);
+  await tester.pumpWidget(SinalAdminApp(auth: fiacao.auth, dataSourceFor: fiacao.dataSourceFor));
   await tester.pump(const Duration(milliseconds: 500));
 }
 

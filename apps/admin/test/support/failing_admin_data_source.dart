@@ -38,21 +38,21 @@ class FailingAdminDataSource implements AdminDataSource {
   }
 
   @override
-  Future<List<AlertSummary>> fetchAlerts({String? microAreaName, AlertStatus? status}) async {
+  Future<List<AlertSummary>> fetchAlerts({String? microAreaId, AlertStatus? status, int limit = 50, int offset = 0}) async {
     if (failNextAlerts) {
       failNextAlerts = false;
       throw StateError('falha simulada: alertas');
     }
-    return inner.fetchAlerts(microAreaName: microAreaName, status: status);
+    return inner.fetchAlerts(microAreaId: microAreaId, status: status, limit: limit, offset: offset);
   }
 
   @override
-  Future<List<AuditLogEntry>> fetchAuditLogs() async {
+  Future<List<AuditLogEntry>> fetchAuditLogs({int limit = 50}) async {
     if (failNextAuditLogs) {
       failNextAuditLogs = false;
       throw StateError('falha simulada: auditoria');
     }
-    return inner.fetchAuditLogs();
+    return inner.fetchAuditLogs(limit: limit);
   }
 
   @override

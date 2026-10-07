@@ -24,7 +24,9 @@ class DashboardIndicators {
   final int acknowledgedRedAlerts;
 
   /// Tempo Médio de Resposta a Alerta Vermelho (métrica North Star do PRD §1.3).
-  final int tmravSeconds;
+  /// `null` = nenhum alerta vermelho reconhecido na janela: sem amostra não há
+  /// média, e `0` seria uma resposta instantânea que nunca aconteceu.
+  final int? tmravSeconds;
 }
 
 /// Vínculo ACS ↔ microárea, para a listagem somente leitura da issue.
@@ -86,6 +88,16 @@ class AuditLogEntry {
   final String result;
 }
 
+/// Falha ao ler dados do backoffice. A mensagem já vem pronta para a tela e
+/// nunca carrega o texto cru do servidor.
+class AdminDataFailure implements Exception {
+  const AdminDataFailure(this.message);
+  final String message;
+
+  @override
+  String toString() => 'AdminDataFailure: $message';
+}
+
 /// Camada de dados isolada atrás de interface (no espírito de `AlertPublisher`/
 /// `AlertStore` do backend), para permitir mock enquanto os endpoints reais
 /// não existem no `sinalacs_client`.
@@ -94,9 +106,16 @@ abstract interface class AdminDataSource {
 
   Future<List<MicroAreaSummary>> fetchMicroAreas();
 
-  Future<List<AlertSummary>> fetchAlerts({String? microAreaName, AlertStatus? status});
+  /// [microAreaId] é o `MicroAreaSummary.id` (o servidor filtra por id, não por
+  /// nome). Mais recentes primeiro; [limit] de 1 a 100.
+  Future<List<AlertSummary>> fetchAlerts({
+    String? microAreaId,
+    AlertStatus? status,
+    int limit = 50,
+    int offset = 0,
+  });
 
-  Future<List<AuditLogEntry>> fetchAuditLogs();
+  Future<List<AuditLogEntry>> fetchAuditLogs({int limit = 50});
 
   /// Registra o próprio acesso do admin a uma tela sensível (PRD §4.2.2:
   /// "Administrador (Sistema): R (auditado)").

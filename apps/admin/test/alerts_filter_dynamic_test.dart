@@ -26,7 +26,7 @@ class _CustomAreaDataSource implements AdminDataSource {
       ];
 
   @override
-  Future<List<AlertSummary>> fetchAlerts({String? microAreaName, AlertStatus? status}) async => [
+  Future<List<AlertSummary>> fetchAlerts({String? microAreaId, AlertStatus? status, int limit = 50, int offset = 0}) async => [
         AlertSummary(
           id: 'alert-99',
           patientLabel: 'Paciente #999',
@@ -35,10 +35,10 @@ class _CustomAreaDataSource implements AdminDataSource {
           status: AlertStatus.resolved,
           triggeredAt: DateTime(2026, 9, 15),
         ),
-      ].where((a) => microAreaName == null || a.microAreaName == microAreaName).toList();
+      ].where((a) => microAreaId == null || microAreaId == 'ma-99').toList();
 
   @override
-  Future<List<AuditLogEntry>> fetchAuditLogs() async => const [];
+  Future<List<AuditLogEntry>> fetchAuditLogs({int limit = 50}) async => const [];
 
   @override
   Future<void> recordAccess({required String actionType, required String resourceType}) async {}
