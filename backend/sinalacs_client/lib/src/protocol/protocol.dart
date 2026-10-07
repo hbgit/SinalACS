@@ -81,11 +81,12 @@ import 'ubs.dart' as _i67;
 import 'user.dart' as _i68;
 import 'user_credential.dart' as _i69;
 import 'visit.dart' as _i70;
+import 'package:sinalacs_client/src/protocol/api/admin_micro_area.dart' as _i71;
 import 'package:sinalacs_client/src/protocol/api/micro_area_patient.dart'
-    as _i71;
-import 'package:sinalacs_client/src/protocol/api/visit_sync_result.dart'
     as _i72;
-import 'package:sinalacs_client/src/protocol/api/visit_sync_entry.dart' as _i73;
+import 'package:sinalacs_client/src/protocol/api/visit_sync_result.dart'
+    as _i73;
+import 'package:sinalacs_client/src/protocol/api/visit_sync_entry.dart' as _i74;
 export 'acs.dart';
 export 'acs_refresh_token.dart';
 export 'acs_upload_token.dart';
@@ -684,24 +685,30 @@ class Protocol extends _i1.SerializationManager {
           )
           as T;
     }
-    if (t == List<_i71.MicroAreaPatient>) {
+    if (t == List<_i71.AdminMicroArea>) {
       return (data as List)
-              .map((e) => deserialize<_i71.MicroAreaPatient>(e))
+              .map((e) => deserialize<_i71.AdminMicroArea>(e))
+              .toList()
+          as T;
+    }
+    if (t == List<_i72.MicroAreaPatient>) {
+      return (data as List)
+              .map((e) => deserialize<_i72.MicroAreaPatient>(e))
               .toList()
           as T;
     }
     if (t == List<String>) {
       return (data as List).map((e) => deserialize<String>(e)).toList() as T;
     }
-    if (t == List<_i72.VisitSyncResult>) {
+    if (t == List<_i73.VisitSyncResult>) {
       return (data as List)
-              .map((e) => deserialize<_i72.VisitSyncResult>(e))
+              .map((e) => deserialize<_i73.VisitSyncResult>(e))
               .toList()
           as T;
     }
-    if (t == List<_i73.VisitSyncEntry>) {
+    if (t == List<_i74.VisitSyncEntry>) {
       return (data as List)
-              .map((e) => deserialize<_i73.VisitSyncEntry>(e))
+              .map((e) => deserialize<_i74.VisitSyncEntry>(e))
               .toList()
           as T;
     }
