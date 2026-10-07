@@ -47,6 +47,17 @@ class AcsTest(unittest.TestCase):
         self.assertEqual(acs_do_manifesto(f.name, "acsB"), {"matricula": "E2E-2", "senha": "b"})
         self.assertEqual(acs_do_manifesto(f.name), {"matricula": "E2E-1", "senha": "a"})
 
+    def test_staff_devolve_tambem_o_codigo_de_ativacao(self):
+        import json, tempfile
+        from otp_relay import acs_do_manifesto
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+            json.dump({"staff": {"matricula": "E2E-ADM-1", "password": "u", "activationCode": "ABCD-EFGH"},
+                       "acs": {"matricula": "E2E-1", "password": "a", "activationCode": "NAO-DEVE-SAIR-NO-ACS"}}, f)
+        self.assertEqual(acs_do_manifesto(f.name, "staff"),
+                         {"matricula": "E2E-ADM-1", "senha": "u", "activationCode": "ABCD-EFGH"})
+        # só o staff tem código de ativação: a resposta do ACS não muda de formato
+        self.assertEqual(acs_do_manifesto(f.name, "acs"), {"matricula": "E2E-1", "senha": "a"})
+
     def test_sem_arquivo_nao_serve_nada(self):
         from otp_relay import acs_do_manifesto
         self.assertIsNone(acs_do_manifesto(None))

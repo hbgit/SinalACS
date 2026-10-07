@@ -77,6 +77,8 @@ igual() { # <descrição> <esperado> <sql>
 }
 igual 'TOTP ativado e passo registrado' 'true|true' \
   "select (\"totpEnabledAt\" is not null)::text || '|' || (\"totpLastStep\" is not null)::text from user_credentials where \"userId\"='$staff_id'"
+igual 'código de ativação apagado após a ativação' 'true|true' \
+  "select (\"activationCodeHash\" is null)::text || '|' || (\"activationCodeIssuedBy\" is not null)::text from staff_accounts where id='$staff_id'"
 igual 'tentativas falhas zeradas pelo login' 0 \
   "select \"failedAttempts\" from user_credentials where \"userId\"='$staff_id'"
 echo 'OK — login real do backoffice contra o banco de teste'

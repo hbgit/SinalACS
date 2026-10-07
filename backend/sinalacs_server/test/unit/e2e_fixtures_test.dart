@@ -86,6 +86,16 @@ void main() {
     expect('$f ${f.staff}'.contains(f.staff.password), isFalse);
   });
 
+  test('o staff traz um código de ativação (#48) no formato da CLI, novo a cada execução e fora do toString', () {
+    final a = generateE2eFixtures(Random(21)).staff;
+    final b = generateE2eFixtures(Random(22)).staff;
+    expect(a.activationCode, matches(RegExp(r'^([A-Z2-7]{4}-){6}[A-Z2-7]{2}$')));
+    expect(a.activationCode, isNot(b.activationCode));
+    expect(a.toJson()['activationCode'], a.activationCode);
+    expect(E2eStaff.fromJson(a.toJson()).activationCode, a.activationCode);
+    expect('$a'.contains(a.activationCode), isFalse);
+  });
+
   group('guarda do seeder (e2eSeedRefusal)', () {
     const ok = {
       'APP_ENV': 'development',

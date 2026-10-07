@@ -45,7 +45,11 @@ def acs_do_manifesto(caminho, chave="acs"):
     try:
         with open(caminho) as f:
             acs = json.load(f)[chave]
-        return {"matricula": acs["matricula"], "senha": acs["password"]}
+        credencial = {"matricula": acs["matricula"], "senha": acs["password"]}
+        # Só a conta de staff tem código de ativação da MFA (#48): o ACS não muda.
+        if chave == "staff" and "activationCode" in acs:
+            credencial["activationCode"] = acs["activationCode"]
+        return credencial
     except (OSError, KeyError, ValueError):
         return None
 

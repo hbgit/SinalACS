@@ -10,6 +10,7 @@ import 'package:sinalacs_server/src/infrastructure/crypto/encrypted_json.dart';
 import 'package:sinalacs_server/src/infrastructure/crypto/health_data_cipher.dart';
 import 'package:sinalacs_server/src/infrastructure/crypto/hmac_cpf_hasher.dart';
 import 'package:sinalacs_server/src/infrastructure/testing/e2e_fixtures.dart';
+import 'package:sinalacs_server/src/application/auth/staff_activation_code.dart';
 
 /// Seed da stack de e2e (`docker-compose.e2e.yml`): UBS, microáreas, dois ACS com
 /// credencial e pacientes SINTÉTICOS com UUIDs e CPFs novos a cada execução.
@@ -117,6 +118,16 @@ Future<void> main(List<String> args) async {
       await tx.execute(
         Sql.named('INSERT INTO "staff_accounts" ("id","enrollmentId","active") VALUES (@id,@matricula,true)'),
         parameters: {'id': staff.id, 'matricula': staff.matricula},
+      );
+      // Código de ativação (#48): só o hash vai ao banco; o claro segue no manifesto.
+      await tx.execute(
+        Sql.named('UPDATE "staff_accounts" SET "activationCodeHash"=@h, "activationCodeExpiresAt"=@e, '
+            '"activationCodeIssuedBy"=\'e2e\', "activationCodeIssuedAt"=NOW() WHERE "id"=@id'),
+        parameters: {
+          'id': staff.id,
+          'h': StaffActivationCode.hash(staff.activationCode),
+          'e': DateTime.now().toUtc().add(StaffActivationCode.defaultValidity),
+        },
       );
       await tx.execute(
         Sql.named('INSERT INTO "user_credentials" ("userId","passwordHash","passwordSalt","memoryKb","iterations","parallelism","failedAttempts","createdAt","updatedAt") '

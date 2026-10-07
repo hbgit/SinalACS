@@ -92,6 +92,29 @@ void main() {
     expect(_existe('login_button'), isTrue);
   });
 
+  testWidgets('código de ativação errado: recusado, e o QR não aparece (#48)', (tester) async {
+    await _abrirApp(tester);
+    final cred = await adminCredentialFromRelay();
+    await _digitar(tester, 'matricula_field', cred.matricula);
+    await _digitar(tester, 'senha_field', cred.senha);
+    await _tocar(tester, 'login_button');
+
+    // Conta sem MFA: o app abre a etapa do código de ativação, ainda sem segredo.
+    await _pumpUntil(tester, () => _existe('activation_code_field'));
+    expect(_existe('mfa_secret'), isFalse);
+
+    // O código certo com o último caractere trocado: não vale em lugar nenhum.
+    final c = cred.activationCode;
+    final errado = '${c.substring(0, c.length - 1)}${c.endsWith('A') ? 'B' : 'A'}';
+    await _digitar(tester, 'activation_code_field', errado);
+    await _tocar(tester, 'activation_continue');
+    await _pumpUntil(tester, () => _existe('activation_error'));
+
+    expect(tester.widget<Text>(find.byKey(const Key('activation_error'))).data, 'Código de ativação inválido ou expirado.');
+    expect(_existe('mfa_secret'), isFalse);
+    expect(find.text('Painel de Indicadores'), findsNothing);
+  });
+
   testWidgets('primeiro acesso: pede a ativação da MFA, mostra o segredo e confirma com o código', (tester) async {
     await _abrirApp(tester);
     final cred = await adminCredentialFromRelay();
@@ -99,7 +122,11 @@ void main() {
     await _digitar(tester, 'senha_field', cred.senha);
     await _tocar(tester, 'login_button');
 
-    // Conta sem TOTP ativado: o servidor responde MfaEnrollmentRequired e o app abre a ativação.
+    // Conta sem TOTP ativado: o servidor responde MfaEnrollmentRequired e o app abre a
+    // etapa do código de ativação (#48); só com ele o servidor devolve o segredo.
+    await _pumpUntil(tester, () => _existe('activation_code_field'));
+    await _digitar(tester, 'activation_code_field', cred.activationCode);
+    await _tocar(tester, 'activation_continue');
     await _pumpUntil(tester, () => _existe('mfa_secret'));
     expect(find.text('Painel de Indicadores'), findsNothing);
     final segredoBase32 = tester.widget<SelectableText>(find.byKey(const Key('mfa_secret'))).data!;
