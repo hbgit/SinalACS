@@ -110,3 +110,27 @@ class RecordingAudit extends AuditTrail {
   @override
   Future<void> record(AuditEvent event) async => events.add(event);
 }
+
+/// Código de ativação do staff em memória (#48).
+class FakeStaffActivationStore implements StaffActivationStore {
+  final _porConta = <String, StaffActivationRecord>{};
+  String? ultimoEmissor;
+
+  @override
+  Future<void> issue(
+    String staffId, {
+    required String codeHash,
+    required DateTime expiresAt,
+    required String issuedBy,
+    required DateTime at,
+  }) async {
+    ultimoEmissor = issuedBy;
+    _porConta[staffId] = StaffActivationRecord(codeHash: codeHash, expiresAt: expiresAt);
+  }
+
+  @override
+  Future<StaffActivationRecord?> find(String staffId) async => _porConta[staffId];
+
+  @override
+  Future<void> clear(String staffId) async => _porConta.remove(staffId);
+}
