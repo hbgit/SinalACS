@@ -59,15 +59,23 @@ class OrmAdminReadStore implements AdminReadStore {
     );
   }
 
+  /// Uma linha por microárea: o `id` é a chave do filtro de alertas no app (dois
+  /// itens com o mesmo valor quebrariam o `DropdownButton`). Com mais de um ACS na
+  /// área, nomes e matrículas vêm juntos, na ordem da matrícula, e `acsActive` vale
+  /// se **algum** deles está ativo.
   @override
   Future<List<AdminMicroArea>> microAreas(AdminScope scope) async {
     final rows = await _session().db.unsafeQuery(
       '''
-      SELECT m.id, m.name, u.name, acs."enrollmentId", acs.active
+      SELECT m.id, m.name,
+             string_agg(u.name, ', ' ORDER BY acs."enrollmentId"),
+             string_agg(acs."enrollmentId", ', ' ORDER BY acs."enrollmentId"),
+             bool_or(acs.active)
       FROM micro_areas m
       LEFT JOIN users u ON u."microAreaId" = m.id AND u.role = 'acs'
       LEFT JOIN acs ON acs.id = u.id
       WHERE (@ubs::uuid IS NULL OR m."ubsId" = @ubs::uuid)
+      GROUP BY m.id, m.name
       ORDER BY m.name, m.id
       ''',
       parameters: QueryParameters.named({'ubs': scope.ubsId}),

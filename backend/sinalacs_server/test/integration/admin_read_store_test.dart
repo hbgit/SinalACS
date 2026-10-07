@@ -284,6 +284,29 @@ void main() {
       expect(soA.map((m) => m.name), ['Microárea A']);
     });
 
+    test('microárea com DOIS ACS aparece UMA vez (o id é a chave do filtro do app)', () async {
+      const segundoAcs = '00000000-0000-4000-8000-0000000000e9';
+      await _usuario(session, segundoAcs, 'Bruno ACS Sintético', UserRole.acs, ma: _maA);
+      await Acs.db.insertRow(
+        session,
+        Acs(
+          id: UuidValue.fromString(segundoAcs),
+          enrollmentId: 'ACS-ADM-RD-2',
+          ubsId: UuidValue.fromString(_ubsA),
+          active: false,
+        ),
+      );
+
+      final lista = await store.microAreas(const AdminScope.system());
+
+      expect(lista.map((m) => m.id).toSet(), hasLength(lista.length), reason: 'ids únicos');
+      final a = lista.singleWhere((m) => m.name == 'Microárea A');
+      expect(a.acsName, 'Carla ACS Sintética, Bruno ACS Sintético');
+      expect(a.acsEnrollmentId, 'ACS-ADM-RD-1, ACS-ADM-RD-2');
+      expect(a.acsActive, isTrue, reason: 'há ao menos um ACS ativo');
+      expect(lista.singleWhere((m) => m.name == 'Microárea B').acsActive, isFalse);
+    });
+
     test(
       'alertas: ordem triggeredAt desc, paginação por offset e nextOffset nulo no fim',
       () async {
