@@ -356,7 +356,10 @@ void main() {
               t.actionType.equals('login'),
         );
         expect(linhas.map((l) => l.result), contains('granted'));
-        expect(linhas.map((l) => l.resourceType), everyElement('staff_session'));
+        expect(
+          linhas.map((l) => l.resourceType),
+          everyElement('staff_session'),
+        );
       },
     );
 
@@ -452,7 +455,10 @@ void main() {
           );
         }
         final admin = await credencialDe(_adminId);
-        expect(admin.failedAttempts, InstitutionalAuthService.maxFailedAttempts);
+        expect(
+          admin.failedAttempts,
+          InstitutionalAuthService.maxFailedAttempts,
+        );
         expect(admin.lockedUntil, isNotNull);
         final acs = await credencialDe(_acsId);
         expect(acs.failedAttempts, 0);
