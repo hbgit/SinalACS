@@ -1,0 +1,5 @@
+### Parâmetro do backoffice fora do intervalo (por exemplo, `limit` de paginação).
+### Não é erro de permissão.
+exception: AdminInvalidRequestException
+fields:
+  message: String
