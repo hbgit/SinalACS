@@ -3,7 +3,9 @@
 abstract final class AdminLabels {
   static String _sufixo(String id) {
     final limpo = id.replaceAll('-', '');
-    return limpo.length < 4 ? '????' : limpo.substring(limpo.length - 4).toUpperCase();
+    return limpo.length < 4
+        ? '????'
+        : limpo.substring(limpo.length - 4).toUpperCase();
   }
 
   /// `#` + 4 hex finais do UUID. É rótulo, não identificador: não volta à pessoa.
@@ -16,10 +18,15 @@ abstract final class AdminLabels {
     'patient': 'Paciente',
   };
 
-  static String user({required String role, required String id, String? enrollmentId}) {
+  static String user({
+    required String role,
+    required String id,
+    String? enrollmentId,
+  }) {
     final papel = _papeis[role] ?? role;
     if (role == 'patient') return 'Paciente ${patient(id)}';
-    if (enrollmentId != null && enrollmentId.isNotEmpty) return '$enrollmentId ($papel)';
+    if (enrollmentId != null && enrollmentId.isNotEmpty)
+      return '$enrollmentId ($papel)';
     return '$papel ${patient(id)}';
   }
 }
