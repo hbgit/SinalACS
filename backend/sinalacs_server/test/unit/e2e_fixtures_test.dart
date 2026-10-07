@@ -96,6 +96,19 @@ void main() {
     expect('$a'.contains(a.activationCode), isFalse);
   });
 
+  test('o painel do admin (#40) tem 3 alertas de fixture, com ids v4 distintos e que sobrevivem ao JSON', () {
+    final f = generateE2eFixtures(Random(31));
+    expect(f.adminAlertIds, hasLength(3));
+    expect(f.adminAlertIds.toSet(), hasLength(3));
+    for (final id in f.adminAlertIds) {
+      expect(id.startsWith('00000000-0000-4000-8000'), isFalse);
+      expect(RegExp(r'^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$').hasMatch(id), isTrue);
+    }
+    expect(E2eFixtures.fromJson(f.toJson()).adminAlertIds, f.adminAlertIds);
+    final ids = {f.staff.id, f.acs.id, f.secondAcs.id, ...f.patients.map((p) => p.id), ...f.adminAlertIds};
+    expect(ids, hasLength(3 + f.patients.length + 3), reason: 'nenhum id repetido entre as entidades');
+  });
+
   group('guarda do seeder (e2eSeedRefusal)', () {
     const ok = {
       'APP_ENV': 'development',

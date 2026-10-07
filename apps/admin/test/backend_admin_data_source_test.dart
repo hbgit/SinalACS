@@ -104,7 +104,7 @@ void main() {
         'limit': 20,
         'offset': 40,
       });
-      expect(r.single.patientLabel, '#A18F');
+      expect(r.single.patientLabel, 'Paciente #A18F', reason: 'a tela mostra o rótulo cru; o servidor manda só o #A18F');
       expect(r.single.riskLevel, RiskLevel.red);
       expect(r.single.status, AlertStatus.acknowledged);
       expect(r.single.triggeredAt, em);

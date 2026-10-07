@@ -73,7 +73,7 @@ class BackendAdminDataSource implements AdminDataSource {
       for (final a in pagina.items)
         AlertSummary(
           id: a.id,
-          patientLabel: a.patientLabel,
+          patientLabel: 'Paciente ${a.patientLabel}',
           microAreaName: a.microAreaName,
           riskLevel: RiskLevel.values.byName(a.riskLevel.name),
           status: AlertStatus.values.byName(a.status.name),
