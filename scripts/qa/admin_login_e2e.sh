@@ -3,6 +3,7 @@
 # Login real do backoffice (staff) no emulador-5554, contra o BANCO DE TESTE.
 #
 #   ./scripts/qa/admin_login_e2e.sh
+#   DEVICE=0087014315 ./scripts/qa/admin_login_e2e.sh   # aparelho físico
 #
 # Sobe a stack de e2e (e2e_stack.sh: banco sinalacs_e2e, sem login de
 # desenvolvimento), semeia fixtures sintéticas (inclui um administrador do
@@ -22,8 +23,8 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$repo_root"
 export PATH="$PATH:$HOME/Android/Sdk/platform-tools:$HOME/flutter/bin:$HOME/.pub-cache/bin"
 
-dev=emulator-5554
-adb -s "$dev" get-state >/dev/null 2>&1 || { echo "emulador $dev não encontrado (adb devices)"; exit 4; }
+dev="${DEVICE:-emulator-5554}"
+adb -s "$dev" get-state >/dev/null 2>&1 || { echo "aparelho $dev não encontrado (adb devices)"; exit 4; }
 
 relay_pid=""
 cleanup() {
