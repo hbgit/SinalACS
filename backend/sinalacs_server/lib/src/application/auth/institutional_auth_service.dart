@@ -38,6 +38,33 @@ abstract interface class TotpStore {
   Future<bool> registerStep(String acsId, int step);
 }
 
+/// Código de ativação vigente de uma conta de staff (#48).
+class StaffActivationRecord {
+  const StaffActivationRecord({required this.codeHash, required this.expiresAt});
+
+  final String codeHash;
+  final DateTime expiresAt;
+}
+
+/// Código de ativação de uso único da MFA do staff. Interface à parte, como
+/// [TotpStore]: só a audiência `staff` a usa.
+abstract interface class StaffActivationStore {
+  /// Grava o hash do código e a validade, substituindo qualquer código anterior.
+  Future<void> issue(
+    String staffId, {
+    required String codeHash,
+    required DateTime expiresAt,
+    required String issuedBy,
+    required DateTime at,
+  });
+
+  /// Código vigente da conta, ou `null` (nunca emitido ou já consumido).
+  Future<StaffActivationRecord?> find(String staffId);
+
+  /// Apaga hash e validade; `issuedBy`/`issuedAt` ficam como último registro.
+  Future<void> clear(String staffId);
+}
+
 /// Quem está entrando: o ACS (com território) ou o staff do backoffice.
 enum CredentialAudience { acs, staff }
 

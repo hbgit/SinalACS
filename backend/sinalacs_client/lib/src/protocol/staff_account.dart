@@ -25,12 +25,20 @@ abstract class StaffAccount implements _i1.SerializableModel {
     this.id,
     required this.enrollmentId,
     required this.active,
+    this.activationCodeHash,
+    this.activationCodeExpiresAt,
+    this.activationCodeIssuedBy,
+    this.activationCodeIssuedAt,
   });
 
   factory StaffAccount({
     _i1.UuidValue? id,
     required String enrollmentId,
     required bool active,
+    String? activationCodeHash,
+    DateTime? activationCodeExpiresAt,
+    String? activationCodeIssuedBy,
+    DateTime? activationCodeIssuedAt,
   }) = _StaffAccountImpl;
 
   factory StaffAccount.fromJson(Map<String, dynamic> jsonSerialization) {
@@ -40,6 +48,21 @@ abstract class StaffAccount implements _i1.SerializableModel {
           : _i1.UuidValueJsonExtension.fromJson(jsonSerialization['id']),
       enrollmentId: jsonSerialization['enrollmentId'] as String,
       active: _i1.BoolJsonExtension.fromJson(jsonSerialization['active']),
+      activationCodeHash: jsonSerialization['activationCodeHash'] as String?,
+      activationCodeExpiresAt:
+          jsonSerialization['activationCodeExpiresAt'] == null
+          ? null
+          : _i1.DateTimeJsonExtension.fromJson(
+              jsonSerialization['activationCodeExpiresAt'],
+            ),
+      activationCodeIssuedBy:
+          jsonSerialization['activationCodeIssuedBy'] as String?,
+      activationCodeIssuedAt:
+          jsonSerialization['activationCodeIssuedAt'] == null
+          ? null
+          : _i1.DateTimeJsonExtension.fromJson(
+              jsonSerialization['activationCodeIssuedAt'],
+            ),
     );
   }
 
@@ -52,6 +75,14 @@ abstract class StaffAccount implements _i1.SerializableModel {
 
   bool active;
 
+  String? activationCodeHash;
+
+  DateTime? activationCodeExpiresAt;
+
+  String? activationCodeIssuedBy;
+
+  DateTime? activationCodeIssuedAt;
+
   /// Returns a shallow copy of this [StaffAccount]
   /// with some or all fields replaced by the given arguments.
   @_i1.useResult
@@ -59,6 +90,10 @@ abstract class StaffAccount implements _i1.SerializableModel {
     _i1.UuidValue? id,
     String? enrollmentId,
     bool? active,
+    String? activationCodeHash,
+    DateTime? activationCodeExpiresAt,
+    String? activationCodeIssuedBy,
+    DateTime? activationCodeIssuedAt,
   });
   @override
   Map<String, dynamic> toJson() {
@@ -67,6 +102,13 @@ abstract class StaffAccount implements _i1.SerializableModel {
       if (id != null) 'id': id?.toJson(),
       'enrollmentId': enrollmentId,
       'active': active,
+      if (activationCodeHash != null) 'activationCodeHash': activationCodeHash,
+      if (activationCodeExpiresAt != null)
+        'activationCodeExpiresAt': activationCodeExpiresAt?.toJson(),
+      if (activationCodeIssuedBy != null)
+        'activationCodeIssuedBy': activationCodeIssuedBy,
+      if (activationCodeIssuedAt != null)
+        'activationCodeIssuedAt': activationCodeIssuedAt?.toJson(),
     };
   }
 
@@ -83,10 +125,18 @@ class _StaffAccountImpl extends StaffAccount {
     _i1.UuidValue? id,
     required String enrollmentId,
     required bool active,
+    String? activationCodeHash,
+    DateTime? activationCodeExpiresAt,
+    String? activationCodeIssuedBy,
+    DateTime? activationCodeIssuedAt,
   }) : super._(
          id: id,
          enrollmentId: enrollmentId,
          active: active,
+         activationCodeHash: activationCodeHash,
+         activationCodeExpiresAt: activationCodeExpiresAt,
+         activationCodeIssuedBy: activationCodeIssuedBy,
+         activationCodeIssuedAt: activationCodeIssuedAt,
        );
 
   /// Returns a shallow copy of this [StaffAccount]
@@ -97,11 +147,27 @@ class _StaffAccountImpl extends StaffAccount {
     Object? id = _Undefined,
     String? enrollmentId,
     bool? active,
+    Object? activationCodeHash = _Undefined,
+    Object? activationCodeExpiresAt = _Undefined,
+    Object? activationCodeIssuedBy = _Undefined,
+    Object? activationCodeIssuedAt = _Undefined,
   }) {
     return StaffAccount(
       id: id is _i1.UuidValue? ? id : this.id,
       enrollmentId: enrollmentId ?? this.enrollmentId,
       active: active ?? this.active,
+      activationCodeHash: activationCodeHash is String?
+          ? activationCodeHash
+          : this.activationCodeHash,
+      activationCodeExpiresAt: activationCodeExpiresAt is DateTime?
+          ? activationCodeExpiresAt
+          : this.activationCodeExpiresAt,
+      activationCodeIssuedBy: activationCodeIssuedBy is String?
+          ? activationCodeIssuedBy
+          : this.activationCodeIssuedBy,
+      activationCodeIssuedAt: activationCodeIssuedAt is DateTime?
+          ? activationCodeIssuedAt
+          : this.activationCodeIssuedAt,
     );
   }
 }
