@@ -146,27 +146,37 @@ class AuthEndpoint extends Endpoint {
     );
   }
 
-  /// Começa a ativação da MFA do staff. Sem token: o staff prova matrícula e
-  /// senha, e a MFA é obrigatória, então não há login possível antes dela.
+  /// Começa a ativação da MFA do staff. Sem token: o staff prova matrícula,
+  /// senha **e o código de ativação de uso único** (#48), emitido fora de banda
+  /// por `bin/issue_staff_activation_code.dart`; a MFA é obrigatória, então não
+  /// há login possível antes dela. Código errado, expirado ou já usado recebe a
+  /// mesma recusa e conta como tentativa falha da conta.
   Future<TotpEnrollmentStart> beginStaffTotpEnrollment(
     Session session, {
     required String matricula,
     required String password,
+    required String activationCode,
   }) =>
-      AlertRuntime.instance
-          .staffAuthServiceFor(session)
-          .beginTotpEnrollment(matricula: matricula, password: password);
+      AlertRuntime.instance.staffAuthServiceFor(session).beginTotpEnrollment(
+            matricula: matricula,
+            password: password,
+            activationCode: activationCode,
+          );
 
   /// Confirma a ativação da MFA do staff com o primeiro código do autenticador.
   Future<void> confirmStaffTotpEnrollment(
     Session session, {
     required String matricula,
     required String password,
+    required String activationCode,
     required String code,
   }) =>
-      AlertRuntime.instance
-          .staffAuthServiceFor(session)
-          .confirmTotpEnrollment(matricula: matricula, password: password, code: code);
+      AlertRuntime.instance.staffAuthServiceFor(session).confirmTotpEnrollment(
+            matricula: matricula,
+            password: password,
+            activationCode: activationCode,
+            code: code,
+          );
 
   /// Renova a sessão do ACS sem pedir senha nem TOTP (LGPD-RT06). Público por
   /// desenho: quem chama já perdeu o JWT de 15 min — o refresh token, opaco e de

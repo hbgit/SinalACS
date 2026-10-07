@@ -469,6 +469,7 @@ class _AuthEndpoint {
     _i1.TestSessionBuilder sessionBuilder, {
     required String matricula,
     required String password,
+    required String activationCode,
   }) async {
     return _i1.callAwaitableFunctionAndHandleExceptions(() async {
       var _localUniqueSession =
@@ -484,6 +485,7 @@ class _AuthEndpoint {
           parameters: _i1.testObjectToJson({
             'matricula': matricula,
             'password': password,
+            'activationCode': activationCode,
           }),
           serializationManager: _serializationManager,
         );
@@ -504,6 +506,7 @@ class _AuthEndpoint {
     _i1.TestSessionBuilder sessionBuilder, {
     required String matricula,
     required String password,
+    required String activationCode,
     required String code,
   }) async {
     return _i1.callAwaitableFunctionAndHandleExceptions(() async {
@@ -520,6 +523,7 @@ class _AuthEndpoint {
           parameters: _i1.testObjectToJson({
             'matricula': matricula,
             'password': password,
+            'activationCode': activationCode,
             'code': code,
           }),
           serializationManager: _serializationManager,

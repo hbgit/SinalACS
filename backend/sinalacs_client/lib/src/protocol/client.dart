@@ -181,17 +181,22 @@ class EndpointAuth extends _i1.EndpointRef {
     },
   );
 
-  /// Começa a ativação da MFA do staff. Sem token: o staff prova matrícula e
-  /// senha, e a MFA é obrigatória, então não há login possível antes dela.
+  /// Começa a ativação da MFA do staff. Sem token: o staff prova matrícula,
+  /// senha **e o código de ativação de uso único** (#48), emitido fora de banda
+  /// por `bin/issue_staff_activation_code.dart`; a MFA é obrigatória, então não
+  /// há login possível antes dela. Código errado, expirado ou já usado recebe a
+  /// mesma recusa e conta como tentativa falha da conta.
   _i2.Future<_i7.TotpEnrollmentStart> beginStaffTotpEnrollment({
     required String matricula,
     required String password,
+    required String activationCode,
   }) => caller.callServerEndpoint<_i7.TotpEnrollmentStart>(
     'auth',
     'beginStaffTotpEnrollment',
     {
       'matricula': matricula,
       'password': password,
+      'activationCode': activationCode,
     },
   );
 
@@ -199,6 +204,7 @@ class EndpointAuth extends _i1.EndpointRef {
   _i2.Future<void> confirmStaffTotpEnrollment({
     required String matricula,
     required String password,
+    required String activationCode,
     required String code,
   }) => caller.callServerEndpoint<void>(
     'auth',
@@ -206,6 +212,7 @@ class EndpointAuth extends _i1.EndpointRef {
     {
       'matricula': matricula,
       'password': password,
+      'activationCode': activationCode,
       'code': code,
     },
   );
