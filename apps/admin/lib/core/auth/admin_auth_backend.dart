@@ -85,11 +85,13 @@ abstract interface class AdminAuthBackend {
   Future<({String secret, String otpauthUri})> beginMfaEnrollment({
     required String matricula,
     required String senha,
+    required String activationCode,
   });
 
   Future<void> confirmMfaEnrollment({
     required String matricula,
     required String senha,
+    required String activationCode,
     required String code,
   });
 }
@@ -137,10 +139,14 @@ class BackendAdminAuth implements AdminAuthBackend {
   Future<({String secret, String otpauthUri})> beginMfaEnrollment({
     required String matricula,
     required String senha,
+    required String activationCode,
   }) async {
     final r = await _guard(
-      () =>
-          _auth.beginStaffTotpEnrollment(matricula: matricula, password: senha),
+      () => _auth.beginStaffTotpEnrollment(
+        matricula: matricula,
+        password: senha,
+        activationCode: activationCode,
+      ),
     );
     return (secret: r.secretBase32, otpauthUri: r.otpauthUri);
   }
@@ -149,11 +155,13 @@ class BackendAdminAuth implements AdminAuthBackend {
   Future<void> confirmMfaEnrollment({
     required String matricula,
     required String senha,
+    required String activationCode,
     required String code,
   }) => _guard(
     () => _auth.confirmStaffTotpEnrollment(
       matricula: matricula,
       password: senha,
+      activationCode: activationCode,
       code: code,
     ),
   );

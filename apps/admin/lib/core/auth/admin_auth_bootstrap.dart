@@ -24,11 +24,11 @@ class MisconfiguredAdminAuth implements AdminAuthBackend {
       Future.error(failure);
 
   @override
-  Future<({String secret, String otpauthUri})> beginMfaEnrollment({required String matricula, required String senha}) =>
+  Future<({String secret, String otpauthUri})> beginMfaEnrollment({required String matricula, required String senha, required String activationCode}) =>
       Future.error(failure);
 
   @override
-  Future<void> confirmMfaEnrollment({required String matricula, required String senha, required String code}) =>
+  Future<void> confirmMfaEnrollment({required String matricula, required String senha, required String activationCode, required String code}) =>
       Future.error(failure);
 }
 
