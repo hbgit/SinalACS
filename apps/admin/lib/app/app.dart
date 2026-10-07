@@ -1,152 +1,29 @@
-import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
+import 'dart:async';
+
+import 'package:sinalacs_admin/app/admin_header.dart';
 import 'package:sinalacs_admin/app/admin_layout.dart';
+import 'package:sinalacs_admin/app/login_screen.dart';
+import 'package:sinalacs_admin/core/auth/admin_auth_backend.dart';
 import 'package:sinalacs_admin/app/admin_theme.dart';
 import 'package:sinalacs_admin/core/data/admin_data_source.dart';
 import 'package:sinalacs_admin/core/data/mock_admin_data_source.dart';
 
 class SinalAdminApp extends StatelessWidget {
-  SinalAdminApp({super.key, AdminDataSource? dataSource, this.devLoginEnabled}) : dataSource = dataSource ?? MockAdminDataSource();
+  SinalAdminApp({super.key, AdminDataSource? dataSource, required this.auth}) : dataSource = dataSource ?? MockAdminDataSource();
 
   final AdminDataSource dataSource;
 
-  /// Repassado para [LoginScreen]; `null` mantém o default (`kDebugMode`).
-  final bool? devLoginEnabled;
+  /// A única porta de entrada do painel: sem sessão devolvida por
+  /// [AdminAuthBackend.login] não existe caminho que abra [AdminHomeShell].
+  final AdminAuthBackend auth;
 
   @override
   Widget build(BuildContext context) => MaterialApp(
         title: 'SinalACS Admin',
         debugShowCheckedModeBanner: false,
         theme: buildAdminTheme(),
-        home: LoginScreen(dataSource: dataSource, devLoginEnabled: devLoginEnabled),
-      );
-}
-
-/// Login local (não chama `auth.developmentLogin`).
-///
-/// Investigado antes de decidir: `backend/sinalacs_server/lib/src/endpoints/auth_endpoint.dart`
-/// só aceita `role: 'patient'` ou `role: 'acs'` — não existe usuário fixo de
-/// desenvolvimento para `admin`, então a chamada real falharia com
-/// AlertValidationException. Ligar isso de verdade exige uma mudança no
-/// backend (fora do escopo desta issue); ver descrição do PR.
-class LoginScreen extends StatefulWidget {
-  /// O banner "ambiente de desenvolvimento" não é um controle de acesso — só
-  /// avisa. Sem isso, `_login` deixaria qualquer pessoa entrar em produção
-  /// sem senha (achado da revisão do PR). O default (`kDebugMode`, `false`
-  /// em builds profile/release) desativa de verdade o bypass fora de dev;
-  /// o parâmetro existe para os testes poderem exercitar os dois estados.
-  const LoginScreen({required this.dataSource, super.key, bool? devLoginEnabled}) : devLoginEnabled = devLoginEnabled ?? kDebugMode;
-
-  final AdminDataSource dataSource;
-  final bool devLoginEnabled;
-
-  @override
-  State<LoginScreen> createState() => _LoginScreenState();
-}
-
-class _LoginScreenState extends State<LoginScreen> {
-  final _matricula = TextEditingController();
-  final _senha = TextEditingController();
-
-  @override
-  void dispose() {
-    _matricula.dispose();
-    _senha.dispose();
-    super.dispose();
-  }
-
-  void _login() {
-    Navigator.of(context).pushReplacement(
-      MaterialPageRoute(builder: (_) => AdminHomeShell(dataSource: widget.dataSource)),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) => Scaffold(
-        appBar: _Header('Backoffice SinalACS', 'Acesso administrativo', height: adminHeaderHeight(context)),
-        body: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 600),
-            child: ListView(
-              padding: const EdgeInsets.all(24),
-              children: [
-                Container(
-                  key: const Key('dev_banner'),
-                  padding: const EdgeInsets.all(12),
-                  margin: const EdgeInsets.only(bottom: 16),
-                  decoration: BoxDecoration(
-                    color: AdminColors.surfaceRaised,
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: AdminColors.accent),
-                  ),
-                  child: const Row(
-                    children: [
-                      Icon(Icons.science_outlined, color: AdminColors.accentOnSurface),
-                      SizedBox(width: 12),
-                      Expanded(
-                        child: Text(
-                          'Ambiente de desenvolvimento — sem autenticação institucional real (SSO/gov.br).',
-                          style: TextStyle(fontWeight: FontWeight.bold),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(24),
-                    child: Column(
-                      children: [
-                        const CircleAvatar(radius: 32, child: Text('ADM')),
-                        const SizedBox(height: 16),
-                        const Text('SinalACS', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
-                        const SizedBox(height: 8),
-                        const Text('Backoffice administrativo', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-                        const SizedBox(height: 20),
-                        TextField(
-                          key: const Key('matricula_field'),
-                          controller: _matricula,
-                          decoration: const InputDecoration(labelText: 'Matrícula / CNS'),
-                        ),
-                        const SizedBox(height: 16),
-                        TextField(
-                          key: const Key('senha_field'),
-                          controller: _senha,
-                          obscureText: true,
-                          decoration: const InputDecoration(labelText: 'Senha de acesso'),
-                        ),
-                        const SizedBox(height: 20),
-                        Semantics(
-                          label: 'Entrar no backoffice administrativo',
-                          button: true,
-                          container: true,
-                          child: SizedBox(
-                            width: double.infinity,
-                            child: FilledButton(
-                              key: const Key('login_button'),
-                              style: FilledButton.styleFrom(minimumSize: const Size(48, 52)),
-                              onPressed: widget.devLoginEnabled ? _login : null,
-                              child: const Text('Entrar'),
-                            ),
-                          ),
-                        ),
-                        if (!widget.devLoginEnabled) ...[
-                          const SizedBox(height: 12),
-                          const Text(
-                            'Login de desenvolvimento desativado nesta build (fora do modo debug).',
-                            key: Key('dev_login_disabled_notice'),
-                            textAlign: TextAlign.center,
-                            style: TextStyle(color: Colors.white70, fontSize: 12),
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
+        home: LoginScreen(auth: auth, dataSource: dataSource),
       );
 }
 
@@ -168,10 +45,26 @@ extension on AdminDestination {
       };
 }
 
+/// Relógio injetável: deixa o teste da sessão vencida sem `sleep`.
+typedef AdminClock = DateTime Function();
+
 class AdminHomeShell extends StatefulWidget {
-  const AdminHomeShell({required this.dataSource, super.key});
+  const AdminHomeShell({
+    required this.dataSource,
+    required this.session,
+    required this.auth,
+    this.now = DateTime.now,
+    super.key,
+  });
 
   final AdminDataSource dataSource;
+
+  /// Sessão devolvida por [AdminAuthBackend.login]. Sem ela o painel não abre.
+  final AdminSession session;
+
+  /// Usada só para reconstruir o login quando a sessão vence.
+  final AdminAuthBackend auth;
+  final AdminClock now;
 
   @override
   State<AdminHomeShell> createState() => _AdminHomeShellState();
@@ -179,6 +72,46 @@ class AdminHomeShell extends StatefulWidget {
 
 class _AdminHomeShellState extends State<AdminHomeShell> {
   AdminDestination destination = AdminDestination.indicators;
+  Timer? _vencimento;
+
+  @override
+  void initState() {
+    super.initState();
+    final restante = widget.session.expiresAt.difference(widget.now());
+    if (restante <= Duration.zero) {
+      // Navegar durante o build não pode: adia para depois do primeiro frame.
+      WidgetsBinding.instance.addPostFrameCallback((_) => _encerrarSeVencida());
+    } else {
+      // O disparo do Timer já é o vencimento: não reconfere o relógio.
+      _vencimento = Timer(restante, _encerrar);
+    }
+  }
+
+  @override
+  void dispose() {
+    _vencimento?.cancel();
+    super.dispose();
+  }
+
+  /// Volta ao login, descartando o painel e a sessão, quando ela venceu.
+  void _encerrarSeVencida() {
+    if (!mounted || widget.now().isBefore(widget.session.expiresAt)) return;
+    _encerrar();
+  }
+
+  void _encerrar() {
+    if (!mounted) return;
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute<void>(
+        builder: (_) => LoginScreen(
+          auth: widget.auth,
+          dataSource: widget.dataSource,
+          aviso: 'Sessão encerrada. Entre novamente.',
+        ),
+      ),
+      (_) => false,
+    );
+  }
 
   Widget _content() => switch (destination) {
         AdminDestination.indicators => IndicatorsScreen(dataSource: widget.dataSource),
@@ -187,13 +120,16 @@ class _AdminHomeShellState extends State<AdminHomeShell> {
         AdminDestination.auditLog => AuditLogScreen(dataSource: widget.dataSource),
       };
 
-  void _select(int index) => setState(() => destination = AdminDestination.values[index]);
+  void _select(int index) {
+    setState(() => destination = AdminDestination.values[index]);
+    _encerrarSeVencida();
+  }
 
   @override
   Widget build(BuildContext context) => LayoutBuilder(
         builder: (context, constraints) {
           final content = _content();
-          final header = _Header('Backoffice • admin.dev', 'Painel administrativo', height: adminHeaderHeight(context));
+          final header = AdminHeader('Backoffice • ${adminRoleLabel(widget.session.role)}', 'Painel administrativo', height: adminHeaderHeight(context));
           // Backoffice é desktop-first (spec/PRD_system.md §2.1): NavigationRail
           // acima de AdminBreakpoints.rail, NavigationBar abaixo — mesmo
           // ThemeData nos dois.
@@ -247,6 +183,15 @@ class _AdminHomeShellState extends State<AdminHomeShell> {
         },
       );
 }
+
+/// Rótulo do papel para o cabeçalho. Valor desconhecido não quebra a tela nem
+/// aparece cru: o token só chega aqui com papel de staff, mas o cabeçalho não
+/// deve depender disso.
+String adminRoleLabel(String role) => switch (role) {
+      'admin' => 'Administrador',
+      'coordinator' => 'Coordenador',
+      _ => 'Equipe',
+    };
 
 String riskLabel(RiskLevel level) => switch (level) {
       RiskLevel.red => 'Vermelho',
@@ -785,58 +730,3 @@ class _InfoRow extends StatelessWidget {
       );
 }
 
-class _Header extends StatelessWidget implements PreferredSizeWidget {
-  const _Header(this.eyebrow, this.title, {required this.height});
-
-  final String eyebrow;
-  final String title;
-
-  /// Calculada por quem monta o Scaffold, via [adminHeaderHeight] — ver o
-  /// porquê lá: `preferredSize` não tem acesso ao `BuildContext`.
-  final double height;
-
-  @override
-  Size get preferredSize => Size.fromHeight(height);
-
-  @override
-  Widget build(BuildContext context) {
-    // O selo é informação, não controle. Em tela estreita ele disputa espaço
-    // com duas linhas de título num AppBar, então vira ícone — mantendo o
-    // rótulo para leitores de tela, que é o que de fato carrega o significado.
-    final estreito = MediaQuery.sizeOf(context).width < AdminBreakpoints.stacked;
-    return AppBar(
-      title: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            eyebrow.toUpperCase(),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontSize: 10, color: AdminColors.accentOnSurface, fontWeight: FontWeight.bold),
-          ),
-          Text(
-            title,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-          ),
-        ],
-      ),
-      actions: [
-        Padding(
-          padding: const EdgeInsets.only(right: 12),
-          child: estreito
-              ? Tooltip(
-                  message: 'Acesso auditado',
-                  child: Semantics(
-                    label: 'Acesso auditado',
-                    child: const Icon(key: Key('admin_audit_badge'), Icons.verified_user_outlined),
-                  ),
-                )
-              : const Chip(key: Key('admin_audit_badge'), label: Text('Acesso auditado')),
-        ),
-      ],
-    );
-  }
-}

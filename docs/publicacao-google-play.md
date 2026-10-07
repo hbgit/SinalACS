@@ -157,8 +157,9 @@ Pontos a revisar antes de publicar:
 - **ACS, segredos em `--dart-define`:** `SINALACS_MQTT_PASSWORD` não tem valor
   padrão e `GOOGLE_MAPS_API_KEY` vira texto vazio se faltar, sem erro de
   build. Nenhum valor real deve aparecer no repositório nem neste documento.
-- **Admin, login:** o botão de entrar só funciona quando `devLoginEnabled` é
-  verdadeiro, e o padrão é `kDebugMode`. Em release, o login fica desativado.
+- **Admin, login:** o login é real (`auth.loginStaff`, matrícula + senha + TOTP) e
+  não há atalho de desenvolvimento; o painel só abre com a sessão devolvida pelo
+  servidor. O host do RPC tem de ser HTTPS (`SINALACS_HOST`).
 
 ### 2.6 Conferir o manifest mesclado
 
@@ -558,7 +559,7 @@ Situação de cada app hoje:
 |-----|-----------------|--------------------------|
 | Paciente | CPF, data de nascimento e código OTP | Um revisor não recebe o código; é preciso uma conta de teste com um caminho de acesso definido (decisão em aberto) |
 | ACS | Matrícula e senha (login institucional) | Precisa de uma matrícula fictícia e de um backend acessível pela internet |
-| Admin | Login local; o botão só funciona com `devLoginEnabled`, que por padrão vale `kDebugMode` | Em release o login fica desativado: o revisor não passa da primeira tela |
+| Admin | Login real do staff (matrícula + senha + TOTP) contra o backend; sem atalho de desenvolvimento | O revisor precisa de uma conta de staff com MFA ativada e de um backend acessível; sem isso não passa da primeira tela |
 
 Em todos os casos, o backend precisa estar acessível para o revisor. Hoje não
 existe deploy de produção (`backend/DEPLOY.md` descreve apenas uma demo
@@ -845,7 +846,7 @@ não reconferido no código).
 | 3 | Paciente aponta por padrão para `https://10.0.2.2/` (`backend_config.dart`, linha 24); não há host de produção | código |
 | 4 | Não existe deploy de produção do backend; `backend/DEPLOY.md` descreve só uma demo free-tier | documentação |
 | 5 | Não foi encontrada URL pública de política de privacidade nem link para ela nos apps; há menções só em planos e especificações em `docs/superpowers/` (busca em `README.md`, `docs/`, `backend/DEPLOY.md` e `apps/*/lib`) | código |
-| 6 | Admin roda sobre `MockAdminDataSource` e, em release, o botão de entrar fica desativado (`devLoginEnabled` vale `kDebugMode`) | código |
+| 6 | Admin roda sobre `MockAdminDataSource` (só o login é real, `auth.loginStaff`); sem credencial de staff o revisor não passa do login | código |
 | 7 | Paciente pede `POST_NOTIFICATIONS` em execução e não a declara no manifest `main` | código |
 | 8 | `RECEIVE_BOOT_COMPLETED` declarada no Paciente sem justificativa conhecida | código |
 | 9 | Os três apps estão com `version: 1.0.0`, sem `+n` | código |

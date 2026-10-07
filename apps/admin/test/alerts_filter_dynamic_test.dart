@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sinalacs_admin/app/app.dart';
 import 'package:sinalacs_admin/core/data/admin_data_source.dart';
+import 'support/fake_admin_auth.dart';
+import 'support/layout_harness.dart';
 
 /// Duplo com uma microárea que não existe na antiga lista fixa do dropdown de
 /// filtro (achado da revisão do PR: as opções eram três strings fixas no
@@ -44,9 +46,8 @@ class _CustomAreaDataSource implements AdminDataSource {
 
 void main() {
   testWidgets('opções do filtro de microárea vêm de fetchMicroAreas(), não de uma lista fixa', (tester) async {
-    await tester.pumpWidget(SinalAdminApp(dataSource: _CustomAreaDataSource()));
-    await tester.tap(find.byKey(const Key('login_button')));
-    await tester.pumpAndSettle();
+    await tester.pumpWidget(SinalAdminApp(dataSource: _CustomAreaDataSource(), auth: FakeAdminAuth()));
+    await entrarComCredenciais(tester);
 
     await tester.tap(find.text('Alertas').last);
     await tester.pumpAndSettle();

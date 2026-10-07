@@ -244,6 +244,8 @@ services:
       # Senha do ACS de desenvolvimento. Gerada por máquina — o script recusa
       # rodar fora de APP_ENV=development.
       DEV_ACS_PASSWORD: ${DEV_ACS_PASSWORD:?defina em .env — rode ./scripts/dev/bootstrap_env.sh}
+      # Senha do admin de desenvolvimento (ADM-001, backoffice).
+      DEV_ADMIN_PASSWORD: ${DEV_ADMIN_PASSWORD:?defina em .env — rode ./scripts/dev/bootstrap_env.sh}
       APP_ENV: ${APP_ENV:-development}
     entrypoint: ["./seed_acs_credentials"]
 

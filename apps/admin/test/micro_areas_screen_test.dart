@@ -1,12 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sinalacs_admin/app/app.dart';
+import 'support/fake_admin_auth.dart';
+import 'support/layout_harness.dart';
 
 void main() {
   testWidgets('deve listar microáreas com o ACS vinculado, somente leitura', (tester) async {
-    await tester.pumpWidget(SinalAdminApp());
-    await tester.tap(find.byKey(const Key('login_button')));
-    await tester.pumpAndSettle();
+    await tester.pumpWidget(SinalAdminApp(auth: FakeAdminAuth()));
+    await entrarComCredenciais(tester);
 
     await tester.tap(find.text('Microáreas').last);
     await tester.pumpAndSettle();

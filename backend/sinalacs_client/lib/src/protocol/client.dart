@@ -157,6 +157,59 @@ class EndpointAuth extends _i1.EndpointRef {
     },
   );
 
+  /// Login do backoffice (coordenador/administrador): matrícula + senha + TOTP.
+  ///
+  /// A MFA é obrigatória em todo ambiente (não há `REQUIRE_*_MFA` para o
+  /// staff). Sem refresh token e sem token de envio diferido: a sessão dura os
+  /// 15 minutos do JWT, e o `deviceId` do token é o sentinela de "sem
+  /// aparelho". O token sai com o papel gravado em `users` e **sem** microárea:
+  /// staff não é territorializado, e os caminhos do ACS o recusam por papel.
+  /// As recusas são as de [loginInstitutional]: mensagem única para matrícula
+  /// inexistente e senha errada, `MfaRequiredException` sem o código, e o mesmo
+  /// bloqueio por tentativas.
+  _i2.Future<_i6.DevelopmentLoginResult> loginStaff({
+    required String matricula,
+    required String password,
+    String? totpCode,
+  }) => caller.callServerEndpoint<_i6.DevelopmentLoginResult>(
+    'auth',
+    'loginStaff',
+    {
+      'matricula': matricula,
+      'password': password,
+      'totpCode': totpCode,
+    },
+  );
+
+  /// Começa a ativação da MFA do staff. Sem token: o staff prova matrícula e
+  /// senha, e a MFA é obrigatória, então não há login possível antes dela.
+  _i2.Future<_i7.TotpEnrollmentStart> beginStaffTotpEnrollment({
+    required String matricula,
+    required String password,
+  }) => caller.callServerEndpoint<_i7.TotpEnrollmentStart>(
+    'auth',
+    'beginStaffTotpEnrollment',
+    {
+      'matricula': matricula,
+      'password': password,
+    },
+  );
+
+  /// Confirma a ativação da MFA do staff com o primeiro código do autenticador.
+  _i2.Future<void> confirmStaffTotpEnrollment({
+    required String matricula,
+    required String password,
+    required String code,
+  }) => caller.callServerEndpoint<void>(
+    'auth',
+    'confirmStaffTotpEnrollment',
+    {
+      'matricula': matricula,
+      'password': password,
+      'code': code,
+    },
+  );
+
   /// Renova a sessão do ACS sem pedir senha nem TOTP (LGPD-RT06). Público por
   /// desenho: quem chama já perdeu o JWT de 15 min — o refresh token, opaco e de
   /// uso único, é a credencial. Toda recusa é a mesma `SessionExpiredException`.

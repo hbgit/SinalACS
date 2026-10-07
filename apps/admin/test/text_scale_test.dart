@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:sinalacs_admin/app/app.dart';
+import 'package:sinalacs_admin/core/auth/admin_auth_backend.dart';
 
+import 'support/fake_admin_auth.dart';
 import 'support/layout_harness.dart';
 
 /// WCAG 1.4.4 exige que o conteúdo sobreviva a 200% de escala de texto.
@@ -29,4 +32,37 @@ void main() {
     expect(alturaAmpliada, greaterThan(alturaPadrao));
     esperarSemEstouroDeLayout(tester, 'cabeçalho com fonte a 200%');
   });
+
+  // O login ganhou o campo do código e há a tela de ativação do MFA: as duas
+  // têm de caber a 130%/200% de fonte e em 320dp de largura (WCAG 1.4.4/1.4.10).
+  for (final largura in const [360.0, 320.0]) {
+    for (final escala in const [1.3, 2.0]) {
+      final rotulo = '${largura.toInt()}dp, fonte a ${(escala * 100).toInt()}%';
+
+      testWidgets('login com campo do código não estoura em $rotulo', (tester) async {
+        redimensionar(tester, Size(largura, 800), escalaDeFonte: escala);
+        addTearDown(tester.view.reset);
+        addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+        final auth = FakeAdminAuth()..requiresTotp = true;
+        await tester.pumpWidget(SinalAdminApp(auth: auth));
+        await tester.pumpAndSettle();
+        await percorrerTelaInteira(tester, 'login ($rotulo)');
+        // Primeira tentativa sem código: o campo do código aparece.
+        await entrarComCredenciais(tester);
+        expect(find.byKey(const Key('totp_field')), findsOneWidget);
+        await percorrerTelaInteira(tester, 'login com código ($rotulo)');
+      });
+
+      testWidgets('ativação do MFA não estoura em $rotulo', (tester) async {
+        redimensionar(tester, Size(largura, 800), escalaDeFonte: escala);
+        addTearDown(tester.view.reset);
+        addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+        final auth = FakeAdminAuth()..failWith = const AdminMfaEnrollmentRequired();
+        await tester.pumpWidget(SinalAdminApp(auth: auth));
+        await entrarComCredenciais(tester);
+        expect(find.byKey(const Key('mfa_secret')), findsOneWidget);
+        await percorrerTelaInteira(tester, 'ativação ($rotulo)');
+      });
+    }
+  }
 }

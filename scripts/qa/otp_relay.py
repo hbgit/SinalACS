@@ -7,7 +7,8 @@ O gateway de log escreve o código no stdout do servidor; o emulador não lê
 
 `/acs` (só com E2E_FIXTURES_FILE) entrega a matrícula e a senha SINTÉTICAS do ACS
 da execução, e `/acs-b` as do segundo ACS (bloco `acsB` do manifesto, mesma
-microárea, para a prova da fila por dono), cada uma **uma única vez por processo**: qualquer app do emulador que alcance
+microárea, para a prova da fila por dono) e `/admin` as do administrador do
+backoffice (bloco `staff`, e2e do app admin), cada uma **uma única vez por processo**: qualquer app do emulador que alcance
 localhost:8765 (adb reverse) poderia lê-las, então depois do primeiro pedido bem
 sucedido — o do teste, no começo — a rota responde 404. O relé é por execução.
 """
@@ -53,6 +54,7 @@ class Handler(BaseHTTPRequestHandler):
     container = "sinalacs-serverpod"
     acs_entregue = False
     acs_b_entregue = False
+    admin_entregue = False
 
     def do_GET(self):
         if not host_permitido(self.headers.get("Host"), self.porta):
@@ -63,15 +65,14 @@ class Handler(BaseHTTPRequestHandler):
             self.send_response(200); self.send_header("Content-Type", "text/plain"); self.end_headers()
             self.wfile.write(str(int(time.time() * 1000)).encode())
             return
-        if url.path in ("/acs", "/acs-b"):
-            segundo = url.path == "/acs-b"
-            credencial = acs_do_manifesto(os.environ.get("E2E_FIXTURES_FILE"), "acsB" if segundo else "acs")
-            if credencial is None or (Handler.acs_b_entregue if segundo else Handler.acs_entregue):
+        if url.path in ("/acs", "/acs-b", "/admin"):
+            # Uma bandeira por rota: cada credencial sai uma única vez.
+            bandeira, chave = {"/acs": ("acs_entregue", "acs"), "/acs-b": ("acs_b_entregue", "acsB"),
+                               "/admin": ("admin_entregue", "staff")}[url.path]
+            credencial = acs_do_manifesto(os.environ.get("E2E_FIXTURES_FILE"), chave)
+            if credencial is None or getattr(Handler, bandeira):
                 self.send_error(404); return
-            if segundo:
-                Handler.acs_b_entregue = True
-            else:
-                Handler.acs_entregue = True
+            setattr(Handler, bandeira, True)
             self.send_response(200); self.send_header("Content-Type", "application/json"); self.end_headers()
             self.wfile.write(json.dumps(credencial).encode())
             return

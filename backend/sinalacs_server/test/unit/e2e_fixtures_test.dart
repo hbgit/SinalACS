@@ -33,7 +33,7 @@ void main() {
 
   test('nenhum UUID é do formato fixo do seed de desenvolvimento', () {
     final f = generateE2eFixtures(Random(3));
-    for (final id in [f.ubsId, f.microAreaId, f.otherMicroAreaId, f.acs.id, f.secondAcs.id, ...f.patients.map((p) => p.id)]) {
+    for (final id in [f.ubsId, f.microAreaId, f.otherMicroAreaId, f.acs.id, f.secondAcs.id, f.staff.id, ...f.patients.map((p) => p.id)]) {
       expect(id.startsWith('00000000-0000-4000-8000'), isFalse);
       expect(RegExp(r'^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$').hasMatch(id), isTrue);
     }
@@ -70,6 +70,20 @@ void main() {
     }
     final f = generateE2eFixtures(Random(11));
     expect(f.toJson()['acsB'], f.secondAcs.toJson());
+  });
+
+  test('há um admin do backoffice, distinto dos ACS, com matrícula própria e sem vazar a senha', () {
+    for (var seed = 0; seed < 200; seed++) {
+      final f = generateE2eFixtures(Random(seed));
+      expect({f.staff.id, f.acs.id, f.secondAcs.id}, hasLength(3), reason: 'seed $seed');
+      expect(f.staff.matricula, startsWith('E2E-ADM-'));
+      expect({f.staff.matricula, f.acs.matricula, f.secondAcs.matricula}, hasLength(3));
+      expect({f.staff.password, f.acs.password, f.secondAcs.password}, hasLength(3));
+    }
+    final f = generateE2eFixtures(Random(12));
+    expect(f.toJson()['staff'], f.staff.toJson());
+    expect(E2eFixtures.fromJson(f.toJson()).staff.matricula, f.staff.matricula);
+    expect('$f ${f.staff}'.contains(f.staff.password), isFalse);
   });
 
   group('guarda do seeder (e2eSeedRefusal)', () {

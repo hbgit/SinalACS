@@ -130,6 +130,9 @@ A tabela abaixo consolida o mapeamento exaustivo de dados persistidos pelo backe
 | | `ubsId` | `uuid` | Pseudonimizado / Organizacional | Chave estrangeira (`ubs.id`) | Lotação institucional do profissional de saúde. |
 | | `active` | `boolean` | Metadado Operacional | Booleano | Status funcional de permissão de acesso ao sistema. |
 | | `lastSyncAt` | `timestamp without time zone` | Metadado Técnico | Timestamp | Última sincronização do app do ACS com o backend. |
+| **staff_accounts** | `id` | `uuid` | Pseudonimizado | UUID (vínculo com `users.id`) | Identificador de cadastro da conta de staff do backoffice (coordenador ou administrador); o papel mora em `users.role`, a credencial em `user_credentials`. |
+| | `enrollmentId` | `text` | Identificável (Funcional) — baixa sensibilidade | Matrícula funcional em texto claro, índice único | Identificador funcional do staff, usado no login do backoffice; mesma ressalva de correlação de `acs.enrollmentId`. |
+| | `active` | `boolean` | Metadado Operacional | Booleano | Status funcional de permissão de acesso ao backoffice. |
 | **micro_areas** | `id` | `uuid` | Pseudonimizado / Territorial | UUID v4 (`gen_random_uuid()`) | Identificador do território sanitário de cobertura. |
 | | `name` | `text` | Dado Institucional / Organizacional | String | Nome ou código descritivo da microárea na UBS. |
 | | `ubsId` | `uuid` | Pseudonimizado / Organizacional | Chave estrangeira (`ubs.id`) | Vinculação com a Unidade Básica de Saúde gestora. |
