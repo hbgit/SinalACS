@@ -1,0 +1,23 @@
+### Conta de staff do backoffice (coordenador ou administrador).
+###
+### Tabela própria, e não uma coluna em `acs`: staff não é ACS, não tem UBS nem
+### sincronização, e misturar os dois faria `acs.enrollmentId` virar um
+### namespace compartilhado. O id é o UUID do usuário (mesma decisão de `Acs`).
+### O papel mora em `users.role` (`coordinator` | `admin`); a credencial, em
+### `user_credentials`.
+class: StaffAccount
+table: staff_accounts
+fields:
+  id: UuidValue?, defaultPersist=random
+  enrollmentId: String
+  active: bool
+  ### UBS do coordenador; nulo para administrador. Coordenador sem UBS é recusado.
+  ubsId: UuidValue?
+  activationCodeHash: String?
+  activationCodeExpiresAt: DateTime?
+  activationCodeIssuedBy: String?
+  activationCodeIssuedAt: DateTime?
+indexes:
+  staff_accounts_enrollment_id_key:
+    fields: enrollmentId
+    unique: true

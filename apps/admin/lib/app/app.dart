@@ -1,152 +1,38 @@
-import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
+import 'dart:async';
+
+import 'package:sinalacs_admin/app/admin_header.dart';
 import 'package:sinalacs_admin/app/admin_layout.dart';
+import 'package:sinalacs_admin/app/login_screen.dart';
+import 'package:sinalacs_admin/core/auth/admin_auth_backend.dart';
+import 'package:sinalacs_admin/core/auth/admin_auth_bootstrap.dart';
 import 'package:sinalacs_admin/app/admin_theme.dart';
 import 'package:sinalacs_admin/core/data/admin_data_source.dart';
 import 'package:sinalacs_admin/core/data/mock_admin_data_source.dart';
 
 class SinalAdminApp extends StatelessWidget {
-  SinalAdminApp({super.key, AdminDataSource? dataSource, this.devLoginEnabled}) : dataSource = dataSource ?? MockAdminDataSource();
+  /// [dataSourceFor] é o caminho de produção: a fonte de dados nasce da sessão
+  /// que o login devolveu (o token vive nela). [dataSource] fixa uma fonte pronta
+  /// e existe para os testes de tela; sem nenhum dos dois, o app cai no
+  /// [MockAdminDataSource] — **só** para teste, `main.dart` sempre passa
+  /// [dataSourceFor].
+  SinalAdminApp({super.key, AdminDataSource? dataSource, AdminDataSourceFactory? dataSourceFor, required this.auth})
+      : dataSourceFor = dataSourceFor ?? _fixa(dataSource ?? MockAdminDataSource());
 
-  final AdminDataSource dataSource;
+  final AdminDataSourceFactory dataSourceFor;
 
-  /// Repassado para [LoginScreen]; `null` mantém o default (`kDebugMode`).
-  final bool? devLoginEnabled;
+  static AdminDataSourceFactory _fixa(AdminDataSource fonte) => (_) => fonte;
+
+  /// A única porta de entrada do painel: sem sessão devolvida por
+  /// [AdminAuthBackend.login] não existe caminho que abra [AdminHomeShell].
+  final AdminAuthBackend auth;
 
   @override
   Widget build(BuildContext context) => MaterialApp(
         title: 'SinalACS Admin',
         debugShowCheckedModeBanner: false,
         theme: buildAdminTheme(),
-        home: LoginScreen(dataSource: dataSource, devLoginEnabled: devLoginEnabled),
-      );
-}
-
-/// Login local (não chama `auth.developmentLogin`).
-///
-/// Investigado antes de decidir: `backend/sinalacs_server/lib/src/endpoints/auth_endpoint.dart`
-/// só aceita `role: 'patient'` ou `role: 'acs'` — não existe usuário fixo de
-/// desenvolvimento para `admin`, então a chamada real falharia com
-/// AlertValidationException. Ligar isso de verdade exige uma mudança no
-/// backend (fora do escopo desta issue); ver descrição do PR.
-class LoginScreen extends StatefulWidget {
-  /// O banner "ambiente de desenvolvimento" não é um controle de acesso — só
-  /// avisa. Sem isso, `_login` deixaria qualquer pessoa entrar em produção
-  /// sem senha (achado da revisão do PR). O default (`kDebugMode`, `false`
-  /// em builds profile/release) desativa de verdade o bypass fora de dev;
-  /// o parâmetro existe para os testes poderem exercitar os dois estados.
-  const LoginScreen({required this.dataSource, super.key, bool? devLoginEnabled}) : devLoginEnabled = devLoginEnabled ?? kDebugMode;
-
-  final AdminDataSource dataSource;
-  final bool devLoginEnabled;
-
-  @override
-  State<LoginScreen> createState() => _LoginScreenState();
-}
-
-class _LoginScreenState extends State<LoginScreen> {
-  final _matricula = TextEditingController();
-  final _senha = TextEditingController();
-
-  @override
-  void dispose() {
-    _matricula.dispose();
-    _senha.dispose();
-    super.dispose();
-  }
-
-  void _login() {
-    Navigator.of(context).pushReplacement(
-      MaterialPageRoute(builder: (_) => AdminHomeShell(dataSource: widget.dataSource)),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) => Scaffold(
-        appBar: _Header('Backoffice SinalACS', 'Acesso administrativo', height: adminHeaderHeight(context)),
-        body: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 600),
-            child: ListView(
-              padding: const EdgeInsets.all(24),
-              children: [
-                Container(
-                  key: const Key('dev_banner'),
-                  padding: const EdgeInsets.all(12),
-                  margin: const EdgeInsets.only(bottom: 16),
-                  decoration: BoxDecoration(
-                    color: AdminColors.surfaceRaised,
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: AdminColors.accent),
-                  ),
-                  child: const Row(
-                    children: [
-                      Icon(Icons.science_outlined, color: AdminColors.accentOnSurface),
-                      SizedBox(width: 12),
-                      Expanded(
-                        child: Text(
-                          'Ambiente de desenvolvimento — sem autenticação institucional real (SSO/gov.br).',
-                          style: TextStyle(fontWeight: FontWeight.bold),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(24),
-                    child: Column(
-                      children: [
-                        const CircleAvatar(radius: 32, child: Text('ADM')),
-                        const SizedBox(height: 16),
-                        const Text('SinalACS', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
-                        const SizedBox(height: 8),
-                        const Text('Backoffice administrativo', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-                        const SizedBox(height: 20),
-                        TextField(
-                          key: const Key('matricula_field'),
-                          controller: _matricula,
-                          decoration: const InputDecoration(labelText: 'Matrícula / CNS'),
-                        ),
-                        const SizedBox(height: 16),
-                        TextField(
-                          key: const Key('senha_field'),
-                          controller: _senha,
-                          obscureText: true,
-                          decoration: const InputDecoration(labelText: 'Senha de acesso'),
-                        ),
-                        const SizedBox(height: 20),
-                        Semantics(
-                          label: 'Entrar no backoffice administrativo',
-                          button: true,
-                          container: true,
-                          child: SizedBox(
-                            width: double.infinity,
-                            child: FilledButton(
-                              key: const Key('login_button'),
-                              style: FilledButton.styleFrom(minimumSize: const Size(48, 52)),
-                              onPressed: widget.devLoginEnabled ? _login : null,
-                              child: const Text('Entrar'),
-                            ),
-                          ),
-                        ),
-                        if (!widget.devLoginEnabled) ...[
-                          const SizedBox(height: 12),
-                          const Text(
-                            'Login de desenvolvimento desativado nesta build (fora do modo debug).',
-                            key: Key('dev_login_disabled_notice'),
-                            textAlign: TextAlign.center,
-                            style: TextStyle(color: Colors.white70, fontSize: 12),
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
+        home: LoginScreen(auth: auth, dataSourceFor: dataSourceFor),
       );
 }
 
@@ -168,10 +54,31 @@ extension on AdminDestination {
       };
 }
 
+/// Relógio injetável: deixa o teste da sessão vencida sem `sleep`.
+typedef AdminClock = DateTime Function();
+
 class AdminHomeShell extends StatefulWidget {
-  const AdminHomeShell({required this.dataSource, super.key});
+  const AdminHomeShell({
+    required this.dataSource,
+    required this.dataSourceFor,
+    required this.session,
+    required this.auth,
+    this.now = DateTime.now,
+    super.key,
+  });
 
   final AdminDataSource dataSource;
+
+  /// Usada só para reconstruir o login quando a sessão vence: a próxima sessão
+  /// tem outro token e portanto outra fonte de dados.
+  final AdminDataSourceFactory dataSourceFor;
+
+  /// Sessão devolvida por [AdminAuthBackend.login]. Sem ela o painel não abre.
+  final AdminSession session;
+
+  /// Usada só para reconstruir o login quando a sessão vence.
+  final AdminAuthBackend auth;
+  final AdminClock now;
 
   @override
   State<AdminHomeShell> createState() => _AdminHomeShellState();
@@ -179,21 +86,66 @@ class AdminHomeShell extends StatefulWidget {
 
 class _AdminHomeShellState extends State<AdminHomeShell> {
   AdminDestination destination = AdminDestination.indicators;
+  Timer? _vencimento;
 
-  Widget _content() => switch (destination) {
+  @override
+  void initState() {
+    super.initState();
+    final restante = widget.session.expiresAt.difference(widget.now());
+    if (restante <= Duration.zero) {
+      // Navegar durante o build não pode: adia para depois do primeiro frame.
+      WidgetsBinding.instance.addPostFrameCallback((_) => _encerrarSeVencida());
+    } else {
+      // O disparo do Timer já é o vencimento: não reconfere o relógio.
+      _vencimento = Timer(restante, _encerrar);
+    }
+  }
+
+  @override
+  void dispose() {
+    _vencimento?.cancel();
+    super.dispose();
+  }
+
+  /// Volta ao login, descartando o painel e a sessão, quando ela venceu.
+  void _encerrarSeVencida() {
+    if (!mounted || widget.now().isBefore(widget.session.expiresAt)) return;
+    _encerrar();
+  }
+
+  void _encerrar() {
+    if (!mounted) return;
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute<void>(
+        builder: (_) => LoginScreen(
+          auth: widget.auth,
+          dataSourceFor: widget.dataSourceFor,
+          aviso: 'Sessão encerrada. Entre novamente.',
+        ),
+      ),
+      (_) => false,
+    );
+  }
+
+  Widget _content() => _SessaoVencida(aoVencer: _encerrar, child: _telaAtual());
+
+  Widget _telaAtual() => switch (destination) {
         AdminDestination.indicators => IndicatorsScreen(dataSource: widget.dataSource),
         AdminDestination.microAreas => MicroAreasScreen(dataSource: widget.dataSource),
         AdminDestination.alerts => AlertsScreen(dataSource: widget.dataSource),
         AdminDestination.auditLog => AuditLogScreen(dataSource: widget.dataSource),
       };
 
-  void _select(int index) => setState(() => destination = AdminDestination.values[index]);
+  void _select(int index) {
+    setState(() => destination = AdminDestination.values[index]);
+    _encerrarSeVencida();
+  }
 
   @override
   Widget build(BuildContext context) => LayoutBuilder(
         builder: (context, constraints) {
           final content = _content();
-          final header = _Header('Backoffice • admin.dev', 'Painel administrativo', height: adminHeaderHeight(context));
+          final header = AdminHeader('Backoffice • ${adminRoleLabel(widget.session.role)}', 'Painel administrativo', height: adminHeaderHeight(context));
           // Backoffice é desktop-first (spec/PRD_system.md §2.1): NavigationRail
           // acima de AdminBreakpoints.rail, NavigationBar abaixo — mesmo
           // ThemeData nos dois.
@@ -248,6 +200,15 @@ class _AdminHomeShellState extends State<AdminHomeShell> {
       );
 }
 
+/// Rótulo do papel para o cabeçalho. Valor desconhecido não quebra a tela nem
+/// aparece cru: o token só chega aqui com papel de staff, mas o cabeçalho não
+/// deve depender disso.
+String adminRoleLabel(String role) => switch (role) {
+      'admin' => 'Administrador',
+      'coordinator' => 'Coordenador',
+      _ => 'Equipe',
+    };
+
 String riskLabel(RiskLevel level) => switch (level) {
       RiskLevel.red => 'Vermelho',
       RiskLevel.yellow => 'Amarelo',
@@ -287,27 +248,55 @@ String statusLabel(AlertStatus status) => switch (status) {
 /// dados realmente vazios — escondendo uma falha de rede/backend como se
 /// não houvesse nada para mostrar (achado da revisão do Copilot no PR).
 class _AsyncError extends StatelessWidget {
-  const _AsyncError({required this.message, required this.onRetry});
+  const _AsyncError({required this.error, required this.fallback, required this.onRetry});
 
-  final String message;
+  /// O que o `FutureBuilder` capturou. [AdminDataFailure] traz o texto próprio
+  /// da falha; [AdminSessionExpired] leva ao login em vez de oferecer retry.
+  final Object? error;
+
+  /// Texto da tela quando a falha não traz mensagem própria.
+  final String fallback;
   final VoidCallback onRetry;
 
   @override
-  Widget build(BuildContext context) => Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(Icons.cloud_off_outlined, size: 32, color: Colors.white70),
-              const SizedBox(height: 12),
-              Text(message, textAlign: TextAlign.center),
-              const SizedBox(height: 16),
-              OutlinedButton.icon(onPressed: onRetry, icon: const Icon(Icons.refresh), label: const Text('Tentar novamente')),
-            ],
-          ),
+  Widget build(BuildContext context) {
+    if (error is AdminSessionExpired) {
+      // Navegar durante o build não pode: adia para depois do frame.
+      final aoVencer = _SessaoVencida.maybeOf(context);
+      WidgetsBinding.instance.addPostFrameCallback((_) => aoVencer?.call());
+      return const Center(child: CircularProgressIndicator());
+    }
+    final message = error is AdminDataFailure ? (error! as AdminDataFailure).message : fallback;
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.cloud_off_outlined, size: 32, color: Colors.white70),
+            const SizedBox(height: 12),
+            Text(message, textAlign: TextAlign.center),
+            const SizedBox(height: 16),
+            OutlinedButton.icon(onPressed: onRetry, icon: const Icon(Icons.refresh), label: const Text('Tentar novamente')),
+          ],
         ),
-      );
+      ),
+    );
+  }
+}
+
+/// Entrega às telas a ação de encerrar a sessão vencida (volta ao login), sem
+/// passar um callback por cada construtor.
+class _SessaoVencida extends InheritedWidget {
+  const _SessaoVencida({required this.aoVencer, required super.child});
+
+  final VoidCallback aoVencer;
+
+  static VoidCallback? maybeOf(BuildContext context) =>
+      context.getInheritedWidgetOfExactType<_SessaoVencida>()?.aoVencer;
+
+  @override
+  bool updateShouldNotify(_SessaoVencida old) => false;
 }
 
 class IndicatorsScreen extends StatefulWidget {
@@ -331,7 +320,7 @@ class _IndicatorsScreenState extends State<IndicatorsScreen> {
         future: _future,
         builder: (context, snapshot) {
           if (snapshot.hasError) {
-            return _AsyncError(message: 'Não foi possível carregar os indicadores.', onRetry: _retry);
+            return _AsyncError(error: snapshot.error, fallback: 'Não foi possível carregar os indicadores.', onRetry: _retry);
           }
           if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
           final data = snapshot.data!;
@@ -374,7 +363,7 @@ class _IndicatorsScreenState extends State<IndicatorsScreen> {
             const SizedBox(height: 8),
             _InfoRow('Abertos (pendentes)', '${data.openRedAlerts}'),
             _InfoRow('Reconhecidos', '${data.acknowledgedRedAlerts}'),
-            _InfoRow('TMRAV (tempo médio de resposta)', '${data.tmravSeconds}s'),
+            _InfoRow('TMRAV (tempo médio de resposta)', data.tmravSeconds == null ? '—' : '${data.tmravSeconds}s'),
           ]);
         },
       );
@@ -437,7 +426,7 @@ class _MicroAreasScreenState extends State<MicroAreasScreen> {
         future: _future,
         builder: (context, snapshot) {
           if (snapshot.hasError) {
-            return _AsyncError(message: 'Não foi possível carregar as microáreas.', onRetry: _retry);
+            return _AsyncError(error: snapshot.error, fallback: 'Não foi possível carregar as microáreas.', onRetry: _retry);
           }
           if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
           final areas = snapshot.data!;
@@ -488,7 +477,8 @@ class _AlertsScreenState extends State<AlertsScreen> {
         builder: (context, accessSnapshot) {
           if (accessSnapshot.hasError) {
             return _AsyncError(
-              message: 'Não foi possível registrar o acesso a esta tela.',
+              error: accessSnapshot.error,
+              fallback: 'Não foi possível registrar o acesso a esta tela.',
               onRetry: () => setState(() {
                 _accessRecorded = widget.dataSource.recordAccess(actionType: 'view', resourceType: 'alerts');
               }),
@@ -523,7 +513,7 @@ class _AlertsList extends StatelessWidget {
   /// no lugar do mock) devolveria alertas para um valor que não existe mais
   /// como opção selecionável (achado da revisão do PR).
   Future<({List<AlertSummary> alerts, List<MicroAreaSummary> microAreas})> _load() async {
-    final alerts = await dataSource.fetchAlerts(microAreaName: microAreaFilter, status: statusFilter);
+    final alerts = await dataSource.fetchAlerts(microAreaId: microAreaFilter, status: statusFilter);
     final microAreas = await dataSource.fetchMicroAreas();
     return (alerts: alerts, microAreas: microAreas);
   }
@@ -533,7 +523,7 @@ class _AlertsList extends StatelessWidget {
         future: _load(),
         builder: (context, snapshot) {
           if (snapshot.hasError) {
-            return _AsyncError(message: 'Não foi possível carregar os alertas.', onRetry: () => onFilterChanged(microAreaFilter, statusFilter));
+            return _AsyncError(error: snapshot.error, fallback: 'Não foi possível carregar os alertas.', onRetry: () => onFilterChanged(microAreaFilter, statusFilter));
           }
           final alerts = snapshot.data?.alerts ?? const [];
           final microAreas = snapshot.data?.microAreas ?? const [];
@@ -557,7 +547,7 @@ class _AlertsList extends StatelessWidget {
                       items: [
                         const DropdownMenuItem(value: null, child: Text('Todas')),
                         for (final area in microAreas)
-                          DropdownMenuItem(value: area.name, child: Text(area.name, overflow: TextOverflow.ellipsis)),
+                          DropdownMenuItem(value: area.id, child: Text(area.name, overflow: TextOverflow.ellipsis)),
                       ],
                       onChanged: (value) => onFilterChanged(value, statusFilter),
                     ),
@@ -654,7 +644,8 @@ class _AuditLogScreenState extends State<AuditLogScreen> {
         builder: (context, recordSnapshot) {
           if (recordSnapshot.hasError) {
             return _AsyncError(
-              message: 'Não foi possível registrar o acesso a esta tela.',
+              error: recordSnapshot.error,
+              fallback: 'Não foi possível registrar o acesso a esta tela.',
               onRetry: () => setState(() {
                 _selfAuditRecorded = widget.dataSource.recordAccess(actionType: 'view', resourceType: 'audit_logs');
               }),
@@ -667,7 +658,7 @@ class _AuditLogScreenState extends State<AuditLogScreen> {
             future: widget.dataSource.fetchAuditLogs(),
             builder: (context, snapshot) {
               if (snapshot.hasError) {
-                return _AsyncError(message: 'Não foi possível carregar os logs de auditoria.', onRetry: () => setState(() {}));
+                return _AsyncError(error: snapshot.error, fallback: 'Não foi possível carregar os logs de auditoria.', onRetry: () => setState(() {}));
               }
               final entries = snapshot.data ?? const [];
               return ListView(
@@ -785,58 +776,3 @@ class _InfoRow extends StatelessWidget {
       );
 }
 
-class _Header extends StatelessWidget implements PreferredSizeWidget {
-  const _Header(this.eyebrow, this.title, {required this.height});
-
-  final String eyebrow;
-  final String title;
-
-  /// Calculada por quem monta o Scaffold, via [adminHeaderHeight] — ver o
-  /// porquê lá: `preferredSize` não tem acesso ao `BuildContext`.
-  final double height;
-
-  @override
-  Size get preferredSize => Size.fromHeight(height);
-
-  @override
-  Widget build(BuildContext context) {
-    // O selo é informação, não controle. Em tela estreita ele disputa espaço
-    // com duas linhas de título num AppBar, então vira ícone — mantendo o
-    // rótulo para leitores de tela, que é o que de fato carrega o significado.
-    final estreito = MediaQuery.sizeOf(context).width < AdminBreakpoints.stacked;
-    return AppBar(
-      title: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            eyebrow.toUpperCase(),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontSize: 10, color: AdminColors.accentOnSurface, fontWeight: FontWeight.bold),
-          ),
-          Text(
-            title,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-          ),
-        ],
-      ),
-      actions: [
-        Padding(
-          padding: const EdgeInsets.only(right: 12),
-          child: estreito
-              ? Tooltip(
-                  message: 'Acesso auditado',
-                  child: Semantics(
-                    label: 'Acesso auditado',
-                    child: const Icon(key: Key('admin_audit_badge'), Icons.verified_user_outlined),
-                  ),
-                )
-              : const Chip(key: Key('admin_audit_badge'), label: Text('Acesso auditado')),
-        ),
-      ],
-    );
-  }
-}

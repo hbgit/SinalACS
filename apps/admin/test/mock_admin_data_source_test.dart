@@ -19,7 +19,7 @@ void main() {
     final dataSource = MockAdminDataSource();
 
     final filtered = await dataSource.fetchAlerts(
-      microAreaName: 'Microárea 07 — Centro',
+      microAreaId: 'ma-07',
       status: AlertStatus.acknowledged,
     );
 

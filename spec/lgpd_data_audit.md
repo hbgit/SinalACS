@@ -130,6 +130,14 @@ A tabela abaixo consolida o mapeamento exaustivo de dados persistidos pelo backe
 | | `ubsId` | `uuid` | Pseudonimizado / Organizacional | Chave estrangeira (`ubs.id`) | Lotação institucional do profissional de saúde. |
 | | `active` | `boolean` | Metadado Operacional | Booleano | Status funcional de permissão de acesso ao sistema. |
 | | `lastSyncAt` | `timestamp without time zone` | Metadado Técnico | Timestamp | Última sincronização do app do ACS com o backend. |
+| **staff_accounts** | `id` | `uuid` | Pseudonimizado | UUID (vínculo com `users.id`) | Identificador de cadastro da conta de staff do backoffice (coordenador ou administrador); o papel mora em `users.role`, a credencial em `user_credentials`. |
+| | `enrollmentId` | `text` | Identificável (Funcional) — baixa sensibilidade | Matrícula funcional em texto claro, índice único | Identificador funcional do staff, usado no login do backoffice; mesma ressalva de correlação de `acs.enrollmentId`. |
+| | `active` | `boolean` | Metadado Operacional | Booleano | Status funcional de permissão de acesso ao backoffice. |
+| | `ubsId` | `uuid` | Pseudonimizado / Organizacional | UUID, nulo para administrador | UBS do coordenador (issue #40): delimita o que ele lê no backoffice. Coordenador sem UBS é recusado. |
+| | `activationCodeHash` | `text` | Segredo Derivado (Alta sensibilidade) | SHA-256 do código de ativação (130 bits), nunca o código | Ativação da MFA do staff (issue #48). Apagado quando a MFA é ativada; o código em claro só existe na saída da CLI do operador. |
+| | `activationCodeExpiresAt` | `timestamp` | Metadado Operacional | UTC, 24 h por padrão | Validade do código de ativação; apagado junto com o hash. |
+| | `activationCodeIssuedBy` | `text` | Identificável (Funcional) — baixa sensibilidade | Texto livre informado ao emitir (`--issued-by`) | Quem emitiu o último código; fica depois do consumo, como registro de emissão (não está em `audit_logs`). |
+| | `activationCodeIssuedAt` | `timestamp` | Metadado Operacional | UTC | Quando o último código foi emitido; fica depois do consumo. |
 | **micro_areas** | `id` | `uuid` | Pseudonimizado / Territorial | UUID v4 (`gen_random_uuid()`) | Identificador do território sanitário de cobertura. |
 | | `name` | `text` | Dado Institucional / Organizacional | String | Nome ou código descritivo da microárea na UBS. |
 | | `ubsId` | `uuid` | Pseudonimizado / Organizacional | Chave estrangeira (`ubs.id`) | Vinculação com a Unidade Básica de Saúde gestora. |

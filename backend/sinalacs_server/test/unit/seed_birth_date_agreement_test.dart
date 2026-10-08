@@ -37,6 +37,11 @@ const _usersForaDoSeedDeCpf = <String, String>{
       'faltar: `findByCpfHash` não filtra papel e `verifyOtp` crava '
       '`role: patient`, então o login passwordless emitiria um token de '
       'PACIENTE com o id e a microárea do ACS',
+  '00000000-0000-4000-8000-000000000090':
+      'o admin do backoffice (ADM-001) entra por matrícula, senha e TOTP '
+      '(`auth.loginStaff`); o `cpfHash` dele é o literal `development-admin`, '
+      'e um CPF real aqui faria o login passwordless emitir token de PACIENTE '
+      'com o id do admin',
 };
 
 void main() {

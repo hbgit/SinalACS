@@ -37,12 +37,14 @@ jobs:
         run: |
           python3 -c 'import yaml' 2>/dev/null || { sudo apt-get update && sudo apt-get install -y python3-yaml; }
           ./scripts/qa/ci_invariants.sh
+          ./scripts/qa/ci_invariants_test.sh
       - name: Testes dos scripts de CI
         run: |
           ./scripts/ci/decode_secret_file_test.sh
           ./scripts/qa/ci_push_e2e_test.sh
           ./scripts/qa/ci_invariants_fcm_test.sh
           ./scripts/dev/sync_dev_ca_test.sh
+          ./scripts/dev/bootstrap_env_test.sh
           ./scripts/dev/run_acs_captura_test.sh
   serverpod-backend:
     runs-on: ubuntu-24.04
@@ -184,6 +186,10 @@ jobs:
         with:
           flutter-version: '3.44.8'
       - run: flutter pub get
+      # Mesmo motivo do job patient-app: assets/certs/ é gitignored e vem do
+      # scripts/dev/sync_dev_ca.sh, que precisa da stack de pé.
+      - name: Cria o diretório assets/certs/ que o pubspec declara
+        run: mkdir -p assets/certs
       - run: flutter analyze
       - run: flutter test
 
@@ -379,4 +385,7 @@ jobs:
           key: gradle-admin-${{ hashFiles('apps/admin/android/**/*.gradle.kts', 'apps/admin/android/gradle/wrapper/gradle-wrapper.properties') }}
           restore-keys: gradle-admin-
       - run: flutter pub get
+      # Sem a CA o APK sobe fail-closed (só raízes do sistema); aqui só interessa compilar.
+      - name: Cria o diretório assets/certs/ que o pubspec declara
+        run: mkdir -p assets/certs
       - run: flutter build apk --debug

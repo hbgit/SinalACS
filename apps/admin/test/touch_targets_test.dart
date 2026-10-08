@@ -4,6 +4,7 @@ import 'package:sinalacs_admin/app/app.dart';
 import 'package:sinalacs_admin/core/data/mock_admin_data_source.dart';
 
 import 'support/failing_admin_data_source.dart';
+import 'support/fake_admin_auth.dart';
 import 'support/layout_harness.dart';
 
 /// WCAG 2.5.5, na régua de `spec/ux_accessibility_assessment.md`: 48dp.
@@ -30,7 +31,7 @@ void main() {
     redimensionar(tester, const Size(360, 800));
     addTearDown(tester.view.reset);
 
-    await tester.pumpWidget(SinalAdminApp(devLoginEnabled: true));
+    await tester.pumpWidget(SinalAdminApp(auth: FakeAdminAuth()));
     await tester.pumpAndSettle();
 
     final botao = tester.getSize(find.byKey(const Key('login_button')));

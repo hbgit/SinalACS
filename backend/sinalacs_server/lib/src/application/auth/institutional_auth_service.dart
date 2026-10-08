@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:sinalacs_server/src/application/audit/audit_trail.dart';
 import 'package:sinalacs_server/src/application/auth/development_auth_service.dart';
 import 'package:sinalacs_server/src/application/auth/password_hasher.dart';
+import 'package:sinalacs_server/src/application/auth/staff_activation_code.dart';
 import 'package:sinalacs_server/src/application/auth/totp.dart';
 import 'package:sinalacs_server/src/application/auth/totp_secret_vault.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
@@ -38,6 +39,36 @@ abstract interface class TotpStore {
   Future<bool> registerStep(String acsId, int step);
 }
 
+/// Código de ativação vigente de uma conta de staff (#48).
+class StaffActivationRecord {
+  const StaffActivationRecord({required this.codeHash, required this.expiresAt});
+
+  final String codeHash;
+  final DateTime expiresAt;
+}
+
+/// Código de ativação de uso único da MFA do staff. Interface à parte, como
+/// [TotpStore]: só a audiência `staff` a usa.
+abstract interface class StaffActivationStore {
+  /// Grava o hash do código e a validade, substituindo qualquer código anterior.
+  Future<void> issue(
+    String staffId, {
+    required String codeHash,
+    required DateTime expiresAt,
+    required String issuedBy,
+    required DateTime at,
+  });
+
+  /// Código vigente da conta, ou `null` (nunca emitido ou já consumido).
+  Future<StaffActivationRecord?> find(String staffId);
+
+  /// Apaga hash e validade; `issuedBy`/`issuedAt` ficam como último registro.
+  Future<void> clear(String staffId);
+}
+
+/// Quem está entrando: o ACS (com território) ou o staff do backoffice.
+enum CredentialAudience { acs, staff }
+
 /// O que o login precisa saber sobre uma credencial, sem `application/`
 /// conhecer o ORM.
 class AcsCredentialRecord {
@@ -45,6 +76,7 @@ class AcsCredentialRecord {
     required this.acsId,
     required this.microAreaId,
     required this.active,
+    this.role = UserRole.acs,
     required this.digest,
     required this.failedAttempts,
     required this.lockedUntil,
@@ -59,6 +91,12 @@ class AcsCredentialRecord {
   final String? microAreaId;
 
   final bool active;
+
+  /// `users.role` da conta. Na audiência `staff` decide quem entra
+  /// (`coordinator` ou `admin`) e é o papel que vai no token; na audiência
+  /// `acs` o store já só devolve linha de papel `acs`.
+  final UserRole role;
+
   final PasswordDigest digest;
   final int failedAttempts;
   final DateTime? lockedUntil;
@@ -133,8 +171,10 @@ class InstitutionalAuthService {
     required this.hasher,
     required this.audit,
     this.totpStore,
+    this.activationStore,
     this.vault,
     this.requireMfa = false,
+    this.audience = CredentialAudience.acs,
     Random? random,
   }) : _random = random ?? Random.secure();
 
@@ -146,11 +186,21 @@ class InstitutionalAuthService {
   /// ativá-la); a falta dele com MFA ativa é erro de montagem ([StateError]).
   final TotpStore? totpStore;
 
+  /// Código de ativação de uso único da MFA do staff (#48). Obrigatório na
+  /// audiência `staff`; ignorado na `acs`.
+  final StaffActivationStore? activationStore;
+
   /// Cofre do segredo TOTP. Mesma regra de [totpStore].
   final TotpSecretVault? vault;
 
   /// `REQUIRE_ACS_MFA`: ACS sem MFA ativa não entra; precisa ativá-la antes.
   final bool requireMfa;
+
+  /// Para quem este serviço abre sessão. `staff` (backoffice) não tem
+  /// território e tem MFA sempre obrigatória, independente de [requireMfa].
+  final CredentialAudience audience;
+
+  bool get _mfaObrigatoria => audience == CredentialAudience.staff || requireMfa;
 
   /// Sorteia o segredo TOTP. `Random.secure()` fora dos testes.
   final Random _random;
@@ -179,6 +229,8 @@ class InstitutionalAuthService {
   static const _invalidCredentials = 'Matrícula ou senha inválidos.';
 
   static const _invalidCode = 'Código de verificação inválido.';
+
+  static const _invalidActivation = 'Código de ativação inválido ou expirado.';
 
   /// Só chega a quem provou conhecer a senha (a ordem do `login` garante isso).
   static const _lockMessage =
@@ -223,7 +275,7 @@ class InstitutionalAuthService {
         await _recordAudit(record.acsId, 'denied_totp_replay');
         throw AuthenticationFailedException(message: _invalidCode);
       }
-    } else if (requireMfa) {
+    } else if (_mfaObrigatoria) {
       await _recordAudit(record.acsId, 'denied_mfa_not_enrolled');
       throw MfaEnrollmentRequiredException(
         message: 'Ative a verificação em duas etapas antes de entrar.',
@@ -233,11 +285,16 @@ class InstitutionalAuthService {
     await store.registerSuccessfulLogin(record.acsId, at);
     await _recordAudit(record.acsId, 'granted');
 
+    final staff = audience == CredentialAudience.staff;
     return AuthenticatedUser(
       id: record.acsId,
-      role: UserRole.acs,
-      // `_authenticatePassword` só devolve linha com território.
-      microAreaId: record.microAreaId!,
+      // `_authenticatePassword` só devolve staff com papel `coordinator` ou
+      // `admin`.
+      role: staff ? record.role : UserRole.acs,
+      // Staff não tem território: a sessão dele nunca carrega microárea, nem
+      // se a linha de `users` tiver uma. Para o ACS, `_authenticatePassword`
+      // só devolve linha com território.
+      microAreaId: staff ? null : record.microAreaId!,
       deviceId: deviceId ?? deviceIdAbsent,
     );
   }
@@ -248,6 +305,7 @@ class InstitutionalAuthService {
   Future<TotpEnrollmentStart> beginTotpEnrollment({
     required String matricula,
     required String password,
+    String? activationCode,
     DateTime? now,
   }) async {
     final at = (now ?? DateTime.now()).toUtc();
@@ -257,6 +315,7 @@ class InstitutionalAuthService {
         message: 'A verificação em duas etapas já está ativa. Peça a redefinição à coordenação.',
       );
     }
+    await _exigirCodigoDeAtivacao(record, activationCode, at);
     final bytes = Uint8List.fromList(List<int>.generate(20, (_) => _random.nextInt(256)));
     if (!await _totpStore().saveSecret(record.acsId, await _vault().seal(bytes), at)) {
       // Uma confirmação concorrente ativou a MFA entre a leitura e a escrita.
@@ -278,6 +337,7 @@ class InstitutionalAuthService {
     required String matricula,
     required String password,
     required String code,
+    String? activationCode,
     DateTime? now,
   }) async {
     final at = (now ?? DateTime.now()).toUtc();
@@ -286,6 +346,7 @@ class InstitutionalAuthService {
     if (totp == null || totp.enabled) {
       throw AuthenticationFailedException(message: 'Não há ativação pendente para esta matrícula.');
     }
+    await _exigirCodigoDeAtivacao(record, activationCode, at);
     final passo = Totp.verify(await _vault().open(totp.sealed), code, at);
     if (passo == null) {
       await _registrarFalha(record, at);
@@ -297,7 +358,29 @@ class InstitutionalAuthService {
       await _recordAudit(record.acsId, 'denied_totp_enrollment_race');
       throw AuthenticationFailedException(message: 'Não há ativação pendente para esta matrícula.');
     }
+    await activationStore?.clear(record.acsId);
     await _recordAudit(record.acsId, 'mfa_enabled');
+  }
+
+  /// Só a audiência staff exige o código. Erro conta como falha de login e vira
+  /// auditoria; o texto é um só para não dizer se o código existiu, expirou ou
+  /// já foi usado.
+  Future<void> _exigirCodigoDeAtivacao(
+    AcsCredentialRecord record,
+    String? code,
+    DateTime at,
+  ) async {
+    if (audience != CredentialAudience.staff) return;
+    final store = activationStore ?? (throw StateError('staff sem store de código de ativação'));
+    final vigente = await store.find(record.acsId);
+    final ok = vigente != null &&
+        code != null &&
+        at.isBefore(vigente.expiresAt) &&
+        StaffActivationCode.matches(code, vigente.codeHash);
+    if (ok) return;
+    await _registrarFalha(record, at);
+    await _recordAudit(record.acsId, 'denied_staff_activation_code');
+    throw AuthenticationFailedException(message: _invalidActivation);
   }
 
   TotpSecretVault _vault() => vault ?? (throw StateError('MFA ativa sem cofre configurado'));
@@ -307,7 +390,8 @@ class InstitutionalAuthService {
 
   /// Tudo o que o login decide antes de abrir a sessão: entrada em branco,
   /// matrícula inexistente, senha errada (com a contagem e o bloqueio),
-  /// bloqueio ativo, acesso inativo e ausência de território. Devolve a linha
+  /// bloqueio ativo, acesso inativo, papel que não é de staff (audiência
+  /// `staff`) e ausência de território (audiência `acs`). Devolve a linha
   /// só quando a senha confere e nada disso recusa; nos outros casos lança
   /// exatamente o que o `login` sempre lançou. A ativação da MFA reaproveita
   /// este caminho: provar a senha ali custa o mesmo que no login.
@@ -408,12 +492,26 @@ class InstitutionalAuthService {
       throw AuthenticationFailedException(message: 'Este acesso está inativo.');
     }
 
-    final microAreaId = record.microAreaId;
-    if (microAreaId == null) {
-      await _recordAudit(record.acsId, 'denied_no_territory');
-      throw AuthenticationFailedException(
-        message: 'Este acesso não está vinculado a uma microárea.',
-      );
+    // Só o coordenador e o administrador entram no backoffice. A recusa usa a
+    // mensagem genérica de propósito, mesmo com a senha certa: dizer "papel
+    // errado" confirmaria a quem tem a senha de um ACS que aquela matrícula
+    // existe numa tabela que não é a dele. A trilha guarda o motivo real.
+    if (audience == CredentialAudience.staff &&
+        record.role != UserRole.coordinator &&
+        record.role != UserRole.admin) {
+      await _recordAudit(record.acsId, 'denied_role');
+      throw AuthenticationFailedException(message: _invalidCredentials);
+    }
+
+    // Território é exigência do ACS (INV-01); o staff não tem microárea.
+    if (audience == CredentialAudience.acs) {
+      final microAreaId = record.microAreaId;
+      if (microAreaId == null) {
+        await _recordAudit(record.acsId, 'denied_no_territory');
+        throw AuthenticationFailedException(
+          message: 'Este acesso não está vinculado a uma microárea.',
+        );
+      }
     }
 
     return record;
@@ -434,13 +532,19 @@ class InstitutionalAuthService {
     );
   }
 
+  /// Distingue a audiência na trilha: revisar a atividade do backoffice não
+  /// pode exigir juntar `userId` com `staff_accounts` à mão. Vale para todo
+  /// evento deste serviço (login e ativação da MFA); o ACS continua `session`.
+  String get _recursoDeAuditoria =>
+      audience == CredentialAudience.staff ? 'staff_session' : 'session';
+
   /// Best-effort, como toda auditoria deste repositório: uma trilha fora do ar
   /// não pode impedir um ACS de entrar.
   Future<void> _recordAudit(String userId, String result) => audit.recordSafely(
     AuditEvent(
       userId: userId,
       actionType: 'login',
-      resourceType: 'session',
+      resourceType: _recursoDeAuditoria,
       result: result,
     ),
   );

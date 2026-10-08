@@ -1,0 +1,12 @@
+### Indicadores do painel do backoffice (issue #40). Contagens por risco e o
+### TMRAV, no escopo do chamador (sistema inteiro para o administrador, a UBS
+### para o coordenador). `tmravSeconds` é nulo quando não há alerta vermelho
+### reconhecido na janela: sem amostra não há média, e zero seria mentira.
+class: AdminIndicators
+fields:
+  red: int
+  yellow: int
+  green: int
+  openRedAlerts: int
+  acknowledgedRedAlerts: int
+  tmravSeconds: int?

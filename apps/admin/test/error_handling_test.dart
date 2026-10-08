@@ -1,14 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sinalacs_admin/app/app.dart';
+import 'package:sinalacs_admin/core/data/admin_data_source.dart';
 import 'package:sinalacs_admin/core/data/mock_admin_data_source.dart';
 
 import 'support/failing_admin_data_source.dart';
+import 'support/fake_admin_auth.dart';
+import 'support/layout_harness.dart';
 
 Future<void> _loginTo(WidgetTester tester, FailingAdminDataSource dataSource, String destination) async {
-  await tester.pumpWidget(SinalAdminApp(dataSource: dataSource));
-  await tester.tap(find.byKey(const Key('login_button')));
-  await tester.pumpAndSettle();
+  await tester.pumpWidget(SinalAdminApp(dataSource: dataSource, auth: FakeAdminAuth()));
+  await entrarComCredenciais(tester);
   if (destination != 'Indicadores') {
     await tester.tap(find.text(destination).last);
     await tester.pumpAndSettle();
@@ -16,6 +18,54 @@ Future<void> _loginTo(WidgetTester tester, FailingAdminDataSource dataSource, St
 }
 
 void main() {
+  group('falhas do backend (#41): texto próprio e sessão vencida', () {
+    testWidgets('AdminDataFailure: a tela mostra a mensagem da falha e o retry recupera', (tester) async {
+      final dataSource = FailingAdminDataSource(inner: MockAdminDataSource())
+        ..nextError = const AdminDataFailure('Não foi possível conectar ao servidor.');
+      await _loginTo(tester, dataSource, 'Indicadores');
+
+      expect(find.text('Não foi possível conectar ao servidor.'), findsOneWidget);
+      expect(find.text('Não foi possível carregar os indicadores.'), findsNothing);
+
+      await tester.tap(find.text('Tentar novamente'));
+      await tester.pumpAndSettle();
+      expect(find.text('Painel de Indicadores'), findsOneWidget);
+    });
+
+    testWidgets('segunda falha seguida continua mostrando o erro, sem spinner', (tester) async {
+      final dataSource = FailingAdminDataSource(inner: MockAdminDataSource())
+        ..nextError = const AdminDataFailure('Acesso restrito ao backoffice.');
+      await _loginTo(tester, dataSource, 'Indicadores');
+      dataSource.nextError = const AdminDataFailure('Acesso restrito ao backoffice.');
+
+      await tester.tap(find.text('Tentar novamente'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Acesso restrito ao backoffice.'), findsOneWidget);
+      expect(find.byType(CircularProgressIndicator), findsNothing);
+    });
+
+    testWidgets('AdminSessionExpired: volta ao login com o aviso, sem oferecer retry', (tester) async {
+      final dataSource = FailingAdminDataSource(inner: MockAdminDataSource())
+        ..nextError = const AdminSessionExpired();
+      await _loginTo(tester, dataSource, 'Indicadores');
+
+      expect(find.text('Sessão encerrada. Entre novamente.'), findsOneWidget);
+      expect(find.text('Tentar novamente'), findsNothing);
+    });
+
+    testWidgets('AdminSessionExpired na auditoria também volta ao login', (tester) async {
+      final dataSource = FailingAdminDataSource(inner: MockAdminDataSource());
+      await _loginTo(tester, dataSource, 'Indicadores');
+      dataSource.nextError = const AdminSessionExpired();
+
+      await tester.tap(find.text('Auditoria').last);
+      await tester.pumpAndSettle();
+
+      expect(find.text('Sessão encerrada. Entre novamente.'), findsOneWidget);
+    });
+  });
+
   group('erro e retry, por tela (achado da revisão do PR: erro não pode parecer vazio ou travar em spinner)', () {
     testWidgets('Indicadores: mostra erro (não spinner infinito) e retry recupera', (tester) async {
       final dataSource = FailingAdminDataSource(inner: MockAdminDataSource())..failNextIndicators = true;

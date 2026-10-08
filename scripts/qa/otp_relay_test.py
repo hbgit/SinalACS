@@ -47,6 +47,17 @@ class AcsTest(unittest.TestCase):
         self.assertEqual(acs_do_manifesto(f.name, "acsB"), {"matricula": "E2E-2", "senha": "b"})
         self.assertEqual(acs_do_manifesto(f.name), {"matricula": "E2E-1", "senha": "a"})
 
+    def test_staff_devolve_tambem_o_codigo_de_ativacao(self):
+        import json, tempfile
+        from otp_relay import acs_do_manifesto
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+            json.dump({"staff": {"matricula": "E2E-ADM-1", "password": "u", "activationCode": "ABCD-EFGH"},
+                       "acs": {"matricula": "E2E-1", "password": "a", "activationCode": "NAO-DEVE-SAIR-NO-ACS"}}, f)
+        self.assertEqual(acs_do_manifesto(f.name, "staff"),
+                         {"matricula": "E2E-ADM-1", "senha": "u", "activationCode": "ABCD-EFGH"})
+        # só o staff tem código de ativação: a resposta do ACS não muda de formato
+        self.assertEqual(acs_do_manifesto(f.name, "acs"), {"matricula": "E2E-1", "senha": "a"})
+
     def test_sem_arquivo_nao_serve_nada(self):
         from otp_relay import acs_do_manifesto
         self.assertIsNone(acs_do_manifesto(None))
@@ -68,12 +79,14 @@ class AcsEntregaUnicaTest(unittest.TestCase):
         self.otp_relay = otp_relay
         arquivo = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False)
         json.dump({"acs": {"matricula": "E2E-1", "password": "s"},
-                   "acsB": {"matricula": "E2E-2", "password": "t"}}, arquivo)
+                   "acsB": {"matricula": "E2E-2", "password": "t"},
+                   "staff": {"matricula": "E2E-ADM-1", "password": "u"}}, arquivo)
         arquivo.close()
         self.caminho = arquivo.name
         os.environ["E2E_FIXTURES_FILE"] = self.caminho
         otp_relay.Handler.acs_entregue = False
         otp_relay.Handler.acs_b_entregue = False
+        otp_relay.Handler.admin_entregue = False
         self.servidor = HTTPServer(("127.0.0.1", 0), otp_relay.Handler)
         otp_relay.Handler.porta = self.servidor.server_address[1]
         threading.Thread(target=self.servidor.serve_forever, daemon=True).start()
@@ -88,6 +101,7 @@ class AcsEntregaUnicaTest(unittest.TestCase):
         self.otp_relay.Handler.porta = 8765
         self.otp_relay.Handler.acs_entregue = False
         self.otp_relay.Handler.acs_b_entregue = False
+        self.otp_relay.Handler.admin_entregue = False
 
     def _get(self, rota="/acs"):
         import urllib.error
@@ -108,6 +122,17 @@ class AcsEntregaUnicaTest(unittest.TestCase):
         self.assertEqual(self._get("/acs-b"), 200)
         self.assertEqual(self._get("/acs-b"), 404)
         self.assertEqual(self._get(), 200)
+
+    def test_admin_serve_uma_vez_e_independe_dos_acs(self):
+        self.assertEqual(self._get("/admin"), 200)
+        self.assertEqual(self._get("/admin"), 404)
+        self.assertEqual(self._get("/acs"), 200)
+
+    def test_admin_sem_bloco_staff_no_manifesto_e_404(self):
+        import json
+        with open(self.caminho, "w") as f:
+            json.dump({"acs": {"matricula": "E2E-1", "password": "s"}}, f)
+        self.assertEqual(self._get("/admin"), 404)
 
 
 if __name__ == "__main__":

@@ -5,14 +5,23 @@ publish_to: 'none'
 version: 1.0.0
 
 environment:
-  sdk: '>=3.3.0 <4.0.0'
+  # ^3.8.0 é exigido por sinalacs_client; era '>=3.3.0 <4.0.0'.
+  sdk: '^3.8.0'
 
 dependencies:
   flutter:
     sdk: flutter
-
+  # Cliente RPC tipado (auth.loginStaff). Os dados seguem no mock (#41).
+  sinalacs_client:
+    path: ../../backend/sinalacs_client
+  # Mesma versão que sinalacs_client declara; divergir quebra a resolução.
+  serverpod_client: 3.4.13
+  # QR da ativação do MFA; mesma versão do app do ACS.
+  qr_flutter: ^4.1.0
 
 dev_dependencies:
+  # Gerador TOTP do e2e (integration_test/support/totp.dart).
+  crypto: ^3.0.0
   flutter_test:
     sdk: flutter
   integration_test:
@@ -21,3 +30,7 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    # CA do RPC de desenvolvimento, copiada por scripts/dev/sync_dev_ca.sh.
+    # Regenerável e fora do versionamento (como nos outros dois apps).
+    - assets/certs/

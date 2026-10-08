@@ -38,6 +38,7 @@ graphify-out/
 # e uma CA de desenvolvimento gerada por máquina não pode ser versionada.
 apps/acs/assets/certs/
 apps/patient/assets/certs/
+apps/admin/assets/certs/
 .worktrees/
 
 # Estado local do proxy headroom (PID e timestamps), reescrito a cada sessão

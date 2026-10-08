@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sinalacs_admin/app/app.dart';
 import 'package:sinalacs_admin/core/data/admin_data_source.dart';
+import 'support/fake_admin_auth.dart';
+import 'support/layout_harness.dart';
 
 /// Duplo com uma microárea que não existe na antiga lista fixa do dropdown de
 /// filtro (achado da revisão do PR: as opções eram três strings fixas no
@@ -24,7 +26,7 @@ class _CustomAreaDataSource implements AdminDataSource {
       ];
 
   @override
-  Future<List<AlertSummary>> fetchAlerts({String? microAreaName, AlertStatus? status}) async => [
+  Future<List<AlertSummary>> fetchAlerts({String? microAreaId, AlertStatus? status, int limit = 50, int offset = 0}) async => [
         AlertSummary(
           id: 'alert-99',
           patientLabel: 'Paciente #999',
@@ -33,10 +35,10 @@ class _CustomAreaDataSource implements AdminDataSource {
           status: AlertStatus.resolved,
           triggeredAt: DateTime(2026, 9, 15),
         ),
-      ].where((a) => microAreaName == null || a.microAreaName == microAreaName).toList();
+      ].where((a) => microAreaId == null || microAreaId == 'ma-99').toList();
 
   @override
-  Future<List<AuditLogEntry>> fetchAuditLogs() async => const [];
+  Future<List<AuditLogEntry>> fetchAuditLogs({int limit = 50}) async => const [];
 
   @override
   Future<void> recordAccess({required String actionType, required String resourceType}) async {}
@@ -44,9 +46,8 @@ class _CustomAreaDataSource implements AdminDataSource {
 
 void main() {
   testWidgets('opções do filtro de microárea vêm de fetchMicroAreas(), não de uma lista fixa', (tester) async {
-    await tester.pumpWidget(SinalAdminApp(dataSource: _CustomAreaDataSource()));
-    await tester.tap(find.byKey(const Key('login_button')));
-    await tester.pumpAndSettle();
+    await tester.pumpWidget(SinalAdminApp(dataSource: _CustomAreaDataSource(), auth: FakeAdminAuth()));
+    await entrarComCredenciais(tester);
 
     await tester.tap(find.text('Alertas').last);
     await tester.pumpAndSettle();

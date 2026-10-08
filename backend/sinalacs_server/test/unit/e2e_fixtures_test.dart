@@ -33,7 +33,7 @@ void main() {
 
   test('nenhum UUID é do formato fixo do seed de desenvolvimento', () {
     final f = generateE2eFixtures(Random(3));
-    for (final id in [f.ubsId, f.microAreaId, f.otherMicroAreaId, f.acs.id, f.secondAcs.id, ...f.patients.map((p) => p.id)]) {
+    for (final id in [f.ubsId, f.microAreaId, f.otherMicroAreaId, f.acs.id, f.secondAcs.id, f.staff.id, ...f.patients.map((p) => p.id)]) {
       expect(id.startsWith('00000000-0000-4000-8000'), isFalse);
       expect(RegExp(r'^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$').hasMatch(id), isTrue);
     }
@@ -70,6 +70,43 @@ void main() {
     }
     final f = generateE2eFixtures(Random(11));
     expect(f.toJson()['acsB'], f.secondAcs.toJson());
+  });
+
+  test('há um admin do backoffice, distinto dos ACS, com matrícula própria e sem vazar a senha', () {
+    for (var seed = 0; seed < 200; seed++) {
+      final f = generateE2eFixtures(Random(seed));
+      expect({f.staff.id, f.acs.id, f.secondAcs.id}, hasLength(3), reason: 'seed $seed');
+      expect(f.staff.matricula, startsWith('E2E-ADM-'));
+      expect({f.staff.matricula, f.acs.matricula, f.secondAcs.matricula}, hasLength(3));
+      expect({f.staff.password, f.acs.password, f.secondAcs.password}, hasLength(3));
+    }
+    final f = generateE2eFixtures(Random(12));
+    expect(f.toJson()['staff'], f.staff.toJson());
+    expect(E2eFixtures.fromJson(f.toJson()).staff.matricula, f.staff.matricula);
+    expect('$f ${f.staff}'.contains(f.staff.password), isFalse);
+  });
+
+  test('o staff traz um código de ativação (#48) no formato da CLI, novo a cada execução e fora do toString', () {
+    final a = generateE2eFixtures(Random(21)).staff;
+    final b = generateE2eFixtures(Random(22)).staff;
+    expect(a.activationCode, matches(RegExp(r'^([A-Z2-7]{4}-){6}[A-Z2-7]{2}$')));
+    expect(a.activationCode, isNot(b.activationCode));
+    expect(a.toJson()['activationCode'], a.activationCode);
+    expect(E2eStaff.fromJson(a.toJson()).activationCode, a.activationCode);
+    expect('$a'.contains(a.activationCode), isFalse);
+  });
+
+  test('o painel do admin (#40) tem 3 alertas de fixture, com ids v4 distintos e que sobrevivem ao JSON', () {
+    final f = generateE2eFixtures(Random(31));
+    expect(f.adminAlertIds, hasLength(3));
+    expect(f.adminAlertIds.toSet(), hasLength(3));
+    for (final id in f.adminAlertIds) {
+      expect(id.startsWith('00000000-0000-4000-8000'), isFalse);
+      expect(RegExp(r'^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$').hasMatch(id), isTrue);
+    }
+    expect(E2eFixtures.fromJson(f.toJson()).adminAlertIds, f.adminAlertIds);
+    final ids = {f.staff.id, f.acs.id, f.secondAcs.id, ...f.patients.map((p) => p.id), ...f.adminAlertIds};
+    expect(ids, hasLength(3 + f.patients.length + 3), reason: 'nenhum id repetido entre as entidades');
   });
 
   group('guarda do seeder (e2eSeedRefusal)', () {

@@ -622,6 +622,65 @@ Plano: `docs/superpowers/plans/2026-10-02-pendencias-do-acs-flag-secure-ubs-rf08
 - T7: *(fechado em parte em 2026-10-05, ver abaixo)* chaves privadas de cliente em modo 644 em dev; o teste "production sem TLS" só verifica a ausência do erro de certificado; cert/chave ignorados em silêncio se o TLS está desligado.
 - T8: `sync_dev_ca.sh` não confere que `acs-area-12.key` é o par do certificado e deixa `.tmp` se interrompido; doc de `alert_feed.dart` passa de 100 colunas; `buildMqttSecurityContext` ignora certificado sem chave em silêncio.
 
+## Login real do backoffice (issue #39, 2026-10-06)
+
+**Entregue (código e testes hermáticos):** `auth.loginStaff`, `auth.beginStaffTotpEnrollment` e `auth.confirmStaffTotpEnrollment` (MFA sempre obrigatória para o staff, JWT com papel `coordinator`/`admin` e sem microárea, `Authorization.staffRoles`), tabela `staff_accounts` (migração aditiva), `ADM-001` no seed de desenvolvimento (senha `DEV_ADMIN_PASSWORD`), `apps/admin` com login real (`LoginScreen`, `MfaEnrollmentScreen`, `BackendAdminAuth`, host só HTTPS, CA de desenvolvimento como asset) e sem `devLoginEnabled` nem atalho. Detalhes em `backend/CLAUDE.md` e `apps/CLAUDE.md`; telas em `docs/telas-admin.md`.
+
+**Suítes rodadas em 2026-10-06:** `dart test` do backend (646 testes, inclui os de integração contra o `postgres-test`) e `flutter test` do admin (95) verdes; `flutter analyze` do admin sem avisos; `scripts/qa/ci_invariants.sh` ok (9 grupos); `scripts/qa/otp_relay_test.py` ok.
+
+**Prova em aparelho: EXECUTADA em 2026-10-07 (Motorola edge 40 neo, Android 15, serial `0087014315`, não no emulador).** `DEVICE=0087014315 ./scripts/qa/admin_login_e2e.sh` passou 4/4 (senha errada com mensagem genérica; ativação da MFA pela tela; código errado recusado; login com o código do passo seguinte até "Painel de Indicadores") e a conferência do banco de teste deu `TOTP ativado e passo registrado: true|true` e `tentativas falhas zeradas pelo login: 0`. A primeira rodada falhou no primeiro teste (3/4, após 1 min 05 s) e a causa não foi identificada, porque o log não foi guardado; a segunda rodada, com log em `.superpowers/admin_e2e_run1.log` (git-ignorado), passou. Trate a falha inicial como intermitência não explicada. RPC real + TLS com a CA do asset + telas estão provados em aparelho Android 15; **não** estão provados no emulador nem em Android ≤ 14.
+
+**Continua aberto:** refresh token do staff (hoje 15 min e novo login com código); tela de redefinição de MFA e gestão de contas (#43); endpoints de dados do staff com RBAC *(#40, fechado em 2026-10-07, ver seção abaixo)*; trocar o `MockAdminDataSource` (#41, parcial: ver a seção da #40); a trilha de auditoria ainda não distingue a audiência *(fechado em 2026-10-06, ver abaixo)*; a primeira ativação do TOTP do staff exigir só matrícula + senha *(fechado em 2026-10-07 pela #48, ver seção abaixo)*; screenshot de `docs/telas-admin.md` do login não foi recapturado *(fechado em 2026-10-06, ver abaixo)*.
+
+## Endpoints do backoffice e painel com dados reais (issue #40, 2026-10-07)
+
+**Entregue.** `AdminEndpoint` (`admin.indicators/microAreas/alerts/auditLogs`), somente leitura, só `coordinator`/`admin`; `AdminReadService` e `OrmAdminReadStore`; `staff_accounts.ubsId` (migração aditiva); rótulos minimizados (`#A18F`); no app, `BackendAdminDataSource` por sessão e `buildAdminWiring`. Regras e decisões em `backend/CLAUDE.md` ("Leitura do backoffice") e `apps/CLAUDE.md`.
+
+**Provado nesta execução.** Backend `dart test` inteiro: 716 verdes (eram 682; entre os novos, 3 de rótulo, 9 do serviço, 11 do store contra Postgres, 10 do endpoint com tokens reais, 1 das fixtures). `apps/admin`: `flutter test` 117 verdes (eram 105) e `flutter analyze` limpo. `scripts/qa/admin_login_e2e.sh` no emulador `emulator-5554` (API 36): 5 testes passaram, incluindo o painel com dados reais (Vermelho 2, TMRAV 60s, 3 alertas só com rótulo, leitura do admin na auditoria), e o banco confirmou 4 recursos `admin_*` lidos e auditados como `read/success`; log em `.superpowers/admin40_emulador.log` (git-ignorado).
+
+**Decisões que valem até alguém trocá-las.** (1) Coordenador vê só a UBS de `staff_accounts.ubsId`; sem UBS é recusado em todos os métodos. (2) Só o administrador lê a auditoria. (3) A auditoria da leitura é fail-closed. (4) TMRAV: janela de 30 dias, só vermelhos reconhecidos, `null` sem amostra (o PRD §1.3 não fixa a janela). (5) Alertas por `offset`, auditoria por `beforeSequence`.
+
+**Continua aberto.** (1) Não há tela nem endpoint para atribuir `ubsId` a um coordenador: hoje só por SQL, e o seed de desenvolvimento não tem coordenador (a #43 é o lugar natural). (2) Auditoria por UBS para o coordenador. (3) *(Tratado na #41, seção abaixo.)* (4) *(Tratado na #41: as telas mostram o texto de `AdminDataFailure` e o 401 leva ao login.)* (5) A paginação do app lê só a primeira página (50 itens): não há "carregar mais". (6) Não foi rodado no celular físico nesta execução. (7) As capturas 02 a 05 de `docs/telas-admin.md` são do emulador com dados do backend; as 06 a 08 (celular e tablet simulado) são de antes e ainda mostram o painel sobre o mock.
+
+## Admin consome o `sinalacs_client` (issue #41, 2026-10-07)
+
+**Estado ao começar.** A #40 já tinha entregue a dependência local do `sinalacs_client`, o `BackendAdminDataSource`, o `buildAdminWiring` e o mock mantido só para testes; `main.dart` nunca usa o mock. Verificado de novo: `flutter analyze` limpo e `flutter test` verde com `assets/certs/` vazio (o que o job `admin-app` faz), e `admin_login_e2e.sh` 5/5 no emulador antes de qualquer mudança.
+
+**Entregue.** (1) `AdminSessionExpired`: sessão vencida no meio de uma leitura leva ao login com "Sessão encerrada. Entre novamente." em vez de "Tentar novamente". O servidor **não** responde 401: recusa o token com `AlertPermissionException` (a mesma da recusa por papel/escopo), então o app só distingue pelo relógio (`expiresAt` da sessão); o 401 (`ServerpodClientUnauthorized`) também é mapeado, por garantia. Relógio do aparelho atrasado ou conta desativada antes do vencimento ainda mostram "Acesso restrito ao backoffice." com retry. (2) As telas mostram o texto de `AdminDataFailure` ("Não foi possível conectar ao servidor.", "Acesso restrito ao backoffice.") no lugar do erro genérico. (3) `scripts/qa/e2e.sh --full` roda do admin só o smoke hermético (`admin_mobile_smoke_test.dart`; antes rodava a pasta inteira, que inclui o `admin_login_e2e.dart`, que precisa de relé) e aponta para `admin_login_e2e.sh` para o fluxo com backend real; o cabeçalho desse script não diz mais que o painel é o mock. Guardas em `scripts/qa/admin_login_e2e_test.sh`.
+
+**Provado nesta execução.** `apps/admin`: `flutter test` 122 verdes (eram 117) e `flutter analyze` limpo. `admin_login_e2e.sh` no emulador `emulator-5554`: 5/5, com os 4 recursos `admin_*` lidos e auditados como `read/success` (logs em `.superpowers/admin41_base.log` e `admin41_final.log`, git-ignorados). `admin_mobile_smoke_test.dart` no emulador: 4/4. `ci_invariants.sh` ok (9 grupos).
+
+**Revisão final.** Dois achados Important corrigidos com teste (RED→GREEN, 126/126): a falha de rede chega do cliente como `ServerpodClientException(-1)` (não `SocketException`), e o token recusado não vira 401. Reprovado no emulador: `admin_login_e2e.sh` 5/5.
+
+**Decisões.** Falha de rede e sessão vencida são provadas por teste de widget e de data source, não por um caso de e2e que derrube o backend: parar o backend dentro do script arrisca deixar a stack quebrada. Não foi criada a flag `--admin-real` no `e2e.sh`.
+
+**Continua aberto.** (0) Exceção própria no servidor para token inválido/expirado (hoje reutiliza `AlertPermissionException`), para o app não depender do relógio. (0b) `AuditLogScreen` e `_AlertsList` buscam dentro do `build`: cada rebuild do shell lê o backend e grava uma linha em `audit_logs`; guardar o `Future` no `State`. (1) O `admin-app` da CI roda `flutter test` com o cliente real compilado, mas não há e2e contra a stack na CI (o `android-e2e` não roda o admin). (2) As capturas 06 a 08 de `docs/telas-admin.md` seguem as de antes, sobre o mock (layout igual, números diferentes). (3) Paginação "carregar mais" e refresh token do staff, já listados acima. (4) A prova no celular físico não foi repetida.
+
+## Ativação do TOTP do staff com código de uso único (issue #48, 2026-10-07)
+
+**Entregue.** `beginStaffTotpEnrollment`/`confirmStaffTotpEnrollment` exigem `activationCode` além de matrícula e senha; quem só tem a senha não registra autenticador. Quatro colunas aditivas em `staff_accounts` (hash SHA-256 do código, validade de 24 h, quem emitiu, quando), `StaffActivationCode`, `StaffActivationStore`, a CLI `bin/issue_staff_activation_code.dart` (lógica em `lib/src/ops/staff_activation_issuer.dart`), a etapa "Código de ativação" antes do QR em `apps/admin` e o código no manifesto de e2e (bloco `staff`, entregue pelo relé em `/admin`). Detalhes em `backend/CLAUDE.md`.
+
+**Provado nesta execução.** Backend `dart test` inteiro: 682 testes verdes (entre os novos: 4 de `StaffActivationCode`, 12 do serviço, 2 de endpoint, 1 do store, 5 da CLI contra o `postgres-test` e 1 das fixtures). `apps/admin`: `flutter test` 105 verdes (eram 95) e `flutter analyze` limpo; `otp_relay_test.py` 15/15. E2E de `scripts/qa/admin_login_e2e.sh` com 5 testes (inclui "código de ativação errado: recusado, e o QR não aparece") e conferência do banco (`TOTP ativado`, `código de ativação apagado após a ativação`): **passou no Motorola edge 40 neo (Android 15, `0087014315`) e no emulador `emulator-5554`**. Logs em `.superpowers/admin48_celular.log` e `admin48_emulador.log` (git-ignorados).
+
+**Continua aberto.** (1) A emissão do código por um coordenador/administrador já autenticado, pela interface, e a redefinição da MFA do staff dependem da #43; hoje só a CLI de operador emite. (2) Quem emitiu o código fica em `activationCodeIssuedBy/At`, **não** em `audit_logs`: a CLI não carrega a cadeia de auditoria do servidor, então o critério "auditoria registra quem emitiu" da issue está cumprido na coluna, não na trilha encadeada. (3) O ACS segue trust-on-first-use (não fazia parte da issue). (4) O `ADM-001` do seed de desenvolvimento não ganha código sozinho: emita um com a CLI antes do primeiro login. (5) A captura da tela do código (`docs/screenshots/admin/01b-codigo-ativacao.png`) foi feita em 2026-10-07 no mesmo aparelho; as telas do QR e do login com a MFA já ativa não foram refeitas.
+
+## Minors adiados da #39 (2026-10-06)
+
+**Fechados:**
+- (a) Testes de endpoint de `beginStaffTotpEnrollment`/`confirmStaffTotpEnrollment` contra o Postgres (5 testes, `e4df0de`).
+- (b) A auditoria do login distingue staff (`staff_session`) de ACS (`session`) (`4f4c9bd`); sem backfill das linhas antigas.
+- (c) O cabeçalho do admin mostra o papel da sessão em vez de `admin.dev` fixo (`5da3008`). O rótulo do papel pode ser truncado com reticências a 320 dp + fonte a 200%, mas o leitor de tela o anuncia por inteiro.
+- (d) O contador de bloqueio é por conta e a política é a mesma para ACS e staff (`57c186a`): os testes fixam o limiar de 5 tentativas e o contador por conta; a progressão de 15 min com dobra é compartilhada porque as duas audiências usam o mesmo código `lockDurationFor`, sem teste específico do staff para a duração. O item original estava mal descrito: o contador nunca foi compartilhado.
+- (e) A captura da tela de login foi refeita (`a378318`).
+- (f) A prova E2E do login real passou em aparelho físico em 2026-10-07 (ver a seção acima). `admin_login_e2e.sh` aceita o aparelho por `DEVICE` (`scripts/qa/admin_login_e2e_test.sh`, não ligado à CI).
+- (g) As capturas 02–08 de `docs/telas-admin.md` foram refeitas em 2026-10-07 com sessão real no mesmo aparelho. A 08 é simulada com `wm size 1600x2560` (não é um tablet físico); 03–05 passaram de web largo para celular em retrato; 06 repete a tela de 02. A Auditoria ainda mostra `admin.dev` como autor, porque os dados são o `MockAdminDataSource` (#41).
+- (h) `dart format` aplicado em `staff_login_test.dart`; é o único minor cosmético nomeado nesta seção, e não há outra lista.
+
+**Continua aberto:**
+- Refresh token do staff. Reconfirmado em 2026-10-07: `loginStaff` devolve só o JWT de 15 min; `refreshSession` é do ACS. Desde a #41 uma chamada em voo com token vencido (401) leva ao login com aviso; o painel segue sem renovar a sessão.
+
+**Suítes (2026-10-06):** backend `dart test` 657 verdes; admin `flutter test` 102 verdes, `flutter analyze` sem avisos; `ci_invariants.sh` ok (9 grupos); `check_documentation_links.sh` exit 0.
+
 ## Migração para Serverpod
 
 Trabalho posterior às Fases 1 e 2, fora da numeração M1.x/M2.x/M3.x do PRD. O
@@ -649,7 +708,7 @@ fecha esse buraco.
 | Schema | 13 tabelas como modelos `.spy.yaml` (as 11 originais mais `alert_idempotency_keys` e `alert_outbox` — ver "cadeia de hash" e "outbox pattern" abaixo); migrações geradas e aplicadas pelo servidor no boot |
 | Endpoints | RPC: `alerts.createRedAlert`, `alerts.acknowledge`, `auth.developmentLogin`, `health.check`, `triage.evaluate`, `patients.listMicroArea`, `visits.sync` |
 | Testes | 16 arquivos (12 unitários herméticos, 4 de integração) sobre o harness `withServerpod`; contagem estática de `test(` no código-fonte, não uma execução nesta revisão — rodar `cd backend/sinalacs_server && dart test` contra a stack local para o número de casos passando |
-| Cliente gerado | Publicado em `backend/sinalacs_client`; **paciente e ACS já o consomem** por dependência local (ver M2.4 acima); `apps/admin` ainda não |
+| Cliente gerado | Publicado em `backend/sinalacs_client`; **paciente e ACS já o consomem** por dependência local (ver M2.4 acima); `apps/admin` também, desde a #40/#41 |
 
 ### Decisões de schema que valem registro
 

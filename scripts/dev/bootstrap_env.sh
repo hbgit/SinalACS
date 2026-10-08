@@ -45,6 +45,15 @@ secret() { openssl rand -hex 32; }
 # --- .env ------------------------------------------------------------------
 if [[ -f "$env_file" && "$force" -eq 0 ]]; then
   echo ".env já existe — preservado. Use --force para recriar."
+  # Só ACRESCENTA variáveis de segredo que surgiram depois do .env ter sido
+  # criado (nunca altera valor existente). Hoje: DEV_ADMIN_PASSWORD (#39).
+  if ! grep -qE '^DEV_ADMIN_PASSWORD=.' "$env_file"; then
+    sed -i '/^DEV_ADMIN_PASSWORD=$/d' "$env_file"
+    # Um .env sem newline final colaria a variável na última linha.
+    if [[ -s "$env_file" && -n "$(tail -c1 "$env_file")" ]]; then echo >> "$env_file"; fi
+    printf 'DEV_ADMIN_PASSWORD=%s\n' "$(secret)" >> "$env_file"
+    echo "  DEV_ADMIN_PASSWORD acrescentada ao .env (estava ausente)."
+  fi
 else
   if [[ ! -f "$env_example" ]]; then
     echo "erro: $env_example não existe." >&2
@@ -69,6 +78,7 @@ else
   HEALTH_DATA_ENCRYPTION_KEY="$(secret)" \
   CPF_HASH_PEPPER="$(secret)" \
   DEV_ACS_PASSWORD="$(secret)" \
+  DEV_ADMIN_PASSWORD="$(secret)" \
   awk '
     {
       split($0, kv, "=")
@@ -86,7 +96,8 @@ else
   echo "  .env gerado (POSTGRES_PASSWORD, TEST_DATABASE_PASSWORD,"
   echo "               MQTT_BACKEND_PASSWORD, MQTT_ACS_PASSWORD, JWT_SECRET,"
   echo "               AUDIT_CHAIN_SECRET, HEALTH_DATA_ENCRYPTION_KEY,"
-  echo "               CPF_HASH_PEPPER, DEV_ACS_PASSWORD)"
+  echo "               CPF_HASH_PEPPER, DEV_ACS_PASSWORD,"
+  echo "               DEV_ADMIN_PASSWORD)"
 fi
 
 # --- config/passwords.yaml -------------------------------------------------

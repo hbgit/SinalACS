@@ -1,3 +1,8 @@
+admin:
+  - indicators:
+  - microAreas:
+  - alerts:
+  - auditLogs:
 alerts:
   - createRedAlert:
   - acknowledge:
@@ -5,6 +10,9 @@ alerts:
 auth:
   - developmentLogin:
   - loginInstitutional:
+  - loginStaff:
+  - beginStaffTotpEnrollment:
+  - confirmStaffTotpEnrollment:
   - refreshSession:
   - logout:
   - beginTotpEnrollment:

@@ -5,15 +5,17 @@ import 'package:sinalacs_admin/app/app.dart';
 import 'package:sinalacs_admin/core/data/mock_admin_data_source.dart';
 
 import '../test/support/failing_admin_data_source.dart';
+import '../test/support/fake_admin_auth.dart';
+import '../test/support/layout_harness.dart' show entrarComCredenciais;
 
 /// Validação do backoffice num dispositivo Android real (ou emulador).
 ///
 /// ATENÇÃO — este arquivo é **hermético**, ao contrário dos `integration_test/`
-/// do app ACS e do app do paciente. O backoffice ainda roda sobre
-/// `MockAdminDataSource`, então aqui **não** é preciso `docker compose up`,
+/// do app ACS e do app do paciente. Aqui o painel roda sobre o
+/// `MockAdminDataSource` (o fluxo com backend real é `scripts/qa/admin_login_e2e.sh`), então aqui **não** é preciso `docker compose up`,
 /// nem seed, nem `--dart-define`. Basta:
 ///
-///     flutter test integration_test -d emulator-5554
+///     flutter test integration_test/admin_mobile_smoke_test.dart -d emulator-5554
 ///
 /// O que isto cobre e `flutter test` não consegue cobrir: o runtime real do
 /// Android — densidade de tela, insets do sistema, rotação de verdade e a
@@ -23,13 +25,9 @@ void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
   Future<void> entrar(WidgetTester tester, {dynamic dataSource}) async {
-    await tester.pumpWidget(SinalAdminApp(dataSource: dataSource, devLoginEnabled: true));
+    await tester.pumpWidget(SinalAdminApp(dataSource: dataSource, auth: FakeAdminAuth()));
     await tester.pumpAndSettle();
-    final entrar = find.byKey(const Key('login_button'));
-    await tester.ensureVisible(entrar);
-    await tester.pumpAndSettle();
-    await tester.tap(entrar);
-    await tester.pumpAndSettle();
+    await entrarComCredenciais(tester);
   }
 
   Future<void> irPara(WidgetTester tester, String destino) async {

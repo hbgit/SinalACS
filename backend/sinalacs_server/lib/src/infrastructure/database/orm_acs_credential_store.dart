@@ -32,10 +32,17 @@ import 'package:sinalacs_server/src/generated/protocol.dart';
 /// `lockUntil`). Mesmo arranjo de `OrmOnboardingStore.consumeIfValid`, que
 /// também resolve no `SET`/`WHERE` do Postgres o que o ORM não expressa — o
 /// ORM não tem `UPDATE ... SET col = col + 1`.
-class OrmAcsCredentialStore implements AcsCredentialStore, TotpStore {
-  OrmAcsCredentialStore({required Session Function() session}) : _session = session;
+class OrmAcsCredentialStore implements AcsCredentialStore, TotpStore, StaffActivationStore {
+  OrmAcsCredentialStore({required Session Function() session, this.staff = false})
+      : _session = session;
 
   final Session Function() _session;
+
+  /// `true` = a matrícula é procurada em `staff_accounts` (backoffice);
+  /// `false` = em `acs`. As duas tabelas têm matrículas independentes, e cada
+  /// instância só enxerga uma delas: uma matrícula de ACS não existe para o
+  /// login do staff, e vice-versa.
+  final bool staff;
 
   @override
   Future<AcsCredentialRecord?> findByEnrollmentId(String enrollmentId) async {
@@ -48,16 +55,31 @@ class OrmAcsCredentialStore implements AcsCredentialStore, TotpStore {
     //
     // O caminho é `acs.enrollmentId → acs.id → users.microAreaId` e
     // `acs.id → user_credentials.userId`: é esta travessia que o teste de
-    // integração prova contra Postgres, e que um store falso não alcança.
-    final acs = await Acs.db.findFirstRow(
-      session,
-      where: (table) => table.enrollmentId.equals(enrollmentId),
-    );
-    if (acs == null) return null;
-
-    // `acs.id` já é `UuidValue` (o id de `acs` É o UUID do usuário) — não há
-    // string para converter aqui.
-    final acsUuid = acs.id!;
+    // integração prova contra Postgres, e que um store falso não alcança. Com
+    // [staff], o primeiro passo troca `acs` por `staff_accounts` (índice
+    // `staff_accounts_enrollment_id_key`, também única).
+    //
+    // O id já é `UuidValue` (o id de `acs`/`staff_accounts` É o UUID do
+    // usuário) — não há string para converter aqui.
+    final UuidValue acsUuid;
+    final bool active;
+    if (staff) {
+      final conta = await StaffAccount.db.findFirstRow(
+        session,
+        where: (table) => table.enrollmentId.equals(enrollmentId),
+      );
+      if (conta == null) return null;
+      acsUuid = conta.id!;
+      active = conta.active;
+    } else {
+      final acs = await Acs.db.findFirstRow(
+        session,
+        where: (table) => table.enrollmentId.equals(enrollmentId),
+      );
+      if (acs == null) return null;
+      acsUuid = acs.id!;
+      active = acs.active;
+    }
 
     final credential = await UserCredential.db.findFirstRow(
       session,
@@ -71,10 +93,18 @@ class OrmAcsCredentialStore implements AcsCredentialStore, TotpStore {
     );
     if (user == null) return null;
 
+    // No login do ACS, só usuário de papel `acs` existe: um `admin` (ou
+    // qualquer outro papel) com linha em `acs` não pode abrir sessão de ACS. A
+    // resposta é a de matrícula inexistente — nada a revelar. No do staff, o
+    // papel segue para o serviço, que recusa quem não é coordenador/admin
+    // depois de a senha conferir (e audita o motivo).
+    if (!staff && user.role != UserRole.acs) return null;
+
     return AcsCredentialRecord(
       acsId: acsUuid.uuid,
       microAreaId: user.microAreaId?.uuid,
-      active: acs.active,
+      active: active,
+      role: user.role,
       digest: PasswordDigest(
         hashBase64: credential.passwordHash,
         saltBase64: credential.passwordSalt,
@@ -293,5 +323,43 @@ class OrmAcsCredentialStore implements AcsCredentialStore, TotpStore {
       ..lockedUntil = null
       ..updatedAt = at;
     await UserCredential.db.updateRow(session, existing);
+  }
+
+  @override
+  Future<void> issue(
+    String staffId, {
+    required String codeHash,
+    required DateTime expiresAt,
+    required String issuedBy,
+    required DateTime at,
+  }) async {
+    await StaffAccount.db.updateWhere(
+      _session(),
+      columnValues: (t) => [
+        t.activationCodeHash(codeHash),
+        t.activationCodeExpiresAt(expiresAt),
+        t.activationCodeIssuedBy(issuedBy),
+        t.activationCodeIssuedAt(at),
+      ],
+      where: (t) => t.id.equals(UuidValue.fromString(staffId)),
+    );
+  }
+
+  @override
+  Future<StaffActivationRecord?> find(String staffId) async {
+    final c = await StaffAccount.db.findById(_session(), UuidValue.fromString(staffId));
+    final hash = c?.activationCodeHash;
+    final expira = c?.activationCodeExpiresAt;
+    if (hash == null || expira == null) return null;
+    return StaffActivationRecord(codeHash: hash, expiresAt: expira);
+  }
+
+  @override
+  Future<void> clear(String staffId) async {
+    await StaffAccount.db.updateWhere(
+      _session(),
+      columnValues: (t) => [t.activationCodeHash(null), t.activationCodeExpiresAt(null)],
+      where: (t) => t.id.equals(UuidValue.fromString(staffId)),
+    );
   }
 }

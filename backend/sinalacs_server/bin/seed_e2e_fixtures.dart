@@ -10,6 +10,7 @@ import 'package:sinalacs_server/src/infrastructure/crypto/encrypted_json.dart';
 import 'package:sinalacs_server/src/infrastructure/crypto/health_data_cipher.dart';
 import 'package:sinalacs_server/src/infrastructure/crypto/hmac_cpf_hasher.dart';
 import 'package:sinalacs_server/src/infrastructure/testing/e2e_fixtures.dart';
+import 'package:sinalacs_server/src/application/auth/staff_activation_code.dart';
 
 /// Seed da stack de e2e (`docker-compose.e2e.yml`): UBS, microáreas, dois ACS com
 /// credencial e pacientes SINTÉTICOS com UUIDs e CPFs novos a cada execução.
@@ -34,6 +35,7 @@ Future<void> main(List<String> args) async {
 
   final fixtures = generateE2eFixtures(Random.secure());
   final acsDigest = await const Argon2PasswordHasher().derive(fixtures.acs.password);
+  final staffDigest = await const Argon2PasswordHasher().derive(fixtures.staff.password);
   final secondAcsDigest = await const Argon2PasswordHasher().derive(fixtures.secondAcs.password);
 
   final connection = await Connection.open(
@@ -112,6 +114,71 @@ Future<void> main(List<String> args) async {
           },
         );
       }
+      // Administrador do backoffice (RF07 para o staff): `users` com papel `admin`,
+      // `staff_accounts` e credencial Argon2id, SEM TOTP (a MFA é ativada pela
+      // tela do app admin). Fora de qualquer microárea.
+      final staff = fixtures.staff;
+      await tx.execute(
+        Sql.named('INSERT INTO "users" ("id","cpfHash","name","birthDate","role","microAreaId","createdAt","updatedAt") '
+            "VALUES (@id,@hash,'Admin E2E','1985-01-01','admin',NULL,NOW(),NOW())"),
+        parameters: {'id': staff.id, 'hash': 'e2e-staff-${staff.id}'},
+      );
+      await tx.execute(
+        Sql.named('INSERT INTO "staff_accounts" ("id","enrollmentId","active") VALUES (@id,@matricula,true)'),
+        parameters: {'id': staff.id, 'matricula': staff.matricula},
+      );
+      // Painel do admin (#40): 3 alertas determinísticos na microárea das fixtures,
+      // para o e2e provar contagens e TMRAV reais. O reconhecimento vem 60 s depois
+      // do disparo, então o TMRAV esperado é exatamente 60 s.
+      //
+      // OPT-IN (`E2E_SEED_ADMIN_ALERTS=1`, ligado só por `admin_login_e2e.sh`): o
+      // seed é compartilhado e estes alertas são do paciente `main`, então semeá-los
+      // sempre alteraria o histórico que as jornadas do paciente e do ACS conferem.
+      if (env['E2E_SEED_ADMIN_ALERTS'] == '1') {
+      final paciente = fixtures.byRole('main');
+      Future<void> alerta(String id, String risco, String status, {int? reconhecidoEmSegundos}) => tx.execute(
+            Sql.named('INSERT INTO "alerts" ("id","patientId","acsId","microAreaId","triggeredAt","acknowledgedAt",'
+                '"riskLevel","locationHash","status","mqttTopic","deviceId","retryCount","version") '
+                "VALUES (@id,@patient,@acs,@ma,NOW() - interval '1 hour',"
+                "CASE WHEN @ack::int IS NULL THEN NULL ELSE NOW() - interval '1 hour' + (@ack::int * interval '1 second') END,"
+                "@risco,'hash-e2e',@status,@topic,'device-e2e',0,0)"),
+            parameters: {
+              'id': id,
+              'patient': paciente.id,
+              'acs': fixtures.acs.id,
+              'ma': fixtures.microAreaId,
+              'ack': reconhecidoEmSegundos,
+              'risco': risco,
+              'status': status,
+              'topic': 'sinalacs/v1/microareas/${fixtures.microAreaId}/alerts',
+            },
+          );
+      await alerta(fixtures.adminAlertIds[0], 'red', 'pending');
+      await alerta(fixtures.adminAlertIds[1], 'red', 'acknowledged', reconhecidoEmSegundos: 60);
+      await alerta(fixtures.adminAlertIds[2], 'green', 'pending');
+      }
+      // Código de ativação (#48): só o hash vai ao banco; o claro segue no manifesto.
+      await tx.execute(
+        Sql.named('UPDATE "staff_accounts" SET "activationCodeHash"=@h, "activationCodeExpiresAt"=@e, '
+            '"activationCodeIssuedBy"=\'e2e\', "activationCodeIssuedAt"=NOW() WHERE "id"=@id'),
+        parameters: {
+          'id': staff.id,
+          'h': StaffActivationCode.hash(staff.activationCode),
+          'e': DateTime.now().toUtc().add(StaffActivationCode.defaultValidity),
+        },
+      );
+      await tx.execute(
+        Sql.named('INSERT INTO "user_credentials" ("userId","passwordHash","passwordSalt","memoryKb","iterations","parallelism","failedAttempts","createdAt","updatedAt") '
+            'VALUES (@userId,@hash,@salt,@memoryKb,@iterations,@parallelism,0,NOW(),NOW())'),
+        parameters: {
+          'userId': staff.id,
+          'hash': staffDigest.hashBase64,
+          'salt': staffDigest.saltBase64,
+          'memoryKb': staffDigest.memoryKb,
+          'iterations': staffDigest.iterations,
+          'parallelism': staffDigest.parallelism,
+        },
+      );
     });
   } finally {
     await connection.close();
@@ -119,5 +186,5 @@ Future<void> main(List<String> args) async {
 
   final out = File(args.isNotEmpty ? args.first : '.e2e/fixtures.json');
   writeManifestPrivately(out, jsonEncode(fixtures.toJson()));
-  stdout.writeln('Fixtures de e2e gravadas (${fixtures.patients.length} pacientes, 2 ACS) em ${out.path}.');
+  stdout.writeln('Fixtures de e2e gravadas (${fixtures.patients.length} pacientes, 2 ACS, 1 admin) em ${out.path}.');
 }

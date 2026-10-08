@@ -1,0 +1,8 @@
+### Microárea e o ACS vinculado, para a listagem somente leitura do backoffice.
+class: AdminMicroArea
+fields:
+  id: String
+  name: String
+  acsName: String
+  acsEnrollmentId: String
+  acsActive: bool
