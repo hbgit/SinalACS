@@ -1,4 +1,6 @@
 import 'package:sinalacs_server/src/application/admin/admin_read_service.dart';
+import 'package:sinalacs_server/src/application/admin/data_subject_case_service.dart';
+import 'package:sinalacs_server/src/infrastructure/database/orm_data_subject_case_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_admin_read_store.dart';
 import 'package:meta/meta.dart';
 import 'package:serverpod/serverpod.dart';
@@ -215,6 +217,26 @@ class AlertRuntime {
   /// requisição: cada leitura do staff vira uma linha encadeada em `audit_logs`.
   AdminReadService adminReadServiceFor(Session session) => AdminReadService(
         store: OrmAdminReadStore(session: () => session),
+        audit: auditTrailFor(session),
+      );
+
+  /// Atendimento de pedidos do titular no backoffice (#42), para uma
+  /// requisição. A decisão é auditada DENTRO da transação do store
+  /// (`recordInTransaction`), com o mesmo `AUDIT_CHAIN_SECRET` da trilha; o
+  /// mesmo segredo assina o `denied` de push da anonimização, como no painel do
+  /// titular (`OrmDataSubjectRightsStore`). Leituras e recusas usam a trilha
+  /// comum da requisição.
+  DataSubjectCaseService dataSubjectCaseServiceFor(Session session) =>
+      DataSubjectCaseService(
+        store: OrmDataSubjectCaseStore(
+          session,
+          healthDataCipher,
+          chainSecret: config.auditChainSecret,
+          appendAudit: OrmAuditTrail(
+            session: () => session,
+            chainSecret: config.auditChainSecret,
+          ).recordInTransaction,
+        ),
         audit: auditTrailFor(session),
       );
 

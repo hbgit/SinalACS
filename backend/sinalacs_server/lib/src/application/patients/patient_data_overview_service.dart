@@ -44,6 +44,7 @@ class DataSubjectRequestSnapshot {
     required this.details,
     required this.createdAt,
     required this.dueAt,
+    this.resolution,
   });
 
   final String id;
@@ -54,6 +55,11 @@ class DataSubjectRequestSnapshot {
   final String? details;
   final DateTime createdAt;
   final DateTime dueAt;
+
+  /// Nota de resposta ou motivo da recusa do backoffice (#42), já decifrada;
+  /// `null` enquanto o pedido não foi decidido (ou foi atendido sem nota). Só
+  /// chega ao próprio titular.
+  final String? resolution;
 }
 
 /// Tudo que o painel "Meus Dados" mostra sobre o próprio paciente.

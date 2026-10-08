@@ -81,6 +81,12 @@ class DataSubjectCaseService {
   static const _naoEncontrado = 'Pedido não encontrado.';
   static const _transicaoInvalida =
       'O pedido não está num estado que permita esta ação.';
+
+  /// Corrida perdida, pedido que saiu do escopo entre a leitura e o lock, ou
+  /// dado inconsistente no store: a mesma frase neutra, que não diz se o pedido
+  /// existe nem em que estado está.
+  static const _indisponivel =
+      'Pedido não encontrado ou já decidido. Atualize a lista.';
   static const _notaInvalida =
       'O texto deve ter de $notaMin a $notaMax caracteres.';
   static const _notaObrigatoria =
@@ -249,30 +255,39 @@ class DataSubjectCaseService {
     required bool anonymize,
     required DateTime agora,
   }) async {
-    final ok = await store.decide(
-      escopo,
-      pedido.id,
-      from: from,
-      to: to,
-      resolution: resolution,
-      decidedBy: user.id,
-      anonymize: anonymize,
-      audit: AuditEvent(
-        userId: user.id,
-        actionType: 'write',
-        resourceType: _recursoDecisao,
-        resourceId: pedido.id,
-        result: switch (to) {
-          DataSubjectRequestStatus.inReview => 'in_review',
-          DataSubjectRequestStatus.completed => 'completed',
-          DataSubjectRequestStatus.rejected => 'rejected',
-          DataSubjectRequestStatus.open => 'open',
-        },
-      ),
-      now: agora,
-    );
-    // Corrida perdida: outro analista decidiu entre a leitura e o lock.
-    if (!ok) throw AdminInvalidRequestException(message: _transicaoInvalida);
+    final bool ok;
+    try {
+      ok = await store.decide(
+        escopo,
+        pedido.id,
+        from: from,
+        to: to,
+        resolution: resolution,
+        decidedBy: user.id,
+        anonymize: anonymize,
+        audit: AuditEvent(
+          userId: user.id,
+          actionType: 'write',
+          resourceType: _recursoDecisao,
+          resourceId: pedido.id,
+          result: switch (to) {
+            DataSubjectRequestStatus.inReview => 'in_review',
+            DataSubjectRequestStatus.completed => 'completed',
+            DataSubjectRequestStatus.rejected => 'rejected',
+            DataSubjectRequestStatus.open => 'open',
+          },
+        ),
+        now: agora,
+      );
+    } on StateError {
+      // Dado inconsistente (titular que não é paciente, anonimização fora de
+      // pedido de exclusão): a transação já foi desfeita no store; o texto do
+      // erro fica fora da resposta.
+      throw AdminInvalidRequestException(message: _indisponivel);
+    }
+    // Corrida perdida (outro analista decidiu entre a leitura e o lock) ou
+    // pedido que saiu do escopo: a mesma mensagem neutra nos dois casos.
+    if (!ok) throw AdminInvalidRequestException(message: _indisponivel);
   }
 
   String _validarNota(String texto) {

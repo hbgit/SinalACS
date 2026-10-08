@@ -8,9 +8,20 @@ import 'package:sinalacs_server/src/application/patients/patient_data_overview_s
 import 'package:sinalacs_server/src/application/patients/terms_change_schedule.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
 
+/// Recusa de escrita para a conta já anonimizada por uma exclusão atendida
+/// (#42). Genérica: quem a recebe é o portador de um JWT que ainda não venceu,
+/// e a resposta certa para ele é voltar ao login, que também recusa.
+const removedAccountMessage = 'Sessão encerrada. Entre novamente.';
+
 /// Persistência das operações do titular sobre os próprios dados. Interface
 /// aqui, implementação ORM em `infrastructure/`, mesmo padrão de
 /// `PatientDataOverviewStore`.
+///
+/// Toda **escrita** recusa a conta anonimizada (#42) com
+/// `StateError(removedAccountMessage)`, que o endpoint traduz em
+/// `AlertPermissionException`. A checagem mora no store, e não no serviço,
+/// porque precisa rodar dentro da transação e depois do lock por titular: só
+/// assim não corre com a anonimização, que segura os mesmos locks.
 abstract interface class DataSubjectRightsStore {
   /// Grava uma linha nova, assinada, em `consent_logs` — nunca edita uma
   /// anterior (append-only, LGPD-RF04).

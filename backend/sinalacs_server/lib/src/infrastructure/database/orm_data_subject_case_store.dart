@@ -9,6 +9,7 @@ import 'package:sinalacs_server/src/application/onboarding/onboarding_service.da
 import 'package:sinalacs_server/src/generated/protocol.dart';
 import 'package:sinalacs_server/src/infrastructure/crypto/encrypted_json.dart';
 import 'package:sinalacs_server/src/infrastructure/crypto/health_data_cipher.dart';
+import 'package:sinalacs_server/src/infrastructure/database/removed_account.dart';
 import 'package:sinalacs_server/src/infrastructure/database/signed_consent_log.dart';
 import 'package:sinalacs_server/src/infrastructure/database/subject_lock.dart';
 
@@ -312,7 +313,7 @@ class OrmDataSubjectCaseStore implements DataSubjectCaseStore {
         name: rotuloRemovido,
         // Aleatório e nunca derivado do CPF: o mesmo CPF não volta a achar
         // esta linha no login, e o índice único segue satisfeito.
-        cpfHash: 'removed:${const Uuid().v4()}',
+        cpfHash: '$removedCpfHashPrefix${const Uuid().v4()}',
         birthDate: nascimentoRemovido,
         updatedAt: now,
       ),

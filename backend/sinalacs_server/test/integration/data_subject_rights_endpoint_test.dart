@@ -436,6 +436,56 @@ void main() {
       );
     });
 
+    test(
+      'conta anonimizada (#42) com JWT ainda vivo não abre pedido nem mexe em consentimento',
+      () async {
+        final session = sessionBuilder.build();
+        await _seed(session);
+        final token = await patientToken();
+        // O que a exclusão atendida faz em `users.cpfHash` (orm_data_subject_case_store).
+        await session.db.unsafeExecute(
+          'UPDATE users SET "cpfHash" = \'removed:sintetico\' WHERE id = @id::uuid',
+          parameters: QueryParameters.named({'id': _patientId}),
+        );
+
+        for (final chamada in <Future<Object?> Function()>[
+          () => endpoints.patients.requestDataDeletion(sessionBuilder, accessToken: token),
+          () => endpoints.patients.requestDataCorrection(
+                sessionBuilder,
+                accessToken: token,
+                details: 'texto sintético',
+              ),
+          () => endpoints.patients.updateConsent(
+                sessionBuilder,
+                accessToken: token,
+                purpose: ConsentPurpose.segmentedPush,
+                granted: true,
+              ),
+          () => endpoints.patients.updateConsent(
+                sessionBuilder,
+                accessToken: token,
+                purpose: ConsentPurpose.localReminders,
+                granted: false,
+              ),
+          () => endpoints.patients.acceptTermsOfUse(sessionBuilder, accessToken: token),
+        ]) {
+          await expectLater(chamada(), throwsA(isA<AlertPermissionException>()));
+        }
+        expect(await DataSubjectRequest.db.count(session), 0);
+        expect(await ConsentLog.db.count(session), 0);
+        await expectLater(
+          endpoints.devices.registerPushToken(
+            sessionBuilder,
+            accessToken: token,
+            token: 'token-sintetico-anonimizado',
+            platform: 'android',
+          ),
+          throwsA(isA<DataRightsException>()),
+        );
+        expect(await PushToken.db.count(session), 0);
+      },
+    );
+
     test('cada escrita deixa linha real em audit_logs', () async {
       final session = sessionBuilder.build();
       await _seed(session);

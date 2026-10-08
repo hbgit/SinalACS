@@ -3,6 +3,11 @@ admin:
   - microAreas:
   - alerts:
   - auditLogs:
+  - dataSubjectRequests:
+  - dataSubjectRequest:
+  - startDataSubjectReview:
+  - completeDataSubjectRequest:
+  - rejectDataSubjectRequest:
 alerts:
   - createRedAlert:
   - acknowledge:

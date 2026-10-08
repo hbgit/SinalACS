@@ -44,6 +44,8 @@ class _Store implements DataSubjectCaseStore {
   final decisoes = <_DecisaoChamada>[];
   AdminScope? ultimoEscopo;
   bool decideDevolve = true;
+  bool decideForaDoEscopo = false;
+  StateError? decideLanca;
   int chamadas = 0;
 
   @override
@@ -105,6 +107,9 @@ class _Store implements DataSubjectCaseStore {
     required DateTime now,
   }) async {
     _ordem.add('store:decide');
+    if (decideLanca != null) throw decideLanca!;
+    // Simula o pedido que saiu do escopo entre o find e o decide.
+    if (decideForaDoEscopo) return false;
     decisoes.add(
       _DecisaoChamada(
         id: id,
@@ -440,6 +445,63 @@ void main() {
         store.pedidos['del-1']!.detalhe.status,
         DataSubjectRequestStatus.open,
       );
+    },
+  );
+
+  test(
+    'corrida perdida (decide == false) dá mensagem neutra: não fala de estado e '
+    'é a mesma para pedido que existe e para pedido que sumiu do escopo',
+    () async {
+      Future<String> mensagem(Future<Object?> Function() chamada) async {
+        try {
+          await chamada();
+        } on AdminInvalidRequestException catch (e) {
+          return e.message;
+        }
+        fail('deveria ter lançado AdminInvalidRequestException');
+      }
+
+      // Pedido no escopo, outro analista decidiu entre o find e o lock.
+      store.decideDevolve = false;
+      final corrida = await mensagem(() => servico.complete(coordA, 'del-1'));
+      // Pedido que o find viu, mas que saiu do escopo antes do decide (o store
+      // devolve false para fora do escopo): mesma mensagem.
+      store.decideDevolve = true;
+      store.decideForaDoEscopo = true;
+      final foraDoEscopo = await mensagem(
+        () => servico.startReview(coordA, 'del-1'),
+      );
+      expect(corrida, foraDoEscopo);
+      expect(corrida, isNot(contains('estado')));
+      // A mensagem de estado inválido segue existindo só para quem viu o
+      // pedido (find) num estado final.
+      store.pedidos['del-9'] = _Pedido(
+        _ubsA,
+        _detalhe('del-9', status: DataSubjectRequestStatus.completed),
+      );
+      store.decideForaDoEscopo = false;
+      final finalizado = await mensagem(
+        () => servico.complete(coordA, 'del-9'),
+      );
+      expect(finalizado, isNot(corrida));
+    },
+  );
+
+  test(
+    'StateError do store (dado inconsistente) vira AdminInvalidRequestException '
+    'genérica, sem o texto do erro',
+    () async {
+      store.decideLanca = StateError(
+        'titular do pedido de exclusão não é paciente',
+      );
+      try {
+        await servico.complete(coordA, 'del-1');
+        fail('deveria recusar');
+      } on AdminInvalidRequestException catch (e) {
+        expect(e.message, isNot(contains('paciente')));
+        expect(e.message, isNot(contains('titular')));
+      }
+      expect(audit.events.where((e) => e.result != 'denied'), isEmpty);
     },
   );
 
