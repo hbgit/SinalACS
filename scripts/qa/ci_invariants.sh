@@ -14,14 +14,14 @@
 # Não precisa de rede nem da stack; só python3 com PyYAML. Roda no job
 # workflow-lint do próprio CI.
 #
-# CI_INVARIANTS_WORKFLOW aponta para um workflow diferente do real — só para
-# testar as checagens contra fixtures sintéticas, sem tocar em
-# .github/workflows/ci.yml.
+# CI_WORKFLOW_PATH aponta para um workflow diferente do real — só para
+# scripts/qa/ci_invariants_test.sh e ci_invariants_fcm_test.sh testarem as
+# checagens contra fixtures sintéticas, sem tocar em .github/workflows/ci.yml.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # CI_WORKFLOW_PATH é o nome usado por ci_invariants_fcm_test.sh; CI_INVARIANTS_WORKFLOW
-# continua aceito (nome anterior).
+# continua aceito (nome anterior, usado por ci_invariants_test.sh).
 caminho_workflow="${CI_WORKFLOW_PATH:-${CI_INVARIANTS_WORKFLOW:-$repo_root/.github/workflows/ci.yml}}"
 
 # Sem isto, o Python usa a codificação do locale do host para stdout/stderr —
@@ -213,6 +213,16 @@ CHECKS_OBRIGATORIOS = sorted(JOBS_DOCUMENTADOS - {'android-e2e'})
 # publique um status com o mesmo nome e destrave o merge.
 APP_GITHUB_ACTIONS = 15368
 
+def _lista_needs(needs):
+    # `needs:` aceita string, lista ou (sem chave) None — normaliza pra uma
+    # lista só, sempre.
+    if needs is None:
+        return []
+    if isinstance(needs, str):
+        return [needs]
+    return list(needs)
+
+
 def check_checks_obrigatorios():
     if 'android-e2e' in CHECKS_OBRIGATORIOS:
         falhas.append('FINDING-4: android-e2e não pode ser obrigatório enquanto for instável')
@@ -221,12 +231,35 @@ def check_checks_obrigatorios():
         if job is None:
             falhas.append(f'FINDING-5: check obrigatório {nome} não existe no workflow')
             continue
-        # O nome do check é o `name:` do job, se houver; e um job com `if:`
-        # pode não rodar e nunca reportar.
+        # O nome do check é o `name:` do job, se houver.
         if job.get('name', nome) != nome:
             falhas.append(f"FINDING-5: {nome} tem name: {job['name']!r}; o check obrigatório não casaria")
         if 'if' in job:
-            falhas.append(f'FINDING-5: {nome} tem if: no nível do job; pode nunca reportar')
+            # Um job pulado pelo próprio `if:` reporta `skipped` — e a
+            # proteção de branch conta `skipped` como aprovado. Não é "pode
+            # nunca reportar": ele sempre reporta, só que reporta verde do
+            # jeito errado, e o merge destrava sem o job ter rodado nada
+            # (issue #20 corrige esta mensagem, que dizia o contrário).
+            falhas.append(
+                f'FINDING-5: {nome} tem if: no nível do job; skipped conta como aprovado e destrava o merge sem rodar'
+            )
+        # issue #20: três outros jeitos de um check obrigatório passar verde
+        # sem ter, de fato, rodado.
+        if job.get('continue-on-error') is True:
+            falhas.append(
+                f'{nome} (obrigatório) tem continue-on-error: true; uma falha do job reporta sucesso'
+            )
+        if 'matrix' in (job.get('strategy') or {}):
+            falhas.append(
+                f'{nome} (obrigatório) tem strategy.matrix; o nome do check vira "{nome} (valor)" '
+                'e não casa com o contexto exigido pela proteção — a PR espera para sempre'
+            )
+        for dep in _lista_needs(job.get('needs')):
+            if dep not in CHECKS_OBRIGATORIOS:
+                falhas.append(
+                    f'{nome} (obrigatório) tem needs: {dep}, que não é obrigatório; se {dep} falhar, '
+                    f'{nome} fica skipped e conta como aprovado'
+                )
 
 
 # Credenciais do FCM (chave de conta de serviço e google-services.json) no android-e2e.
