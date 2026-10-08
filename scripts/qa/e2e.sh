@@ -138,8 +138,10 @@ tentar_flutter_test() {
 if [[ "$run_emulator" -eq 1 ]]; then
   echo
   # Smoke: um arquivo por app, que é um build e um `adb install` por app.
-  # --full: a pasta inteira, como era antes, mais o admin (hermético, roda
-  # sobre o MockAdminDataSource e não precisa da stack).
+  # --full: a pasta inteira, como era antes, mais o smoke do admin (hermético,
+  # roda sobre o MockAdminDataSource e não precisa da stack). O fluxo do admin
+  # com o backend real (login, MFA, painel) troca a stack de desenvolvimento
+  # pela de e2e e por isso fica em scripts/qa/admin_login_e2e.sh.
   if [[ "$run_full" -eq 1 ]]; then
     alvo_integracao=integration_test
     echo '== testes de integração no dispositivo (bateria completa) =='
@@ -189,7 +191,8 @@ if [[ "$run_emulator" -eq 1 ]]; then
   (cd apps/acs && tentar_flutter_test "${acs_cmd[@]}")
   if [[ "$run_full" -eq 1 ]]; then
     (cd apps/admin && flutter pub get >/dev/null && \
-      tentar_flutter_test flutter test integration_test -d emulator-5554)
+      tentar_flutter_test flutter test integration_test/admin_mobile_smoke_test.dart -d emulator-5554)
+    echo 'admin com backend real: rode ./scripts/qa/admin_login_e2e.sh (troca a stack de dev pela de e2e).'
   fi
 fi
 
