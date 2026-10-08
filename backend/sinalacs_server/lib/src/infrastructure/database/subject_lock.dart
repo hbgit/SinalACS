@@ -10,6 +10,8 @@ const int lockNamespacePushToken = 3;
 const int lockNamespacePushTokenRow = 4;
 /// Token de envio diferido: serializa a troca por (usuário, aparelho).
 const int lockNamespaceUploadToken = 5;
+/// Atendimento de pedido do titular (#42): serializa as decisões por pedido.
+const int lockNamespaceDataSubjectCase = 6;
 
 /// Serializa, dentro de [transaction], quem disputa a mesma [key] no mesmo
 /// [namespace]. Solta sozinho no fim da transação.

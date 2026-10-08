@@ -36,6 +36,24 @@ class OrmAuditTrail extends AuditTrail {
   @override
   Future<void> record(AuditEvent event) async {
     final session = _session();
+    await session.db.transaction(
+      (transaction) => recordInTransaction(session, transaction, event),
+    );
+  }
+
+  /// O apêndice à cadeia dentro de uma transação que já existe, para quem
+  /// precisa que a linha de auditoria e a mudança que ela descreve vivam ou
+  /// morram juntas (o atendimento de pedidos do titular, #42): se esta
+  /// gravação falhar, a transação de quem chamou é desfeita inteira.
+  ///
+  /// Toma o lock da cadeia por último: quem chama pode já segurar locks
+  /// próprios (por pedido, por titular), mas nunca deve pedir outro depois
+  /// deste — é essa ordem fixa que impede o deadlock.
+  Future<void> recordInTransaction(
+    Session session,
+    Transaction transaction,
+    AuditEvent event,
+  ) async {
     // Nulo em sessões sem requisição HTTP (ex.: tarefas internas). Nunca cai
     // para string vazia, que se confundiria com "IP resolvido, mas vazio" —
     // um marcador explícito deixa a ausência de request auditável também.
@@ -44,50 +62,48 @@ class OrmAuditTrail extends AuditTrail {
     final resourceId = event.resourceId;
     final timestamp = DateTime.now().toUtc();
 
-    await session.db.transaction((transaction) async {
-      await session.db.unsafeExecute(
-        'SELECT pg_advisory_xact_lock(@key);',
-        parameters: QueryParameters.named({'key': _chainLockKey}),
-        transaction: transaction,
-      );
+    await session.db.unsafeExecute(
+      'SELECT pg_advisory_xact_lock(@key);',
+      parameters: QueryParameters.named({'key': _chainLockKey}),
+      transaction: transaction,
+    );
 
-      final last = await AuditLog.db.findFirstRow(
-        session,
-        orderBy: (t) => t.sequence,
-        orderDescending: true,
-        transaction: transaction,
-      );
+    final last = await AuditLog.db.findFirstRow(
+      session,
+      orderBy: (t) => t.sequence,
+      orderDescending: true,
+      transaction: transaction,
+    );
 
-      final sequence = (last?.sequence ?? 0) + 1;
-      final previousHash = last?.entryHash ?? AuditChain.genesisHash;
-      final entryHash = _chain.computeEntryHash(AuditChainFields(
-        sequence: sequence,
-        previousHash: previousHash,
-        userId: event.userId,
+    final sequence = (last?.sequence ?? 0) + 1;
+    final previousHash = last?.entryHash ?? AuditChain.genesisHash;
+    final entryHash = _chain.computeEntryHash(AuditChainFields(
+      sequence: sequence,
+      previousHash: previousHash,
+      userId: event.userId,
+      actionType: event.actionType,
+      resourceType: event.resourceType,
+      resourceId: resourceId,
+      timestamp: timestamp,
+      ipHash: ipHash,
+      result: event.result,
+    ));
+
+    await AuditLog.db.insertRow(
+      session,
+      AuditLog(
+        userId: UuidValue.fromString(event.userId),
         actionType: event.actionType,
         resourceType: event.resourceType,
-        resourceId: resourceId,
+        resourceId: resourceId == null ? null : UuidValue.fromString(resourceId),
         timestamp: timestamp,
         ipHash: ipHash,
         result: event.result,
-      ));
-
-      await AuditLog.db.insertRow(
-        session,
-        AuditLog(
-          userId: UuidValue.fromString(event.userId),
-          actionType: event.actionType,
-          resourceType: event.resourceType,
-          resourceId: resourceId == null ? null : UuidValue.fromString(resourceId),
-          timestamp: timestamp,
-          ipHash: ipHash,
-          result: event.result,
-          sequence: sequence,
-          previousHash: previousHash,
-          entryHash: entryHash,
-        ),
-        transaction: transaction,
-      );
-    });
+        sequence: sequence,
+        previousHash: previousHash,
+        entryHash: entryHash,
+      ),
+      transaction: transaction,
+    );
   }
 }
