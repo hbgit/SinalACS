@@ -189,6 +189,15 @@ void main() {
     );
   });
 
+  test('401 do servidor (token vencido na chamada) vira AdminSessionExpired', () async {
+    await expectLater(
+      _fonte(
+        FakeEndpointCaller(error: api.ServerpodClientUnauthorized()),
+      ).fetchDashboardIndicators(),
+      throwsA(isA<AdminSessionExpired>()),
+    );
+  });
+
   test(
     'recordAccess não chama o servidor: ele já audita cada leitura',
     () async {

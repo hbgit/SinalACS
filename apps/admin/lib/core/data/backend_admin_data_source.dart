@@ -111,6 +111,8 @@ class BackendAdminDataSource implements AdminDataSource {
   Future<T> _guard<T>(Future<T> Function() chamada) async {
     try {
       return await chamada();
+    } on api.ServerpodClientUnauthorized {
+      throw const AdminSessionExpired();
     } on api.AlertPermissionException {
       throw const AdminDataFailure('Acesso restrito ao backoffice.');
     } on api.AdminInvalidRequestException {

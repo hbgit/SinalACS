@@ -127,7 +127,9 @@ class _AdminHomeShellState extends State<AdminHomeShell> {
     );
   }
 
-  Widget _content() => switch (destination) {
+  Widget _content() => _SessaoVencida(aoVencer: _encerrar, child: _telaAtual());
+
+  Widget _telaAtual() => switch (destination) {
         AdminDestination.indicators => IndicatorsScreen(dataSource: widget.dataSource),
         AdminDestination.microAreas => MicroAreasScreen(dataSource: widget.dataSource),
         AdminDestination.alerts => AlertsScreen(dataSource: widget.dataSource),
@@ -246,27 +248,55 @@ String statusLabel(AlertStatus status) => switch (status) {
 /// dados realmente vazios — escondendo uma falha de rede/backend como se
 /// não houvesse nada para mostrar (achado da revisão do Copilot no PR).
 class _AsyncError extends StatelessWidget {
-  const _AsyncError({required this.message, required this.onRetry});
+  const _AsyncError({required this.error, required this.fallback, required this.onRetry});
 
-  final String message;
+  /// O que o `FutureBuilder` capturou. [AdminDataFailure] traz o texto próprio
+  /// da falha; [AdminSessionExpired] leva ao login em vez de oferecer retry.
+  final Object? error;
+
+  /// Texto da tela quando a falha não traz mensagem própria.
+  final String fallback;
   final VoidCallback onRetry;
 
   @override
-  Widget build(BuildContext context) => Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(Icons.cloud_off_outlined, size: 32, color: Colors.white70),
-              const SizedBox(height: 12),
-              Text(message, textAlign: TextAlign.center),
-              const SizedBox(height: 16),
-              OutlinedButton.icon(onPressed: onRetry, icon: const Icon(Icons.refresh), label: const Text('Tentar novamente')),
-            ],
-          ),
+  Widget build(BuildContext context) {
+    if (error is AdminSessionExpired) {
+      // Navegar durante o build não pode: adia para depois do frame.
+      final aoVencer = _SessaoVencida.maybeOf(context);
+      WidgetsBinding.instance.addPostFrameCallback((_) => aoVencer?.call());
+      return const Center(child: CircularProgressIndicator());
+    }
+    final message = error is AdminDataFailure ? (error! as AdminDataFailure).message : fallback;
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.cloud_off_outlined, size: 32, color: Colors.white70),
+            const SizedBox(height: 12),
+            Text(message, textAlign: TextAlign.center),
+            const SizedBox(height: 16),
+            OutlinedButton.icon(onPressed: onRetry, icon: const Icon(Icons.refresh), label: const Text('Tentar novamente')),
+          ],
         ),
-      );
+      ),
+    );
+  }
+}
+
+/// Entrega às telas a ação de encerrar a sessão vencida (volta ao login), sem
+/// passar um callback por cada construtor.
+class _SessaoVencida extends InheritedWidget {
+  const _SessaoVencida({required this.aoVencer, required super.child});
+
+  final VoidCallback aoVencer;
+
+  static VoidCallback? maybeOf(BuildContext context) =>
+      context.getInheritedWidgetOfExactType<_SessaoVencida>()?.aoVencer;
+
+  @override
+  bool updateShouldNotify(_SessaoVencida old) => false;
 }
 
 class IndicatorsScreen extends StatefulWidget {
@@ -290,7 +320,7 @@ class _IndicatorsScreenState extends State<IndicatorsScreen> {
         future: _future,
         builder: (context, snapshot) {
           if (snapshot.hasError) {
-            return _AsyncError(message: 'Não foi possível carregar os indicadores.', onRetry: _retry);
+            return _AsyncError(error: snapshot.error, fallback: 'Não foi possível carregar os indicadores.', onRetry: _retry);
           }
           if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
           final data = snapshot.data!;
@@ -396,7 +426,7 @@ class _MicroAreasScreenState extends State<MicroAreasScreen> {
         future: _future,
         builder: (context, snapshot) {
           if (snapshot.hasError) {
-            return _AsyncError(message: 'Não foi possível carregar as microáreas.', onRetry: _retry);
+            return _AsyncError(error: snapshot.error, fallback: 'Não foi possível carregar as microáreas.', onRetry: _retry);
           }
           if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
           final areas = snapshot.data!;
@@ -447,7 +477,8 @@ class _AlertsScreenState extends State<AlertsScreen> {
         builder: (context, accessSnapshot) {
           if (accessSnapshot.hasError) {
             return _AsyncError(
-              message: 'Não foi possível registrar o acesso a esta tela.',
+              error: accessSnapshot.error,
+              fallback: 'Não foi possível registrar o acesso a esta tela.',
               onRetry: () => setState(() {
                 _accessRecorded = widget.dataSource.recordAccess(actionType: 'view', resourceType: 'alerts');
               }),
@@ -492,7 +523,7 @@ class _AlertsList extends StatelessWidget {
         future: _load(),
         builder: (context, snapshot) {
           if (snapshot.hasError) {
-            return _AsyncError(message: 'Não foi possível carregar os alertas.', onRetry: () => onFilterChanged(microAreaFilter, statusFilter));
+            return _AsyncError(error: snapshot.error, fallback: 'Não foi possível carregar os alertas.', onRetry: () => onFilterChanged(microAreaFilter, statusFilter));
           }
           final alerts = snapshot.data?.alerts ?? const [];
           final microAreas = snapshot.data?.microAreas ?? const [];
@@ -613,7 +644,8 @@ class _AuditLogScreenState extends State<AuditLogScreen> {
         builder: (context, recordSnapshot) {
           if (recordSnapshot.hasError) {
             return _AsyncError(
-              message: 'Não foi possível registrar o acesso a esta tela.',
+              error: recordSnapshot.error,
+              fallback: 'Não foi possível registrar o acesso a esta tela.',
               onRetry: () => setState(() {
                 _selfAuditRecorded = widget.dataSource.recordAccess(actionType: 'view', resourceType: 'audit_logs');
               }),
@@ -626,7 +658,7 @@ class _AuditLogScreenState extends State<AuditLogScreen> {
             future: widget.dataSource.fetchAuditLogs(),
             builder: (context, snapshot) {
               if (snapshot.hasError) {
-                return _AsyncError(message: 'Não foi possível carregar os logs de auditoria.', onRetry: () => setState(() {}));
+                return _AsyncError(error: snapshot.error, fallback: 'Não foi possível carregar os logs de auditoria.', onRetry: () => setState(() {}));
               }
               final entries = snapshot.data ?? const [];
               return ListView(
