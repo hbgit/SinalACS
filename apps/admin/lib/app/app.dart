@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'dart:async';
 
+import 'package:sinalacs_admin/app/admin_async_states.dart';
 import 'package:sinalacs_admin/app/admin_header.dart';
+import 'package:sinalacs_admin/app/data_requests_screen.dart';
 import 'package:sinalacs_admin/app/admin_layout.dart';
 import 'package:sinalacs_admin/app/login_screen.dart';
 import 'package:sinalacs_admin/core/auth/admin_auth_backend.dart';
@@ -36,7 +38,7 @@ class SinalAdminApp extends StatelessWidget {
       );
 }
 
-enum AdminDestination { indicators, microAreas, alerts, auditLog }
+enum AdminDestination { indicators, microAreas, alerts, auditLog, dataRequests }
 
 extension on AdminDestination {
   String get label => switch (this) {
@@ -44,6 +46,18 @@ extension on AdminDestination {
         AdminDestination.microAreas => 'Microáreas',
         AdminDestination.alerts => 'Alertas',
         AdminDestination.auditLog => 'Auditoria',
+        AdminDestination.dataRequests => 'Pedidos do titular',
+      };
+
+  /// Rótulo da barra inferior do celular, onde com cinco destinos cada um tem
+  /// 64–72dp de largura: "Pedidos do titular" quebrava em quatro linhas (a
+  /// última cortada abaixo da barra) e "Indicadores" partia no meio da
+  /// palavra. O nome completo segue no `tooltip` (toque longo e leitor de
+  /// tela) e no NavigationRail. "Painel" é o título da própria tela.
+  String get shortLabel => switch (this) {
+        AdminDestination.indicators => 'Painel',
+        AdminDestination.dataRequests => 'Pedidos',
+        _ => label,
       };
 
   IconData get icon => switch (this) {
@@ -51,6 +65,7 @@ extension on AdminDestination {
         AdminDestination.microAreas => Icons.map_outlined,
         AdminDestination.alerts => Icons.warning_amber_outlined,
         AdminDestination.auditLog => Icons.fact_check_outlined,
+        AdminDestination.dataRequests => Icons.privacy_tip_outlined,
       };
 }
 
@@ -127,13 +142,14 @@ class _AdminHomeShellState extends State<AdminHomeShell> {
     );
   }
 
-  Widget _content() => _SessaoVencida(aoVencer: _encerrar, child: _telaAtual());
+  Widget _content() => AdminSessionScope(aoVencer: _encerrar, child: _telaAtual());
 
   Widget _telaAtual() => switch (destination) {
         AdminDestination.indicators => IndicatorsScreen(dataSource: widget.dataSource),
         AdminDestination.microAreas => MicroAreasScreen(dataSource: widget.dataSource),
         AdminDestination.alerts => AlertsScreen(dataSource: widget.dataSource),
         AdminDestination.auditLog => AuditLogScreen(dataSource: widget.dataSource),
+        AdminDestination.dataRequests => DataRequestsScreen(dataSource: widget.dataSource, now: widget.now),
       };
 
   void _select(int index) {
@@ -188,11 +204,16 @@ class _AdminHomeShellState extends State<AdminHomeShell> {
             body: SafeArea(top: false, bottom: false, child: content),
             bottomNavigationBar: NavigationBar(
               key: const Key('admin_navigation_bar'),
+              height: adminNavigationBarHeight(context),
               selectedIndex: destination.index,
               onDestinationSelected: _select,
               destinations: [
                 for (final value in AdminDestination.values)
-                  NavigationDestination(icon: Icon(value.icon), label: value.label),
+                  NavigationDestination(
+                    icon: Icon(value.icon),
+                    label: value.shortLabel,
+                    tooltip: value.shortLabel == value.label ? null : value.label,
+                  ),
               ],
             ),
           );
@@ -241,64 +262,6 @@ String statusLabel(AlertStatus status) => switch (status) {
       AlertStatus.escalated => 'Escalonado',
     };
 
-/// Estado de erro compartilhado pelas telas assíncronas, com retry.
-///
-/// Sem isso, um `FutureBuilder` que falha fica com `hasData == false` para
-/// sempre (spinner infinito) ou, pior, cai no mesmo ramo de "vazio" que os
-/// dados realmente vazios — escondendo uma falha de rede/backend como se
-/// não houvesse nada para mostrar (achado da revisão do Copilot no PR).
-class _AsyncError extends StatelessWidget {
-  const _AsyncError({required this.error, required this.fallback, required this.onRetry});
-
-  /// O que o `FutureBuilder` capturou. [AdminDataFailure] traz o texto próprio
-  /// da falha; [AdminSessionExpired] leva ao login em vez de oferecer retry.
-  final Object? error;
-
-  /// Texto da tela quando a falha não traz mensagem própria.
-  final String fallback;
-  final VoidCallback onRetry;
-
-  @override
-  Widget build(BuildContext context) {
-    if (error is AdminSessionExpired) {
-      // Navegar durante o build não pode: adia para depois do frame.
-      final aoVencer = _SessaoVencida.maybeOf(context);
-      WidgetsBinding.instance.addPostFrameCallback((_) => aoVencer?.call());
-      return const Center(child: CircularProgressIndicator());
-    }
-    final message = error is AdminDataFailure ? (error! as AdminDataFailure).message : fallback;
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.cloud_off_outlined, size: 32, color: Colors.white70),
-            const SizedBox(height: 12),
-            Text(message, textAlign: TextAlign.center),
-            const SizedBox(height: 16),
-            OutlinedButton.icon(onPressed: onRetry, icon: const Icon(Icons.refresh), label: const Text('Tentar novamente')),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// Entrega às telas a ação de encerrar a sessão vencida (volta ao login), sem
-/// passar um callback por cada construtor.
-class _SessaoVencida extends InheritedWidget {
-  const _SessaoVencida({required this.aoVencer, required super.child});
-
-  final VoidCallback aoVencer;
-
-  static VoidCallback? maybeOf(BuildContext context) =>
-      context.getInheritedWidgetOfExactType<_SessaoVencida>()?.aoVencer;
-
-  @override
-  bool updateShouldNotify(_SessaoVencida old) => false;
-}
-
 class IndicatorsScreen extends StatefulWidget {
   const IndicatorsScreen({required this.dataSource, super.key});
 
@@ -320,7 +283,7 @@ class _IndicatorsScreenState extends State<IndicatorsScreen> {
         future: _future,
         builder: (context, snapshot) {
           if (snapshot.hasError) {
-            return _AsyncError(error: snapshot.error, fallback: 'Não foi possível carregar os indicadores.', onRetry: _retry);
+            return AdminAsyncError(error: snapshot.error, fallback: 'Não foi possível carregar os indicadores.', onRetry: _retry);
           }
           if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
           final data = snapshot.data!;
@@ -426,7 +389,7 @@ class _MicroAreasScreenState extends State<MicroAreasScreen> {
         future: _future,
         builder: (context, snapshot) {
           if (snapshot.hasError) {
-            return _AsyncError(error: snapshot.error, fallback: 'Não foi possível carregar as microáreas.', onRetry: _retry);
+            return AdminAsyncError(error: snapshot.error, fallback: 'Não foi possível carregar as microáreas.', onRetry: _retry);
           }
           if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
           final areas = snapshot.data!;
@@ -476,7 +439,7 @@ class _AlertsScreenState extends State<AlertsScreen> {
         future: _accessRecorded,
         builder: (context, accessSnapshot) {
           if (accessSnapshot.hasError) {
-            return _AsyncError(
+            return AdminAsyncError(
               error: accessSnapshot.error,
               fallback: 'Não foi possível registrar o acesso a esta tela.',
               onRetry: () => setState(() {
@@ -523,7 +486,7 @@ class _AlertsList extends StatelessWidget {
         future: _load(),
         builder: (context, snapshot) {
           if (snapshot.hasError) {
-            return _AsyncError(error: snapshot.error, fallback: 'Não foi possível carregar os alertas.', onRetry: () => onFilterChanged(microAreaFilter, statusFilter));
+            return AdminAsyncError(error: snapshot.error, fallback: 'Não foi possível carregar os alertas.', onRetry: () => onFilterChanged(microAreaFilter, statusFilter));
           }
           final alerts = snapshot.data?.alerts ?? const [];
           final microAreas = snapshot.data?.microAreas ?? const [];
@@ -643,7 +606,7 @@ class _AuditLogScreenState extends State<AuditLogScreen> {
         future: _selfAuditRecorded,
         builder: (context, recordSnapshot) {
           if (recordSnapshot.hasError) {
-            return _AsyncError(
+            return AdminAsyncError(
               error: recordSnapshot.error,
               fallback: 'Não foi possível registrar o acesso a esta tela.',
               onRetry: () => setState(() {
@@ -658,7 +621,7 @@ class _AuditLogScreenState extends State<AuditLogScreen> {
             future: widget.dataSource.fetchAuditLogs(),
             builder: (context, snapshot) {
               if (snapshot.hasError) {
-                return _AsyncError(error: snapshot.error, fallback: 'Não foi possível carregar os logs de auditoria.', onRetry: () => setState(() {}));
+                return AdminAsyncError(error: snapshot.error, fallback: 'Não foi possível carregar os logs de auditoria.', onRetry: () => setState(() {}));
               }
               final entries = snapshot.data ?? const [];
               return ListView(

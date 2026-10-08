@@ -84,4 +84,34 @@ class FailingAdminDataSource implements AdminDataSource {
     }
     return inner.recordAccess(actionType: actionType, resourceType: resourceType);
   }
+
+  @override
+  Future<List<DataRequestSummary>> fetchDataRequests({DataRequestStatus? status, int limit = 50, int offset = 0}) async {
+    await _lancaSeProgramado();
+    return inner.fetchDataRequests(status: status, limit: limit, offset: offset);
+  }
+
+  @override
+  Future<DataRequestDetail> fetchDataRequest(String id) async {
+    await _lancaSeProgramado();
+    return inner.fetchDataRequest(id);
+  }
+
+  @override
+  Future<void> startDataRequestReview(String id) async {
+    await _lancaSeProgramado();
+    return inner.startDataRequestReview(id);
+  }
+
+  @override
+  Future<void> completeDataRequest(String id, {String? note}) async {
+    await _lancaSeProgramado();
+    return inner.completeDataRequest(id, note: note);
+  }
+
+  @override
+  Future<void> rejectDataRequest(String id, {required String reason}) async {
+    await _lancaSeProgramado();
+    return inner.rejectDataRequest(id, reason: reason);
+  }
 }

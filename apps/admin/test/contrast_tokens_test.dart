@@ -35,6 +35,12 @@ void main() {
     // não sobre um Card — é por isso que accentOnSurface precisa passar nas
     // duas superfícies, e não só sobre card.
     ('accentOnSurface sobre appbar (eyebrow do cabeçalho)', AdminColors.accentOnSurface, AdminColors.surface, normalText),
+    // Prazo LGPD vencido (#42): texto + ícone na linha da fila e no detalhe,
+    // ambos dentro de Card. Não é cor clínica — ver o token.
+    ('overdueOnSurface sobre card (pedido do titular vencido)', AdminColors.overdueOnSurface, AdminColors.surfaceRaised, normalText),
+    // Rótulos ("Paciente:", "Prazo:") do detalhe do pedido, dentro de Card.
+    ('white70 sobre card (rótulo do detalhe do pedido)', Colors.white70, AdminColors.surfaceRaised, normalText),
+    ('overdueOnSurface sobre scaffold', AdminColors.overdueOnSurface, AdminColors.background, normalText),
     // Preenchimento: texto branco sobre a cor de fundo — a prova de que não
     // precisamos trocar `red`/`accent` como fill.
     ('branco sobre red (faixa/chip de risco)', Colors.white, AdminColors.red, largeTextOrUi),
@@ -76,5 +82,11 @@ void main() {
     // visual, e não aparece num teste de contraste isolado.
     const acsAccentOnSurface = Color(0xFF60A5FA);
     expect(contrastOn(acsAccentOnSurface, AdminColors.surfaceRaised), greaterThanOrEqualTo(normalText));
+  });
+
+  test('overdueOnSurface não reaproveita nenhuma cor clínica (vermelho/amarelo/verde são só risco)', () {
+    for (final clinica in const [AdminColors.red, AdminColors.redOnSurface, AdminColors.yellow, AdminColors.green]) {
+      expect(AdminColors.overdueOnSurface, isNot(clinica));
+    }
   });
 }

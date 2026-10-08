@@ -116,12 +116,107 @@ class BackendAdminDataSource implements AdminDataSource {
       });
 
   @override
+  Future<List<DataRequestSummary>> fetchDataRequests({
+    DataRequestStatus? status,
+    int limit = 50,
+    int offset = 0,
+  }) => _guard(() async {
+    final pagina = await _admin.dataSubjectRequests(
+      accessToken: _accessToken,
+      status: status == null
+          ? null
+          : api.DataSubjectRequestStatus.values.byName(status.name),
+      limit: limit,
+      offset: offset,
+    );
+    // A ordem é a do servidor (prazo crescente): não reordena.
+    return [
+      for (final r in pagina.items)
+        DataRequestSummary(
+          id: r.id,
+          type: DataRequestType.values.byName(r.type.name),
+          status: DataRequestStatus.values.byName(r.status.name),
+          createdAt: r.createdAt,
+          dueAt: r.dueAt,
+          overdue: r.overdue,
+          patientLabel: 'Paciente ${r.patientLabel}',
+        ),
+    ];
+  });
+
+  @override
+  Future<DataRequestDetail> fetchDataRequest(String id) => _guard(() async {
+    final r = await _admin.dataSubjectRequest(accessToken: _accessToken, id: id);
+    return DataRequestDetail(
+      id: r.id,
+      type: DataRequestType.values.byName(r.type.name),
+      status: DataRequestStatus.values.byName(r.status.name),
+      createdAt: r.createdAt,
+      dueAt: r.dueAt,
+      overdue: r.overdue,
+      patientLabel: 'Paciente ${r.patientLabel}',
+      details: r.details,
+      resolution: r.resolution,
+      decidedAt: r.decidedAt,
+    );
+  }, invalido: dataRequestUnavailable);
+
+  @override
+  Future<void> startDataRequestReview(String id) => _guard(
+    () => _admin.startDataSubjectReview(accessToken: _accessToken, id: id),
+    invalido: dataRequestUnavailable,
+  );
+
+  @override
+  Future<void> completeDataRequest(String id, {String? note}) async {
+    final nota = note == null ? null : _textoValidado(note);
+    return _guard(
+      () => _admin.completeDataSubjectRequest(
+        accessToken: _accessToken,
+        id: id,
+        note: nota,
+      ),
+      invalido: dataRequestUnavailable,
+    );
+  }
+
+  @override
+  Future<void> rejectDataRequest(String id, {required String reason}) async {
+    final motivo = _textoValidado(reason);
+    return _guard(
+      () => _admin.rejectDataSubjectRequest(
+        accessToken: _accessToken,
+        id: id,
+        reason: motivo,
+      ),
+      invalido: dataRequestUnavailable,
+    );
+  }
+
+  /// Valida a nota/motivo aqui, com o mesmo critério do servidor, para que a
+  /// recusa por tamanho tenha texto próprio sem depender da mensagem do
+  /// servidor. Assim toda `AdminInvalidRequestException` de uma decisão é o
+  /// caso neutro (corrida perdida, fora do escopo, já decidido).
+  static String _textoValidado(String texto) {
+    if (!dataRequestTextIsValid(texto)) {
+      throw const AdminDataFailure(dataRequestTextInvalid);
+    }
+    return texto.trim();
+  }
+
+  @override
   Future<void> recordAccess({
     required String actionType,
     required String resourceType,
   }) async {}
 
-  Future<T> _guard<T>(Future<T> Function() chamada) async {
+  /// [invalido] é o texto da tela para `AdminInvalidRequestException`, que o
+  /// servidor usa tanto para paginação inválida (listas) quanto para decisão
+  /// sobre pedido indisponível: cada chamada diz qual dos dois ela é.
+  Future<T> _guard<T>(
+    Future<T> Function() chamada, {
+    String invalido = 'Parâmetro de paginação inválido.',
+  }) async {
     try {
       return await chamada();
     } on api.ServerpodClientUnauthorized {
@@ -131,7 +226,7 @@ class BackendAdminDataSource implements AdminDataSource {
       if (venceu) throw const AdminSessionExpired();
       throw const AdminDataFailure('Acesso restrito ao backoffice.');
     } on api.AdminInvalidRequestException {
-      throw const AdminDataFailure('Parâmetro de paginação inválido.');
+      throw AdminDataFailure(invalido);
     } on SocketException {
       throw const AdminDataFailure('Não foi possível conectar ao servidor.');
     } on TimeoutException {

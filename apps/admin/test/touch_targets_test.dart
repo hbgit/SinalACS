@@ -44,4 +44,22 @@ void main() {
     final barra = tester.getSize(find.byKey(const Key('admin_navigation_bar')));
     expect(barra.height, greaterThanOrEqualTo(alturaMinima));
   });
+
+  testWidgets('pedidos do titular: linha da fila, filtro, voltar e ações têm pelo menos 48dp', (tester) async {
+    await abrirBackoffice(tester, tamanho: const Size(360, 800));
+    await irPara(tester, 'Pedidos do titular');
+
+    await rolarAtePedido(tester, find.byKey(const Key('data_request_req-a18f')));
+    expect(tester.getSize(find.byKey(const Key('data_request_req-a18f'))).height, greaterThanOrEqualTo(alturaMinima));
+    expect(tester.getSize(find.byKey(const Key('data_requests_status_filter'))).height, greaterThanOrEqualTo(alturaMinima));
+
+    await abrirPedidoDoTitular(tester, 'req-a18f');
+    for (final chave in const ['data_request_back', 'start_review_button', 'complete_button', 'reject_button']) {
+      final alvo = find.byKey(Key(chave));
+      await rolarAtePedido(tester, alvo);
+      final tamanho = tester.getSize(alvo);
+      expect(tamanho.height, greaterThanOrEqualTo(alturaMinima), reason: chave);
+      expect(tamanho.width, greaterThanOrEqualTo(alturaMinima), reason: chave);
+    }
+  });
 }

@@ -88,6 +88,80 @@ class AuditLogEntry {
   final String result;
 }
 
+/// Espelha `DataSubjectRequestType` (`enums/data_subject_request_type.spy.yaml`).
+enum DataRequestType { deletion, correction }
+
+/// Espelha `DataSubjectRequestStatus`. `completed` e `rejected` são finais.
+enum DataRequestStatus { open, inReview, completed, rejected }
+
+/// Limites da nota de resposta e do motivo de recusa, os mesmos do servidor
+/// (`DataSubjectCaseService.notaMin/notaMax`), contados depois do `trim`.
+const dataRequestTextMin = 3;
+const dataRequestTextMax = 500;
+
+/// Texto da falha de validação da nota/motivo. Fixo do app: a mensagem do
+/// servidor não chega à tela.
+const dataRequestTextInvalid = 'A resposta deve ter de $dataRequestTextMin a $dataRequestTextMax caracteres.';
+
+/// Texto neutro para decisão recusada pelo servidor: corrida perdida, pedido
+/// fora do escopo ou já decidido. Não diz se o pedido existe.
+const dataRequestUnavailable = 'Pedido não encontrado ou já decidido. Atualize a lista.';
+
+/// `true` quando [texto], sem espaços nas pontas, cabe em 3–500 caracteres.
+bool dataRequestTextIsValid(String texto) {
+  final t = texto.trim();
+  return t.length >= dataRequestTextMin && t.length <= dataRequestTextMax;
+}
+
+/// Pedido do titular na fila do backoffice (#42). Espelha `AdminDataSubjectRequest`.
+/// A lista **nunca** traz o texto do pedido: ele só é decifrado no detalhe.
+/// [overdue] vem do servidor (aberto ou em análise e com o prazo passado).
+class DataRequestSummary {
+  const DataRequestSummary({
+    required this.id,
+    required this.type,
+    required this.status,
+    required this.createdAt,
+    required this.dueAt,
+    required this.overdue,
+    required this.patientLabel,
+  });
+
+  final String id;
+  final DataRequestType type;
+  final DataRequestStatus status;
+  final DateTime createdAt;
+  final DateTime dueAt;
+  final bool overdue;
+
+  /// Rótulo minimizado (`Paciente #A18F`), nunca o nome.
+  final String patientLabel;
+}
+
+/// Detalhe de um pedido, com o texto decifrado. Espelha
+/// `AdminDataSubjectRequestDetail`; a leitura é auditada pelo servidor antes.
+class DataRequestDetail extends DataRequestSummary {
+  const DataRequestDetail({
+    required super.id,
+    required super.type,
+    required super.status,
+    required super.createdAt,
+    required super.dueAt,
+    required super.overdue,
+    required super.patientLabel,
+    this.details,
+    this.resolution,
+    this.decidedAt,
+  });
+
+  /// Texto livre do pedido de correção (exclusão não tem).
+  final String? details;
+
+  /// Nota de atendimento ou motivo da recusa, que o titular vê.
+  final String? resolution;
+  final DateTime? decidedAt;
+}
+
 /// Falha ao ler dados do backoffice. A mensagem já vem pronta para a tela e
 /// nunca carrega o texto cru do servidor.
 class AdminDataFailure implements Exception {
@@ -129,4 +203,20 @@ abstract interface class AdminDataSource {
   /// Registra o próprio acesso do admin a uma tela sensível (PRD §4.2.2:
   /// "Administrador (Sistema): R (auditado)").
   Future<void> recordAccess({required String actionType, required String resourceType});
+
+  /// Pedidos do titular, na ordem do servidor (prazo crescente). [status]
+  /// `null` = todos.
+  Future<List<DataRequestSummary>> fetchDataRequests({DataRequestStatus? status, int limit = 50, int offset = 0});
+
+  /// Detalhe com o texto decifrado.
+  Future<DataRequestDetail> fetchDataRequest(String id);
+
+  /// `open → inReview`.
+  Future<void> startDataRequestReview(String id);
+
+  /// Atende o pedido. Correção exige [note]; exclusão anonimiza o titular.
+  Future<void> completeDataRequest(String id, {String? note});
+
+  /// Recusa com motivo de 3 a 500 caracteres, que o titular vê.
+  Future<void> rejectDataRequest(String id, {required String reason});
 }

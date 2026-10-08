@@ -42,6 +42,22 @@ class _CustomAreaDataSource implements AdminDataSource {
 
   @override
   Future<void> recordAccess({required String actionType, required String resourceType}) async {}
+
+  // Pedidos do titular (#42): fora do escopo deste teste.
+  @override
+  Future<List<DataRequestSummary>> fetchDataRequests({DataRequestStatus? status, int limit = 50, int offset = 0}) async => const [];
+
+  @override
+  Future<DataRequestDetail> fetchDataRequest(String id) => throw UnimplementedError();
+
+  @override
+  Future<void> startDataRequestReview(String id) => throw UnimplementedError();
+
+  @override
+  Future<void> completeDataRequest(String id, {String? note}) => throw UnimplementedError();
+
+  @override
+  Future<void> rejectDataRequest(String id, {required String reason}) => throw UnimplementedError();
 }
 
 void main() {
