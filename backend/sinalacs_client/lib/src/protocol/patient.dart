@@ -24,18 +24,22 @@ import 'package:serverpod_client/serverpod_client.dart' as _i1;
 abstract class Patient implements _i1.SerializableModel {
   Patient._({
     this.id,
-    required this.emergencyContact,
+    String? emergencyContactEncrypted,
+    int? emergencyContactKeyVersion,
     required this.isChronic,
     String? chronicConditionsEncrypted,
     int? chronicConditionsKeyVersion,
     this.lastLocationHash,
     this.lastTriageAt,
-  }) : chronicConditionsEncrypted = chronicConditionsEncrypted ?? '',
+  }) : emergencyContactEncrypted = emergencyContactEncrypted ?? '',
+       emergencyContactKeyVersion = emergencyContactKeyVersion ?? 1,
+       chronicConditionsEncrypted = chronicConditionsEncrypted ?? '',
        chronicConditionsKeyVersion = chronicConditionsKeyVersion ?? 1;
 
   factory Patient({
     _i1.UuidValue? id,
-    required String emergencyContact,
+    String? emergencyContactEncrypted,
+    int? emergencyContactKeyVersion,
     required bool isChronic,
     String? chronicConditionsEncrypted,
     int? chronicConditionsKeyVersion,
@@ -48,7 +52,10 @@ abstract class Patient implements _i1.SerializableModel {
       id: jsonSerialization['id'] == null
           ? null
           : _i1.UuidValueJsonExtension.fromJson(jsonSerialization['id']),
-      emergencyContact: jsonSerialization['emergencyContact'] as String,
+      emergencyContactEncrypted:
+          jsonSerialization['emergencyContactEncrypted'] as String?,
+      emergencyContactKeyVersion:
+          jsonSerialization['emergencyContactKeyVersion'] as int?,
       isChronic: _i1.BoolJsonExtension.fromJson(jsonSerialization['isChronic']),
       chronicConditionsEncrypted:
           jsonSerialization['chronicConditionsEncrypted'] as String?,
@@ -68,7 +75,17 @@ abstract class Patient implements _i1.SerializableModel {
   /// the id will be null.
   _i1.UuidValue? id;
 
-  String emergencyContact;
+  /// Contato de emergência do paciente (PII de terceiro: nome/telefone),
+  /// cifrado em AES-256-GCM (RNF03, INV-04) — mesmo padrão de
+  /// chronicConditions. Antes era `emergencyContact` em texto claro; agora o
+  /// par `emergencyContactEncrypted`/`emergencyContactKeyVersion` guarda o
+  /// ciphertext, cifrado e decifrado na borda do repositório ORM
+  /// (OrmPatientDirectoryStore), nunca em application/.
+  String emergencyContactEncrypted;
+
+  /// Versão da chave que cifrou o campo acima, para permitir rotação futura
+  /// sem reescrever todas as linhas de uma vez.
+  int emergencyContactKeyVersion;
 
   bool isChronic;
 
@@ -96,7 +113,8 @@ abstract class Patient implements _i1.SerializableModel {
   @_i1.useResult
   Patient copyWith({
     _i1.UuidValue? id,
-    String? emergencyContact,
+    String? emergencyContactEncrypted,
+    int? emergencyContactKeyVersion,
     bool? isChronic,
     String? chronicConditionsEncrypted,
     int? chronicConditionsKeyVersion,
@@ -108,7 +126,8 @@ abstract class Patient implements _i1.SerializableModel {
     return {
       '__className__': 'Patient',
       if (id != null) 'id': id?.toJson(),
-      'emergencyContact': emergencyContact,
+      'emergencyContactEncrypted': emergencyContactEncrypted,
+      'emergencyContactKeyVersion': emergencyContactKeyVersion,
       'isChronic': isChronic,
       'chronicConditionsEncrypted': chronicConditionsEncrypted,
       'chronicConditionsKeyVersion': chronicConditionsKeyVersion,
@@ -128,7 +147,8 @@ class _Undefined {}
 class _PatientImpl extends Patient {
   _PatientImpl({
     _i1.UuidValue? id,
-    required String emergencyContact,
+    String? emergencyContactEncrypted,
+    int? emergencyContactKeyVersion,
     required bool isChronic,
     String? chronicConditionsEncrypted,
     int? chronicConditionsKeyVersion,
@@ -136,7 +156,8 @@ class _PatientImpl extends Patient {
     DateTime? lastTriageAt,
   }) : super._(
          id: id,
-         emergencyContact: emergencyContact,
+         emergencyContactEncrypted: emergencyContactEncrypted,
+         emergencyContactKeyVersion: emergencyContactKeyVersion,
          isChronic: isChronic,
          chronicConditionsEncrypted: chronicConditionsEncrypted,
          chronicConditionsKeyVersion: chronicConditionsKeyVersion,
@@ -150,7 +171,8 @@ class _PatientImpl extends Patient {
   @override
   Patient copyWith({
     Object? id = _Undefined,
-    String? emergencyContact,
+    String? emergencyContactEncrypted,
+    int? emergencyContactKeyVersion,
     bool? isChronic,
     String? chronicConditionsEncrypted,
     int? chronicConditionsKeyVersion,
@@ -159,7 +181,10 @@ class _PatientImpl extends Patient {
   }) {
     return Patient(
       id: id is _i1.UuidValue? ? id : this.id,
-      emergencyContact: emergencyContact ?? this.emergencyContact,
+      emergencyContactEncrypted:
+          emergencyContactEncrypted ?? this.emergencyContactEncrypted,
+      emergencyContactKeyVersion:
+          emergencyContactKeyVersion ?? this.emergencyContactKeyVersion,
       isChronic: isChronic ?? this.isChronic,
       chronicConditionsEncrypted:
           chronicConditionsEncrypted ?? this.chronicConditionsEncrypted,

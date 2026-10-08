@@ -6,9 +6,10 @@ import 'package:sinalacs_server/src/infrastructure/crypto/health_data_cipher.dar
 
 /// Ajudantes para os testes que precisam SEMEAR linhas cifradas.
 ///
-/// `patients.chronicConditions` virou `chronicConditionsEncrypted` (Track E,
+/// `patients.chronicConditions` virou `chronicConditionsEncrypted` e
+/// `patients.emergencyContact` virou `emergencyContactEncrypted` (Track E,
 /// RNF03/INV-04). `patients.updateChronicConditions` é hoje o único caminho
-/// Dart de produção que escreve essa coluna (perfil clínico do próprio
+/// Dart de produção que escreve a coluna clínica (perfil do próprio
 /// paciente); estas funções aqui são para o estado de PARTIDA de cada teste
 /// de integração, sem passar pelo endpoint. Cifram com a MESMA chave de
 /// desenvolvimento que o `AlertRuntime` usa nos testes, para que o store
@@ -21,18 +22,21 @@ HealthDataCipher testHealthDataCipher() => HealthDataCipher(
       keyVersion: 1,
     );
 
-/// Um `Patient` pronto para `insertRow`, com as condições crônicas já
-/// cifradas.
+/// Um `Patient` pronto para `insertRow`, com as condições crônicas e o
+/// contato de emergência já cifrados.
 Future<Patient> encryptedPatient({
   required String id,
   required String emergencyContact,
   required bool isChronic,
   List<String> chronicConditions = const [],
 }) async {
-  final encrypted = await testHealthDataCipher().encryptJson(chronicConditions);
+  final cipher = testHealthDataCipher();
+  final encrypted = await cipher.encryptJson(chronicConditions);
+  final encryptedContact = await cipher.encryptJson(emergencyContact);
   return Patient(
     id: UuidValue.fromString(id),
-    emergencyContact: emergencyContact,
+    emergencyContactEncrypted: encryptedContact.ciphertextBase64,
+    emergencyContactKeyVersion: encryptedContact.keyVersion,
     isChronic: isChronic,
     chronicConditionsEncrypted: encrypted.ciphertextBase64,
     chronicConditionsKeyVersion: encrypted.keyVersion,

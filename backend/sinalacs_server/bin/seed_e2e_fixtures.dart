@@ -69,10 +69,18 @@ Future<void> main(List<String> args) async {
         );
         final conditions = p.chronic ? ['hipertensão'] : <String>[];
         final encrypted = await cipher.encryptJson(conditions);
+        final encryptedContact = await cipher.encryptJson('Contato E2E');
         await tx.execute(
-          Sql.named('INSERT INTO "patients" ("id","emergencyContact","isChronic","chronicConditionsEncrypted","chronicConditionsKeyVersion") '
-              "VALUES (@id,'Contato E2E',@chronic,@cipher,@ver)"),
-          parameters: {'id': p.id, 'chronic': p.chronic, 'cipher': encrypted.ciphertextBase64, 'ver': encrypted.keyVersion},
+          Sql.named('INSERT INTO "patients" ("id","emergencyContactEncrypted","emergencyContactKeyVersion","isChronic","chronicConditionsEncrypted","chronicConditionsKeyVersion") '
+              'VALUES (@id,@contactCipher,@contactVer,@chronic,@cipher,@ver)'),
+          parameters: {
+            'id': p.id,
+            'contactCipher': encryptedContact.ciphertextBase64,
+            'contactVer': encryptedContact.keyVersion,
+            'chronic': p.chronic,
+            'cipher': encrypted.ciphertextBase64,
+            'ver': encrypted.keyVersion,
+          },
         );
       }
       // Os ACS entram por matrícula e senha (RF07), nunca por CPF: o cpfHash é

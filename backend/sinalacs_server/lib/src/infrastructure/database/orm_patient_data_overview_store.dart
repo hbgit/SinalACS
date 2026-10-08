@@ -10,8 +10,9 @@ import 'package:sinalacs_server/src/infrastructure/database/orm_data_subject_rig
 /// Agrega cinco consultas independentes — `patients`, `users`,
 /// `consent_logs`, o histórico de risco de `triage_sessions`/`alerts` e
 /// `data_subject_requests` — num único snapshot. Decifra
-/// `chronicConditionsEncrypted` e o `detailsEncrypted` dos pedidos, texto que o
-/// próprio titular escreveu; o conteúdo bruto
+/// `chronicConditionsEncrypted`, `emergencyContactEncrypted` (PII de
+/// terceiro) e o `detailsEncrypted` dos pedidos, texto que o próprio titular
+/// escreveu; o conteúdo bruto
 /// de uma triagem (`answersEncrypted`) e a localização de um alerta nunca
 /// entram no snapshot, por minimização (spec/lgpd_design.md).
 class OrmPatientDataOverviewStore implements PatientDataOverviewStore {
@@ -39,6 +40,16 @@ class OrmPatientDataOverviewStore implements PatientDataOverviewStore {
     );
     final chronicConditions =
         decoded == null ? const <String>[] : (decoded as List).cast<String>();
+
+    // Mesmo padrão de cifragem de chronicConditions (RNF03, INV-04):
+    // ciphertext vazio = linha nunca escrita por caminho Dart (seed SQL) — e o
+    // DTO de domínio sempre teve `emergencyContact` como String não-nula, então
+    // a ausência vira string vazia, não null.
+    final decodedContact = await _cipher.decryptJson(
+      patient.emergencyContactEncrypted,
+      patient.emergencyContactKeyVersion,
+    );
+    final emergencyContact = (decodedContact as String?) ?? '';
 
     final consentRows = await ConsentLog.db.find(
       session,
@@ -79,7 +90,7 @@ class OrmPatientDataOverviewStore implements PatientDataOverviewStore {
       // `createdAt`, por isso o epoch como sentinela óbvio de dado ausente.
       name: user?.name ?? '',
       birthDate: user?.birthDate ?? DateTime.utc(1970),
-      emergencyContact: patient.emergencyContact,
+      emergencyContact: emergencyContact,
       isChronic: patient.isChronic,
       chronicConditions: chronicConditions,
       consents: [
