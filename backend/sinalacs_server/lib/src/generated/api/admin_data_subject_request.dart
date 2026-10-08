@@ -15,94 +15,102 @@ import 'package:serverpod/serverpod.dart' as _i1;
 import '../enums/data_subject_request_type.dart' as _i2;
 import '../enums/data_subject_request_status.dart' as _i3;
 
-/// Um pedido do próprio titular, para o painel "Meus Dados". `details` já
-/// decifrado — é texto que o próprio titular escreveu (direito de acesso).
-abstract class PatientDataSubjectRequestRecord
+/// Linha da lista de pedidos do titular no backoffice. Sem nome nem CPF:
+/// `patientLabel` é um rótulo curto (`#A18F`) derivado do id do titular.
+abstract class AdminDataSubjectRequest
     implements _i1.SerializableModel, _i1.ProtocolSerialization {
-  PatientDataSubjectRequestRecord._({
+  AdminDataSubjectRequest._({
+    required this.id,
     required this.type,
     required this.status,
-    this.details,
     required this.createdAt,
     required this.dueAt,
-    this.resolution,
+    required this.overdue,
+    required this.patientLabel,
   });
 
-  factory PatientDataSubjectRequestRecord({
+  factory AdminDataSubjectRequest({
+    required String id,
     required _i2.DataSubjectRequestType type,
     required _i3.DataSubjectRequestStatus status,
-    String? details,
     required DateTime createdAt,
     required DateTime dueAt,
-    String? resolution,
-  }) = _PatientDataSubjectRequestRecordImpl;
+    required bool overdue,
+    required String patientLabel,
+  }) = _AdminDataSubjectRequestImpl;
 
-  factory PatientDataSubjectRequestRecord.fromJson(
+  factory AdminDataSubjectRequest.fromJson(
     Map<String, dynamic> jsonSerialization,
   ) {
-    return PatientDataSubjectRequestRecord(
+    return AdminDataSubjectRequest(
+      id: jsonSerialization['id'] as String,
       type: _i2.DataSubjectRequestType.fromJson(
         (jsonSerialization['type'] as String),
       ),
       status: _i3.DataSubjectRequestStatus.fromJson(
         (jsonSerialization['status'] as String),
       ),
-      details: jsonSerialization['details'] as String?,
       createdAt: _i1.DateTimeJsonExtension.fromJson(
         jsonSerialization['createdAt'],
       ),
       dueAt: _i1.DateTimeJsonExtension.fromJson(jsonSerialization['dueAt']),
-      resolution: jsonSerialization['resolution'] as String?,
+      overdue: _i1.BoolJsonExtension.fromJson(jsonSerialization['overdue']),
+      patientLabel: jsonSerialization['patientLabel'] as String,
     );
   }
+
+  String id;
 
   _i2.DataSubjectRequestType type;
 
   _i3.DataSubjectRequestStatus status;
 
-  String? details;
-
   DateTime createdAt;
 
   DateTime dueAt;
 
-  /// Nota de resposta do backoffice, já decifrada; nula até a decisão.
-  String? resolution;
+  /// Vencido: status `open`/`inReview` e agora > `dueAt`.
+  bool overdue;
 
-  /// Returns a shallow copy of this [PatientDataSubjectRequestRecord]
+  String patientLabel;
+
+  /// Returns a shallow copy of this [AdminDataSubjectRequest]
   /// with some or all fields replaced by the given arguments.
   @_i1.useResult
-  PatientDataSubjectRequestRecord copyWith({
+  AdminDataSubjectRequest copyWith({
+    String? id,
     _i2.DataSubjectRequestType? type,
     _i3.DataSubjectRequestStatus? status,
-    String? details,
     DateTime? createdAt,
     DateTime? dueAt,
-    String? resolution,
+    bool? overdue,
+    String? patientLabel,
   });
   @override
   Map<String, dynamic> toJson() {
     return {
-      '__className__': 'PatientDataSubjectRequestRecord',
+      '__className__': 'AdminDataSubjectRequest',
+      'id': id,
       'type': type.toJson(),
       'status': status.toJson(),
-      if (details != null) 'details': details,
       'createdAt': createdAt.toJson(),
       'dueAt': dueAt.toJson(),
-      if (resolution != null) 'resolution': resolution,
+      'overdue': overdue,
+      'patientLabel': patientLabel,
     };
   }
 
   @override
   Map<String, dynamic> toJsonForProtocol() {
     return {
-      '__className__': 'PatientDataSubjectRequestRecord',
+      '__className__': 'AdminDataSubjectRequest',
+      'id': id,
       'type': type.toJson(),
       'status': status.toJson(),
-      if (details != null) 'details': details,
       'createdAt': createdAt.toJson(),
       'dueAt': dueAt.toJson(),
-      if (resolution != null) 'resolution': resolution,
+      'overdue': overdue,
+      'patientLabel': patientLabel,
     };
   }
 
@@ -112,45 +120,46 @@ abstract class PatientDataSubjectRequestRecord
   }
 }
 
-class _Undefined {}
-
-class _PatientDataSubjectRequestRecordImpl
-    extends PatientDataSubjectRequestRecord {
-  _PatientDataSubjectRequestRecordImpl({
+class _AdminDataSubjectRequestImpl extends AdminDataSubjectRequest {
+  _AdminDataSubjectRequestImpl({
+    required String id,
     required _i2.DataSubjectRequestType type,
     required _i3.DataSubjectRequestStatus status,
-    String? details,
     required DateTime createdAt,
     required DateTime dueAt,
-    String? resolution,
+    required bool overdue,
+    required String patientLabel,
   }) : super._(
+         id: id,
          type: type,
          status: status,
-         details: details,
          createdAt: createdAt,
          dueAt: dueAt,
-         resolution: resolution,
+         overdue: overdue,
+         patientLabel: patientLabel,
        );
 
-  /// Returns a shallow copy of this [PatientDataSubjectRequestRecord]
+  /// Returns a shallow copy of this [AdminDataSubjectRequest]
   /// with some or all fields replaced by the given arguments.
   @_i1.useResult
   @override
-  PatientDataSubjectRequestRecord copyWith({
+  AdminDataSubjectRequest copyWith({
+    String? id,
     _i2.DataSubjectRequestType? type,
     _i3.DataSubjectRequestStatus? status,
-    Object? details = _Undefined,
     DateTime? createdAt,
     DateTime? dueAt,
-    Object? resolution = _Undefined,
+    bool? overdue,
+    String? patientLabel,
   }) {
-    return PatientDataSubjectRequestRecord(
+    return AdminDataSubjectRequest(
+      id: id ?? this.id,
       type: type ?? this.type,
       status: status ?? this.status,
-      details: details is String? ? details : this.details,
       createdAt: createdAt ?? this.createdAt,
       dueAt: dueAt ?? this.dueAt,
-      resolution: resolution is String? ? resolution : this.resolution,
+      overdue: overdue ?? this.overdue,
+      patientLabel: patientLabel ?? this.patientLabel,
     );
   }
 }

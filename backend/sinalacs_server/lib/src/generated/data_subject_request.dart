@@ -33,6 +33,10 @@ abstract class DataSubjectRequest
     required this.status,
     required this.createdAt,
     required this.dueAt,
+    this.decidedAt,
+    this.decidedBy,
+    this.resolutionEncrypted,
+    this.resolutionKeyVersion,
   });
 
   factory DataSubjectRequest({
@@ -44,6 +48,10 @@ abstract class DataSubjectRequest
     required _i3.DataSubjectRequestStatus status,
     required DateTime createdAt,
     required DateTime dueAt,
+    DateTime? decidedAt,
+    _i1.UuidValue? decidedBy,
+    String? resolutionEncrypted,
+    int? resolutionKeyVersion,
   }) = _DataSubjectRequestImpl;
 
   factory DataSubjectRequest.fromJson(Map<String, dynamic> jsonSerialization) {
@@ -64,6 +72,14 @@ abstract class DataSubjectRequest
         jsonSerialization['createdAt'],
       ),
       dueAt: _i1.DateTimeJsonExtension.fromJson(jsonSerialization['dueAt']),
+      decidedAt: jsonSerialization['decidedAt'] == null
+          ? null
+          : _i1.DateTimeJsonExtension.fromJson(jsonSerialization['decidedAt']),
+      decidedBy: jsonSerialization['decidedBy'] == null
+          ? null
+          : _i1.UuidValueJsonExtension.fromJson(jsonSerialization['decidedBy']),
+      resolutionEncrypted: jsonSerialization['resolutionEncrypted'] as String?,
+      resolutionKeyVersion: jsonSerialization['resolutionKeyVersion'] as int?,
     );
   }
 
@@ -89,6 +105,16 @@ abstract class DataSubjectRequest
   /// Prazo de resposta: `createdAt` + 15 dias.
   DateTime dueAt;
 
+  /// Decisão do backoffice (#42); nulos enquanto o pedido está `open`.
+  DateTime? decidedAt;
+
+  _i1.UuidValue? decidedBy;
+
+  /// Nota de resposta/motivo da recusa: texto livre, cifrado como `details`.
+  String? resolutionEncrypted;
+
+  int? resolutionKeyVersion;
+
   @override
   _i1.Table<_i1.UuidValue?> get table => t;
 
@@ -104,6 +130,10 @@ abstract class DataSubjectRequest
     _i3.DataSubjectRequestStatus? status,
     DateTime? createdAt,
     DateTime? dueAt,
+    DateTime? decidedAt,
+    _i1.UuidValue? decidedBy,
+    String? resolutionEncrypted,
+    int? resolutionKeyVersion,
   });
   @override
   Map<String, dynamic> toJson() {
@@ -117,6 +147,12 @@ abstract class DataSubjectRequest
       'status': status.toJson(),
       'createdAt': createdAt.toJson(),
       'dueAt': dueAt.toJson(),
+      if (decidedAt != null) 'decidedAt': decidedAt?.toJson(),
+      if (decidedBy != null) 'decidedBy': decidedBy?.toJson(),
+      if (resolutionEncrypted != null)
+        'resolutionEncrypted': resolutionEncrypted,
+      if (resolutionKeyVersion != null)
+        'resolutionKeyVersion': resolutionKeyVersion,
     };
   }
 
@@ -132,6 +168,12 @@ abstract class DataSubjectRequest
       'status': status.toJson(),
       'createdAt': createdAt.toJson(),
       'dueAt': dueAt.toJson(),
+      if (decidedAt != null) 'decidedAt': decidedAt?.toJson(),
+      if (decidedBy != null) 'decidedBy': decidedBy?.toJson(),
+      if (resolutionEncrypted != null)
+        'resolutionEncrypted': resolutionEncrypted,
+      if (resolutionKeyVersion != null)
+        'resolutionKeyVersion': resolutionKeyVersion,
     };
   }
 
@@ -177,6 +219,10 @@ class _DataSubjectRequestImpl extends DataSubjectRequest {
     required _i3.DataSubjectRequestStatus status,
     required DateTime createdAt,
     required DateTime dueAt,
+    DateTime? decidedAt,
+    _i1.UuidValue? decidedBy,
+    String? resolutionEncrypted,
+    int? resolutionKeyVersion,
   }) : super._(
          id: id,
          userId: userId,
@@ -186,6 +232,10 @@ class _DataSubjectRequestImpl extends DataSubjectRequest {
          status: status,
          createdAt: createdAt,
          dueAt: dueAt,
+         decidedAt: decidedAt,
+         decidedBy: decidedBy,
+         resolutionEncrypted: resolutionEncrypted,
+         resolutionKeyVersion: resolutionKeyVersion,
        );
 
   /// Returns a shallow copy of this [DataSubjectRequest]
@@ -201,6 +251,10 @@ class _DataSubjectRequestImpl extends DataSubjectRequest {
     _i3.DataSubjectRequestStatus? status,
     DateTime? createdAt,
     DateTime? dueAt,
+    Object? decidedAt = _Undefined,
+    Object? decidedBy = _Undefined,
+    Object? resolutionEncrypted = _Undefined,
+    Object? resolutionKeyVersion = _Undefined,
   }) {
     return DataSubjectRequest(
       id: id is _i1.UuidValue? ? id : this.id,
@@ -211,6 +265,14 @@ class _DataSubjectRequestImpl extends DataSubjectRequest {
       status: status ?? this.status,
       createdAt: createdAt ?? this.createdAt,
       dueAt: dueAt ?? this.dueAt,
+      decidedAt: decidedAt is DateTime? ? decidedAt : this.decidedAt,
+      decidedBy: decidedBy is _i1.UuidValue? ? decidedBy : this.decidedBy,
+      resolutionEncrypted: resolutionEncrypted is String?
+          ? resolutionEncrypted
+          : this.resolutionEncrypted,
+      resolutionKeyVersion: resolutionKeyVersion is int?
+          ? resolutionKeyVersion
+          : this.resolutionKeyVersion,
     );
   }
 }
@@ -258,6 +320,30 @@ class DataSubjectRequestUpdateTable
     table.dueAt,
     value,
   );
+
+  _i1.ColumnValue<DateTime, DateTime> decidedAt(DateTime? value) =>
+      _i1.ColumnValue(
+        table.decidedAt,
+        value,
+      );
+
+  _i1.ColumnValue<_i1.UuidValue, _i1.UuidValue> decidedBy(
+    _i1.UuidValue? value,
+  ) => _i1.ColumnValue(
+    table.decidedBy,
+    value,
+  );
+
+  _i1.ColumnValue<String, String> resolutionEncrypted(String? value) =>
+      _i1.ColumnValue(
+        table.resolutionEncrypted,
+        value,
+      );
+
+  _i1.ColumnValue<int, int> resolutionKeyVersion(int? value) => _i1.ColumnValue(
+    table.resolutionKeyVersion,
+    value,
+  );
 }
 
 class DataSubjectRequestTable extends _i1.Table<_i1.UuidValue?> {
@@ -294,6 +380,22 @@ class DataSubjectRequestTable extends _i1.Table<_i1.UuidValue?> {
       'dueAt',
       this,
     );
+    decidedAt = _i1.ColumnDateTime(
+      'decidedAt',
+      this,
+    );
+    decidedBy = _i1.ColumnUuid(
+      'decidedBy',
+      this,
+    );
+    resolutionEncrypted = _i1.ColumnString(
+      'resolutionEncrypted',
+      this,
+    );
+    resolutionKeyVersion = _i1.ColumnInt(
+      'resolutionKeyVersion',
+      this,
+    );
   }
 
   late final DataSubjectRequestUpdateTable updateTable;
@@ -313,6 +415,16 @@ class DataSubjectRequestTable extends _i1.Table<_i1.UuidValue?> {
   /// Prazo de resposta: `createdAt` + 15 dias.
   late final _i1.ColumnDateTime dueAt;
 
+  /// Decisão do backoffice (#42); nulos enquanto o pedido está `open`.
+  late final _i1.ColumnDateTime decidedAt;
+
+  late final _i1.ColumnUuid decidedBy;
+
+  /// Nota de resposta/motivo da recusa: texto livre, cifrado como `details`.
+  late final _i1.ColumnString resolutionEncrypted;
+
+  late final _i1.ColumnInt resolutionKeyVersion;
+
   @override
   List<_i1.Column> get columns => [
     id,
@@ -323,6 +435,10 @@ class DataSubjectRequestTable extends _i1.Table<_i1.UuidValue?> {
     status,
     createdAt,
     dueAt,
+    decidedAt,
+    decidedBy,
+    resolutionEncrypted,
+    resolutionKeyVersion,
   ];
 }
 

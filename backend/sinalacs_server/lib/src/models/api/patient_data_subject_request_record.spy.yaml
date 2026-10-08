@@ -7,3 +7,5 @@ fields:
   details: String?
   createdAt: DateTime
   dueAt: DateTime
+  ### Nota de resposta do backoffice, já decifrada; nula até a decisão.
+  resolution: String?

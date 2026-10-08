@@ -1,0 +1,12 @@
+### Linha da lista de pedidos do titular no backoffice. Sem nome nem CPF:
+### `patientLabel` é um rótulo curto (`#A18F`) derivado do id do titular.
+class: AdminDataSubjectRequest
+fields:
+  id: String
+  type: DataSubjectRequestType
+  status: DataSubjectRequestStatus
+  createdAt: DateTime
+  dueAt: DateTime
+  ### Vencido: status `open`/`inReview` e agora > `dueAt`.
+  overdue: bool
+  patientLabel: String

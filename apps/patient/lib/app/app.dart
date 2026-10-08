@@ -2017,6 +2017,7 @@ class _MyDataScreenState extends State<MyDataScreen> {
 
   String _requestStatusLabel(DataSubjectRequestStatus status) => switch (status) {
         DataSubjectRequestStatus.open => 'Em análise',
+        DataSubjectRequestStatus.inReview => 'Em análise',
         DataSubjectRequestStatus.completed => 'Atendido',
         DataSubjectRequestStatus.rejected => 'Recusado',
       };

@@ -25,6 +25,7 @@ abstract class PatientDataSubjectRequestRecord
     this.details,
     required this.createdAt,
     required this.dueAt,
+    this.resolution,
   });
 
   factory PatientDataSubjectRequestRecord({
@@ -33,6 +34,7 @@ abstract class PatientDataSubjectRequestRecord
     String? details,
     required DateTime createdAt,
     required DateTime dueAt,
+    String? resolution,
   }) = _PatientDataSubjectRequestRecordImpl;
 
   factory PatientDataSubjectRequestRecord.fromJson(
@@ -50,6 +52,7 @@ abstract class PatientDataSubjectRequestRecord
         jsonSerialization['createdAt'],
       ),
       dueAt: _i1.DateTimeJsonExtension.fromJson(jsonSerialization['dueAt']),
+      resolution: jsonSerialization['resolution'] as String?,
     );
   }
 
@@ -63,6 +66,9 @@ abstract class PatientDataSubjectRequestRecord
 
   DateTime dueAt;
 
+  /// Nota de resposta do backoffice, já decifrada; nula até a decisão.
+  String? resolution;
+
   /// Returns a shallow copy of this [PatientDataSubjectRequestRecord]
   /// with some or all fields replaced by the given arguments.
   @_i1.useResult
@@ -72,6 +78,7 @@ abstract class PatientDataSubjectRequestRecord
     String? details,
     DateTime? createdAt,
     DateTime? dueAt,
+    String? resolution,
   });
   @override
   Map<String, dynamic> toJson() {
@@ -82,6 +89,7 @@ abstract class PatientDataSubjectRequestRecord
       if (details != null) 'details': details,
       'createdAt': createdAt.toJson(),
       'dueAt': dueAt.toJson(),
+      if (resolution != null) 'resolution': resolution,
     };
   }
 
@@ -101,12 +109,14 @@ class _PatientDataSubjectRequestRecordImpl
     String? details,
     required DateTime createdAt,
     required DateTime dueAt,
+    String? resolution,
   }) : super._(
          type: type,
          status: status,
          details: details,
          createdAt: createdAt,
          dueAt: dueAt,
+         resolution: resolution,
        );
 
   /// Returns a shallow copy of this [PatientDataSubjectRequestRecord]
@@ -119,6 +129,7 @@ class _PatientDataSubjectRequestRecordImpl
     Object? details = _Undefined,
     DateTime? createdAt,
     DateTime? dueAt,
+    Object? resolution = _Undefined,
   }) {
     return PatientDataSubjectRequestRecord(
       type: type ?? this.type,
@@ -126,6 +137,7 @@ class _PatientDataSubjectRequestRecordImpl
       details: details is String? ? details : this.details,
       createdAt: createdAt ?? this.createdAt,
       dueAt: dueAt ?? this.dueAt,
+      resolution: resolution is String? ? resolution : this.resolution,
     );
   }
 }

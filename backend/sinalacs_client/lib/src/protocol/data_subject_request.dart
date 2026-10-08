@@ -32,6 +32,10 @@ abstract class DataSubjectRequest implements _i1.SerializableModel {
     required this.status,
     required this.createdAt,
     required this.dueAt,
+    this.decidedAt,
+    this.decidedBy,
+    this.resolutionEncrypted,
+    this.resolutionKeyVersion,
   });
 
   factory DataSubjectRequest({
@@ -43,6 +47,10 @@ abstract class DataSubjectRequest implements _i1.SerializableModel {
     required _i3.DataSubjectRequestStatus status,
     required DateTime createdAt,
     required DateTime dueAt,
+    DateTime? decidedAt,
+    _i1.UuidValue? decidedBy,
+    String? resolutionEncrypted,
+    int? resolutionKeyVersion,
   }) = _DataSubjectRequestImpl;
 
   factory DataSubjectRequest.fromJson(Map<String, dynamic> jsonSerialization) {
@@ -63,6 +71,14 @@ abstract class DataSubjectRequest implements _i1.SerializableModel {
         jsonSerialization['createdAt'],
       ),
       dueAt: _i1.DateTimeJsonExtension.fromJson(jsonSerialization['dueAt']),
+      decidedAt: jsonSerialization['decidedAt'] == null
+          ? null
+          : _i1.DateTimeJsonExtension.fromJson(jsonSerialization['decidedAt']),
+      decidedBy: jsonSerialization['decidedBy'] == null
+          ? null
+          : _i1.UuidValueJsonExtension.fromJson(jsonSerialization['decidedBy']),
+      resolutionEncrypted: jsonSerialization['resolutionEncrypted'] as String?,
+      resolutionKeyVersion: jsonSerialization['resolutionKeyVersion'] as int?,
     );
   }
 
@@ -86,6 +102,16 @@ abstract class DataSubjectRequest implements _i1.SerializableModel {
   /// Prazo de resposta: `createdAt` + 15 dias.
   DateTime dueAt;
 
+  /// Decisão do backoffice (#42); nulos enquanto o pedido está `open`.
+  DateTime? decidedAt;
+
+  _i1.UuidValue? decidedBy;
+
+  /// Nota de resposta/motivo da recusa: texto livre, cifrado como `details`.
+  String? resolutionEncrypted;
+
+  int? resolutionKeyVersion;
+
   /// Returns a shallow copy of this [DataSubjectRequest]
   /// with some or all fields replaced by the given arguments.
   @_i1.useResult
@@ -98,6 +124,10 @@ abstract class DataSubjectRequest implements _i1.SerializableModel {
     _i3.DataSubjectRequestStatus? status,
     DateTime? createdAt,
     DateTime? dueAt,
+    DateTime? decidedAt,
+    _i1.UuidValue? decidedBy,
+    String? resolutionEncrypted,
+    int? resolutionKeyVersion,
   });
   @override
   Map<String, dynamic> toJson() {
@@ -111,6 +141,12 @@ abstract class DataSubjectRequest implements _i1.SerializableModel {
       'status': status.toJson(),
       'createdAt': createdAt.toJson(),
       'dueAt': dueAt.toJson(),
+      if (decidedAt != null) 'decidedAt': decidedAt?.toJson(),
+      if (decidedBy != null) 'decidedBy': decidedBy?.toJson(),
+      if (resolutionEncrypted != null)
+        'resolutionEncrypted': resolutionEncrypted,
+      if (resolutionKeyVersion != null)
+        'resolutionKeyVersion': resolutionKeyVersion,
     };
   }
 
@@ -132,6 +168,10 @@ class _DataSubjectRequestImpl extends DataSubjectRequest {
     required _i3.DataSubjectRequestStatus status,
     required DateTime createdAt,
     required DateTime dueAt,
+    DateTime? decidedAt,
+    _i1.UuidValue? decidedBy,
+    String? resolutionEncrypted,
+    int? resolutionKeyVersion,
   }) : super._(
          id: id,
          userId: userId,
@@ -141,6 +181,10 @@ class _DataSubjectRequestImpl extends DataSubjectRequest {
          status: status,
          createdAt: createdAt,
          dueAt: dueAt,
+         decidedAt: decidedAt,
+         decidedBy: decidedBy,
+         resolutionEncrypted: resolutionEncrypted,
+         resolutionKeyVersion: resolutionKeyVersion,
        );
 
   /// Returns a shallow copy of this [DataSubjectRequest]
@@ -156,6 +200,10 @@ class _DataSubjectRequestImpl extends DataSubjectRequest {
     _i3.DataSubjectRequestStatus? status,
     DateTime? createdAt,
     DateTime? dueAt,
+    Object? decidedAt = _Undefined,
+    Object? decidedBy = _Undefined,
+    Object? resolutionEncrypted = _Undefined,
+    Object? resolutionKeyVersion = _Undefined,
   }) {
     return DataSubjectRequest(
       id: id is _i1.UuidValue? ? id : this.id,
@@ -166,6 +214,14 @@ class _DataSubjectRequestImpl extends DataSubjectRequest {
       status: status ?? this.status,
       createdAt: createdAt ?? this.createdAt,
       dueAt: dueAt ?? this.dueAt,
+      decidedAt: decidedAt is DateTime? ? decidedAt : this.decidedAt,
+      decidedBy: decidedBy is _i1.UuidValue? ? decidedBy : this.decidedBy,
+      resolutionEncrypted: resolutionEncrypted is String?
+          ? resolutionEncrypted
+          : this.resolutionEncrypted,
+      resolutionKeyVersion: resolutionKeyVersion is int?
+          ? resolutionKeyVersion
+          : this.resolutionKeyVersion,
     );
   }
 }

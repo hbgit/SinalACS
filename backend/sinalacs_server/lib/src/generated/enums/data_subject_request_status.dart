@@ -13,10 +13,12 @@
 
 import 'package:serverpod/serverpod.dart' as _i1;
 
-/// Situação de um pedido do titular. Nesta versão só `open` tem escritor:
-/// quem atende o pedido (backoffice) ainda não existe — ver PROGRESS.md.
+/// Situação de um pedido do titular. `open` é escrito pelo titular; `inReview`,
+/// `completed` e `rejected` pelo backoffice (coordenador/admin, #42).
+/// `completed` e `rejected` são finais.
 enum DataSubjectRequestStatus implements _i1.SerializableModel {
   open,
+  inReview,
   completed,
   rejected;
 
@@ -24,6 +26,8 @@ enum DataSubjectRequestStatus implements _i1.SerializableModel {
     switch (name) {
       case 'open':
         return DataSubjectRequestStatus.open;
+      case 'inReview':
+        return DataSubjectRequestStatus.inReview;
       case 'completed':
         return DataSubjectRequestStatus.completed;
       case 'rejected':
