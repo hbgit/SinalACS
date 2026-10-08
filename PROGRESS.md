@@ -640,7 +640,19 @@ Plano: `docs/superpowers/plans/2026-10-02-pendencias-do-acs-flag-secure-ubs-rf08
 
 **Decisões que valem até alguém trocá-las.** (1) Coordenador vê só a UBS de `staff_accounts.ubsId`; sem UBS é recusado em todos os métodos. (2) Só o administrador lê a auditoria. (3) A auditoria da leitura é fail-closed. (4) TMRAV: janela de 30 dias, só vermelhos reconhecidos, `null` sem amostra (o PRD §1.3 não fixa a janela). (5) Alertas por `offset`, auditoria por `beforeSequence`.
 
-**Continua aberto.** (1) Não há tela nem endpoint para atribuir `ubsId` a um coordenador: hoje só por SQL, e o seed de desenvolvimento não tem coordenador (a #43 é o lugar natural). (2) Auditoria por UBS para o coordenador. (3) **Esta issue avança a #41, mas não a fecha:** o `BackendAdminDataSource` e o mock mantido para testes existem, porém o e2e pelo `scripts/qa/e2e.sh` e o job `admin-app` do CI com o cliente real não foram tratados. (4) Toda falha de leitura (inclusive token vencido no meio da chamada) aparece nas telas como o erro genérico "Não foi possível carregar …" com "Tentar de novo": o texto de `AdminDataFailure` existe e é testado, mas nenhuma tela o exibe, e uma chamada em voo com token vencido não leva ao login (só o cronômetro de `expiresAt` leva). (5) A paginação do app lê só a primeira página (50 itens): não há "carregar mais". (6) Não foi rodado no celular físico nesta execução. (7) As capturas 02 a 05 de `docs/telas-admin.md` são do emulador com dados do backend; as 06 a 08 (celular e tablet simulado) são de antes e ainda mostram o painel sobre o mock.
+**Continua aberto.** (1) Não há tela nem endpoint para atribuir `ubsId` a um coordenador: hoje só por SQL, e o seed de desenvolvimento não tem coordenador (a #43 é o lugar natural). (2) Auditoria por UBS para o coordenador. (3) *(Tratado na #41, seção abaixo.)* (4) *(Tratado na #41: as telas mostram o texto de `AdminDataFailure` e o 401 leva ao login.)* (5) A paginação do app lê só a primeira página (50 itens): não há "carregar mais". (6) Não foi rodado no celular físico nesta execução. (7) As capturas 02 a 05 de `docs/telas-admin.md` são do emulador com dados do backend; as 06 a 08 (celular e tablet simulado) são de antes e ainda mostram o painel sobre o mock.
+
+## Admin consome o `sinalacs_client` (issue #41, 2026-10-07)
+
+**Estado ao começar.** A #40 já tinha entregue a dependência local do `sinalacs_client`, o `BackendAdminDataSource`, o `buildAdminWiring` e o mock mantido só para testes; `main.dart` nunca usa o mock. Verificado de novo: `flutter analyze` limpo e `flutter test` verde com `assets/certs/` vazio (o que o job `admin-app` faz), e `admin_login_e2e.sh` 5/5 no emulador antes de qualquer mudança.
+
+**Entregue.** (1) `AdminSessionExpired`: um 401 no meio de uma leitura (`ServerpodClientUnauthorized`) leva ao login com "Sessão encerrada. Entre novamente." em vez de "Tentar novamente". (2) As telas mostram o texto de `AdminDataFailure` ("Não foi possível conectar ao servidor.", "Acesso restrito ao backoffice.") no lugar do erro genérico. (3) `scripts/qa/e2e.sh --full` roda do admin só o smoke hermético (`admin_mobile_smoke_test.dart`; antes rodava a pasta inteira, que inclui o `admin_login_e2e.dart`, que precisa de relé) e aponta para `admin_login_e2e.sh` para o fluxo com backend real; o cabeçalho desse script não diz mais que o painel é o mock. Guardas em `scripts/qa/admin_login_e2e_test.sh`.
+
+**Provado nesta execução.** `apps/admin`: `flutter test` 122 verdes (eram 117) e `flutter analyze` limpo. `admin_login_e2e.sh` no emulador `emulator-5554`: 5/5, com os 4 recursos `admin_*` lidos e auditados como `read/success` (logs em `.superpowers/admin41_base.log` e `admin41_final.log`, git-ignorados). `admin_mobile_smoke_test.dart` no emulador: 4/4. `ci_invariants.sh` ok (9 grupos).
+
+**Decisões.** Falha de rede e sessão vencida são provadas por teste de widget e de data source, não por um caso de e2e que derrube o backend: parar o backend dentro do script arrisca deixar a stack quebrada. Não foi criada a flag `--admin-real` no `e2e.sh`.
+
+**Continua aberto.** (1) O `admin-app` da CI roda `flutter test` com o cliente real compilado, mas não há e2e contra a stack na CI (o `android-e2e` não roda o admin). (2) As capturas 06 a 08 de `docs/telas-admin.md` seguem as de antes, sobre o mock (layout igual, números diferentes). (3) Paginação "carregar mais" e refresh token do staff, já listados acima. (4) A prova no celular físico não foi repetida.
 
 ## Ativação do TOTP do staff com código de uso único (issue #48, 2026-10-07)
 
@@ -663,7 +675,7 @@ Plano: `docs/superpowers/plans/2026-10-02-pendencias-do-acs-flag-secure-ubs-rf08
 - (h) `dart format` aplicado em `staff_login_test.dart`; é o único minor cosmético nomeado nesta seção, e não há outra lista.
 
 **Continua aberto:**
-- Refresh token do staff. Reconfirmado em 2026-10-07: `loginStaff` devolve só o JWT de 15 min; `refreshSession` é do ACS. Hoje nenhuma chamada autenticada do painel falha na expiração, pois os dados são Mock (#41).
+- Refresh token do staff. Reconfirmado em 2026-10-07: `loginStaff` devolve só o JWT de 15 min; `refreshSession` é do ACS. Desde a #41 uma chamada em voo com token vencido (401) leva ao login com aviso; o painel segue sem renovar a sessão.
 
 **Suítes (2026-10-06):** backend `dart test` 657 verdes; admin `flutter test` 102 verdes, `flutter analyze` sem avisos; `ci_invariants.sh` ok (9 grupos); `check_documentation_links.sh` exit 0.
 
@@ -694,7 +706,7 @@ fecha esse buraco.
 | Schema | 13 tabelas como modelos `.spy.yaml` (as 11 originais mais `alert_idempotency_keys` e `alert_outbox` — ver "cadeia de hash" e "outbox pattern" abaixo); migrações geradas e aplicadas pelo servidor no boot |
 | Endpoints | RPC: `alerts.createRedAlert`, `alerts.acknowledge`, `auth.developmentLogin`, `health.check`, `triage.evaluate`, `patients.listMicroArea`, `visits.sync` |
 | Testes | 16 arquivos (12 unitários herméticos, 4 de integração) sobre o harness `withServerpod`; contagem estática de `test(` no código-fonte, não uma execução nesta revisão — rodar `cd backend/sinalacs_server && dart test` contra a stack local para o número de casos passando |
-| Cliente gerado | Publicado em `backend/sinalacs_client`; **paciente e ACS já o consomem** por dependência local (ver M2.4 acima); `apps/admin` ainda não |
+| Cliente gerado | Publicado em `backend/sinalacs_client`; **paciente e ACS já o consomem** por dependência local (ver M2.4 acima); `apps/admin` também, desde a #40/#41 |
 
 ### Decisões de schema que valem registro
 
