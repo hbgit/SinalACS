@@ -710,6 +710,12 @@ void main() {
       );
     });
 
+    test('subjectOf devolve o titular do pedido e null para id inexistente ou malformado', () async {
+      expect(await store.subjectOf(_pedA1), _pacA);
+      expect(await store.subjectOf('00000000-0000-4000-8000-0000000042ff'), isNull);
+      expect(await store.subjectOf('nao-e-uuid'), isNull);
+    });
+
     test('ubsOf devolve a UBS do coordenador e null para quem não tem', () async {
       const coord = '00000000-0000-4000-8000-000000004216';
       await _usuario(session, coord, 'Coord Sintético 42', UserRole.coordinator);

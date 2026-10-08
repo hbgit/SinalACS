@@ -52,6 +52,9 @@ class _Store implements DataSubjectCaseStore {
   Future<String?> ubsOf(String staffId) async => ubs[staffId];
 
   @override
+  Future<String?> subjectOf(String requestId) async => 'titular-$requestId';
+
+  @override
   Future<AdminDataSubjectRequestPage> list(
     AdminScope scope, {
     DataSubjectRequestStatus? status,
@@ -150,6 +153,17 @@ class _Audit extends AuditTrail {
     if (falhar) throw StateError('auditoria indisponível');
     _ordem.add('audit:${event.resourceType}:${event.result}');
     events.add(event);
+  }
+}
+
+class _Notificador implements DataSubjectNotifier {
+  final chamadas = <(String, DataSubjectRequestStatus)>[];
+  Object? lanca;
+
+  @override
+  Future<void> decided(String userId, DataSubjectRequestStatus status) async {
+    chamadas.add((userId, status));
+    if (lanca != null) throw lanca!;
   }
 }
 
@@ -530,5 +544,63 @@ void main() {
         isNot(contains(segredo)),
       );
     }
+  });
+
+  group('aviso', () {
+    late _Notificador notificador;
+    late DataSubjectCaseService comAviso;
+
+    setUp(() {
+      notificador = _Notificador();
+      comAviso = DataSubjectCaseService(
+        store: store,
+        audit: audit,
+        clock: () => agora,
+        notifier: notificador,
+      );
+    });
+
+    test('correção atendida chama decided uma vez, depois do commit', () async {
+      await comAviso.complete(coordA, 'cor-1', note: 'Dado corrigido.');
+      expect(notificador.chamadas, [
+        ('titular-cor-1', DataSubjectRequestStatus.completed),
+      ]);
+    });
+
+    test('recusa chama decided com rejected', () async {
+      await comAviso.reject(coordA, 'del-1', reason: 'Pedido sem fundamento.');
+      expect(notificador.chamadas, [
+        ('titular-del-1', DataSubjectRequestStatus.rejected),
+      ]);
+    });
+
+    test('exclusão atendida e início de análise não chamam decided', () async {
+      await comAviso.startReview(coordA, 'cor-1');
+      await comAviso.complete(coordA, 'del-1');
+      expect(notificador.chamadas, isEmpty);
+    });
+
+    test('decisão perdida (decide false) não avisa', () async {
+      store.decideDevolve = false;
+      await expectLater(
+        comAviso.complete(coordA, 'cor-1', note: 'Dado corrigido.'),
+        throwsA(isA<AdminInvalidRequestException>()),
+      );
+      expect(notificador.chamadas, isEmpty);
+    });
+
+    test('decided lançando erro não altera o resultado de complete', () async {
+      notificador.lanca = StateError('relé fora do ar');
+      await comAviso.complete(coordA, 'cor-1', note: 'Dado corrigido.');
+      expect(
+        store.pedidos['cor-1']!.detalhe.status,
+        DataSubjectRequestStatus.completed,
+      );
+      await comAviso.reject(coordA, 'del-1', reason: 'Pedido sem fundamento.');
+      expect(
+        store.pedidos['del-1']!.detalhe.status,
+        DataSubjectRequestStatus.rejected,
+      );
+    });
   });
 }

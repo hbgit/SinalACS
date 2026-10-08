@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:sinalacs_server/src/application/admin/admin_read_service.dart';
 import 'package:sinalacs_server/src/application/audit/audit_trail.dart';
 import 'package:sinalacs_server/src/application/auth/authorization.dart';
@@ -9,6 +11,10 @@ import 'package:sinalacs_server/src/generated/protocol.dart';
 abstract interface class DataSubjectCaseStore {
   /// UBS do coordenador (`staff_accounts.ubsId`), ou `null` se não houver.
   Future<String?> ubsOf(String staffId);
+
+  /// Titular (`users.id`) do pedido, para o aviso pós-decisão. Sem filtro de
+  /// escopo: só é chamado depois de a decisão ter passado pelo escopo.
+  Future<String?> subjectOf(String requestId);
 
   /// Prazo mais próximo primeiro (`dueAt` crescente, `id` desempata): os
   /// vencidos sobem ao topo. `nextOffset` nulo = fim da lista. Nunca decifra
@@ -45,6 +51,12 @@ abstract interface class DataSubjectCaseStore {
   });
 }
 
+/// Aviso ao titular depois de o pedido ser decidido. Melhor esforço: a falha
+/// nunca desfaz a decisão (o serviço captura e registra só em stderr).
+abstract interface class DataSubjectNotifier {
+  Future<void> decided(String userId, DataSubjectRequestStatus status);
+}
+
 /// Regras do atendimento de pedidos do titular no backoffice (issue #42).
 ///
 /// 1. **Papel e escopo:** como em [AdminReadService] — só `coordinator` e
@@ -65,11 +77,14 @@ class DataSubjectCaseService {
     required this.store,
     required this.audit,
     DateTime Function()? clock,
-  }) : _clock = clock ?? DateTime.now;
+    DataSubjectNotifier? notifier,
+  }) : _clock = clock ?? DateTime.now,
+       _notifier = notifier;
 
   final DataSubjectCaseStore store;
   final AuditTrail audit;
   final DateTime Function() _clock;
+  final DataSubjectNotifier? _notifier;
 
   static const maxLimit = 100;
   static const notaMin = 3;
@@ -179,6 +194,8 @@ class DataSubjectCaseService {
       resolution: texto,
       anonymize: pedido.type == DataSubjectRequestType.deletion,
       agora: agora,
+      // Exclusão atendida: os tokens foram apagados, não há o que avisar.
+      avisar: pedido.type != DataSubjectRequestType.deletion,
     );
   }
 
@@ -201,6 +218,7 @@ class DataSubjectCaseService {
       resolution: motivo,
       anonymize: false,
       agora: agora,
+      avisar: true,
     );
   }
 
@@ -254,6 +272,7 @@ class DataSubjectCaseService {
     required String? resolution,
     required bool anonymize,
     required DateTime agora,
+    bool avisar = false,
   }) async {
     final bool ok;
     try {
@@ -288,6 +307,21 @@ class DataSubjectCaseService {
     // Corrida perdida (outro analista decidiu entre a leitura e o lock) ou
     // pedido que saiu do escopo: a mesma mensagem neutra nos dois casos.
     if (!ok) throw AdminInvalidRequestException(message: _indisponivel);
+    if (avisar) await _avisar(pedido.id, to);
+  }
+
+  /// Pós-commit, melhor esforço. Só o tipo da exceção vai para o stderr: nunca
+  /// nota, motivo nem texto da falha.
+  Future<void> _avisar(String pedidoId, DataSubjectRequestStatus to) async {
+    final notifier = _notifier;
+    if (notifier == null) return;
+    try {
+      final titular = await store.subjectOf(pedidoId);
+      if (titular == null) return;
+      await notifier.decided(titular, to);
+    } catch (e) {
+      stderr.writeln('aviso ao titular falhou: ${e.runtimeType}');
+    }
   }
 
   String _validarNota(String texto) {

@@ -83,6 +83,17 @@ class OrmDataSubjectCaseStore implements DataSubjectCaseStore {
   }
 
   @override
+  Future<String?> subjectOf(String requestId) async {
+    final uuid = _uuid(requestId);
+    if (uuid == null) return null;
+    final rows = await _session.db.unsafeQuery(
+      'SELECT "userId" FROM data_subject_requests WHERE id = @id::uuid',
+      parameters: QueryParameters.named({'id': uuid.uuid}),
+    );
+    return rows.isEmpty ? null : rows.single[0].toString();
+  }
+
+  @override
   Future<AdminDataSubjectRequestPage> list(
     AdminScope scope, {
     DataSubjectRequestStatus? status,

@@ -38,6 +38,7 @@ import 'package:sinalacs_server/src/infrastructure/database/orm_otp_challenge_st
 import 'package:sinalacs_server/src/infrastructure/database/orm_data_subject_rights_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_notice_recipient_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_push_token_store.dart';
+import 'package:sinalacs_server/src/infrastructure/push/data_subject_push_notifier.dart';
 import 'package:sinalacs_server/src/infrastructure/push/gorush_client.dart';
 import 'package:sinalacs_server/src/application/notices/notice_service.dart';
 import 'package:sinalacs_server/src/application/patients/push_token_service.dart';
@@ -238,6 +239,7 @@ class AlertRuntime {
           ).recordInTransaction,
         ),
         audit: auditTrailFor(session),
+        notifier: _dataSubjectNotifierFor(session),
       );
 
   /// Contato da UBS do ACS (RF13), para uma requisição.
@@ -275,6 +277,21 @@ class AlertRuntime {
         ),
         audit: auditTrailFor(session),
       );
+
+  /// Aviso push ao titular; mesmo remetente do aviso comunitário. Sem relé,
+  /// sem notificador.
+  DataSubjectNotifier? _dataSubjectNotifierFor(Session session) {
+    final override = _noticeSenderOverride;
+    final url = config.gorushUrl;
+    final sender = override != null
+        ? override()
+        : (url == null ? null : _gorushClientFor(url));
+    if (sender == null) return null;
+    return GorushDataSubjectNotifier(
+      targets: OrmDataSubjectPushTargets(session: () => session),
+      sender: sender,
+    );
+  }
 
   /// Aviso comunitário do ACS (RF14). Sem `GORUSH_URL` o serviço nasce sem relé e
   /// recusa o envio com uma mensagem clara.
