@@ -253,6 +253,23 @@ CREATE UNIQUE INDEX "push_tokens_token_key" ON "push_tokens" USING btree ("token
 CREATE INDEX "push_tokens_user_id_idx" ON "push_tokens" USING btree ("userId");
 
 --
+-- Class StaffAccount as table staff_accounts
+--
+CREATE TABLE "staff_accounts" (
+    "id" uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    "enrollmentId" text NOT NULL,
+    "active" boolean NOT NULL,
+    "ubsId" uuid,
+    "activationCodeHash" text,
+    "activationCodeExpiresAt" timestamp without time zone,
+    "activationCodeIssuedBy" text,
+    "activationCodeIssuedAt" timestamp without time zone
+);
+
+-- Indexes
+CREATE UNIQUE INDEX "staff_accounts_enrollment_id_key" ON "staff_accounts" USING btree ("enrollmentId");
+
+--
 -- Class TriageSession as table triage_sessions
 --
 CREATE TABLE "triage_sessions" (
@@ -765,9 +782,9 @@ ALTER TABLE ONLY "serverpod_query_log"
 -- MIGRATION VERSION FOR sinalacs
 --
 INSERT INTO "serverpod_migrations" ("module", "version", "timestamp")
-    VALUES ('sinalacs', '20261007153048060', now())
+    VALUES ('sinalacs', '20261008135543372', now())
     ON CONFLICT ("module")
-    DO UPDATE SET "version" = '20261007153048060', "timestamp" = now();
+    DO UPDATE SET "version" = '20261008135543372', "timestamp" = now();
 
 --
 -- MIGRATION VERSION FOR serverpod
