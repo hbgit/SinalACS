@@ -159,7 +159,7 @@ void main() {
       );
       final r = await _backend(
         caller,
-      ).beginMfaEnrollment(matricula: 'a', senha: 'b');
+      ).beginMfaEnrollment(matricula: 'a', senha: 'b', activationCode: 'c');
       expect(r.secret, 'SEG');
       expect(r.otpauthUri, 'otpauth://x');
     });
@@ -169,9 +169,12 @@ void main() {
         error: AuthenticationFailedException(message: 'Código inválido'),
       );
       expect(
-        _backend(
-          caller,
-        ).confirmMfaEnrollment(matricula: 'a', senha: 'b', code: '1'),
+        _backend(caller).confirmMfaEnrollment(
+          matricula: 'a',
+          senha: 'b',
+          activationCode: 'c',
+          code: '1',
+        ),
         throwsA(isA<AdminAuthFailure>()),
       );
     });

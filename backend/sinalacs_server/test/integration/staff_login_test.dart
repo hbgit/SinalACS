@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:serverpod/serverpod.dart';
 import 'package:sinalacs_server/src/application/audit/audit_trail.dart';
 import 'package:sinalacs_server/src/application/auth/institutional_auth_service.dart';
+import 'package:sinalacs_server/src/application/auth/staff_activation_code.dart';
 import 'package:sinalacs_server/src/application/auth/totp.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
 import 'package:sinalacs_server/src/infrastructure/crypto/health_cipher_totp_vault.dart';
@@ -27,6 +28,7 @@ const _acsId = '00000000-0000-4000-8000-0000000000a2';
 const _acsMatricula = 'ACS-001';
 const _microAreaId = '00000000-0000-4000-8000-0000000000a3';
 const _ubsId = '00000000-0000-4000-8000-0000000000a4';
+const _codigoAtivacao = 'ABCD-EFGH-JKLM-NPQR-STUV-WXYZ-23';
 const _senha = 'senha-sintetica-de-teste';
 const _mensagemGenerica = 'Matrícula ou senha inválidos.';
 
@@ -178,6 +180,13 @@ Future<void> _semMfa(Session session) async {
       ..totpKeyVersion = null
       ..totpEnabledAt = null
       ..totpLastStep = null,
+  );
+  await OrmAcsCredentialStore(session: () => session, staff: true).issue(
+    _adminId,
+    codeHash: StaffActivationCode.hash(_codigoAtivacao),
+    expiresAt: DateTime.now().toUtc().add(StaffActivationCode.defaultValidity),
+    issuedBy: 'operador-de-teste',
+    at: DateTime.now().toUtc(),
   );
 }
 
@@ -356,7 +365,10 @@ void main() {
               t.actionType.equals('login'),
         );
         expect(linhas.map((l) => l.result), contains('granted'));
-        expect(linhas.map((l) => l.resourceType), everyElement('staff_session'));
+        expect(
+          linhas.map((l) => l.resourceType),
+          everyElement('staff_session'),
+        );
       },
     );
 
@@ -452,7 +464,10 @@ void main() {
           );
         }
         final admin = await credencialDe(_adminId);
-        expect(admin.failedAttempts, InstitutionalAuthService.maxFailedAttempts);
+        expect(
+          admin.failedAttempts,
+          InstitutionalAuthService.maxFailedAttempts,
+        );
         expect(admin.lockedUntil, isNotNull);
         final acs = await credencialDe(_acsId);
         expect(acs.failedAttempts, 0);
@@ -480,6 +495,53 @@ void main() {
     );
 
     group('ativação de MFA do staff pelo endpoint', () {
+      test('begin com código errado é recusado e não grava segredo', () async {
+        final session = sessionBuilder.build();
+        await _semMfa(session);
+
+        await expectLater(
+          endpoints.auth.beginStaffTotpEnrollment(
+            sessionBuilder,
+            matricula: _adminMatricula,
+            password: _senha,
+            activationCode: 'ZZZZ-ZZZZ-ZZZZ',
+          ),
+          throwsA(
+            isA<AuthenticationFailedException>().having(
+              (e) => e.message,
+              'message',
+              'Código de ativação inválido ou expirado.',
+            ),
+          ),
+        );
+        final cred = await _credencialAdmin(session);
+        expect(cred.totpSecretEncrypted, isNull);
+        expect(cred.failedAttempts, 1);
+      });
+
+      test('confirm com código certo ativa e o código some do banco', () async {
+        final session = sessionBuilder.build();
+        await _semMfa(session);
+        final inicio = await endpoints.auth.beginStaffTotpEnrollment(
+          sessionBuilder,
+          matricula: _adminMatricula,
+          password: _senha,
+          activationCode: _codigoAtivacao,
+        );
+        final store = OrmAcsCredentialStore(session: () => session, staff: true);
+        expect(await store.find(_adminId), isNotNull, reason: 'begin não consome o código');
+
+        await endpoints.auth.confirmStaffTotpEnrollment(
+          sessionBuilder,
+          matricula: _adminMatricula,
+          password: _senha,
+          activationCode: _codigoAtivacao,
+          code: Totp.code(_deBase32(inicio.secretBase32), DateTime.now().toUtc()),
+        );
+        expect((await _credencialAdmin(session)).totpEnabledAt, isNotNull);
+        expect(await store.find(_adminId), isNull);
+      });
+
       test('begin devolve segredo e URI otpauth e não ativa a MFA', () async {
         final session = sessionBuilder.build();
         await _semMfa(session);
@@ -488,6 +550,7 @@ void main() {
           sessionBuilder,
           matricula: _adminMatricula,
           password: _senha,
+        activationCode: _codigoAtivacao,
         );
 
         expect(inicio.secretBase32, isNotEmpty);
@@ -514,6 +577,7 @@ void main() {
             sessionBuilder,
             matricula: _adminMatricula,
             password: _senha,
+          activationCode: _codigoAtivacao,
           );
           final codigo = Totp.code(
             _deBase32(inicio.secretBase32),
@@ -524,6 +588,7 @@ void main() {
             sessionBuilder,
             matricula: _adminMatricula,
             password: _senha,
+            activationCode: _codigoAtivacao,
             code: codigo,
           );
 
@@ -548,6 +613,7 @@ void main() {
             sessionBuilder,
             matricula: _adminMatricula,
             password: _senha,
+          activationCode: _codigoAtivacao,
           );
           // Diferente do código do passo atual; coincidir com um passo vizinho tem chance ~2e-6.
           final certo = Totp.code(
@@ -561,6 +627,7 @@ void main() {
               sessionBuilder,
               matricula: _adminMatricula,
               password: _senha,
+              activationCode: _codigoAtivacao,
               code: errado,
             ),
             throwsA(isA<AuthenticationFailedException>()),
@@ -581,6 +648,7 @@ void main() {
               sessionBuilder,
               matricula: _adminMatricula,
               password: 'senha-errada',
+              activationCode: _codigoAtivacao,
             ),
             throwsA(
               isA<AuthenticationFailedException>().having(
@@ -601,6 +669,7 @@ void main() {
               sessionBuilder,
               matricula: _acsMatricula,
               password: _senha,
+            activationCode: _codigoAtivacao,
             ),
             throwsA(
               isA<AuthenticationFailedException>().having(

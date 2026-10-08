@@ -60,6 +60,13 @@ void main() {
         final auth = FakeAdminAuth()..failWith = const AdminMfaEnrollmentRequired();
         await tester.pumpWidget(SinalAdminApp(auth: auth));
         await entrarComCredenciais(tester);
+        expect(find.byKey(const Key('activation_code_field')), findsOneWidget);
+        await percorrerTelaInteira(tester, 'código de ativação ($rotulo)');
+        await tester.enterText(find.byKey(const Key('activation_code_field')), 'ABCD-EFGH');
+        await tester.ensureVisible(find.byKey(const Key('activation_continue')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const Key('activation_continue')));
+        await tester.pumpAndSettle();
         expect(find.byKey(const Key('mfa_secret')), findsOneWidget);
         await percorrerTelaInteira(tester, 'ativação ($rotulo)');
       });

@@ -53,6 +53,11 @@ class FakeAdminAuth implements AdminAuthBackend {
   /// Lançada por `confirmMfaEnrollment` quando não for `null`.
   Object? confirmFailWith;
   String? lastEnrollmentCode;
+
+  /// Último código de ativação recebido por `begin`/`confirm`, e a falha que o
+  /// `begin` lança quando não for `null` (código errado/expirado).
+  String? lastActivationCode;
+  Object? beginFailWith;
   int enrollmentBegins = 0;
 
   @override
@@ -82,8 +87,11 @@ class FakeAdminAuth implements AdminAuthBackend {
   Future<({String secret, String otpauthUri})> beginMfaEnrollment({
     required String matricula,
     required String senha,
+    required String activationCode,
   }) async {
     enrollmentBegins++;
+    lastActivationCode = activationCode;
+    if (beginFailWith != null) throw beginFailWith!;
     return (
       secret: 'JBSWY3DPEHPK3PXP',
       otpauthUri: 'otpauth://totp/x?secret=JBSWY3DPEHPK3PXP',
@@ -94,9 +102,11 @@ class FakeAdminAuth implements AdminAuthBackend {
   Future<void> confirmMfaEnrollment({
     required String matricula,
     required String senha,
+    required String activationCode,
     required String code,
   }) async {
     lastEnrollmentCode = code;
+    lastActivationCode = activationCode;
     if (confirmFailWith != null) throw confirmFailWith!;
   }
 }

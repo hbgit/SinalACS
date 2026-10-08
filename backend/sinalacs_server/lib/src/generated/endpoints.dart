@@ -281,6 +281,11 @@ class Endpoints extends _i1.EndpointDispatch {
               type: _i1.getType<String>(),
               nullable: false,
             ),
+            'activationCode': _i1.ParameterDescription(
+              name: 'activationCode',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
           },
           call:
               (
@@ -291,6 +296,7 @@ class Endpoints extends _i1.EndpointDispatch {
                     session,
                     matricula: params['matricula'],
                     password: params['password'],
+                    activationCode: params['activationCode'],
                   ),
         ),
         'confirmStaffTotpEnrollment': _i1.MethodConnector(
@@ -303,6 +309,11 @@ class Endpoints extends _i1.EndpointDispatch {
             ),
             'password': _i1.ParameterDescription(
               name: 'password',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'activationCode': _i1.ParameterDescription(
+              name: 'activationCode',
               type: _i1.getType<String>(),
               nullable: false,
             ),
@@ -321,6 +332,7 @@ class Endpoints extends _i1.EndpointDispatch {
                     session,
                     matricula: params['matricula'],
                     password: params['password'],
+                    activationCode: params['activationCode'],
                     code: params['code'],
                   ),
         ),

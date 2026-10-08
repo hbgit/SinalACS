@@ -32,7 +32,7 @@ import 'package:sinalacs_server/src/generated/protocol.dart';
 /// `lockUntil`). Mesmo arranjo de `OrmOnboardingStore.consumeIfValid`, que
 /// também resolve no `SET`/`WHERE` do Postgres o que o ORM não expressa — o
 /// ORM não tem `UPDATE ... SET col = col + 1`.
-class OrmAcsCredentialStore implements AcsCredentialStore, TotpStore {
+class OrmAcsCredentialStore implements AcsCredentialStore, TotpStore, StaffActivationStore {
   OrmAcsCredentialStore({required Session Function() session, this.staff = false})
       : _session = session;
 
@@ -323,5 +323,43 @@ class OrmAcsCredentialStore implements AcsCredentialStore, TotpStore {
       ..lockedUntil = null
       ..updatedAt = at;
     await UserCredential.db.updateRow(session, existing);
+  }
+
+  @override
+  Future<void> issue(
+    String staffId, {
+    required String codeHash,
+    required DateTime expiresAt,
+    required String issuedBy,
+    required DateTime at,
+  }) async {
+    await StaffAccount.db.updateWhere(
+      _session(),
+      columnValues: (t) => [
+        t.activationCodeHash(codeHash),
+        t.activationCodeExpiresAt(expiresAt),
+        t.activationCodeIssuedBy(issuedBy),
+        t.activationCodeIssuedAt(at),
+      ],
+      where: (t) => t.id.equals(UuidValue.fromString(staffId)),
+    );
+  }
+
+  @override
+  Future<StaffActivationRecord?> find(String staffId) async {
+    final c = await StaffAccount.db.findById(_session(), UuidValue.fromString(staffId));
+    final hash = c?.activationCodeHash;
+    final expira = c?.activationCodeExpiresAt;
+    if (hash == null || expira == null) return null;
+    return StaffActivationRecord(codeHash: hash, expiresAt: expira);
+  }
+
+  @override
+  Future<void> clear(String staffId) async {
+    await StaffAccount.db.updateWhere(
+      _session(),
+      columnValues: (t) => [t.activationCodeHash(null), t.activationCodeExpiresAt(null)],
+      where: (t) => t.id.equals(UuidValue.fromString(staffId)),
+    );
   }
 }

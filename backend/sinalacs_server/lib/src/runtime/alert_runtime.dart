@@ -343,6 +343,7 @@ class AlertRuntime {
       hasher: passwordHasher,
       audit: auditTrailFor(session),
       totpStore: store,
+      activationStore: store,
       vault: HealthCipherTotpVault(healthDataCipher),
       audience: CredentialAudience.staff,
     );

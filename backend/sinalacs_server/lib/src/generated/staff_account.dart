@@ -26,12 +26,20 @@ abstract class StaffAccount
     this.id,
     required this.enrollmentId,
     required this.active,
+    this.activationCodeHash,
+    this.activationCodeExpiresAt,
+    this.activationCodeIssuedBy,
+    this.activationCodeIssuedAt,
   });
 
   factory StaffAccount({
     _i1.UuidValue? id,
     required String enrollmentId,
     required bool active,
+    String? activationCodeHash,
+    DateTime? activationCodeExpiresAt,
+    String? activationCodeIssuedBy,
+    DateTime? activationCodeIssuedAt,
   }) = _StaffAccountImpl;
 
   factory StaffAccount.fromJson(Map<String, dynamic> jsonSerialization) {
@@ -41,6 +49,21 @@ abstract class StaffAccount
           : _i1.UuidValueJsonExtension.fromJson(jsonSerialization['id']),
       enrollmentId: jsonSerialization['enrollmentId'] as String,
       active: _i1.BoolJsonExtension.fromJson(jsonSerialization['active']),
+      activationCodeHash: jsonSerialization['activationCodeHash'] as String?,
+      activationCodeExpiresAt:
+          jsonSerialization['activationCodeExpiresAt'] == null
+          ? null
+          : _i1.DateTimeJsonExtension.fromJson(
+              jsonSerialization['activationCodeExpiresAt'],
+            ),
+      activationCodeIssuedBy:
+          jsonSerialization['activationCodeIssuedBy'] as String?,
+      activationCodeIssuedAt:
+          jsonSerialization['activationCodeIssuedAt'] == null
+          ? null
+          : _i1.DateTimeJsonExtension.fromJson(
+              jsonSerialization['activationCodeIssuedAt'],
+            ),
     );
   }
 
@@ -55,6 +78,14 @@ abstract class StaffAccount
 
   bool active;
 
+  String? activationCodeHash;
+
+  DateTime? activationCodeExpiresAt;
+
+  String? activationCodeIssuedBy;
+
+  DateTime? activationCodeIssuedAt;
+
   @override
   _i1.Table<_i1.UuidValue?> get table => t;
 
@@ -65,6 +96,10 @@ abstract class StaffAccount
     _i1.UuidValue? id,
     String? enrollmentId,
     bool? active,
+    String? activationCodeHash,
+    DateTime? activationCodeExpiresAt,
+    String? activationCodeIssuedBy,
+    DateTime? activationCodeIssuedAt,
   });
   @override
   Map<String, dynamic> toJson() {
@@ -73,6 +108,13 @@ abstract class StaffAccount
       if (id != null) 'id': id?.toJson(),
       'enrollmentId': enrollmentId,
       'active': active,
+      if (activationCodeHash != null) 'activationCodeHash': activationCodeHash,
+      if (activationCodeExpiresAt != null)
+        'activationCodeExpiresAt': activationCodeExpiresAt?.toJson(),
+      if (activationCodeIssuedBy != null)
+        'activationCodeIssuedBy': activationCodeIssuedBy,
+      if (activationCodeIssuedAt != null)
+        'activationCodeIssuedAt': activationCodeIssuedAt?.toJson(),
     };
   }
 
@@ -83,6 +125,13 @@ abstract class StaffAccount
       if (id != null) 'id': id?.toJson(),
       'enrollmentId': enrollmentId,
       'active': active,
+      if (activationCodeHash != null) 'activationCodeHash': activationCodeHash,
+      if (activationCodeExpiresAt != null)
+        'activationCodeExpiresAt': activationCodeExpiresAt?.toJson(),
+      if (activationCodeIssuedBy != null)
+        'activationCodeIssuedBy': activationCodeIssuedBy,
+      if (activationCodeIssuedAt != null)
+        'activationCodeIssuedAt': activationCodeIssuedAt?.toJson(),
     };
   }
 
@@ -123,10 +172,18 @@ class _StaffAccountImpl extends StaffAccount {
     _i1.UuidValue? id,
     required String enrollmentId,
     required bool active,
+    String? activationCodeHash,
+    DateTime? activationCodeExpiresAt,
+    String? activationCodeIssuedBy,
+    DateTime? activationCodeIssuedAt,
   }) : super._(
          id: id,
          enrollmentId: enrollmentId,
          active: active,
+         activationCodeHash: activationCodeHash,
+         activationCodeExpiresAt: activationCodeExpiresAt,
+         activationCodeIssuedBy: activationCodeIssuedBy,
+         activationCodeIssuedAt: activationCodeIssuedAt,
        );
 
   /// Returns a shallow copy of this [StaffAccount]
@@ -137,11 +194,27 @@ class _StaffAccountImpl extends StaffAccount {
     Object? id = _Undefined,
     String? enrollmentId,
     bool? active,
+    Object? activationCodeHash = _Undefined,
+    Object? activationCodeExpiresAt = _Undefined,
+    Object? activationCodeIssuedBy = _Undefined,
+    Object? activationCodeIssuedAt = _Undefined,
   }) {
     return StaffAccount(
       id: id is _i1.UuidValue? ? id : this.id,
       enrollmentId: enrollmentId ?? this.enrollmentId,
       active: active ?? this.active,
+      activationCodeHash: activationCodeHash is String?
+          ? activationCodeHash
+          : this.activationCodeHash,
+      activationCodeExpiresAt: activationCodeExpiresAt is DateTime?
+          ? activationCodeExpiresAt
+          : this.activationCodeExpiresAt,
+      activationCodeIssuedBy: activationCodeIssuedBy is String?
+          ? activationCodeIssuedBy
+          : this.activationCodeIssuedBy,
+      activationCodeIssuedAt: activationCodeIssuedAt is DateTime?
+          ? activationCodeIssuedAt
+          : this.activationCodeIssuedAt,
     );
   }
 }
@@ -158,6 +231,31 @@ class StaffAccountUpdateTable extends _i1.UpdateTable<StaffAccountTable> {
     table.active,
     value,
   );
+
+  _i1.ColumnValue<String, String> activationCodeHash(String? value) =>
+      _i1.ColumnValue(
+        table.activationCodeHash,
+        value,
+      );
+
+  _i1.ColumnValue<DateTime, DateTime> activationCodeExpiresAt(
+    DateTime? value,
+  ) => _i1.ColumnValue(
+    table.activationCodeExpiresAt,
+    value,
+  );
+
+  _i1.ColumnValue<String, String> activationCodeIssuedBy(String? value) =>
+      _i1.ColumnValue(
+        table.activationCodeIssuedBy,
+        value,
+      );
+
+  _i1.ColumnValue<DateTime, DateTime> activationCodeIssuedAt(DateTime? value) =>
+      _i1.ColumnValue(
+        table.activationCodeIssuedAt,
+        value,
+      );
 }
 
 class StaffAccountTable extends _i1.Table<_i1.UuidValue?> {
@@ -172,6 +270,22 @@ class StaffAccountTable extends _i1.Table<_i1.UuidValue?> {
       'active',
       this,
     );
+    activationCodeHash = _i1.ColumnString(
+      'activationCodeHash',
+      this,
+    );
+    activationCodeExpiresAt = _i1.ColumnDateTime(
+      'activationCodeExpiresAt',
+      this,
+    );
+    activationCodeIssuedBy = _i1.ColumnString(
+      'activationCodeIssuedBy',
+      this,
+    );
+    activationCodeIssuedAt = _i1.ColumnDateTime(
+      'activationCodeIssuedAt',
+      this,
+    );
   }
 
   late final StaffAccountUpdateTable updateTable;
@@ -180,11 +294,23 @@ class StaffAccountTable extends _i1.Table<_i1.UuidValue?> {
 
   late final _i1.ColumnBool active;
 
+  late final _i1.ColumnString activationCodeHash;
+
+  late final _i1.ColumnDateTime activationCodeExpiresAt;
+
+  late final _i1.ColumnString activationCodeIssuedBy;
+
+  late final _i1.ColumnDateTime activationCodeIssuedAt;
+
   @override
   List<_i1.Column> get columns => [
     id,
     enrollmentId,
     active,
+    activationCodeHash,
+    activationCodeExpiresAt,
+    activationCodeIssuedBy,
+    activationCodeIssuedAt,
   ];
 }
 

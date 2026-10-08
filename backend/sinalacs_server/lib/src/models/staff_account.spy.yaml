@@ -11,6 +11,10 @@ fields:
   id: UuidValue?, defaultPersist=random
   enrollmentId: String
   active: bool
+  activationCodeHash: String?
+  activationCodeExpiresAt: DateTime?
+  activationCodeIssuedBy: String?
+  activationCodeIssuedAt: DateTime?
 indexes:
   staff_accounts_enrollment_id_key:
     fields: enrollmentId

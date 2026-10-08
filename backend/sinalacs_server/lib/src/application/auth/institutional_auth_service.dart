@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:sinalacs_server/src/application/audit/audit_trail.dart';
 import 'package:sinalacs_server/src/application/auth/development_auth_service.dart';
 import 'package:sinalacs_server/src/application/auth/password_hasher.dart';
+import 'package:sinalacs_server/src/application/auth/staff_activation_code.dart';
 import 'package:sinalacs_server/src/application/auth/totp.dart';
 import 'package:sinalacs_server/src/application/auth/totp_secret_vault.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
@@ -36,6 +37,33 @@ abstract interface class TotpStore {
   /// avançou; `false` = outra requisição já gravou este passo (ou um maior):
   /// o código é um replay e a sessão **não** pode ser emitida.
   Future<bool> registerStep(String acsId, int step);
+}
+
+/// Código de ativação vigente de uma conta de staff (#48).
+class StaffActivationRecord {
+  const StaffActivationRecord({required this.codeHash, required this.expiresAt});
+
+  final String codeHash;
+  final DateTime expiresAt;
+}
+
+/// Código de ativação de uso único da MFA do staff. Interface à parte, como
+/// [TotpStore]: só a audiência `staff` a usa.
+abstract interface class StaffActivationStore {
+  /// Grava o hash do código e a validade, substituindo qualquer código anterior.
+  Future<void> issue(
+    String staffId, {
+    required String codeHash,
+    required DateTime expiresAt,
+    required String issuedBy,
+    required DateTime at,
+  });
+
+  /// Código vigente da conta, ou `null` (nunca emitido ou já consumido).
+  Future<StaffActivationRecord?> find(String staffId);
+
+  /// Apaga hash e validade; `issuedBy`/`issuedAt` ficam como último registro.
+  Future<void> clear(String staffId);
 }
 
 /// Quem está entrando: o ACS (com território) ou o staff do backoffice.
@@ -143,6 +171,7 @@ class InstitutionalAuthService {
     required this.hasher,
     required this.audit,
     this.totpStore,
+    this.activationStore,
     this.vault,
     this.requireMfa = false,
     this.audience = CredentialAudience.acs,
@@ -156,6 +185,10 @@ class InstitutionalAuthService {
   /// Escrita do estado da MFA. Obrigatório quando algum ACS tem MFA (ou para
   /// ativá-la); a falta dele com MFA ativa é erro de montagem ([StateError]).
   final TotpStore? totpStore;
+
+  /// Código de ativação de uso único da MFA do staff (#48). Obrigatório na
+  /// audiência `staff`; ignorado na `acs`.
+  final StaffActivationStore? activationStore;
 
   /// Cofre do segredo TOTP. Mesma regra de [totpStore].
   final TotpSecretVault? vault;
@@ -196,6 +229,8 @@ class InstitutionalAuthService {
   static const _invalidCredentials = 'Matrícula ou senha inválidos.';
 
   static const _invalidCode = 'Código de verificação inválido.';
+
+  static const _invalidActivation = 'Código de ativação inválido ou expirado.';
 
   /// Só chega a quem provou conhecer a senha (a ordem do `login` garante isso).
   static const _lockMessage =
@@ -270,6 +305,7 @@ class InstitutionalAuthService {
   Future<TotpEnrollmentStart> beginTotpEnrollment({
     required String matricula,
     required String password,
+    String? activationCode,
     DateTime? now,
   }) async {
     final at = (now ?? DateTime.now()).toUtc();
@@ -279,6 +315,7 @@ class InstitutionalAuthService {
         message: 'A verificação em duas etapas já está ativa. Peça a redefinição à coordenação.',
       );
     }
+    await _exigirCodigoDeAtivacao(record, activationCode, at);
     final bytes = Uint8List.fromList(List<int>.generate(20, (_) => _random.nextInt(256)));
     if (!await _totpStore().saveSecret(record.acsId, await _vault().seal(bytes), at)) {
       // Uma confirmação concorrente ativou a MFA entre a leitura e a escrita.
@@ -300,6 +337,7 @@ class InstitutionalAuthService {
     required String matricula,
     required String password,
     required String code,
+    String? activationCode,
     DateTime? now,
   }) async {
     final at = (now ?? DateTime.now()).toUtc();
@@ -308,6 +346,7 @@ class InstitutionalAuthService {
     if (totp == null || totp.enabled) {
       throw AuthenticationFailedException(message: 'Não há ativação pendente para esta matrícula.');
     }
+    await _exigirCodigoDeAtivacao(record, activationCode, at);
     final passo = Totp.verify(await _vault().open(totp.sealed), code, at);
     if (passo == null) {
       await _registrarFalha(record, at);
@@ -319,7 +358,29 @@ class InstitutionalAuthService {
       await _recordAudit(record.acsId, 'denied_totp_enrollment_race');
       throw AuthenticationFailedException(message: 'Não há ativação pendente para esta matrícula.');
     }
+    await activationStore?.clear(record.acsId);
     await _recordAudit(record.acsId, 'mfa_enabled');
+  }
+
+  /// Só a audiência staff exige o código. Erro conta como falha de login e vira
+  /// auditoria; o texto é um só para não dizer se o código existiu, expirou ou
+  /// já foi usado.
+  Future<void> _exigirCodigoDeAtivacao(
+    AcsCredentialRecord record,
+    String? code,
+    DateTime at,
+  ) async {
+    if (audience != CredentialAudience.staff) return;
+    final store = activationStore ?? (throw StateError('staff sem store de código de ativação'));
+    final vigente = await store.find(record.acsId);
+    final ok = vigente != null &&
+        code != null &&
+        at.isBefore(vigente.expiresAt) &&
+        StaffActivationCode.matches(code, vigente.codeHash);
+    if (ok) return;
+    await _registrarFalha(record, at);
+    await _recordAudit(record.acsId, 'denied_staff_activation_code');
+    throw AuthenticationFailedException(message: _invalidActivation);
   }
 
   TotpSecretVault _vault() => vault ?? (throw StateError('MFA ativa sem cofre configurado'));
