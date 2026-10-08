@@ -98,6 +98,15 @@ class AdminDataFailure implements Exception {
   String toString() => 'AdminDataFailure: $message';
 }
 
+/// O servidor recusou o token (401): a sessão venceu no meio da chamada. As telas
+/// levam ao login em vez de oferecer "Tentar novamente", que falharia de novo.
+class AdminSessionExpired implements Exception {
+  const AdminSessionExpired();
+
+  @override
+  String toString() => 'AdminSessionExpired';
+}
+
 /// Camada de dados isolada atrás de interface (no espírito de `AlertPublisher`/
 /// `AlertStore` do backend), para permitir mock enquanto os endpoints reais
 /// não existem no `sinalacs_client`.

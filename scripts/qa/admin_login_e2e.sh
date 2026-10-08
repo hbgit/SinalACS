@@ -15,7 +15,9 @@
 # passo registrado, tentativas zeradas). Nada é escrito no banco de desenvolvimento; o banco e o
 # manifesto são apagados ao final.
 #
-# Os dados do painel seguem no MockAdminDataSource (#41): só o login é real.
+# O painel também lê do backend real (#40/#41): o e2e confere os 4 recursos admin_*
+# lidos e auditados. Falha de rede e sessão vencida são cobertas por teste de
+# widget (apps/admin/test/error_handling_test.dart), não aqui.
 set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib_rele.sh"
 

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -186,6 +187,61 @@ void main() {
           'Não foi possível conectar ao servidor.',
         ),
       ),
+    );
+  });
+
+  test('401 do servidor (token vencido na chamada) vira AdminSessionExpired', () async {
+    await expectLater(
+      _fonte(
+        FakeEndpointCaller(error: api.ServerpodClientUnauthorized()),
+      ).fetchDashboardIndicators(),
+      throwsA(isA<AdminSessionExpired>()),
+    );
+  });
+
+  test('o cliente embrulha a falha de rede em ServerpodClientException(-1): texto de conexão', () async {
+    await expectLater(
+      _fonte(
+        FakeEndpointCaller(error: const api.ServerpodClientException('Connection refused', -1)),
+      ).fetchDashboardIndicators(),
+      throwsA(
+        isA<AdminDataFailure>().having((e) => e.message, 'message', 'Não foi possível conectar ao servidor.'),
+      ),
+    );
+  });
+
+  test('tempo esgotado e falha de TLS também viram o texto de conexão', () async {
+    for (final erro in <Object>[TimeoutException('x'), const HandshakeException('x')]) {
+      await expectLater(
+        _fonte(FakeEndpointCaller(error: erro)).fetchDashboardIndicators(),
+        throwsA(isA<AdminDataFailure>().having((e) => e.message, 'message', 'Não foi possível conectar ao servidor.')),
+      );
+    }
+  });
+
+  // O servidor NÃO responde 401: recusa o token com AlertPermissionException
+  // ('token inválido ou expirado'). Com a sessão já vencida pelo relógio, isso é
+  // sessão vencida; antes do vencimento continua sendo recusa de acesso.
+  test('recusa depois do vencimento da sessão vira AdminSessionExpired', () async {
+    final fonte = BackendAdminDataSource(
+      api.EndpointAdmin(FakeEndpointCaller(error: api.AlertPermissionException(message: 'token inválido ou expirado'))),
+      accessToken: 't',
+      expiresAt: DateTime.utc(2026, 1, 1, 12),
+      now: () => DateTime.utc(2026, 1, 1, 12, 0, 1),
+    );
+    await expectLater(fonte.fetchDashboardIndicators(), throwsA(isA<AdminSessionExpired>()));
+  });
+
+  test('recusa antes do vencimento segue sendo acesso restrito', () async {
+    final fonte = BackendAdminDataSource(
+      api.EndpointAdmin(FakeEndpointCaller(error: api.AlertPermissionException(message: 'x'))),
+      accessToken: 't',
+      expiresAt: DateTime.utc(2026, 1, 1, 12),
+      now: () => DateTime.utc(2026, 1, 1, 11),
+    );
+    await expectLater(
+      fonte.fetchDashboardIndicators(),
+      throwsA(isA<AdminDataFailure>().having((e) => e.message, 'message', 'Acesso restrito ao backoffice.')),
     );
   });
 

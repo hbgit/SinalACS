@@ -19,8 +19,25 @@ class FailingAdminDataSource implements AdminDataSource {
 
   int recordAccessCalls = 0;
 
+  /// Exceção específica lançada (uma vez) pela próxima leitura de dados, no
+  /// lugar do `StateError` genérico: prova o tratamento de `AdminDataFailure` e
+  /// `AdminSessionExpired` nas telas.
+  Object? nextError;
+
+  /// Falha depois do próximo frame (o pump avança o relógio antes de montar), como uma chamada de rede de
+  /// verdade: um erro síncrono antes de o `FutureBuilder` assinar o `Future` é
+  /// reportado como não tratado.
+  Future<void> _lancaSeProgramado() async {
+    final erro = nextError;
+    if (erro == null) return;
+    nextError = null;
+    await Future<void>.delayed(const Duration(milliseconds: 150));
+    throw erro;
+  }
+
   @override
   Future<DashboardIndicators> fetchDashboardIndicators() async {
+    await _lancaSeProgramado();
     if (failNextIndicators) {
       failNextIndicators = false;
       throw StateError('falha simulada: indicadores');
@@ -30,6 +47,7 @@ class FailingAdminDataSource implements AdminDataSource {
 
   @override
   Future<List<MicroAreaSummary>> fetchMicroAreas() async {
+    await _lancaSeProgramado();
     if (failNextMicroAreas) {
       failNextMicroAreas = false;
       throw StateError('falha simulada: microáreas');
@@ -39,6 +57,7 @@ class FailingAdminDataSource implements AdminDataSource {
 
   @override
   Future<List<AlertSummary>> fetchAlerts({String? microAreaId, AlertStatus? status, int limit = 50, int offset = 0}) async {
+    await _lancaSeProgramado();
     if (failNextAlerts) {
       failNextAlerts = false;
       throw StateError('falha simulada: alertas');
@@ -48,6 +67,7 @@ class FailingAdminDataSource implements AdminDataSource {
 
   @override
   Future<List<AuditLogEntry>> fetchAuditLogs({int limit = 50}) async {
+    await _lancaSeProgramado();
     if (failNextAuditLogs) {
       failNextAuditLogs = false;
       throw StateError('falha simulada: auditoria');

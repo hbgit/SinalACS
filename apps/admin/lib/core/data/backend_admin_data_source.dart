@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:sinalacs_client/sinalacs_client.dart' as api;
@@ -17,11 +18,23 @@ import 'admin_data_source.dart';
 /// As falhas viram [AdminDataFailure] com texto próprio: a mensagem do servidor
 /// (que descreve o motivo da recusa) não vai para a tela.
 class BackendAdminDataSource implements AdminDataSource {
-  BackendAdminDataSource(this._admin, {required String accessToken})
-    : _accessToken = accessToken;
+  BackendAdminDataSource(
+    this._admin, {
+    required String accessToken,
+    DateTime? expiresAt,
+    DateTime Function()? now,
+  }) : _accessToken = accessToken,
+       _expiresAt = expiresAt,
+       _now = now ?? DateTime.now;
 
   final api.EndpointAdmin _admin;
   final String _accessToken;
+
+  /// Vencimento da sessão. O servidor não responde 401: recusa o token com
+  /// `AlertPermissionException`, a mesma exceção da recusa por papel ou escopo.
+  /// Só o relógio separa as duas: recusa depois do vencimento é sessão vencida.
+  final DateTime? _expiresAt;
+  final DateTime Function() _now;
 
   @override
   Future<DashboardIndicators> fetchDashboardIndicators() => _guard(() async {
@@ -111,12 +124,28 @@ class BackendAdminDataSource implements AdminDataSource {
   Future<T> _guard<T>(Future<T> Function() chamada) async {
     try {
       return await chamada();
+    } on api.ServerpodClientUnauthorized {
+      throw const AdminSessionExpired();
     } on api.AlertPermissionException {
+      final venceu = _expiresAt != null && !_now().isBefore(_expiresAt);
+      if (venceu) throw const AdminSessionExpired();
       throw const AdminDataFailure('Acesso restrito ao backoffice.');
     } on api.AdminInvalidRequestException {
       throw const AdminDataFailure('Parâmetro de paginação inválido.');
     } on SocketException {
       throw const AdminDataFailure('Não foi possível conectar ao servidor.');
+    } on TimeoutException {
+      throw const AdminDataFailure('Não foi possível conectar ao servidor.');
+    } on HandshakeException {
+      throw const AdminDataFailure('Não foi possível conectar ao servidor.');
+    } on api.ServerpodClientException catch (e) {
+      // O cliente embrulha a SocketException em ServerpodClientException(-1).
+      // Vem depois do Unauthorized, que é subtipo deste. Os outros status (500
+      // etc.) seguem para o texto genérico da tela: não são falta de conexão.
+      if (e.statusCode == -1) {
+        throw const AdminDataFailure('Não foi possível conectar ao servidor.');
+      }
+      rethrow;
     }
   }
 }
