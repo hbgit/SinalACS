@@ -112,16 +112,25 @@ class MockAdminDataSource implements AdminDataSource {
   Future<List<MicroAreaSummary>> fetchMicroAreas() async => _microAreas;
 
   @override
-  Future<List<AlertSummary>> fetchAlerts({String? microAreaName, AlertStatus? status}) async {
+  Future<List<AlertSummary>> fetchAlerts({
+    String? microAreaId,
+    AlertStatus? status,
+    int limit = 50,
+    int offset = 0,
+  }) async {
+    final nome = microAreaId == null
+        ? null
+        : _microAreas.where((area) => area.id == microAreaId).map((area) => area.name).firstOrNull;
     return _alerts.where((alert) {
-      if (microAreaName != null && alert.microAreaName != microAreaName) return false;
+      if (microAreaId != null && alert.microAreaName != nome) return false;
       if (status != null && alert.status != status) return false;
       return true;
-    }).toList();
+    }).skip(offset).take(limit).toList();
   }
 
   @override
-  Future<List<AuditLogEntry>> fetchAuditLogs() async => List.unmodifiable(_auditLog.reversed);
+  Future<List<AuditLogEntry>> fetchAuditLogs({int limit = 50}) async =>
+      List.unmodifiable(_auditLog.reversed.take(limit));
 
   @override
   Future<void> recordAccess({required String actionType, required String resourceType}) async {

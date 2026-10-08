@@ -119,6 +119,36 @@ Future<void> main(List<String> args) async {
         Sql.named('INSERT INTO "staff_accounts" ("id","enrollmentId","active") VALUES (@id,@matricula,true)'),
         parameters: {'id': staff.id, 'matricula': staff.matricula},
       );
+      // Painel do admin (#40): 3 alertas determinísticos na microárea das fixtures,
+      // para o e2e provar contagens e TMRAV reais. O reconhecimento vem 60 s depois
+      // do disparo, então o TMRAV esperado é exatamente 60 s.
+      //
+      // OPT-IN (`E2E_SEED_ADMIN_ALERTS=1`, ligado só por `admin_login_e2e.sh`): o
+      // seed é compartilhado e estes alertas são do paciente `main`, então semeá-los
+      // sempre alteraria o histórico que as jornadas do paciente e do ACS conferem.
+      if (env['E2E_SEED_ADMIN_ALERTS'] == '1') {
+      final paciente = fixtures.byRole('main');
+      Future<void> alerta(String id, String risco, String status, {int? reconhecidoEmSegundos}) => tx.execute(
+            Sql.named('INSERT INTO "alerts" ("id","patientId","acsId","microAreaId","triggeredAt","acknowledgedAt",'
+                '"riskLevel","locationHash","status","mqttTopic","deviceId","retryCount","version") '
+                "VALUES (@id,@patient,@acs,@ma,NOW() - interval '1 hour',"
+                "CASE WHEN @ack::int IS NULL THEN NULL ELSE NOW() - interval '1 hour' + (@ack::int * interval '1 second') END,"
+                "@risco,'hash-e2e',@status,@topic,'device-e2e',0,0)"),
+            parameters: {
+              'id': id,
+              'patient': paciente.id,
+              'acs': fixtures.acs.id,
+              'ma': fixtures.microAreaId,
+              'ack': reconhecidoEmSegundos,
+              'risco': risco,
+              'status': status,
+              'topic': 'sinalacs/v1/microareas/${fixtures.microAreaId}/alerts',
+            },
+          );
+      await alerta(fixtures.adminAlertIds[0], 'red', 'pending');
+      await alerta(fixtures.adminAlertIds[1], 'red', 'acknowledged', reconhecidoEmSegundos: 60);
+      await alerta(fixtures.adminAlertIds[2], 'green', 'pending');
+      }
       // Código de ativação (#48): só o hash vai ao banco; o claro segue no manifesto.
       await tx.execute(
         Sql.named('UPDATE "staff_accounts" SET "activationCodeHash"=@h, "activationCodeExpiresAt"=@e, '

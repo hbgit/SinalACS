@@ -7,7 +7,10 @@ import 'package:sinalacs_admin/core/auth/admin_auth_bootstrap.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  runApp(SinalAdminApp(auth: buildAdminAuth(caBytes: await _rpcCaBytes())));
+  // Autenticação e dados saem do MESMO cliente (mesma CA, mesmo host https): o
+  // painel de produção nunca cai no MockAdminDataSource.
+  final fiacao = buildAdminWiring(caBytes: await _rpcCaBytes());
+  runApp(SinalAdminApp(auth: fiacao.auth, dataSourceFor: fiacao.dataSourceFor));
 }
 
 /// Bytes da CA de desenvolvimento do RPC, ou `null` quando não há como usá-la.

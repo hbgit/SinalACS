@@ -1,0 +1,439 @@
+import 'dart:convert';
+
+import 'package:serverpod/serverpod.dart';
+import 'package:sinalacs_server/src/application/auth/development_auth_service.dart';
+import 'package:sinalacs_server/src/generated/protocol.dart';
+import 'package:sinalacs_server/src/runtime/alert_runtime.dart';
+import 'package:test/test.dart';
+
+import 'test_tools/serverpod_test_tools.dart';
+
+/// `admin.*` (#40) pelo endpoint, com tokens reais e Postgres real: papel,
+/// escopo por UBS, auditoria de cada leitura e minimização de PII.
+/// Dados sintéticos; ids próprios.
+const _ubsA = '00000000-0000-4000-8000-0000000000d1';
+const _ubsB = '00000000-0000-4000-8000-0000000000d2';
+const _maA = '00000000-0000-4000-8000-0000000000d3';
+const _maB = '00000000-0000-4000-8000-0000000000d4';
+const _admin = '00000000-0000-4000-8000-0000000000d5';
+const _coordA = '00000000-0000-4000-8000-0000000000d6';
+const _coordSemUbs = '00000000-0000-4000-8000-0000000000d7';
+const _acs = '00000000-0000-4000-8000-0000000000d8';
+const _paciente = '00000000-0000-4000-8000-0000000000d9';
+const _nomePaciente = 'Joana Sintética Pereira';
+
+final _agora = DateTime.now().toUtc();
+
+Future<void> _usuario(
+  Session s,
+  String id,
+  String nome,
+  UserRole role, {
+  String? ma,
+}) async {
+  await User.db.insertRow(
+    s,
+    User(
+      id: UuidValue.fromString(id),
+      cpfHash: 'admin-ep-$id',
+      name: nome,
+      birthDate: DateTime.utc(1980),
+      role: role,
+      microAreaId: ma == null ? null : UuidValue.fromString(ma),
+      createdAt: _agora,
+      updatedAt: _agora,
+    ),
+  );
+}
+
+Future<void> _alerta(
+  Session s,
+  String ma,
+  RiskLevel risco,
+  AlertStatus status,
+  Duration atras,
+) async {
+  await Alert.db.insertRow(
+    s,
+    Alert(
+      patientId: UuidValue.fromString(_paciente),
+      microAreaId: UuidValue.fromString(ma),
+      triggeredAt: _agora.subtract(atras),
+      riskLevel: risco,
+      locationHash: 'hash-sintetico',
+      status: status,
+      mqttTopic: 'sinalacs/v1/microareas/$ma/alerts',
+      deviceId: 'device-sintetico',
+      retryCount: 0,
+      version: 0,
+    ),
+  );
+}
+
+Future<void> _seed(Session s) async {
+  for (final (id, nome) in [(_ubsA, 'UBS A'), (_ubsB, 'UBS B')]) {
+    await Ubs.db.insertRow(
+      s,
+      Ubs(
+        id: UuidValue.fromString(id),
+        name: nome,
+        address: 'Endereço sintético',
+        city: 'São Paulo',
+        state: 'SP',
+      ),
+    );
+  }
+  for (final (id, nome, ubs) in [
+    (_maA, 'Microárea A', _ubsA),
+    (_maB, 'Microárea B', _ubsB),
+  ]) {
+    await MicroArea.db.insertRow(
+      s,
+      MicroArea(
+        id: UuidValue.fromString(id),
+        name: nome,
+        ubsId: UuidValue.fromString(ubs),
+        geoJsonBoundary: '{}',
+      ),
+    );
+  }
+  await _usuario(s, _acs, 'ACS Sintético', UserRole.acs, ma: _maA);
+  await Acs.db.insertRow(
+    s,
+    Acs(
+      id: UuidValue.fromString(_acs),
+      enrollmentId: 'ACS-EP-1',
+      ubsId: UuidValue.fromString(_ubsA),
+      active: true,
+    ),
+  );
+  await _usuario(s, _paciente, _nomePaciente, UserRole.patient, ma: _maA);
+  await Patient.db.insertRow(
+    s,
+    Patient(
+      id: UuidValue.fromString(_paciente),
+      emergencyContact: 'x',
+      isChronic: false,
+    ),
+  );
+  await _usuario(s, _admin, 'Admin Sintético', UserRole.admin);
+  await StaffAccount.db.insertRow(
+    s,
+    StaffAccount(
+      id: UuidValue.fromString(_admin),
+      enrollmentId: 'ADM-EP-1',
+      active: true,
+    ),
+  );
+  await _usuario(s, _coordA, 'Coord A Sintético', UserRole.coordinator);
+  await StaffAccount.db.insertRow(
+    s,
+    StaffAccount(
+      id: UuidValue.fromString(_coordA),
+      enrollmentId: 'COO-EP-1',
+      active: true,
+      ubsId: UuidValue.fromString(_ubsA),
+    ),
+  );
+  await _usuario(s, _coordSemUbs, 'Coord Sem UBS', UserRole.coordinator);
+  await StaffAccount.db.insertRow(
+    s,
+    StaffAccount(
+      id: UuidValue.fromString(_coordSemUbs),
+      enrollmentId: 'COO-EP-2',
+      active: true,
+    ),
+  );
+
+  await _alerta(
+    s,
+    _maA,
+    RiskLevel.red,
+    AlertStatus.pending,
+    const Duration(minutes: 10),
+  );
+  await _alerta(
+    s,
+    _maA,
+    RiskLevel.green,
+    AlertStatus.pending,
+    const Duration(minutes: 20),
+  );
+  await _alerta(
+    s,
+    _maB,
+    RiskLevel.red,
+    AlertStatus.pending,
+    const Duration(minutes: 5),
+  );
+}
+
+String _token(String id, UserRole role, {String? ma, DateTime? now}) =>
+    AlertRuntime.instance.auth.issueToken(
+      AuthenticatedUser(
+        id: id,
+        role: role,
+        microAreaId: ma,
+        deviceId: 'sem-aparelho',
+      ),
+      now: now,
+    );
+
+Future<int> _auditoriasAdmin(Session s, String resultado) async {
+  final linhas = await s.db.unsafeQuery(
+    'SELECT count(*) FROM audit_logs WHERE "resourceType" LIKE \'admin_%\' AND result = @r',
+    parameters: QueryParameters.named({'r': resultado}),
+  );
+  return linhas.single[0] as int;
+}
+
+void main() {
+  withServerpod('Dado o endpoint admin do backoffice (#40)', (
+    sessionBuilder,
+    endpoints,
+  ) {
+    late Session session;
+    setUp(() async {
+      session = sessionBuilder.build();
+      await _seed(session);
+    });
+
+    test(
+      'admin lê os quatro endpoints e cada leitura vira uma linha read/success em audit_logs',
+      () async {
+        final t = _token(_admin, UserRole.admin);
+        final ind = await endpoints.admin.indicators(
+          sessionBuilder,
+          accessToken: t,
+        );
+        expect(ind.red, 2);
+        expect(ind.green, 1);
+        expect(ind.tmravSeconds, isNull);
+        expect(
+          (await endpoints.admin.microAreas(
+            sessionBuilder,
+            accessToken: t,
+          )).map((m) => m.name),
+          containsAll(['Microárea A', 'Microárea B']),
+        );
+        expect(
+          (await endpoints.admin.alerts(
+            sessionBuilder,
+            accessToken: t,
+            limit: 50,
+            offset: 0,
+          )).items,
+          hasLength(3),
+        );
+        await endpoints.admin.auditLogs(
+          sessionBuilder,
+          accessToken: t,
+          limit: 50,
+        );
+        expect(await _auditoriasAdmin(session, 'success'), 4);
+      },
+    );
+
+    test(
+      'coordenador da UBS A não vê a UBS B (indicators, microAreas, alerts)',
+      () async {
+        final t = _token(_coordA, UserRole.coordinator);
+        expect(
+          (await endpoints.admin.indicators(
+            sessionBuilder,
+            accessToken: t,
+          )).red,
+          1,
+        );
+        expect(
+          (await endpoints.admin.microAreas(
+            sessionBuilder,
+            accessToken: t,
+          )).map((m) => m.name),
+          ['Microárea A'],
+        );
+        final alertas = await endpoints.admin.alerts(
+          sessionBuilder,
+          accessToken: t,
+          limit: 50,
+          offset: 0,
+        );
+        expect(alertas.items, hasLength(2));
+        expect(alertas.items.map((a) => a.microAreaName).toSet(), {
+          'Microárea A',
+        });
+        final filtrandoB = await endpoints.admin.alerts(
+          sessionBuilder,
+          accessToken: t,
+          microAreaId: _maB,
+          limit: 50,
+          offset: 0,
+        );
+        expect(
+          filtrandoB.items,
+          isEmpty,
+          reason: 'filtro de outra UBS não fura o escopo',
+        );
+      },
+    );
+
+    test('coordenador não lê a auditoria', () async {
+      await expectLater(
+        endpoints.admin.auditLogs(
+          sessionBuilder,
+          accessToken: _token(_coordA, UserRole.coordinator),
+          limit: 50,
+        ),
+        throwsA(isA<AlertPermissionException>()),
+      );
+    });
+
+    test(
+      'coordenador sem UBS recebe AlertPermissionException nos quatro',
+      () async {
+        final t = _token(_coordSemUbs, UserRole.coordinator);
+        for (final chamada in <Future<Object?> Function()>[
+          () => endpoints.admin.indicators(sessionBuilder, accessToken: t),
+          () => endpoints.admin.microAreas(sessionBuilder, accessToken: t),
+          () => endpoints.admin.alerts(
+            sessionBuilder,
+            accessToken: t,
+            limit: 50,
+            offset: 0,
+          ),
+          () => endpoints.admin.auditLogs(
+            sessionBuilder,
+            accessToken: t,
+            limit: 50,
+          ),
+        ]) {
+          await expectLater(
+            chamada(),
+            throwsA(isA<AlertPermissionException>()),
+          );
+        }
+        expect(await _auditoriasAdmin(session, 'denied'), 4);
+      },
+    );
+
+    test(
+      'acs (com microárea) e patient com token válido recebem AlertPermissionException nos quatro',
+      () async {
+        for (final (id, role, ma) in [
+          (_acs, UserRole.acs, _maA),
+          (_paciente, UserRole.patient, _maA),
+        ]) {
+          final t = _token(id, role, ma: ma);
+          for (final chamada in <Future<Object?> Function()>[
+            () => endpoints.admin.indicators(sessionBuilder, accessToken: t),
+            () => endpoints.admin.microAreas(sessionBuilder, accessToken: t),
+            () => endpoints.admin.alerts(
+              sessionBuilder,
+              accessToken: t,
+              limit: 50,
+              offset: 0,
+            ),
+            () => endpoints.admin.auditLogs(
+              sessionBuilder,
+              accessToken: t,
+              limit: 50,
+            ),
+          ]) {
+            await expectLater(
+              chamada(),
+              throwsA(isA<AlertPermissionException>()),
+            );
+          }
+        }
+        expect(await _auditoriasAdmin(session, 'denied'), 8);
+      },
+    );
+
+    test(
+      'token adulterado e token expirado são recusados e não auditam leitura',
+      () async {
+        final bom = _token(_admin, UserRole.admin);
+        final expirado = _token(
+          _admin,
+          UserRole.admin,
+          now: DateTime.utc(2020),
+        );
+        for (final t in ['${bom}x', expirado, '', 'lixo']) {
+          await expectLater(
+            endpoints.admin.indicators(sessionBuilder, accessToken: t),
+            throwsA(isA<AlertPermissionException>()),
+          );
+        }
+        expect(await _auditoriasAdmin(session, 'success'), 0);
+      },
+    );
+
+    test('a auditoria não devolve hash nem IP', () async {
+      final t = _token(_admin, UserRole.admin);
+      await endpoints.admin.indicators(sessionBuilder, accessToken: t);
+      final json = jsonEncode(
+        (await endpoints.admin.auditLogs(
+          sessionBuilder,
+          accessToken: t,
+          limit: 50,
+        )).toJson(),
+      );
+      expect(json, isNot(contains('Hash')));
+      expect(json, isNot(contains('ip')));
+      expect(json, contains('ADM-EP-1 (Administrador)'));
+    });
+
+    test(
+      'a resposta de alertas não contém nome nem UUID do paciente',
+      () async {
+        final json = jsonEncode(
+          (await endpoints.admin.alerts(
+            sessionBuilder,
+            accessToken: _token(_admin, UserRole.admin),
+            limit: 50,
+            offset: 0,
+          )).toJson(),
+        );
+        expect(json, isNot(contains(_nomePaciente)));
+        expect(json, isNot(contains(_paciente)));
+      },
+    );
+
+    test(
+      'limit fora de 1..100 vira AdminInvalidRequestException e não é auditado como leitura',
+      () async {
+        final t = _token(_admin, UserRole.admin);
+        await expectLater(
+          endpoints.admin.alerts(
+            sessionBuilder,
+            accessToken: t,
+            limit: 0,
+            offset: 0,
+          ),
+          throwsA(isA<AdminInvalidRequestException>()),
+        );
+        await expectLater(
+          endpoints.admin.alerts(
+            sessionBuilder,
+            accessToken: t,
+            limit: 101,
+            offset: 0,
+          ),
+          throwsA(isA<AdminInvalidRequestException>()),
+        );
+        expect(await _auditoriasAdmin(session, 'success'), 0);
+      },
+    );
+
+    test('página além do fim: items vazio e nextOffset nulo', () async {
+      final p = await endpoints.admin.alerts(
+        sessionBuilder,
+        accessToken: _token(_admin, UserRole.admin),
+        offset: 50,
+        limit: 50,
+      );
+      expect(p.items, isEmpty);
+      expect(p.nextOffset, isNull);
+    });
+  });
+}

@@ -11,6 +11,8 @@ fields:
   id: UuidValue?, defaultPersist=random
   enrollmentId: String
   active: bool
+  ### UBS do coordenador; nulo para administrador. Coordenador sem UBS é recusado.
+  ubsId: UuidValue?
   activationCodeHash: String?
   activationCodeExpiresAt: DateTime?
   activationCodeIssuedBy: String?

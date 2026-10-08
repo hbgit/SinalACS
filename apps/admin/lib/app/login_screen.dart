@@ -6,7 +6,7 @@ import 'package:sinalacs_admin/app/admin_theme.dart';
 import 'package:sinalacs_admin/app/app.dart';
 import 'package:sinalacs_admin/app/mfa_enrollment_screen.dart';
 import 'package:sinalacs_admin/core/auth/admin_auth_backend.dart';
-import 'package:sinalacs_admin/core/data/admin_data_source.dart';
+import 'package:sinalacs_admin/core/auth/admin_auth_bootstrap.dart';
 
 /// Login institucional do backoffice (staff: coordenador e administrador).
 ///
@@ -14,10 +14,12 @@ import 'package:sinalacs_admin/core/data/admin_data_source.dart';
 /// atalho de desenvolvimento. Com MFA obrigatória no staff, o servidor pede o
 /// código (`AdminMfaCodeRequired`) ou a ativação (`AdminMfaEnrollmentRequired`).
 class LoginScreen extends StatefulWidget {
-  const LoginScreen({required this.auth, required this.dataSource, this.aviso, super.key});
+  const LoginScreen({required this.auth, required this.dataSourceFor, this.aviso, super.key});
 
   final AdminAuthBackend auth;
-  final AdminDataSource dataSource;
+
+  /// Cria a fonte de dados da sessão que o login devolveu.
+  final AdminDataSourceFactory dataSourceFor;
 
   /// Mensagem informativa inicial (ex.: sessão encerrada).
   final String? aviso;
@@ -76,7 +78,12 @@ class _LoginScreenState extends State<LoginScreen> {
       if (!mounted) return;
       await Navigator.of(context).pushReplacement(
         MaterialPageRoute<void>(
-          builder: (_) => AdminHomeShell(dataSource: widget.dataSource, session: session, auth: widget.auth),
+          builder: (_) => AdminHomeShell(
+            dataSource: widget.dataSourceFor(session),
+            dataSourceFor: widget.dataSourceFor,
+            session: session,
+            auth: widget.auth,
+          ),
         ),
       );
     } on AdminMfaCodeRequired {

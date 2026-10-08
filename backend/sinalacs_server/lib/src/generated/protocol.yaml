@@ -1,3 +1,8 @@
+admin:
+  - indicators:
+  - microAreas:
+  - alerts:
+  - auditLogs:
 alerts:
   - createRedAlert:
   - acknowledge:

@@ -114,6 +114,7 @@ class E2eFixtures {
     required this.acs,
     required this.secondAcs,
     required this.staff,
+    required this.adminAlertIds,
     required this.patients,
   });
 
@@ -129,6 +130,12 @@ class E2eFixtures {
 
   /// Administrador do backoffice (sem MFA ativada), para o e2e do app admin.
   final E2eStaff staff;
+
+  /// Ids dos 3 alertas semeados para o painel do admin (#40): um vermelho
+  /// pendente, um vermelho reconhecido 60 s depois do disparo e um verde
+  /// pendente, todos na microárea das fixtures. O painel deve mostrar Vermelho 2,
+  /// Verde 1, 1 aberto, 1 reconhecido e TMRAV 60s.
+  final List<String> adminAlertIds;
   final List<E2ePatient> patients;
 
   E2ePatient byRole(String role) => patients.singleWhere((p) => p.role == role);
@@ -140,6 +147,7 @@ class E2eFixtures {
         'acs': acs.toJson(),
         'acsB': secondAcs.toJson(),
         'staff': staff.toJson(),
+        'adminAlertIds': adminAlertIds,
         'patients': [for (final p in patients) p.toJson()],
       };
 
@@ -150,6 +158,7 @@ class E2eFixtures {
         acs: E2eAcs.fromJson((j['acs']! as Map).cast<String, Object?>()),
         secondAcs: E2eAcs.fromJson((j['acsB']! as Map).cast<String, Object?>()),
         staff: E2eStaff.fromJson((j['staff']! as Map).cast<String, Object?>()),
+        adminAlertIds: [for (final id in (j['adminAlertIds']! as List)) id as String],
         patients: [
           for (final p in (j['patients']! as List)) E2ePatient.fromJson((p as Map).cast<String, Object?>()),
         ],
@@ -243,6 +252,7 @@ E2eFixtures generateE2eFixtures(Random random) {
       password: _password(random),
       activationCode: StaffActivationCode.generate(random),
     ),
+    adminAlertIds: [for (var i = 0; i < 3; i++) generateUuidV4(random)],
     patients: [
       patient('main', 'Paciente E2E Principal', chronic: false, microAreaId: microAreaId),
       patient('chronic', 'Paciente E2E Crônico', chronic: true, microAreaId: microAreaId),

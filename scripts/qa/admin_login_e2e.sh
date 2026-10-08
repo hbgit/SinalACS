@@ -43,7 +43,8 @@ fi
 
 echo "== stack de e2e (banco de teste)"
 ./scripts/qa/e2e_stack.sh up
-./scripts/qa/e2e_stack.sh seed
+# Os 3 alertas do painel (#40) só existem neste e2e: o seed é compartilhado.
+E2E_SEED_ADMIN_ALERTS=1 ./scripts/qa/e2e_stack.sh seed
 ./scripts/dev/sync_dev_ca.sh >/dev/null 2>&1 || true
 [[ -f apps/admin/assets/certs/dev_rpc_ca.crt ]] \
   || { echo 'erro: falta apps/admin/assets/certs/dev_rpc_ca.crt (./scripts/dev/sync_dev_ca.sh)' >&2; exit 1; }
@@ -79,6 +80,11 @@ igual 'TOTP ativado e passo registrado' 'true|true' \
   "select (\"totpEnabledAt\" is not null)::text || '|' || (\"totpLastStep\" is not null)::text from user_credentials where \"userId\"='$staff_id'"
 igual 'código de ativação apagado após a ativação' 'true|true' \
   "select (\"activationCodeHash\" is null)::text || '|' || (\"activationCodeIssuedBy\" is not null)::text from staff_accounts where id='$staff_id'"
+# Leitura do painel (#40): indicadores, microáreas (pelo filtro de alertas), alertas e
+# auditoria. `>=` porque a tela pode refazer a consulta ao reconstruir; o que importa é
+# que cada um dos quatro recursos tenha ficado registrado como leitura bem-sucedida.
+igual 'leituras do painel auditadas (4 recursos, read/success)' '4|true' \
+  "select count(distinct \"resourceType\")::text || '|' || (count(*) >= 4)::text from audit_logs where \"resourceType\" like 'admin\\_%' and \"actionType\"='read' and result='success' and \"userId\"='$staff_id'"
 igual 'tentativas falhas zeradas pelo login' 0 \
   "select \"failedAttempts\" from user_credentials where \"userId\"='$staff_id'"
 echo 'OK — login real do backoffice contra o banco de teste'

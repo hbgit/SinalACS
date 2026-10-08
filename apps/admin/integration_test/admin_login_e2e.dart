@@ -66,7 +66,8 @@ Future<void> _digitar(WidgetTester tester, String chave, String texto) async {
 
 Future<void> _abrirApp(WidgetTester tester) async {
   final ca = (await rootBundle.load(adminRpcCaAsset)).buffer.asUint8List();
-  await tester.pumpWidget(SinalAdminApp(auth: buildAdminAuth(caBytes: ca)));
+  final fiacao = buildAdminWiring(caBytes: ca);
+  await tester.pumpWidget(SinalAdminApp(auth: fiacao.auth, dataSourceFor: fiacao.dataSourceFor));
   await tester.pump(const Duration(milliseconds: 500));
 }
 
@@ -192,5 +193,28 @@ void main() {
     expect(_existe('login_error'), isFalse,
         reason: _existe('login_error') ? (tester.widget<Text>(find.byKey(const Key('login_error'))).data ?? '') : '');
     expect(find.text('Painel de Indicadores'), findsOneWidget);
+
+    // Dados REAIS (#40): o seed semeia 3 alertas na microárea (vermelho pendente,
+    // vermelho reconhecido 60 s depois e verde pendente), então o painel deve
+    // mostrar Vermelho 2, Amarelo 0, Verde 1, 1 aberto, 1 reconhecido e TMRAV 60s.
+    await _pumpUntil(tester, () => find.text('60s').evaluate().isNotEmpty);
+    expect(find.text('2'), findsOneWidget, reason: 'Vermelho = 2');
+    expect(find.text('0'), findsOneWidget, reason: 'Amarelo = 0');
+    expect(find.text('—'), findsNothing, reason: 'há amostra: o TMRAV não pode ser o traço');
+
+    // Alertas: 3 cartões, só com rótulo (`Paciente #XXXX`), nunca nome de paciente.
+    await tester.tap(find.text('Alertas').last);
+    await tester.pump(const Duration(milliseconds: 300));
+    final rotulo = RegExp(r'^Paciente #[0-9A-F]{4}$');
+    await _pumpUntil(tester, () => find.byWidgetPredicate((w) => w is Text && rotulo.hasMatch(w.data ?? '')).evaluate().length == 3);
+    expect(find.text('Risco: Vermelho'), findsNWidgets(2));
+    expect(find.text('Risco: Verde'), findsOneWidget);
+    expect(find.textContaining('Paciente E2E'), findsNothing, reason: 'nome de paciente nunca aparece');
+
+    // Auditoria: a leitura do próprio admin ficou registrada pelo servidor.
+    await tester.tap(find.text('Auditoria').last);
+    await tester.pump(const Duration(milliseconds: 300));
+    await _pumpUntil(tester, () => find.textContaining('admin_indicators').evaluate().isNotEmpty);
+    expect(find.textContaining('(Administrador)'), findsWidgets);
   });
 }

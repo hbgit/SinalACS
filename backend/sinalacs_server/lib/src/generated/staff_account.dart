@@ -26,6 +26,7 @@ abstract class StaffAccount
     this.id,
     required this.enrollmentId,
     required this.active,
+    this.ubsId,
     this.activationCodeHash,
     this.activationCodeExpiresAt,
     this.activationCodeIssuedBy,
@@ -36,6 +37,7 @@ abstract class StaffAccount
     _i1.UuidValue? id,
     required String enrollmentId,
     required bool active,
+    _i1.UuidValue? ubsId,
     String? activationCodeHash,
     DateTime? activationCodeExpiresAt,
     String? activationCodeIssuedBy,
@@ -49,6 +51,9 @@ abstract class StaffAccount
           : _i1.UuidValueJsonExtension.fromJson(jsonSerialization['id']),
       enrollmentId: jsonSerialization['enrollmentId'] as String,
       active: _i1.BoolJsonExtension.fromJson(jsonSerialization['active']),
+      ubsId: jsonSerialization['ubsId'] == null
+          ? null
+          : _i1.UuidValueJsonExtension.fromJson(jsonSerialization['ubsId']),
       activationCodeHash: jsonSerialization['activationCodeHash'] as String?,
       activationCodeExpiresAt:
           jsonSerialization['activationCodeExpiresAt'] == null
@@ -78,6 +83,9 @@ abstract class StaffAccount
 
   bool active;
 
+  /// UBS do coordenador; nulo para administrador. Coordenador sem UBS é recusado.
+  _i1.UuidValue? ubsId;
+
   String? activationCodeHash;
 
   DateTime? activationCodeExpiresAt;
@@ -96,6 +104,7 @@ abstract class StaffAccount
     _i1.UuidValue? id,
     String? enrollmentId,
     bool? active,
+    _i1.UuidValue? ubsId,
     String? activationCodeHash,
     DateTime? activationCodeExpiresAt,
     String? activationCodeIssuedBy,
@@ -108,6 +117,7 @@ abstract class StaffAccount
       if (id != null) 'id': id?.toJson(),
       'enrollmentId': enrollmentId,
       'active': active,
+      if (ubsId != null) 'ubsId': ubsId?.toJson(),
       if (activationCodeHash != null) 'activationCodeHash': activationCodeHash,
       if (activationCodeExpiresAt != null)
         'activationCodeExpiresAt': activationCodeExpiresAt?.toJson(),
@@ -125,6 +135,7 @@ abstract class StaffAccount
       if (id != null) 'id': id?.toJson(),
       'enrollmentId': enrollmentId,
       'active': active,
+      if (ubsId != null) 'ubsId': ubsId?.toJson(),
       if (activationCodeHash != null) 'activationCodeHash': activationCodeHash,
       if (activationCodeExpiresAt != null)
         'activationCodeExpiresAt': activationCodeExpiresAt?.toJson(),
@@ -172,6 +183,7 @@ class _StaffAccountImpl extends StaffAccount {
     _i1.UuidValue? id,
     required String enrollmentId,
     required bool active,
+    _i1.UuidValue? ubsId,
     String? activationCodeHash,
     DateTime? activationCodeExpiresAt,
     String? activationCodeIssuedBy,
@@ -180,6 +192,7 @@ class _StaffAccountImpl extends StaffAccount {
          id: id,
          enrollmentId: enrollmentId,
          active: active,
+         ubsId: ubsId,
          activationCodeHash: activationCodeHash,
          activationCodeExpiresAt: activationCodeExpiresAt,
          activationCodeIssuedBy: activationCodeIssuedBy,
@@ -194,6 +207,7 @@ class _StaffAccountImpl extends StaffAccount {
     Object? id = _Undefined,
     String? enrollmentId,
     bool? active,
+    Object? ubsId = _Undefined,
     Object? activationCodeHash = _Undefined,
     Object? activationCodeExpiresAt = _Undefined,
     Object? activationCodeIssuedBy = _Undefined,
@@ -203,6 +217,7 @@ class _StaffAccountImpl extends StaffAccount {
       id: id is _i1.UuidValue? ? id : this.id,
       enrollmentId: enrollmentId ?? this.enrollmentId,
       active: active ?? this.active,
+      ubsId: ubsId is _i1.UuidValue? ? ubsId : this.ubsId,
       activationCodeHash: activationCodeHash is String?
           ? activationCodeHash
           : this.activationCodeHash,
@@ -231,6 +246,12 @@ class StaffAccountUpdateTable extends _i1.UpdateTable<StaffAccountTable> {
     table.active,
     value,
   );
+
+  _i1.ColumnValue<_i1.UuidValue, _i1.UuidValue> ubsId(_i1.UuidValue? value) =>
+      _i1.ColumnValue(
+        table.ubsId,
+        value,
+      );
 
   _i1.ColumnValue<String, String> activationCodeHash(String? value) =>
       _i1.ColumnValue(
@@ -270,6 +291,10 @@ class StaffAccountTable extends _i1.Table<_i1.UuidValue?> {
       'active',
       this,
     );
+    ubsId = _i1.ColumnUuid(
+      'ubsId',
+      this,
+    );
     activationCodeHash = _i1.ColumnString(
       'activationCodeHash',
       this,
@@ -294,6 +319,9 @@ class StaffAccountTable extends _i1.Table<_i1.UuidValue?> {
 
   late final _i1.ColumnBool active;
 
+  /// UBS do coordenador; nulo para administrador. Coordenador sem UBS é recusado.
+  late final _i1.ColumnUuid ubsId;
+
   late final _i1.ColumnString activationCodeHash;
 
   late final _i1.ColumnDateTime activationCodeExpiresAt;
@@ -307,6 +335,7 @@ class StaffAccountTable extends _i1.Table<_i1.UuidValue?> {
     id,
     enrollmentId,
     active,
+    ubsId,
     activationCodeHash,
     activationCodeExpiresAt,
     activationCodeIssuedBy,

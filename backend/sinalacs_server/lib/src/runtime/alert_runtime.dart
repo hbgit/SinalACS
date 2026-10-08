@@ -1,3 +1,5 @@
+import 'package:sinalacs_server/src/application/admin/admin_read_service.dart';
+import 'package:sinalacs_server/src/infrastructure/database/orm_admin_read_store.dart';
 import 'package:meta/meta.dart';
 import 'package:serverpod/serverpod.dart';
 import 'package:sinalacs_server/src/application/alerts/alert_outbox_dispatcher.dart';
@@ -206,6 +208,13 @@ class AlertRuntime {
           cipher: healthDataCipher,
           transaction: transaction,
         ),
+        audit: auditTrailFor(session),
+      );
+
+  /// Leitura do backoffice (#40), para uma requisição. A trilha é a da
+  /// requisição: cada leitura do staff vira uma linha encadeada em `audit_logs`.
+  AdminReadService adminReadServiceFor(Session session) => AdminReadService(
+        store: OrmAdminReadStore(session: () => session),
         audit: auditTrailFor(session),
       );
 

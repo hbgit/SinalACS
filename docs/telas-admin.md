@@ -1,6 +1,6 @@
 # Telas do Backoffice Admin
 
-Documentação visual do protótipo Flutter do backoffice administrativo (`apps/admin`). Assim como `docs/telas-acs.md` e `docs/telas-paciente.md`, as imagens abaixo foram capturadas rodando o app com dados sintéticos: a 01 num emulador (2026-10-06) e as de 02 a 08 num aparelho físico (Motorola edge 40 neo, Android 15, tema escuro) com sessão real do administrador de teste (`flutter run -d 0087014315`, em 2026-10-07).
+Documentação visual do protótipo Flutter do backoffice administrativo (`apps/admin`). Assim como `docs/telas-acs.md` e `docs/telas-paciente.md`, as imagens abaixo foram capturadas rodando o app com dados sintéticos: a 01 no emulador em 2026-10-06 e a 01b no Motorola edge 40 neo em 2026-10-07; as de 02 a 05 em 2026-10-07 no emulador `emulator-5554` (API 36, tema escuro, com a borda de 5 px recortada), com sessão real do administrador de teste e **dados do backend** (3 alertas semeados no banco de e2e, nenhum dado real); as de 06 a 08 em 2026-10-07 no Motorola edge 40 neo (Android 15), de uma rodada anterior, com o painel ainda sobre o mock (o layout é o mesmo, mas os números mostrados nelas não são os do backend).
 
 ## Navegação
 
@@ -10,7 +10,7 @@ O backoffice é desktop-first (`spec/PRD_system.md` §2.1): acima de `AdminBreak
 
 ![Login do backoffice](screenshots/admin/01-login.png)
 
-Login real do staff (coordenador e administrador): matrícula/CNS e senha vão para `auth.loginStaff`; o painel só abre com a sessão que o servidor devolve, não há atalho de desenvolvimento. A imagem acima foi recapturada em 2026-10-06 no emulador Android (tema escuro, retrato). As capturas 02 a 08 foram refeitas em 2026-10-07 com uma sessão real (login, ativação da MFA e código), e o cabeçalho mostra o papel da sessão ("Backoffice • Administrador"). Os dados do painel seguem no `MockAdminDataSource` (#41): por isso a Auditoria ainda lista `admin.dev` como autor. Como a verificação em duas etapas é obrigatória para o staff, o fluxo tem três desfechos:
+Login real do staff (coordenador e administrador): matrícula/CNS e senha vão para `auth.loginStaff`; o painel só abre com a sessão que o servidor devolve, não há atalho de desenvolvimento. A imagem acima foi recapturada em 2026-10-06 no emulador Android (tema escuro, retrato). As capturas 02 a 08 foram refeitas em 2026-10-07 com uma sessão real (login, ativação da MFA e código), e o cabeçalho mostra o papel da sessão ("Backoffice • Administrador"). Os números do painel passaram a vir do backend na issue #40 (as capturas 02 a 05 abaixo foram refeitas então, com dados sintéticos do e2e). Como a verificação em duas etapas é obrigatória para o staff, o fluxo tem três desfechos:
 
 - **Credencial inválida:** a mensagem genérica "Matrícula ou senha inválidos." (a mesma para matrícula inexistente e senha errada) ou o aviso de bloqueio por tentativas.
 - **Conta sem MFA (primeiro acesso):** o app abre a tela *Verificação em duas etapas* (`MfaEnrollmentScreen`) em duas etapas. Primeiro pede o **código de ativação** de uso único (`activation_code_field`), que a coordenação entrega fora de banda e que o operador emite com `bin/issue_staff_activation_code.dart` (issue #48); sem ele, o servidor não devolve o segredo. Só então mostra o QR e a chave em texto (`mfa_secret`) para o aplicativo autenticador e o campo do código de 6 dígitos; nada é gravado no aparelho. Ao confirmar, volta ao login com o aviso "Verificação ativada. Entre com o código do aplicativo.".
@@ -27,7 +27,7 @@ O roteiro desse fluxo está escrito em `apps/admin/integration_test/admin_login_
 
 ![Painel de indicadores da UBS](screenshots/admin/02-indicadores.png)
 
-Contadores por `RiskLevel` (vermelho/amarelo/verde), alertas vermelhos abertos vs. reconhecidos e o TMRAV (Tempo Médio de Resposta a Alerta Vermelho, a métrica North Star do PRD). Dados mockados atrás de `AdminDataSource`; cor usada exclusivamente como sinal clínico.
+Contadores por `RiskLevel` (vermelho/amarelo/verde), alertas vermelhos abertos vs. reconhecidos e o TMRAV (Tempo Médio de Resposta a Alerta Vermelho, a métrica North Star do PRD). Desde a issue #40 os números vêm do backend (`admin.indicators`): contagens reais por risco e o TMRAV real, média de `acknowledgedAt − triggeredAt` dos alertas vermelhos dos últimos 30 dias. Sem alerta vermelho reconhecido na janela o TMRAV aparece como "—", nunca como "0s". Cor usada exclusivamente como sinal clínico.
 
 ## Microáreas e vínculo ACS
 
@@ -45,7 +45,7 @@ Lista de alertas filtrável por microárea e status. Não há nenhum controle de
 
 ![Logs de auditoria somente leitura](screenshots/admin/05-auditoria.png)
 
-Log somente leitura. Toda visita às telas de Microáreas, Alertas e Auditoria registra uma entrada própria via `AdminDataSource.recordAccess`, simulando o requisito do PRD §4.2.2 de que o acesso do Administrador também é auditado.
+Log somente leitura, só para o administrador (o coordenador recebe recusa; a visão por UBS fica para a #43), por página de 50 e do mais recente para o mais antigo. Desde a #40 é o **servidor** que audita: cada leitura de indicadores, microáreas, alertas ou da própria auditoria grava uma linha `read` em `audit_logs` **antes** de devolver o dado (se a gravação falha, o dado não sai), atendendo ao requisito do PRD §4.2.2 de que o acesso do Administrador também é auditado. O autor aparece como `MATRÍCULA (Papel)`; a tela nunca recebe hash nem IP.
 
 ## Layout em celular (Android)
 
