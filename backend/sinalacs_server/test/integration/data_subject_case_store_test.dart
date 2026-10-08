@@ -6,6 +6,8 @@ import 'package:sinalacs_server/src/application/audit/audit_trail.dart';
 import 'package:sinalacs_server/src/application/auth/cpf.dart';
 import 'package:sinalacs_server/src/application/auth/passwordless_auth_service.dart';
 import 'package:sinalacs_server/src/application/auth/sms_gateway.dart';
+import 'package:sinalacs_server/src/application/onboarding/consent_signature.dart';
+import 'package:sinalacs_server/src/application/patients/push_token_service.dart';
 import 'package:sinalacs_server/src/config/app_config.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
 import 'package:sinalacs_server/src/infrastructure/crypto/encrypted_json.dart';
@@ -13,6 +15,7 @@ import 'package:sinalacs_server/src/infrastructure/crypto/hmac_cpf_hasher.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_audit_trail.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_data_subject_case_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_otp_challenge_store.dart';
+import 'package:sinalacs_server/src/infrastructure/database/orm_push_token_store.dart';
 import 'package:test/test.dart';
 
 import '../support/health_data_fixtures.dart';
@@ -31,6 +34,8 @@ const _pacB = '00000000-0000-4000-8000-000000004212';
 const _semArea = '00000000-0000-4000-8000-000000004213';
 const _acsId = '00000000-0000-4000-8000-000000004214';
 const _adminId = '00000000-0000-4000-8000-000000004215';
+const _ubsCorrida = '00000000-0000-4000-8000-0000000043f1';
+const _maCorrida = '00000000-0000-4000-8000-0000000043f2';
 const _pedA1 = '00000000-0000-4000-8000-000000004221';
 const _pedA2 = '00000000-0000-4000-8000-000000004222';
 const _pedA3 = '00000000-0000-4000-8000-000000004223';
@@ -45,6 +50,8 @@ const _resolucao = 'Pedido atendido conforme LGPD (texto sintético)';
 const _cpfSintetico = '52998224725';
 
 final _t = DateTime.utc(2026, 10, 8, 12);
+
+const _segredoConsentimento = 'segredo-consentimento-sintetico';
 
 final _hasher = HmacCpfHasher(pepper: AppConfig.developmentCpfHashPepper);
 
@@ -325,6 +332,7 @@ void main() {
       store = OrmDataSubjectCaseStore(
         session,
         testHealthDataCipher(),
+        chainSecret: _segredoConsentimento,
         appendAudit: auditoria.call,
       );
     });
@@ -473,6 +481,8 @@ void main() {
         final p = (await Patient.db.findById(session, a))!;
         expect(p.chronicConditionsEncrypted, '');
         expect(p.lastLocationHash, isNull);
+        expect(p.emergencyContact, '');
+        expect(u.birthDate, DateTime.utc(1900, 1, 1));
 
         expect(await PushToken.db.count(session, where: (t) => t.userId.equals(a)), 0);
         expect(await OtpChallenge.db.count(session, where: (t) => t.userId.equals(a)), 0);
@@ -484,14 +494,36 @@ void main() {
 
         expect(await Alert.db.count(session, where: (t) => t.patientId.equals(a)), 1);
         expect(await Visit.db.count(session, where: (t) => t.patientId.equals(a)), 1);
-        expect(await ConsentLog.db.count(session, where: (t) => t.userId.equals(a)), 1);
+        // O consentimento original fica intocado (append-only); entra um
+        // `denied` de segmentedPush, assinado como os do painel do titular.
+        final consentimentos = await ConsentLog.db.find(
+          session,
+          where: (t) => t.userId.equals(a),
+          orderBy: (t) => t.timestamp,
+        );
+        expect(consentimentos, hasLength(2));
+        expect(consentimentos.first.action, 'granted');
+        final negado = consentimentos.last;
+        expect(negado.purpose, ConsentPurpose.segmentedPush.name);
+        expect(negado.action, 'denied');
+        expect(negado.timestamp, _t.add(const Duration(microseconds: 1)));
+        expect(
+          negado.signature,
+          ConsentSignature(secret: _segredoConsentimento).compute(
+            userId: _pacA,
+            purpose: negado.purpose,
+            action: negado.action,
+            version: negado.version,
+            timestamp: negado.timestamp,
+          ),
+        );
         expect(await AuditLog.db.count(session, where: (t) => t.userId.equals(a)), 1);
 
         final linha = await pedido(_pedA1);
         expect(linha.status, DataSubjectRequestStatus.completed);
         expect(linha.decidedBy, UuidValue.fromString(_adminId));
         expect(linha.decidedAt, _t);
-        expect(auditoria.eventos.single.resourceId, _pedA1);
+        expect(auditoria.eventos.map((e) => e.resourceId), [_pedA1, _pedA3]);
 
         // O paciente B não é tocado.
         expect((await usuario(_pacB)).name, 'Paciente B Sintético');
@@ -507,10 +539,40 @@ void main() {
       expect(a3.decidedBy, UuidValue.fromString(_adminId));
       // A correção aberta do mesmo titular continua aberta: só exclusões fecham.
       expect((await pedido(_pedA2)).status, DataSubjectRequestStatus.open);
-      // Uma linha de auditoria por decisão.
-      expect(auditoria.eventos, hasLength(1));
+      // Uma linha de auditoria por pedido fechado: o decidido e o irmão.
+      expect(auditoria.eventos, hasLength(2));
+      final irmao = auditoria.eventos.last;
+      expect(irmao.resourceId, _pedA3);
+      expect(irmao.userId, _adminId);
+      expect(irmao.actionType, 'write');
+      expect(irmao.resourceType, 'data_subject_request');
+      expect(irmao.result, 'completed');
       // O pedido fechado junto não pode ser decidido de novo.
       expect(await excluir(_pedA3), isFalse);
+    });
+
+    test('depois da anonimização, a sessão viva do titular não registra token de push', () async {
+      // Consentimento `granted` vigente antes: sem o `denied` da anonimização,
+      // o registro passaria.
+      await _prontuarioA(session);
+      expect(await excluir(_pedA1), isTrue);
+
+      final r = await OrmPushTokenStore(session: () => session).registerIfConsented(
+        userId: _pacA,
+        microAreaId: _maA,
+        token: 'tok-42-depois',
+        platform: 'android',
+        now: _t.add(const Duration(minutes: 1)),
+      );
+
+      expect(r.outcome, PushRegistration.refused);
+      expect(
+        await PushToken.db.count(
+          session,
+          where: (t) => t.userId.equals(UuidValue.fromString(_pacA)),
+        ),
+        0,
+      );
     });
 
     test('decide em titular sem linha em patients não quebra', () async {
@@ -580,9 +642,15 @@ void main() {
       final real = OrmDataSubjectCaseStore(
         session,
         testHealthDataCipher(),
+        chainSecret: _segredoConsentimento,
         appendAudit: trilha.recordInTransaction,
       );
       expect(await excluir(_pedA1, via: real), isTrue);
+      final irmas = await AuditLog.db.find(
+        session,
+        where: (t) => t.resourceId.equals(UuidValue.fromString(_pedA3)),
+      );
+      expect(irmas.single.result, 'completed', reason: 'o pedido irmão também é auditado');
       final linhas = await AuditLog.db.find(
         session,
         where: (t) => t.resourceId.equals(UuidValue.fromString(_pedA1)),
@@ -677,6 +745,7 @@ void main() {
         for (var i = 0; i < rodadas; i++) {
           final user = UuidValue.fromString(idDe(0x10, i));
           await DataSubjectRequest.db.deleteWhere(s, where: (t) => t.userId.equals(user));
+          await ConsentLog.db.deleteWhere(s, where: (t) => t.userId.equals(user));
           await Patient.db.deleteWhere(s, where: (t) => t.id.equals(user));
           await User.db.deleteWhere(s, where: (t) => t.id.equals(user));
         }
@@ -686,8 +755,8 @@ void main() {
               t.id.equals(UuidValue.fromString(idDe(0x01, 0))) |
               t.id.equals(UuidValue.fromString(idDe(0x02, 0))),
         );
-        await MicroArea.db.deleteWhere(s, where: (t) => t.id.equals(UuidValue.fromString(_maA)));
-        await Ubs.db.deleteWhere(s, where: (t) => t.id.equals(UuidValue.fromString(_ubsA)));
+        await MicroArea.db.deleteWhere(s, where: (t) => t.id.equals(UuidValue.fromString(_maCorrida)));
+        await Ubs.db.deleteWhere(s, where: (t) => t.id.equals(UuidValue.fromString(_ubsCorrida)));
       }
 
       test('duas decisões simultâneas: uma true, outra false; uma só anonimização', () async {
@@ -699,7 +768,7 @@ void main() {
           await Ubs.db.insertRow(
             s,
             Ubs(
-              id: UuidValue.fromString(_ubsA),
+              id: UuidValue.fromString(_ubsCorrida),
               name: 'UBS Corrida 42',
               address: 'Endereço sintético',
               city: 'São Paulo',
@@ -709,9 +778,9 @@ void main() {
           await MicroArea.db.insertRow(
             s,
             MicroArea(
-              id: UuidValue.fromString(_maA),
+              id: UuidValue.fromString(_maCorrida),
               name: 'Microárea Corrida 42',
-              ubsId: UuidValue.fromString(_ubsA),
+              ubsId: UuidValue.fromString(_ubsCorrida),
               geoJsonBoundary: '{}',
             ),
           );
@@ -721,7 +790,7 @@ void main() {
           for (var i = 0; i < rodadas; i++) {
             final titular = idDe(0x10, i);
             final pedidoId = idDe(0x20, i);
-            await _usuario(s, titular, 'Titular Corrida $i', UserRole.patient, ma: _maA);
+            await _usuario(s, titular, 'Titular Corrida $i', UserRole.patient, ma: _maCorrida);
             await Patient.db.insertRow(
               s,
               await encryptedPatient(id: titular, emergencyContact: 'x', isChronic: false),
@@ -733,6 +802,7 @@ void main() {
             Future<bool> decidir(String analista) => OrmDataSubjectCaseStore(
               sessionBuilder.build(),
               testHealthDataCipher(),
+              chainSecret: _segredoConsentimento,
               appendAudit: auditoria.call,
             ).decide(
               const AdminScope.system(),
@@ -763,6 +833,15 @@ void main() {
             expect(linha.decidedBy, UuidValue.fromString(vencedor), reason: 'o perdedor não sobrescreve');
             final u = (await User.db.findById(s, UuidValue.fromString(titular)))!;
             expect(u.name, 'Titular removido');
+            // Uma anonimização só, medida no banco: um único `denied` gravado.
+            expect(
+              await ConsentLog.db.count(
+                s,
+                where: (t) => t.userId.equals(UuidValue.fromString(titular)),
+              ),
+              1,
+              reason: 'rodada $i',
+            );
           }
         } finally {
           await limpar(s);

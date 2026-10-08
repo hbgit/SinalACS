@@ -3,9 +3,13 @@ import 'package:sinalacs_server/src/application/admin/admin_labels.dart';
 import 'package:sinalacs_server/src/application/admin/admin_read_service.dart';
 import 'package:sinalacs_server/src/application/admin/data_subject_case_service.dart';
 import 'package:sinalacs_server/src/application/audit/audit_trail.dart';
+import 'package:sinalacs_server/src/application/onboarding/consent_signature.dart';
+import 'package:sinalacs_server/src/application/onboarding/onboarding_service.dart'
+    show ConsentLogEntry, consentPolicyVersion;
 import 'package:sinalacs_server/src/generated/protocol.dart';
 import 'package:sinalacs_server/src/infrastructure/crypto/encrypted_json.dart';
 import 'package:sinalacs_server/src/infrastructure/crypto/health_data_cipher.dart';
+import 'package:sinalacs_server/src/infrastructure/database/signed_consent_log.dart';
 import 'package:sinalacs_server/src/infrastructure/database/subject_lock.dart';
 
 /// Grava um evento de auditoria DENTRO de [transaction]. Em produção é
@@ -31,15 +35,23 @@ class OrmDataSubjectCaseStore implements DataSubjectCaseStore {
   OrmDataSubjectCaseStore(
     this._session,
     this._cipher, {
+    required String chainSecret,
     required this.appendAudit,
-  });
+  }) : _signature = ConsentSignature(secret: chainSecret);
 
   final Session _session;
   final HealthDataCipher _cipher;
+
+  /// Assina o `denied` de push da anonimização com o MESMO `AUDIT_CHAIN_SECRET`
+  /// do painel do titular (`OrmDataSubjectRightsStore`).
+  final ConsentSignature _signature;
   /// Onde a decisão é auditada, dentro da transação dela.
   final AuditAppender appendAudit;
 
   static const rotuloRemovido = 'Titular removido';
+
+  /// `users.birthDate` é NOT NULL: a data real dá lugar a este marcador fixo.
+  static final nascimentoRemovido = DateTime.utc(1900, 1, 1);
 
   /// `@ubs` nulo = sistema inteiro.
   static const _base = '''
@@ -162,8 +174,14 @@ class OrmDataSubjectCaseStore implements DataSubjectCaseStore {
   ///    `OrmDataSubjectRightsStore.createDeletionRequestIfNoneOpen`) — duas
   ///    exclusões do mesmo titular decididas ao mesmo tempo, ou o titular
   ///    abrindo um pedido novo durante a anonimização;
-  /// 3. cadeia de auditoria, tomado dentro de [appendAudit], por último.
-  /// O status é relido só depois dos dois primeiros locks.
+  /// 3. push do titular (`lockNamespacePushToken`, o MESMO de
+  ///    `OrmPushTokenStore.registerIfConsented`), só na anonimização — um
+  ///    registro de token em voo termina antes do `DELETE` ou espera e lê o
+  ///    `denied`;
+  /// 4. cadeia de auditoria, tomado dentro de [appendAudit], por último.
+  /// O status é relido só depois dos dois primeiros locks. Nenhum outro
+  /// escritor pega estes locks na ordem inversa: o registro de push pega 3 e o
+  /// lock por token (4 em `subject_lock.dart`), nunca 1 nem 6.
   @override
   Future<bool> decide(
     AdminScope scope,
@@ -225,11 +243,12 @@ class OrmDataSubjectCaseStore implements DataSubjectCaseStore {
         transaction: transaction,
       );
 
+      var irmaos = const <UuidValue>[];
       if (anonymize) {
         if (pedido.requestType != DataSubjectRequestType.deletion) {
           throw StateError('anonimização só atende pedido de exclusão');
         }
-        await _anonimizar(
+        irmaos = await _anonimizar(
           session,
           transaction,
           titular: pedido.userId,
@@ -241,6 +260,21 @@ class OrmDataSubjectCaseStore implements DataSubjectCaseStore {
 
       // Por último e na mesma transação: se a auditoria falhar, nada fica.
       await appendAudit(session, transaction, audit);
+      // Cada pedido irmão fechado junto ganha a própria linha, com a mesma
+      // forma da decisão principal e o id dele.
+      for (final irmao in irmaos) {
+        await appendAudit(
+          session,
+          transaction,
+          AuditEvent(
+            userId: audit.userId,
+            actionType: audit.actionType,
+            resourceType: audit.resourceType,
+            resourceId: irmao.uuid,
+            result: 'completed',
+          ),
+        );
+      }
       return true;
     });
   }
@@ -250,7 +284,10 @@ class OrmDataSubjectCaseStore implements DataSubjectCaseStore {
   /// `audit_logs` e `consent_logs` (trilha e estatística pseudonimizada,
   /// `spec/lgpd_design.md` 5.7). A microárea do usuário fica, para o pedido
   /// continuar no escopo do coordenador que o atendeu.
-  Future<void> _anonimizar(
+  ///
+  /// Devolve os ids dos outros pedidos de exclusão fechados junto, para a
+  /// auditoria de cada um.
+  Future<List<UuidValue>> _anonimizar(
     Session session,
     Transaction transaction, {
     required UuidValue titular,
@@ -276,6 +313,7 @@ class OrmDataSubjectCaseStore implements DataSubjectCaseStore {
         // Aleatório e nunca derivado do CPF: o mesmo CPF não volta a achar
         // esta linha no login, e o índice único segue satisfeito.
         cpfHash: 'removed:${const Uuid().v4()}',
+        birthDate: nascimentoRemovido,
         updatedAt: now,
       ),
       transaction: transaction,
@@ -284,7 +322,9 @@ class OrmDataSubjectCaseStore implements DataSubjectCaseStore {
     // linha em `patients` atualiza zero linhas e segue.
     await session.db.unsafeExecute(
       '''
-      UPDATE patients SET "chronicConditionsEncrypted" = '', "lastLocationHash" = NULL
+      UPDATE patients
+      SET "chronicConditionsEncrypted" = '', "lastLocationHash" = NULL,
+          "emergencyContact" = ''
       WHERE id = @id::uuid
       ''',
       parameters: QueryParameters.named({'id': titular.uuid}),
@@ -301,9 +341,48 @@ class OrmDataSubjectCaseStore implements DataSubjectCaseStore {
       parameters: QueryParameters.named({'id': titular.uuid}),
       transaction: transaction,
     );
+    // Push: a sessão do titular pode seguir viva até o JWT vencer, e
+    // `registerIfConsented` só olha o consentimento mais recente. Sob o lock
+    // de push do titular, apaga os tokens e acrescenta um `denied` assinado
+    // (append-only: as linhas anteriores ficam como estão). Só `segmentedPush`.
+    await lockPerSubject(
+      session,
+      transaction,
+      namespace: lockNamespacePushToken,
+      key: titular.uuid,
+    );
     await PushToken.db.deleteWhere(
       session,
       where: (t) => t.userId.equals(titular),
+      transaction: transaction,
+    );
+    final ultimo = await ConsentLog.db.findFirstRow(
+      session,
+      where: (t) =>
+          t.userId.equals(titular) &
+          t.purpose.equals(ConsentPurpose.segmentedPush.name),
+      orderBy: (t) => t.timestamp,
+      orderDescending: true,
+      transaction: transaction,
+    );
+    // Estritamente depois do último: no empate de instante a leitura desempata
+    // por id aleatório, e o `denied` poderia perder para um `granted`.
+    final instante = ultimo == null || ultimo.timestamp.isBefore(now)
+        ? now
+        : ultimo.timestamp.add(const Duration(microseconds: 1));
+    await ConsentLog.db.insertRow(
+      session,
+      signedConsentLog(
+        ConsentLogEntry(
+          userId: titular.uuid,
+          purpose: ConsentPurpose.segmentedPush,
+          action: 'denied',
+          version: consentPolicyVersion,
+          timestamp: instante,
+        ),
+        signature: _signature,
+        origin: 'atendimento-exclusao',
+      ),
       transaction: transaction,
     );
     await OtpChallenge.db.deleteWhere(
@@ -340,5 +419,6 @@ class OrmDataSubjectCaseStore implements DataSubjectCaseStore {
         transaction: transaction,
       );
     }
+    return [for (final outro in outros) outro.id!];
   }
 }

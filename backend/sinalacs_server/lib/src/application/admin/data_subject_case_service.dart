@@ -10,7 +10,8 @@ abstract interface class DataSubjectCaseStore {
   /// UBS do coordenador (`staff_accounts.ubsId`), ou `null` se não houver.
   Future<String?> ubsOf(String staffId);
 
-  /// Mais recentes primeiro. `nextOffset` nulo = fim da lista. Nunca decifra
+  /// Prazo mais próximo primeiro (`dueAt` crescente, `id` desempata): os
+  /// vencidos sobem ao topo. `nextOffset` nulo = fim da lista. Nunca decifra
   /// `details` nem a nota.
   Future<AdminDataSubjectRequestPage> list(
     AdminScope scope, {
