@@ -448,8 +448,10 @@ void main() {
         );
       }
 
-      Future<String> idDoPedido() async =>
-          (await DataSubjectRequest.db.find(session)).single.id!.uuid;
+      Future<String> idDoPedido() async => (await DataSubjectRequest.db.find(
+        session,
+        where: (t) => t.userId.equals(UuidValue.fromString(_paciente)),
+      )).single.id!.uuid;
 
       test(
         'correção: paciente pede, coordenador lista (rótulo), abre, analisa e '
@@ -610,7 +612,10 @@ void main() {
               throwsA(isA<AlertPermissionException>()),
             );
           }
-          final pedido = (await DataSubjectRequest.db.find(session)).single;
+          final pedido = (await DataSubjectRequest.db.find(
+            session,
+            where: (t) => t.userId.equals(UuidValue.fromString(_paciente)),
+          )).single;
           expect(pedido.status, DataSubjectRequestStatus.open);
         },
       );
@@ -648,6 +653,18 @@ void main() {
 
           const inexistente = '00000000-0000-4000-8000-0000000000ff';
           for (final (alvo, outro) in [
+            (
+              () => endpoints.admin.startDataSubjectReview(
+                sessionBuilder,
+                accessToken: tB,
+                id: id,
+              ),
+              () => endpoints.admin.startDataSubjectReview(
+                sessionBuilder,
+                accessToken: tB,
+                id: inexistente,
+              ),
+            ),
             (
               () => endpoints.admin.dataSubjectRequest(
                 sessionBuilder,
@@ -690,7 +707,10 @@ void main() {
             expect(await mensagem(alvo), await mensagem(outro));
           }
 
-          final pedido = (await DataSubjectRequest.db.find(session)).single;
+          final pedido = (await DataSubjectRequest.db.find(
+            session,
+            where: (t) => t.userId.equals(UuidValue.fromString(_paciente)),
+          )).single;
           expect(pedido.status, DataSubjectRequestStatus.open);
           final usuario = await User.db.findById(
             session,
@@ -759,8 +779,20 @@ void main() {
             ),
             throwsA(isA<DataRightsException>()),
           );
-          expect(await PushToken.db.count(session), 0);
-          expect(await DataSubjectRequest.db.count(session), 1);
+          expect(
+            await PushToken.db.count(
+              session,
+              where: (t) => t.userId.equals(UuidValue.fromString(_paciente)),
+            ),
+            0,
+          );
+          expect(
+            await DataSubjectRequest.db.count(
+              session,
+              where: (t) => t.userId.equals(UuidValue.fromString(_paciente)),
+            ),
+            1,
+          );
         },
       );
     });

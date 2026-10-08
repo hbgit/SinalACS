@@ -385,7 +385,7 @@ void main() {
       expect(second.createdAt, first.createdAt);
       expect(first.dueAt.difference(first.createdAt), const Duration(days: 15));
       expect(first.status, DataSubjectRequestStatus.open);
-      expect(await DataSubjectRequest.db.count(session), 1);
+      expect(await DataSubjectRequest.db.count(session, where: (t) => t.userId.equals(UuidValue.fromString(_patientId))), 1);
 
       final overview = await endpoints.patients.myData(sessionBuilder, accessToken: token);
       expect(overview.requests.single.type, DataSubjectRequestType.deletion);
@@ -403,7 +403,7 @@ void main() {
         details: 'Meu contato de emergência mudou.',
       );
 
-      final row = (await DataSubjectRequest.db.find(session)).single;
+      final row = (await DataSubjectRequest.db.find(session, where: (t) => t.userId.equals(UuidValue.fromString(_patientId)))).single;
       expect(row.detailsEncrypted, isNot(contains('contato')));
       expect(row.detailsEncrypted, isNotEmpty);
 
@@ -471,8 +471,8 @@ void main() {
         ]) {
           await expectLater(chamada(), throwsA(isA<AlertPermissionException>()));
         }
-        expect(await DataSubjectRequest.db.count(session), 0);
-        expect(await ConsentLog.db.count(session), 0);
+        expect(await DataSubjectRequest.db.count(session, where: (t) => t.userId.equals(UuidValue.fromString(_patientId))), 0);
+        expect(await ConsentLog.db.count(session, where: (t) => t.userId.equals(UuidValue.fromString(_patientId))), 0);
         await expectLater(
           endpoints.devices.registerPushToken(
             sessionBuilder,
@@ -482,7 +482,71 @@ void main() {
           ),
           throwsA(isA<DataRightsException>()),
         );
-        expect(await PushToken.db.count(session), 0);
+        expect(await PushToken.db.count(session, where: (t) => t.userId.equals(UuidValue.fromString(_patientId))), 0);
+      },
+    );
+
+    test(
+      'conta anonimizada (#42) com JWT vivo não regrava condições crônicas',
+      () async {
+        final session = sessionBuilder.build();
+        await _seed(session);
+        final token = await patientToken();
+        final antes = (await Patient.db.findById(session, UuidValue.fromString(_patientId)))!
+            .chronicConditionsEncrypted;
+        await session.db.unsafeExecute(
+          'UPDATE users SET "cpfHash" = \'removed:sintetico\' WHERE id = @id::uuid',
+          parameters: QueryParameters.named({'id': _patientId}),
+        );
+
+        try {
+          await endpoints.patients.updateChronicConditions(
+            sessionBuilder,
+            accessToken: token,
+            conditions: const ['hipertensão sintética'],
+          );
+          fail('deveria recusar');
+        } on AlertPermissionException catch (e) {
+          expect(e.message, 'Sessão encerrada. Entre novamente.');
+        }
+        final depois = (await Patient.db.findById(session, UuidValue.fromString(_patientId)))!
+            .chronicConditionsEncrypted;
+        expect(depois, antes);
+      },
+    );
+
+    test(
+      'triagem: conta normal grava a sessão; conta anonimizada (#42) recebe a '
+      'mesma classificação e nada é gravado',
+      () async {
+        final session = sessionBuilder.build();
+        await _seed(session);
+        final token = await patientToken();
+
+        Future<TriageResult> avaliar() => endpoints.triage.evaluate(
+              sessionBuilder,
+              accessToken: token,
+              chestPain: true,
+              difficultyBreathing: false,
+              fever: true,
+              persistentVomiting: false,
+              bleeding: false,
+              severeWeakness: false,
+            );
+
+        final normal = await avaliar();
+        expect(await TriageSession.db.count(session, where: (t) => t.patientId.equals(UuidValue.fromString(_patientId))), 1);
+        final linha = (await TriageSession.db.find(session, where: (t) => t.patientId.equals(UuidValue.fromString(_patientId)))).single;
+        expect(linha.answersEncrypted, isNotEmpty);
+
+        await session.db.unsafeExecute(
+          'UPDATE users SET "cpfHash" = \'removed:sintetico\' WHERE id = @id::uuid',
+          parameters: QueryParameters.named({'id': _patientId}),
+        );
+        final anonimizada = await avaliar();
+        expect(anonimizada.risk, normal.risk);
+        expect(await TriageSession.db.count(session, where: (t) => t.patientId.equals(UuidValue.fromString(_patientId))), 1,
+            reason: 'nenhuma sessão nova (nem respostas) para a conta anonimizada');
       },
     );
 
