@@ -160,7 +160,8 @@ class TriageSessionService {
       ));
     } catch (error) {
       stderr.writeln(
-        'Falha ao gravar a sessão de triagem do paciente ${user.id}: $error.',
+        'Falha ao gravar a sessão de triagem do paciente ${user.id} '
+        '(${error.runtimeType}).',
       );
     }
 
