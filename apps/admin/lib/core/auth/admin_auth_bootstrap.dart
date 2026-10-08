@@ -56,7 +56,7 @@ AdminWiring buildAdminWiring({String? host, List<int>? caBytes}) {
     )..connectivityMonitor = null;
     return AdminWiring(
       auth: BackendAdminAuth(client.auth),
-      dataSourceFor: (session) => BackendAdminDataSource(client.admin, accessToken: session.accessToken),
+      dataSourceFor: (session) => BackendAdminDataSource(client.admin, accessToken: session.accessToken, expiresAt: session.expiresAt),
     );
   } on FormatException catch (erro) {
     return AdminWiring(
