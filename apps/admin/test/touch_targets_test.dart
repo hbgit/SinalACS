@@ -12,21 +12,24 @@ import 'support/layout_harness.dart';
 /// Os apps ACS e paciente já fixam `minimumSize` nos botões; o backoffice
 /// nunca precisou porque era só web com mouse. Em celular o default do
 /// Material 3 para `OutlinedButton`/`TextButton` é 40dp de altura — abaixo do
-/// mínimo. A correção mora no tema, não no widget, senão o próximo botão
-/// adicionado nasce fora da régua de novo.
+/// mínimo. O tema do backoffice não define botão (`admin_theme.dart` não tem
+/// `outlinedButtonTheme`/`filledButtonTheme`), então a correção é botão a botão,
+/// como `login_screen.dart:184` já fazia.
 ///
 /// A gestão de contas (#43) é o caso novo: a fileira de ações do cartão de ACS
-/// e as ações do diálogo destrutivo são as primeiras telas cujos botões não
-/// herdam o mínimo do tema, então cada um declara o próprio `minimumSize` e cada
-/// um tem o seu caso aqui.
+/// e as ações do diálogo destrutivo declaram o próprio `minimumSize` e cada uma
+/// tem o seu caso aqui.
 ///
-/// Medido: `getSize` devolve o **alvo** (a caixa que recebe o toque), não a
-/// tinta. O `AlertDialog` do Material 3 pinta ações de 40dp e o
-/// `MaterialTapTargetSize.padded` do tema infla o alvo para 48 — ou seja, sem
-/// `minimumSize` algum o alvo ainda passaria raspando e o botão visível ficaria
-/// abaixo da régua. Quem medir a tinta um dia (o `Material` interno, 40dp) é
-/// quem pega a remoção do `minimumSize`; aqui se prende o que a WCAG 2.5.5
-/// pede, e é um `materialTapTargetSize: shrinkWrap` no tema que derruba isto.
+/// Medido, e é por isso que cada botão é conferido em **duas** medidas:
+/// `getSize` devolve o **alvo** (a caixa que recebe o toque), não a tinta. O
+/// `AlertDialog` do Material 3 pinta ações de 40dp e o
+/// `MaterialTapTargetSize.padded` do tema infla o alvo para 48 — com o
+/// `minimumSize` removido o alvo continuava passando raspando, e só a medida da
+/// tinta ([alturaPintada], o `Material` interno) denunciava o botão de 40dp. A
+/// régua deste projeto é a altura pintada (é ela que
+/// `spec/ux_accessibility_assessment.md` registra como "40dp de altura
+/// visual"), então as duas valem: o alvo é o que a WCAG 2.5.5 pede e a tinta é
+/// o que se vê e se acerta com o dedo.
 void main() {
   const alturaMinima = 48.0;
 
@@ -46,6 +49,21 @@ void main() {
   Future<void> abrirMicroAreas(WidgetTester tester) async {
     await abrirBackoffice(tester, tamanho: const Size(360, 800));
     await irPara(tester, 'Microáreas');
+  }
+
+  /// Altura da TINTA do botão — o `Material` que o `ButtonStyleButton` monta
+  /// por dentro do `ConstrainedBox` das `minimumSize`.
+  ///
+  /// É a medida que pega a remoção do `minimumSize`: sem ela, o botão do
+  /// `AlertDialog` volta a pintar 40dp enquanto o alvo segue com 48 — ver o
+  /// cabeçalho.
+  double alturaPintada(WidgetTester tester, Finder botao) =>
+      tester.getSize(find.descendant(of: botao, matching: find.byType(Material)).first).height;
+
+  /// Confere as duas medidas da WCAG 2.5.5 de um botão: alvo e tinta.
+  void conferirAlvo(WidgetTester tester, Finder botao, String rotulo) {
+    expect(tester.getSize(botao).height, greaterThanOrEqualTo(alturaMinima), reason: '$rotulo (alvo de toque)');
+    expect(alturaPintada(tester, botao), greaterThanOrEqualTo(alturaMinima), reason: '$rotulo (altura pintada)');
   }
 
   testWidgets('o botão de tentar novamente tem pelo menos 48dp de altura', (tester) async {
@@ -81,7 +99,7 @@ void main() {
 
     final botao = find.byKey(const Key('novo_acs'));
     await rolarAte(tester, botao);
-    expect(tester.getSize(botao).height, greaterThanOrEqualTo(alturaMinima));
+    conferirAlvo(tester, botao, 'novo_acs');
   });
 
   testWidgets('as ações do cartão de ACS têm pelo menos 48dp de altura', (tester) async {
@@ -97,7 +115,7 @@ void main() {
     ]) {
       final botao = find.byKey(Key(chave));
       await rolarAte(tester, botao);
-      expect(tester.getSize(botao).height, greaterThanOrEqualTo(alturaMinima), reason: chave);
+      conferirAlvo(tester, botao, chave);
     }
   });
 
@@ -109,9 +127,10 @@ void main() {
     await tester.tap(desativar);
     await tester.pumpAndSettle();
 
-    // DENTRO do diálogo e não na tela de fundo — ver o cabeçalho para o que
-    // exatamente estes 48dp prendem (o alvo, que é o que a WCAG 2.5.5 mede).
-    expect(tester.getSize(find.byKey(const Key('confirmar_acao'))).height, greaterThanOrEqualTo(alturaMinima));
-    expect(tester.getSize(find.byKey(const Key('cancelar_acao'))).height, greaterThanOrEqualTo(alturaMinima));
+    // DENTRO do diálogo e não na tela de fundo: é aqui que o mínimo não vem de
+    // graça — sem o `minimumSize` de `_ConfirmacaoDestrutiva._estilo` os dois
+    // pintam 40dp e só o alvo do tema os segura em 48.
+    conferirAlvo(tester, find.byKey(const Key('confirmar_acao')), 'confirmar_acao');
+    conferirAlvo(tester, find.byKey(const Key('cancelar_acao')), 'cancelar_acao');
   });
 }
