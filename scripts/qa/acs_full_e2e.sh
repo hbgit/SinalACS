@@ -65,8 +65,9 @@ for _ in $(seq 1 20); do
 done
 kill -0 "$relay_pid" 2>/dev/null || { echo 'erro: o relé não subiu' >&2; exit 1; }
 
-# Sem o bloco `acs`: a senha chega pelo relé, nunca pelo argv do flutter test nem no APK.
-fixtures="$(python3 -c "import json;d=json.load(open('.e2e/fixtures.json'));d.pop('acs',None);d.pop('acsB',None);d.pop('staff',None);print(json.dumps(d))")"
+# Sem os blocos de credencial (`acs`, `acsB`, `staff`, `coordinator`): as senhas chegam
+# pelo relé, nunca pelo argv do flutter test nem no APK.
+fixtures="$(python3 -c "import json;d=json.load(open('.e2e/fixtures.json'));d.pop('acs',None);d.pop('acsB',None);d.pop('staff',None);d.pop('coordinator',None);print(json.dumps(d))")"
 acs_id="$(python3 -c "import json;print(json.load(open('.e2e/fixtures.json'))['acs']['id'])")"
 acs_b_id="$(python3 -c "import json;print(json.load(open('.e2e/fixtures.json'))['acsB']['id'])")"
 

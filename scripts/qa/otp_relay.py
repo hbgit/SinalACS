@@ -7,8 +7,10 @@ O gateway de log escreve o código no stdout do servidor; o emulador não lê
 
 `/acs` (só com E2E_FIXTURES_FILE) entrega a matrícula e a senha SINTÉTICAS do ACS
 da execução, e `/acs-b` as do segundo ACS (bloco `acsB` do manifesto, mesma
-microárea, para a prova da fila por dono) e `/admin` as do administrador do
-backoffice (bloco `staff`, e2e do app admin), cada uma **uma única vez por processo**: qualquer app do emulador que alcance
+microárea, para a prova da fila por dono), `/admin` as do administrador do
+backoffice (bloco `staff`, e2e do app admin) e `/coordenador` as do coordenador
+(bloco `coordinator`, mesmo formato — a MFA do staff é ativada pela tela), cada
+uma **uma única vez por processo**: qualquer app do emulador que alcance
 localhost:8765 (adb reverse) poderia lê-las, então depois do primeiro pedido bem
 sucedido — o do teste, no começo — a rota responde 404. O relé é por execução.
 """
@@ -35,19 +37,20 @@ def count_codes(log_text):
     return len(PADRAO.findall(log_text))
 
 def acs_do_manifesto(caminho, chave="acs"):
-    """Matrícula e senha sintéticas do ACS do manifesto de e2e (`chave` = "acs"
-    ou "acsB"), ou None.
+    """Matrícula e senha sintéticas da conta do manifesto de e2e (`chave` =
+    "acs", "acsB", "staff" ou "coordinator"), ou None.
 
-    Só existe para o e2e de TELA do ACS. Opt-in: sem E2E_FIXTURES_FILE o relé
-    não serve credencial nenhuma, e o e2e do paciente segue exatamente como era."""
+    Só existe para o e2e de TELA do ACS e do backoffice. Opt-in: sem
+    E2E_FIXTURES_FILE o relé não serve credencial nenhuma, e o e2e do paciente
+    segue exatamente como era."""
     if not caminho:
         return None
     try:
         with open(caminho) as f:
             acs = json.load(f)[chave]
         credencial = {"matricula": acs["matricula"], "senha": acs["password"]}
-        # Só a conta de staff tem código de ativação da MFA (#48): o ACS não muda.
-        if chave == "staff" and "activationCode" in acs:
+        # Só as contas de staff têm código de ativação da MFA (#48): o ACS não muda.
+        if chave in ("staff", "coordinator") and "activationCode" in acs:
             credencial["activationCode"] = acs["activationCode"]
         return credencial
     except (OSError, KeyError, ValueError):
@@ -59,6 +62,7 @@ class Handler(BaseHTTPRequestHandler):
     acs_entregue = False
     acs_b_entregue = False
     admin_entregue = False
+    coordenador_entregue = False
 
     def do_GET(self):
         if not host_permitido(self.headers.get("Host"), self.porta):
@@ -69,10 +73,11 @@ class Handler(BaseHTTPRequestHandler):
             self.send_response(200); self.send_header("Content-Type", "text/plain"); self.end_headers()
             self.wfile.write(str(int(time.time() * 1000)).encode())
             return
-        if url.path in ("/acs", "/acs-b", "/admin"):
+        if url.path in ("/acs", "/acs-b", "/admin", "/coordenador"):
             # Uma bandeira por rota: cada credencial sai uma única vez.
             bandeira, chave = {"/acs": ("acs_entregue", "acs"), "/acs-b": ("acs_b_entregue", "acsB"),
-                               "/admin": ("admin_entregue", "staff")}[url.path]
+                               "/admin": ("admin_entregue", "staff"),
+                               "/coordenador": ("coordenador_entregue", "coordinator")}[url.path]
             credencial = acs_do_manifesto(os.environ.get("E2E_FIXTURES_FILE"), chave)
             if credencial is None or getattr(Handler, bandeira):
                 self.send_error(404); return
