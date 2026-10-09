@@ -1,0 +1,11 @@
+### ACS recém-cadastrado e a senha inicial gerada (issue #43).
+###
+### A senha existe **só** aqui e na resposta de `admin.createAcs`: não há coluna,
+### log nem linha de auditoria que a guarde — o servidor persiste apenas o hash
+### Argon2id em `user_credentials`. A trilha registra `created` com o id do ACS e
+### nunca a credencial. Quem cadastra mostra uma vez; perdida a senha, o caminho
+### é redefinir, não recuperar (operação seguinte da mesma issue).
+class: AdminAcsCreationResult
+fields:
+  acs: AdminAcs
+  initialPassword: String

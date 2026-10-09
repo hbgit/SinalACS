@@ -33,10 +33,25 @@ import 'package:sinalacs_server/src/generated/protocol.dart';
 /// também resolve no `SET`/`WHERE` do Postgres o que o ORM não expressa — o
 /// ORM não tem `UPDATE ... SET col = col + 1`.
 class OrmAcsCredentialStore implements AcsCredentialStore, TotpStore, StaffActivationStore {
-  OrmAcsCredentialStore({required Session Function() session, this.staff = false})
-      : _session = session;
+  OrmAcsCredentialStore({
+    required Session Function() session,
+    Transaction? transaction,
+    this.staff = false,
+  }) : _session = session,
+       _transaction = transaction;
 
   final Session Function() _session;
+
+  /// Quando fornecida, **toda** operação deste store participa dela — mesmo
+  /// arranjo de `OrmRefreshTokenStore`/`OrmUploadTokenStore`.
+  ///
+  /// É o que permite a redefinição da MFA do staff (#43) zerar as colunas
+  /// `totp*` de `user_credentials` e emitir o código em `staff_accounts` na
+  /// mesma transação, sem que este store conheça o caso de uso: quem abre a
+  /// transação é o `OrmAdminAccountStore`, que constrói uma instância amarrada
+  /// a ela. Sem transação, o comportamento é o de sempre (cada instrução
+  /// autocommita).
+  final Transaction? _transaction;
 
   /// `true` = a matrícula é procurada em `staff_accounts` (backoffice);
   /// `false` = em `acs`. As duas tabelas têm matrículas independentes, e cada
@@ -67,6 +82,7 @@ class OrmAcsCredentialStore implements AcsCredentialStore, TotpStore, StaffActiv
       final conta = await StaffAccount.db.findFirstRow(
         session,
         where: (table) => table.enrollmentId.equals(enrollmentId),
+        transaction: _transaction,
       );
       if (conta == null) return null;
       acsUuid = conta.id!;
@@ -75,6 +91,7 @@ class OrmAcsCredentialStore implements AcsCredentialStore, TotpStore, StaffActiv
       final acs = await Acs.db.findFirstRow(
         session,
         where: (table) => table.enrollmentId.equals(enrollmentId),
+        transaction: _transaction,
       );
       if (acs == null) return null;
       acsUuid = acs.id!;
@@ -84,12 +101,14 @@ class OrmAcsCredentialStore implements AcsCredentialStore, TotpStore, StaffActiv
     final credential = await UserCredential.db.findFirstRow(
       session,
       where: (table) => table.userId.equals(acsUuid),
+      transaction: _transaction,
     );
     if (credential == null) return null;
 
     final user = await User.db.findFirstRow(
       session,
       where: (table) => table.id.equals(acsUuid),
+      transaction: _transaction,
     );
     if (user == null) return null;
 
@@ -153,6 +172,7 @@ class OrmAcsCredentialStore implements AcsCredentialStore, TotpStore, StaffActiv
         t.updatedAt(at),
       ],
       where: (t) => t.userId.equals(UuidValue.fromString(acsId)) & t.totpEnabledAt.equals(null),
+      transaction: _transaction,
     );
     return linhas.isNotEmpty;
   }
@@ -170,6 +190,7 @@ class OrmAcsCredentialStore implements AcsCredentialStore, TotpStore, StaffActiv
           t.userId.equals(UuidValue.fromString(acsId)) &
           t.totpEnabledAt.equals(null) &
           t.totpSecretEncrypted.equals(pending.ciphertextBase64),
+      transaction: _transaction,
     );
     return linhas.isNotEmpty;
   }
@@ -187,8 +208,32 @@ class OrmAcsCredentialStore implements AcsCredentialStore, TotpStore, StaffActiv
       where: (t) =>
           t.userId.equals(UuidValue.fromString(acsId)) &
           (t.totpLastStep.equals(null) | (t.totpLastStep < step)),
+      transaction: _transaction,
     );
     return linhas.isNotEmpty;
+  }
+
+  /// Apaga o estado da MFA da conta numa única instrução: as quatro colunas
+  /// `totp*` voltam a NULL e `updatedAt` recebe [at].
+  ///
+  /// É o caminho sancionado da redefinição pela coordenação (#43). Sem `WHERE`
+  /// sobre o estado: a operação é idempotente por desenho — um ACS sem MFA
+  /// passa pela mesma instrução sem efeito, e quem decide se o alvo existe (e
+  /// se está no escopo de quem pediu) é o serviço, que já o validou.
+  @override
+  Future<void> clearTotp(String acsId, DateTime at) async {
+    await UserCredential.db.updateWhere(
+      _session(),
+      columnValues: (t) => [
+        t.totpSecretEncrypted(null),
+        t.totpKeyVersion(null),
+        t.totpEnabledAt(null),
+        t.totpLastStep(null),
+        t.updatedAt(at),
+      ],
+      where: (t) => t.userId.equals(UuidValue.fromString(acsId)),
+      transaction: _transaction,
+    );
   }
 
   @override
@@ -260,6 +305,7 @@ class OrmAcsCredentialStore implements AcsCredentialStore, TotpStore, StaffActiv
         'at': at,
         'userId': acsId,
       }),
+      transaction: _transaction,
     );
   }
 
@@ -278,6 +324,7 @@ class OrmAcsCredentialStore implements AcsCredentialStore, TotpStore, StaffActiv
       'SET "failedAttempts" = 0, "lockedUntil" = NULL, "lockStreak" = 0, "updatedAt" = @at '
       'WHERE "userId" = @userId::uuid;',
       parameters: QueryParameters.named({'at': at, 'userId': acsId}),
+      transaction: _transaction,
     );
   }
 
@@ -289,6 +336,7 @@ class OrmAcsCredentialStore implements AcsCredentialStore, TotpStore, StaffActiv
     final existing = await UserCredential.db.findFirstRow(
       session,
       where: (table) => table.userId.equals(userId),
+      transaction: _transaction,
     );
 
     if (existing == null) {
@@ -306,6 +354,7 @@ class OrmAcsCredentialStore implements AcsCredentialStore, TotpStore, StaffActiv
           createdAt: at,
           updatedAt: at,
         ),
+        transaction: _transaction,
       );
       return;
     }
@@ -313,6 +362,12 @@ class OrmAcsCredentialStore implements AcsCredentialStore, TotpStore, StaffActiv
     // Substituir a credencial também zera o estado de bloqueio: a senha nova
     // não tem relação com as tentativas da antiga, e herdar o contador faria
     // uma troca de senha nascer a uma falha do bloqueio.
+    //
+    // O `lockStreak` sai junto, pela mesma razão: ele é a contagem de rodadas
+    // de bloqueio **daquela credencial**, e preservá-lo faria o próximo
+    // bloqueio da senha nova vencer no dobro do tempo por causa das rodadas de
+    // uma credencial que deixou de existir — uma redefinição de senha pela
+    // coordenação ficaria mais punitiva que o primeiro bloqueio.
     existing
       ..passwordHash = digest.hashBase64
       ..passwordSalt = digest.saltBase64
@@ -321,8 +376,9 @@ class OrmAcsCredentialStore implements AcsCredentialStore, TotpStore, StaffActiv
       ..parallelism = digest.parallelism
       ..failedAttempts = 0
       ..lockedUntil = null
+      ..lockStreak = 0
       ..updatedAt = at;
-    await UserCredential.db.updateRow(session, existing);
+    await UserCredential.db.updateRow(session, existing, transaction: _transaction);
   }
 
   @override
@@ -342,12 +398,17 @@ class OrmAcsCredentialStore implements AcsCredentialStore, TotpStore, StaffActiv
         t.activationCodeIssuedAt(at),
       ],
       where: (t) => t.id.equals(UuidValue.fromString(staffId)),
+      transaction: _transaction,
     );
   }
 
   @override
   Future<StaffActivationRecord?> find(String staffId) async {
-    final c = await StaffAccount.db.findById(_session(), UuidValue.fromString(staffId));
+    final c = await StaffAccount.db.findById(
+      _session(),
+      UuidValue.fromString(staffId),
+      transaction: _transaction,
+    );
     final hash = c?.activationCodeHash;
     final expira = c?.activationCodeExpiresAt;
     if (hash == null || expira == null) return null;
@@ -360,6 +421,7 @@ class OrmAcsCredentialStore implements AcsCredentialStore, TotpStore, StaffActiv
       _session(),
       columnValues: (t) => [t.activationCodeHash(null), t.activationCodeExpiresAt(null)],
       where: (t) => t.id.equals(UuidValue.fromString(staffId)),
+      transaction: _transaction,
     );
   }
 }

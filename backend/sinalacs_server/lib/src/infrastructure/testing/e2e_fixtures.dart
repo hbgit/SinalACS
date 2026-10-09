@@ -74,8 +74,12 @@ class E2eAcs {
   String toString() => 'E2eAcs(${id.substring(0, 8)}…)';
 }
 
-/// Conta do backoffice (`staff_accounts`, papel `admin`) SEM TOTP ativado: o e2e
-/// do admin faz a ativação da MFA pela tela. Matrícula e senha novas a cada execução.
+/// Conta do backoffice (`staff_accounts`) SEM TOTP ativado: o e2e faz a
+/// ativação da MFA pela tela. Matrícula e senha novas a cada execução.
+///
+/// A MESMA forma serve ao administrador e ao coordenador (#43): a única
+/// diferença entre os dois está no seed — o papel em `users` e a UBS do
+/// `staff_accounts` —, não no que o manifesto e o relé precisam entregar.
 class E2eStaff {
   const E2eStaff({
     required this.id,
@@ -114,6 +118,7 @@ class E2eFixtures {
     required this.acs,
     required this.secondAcs,
     required this.staff,
+    required this.coordinator,
     required this.adminAlertIds,
     required this.patients,
   });
@@ -131,6 +136,12 @@ class E2eFixtures {
   /// Administrador do backoffice (sem MFA ativada), para o e2e do app admin.
   final E2eStaff staff;
 
+  /// Coordenador do backoffice (#43), também sem MFA ativada. O escopo dele é a
+  /// UBS destas fixtures — a mesma que contém as duas microáreas —, e é isso
+  /// que o e2e da gestão de contas prova dos dois lados: ele enxerga os ACS da
+  /// UBS e não enxerga a equipe do backoffice.
+  final E2eStaff coordinator;
+
   /// Ids dos 3 alertas semeados para o painel do admin (#40): um vermelho
   /// pendente, um vermelho reconhecido 60 s depois do disparo e um verde
   /// pendente, todos na microárea das fixtures. O painel deve mostrar Vermelho 2,
@@ -147,6 +158,7 @@ class E2eFixtures {
         'acs': acs.toJson(),
         'acsB': secondAcs.toJson(),
         'staff': staff.toJson(),
+        'coordinator': coordinator.toJson(),
         'adminAlertIds': adminAlertIds,
         'patients': [for (final p in patients) p.toJson()],
       };
@@ -158,6 +170,7 @@ class E2eFixtures {
         acs: E2eAcs.fromJson((j['acs']! as Map).cast<String, Object?>()),
         secondAcs: E2eAcs.fromJson((j['acsB']! as Map).cast<String, Object?>()),
         staff: E2eStaff.fromJson((j['staff']! as Map).cast<String, Object?>()),
+        coordinator: E2eStaff.fromJson((j['coordinator']! as Map).cast<String, Object?>()),
         adminAlertIds: [for (final id in (j['adminAlertIds']! as List)) id as String],
         patients: [
           for (final p in (j['patients']! as List)) E2ePatient.fromJson((p as Map).cast<String, Object?>()),
@@ -249,6 +262,16 @@ E2eFixtures generateE2eFixtures(Random random) {
     staff: E2eStaff(
       id: generateUuidV4(random),
       matricula: 'E2E-ADM-${1000 + random.nextInt(9000)}',
+      password: _password(random),
+      activationCode: StaffActivationCode.generate(random),
+    ),
+    // Prefixo próprio: as duas matrículas de staff nascem de sorteios
+    // independentes e `staff_accounts.enrollmentId` é único — dois prefixos
+    // diferentes não colidem nem entre si nem com a matrícula que o e2e cria
+    // pela tela.
+    coordinator: E2eStaff(
+      id: generateUuidV4(random),
+      matricula: 'E2E-COORD-${1000 + random.nextInt(9000)}',
       password: _password(random),
       activationCode: StaffActivationCode.generate(random),
     ),

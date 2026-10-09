@@ -11,7 +11,10 @@ import 'package:sinalacs_server/src/generated/protocol.dart';
 ///
 /// O escopo de UBS passa por `micro_areas.ubsId`. `alerts.microAreaId` é
 /// anulável, então a junção é `LEFT`: o administrador conta também o alerta sem
-/// microárea; o coordenador, filtrado por `ubsId`, não o enxerga.
+/// microárea; o coordenador, filtrado por `ubsId`, não o enxerga. Na auditoria
+/// não há microárea na linha — ela pertence ao **autor** (`users."microAreaId"`,
+/// subconsulta de [auditLogs]), e staff não tem microárea: as linhas de staff só
+/// o escopo de sistema enxerga.
 class OrmAdminReadStore implements AdminReadStore {
   OrmAdminReadStore({required Session Function() session}) : _session = session;
 
@@ -138,8 +141,13 @@ class OrmAdminReadStore implements AdminReadStore {
     );
   }
 
+  /// O escopo filtra o autor da linha, não o recurso auditado: o `IN` junta
+  /// `users` a `micro_areas` (#43 — o que a #40 havia adiado). `@ubs` nulo
+  /// (administrador) não filtra nada; ninguém de staff tem microárea, então
+  /// só o administrador lê as linhas de staff.
   @override
-  Future<AdminAuditPage> auditLogs({
+  Future<AdminAuditPage> auditLogs(
+    AdminScope scope, {
     required int limit,
     int? beforeSequence,
   }) async {
@@ -153,11 +161,16 @@ class OrmAdminReadStore implements AdminReadStore {
       LEFT JOIN acs ON acs.id = l."userId"
       LEFT JOIN staff_accounts s ON s.id = l."userId"
       WHERE (@before::bigint IS NULL OR l.sequence < @before::bigint)
+        AND (@ubs::uuid IS NULL OR l."userId" IN (
+              SELECT u.id FROM users u
+              JOIN micro_areas m ON m.id = u."microAreaId"
+              WHERE m."ubsId" = @ubs::uuid))
       ORDER BY l.sequence DESC
       LIMIT @limit
       ''',
       parameters: QueryParameters.named({
         'before': beforeSequence,
+        'ubs': scope.ubsId,
         'limit': limit + 1,
       }),
     );

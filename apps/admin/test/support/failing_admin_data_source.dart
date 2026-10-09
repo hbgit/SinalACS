@@ -13,6 +13,8 @@ class FailingAdminDataSource implements AdminDataSource {
 
   bool failNextIndicators = false;
   bool failNextMicroAreas = false;
+  bool failNextAcs = false;
+  bool failNextStaff = false;
   bool failNextAlerts = false;
   bool failNextAuditLogs = false;
   bool failNextRecordAccess = false;
@@ -54,6 +56,52 @@ class FailingAdminDataSource implements AdminDataSource {
     }
     return inner.fetchMicroAreas();
   }
+
+  @override
+  Future<List<AcsSummary>> fetchAcs() async {
+    await _lancaSeProgramado();
+    if (failNextAcs) {
+      failNextAcs = false;
+      throw StateError('falha simulada: ACS');
+    }
+    return inner.fetchAcs();
+  }
+
+  @override
+  Future<List<StaffSummary>> fetchStaff() async {
+    await _lancaSeProgramado();
+    if (failNextStaff) {
+      failNextStaff = false;
+      throw StateError('falha simulada: equipe do backoffice');
+    }
+    return inner.fetchStaff();
+  }
+
+  // As escritas da gestão de contas (#43) passam direto: as telas que este duplo
+  // exercita medem falha de **leitura**.
+  @override
+  Future<NewAcsCredential> createAcs({
+    required String name,
+    required String enrollmentId,
+    required String microAreaId,
+  }) => inner.createAcs(name: name, enrollmentId: enrollmentId, microAreaId: microAreaId);
+
+  @override
+  Future<AcsSummary> setAcsMicroArea({required String acsId, required String microAreaId}) =>
+      inner.setAcsMicroArea(acsId: acsId, microAreaId: microAreaId);
+
+  @override
+  Future<AcsSummary> setAcsActive({required String acsId, required bool active}) =>
+      inner.setAcsActive(acsId: acsId, active: active);
+
+  @override
+  Future<String> resetAcsPassword({required String acsId}) => inner.resetAcsPassword(acsId: acsId);
+
+  @override
+  Future<void> resetAcsMfa({required String acsId}) => inner.resetAcsMfa(acsId: acsId);
+
+  @override
+  Future<NewStaffActivation> resetStaffMfa({required String staffId}) => inner.resetStaffMfa(staffId: staffId);
 
   @override
   Future<List<AlertSummary>> fetchAlerts({String? microAreaId, AlertStatus? status, int limit = 50, int offset = 0}) async {

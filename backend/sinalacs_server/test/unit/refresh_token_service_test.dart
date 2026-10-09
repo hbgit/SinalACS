@@ -56,6 +56,19 @@ class _MemoryStore implements RefreshTokenStore {
     }
   }
 
+  /// Desativação por conta (#43): todas as famílias do usuário de uma vez.
+  final revogacoesTotais = <({String userId, DateTime at})>[];
+
+  @override
+  Future<void> revokeAllForUser(String userId, DateTime at) async {
+    revogacoesTotais.add((userId: userId, at: at));
+    for (final e in byId.entries.toList()) {
+      if (e.value.userId == userId && e.value.revokedAt == null) {
+        byId[e.key] = _copy(e.value, revokedAt: at);
+      }
+    }
+  }
+
   @override
   Future<RefreshAccount?> findAccount(String userId) async => accounts[userId];
 

@@ -91,7 +91,11 @@ void main() {
       await tester.tap(find.text('Tentar novamente'));
       await tester.pumpAndSettle();
 
-      expect(find.textContaining('Microárea 12'), findsOneWidget);
+      // A lista voltou. Aqui a asserção mudou de `find.textContaining` para a
+      // chave do cartão: desde a gestão de contas (#43) o nome da microárea
+      // também aparece no cartão do ACS vinculado a ela, então contar ocorrências
+      // do texto deixou de ser a medida de "a lista está de volta".
+      expect(find.byKey(const Key('micro_area_ma-12')), findsOneWidget);
     });
 
     testWidgets('Alertas: erro no carregamento não deve aparecer como "nenhum alerta"', (tester) async {

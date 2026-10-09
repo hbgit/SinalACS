@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'dart:async';
 
+import 'package:sinalacs_admin/app/admin_accounts.dart';
 import 'package:sinalacs_admin/app/admin_header.dart';
 import 'package:sinalacs_admin/app/admin_layout.dart';
 import 'package:sinalacs_admin/app/login_screen.dart';
@@ -131,7 +132,8 @@ class _AdminHomeShellState extends State<AdminHomeShell> {
 
   Widget _telaAtual() => switch (destination) {
         AdminDestination.indicators => IndicatorsScreen(dataSource: widget.dataSource),
-        AdminDestination.microAreas => MicroAreasScreen(dataSource: widget.dataSource),
+        AdminDestination.microAreas =>
+          MicroAreasScreen(dataSource: widget.dataSource, role: widget.session.role),
         AdminDestination.alerts => AlertsScreen(dataSource: widget.dataSource),
         AdminDestination.auditLog => AuditLogScreen(dataSource: widget.dataSource),
       };
@@ -397,24 +399,45 @@ class _CounterCard extends StatelessWidget {
       );
 }
 
+/// O que a tela Microáreas carrega numa tarefa só: as seções de gestão (#43)
+/// precisam das microáreas (opções de vínculo), dos ACS e — só para o
+/// administrador — das contas de equipe.
+typedef _DadosDaTela = ({
+  List<MicroAreaSummary> areas,
+  List<AcsSummary> acs,
+  List<StaffSummary> staff,
+});
+
 class MicroAreasScreen extends StatefulWidget {
-  const MicroAreasScreen({required this.dataSource, super.key});
+  const MicroAreasScreen({required this.dataSource, required this.role, super.key});
 
   final AdminDataSource dataSource;
+
+  /// Papel da sessão (`admin`/`coordinator`). A seção de Equipe do backoffice
+  /// só existe para o administrador — `StaffManagementSection` não é montada
+  /// para o coordenador, e o servidor também recusa essa listagem para ele.
+  final String role;
 
   @override
   State<MicroAreasScreen> createState() => _MicroAreasScreenState();
 }
 
 class _MicroAreasScreenState extends State<MicroAreasScreen> {
-  late Future<List<MicroAreaSummary>> _future = _load();
+  late Future<_DadosDaTela> _future = _load();
 
   /// Registra o acesso *antes* de expor os dados — se o registro falhar, a
   /// tela cai no estado de erro em vez de mostrar dado sensível sem auditoria
   /// (PRD §4.2.2: acesso do Administrador precisa ser auditado).
-  Future<List<MicroAreaSummary>> _load() async {
+  ///
+  /// As três leituras vêm numa tarefa só, em série e depois do registro: a tela
+  /// é uma página, e meia página carregada ao lado de outra pela metade (com a
+  /// seção de ACS vazia, por exemplo) pareceria "não há nada" em vez de erro.
+  Future<_DadosDaTela> _load() async {
     await widget.dataSource.recordAccess(actionType: 'view', resourceType: 'micro_areas');
-    return widget.dataSource.fetchMicroAreas();
+    final areas = await widget.dataSource.fetchMicroAreas();
+    final acs = await widget.dataSource.fetchAcs();
+    final staff = widget.role == 'admin' ? await widget.dataSource.fetchStaff() : const <StaffSummary>[];
+    return (areas: areas, acs: acs, staff: staff);
   }
 
   void _retry() => setState(() {
@@ -422,22 +445,25 @@ class _MicroAreasScreenState extends State<MicroAreasScreen> {
       });
 
   @override
-  Widget build(BuildContext context) => FutureBuilder<List<MicroAreaSummary>>(
+  Widget build(BuildContext context) => FutureBuilder<_DadosDaTela>(
         future: _future,
         builder: (context, snapshot) {
           if (snapshot.hasError) {
             return _AsyncError(error: snapshot.error, fallback: 'Não foi possível carregar as microáreas.', onRetry: _retry);
           }
           if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
-          final areas = snapshot.data!;
+          final dados = snapshot.data!;
+          // Sessão vencida no meio de uma escrita da seção: as seções não têm o
+          // `_SessaoVencida` no escopo delas, então recebem a ação pronta.
+          final aoVencer = _SessaoVencida.maybeOf(context);
           return ListView(
             padding: const EdgeInsets.all(20),
             children: [
               const Text('Microáreas e vínculo ACS', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
               const SizedBox(height: 4),
-              const Text('Listagem somente leitura — edição de vínculo fica para uma próxima issue.'),
+              const Text('Território de cada microárea e gestão das contas de ACS — cadastro, vínculo, senha e MFA.'),
               const SizedBox(height: 16),
-              for (final area in areas)
+              for (final area in dados.areas)
                 Card(
                   key: Key('micro_area_${area.id}'),
                   margin: const EdgeInsets.only(bottom: 12),
@@ -451,6 +477,27 @@ class _MicroAreasScreenState extends State<MicroAreasScreen> {
                     ),
                   ),
                 ),
+              const SizedBox(height: 16),
+              const Divider(),
+              const SizedBox(height: 16),
+              AcsManagementSection(
+                dataSource: widget.dataSource,
+                microAreas: dados.areas,
+                acs: dados.acs,
+                onRecarregar: _retry,
+                aoVencerSessao: aoVencer,
+              ),
+              if (widget.role == 'admin') ...[
+                const SizedBox(height: 28),
+                const Divider(),
+                const SizedBox(height: 16),
+                StaffManagementSection(
+                  dataSource: widget.dataSource,
+                  staff: dados.staff,
+                  onRecarregar: _retry,
+                  aoVencerSessao: aoVencer,
+                ),
+              ],
             ],
           );
         },
@@ -666,7 +713,7 @@ class _AuditLogScreenState extends State<AuditLogScreen> {
                 children: [
                   const Text('Logs de auditoria', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 4),
-                  const Text('Somente leitura. O próprio acesso do administrador a esta tela também é auditado.'),
+                  const Text('Somente leitura. O próprio acesso a esta tela também é auditado. A coordenação vê apenas os registros dos autores com microárea na sua UBS.'),
                   const SizedBox(height: 16),
                   if (entries.isEmpty)
                     const Padding(padding: EdgeInsets.only(top: 24), child: Text('Nenhum acesso registrado ainda.'))

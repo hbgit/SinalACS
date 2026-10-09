@@ -83,9 +83,23 @@ class FakeCredentialStore implements AcsCredentialStore, TotpStore {
     return true;
   }
 
+  /// `clearTotp` do store real: o estado da MFA some por inteiro — as quatro
+  /// colunas `totp*` viram NULL —, e não só o segredo.
+  @override
+  Future<void> clearTotp(String acsId, DateTime at) async {
+    record = _copia(apagarTotp: true);
+  }
+
   /// Copia a linha preservando papel e sequência de bloqueios: um fake que
   /// perdesse o papel faria uma conta de staff "virar" ACS no meio do teste.
-  AcsCredentialRecord _copia({int? failedAttempts, DateTime? lockedUntil, TotpEnrollment? totp}) =>
+  /// [apagarTotp] é o único jeito de gravar `totp: null` — `totp` posicional
+  /// não distingue "não mexer" de "apagar".
+  AcsCredentialRecord _copia({
+    int? failedAttempts,
+    DateTime? lockedUntil,
+    TotpEnrollment? totp,
+    bool apagarTotp = false,
+  }) =>
       AcsCredentialRecord(
         acsId: record.acsId,
         microAreaId: record.microAreaId,
@@ -95,7 +109,7 @@ class FakeCredentialStore implements AcsCredentialStore, TotpStore {
         failedAttempts: failedAttempts ?? record.failedAttempts,
         lockedUntil: failedAttempts != null ? lockedUntil : record.lockedUntil,
         lockStreak: record.lockStreak,
-        totp: totp ?? record.totp,
+        totp: apagarTotp ? null : (totp ?? record.totp),
       );
 }
 

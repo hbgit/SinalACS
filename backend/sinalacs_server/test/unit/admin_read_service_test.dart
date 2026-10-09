@@ -62,11 +62,13 @@ class _Store implements AdminReadStore {
   }
 
   @override
-  Future<AdminAuditPage> auditLogs({
+  Future<AdminAuditPage> auditLogs(
+    AdminScope scope, {
     required int limit,
     int? beforeSequence,
   }) async {
-    _marca('auditLogs');
+    _marca('auditLogs', scope);
+    ultimoLimit = limit;
     return AdminAuditPage(items: []);
   }
 
@@ -144,18 +146,30 @@ void main() {
     },
   );
 
-  test('coordenador não lê auditoria (só admin)', () async {
+  test(
+    'coordenador lê a auditoria escopada à sua UBS, auditada ANTES do dado',
+    () async {
+      await servico.auditLogs(coordA, limit: 10);
+      expect(store.ultimoEscopo!.ubsId, _ubsDoCoordenador);
+      expect(store.ultimoLimit, 10);
+      expect(_ordem, ['audit:admin_audit_logs:success', 'store:auditLogs']);
+      expect(audit.events.single.result, 'success');
+    },
+  );
+
+  test('coordenador sem UBS é recusado na auditoria (fail-closed)', () async {
     await expectLater(
-      servico.auditLogs(coordA),
+      servico.auditLogs(coordSemUbs),
       throwsA(isA<AlertPermissionException>()),
     );
-    expect(store.chamadas, 0);
+    expect(store.chamadas, 0, reason: 'nenhum dado sai');
     expect(audit.events.single.result, 'denied');
   });
 
-  test('admin lê a auditoria', () async {
+  test('admin lê a auditoria com escopo de sistema', () async {
     await servico.auditLogs(admin);
     expect(store.chamadas, 1);
+    expect(store.ultimoEscopo!.ubsId, isNull);
     expect(audit.events.single.resourceType, 'admin_audit_logs');
   });
 

@@ -277,16 +277,59 @@ void main() {
       },
     );
 
-    test('coordenador não lê a auditoria', () async {
-      await expectLater(
-        endpoints.admin.auditLogs(
+    test(
+      'coordenador lê a auditoria escopada à UBS dele; linha de staff fica invisível',
+      () async {
+        // Linhas reais: a leitura do diretório pelo ACS (ator com microárea da
+        // UBS A) e a leitura de indicadores pelo administrador (staff, sem
+        // microárea). A do coordenador é a própria chamada abaixo.
+        await endpoints.patients.listMicroArea(
+          sessionBuilder,
+          accessToken: _token(_acs, UserRole.acs, ma: _maA),
+        );
+        await endpoints.admin.indicators(
+          sessionBuilder,
+          accessToken: _token(_admin, UserRole.admin),
+        );
+
+        final doCoordenador = await endpoints.admin.auditLogs(
           sessionBuilder,
           accessToken: _token(_coordA, UserRole.coordinator),
           limit: 50,
-        ),
-        throwsA(isA<AlertPermissionException>()),
-      );
-    });
+        );
+        expect(
+          doCoordenador.items.map((e) => e.userLabel),
+          contains('ACS-EP-1 (ACS)'),
+        );
+        expect(
+          doCoordenador.items.map((e) => e.userLabel),
+          isNot(contains('ADM-EP-1 (Administrador)')),
+          reason: 'linha de staff não tem microárea: fora do escopo da UBS',
+        );
+        expect(
+          doCoordenador.items.map((e) => e.userLabel),
+          isNot(contains('COO-EP-1 (Coordenador)')),
+          reason: 'a própria leitura do coordenador também é linha de staff',
+        );
+
+        final doAdmin = await endpoints.admin.auditLogs(
+          sessionBuilder,
+          accessToken: _token(_admin, UserRole.admin),
+          limit: 50,
+        );
+        expect(
+          doAdmin.items.map((e) => e.userLabel),
+          containsAll(
+            <String>[
+              'ACS-EP-1 (ACS)',
+              'ADM-EP-1 (Administrador)',
+              'COO-EP-1 (Coordenador)',
+            ],
+          ),
+          reason: 'o administrador continua vendo o sistema inteiro',
+        );
+      },
+    );
 
     test(
       'coordenador sem UBS recebe AlertPermissionException nos quatro',
