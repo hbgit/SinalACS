@@ -1,9 +1,23 @@
+import 'dart:convert';
+import 'dart:math';
+
 import 'package:serverpod/serverpod.dart';
 import 'package:sinalacs_server/src/application/admin/admin_account_service.dart';
+import 'package:sinalacs_server/src/application/audit/audit_trail.dart';
+import 'package:sinalacs_server/src/application/auth/cpf.dart';
+import 'package:sinalacs_server/src/application/auth/development_auth_service.dart';
+import 'package:sinalacs_server/src/application/auth/institutional_auth_service.dart';
+import 'package:sinalacs_server/src/application/auth/password_hasher.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
+import 'package:sinalacs_server/src/infrastructure/database/orm_acs_credential_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_admin_account_store.dart';
+import 'package:sinalacs_server/src/infrastructure/database/orm_otp_challenge_store.dart';
+import 'package:sinalacs_server/src/infrastructure/database/orm_refresh_token_store.dart';
+import 'package:sinalacs_server/src/infrastructure/database/orm_upload_token_store.dart';
+import 'package:sinalacs_server/src/runtime/alert_runtime.dart';
 import 'package:test/test.dart';
 
+import 'test_tools/runtime_harness.dart';
 import 'test_tools/serverpod_test_tools.dart';
 
 /// Gestão de contas do backoffice (#43) contra Postgres real: escopo por UBS,
@@ -107,6 +121,63 @@ Future<void> _staff(
       ),
     )
     .then((_) {});
+
+/// Auditoria de mentira: o que se prova aqui é o efeito da operação nas tabelas
+/// (transação, login com a senha gerada), e a trilha do serviço já tem os
+/// próprios testes contra um `AuditTrail` que registra de verdade.
+/// `_RecordingAudit`, de `institutional_login_test.dart`, pelo mesmo motivo.
+class _Audit extends AuditTrail {
+  final events = <AuditEvent>[];
+
+  @override
+  Future<void> record(AuditEvent event) async => events.add(event);
+}
+
+/// O mesmo store real, com a pré-checagem de matrícula desligada: abre de
+/// propósito a janela entre "a matrícula está livre" e o INSERT, que na
+/// produção só outra requisição simultânea abre.
+class _SemPreChecagem extends OrmAdminAccountStore {
+  _SemPreChecagem({required super.session});
+
+  @override
+  Future<bool> enrollmentIdTaken(String enrollmentId) async => false;
+}
+
+/// Serviço montado como o endpoint o monta (`adminAccountServiceFor`), com o
+/// hasher de custo reduzido do harness: a integração prova o caminho, não o
+/// custo do Argon2id.
+AdminAccountService _servico(
+  Session session,
+  AdminAccountStore store, {
+  required AuditTrail audit,
+}) => AdminAccountService(
+  store: store,
+  credentials: OrmAcsCredentialStore(session: () => session),
+  totpStore: OrmAcsCredentialStore(session: () => session),
+  activationStore: OrmAcsCredentialStore(session: () => session, staff: true),
+  refreshStore: OrmRefreshTokenStore(session: () => session),
+  uploadStore: OrmUploadTokenStore(session: () => session),
+  hasher: AlertRuntimeHarness.hasher,
+  audit: audit,
+  clock: () => _t,
+  random: Random(1),
+);
+
+AuthenticatedUser _operador(String id, UserRole role) => AuthenticatedUser(
+  id: id,
+  role: role,
+  microAreaId: null,
+  deviceId: 'sem-aparelho',
+);
+
+Future<int> _contar(Session s, String consulta) async {
+  final linhas = await s.db.unsafeQuery(consulta);
+  return linhas.single[0] as int;
+}
+
+/// A senha da corrida de matrícula: o `insertAcs` direto precisa de um digest.
+Future<PasswordDigest> _digestSintetico() =>
+    AlertRuntimeHarness.hasher.derive('senha-sintetica-de-teste');
 
 Future<void> _seed(Session s) async {
   for (final (id, nome) in [(_ubsA, 'UBS A'), (_ubsB, 'UBS B')]) {
@@ -269,6 +340,239 @@ void main() {
       expect(await store.ubsOf(_admin), isNull);
       expect(await store.ubsOf(_coordSemUbs), isNull);
       expect(await store.ubsOf('lixo'), isNull);
+    });
+
+    test('microAreaFor devolve a UBS dona da microárea, e nulo fora do formato de UUID', () async {
+      expect(await store.microAreaFor(_maA), (name: 'Microárea A', ubsId: _ubsA));
+      expect(await store.microAreaFor('00000000-0000-4000-8000-0000000000ff'), isNull);
+      expect(await store.microAreaFor('lixo'), isNull, reason: 'sem erro de sintaxe do ::uuid');
+    });
+
+    test('enrollmentIdTaken só é verdadeiro para matrícula de ACS existente', () async {
+      expect(await store.enrollmentIdTaken('ACS-ACC-1'), isTrue);
+      expect(await store.enrollmentIdTaken('ACS-ACC-9'), isFalse);
+      expect(await store.enrollmentIdTaken('ADM-ACC-1'), isFalse, reason: 'matrícula de staff não é de ACS');
+    });
+
+    group('createAcs (#43, cadastro)', () {
+      late _Audit auditoria;
+      late AdminAccountService servico;
+      final admin = _operador(_admin, UserRole.admin);
+
+      setUp(() {
+        auditoria = _Audit();
+        servico = _servico(session, store, audit: auditoria);
+      });
+
+      test('cadastro grava users+acs+user_credentials e o ACS consegue logar com a senha gerada', () async {
+        final r = await servico.createAcs(
+          admin,
+          name: 'Nova ACS Sintética',
+          enrollmentId: 'ACS-43-1',
+          microAreaId: _maA,
+        );
+
+        expect(r.acs.name, 'Nova ACS Sintética');
+        expect(r.acs.enrollmentId, 'ACS-43-1');
+        expect(r.acs.ubsId, _ubsA, reason: 'a UBS vem da microárea, nunca do pedido');
+        expect(r.acs.ubsName, 'UBS A');
+        expect(r.acs.microAreaId, _maA);
+        expect(r.acs.microAreaName, 'Microárea A');
+        expect(r.acs.active, isTrue);
+        expect(r.acs.mfaActive, isFalse, reason: 'cadastro não ativa MFA nenhuma');
+
+        final id = UuidValue.fromString(r.acs.id);
+        final usuario = await User.db.findById(session, id);
+        expect(usuario!.role, UserRole.acs);
+        expect(usuario.microAreaId, UuidValue.fromString(_maA));
+        expect((await Acs.db.findById(session, id))!.enrollmentId, 'ACS-43-1');
+        final credencial = await UserCredential.db.findFirstRow(
+          session,
+          where: (t) => t.userId.equals(id),
+        );
+        expect(credencial, isNotNull);
+        expect(
+          jsonEncode(credencial!.toJson()),
+          isNot(contains(r.initialPassword)),
+          reason: 'a senha em claro não é gravada em coluna nenhuma',
+        );
+
+        // A prova que interessa: a senha mostrada uma única vez é a que abre o
+        // login institucional (RF07), já com o território do cadastro.
+        final login = await InstitutionalAuthService(
+          store: AlertRuntimeHarness.store(session),
+          hasher: AlertRuntimeHarness.hasher,
+          audit: _Audit(),
+        ).login(matricula: 'ACS-43-1', password: r.initialPassword);
+        expect(login.id, r.acs.id);
+        expect(login.role, UserRole.acs);
+        expect(login.microAreaId, _maA);
+
+        expect(auditoria.events.single.actionType, 'write');
+        expect(auditoria.events.single.resourceType, 'admin_acs');
+        expect(auditoria.events.single.result, 'created');
+        expect(auditoria.events.single.resourceId, r.acs.id);
+      });
+
+      test('falha injetada depois de users não deixa órfão: nem users, nem acs, nem credencial', () async {
+        final quebrado = OrmAdminAccountStore(
+          session: () => session,
+          debugFailAfterUsersInsert: true,
+        );
+        final servicoQuebrado = _servico(session, quebrado, audit: _Audit());
+
+        await expectLater(
+          servicoQuebrado.createAcs(
+            admin,
+            name: 'Fantasma Sintética',
+            enrollmentId: 'ACS-43-2',
+            microAreaId: _maA,
+          ),
+          throwsA(isA<StateError>()),
+        );
+
+        expect(
+          await User.db.findFirstRow(
+            session,
+            where: (t) => t.name.equals('Fantasma Sintética'),
+          ),
+          isNull,
+          reason: 'a transação desfez o INSERT de users',
+        );
+        expect(
+          await Acs.db.findFirstRow(
+            session,
+            where: (t) => t.enrollmentId.equals('ACS-43-2'),
+          ),
+          isNull,
+        );
+        expect(
+          await _contar(session, 'SELECT count(*) FROM user_credentials'),
+          3,
+          reason: 'só as credenciais do seed: nenhuma órfã ficou para trás',
+        );
+      });
+
+      test('matrícula repetida devolve null (corrida) e o serviço responde validação, não 500', () async {
+        await servico.createAcs(
+          admin,
+          name: 'Primeira ACS Sintética',
+          enrollmentId: 'ACS-43-3',
+          microAreaId: _maA,
+        );
+
+        // Caso comum: a pré-checagem barra antes de qualquer escrita.
+        await expectLater(
+          servico.createAcs(
+            admin,
+            name: 'Segunda ACS Sintética',
+            enrollmentId: 'ACS-43-3',
+            microAreaId: _maA,
+          ),
+          throwsA(
+            isA<AdminInvalidRequestException>().having(
+              (e) => e.message,
+              'message',
+              'Já existe um ACS com esta matrícula.',
+            ),
+          ),
+        );
+
+        // Corrida: o índice único é quem barra, e o store traduz o 23505 em
+        // `null` — não em erro de banco.
+        final semPreChecagem = _SemPreChecagem(session: () => session);
+        expect(
+          await semPreChecagem.insertAcs(
+            name: 'Segunda ACS Sintética',
+            enrollmentId: 'ACS-43-3',
+            microAreaId: _maA,
+            ubsId: _ubsA,
+            digest: await _digestSintetico(),
+            at: _t,
+          ),
+          isNull,
+        );
+
+        // E o serviço, com a janela aberta, responde a MESMA validação.
+        await expectLater(
+          _servico(session, semPreChecagem, audit: _Audit()).createAcs(
+            admin,
+            name: 'Terceira ACS Sintética',
+            enrollmentId: 'ACS-43-3',
+            microAreaId: _maA,
+          ),
+          throwsA(
+            isA<AdminInvalidRequestException>().having(
+              (e) => e.message,
+              'message',
+              'Já existe um ACS com esta matrícula.',
+            ),
+          ),
+        );
+
+        expect(
+          await Acs.db.find(
+            session,
+            where: (t) => t.enrollmentId.equals('ACS-43-3'),
+          ),
+          hasLength(1),
+        );
+        expect(
+          await User.db.find(
+            session,
+            where: (t) => t.name.equals('Terceira ACS Sintética'),
+          ),
+          isEmpty,
+          reason: 'o cadastro perdido da corrida não deixou usuário nenhum',
+        );
+      });
+
+      test('o CPF placeholder e a data sentinela do ACS não abrem login passwordless de paciente', () async {
+        final r = await servico.createAcs(
+          admin,
+          name: 'Nova ACS Sintética',
+          enrollmentId: 'ACS-43-4',
+          microAreaId: _maA,
+        );
+        final usuario = (await User.db.findById(
+          session,
+          UuidValue.fromString(r.acs.id),
+        ))!;
+
+        expect(usuario.cpfHash, 'acs-sem-cpf-${r.acs.id}');
+        expect(usuario.birthDate, DateTime.utc(1900, 1, 1));
+        expect(
+          RegExp(r'^[0-9a-f]{64}$').hasMatch(usuario.cpfHash),
+          isFalse,
+          reason: 'o login procura por `hasher.hash(cpf)`, sempre 64 dígitos hexadecimais',
+        );
+
+        // O passo exato do login passwordless: `verifyOtp` procura pelo HMAC
+        // do CPF digitado, e o placeholder do ACS não tem como ser um.
+        final otpStore = OrmOtpChallengeStore(session: () => session);
+        final hmacDoCpf = AlertRuntime.instance.cpfHasherForTests.hash(
+          Cpf.tryParse('52998224725')!,
+        );
+        expect(await otpStore.findByCpfHash(hmacDoCpf), isNull);
+
+        // Controle: o mesmo caminho ACHA um paciente de verdade — o nulo acima
+        // é ausência de ACS, não um lookup que nunca devolve nada.
+        const paciente = '00000000-0000-4000-8000-0000000000ac';
+        await User.db.insertRow(
+          session,
+          User(
+            id: UuidValue.fromString(paciente),
+            cpfHash: hmacDoCpf,
+            name: 'Paciente Sintética',
+            birthDate: DateTime.utc(1990),
+            role: UserRole.patient,
+            microAreaId: UuidValue.fromString(_maA),
+            createdAt: _t,
+            updatedAt: _t,
+          ),
+        );
+        expect((await otpStore.findByCpfHash(hmacDoCpf))?.userId, paciente);
+      });
     });
   });
 }

@@ -1,11 +1,14 @@
 import 'dart:convert';
 
 import 'package:serverpod/serverpod.dart';
+import 'package:sinalacs_server/src/application/audit/audit_trail.dart';
 import 'package:sinalacs_server/src/application/auth/development_auth_service.dart';
+import 'package:sinalacs_server/src/application/auth/institutional_auth_service.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
 import 'package:sinalacs_server/src/runtime/alert_runtime.dart';
 import 'package:test/test.dart';
 
+import 'test_tools/runtime_harness.dart';
 import 'test_tools/serverpod_test_tools.dart';
 
 /// `admin.acs` e `admin.staff` (#43) pelo endpoint, com tokens reais e Postgres
@@ -164,6 +167,14 @@ String _token(String id, UserRole role, {String? ma, DateTime? now}) =>
       now: now,
     );
 
+/// Auditoria de mentira para o login de conferência: o que se prova é que a
+/// senha devolvida uma vez abre o RF07, não a trilha do login (que tem os
+/// próprios testes).
+class _Audit extends AuditTrail {
+  @override
+  Future<void> record(AuditEvent event) async {}
+}
+
 Future<int> _auditorias(Session s, String recurso, String resultado) async {
   final linhas = await s.db.unsafeQuery(
     'SELECT count(*) FROM audit_logs WHERE "resourceType" = @t AND result = @r',
@@ -273,6 +284,106 @@ void main() {
       }
       expect(await _auditorias(session, 'admin_acs', 'success'), 0);
       expect(await _auditorias(session, 'admin_acs', 'denied'), 0);
+    });
+
+    test(
+      'admin cadastra um ACS: a senha volta uma vez, abre o login e a trilha registra created',
+      () async {
+        final t = _token(_admin, UserRole.admin);
+        final r = await endpoints.admin.createAcs(
+          sessionBuilder,
+          accessToken: t,
+          name: 'Nova ACS Sintética',
+          enrollmentId: 'ACS-EP-ACC-9',
+          microAreaId: _maA,
+        );
+
+        expect(r.acs.enrollmentId, 'ACS-EP-ACC-9');
+        expect(r.acs.ubsId, _ubsA, reason: 'a UBS vem da microárea');
+        expect(r.acs.microAreaId, _maA);
+        expect(r.acs.active, isTrue);
+        expect(r.initialPassword, isNotEmpty);
+
+        // O ACS novo aparece na listagem de quem o cadastrou.
+        final lista = await endpoints.admin.acs(sessionBuilder, accessToken: t);
+        expect(lista.map((a) => a.enrollmentId), contains('ACS-EP-ACC-9'));
+        expect(
+          jsonEncode(lista.map((a) => a.toJson()).toList()),
+          isNot(contains(r.initialPassword)),
+          reason: 'a senha não volta em nenhuma listagem',
+        );
+
+        // A senha devolvida uma única vez é a que abre o login institucional.
+        final login = await InstitutionalAuthService(
+          store: AlertRuntimeHarness.store(sessionBuilder.build()),
+          hasher: AlertRuntimeHarness.hasher,
+          audit: _Audit(),
+        ).login(matricula: 'ACS-EP-ACC-9', password: r.initialPassword);
+        expect(login.role, UserRole.acs);
+        expect(login.microAreaId, _maA);
+
+        expect(await _auditorias(session, 'admin_acs', 'created'), 1);
+        expect(await _auditorias(session, 'admin_acs', 'denied'), 0);
+      },
+    );
+
+    test('coordenador cadastra na própria UBS e não na de outra', () async {
+      final t = _token(_coordA, UserRole.coordinator);
+      final r = await endpoints.admin.createAcs(
+        sessionBuilder,
+        accessToken: t,
+        name: 'Nova ACS da UBS A',
+        enrollmentId: 'ACS-EP-ACC-8',
+        microAreaId: _maA,
+      );
+      expect(r.acs.ubsId, _ubsA);
+
+      // Microárea de outra UBS: a mesma resposta de "não existe".
+      await expectLater(
+        endpoints.admin.createAcs(
+          sessionBuilder,
+          accessToken: t,
+          name: 'Nova ACS da UBS B',
+          enrollmentId: 'ACS-EP-ACC-7',
+          microAreaId: _maB,
+        ),
+        throwsA(
+          isA<AdminInvalidRequestException>().having(
+            (e) => e.message,
+            'message',
+            'Microárea não encontrada.',
+          ),
+        ),
+      );
+      expect(await _auditorias(session, 'admin_acs', 'created'), 1);
+      expect(await _auditorias(session, 'admin_acs', 'denied'), 1);
+    });
+
+    test('acs e patient não cadastram: a recusa é auditada como escrita', () async {
+      for (final (id, role, ma) in [
+        (_acsA, UserRole.acs, _maA),
+        (_paciente, UserRole.patient, _maA),
+      ]) {
+        final t = _token(id, role, ma: ma);
+        await expectLater(
+          endpoints.admin.createAcs(
+            sessionBuilder,
+            accessToken: t,
+            name: 'Nova ACS Sintética',
+            enrollmentId: 'ACS-EP-ACC-9',
+            microAreaId: _maA,
+          ),
+          throwsA(isA<AlertPermissionException>()),
+        );
+      }
+      expect(await _auditorias(session, 'admin_acs', 'denied'), 2);
+      expect(
+        await User.db.findFirstRow(
+          session,
+          where: (u) => u.name.equals('Nova ACS Sintética'),
+        ),
+        isNull,
+      );
     });
 
     test('a listagem não devolve CPF, hash de CPF nem senha', () async {

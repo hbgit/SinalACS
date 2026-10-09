@@ -1,6 +1,7 @@
 import 'dart:math';
 
 import 'package:sinalacs_server/src/application/admin/admin_scope.dart';
+import 'package:sinalacs_server/src/application/admin/initial_password.dart';
 import 'package:sinalacs_server/src/application/audit/audit_trail.dart';
 import 'package:sinalacs_server/src/application/auth/development_auth_service.dart';
 import 'package:sinalacs_server/src/application/auth/institutional_auth_service.dart';
@@ -34,6 +35,38 @@ abstract interface class AdminAccountStore implements AdminScopeStore {
 
   /// Conta de equipe, ou `null` se não existir.
   Future<AdminStaff?> staffById(String staffId);
+
+  /// A microárea [microAreaId] com a UBS dona dela, ou `null` se não existir.
+  ///
+  /// A UBS vem junto porque o escopo do coordenador é decidido comparando-a
+  /// com `staff_accounts.ubsId`: devolvesse só a microárea e o serviço faria
+  /// uma segunda consulta pela UBS — e uma decisão de território feita sobre
+  /// duas leituras é uma decisão sobre dois alvos diferentes.
+  Future<({String? ubsId, String? name})?> microAreaFor(String microAreaId);
+
+  /// `true` se já existe um ACS com a matrícula [enrollmentId].
+  ///
+  /// É a pré-checagem do cadastro, para a resposta limpa do caso comum. Quem
+  /// fecha a corrida é o índice único de `acs."enrollmentId"`, tratado em
+  /// [insertAcs] — entre esta consulta e o INSERT cabe outro cadastro.
+  Future<bool> enrollmentIdTaken(String enrollmentId);
+
+  /// Cria `users` (papel `acs`), `acs` e `user_credentials` numa **única
+  /// transação**, com [digest] já derivado do lado de fora (o serviço é quem
+  /// sorteia a senha e nunca a guarda).
+  ///
+  /// Devolve o ACS criado — já no formato da listagem — ou `null` quando o
+  /// índice único da matrícula dispara, ou seja, quando outro cadastro passou
+  /// entre a pré-checagem e este INSERT. Nada fica gravado nesse caso: as três
+  /// linhas são da mesma transação.
+  Future<AdminAcs?> insertAcs({
+    required String name,
+    required String enrollmentId,
+    required String microAreaId,
+    required String ubsId,
+    required PasswordDigest digest,
+    required DateTime at,
+  });
 }
 
 /// Gestão de contas do backoffice (issue #43): listagem de ACS e da equipe
@@ -92,12 +125,10 @@ class AdminAccountService {
   final AuditTrail audit;
 
   /// Sorteio das credenciais entregues fora de banda (senha inicial, código de
-  /// ativação). As operações de escrita da #43 é que o usam.
-  // ignore: unused_field
+  /// ativação).
   final Random _random;
 
-  /// Relógio dos carimbos de tempo. As operações de escrita da #43 é que o usam.
-  // ignore: unused_field
+  /// Relógio dos carimbos de tempo.
   final DateTime Function() _clock;
 
   /// A regra única de papel/escopo, sobre o [store] (que também é a porta da
@@ -121,6 +152,77 @@ class AdminAccountService {
     return store.staffList();
   }
 
+  /// Cadastra um ACS na UBS da microárea escolhida e devolve a senha inicial
+  /// gerada — que existe **só** nesta resposta (ver `AcsInitialPassword`).
+  ///
+  /// A UBS **nunca** vem do pedido: sai da microárea, que é o único dado que o
+  /// escopo do coordenador pode comparar. Microárea inexistente e microárea de
+  /// outra UBS recebem a **mesma** mensagem; separá-las diria ao coordenador,
+  /// por tentativa, quais microáreas existem fora da UBS dele.
+  ///
+  /// A ordem é deliberada: papel/escopo (recusa auditada), entrada, alvo e
+  /// matrícula — e só então o sorteio da senha, porque derivar o Argon2id é
+  /// caro e não deve acontecer para um pedido que já vai ser recusado. A
+  /// corrida que passa pela pré-checagem da matrícula é fechada pelo índice
+  /// único do banco e chega aqui como `insertAcs` devolvendo `null`: mesmo
+  /// desfecho, mesma mensagem, nunca um erro de servidor.
+  Future<AdminAcsCreationResult> createAcs(
+    AuthenticatedUser user, {
+    required String name,
+    required String enrollmentId,
+    required String microAreaId,
+  }) async {
+    const recurso = 'admin_acs';
+    final escopo = await _resolver.resolve(
+      user,
+      recurso: recurso,
+      actionType: 'write',
+    );
+
+    final nome = name.trim();
+    final matricula = enrollmentId.trim();
+    final ma = await store.microAreaFor(microAreaId);
+    final ubsDaMicroarea = ma?.ubsId;
+
+    if (nome.isEmpty ||
+        nome.length > 120 ||
+        matricula.isEmpty ||
+        matricula.length > 32) {
+      await _negar(user, recurso, message: 'Informe nome e matrícula do ACS.');
+    }
+    if (ubsDaMicroarea == null ||
+        (escopo.ubsId != null && ubsDaMicroarea != escopo.ubsId)) {
+      await _negar(user, recurso, message: 'Microárea não encontrada.');
+    }
+    if (await store.enrollmentIdTaken(matricula)) {
+      await _negar(
+        user,
+        recurso,
+        message: 'Já existe um ACS com esta matrícula.',
+      );
+    }
+
+    final senha = AcsInitialPassword.generate(_random);
+    final digest = await hasher.derive(senha);
+    final acs = await store.insertAcs(
+      name: nome,
+      enrollmentId: matricula,
+      microAreaId: microAreaId,
+      ubsId: ubsDaMicroarea,
+      digest: digest,
+      at: _clock().toUtc(),
+    );
+    if (acs == null) {
+      await _negar(
+        user,
+        recurso,
+        message: 'Já existe um ACS com esta matrícula.',
+      );
+    }
+    await _auditar(user, recurso, result: 'created', resourceId: acs.id);
+    return AdminAcsCreationResult(acs: acs, initialPassword: senha);
+  }
+
   /// Leitura bem-sucedida: a linha entra na trilha **antes** de o store ser
   /// consultado, mesmo arranjo de `AdminReadService`.
   Future<void> _auditarLeitura(AuthenticatedUser user, String recurso) =>
@@ -134,13 +236,11 @@ class AdminAccountService {
       );
 
   // Os dois helpers abaixo são a interface interna das operações de escrita da
-  // #43 (tarefas seguintes): ficam declarados desde já para as escritas
-  // entrarem sem mudar a forma do arquivo. Nesta tarefa, ainda não há chamador.
+  // #43.
 
   /// Recusa com linha `denied` na trilha ANTES de lançar (fail-closed), a mesma
   /// mensagem para "não existe" e "não é seu". [message] só é sobre a própria
   /// entrada do operador (validação) — nunca revela existência de outro território.
-  // ignore: unused_element
   Future<Never> _negar(
     AuthenticatedUser user,
     String recurso, {
@@ -158,7 +258,6 @@ class AdminAccountService {
   }
 
   /// Sucesso: audita DEPOIS do commit, com `record` (não `recordSafely`).
-  // ignore: unused_element
   Future<void> _auditar(
     AuthenticatedUser user,
     String recurso, {

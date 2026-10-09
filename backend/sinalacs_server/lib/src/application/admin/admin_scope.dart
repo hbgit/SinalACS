@@ -28,9 +28,14 @@ abstract interface class AdminScopeStore {
 ///    `patient` são recusados mesmo com token válido.
 /// 2. **Escopo:** o administrador vê o sistema; o coordenador, a UBS de
 ///    `staff_accounts.ubsId`. Coordenador sem UBS é recusado (fail-closed).
-/// 3. **Recusa auditada, fail-closed:** toda recusa grava uma linha `read` com
+/// 3. **Recusa auditada, fail-closed:** toda recusa grava uma linha com
 ///    `result: denied` **antes** de lançar, e com `record` (não `recordSafely`):
 ///    se a linha não grava, a exceção da trilha sobe no lugar da recusa.
+///
+/// O `actionType` da linha de recusa é o do **caminho que chamou**
+/// ([actionType], `read` por padrão): uma tentativa de escrita recusada por
+/// papel ou escopo grava `write`, porque é isso que a linha descreve — o que a
+/// requisição tentou fazer, não o que ela conseguiu.
 class AdminScopeResolver {
   AdminScopeResolver({required this.store, required this.audit});
 
@@ -46,13 +51,14 @@ class AdminScopeResolver {
   Future<AdminScope> resolve(
     AuthenticatedUser user, {
     required String recurso,
+    String actionType = 'read',
   }) async {
     if (!Authorization.staffRoles.contains(user.role)) {
-      return _negar(user, recurso);
+      return _negar(user, recurso, actionType);
     }
     if (user.role == UserRole.admin) return const AdminScope.system();
     final ubs = await store.ubsOf(user.id);
-    if (ubs == null) return _negar(user, recurso);
+    if (ubs == null) return _negar(user, recurso, actionType);
     return AdminScope.ubs(ubs);
   }
 
@@ -61,17 +67,22 @@ class AdminScopeResolver {
   Future<void> requireAdmin(
     AuthenticatedUser user, {
     required String recurso,
+    String actionType = 'read',
   }) async {
     if (user.role != UserRole.admin) {
-      await _negar(user, recurso);
+      await _negar(user, recurso, actionType);
     }
   }
 
-  Future<Never> _negar(AuthenticatedUser user, String recurso) async {
+  Future<Never> _negar(
+    AuthenticatedUser user,
+    String recurso,
+    String actionType,
+  ) async {
     await audit.record(
       AuditEvent(
         userId: user.id,
-        actionType: 'read',
+        actionType: actionType,
         resourceType: recurso,
         result: 'denied',
       ),

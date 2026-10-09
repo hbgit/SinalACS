@@ -7,11 +7,10 @@ import 'package:sinalacs_server/src/runtime/alert_runtime.dart';
 /// contas (issue #43).
 ///
 /// A leitura — indicadores, microáreas, alertas e auditoria — é do
-/// `AdminReadService`; a listagem de ACS e de equipe é do `AdminAccountService`,
-/// que nas operações seguintes da mesma issue ganha o cadastro, o vínculo de
-/// microárea, a desativação e as redefinições de senha/MFA. Hoje todos os
-/// métodos daqui são de leitura: os de escrita entram na mesma dupla
-/// serviço/store, sem endpoint novo.
+/// `AdminReadService`; a listagem de ACS e de equipe e o cadastro são do
+/// `AdminAccountService`, que nas operações seguintes da mesma issue ganha o
+/// vínculo de microárea, a desativação e as redefinições de senha/MFA — sempre
+/// na mesma dupla serviço/store, sem endpoint novo.
 ///
 /// O papel, o escopo (sistema para o administrador, UBS para o coordenador),
 /// a paginação e a auditoria de cada operação são dos serviços; o endpoint só
@@ -79,4 +78,22 @@ class AdminEndpoint extends AuthenticatedEndpoint {
   }) => AlertRuntime.instance
       .adminAccountServiceFor(session)
       .staffList(authenticate(accessToken));
+
+  /// Cadastra um ACS e devolve a senha inicial gerada, que **só** existe nesta
+  /// resposta: o servidor guarda apenas o hash (ver `AcsInitialPassword`).
+  /// A UBS vem da microárea, nunca do pedido.
+  Future<AdminAcsCreationResult> createAcs(
+    Session session, {
+    required String accessToken,
+    required String name,
+    required String enrollmentId,
+    required String microAreaId,
+  }) => AlertRuntime.instance
+      .adminAccountServiceFor(session)
+      .createAcs(
+        authenticate(accessToken),
+        name: name,
+        enrollmentId: enrollmentId,
+        microAreaId: microAreaId,
+      );
 }

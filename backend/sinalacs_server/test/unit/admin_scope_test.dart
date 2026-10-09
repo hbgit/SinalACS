@@ -145,6 +145,48 @@ void main() {
     expect(audit.events.map((e) => e.result), everyElement('denied'));
   });
 
+  test('recusa em caminho de escrita audita a TENTATIVA: actionType write', () async {
+    // Papel fora do backoffice (resolve) e coordenador sem UBS (escopo).
+    await expectLater(
+      resolver.resolve(
+        _u('u-acs', UserRole.acs),
+        recurso: 'admin_acs',
+        actionType: 'write',
+      ),
+      throwsA(isA<AlertPermissionException>()),
+    );
+    await expectLater(
+      resolver.resolve(coordSemUbs, recurso: 'admin_acs', actionType: 'write'),
+      throwsA(isA<AlertPermissionException>()),
+    );
+    // requireAdmin aceita o mesmo parâmetro.
+    await expectLater(
+      resolver.requireAdmin(
+        coordA,
+        recurso: 'admin_staff',
+        actionType: 'write',
+      ),
+      throwsA(isA<AlertPermissionException>()),
+    );
+
+    expect(audit.events, hasLength(3));
+    expect(
+      audit.events.map((e) => e.actionType),
+      everyElement('write'),
+      reason: 'a linha descreve o que foi TENTADO: uma escrita',
+    );
+    expect(audit.events.map((e) => e.result), everyElement('denied'));
+
+    // O default continua `read`: nenhuma linha do caminho de leitura muda de forma.
+    await expectLater(
+      resolver.resolve(coordSemUbs, recurso: 'admin_indicators'),
+      throwsA(isA<AlertPermissionException>()),
+    );
+    expect(audit.events.last.actionType, 'read');
+    expect(audit.events.last.resourceType, 'admin_indicators');
+    expect(audit.events.last.result, 'denied');
+  });
+
   test('se a auditoria falha, a exceção sobe no lugar da recusa', () async {
     audit.falhar = true;
     await expectLater(

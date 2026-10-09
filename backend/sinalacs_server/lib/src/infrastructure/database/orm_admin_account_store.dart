@@ -1,6 +1,12 @@
+import 'package:meta/meta.dart';
 import 'package:serverpod/serverpod.dart';
 import 'package:sinalacs_server/src/application/admin/admin_account_service.dart';
+import 'package:sinalacs_server/src/application/auth/password_hasher.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
+
+/// Mesmo `Uuid` de `RedAlertService`: o sorteio da chave é o mesmo em todo o
+/// servidor.
+const _uuid = Uuid();
 
 /// Contas do backoffice sobre Postgres (issue #43).
 ///
@@ -17,10 +23,21 @@ import 'package:sinalacs_server/src/generated/protocol.dart';
 /// `mfaActive` vem da própria consulta (`totpEnabledAt IS NOT NULL`), nunca de
 /// coluna calculada: MFA iniciada e não confirmada não é MFA ativa.
 class OrmAdminAccountStore implements AdminAccountStore {
-  OrmAdminAccountStore({required Session Function() session})
-    : _session = session;
+  OrmAdminAccountStore({
+    required Session Function() session,
+    @visibleForTesting bool debugFailAfterUsersInsert = false,
+  }) : _session = session,
+       _debugFailAfterUsersInsert = debugFailAfterUsersInsert;
 
   final Session Function() _session;
+
+  /// Derruba a transação do cadastro **depois** de `users` e antes de `acs`,
+  /// para o teste provar que a atomicidade não é teórica: se as três linhas não
+  /// fossem da mesma transação, sobraria um usuário sem credencial e sem
+  /// matrícula — um órfão que ninguém consegue nem logar nem apagar pela
+  /// interface. Mesmo arranjo de
+  /// `OrmDataSubjectRightsStore._debugFailAfterTokenDelete`.
+  final bool _debugFailAfterUsersInsert;
 
   /// `@ubs` nulo = sistema inteiro (administrador).
   static const _escopoAcs = '(@ubs::uuid IS NULL OR acs."ubsId" = @ubs::uuid)';
@@ -82,6 +99,126 @@ class OrmAdminAccountStore implements AdminAccountStore {
       parameters: QueryParameters.named({'id': staffId}),
     );
     return rows.isEmpty ? null : _staff(rows.single);
+  }
+
+  /// A microárea e a UBS dona dela. Um id que não é UUID devolve `null` pela
+  /// mesma guarda de [acsById]: a alternativa é o erro de sintaxe do Postgres
+  /// no `::uuid`, que diria ao chamador que o id é inválido em vez de
+  /// "microárea não encontrada".
+  @override
+  Future<({String? ubsId, String? name})?> microAreaFor(
+    String microAreaId,
+  ) async {
+    if (!_uuidValido(microAreaId)) return null;
+    final rows = await _session().db.unsafeQuery(
+      'SELECT m.name, m."ubsId" FROM micro_areas m WHERE m.id = @id::uuid',
+      parameters: QueryParameters.named({'id': microAreaId}),
+    );
+    if (rows.isEmpty) return null;
+    return (name: rows.single[0] as String, ubsId: rows.single[1].toString());
+  }
+
+  /// Índice único `acs_enrollment_id_key`. Só a existência interessa: a linha
+  /// não é lida aqui, e um `SELECT 1` não devolve PII nenhuma.
+  @override
+  Future<bool> enrollmentIdTaken(String enrollmentId) async {
+    final rows = await _session().db.unsafeQuery(
+      'SELECT 1 FROM acs WHERE "enrollmentId" = @matricula LIMIT 1',
+      parameters: QueryParameters.named({'matricula': enrollmentId}),
+    );
+    return rows.isNotEmpty;
+  }
+
+  /// As três linhas do cadastro numa transação — ou todas, ou nenhuma.
+  ///
+  /// O id é sorteado aqui e serve às três tabelas: `acs.id` e
+  /// `user_credentials.userId` são o mesmo UUID de `users.id`, a chave
+  /// compartilhada que o login do RF07 já atravessa. Sorteado em Dart (e não
+  /// pelo `DEFAULT gen_random_uuid()` da coluna) porque ele entra também no
+  /// placeholder do CPF, que é gravado na **mesma** linha — e o índice único
+  /// de `users.cpfHash` não pode disparar por dois ACS cadastrados no mesmo
+  /// instante. Mesmo `Uuid` de `RedAlertService`.
+  ///
+  /// `cpfHash` recebe um placeholder aleatório único, **nunca** o HMAC de um
+  /// CPF: `verifyOtp` emite papel de PACIENTE a partir da linha que encontra
+  /// por `users.cpfHash`, então um CPF na linha do ACS deixaria o login
+  /// passwordless abrir sessão de paciente com o id e a microárea dele (o
+  /// mesmo motivo que deixou o ACS semeado fora de `seed_cpf_hashes.dart` —
+  /// `spec/lgpd_data_audit.md`, nota de seed). O placeholder não é um HMAC
+  /// (não é hex de 64 caracteres), então nenhum CPF chega até ele.
+  ///
+  /// `birthDate` recebe a sentinela 1900-01-01 UTC — a coluna é NOT NULL e não
+  /// existe data de nascimento de ACS a guardar: nada além do login
+  /// passwordless lê este campo, e esse login não alcança esta linha.
+  ///
+  /// Um 23505 (`unique_violation`) devolve `null` em vez de subir: significa
+  /// que outra requisição cadastrou a mesma matrícula entre a pré-checagem do
+  /// serviço e este INSERT, e o resultado para quem chamou é a mesma validação
+  /// do caso comum. Qualquer outro erro de banco sobe — engolir um erro
+  /// inesperado aqui viraria "matrícula duplicada" para um defeito de verdade.
+  @override
+  Future<AdminAcs?> insertAcs({
+    required String name,
+    required String enrollmentId,
+    required String microAreaId,
+    required String ubsId,
+    required PasswordDigest digest,
+    required DateTime at,
+  }) async {
+    final session = _session();
+    final id = UuidValue.fromString(_uuid.v4());
+    try {
+      await session.db.transaction((transaction) async {
+        await User.db.insertRow(
+          session,
+          User(
+            id: id,
+            cpfHash: 'acs-sem-cpf-${id.uuid}',
+            name: name,
+            birthDate: DateTime.utc(1900, 1, 1),
+            role: UserRole.acs,
+            microAreaId: UuidValue.fromString(microAreaId),
+            createdAt: at,
+            updatedAt: at,
+          ),
+          transaction: transaction,
+        );
+        if (_debugFailAfterUsersInsert) {
+          throw StateError('falha injetada depois de users (só em teste)');
+        }
+        await Acs.db.insertRow(
+          session,
+          Acs(
+            id: id,
+            enrollmentId: enrollmentId,
+            ubsId: UuidValue.fromString(ubsId),
+            active: true,
+          ),
+          transaction: transaction,
+        );
+        await UserCredential.db.insertRow(
+          session,
+          UserCredential(
+            userId: id,
+            passwordHash: digest.hashBase64,
+            passwordSalt: digest.saltBase64,
+            memoryKb: digest.memoryKb,
+            iterations: digest.iterations,
+            parallelism: digest.parallelism,
+            failedAttempts: 0,
+            lockStreak: 0,
+            createdAt: at,
+            updatedAt: at,
+          ),
+          transaction: transaction,
+        );
+      });
+    } on DatabaseQueryException catch (e) {
+      // 23505 = unique_violation: a matrícula já existe (corrida).
+      if (e.code == '23505') return null;
+      rethrow;
+    }
+    return acsById(const AdminScope.system(), id.uuid);
   }
 
   /// Mesma leitura de `OrmAdminReadStore.ubsOf`: `staff_accounts.ubsId` é a

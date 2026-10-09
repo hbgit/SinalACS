@@ -248,6 +248,42 @@ class Endpoints extends _i1.EndpointDispatch {
                 accessToken: params['accessToken'],
               ),
         ),
+        'createAcs': _i1.MethodConnector(
+          name: 'createAcs',
+          params: {
+            'accessToken': _i1.ParameterDescription(
+              name: 'accessToken',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'name': _i1.ParameterDescription(
+              name: 'name',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'enrollmentId': _i1.ParameterDescription(
+              name: 'enrollmentId',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'microAreaId': _i1.ParameterDescription(
+              name: 'microAreaId',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async => (endpoints['admin'] as _i2.AdminEndpoint).createAcs(
+                session,
+                accessToken: params['accessToken'],
+                name: params['name'],
+                enrollmentId: params['enrollmentId'],
+                microAreaId: params['microAreaId'],
+              ),
+        ),
       },
     );
     connectors['alerts'] = _i1.EndpointConnector(
