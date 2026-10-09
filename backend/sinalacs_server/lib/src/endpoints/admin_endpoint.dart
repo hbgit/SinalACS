@@ -114,4 +114,21 @@ class AdminEndpoint extends AuthenticatedEndpoint {
         acsId: acsId,
         microAreaId: microAreaId,
       );
+
+  /// Liga/desliga o acesso de um ACS — da própria UBS, para o coordenador; de
+  /// qualquer UBS, para o administrador.
+  ///
+  /// Desativar revoga, na mesma transação da flag, todas as sessões (refresh
+  /// token) e todos os tokens de envio diferido da conta: o aparelho perde o
+  /// acesso na hora, inclusive o envio offline das visitas pendentes, e o login
+  /// por senha passa a recusar com `'Este acesso está inativo.'`. Reativar
+  /// devolve o acesso pelo login — os tokens revogados não voltam.
+  Future<AdminAcs> setAcsActive(
+    Session session, {
+    required String accessToken,
+    required String acsId,
+    required bool active,
+  }) => AlertRuntime.instance
+      .adminAccountServiceFor(session)
+      .setAcsActive(authenticate(accessToken), acsId: acsId, active: active);
 }

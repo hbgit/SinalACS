@@ -536,6 +536,43 @@ class _AdminEndpoint {
       }
     });
   }
+
+  _i3.Future<_i9.AdminAcs> setAcsActive(
+    _i1.TestSessionBuilder sessionBuilder, {
+    required String accessToken,
+    required String acsId,
+    required bool active,
+  }) async {
+    return _i1.callAwaitableFunctionAndHandleExceptions(() async {
+      var _localUniqueSession =
+          (sessionBuilder as _i1.InternalTestSessionBuilder).internalBuild(
+            endpoint: 'admin',
+            method: 'setAcsActive',
+          );
+      try {
+        var _localCallContext = await _endpointDispatch.getMethodCallContext(
+          createSessionCallback: (_) => _localUniqueSession,
+          endpointPath: 'admin',
+          methodName: 'setAcsActive',
+          parameters: _i1.testObjectToJson({
+            'accessToken': accessToken,
+            'acsId': acsId,
+            'active': active,
+          }),
+          serializationManager: _serializationManager,
+        );
+        var _localReturnValue =
+            await (_localCallContext.method.call(
+                  _localUniqueSession,
+                  _localCallContext.arguments,
+                )
+                as _i3.Future<_i9.AdminAcs>);
+        return _localReturnValue;
+      } finally {
+        await _localUniqueSession.close();
+      }
+    });
+  }
 }
 
 class _AlertsEndpoint {

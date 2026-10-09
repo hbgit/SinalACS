@@ -315,6 +315,36 @@ class Endpoints extends _i1.EndpointDispatch {
                     microAreaId: params['microAreaId'],
                   ),
         ),
+        'setAcsActive': _i1.MethodConnector(
+          name: 'setAcsActive',
+          params: {
+            'accessToken': _i1.ParameterDescription(
+              name: 'accessToken',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'acsId': _i1.ParameterDescription(
+              name: 'acsId',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'active': _i1.ParameterDescription(
+              name: 'active',
+              type: _i1.getType<bool>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async => (endpoints['admin'] as _i2.AdminEndpoint).setAcsActive(
+                session,
+                accessToken: params['accessToken'],
+                acsId: params['acsId'],
+                active: params['active'],
+              ),
+        ),
       },
     );
     connectors['alerts'] = _i1.EndpointConnector(

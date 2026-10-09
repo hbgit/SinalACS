@@ -35,6 +35,16 @@ abstract interface class UploadTokenStore {
   /// Marca `revokedAt` se a linha ainda está vigente; nada se já revogada.
   Future<void> revoke(String id, DateTime at);
 
+  /// Todos os tokens do usuário, para a desativação da conta (#43): o envio
+  /// diferido não depende de sessão, então derrubar só o refresh deixaria o
+  /// aparelho de um ACS desativado subindo visita em nome dele até o token
+  /// vencer (7 dias).
+  ///
+  /// Como no refresh, um token emitido na janela de uma desativação
+  /// concorrente já nasce inutilizável: [UploadTokenService.resolve] relê a
+  /// conta a cada uso e, inativa, revoga e recusa.
+  Future<void> revokeAllForUser(String userId, DateTime at);
+
   /// Mesma leitura do refresh token: só conta de ACS, com `acs.active` e a
   /// microárea atual de `users`.
   Future<RefreshAccount?> findAccount(String userId);

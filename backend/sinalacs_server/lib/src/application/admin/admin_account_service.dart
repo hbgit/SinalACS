@@ -84,6 +84,28 @@ abstract interface class AdminAccountStore implements AdminScopeStore {
     required AdminScope scope,
     required DateTime at,
   });
+
+  /// Liga/desliga o acesso do ACS [acsId] numa **única transação**, com o
+  /// predicado de [scope] dentro do `WHERE` (mesma defesa de [setAcsMicroArea]).
+  ///
+  /// Desativar revoga, **na mesma transação**, todas as famílias de refresh
+  /// token e todos os tokens de envio diferido da conta, com [at] como carimbo
+  /// da revogação: a flag e as revogações são um só estado, e não existe
+  /// instante observável em que o ACS esteja inativo e ainda com sessão viva
+  /// (o `findAccount` do refresh só recusaria na próxima renovação). Reativar
+  /// não toca em token nenhum — revogado é revogado, e o acesso novo se obtém
+  /// com um login novo.
+  ///
+  /// Devolve `true` quando o ACS existe no escopo e a flag foi gravada — o
+  /// valor anterior não importa (desativar um já inativo também grava). `false`
+  /// significa que nada foi escrito: o ACS não existe, está fora do escopo ou
+  /// o id não é UUID.
+  Future<bool> setAcsActive({
+    required String acsId,
+    required AdminScope scope,
+    required bool active,
+    required DateTime at,
+  });
 }
 
 /// Gestão de contas do backoffice (issue #43): listagem de ACS e da equipe
@@ -132,10 +154,17 @@ class AdminAccountService {
   /// Código de ativação de uso único da MFA do staff (#48).
   final StaffActivationStore activationStore;
 
-  /// Refresh tokens do ACS: a desativação revoga a família inteira.
+  /// Refresh tokens do ACS.
+  ///
+  /// A desativação revoga todas as famílias **dentro da transação do
+  /// [store]** (ver [setAcsActive]): um serviço que revogasse por aqui faria
+  /// da flag e da revogação duas gravações independentes, e uma sessão viva
+  /// sobreviveria à desativação até a próxima renovação. A porta continua no
+  /// construtor para as operações do serviço que não precisam de atomicidade
+  /// com [store].
   final RefreshTokenStore refreshStore;
 
-  /// Tokens de envio diferido do ACS: a desativação também os derruba.
+  /// Tokens de envio diferido do ACS, pela mesma regra de [refreshStore].
   final UploadTokenStore uploadStore;
 
   final PasswordHasher hasher;
@@ -300,6 +329,61 @@ class AdminAccountService {
       user,
       recurso,
       result: 'micro_area_changed',
+      resourceId: acs.id,
+    );
+    return acs;
+  }
+
+  /// Ativa ou desativa o ACS, com a revogação das sessões na desativação.
+  ///
+  /// A flag e as revogações são da **mesma** transação, do lado do store: o
+  /// ACS desativado perde a sessão na hora, e não na próxima renovação — o
+  /// `findAccount` do refresh só recusaria lá, e a desativação precisa valer
+  /// agora. A reativação **não** ressuscita token nenhum: o acesso novo se
+  /// obtém com um login novo (senha + TOTP).
+  ///
+  /// Desativar um ACS já inativo (e reativar um já ativo) é idempotente: a
+  /// operação conclui e audita uma linha nova — o que a trilha registra é o
+  /// pedido do operador, e um pedido repetido é um fato novo.
+  ///
+  /// As recusas são as do vínculo, pela mesma razão: ACS inexistente e ACS de
+  /// outra UBS recebem a **mesma** mensagem — um ACS fora do escopo não existe
+  /// para quem perguntou.
+  Future<AdminAcs> setAcsActive(
+    AuthenticatedUser user, {
+    required String acsId,
+    required bool active,
+  }) async {
+    const recurso = 'admin_acs';
+    final escopo = await _resolver.resolve(
+      user,
+      recurso: recurso,
+      actionType: 'write',
+    );
+
+    final antes = await store.acsById(escopo, acsId);
+    if (antes == null) {
+      await _negar(user, recurso, message: 'ACS não encontrado.');
+    }
+
+    final mudou = await store.setAcsActive(
+      acsId: acsId,
+      scope: escopo,
+      active: active,
+      at: _clock().toUtc(),
+    );
+    if (!mudou) {
+      await _negar(user, recurso, message: 'ACS não encontrado.');
+    }
+
+    // A releitura é a do banco; o `??` só cobre o caso extremo de o ACS ter
+    // saído do escopo entre o commit e esta leitura — aí a linha da
+    // pré-checagem, com a flag que a transação gravou, ainda descreve o estado.
+    final acs = await store.acsById(escopo, acsId) ?? antes.copyWith(active: active);
+    await _auditar(
+      user,
+      recurso,
+      result: active ? 'activated' : 'deactivated',
       resourceId: acs.id,
     );
     return acs;

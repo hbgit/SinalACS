@@ -723,5 +723,228 @@ void main() {
         );
       });
     });
+
+    group('setAcsActive (#43, desativação)', () {
+      late _Audit auditoria;
+      late AdminAccountService servico;
+      final admin = _operador(_admin, UserRole.admin);
+      final coordA = _operador(_coordA, UserRole.coordinator);
+
+      setUp(() {
+        auditoria = _Audit();
+        servico = _servico(session, store, audit: auditoria);
+      });
+
+      var proximoId = 0;
+
+      /// Ids sintéticos e únicos das linhas de token deste grupo.
+      UuidValue novoId() => UuidValue.fromString(
+        '00000000-0000-4000-8000-'
+        '${(0xf00 + (++proximoId)).toRadixString(16).padLeft(12, '0')}',
+      );
+
+      /// O estado que a desativação tem de derrubar inteiro: **duas famílias**
+      /// de refresh (duas sessões) e **dois aparelhos** de envio diferido do
+      /// mesmo ACS.
+      Future<void> tokens(String userId) async {
+        final id = UuidValue.fromString(userId);
+        await AcsRefreshToken.db.insert(session, [
+          for (final aparelho in [1, 2])
+            AcsRefreshToken(
+              id: novoId(),
+              userId: id,
+              familyId: novoId(),
+              tokenHash: 'hash-refresh-$userId-$aparelho',
+              deviceId: 'aparelho-$aparelho',
+              issuedAt: _t,
+              idleExpiresAt: _t.add(const Duration(hours: 2)),
+              absoluteExpiresAt: _t.add(const Duration(hours: 8)),
+            ),
+        ]);
+        await AcsUploadToken.db.insert(session, [
+          for (final aparelho in [1, 2])
+            AcsUploadToken(
+              id: novoId(),
+              userId: id,
+              tokenHash: 'hash-upload-$userId-$aparelho',
+              deviceId: 'aparelho-$aparelho',
+              issuedAt: _t,
+              expiresAt: _t.add(const Duration(days: 7)),
+            ),
+        ]);
+      }
+
+      /// Linhas **vigentes** (não revogadas) do usuário numa das duas tabelas.
+      Future<int> vigentes(String tabela, String userId) async {
+        final linhas = await session.db.unsafeQuery(
+          'SELECT count(*) FROM $tabela '
+          'WHERE "userId" = @id::uuid AND "revokedAt" IS NULL',
+          parameters: QueryParameters.named({'id': userId}),
+        );
+        return linhas.single[0] as int;
+      }
+
+      Future<bool> ativo(String acsId) async =>
+          (await Acs.db.findById(session, UuidValue.fromString(acsId)))!.active;
+
+      test(
+        'desativar grava a flag e revoga TODOS os tokens do ACS, nas duas tabelas',
+        () async {
+          await tokens(_acsA);
+          await tokens(_acsBPendente);
+
+          final resultado = await servico.setAcsActive(
+            admin,
+            acsId: _acsA,
+            active: false,
+          );
+
+          expect(resultado.id, _acsA);
+          expect(resultado.active, isFalse);
+          expect(await ativo(_acsA), isFalse);
+          expect(await vigentes('acs_refresh_tokens', _acsA), 0);
+          expect(await vigentes('acs_upload_tokens', _acsA), 0);
+
+          // O carimbo é o do relógio do serviço, nas linhas das duas tabelas.
+          final refreshes = await AcsRefreshToken.db.find(
+            session,
+            where: (t) => t.userId.equals(UuidValue.fromString(_acsA)),
+          );
+          expect(refreshes, hasLength(2));
+          expect(refreshes.map((l) => l.revokedAt), everyElement(_t));
+          final uploads = await AcsUploadToken.db.find(
+            session,
+            where: (t) => t.userId.equals(UuidValue.fromString(_acsA)),
+          );
+          expect(uploads, hasLength(2));
+          expect(uploads.map((l) => l.revokedAt), everyElement(_t));
+
+          // A revogação é por conta: o outro ACS mantém os tokens dele.
+          expect(await vigentes('acs_refresh_tokens', _acsBPendente), 2);
+          expect(await vigentes('acs_upload_tokens', _acsBPendente), 2);
+          expect(await ativo(_acsBPendente), isTrue);
+
+          expect(auditoria.events.single.actionType, 'write');
+          expect(auditoria.events.single.result, 'deactivated');
+          expect(auditoria.events.single.resourceId, _acsA);
+        },
+      );
+
+      test('reativar grava a flag e não ressuscita token nenhum', () async {
+        await tokens(_acsA);
+        await servico.setAcsActive(admin, acsId: _acsA, active: false);
+
+        final reativado = await servico.setAcsActive(
+          admin,
+          acsId: _acsA,
+          active: true,
+        );
+
+        expect(reativado.active, isTrue);
+        expect(await ativo(_acsA), isTrue);
+        expect(
+          await vigentes('acs_refresh_tokens', _acsA),
+          0,
+          reason: 'revogado é revogado: o acesso novo se obtém com um login novo',
+        );
+        expect(await vigentes('acs_upload_tokens', _acsA), 0);
+        expect(
+          auditoria.events.map((e) => e.result),
+          ['deactivated', 'activated'],
+        );
+      });
+
+      test('desativar quem já está inativo é idempotente e audita uma linha nova', () async {
+        await tokens(_acsA);
+        await servico.setAcsActive(admin, acsId: _acsA, active: false);
+        final segunda = await servico.setAcsActive(
+          admin,
+          acsId: _acsA,
+          active: false,
+        );
+
+        expect(segunda.active, isFalse);
+        expect(await ativo(_acsA), isFalse);
+        expect(
+          auditoria.events.map((e) => e.result),
+          ['deactivated', 'deactivated'],
+        );
+      });
+
+      test(
+        'escopo dentro do UPDATE: ACS de outra UBS não é desativado nem revogado',
+        () async {
+          await tokens(_acsBPendente);
+
+          // Sem a pré-checagem do serviço: quem barra é o predicado de escopo
+          // repetido no `WHERE` do UPDATE (a defesa em profundidade do TOCTOU).
+          expect(
+            await store.setAcsActive(
+              acsId: _acsBPendente,
+              scope: const AdminScope.ubs(_ubsA),
+              active: false,
+              at: _t,
+            ),
+            isFalse,
+          );
+          // E um id fora do formato de UUID devolve o mesmo `false`, sem erro de SQL.
+          expect(
+            await store.setAcsActive(
+              acsId: 'lixo',
+              scope: const AdminScope.system(),
+              active: false,
+              at: _t,
+            ),
+            isFalse,
+          );
+
+          expect(await ativo(_acsBPendente), isTrue);
+          expect(await vigentes('acs_refresh_tokens', _acsBPendente), 2);
+          expect(await vigentes('acs_upload_tokens', _acsBPendente), 2);
+
+          // Pelo serviço, a recusa é a mesma de "não existe".
+          await expectLater(
+            servico.setAcsActive(coordA, acsId: _acsBPendente, active: false),
+            throwsA(
+              isA<AdminInvalidRequestException>().having(
+                (e) => e.message,
+                'message',
+                'ACS não encontrado.',
+              ),
+            ),
+          );
+          expect(auditoria.events.single.result, 'denied');
+        },
+      );
+
+      test(
+        'a flag e as revogações são uma só transação: a falha depois delas desfaz as três',
+        () async {
+          await tokens(_acsA);
+          final quebrado = OrmAdminAccountStore(
+            session: () => session,
+            debugFailAfterRevocations: true,
+          );
+
+          await expectLater(
+            quebrado.setAcsActive(
+              acsId: _acsA,
+              scope: const AdminScope.system(),
+              active: false,
+              at: _t,
+            ),
+            throwsA(isA<StateError>()),
+          );
+
+          expect(
+            await ativo(_acsA),
+            isTrue,
+            reason: 'o UPDATE da flag voltou atrás junto com as revogações',
+          );
+          expect(await vigentes('acs_refresh_tokens', _acsA), 2);
+          expect(await vigentes('acs_upload_tokens', _acsA), 2);
+        },
+      );
+    });
   });
 }

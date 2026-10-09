@@ -3,6 +3,8 @@ import 'package:serverpod/serverpod.dart';
 import 'package:sinalacs_server/src/application/admin/admin_account_service.dart';
 import 'package:sinalacs_server/src/application/auth/password_hasher.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
+import 'package:sinalacs_server/src/infrastructure/database/orm_refresh_token_store.dart';
+import 'package:sinalacs_server/src/infrastructure/database/orm_upload_token_store.dart';
 
 /// Mesmo `Uuid` de `RedAlertService`: o sorteio da chave é o mesmo em todo o
 /// servidor.
@@ -26,8 +28,10 @@ class OrmAdminAccountStore implements AdminAccountStore {
   OrmAdminAccountStore({
     required Session Function() session,
     @visibleForTesting bool debugFailAfterUsersInsert = false,
+    @visibleForTesting bool debugFailAfterRevocations = false,
   }) : _session = session,
-       _debugFailAfterUsersInsert = debugFailAfterUsersInsert;
+       _debugFailAfterUsersInsert = debugFailAfterUsersInsert,
+       _debugFailAfterRevocations = debugFailAfterRevocations;
 
   final Session Function() _session;
 
@@ -38,6 +42,12 @@ class OrmAdminAccountStore implements AdminAccountStore {
   /// interface. Mesmo arranjo de
   /// `OrmDataSubjectRightsStore._debugFailAfterTokenDelete`.
   final bool _debugFailAfterUsersInsert;
+
+  /// Derruba a transação da desativação **depois** das duas revogações: sem a
+  /// transação única, a flag ficaria gravada e os tokens vigentes — o teste
+  /// prova que o rollback leva os três `UPDATE` juntos. Mesmo arranjo de
+  /// [_debugFailAfterUsersInsert].
+  final bool _debugFailAfterRevocations;
 
   /// `@ubs` nulo = sistema inteiro (administrador).
   static const _escopoAcs = '(@ubs::uuid IS NULL OR acs."ubsId" = @ubs::uuid)';
@@ -299,6 +309,66 @@ class OrmAdminAccountStore implements AdminAccountStore {
     });
     if (!vinculado) return null;
     return acsById(scope, acsId);
+  }
+
+  /// A flag de acesso e as revogações numa **única** transação.
+  ///
+  /// Desativar sem revogar deixaria a sessão do ACS viva até a próxima
+  /// renovação (o `findAccount` do refresh só recusa lá) — a desativação tem de
+  /// valer agora, e não no próximo `refreshSession`. Como o `UPDATE` da flag e
+  /// as duas revogações são da mesma transação, não existe estado observável
+  /// intermediário: ou o ACS está inativo e sem token vigente, ou nada mudou
+  /// (é o que a falha injetada de [_debugFailAfterRevocations] prova).
+  ///
+  /// As revogações são dos stores de token, amarrados a ESTA transação pelo
+  /// construtor — o SQL de cada tabela continua sendo de quem é dono dela, e
+  /// nem `refresh_token_service`/`upload_token_service` nem este arquivo
+  /// conhecem o `package:serverpod` do outro lado da porta.
+  ///
+  /// Reativar não toca em token nenhum: revogado é revogado, e o acesso novo
+  /// se obtém com um login novo. O predicado de escopo vai **dentro** do
+  /// `WHERE` (mesma defesa de [setAcsMicroArea]), e um id fora do formato de
+  /// UUID devolve `false` sem chegar ao `::uuid` do Postgres.
+  @override
+  Future<bool> setAcsActive({
+    required String acsId,
+    required AdminScope scope,
+    required bool active,
+    required DateTime at,
+  }) async {
+    if (!_uuidValido(acsId)) return false;
+    final session = _session();
+    return session.db.transaction((transaction) async {
+      // Sem `RETURNING`: a contagem de linhas já diz se o ACS existe no
+      // escopo, e um `UPDATE` que regrava o mesmo valor conta igual — é o que
+      // torna a operação idempotente sem um `SELECT` a mais.
+      final linhas = await session.db.unsafeExecute(
+        'UPDATE acs SET active = @ativo '
+        'WHERE id = @acs::uuid '
+        'AND (@escopo::uuid IS NULL OR "ubsId" = @escopo::uuid);',
+        parameters: QueryParameters.named({
+          'ativo': active,
+          'acs': acsId,
+          'escopo': scope.ubsId,
+        }),
+        transaction: transaction,
+      );
+      if (linhas != 1) return false;
+      if (active) return true;
+
+      await OrmRefreshTokenStore(
+        session: _session,
+        transaction: transaction,
+      ).revokeAllForUser(acsId, at);
+      await OrmUploadTokenStore(
+        session: _session,
+        transaction: transaction,
+      ).revokeAllForUser(acsId, at);
+      if (_debugFailAfterRevocations) {
+        throw StateError('falha injetada depois das revogações (só em teste)');
+      }
+      return true;
+    });
   }
 
   /// Mesma leitura de `OrmAdminReadStore.ubsOf`: `staff_accounts.ubsId` é a

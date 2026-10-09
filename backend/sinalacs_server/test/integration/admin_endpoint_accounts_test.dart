@@ -4,6 +4,7 @@ import 'package:serverpod/serverpod.dart';
 import 'package:sinalacs_server/src/application/audit/audit_trail.dart';
 import 'package:sinalacs_server/src/application/auth/development_auth_service.dart';
 import 'package:sinalacs_server/src/application/auth/institutional_auth_service.dart';
+import 'package:sinalacs_server/src/application/auth/password_hasher.dart';
 import 'package:sinalacs_server/src/application/auth/refresh_token_service.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_refresh_token_store.dart';
@@ -32,6 +33,12 @@ const _paciente = '00000000-0000-4000-8000-0000000000ba';
 /// trocá-lo de UBS.
 const _maA2 = '00000000-0000-4000-8000-0000000000bb';
 
+/// ACS da prova de desativação, criado dentro do próprio caso: a fixture
+/// compartilhada não tem senha (nenhum outro caso loga por ela).
+const _acsDesat = '00000000-0000-4000-8000-0000000000bc';
+const _matriculaDesat = 'ACS-EP-DESAT-1';
+const _senha = 'senha-sintetica-de-teste';
+
 final _t = DateTime.utc(2026, 10, 8, 12);
 
 Future<void> _usuario(
@@ -57,17 +64,26 @@ Future<void> _usuario(
     .then((_) {});
 
 /// Credencial de login; só a do ACS da UBS A tem MFA ativa.
-Future<void> _credencial(Session s, String userId, {bool mfaAtiva = false}) =>
+///
+/// Com [digest], a senha é de verdade (Argon2id do custo reduzido do harness) e
+/// abre o `auth.loginInstitutional` do endpoint; sem ele, o hash é o sintético
+/// de sempre — nenhum caso desta suite loga por ele.
+Future<void> _credencial(
+  Session s,
+  String userId, {
+  bool mfaAtiva = false,
+  PasswordDigest? digest,
+}) =>
     UserCredential.db
         .insertRow(
           s,
           UserCredential(
             userId: UuidValue.fromString(userId),
-            passwordHash: 'hash-sintetico',
-            passwordSalt: 'salt-sintetico',
-            memoryKb: 65536,
-            iterations: 3,
-            parallelism: 1,
+            passwordHash: digest?.hashBase64 ?? 'hash-sintetico',
+            passwordSalt: digest?.saltBase64 ?? 'salt-sintetico',
+            memoryKb: digest?.memoryKb ?? 65536,
+            iterations: digest?.iterations ?? 3,
+            parallelism: digest?.parallelism ?? 1,
             failedAttempts: 0,
             createdAt: _t,
             updatedAt: _t,
@@ -190,6 +206,39 @@ Future<int> _auditorias(Session s, String recurso, String resultado) async {
   );
   return linhas.single[0] as int;
 }
+
+/// Linhas do usuário numa das tabelas de token — no total, ou só as vigentes
+/// (`revokedAt IS NULL`). É a única leitura possível: nenhum endpoint devolve
+/// estas tabelas, e é por SQL que a prova da desativação se faz.
+Future<int> _tokens(
+  Session s,
+  String tabela,
+  String userId, {
+  bool soVigentes = false,
+}) async {
+  final filtro = soVigentes ? ' AND "revokedAt" IS NULL' : '';
+  final linhas = await s.db.unsafeQuery(
+    'SELECT count(*) FROM $tabela WHERE "userId" = @id::uuid$filtro',
+    parameters: QueryParameters.named({'id': userId}),
+  );
+  return linhas.single[0] as int;
+}
+
+/// Uma visita sintética bem formada do paciente da Microárea A. O lote nunca
+/// chega a ser aplicado: com o token revogado, `syncDeferred` recusa na
+/// resolução do token, antes de abrir a transação — se ele chegasse a rodar, a
+/// exceção seria outra.
+VisitSyncEntry _visita() => VisitSyncEntry(
+  localId: '00000000-0000-4000-8000-0000000000bd',
+  patientId: _paciente,
+  scheduledAt: _t,
+  completedAt: _t.add(const Duration(hours: 1)),
+  status: 'realizada',
+  riskLevelBefore: RiskLevel.green,
+  notes: const {'campo': 'sintético'},
+  version: 0,
+  arrivalMethod: ArrivalMethod.manual,
+);
 
 void main() {
   withServerpod('Dado o endpoint de contas do backoffice (#43)', (
@@ -547,6 +596,149 @@ void main() {
           isNot(refreshToken),
           reason: 'a rotação devolve um filho novo',
         );
+      },
+    );
+
+    test(
+      'desativar revoga refresh e envio diferido: refreshSession e syncDeferred são recusados depois',
+      () async {
+        const aparelho = 'aparelho-desativacao-1';
+        await _usuario(
+          session,
+          _acsDesat,
+          'Dora ACS Desativável',
+          UserRole.acs,
+          ma: _maA,
+        );
+        await Acs.db.insertRow(
+          session,
+          Acs(
+            id: UuidValue.fromString(_acsDesat),
+            enrollmentId: _matriculaDesat,
+            ubsId: UuidValue.fromString(_ubsA),
+            active: true,
+          ),
+        );
+        await _credencial(
+          session,
+          _acsDesat,
+          digest: await AlertRuntimeHarness.hasher.derive(_senha),
+        );
+
+        // 1. Login real pelo endpoint, com aparelho: emite a sessão (refresh) e
+        //    o token do envio diferido, que até aqui sobrevivem a um ao outro.
+        final login = await endpoints.auth.loginInstitutional(
+          sessionBuilder,
+          matricula: _matriculaDesat,
+          password: _senha,
+          deviceId: aparelho,
+        );
+        final refreshToken = login.refreshToken;
+        final uploadToken = login.uploadToken;
+        expect(refreshToken, isNotNull);
+        expect(uploadToken, isNotNull);
+
+        // 2. A desativação pelo backoffice.
+        final desativado = await endpoints.admin.setAcsActive(
+          sessionBuilder,
+          accessToken: _token(_admin, UserRole.admin),
+          acsId: _acsDesat,
+          active: false,
+        );
+        expect(desativado.active, isFalse);
+
+        // 3. SQL: as duas tabelas do usuário ficaram sem NENHUMA linha vigente
+        //    (e as linhas existem — senão a asserção passaria por vacuidade).
+        for (final tabela in ['acs_refresh_tokens', 'acs_upload_tokens']) {
+          expect(await _tokens(session, tabela, _acsDesat), greaterThan(0));
+          expect(
+            await _tokens(session, tabela, _acsDesat, soVigentes: true),
+            0,
+            reason: '$tabela: toda linha do usuário desativado está revogada',
+          );
+        }
+
+        // 4. A renovação é recusada — e a linha da trilha diz que a recusa veio
+        //    da revogação, não do desvio pela conta inativa (`denied_inactive`).
+        await expectLater(
+          endpoints.auth.refreshSession(
+            sessionBuilder,
+            refreshToken: refreshToken!,
+            deviceId: aparelho,
+          ),
+          throwsA(isA<SessionExpiredException>()),
+        );
+        expect(await _auditorias(session, 'session_refresh', 'denied_revoked'), 1);
+        expect(await _auditorias(session, 'session_refresh', 'denied_inactive'), 0);
+
+        // 5. O envio diferido é recusado na resolução do token, antes do lote:
+        //    é o que impede o aparelho de um ACS desativado de subir visitas com
+        //    a autoria dele durante os 7 dias de validade do token.
+        await expectLater(
+          endpoints.visits.syncDeferred(
+            sessionBuilder,
+            uploadToken: uploadToken!,
+            deviceId: aparelho,
+            visits: [_visita()],
+          ),
+          throwsA(isA<SessionExpiredException>()),
+        );
+        expect(
+          await Visit.db.findFirstRow(
+            session,
+            where: (v) => v.localId.equals(
+              UuidValue.fromString(_visita().localId),
+            ),
+          ),
+          isNull,
+          reason: 'nada foi gravado',
+        );
+
+        // 6. E o login por senha recusa com a mensagem da conta inativa.
+        await expectLater(
+          endpoints.auth.loginInstitutional(
+            sessionBuilder,
+            matricula: _matriculaDesat,
+            password: _senha,
+            deviceId: aparelho,
+          ),
+          throwsA(
+            isA<AuthenticationFailedException>().having(
+              (e) => e.message,
+              'message',
+              'Este acesso está inativo.',
+            ),
+          ),
+        );
+
+        // 7. Reativar devolve o acesso por um LOGIN NOVO: os tokens revogados
+        //    não voltam à vida.
+        await endpoints.admin.setAcsActive(
+          sessionBuilder,
+          accessToken: _token(_admin, UserRole.admin),
+          acsId: _acsDesat,
+          active: true,
+        );
+        final novoLogin = await endpoints.auth.loginInstitutional(
+          sessionBuilder,
+          matricula: _matriculaDesat,
+          password: _senha,
+          deviceId: aparelho,
+        );
+        expect(novoLogin.accessToken, isNotEmpty);
+        expect(novoLogin.refreshToken, isNot(refreshToken));
+        await expectLater(
+          endpoints.auth.refreshSession(
+            sessionBuilder,
+            refreshToken: refreshToken,
+            deviceId: aparelho,
+          ),
+          throwsA(isA<SessionExpiredException>()),
+        );
+
+        expect(await _auditorias(session, 'admin_acs', 'deactivated'), 1);
+        expect(await _auditorias(session, 'admin_acs', 'activated'), 1);
+        expect(await _auditorias(session, 'admin_acs', 'denied'), 0);
       },
     );
   });

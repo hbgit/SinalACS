@@ -8,10 +8,19 @@ import 'package:sinalacs_server/src/infrastructure/database/subject_lock.dart';
 ///
 /// Mesmo arranjo de `OrmRefreshTokenStore`: o `Session` vem por chamada e só o
 /// SHA-256 do token chega aqui — o token em claro nunca é visto por este store.
+///
+/// Quando [transaction] é fornecida, todas as escritas participam dela — é o
+/// que permite a desativação (#43) revogar o envio diferido na mesma transação
+/// da flag do ACS.
 class OrmUploadTokenStore implements UploadTokenStore {
-  OrmUploadTokenStore({required Session Function() session}) : _session = session;
+  OrmUploadTokenStore({
+    required Session Function() session,
+    Transaction? transaction,
+  }) : _session = session,
+       _transaction = transaction;
 
   final Session Function() _session;
+  final Transaction? _transaction;
 
   /// Revoga o vigente do par e insere o novo numa transação serializada por
   /// (usuário, aparelho) com advisory lock: dois logins concorrentes do mesmo
@@ -20,7 +29,7 @@ class OrmUploadTokenStore implements UploadTokenStore {
   @override
   Future<void> replace(UploadTokenRecord record, String tokenHash) async {
     final session = _session();
-    await session.db.transaction((transaction) async {
+    await _naTransacao(session, (transaction) async {
       await lockPerSubject(
         session,
         transaction,
@@ -53,11 +62,24 @@ class OrmUploadTokenStore implements UploadTokenStore {
     });
   }
 
+  /// Executa [body] na transação do construtor, quando ela existe, e numa
+  /// transação nova do banco quando não existe — mesmo arranjo de
+  /// `OrmAlertStore.acknowledge`: a instância amarrada a uma transação nunca
+  /// abre uma segunda, que ficaria fora (e invisível para) a primeira.
+  Future<T> _naTransacao<T>(
+    Session session,
+    Future<T> Function(Transaction transaction) body,
+  ) {
+    final existente = _transaction;
+    return existente != null ? body(existente) : session.db.transaction(body);
+  }
+
   @override
   Future<UploadTokenRecord?> findByHash(String tokenHash) async {
     final row = await AcsUploadToken.db.findFirstRow(
       _session(),
       where: (t) => t.tokenHash.equals(tokenHash),
+      transaction: _transaction,
     );
     if (row == null) return null;
     return UploadTokenRecord(
@@ -76,6 +98,20 @@ class OrmUploadTokenStore implements UploadTokenStore {
       'UPDATE "acs_upload_tokens" SET "revokedAt" = @at '
       'WHERE "id" = @id::uuid AND "revokedAt" IS NULL;',
       parameters: QueryParameters.named({'at': at, 'id': id}),
+      transaction: _transaction,
+    );
+  }
+
+  /// Todos os tokens do usuário — a desativação da conta (#43). Um token
+  /// emitido na janela de uma desativação concorrente já nasce inutilizável:
+  /// `resolve` relê a conta a cada uso e, inativa, revoga e recusa.
+  @override
+  Future<void> revokeAllForUser(String userId, DateTime at) async {
+    await _session().db.unsafeExecute(
+      'UPDATE "acs_upload_tokens" SET "revokedAt" = @at '
+      'WHERE "userId" = @userId::uuid AND "revokedAt" IS NULL;',
+      parameters: QueryParameters.named({'at': at, 'userId': userId}),
+      transaction: _transaction,
     );
   }
 
@@ -85,9 +121,17 @@ class OrmUploadTokenStore implements UploadTokenStore {
   Future<RefreshAccount?> findAccount(String userId) async {
     final session = _session();
     final id = UuidValue.fromString(userId);
-    final acs = await Acs.db.findFirstRow(session, where: (t) => t.id.equals(id));
+    final acs = await Acs.db.findFirstRow(
+      session,
+      where: (t) => t.id.equals(id),
+      transaction: _transaction,
+    );
     if (acs == null) return null;
-    final user = await User.db.findFirstRow(session, where: (t) => t.id.equals(id));
+    final user = await User.db.findFirstRow(
+      session,
+      where: (t) => t.id.equals(id),
+      transaction: _transaction,
+    );
     if (user == null) return null;
     return RefreshAccount(active: acs.active, microAreaId: user.microAreaId?.uuid);
   }
@@ -98,6 +142,7 @@ class OrmUploadTokenStore implements UploadTokenStore {
       _session(),
       where: (t) =>
           t.userId.equals(UuidValue.fromString(userId)) & (t.expiresAt < before),
+      transaction: _transaction,
     );
   }
 }

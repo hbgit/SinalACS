@@ -72,10 +72,15 @@ class _Store implements AdminAccountStore {
   /// `WHERE` com o predicado de escopo fecha.
   bool corridaDeVinculo = false;
 
+  /// Mesma corrida de [corridaDeVinculo], para [setAcsActive].
+  bool corridaDeAtivacao = false;
+
   int insertAcsChamadas = 0;
   int setAcsMicroAreaChamadas = 0;
+  int setAcsActiveChamadas = 0;
   String? ultimaUbs;
   String? ultimaMicroArea;
+  bool? ultimoActive;
   PasswordDigest? ultimoDigest;
   DateTime? ultimoAt;
 
@@ -159,6 +164,25 @@ class _Store implements AdminAccountStore {
     );
     acs[acsId] = movido;
     return movido;
+  }
+
+  @override
+  Future<bool> setAcsActive({
+    required String acsId,
+    required AdminScope scope,
+    required bool active,
+    required DateTime at,
+  }) async {
+    _marca('setAcsActive', scope);
+    setAcsActiveChamadas++;
+    ultimoActive = active;
+    ultimoAt = at;
+    final encontrado = acs[acsId];
+    if (encontrado == null) return false;
+    if (scope.ubsId != null && encontrado.ubsId != scope.ubsId) return false;
+    if (corridaDeAtivacao) return false;
+    acs[acsId] = encontrado.copyWith(active: active);
+    return true;
   }
 
   @override
@@ -689,6 +713,152 @@ void main() {
         );
       }
       expect(store.chamadas, 0, reason: 'nem a microárea-alvo é consultada');
+      expect(audit.events, hasLength(3));
+      expect(
+        audit.events.map((e) => e.actionType),
+        everyElement('write'),
+        reason: 'a linha descreve a TENTATIVA de escrita, não uma leitura',
+      );
+      expect(audit.events.map((e) => e.result), everyElement('denied'));
+    });
+  });
+
+  group('setAcsActive', () {
+    test(
+      'desativar devolve a linha inativa e audita deactivated DEPOIS do commit',
+      () async {
+        final resultado = await servico.setAcsActive(
+          admin,
+          acsId: 'acs-a',
+          active: false,
+        );
+
+        expect(resultado.id, 'acs-a');
+        expect(resultado.active, isFalse);
+        expect(store.ultimoActive, isFalse);
+        expect(store.ultimoAt, DateTime.utc(2026, 10, 8, 12));
+        expect(store.ultimoEscopo!.ubsId, isNull, reason: 'escopo do administrador');
+
+        expect(
+          _ordem,
+          [
+            'store:acsById',
+            'store:setAcsActive',
+            'store:acsById',
+            'audit:write:admin_acs:deactivated',
+          ],
+          reason: 'a linha de sucesso entra DEPOIS do commit, e a releitura é do serviço',
+        );
+        final linha = audit.events.single;
+        expect(linha.userId, 'admin-1');
+        expect(linha.actionType, 'write');
+        expect(linha.resourceType, 'admin_acs');
+        expect(linha.result, 'deactivated');
+        expect(linha.resourceId, 'acs-a');
+      },
+    );
+
+    test('coordenador desativa o ACS da própria UBS no escopo de UBS', () async {
+      final resultado = await servico.setAcsActive(
+        coordA,
+        acsId: 'acs-a',
+        active: false,
+      );
+
+      expect(store.ultimoEscopo!.ubsId, _ubsDoCoordenador);
+      expect(resultado.active, isFalse);
+      expect(audit.events.single.result, 'deactivated');
+      expect(audit.events.single.resourceId, 'acs-a');
+    });
+
+    test(
+      'reativar audita activated e devolve a linha ativa de novo',
+      () async {
+        await servico.setAcsActive(admin, acsId: 'acs-a', active: false);
+        final resultado = await servico.setAcsActive(
+          admin,
+          acsId: 'acs-a',
+          active: true,
+        );
+
+        expect(resultado.active, isTrue);
+        expect(store.ultimoActive, isTrue);
+        expect(
+          audit.events.map((e) => e.result),
+          ['deactivated', 'activated'],
+          reason: 'cada pedido do operador vira uma linha, com o desfecho do pedido',
+        );
+        expect(audit.events.map((e) => e.resourceId), everyElement('acs-a'));
+      },
+    );
+
+    test('desativar um ACS já inativo é idempotente e audita uma linha nova', () async {
+      final primeira = await servico.setAcsActive(admin, acsId: 'acs-a', active: false);
+      final segunda = await servico.setAcsActive(admin, acsId: 'acs-a', active: false);
+
+      expect(primeira.active, isFalse);
+      expect(segunda.active, isFalse);
+      expect(store.setAcsActiveChamadas, 2, reason: 'o segundo pedido também escreve');
+      expect(
+        audit.events.map((e) => e.result),
+        ['deactivated', 'deactivated'],
+        reason: 'idempotente não é silencioso: a trilha registra os dois pedidos',
+      );
+    });
+
+    test('ACS inexistente e ACS de outra UBS → mesma recusa auditada, nada escrito', () async {
+      final casos = <(AuthenticatedUser, String)>[
+        (admin, 'acs-inexistente'),
+        // ACS da outra UBS: o coordenador não descobre território alheio.
+        (coordA, 'acs-b'),
+      ];
+      for (final (operador, acsId) in casos) {
+        await expectLater(
+          servico.setAcsActive(operador, acsId: acsId, active: false),
+          throwsA(
+            isA<AdminInvalidRequestException>().having(
+              (e) => e.message,
+              'message',
+              'ACS não encontrado.',
+            ),
+          ),
+        );
+      }
+      expect(store.setAcsActiveChamadas, 0, reason: 'nada é escrito');
+      expect(audit.events, hasLength(casos.length));
+      expect(audit.events.map((e) => e.actionType), everyElement('write'));
+      expect(audit.events.map((e) => e.result), everyElement('denied'));
+    });
+
+    test('corrida: o ACS sai do escopo entre a pré-checagem e o UPDATE → mesma recusa', () async {
+      store.corridaDeAtivacao = true;
+      await expectLater(
+        servico.setAcsActive(coordA, acsId: 'acs-a', active: false),
+        throwsA(
+          isA<AdminInvalidRequestException>().having(
+            (e) => e.message,
+            'message',
+            'ACS não encontrado.',
+          ),
+        ),
+      );
+      expect(store.setAcsActiveChamadas, 1);
+      expect(audit.events.single.actionType, 'write');
+      expect(audit.events.single.result, 'denied');
+    });
+
+    test('papel fora do backoffice e coordenador sem UBS recebem recusa auditada', () async {
+      for (final usuario in [
+        _u('u-acs', UserRole.acs),
+        _u('u-paciente', UserRole.patient),
+        coordSemUbs,
+      ]) {
+        await expectLater(
+          servico.setAcsActive(usuario, acsId: 'acs-a', active: false),
+          throwsA(isA<AlertPermissionException>()),
+        );
+      }
+      expect(store.chamadas, 0, reason: 'nem o alvo é lido');
       expect(audit.events, hasLength(3));
       expect(
         audit.events.map((e) => e.actionType),
