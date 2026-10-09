@@ -85,10 +85,23 @@ void esperarSemEstouroDeLayout(WidgetTester tester, String contexto) {
 /// Rola a tela até o fim, checando estouro a cada passo.
 ///
 /// Sem isso só a primeira dobra seria coberta — ver armadilha 2 no topo.
+///
+/// "Até o fim" e não um número fixo de arrastos: a lista é preguiçosa e o
+/// `maxScrollExtent` inicial é só uma estimativa sobre os filhos já construídos,
+/// então o número de passos que bastava a uma tela curta fica curto assim que a
+/// tela cresce. Na gestão de contas (#43) a tela Microáreas passou a ter ~5150dp
+/// de rolagem a 200% de fonte em 360x800 — o teto de 8 (≈2400dp) e um teto de 12
+/// que eu pus na primeira tentativa paravam bem antes do rodapé da seção de
+/// Equipe, e a roda parava de ser checada sem que nenhum teste ficasse vermelho.
+/// O teto agora é só uma trava contra laço infinito.
 Future<void> percorrerTelaInteira(WidgetTester tester, String contexto) async {
   esperarSemEstouroDeLayout(tester, '$contexto (topo)');
   final lista = find.byType(Scrollable).last;
-  for (var passo = 1; passo <= 8; passo++) {
+  var anterior = -1.0;
+  for (var passo = 1; passo <= 30; passo++) {
+    final posicao = tester.state<ScrollableState>(lista).position;
+    if (posicao.pixels >= posicao.maxScrollExtent || posicao.pixels == anterior) return;
+    anterior = posicao.pixels;
     await tester.drag(lista, const Offset(0, -320));
     await tester.pumpAndSettle();
     esperarSemEstouroDeLayout(tester, '$contexto (rolagem $passo)');
