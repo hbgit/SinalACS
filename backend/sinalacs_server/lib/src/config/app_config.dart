@@ -23,6 +23,9 @@ class AppConfig {
     required this.enableDevLogin,
     this.requireAcsMfa = false,
     this.gorushUrl,
+    this.retentionAlertDays = defaultRetentionAlertDays,
+    this.retentionVisitDays = defaultRetentionVisitDays,
+    this.retentionTriageDays = defaultRetentionTriageDays,
   });
 
   final String mqttBroker;
@@ -102,6 +105,15 @@ class AppConfig {
   /// `false` só para as configurações montadas à mão nos testes.
   final bool requireAcsMfa;
 
+  /// Prazos de retenção do expurgo LGPD-RF07, em dias — `RETENTION_ALERT_DAYS`,
+  /// `RETENTION_VISIT_DAYS`, `RETENTION_TRIAGE_DAYS`. Opcionais: os defaults
+  /// são a tabela de retenção de spec/lgpd_design.md §5.6 (alertas 2 anos,
+  /// visitas e triagens 5 anos). Só inteiro positivo com teto sanitário de
+  /// 36500 dias: um valor errado aqui apaga dados reais de forma irreversível.
+  final int retentionAlertDays;
+  final int retentionVisitDays;
+  final int retentionTriageDays;
+
   bool get isProduction => appEnv == 'production';
 
   /// Segredo usado quando `JWT_SECRET` não é informado em desenvolvimento.
@@ -133,6 +145,11 @@ class AppConfig {
   /// Pepper de desenvolvimento. Público, como os outros fallbacks — e por isso
   /// restrito a `development` por [_resolveSecret].
   static const developmentCpfHashPepper = 'development-cpf-hash-pepper';
+
+  /// Defaults da política de retenção (spec/lgpd_design.md §5.6).
+  static const defaultRetentionAlertDays = 730; // 2 anos
+  static const defaultRetentionVisitDays = 1825; // 5 anos
+  static const defaultRetentionTriageDays = 1825; // 5 anos
 
   static const _knownSmsGateways = {'log'};
 
@@ -239,7 +256,42 @@ class AppConfig {
         appEnv: appEnv,
       ),
       gorushUrl: _resolveGorushUrl(environment['GORUSH_URL']),
+      retentionAlertDays: _resolveRetentionDays(
+        environment['RETENTION_ALERT_DAYS'],
+        fallback: defaultRetentionAlertDays,
+        envVarName: 'RETENTION_ALERT_DAYS',
+      ),
+      retentionVisitDays: _resolveRetentionDays(
+        environment['RETENTION_VISIT_DAYS'],
+        fallback: defaultRetentionVisitDays,
+        envVarName: 'RETENTION_VISIT_DAYS',
+      ),
+      retentionTriageDays: _resolveRetentionDays(
+        environment['RETENTION_TRIAGE_DAYS'],
+        fallback: defaultRetentionTriageDays,
+        envVarName: 'RETENTION_TRIAGE_DAYS',
+      ),
     );
+  }
+
+  /// Inteiro positivo de dias, com teto sanitário de 36500 (100 anos) — um
+  /// `RETENTION_*_DAYS` malformado ou absurdo falha no boot em vez de apagar
+  /// mais do que a política manda.
+  static int _resolveRetentionDays(
+    String? value, {
+    required int fallback,
+    required String envVarName,
+  }) {
+    final raw = value?.trim() ?? '';
+    if (raw.isEmpty) return fallback;
+    final days = int.tryParse(raw);
+    if (days == null || days <= 0 || days > 36500) {
+      throw StateError(
+        '$envVarName inválido ("$value"): use um inteiro positivo de dias '
+        '(1 a 36500).',
+      );
+    }
+    return days;
   }
 
   /// Com a variável presente, só a string exata `true` liga (mesma regra de
