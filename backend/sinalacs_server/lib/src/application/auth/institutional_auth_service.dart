@@ -37,6 +37,19 @@ abstract interface class TotpStore {
   /// avançou; `false` = outra requisição já gravou este passo (ou um maior):
   /// o código é um replay e a sessão **não** pode ser emitida.
   Future<bool> registerStep(String acsId, int step);
+
+  /// Apaga o estado da MFA da conta — as **quatro** colunas `totp*` voltam a
+  /// NULL — e carimba `updatedAt` com [at]. É a redefinição pela coordenação
+  /// (issue #43): o caminho que a recusa "Peça a redefinição à coordenação"
+  /// não tinha.
+  ///
+  /// As quatro juntas, numa instrução: apagar só o segredo deixaria
+  /// `totpEnabledAt` para trás e a conta continuaria com MFA **ativa**
+  /// apontando para um segredo que não existe (o login passaria a exigir um
+  /// código que ninguém consegue gerar); apagar só a ativação deixaria um
+  /// segredo órfão na linha. Nenhuma política mora aqui: como nas outras
+  /// escritas do estado, quem decide *quando* redefinir é o serviço.
+  Future<void> clearTotp(String acsId, DateTime at);
 }
 
 /// Código de ativação vigente de uma conta de staff (#48).

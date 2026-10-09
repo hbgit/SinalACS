@@ -36,6 +36,7 @@ Future<void> main(List<String> args) async {
   final fixtures = generateE2eFixtures(Random.secure());
   final acsDigest = await const Argon2PasswordHasher().derive(fixtures.acs.password);
   final staffDigest = await const Argon2PasswordHasher().derive(fixtures.staff.password);
+  final coordinatorDigest = await const Argon2PasswordHasher().derive(fixtures.coordinator.password);
   final secondAcsDigest = await const Argon2PasswordHasher().derive(fixtures.secondAcs.password);
 
   final connection = await Connection.open(
@@ -157,6 +158,30 @@ Future<void> main(List<String> args) async {
       await alerta(fixtures.adminAlertIds[1], 'red', 'acknowledged', reconhecidoEmSegundos: 60);
       await alerta(fixtures.adminAlertIds[2], 'green', 'pending');
       }
+      // Pedidos do titular (#42), OPT-IN (`E2E_SEED_DATA_REQUESTS=1`, só por
+      // `admin_titular_e2e.sh`): uma correção JÁ VENCIDA (paciente `main`) e uma
+      // exclusão no prazo (paciente `chronic`, com um token de push para provar a
+      // limpeza). Os textos são sintéticos e o e2e procura por eles no log.
+      if (env['E2E_SEED_DATA_REQUESTS'] == '1') {
+        Future<void> pedido(String userId, String tipo, String texto, {required int criadoHaDias, required int prazoEmDias}) async {
+          final cifrado = await cipher.encryptJson(texto);
+          await tx.execute(
+            Sql.named('INSERT INTO "data_subject_requests" ("userId","requestType","detailsEncrypted","detailsKeyVersion",'
+                '"status","createdAt","dueAt") VALUES (@u,@t,@c,@v,\'open\','
+                "NOW() - (@criado::int * interval '1 day'), NOW() + (@prazo::int * interval '1 day'))"),
+            parameters: {'u': userId, 't': tipo, 'c': cifrado.ciphertextBase64, 'v': cifrado.keyVersion, 'criado': criadoHaDias, 'prazo': prazoEmDias},
+          );
+        }
+        await pedido(fixtures.byRole('main').id, 'correction', 'E2E-CORRECAO telefone de contato desatualizado',
+            criadoHaDias: 20, prazoEmDias: -5);
+        await pedido(fixtures.byRole('chronic').id, 'deletion', 'E2E-EXCLUSAO pedido do titular',
+            criadoHaDias: 1, prazoEmDias: 14);
+        await tx.execute(
+          Sql.named('INSERT INTO "push_tokens" ("userId","token","platform","createdAt","updatedAt") '
+              "VALUES (@u,@tok,'android',NOW(),NOW())"),
+          parameters: {'u': fixtures.byRole('chronic').id, 'tok': 'e2e-push-${fixtures.byRole('chronic').id}'},
+        );
+      }
       // Código de ativação (#48): só o hash vai ao banco; o claro segue no manifesto.
       await tx.execute(
         Sql.named('UPDATE "staff_accounts" SET "activationCodeHash"=@h, "activationCodeExpiresAt"=@e, '
@@ -179,6 +204,43 @@ Future<void> main(List<String> args) async {
           'parallelism': staffDigest.parallelism,
         },
       );
+      // Coordenador do backoffice (issue #43): o MESMO arranjo do administrador
+      // — `users` + `staff_accounts` + código de ativação + credencial Argon2id,
+      // sem TOTP —, com duas diferenças: o papel é `coordinator` e o
+      // `staff_accounts."ubsId"` está preenchido com a UBS destas fixtures. É o
+      // que dá escopo ao papel no e2e: o coordenador vê os ACS da UBS (as duas
+      // microáreas são dela) e não vê a equipe do backoffice.
+      final coordinator = fixtures.coordinator;
+      await tx.execute(
+        Sql.named('INSERT INTO "users" ("id","cpfHash","name","birthDate","role","microAreaId","createdAt","updatedAt") '
+            "VALUES (@id,@hash,'Coordenador E2E','1985-01-01','coordinator',NULL,NOW(),NOW())"),
+        parameters: {'id': coordinator.id, 'hash': 'e2e-coordinator-${coordinator.id}'},
+      );
+      await tx.execute(
+        Sql.named('INSERT INTO "staff_accounts" ("id","enrollmentId","active","ubsId") VALUES (@id,@matricula,true,@ubs)'),
+        parameters: {'id': coordinator.id, 'matricula': coordinator.matricula, 'ubs': fixtures.ubsId},
+      );
+      await tx.execute(
+        Sql.named('UPDATE "staff_accounts" SET "activationCodeHash"=@h, "activationCodeExpiresAt"=@e, '
+            '"activationCodeIssuedBy"=\'e2e\', "activationCodeIssuedAt"=NOW() WHERE "id"=@id'),
+        parameters: {
+          'id': coordinator.id,
+          'h': StaffActivationCode.hash(coordinator.activationCode),
+          'e': DateTime.now().toUtc().add(StaffActivationCode.defaultValidity),
+        },
+      );
+      await tx.execute(
+        Sql.named('INSERT INTO "user_credentials" ("userId","passwordHash","passwordSalt","memoryKb","iterations","parallelism","failedAttempts","createdAt","updatedAt") '
+            'VALUES (@userId,@hash,@salt,@memoryKb,@iterations,@parallelism,0,NOW(),NOW())'),
+        parameters: {
+          'userId': coordinator.id,
+          'hash': coordinatorDigest.hashBase64,
+          'salt': coordinatorDigest.saltBase64,
+          'memoryKb': coordinatorDigest.memoryKb,
+          'iterations': coordinatorDigest.iterations,
+          'parallelism': coordinatorDigest.parallelism,
+        },
+      );
     });
   } finally {
     await connection.close();
@@ -186,5 +248,6 @@ Future<void> main(List<String> args) async {
 
   final out = File(args.isNotEmpty ? args.first : '.e2e/fixtures.json');
   writeManifestPrivately(out, jsonEncode(fixtures.toJson()));
-  stdout.writeln('Fixtures de e2e gravadas (${fixtures.patients.length} pacientes, 2 ACS, 1 admin) em ${out.path}.');
+  stdout.writeln('Fixtures de e2e gravadas (${fixtures.patients.length} pacientes, 2 ACS, 1 admin, 1 coordenador) '
+      'em ${out.path}.');
 }

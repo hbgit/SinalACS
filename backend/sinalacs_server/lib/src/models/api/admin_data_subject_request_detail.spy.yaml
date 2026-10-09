@@ -1,0 +1,14 @@
+### Detalhe de um pedido do titular. `details` e `resolution` são decifrados
+### só aqui (nunca na lista) e a leitura é auditada antes do dado.
+class: AdminDataSubjectRequestDetail
+fields:
+  id: String
+  type: DataSubjectRequestType
+  status: DataSubjectRequestStatus
+  createdAt: DateTime
+  dueAt: DateTime
+  overdue: bool
+  patientLabel: String
+  details: String?
+  resolution: String?
+  decidedAt: DateTime?

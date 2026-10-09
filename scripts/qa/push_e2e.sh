@@ -112,8 +112,9 @@ if [[ "$e2e_db" -eq 1 ]]; then
   export ACS_MATRICULA ACS_PASSWORD E2E_FIXTURES_FILE="$repo_root/.e2e/fixtures.json"
   ACS_MATRICULA="$(python3 -c "import json;print(json.load(open('.e2e/fixtures.json'))['acs']['matricula'])")"
   ACS_PASSWORD="$(python3 -c "import json;print(json.load(open('.e2e/fixtures.json'))['acs']['password'])")"
-  # Sem o bloco `acs`: a senha do ACS vai por ambiente, nunca pelo argv do flutter test.
-  e2e_fixtures="$(python3 -c "import json,sys;d=json.load(open('.e2e/fixtures.json'));d.pop('acs',None);d.pop('acsB',None);d.pop('staff',None);print(json.dumps(d))")"
+  # Sem os blocos de credencial (`acs`, `acsB`, `staff`, `coordinator`): as senhas vão
+  # por ambiente, nunca pelo argv do flutter test.
+  e2e_fixtures="$(python3 -c "import json,sys;d=json.load(open('.e2e/fixtures.json'));d.pop('acs',None);d.pop('acsB',None);d.pop('staff',None);d.pop('coordinator',None);print(json.dumps(d))")"
 else
   echo "== stack com o perfil push"
   docker compose --profile push up -d --build >/dev/null 2>&1

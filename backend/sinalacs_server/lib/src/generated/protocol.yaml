@@ -3,6 +3,19 @@ admin:
   - microAreas:
   - alerts:
   - auditLogs:
+  - dataSubjectRequests:
+  - dataSubjectRequest:
+  - startDataSubjectReview:
+  - completeDataSubjectRequest:
+  - rejectDataSubjectRequest:
+  - acs:
+  - staff:
+  - createAcs:
+  - setAcsMicroArea:
+  - setAcsActive:
+  - resetAcsPassword:
+  - resetAcsMfa:
+  - resetStaffMfa:
 alerts:
   - createRedAlert:
   - acknowledge:

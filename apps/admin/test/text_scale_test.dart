@@ -19,6 +19,15 @@ void main() {
     });
   }
 
+  for (final largura in const [360.0, 320.0]) {
+    testWidgets('detalhe de pedido do titular não estoura com fonte a 200% em ${largura.toInt()}dp', (tester) async {
+      await abrirBackoffice(tester, tamanho: Size(largura, 800), escalaDeFonte: 2.0);
+      await irPara(tester, 'Pedidos do titular');
+      await abrirPedidoDoTitular(tester, 'req-a18f');
+      await percorrerTelaInteira(tester, 'detalhe do pedido (${largura.toInt()}dp, 200%)', lista: rolagemDosPedidos());
+    });
+  }
+
   testWidgets('o cabeçalho cresce quando a escala de fonte aumenta em tempo de execução', (tester) async {
     // Mudar a escala com o app aberto é o caso real: no Android a preferência
     // de tamanho de fonte muda em Configurações, com o app já em segundo plano.

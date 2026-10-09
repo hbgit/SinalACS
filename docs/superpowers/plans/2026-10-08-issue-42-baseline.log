@@ -1,0 +1,16 @@
+Linha de base da #42 (2026-10-08, branch feat/admin-pedidos-titular-42)
+
+Passo 1 - nada de atendimento hoje
+  grep DataSubjectRequestStatus.(completed|rejected) em lib/src (sem generated): vazio
+  grep dataSubject em endpoints/admin_endpoint.dart: vazio
+
+Passo 2 - suites
+  backend: dart analyze -> 55 issues, todas info (0 error, 0 warning), pre-existentes
+  backend: dart test test/unit -> +499 All tests passed
+  apps/admin: flutter analyze -> No issues; flutter test -> +126 All tests passed
+  apps/patient: flutter analyze -> No issues; flutter test -> +255 All tests passed
+
+Passo 3 - emulador
+  adb devices: emulator-5554 device
+  scripts/qa/admin_login_e2e.sh -> +5 All tests passed; OK login real do backoffice
+  docker compose up -d executado ao final para restaurar a stack de dev

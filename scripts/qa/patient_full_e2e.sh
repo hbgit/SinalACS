@@ -69,9 +69,9 @@ adb -s "$dev" reverse tcp:8443 tcp:443 >/dev/null
 adb -s "$dev" reverse tcp:8765 tcp:8765 >/dev/null
 iniciar_rele
 
-# Sem o bloco `acs`: a senha do ACS vai por ambiente, nunca pelo argv do flutter test
-# (visível em `ps`) nem compilada no APK.
-fixtures="$(python3 -c "import json,sys;d=json.load(open('.e2e/fixtures.json'));d.pop('acs',None);d.pop('acsB',None);d.pop('staff',None);print(json.dumps(d))")"
+# Sem os blocos de credencial (`acs`, `acsB`, `staff`, `coordinator`): as senhas vão
+# por ambiente, nunca pelo argv do flutter test (visível em `ps`) nem compiladas no APK.
+fixtures="$(python3 -c "import json,sys;d=json.load(open('.e2e/fixtures.json'));d.pop('acs',None);d.pop('acsB',None);d.pop('staff',None);d.pop('coordinator',None);print(json.dumps(d))")"
 echo "== jornada e conexão no emulador"
 ( cd apps/patient && flutter test integration_test/full_journey_test.dart integration_test/backend_connection_test.dart \
     -d "$dev" --dart-define=SINALACS_HOST=https://localhost:8443/ --dart-define=E2E_FIXTURES="$fixtures" )

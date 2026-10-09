@@ -1184,6 +1184,76 @@ void main() {
       expect(find.textContaining('resposta até 16/09/2026'), findsOneWidget);
     });
 
+    PatientDataSubjectRequestRecord decided(
+      DataSubjectRequestType type,
+      DataSubjectRequestStatus status, {
+      String? resolution,
+    }) =>
+        PatientDataSubjectRequestRecord(
+          type: type,
+          status: status,
+          createdAt: DateTime.utc(2026, 9, 1, 12),
+          dueAt: DateTime.utc(2026, 9, 16, 12),
+          resolution: resolution,
+        );
+
+    testWidgets('titular: pedido em análise mostra "Em análise" e não duplica a exclusão', (tester) async {
+      final backend = FakePatientBackend()
+        ..myDataResult = overview(
+          requests: [decided(DataSubjectRequestType.deletion, DataSubjectRequestStatus.inReview)],
+        );
+      await pumpMyData(tester, backend);
+
+      expect(find.textContaining('Exclusão dos dados · Em análise'), findsOneWidget);
+      expect(outlined(tester, 'request_deletion_button').onPressed, isNull);
+      expect(find.text('Exclusão já solicitada — em análise'), findsOneWidget);
+    });
+
+    testWidgets('titular: pedido atendido mostra a nota da resposta', (tester) async {
+      final backend = FakePatientBackend()
+        ..myDataResult = overview(
+          requests: [
+            decided(
+              DataSubjectRequestType.correction,
+              DataSubjectRequestStatus.completed,
+              resolution: 'Telefone corrigido conforme solicitado.',
+            ),
+          ],
+        );
+      await pumpMyData(tester, backend);
+
+      expect(find.textContaining('Correção de dados · Atendido'), findsOneWidget);
+      expect(find.textContaining('Telefone corrigido conforme solicitado.'), findsOneWidget);
+    });
+
+    testWidgets('titular: pedido recusado mostra o motivo', (tester) async {
+      final backend = FakePatientBackend()
+        ..myDataResult = overview(
+          requests: [
+            decided(
+              DataSubjectRequestType.correction,
+              DataSubjectRequestStatus.rejected,
+              resolution: 'Dado já está correto no cadastro.',
+            ),
+          ],
+        );
+      await pumpMyData(tester, backend);
+
+      expect(find.textContaining('Correção de dados · Recusado'), findsOneWidget);
+      expect(find.textContaining('Dado já está correto no cadastro.'), findsOneWidget);
+    });
+
+    testWidgets('titular: exclusão já atendida libera novo pedido e sem nota não mostra linha de resposta', (tester) async {
+      final backend = FakePatientBackend()
+        ..myDataResult = overview(
+          requests: [decided(DataSubjectRequestType.deletion, DataSubjectRequestStatus.rejected)],
+        );
+      await pumpMyData(tester, backend);
+
+      expect(outlined(tester, 'request_deletion_button').onPressed, isNotNull);
+      expect(find.textContaining('Resposta:'), findsNothing);
+    });
+
     testWidgets('correção: só envia com texto de verdade, e sem os espaços das pontas', (tester) async {
       final backend = FakePatientBackend()..myDataResult = overview();
       await pumpMyData(tester, backend);

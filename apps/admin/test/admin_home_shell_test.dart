@@ -28,7 +28,7 @@ void main() {
     expect(find.byKey(const Key('admin_navigation_rail')), findsNothing);
   });
 
-  testWidgets('navega entre os quatro destinos do backoffice', (tester) async {
+  testWidgets('navega entre os cinco destinos do backoffice', (tester) async {
     await _login(tester);
 
     await tester.tap(find.text('Microáreas').last);
@@ -42,5 +42,9 @@ void main() {
     await tester.tap(find.text('Auditoria').last);
     await tester.pumpAndSettle();
     expect(find.text('Logs de auditoria'), findsOneWidget);
+
+    await tester.tap(find.text('Pedidos do titular').last);
+    await tester.pumpAndSettle();
+    expect(find.text('Pedidos do titular (LGPD)'), findsOneWidget);
   });
 }

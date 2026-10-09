@@ -58,6 +58,17 @@ class AcsTest(unittest.TestCase):
         # só o staff tem código de ativação: a resposta do ACS não muda de formato
         self.assertEqual(acs_do_manifesto(f.name, "acs"), {"matricula": "E2E-1", "senha": "a"})
 
+    def test_coordenador_devolve_tambem_o_codigo_de_ativacao(self):
+        import json, tempfile
+        from otp_relay import acs_do_manifesto
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+            json.dump({"coordinator": {"id": "uuid", "matricula": "E2E-COORD-1", "password": "c",
+                                       "activationCode": "IJKL-MNOP"}}, f)
+        # A MFA do staff é obrigatória e é ativada pela tela: sem o código, o
+        # login do coordenador não passa da primeira etapa.
+        self.assertEqual(acs_do_manifesto(f.name, "coordinator"),
+                         {"matricula": "E2E-COORD-1", "senha": "c", "activationCode": "IJKL-MNOP"})
+
     def test_sem_arquivo_nao_serve_nada(self):
         from otp_relay import acs_do_manifesto
         self.assertIsNone(acs_do_manifesto(None))
@@ -80,13 +91,16 @@ class AcsEntregaUnicaTest(unittest.TestCase):
         arquivo = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False)
         json.dump({"acs": {"matricula": "E2E-1", "password": "s"},
                    "acsB": {"matricula": "E2E-2", "password": "t"},
-                   "staff": {"matricula": "E2E-ADM-1", "password": "u"}}, arquivo)
+                   "staff": {"matricula": "E2E-ADM-1", "password": "u"},
+                   "coordinator": {"matricula": "E2E-COORD-1", "password": "c",
+                                   "activationCode": "IJKL-MNOP"}}, arquivo)
         arquivo.close()
         self.caminho = arquivo.name
         os.environ["E2E_FIXTURES_FILE"] = self.caminho
         otp_relay.Handler.acs_entregue = False
         otp_relay.Handler.acs_b_entregue = False
         otp_relay.Handler.admin_entregue = False
+        otp_relay.Handler.coordenador_entregue = False
         self.servidor = HTTPServer(("127.0.0.1", 0), otp_relay.Handler)
         otp_relay.Handler.porta = self.servidor.server_address[1]
         threading.Thread(target=self.servidor.serve_forever, daemon=True).start()
@@ -102,6 +116,7 @@ class AcsEntregaUnicaTest(unittest.TestCase):
         self.otp_relay.Handler.acs_entregue = False
         self.otp_relay.Handler.acs_b_entregue = False
         self.otp_relay.Handler.admin_entregue = False
+        self.otp_relay.Handler.coordenador_entregue = False
 
     def _get(self, rota="/acs"):
         import urllib.error
@@ -133,6 +148,29 @@ class AcsEntregaUnicaTest(unittest.TestCase):
         with open(self.caminho, "w") as f:
             json.dump({"acs": {"matricula": "E2E-1", "password": "s"}}, f)
         self.assertEqual(self._get("/admin"), 404)
+
+    def test_coordenador_serve_uma_vez_e_independe_do_admin(self):
+        self.assertEqual(self._get("/coordenador"), 200)
+        self.assertEqual(self._get("/coordenador"), 404)
+        # Consumir a rota do coordenador não gasta a do administrador (e vice-versa).
+        self.assertEqual(self._get("/admin"), 200)
+
+    def test_coordenador_devolve_a_credencial_do_manifesto(self):
+        import json
+        import urllib.request
+
+        url = f"http://127.0.0.1:{self.servidor.server_address[1]}/coordenador"
+        with urllib.request.urlopen(url) as resposta:
+            corpo = json.loads(resposta.read().decode())
+        # A mesma forma de `/admin`, com o código de ativação: sem ele não há
+        # como ativar a MFA do staff pela tela, que é o primeiro passo do e2e.
+        self.assertEqual(corpo, {"matricula": "E2E-COORD-1", "senha": "c", "activationCode": "IJKL-MNOP"})
+
+    def test_coordenador_sem_bloco_no_manifesto_e_404(self):
+        import json
+        with open(self.caminho, "w") as f:
+            json.dump({"acs": {"matricula": "E2E-1", "password": "s"}}, f)
+        self.assertEqual(self._get("/coordenador"), 404)
 
 
 if __name__ == "__main__":
