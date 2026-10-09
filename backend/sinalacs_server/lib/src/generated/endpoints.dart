@@ -394,6 +394,31 @@ class Endpoints extends _i1.EndpointDispatch {
                 acsId: params['acsId'],
               ),
         ),
+        'resetStaffMfa': _i1.MethodConnector(
+          name: 'resetStaffMfa',
+          params: {
+            'accessToken': _i1.ParameterDescription(
+              name: 'accessToken',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'staffId': _i1.ParameterDescription(
+              name: 'staffId',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async =>
+                  (endpoints['admin'] as _i2.AdminEndpoint).resetStaffMfa(
+                    session,
+                    accessToken: params['accessToken'],
+                    staffId: params['staffId'],
+                  ),
+        ),
       },
     );
     connectors['alerts'] = _i1.EndpointConnector(

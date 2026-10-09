@@ -6,6 +6,7 @@ import 'package:sinalacs_server/src/application/audit/audit_trail.dart';
 import 'package:sinalacs_server/src/application/auth/development_auth_service.dart';
 import 'package:sinalacs_server/src/application/auth/institutional_auth_service.dart';
 import 'package:sinalacs_server/src/application/auth/password_hasher.dart';
+import 'package:sinalacs_server/src/application/auth/staff_activation_code.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
 
 // A `AdminScope`/`AdminScopeStore` vêm com o serviço: quem implementa o store
@@ -102,6 +103,35 @@ abstract interface class AdminAccountStore implements AdminScopeStore {
     required String acsId,
     required AdminScope scope,
     required bool active,
+    required DateTime at,
+  });
+
+  /// Zera a MFA da conta de equipe [staffId] **e** emite o código de ativação
+  /// novo numa **única transação**, devolvendo `true` quando alguma linha foi
+  /// alcançada.
+  ///
+  /// As duas escritas são um só estado: a conta que perdeu a MFA sem código
+  /// nenhum fica trancada fora (o login do staff **sempre** exige MFA, e sem
+  /// segredo gravado `beginStaffTotpEnrollment` não tem como ativar), e um
+  /// código emitido sobre uma MFA ainda viva seria um segundo caminho de
+  /// ativação concorrente com o autenticador que a pessoa já tem. Ou as duas
+  /// valem, ou nenhuma aconteceu.
+  ///
+  /// [codeHash] já chega derivado ([StaffActivationCode.hash]) e [issuedBy] é o
+  /// UUID do ator — este store não vê o código em claro nem conhece quem o
+  /// sorteou.
+  ///
+  /// `false` = nada foi escrito: o id não é UUID, não existe linha em
+  /// `staff_accounts` ou a conta está inativa. A checagem é a da própria
+  /// transação (existência **e** `active` na leitura de dentro dela), e não a
+  /// pré-checagem do serviço: entre uma e outra cabe a desativação de outra
+  /// requisição, e um código emitido para uma conta desativada seria uma
+  /// credencial de ativação viva para quem não pode entrar.
+  Future<bool> resetStaffMfa({
+    required String staffId,
+    required String codeHash,
+    required DateTime expiresAt,
+    required String issuedBy,
     required DateTime at,
   });
 }
@@ -453,6 +483,76 @@ class AdminAccountService {
 
     await totpStore.clearTotp(acs.id, _clock().toUtc());
     await _auditar(user, recurso, result: 'mfa_reset', resourceId: acs.id);
+  }
+
+  /// Redefine a MFA de uma conta de equipe e emite o código de ativação novo,
+  /// que existe **só** nesta resposta — é o deferimento da #48: até aqui só a
+  /// CLI de operador emitia, e a emissão não entrava em `audit_logs`.
+  ///
+  /// **Só o administrador**, e **nunca a própria conta**: uma conta que
+  /// redefine a própria MFA não tem segundo fator nenhum no intervalo (o
+  /// código novo é mostrado na mesma tela em que se acabou de entrar) — quem
+  /// perdeu o autenticador pede a outro administrador. A recusa da própria
+  /// conta é do chamador sobre si mesmo, e por isso vem **antes** de o alvo ser
+  /// lido.
+  ///
+  /// Conta inexistente e conta inativa recebem a **mesma** mensagem: separá-las
+  /// diria quem existe (e está desativado) a quem tentou. A pré-checagem é para
+  /// a resposta limpa do caso comum; quem decide de verdade é o `WHERE` da
+  /// transação do store, que repete existência e `active` — um `false` de lá
+  /// cai na mesma recusa, e nada fica gravado (nem a MFA zerada).
+  ///
+  /// A ordem é a das outras operações de escrita: papel (recusa auditada),
+  /// entrada do chamador, alvo — e só então o sorteio, que é barato, mas não
+  /// deve acontecer para um pedido que já vai ser recusado.
+  ///
+  /// O [AdminStaffMfaResetResult.activationCode] devolvido **não** é guardado em
+  /// lugar nenhum em claro: a coluna recebe o SHA-256
+  /// ([StaffActivationCode.hash]) e a validade é a de
+  /// [StaffActivationCode.defaultValidity] contada do relógio do serviço.
+  /// [StaffActivationCode.matches] é o que o login usa para conferir o código
+  /// que a pessoa digitar. A linha de auditoria registra o **pedido** com o id
+  /// do alvo (`mfa_reset`), depois do commit: é a primeira vez que uma emissão
+  /// de código de ativação entra na trilha encadeada.
+  Future<AdminStaffMfaResetResult> resetStaffMfa(
+    AuthenticatedUser user, {
+    required String staffId,
+  }) async {
+    const recurso = 'admin_staff';
+    await _resolver.requireAdmin(user, recurso: recurso, actionType: 'write');
+
+    if (staffId == user.id) {
+      await _negar(
+        user,
+        recurso,
+        message:
+            'Uma conta não redefine a própria MFA: peça a outro administrador.',
+      );
+    }
+
+    final conta = await store.staffById(staffId);
+    if (conta == null || !conta.active) {
+      await _negar(user, recurso, message: 'Conta de equipe não encontrada.');
+    }
+
+    final codigo = StaffActivationCode.generate(_random);
+    final agora = _clock().toUtc();
+    final expira = agora.add(StaffActivationCode.defaultValidity);
+    final gravou = await store.resetStaffMfa(
+      staffId: staffId,
+      codeHash: StaffActivationCode.hash(codigo),
+      expiresAt: expira,
+      issuedBy: user.id,
+      at: agora,
+    );
+    if (!gravou) {
+      await _negar(user, recurso, message: 'Conta de equipe não encontrada.');
+    }
+    await _auditar(user, recurso, result: 'mfa_reset', resourceId: staffId);
+    return AdminStaffMfaResetResult(
+      activationCode: codigo,
+      activationCodeExpiresAt: expira,
+    );
   }
 
   /// Leitura bem-sucedida: a linha entra na trilha **antes** de o store ser

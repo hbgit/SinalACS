@@ -6,6 +6,7 @@ import 'package:sinalacs_server/src/application/audit/audit_trail.dart';
 import 'package:sinalacs_server/src/application/auth/development_auth_service.dart';
 import 'package:sinalacs_server/src/application/auth/institutional_auth_service.dart';
 import 'package:sinalacs_server/src/application/auth/password_hasher.dart';
+import 'package:sinalacs_server/src/application/auth/staff_activation_code.dart';
 import 'package:sinalacs_server/src/application/auth/totp_secret_vault.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
 import 'package:test/test.dart';
@@ -196,21 +197,113 @@ class _Store implements AdminAccountStore {
     return [];
   }
 
+  /// Contas de equipe conhecidas, por id: é o alvo da redefinição da MFA do
+  /// staff. `staff-inativo` existe e está desativada — a mesma recusa do
+  /// inexistente, para que o administrador não descubra a existência de uma
+  /// conta que não pode operar.
+  final staff = <String, AdminStaff>{
+    'admin-1': AdminStaff(
+      id: 'admin-1',
+      name: 'Elisa Administradora',
+      enrollmentId: 'ADM-1',
+      role: UserRole.admin,
+      ubsName: null,
+      active: true,
+      mfaActive: true,
+    ),
+    'coord-a': AdminStaff(
+      id: 'coord-a',
+      name: 'Fábio Coordenador',
+      enrollmentId: 'COO-1',
+      role: UserRole.coordinator,
+      ubsName: _ubsDoCoordenador,
+      active: true,
+      mfaActive: true,
+    ),
+    'staff-inativo': AdminStaff(
+      id: 'staff-inativo',
+      name: 'Gilda Coordenadora Inativa',
+      enrollmentId: 'COO-2',
+      role: UserRole.coordinator,
+      ubsName: _ubsDoCoordenador,
+      active: false,
+      mfaActive: false,
+    ),
+  };
+
   @override
-  Future<AdminStaff?> staffById(String staffId) =>
-      throw UnimplementedError('staffById é das tarefas de escrita da #43');
+  Future<AdminStaff?> staffById(String staffId) async {
+    _marca('staffById');
+    return staff[staffId];
+  }
+
+  /// O `resetStaffMfa` do store real: `clearTotp` e `issue` numa transação só.
+  /// Aqui fica o pedido do serviço — o que o teste observa é o que ele mandou
+  /// gravar (as duas escritas no banco têm prova na suíte de integração).
+  final resetsDoStaff =
+      <({String staffId, String codeHash, DateTime expiresAt, String issuedBy, DateTime at})>[];
+
+  /// `true` = o alvo sumiu (ou foi desativado) entre a checagem do serviço e a
+  /// transação: o `WHERE` do banco não alcança linha nenhuma e o store devolve
+  /// `false` — o mesmo desfecho de "não existe".
+  bool corridaDeResetStaff = false;
+
+  @override
+  Future<bool> resetStaffMfa({
+    required String staffId,
+    required String codeHash,
+    required DateTime expiresAt,
+    required String issuedBy,
+    required DateTime at,
+  }) async {
+    _marca('resetStaffMfa');
+    if (corridaDeResetStaff) return false;
+    resetsDoStaff.add((
+      staffId: staffId,
+      codeHash: codeHash,
+      expiresAt: expiresAt,
+      issuedBy: issuedBy,
+      at: at,
+    ));
+    return true;
+  }
 
   @override
   Future<String?> ubsOf(String staffId) async => ubs[staffId];
 }
 
-/// Stub da porta que esta tarefa ainda não usa (o código de ativação da MFA do
-/// staff é de outra tarefa da #43). Chamar qualquer método aqui é erro de
-/// montagem do teste.
-class _NaoUsado implements StaffActivationStore {
+/// Código de ativação do staff: guarda a emissão pedida pela redefinição da MFA
+/// (#43). `find`/`clear` não são do caminho da redefinição — chamá-los aqui é
+/// erro de montagem do teste, como no `_NaoUsado` que este fake substitui.
+class _Ativacoes implements StaffActivationStore {
+  final emissoes =
+      <({String staffId, String codeHash, DateTime expiresAt, String issuedBy, DateTime at})>[];
+
   @override
-  dynamic noSuchMethod(Invocation invocation) =>
-      throw UnimplementedError('${invocation.memberName} não é usado aqui');
+  Future<void> issue(
+    String staffId, {
+    required String codeHash,
+    required DateTime expiresAt,
+    required String issuedBy,
+    required DateTime at,
+  }) async {
+    _ordem.add('activation:issue');
+    emissoes.add((
+      staffId: staffId,
+      codeHash: codeHash,
+      expiresAt: expiresAt,
+      issuedBy: issuedBy,
+      at: at,
+    ));
+  }
+
+  @override
+  Future<StaffActivationRecord?> find(String staffId) =>
+      throw UnimplementedError('find não é usado aqui');
+
+  @override
+  Future<void> clear(String staffId) =>
+      throw UnimplementedError('clear não é usado aqui');
 }
 
 /// Credencial do ACS: guarda a substituição pedida pela redefinição de senha —
@@ -315,6 +408,7 @@ void main() {
   late _Hasher hasher;
   late _Credenciais credenciais;
   late _Totp totp;
+  late _Ativacoes ativacoes;
   late AdminAccountService servico;
   final admin = _u('admin-1', UserRole.admin);
   final coordA = _u('coord-a', UserRole.coordinator);
@@ -327,11 +421,12 @@ void main() {
     hasher = _Hasher();
     credenciais = _Credenciais();
     totp = _Totp();
+    ativacoes = _Ativacoes();
     servico = AdminAccountService(
       store: store,
       credentials: credenciais,
       totpStore: totp,
-      activationStore: _NaoUsado(),
+      activationStore: ativacoes,
       hasher: hasher,
       audit: audit,
       // Sorteio e relógio fixos: o teste compara a senha devolvida com a que o
@@ -1080,6 +1175,181 @@ void main() {
       expect(audit.events.map((e) => e.actionType), everyElement('write'));
       expect(audit.events.map((e) => e.result), everyElement('denied'));
     });
+  });
+
+  group('resetStaffMfa do staff', () {
+    test(
+      'admin redefine: código novo de 24 h, só o SHA-256 gravado, issuedBy do ator e trilha mfa_reset DEPOIS do commit',
+      () async {
+        final resultado = await servico.resetStaffMfa(admin, staffId: 'coord-a');
+
+        expect(
+          resultado.activationCode,
+          matches(RegExp(r'^[A-Z2-7]{4}(-[A-Z2-7]{4}){5}-[A-Z2-7]{2}$')),
+          reason: 'o mesmo formato do código da CLI (#48): 130 bits em grupos de 4',
+        );
+        final gravado = store.resetsDoStaff.single;
+        expect(gravado.staffId, 'coord-a');
+        expect(
+          gravado.issuedBy,
+          'admin-1',
+          reason: 'a coluna guarda o UUID do ator; o rótulo humano vem da linha de auditoria',
+        );
+        expect(gravado.at, DateTime.utc(2026, 10, 8, 12));
+        expect(
+          gravado.expiresAt,
+          DateTime.utc(2026, 10, 8, 12).add(const Duration(hours: 24)),
+          reason: 'a validade é a do código da CLI (`StaffActivationCode.defaultValidity`)',
+        );
+        expect(resultado.activationCodeExpiresAt, gravado.expiresAt);
+        expect(
+          StaffActivationCode.matches(resultado.activationCode, gravado.codeHash),
+          isTrue,
+          reason: 'o código devolvido é o único que casa com o hash gravado',
+        );
+        expect(
+          gravado.codeHash,
+          isNot(contains(resultado.activationCode)),
+          reason: 'o código em claro não existe no servidor: só o SHA-256 chega ao store',
+        );
+        expect(
+          resultado.activationCode,
+          isNot(gravado.codeHash),
+          reason: 'nem o próprio hash é o código: a resposta devolve o valor sorteado',
+        );
+
+        expect(_ordem, [
+          'store:staffById',
+          'store:resetStaffMfa',
+          'audit:write:admin_staff:mfa_reset',
+        ]);
+        final linha = audit.events.single;
+        expect(linha.userId, 'admin-1');
+        expect(linha.actionType, 'write');
+        expect(linha.resourceType, 'admin_staff');
+        expect(linha.result, 'mfa_reset');
+        expect(linha.resourceId, 'coord-a');
+      },
+    );
+
+    test('cada pedido emite um código novo: o anterior deixa de valer', () async {
+      final primeiro = await servico.resetStaffMfa(admin, staffId: 'coord-a');
+      final segundo = await servico.resetStaffMfa(admin, staffId: 'coord-a');
+
+      expect(segundo.activationCode, isNot(primeiro.activationCode));
+      expect(store.resetsDoStaff, hasLength(2));
+      expect(store.resetsDoStaff.map((r) => r.codeHash).toSet(), hasLength(2));
+      expect(
+        StaffActivationCode.matches(segundo.activationCode, store.resetsDoStaff.last.codeHash),
+        isTrue,
+      );
+    });
+
+    test(
+      'só o administrador redefine a MFA do staff: o coordenador é recusado, inclusive para a própria conta',
+      () async {
+        for (final alvo in ['coord-a', 'coord-sem-ubs']) {
+          await expectLater(
+            servico.resetStaffMfa(coordA, staffId: alvo),
+            throwsA(isA<AlertPermissionException>()),
+          );
+        }
+        expect(store.chamadas, 0, reason: 'nem o alvo é lido: a recusa é de papel');
+        expect(ativacoes.emissoes, isEmpty);
+        expect(store.resetsDoStaff, isEmpty);
+        expect(audit.events, hasLength(2));
+        expect(audit.events.map((e) => e.actionType), everyElement('write'));
+        expect(audit.events.map((e) => e.resourceType), everyElement('admin_staff'));
+        expect(audit.events.map((e) => e.result), everyElement('denied'));
+        expect(audit.events.map((e) => e.userId), everyElement('coord-a'));
+      },
+    );
+
+    test('papel fora do backoffice é recusado com a mesma trilha denied', () async {
+      for (final usuario in [
+        _u('u-acs', UserRole.acs),
+        _u('u-paciente', UserRole.patient),
+      ]) {
+        await expectLater(
+          servico.resetStaffMfa(usuario, staffId: 'coord-a'),
+          throwsA(isA<AlertPermissionException>()),
+        );
+      }
+      expect(store.chamadas, 0);
+      expect(audit.events, hasLength(2));
+      expect(audit.events.map((e) => e.actionType), everyElement('write'));
+      expect(audit.events.map((e) => e.result), everyElement('denied'));
+    });
+
+    test('uma conta não redefine a própria MFA: pede a outro administrador', () async {
+      await expectLater(
+        servico.resetStaffMfa(admin, staffId: 'admin-1'),
+        throwsA(
+          isA<AdminInvalidRequestException>().having(
+            (e) => e.message,
+            'message',
+            'Uma conta não redefine a própria MFA: peça a outro administrador.',
+          ),
+        ),
+      );
+      expect(
+        store.chamadas,
+        0,
+        reason: 'a recusa é do chamador sobre si mesmo: nem o alvo é lido',
+      );
+      expect(store.resetsDoStaff, isEmpty);
+      expect(audit.events.single.result, 'denied');
+      expect(audit.events.single.actionType, 'write');
+      expect(audit.events.single.resourceType, 'admin_staff');
+      expect(audit.events.single.userId, 'admin-1');
+    });
+
+    test('alvo inexistente e conta inativa recebem a mesma recusa auditada, sem emissão', () async {
+      final casos = ['staff-inexistente', 'staff-inativo'];
+      for (final staffId in casos) {
+        await expectLater(
+          servico.resetStaffMfa(admin, staffId: staffId),
+          throwsA(
+            isA<AdminInvalidRequestException>().having(
+              (e) => e.message,
+              'message',
+              'Conta de equipe não encontrada.',
+            ),
+          ),
+        );
+      }
+      expect(
+        store.resetsDoStaff,
+        isEmpty,
+        reason: 'nem o código é sorteado para um alvo que não pode entrar',
+      );
+      expect(audit.events, hasLength(casos.length));
+      expect(audit.events.map((e) => e.result), everyElement('denied'));
+      expect(audit.events.map((e) => e.resourceType), everyElement('admin_staff'));
+    });
+
+    test(
+      'corrida: o alvo sai do ar entre a checagem e a transação → mesma recusa, nada emitido',
+      () async {
+        // A pré-checagem acha a conta; o `WHERE` da transação (existência e
+        // `active`) não. O desfecho é o de "não existe", e a trilha não mente
+        // dizendo que a MFA foi redefinida.
+        store.corridaDeResetStaff = true;
+
+        await expectLater(
+          servico.resetStaffMfa(admin, staffId: 'coord-a'),
+          throwsA(
+            isA<AdminInvalidRequestException>().having(
+              (e) => e.message,
+              'message',
+              'Conta de equipe não encontrada.',
+            ),
+          ),
+        );
+        expect(store.resetsDoStaff, isEmpty);
+        expect(audit.events.single.result, 'denied');
+      },
+    );
   });
 
   group('AcsInitialPassword', () {

@@ -1,0 +1,17 @@
+### Redefinição da MFA de uma conta de equipe pelo backoffice (issue #43), com
+### o código de ativação novo emitido **pela tela** — o deferimento da #48.
+###
+### Fecha a pendência registrada no `PROGRESS.md` (L665): até aqui só a CLI de
+### operador `bin/issue_staff_activation_code.dart` emitia, e a emissão não
+### entrava em `audit_logs`. Agora a operação faz as duas coisas numa transação
+### só — zera as quatro colunas `totp*` da conta e grava
+### `activationCodeHash/ExpiresAt/IssuedBy/IssuedAt` — e a linha
+### `admin_staff`/`mfa_reset` com o id do alvo fica na trilha.
+###
+### O código existe **só** nesta resposta: o servidor guarda apenas o SHA-256
+### (`StaffActivationCode.hash`), como no `#48`. Quem redefine mostra uma vez;
+### perdido de novo, o caminho é redefinir outra vez, nunca recuperar.
+class: AdminStaffMfaResetResult
+fields:
+  activationCode: String
+  activationCodeExpiresAt: DateTime

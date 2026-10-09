@@ -3,6 +3,7 @@ import 'package:serverpod/serverpod.dart';
 import 'package:sinalacs_server/src/application/admin/admin_account_service.dart';
 import 'package:sinalacs_server/src/application/auth/password_hasher.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
+import 'package:sinalacs_server/src/infrastructure/database/orm_acs_credential_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_refresh_token_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_upload_token_store.dart';
 
@@ -29,9 +30,11 @@ class OrmAdminAccountStore implements AdminAccountStore {
     required Session Function() session,
     @visibleForTesting bool debugFailAfterUsersInsert = false,
     @visibleForTesting bool debugFailAfterRevocations = false,
+    @visibleForTesting bool debugFailAfterActivationIssue = false,
   }) : _session = session,
        _debugFailAfterUsersInsert = debugFailAfterUsersInsert,
-       _debugFailAfterRevocations = debugFailAfterRevocations;
+       _debugFailAfterRevocations = debugFailAfterRevocations,
+       _debugFailAfterActivationIssue = debugFailAfterActivationIssue;
 
   final Session Function() _session;
 
@@ -48,6 +51,13 @@ class OrmAdminAccountStore implements AdminAccountStore {
   /// prova que o rollback leva os três `UPDATE` juntos. Mesmo arranjo de
   /// [_debugFailAfterUsersInsert].
   final bool _debugFailAfterRevocations;
+
+  /// Derruba a transação da redefinição da MFA do staff **depois** das duas
+  /// escritas: sem a transação única, a MFA ficaria zerada e o código novo não
+  /// estaria gravado (conta trancada fora, sem como ativar) — o teste prova que
+  /// o rollback leva a limpeza e a emissão juntas. Mesmo arranjo de
+  /// [_debugFailAfterUsersInsert] e [_debugFailAfterRevocations].
+  final bool _debugFailAfterActivationIssue;
 
   /// `@ubs` nulo = sistema inteiro (administrador).
   static const _escopoAcs = '(@ubs::uuid IS NULL OR acs."ubsId" = @ubs::uuid)';
@@ -366,6 +376,64 @@ class OrmAdminAccountStore implements AdminAccountStore {
       ).revokeAllForUser(acsId, at);
       if (_debugFailAfterRevocations) {
         throw StateError('falha injetada depois das revogações (só em teste)');
+      }
+      return true;
+    });
+  }
+
+  /// Zera a MFA da conta de equipe e grava o código de ativação novo na
+  /// **mesma transação**.
+  ///
+  /// As duas escritas são do `OrmAcsCredentialStore` amarrado a ESTA transação
+  /// pelo construtor — mesmo arranjo de [setAcsActive] com os stores de token:
+  /// o SQL de `user_credentials` e de `staff_accounts` continua sendo de quem é
+  /// dono da tabela, e nem o serviço nem este arquivo conhecem as colunas
+  /// `totp*`/`activationCode*`.
+  ///
+  /// Juntas porque são um só estado: a conta que perdeu a MFA sem código novo
+  /// fica trancada fora (o login do staff sempre exige MFA, e sem segredo
+  /// gravado não há o que ativar), e um código emitido sobre uma MFA ainda viva
+  /// seria um segundo caminho de ativação ao lado do autenticador que a pessoa
+  /// já tem. É o que a falha injetada de [_debugFailAfterActivationIssue] prova.
+  ///
+  /// A existência e o `active` da conta são lidos **dentro** da transação, e
+  /// não só na pré-checagem do serviço: entre uma e outra cabe a desativação de
+  /// outra requisição, e um código emitido para uma conta desativada seria uma
+  /// credencial de ativação viva para quem não pode entrar. `false` = nada foi
+  /// escrito — id fora do formato de UUID, conta inexistente ou inativa —, o
+  /// mesmo desfecho de "não existe". Mesma guarda de [acsById] no `::uuid`.
+  @override
+  Future<bool> resetStaffMfa({
+    required String staffId,
+    required String codeHash,
+    required DateTime expiresAt,
+    required String issuedBy,
+    required DateTime at,
+  }) async {
+    if (!_uuidValido(staffId)) return false;
+    final session = _session();
+    return session.db.transaction((transaction) async {
+      final conta = await StaffAccount.db.findById(
+        session,
+        UuidValue.fromString(staffId),
+        transaction: transaction,
+      );
+      if (conta == null || !conta.active) return false;
+
+      final credenciais = OrmAcsCredentialStore(
+        session: _session,
+        transaction: transaction,
+      );
+      await credenciais.clearTotp(staffId, at);
+      await credenciais.issue(
+        staffId,
+        codeHash: codeHash,
+        expiresAt: expiresAt,
+        issuedBy: issuedBy,
+        at: at,
+      );
+      if (_debugFailAfterActivationIssue) {
+        throw StateError('falha injetada depois da emissão do código (só em teste)');
       }
       return true;
     });

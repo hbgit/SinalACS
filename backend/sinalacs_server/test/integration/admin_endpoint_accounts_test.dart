@@ -7,6 +7,7 @@ import 'package:sinalacs_server/src/application/auth/development_auth_service.da
 import 'package:sinalacs_server/src/application/auth/institutional_auth_service.dart';
 import 'package:sinalacs_server/src/application/auth/password_hasher.dart';
 import 'package:sinalacs_server/src/application/auth/refresh_token_service.dart';
+import 'package:sinalacs_server/src/application/auth/staff_activation_code.dart';
 import 'package:sinalacs_server/src/application/auth/totp.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
 import 'package:sinalacs_server/src/infrastructure/crypto/health_cipher_totp_vault.dart';
@@ -54,6 +55,20 @@ const _matriculaSenha = 'ACS-EP-SENHA-1';
 /// pelas colunas sintéticas da fixture compartilhada.
 const _acsMfa = '00000000-0000-4000-8000-0000000000bf';
 const _matriculaMfa = 'ACS-EP-MFA-1';
+
+/// Coordenador da prova da redefinição de MFA do staff (deferimento da #48),
+/// criado dentro do próprio caso: a MFA dele é ativada pelo fluxo de verdade —
+/// com o código de uso único que a CLI emitia —, e é ele que o administrador
+/// redefine pela tela.
+const _coordMfa = '00000000-0000-4000-8000-0000000000c1';
+const _matriculaCoordMfa = 'COO-EP-MFA-1';
+
+/// Os dois códigos de ativação do caso: o que ativa a MFA original (consumido
+/// no `confirm`) e o que fica vigente depois dela — o que a redefinição pela
+/// tela precisa invalidar. Formato do `StaffActivationCode` (base32 em grupos
+/// de 4), como os da CLI.
+const _codigoDeAtivacao = 'ABCD-EFGH-JKLM-NPQR-STUV-WXYZ-23';
+const _codigoVigente = 'WXYZ-2345-ABCD-EFGH-JKLM-NPQR-67';
 
 final _t = DateTime.utc(2026, 10, 8, 12);
 
@@ -281,6 +296,23 @@ Future<UserCredential> _credencialDo(Session s, String userId) async =>
       s,
       where: (t) => t.userId.equals(UuidValue.fromString(userId)),
     ))!;
+
+/// A linha de `staff_accounts` da conta, para as provas das colunas
+/// `activationCode*`.
+Future<StaffAccount> _staffDo(Session s, String staffId) async =>
+    (await StaffAccount.db.findById(s, UuidValue.fromString(staffId)))!;
+
+/// Emite um código de ativação direto no store, como a CLI de operador fazia
+/// (`bin/issue_staff_activation_code.dart`): é o emissor que a redefinição pela
+/// tela substitui.
+Future<void> _emitirCodigo(Session s, String staffId, String codigo) =>
+    OrmAcsCredentialStore(session: () => s, staff: true).issue(
+      staffId,
+      codeHash: StaffActivationCode.hash(codigo),
+      expiresAt: DateTime.now().toUtc().add(StaffActivationCode.defaultValidity),
+      issuedBy: 'CLI-de-operador',
+      at: DateTime.now().toUtc(),
+    );
 
 /// Uma visita sintética bem formada do paciente da Microárea A. O lote nunca
 /// chega a ser aplicado: com o token revogado, `syncDeferred` recusa na
@@ -999,5 +1031,222 @@ void main() {
         reason: 'idempotente não é silencioso: cada pedido do operador vira uma linha',
       );
     });
+
+    test(
+      'redefinir a MFA do staff emite um código que ativa a MFA nova, invalida o antigo e abre o loginStaff',
+      () async {
+        // Fixture do caso: coordenador com senha de verdade e MFA ativada pelo
+        // fluxo real — com o código de uso único que a CLI emitia.
+        await _usuario(
+          session,
+          _coordMfa,
+          'Rita Coordenadora MFA',
+          UserRole.coordinator,
+        );
+        await StaffAccount.db.insertRow(
+          session,
+          StaffAccount(
+            id: UuidValue.fromString(_coordMfa),
+            enrollmentId: _matriculaCoordMfa,
+            active: true,
+          ),
+        );
+        await _credencial(
+          session,
+          _coordMfa,
+          digest: await AlertRuntimeHarness.hasher.derive(_senha),
+        );
+
+        await _emitirCodigo(session, _coordMfa, _codigoDeAtivacao);
+        final inicio = await endpoints.auth.beginStaffTotpEnrollment(
+          sessionBuilder,
+          matricula: _matriculaCoordMfa,
+          password: _senha,
+          activationCode: _codigoDeAtivacao,
+        );
+        await endpoints.auth.confirmStaffTotpEnrollment(
+          sessionBuilder,
+          matricula: _matriculaCoordMfa,
+          password: _senha,
+          activationCode: _codigoDeAtivacao,
+          code: Totp.code(_deBase32(inicio.secretBase32), DateTime.now().toUtc()),
+        );
+        expect((await _credencialDo(session, _coordMfa)).totpEnabledAt, isNotNull);
+
+        // Um código vigente emitido depois da ativação (como a CLI podia
+        // emitir): é ele que a redefinição pela tela tem de invalidar.
+        await _emitirCodigo(session, _coordMfa, _codigoVigente);
+
+        // 1. O administrador redefine a MFA: o código novo existe **só** nesta
+        //    resposta, no mesmo formato do da CLI e com 24 h de validade.
+        final reset = await endpoints.admin.resetStaffMfa(
+          sessionBuilder,
+          accessToken: _token(_admin, UserRole.admin),
+          staffId: _coordMfa,
+        );
+        expect(
+          reset.activationCode,
+          matches(RegExp(r'^[A-Z2-7]{4}(-[A-Z2-7]{4}){5}-[A-Z2-7]{2}$')),
+        );
+        expect(reset.activationCode, isNot(_codigoVigente));
+        expect(
+          reset.activationCodeExpiresAt.isAfter(
+            DateTime.now().toUtc().add(const Duration(hours: 23)),
+          ),
+          isTrue,
+          reason: 'validade de 24 h contada do relógio do servidor',
+        );
+
+        // 2. Na linha: as quatro colunas `totp*` em NULL e o código gravado só
+        //    como SHA-256 — o que a tela mostrou não existe no banco, e a
+        //    trilha registra o pedido com o alvo (a emissão pela tela entra na
+        //    cadeia, o que a CLI não conseguia).
+        final linha = await _credencialDo(session, _coordMfa);
+        expect(linha.totpSecretEncrypted, isNull);
+        expect(linha.totpKeyVersion, isNull);
+        expect(linha.totpEnabledAt, isNull);
+        expect(linha.totpLastStep, isNull);
+        final conta = await _staffDo(session, _coordMfa);
+        expect(conta.activationCodeHash, StaffActivationCode.hash(reset.activationCode));
+        expect(
+          conta.activationCodeHash,
+          isNot(reset.activationCode),
+          reason: 'nem o hash é o código: a resposta devolve o valor sorteado',
+        );
+        expect(
+          conta.activationCodeIssuedBy,
+          _admin,
+          reason: 'a coluna guarda o UUID do ator; quem ele é vem da linha de auditoria',
+        );
+        expect(await _auditorias(session, 'admin_staff', 'mfa_reset'), 1);
+
+        // 3. O código que estava vigente não vale mais...
+        await expectLater(
+          endpoints.auth.beginStaffTotpEnrollment(
+            sessionBuilder,
+            matricula: _matriculaCoordMfa,
+            password: _senha,
+            activationCode: _codigoVigente,
+          ),
+          throwsA(
+            isA<AuthenticationFailedException>().having(
+              (e) => e.message,
+              'message',
+              'Código de ativação inválido ou expirado.',
+            ),
+          ),
+        );
+
+        // 4. ... e o devolvido pela tela ativa a MFA nova, com segredo novo.
+        final novo = await endpoints.auth.beginStaffTotpEnrollment(
+          sessionBuilder,
+          matricula: _matriculaCoordMfa,
+          password: _senha,
+          activationCode: reset.activationCode,
+        );
+        expect(
+          novo.secretBase32,
+          isNot(inicio.secretBase32),
+          reason: 'o segredo novo não é o antigo (que não existe mais em lugar nenhum)',
+        );
+        await endpoints.auth.confirmStaffTotpEnrollment(
+          sessionBuilder,
+          matricula: _matriculaCoordMfa,
+          password: _senha,
+          activationCode: reset.activationCode,
+          code: Totp.code(_deBase32(novo.secretBase32), DateTime.now().toUtc()),
+        );
+        expect((await _credencialDo(session, _coordMfa)).totpEnabledAt, isNotNull);
+        expect(
+          await OrmAcsCredentialStore(
+            session: () => session,
+            staff: true,
+          ).find(_coordMfa),
+          isNull,
+          reason: 'o código é de uso único: a confirmação o consome',
+        );
+
+        // 5. O login do staff com a MFA nova entra. O passo seguinte da janela
+        //    é o código do login: o passo usado na confirmação já está gravado,
+        //    e o mesmo código não valeria duas vezes (replay).
+        final login = await endpoints.auth.loginStaff(
+          sessionBuilder,
+          matricula: _matriculaCoordMfa,
+          password: _senha,
+          totpCode: Totp.code(
+            _deBase32(novo.secretBase32),
+            DateTime.now().toUtc().add(const Duration(seconds: 30)),
+          ),
+        );
+        final autenticado = AlertRuntimeHarness.verify(login.accessToken)!;
+        expect(autenticado.id, _coordMfa);
+        expect(autenticado.role, UserRole.coordinator);
+      },
+    );
+
+    test(
+      'só o administrador redefine a MFA do staff: o coordenador é recusado, e ninguém redefine a própria',
+      () async {
+        // O coordenador, mesmo com o próprio token e o alvo sendo ele mesmo: a
+        // recusa é de papel, não de alvo.
+        for (final alvo in [_coordA, _coordMfa]) {
+          await expectLater(
+            endpoints.admin.resetStaffMfa(
+              sessionBuilder,
+              accessToken: _token(_coordA, UserRole.coordinator),
+              staffId: alvo,
+            ),
+            throwsA(isA<AlertPermissionException>()),
+          );
+        }
+
+        // O administrador não redefine a própria MFA: pede a outro.
+        await expectLater(
+          endpoints.admin.resetStaffMfa(
+            sessionBuilder,
+            accessToken: _token(_admin, UserRole.admin),
+            staffId: _admin,
+          ),
+          throwsA(
+            isA<AdminInvalidRequestException>().having(
+              (e) => e.message,
+              'message',
+              'Uma conta não redefine a própria MFA: peça a outro administrador.',
+            ),
+          ),
+        );
+
+        // Conta inexistente: a mesma recusa de "não encontrada", sem emitir.
+        await expectLater(
+          endpoints.admin.resetStaffMfa(
+            sessionBuilder,
+            accessToken: _token(_admin, UserRole.admin),
+            staffId: '00000000-0000-4000-8000-0000000000ff',
+          ),
+          throwsA(
+            isA<AdminInvalidRequestException>().having(
+              (e) => e.message,
+              'message',
+              'Conta de equipe não encontrada.',
+            ),
+          ),
+        );
+
+        expect(
+          await _auditorias(session, 'admin_staff', 'denied'),
+          4,
+          reason: 'as quatro recusas entram na trilha antes da exceção',
+        );
+        expect(
+          await _auditorias(session, 'admin_staff', 'mfa_reset'),
+          0,
+          reason: 'nenhuma recusa vira sucesso na trilha',
+        );
+        // Nada foi escrito nas contas que apareceram nas tentativas: o
+        // administrador não perde a MFA por ter pedido a si mesmo.
+        expect((await _staffDo(session, _admin)).activationCodeHash, isNull);
+        expect((await _staffDo(session, _coordA)).activationCodeHash, isNull);
+      },
+    );
   });
 }

@@ -10,6 +10,7 @@ admin:
   - setAcsActive:
   - resetAcsPassword:
   - resetAcsMfa:
+  - resetStaffMfa:
 alerts:
   - createRedAlert:
   - acknowledge:

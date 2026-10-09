@@ -942,5 +942,185 @@ void main() {
         },
       );
     });
+
+    group('resetStaffMfa (#43, MFA do staff)', () {
+      late _Audit auditoria;
+      late AdminAccountService servico;
+      final admin = _operador(_admin, UserRole.admin);
+
+      setUp(() {
+        auditoria = _Audit();
+        servico = _servico(session, store, audit: auditoria);
+      });
+
+      /// A linha de `user_credentials` da conta, para as provas por ORM das
+      /// colunas `totp*`.
+      Future<UserCredential> credencialDe(String userId) async =>
+          (await UserCredential.db.findFirstRow(
+            session,
+            where: (t) => t.userId.equals(UuidValue.fromString(userId)),
+          ))!;
+
+      Future<StaffAccount> staffDe(String staffId) async =>
+          (await StaffAccount.db.findById(
+            session,
+            UuidValue.fromString(staffId),
+          ))!;
+
+      test(
+        'zera as quatro colunas totp* e grava o código novo com o emissor, na mesma transação',
+        () async {
+          expect(
+            (await credencialDe(_admin)).totpSecretEncrypted,
+            isNotNull,
+            reason: 'a fixture do administrador nasce com MFA ativa',
+          );
+
+          final ok = await store.resetStaffMfa(
+            staffId: _admin,
+            codeHash: 'hash-do-codigo-novo',
+            expiresAt: _t.add(const Duration(hours: 24)),
+            issuedBy: _coordA,
+            at: _t,
+          );
+          expect(ok, isTrue);
+
+          // As QUATRO colunas voltam a NULL — inclusive `totpLastStep`, que
+          // deixaria um código do segredo antigo valendo como replay.
+          final linha = await credencialDe(_admin);
+          expect(linha.totpSecretEncrypted, isNull);
+          expect(linha.totpKeyVersion, isNull);
+          expect(linha.totpEnabledAt, isNull);
+          expect(linha.totpLastStep, isNull);
+
+          // E o código novo está gravado, com a validade e o emissor do
+          // chamado: as duas escritas descrevem o mesmo instante.
+          final conta = await staffDe(_admin);
+          expect(conta.activationCodeHash, 'hash-do-codigo-novo');
+          expect(conta.activationCodeExpiresAt, _t.add(const Duration(hours: 24)));
+          expect(
+            conta.activationCodeIssuedBy,
+            _coordA,
+            reason: 'a coluna guarda o UUID do ator; o rótulo humano vem da trilha',
+          );
+          expect(conta.activationCodeIssuedAt, _t);
+          expect(conta.active, isTrue, reason: 'redefinir a MFA não mexe no acesso');
+        },
+      );
+
+      test(
+        'id fora do formato, conta inexistente e conta inativa devolvem false sem escrever nada',
+        () async {
+          // A fixture compartilhada não tem conta de equipe desativada: a prova
+          // cria uma aqui, com MFA ativa, para que "nada escrito" seja visível.
+          const inativo = '00000000-0000-4000-8000-0000000000ac';
+          await _usuario(
+            session,
+            inativo,
+            'Hélio Inativo Sintético',
+            UserRole.coordinator,
+          );
+          await StaffAccount.db.insertRow(
+            session,
+            StaffAccount(
+              id: UuidValue.fromString(inativo),
+              enrollmentId: 'COO-ACC-3',
+              active: false,
+            ),
+          );
+          await _credencial(session, inativo, mfaAtiva: true);
+
+          for (final alvo in [
+            'lixo',
+            '00000000-0000-4000-8000-0000000000ff',
+            inativo,
+          ]) {
+            expect(
+              await store.resetStaffMfa(
+                staffId: alvo,
+                codeHash: 'hash-do-codigo-novo',
+                expiresAt: _t.add(const Duration(hours: 24)),
+                issuedBy: _coordA,
+                at: _t,
+              ),
+              isFalse,
+            );
+          }
+
+          // A conta inativa fica exatamente como estava: nem a MFA zerada, nem
+          // código emitido — uma credencial de ativação viva para quem não pode
+          // entrar seria um caminho de volta pela porta dos fundos.
+          final linha = await credencialDe(inativo);
+          expect(linha.totpSecretEncrypted, 'segredo-sintetico');
+          expect(linha.totpEnabledAt, _t);
+          final conta = await staffDe(inativo);
+          expect(conta.activationCodeHash, isNull);
+          expect(conta.activationCodeExpiresAt, isNull);
+
+          // Pelo serviço, a recusa é a mesma de "não existe", e a trilha não
+          // diz que a MFA foi redefinida.
+          await expectLater(
+            servico.resetStaffMfa(admin, staffId: inativo),
+            throwsA(
+              isA<AdminInvalidRequestException>().having(
+                (e) => e.message,
+                'message',
+                'Conta de equipe não encontrada.',
+              ),
+            ),
+          );
+          expect(auditoria.events.single.result, 'denied');
+          expect(auditoria.events.single.actionType, 'write');
+        },
+      );
+
+      test(
+        'a limpeza da MFA e a emissão do código são uma só transação: a falha depois das duas desfaz as duas',
+        () async {
+          // Um código vigente de antes (o que a CLI teria emitido): se a
+          // transação não voltasse atrás inteira, ele teria sido substituído.
+          await OrmAcsCredentialStore(
+            session: () => session,
+            staff: true,
+          ).issue(
+            _admin,
+            codeHash: 'hash-antigo',
+            expiresAt: _t.add(const Duration(hours: 1)),
+            issuedBy: 'operador',
+            at: _t,
+          );
+          final quebrado = OrmAdminAccountStore(
+            session: () => session,
+            debugFailAfterActivationIssue: true,
+          );
+
+          await expectLater(
+            quebrado.resetStaffMfa(
+              staffId: _admin,
+              codeHash: 'hash-do-codigo-novo',
+              expiresAt: _t.add(const Duration(hours: 24)),
+              issuedBy: _coordA,
+              at: _t,
+            ),
+            throwsA(isA<StateError>()),
+          );
+
+          final linha = await credencialDe(_admin);
+          expect(
+            linha.totpSecretEncrypted,
+            'segredo-sintetico',
+            reason: 'a limpeza voltou atrás junto com a emissão',
+          );
+          expect(linha.totpEnabledAt, _t);
+          final conta = await staffDe(_admin);
+          expect(
+            conta.activationCodeHash,
+            'hash-antigo',
+            reason: 'o código da transação que falhou não ficou gravado',
+          );
+          expect(conta.activationCodeIssuedBy, 'operador');
+        },
+      );
+    });
   });
 }

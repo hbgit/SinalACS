@@ -8,9 +8,10 @@ import 'package:sinalacs_server/src/runtime/alert_runtime.dart';
 ///
 /// A leitura — indicadores, microáreas, alertas e auditoria — é do
 /// `AdminReadService`; a listagem de ACS e de equipe, o cadastro, o vínculo de
-/// microárea, a (des)ativação e as redefinições de senha/MFA do ACS são do
-/// `AdminAccountService` — sempre na mesma dupla serviço/store, sem endpoint
-/// novo. A redefinição da MFA do staff é a última operação da issue.
+/// microárea, a (des)ativação, as redefinições de senha/MFA do ACS e a
+/// redefinição da MFA do staff (com a emissão do código de ativação pela tela,
+/// o deferimento da #48) são do `AdminAccountService` — sempre na mesma dupla
+/// serviço/store, sem endpoint novo.
 ///
 /// O papel, o escopo (sistema para o administrador, UBS para o coordenador),
 /// a paginação e a auditoria de cada operação são dos serviços; o endpoint só
@@ -158,4 +159,22 @@ class AdminEndpoint extends AuthenticatedEndpoint {
   }) => AlertRuntime.instance
       .adminAccountServiceFor(session)
       .resetAcsMfa(authenticate(accessToken), acsId: acsId);
+
+  /// Redefine a MFA de uma conta de equipe — só o administrador, nunca a
+  /// própria conta — e devolve o código de ativação novo, que **só** existe
+  /// nesta resposta (é o deferimento da #48: a CLI de operador era o único
+  /// emissor, e a emissão não entrava na trilha).
+  ///
+  /// As duas escritas — as quatro colunas `totp*` zeradas e o
+  /// `activationCodeHash`/validade/emissor gravados — são uma transação só, e a
+  /// linha `admin_staff`/`mfa_reset` entra em `audit_logs` com o id do alvo.
+  /// Quem redefine mostra o código uma vez; perdido de novo, o caminho é
+  /// redefinir outra vez, nunca recuperar.
+  Future<AdminStaffMfaResetResult> resetStaffMfa(
+    Session session, {
+    required String accessToken,
+    required String staffId,
+  }) => AlertRuntime.instance
+      .adminAccountServiceFor(session)
+      .resetStaffMfa(authenticate(accessToken), staffId: staffId);
 }
