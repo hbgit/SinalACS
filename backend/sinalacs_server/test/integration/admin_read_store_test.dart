@@ -422,17 +422,21 @@ void main() {
             ),
           );
         }
-        final p = await store.auditLogs(limit: 2);
+        final p = await store.auditLogs(const AdminScope.system(), limit: 2);
         expect(p.items, hasLength(2));
         expect(p.nextBeforeSequence, p.items.last.sequence);
         expect(p.items.first.sequence, greaterThan(p.items.last.sequence));
         final proxima = await store.auditLogs(
+          const AdminScope.system(),
           limit: 2,
           beforeSequence: p.nextBeforeSequence,
         );
         expect(proxima.items.first.sequence, lessThan(p.items.last.sequence));
 
-        final todas = await store.auditLogs(limit: 50);
+        final todas = await store.auditLogs(
+          const AdminScope.system(),
+          limit: 50,
+        );
         final rotulos = todas.items.map((e) => e.userLabel).toSet();
         expect(
           rotulos,
@@ -442,6 +446,104 @@ void main() {
         expect(json, isNot(contains('Admin Sintético')));
         expect(json, isNot(contains('Hash')));
         expect(json, isNot(contains('ip')));
+      },
+    );
+
+    test(
+      'auditoria do coordenador: só atores com microárea da UBS dele; staff fica invisível',
+      () async {
+        final trilha = OrmAuditTrail(
+          session: () => session,
+          chainSecret: 'segredo-sintetico-de-teste',
+        );
+        // Dois staff (sem microárea: administrador e coordenador), o ACS da
+        // microárea A e o paciente dela — os dois últimos são da UBS A.
+        for (final (quem, recurso) in [
+          (_adminId, 'admin_indicators'),
+          (_coordId, 'admin_audit_logs'),
+          (_acsId, 'session'),
+          (_paciente, 'triage_session'),
+        ]) {
+          await trilha.record(
+            AuditEvent(
+              userId: quem,
+              actionType: 'read',
+              resourceType: recurso,
+              result: 'success',
+            ),
+          );
+        }
+
+        final sistema = await store.auditLogs(
+          const AdminScope.system(),
+          limit: 50,
+        );
+        expect(sistema.items, hasLength(4), reason: 'o administrador vê tudo');
+
+        final daUbsA = await store.auditLogs(
+          const AdminScope.ubs(_ubsA),
+          limit: 50,
+        );
+        expect(daUbsA.items, hasLength(2));
+        expect(
+          daUbsA.items.map((e) => e.userLabel).toSet(),
+          {'ACS-ADM-RD-1 (ACS)', 'Paciente #00F1'},
+          reason: 'só atores com microárea na UBS A',
+        );
+        expect(
+          daUbsA.items.map((e) => e.resourceType).toSet(),
+          {'session', 'triage_session'},
+          reason:
+              'as linhas de staff (admin_indicators, admin_audit_logs) ficam de fora',
+        );
+
+        expect(
+          (await store.auditLogs(const AdminScope.ubs(_ubsB), limit: 50)).items,
+          isEmpty,
+          reason: 'nenhum ator com microárea na UBS B',
+        );
+      },
+    );
+
+    test(
+      'auditoria escopada pagina por keyset dentro do escopo',
+      () async {
+        final trilha = OrmAuditTrail(
+          session: () => session,
+          chainSecret: 'segredo-sintetico-de-teste',
+        );
+        for (final (quem, recurso) in [
+          (_adminId, 'admin_indicators'),
+          (_acsId, 'session'),
+          (_paciente, 'triage_session'),
+        ]) {
+          await trilha.record(
+            AuditEvent(
+              userId: quem,
+              actionType: 'read',
+              resourceType: recurso,
+              result: 'success',
+            ),
+          );
+        }
+
+        final soA = const AdminScope.ubs(_ubsA);
+        final p1 = await store.auditLogs(soA, limit: 1);
+        expect(p1.items, hasLength(1));
+        expect(p1.nextBeforeSequence, p1.items.last.sequence);
+
+        final p2 = await store.auditLogs(
+          soA,
+          limit: 1,
+          beforeSequence: p1.nextBeforeSequence,
+        );
+        expect(p2.items, hasLength(1));
+        expect(p2.items.first.sequence, lessThan(p1.items.first.sequence));
+        expect(
+          p2.nextBeforeSequence,
+          isNull,
+          reason: 'a terceira linha (do staff) não pertence ao escopo',
+        );
       },
     );
 

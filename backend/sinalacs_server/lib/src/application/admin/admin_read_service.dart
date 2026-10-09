@@ -27,7 +27,15 @@ abstract interface class AdminReadStore implements AdminScopeStore {
   });
 
   /// Mais recentes primeiro, por keyset (`sequence` menor que [beforeSequence]).
-  Future<AdminAuditPage> auditLogs({required int limit, int? beforeSequence});
+  ///
+  /// O escopo não filtra só o recurso auditado: filtra o **autor** da linha — o
+  /// coordenador só vê linhas de atores com microárea na UBS dele; linhas de
+  /// staff (sem microárea) não aparecem para ele.
+  Future<AdminAuditPage> auditLogs(
+    AdminScope scope, {
+    required int limit,
+    int? beforeSequence,
+  });
 }
 
 /// Regras de leitura do backoffice (issue #40). Papel e escopo vêm do
@@ -43,8 +51,9 @@ abstract interface class AdminReadStore implements AdminScopeStore {
 /// 2. **Paginação:** `limit` de 1 a 100, `offset` não negativo; fora disso,
 ///    [AdminInvalidRequestException] (não é erro de permissão).
 ///
-/// A auditoria de logs é só do administrador: filtrar logs por UBS exige juntar
-/// `users` a `micro_areas` e fica para a issue #43.
+/// A auditoria de logs segue o mesmo escopo, com a junção `users` ×
+/// `micro_areas` que a #40 havia adiado: o coordenador lê as linhas dos atores
+/// da UBS dele; as de staff (sem microárea) só o administrador lê.
 class AdminReadService {
   AdminReadService({
     required this.store,
@@ -103,10 +112,14 @@ class AdminReadService {
     int? beforeSequence,
   }) async {
     const recurso = 'admin_audit_logs';
-    await _resolver.requireAdmin(user, recurso: recurso);
+    final escopo = await _resolver.resolve(user, recurso: recurso);
     _validarPagina(limit, 0);
     await _auditar(user, recurso, 'success');
-    return store.auditLogs(limit: limit, beforeSequence: beforeSequence);
+    return store.auditLogs(
+      escopo,
+      limit: limit,
+      beforeSequence: beforeSequence,
+    );
   }
 
   void _validarPagina(int limit, int offset) {
