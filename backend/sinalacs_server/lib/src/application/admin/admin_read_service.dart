@@ -1,21 +1,15 @@
+import 'package:sinalacs_server/src/application/admin/admin_scope.dart';
 import 'package:sinalacs_server/src/application/audit/audit_trail.dart';
-import 'package:sinalacs_server/src/application/auth/authorization.dart';
 import 'package:sinalacs_server/src/application/auth/development_auth_service.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
 
-/// Até onde o chamador enxerga no backoffice (PRD §4.2.2): o administrador vê o
-/// sistema inteiro; o coordenador, só a sua UBS.
-class AdminScope {
-  const AdminScope.system() : ubsId = null;
-  const AdminScope.ubs(String this.ubsId);
-
-  /// `null` = sistema inteiro.
-  final String? ubsId;
-}
+// `AdminScope` e `AdminScopeStore` nasceram aqui e mudaram de casa na #43; o
+// `export` mantém o alcance de quem já importava este arquivo.
+export 'package:sinalacs_server/src/application/admin/admin_scope.dart';
 
 /// Leitura do backoffice. Interface à parte do ORM, no espírito de
 /// `AlertStore`: o serviço e seus testes não conhecem SQL.
-abstract interface class AdminReadStore {
+abstract interface class AdminReadStore implements AdminScopeStore {
   /// Contagens por risco e TMRAV no escopo. O TMRAV olha os 30 dias anteriores
   /// a [now]; sem alerta vermelho reconhecido na janela, `tmravSeconds` é nulo.
   Future<AdminIndicators> indicators(AdminScope scope, {required DateTime now});
@@ -34,22 +28,19 @@ abstract interface class AdminReadStore {
 
   /// Mais recentes primeiro, por keyset (`sequence` menor que [beforeSequence]).
   Future<AdminAuditPage> auditLogs({required int limit, int? beforeSequence});
-
-  /// UBS do coordenador (`staff_accounts.ubsId`), ou `null` se não houver.
-  Future<String?> ubsOf(String staffId);
 }
 
-/// Regras de leitura do backoffice (issue #40).
+/// Regras de leitura do backoffice (issue #40). Papel e escopo vêm do
+/// [AdminScopeResolver] — a regra única do backoffice (issue #43): só
+/// `coordinator` e `admin` leem; `acs` e `patient` são recusados mesmo com token
+/// válido, e a recusa é auditada. O administrador vê o sistema; o coordenador, a
+/// UBS de `staff_accounts.ubsId` — coordenador sem UBS é recusado (fail-closed),
+/// em **todos** os métodos.
 ///
-/// 1. **Papel:** só `coordinator` e `admin` ([Authorization.staffRoles]); `acs` e
-///    `patient` são recusados mesmo com token válido, e a recusa é auditada.
-/// 2. **Escopo:** o administrador vê o sistema; o coordenador, a UBS de
-///    `staff_accounts.ubsId`. Coordenador sem UBS é recusado (fail-closed), em
-///    **todos** os métodos.
-/// 3. **Auditoria antes do dado:** cada leitura grava uma linha `read` e só então
+/// 1. **Auditoria antes do dado:** cada leitura grava uma linha `read` e só então
 ///    consulta o store. `record` (não `recordSafely`): se a linha não grava, a
 ///    exceção sobe e nenhum dado sai.
-/// 4. **Paginação:** `limit` de 1 a 100, `offset` não negativo; fora disso,
+/// 2. **Paginação:** `limit` de 1 a 100, `offset` não negativo; fora disso,
 ///    [AdminInvalidRequestException] (não é erro de permissão).
 ///
 /// A auditoria de logs é só do administrador: filtrar logs por UBS exige juntar
@@ -65,18 +56,24 @@ class AdminReadService {
   final AuditTrail audit;
   final DateTime Function() _clock;
 
+  /// A regra única de papel/escopo, sobre o [store] (que também é a porta da
+  /// UBS do coordenador).
+  late final AdminScopeResolver _resolver = AdminScopeResolver(
+    store: store,
+    audit: audit,
+  );
+
   static const maxLimit = 100;
-  static const _negado = 'acesso restrito ao backoffice';
   static const _paginacaoInvalida = 'Parâmetro de paginação inválido.';
 
   Future<AdminIndicators> indicators(AuthenticatedUser user) async {
-    final escopo = await _escopo(user, 'admin_indicators');
+    final escopo = await _resolver.resolve(user, recurso: 'admin_indicators');
     await _auditar(user, 'admin_indicators', 'success');
     return store.indicators(escopo, now: _clock().toUtc());
   }
 
   Future<List<AdminMicroArea>> microAreas(AuthenticatedUser user) async {
-    final escopo = await _escopo(user, 'admin_micro_areas');
+    final escopo = await _resolver.resolve(user, recurso: 'admin_micro_areas');
     await _auditar(user, 'admin_micro_areas', 'success');
     return store.microAreas(escopo);
   }
@@ -88,7 +85,7 @@ class AdminReadService {
     int limit = 50,
     int offset = 0,
   }) async {
-    final escopo = await _escopo(user, 'admin_alerts');
+    final escopo = await _resolver.resolve(user, recurso: 'admin_alerts');
     _validarPagina(limit, offset);
     await _auditar(user, 'admin_alerts', 'success');
     return store.alerts(
@@ -106,27 +103,10 @@ class AdminReadService {
     int? beforeSequence,
   }) async {
     const recurso = 'admin_audit_logs';
-    if (user.role != UserRole.admin) {
-      await _auditar(user, recurso, 'denied');
-      throw AlertPermissionException(message: _negado);
-    }
+    await _resolver.requireAdmin(user, recurso: recurso);
     _validarPagina(limit, 0);
     await _auditar(user, recurso, 'success');
     return store.auditLogs(limit: limit, beforeSequence: beforeSequence);
-  }
-
-  Future<AdminScope> _escopo(AuthenticatedUser user, String recurso) async {
-    if (!Authorization.staffRoles.contains(user.role)) {
-      await _auditar(user, recurso, 'denied');
-      throw AlertPermissionException(message: _negado);
-    }
-    if (user.role == UserRole.admin) return const AdminScope.system();
-    final ubs = await store.ubsOf(user.id);
-    if (ubs == null) {
-      await _auditar(user, recurso, 'denied');
-      throw AlertPermissionException(message: _negado);
-    }
-    return AdminScope.ubs(ubs);
   }
 
   void _validarPagina(int limit, int offset) {
