@@ -36,3 +36,16 @@ abstract final class AdminBreakpoints {
 /// celular; o título já usa elipse, então o corte é o do texto, não do layout.
 double adminHeaderHeight(BuildContext context) =>
     MediaQuery.textScalerOf(context).scale(72).clamp(72.0, 132.0);
+
+/// Altura da barra de navegação inferior, acompanhando a escala de fonte.
+///
+/// O `NavigationBar` tem 80dp fixos: a 200% de fonte o rótulo de uma linha já
+/// passava ~10dp da borda de baixo e era cortado (o Flutter não reporta isso
+/// como estouro). Acima de 100% a barra cresce a partir de 96dp — com cinco
+/// destinos num celular de 320dp "Microáreas" quebra em várias linhas a 130%
+/// e 80dp escalados não bastavam —, com teto para não comer a tela.
+double adminNavigationBarHeight(BuildContext context) {
+  final escala = MediaQuery.textScalerOf(context);
+  if (escala.scale(1) <= 1) return 80;
+  return escala.scale(96).clamp(80.0, 136.0);
+}

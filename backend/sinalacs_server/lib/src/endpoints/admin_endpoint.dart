@@ -3,18 +3,18 @@ import 'package:sinalacs_server/src/endpoints/authenticated_endpoint.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
 import 'package:sinalacs_server/src/runtime/alert_runtime.dart';
 
-/// Backoffice, só para `coordinator` e `admin`: leitura (issue #40) e gestão de
-/// contas (issue #43).
+/// Backoffice, só para `coordinator` e `admin`: leitura (issue #40), gestão de
+/// contas (issue #43) e atendimento de pedidos do titular (issue #42).
 ///
 /// A leitura — indicadores, microáreas, alertas e auditoria — é do
 /// `AdminReadService`; a listagem de ACS e de equipe, o cadastro, o vínculo de
 /// microárea, a (des)ativação, as redefinições de senha/MFA do ACS e a
 /// redefinição da MFA do staff (com a emissão do código de ativação pela tela,
-/// o deferimento da #48) são do `AdminAccountService` — sempre na mesma dupla
-/// serviço/store, sem endpoint novo.
+/// o deferimento da #48) são do `AdminAccountService`; os pedidos do titular
+/// são do `DataSubjectCaseService` — sempre na mesma dupla serviço/store.
 ///
-/// O papel, o escopo (sistema para o administrador, UBS para o coordenador),
-/// a paginação e a auditoria de cada operação são dos serviços; o endpoint só
+/// O papel, o escopo (sistema para o administrador, UBS para o coordenador), a
+/// paginação e a auditoria de cada operação são dos serviços; o endpoint só
 /// verifica o token e delega. Nenhum método devolve nome, CPF ou contato de
 /// paciente: o paciente é um rótulo (`#A18F`), e o que sai dos cadastros é a
 /// identificação **profissional** (nome, matrícula, UBS, microárea).
@@ -63,6 +63,62 @@ class AdminEndpoint extends AuthenticatedEndpoint {
         beforeSequence: beforeSequence,
       );
 
+  /// Pedidos do titular no escopo de quem chama, prazo mais próximo primeiro.
+  /// Nunca traz o texto do pedido nem a nota.
+  Future<AdminDataSubjectRequestPage> dataSubjectRequests(
+    Session session, {
+    required String accessToken,
+    DataSubjectRequestStatus? status,
+    int limit = 50,
+    int offset = 0,
+  }) => AlertRuntime.instance
+      .dataSubjectCaseServiceFor(session)
+      .list(
+        authenticate(accessToken),
+        status: status,
+        limit: limit,
+        offset: offset,
+      );
+
+  /// Detalhe de um pedido, com o texto decifrado. A leitura é auditada antes.
+  /// Inexistente e fora do escopo dão a mesma recusa.
+  Future<AdminDataSubjectRequestDetail> dataSubjectRequest(
+    Session session, {
+    required String accessToken,
+    required String id,
+  }) => AlertRuntime.instance
+      .dataSubjectCaseServiceFor(session)
+      .get(authenticate(accessToken), id);
+
+  /// `open → inReview`.
+  Future<void> startDataSubjectReview(
+    Session session, {
+    required String accessToken,
+    required String id,
+  }) => AlertRuntime.instance
+      .dataSubjectCaseServiceFor(session)
+      .startReview(authenticate(accessToken), id);
+
+  /// Atende o pedido. Correção exige [note]; exclusão anonimiza o titular na
+  /// mesma transação da mudança de status e da auditoria.
+  Future<void> completeDataSubjectRequest(
+    Session session, {
+    required String accessToken,
+    required String id,
+    String? note,
+  }) => AlertRuntime.instance
+      .dataSubjectCaseServiceFor(session)
+      .complete(authenticate(accessToken), id, note: note);
+
+  /// Recusa o pedido com um motivo de 3 a 500 caracteres, que o titular vê.
+  Future<void> rejectDataSubjectRequest(
+    Session session, {
+    required String accessToken,
+    required String id,
+    required String reason,
+  }) => AlertRuntime.instance
+      .dataSubjectCaseServiceFor(session)
+      .reject(authenticate(accessToken), id, reason: reason);
   /// ACS visíveis para o chamador: o administrador vê o sistema, o coordenador
   /// só os da própria UBS.
   Future<List<AdminAcs>> acs(

@@ -17,6 +17,12 @@ fields:
   createdAt: DateTime
   ### Prazo de resposta: `createdAt` + 15 dias.
   dueAt: DateTime
+  ### Decisão do backoffice (#42); nulos enquanto o pedido está `open`.
+  decidedAt: DateTime?
+  decidedBy: UuidValue?, relation(parent=users)
+  ### Nota de resposta/motivo da recusa: texto livre, cifrado como `details`.
+  resolutionEncrypted: String?
+  resolutionKeyVersion: int?
 indexes:
   data_subject_requests_user_id_type_idx:
     fields: userId, requestType

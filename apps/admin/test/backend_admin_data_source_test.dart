@@ -255,4 +255,151 @@ void main() {
       expect(caller.lastArgs, isNull);
     },
   );
+  group('pedidos do titular (#42)', () {
+    final prazo = DateTime.utc(2026, 10, 3, 12);
+    final criado = DateTime.utc(2026, 9, 18, 12);
+
+    test('lista: manda token, status e página; traduz os enums por nome e mantém a ordem', () async {
+      final caller = FakeEndpointCaller(
+        result: api.AdminDataSubjectRequestPage(
+          items: [
+            api.AdminDataSubjectRequest(
+              id: 'r1',
+              type: api.DataSubjectRequestType.correction,
+              status: api.DataSubjectRequestStatus.inReview,
+              createdAt: criado,
+              dueAt: prazo,
+              overdue: true,
+              patientLabel: '#A18F',
+            ),
+            api.AdminDataSubjectRequest(
+              id: 'r2',
+              type: api.DataSubjectRequestType.deletion,
+              status: api.DataSubjectRequestStatus.open,
+              createdAt: criado,
+              dueAt: prazo.add(const Duration(days: 1)),
+              overdue: false,
+              patientLabel: '#7C2E',
+            ),
+          ],
+        ),
+      );
+      final r = await _fonte(caller).fetchDataRequests(status: DataRequestStatus.inReview, limit: 20, offset: 40);
+      expect(caller.lastArgs, {
+        'accessToken': 'token-de-teste',
+        'status': api.DataSubjectRequestStatus.inReview,
+        'limit': 20,
+        'offset': 40,
+      });
+      expect(r.map((e) => e.id), ['r1', 'r2']);
+      expect(r.first.type, DataRequestType.correction);
+      expect(r.first.status, DataRequestStatus.inReview);
+      expect(r.first.overdue, isTrue);
+      expect(r.first.dueAt, prazo);
+      expect(r.first.createdAt, criado);
+      expect(r.first.patientLabel, 'Paciente #A18F');
+      expect(r.last.type, DataRequestType.deletion);
+    });
+
+    test('detalhe: traz o texto decifrado, a resposta e a data da decisão', () async {
+      final decidido = DateTime.utc(2026, 10, 1, 9);
+      final caller = FakeEndpointCaller(
+        result: api.AdminDataSubjectRequestDetail(
+          id: 'r1',
+          type: api.DataSubjectRequestType.correction,
+          status: api.DataSubjectRequestStatus.rejected,
+          createdAt: criado,
+          dueAt: prazo,
+          overdue: false,
+          patientLabel: '#A18F',
+          details: 'texto fictício',
+          resolution: 'motivo fictício',
+          decidedAt: decidido,
+        ),
+      );
+      final r = await _fonte(caller).fetchDataRequest('r1');
+      expect(caller.lastArgs, {'accessToken': 'token-de-teste', 'id': 'r1'});
+      expect(r.details, 'texto fictício');
+      expect(r.resolution, 'motivo fictício');
+      expect(r.decidedAt, decidido);
+      expect(r.status, DataRequestStatus.rejected);
+      expect(r.patientLabel, 'Paciente #A18F');
+    });
+
+    test('decisões mandam token, id e o texto já sem espaços nas pontas', () async {
+      final caller = FakeEndpointCaller();
+      final fonte = _fonte(caller);
+
+      await fonte.startDataRequestReview('r1');
+      expect(caller.lastArgs, {'accessToken': 'token-de-teste', 'id': 'r1'});
+
+      await fonte.completeDataRequest('r1', note: '  nota fictícia  ');
+      expect(caller.lastArgs, {'accessToken': 'token-de-teste', 'id': 'r1', 'note': 'nota fictícia'});
+
+      await fonte.completeDataRequest('r2');
+      expect(caller.lastArgs, {'accessToken': 'token-de-teste', 'id': 'r2', 'note': null});
+
+      await fonte.rejectDataRequest('r3', reason: ' motivo fictício ');
+      expect(caller.lastArgs, {'accessToken': 'token-de-teste', 'id': 'r3', 'reason': 'motivo fictício'});
+    });
+
+    test('recusa de decisão pelo servidor vira o texto neutro, nunca o de paginação nem o cru', () async {
+      const neutro = 'Pedido não encontrado ou já decidido. Atualize a lista.';
+      final caller = FakeEndpointCaller(
+        error: api.AdminInvalidRequestException(message: 'detalhe interno do servidor'),
+      );
+      final fonte = _fonte(caller);
+      for (final chamada in <Future<void> Function()>[
+        () => fonte.startDataRequestReview('r1'),
+        () => fonte.completeDataRequest('r1', note: 'nota fictícia'),
+        () => fonte.rejectDataRequest('r1', reason: 'motivo fictício'),
+        () => fonte.fetchDataRequest('r1'),
+      ]) {
+        await expectLater(
+          chamada(),
+          throwsA(isA<AdminDataFailure>().having((e) => e.message, 'message', neutro)),
+        );
+      }
+      // A lista continua com o texto de paginação.
+      await expectLater(
+        fonte.fetchDataRequests(),
+        throwsA(isA<AdminDataFailure>().having((e) => e.message, 'message', 'Parâmetro de paginação inválido.')),
+      );
+    });
+
+    test('nota ou motivo fora de 3 a 500 caracteres é recusado sem chamar o servidor', () async {
+      const textoInvalido = 'A resposta deve ter de 3 a 500 caracteres.';
+      for (final texto in ['', '  ', 'ab', '   ab   ', 'x' * 501]) {
+        final caller = FakeEndpointCaller();
+        final fonte = _fonte(caller);
+        await expectLater(
+          fonte.rejectDataRequest('r1', reason: texto),
+          throwsA(isA<AdminDataFailure>().having((e) => e.message, 'message', textoInvalido)),
+        );
+        await expectLater(
+          fonte.completeDataRequest('r1', note: texto),
+          throwsA(isA<AdminDataFailure>().having((e) => e.message, 'message', textoInvalido)),
+        );
+        expect(caller.lastArgs, isNull, reason: 'nada foi enviado para "$texto"');
+      }
+      // Exatamente 500 depois do trim passa.
+      final caller = FakeEndpointCaller();
+      await _fonte(caller).rejectDataRequest('r1', reason: ' ${'x' * 500} ');
+      expect(caller.lastArgs?['reason'], 'x' * 500);
+    });
+
+    test('sessão vencida numa decisão vira AdminSessionExpired', () async {
+      final fonte = BackendAdminDataSource(
+        api.EndpointAdmin(FakeEndpointCaller(error: api.AlertPermissionException(message: 'x'))),
+        accessToken: 't',
+        expiresAt: DateTime.utc(2026, 1, 1, 12),
+        now: () => DateTime.utc(2026, 1, 1, 12, 0, 1),
+      );
+      await expectLater(fonte.completeDataRequest('r1', note: 'nota fictícia'), throwsA(isA<AdminSessionExpired>()));
+      await expectLater(
+        _fonte(FakeEndpointCaller(error: api.ServerpodClientUnauthorized())).rejectDataRequest('r1', reason: 'motivo'),
+        throwsA(isA<AdminSessionExpired>()),
+      );
+    });
+  });
 }

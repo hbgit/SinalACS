@@ -262,5 +262,6 @@ class PatientsEndpoint extends AuthenticatedEndpoint {
         details: r.details,
         createdAt: r.createdAt,
         dueAt: r.dueAt,
+        resolution: r.resolution,
       );
 }

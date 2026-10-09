@@ -162,6 +162,32 @@ void main() {
     expect(offenders, isEmpty, reason: offenders.join('\n'));
   });
 
+  // Os cinco métodos do atendimento de pedidos do titular (#42) mexem em dado
+  // pessoal e podem anonimizar uma conta: além da regra genérica acima, este
+  // caso exige nominalmente que existam, que `AdminEndpoint` estenda a base e
+  // que nenhum deles esteja isento.
+  test('os cinco métodos do atendimento de pedidos do titular autenticam', () {
+    const metodos = [
+      'dataSubjectRequests',
+      'dataSubjectRequest',
+      'startDataSubjectReview',
+      'completeDataSubjectRequest',
+      'rejectDataSubjectRequest',
+    ];
+    final admin = _scan().singleWhere((e) => e.name == 'AdminEndpoint');
+    expect(admin.extendsBase, isTrue);
+    final porNome = {for (final m in admin.methods) m.name: m};
+    for (final nome in metodos) {
+      expect(porNome[nome], isNotNull, reason: 'AdminEndpoint.$nome não existe');
+      expect(
+        porNome[nome]!.body,
+        contains('authenticate(accessToken)'),
+        reason: 'AdminEndpoint.$nome precisa chamar authenticate(accessToken)',
+      );
+      expect(_publicMethodsByDesign.containsKey('AdminEndpoint.$nome'), isFalse);
+    }
+  });
+
   test('a allowlist não guarda endpoint que já virou autenticado', () {
     // Entrada obsoleta na allowlist é pior que entrada ausente: ela documenta
     // uma postura pública que não existe mais e esconde a hora de removê-la.

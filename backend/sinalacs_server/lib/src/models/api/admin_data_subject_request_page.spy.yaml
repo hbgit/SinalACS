@@ -1,0 +1,5 @@
+### Página de pedidos do titular. `nextOffset` nulo = não há mais páginas.
+class: AdminDataSubjectRequestPage
+fields:
+  items: List<AdminDataSubjectRequest>
+  nextOffset: int?

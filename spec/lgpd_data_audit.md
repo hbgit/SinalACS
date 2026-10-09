@@ -107,7 +107,9 @@ A tabela abaixo consolida o mapeamento exaustivo de dados persistidos pelo backe
 | | `userId` | `uuid` | Pseudonimizado | Chave estrangeira (`users.id`) | Titular que fez o pedido — sempre o do token, nunca parâmetro (INV-05). |
 | | `requestType` | `text` | Metadado de Conformidade | `deletion` \| `correction` | — |
 | | `detailsEncrypted` / `detailsKeyVersion` | `text` / `bigint` | Potencialmente Sensível (texto livre do titular) | AES-256-GCM na aplicação, mesma `HEALTH_DATA_ENCRYPTION_KEY` do §2.3 | O pedido de correção é texto livre e pode citar condição de saúde; cifrado pelo mesmo motivo de `visits.notes`. Num pedido de exclusão guarda o JSON `null` cifrado. Nunca copiado para `audit_logs`. |
-| | `status` | `text` | Metadado de Conformidade | `open` \| `completed` \| `rejected` | Só `open` tem escritor nesta versão — quem atende o pedido (backoffice) ainda não existe (ver `PROGRESS.md`). |
+| | `status` | `text` | Metadado de Conformidade | `open` \| `inReview` \| `completed` \| `rejected` | `open` é escrito pelo titular; os demais pelo backoffice (coordenador da UBS ou admin, #42). `completed` e `rejected` são finais. |
+| | `decidedAt` / `decidedBy` | `timestamp without time zone` / `uuid` | Metadado de Conformidade / Pseudonimizado | Instante da decisão e `users.id` do staff | Quem atendeu e quando; nulos enquanto o pedido está aberto. |
+| | `resolutionEncrypted` / `resolutionKeyVersion` | `text` / `bigint` | Potencialmente Sensível (texto livre do analista) | AES-256-GCM na aplicação, mesma chave de `detailsEncrypted` | Nota de resposta ou motivo da recusa; o titular a vê em "Meus dados". Nunca vai para log nem para o payload de push. |
 | | `createdAt` / `dueAt` | `timestamp without time zone` | Metadado de Conformidade | `dueAt` = `createdAt` + 15 dias | Prazo de resposta do Art. 18 (spec/lgpd_design.md, linhas 596-597). |
 | **push_tokens** | `id` | `uuid` | Pseudonimizado | UUID v4 (`gen_random_uuid()`) | Identificador da linha do token de push (RF14). |
 | | `userId` | `uuid` | Pseudonimizado | Chave estrangeira (`users.id`) | Liga o aparelho ao titular; apagado quando o consentimento `segmentedPush` é revogado. |

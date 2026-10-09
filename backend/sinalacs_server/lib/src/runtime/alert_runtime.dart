@@ -1,5 +1,7 @@
 import 'package:sinalacs_server/src/application/admin/admin_account_service.dart';
 import 'package:sinalacs_server/src/application/admin/admin_read_service.dart';
+import 'package:sinalacs_server/src/application/admin/data_subject_case_service.dart';
+import 'package:sinalacs_server/src/infrastructure/database/orm_data_subject_case_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_admin_account_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_admin_read_store.dart';
 import 'package:meta/meta.dart';
@@ -38,6 +40,7 @@ import 'package:sinalacs_server/src/infrastructure/database/orm_otp_challenge_st
 import 'package:sinalacs_server/src/infrastructure/database/orm_data_subject_rights_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_notice_recipient_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_push_token_store.dart';
+import 'package:sinalacs_server/src/infrastructure/push/data_subject_push_notifier.dart';
 import 'package:sinalacs_server/src/infrastructure/push/gorush_client.dart';
 import 'package:sinalacs_server/src/application/notices/notice_service.dart';
 import 'package:sinalacs_server/src/application/patients/push_token_service.dart';
@@ -220,6 +223,26 @@ class AlertRuntime {
         audit: auditTrailFor(session),
       );
 
+  /// Atendimento de pedidos do titular no backoffice (#42), para uma
+  /// requisição. A decisão é auditada DENTRO da transação do store
+  /// (`recordInTransaction`), com o mesmo `AUDIT_CHAIN_SECRET` da trilha; o
+  /// mesmo segredo assina o `denied` de push da anonimização, como no painel do
+  /// titular (`OrmDataSubjectRightsStore`). Leituras e recusas usam a trilha
+  /// comum da requisição.
+  DataSubjectCaseService dataSubjectCaseServiceFor(Session session) =>
+      DataSubjectCaseService(
+        store: OrmDataSubjectCaseStore(
+          session,
+          healthDataCipher,
+          chainSecret: config.auditChainSecret,
+          appendAudit: OrmAuditTrail(
+            session: () => session,
+            chainSecret: config.auditChainSecret,
+          ).recordInTransaction,
+        ),
+        audit: auditTrailFor(session),
+        notifier: _dataSubjectNotifierFor(session),
+      );
   /// Gestão de contas do backoffice (#43), para uma requisição. Mesmo arranjo
   /// de [adminReadServiceFor]: os stores são amarrados à sessão da chamada e a
   /// trilha é a da requisição — cada operação vira uma linha encadeada em
@@ -278,6 +301,21 @@ class AlertRuntime {
         ),
         audit: auditTrailFor(session),
       );
+
+  /// Aviso push ao titular; mesmo remetente do aviso comunitário. Sem relé,
+  /// sem notificador.
+  DataSubjectNotifier? _dataSubjectNotifierFor(Session session) {
+    final override = _noticeSenderOverride;
+    final url = config.gorushUrl;
+    final sender = override != null
+        ? override()
+        : (url == null ? null : _gorushClientFor(url));
+    if (sender == null) return null;
+    return GorushDataSubjectNotifier(
+      targets: OrmDataSubjectPushTargets(session: () => session),
+      sender: sender,
+    );
+  }
 
   /// Aviso comunitário do ACS (RF14). Sem `GORUSH_URL` o serviço nasce sem relé e
   /// recusa o envio com uma mensagem clara.

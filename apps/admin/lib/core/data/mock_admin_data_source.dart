@@ -4,11 +4,20 @@ import 'admin_data_source.dart';
 /// (nenhum dado real de paciente/UBS/ACS), no espírito do `AlertStore`/
 /// `AlertPublisher` fake usados nos testes do backend.
 class MockAdminDataSource implements AdminDataSource {
-  MockAdminDataSource()
+  MockAdminDataSource({DateTime Function()? now})
       : _microAreas = List.unmodifiable(_seedMicroAreas),
         _alerts = List.unmodifiable(_seedAlerts),
         _acs = [..._seedAcs],
-        _staff = [..._seedStaff];
+        _staff = [..._seedStaff],
+        _now = now ?? DateTime.now {
+    _pedidos.addAll(_seedPedidos(_now()));
+  }
+
+  final DateTime Function() _now;
+
+  /// Pedidos do titular (#42), mutáveis para as decisões do mock. Textos
+  /// fictícios; nenhum dado real de paciente.
+  final List<DataRequestDetail> _pedidos = [];
 
   final List<MicroAreaSummary> _microAreas;
   final List<AlertSummary> _alerts;
@@ -112,6 +121,44 @@ class MockAdminDataSource implements AdminDataSource {
     ),
   ];
 
+  /// Prazos relativos ao relógio: um vencido, os outros no prazo, e um já
+  /// decidido. Já em ordem de prazo, como o servidor devolve.
+  static List<DataRequestDetail> _seedPedidos(DateTime agora) {
+    DataRequestDetail pedido(
+      String id,
+      DataRequestType type,
+      DataRequestStatus status,
+      Duration prazo, {
+      String? details,
+      String? resolution,
+    }) {
+      final dueAt = agora.add(prazo);
+      final decidido = status == DataRequestStatus.completed || status == DataRequestStatus.rejected;
+      return DataRequestDetail(
+        id: id,
+        type: type,
+        status: status,
+        createdAt: dueAt.subtract(const Duration(days: 15)),
+        dueAt: dueAt,
+        overdue: !decidido && agora.isAfter(dueAt),
+        patientLabel: 'Paciente #${id.substring(4).toUpperCase()}',
+        details: details,
+        resolution: resolution,
+        decidedAt: decidido ? agora.subtract(const Duration(days: 1)) : null,
+      );
+    }
+
+    return [
+      pedido('req-a18f', DataRequestType.correction, DataRequestStatus.open, const Duration(days: -4, hours: -3),
+          details: 'Texto fictício: o nome social cadastrado está desatualizado.'),
+      pedido('req-7c2e', DataRequestType.deletion, DataRequestStatus.open, const Duration(days: 5)),
+      pedido('req-4d91', DataRequestType.correction, DataRequestStatus.inReview, const Duration(days: 10),
+          details: 'Texto fictício: a data de nascimento está trocada.'),
+      pedido('req-b6a0', DataRequestType.deletion, DataRequestStatus.rejected, const Duration(days: 12),
+          resolution: 'Texto fictício: há atendimento em curso que exige o registro.'),
+    ];
+  }
+
   /// ACS sintéticos. `acs-1` e `acs-2` espelham as duas primeiras microáreas da
   /// listagem (mesmo vínculo e mesma matrícula), para as duas metades da tela
   /// contarem a mesma história; `acs-1` é a chave fixada pelos testes (Tarefa 10).
@@ -207,6 +254,51 @@ class MockAdminDataSource implements AdminDataSource {
       timestamp: DateTime.now(),
       result: 'success',
     ));
+  }
+
+  @override
+  Future<List<DataRequestSummary>> fetchDataRequests({DataRequestStatus? status, int limit = 50, int offset = 0}) async =>
+      _pedidos.where((p) => status == null || p.status == status).skip(offset).take(limit).toList();
+
+  @override
+  Future<DataRequestDetail> fetchDataRequest(String id) async =>
+      _pedidos.firstWhere((p) => p.id == id, orElse: () => throw const AdminDataFailure(dataRequestUnavailable));
+
+  @override
+  Future<void> startDataRequestReview(String id) async =>
+      _decidir(id, const {DataRequestStatus.open}, DataRequestStatus.inReview, null);
+
+  @override
+  Future<void> completeDataRequest(String id, {String? note}) async {
+    if (note != null && !dataRequestTextIsValid(note)) throw const AdminDataFailure(dataRequestTextInvalid);
+    _decidir(id, _abertos, DataRequestStatus.completed, note?.trim());
+  }
+
+  @override
+  Future<void> rejectDataRequest(String id, {required String reason}) async {
+    if (!dataRequestTextIsValid(reason)) throw const AdminDataFailure(dataRequestTextInvalid);
+    _decidir(id, _abertos, DataRequestStatus.rejected, reason.trim());
+  }
+
+  static const _abertos = {DataRequestStatus.open, DataRequestStatus.inReview};
+
+  void _decidir(String id, Set<DataRequestStatus> de, DataRequestStatus para, String? resolution) {
+    final i = _pedidos.indexWhere((p) => p.id == id);
+    if (i < 0 || !de.contains(_pedidos[i].status)) throw const AdminDataFailure(dataRequestUnavailable);
+    final p = _pedidos[i];
+    final finalizado = para != DataRequestStatus.inReview;
+    _pedidos[i] = DataRequestDetail(
+      id: p.id,
+      type: p.type,
+      status: para,
+      createdAt: p.createdAt,
+      dueAt: p.dueAt,
+      overdue: !finalizado && _now().isAfter(p.dueAt),
+      patientLabel: p.patientLabel,
+      details: p.details,
+      resolution: resolution,
+      decidedAt: finalizado ? _now() : null,
+    );
   }
 
   @override

@@ -21,6 +21,8 @@ void main() {
     // A tela deixou de ser somente leitura (#43): cadastro e vínculo de ACS
     // vivem aqui agora. O que continua fora dela é a classificação de risco —
     // a triagem é determinística e não se altera por tela nenhuma (PRD §2.4).
+    // A lista é preguiçosa: a seção de ACS pode estar abaixo da dobra.
+    await tester.scrollUntilVisible(find.byKey(const Key('novo_acs')), 200, scrollable: find.byType(Scrollable).last);
     expect(find.byKey(const Key('novo_acs')), findsOneWidget);
     expect(find.byKey(const Key('vincular_acs_acs-1')), findsOneWidget);
     expect(find.byType(DropdownButtonFormField<RiskLevel>), findsNothing);

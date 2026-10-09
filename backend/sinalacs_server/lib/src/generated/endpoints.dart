@@ -24,10 +24,12 @@ import '../endpoints/triage_endpoint.dart' as _i10;
 import '../endpoints/ubs_endpoint.dart' as _i11;
 import '../endpoints/visits_endpoint.dart' as _i12;
 import 'package:sinalacs_server/src/generated/enums/alert_status.dart' as _i13;
-import 'package:sinalacs_server/src/generated/enums/consent_purpose.dart'
+import 'package:sinalacs_server/src/generated/enums/data_subject_request_status.dart'
     as _i14;
-import 'package:sinalacs_server/src/generated/api/visit_sync_entry.dart'
+import 'package:sinalacs_server/src/generated/enums/consent_purpose.dart'
     as _i15;
+import 'package:sinalacs_server/src/generated/api/visit_sync_entry.dart'
+    as _i16;
 
 class Endpoints extends _i1.EndpointDispatch {
   @override
@@ -211,6 +213,155 @@ class Endpoints extends _i1.EndpointDispatch {
                 limit: params['limit'],
                 beforeSequence: params['beforeSequence'],
               ),
+        ),
+        'dataSubjectRequests': _i1.MethodConnector(
+          name: 'dataSubjectRequests',
+          params: {
+            'accessToken': _i1.ParameterDescription(
+              name: 'accessToken',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'status': _i1.ParameterDescription(
+              name: 'status',
+              type: _i1.getType<_i14.DataSubjectRequestStatus?>(),
+              nullable: true,
+            ),
+            'limit': _i1.ParameterDescription(
+              name: 'limit',
+              type: _i1.getType<int>(),
+              nullable: false,
+            ),
+            'offset': _i1.ParameterDescription(
+              name: 'offset',
+              type: _i1.getType<int>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async =>
+                  (endpoints['admin'] as _i2.AdminEndpoint).dataSubjectRequests(
+                    session,
+                    accessToken: params['accessToken'],
+                    status: params['status'],
+                    limit: params['limit'],
+                    offset: params['offset'],
+                  ),
+        ),
+        'dataSubjectRequest': _i1.MethodConnector(
+          name: 'dataSubjectRequest',
+          params: {
+            'accessToken': _i1.ParameterDescription(
+              name: 'accessToken',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'id': _i1.ParameterDescription(
+              name: 'id',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async =>
+                  (endpoints['admin'] as _i2.AdminEndpoint).dataSubjectRequest(
+                    session,
+                    accessToken: params['accessToken'],
+                    id: params['id'],
+                  ),
+        ),
+        'startDataSubjectReview': _i1.MethodConnector(
+          name: 'startDataSubjectReview',
+          params: {
+            'accessToken': _i1.ParameterDescription(
+              name: 'accessToken',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'id': _i1.ParameterDescription(
+              name: 'id',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async => (endpoints['admin'] as _i2.AdminEndpoint)
+                  .startDataSubjectReview(
+                    session,
+                    accessToken: params['accessToken'],
+                    id: params['id'],
+                  ),
+        ),
+        'completeDataSubjectRequest': _i1.MethodConnector(
+          name: 'completeDataSubjectRequest',
+          params: {
+            'accessToken': _i1.ParameterDescription(
+              name: 'accessToken',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'id': _i1.ParameterDescription(
+              name: 'id',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'note': _i1.ParameterDescription(
+              name: 'note',
+              type: _i1.getType<String?>(),
+              nullable: true,
+            ),
+          },
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async => (endpoints['admin'] as _i2.AdminEndpoint)
+                  .completeDataSubjectRequest(
+                    session,
+                    accessToken: params['accessToken'],
+                    id: params['id'],
+                    note: params['note'],
+                  ),
+        ),
+        'rejectDataSubjectRequest': _i1.MethodConnector(
+          name: 'rejectDataSubjectRequest',
+          params: {
+            'accessToken': _i1.ParameterDescription(
+              name: 'accessToken',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'id': _i1.ParameterDescription(
+              name: 'id',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'reason': _i1.ParameterDescription(
+              name: 'reason',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async => (endpoints['admin'] as _i2.AdminEndpoint)
+                  .rejectDataSubjectRequest(
+                    session,
+                    accessToken: params['accessToken'],
+                    id: params['id'],
+                    reason: params['reason'],
+                  ),
         ),
         'acs': _i1.MethodConnector(
           name: 'acs',
@@ -1084,7 +1235,7 @@ class Endpoints extends _i1.EndpointDispatch {
             ),
             'purpose': _i1.ParameterDescription(
               name: 'purpose',
-              type: _i1.getType<_i14.ConsentPurpose>(),
+              type: _i1.getType<_i15.ConsentPurpose>(),
               nullable: false,
             ),
             'granted': _i1.ParameterDescription(
@@ -1153,7 +1304,7 @@ class Endpoints extends _i1.EndpointDispatch {
             ),
             'purpose': _i1.ParameterDescription(
               name: 'purpose',
-              type: _i1.getType<_i14.ConsentPurpose>(),
+              type: _i1.getType<_i15.ConsentPurpose>(),
               nullable: false,
             ),
           },
@@ -1331,7 +1482,7 @@ class Endpoints extends _i1.EndpointDispatch {
             ),
             'visits': _i1.ParameterDescription(
               name: 'visits',
-              type: _i1.getType<List<_i15.VisitSyncEntry>>(),
+              type: _i1.getType<List<_i16.VisitSyncEntry>>(),
               nullable: false,
             ),
           },
@@ -1360,7 +1511,7 @@ class Endpoints extends _i1.EndpointDispatch {
             ),
             'visits': _i1.ParameterDescription(
               name: 'visits',
-              type: _i1.getType<List<_i15.VisitSyncEntry>>(),
+              type: _i1.getType<List<_i16.VisitSyncEntry>>(),
               nullable: false,
             ),
           },
@@ -1391,7 +1542,7 @@ class Endpoints extends _i1.EndpointDispatch {
             ),
             'visits': _i1.ParameterDescription(
               name: 'visits',
-              type: _i1.getType<List<_i15.VisitSyncEntry>>(),
+              type: _i1.getType<List<_i16.VisitSyncEntry>>(),
               nullable: false,
             ),
           },

@@ -9,23 +9,31 @@ import 'package:sinalacs_server/src/application/patients/patient_data_overview_s
 import 'package:sinalacs_server/src/generated/protocol.dart';
 import 'package:sinalacs_server/src/infrastructure/crypto/encrypted_json.dart';
 import 'package:sinalacs_server/src/infrastructure/crypto/health_data_cipher.dart';
+import 'package:sinalacs_server/src/infrastructure/database/removed_account.dart';
 import 'package:sinalacs_server/src/infrastructure/database/signed_consent_log.dart';
 import 'package:sinalacs_server/src/infrastructure/database/subject_lock.dart';
 
-/// Um pedido lido do banco, com `details` decifrado. Compartilhado com
-/// `OrmPatientDataOverviewStore`, que lista os mesmos pedidos em "Meus Dados".
+/// Um pedido lido do banco, com `details` e a nota de resposta (`resolution`,
+/// #42) decifrados. Compartilhado com `OrmPatientDataOverviewStore`, que lista
+/// os mesmos pedidos em "Meus Dados": quem lê é sempre o próprio titular.
 Future<DataSubjectRequestSnapshot> dataSubjectRequestSnapshotOf(
   DataSubjectRequest row,
   HealthDataCipher cipher,
-) async =>
-    DataSubjectRequestSnapshot(
-      id: row.id!.uuid,
-      type: row.requestType,
-      status: row.status,
-      details: await cipher.decryptJson(row.detailsEncrypted, row.detailsKeyVersion) as String?,
-      createdAt: row.createdAt,
-      dueAt: row.dueAt,
-    );
+) async {
+  final resolutionEncrypted = row.resolutionEncrypted;
+  final resolutionKeyVersion = row.resolutionKeyVersion;
+  return DataSubjectRequestSnapshot(
+    id: row.id!.uuid,
+    type: row.requestType,
+    status: row.status,
+    details: await cipher.decryptJson(row.detailsEncrypted, row.detailsKeyVersion) as String?,
+    createdAt: row.createdAt,
+    dueAt: row.dueAt,
+    resolution: resolutionEncrypted == null || resolutionKeyVersion == null
+        ? null
+        : await cipher.decryptJson(resolutionEncrypted, resolutionKeyVersion) as String?,
+  );
+}
 
 /// Implementação de [DataSubjectRightsStore] sobre o ORM do Serverpod.
 ///
@@ -48,13 +56,30 @@ class OrmDataSubjectRightsStore implements DataSubjectRightsStore {
   final HealthDataCipher _cipher;
   final bool _debugFailAfterTokenDelete;
 
+  /// Sob o lock de push do titular (namespace 3), o mesmo que a anonimização
+  /// (#42) segura até o commit: um `granted` de `segmentedPush` nunca entra
+  /// depois do `denied` que ela grava.
   @override
   Future<String> recordConsent(ConsentLogEntry entry) async {
-    final row = await ConsentLog.db.insertRow(
-      _session(),
-      signedConsentLog(entry, signature: _signature, origin: 'painel-titular'),
-    );
-    return row.id!.uuid;
+    final session = _session();
+    return session.db.transaction((transaction) async {
+      await lockPerSubject(session, transaction,
+          namespace: lockNamespacePushToken, key: entry.userId);
+      await _refuseRemoved(session, transaction, entry.userId);
+      final row = await ConsentLog.db.insertRow(
+        session,
+        signedConsentLog(entry, signature: _signature, origin: 'painel-titular'),
+        transaction: transaction,
+      );
+      return row.id!.uuid;
+    });
+  }
+
+  /// Conta anonimizada por exclusão atendida (#42): nenhuma escrita nova.
+  Future<void> _refuseRemoved(Session session, Transaction transaction, String userId) async {
+    if (await isRemovedAccount(session, UuidValue.fromString(userId), transaction: transaction)) {
+      throw StateError(removedAccountMessage);
+    }
   }
 
   /// Trava por titular (a MESMA de `OrmPushTokenStore.registerIfConsented`), apaga
@@ -68,6 +93,7 @@ class OrmDataSubjectRightsStore implements DataSubjectRightsStore {
     return session.db.transaction((transaction) async {
       await lockPerSubject(session, transaction,
           namespace: lockNamespacePushToken, key: entry.userId);
+      await _refuseRemoved(session, transaction, entry.userId);
       await PushToken.db.deleteWhere(
         session,
         where: (t) => t.userId.equals(userUuid),
@@ -94,6 +120,7 @@ class OrmDataSubjectRightsStore implements DataSubjectRightsStore {
     return session.db.transaction((transaction) async {
       await lockPerSubject(session, transaction,
           namespace: lockNamespaceTerms, key: '${entry.purpose.name}:${entry.userId}');
+      await _refuseRemoved(session, transaction, entry.userId);
       final latest = await ConsentLog.db.findFirstRow(
         session,
         where: (t) => t.userId.equals(userUuid) & t.purpose.equals(entry.purpose.name),
@@ -158,6 +185,7 @@ class OrmDataSubjectRightsStore implements DataSubjectRightsStore {
     final encrypted = await _cipher.encryptJson(null);
     return session.db.transaction((transaction) async {
       await lockPerSubject(session, transaction, namespace: lockNamespaceDeletion, key: userId);
+      await _refuseRemoved(session, transaction, userId);
       final open = await DataSubjectRequest.db.findFirstRow(
         session,
         where: (t) =>
@@ -199,18 +227,26 @@ class OrmDataSubjectRightsStore implements DataSubjectRightsStore {
     // Cifra sempre, inclusive o `null` da exclusão: a coluna vazia fica
     // reservada para linha escrita fora do caminho Dart (ver `decryptJson`).
     final encrypted = await _cipher.encryptJson(details);
-    final row = await DataSubjectRequest.db.insertRow(
-      _session(),
-      DataSubjectRequest(
-        userId: UuidValue.fromString(userId),
-        requestType: type,
-        detailsEncrypted: encrypted.ciphertextBase64,
-        detailsKeyVersion: encrypted.keyVersion,
-        status: DataSubjectRequestStatus.open,
-        createdAt: createdAt,
-        dueAt: dueAt,
-      ),
-    );
-    return dataSubjectRequestSnapshotOf(row, _cipher);
+    final session = _session();
+    // Sob o lock por titular da exclusão (namespace 1), o mesmo que a
+    // anonimização (#42) toma: um pedido novo nunca nasce depois dela.
+    return session.db.transaction((transaction) async {
+      await lockPerSubject(session, transaction, namespace: lockNamespaceDeletion, key: userId);
+      await _refuseRemoved(session, transaction, userId);
+      final row = await DataSubjectRequest.db.insertRow(
+        session,
+        DataSubjectRequest(
+          userId: UuidValue.fromString(userId),
+          requestType: type,
+          detailsEncrypted: encrypted.ciphertextBase64,
+          detailsKeyVersion: encrypted.keyVersion,
+          status: DataSubjectRequestStatus.open,
+          createdAt: createdAt,
+          dueAt: dueAt,
+        ),
+        transaction: transaction,
+      );
+      return dataSubjectRequestSnapshotOf(row, _cipher);
+    });
   }
 }

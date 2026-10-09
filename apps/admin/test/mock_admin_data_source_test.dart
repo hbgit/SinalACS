@@ -40,6 +40,33 @@ void main() {
     expect(log.last.resourceType, 'micro_areas');
   });
 
+  test('pedidos do titular: fixtures sintéticas ordenadas por prazo, com um vencido', () async {
+    final dataSource = MockAdminDataSource();
+
+    final pedidos = await dataSource.fetchDataRequests();
+
+    expect(pedidos, isNotEmpty);
+    for (var i = 1; i < pedidos.length; i++) {
+      expect(pedidos[i - 1].dueAt.isAfter(pedidos[i].dueAt), isFalse);
+    }
+    expect(pedidos.where((p) => p.overdue), isNotEmpty);
+  });
+
+  test('pedidos do titular: atender correção muda o status e grava a resposta', () async {
+    final dataSource = MockAdminDataSource();
+
+    await dataSource.completeDataRequest('req-a18f', note: 'Resposta fictícia.');
+    final pedido = await dataSource.fetchDataRequest('req-a18f');
+
+    expect(pedido.status, DataRequestStatus.completed);
+    expect(pedido.resolution, 'Resposta fictícia.');
+    expect(pedido.overdue, isFalse, reason: 'decidido não é mais vencido');
+    await expectLater(
+      dataSource.rejectDataRequest('req-a18f', reason: 'tarde demais'),
+      throwsA(isA<AdminDataFailure>()),
+    );
+  });
+
   group('gestão de contas (#43)', () {
     test('semeia o ACS acs-1 e a conta de equipe staff-1, por chave', () async {
       final dataSource = MockAdminDataSource();
