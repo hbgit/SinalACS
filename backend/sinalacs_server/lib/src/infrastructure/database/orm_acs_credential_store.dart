@@ -191,6 +191,28 @@ class OrmAcsCredentialStore implements AcsCredentialStore, TotpStore, StaffActiv
     return linhas.isNotEmpty;
   }
 
+  /// Apaga o estado da MFA da conta numa única instrução: as quatro colunas
+  /// `totp*` voltam a NULL e `updatedAt` recebe [at].
+  ///
+  /// É o caminho sancionado da redefinição pela coordenação (#43). Sem `WHERE`
+  /// sobre o estado: a operação é idempotente por desenho — um ACS sem MFA
+  /// passa pela mesma instrução sem efeito, e quem decide se o alvo existe (e
+  /// se está no escopo de quem pediu) é o serviço, que já o validou.
+  @override
+  Future<void> clearTotp(String acsId, DateTime at) async {
+    await UserCredential.db.updateWhere(
+      _session(),
+      columnValues: (t) => [
+        t.totpSecretEncrypted(null),
+        t.totpKeyVersion(null),
+        t.totpEnabledAt(null),
+        t.totpLastStep(null),
+        t.updatedAt(at),
+      ],
+      where: (t) => t.userId.equals(UuidValue.fromString(acsId)),
+    );
+  }
+
   @override
   Future<void> registerFailedAttempt(
     String acsId, {
@@ -313,6 +335,12 @@ class OrmAcsCredentialStore implements AcsCredentialStore, TotpStore, StaffActiv
     // Substituir a credencial também zera o estado de bloqueio: a senha nova
     // não tem relação com as tentativas da antiga, e herdar o contador faria
     // uma troca de senha nascer a uma falha do bloqueio.
+    //
+    // O `lockStreak` sai junto, pela mesma razão: ele é a contagem de rodadas
+    // de bloqueio **daquela credencial**, e preservá-lo faria o próximo
+    // bloqueio da senha nova vencer no dobro do tempo por causa das rodadas de
+    // uma credencial que deixou de existir — uma redefinição de senha pela
+    // coordenação ficaria mais punitiva que o primeiro bloqueio.
     existing
       ..passwordHash = digest.hashBase64
       ..passwordSalt = digest.saltBase64
@@ -321,6 +349,7 @@ class OrmAcsCredentialStore implements AcsCredentialStore, TotpStore, StaffActiv
       ..parallelism = digest.parallelism
       ..failedAttempts = 0
       ..lockedUntil = null
+      ..lockStreak = 0
       ..updatedAt = at;
     await UserCredential.db.updateRow(session, existing);
   }

@@ -6,8 +6,7 @@ import 'package:sinalacs_server/src/application/audit/audit_trail.dart';
 import 'package:sinalacs_server/src/application/auth/development_auth_service.dart';
 import 'package:sinalacs_server/src/application/auth/institutional_auth_service.dart';
 import 'package:sinalacs_server/src/application/auth/password_hasher.dart';
-import 'package:sinalacs_server/src/application/auth/refresh_token_service.dart';
-import 'package:sinalacs_server/src/application/auth/upload_token_service.dart';
+import 'package:sinalacs_server/src/application/auth/totp_secret_vault.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
 import 'package:test/test.dart';
 
@@ -205,27 +204,65 @@ class _Store implements AdminAccountStore {
   Future<String?> ubsOf(String staffId) async => ubs[staffId];
 }
 
-/// Stubs das portas que esta tarefa (leitura) ainda não usa: as operações de
-/// escrita da #43 é que passam por credencial, MFA, ativação, refresh e envio
-/// diferido. Chamar qualquer uma aqui é erro de montagem do teste.
-class _NaoUsado
-    implements
-        AcsCredentialStore,
-        TotpStore,
-        StaffActivationStore,
-        RefreshTokenStore,
-        UploadTokenStore,
-        PasswordHasher {
+/// Stub da porta que esta tarefa ainda não usa (o código de ativação da MFA do
+/// staff é de outra tarefa da #43). Chamar qualquer método aqui é erro de
+/// montagem do teste.
+class _NaoUsado implements StaffActivationStore {
   @override
   dynamic noSuchMethod(Invocation invocation) =>
       throw UnimplementedError('${invocation.memberName} não é usado aqui');
+}
 
-  /// `RefreshTokenStore` e `UploadTokenStore` declaram este método com tipos de
-  /// retorno incompatíveis entre si; por isso ele precisa de uma assinatura
-  /// própria (`Never` satisfaz os dois) em vez de vir do `noSuchMethod`.
+/// Credencial do ACS: guarda a substituição pedida pela redefinição de senha —
+/// é o que o teste observa, porque o serviço não tem retorno daqui.
+class _Credenciais implements AcsCredentialStore {
+  final trocas = <(String, PasswordDigest, DateTime)>[];
+
   @override
-  Never findByHash(String tokenHash) =>
-      throw UnimplementedError('findByHash não é usado aqui');
+  Future<void> saveCredential(String acsId, PasswordDigest digest, DateTime at) async {
+    _ordem.add('credentials:saveCredential');
+    trocas.add((acsId, digest, at));
+  }
+
+  @override
+  Future<AcsCredentialRecord?> findByEnrollmentId(String enrollmentId) =>
+      throw UnimplementedError('findByEnrollmentId não é usado aqui');
+
+  @override
+  Future<void> registerFailedAttempt(
+    String acsId, {
+    required bool restartCounter,
+    required int maxFailedAttempts,
+    required DateTime lockUntil,
+    required DateTime at,
+  }) => throw UnimplementedError('registerFailedAttempt não é usado aqui');
+
+  @override
+  Future<void> registerSuccessfulLogin(String acsId, DateTime at) =>
+      throw UnimplementedError('registerSuccessfulLogin não é usado aqui');
+}
+
+/// Estado da MFA: guarda as limpezas pedidas pela redefinição de MFA.
+class _Totp implements TotpStore {
+  final limpezas = <(String, DateTime)>[];
+
+  @override
+  Future<void> clearTotp(String acsId, DateTime at) async {
+    _ordem.add('totp:clearTotp');
+    limpezas.add((acsId, at));
+  }
+
+  @override
+  Future<bool> saveSecret(String acsId, SealedSecret secret, DateTime at) =>
+      throw UnimplementedError('saveSecret não é usado aqui');
+
+  @override
+  Future<bool> enable(String acsId, SealedSecret pending, int step, DateTime at) =>
+      throw UnimplementedError('enable não é usado aqui');
+
+  @override
+  Future<bool> registerStep(String acsId, int step) =>
+      throw UnimplementedError('registerStep não é usado aqui');
 }
 
 /// Hasher de mentira: guarda a senha em claro que recebeu, para o teste provar
@@ -276,6 +313,8 @@ void main() {
   late _Store store;
   late _Audit audit;
   late _Hasher hasher;
+  late _Credenciais credenciais;
+  late _Totp totp;
   late AdminAccountService servico;
   final admin = _u('admin-1', UserRole.admin);
   final coordA = _u('coord-a', UserRole.coordinator);
@@ -286,13 +325,13 @@ void main() {
     store = _Store();
     audit = _Audit();
     hasher = _Hasher();
+    credenciais = _Credenciais();
+    totp = _Totp();
     servico = AdminAccountService(
       store: store,
-      credentials: _NaoUsado(),
-      totpStore: _NaoUsado(),
+      credentials: credenciais,
+      totpStore: totp,
       activationStore: _NaoUsado(),
-      refreshStore: _NaoUsado(),
-      uploadStore: _NaoUsado(),
       hasher: hasher,
       audit: audit,
       // Sorteio e relógio fixos: o teste compara a senha devolvida com a que o
@@ -865,6 +904,180 @@ void main() {
         everyElement('write'),
         reason: 'a linha descreve a TENTATIVA de escrita, não uma leitura',
       );
+      expect(audit.events.map((e) => e.result), everyElement('denied'));
+    });
+  });
+
+  group('resetAcsPassword', () {
+    test(
+      'admin redefine: senha nova sorteada, Argon2id derivado e auditoria password_reset DEPOIS do commit',
+      () async {
+        final resultado = await servico.resetAcsPassword(admin, acsId: 'acs-a');
+
+        expect(
+          resultado.newPassword,
+          matches(
+            RegExp(
+              r'^[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{4}'
+              r'(-[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{4}){3}$',
+            ),
+          ),
+          reason: 'o mesmo formato da senha inicial: o operador não escolhe a senha',
+        );
+        expect(
+          hasher.senhas,
+          [resultado.newPassword],
+          reason: 'a credencial gravada é exatamente a senha devolvida ao operador',
+        );
+        expect(credenciais.trocas, [
+          ('acs-a', _Hasher.digest, DateTime.utc(2026, 10, 8, 12)),
+        ]);
+
+        expect(
+          _ordem,
+          [
+            'store:acsById',
+            'credentials:saveCredential',
+            'audit:write:admin_acs:password_reset',
+          ],
+          reason: 'o alvo é validado antes do sorteio e a linha de sucesso entra DEPOIS do commit',
+        );
+        final linha = audit.events.single;
+        expect(linha.userId, 'admin-1');
+        expect(linha.actionType, 'write');
+        expect(linha.resourceType, 'admin_acs');
+        expect(linha.result, 'password_reset');
+        expect(linha.resourceId, 'acs-a');
+      },
+    );
+
+    test('coordenador redefine a senha do ACS da própria UBS, com o escopo de UBS', () async {
+      final resultado = await servico.resetAcsPassword(coordA, acsId: 'acs-a');
+
+      expect(resultado.newPassword, isNotEmpty);
+      expect(store.ultimoEscopo!.ubsId, _ubsDoCoordenador);
+      expect(audit.events.single.result, 'password_reset');
+      expect(audit.events.single.resourceId, 'acs-a');
+    });
+
+    test('ACS inexistente e ACS de outra UBS → mesma recusa auditada, nada escrito', () async {
+      final casos = <(AuthenticatedUser, String)>[
+        (admin, 'acs-inexistente'),
+        // ACS da outra UBS: o coordenador não descobre território alheio.
+        (coordA, 'acs-b'),
+      ];
+      for (final (operador, acsId) in casos) {
+        await expectLater(
+          servico.resetAcsPassword(operador, acsId: acsId),
+          throwsA(
+            isA<AdminInvalidRequestException>().having(
+              (e) => e.message,
+              'message',
+              'ACS não encontrado.',
+            ),
+          ),
+        );
+      }
+      expect(credenciais.trocas, isEmpty, reason: 'a credencial antiga fica como está');
+      expect(
+        hasher.senhas,
+        isEmpty,
+        reason: 'nem a senha é sorteada para um alvo fora do escopo (derivar é caro)',
+      );
+      expect(audit.events, hasLength(casos.length));
+      expect(audit.events.map((e) => e.actionType), everyElement('write'));
+      expect(audit.events.map((e) => e.result), everyElement('denied'));
+    });
+
+    test('papel fora do backoffice e coordenador sem UBS recebem recusa auditada', () async {
+      for (final usuario in [
+        _u('u-acs', UserRole.acs),
+        _u('u-paciente', UserRole.patient),
+        coordSemUbs,
+      ]) {
+        await expectLater(
+          servico.resetAcsPassword(usuario, acsId: 'acs-a'),
+          throwsA(isA<AlertPermissionException>()),
+        );
+      }
+      expect(store.chamadas, 0, reason: 'nem o alvo é lido');
+      expect(audit.events, hasLength(3));
+      expect(
+        audit.events.map((e) => e.actionType),
+        everyElement('write'),
+        reason: 'a linha descreve a TENTATIVA de escrita, não uma leitura',
+      );
+      expect(audit.events.map((e) => e.result), everyElement('denied'));
+    });
+  });
+
+  group('resetAcsMfa', () {
+    test('zera as quatro colunas totp* e audita mfa_reset com o id DEPOIS da limpeza', () async {
+      await servico.resetAcsMfa(admin, acsId: 'acs-a');
+
+      expect(totp.limpezas, [('acs-a', DateTime.utc(2026, 10, 8, 12))]);
+      expect(_ordem, [
+        'store:acsById',
+        'totp:clearTotp',
+        'audit:write:admin_acs:mfa_reset',
+      ]);
+      final linha = audit.events.single;
+      expect(linha.userId, 'admin-1');
+      expect(linha.actionType, 'write');
+      expect(linha.resourceType, 'admin_acs');
+      expect(linha.result, 'mfa_reset');
+      expect(linha.resourceId, 'acs-a');
+    });
+
+    test('ACS sem MFA é idempotente: a limpeza é pedida do mesmo jeito e audita mfa_reset', () async {
+      // `acs-a` não tem MFA (a limpeza não acha nada a apagar): a operação
+      // conclui, e o que a trilha registra é o pedido do operador.
+      await servico.resetAcsMfa(coordA, acsId: 'acs-a');
+      await servico.resetAcsMfa(coordA, acsId: 'acs-a');
+
+      expect(totp.limpezas, hasLength(2));
+      expect(audit.events, hasLength(2));
+      expect(audit.events.map((e) => e.result), ['mfa_reset', 'mfa_reset']);
+      expect(audit.events.map((e) => e.resourceId), everyElement('acs-a'));
+    });
+
+    test('ACS inexistente e ACS de outra UBS → mesma recusa auditada, nada limpo', () async {
+      final casos = <(AuthenticatedUser, String)>[
+        (admin, 'acs-inexistente'),
+        (coordA, 'acs-b'),
+      ];
+      for (final (operador, acsId) in casos) {
+        await expectLater(
+          servico.resetAcsMfa(operador, acsId: acsId),
+          throwsA(
+            isA<AdminInvalidRequestException>().having(
+              (e) => e.message,
+              'message',
+              'ACS não encontrado.',
+            ),
+          ),
+        );
+      }
+      expect(totp.limpezas, isEmpty, reason: 'a MFA de um alvo fora do escopo fica como está');
+      expect(audit.events, hasLength(casos.length));
+      expect(audit.events.map((e) => e.actionType), everyElement('write'));
+      expect(audit.events.map((e) => e.result), everyElement('denied'));
+    });
+
+    test('papel fora do backoffice e coordenador sem UBS recebem recusa auditada', () async {
+      for (final usuario in [
+        _u('u-acs', UserRole.acs),
+        _u('u-paciente', UserRole.patient),
+        coordSemUbs,
+      ]) {
+        await expectLater(
+          servico.resetAcsMfa(usuario, acsId: 'acs-a'),
+          throwsA(isA<AlertPermissionException>()),
+        );
+      }
+      expect(store.chamadas, 0);
+      expect(audit.events, hasLength(3));
+      expect(audit.events.map((e) => e.actionType), everyElement('write'));
       expect(audit.events.map((e) => e.result), everyElement('denied'));
     });
   });

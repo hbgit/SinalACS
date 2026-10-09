@@ -12,8 +12,6 @@ import 'package:sinalacs_server/src/generated/protocol.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_acs_credential_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_admin_account_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_otp_challenge_store.dart';
-import 'package:sinalacs_server/src/infrastructure/database/orm_refresh_token_store.dart';
-import 'package:sinalacs_server/src/infrastructure/database/orm_upload_token_store.dart';
 import 'package:sinalacs_server/src/runtime/alert_runtime.dart';
 import 'package:test/test.dart';
 
@@ -155,8 +153,6 @@ AdminAccountService _servico(
   credentials: OrmAcsCredentialStore(session: () => session),
   totpStore: OrmAcsCredentialStore(session: () => session),
   activationStore: OrmAcsCredentialStore(session: () => session, staff: true),
-  refreshStore: OrmRefreshTokenStore(session: () => session),
-  uploadStore: OrmUploadTokenStore(session: () => session),
   hasher: AlertRuntimeHarness.hasher,
   audit: audit,
   clock: () => _t,

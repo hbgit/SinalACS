@@ -345,6 +345,55 @@ class Endpoints extends _i1.EndpointDispatch {
                 active: params['active'],
               ),
         ),
+        'resetAcsPassword': _i1.MethodConnector(
+          name: 'resetAcsPassword',
+          params: {
+            'accessToken': _i1.ParameterDescription(
+              name: 'accessToken',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'acsId': _i1.ParameterDescription(
+              name: 'acsId',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async =>
+                  (endpoints['admin'] as _i2.AdminEndpoint).resetAcsPassword(
+                    session,
+                    accessToken: params['accessToken'],
+                    acsId: params['acsId'],
+                  ),
+        ),
+        'resetAcsMfa': _i1.MethodConnector(
+          name: 'resetAcsMfa',
+          params: {
+            'accessToken': _i1.ParameterDescription(
+              name: 'accessToken',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'acsId': _i1.ParameterDescription(
+              name: 'acsId',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async => (endpoints['admin'] as _i2.AdminEndpoint).resetAcsMfa(
+                session,
+                accessToken: params['accessToken'],
+                acsId: params['acsId'],
+              ),
+        ),
       },
     );
     connectors['alerts'] = _i1.EndpointConnector(

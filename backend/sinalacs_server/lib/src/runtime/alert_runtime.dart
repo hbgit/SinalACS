@@ -226,6 +226,11 @@ class AlertRuntime {
   /// `audit_logs`. A credencial do ACS e o estado da MFA vivem na mesma tabela
   /// (`user_credentials`), por isso um store só serve às duas portas; o código
   /// de ativação é do staff (`staff_accounts`), daí a segunda instância.
+  ///
+  /// Não há porta de refresh token nem de envio diferido aqui: a desativação
+  /// revoga as duas **dentro da transação do `OrmAdminAccountStore`**, para a
+  /// flag e as revogações serem um só estado (ver `setAcsActive`), e as demais
+  /// operações da #43 não tocam em token.
   AdminAccountService adminAccountServiceFor(Session session) {
     final credenciais = OrmAcsCredentialStore(session: () => session);
     return AdminAccountService(
@@ -233,8 +238,6 @@ class AlertRuntime {
       credentials: credenciais,
       totpStore: credenciais,
       activationStore: OrmAcsCredentialStore(session: () => session, staff: true),
-      refreshStore: OrmRefreshTokenStore(session: () => session),
-      uploadStore: OrmUploadTokenStore(session: () => session),
       hasher: passwordHasher,
       audit: auditTrailFor(session),
     );

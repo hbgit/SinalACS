@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:serverpod/serverpod.dart';
 import 'package:sinalacs_server/src/application/audit/audit_trail.dart';
@@ -6,7 +7,10 @@ import 'package:sinalacs_server/src/application/auth/development_auth_service.da
 import 'package:sinalacs_server/src/application/auth/institutional_auth_service.dart';
 import 'package:sinalacs_server/src/application/auth/password_hasher.dart';
 import 'package:sinalacs_server/src/application/auth/refresh_token_service.dart';
+import 'package:sinalacs_server/src/application/auth/totp.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
+import 'package:sinalacs_server/src/infrastructure/crypto/health_cipher_totp_vault.dart';
+import 'package:sinalacs_server/src/infrastructure/database/orm_acs_credential_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_refresh_token_store.dart';
 import 'package:sinalacs_server/src/runtime/alert_runtime.dart';
 import 'package:test/test.dart';
@@ -14,9 +18,10 @@ import 'package:test/test.dart';
 import 'test_tools/runtime_harness.dart';
 import 'test_tools/serverpod_test_tools.dart';
 
-/// `admin.acs`, `admin.staff`, `admin.createAcs` e `admin.setAcsMicroArea`
-/// (#43) pelo endpoint, com tokens reais e Postgres real: papel, escopo por
-/// UBS, auditoria de cada leitura e minimização de PII. Dados sintéticos; ids
+/// `admin.acs`, `admin.staff`, `admin.createAcs`, `admin.setAcsMicroArea`,
+/// `admin.setAcsActive`, `admin.resetAcsPassword` e `admin.resetAcsMfa` (#43)
+/// pelo endpoint, com tokens reais e Postgres real: papel, escopo por UBS,
+/// auditoria de cada leitura e minimização de PII. Dados sintéticos; ids
 /// próprios.
 const _ubsA = '00000000-0000-4000-8000-0000000000b1';
 const _ubsB = '00000000-0000-4000-8000-0000000000b2';
@@ -38,6 +43,17 @@ const _maA2 = '00000000-0000-4000-8000-0000000000bb';
 const _acsDesat = '00000000-0000-4000-8000-0000000000bc';
 const _matriculaDesat = 'ACS-EP-DESAT-1';
 const _senha = 'senha-sintetica-de-teste';
+
+/// ACS da prova de redefinição de senha, criado dentro do próprio caso: é ele
+/// que nasce bloqueado e tem a credencial substituída.
+const _acsSenha = '00000000-0000-4000-8000-0000000000be';
+const _matriculaSenha = 'ACS-EP-SENHA-1';
+
+/// ACS da prova de redefinição de MFA, criado dentro do próprio caso: a MFA
+/// dele é ativada pelo fluxo de verdade (segredo cifrado pelo cofre), e não
+/// pelas colunas sintéticas da fixture compartilhada.
+const _acsMfa = '00000000-0000-4000-8000-0000000000bf';
+const _matriculaMfa = 'ACS-EP-MFA-1';
 
 final _t = DateTime.utc(2026, 10, 8, 12);
 
@@ -223,6 +239,48 @@ Future<int> _tokens(
   );
   return linhas.single[0] as int;
 }
+
+/// Base32 (RFC 4648, sem preenchimento) → bytes: o que o aplicativo
+/// autenticador faz com o segredo devolvido por `beginTotpEnrollment`.
+Uint8List _deBase32(String texto) {
+  const alfabeto = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+  var bits = 0;
+  var valor = 0;
+  final saida = <int>[];
+  for (final c in texto.split('')) {
+    valor = (valor << 5) | alfabeto.indexOf(c);
+    bits += 5;
+    if (bits >= 8) {
+      saida.add((valor >> (bits - 8)) & 0xff);
+      bits -= 8;
+    }
+  }
+  return Uint8List.fromList(saida);
+}
+
+/// Login do ACS com a MFA **obrigatória** ligada e o cofre de verdade: o
+/// endpoint usa `config.requireAcsMfa`, que é falso no ambiente de teste, e é
+/// com a exigência ligada que "a próxima entrada pede ativação de novo" vira
+/// uma recusa observável.
+InstitutionalAuthService _servicoDeLogin(Session session) {
+  final store = OrmAcsCredentialStore(session: () => session);
+  return InstitutionalAuthService(
+    store: store,
+    hasher: AlertRuntimeHarness.hasher,
+    audit: _Audit(),
+    totpStore: store,
+    vault: HealthCipherTotpVault(AlertRuntime.instance.healthDataCipher),
+    requireMfa: true,
+  );
+}
+
+/// A linha de `user_credentials` do usuário, para as provas por SQL/ORM do
+/// estado de bloqueio e das colunas `totp*`.
+Future<UserCredential> _credencialDo(Session s, String userId) async =>
+    (await UserCredential.db.findFirstRow(
+      s,
+      where: (t) => t.userId.equals(UuidValue.fromString(userId)),
+    ))!;
 
 /// Uma visita sintética bem formada do paciente da Microárea A. O lote nunca
 /// chega a ser aplicado: com o token revogado, `syncDeferred` recusa na
@@ -741,5 +799,205 @@ void main() {
         expect(await _auditorias(session, 'admin_acs', 'denied'), 0);
       },
     );
+
+    test(
+      'redefinir a senha devolve uma senha nova, grava o Argon2id novo e zera o bloqueio (failedAttempts, lockedUntil e lockStreak)',
+      () async {
+        // Fixture do caso: um ACS com senha de verdade — a fixture compartilhada
+        // só guarda hash sintético, e é a senha que abre o login.
+        await _usuario(session, _acsSenha, 'Sofia ACS Senha', UserRole.acs, ma: _maA);
+        await Acs.db.insertRow(
+          session,
+          Acs(
+            id: UuidValue.fromString(_acsSenha),
+            enrollmentId: _matriculaSenha,
+            ubsId: UuidValue.fromString(_ubsA),
+            active: true,
+          ),
+        );
+        await _credencial(
+          session,
+          _acsSenha,
+          digest: await AlertRuntimeHarness.hasher.derive(_senha),
+        );
+
+        // 1. Conta bloqueada com duas rodadas de bloqueio no histórico
+        //    (`lockStreak = 2`): nem a senha certa entra enquanto o bloqueio
+        //    vale.
+        final antes = await _credencialDo(session, _acsSenha);
+        await UserCredential.db.updateRow(
+          session,
+          antes
+            ..failedAttempts = 5
+            ..lockedUntil = DateTime.now().toUtc().add(const Duration(hours: 1))
+            ..lockStreak = 2,
+        );
+        await expectLater(
+          endpoints.auth.loginInstitutional(
+            sessionBuilder,
+            matricula: _matriculaSenha,
+            password: _senha,
+          ),
+          throwsA(isA<AuthenticationFailedException>()),
+        );
+
+        // 2. O coordenador da UBS A redefine a senha: a nova é sorteada pelo
+        //    servidor, nunca escolhida pelo operador.
+        final r = await endpoints.admin.resetAcsPassword(
+          sessionBuilder,
+          accessToken: _token(_coordA, UserRole.coordinator),
+          acsId: _acsSenha,
+        );
+        expect(r.newPassword, isNotEmpty);
+        expect(r.newPassword, isNot(_senha));
+
+        // 3. A linha está zerada: a credencial nova não herda o bloqueio da
+        //    antiga (e o hash é o de outro Argon2id).
+        final depois = await _credencialDo(session, _acsSenha);
+        expect(depois.failedAttempts, 0);
+        expect(depois.lockedUntil, isNull);
+        expect(
+          depois.lockStreak,
+          0,
+          reason: 'as rodadas de bloqueio da credencial que deixou de existir não sobrevivem',
+        );
+        expect(depois.passwordHash, isNot(antes.passwordHash));
+
+        // 4. A senha nova abre o RF07; a antiga, não.
+        final login = await endpoints.auth.loginInstitutional(
+          sessionBuilder,
+          matricula: _matriculaSenha,
+          password: r.newPassword,
+        );
+        expect(AlertRuntimeHarness.verify(login.accessToken)!.id, _acsSenha);
+        await expectLater(
+          endpoints.auth.loginInstitutional(
+            sessionBuilder,
+            matricula: _matriculaSenha,
+            password: _senha,
+          ),
+          throwsA(isA<AuthenticationFailedException>()),
+        );
+
+        // 5. As sessões em curso não são revogadas por uma redefinição de senha
+        //    (decisão D8): o que a trilha registra é a troca da credencial.
+        expect(await _auditorias(session, 'admin_acs', 'password_reset'), 1);
+        expect(await _auditorias(session, 'admin_acs', 'denied'), 0);
+      },
+    );
+
+    test(
+      'redefinir a MFA zera as quatro colunas totp* e a próxima entrada pede ativação de novo',
+      () async {
+        // Fixture do caso: ACS com senha de verdade e MFA ativada pelo fluxo
+        // real (begin → confirm), como o app do ACS faz.
+        await _usuario(session, _acsMfa, 'Marta ACS MFA', UserRole.acs, ma: _maA);
+        await Acs.db.insertRow(
+          session,
+          Acs(
+            id: UuidValue.fromString(_acsMfa),
+            enrollmentId: _matriculaMfa,
+            ubsId: UuidValue.fromString(_ubsA),
+            active: true,
+          ),
+        );
+        await _credencial(
+          session,
+          _acsMfa,
+          digest: await AlertRuntimeHarness.hasher.derive(_senha),
+        );
+
+        final inicio = await endpoints.auth.beginTotpEnrollment(
+          sessionBuilder,
+          matricula: _matriculaMfa,
+          password: _senha,
+        );
+        await endpoints.auth.confirmTotpEnrollment(
+          sessionBuilder,
+          matricula: _matriculaMfa,
+          password: _senha,
+          code: Totp.code(_deBase32(inicio.secretBase32), DateTime.now().toUtc()),
+        );
+
+        // Com a MFA ativa, a senha sozinha já não entra.
+        final comMfa = _servicoDeLogin(session);
+        await expectLater(
+          comMfa.login(matricula: _matriculaMfa, password: _senha),
+          throwsA(isA<MfaRequiredException>()),
+        );
+        final hashDaSenha = (await _credencialDo(session, _acsMfa)).passwordHash;
+
+        // O coordenador da UBS A redefine a MFA.
+        await endpoints.admin.resetAcsMfa(
+          sessionBuilder,
+          accessToken: _token(_coordA, UserRole.coordinator),
+          acsId: _acsMfa,
+        );
+
+        // As QUATRO colunas voltam a NULL — inclusive `totpLastStep`, que
+        // deixaria um código do segredo antigo valendo como replay.
+        final linha = await _credencialDo(session, _acsMfa);
+        expect(linha.totpSecretEncrypted, isNull);
+        expect(linha.totpKeyVersion, isNull);
+        expect(linha.totpEnabledAt, isNull);
+        expect(linha.totpLastStep, isNull);
+        expect(
+          linha.passwordHash,
+          hashDaSenha,
+          reason: 'redefinir a MFA não toca no primeiro fator',
+        );
+
+        // A entrada seguinte pede a ativação de novo: é o caminho que a recusa
+        // "Peça a redefinição à coordenação" não tinha.
+        await expectLater(
+          comMfa.login(matricula: _matriculaMfa, password: _senha),
+          throwsA(
+            isA<MfaEnrollmentRequiredException>().having(
+              (e) => e.message,
+              'message',
+              'Ative a verificação em duas etapas antes de entrar.',
+            ),
+          ),
+        );
+        final novo = await endpoints.auth.beginTotpEnrollment(
+          sessionBuilder,
+          matricula: _matriculaMfa,
+          password: _senha,
+        );
+        expect(
+          novo.secretBase32,
+          isNot(inicio.secretBase32),
+          reason: 'o segredo novo não é o antigo (que não existe mais em lugar nenhum)',
+        );
+
+        final lista = await endpoints.admin.acs(
+          sessionBuilder,
+          accessToken: _token(_admin, UserRole.admin),
+        );
+        expect(lista.singleWhere((a) => a.id == _acsMfa).mfaActive, isFalse);
+        expect(await _auditorias(session, 'admin_acs', 'mfa_reset'), 1);
+      },
+    );
+
+    test('redefinir a MFA de um ACS sem MFA é idempotente e ainda audita mfa_reset', () async {
+      // `_acsB` tem credencial e nenhum segredo em `user_credentials`: a
+      // limpeza não acha nada a apagar e a operação conclui do mesmo jeito.
+      await _credencial(session, _acsB);
+      expect((await _credencialDo(session, _acsB)).totpSecretEncrypted, isNull);
+
+      final t = _token(_admin, UserRole.admin);
+      for (var i = 0; i < 2; i++) {
+        await endpoints.admin.resetAcsMfa(sessionBuilder, accessToken: t, acsId: _acsB);
+      }
+
+      final depois = await _credencialDo(session, _acsB);
+      expect(depois.totpSecretEncrypted, isNull);
+      expect(depois.totpEnabledAt, isNull);
+      expect(
+        await _auditorias(session, 'admin_acs', 'mfa_reset'),
+        2,
+        reason: 'idempotente não é silencioso: cada pedido do operador vira uma linha',
+      );
+    });
   });
 }

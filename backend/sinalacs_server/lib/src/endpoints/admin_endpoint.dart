@@ -7,10 +7,10 @@ import 'package:sinalacs_server/src/runtime/alert_runtime.dart';
 /// contas (issue #43).
 ///
 /// A leitura — indicadores, microáreas, alertas e auditoria — é do
-/// `AdminReadService`; a listagem de ACS e de equipe e o cadastro são do
-/// `AdminAccountService`, que nas operações seguintes da mesma issue ganha o
-/// vínculo de microárea, a desativação e as redefinições de senha/MFA — sempre
-/// na mesma dupla serviço/store, sem endpoint novo.
+/// `AdminReadService`; a listagem de ACS e de equipe, o cadastro, o vínculo de
+/// microárea, a (des)ativação e as redefinições de senha/MFA do ACS são do
+/// `AdminAccountService` — sempre na mesma dupla serviço/store, sem endpoint
+/// novo. A redefinição da MFA do staff é a última operação da issue.
 ///
 /// O papel, o escopo (sistema para o administrador, UBS para o coordenador),
 /// a paginação e a auditoria de cada operação são dos serviços; o endpoint só
@@ -131,4 +131,31 @@ class AdminEndpoint extends AuthenticatedEndpoint {
   }) => AlertRuntime.instance
       .adminAccountServiceFor(session)
       .setAcsActive(authenticate(accessToken), acsId: acsId, active: active);
+
+  /// Redefine a senha do ACS — da própria UBS, para o coordenador; de qualquer
+  /// UBS, para o administrador — e devolve a nova, que **só** existe nesta
+  /// resposta.
+  ///
+  /// A senha é sorteada pelo servidor (nunca escolhida pelo operador) e o
+  /// bloqueio da conta é zerado: a credencial nova não herda as tentativas da
+  /// antiga. As sessões em curso **não** são revogadas; cortá-las na hora é a
+  /// desativação.
+  Future<AdminPasswordResetResult> resetAcsPassword(
+    Session session, {
+    required String accessToken,
+    required String acsId,
+  }) => AlertRuntime.instance
+      .adminAccountServiceFor(session)
+      .resetAcsPassword(authenticate(accessToken), acsId: acsId);
+
+  /// Redefine a MFA do ACS: apaga o segredo TOTP gravado, para ele ativar de
+  /// novo na próxima entrada (é o caminho que a recusa "Peça a redefinição à
+  /// coordenação" não tinha). A senha e o bloqueio não são tocados.
+  Future<void> resetAcsMfa(
+    Session session, {
+    required String accessToken,
+    required String acsId,
+  }) => AlertRuntime.instance
+      .adminAccountServiceFor(session)
+      .resetAcsMfa(authenticate(accessToken), acsId: acsId);
 }

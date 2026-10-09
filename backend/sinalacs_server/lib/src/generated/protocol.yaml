@@ -8,6 +8,8 @@ admin:
   - createAcs:
   - setAcsMicroArea:
   - setAcsActive:
+  - resetAcsPassword:
+  - resetAcsMfa:
 alerts:
   - createRedAlert:
   - acknowledge:

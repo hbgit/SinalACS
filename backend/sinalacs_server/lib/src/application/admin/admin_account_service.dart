@@ -6,8 +6,6 @@ import 'package:sinalacs_server/src/application/audit/audit_trail.dart';
 import 'package:sinalacs_server/src/application/auth/development_auth_service.dart';
 import 'package:sinalacs_server/src/application/auth/institutional_auth_service.dart';
 import 'package:sinalacs_server/src/application/auth/password_hasher.dart';
-import 'package:sinalacs_server/src/application/auth/refresh_token_service.dart';
-import 'package:sinalacs_server/src/application/auth/upload_token_service.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
 
 // A `AdminScope`/`AdminScopeStore` vêm com o serviço: quem implementa o store
@@ -108,9 +106,9 @@ abstract interface class AdminAccountStore implements AdminScopeStore {
   });
 }
 
-/// Gestão de contas do backoffice (issue #43): listagem de ACS e da equipe
-/// (esta tarefa) e, nas operações seguintes da mesma issue, cadastro, vínculo
-/// de microárea, desativação e redefinição de senha/MFA.
+/// Gestão de contas do backoffice (issue #43): listagem de ACS e da equipe,
+/// cadastro, vínculo de microárea, ativação/desativação e redefinição de
+/// senha/MFA.
 ///
 /// Papel e escopo vêm do [AdminScopeResolver] — a regra única do backoffice
 /// (PRD §4.2.2): só `coordinator` e `admin`; o coordenador enxerga e opera
@@ -134,8 +132,6 @@ class AdminAccountService {
     required this.credentials,
     required this.totpStore,
     required this.activationStore,
-    required this.refreshStore,
-    required this.uploadStore,
     required this.hasher,
     required this.audit,
     Random? random,
@@ -153,19 +149,6 @@ class AdminAccountService {
 
   /// Código de ativação de uso único da MFA do staff (#48).
   final StaffActivationStore activationStore;
-
-  /// Refresh tokens do ACS.
-  ///
-  /// A desativação revoga todas as famílias **dentro da transação do
-  /// [store]** (ver [setAcsActive]): um serviço que revogasse por aqui faria
-  /// da flag e da revogação duas gravações independentes, e uma sessão viva
-  /// sobreviveria à desativação até a próxima renovação. A porta continua no
-  /// construtor para as operações do serviço que não precisam de atomicidade
-  /// com [store].
-  final RefreshTokenStore refreshStore;
-
-  /// Tokens de envio diferido do ACS, pela mesma regra de [refreshStore].
-  final UploadTokenStore uploadStore;
 
   final PasswordHasher hasher;
   final AuditTrail audit;
@@ -387,6 +370,89 @@ class AdminAccountService {
       resourceId: acs.id,
     );
     return acs;
+  }
+
+  /// Redefine a senha do ACS e devolve a nova, que existe **só** nesta
+  /// resposta — mesma regra da senha inicial: o servidor guarda apenas o hash
+  /// Argon2id e não há como recuperá-la depois (ver `AcsInitialPassword`).
+  ///
+  /// A senha **nunca** vem do operador: é sorteada pelo servidor, com o mesmo
+  /// formato da inicial, pela razão registrada lá (uma senha escolhida por
+  /// quem tem pressa vira a credencial do RF07). O caminho da escrita é o
+  /// `saveCredential` que já existia — redefinir é substituir a credencial —,
+  /// e é ele que zera o estado de bloqueio: a senha nova não tem relação com
+  /// as tentativas da antiga, e uma conta bloqueada que continuasse bloqueada
+  /// depois do reset deixaria o ACS fora até `lockedUntil` vencer, com uma
+  /// senha que ele nem conhece.
+  ///
+  /// As sessões **em curso não são revogadas** (decisão D8 do plano): o JWT e
+  /// o refresh token existentes seguem valendo até expirar. Quem precisa cortar
+  /// o acesso na hora é a desativação ([setAcsActive]).
+  ///
+  /// A ordem é a da criação: papel/escopo (recusa auditada), alvo, e só então o
+  /// sorteio — derivar o Argon2id é caro e não deve acontecer para um pedido que
+  /// já vai ser recusado.
+  Future<AdminPasswordResetResult> resetAcsPassword(
+    AuthenticatedUser user, {
+    required String acsId,
+  }) async {
+    const recurso = 'admin_acs';
+    final escopo = await _resolver.resolve(
+      user,
+      recurso: recurso,
+      actionType: 'write',
+    );
+
+    final acs = await store.acsById(escopo, acsId);
+    if (acs == null) {
+      await _negar(user, recurso, message: 'ACS não encontrado.');
+    }
+
+    final senha = AcsInitialPassword.generate(_random);
+    final digest = await hasher.derive(senha);
+    await credentials.saveCredential(acs.id, digest, _clock().toUtc());
+    await _auditar(
+      user,
+      recurso,
+      result: 'password_reset',
+      resourceId: acs.id,
+    );
+    return AdminPasswordResetResult(newPassword: senha);
+  }
+
+  /// Redefine a MFA do ACS: apaga o segredo e o estado da ativação, para ele
+  /// ativar de novo pela tela.
+  ///
+  /// É o caminho que faltava para a recusa de `beginTotpEnrollment` ("Peça a
+  /// redefinição à coordenação"): com as quatro colunas `totp*` zeradas, a
+  /// entrada seguinte pede a ativação outra vez, e o aplicativo autenticador
+  /// antigo deixa de valer — o segredo dele não existe mais em lugar nenhum.
+  ///
+  /// A senha **não** é tocada: a MFA é o segundo fator e redefini-la não muda o
+  /// primeiro. O estado de bloqueio também fica como está — redefinir a MFA não
+  /// é desbloquear a conta (é a redefinição de senha que zera o bloqueio).
+  ///
+  /// Idempotente: um ACS sem MFA passa pela mesma limpeza (que não acha nada a
+  /// apagar) e audita `mfa_reset` do mesmo jeito — o que a trilha registra é o
+  /// pedido do operador, como na (des)ativação.
+  Future<void> resetAcsMfa(
+    AuthenticatedUser user, {
+    required String acsId,
+  }) async {
+    const recurso = 'admin_acs';
+    final escopo = await _resolver.resolve(
+      user,
+      recurso: recurso,
+      actionType: 'write',
+    );
+
+    final acs = await store.acsById(escopo, acsId);
+    if (acs == null) {
+      await _negar(user, recurso, message: 'ACS não encontrado.');
+    }
+
+    await totpStore.clearTotp(acs.id, _clock().toUtc());
+    await _auditar(user, recurso, result: 'mfa_reset', resourceId: acs.id);
   }
 
   /// Leitura bem-sucedida: a linha entra na trilha **antes** de o store ser
