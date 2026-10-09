@@ -521,7 +521,17 @@ class AdminAccountService {
     const recurso = 'admin_staff';
     await _resolver.requireAdmin(user, recurso: recurso, actionType: 'write');
 
-    if (staffId == user.id) {
+    // A comparação é entre ids **canônicos**, não entre strings cruas: a forma
+    // canônica de um UUID é a minúscula, e tanto o `UuidValue` do Serverpod
+    // quanto o `::uuid` do Postgres aceitam a mesma conta grafada em
+    // maiúsculas. Comparando as strings como chegaram, um administrador que
+    // mandasse o próprio id com uma letra maiúscula passaria pela recusa e
+    // redefiniria a própria MFA — a propriedade que a decisão 9.4 do plano
+    // proíbe —, e a trilha guardaria o id torto, como se fosse outro alvo.
+    // A validação de formato continua sendo do store (um id que não é UUID cai
+    // na resposta de "não existe", sem chegar ao `::uuid`).
+    final alvo = staffId.toLowerCase();
+    if (alvo == user.id.toLowerCase()) {
       await _negar(
         user,
         recurso,
@@ -530,7 +540,7 @@ class AdminAccountService {
       );
     }
 
-    final conta = await store.staffById(staffId);
+    final conta = await store.staffById(alvo);
     if (conta == null || !conta.active) {
       await _negar(user, recurso, message: 'Conta de equipe não encontrada.');
     }
@@ -539,7 +549,7 @@ class AdminAccountService {
     final agora = _clock().toUtc();
     final expira = agora.add(StaffActivationCode.defaultValidity);
     final gravou = await store.resetStaffMfa(
-      staffId: staffId,
+      staffId: alvo,
       codeHash: StaffActivationCode.hash(codigo),
       expiresAt: expira,
       issuedBy: user.id,
@@ -548,7 +558,7 @@ class AdminAccountService {
     if (!gravou) {
       await _negar(user, recurso, message: 'Conta de equipe não encontrada.');
     }
-    await _auditar(user, recurso, result: 'mfa_reset', resourceId: staffId);
+    await _auditar(user, recurso, result: 'mfa_reset', resourceId: alvo);
     return AdminStaffMfaResetResult(
       activationCode: codigo,
       activationCodeExpiresAt: expira,

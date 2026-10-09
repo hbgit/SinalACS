@@ -1216,6 +1216,25 @@ void main() {
           ),
         );
 
+        // O mesmo pedido com o id em maiúsculas: `UuidValue` e o `::uuid` do
+        // Postgres normalizam a caixa, então a recusa da própria conta não pode
+        // depender da grafia — sem isso, o administrador redefiniria a própria
+        // MFA com uma letra maiúscula (e a trilha registraria o id torto).
+        await expectLater(
+          endpoints.admin.resetStaffMfa(
+            sessionBuilder,
+            accessToken: _token(_admin, UserRole.admin),
+            staffId: _admin.toUpperCase(),
+          ),
+          throwsA(
+            isA<AdminInvalidRequestException>().having(
+              (e) => e.message,
+              'message',
+              'Uma conta não redefine a própria MFA: peça a outro administrador.',
+            ),
+          ),
+        );
+
         // Conta inexistente: a mesma recusa de "não encontrada", sem emitir.
         await expectLater(
           endpoints.admin.resetStaffMfa(
@@ -1234,8 +1253,8 @@ void main() {
 
         expect(
           await _auditorias(session, 'admin_staff', 'denied'),
-          4,
-          reason: 'as quatro recusas entram na trilha antes da exceção',
+          5,
+          reason: 'as cinco recusas entram na trilha antes da exceção',
         );
         expect(
           await _auditorias(session, 'admin_staff', 'mfa_reset'),

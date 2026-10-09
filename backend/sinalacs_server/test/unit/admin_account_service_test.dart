@@ -15,6 +15,11 @@ import 'package:test/test.dart';
 /// UBS e a auditoria de cada leitura. Dados sintéticos.
 const _ubsDoCoordenador = 'ubs-a';
 
+/// Id em UUID de verdade da prova de normalização: `UuidValue` e o `::uuid` do
+/// Postgres normalizam a caixa, então a mesma conta pode chegar grafada de duas
+/// formas — e nenhuma delas pode ser tratada como outra conta.
+const _uuidDoCoordenador = '00000000-0000-4000-8000-00000000ab01';
+
 /// Registra cada chamada com a ordem global, para provar "auditoria antes do dado".
 final _ordem = <String>[];
 
@@ -227,6 +232,15 @@ class _Store implements AdminAccountStore {
       role: UserRole.coordinator,
       ubsName: _ubsDoCoordenador,
       active: false,
+      mfaActive: false,
+    ),
+    _uuidDoCoordenador: AdminStaff(
+      id: _uuidDoCoordenador,
+      name: 'Hélio Coordenador UUID',
+      enrollmentId: 'COO-3',
+      role: UserRole.coordinator,
+      ubsName: _ubsDoCoordenador,
+      active: true,
       mfaActive: false,
     ),
   };
@@ -1304,8 +1318,56 @@ void main() {
       expect(audit.events.single.userId, 'admin-1');
     });
 
-    test('alvo inexistente e conta inativa recebem a mesma recusa auditada, sem emissão', () async {
-      final casos = ['staff-inexistente', 'staff-inativo'];
+    test(
+      'a própria conta com o id em maiúsculas também é recusada: a comparação é canônica',
+      () async {
+        // `UuidValue` e o `::uuid` do Postgres normalizam a caixa; a comparação
+        // ingênua de strings, não — e o administrador que manda o próprio id
+        // com uma letra maiúscula redefiniria a própria MFA, exatamente o que a
+        // decisão 9.4 do plano proíbe.
+        const meuId = '00000000-0000-4000-8000-00000000ab01';
+        final eu = _u(meuId, UserRole.admin);
+
+        await expectLater(
+          servico.resetStaffMfa(eu, staffId: meuId.toUpperCase()),
+          throwsA(
+            isA<AdminInvalidRequestException>().having(
+              (e) => e.message,
+              'message',
+              'Uma conta não redefine a própria MFA: peça a outro administrador.',
+            ),
+          ),
+        );
+        expect(store.chamadas, 0, reason: 'a recusa vem antes de ler o alvo');
+        expect(store.resetsDoStaff, isEmpty);
+        expect(audit.events.single.result, 'denied');
+        expect(audit.events.single.userId, meuId);
+      },
+    );
+
+    test('o alvo é normalizado: o store e a trilha recebem o id canônico', () async {
+      // O alvo chega com letra maiúscula e sai em minúsculas: duas linhas de
+      // auditoria do mesmo alvo não podem parecer dois alvos diferentes.
+      final resultado = await servico.resetStaffMfa(
+        admin,
+        staffId: _uuidDoCoordenador.toUpperCase(),
+      );
+
+      expect(store.resetsDoStaff.single.staffId, _uuidDoCoordenador);
+      expect(audit.events.single.resourceId, _uuidDoCoordenador);
+      expect(
+        StaffActivationCode.matches(
+          resultado.activationCode,
+          store.resetsDoStaff.single.codeHash,
+        ),
+        isTrue,
+      );
+    });
+
+    test(
+      'alvo inexistente e conta inativa recebem a mesma recusa auditada, sem emissão',
+      () async {
+        final casos = ['staff-inexistente', 'staff-inativo'];
       for (final staffId in casos) {
         await expectLater(
           servico.resetStaffMfa(admin, staffId: staffId),
