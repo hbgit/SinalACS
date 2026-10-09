@@ -96,4 +96,22 @@ class AdminEndpoint extends AuthenticatedEndpoint {
         enrollmentId: enrollmentId,
         microAreaId: microAreaId,
       );
+
+  /// Move um ACS existente para outra microárea — da própria UBS, para o
+  /// coordenador; de qualquer UBS, para o administrador. A UBS do vínculo sai
+  /// da microárea-alvo, nunca do pedido, e devolve a linha já no território
+  /// novo. O ACS renovará a sessão (refresh token) já no território novo; o JWT
+  /// em curso continua com o antigo até o refresh.
+  Future<AdminAcs> setAcsMicroArea(
+    Session session, {
+    required String accessToken,
+    required String acsId,
+    required String microAreaId,
+  }) => AlertRuntime.instance
+      .adminAccountServiceFor(session)
+      .setAcsMicroArea(
+        authenticate(accessToken),
+        acsId: acsId,
+        microAreaId: microAreaId,
+      );
 }

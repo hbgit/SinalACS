@@ -33,6 +33,33 @@ class _Store implements AdminAccountStore {
     'ma-b': (ubsId: 'ubs-b', name: 'Microárea B'),
   };
 
+  /// ACS conhecidos, por id: o `ubsId` de cada um é o que o escopo compara.
+  /// `acs-a` é da UBS do coordenador; `acs-b`, da outra.
+  final acs = <String, AdminAcs>{
+    'acs-a': AdminAcs(
+      id: 'acs-a',
+      name: 'Ana ACS',
+      enrollmentId: 'ACS-1',
+      ubsId: _ubsDoCoordenador,
+      ubsName: 'UBS A',
+      microAreaId: 'ma-antiga',
+      microAreaName: 'Microárea Antiga',
+      active: true,
+      mfaActive: false,
+    ),
+    'acs-b': AdminAcs(
+      id: 'acs-b',
+      name: 'Bia ACS',
+      enrollmentId: 'ACS-2',
+      ubsId: 'ubs-b',
+      ubsName: 'UBS B',
+      microAreaId: 'ma-b',
+      microAreaName: 'Microárea B',
+      active: true,
+      mfaActive: false,
+    ),
+  };
+
   /// Matrículas já cadastradas (a pré-checagem do serviço).
   final matriculas = <String>{};
 
@@ -40,7 +67,13 @@ class _Store implements AdminAccountStore {
   /// (`insertAcs` devolve `null`): a corrida que o catch de 23505 fecha.
   bool corridaDeMatricula = false;
 
+  /// `true` = a pré-checagem de [setAcsMicroArea] achou o ACS e o `UPDATE`
+  /// condicional do banco não (o ACS saiu do escopo no meio): a corrida que o
+  /// `WHERE` com o predicado de escopo fecha.
+  bool corridaDeVinculo = false;
+
   int insertAcsChamadas = 0;
+  int setAcsMicroAreaChamadas = 0;
   String? ultimaUbs;
   String? ultimaMicroArea;
   PasswordDigest? ultimoDigest;
@@ -94,6 +127,41 @@ class _Store implements AdminAccountStore {
   }
 
   @override
+  Future<AdminAcs?> acsById(AdminScope scope, String acsId) async {
+    _marca('acsById', scope);
+    final encontrado = acs[acsId];
+    if (encontrado == null) return null;
+    if (scope.ubsId != null && encontrado.ubsId != scope.ubsId) return null;
+    return encontrado;
+  }
+
+  @override
+  Future<AdminAcs?> setAcsMicroArea({
+    required String acsId,
+    required String microAreaId,
+    required String ubsId,
+    required AdminScope scope,
+    required DateTime at,
+  }) async {
+    _marca('setAcsMicroArea', scope);
+    setAcsMicroAreaChamadas++;
+    ultimaUbs = ubsId;
+    ultimaMicroArea = microAreaId;
+    ultimoAt = at;
+    final encontrado = acs[acsId];
+    if (encontrado == null) return null;
+    if (scope.ubsId != null && encontrado.ubsId != scope.ubsId) return null;
+    if (corridaDeVinculo) return null;
+    final movido = encontrado.copyWith(
+      ubsId: ubsId,
+      microAreaId: microAreaId,
+      microAreaName: microAreas[microAreaId]?.name,
+    );
+    acs[acsId] = movido;
+    return movido;
+  }
+
+  @override
   Future<List<AdminAcs>> acsList(AdminScope scope) async {
     _marca('acsList', scope);
     return [];
@@ -104,10 +172,6 @@ class _Store implements AdminAccountStore {
     _marca('staffList');
     return [];
   }
-
-  @override
-  Future<AdminAcs?> acsById(AdminScope scope, String acsId) =>
-      throw UnimplementedError('acsById é das tarefas de escrita da #43');
 
   @override
   Future<AdminStaff?> staffById(String staffId) =>
@@ -475,6 +539,156 @@ void main() {
         );
       }
       expect(store.chamadas, 0);
+      expect(audit.events, hasLength(3));
+      expect(
+        audit.events.map((e) => e.actionType),
+        everyElement('write'),
+        reason: 'a linha descreve a TENTATIVA de escrita, não uma leitura',
+      );
+      expect(audit.events.map((e) => e.result), everyElement('denied'));
+    });
+  });
+
+  group('setAcsMicroArea', () {
+    test(
+      'microárea inexistente e microárea de outra UBS → mesma mensagem, nada escrito, recusa auditada',
+      () async {
+        final casos = <(AuthenticatedUser, String, String)>[
+          // (operador, acsId, microárea-alvo)
+          (admin, 'acs-a', 'inexistente'),
+          // Microárea de OUTRA UBS recebe a MESMA mensagem de "não existe".
+          (coordA, 'acs-a', 'ma-b'),
+        ];
+        for (final (operador, acsId, microarea) in casos) {
+          await expectLater(
+            servico.setAcsMicroArea(operador, acsId: acsId, microAreaId: microarea),
+            throwsA(
+              isA<AdminInvalidRequestException>().having(
+                (e) => e.message,
+                'message',
+                'Microárea não encontrada.',
+              ),
+            ),
+          );
+        }
+        expect(store.setAcsMicroAreaChamadas, 0, reason: 'nada é escrito');
+        expect(
+          _ordem.where((c) => c.startsWith('store:')),
+          ['store:microAreaFor', 'store:microAreaFor'],
+          reason: 'a microárea-alvo é validada antes de qualquer leitura do ACS',
+        );
+        expect(audit.events, hasLength(casos.length));
+        expect(audit.events.map((e) => e.actionType), everyElement('write'));
+        expect(audit.events.map((e) => e.result), everyElement('denied'));
+      },
+    );
+
+    test('ACS inexistente e ACS de outra UBS → mesma recusa auditada', () async {
+      final casos = <(AuthenticatedUser, String)>[
+        (admin, 'acs-inexistente'),
+        // ACS da outra UBS: o coordenador não descobre território alheio.
+        (coordA, 'acs-b'),
+      ];
+      for (final (operador, acsId) in casos) {
+        await expectLater(
+          servico.setAcsMicroArea(operador, acsId: acsId, microAreaId: 'ma-a'),
+          throwsA(
+            isA<AdminInvalidRequestException>().having(
+              (e) => e.message,
+              'message',
+              'ACS não encontrado.',
+            ),
+          ),
+        );
+      }
+      expect(store.setAcsMicroAreaChamadas, 0, reason: 'nada é escrito');
+      expect(audit.events, hasLength(casos.length));
+      expect(audit.events.map((e) => e.actionType), everyElement('write'));
+      expect(audit.events.map((e) => e.result), everyElement('denied'));
+    });
+
+    test('coordenador move o ACS da própria UBS e a trilha registra micro_area_changed com o id', () async {
+      final resultado = await servico.setAcsMicroArea(
+        coordA,
+        acsId: 'acs-a',
+        microAreaId: 'ma-a',
+      );
+
+      expect(resultado.id, 'acs-a');
+      expect(resultado.microAreaId, 'ma-a');
+      expect(resultado.microAreaName, 'Microárea A');
+      expect(resultado.ubsId, _ubsDoCoordenador, reason: 'a UBS vem da microárea-alvo');
+      expect(store.ultimaUbs, _ubsDoCoordenador);
+      expect(store.ultimaMicroArea, 'ma-a');
+      expect(store.ultimoAt, DateTime.utc(2026, 10, 8, 12));
+
+      expect(
+        _ordem,
+        [
+          'store:microAreaFor',
+          'store:acsById',
+          'store:setAcsMicroArea',
+          'store:acsById',
+          'audit:write:admin_acs:micro_area_changed',
+        ],
+        reason: 'a linha de sucesso entra DEPOIS do commit, e a releitura é do serviço',
+      );
+      final linha = audit.events.single;
+      expect(linha.userId, 'coord-a');
+      expect(linha.actionType, 'write');
+      expect(linha.resourceType, 'admin_acs');
+      expect(linha.result, 'micro_area_changed');
+      expect(linha.resourceId, 'acs-a');
+    });
+
+    test('administrador move entre UBS: a UBS nova vem da microárea-alvo, não do escopo', () async {
+      final resultado = await servico.setAcsMicroArea(
+        admin,
+        acsId: 'acs-a',
+        microAreaId: 'ma-b',
+      );
+
+      expect(
+        store.ultimaUbs,
+        'ubs-b',
+        reason: 'o escopo do administrador é nulo; a UBS do vínculo é a da microárea',
+      );
+      expect(resultado.ubsId, 'ubs-b');
+      expect(resultado.microAreaId, 'ma-b');
+      expect(resultado.microAreaName, 'Microárea B');
+    });
+
+    test('corrida: o ACS sai do escopo entre a pré-checagem e o UPDATE → mesma recusa', () async {
+      // A pré-checagem viu o ACS; o UPDATE condicional do banco não achou
+      // (`setAcsMicroArea` devolve null). A resposta é a mesma de "não existe".
+      store.corridaDeVinculo = true;
+      await expectLater(
+        servico.setAcsMicroArea(coordA, acsId: 'acs-a', microAreaId: 'ma-a'),
+        throwsA(
+          isA<AdminInvalidRequestException>().having(
+            (e) => e.message,
+            'message',
+            'ACS não encontrado.',
+          ),
+        ),
+      );
+      expect(store.setAcsMicroAreaChamadas, 1);
+      expect(audit.events.single.actionType, 'write');
+      expect(audit.events.single.result, 'denied');
+    });
+
+    test('papel fora do backoffice e coordenador sem UBS recebem recusa auditada', () async {
+      for (final usuario in [
+        _u('u-acs', UserRole.acs),
+        _u('u-paciente', UserRole.patient),
+        coordSemUbs,
+      ]) {
+        await expectLater(
+          servico.setAcsMicroArea(usuario, acsId: 'acs-a', microAreaId: 'ma-a'),
+          throwsA(isA<AlertPermissionException>()),
+        );
+      }
+      expect(store.chamadas, 0, reason: 'nem a microárea-alvo é consultada');
       expect(audit.events, hasLength(3));
       expect(
         audit.events.map((e) => e.actionType),

@@ -6,6 +6,7 @@ admin:
   - acs:
   - staff:
   - createAcs:
+  - setAcsMicroArea:
 alerts:
   - createRedAlert:
   - acknowledge:

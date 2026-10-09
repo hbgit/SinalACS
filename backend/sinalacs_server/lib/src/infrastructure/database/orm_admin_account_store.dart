@@ -221,6 +221,86 @@ class OrmAdminAccountStore implements AdminAccountStore {
     return acsById(const AdminScope.system(), id.uuid);
   }
 
+  /// O vínculo novo: `acs."ubsId"` (a UBS da microárea-alvo) e
+  /// `users."microAreaId"` na **mesma transação**.
+  ///
+  /// O predicado de escopo vai **dentro** do `WHERE` do `UPDATE`, e não só na
+  /// pré-checagem do serviço: entre a checagem e a escrita cabe uma outra
+  /// requisição movendo o mesmo ACS para fora do escopo, e quem decide é a
+  /// escrita — a única leitura e a única decisão são a da mesma instrução
+  /// (fecha o TOCTOU). A CTE `alvo` é o alvo `id` já filtrado pelo escopo, e o
+  /// `RETURNING id` é o que diz se o `UPDATE` alcançou alguma linha: sem linha,
+  /// nada é movido e nada é escrito em `users`.
+  ///
+  /// A UBS gravada é a [ubsId] recebida — derivada da microárea-alvo pelo
+  /// serviço —, **nunca** `scope.ubsId`: o escopo do administrador é nulo, e
+  /// `acs."ubsId"` é NOT NULL.
+  ///
+  /// A segunda escrita é conferida: o Serverpod não declara a chave
+  /// estrangeira de `acs.id` para `users.id`, então um `acs` órfão é gravável,
+  /// e sem esta checagem o vínculo ficaria pela metade (UBS nova no `acs`,
+  /// microárea velha no `users`). Sem a linha de `users` a transação inteira
+  /// volta atrás.
+  @override
+  Future<AdminAcs?> setAcsMicroArea({
+    required String acsId,
+    required String microAreaId,
+    required String ubsId,
+    required AdminScope scope,
+    required DateTime at,
+  }) async {
+    // A mesma guarda de [acsById]: um id fora do formato não pode virar erro de
+    // sintaxe do Postgres no `::uuid` — o desfecho dele é "não movido".
+    if (!_uuidValido(acsId) ||
+        !_uuidValido(microAreaId) ||
+        !_uuidValido(ubsId)) {
+      return null;
+    }
+    final session = _session();
+    final vinculado = await session.db.transaction((transaction) async {
+      final alvo = await session.db.unsafeQuery(
+        '''
+        WITH alvo AS (
+          SELECT a.id FROM acs a
+           WHERE a.id = @acs::uuid
+             AND (@escopo::uuid IS NULL OR a."ubsId" = @escopo::uuid)
+        )
+        UPDATE acs SET "ubsId" = @ubs::uuid
+         WHERE id IN (SELECT id FROM alvo)
+        RETURNING id;
+        ''',
+        parameters: QueryParameters.named({
+          'acs': acsId,
+          'ubs': ubsId,
+          'escopo': scope.ubsId,
+        }),
+        transaction: transaction,
+      );
+      if (alvo.isEmpty) return false;
+
+      final usuarios = await session.db.unsafeExecute(
+        'UPDATE users SET "microAreaId" = @ma::uuid, "updatedAt" = @at '
+        'WHERE id = @acs::uuid;',
+        parameters: QueryParameters.named({
+          'ma': microAreaId,
+          'at': at,
+          'acs': acsId,
+        }),
+        transaction: transaction,
+      );
+      if (usuarios != 1) {
+        // Inalcançável com dado íntegro (toda linha de `acs` nasce com a de
+        // `users`); desfaz os dois UPDATEs em vez de confirmar meio vínculo.
+        throw StateError(
+          'acs sem linha em users: vínculo desfeito (dado inconsistente)',
+        );
+      }
+      return true;
+    });
+    if (!vinculado) return null;
+    return acsById(scope, acsId);
+  }
+
   /// Mesma leitura de `OrmAdminReadStore.ubsOf`: `staff_accounts.ubsId` é a
   /// única fonte do escopo do coordenador.
   @override

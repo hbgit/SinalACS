@@ -4,16 +4,19 @@ import 'package:serverpod/serverpod.dart';
 import 'package:sinalacs_server/src/application/audit/audit_trail.dart';
 import 'package:sinalacs_server/src/application/auth/development_auth_service.dart';
 import 'package:sinalacs_server/src/application/auth/institutional_auth_service.dart';
+import 'package:sinalacs_server/src/application/auth/refresh_token_service.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
+import 'package:sinalacs_server/src/infrastructure/database/orm_refresh_token_store.dart';
 import 'package:sinalacs_server/src/runtime/alert_runtime.dart';
 import 'package:test/test.dart';
 
 import 'test_tools/runtime_harness.dart';
 import 'test_tools/serverpod_test_tools.dart';
 
-/// `admin.acs` e `admin.staff` (#43) pelo endpoint, com tokens reais e Postgres
-/// real: papel, escopo por UBS, auditoria de cada leitura e minimização de PII.
-/// Dados sintéticos; ids próprios.
+/// `admin.acs`, `admin.staff`, `admin.createAcs` e `admin.setAcsMicroArea`
+/// (#43) pelo endpoint, com tokens reais e Postgres real: papel, escopo por
+/// UBS, auditoria de cada leitura e minimização de PII. Dados sintéticos; ids
+/// próprios.
 const _ubsA = '00000000-0000-4000-8000-0000000000b1';
 const _ubsB = '00000000-0000-4000-8000-0000000000b2';
 const _maA = '00000000-0000-4000-8000-0000000000b3';
@@ -24,6 +27,10 @@ const _admin = '00000000-0000-4000-8000-0000000000b7';
 const _coordA = '00000000-0000-4000-8000-0000000000b8';
 const _coordSemUbs = '00000000-0000-4000-8000-0000000000b9';
 const _paciente = '00000000-0000-4000-8000-0000000000ba';
+
+/// Segunda microárea da UBS A: sem ela não há para onde mover um ACS sem
+/// trocá-lo de UBS.
+const _maA2 = '00000000-0000-4000-8000-0000000000bb';
 
 final _t = DateTime.utc(2026, 10, 8, 12);
 
@@ -86,6 +93,7 @@ Future<void> _seed(Session s) async {
   }
   for (final (id, nome, ubs) in [
     (_maA, 'Microárea A', _ubsA),
+    (_maA2, 'Microárea A2', _ubsA),
     (_maB, 'Microárea B', _ubsB),
   ]) {
     await MicroArea.db.insertRow(
@@ -399,5 +407,147 @@ void main() {
       expect(json, isNot(contains('admin-ep-acc-$_acsA')));
       expect(json, isNot(contains('Hash')));
     });
+
+    test(
+      'coordenador vincula um ACS da própria UBS a outra microárea dela e a trilha registra micro_area_changed',
+      () async {
+        final t = _token(_coordA, UserRole.coordinator);
+        final r = await endpoints.admin.setAcsMicroArea(
+          sessionBuilder,
+          accessToken: t,
+          acsId: _acsA,
+          microAreaId: _maA2,
+        );
+
+        expect(r.id, _acsA);
+        expect(r.microAreaId, _maA2);
+        expect(r.microAreaName, 'Microárea A2');
+        expect(r.ubsId, _ubsA, reason: 'a UBS vem da microárea-alvo');
+
+        // A listagem do coordenador já reflete o vínculo novo.
+        final lista = await endpoints.admin.acs(sessionBuilder, accessToken: t);
+        expect(
+          lista.singleWhere((a) => a.id == _acsA).microAreaName,
+          'Microárea A2',
+        );
+
+        expect(await _auditorias(session, 'admin_acs', 'micro_area_changed'), 1);
+        expect(await _auditorias(session, 'admin_acs', 'denied'), 0);
+      },
+    );
+
+    test(
+      'microárea de outra UBS e ACS de outra UBS: a mesma recusa de "não encontrado", auditada denied',
+      () async {
+        final t = _token(_coordA, UserRole.coordinator);
+        await expectLater(
+          endpoints.admin.setAcsMicroArea(
+            sessionBuilder,
+            accessToken: t,
+            acsId: _acsA,
+            microAreaId: _maB,
+          ),
+          throwsA(
+            isA<AdminInvalidRequestException>().having(
+              (e) => e.message,
+              'message',
+              'Microárea não encontrada.',
+            ),
+          ),
+        );
+        await expectLater(
+          endpoints.admin.setAcsMicroArea(
+            sessionBuilder,
+            accessToken: t,
+            acsId: _acsB,
+            microAreaId: _maA,
+          ),
+          throwsA(
+            isA<AdminInvalidRequestException>().having(
+              (e) => e.message,
+              'message',
+              'ACS não encontrado.',
+            ),
+          ),
+        );
+
+        expect(await _auditorias(session, 'admin_acs', 'denied'), 2);
+        expect(await _auditorias(session, 'admin_acs', 'micro_area_changed'), 0);
+        expect(
+          (await User.db.findById(session, UuidValue.fromString(_acsB)))!.microAreaId,
+          UuidValue.fromString(_maB),
+          reason: 'nada mudou para o ACS de fora do escopo',
+        );
+      },
+    );
+
+    test(
+      'o vínculo novo vale no próximo refresh: o JWT renovado carrega a microárea nova',
+      () async {
+        // 1. Cadastro pela UBS A: o ACS nasce vinculado à Microárea A, e a senha
+        //    mostrada uma única vez é a que abre o login (RF07).
+        final t = _token(_admin, UserRole.admin);
+        final r = await endpoints.admin.createAcs(
+          sessionBuilder,
+          accessToken: t,
+          name: 'Nova ACS Vínculo',
+          enrollmentId: 'ACS-EP-VINC-1',
+          microAreaId: _maA,
+        );
+        const aparelho = 'aparelho-vinculo-1';
+        final login = await InstitutionalAuthService(
+          store: AlertRuntimeHarness.store(sessionBuilder.build()),
+          hasher: AlertRuntimeHarness.hasher,
+          audit: _Audit(),
+        ).login(
+          matricula: 'ACS-EP-VINC-1',
+          password: r.initialPassword,
+          deviceId: aparelho,
+        );
+        expect(login.microAreaId, _maA);
+
+        // O JWT emitido no login carrega a microárea antiga — é ele que o app
+        // usa até o próximo refresh.
+        final antes = AlertRuntimeHarness.verify(
+          AlertRuntime.instance.auth.issueToken(login),
+        )!;
+        expect(antes.microAreaId, _maA);
+
+        // 2. O refresh token daquele aparelho (o mesmo `deviceId` do login),
+        //    emitido como `auth.loginInstitutional` o emite.
+        final refreshToken = await RefreshTokenService(
+          store: OrmRefreshTokenStore(session: () => session),
+          audit: _Audit(),
+        ).issue(login);
+
+        // 3. O coordenador da UBS A move o ACS para a outra microárea da UBS.
+        await endpoints.admin.setAcsMicroArea(
+          sessionBuilder,
+          accessToken: _token(_coordA, UserRole.coordinator),
+          acsId: r.acs.id,
+          microAreaId: _maA2,
+        );
+
+        // 4. A renovação relê `users.microAreaId` do banco a cada rotação: o
+        //    JWT novo já vale no território novo, sem novo login (INV-01).
+        final renovada = await endpoints.auth.refreshSession(
+          sessionBuilder,
+          refreshToken: refreshToken,
+          deviceId: aparelho,
+        );
+        final depois = AlertRuntimeHarness.verify(renovada.accessToken)!;
+        expect(depois.id, r.acs.id);
+        expect(
+          depois.microAreaId,
+          _maA2,
+          reason: 'a microárea do JWT renovado é a relida do banco, não a do token antigo',
+        );
+        expect(
+          renovada.refreshToken,
+          isNot(refreshToken),
+          reason: 'a rotação devolve um filho novo',
+        );
+      },
+    );
   });
 }

@@ -574,5 +574,154 @@ void main() {
         expect((await otpStore.findByCpfHash(hmacDoCpf))?.userId, paciente);
       });
     });
+
+    group('setAcsMicroArea (#43, vínculo)', () {
+      late _Audit auditoria;
+      late AdminAccountService servico;
+      final admin = _operador(_admin, UserRole.admin);
+      final coordA = _operador(_coordA, UserRole.coordinator);
+
+      setUp(() {
+        auditoria = _Audit();
+        servico = _servico(session, store, audit: auditoria);
+      });
+
+      test('coordenador vincula à própria UBS o ACS que ainda não tinha território', () async {
+        final r = await servico.setAcsMicroArea(
+          coordA,
+          acsId: _acsSemMicroarea,
+          microAreaId: _maA,
+        );
+
+        expect(r.microAreaId, _maA);
+        expect(r.microAreaName, 'Microárea A');
+        expect(r.ubsId, _ubsA, reason: 'a UBS vem da microárea-alvo');
+
+        final usuario = (await User.db.findById(
+          session,
+          UuidValue.fromString(_acsSemMicroarea),
+        ))!;
+        expect(usuario.microAreaId, UuidValue.fromString(_maA));
+        expect(usuario.updatedAt, _t, reason: 'o carimbo do vínculo é o do serviço');
+        expect(
+          (await Acs.db.findById(session, UuidValue.fromString(_acsSemMicroarea)))!
+              .ubsId,
+          UuidValue.fromString(_ubsA),
+          reason: 'a UBS do ACS não muda quando a microárea é da mesma UBS',
+        );
+
+        // A listagem do coordenador já o mostra no território novo.
+        final lista = await store.acsList(const AdminScope.ubs(_ubsA));
+        expect(
+          lista.singleWhere((a) => a.id == _acsSemMicroarea).microAreaName,
+          'Microárea A',
+        );
+
+        expect(auditoria.events.single.actionType, 'write');
+        expect(auditoria.events.single.resourceType, 'admin_acs');
+        expect(auditoria.events.single.result, 'micro_area_changed');
+        expect(auditoria.events.single.resourceId, _acsSemMicroarea);
+      });
+
+      test('admin move o ACS para microárea de outra UBS e a UBS dele muda junto', () async {
+        await servico.setAcsMicroArea(admin, acsId: _acsA, microAreaId: _maB);
+
+        expect(
+          (await Acs.db.findById(session, UuidValue.fromString(_acsA)))!.ubsId,
+          UuidValue.fromString(_ubsB),
+          reason: 'a UBS do vínculo sai da microárea-alvo, nunca do chamador',
+        );
+        expect(
+          (await User.db.findById(session, UuidValue.fromString(_acsA)))!.microAreaId,
+          UuidValue.fromString(_maB),
+        );
+
+        final ubsA = await store.acsList(const AdminScope.ubs(_ubsA));
+        expect(ubsA.map((a) => a.id), isNot(contains(_acsA)));
+        final ubsB = await store.acsList(const AdminScope.ubs(_ubsB));
+        final ana = ubsB.singleWhere((a) => a.id == _acsA);
+        expect(ana.ubsName, 'UBS B');
+        expect(ana.microAreaName, 'Microárea B');
+      });
+
+      test('o escopo dentro do UPDATE: ACS de outra UBS não é movido nem chamando o store direto', () async {
+        // Sem a pré-checagem do serviço: quem barra é o predicado de escopo
+        // repetido no `WHERE` do UPDATE (a defesa em profundidade do TOCTOU).
+        expect(
+          await store.setAcsMicroArea(
+            acsId: _acsBPendente,
+            microAreaId: _maA,
+            ubsId: _ubsA,
+            scope: const AdminScope.ubs(_ubsA),
+            at: _t,
+          ),
+          isNull,
+        );
+        // E um id fora do formato de UUID devolve o mesmo nulo, sem erro de SQL.
+        expect(
+          await store.setAcsMicroArea(
+            acsId: 'lixo',
+            microAreaId: _maA,
+            ubsId: _ubsA,
+            scope: const AdminScope.system(),
+            at: _t,
+          ),
+          isNull,
+        );
+
+        expect(
+          (await Acs.db.findById(session, UuidValue.fromString(_acsBPendente)))!.ubsId,
+          UuidValue.fromString(_ubsB),
+        );
+        expect(
+          (await User.db.findById(session, UuidValue.fromString(_acsBPendente)))!
+              .microAreaId,
+          UuidValue.fromString(_maB),
+          reason: 'nenhuma das duas escritas da transação rodou',
+        );
+      });
+
+      test('ACS inexistente recebe a mesma recusa do escopo, auditada denied', () async {
+        await expectLater(
+          servico.setAcsMicroArea(
+            coordA,
+            acsId: '00000000-0000-4000-8000-0000000000ff',
+            microAreaId: _maA,
+          ),
+          throwsA(
+            isA<AdminInvalidRequestException>().having(
+              (e) => e.message,
+              'message',
+              'ACS não encontrado.',
+            ),
+          ),
+        );
+        expect(auditoria.events.single.actionType, 'write');
+        expect(auditoria.events.single.result, 'denied');
+      });
+
+      test('ACS órfão (sem a linha de users) não move nada: a transação desfaz o UPDATE de acs', () async {
+        // O acs não tem FK para users, então esta linha inconsistente é
+        // gravável — e é o que prova que o vínculo é atômico: a segunda escrita
+        // não acha o usuário e a transação inteira volta atrás.
+        const orfao = '00000000-0000-4000-8000-0000000000ad';
+        await _acs(session, orfao, 'ACS-ACC-ORFAO', _ubsA);
+        await expectLater(
+          store.setAcsMicroArea(
+            acsId: orfao,
+            microAreaId: _maB,
+            ubsId: _ubsB,
+            scope: const AdminScope.system(),
+            at: _t,
+          ),
+          throwsA(isA<StateError>()),
+        );
+        expect(
+          (await Acs.db.findById(session, UuidValue.fromString(orfao)))!.ubsId,
+          UuidValue.fromString(_ubsA),
+          reason: 'o UPDATE de acs foi desfeito junto com a escrita que faltou',
+        );
+      });
+    });
   });
 }

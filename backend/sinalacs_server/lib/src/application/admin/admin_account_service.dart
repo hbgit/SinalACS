@@ -67,6 +67,23 @@ abstract interface class AdminAccountStore implements AdminScopeStore {
     required PasswordDigest digest,
     required DateTime at,
   });
+
+  /// Move o ACS [acsId] para a microárea [microAreaId], gravando
+  /// `users."microAreaId"` e `acs."ubsId"` (o de [ubsId], derivado da
+  /// microárea-alvo pelo serviço) numa **única transação**.
+  ///
+  /// O predicado de [scope] vai **dentro** do `WHERE` do `UPDATE`: um ACS que
+  /// saia do escopo entre a pré-checagem do serviço e esta escrita não é movido
+  /// — a checagem e a escrita não podem ser duas decisões sobre estados
+  /// diferentes (TOCTOU). `null` significa exatamente isso: nada foi movido,
+  /// seja porque o ACS não existe, seja porque não é do escopo.
+  Future<AdminAcs?> setAcsMicroArea({
+    required String acsId,
+    required String microAreaId,
+    required String ubsId,
+    required AdminScope scope,
+    required DateTime at,
+  });
 }
 
 /// Gestão de contas do backoffice (issue #43): listagem de ACS e da equipe
@@ -221,6 +238,71 @@ class AdminAccountService {
     }
     await _auditar(user, recurso, result: 'created', resourceId: acs.id);
     return AdminAcsCreationResult(acs: acs, initialPassword: senha);
+  }
+
+  /// Move um ACS para outra microárea e devolve a linha já com o território
+  /// novo.
+  ///
+  /// As validações são as da criação, pela mesma razão: microárea inexistente e
+  /// microárea de outra UBS recebem a **mesma** mensagem (senão o coordenador
+  /// descobre, por tentativa, quais microáreas existem fora da UBS dele), e o
+  /// ACS inexistente e o ACS de outra UBS recebem a **mesma** recusa — um ACS
+  /// fora do escopo não existe para quem perguntou.
+  ///
+  /// A ordem é: papel/escopo (recusa auditada) → microárea-alvo → ACS-alvo →
+  /// escrita. A UBS do vínculo sai da microárea-alvo, nunca do chamador: para o
+  /// administrador o escopo é nulo, e um `acs."ubsId"` nulo seria um ACS sem
+  /// UBS nenhuma.
+  ///
+  /// As duas pré-checagens são para a resposta limpa do caso comum; quem fecha
+  /// a corrida é o `WHERE` do store, que repete o escopo dentro da própria
+  /// escrita e devolve `null` se o ACS saiu do escopo nesse meio-tempo — mesmo
+  /// desfecho, mesma mensagem, nada movido. A releitura com [AdminAccountStore.acsById]
+  /// depois do commit é o que garante que a linha devolvida é a do banco, e não
+  /// a que o `UPDATE` achou que gravou.
+  Future<AdminAcs> setAcsMicroArea(
+    AuthenticatedUser user, {
+    required String acsId,
+    required String microAreaId,
+  }) async {
+    const recurso = 'admin_acs';
+    final escopo = await _resolver.resolve(
+      user,
+      recurso: recurso,
+      actionType: 'write',
+    );
+
+    final ma = await store.microAreaFor(microAreaId);
+    final ubsDaMicroarea = ma?.ubsId;
+    if (ubsDaMicroarea == null ||
+        (escopo.ubsId != null && ubsDaMicroarea != escopo.ubsId)) {
+      await _negar(user, recurso, message: 'Microárea não encontrada.');
+    }
+    if (await store.acsById(escopo, acsId) == null) {
+      await _negar(user, recurso, message: 'ACS não encontrado.');
+    }
+
+    final movido = await store.setAcsMicroArea(
+      acsId: acsId,
+      microAreaId: microAreaId,
+      ubsId: ubsDaMicroarea,
+      scope: escopo,
+      at: _clock().toUtc(),
+    );
+    if (movido == null) {
+      await _negar(user, recurso, message: 'ACS não encontrado.');
+    }
+    // A leitura é preferida à devolvida pelo `UPDATE`; o `??` só cobre o caso
+    // extremo de o ACS ter saído do escopo entre o commit e esta releitura —
+    // aí a linha do `UPDATE` ainda descreve o vínculo que de fato aconteceu.
+    final acs = await store.acsById(escopo, acsId) ?? movido;
+    await _auditar(
+      user,
+      recurso,
+      result: 'micro_area_changed',
+      resourceId: acs.id,
+    );
+    return acs;
   }
 
   /// Leitura bem-sucedida: a linha entra na trilha **antes** de o store ser
