@@ -66,7 +66,9 @@ for _ in $(seq 1 20); do
 done
 kill -0 "$relay_pid" 2>/dev/null || { echo 'erro: o relé não subiu' >&2; exit 1; }
 
-coord_matricula="$(python3 -c "import json;print(json.load(open('.e2e/fixtures.json'))['coordinator']['matricula'])")"
+# `|| true`: sob `set -e`/`pipefail` um `python3` sem saída derrubaria o script
+# aqui, antes da mensagem de erro do assert que usa a variável.
+coord_matricula="$(python3 -c "import json;print(json.load(open('.e2e/fixtures.json'))['coordinator']['matricula'])" || true)"
 
 echo "== gestão de contas no emulador"
 # `2>&1 | tee /dev/stderr`: a saída é capturada — o script lê a linha marcadora
@@ -82,7 +84,10 @@ saida="$( ( cd apps/admin && flutter pub get >/dev/null && flutter test integrat
 # manifesto, com o id, fica no host). O `grep -o` tira qualquer prefixo que o
 # repórter do `flutter test` ponha na linha; a partir daí a extração é campo a
 # campo, e o nome tem espaços.
-linha_marcadora="$(grep -o 'E2E_ACS_CRIADO .*' <<< "$saida" | tail -1)"
+# `|| true`: sem correspondência o `grep` sai 1 e, com `pipefail`, mataria o
+# script antes do diagnóstico logo abaixo — que é justamente quem diz o que
+# faltou.
+linha_marcadora="$(grep -o 'E2E_ACS_CRIADO .*' <<< "$saida" | tail -1 || true)"
 [[ -n "$linha_marcadora" ]] \
   || { echo 'erro: o teste não informou a matrícula e o nome do ACS criado (linha E2E_ACS_CRIADO)' >&2; exit 1; }
 matricula="$(sed -n 's/^E2E_ACS_CRIADO matricula=\([^ ]*\).*/\1/p' <<< "$linha_marcadora" | tail -1)"

@@ -14,7 +14,7 @@ import 'dart:math';
 /// `user_credentials`. Quem cadastra repassa a senha ao ACS e não a vê de novo;
 /// perdê-la significa redefinir, nunca recuperar.
 ///
-/// **Formato.** 16 caracteres de um alfabeto de 30 símbolos — 30^16 ≈ 2^78,6,
+/// **Formato.** 16 caracteres de um alfabeto de 31 símbolos — 31^16 ≈ 2^79,3,
 /// os "~80 bits" da issue —, em quatro grupos de quatro, como o
 /// `StaffActivationCode`. O alfabeto é `ABC…Z` e `2…9` **sem** `0`/`O` e
 /// `1`/`I`/`L`: são os pares que se confundem quando a senha é lida em voz

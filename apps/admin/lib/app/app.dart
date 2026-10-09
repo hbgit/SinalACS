@@ -713,7 +713,7 @@ class _AuditLogScreenState extends State<AuditLogScreen> {
                 children: [
                   const Text('Logs de auditoria', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 4),
-                  const Text('Somente leitura. O próprio acesso do administrador a esta tela também é auditado.'),
+                  const Text('Somente leitura. O próprio acesso a esta tela também é auditado. A coordenação vê apenas os registros dos autores com microárea na sua UBS.'),
                   const SizedBox(height: 16),
                   if (entries.isEmpty)
                     const Padding(padding: EdgeInsets.only(top: 24), child: Text('Nenhum acesso registrado ainda.'))
