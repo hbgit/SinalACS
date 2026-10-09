@@ -2104,7 +2104,8 @@ class _MyDataScreenState extends State<MyDataScreen> {
         : currentConsentDecisions(data.consents);
     final openDeletion = data?.requests.any((r) =>
             r.type == DataSubjectRequestType.deletion &&
-            r.status == DataSubjectRequestStatus.open) ??
+            (r.status == DataSubjectRequestStatus.open ||
+                r.status == DataSubjectRequestStatus.inReview)) ??
         false;
     return ListView(
       padding: const EdgeInsets.all(20),
@@ -2230,6 +2231,8 @@ class _MyDataScreenState extends State<MyDataScreen> {
                   'Pedido em ${_formatDate(request.createdAt.toLocal())} · '
                       'resposta até ${_formatDate(request.dueAt.toLocal())}',
                   if (request.details != null) '"${request.details}"',
+                  if (request.resolution != null && request.resolution!.isNotEmpty)
+                    'Resposta: ${request.resolution}',
                 ].join('\n')),
               ),
             ),
