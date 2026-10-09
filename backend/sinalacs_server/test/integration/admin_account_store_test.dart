@@ -36,6 +36,21 @@ const _admin = '00000000-0000-4000-8000-0000000000a9';
 const _coordA = '00000000-0000-4000-8000-0000000000aa';
 const _coordSemUbs = '00000000-0000-4000-8000-0000000000ab';
 
+/// Só os ACS que **este** arquivo semeia (`_seed`): as listagens de escopo de
+/// sistema são globais por definição e o banco é compartilhado, então elas vêm
+/// filtradas por aqui antes de qualquer igualdade exata (ver o porquê na
+/// primeira asserção que usa o conjunto).
+const _acsDoSemeio = {
+  _acsA,
+  _acsSemMicroarea,
+  _acsBPendente,
+  _acsBSemCredencial,
+};
+
+/// Só as contas de equipe que **este** arquivo semeia (`_seed`), pelo mesmo
+/// motivo: `staffList()` também é uma listagem global.
+const _staffDoSemeio = {_admin, _coordA, _coordSemUbs};
+
 final _t = DateTime.utc(2026, 10, 8, 12);
 
 Future<void> _usuario(
@@ -243,7 +258,16 @@ void main() {
     });
 
     test('o escopo de sistema vê os ACS das duas UBS, com o território de cada um', () async {
-      final lista = await store.acsList(const AdminScope.system());
+      // O escopo de sistema enxerga o banco inteiro, e este banco é
+      // compartilhado: os grupos com `RollbackDatabase.disabled` de outros
+      // arquivos (o de corrida de `onboarding_endpoint_test.dart`, entre
+      // outros) COMMITAM fixtures enquanto a suíte roda em paralelo, e essas
+      // linhas aparecem na listagem global. O filtro restringe a asserção aos
+      // ACS que ESTE arquivo semeia — e é só isso que ele faz: a igualdade
+      // exata continua valendo, inteira, sobre as quatro linhas próprias.
+      final lista = (await store.acsList(const AdminScope.system()))
+          .where((a) => _acsDoSemeio.contains(a.id))
+          .toList();
       expect(lista.map((a) => a.name), [
         'Ana ACS Sintética',
         'Bruno ACS Sintético',
@@ -307,7 +331,14 @@ void main() {
     });
 
     test('staffList traz papel, UBS e mfaActive de cada conta', () async {
-      final lista = await store.staffList();
+      // `staffList()` também é uma listagem global num banco compartilhado: os
+      // grupos com `RollbackDatabase.disabled` de outros arquivos (o login
+      // institucional e o de MFA, entre outros) COMMITAM contas de equipe
+      // enquanto a suíte roda em paralelo. O filtro prende a igualdade exata
+      // às contas que ESTE arquivo semeia.
+      final lista = (await store.staffList())
+          .where((s) => _staffDoSemeio.contains(s.id))
+          .toList();
       expect(lista.map((s) => s.name), [
         'Elisa Administradora Sintética',
         'Fábio Coordenador Sintético',
