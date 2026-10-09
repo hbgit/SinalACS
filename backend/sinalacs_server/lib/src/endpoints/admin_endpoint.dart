@@ -3,13 +3,21 @@ import 'package:sinalacs_server/src/endpoints/authenticated_endpoint.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
 import 'package:sinalacs_server/src/runtime/alert_runtime.dart';
 
-/// Leitura do backoffice (issue #40): indicadores, microáreas, alertas e
-/// auditoria. Somente leitura, só para `coordinator` e `admin`.
+/// Backoffice, só para `coordinator` e `admin`: leitura (issue #40) e gestão de
+/// contas (issue #43).
 ///
-/// O papel, o escopo (sistema para o administrador, UBS para o coordenador), a
-/// paginação e a auditoria de cada leitura são do `AdminReadService`; o endpoint
-/// só verifica o token e delega. Nenhum método devolve nome, CPF ou contato de
-/// paciente: o paciente é um rótulo (`#A18F`).
+/// A leitura — indicadores, microáreas, alertas e auditoria — é do
+/// `AdminReadService`; a listagem de ACS e de equipe é do `AdminAccountService`,
+/// que nas operações seguintes da mesma issue ganha o cadastro, o vínculo de
+/// microárea, a desativação e as redefinições de senha/MFA. Hoje todos os
+/// métodos daqui são de leitura: os de escrita entram na mesma dupla
+/// serviço/store, sem endpoint novo.
+///
+/// O papel, o escopo (sistema para o administrador, UBS para o coordenador),
+/// a paginação e a auditoria de cada operação são dos serviços; o endpoint só
+/// verifica o token e delega. Nenhum método devolve nome, CPF ou contato de
+/// paciente: o paciente é um rótulo (`#A18F`), e o que sai dos cadastros é a
+/// identificação **profissional** (nome, matrícula, UBS, microárea).
 class AdminEndpoint extends AuthenticatedEndpoint {
   Future<AdminIndicators> indicators(
     Session session, {
@@ -54,4 +62,21 @@ class AdminEndpoint extends AuthenticatedEndpoint {
         limit: limit,
         beforeSequence: beforeSequence,
       );
+
+  /// ACS visíveis para o chamador: o administrador vê o sistema, o coordenador
+  /// só os da própria UBS.
+  Future<List<AdminAcs>> acs(
+    Session session, {
+    required String accessToken,
+  }) => AlertRuntime.instance
+      .adminAccountServiceFor(session)
+      .acsList(authenticate(accessToken));
+
+  /// Contas de equipe do backoffice — só o administrador.
+  Future<List<AdminStaff>> staff(
+    Session session, {
+    required String accessToken,
+  }) => AlertRuntime.instance
+      .adminAccountServiceFor(session)
+      .staffList(authenticate(accessToken));
 }

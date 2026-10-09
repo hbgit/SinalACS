@@ -3,6 +3,8 @@ admin:
   - microAreas:
   - alerts:
   - auditLogs:
+  - acs:
+  - staff:
 alerts:
   - createRedAlert:
   - acknowledge:
