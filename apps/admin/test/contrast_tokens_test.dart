@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:sinalacs_admin/app/admin_theme.dart';
 
 import 'support/contrast.dart';
+import 'support/layout_harness.dart';
 
 /// Matriz determinística de contraste (WCAG 2.1 §1.4.3), no mesmo formato de
 /// `apps/acs/test/contrast_tokens_test.dart` e
@@ -67,6 +68,47 @@ void main() {
     // O ícone do banner "Ambiente de desenvolvimento" é WCAG 1.4.11 (limiar
     // 3:1 para componente não-textual), não 1.4.3 — mas falha nos dois.
     expect(contrastOn(AdminColors.accent, AdminColors.surfaceRaised), lessThan(largeTextOrUi));
+  });
+
+  // A matriz acima é de pares fixos; o rótulo destrutivo da gestão de contas
+  // (#43) não é um deles, por dois motivos ao mesmo tempo: ele só existe dentro
+  // do diálogo, e a superfície do diálogo não vem do tema — `admin_theme.dart`
+  // não define `dialogTheme`, então o `AlertDialog` cai no
+  // `colorScheme.surfaceContainerHigh` derivado da seed. É por isso que a razão
+  // é medida contra a cor que o diálogo REALMENTE pinta, lida do `Material` que
+  // o monta (com `surfaceTintColor` transparente no Material 3, a cor declarada
+  // é a pintada), e não contra `surfaceRaised`, que aqui não aparece.
+  testWidgets('o rótulo destrutivo usa o token e passa 4,5:1 sobre a superfície do diálogo', (tester) async {
+    await abrirBackoffice(tester, tamanho: const Size(360, 800));
+    await irPara(tester, 'Microáreas');
+
+    final desativar = find.byKey(const Key('desativar_acs_acs-1'));
+    if (desativar.evaluate().isEmpty) {
+      await tester.scrollUntilVisible(desativar, 320, scrollable: find.byType(Scrollable).last);
+    }
+    await tester.ensureVisible(desativar);
+    await tester.pumpAndSettle();
+    await tester.tap(desativar);
+    await tester.pumpAndSettle();
+
+    final rotulo = tester.widget<Text>(
+      find.descendant(of: find.byKey(const Key('confirmar_acao')), matching: find.byType(Text)).first,
+    );
+    expect(
+      rotulo.style?.color,
+      AdminColors.redOnSurface,
+      reason: 'o rótulo que confirma a ação destrutiva usa o token de texto, nunca o `red` de preenchimento',
+    );
+
+    final superficie = tester
+        .widget<Material>(find.descendant(of: find.byType(Dialog), matching: find.byType(Material)).first)
+        .color!;
+    final ratio = contrastOn(AdminColors.redOnSurface, superficie);
+    expect(
+      ratio,
+      greaterThanOrEqualTo(normalText),
+      reason: 'rótulo destrutivo sobre a superfície do diálogo ($superficie): $ratio:1 abaixo de $normalText:1',
+    );
   });
 
   test('o accentOnSurface do ACS (#60A5FA) passaria no contraste mas troca o matiz', () {

@@ -21,6 +21,11 @@ import 'fake_admin_auth.dart';
 ///    [percorrerTelaInteira].
 /// 3. `takeException()` consome **uma** exceção por chamada. Duas telas
 ///    estourando com uma única checagem no fim reportariam uma só.
+///
+/// Há uma quarta, que é o mesmo estrago por outro caminho: um teto de rolagem
+/// que devolve em silêncio. A tela cresce, o teto não, e o rodapé deixa de ser
+/// checado sem que nada fique vermelho — por isso [percorrerTelaInteira] hoje
+/// **falha** ao gastar [tetoDeRolagem] passos.
 
 /// Nomes dos quatro destinos, na ordem de `AdminDestination`.
 const destinosDoBackoffice = ['Indicadores', 'Microáreas', 'Alertas', 'Auditoria'];
@@ -82,6 +87,15 @@ void esperarSemEstouroDeLayout(WidgetTester tester, String contexto) {
   expect(erro, isNull, reason: 'estouro de layout em $contexto: $erro');
 }
 
+/// Número máximo de arrastos de [percorrerTelaInteira] — 30 × 320dp = 9600dp.
+///
+/// Medido nesta tarefa, a 200% de fonte em 360x800: Microáreas gasta 17 dos 30
+/// (≈5400dp), Indicadores 4, Auditoria 5, Alertas 9. São ~75% de folga na tela
+/// mais longa, bem acima do teto de 8 (≈2400dp) que os testes responsivos
+/// herdaram da época em que a tela cabia em dois arrastos — esse parava antes do
+/// rodapé de Equipe e nada ficava vermelho.
+const tetoDeRolagem = 30;
+
 /// Rola a tela até o fim, checando estouro a cada passo.
 ///
 /// Sem isso só a primeira dobra seria coberta — ver armadilha 2 no topo.
@@ -93,12 +107,18 @@ void esperarSemEstouroDeLayout(WidgetTester tester, String contexto) {
 /// de rolagem a 200% de fonte em 360x800 — o teto de 8 (≈2400dp) e um teto de 12
 /// que eu pus na primeira tentativa paravam bem antes do rodapé da seção de
 /// Equipe, e a roda parava de ser checada sem que nenhum teste ficasse vermelho.
-/// O teto agora é só uma trava contra laço infinito.
+///
+/// Gastar [tetoDeRolagem] passos **sem** chegar ao fim agora FALHA, em vez de
+/// devolver em silêncio: era esse silêncio que transformava "a tela cresceu" em
+/// cobertura perdida sem nenhum teste vermelho, que é justamente o que o topo
+/// deste arquivo descreve como a pior falha possível aqui. Quem crescer além do
+/// teto sobe o teto — a trava existe só contra laço infinito, não para limitar a
+/// cobertura.
 Future<void> percorrerTelaInteira(WidgetTester tester, String contexto) async {
   esperarSemEstouroDeLayout(tester, '$contexto (topo)');
   final lista = find.byType(Scrollable).last;
   var anterior = -1.0;
-  for (var passo = 1; passo <= 30; passo++) {
+  for (var passo = 1; passo <= tetoDeRolagem; passo++) {
     final posicao = tester.state<ScrollableState>(lista).position;
     if (posicao.pixels >= posicao.maxScrollExtent || posicao.pixels == anterior) return;
     anterior = posicao.pixels;
@@ -106,6 +126,13 @@ Future<void> percorrerTelaInteira(WidgetTester tester, String contexto) async {
     await tester.pumpAndSettle();
     esperarSemEstouroDeLayout(tester, '$contexto (rolagem $passo)');
   }
+  final parada = tester.state<ScrollableState>(lista).position;
+  final faltam = (parada.maxScrollExtent - parada.pixels).round();
+  fail(
+    '$contexto: os $tetoDeRolagem passos do harness acabaram antes do fim da '
+    'rolagem (faltavam ${faltam}dp). A tela pode ter crescido além do teto: '
+    'suba `tetoDeRolagem` para que o rodapé volte a ser checado.',
+  );
 }
 
 /// Visita os quatro destinos, percorrendo cada um por inteiro.
