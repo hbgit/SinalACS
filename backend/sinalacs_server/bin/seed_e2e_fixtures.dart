@@ -149,6 +149,30 @@ Future<void> main(List<String> args) async {
       await alerta(fixtures.adminAlertIds[1], 'red', 'acknowledged', reconhecidoEmSegundos: 60);
       await alerta(fixtures.adminAlertIds[2], 'green', 'pending');
       }
+      // Pedidos do titular (#42), OPT-IN (`E2E_SEED_DATA_REQUESTS=1`, só por
+      // `admin_titular_e2e.sh`): uma correção JÁ VENCIDA (paciente `main`) e uma
+      // exclusão no prazo (paciente `chronic`, com um token de push para provar a
+      // limpeza). Os textos são sintéticos e o e2e procura por eles no log.
+      if (env['E2E_SEED_DATA_REQUESTS'] == '1') {
+        Future<void> pedido(String userId, String tipo, String texto, {required int criadoHaDias, required int prazoEmDias}) async {
+          final cifrado = await cipher.encryptJson(texto);
+          await tx.execute(
+            Sql.named('INSERT INTO "data_subject_requests" ("userId","requestType","detailsEncrypted","detailsKeyVersion",'
+                '"status","createdAt","dueAt") VALUES (@u,@t,@c,@v,\'open\','
+                "NOW() - (@criado::int * interval '1 day'), NOW() + (@prazo::int * interval '1 day'))"),
+            parameters: {'u': userId, 't': tipo, 'c': cifrado.ciphertextBase64, 'v': cifrado.keyVersion, 'criado': criadoHaDias, 'prazo': prazoEmDias},
+          );
+        }
+        await pedido(fixtures.byRole('main').id, 'correction', 'E2E-CORRECAO telefone de contato desatualizado',
+            criadoHaDias: 20, prazoEmDias: -5);
+        await pedido(fixtures.byRole('chronic').id, 'deletion', 'E2E-EXCLUSAO pedido do titular',
+            criadoHaDias: 1, prazoEmDias: 14);
+        await tx.execute(
+          Sql.named('INSERT INTO "push_tokens" ("userId","token","platform","createdAt","updatedAt") '
+              "VALUES (@u,@tok,'android',NOW(),NOW())"),
+          parameters: {'u': fixtures.byRole('chronic').id, 'tok': 'e2e-push-${fixtures.byRole('chronic').id}'},
+        );
+      }
       // Código de ativação (#48): só o hash vai ao banco; o claro segue no manifesto.
       await tx.execute(
         Sql.named('UPDATE "staff_accounts" SET "activationCodeHash"=@h, "activationCodeExpiresAt"=@e, '
