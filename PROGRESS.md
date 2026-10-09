@@ -1242,10 +1242,10 @@ continua como já registrado acima, sem dono novo.
 
 O que **não** foi feito, de propósito:
 
-- **Ninguém atende os pedidos.** `status` só é escrito como `open`: o backoffice
-  (`apps/admin`) ainda roda sobre `MockAdminDataSource`. O prazo de 15 dias é
-  exibido mas não é cumprido por sistema nenhum. **Dono:** quem der backend ao
-  admin.
+- **Ninguém atende os pedidos.** *(Resolvido em 2026-10-09, ver "Atendimento dos
+  pedidos do titular (#42)".)* Na época `status` só era escrito como `open`. O
+  prazo de 15 dias passa a ser exibido com destaque de vencido, mas nenhum
+  alarme ou expurgo o cobra sozinho.
 - **`healthDataProcessing` não tem interruptor.** É a base legal do app inteiro,
   inclusive do alerta de emergência; `updateConsent` recusa essa finalidade com
   `DataRightsException` e aponta para o pedido de exclusão. Parar o tratamento
@@ -1479,3 +1479,21 @@ Plano: `docs/superpowers/plans/2026-09-30-ci-credencial-fcm.md`, branch `fix/pat
 
 
 - **Fonte a 200% no ACS: 320 dp, paisagem, `save_visit` e chip de conexão (2026-10-06).** Plano: `docs/superpowers/plans/2026-10-06-verificacao-fonte-200-acs.md`, resultado da verificação em `...-resultado.md`. As três lacunas que o teste de fonte deixava estavam abertas e foram fechadas: (1) `test/text_scale_test.dart` agora percorre o painel a 130% e 200% em 360x800, 320x640 e 800x360 (paisagem); a varredura achou um estouro real, a legenda do Mapa (`_LegendChip`, 24 px a 320 dp e 200%), corrigido com `Flexible`. O harness também tinha dois defeitos que esvaziavam a varredura: `percorrerTelaInteira` arrastava o `Scrollable` interno do `TextField` (fora da tela) nas abas com campo de texto, e `abrirPainel` tocava no botão Entrar antes de a rolagem assentar em paisagem. (2) `save_visit` é provado alcançável a 200% nas três janelas: habilitado, tocável e com 48 dp ou mais (rota: alerta amarelo → Fila → "Iniciar rota de visita" → chegada confirmada). (3) O rótulo semântico do chip `broker_status` é completo nos três estados (`Alertas em tempo real`, `Sem central`, `Offline ready`) mesmo com o texto cortado por elipse; não precisou de mudança no código. **Prova no emulador (API 36, fonte real):** `integration_test/layout_fonte_200_test.dart` percorre o painel inteiro com a janela e a escala que o sistema configurou (`adb shell settings put system font_scale 2.0` e `wm size`/`wm density 160`): passou a 320x640 dp e a 800x360 dp, ambos a 200%, sem estouro. No aparelho o `enterText` abre o teclado de verdade e ele come ~300 dp da janela (o corpo do login fica com 177 dp a 320x640, e o botão Entrar sai da viewport até o teclado recolher); o harness larga o foco e espera o teclado sumir antes de medir, então esse número **não** cobre o login com o teclado aberto. **Limites:** os testes de widget usam a fonte Ahem; a prova do aparelho é só no emulador API 36, e aparelho físico segue sem prova.
+
+
+## Atendimento dos pedidos do titular (#42, 2026-10-09)
+
+Plano: `docs/superpowers/plans/2026-10-08-issue-42-pedidos-do-titular-admin.md`; log do e2e: `docs/superpowers/plans/2026-10-08-issue-42-e2e.log`.
+
+**O que existe**
+- Backend: estado `inReview` e colunas `decidedAt`, `decidedBy`, `resolutionEncrypted`, `resolutionKeyVersion` em `data_subject_requests`; `DataSubjectCaseService` (regras puras) sobre `OrmDataSubjectCaseStore` (transação com lock por pedido, nota cifrada, auditoria na mesma transação); cinco métodos em `AdminEndpoint` (`dataSubjectRequests`, `dataSubjectRequest`, `startDataSubjectReview`, `completeDataSubjectRequest`, `rejectDataSubjectRequest`), só `coordinator` (UBS própria) e `admin`.
+- Exclusão atendida = **anonimização** na mesma transação: nome, `cpfHash` (`removed:<uuid>` não derivável do CPF), contato de emergência, data de nascimento (sentinela 1900-01-01), condições crônicas, respostas de triagem; apaga `push_tokens`, `otp_challenges`, `user_credentials`; fecha outros pedidos de exclusão abertos; acrescenta uma recusa de `segmentedPush`. Sessão ainda viva de conta anonimizada não regrava condições crônicas nem respostas de triagem; o alerta vermelho segue aceito.
+- Aviso push ao titular (correção atendida ou recusa), melhor esforço, sem a nota no payload.
+- Admin: aba "Pedidos do titular" (fila com vencido primeiro e destacado, filtro de status, "Carregar mais", detalhe, iniciar análise, atender, recusar com motivo, confirmação na exclusão).
+- App do paciente: "Em análise", "Resposta: <nota>" e botão de exclusão indisponível também com o pedido em análise.
+
+**Provas (2026-10-09, números medidos agora)**: backend `dart test` 767/767; admin 162, patient 259, acs 536, todos verdes e `flutter analyze` limpo; `dart analyze` do backend sem warnings (59 `info`). Emulador: `scripts/qa/admin_titular_e2e.sh` verde (login com MFA, vencido primeiro, correção em duas etapas, exclusão com confirmação; no banco: dois `completed` pelo admin, nota cifrada, titular anonimizado, zero push/OTP, alertas e consentimentos preservados, uma linha de auditoria por escrita, cadeia íntegra com 17 linhas, texto do titular ausente dos logs); regressões `admin_login_e2e.sh` e `patient_full_e2e.sh --sem-push` verdes.
+
+**Decisões assumidas** (a validar com o encarregado/DPO): (1) quem decide: coordenador da própria UBS e admin; (2) exclusão = anonimização, não `DELETE` (`alerts`, `visits`, `audit_logs`, `consent_logs` ficam, pseudonimizados); (3) correção não reescreve campo, exige nota; (4) transições `open→inReview→completed|rejected` e `open→completed|rejected`, recusa exige motivo de 3 a 500 caracteres; (5) aviso push só para correção/recusa, com consentimento e token.
+
+**Ficou de fora, de propósito**: a correção não reescreve o campo; sem aviso por e-mail; sem prazo de expurgo de `consent_logs`; ficam também pseudônimos como hash de localização, hashes de aparelho, `visits.notesEncrypted` e `enrollment_tokens` (M-2/Task 4); iOS e aparelho físico; o app ACS não consome o cliente novo; `screen: my_data` do push não tem consumidor no app do paciente; o `e2e.sh --full` só indica o script (troca a stack) e o CI não o roda; `docs/telas-admin.md` ainda diz "quatro destinos" (recaptura de telas pendente).
