@@ -58,6 +58,38 @@ class _CustomAreaDataSource implements AdminDataSource {
 
   @override
   Future<void> rejectDataRequest(String id, {required String reason}) => throw UnimplementedError();
+  // A gestão de contas (#43) não é exercitada aqui: este teste fica na aba
+  // Alertas, e a tela Microáreas nem chega a ser montada.
+  @override
+  Future<List<AcsSummary>> fetchAcs() => throw UnimplementedError('não usado neste teste');
+
+  @override
+  Future<List<StaffSummary>> fetchStaff() => throw UnimplementedError('não usado neste teste');
+
+  @override
+  Future<NewAcsCredential> createAcs({
+    required String name,
+    required String enrollmentId,
+    required String microAreaId,
+  }) => throw UnimplementedError('não usado neste teste');
+
+  @override
+  Future<AcsSummary> setAcsMicroArea({required String acsId, required String microAreaId}) =>
+      throw UnimplementedError('não usado neste teste');
+
+  @override
+  Future<AcsSummary> setAcsActive({required String acsId, required bool active}) =>
+      throw UnimplementedError('não usado neste teste');
+
+  @override
+  Future<String> resetAcsPassword({required String acsId}) => throw UnimplementedError('não usado neste teste');
+
+  @override
+  Future<void> resetAcsMfa({required String acsId}) => throw UnimplementedError('não usado neste teste');
+
+  @override
+  Future<NewStaffActivation> resetStaffMfa({required String staffId}) =>
+      throw UnimplementedError('não usado neste teste');
 }
 
 void main() {

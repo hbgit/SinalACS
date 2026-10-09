@@ -86,6 +86,29 @@ void main() {
     expect('$f ${f.staff}'.contains(f.staff.password), isFalse);
   });
 
+  test('há um coordenador do backoffice (#43), distinto do admin e dos ACS, com código próprio', () {
+    for (var seed = 0; seed < 200; seed++) {
+      final f = generateE2eFixtures(Random(seed));
+      expect({f.coordinator.id, f.staff.id, f.acs.id, f.secondAcs.id}, hasLength(4), reason: 'seed $seed');
+      // Prefixo próprio: as matrículas de staff vivem na MESMA tabela, com
+      // índice único — colidir aqui seria um seed que falha no meio.
+      expect(f.coordinator.matricula, startsWith('E2E-COORD-'), reason: 'seed $seed');
+      expect(
+        {f.coordinator.matricula, f.staff.matricula, f.acs.matricula, f.secondAcs.matricula},
+        hasLength(4),
+        reason: 'seed $seed',
+      );
+      expect({f.coordinator.password, f.staff.password, f.acs.password, f.secondAcs.password}, hasLength(4));
+      expect(f.coordinator.activationCode, isNot(f.staff.activationCode));
+    }
+    final f = generateE2eFixtures(Random(41));
+    expect(f.toJson()['coordinator'], f.coordinator.toJson());
+    expect(E2eFixtures.fromJson(f.toJson()).coordinator.matricula, f.coordinator.matricula);
+    // Nem a senha nem o código de ativação saem no toString.
+    expect('$f ${f.coordinator}'.contains(f.coordinator.password), isFalse);
+    expect('${f.coordinator}'.contains(f.coordinator.activationCode), isFalse);
+  });
+
   test('o staff traz um código de ativação (#48) no formato da CLI, novo a cada execução e fora do toString', () {
     final a = generateE2eFixtures(Random(21)).staff;
     final b = generateE2eFixtures(Random(22)).staff;

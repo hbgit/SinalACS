@@ -1,6 +1,8 @@
+import 'package:sinalacs_server/src/application/admin/admin_account_service.dart';
 import 'package:sinalacs_server/src/application/admin/admin_read_service.dart';
 import 'package:sinalacs_server/src/application/admin/data_subject_case_service.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_data_subject_case_store.dart';
+import 'package:sinalacs_server/src/infrastructure/database/orm_admin_account_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_admin_read_store.dart';
 import 'package:meta/meta.dart';
 import 'package:serverpod/serverpod.dart';
@@ -241,6 +243,28 @@ class AlertRuntime {
         audit: auditTrailFor(session),
         notifier: _dataSubjectNotifierFor(session),
       );
+  /// Gestão de contas do backoffice (#43), para uma requisição. Mesmo arranjo
+  /// de [adminReadServiceFor]: os stores são amarrados à sessão da chamada e a
+  /// trilha é a da requisição — cada operação vira uma linha encadeada em
+  /// `audit_logs`. A credencial do ACS e o estado da MFA vivem na mesma tabela
+  /// (`user_credentials`), por isso um store só serve às duas portas; o código
+  /// de ativação é do staff (`staff_accounts`), daí a segunda instância.
+  ///
+  /// Não há porta de refresh token nem de envio diferido aqui: a desativação
+  /// revoga as duas **dentro da transação do `OrmAdminAccountStore`**, para a
+  /// flag e as revogações serem um só estado (ver `setAcsActive`), e as demais
+  /// operações da #43 não tocam em token.
+  AdminAccountService adminAccountServiceFor(Session session) {
+    final credenciais = OrmAcsCredentialStore(session: () => session);
+    return AdminAccountService(
+      store: OrmAdminAccountStore(session: () => session),
+      credentials: credenciais,
+      totpStore: credenciais,
+      activationStore: OrmAcsCredentialStore(session: () => session, staff: true),
+      hasher: passwordHasher,
+      audit: auditTrailFor(session),
+    );
+  }
 
   /// Contato da UBS do ACS (RF13), para uma requisição.
   UbsContactService ubsContactServiceFor(Session session) =>

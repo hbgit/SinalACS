@@ -162,6 +162,83 @@ class DataRequestDetail extends DataRequestSummary {
   final DateTime? decidedAt;
 }
 
+/// Espelha `AdminAcs` (`admin_acs.spy.yaml`): identificação profissional,
+/// território e estado de acesso — nunca CPF, senha ou contato.
+class AcsSummary {
+  const AcsSummary({
+    required this.id,
+    required this.name,
+    required this.enrollmentId,
+    required this.ubsName,
+    this.microAreaId,
+    this.microAreaName,
+    required this.active,
+    required this.mfaActive,
+  });
+
+  final String id;
+  final String name;
+  final String enrollmentId;
+  final String ubsName;
+
+  /// Nulos enquanto o ACS não tem território (`users.microAreaId`). A listagem
+  /// inclui quem não tem, para poder vinculá-lo.
+  final String? microAreaId;
+  final String? microAreaName;
+
+  final bool active;
+
+  /// MFA **ativa** (`totpEnabledAt` preenchido no servidor): um enrollment
+  /// pendente não vale como proteção e a tela precisa poder dizer isso.
+  final bool mfaActive;
+}
+
+/// Espelha `AdminStaff` (`admin_staff.spy.yaml`): conta de equipe do
+/// backoffice. `ubsName` é nulo para o administrador (vê o sistema inteiro).
+class StaffSummary {
+  const StaffSummary({
+    required this.id,
+    required this.name,
+    required this.enrollmentId,
+    required this.role,
+    this.ubsName,
+    required this.active,
+    required this.mfaActive,
+  });
+
+  final String id;
+  final String name;
+  final String enrollmentId;
+
+  /// `UserRole` do servidor **pelo nome** (`'coordinator'`, `'admin'`), nunca
+  /// pelo índice: a ordem do enum do cliente não é contrato.
+  final String role;
+
+  final String? ubsName;
+  final bool active;
+
+  /// Mesma leitura de [AcsSummary.mfaActive].
+  final bool mfaActive;
+}
+
+/// Cadastro de ACS: a linha criada e a senha inicial, que **só** existe nesta
+/// resposta — o servidor guarda apenas o hash.
+class NewAcsCredential {
+  const NewAcsCredential({required this.acs, required this.initialPassword});
+
+  final AcsSummary acs;
+  final String initialPassword;
+}
+
+/// Redefinição da MFA de uma conta de equipe: o código de ativação novo e a
+/// validade dele, mostrados uma única vez.
+class NewStaffActivation {
+  const NewStaffActivation({required this.code, required this.expiresAt});
+
+  final String code;
+  final DateTime expiresAt;
+}
+
 /// Falha ao ler dados do backoffice. A mensagem já vem pronta para a tela e
 /// nunca carrega o texto cru do servidor.
 class AdminDataFailure implements Exception {
@@ -181,13 +258,59 @@ class AdminSessionExpired implements Exception {
   String toString() => 'AdminSessionExpired';
 }
 
+/// Recusa de **validação** de uma escrita cuja mensagem vem do servidor e pode
+/// ir à tela: é o texto sobre a própria entrada do operador ('Já existe um ACS
+/// com esta matrícula.'), nunca dado de outro território nem o motivo de uma
+/// recusa de permissão — essa continua virando [AdminDataFailure] com texto
+/// fixo, como todo o resto.
+class AdminValidationFailure implements Exception {
+  const AdminValidationFailure(this.message);
+  final String message;
+
+  @override
+  String toString() => 'AdminValidationFailure: $message';
+}
+
 /// Camada de dados isolada atrás de interface (no espírito de `AlertPublisher`/
-/// `AlertStore` do backend), para permitir mock enquanto os endpoints reais
-/// não existem no `sinalacs_client`.
+/// `AlertStore` do backend): a produção fala com o `admin.*` do backend pelo
+/// `sinalacs_client` e as telas seguem herméticas sobre [MockAdminDataSource].
 abstract interface class AdminDataSource {
   Future<DashboardIndicators> fetchDashboardIndicators();
 
   Future<List<MicroAreaSummary>> fetchMicroAreas();
+
+  /// ACS visíveis para a sessão (issue #43): o administrador vê o sistema, o
+  /// coordenador só os da própria UBS.
+  Future<List<AcsSummary>> fetchAcs();
+
+  /// Contas de equipe do backoffice — só o administrador as enxerga.
+  Future<List<StaffSummary>> fetchStaff();
+
+  /// Cadastra o ACS e devolve a senha inicial, que só existe nesta resposta.
+  /// A UBS vem da microárea escolhida, nunca do pedido.
+  Future<NewAcsCredential> createAcs({
+    required String name,
+    required String enrollmentId,
+    required String microAreaId,
+  });
+
+  /// Move o ACS para outra microárea e devolve a linha já no território novo.
+  Future<AcsSummary> setAcsMicroArea({required String acsId, required String microAreaId});
+
+  /// Liga/desliga o acesso do ACS. Desativar revoga as sessões e os tokens de
+  /// envio diferido da conta no servidor.
+  Future<AcsSummary> setAcsActive({required String acsId, required bool active});
+
+  /// Redefine a senha do ACS (sorteada pelo servidor) e devolve a nova, que só
+  /// existe nesta resposta. As sessões em curso não são revogadas.
+  Future<String> resetAcsPassword({required String acsId});
+
+  /// Apaga o segredo TOTP do ACS, para ele ativar de novo na próxima entrada.
+  Future<void> resetAcsMfa({required String acsId});
+
+  /// Redefine a MFA de uma conta de equipe (só o administrador, nunca a própria
+  /// conta) e devolve o código de ativação novo.
+  Future<NewStaffActivation> resetStaffMfa({required String staffId});
 
   /// [microAreaId] é o `MicroAreaSummary.id` (o servidor filtra por id, não por
   /// nome). Mais recentes primeiro; [limit] de 1 a 100.

@@ -46,6 +46,16 @@ abstract interface class RefreshTokenStore {
   Future<bool> markRotated(String id, DateTime at);
 
   Future<void> revokeFamily(String familyId, DateTime at);
+
+  /// Todas as famílias do usuário, para a desativação da conta (#43); o
+  /// `logout` continua revogando só a própria família.
+  ///
+  /// Um token emitido na janela de uma desativação concorrente (o login pode
+  /// ter começado antes de a flag ser gravada) já nasce inutilizável: toda
+  /// renovação relê a conta e, inativa, revoga a família e recusa — a mesma
+  /// releitura que sustenta INV-01.
+  Future<void> revokeAllForUser(String userId, DateTime at);
+
   Future<RefreshAccount?> findAccount(String userId);
 
   /// Poda do próprio usuário: tokens cujo teto absoluto já passou.

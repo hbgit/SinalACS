@@ -363,6 +363,213 @@ class Endpoints extends _i1.EndpointDispatch {
                     reason: params['reason'],
                   ),
         ),
+        'acs': _i1.MethodConnector(
+          name: 'acs',
+          params: {
+            'accessToken': _i1.ParameterDescription(
+              name: 'accessToken',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async => (endpoints['admin'] as _i2.AdminEndpoint).acs(
+                session,
+                accessToken: params['accessToken'],
+              ),
+        ),
+        'staff': _i1.MethodConnector(
+          name: 'staff',
+          params: {
+            'accessToken': _i1.ParameterDescription(
+              name: 'accessToken',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async => (endpoints['admin'] as _i2.AdminEndpoint).staff(
+                session,
+                accessToken: params['accessToken'],
+              ),
+        ),
+        'createAcs': _i1.MethodConnector(
+          name: 'createAcs',
+          params: {
+            'accessToken': _i1.ParameterDescription(
+              name: 'accessToken',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'name': _i1.ParameterDescription(
+              name: 'name',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'enrollmentId': _i1.ParameterDescription(
+              name: 'enrollmentId',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'microAreaId': _i1.ParameterDescription(
+              name: 'microAreaId',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async => (endpoints['admin'] as _i2.AdminEndpoint).createAcs(
+                session,
+                accessToken: params['accessToken'],
+                name: params['name'],
+                enrollmentId: params['enrollmentId'],
+                microAreaId: params['microAreaId'],
+              ),
+        ),
+        'setAcsMicroArea': _i1.MethodConnector(
+          name: 'setAcsMicroArea',
+          params: {
+            'accessToken': _i1.ParameterDescription(
+              name: 'accessToken',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'acsId': _i1.ParameterDescription(
+              name: 'acsId',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'microAreaId': _i1.ParameterDescription(
+              name: 'microAreaId',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async =>
+                  (endpoints['admin'] as _i2.AdminEndpoint).setAcsMicroArea(
+                    session,
+                    accessToken: params['accessToken'],
+                    acsId: params['acsId'],
+                    microAreaId: params['microAreaId'],
+                  ),
+        ),
+        'setAcsActive': _i1.MethodConnector(
+          name: 'setAcsActive',
+          params: {
+            'accessToken': _i1.ParameterDescription(
+              name: 'accessToken',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'acsId': _i1.ParameterDescription(
+              name: 'acsId',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'active': _i1.ParameterDescription(
+              name: 'active',
+              type: _i1.getType<bool>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async => (endpoints['admin'] as _i2.AdminEndpoint).setAcsActive(
+                session,
+                accessToken: params['accessToken'],
+                acsId: params['acsId'],
+                active: params['active'],
+              ),
+        ),
+        'resetAcsPassword': _i1.MethodConnector(
+          name: 'resetAcsPassword',
+          params: {
+            'accessToken': _i1.ParameterDescription(
+              name: 'accessToken',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'acsId': _i1.ParameterDescription(
+              name: 'acsId',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async =>
+                  (endpoints['admin'] as _i2.AdminEndpoint).resetAcsPassword(
+                    session,
+                    accessToken: params['accessToken'],
+                    acsId: params['acsId'],
+                  ),
+        ),
+        'resetAcsMfa': _i1.MethodConnector(
+          name: 'resetAcsMfa',
+          params: {
+            'accessToken': _i1.ParameterDescription(
+              name: 'accessToken',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'acsId': _i1.ParameterDescription(
+              name: 'acsId',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async => (endpoints['admin'] as _i2.AdminEndpoint).resetAcsMfa(
+                session,
+                accessToken: params['accessToken'],
+                acsId: params['acsId'],
+              ),
+        ),
+        'resetStaffMfa': _i1.MethodConnector(
+          name: 'resetStaffMfa',
+          params: {
+            'accessToken': _i1.ParameterDescription(
+              name: 'accessToken',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'staffId': _i1.ParameterDescription(
+              name: 'staffId',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async =>
+                  (endpoints['admin'] as _i2.AdminEndpoint).resetStaffMfa(
+                    session,
+                    accessToken: params['accessToken'],
+                    staffId: params['staffId'],
+                  ),
+        ),
       },
     );
     connectors['alerts'] = _i1.EndpointConnector(
