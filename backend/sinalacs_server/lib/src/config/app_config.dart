@@ -17,11 +17,26 @@ class AppConfig {
     required this.mqttPassword,
     required this.mqttUseTls,
     required this.mqttCaCertificatePath,
+    this.mqttClientCertificatePath,
+    this.mqttClientKeyPath,
     required this.appEnv,
     required this.enableDevLogin,
+    this.requireAcsMfa = false,
+    this.gorushUrl,
+    this.retentionAlertDays = defaultRetentionAlertDays,
+    this.retentionVisitDays = defaultRetentionVisitDays,
+    this.retentionTriageDays = defaultRetentionTriageDays,
   });
 
   final String mqttBroker;
+
+  /// Endereço do Gorush, o relé de push para FCM/APNs (RF14, decisão §3.2), sem
+  /// barra final. `null` desliga o envio de avisos: o backend sobe e responde
+  /// tudo o mais, e `notices.sendSegmented` recusa com uma mensagem clara.
+  final String? gorushUrl;
+
+  /// Tempo máximo de uma chamada ao Gorush, do connect à resposta inteira.
+  Duration get gorushTimeout => const Duration(seconds: 5);
 
   /// Chave HMAC que assina os tokens de `auth.developmentLogin`.
   ///
@@ -75,8 +90,29 @@ class AppConfig {
   final String? mqttPassword;
   final bool mqttUseTls;
   final String? mqttCaCertificatePath;
+
+  /// Certificado e chave de CLIENTE para o mTLS do broker (`MQTT_CLIENT_CERT_PATH`
+  /// e `MQTT_CLIENT_KEY_PATH`). Vêm sempre juntos; fora de `development` com
+  /// TLS são obrigatórios.
+  final String? mqttClientCertificatePath;
+  final String? mqttClientKeyPath;
   final String appEnv;
   final bool enableDevLogin;
+
+  /// `REQUIRE_ACS_MFA`: ACS sem MFA (TOTP) ativa não entra pelo login
+  /// institucional; precisa ativá-la antes. Padrão **ligado fora de
+  /// `development`** ([resolveRequireAcsMfa]). O default do construtor é
+  /// `false` só para as configurações montadas à mão nos testes.
+  final bool requireAcsMfa;
+
+  /// Prazos de retenção do expurgo LGPD-RF07, em dias — `RETENTION_ALERT_DAYS`,
+  /// `RETENTION_VISIT_DAYS`, `RETENTION_TRIAGE_DAYS`. Opcionais: os defaults
+  /// são a tabela de retenção de spec/lgpd_design.md §5.6 (alertas 2 anos,
+  /// visitas e triagens 5 anos). Só inteiro positivo com teto sanitário de
+  /// 36500 dias: um valor errado aqui apaga dados reais de forma irreversível.
+  final int retentionAlertDays;
+  final int retentionVisitDays;
+  final int retentionTriageDays;
 
   bool get isProduction => appEnv == 'production';
 
@@ -109,6 +145,11 @@ class AppConfig {
   /// Pepper de desenvolvimento. Público, como os outros fallbacks — e por isso
   /// restrito a `development` por [_resolveSecret].
   static const developmentCpfHashPepper = 'development-cpf-hash-pepper';
+
+  /// Defaults da política de retenção (spec/lgpd_design.md §5.6).
+  static const defaultRetentionAlertDays = 730; // 2 anos
+  static const defaultRetentionVisitDays = 1825; // 5 anos
+  static const defaultRetentionTriageDays = 1825; // 5 anos
 
   static const _knownSmsGateways = {'log'};
 
@@ -148,6 +189,9 @@ class AppConfig {
   factory AppConfig.fromEnvironment() =>
       AppConfig.fromMap(Platform.environment);
 
+  static String? _blankToNull(String? value) =>
+      (value == null || value.trim().isEmpty) ? null : value;
+
   /// Mesma leitura, a partir de um mapa qualquer.
   ///
   /// `Platform.environment` não é substituível dentro do processo, então as
@@ -155,6 +199,21 @@ class AppConfig {
   /// atalho para o ambiente real.
   factory AppConfig.fromMap(Map<String, String> environment) {
     final appEnv = environment['APP_ENV'] ?? 'development';
+
+    final mqttUseTls = environment['MQTT_USE_TLS'] == 'true';
+    final mqttClientCert = _blankToNull(environment['MQTT_CLIENT_CERT_PATH']);
+    final mqttClientKey = _blankToNull(environment['MQTT_CLIENT_KEY_PATH']);
+    if ((mqttClientCert == null) != (mqttClientKey == null)) {
+      throw StateError(
+        'MQTT_CLIENT_CERT_PATH e MQTT_CLIENT_KEY_PATH devem vir juntos.',
+      );
+    }
+    if (appEnv != 'development' && mqttUseTls && mqttClientCert == null) {
+      throw StateError(
+        'MQTT_CLIENT_CERT_PATH e MQTT_CLIENT_KEY_PATH são obrigatórios '
+        'fora de development com MQTT_USE_TLS=true (mTLS do broker).',
+      );
+    }
 
     return AppConfig(
       mqttBroker: environment['MQTT_BROKER'] ?? 'localhost:1883',
@@ -186,11 +245,71 @@ class AppConfig {
       ),
       mqttUsername: environment['MQTT_USERNAME'],
       mqttPassword: environment['MQTT_PASSWORD'],
-      mqttUseTls: environment['MQTT_USE_TLS'] == 'true',
+      mqttUseTls: mqttUseTls,
       mqttCaCertificatePath: environment['MQTT_CA_CERT_PATH'],
+      mqttClientCertificatePath: mqttClientCert,
+      mqttClientKeyPath: mqttClientKey,
       appEnv: appEnv,
       enableDevLogin: environment['ENABLE_DEV_LOGIN'] == 'true',
+      requireAcsMfa: resolveRequireAcsMfa(
+        value: environment['REQUIRE_ACS_MFA'],
+        appEnv: appEnv,
+      ),
+      gorushUrl: _resolveGorushUrl(environment['GORUSH_URL']),
+      retentionAlertDays: _resolveRetentionDays(
+        environment['RETENTION_ALERT_DAYS'],
+        fallback: defaultRetentionAlertDays,
+        envVarName: 'RETENTION_ALERT_DAYS',
+      ),
+      retentionVisitDays: _resolveRetentionDays(
+        environment['RETENTION_VISIT_DAYS'],
+        fallback: defaultRetentionVisitDays,
+        envVarName: 'RETENTION_VISIT_DAYS',
+      ),
+      retentionTriageDays: _resolveRetentionDays(
+        environment['RETENTION_TRIAGE_DAYS'],
+        fallback: defaultRetentionTriageDays,
+        envVarName: 'RETENTION_TRIAGE_DAYS',
+      ),
     );
+  }
+
+  /// Inteiro positivo de dias, com teto sanitário de 36500 (100 anos) — um
+  /// `RETENTION_*_DAYS` malformado ou absurdo falha no boot em vez de apagar
+  /// mais do que a política manda.
+  static int _resolveRetentionDays(
+    String? value, {
+    required int fallback,
+    required String envVarName,
+  }) {
+    final raw = value?.trim() ?? '';
+    if (raw.isEmpty) return fallback;
+    final days = int.tryParse(raw);
+    if (days == null || days <= 0 || days > 36500) {
+      throw StateError(
+        '$envVarName inválido ("$value"): use um inteiro positivo de dias '
+        '(1 a 36500).',
+      );
+    }
+    return days;
+  }
+
+  /// Com a variável presente, só a string exata `true` liga (mesma regra de
+  /// `ENABLE_DEV_LOGIN`). Ausente, vale `true` em todo ambiente que não seja
+  /// `development`: esquecer a variável em produção não pode desligar a MFA.
+  static bool resolveRequireAcsMfa({required String? value, required String appEnv}) =>
+      value != null ? value == 'true' : appEnv != 'development';
+
+  static String? _resolveGorushUrl(String? value) {
+    var url = value?.trim() ?? '';
+    if (url.isEmpty) return null;
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+      throw StateError('GORUSH_URL deve começar com http:// ou https://.');
+    }
+    while (url.endsWith('/')) {
+      url = url.substring(0, url.length - 1);
+    }
+    return url;
   }
 
   /// Decide um segredo de assinatura, recusando subir com um valor fraco.

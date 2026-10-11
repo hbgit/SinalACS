@@ -35,6 +35,21 @@ const _publicMethodsByDesign = <String, String>{
   'AuthEndpoint.loginInstitutional':
       'é o próprio emissor de token: quem chama o login institucional (RF07) '
       'ainda não tem credencial — a matrícula e a senha SÃO a credencial',
+  'AuthEndpoint.loginStaff':
+      'é o próprio emissor de token do backoffice: quem chama ainda não tem '
+      'credencial — a matrícula e a senha SÃO a credencial (mais o TOTP)',
+  'AuthEndpoint.beginStaffTotpEnrollment':
+      'ativação da MFA do staff: não há token antes da MFA, como a do ACS; '
+      'matrícula e senha são a prova',
+  'AuthEndpoint.confirmStaffTotpEnrollment':
+      'ativação da MFA do staff: não há token antes da MFA, como a do ACS; '
+      'matrícula, senha e o primeiro código são a prova',
+  'AuthEndpoint.refreshSession':
+      'renovação por refresh token (LGPD-RT06): quem chama já perdeu o JWT; o '
+      'token opaco, rotativo e amarrado ao aparelho É a credencial',
+  'AuthEndpoint.logout':
+      'revoga pela posse do refresh token; idempotente e sem efeito sobre '
+      'token desconhecido',
   'OnboardingEndpoint.completeEnrollment':
       'público por desenho: quem conclui o onboarding ainda não tem sessão — o '
       'convite de uso único é a credencial',
@@ -42,6 +57,21 @@ const _publicMethodsByDesign = <String, String>{
       'login por desenho: quem pede o código ainda não tem sessão',
   'AuthEndpoint.verifyOtp':
       'login por desenho: é esta chamada que emite a sessão do paciente',
+  'AuthEndpoint.beginTotpEnrollment':
+      'ativação da MFA (RF07) acontece ANTES do primeiro token: com '
+      'REQUIRE_ACS_MFA o ACS sem MFA não recebe sessão — matrícula e senha SÃO '
+      'a credencial, e a tentativa errada conta no bloqueio como no login',
+  'VisitsEndpoint.syncDeferred':
+      'envio diferido (D7 do plano 2026-10-03): roda depois de o ACS sair, sem '
+      'JWT — o token de envio opaco, amarrado ao aparelho, de 7 dias e escopo '
+      'único É a credencial; o usuário vem de UploadTokenService.resolve (dono '
+      'do token, microárea relida do banco), nunca de parâmetro',
+  'VisitsEndpoint.revokeUploadToken':
+      'revoga pela posse do token de envio diferido, como AuthEndpoint.logout; '
+      'idempotente e sem efeito sobre token desconhecido',
+  'AuthEndpoint.confirmTotpEnrollment':
+      'mesma razão de beginTotpEnrollment: matrícula + senha + código válido '
+      'do segredo pendente são a credencial; não há token a exigir ainda',
 };
 
 /// A classe que o teste protege — e cuja declaração ele precisa ignorar.
@@ -130,6 +160,32 @@ void main() {
     }
 
     expect(offenders, isEmpty, reason: offenders.join('\n'));
+  });
+
+  // Os cinco métodos do atendimento de pedidos do titular (#42) mexem em dado
+  // pessoal e podem anonimizar uma conta: além da regra genérica acima, este
+  // caso exige nominalmente que existam, que `AdminEndpoint` estenda a base e
+  // que nenhum deles esteja isento.
+  test('os cinco métodos do atendimento de pedidos do titular autenticam', () {
+    const metodos = [
+      'dataSubjectRequests',
+      'dataSubjectRequest',
+      'startDataSubjectReview',
+      'completeDataSubjectRequest',
+      'rejectDataSubjectRequest',
+    ];
+    final admin = _scan().singleWhere((e) => e.name == 'AdminEndpoint');
+    expect(admin.extendsBase, isTrue);
+    final porNome = {for (final m in admin.methods) m.name: m};
+    for (final nome in metodos) {
+      expect(porNome[nome], isNotNull, reason: 'AdminEndpoint.$nome não existe');
+      expect(
+        porNome[nome]!.body,
+        contains('authenticate(accessToken)'),
+        reason: 'AdminEndpoint.$nome precisa chamar authenticate(accessToken)',
+      );
+      expect(_publicMethodsByDesign.containsKey('AdminEndpoint.$nome'), isFalse);
+    }
   });
 
   test('a allowlist não guarda endpoint que já virou autenticado', () {

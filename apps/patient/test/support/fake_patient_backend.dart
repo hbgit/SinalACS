@@ -1,4 +1,8 @@
+import 'dart:async';
+
 import 'package:sinalacs_client/sinalacs_client.dart';
+import 'package:sinalacs_patient/core/consent/consent_decisions.dart';
+import 'package:sinalacs_patient/core/legal/legal_documents.dart';
 import 'package:sinalacs_patient/core/network/auth_session.dart';
 import 'package:sinalacs_patient/core/network/backend_client.dart';
 
@@ -49,9 +53,123 @@ class FakePatientBackend implements PatientBackend {
     chronicConditions: const [],
     consents: const [],
     riskHistory: const [],
+    requests: const [],
   );
   BackendFailure? myDataFailure;
   int myDataCallCount = 0;
+
+
+  /// Acrescenta ao histórico uma decisão sobre [purpose] (`granted` ou
+  /// `revoked`), como o servidor faria ao gravar em `consent_logs`.
+  void addConsentRecord(String purpose, String action, DateTime timestamp) {
+    final record = PatientConsentRecord(
+      purpose: purpose,
+      action: action,
+      version: legalDocumentsVersion,
+      timestamp: timestamp,
+    );
+    myDataResult = myDataResult.copyWith(consents: [...myDataResult.consents, record]);
+  }
+
+  /// Atalho: o paciente já concedeu "Avisos da equipe".
+  void grantPushConsent() => addConsentRecord('segmentedPush', 'granted', DateTime.utc(2026, 9, 1));
+
+  /// Chamadas a [updateConsent], na ordem.
+  final List<({ConsentPurpose purpose, bool granted})> updateConsentCalls =
+      <({ConsentPurpose purpose, bool granted})>[];
+  BackendFailure? updateConsentFailure;
+
+  /// Chamadas a [registerPushToken], na ordem.
+  final List<(String, String)> pushRegistrations = <(String, String)>[];
+  BackendFailure? pushRegistrationFailure;
+
+  @override
+  Future<void> registerPushToken({required String token, required String platform}) async {
+    pushRegistrations.add((token, platform));
+    final failure = pushRegistrationFailure;
+    if (failure != null) throw failure;
+  }
+
+  /// O aviso de mudança dos termos que o servidor devolveria, ou `null`.
+  TermsChangeNotice? termsNotice;
+  int termsNoticeCalls = 0;
+  BackendFailure? termsNoticeFailure;
+
+  /// Quando definido, [termsChangeNotice] só responde depois que ele completa —
+  /// simula um backend lento ou pendurado.
+  Completer<void>? termsNoticeGate;
+
+  @override
+  Future<TermsChangeNotice?> termsChangeNotice() async {
+    termsNoticeCalls++;
+    await termsNoticeGate?.future;
+    final failure = termsNoticeFailure;
+    if (failure != null) throw failure;
+    return termsNotice;
+  }
+
+  /// O que o servidor responderia a [hasAcceptedCurrentTerms].
+  bool termsAccepted = true;
+  int termsStatusCalls = 0;
+  BackendFailure? termsStatusFailure;
+
+  /// Quando definido, [hasAcceptedCurrentTerms] só responde depois que ele
+  /// completa — simula um backend lento ou pendurado.
+  Completer<void>? termsStatusGate;
+
+  @override
+  Future<bool> hasAcceptedCurrentTerms() async {
+    termsStatusCalls++;
+    await termsStatusGate?.future;
+    final failure = termsStatusFailure;
+    if (failure != null) throw failure;
+    return termsAccepted;
+  }
+
+  /// Como no servidor: a decisão mais recente do histórico para [purpose].
+  int hasGrantedConsentCalls = 0;
+  BackendFailure? hasGrantedConsentFailure;
+
+  /// Definido, segura [hasGrantedConsent] até ser completado — backend lento.
+  Completer<void>? hasGrantedConsentGate;
+
+  @override
+  Future<bool> hasGrantedConsent(ConsentPurpose purpose) async {
+    hasGrantedConsentCalls++;
+    await hasGrantedConsentGate?.future;
+    final failure = hasGrantedConsentFailure;
+    if (failure != null) throw failure;
+    return currentConsentDecisions(myDataResult.consents)[purpose] == true;
+  }
+
+  /// Chamadas a [acceptTermsOfUse].
+  int acceptTermsCalls = 0;
+  BackendFailure? acceptTermsFailure;
+
+  /// Como no servidor: uma linha `termsOfUse` `granted` a mais no histórico.
+  @override
+  Future<PatientConsentRecord> acceptTermsOfUse() async {
+    acceptTermsCalls++;
+    final failure = acceptTermsFailure;
+    if (failure != null) throw failure;
+    final record = PatientConsentRecord(
+      purpose: 'termsOfUse',
+      action: 'granted',
+      version: legalDocumentsVersion,
+      timestamp: DateTime.now().toUtc(),
+    );
+    termsAccepted = true;
+    myDataResult = myDataResult.copyWith(consents: [...myDataResult.consents, record]);
+    return record;
+  }
+
+  int requestDataDeletionCount = 0;
+  final List<String> correctionRequests = <String>[];
+  BackendFailure? dataRequestFailure;
+
+  /// Definido, segura [requestDataDeletion] até ser completado — é como o teste
+  /// observa a tela com o pedido ainda em voo.
+  Completer<void>? dataRequestGate;
 
   /// Código que o "servidor" aceita em [verifyOtp].
   ///
@@ -235,12 +353,14 @@ class FakePatientBackend implements PatientBackend {
     required bool healthDataConsent,
     required bool remindersConsent,
     required bool pushConsent,
+    required bool termsAccepted,
   }) async {
     enrollmentCalls.add(<String, Object>{
       'token': token,
       'healthDataConsent': healthDataConsent,
       'remindersConsent': remindersConsent,
       'pushConsent': pushConsent,
+      'termsAccepted': termsAccepted,
     });
     final failure = enrollmentFailure;
     if (failure != null) throw failure;
@@ -279,6 +399,63 @@ class FakePatientBackend implements PatientBackend {
     final failure = myDataFailure;
     if (failure != null) throw failure;
     return myDataResult;
+  }
+
+  /// Como no servidor: uma linha nova no histórico, que o próximo [myData]
+  /// devolve.
+  @override
+  Future<PatientConsentRecord> updateConsent({
+    required ConsentPurpose purpose,
+    required bool granted,
+  }) async {
+    updateConsentCalls.add((purpose: purpose, granted: granted));
+    final failure = updateConsentFailure;
+    if (failure != null) throw failure;
+    final record = PatientConsentRecord(
+      purpose: purpose.name,
+      action: granted ? 'granted' : 'denied',
+      version: legalDocumentsVersion,
+      timestamp: DateTime.now().toUtc(),
+    );
+    myDataResult = myDataResult.copyWith(consents: [...myDataResult.consents, record]);
+    return record;
+  }
+
+  /// Idempotente enquanto houver exclusão aberta, como o servidor.
+  @override
+  Future<PatientDataSubjectRequestRecord> requestDataDeletion() async {
+    requestDataDeletionCount++;
+    await dataRequestGate?.future;
+    final failure = dataRequestFailure;
+    if (failure != null) throw failure;
+    for (final request in myDataResult.requests) {
+      if (request.type == DataSubjectRequestType.deletion &&
+          request.status == DataSubjectRequestStatus.open) {
+        return request;
+      }
+    }
+    return _appendRequest(DataSubjectRequestType.deletion, null);
+  }
+
+  @override
+  Future<PatientDataSubjectRequestRecord> requestDataCorrection(String details) async {
+    correctionRequests.add(details);
+    final failure = dataRequestFailure;
+    if (failure != null) throw failure;
+    return _appendRequest(DataSubjectRequestType.correction, details);
+  }
+
+  PatientDataSubjectRequestRecord _appendRequest(DataSubjectRequestType type, String? details) {
+    final now = DateTime.now().toUtc();
+    final record = PatientDataSubjectRequestRecord(
+      type: type,
+      status: DataSubjectRequestStatus.open,
+      details: details,
+      createdAt: now,
+      dueAt: now.add(const Duration(days: 15)),
+    );
+    myDataResult = myDataResult.copyWith(requests: [...myDataResult.requests, record]);
+    return record;
   }
 
   @override

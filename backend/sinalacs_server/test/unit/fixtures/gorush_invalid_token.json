@@ -1,0 +1,16 @@
+{
+  "status": 200,
+  "body": {
+    "counts": 1,
+    "logs": [
+      {
+        "type": "failed-push",
+        "platform": "android",
+        "token": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "message": "(message redacted)",
+        "error": "The registration token is not a valid FCM registration token"
+      }
+    ],
+    "success": "ok"
+  }
+}

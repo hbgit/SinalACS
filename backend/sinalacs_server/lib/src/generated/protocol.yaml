@@ -1,3 +1,21 @@
+admin:
+  - indicators:
+  - microAreas:
+  - alerts:
+  - auditLogs:
+  - dataSubjectRequests:
+  - dataSubjectRequest:
+  - startDataSubjectReview:
+  - completeDataSubjectRequest:
+  - rejectDataSubjectRequest:
+  - acs:
+  - staff:
+  - createAcs:
+  - setAcsMicroArea:
+  - setAcsActive:
+  - resetAcsPassword:
+  - resetAcsMfa:
+  - resetStaffMfa:
 alerts:
   - createRedAlert:
   - acknowledge:
@@ -5,10 +23,21 @@ alerts:
 auth:
   - developmentLogin:
   - loginInstitutional:
+  - loginStaff:
+  - beginStaffTotpEnrollment:
+  - confirmStaffTotpEnrollment:
+  - refreshSession:
+  - logout:
+  - beginTotpEnrollment:
+  - confirmTotpEnrollment:
   - requestOtp:
   - verifyOtp:
+devices:
+  - registerPushToken:
 health:
   - check:
+notices:
+  - sendSegmented:
 onboarding:
   - generateEnrollmentToken:
   - completeEnrollment:
@@ -17,8 +46,20 @@ patients:
   - myChronicConditions:
   - updateChronicConditions:
   - myData:
+  - updateConsent:
+  - acceptTermsOfUse:
+  - hasAcceptedCurrentTerms:
+  - hasGrantedConsent:
+  - termsChangeNotice:
+  - requestDataDeletion:
+  - requestDataCorrection:
 triage:
   - evaluate:
+ubs:
+  - myContact:
 visits:
   - sync:
+  - syncLegacy:
+  - syncDeferred:
+  - revokeUploadToken:
   - pull:

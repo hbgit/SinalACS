@@ -99,5 +99,32 @@ void main() {
         );
       }
     });
+
+    test('staffRoles contém coordinator e admin, e só eles', () {
+      expect(Authorization.staffRoles, {UserRole.coordinator, UserRole.admin});
+    });
+
+    test('token de admin (sem microárea) é recusado onde só o ACS pode', () {
+      expect(
+        () => Authorization.require(
+          _user(UserRole.admin, microAreaId: null),
+          roles: {UserRole.acs},
+          onDenied: () => StateError('Somente ACS podem fazer isto.'),
+        ),
+        throwsA(isA<StateError>()),
+      );
+    });
+
+    test('requireMicroArea:false com staffRoles aceita admin sem território', () {
+      expect(
+        () => Authorization.require(
+          _user(UserRole.admin, microAreaId: null),
+          roles: Authorization.staffRoles,
+          requireMicroArea: false,
+          onDenied: () => StateError('x'),
+        ),
+        returnsNormally,
+      );
+    });
   });
 }

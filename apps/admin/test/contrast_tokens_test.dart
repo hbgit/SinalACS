@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:sinalacs_admin/app/admin_theme.dart';
 
 import 'support/contrast.dart';
+import 'support/layout_harness.dart';
 
 /// Matriz determinística de contraste (WCAG 2.1 §1.4.3), no mesmo formato de
 /// `apps/acs/test/contrast_tokens_test.dart` e
@@ -35,6 +36,12 @@ void main() {
     // não sobre um Card — é por isso que accentOnSurface precisa passar nas
     // duas superfícies, e não só sobre card.
     ('accentOnSurface sobre appbar (eyebrow do cabeçalho)', AdminColors.accentOnSurface, AdminColors.surface, normalText),
+    // Prazo LGPD vencido (#42): texto + ícone na linha da fila e no detalhe,
+    // ambos dentro de Card. Não é cor clínica — ver o token.
+    ('overdueOnSurface sobre card (pedido do titular vencido)', AdminColors.overdueOnSurface, AdminColors.surfaceRaised, normalText),
+    // Rótulos ("Paciente:", "Prazo:") do detalhe do pedido, dentro de Card.
+    ('white70 sobre card (rótulo do detalhe do pedido)', Colors.white70, AdminColors.surfaceRaised, normalText),
+    ('overdueOnSurface sobre scaffold', AdminColors.overdueOnSurface, AdminColors.background, normalText),
     // Preenchimento: texto branco sobre a cor de fundo — a prova de que não
     // precisamos trocar `red`/`accent` como fill.
     ('branco sobre red (faixa/chip de risco)', Colors.white, AdminColors.red, largeTextOrUi),
@@ -69,6 +76,47 @@ void main() {
     expect(contrastOn(AdminColors.accent, AdminColors.surfaceRaised), lessThan(largeTextOrUi));
   });
 
+  // A matriz acima é de pares fixos; o rótulo destrutivo da gestão de contas
+  // (#43) não é um deles, por dois motivos ao mesmo tempo: ele só existe dentro
+  // do diálogo, e a superfície do diálogo não vem do tema — `admin_theme.dart`
+  // não define `dialogTheme`, então o `AlertDialog` cai no
+  // `colorScheme.surfaceContainerHigh` derivado da seed. É por isso que a razão
+  // é medida contra a cor que o diálogo REALMENTE pinta, lida do `Material` que
+  // o monta (com `surfaceTintColor` transparente no Material 3, a cor declarada
+  // é a pintada), e não contra `surfaceRaised`, que aqui não aparece.
+  testWidgets('o rótulo destrutivo usa o token e passa 4,5:1 sobre a superfície do diálogo', (tester) async {
+    await abrirBackoffice(tester, tamanho: const Size(360, 800));
+    await irPara(tester, 'Microáreas');
+
+    final desativar = find.byKey(const Key('desativar_acs_acs-1'));
+    if (desativar.evaluate().isEmpty) {
+      await tester.scrollUntilVisible(desativar, 320, scrollable: find.byType(Scrollable).last);
+    }
+    await tester.ensureVisible(desativar);
+    await tester.pumpAndSettle();
+    await tester.tap(desativar);
+    await tester.pumpAndSettle();
+
+    final rotulo = tester.widget<Text>(
+      find.descendant(of: find.byKey(const Key('confirmar_acao')), matching: find.byType(Text)).first,
+    );
+    expect(
+      rotulo.style?.color,
+      AdminColors.redOnSurface,
+      reason: 'o rótulo que confirma a ação destrutiva usa o token de texto, nunca o `red` de preenchimento',
+    );
+
+    final superficie = tester
+        .widget<Material>(find.descendant(of: find.byType(Dialog), matching: find.byType(Material)).first)
+        .color!;
+    final ratio = contrastOn(AdminColors.redOnSurface, superficie);
+    expect(
+      ratio,
+      greaterThanOrEqualTo(normalText),
+      reason: 'rótulo destrutivo sobre a superfície do diálogo ($superficie): $ratio:1 abaixo de $normalText:1',
+    );
+  });
+
   test('o accentOnSurface do ACS (#60A5FA) passaria no contraste mas troca o matiz', () {
     // Documenta por que o valor não foi copiado literalmente de acs_theme.dart:
     // o par (fill, texto) do admin é indigo/indigo, não indigo/azul. #60A5FA
@@ -76,5 +124,11 @@ void main() {
     // visual, e não aparece num teste de contraste isolado.
     const acsAccentOnSurface = Color(0xFF60A5FA);
     expect(contrastOn(acsAccentOnSurface, AdminColors.surfaceRaised), greaterThanOrEqualTo(normalText));
+  });
+
+  test('overdueOnSurface não reaproveita nenhuma cor clínica (vermelho/amarelo/verde são só risco)', () {
+    for (final clinica in const [AdminColors.red, AdminColors.redOnSurface, AdminColors.yellow, AdminColors.green]) {
+      expect(AdminColors.overdueOnSurface, isNot(clinica));
+    }
   });
 }

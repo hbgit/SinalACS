@@ -4,6 +4,13 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+// `google-services.json` não é versionado (a CI e outros devs não o têm): sem ele o
+// plugin derrubaria o build inteiro. Só aplica quando o arquivo existe; sem ele o
+// app compila e o lado nativo responde "firebase_unavailable" (sem push, RF14).
+if (file("google-services.json").exists()) {
+    apply(plugin = "com.google.gms.google-services")
+}
+
 android {
     namespace = "br.com.prismrr.sinalacs.patient"
     compileSdk = 36
@@ -36,6 +43,7 @@ android {
 
 dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
+    implementation("com.google.firebase:firebase-messaging:25.1.3")
 }
 
 kotlin {

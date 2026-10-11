@@ -1,0 +1,6 @@
+### Página de auditoria por keyset: `nextBeforeSequence` é o `sequence` da última
+### linha devolvida (o log só cresce, então `offset` repetiria linhas).
+class: AdminAuditPage
+fields:
+  items: List<AdminAuditEntry>
+  nextBeforeSequence: int?

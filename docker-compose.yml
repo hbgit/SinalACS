@@ -80,6 +80,27 @@ services:
       - ./infra/docker/mosquitto/runtime:/mosquitto/runtime
     entrypoint: ["/bin/sh", "-c", "apk add --no-cache openssl && sh /init.sh"]
 
+  # Relé de push para FCM/APNs (RF14, decisão §3.2). Opcional: só sobe com
+  # `docker compose --profile push up`. Não publica porta — só o backend, na rede
+  # do Compose, fala com ele. As credenciais FCM/APNs são arquivos fornecidos pela
+  # organização e nunca são versionados (ver infra/docker/gorush/README.md).
+  gorush:
+    image: appleboy/gorush:1.22.0
+    profiles: [push]
+    restart: unless-stopped
+    command: ["-c", "/config.yml"]
+    # A chave da conta de serviço tem de ser 0600 (push_e2e.sh exige) e, portanto, só o dono a
+    # lê. A imagem roda como uid 1000; no runner do CI o dono é o usuário `runner` (uid 1001),
+    # e o Gorush cairia com EACCES. O container roda com o uid/gid de quem montou a chave
+    # (ci_push_e2e.sh os exporta); fora do CI o padrão 1000 é o da imagem.
+    user: "${GORUSH_UID:-1000}:${GORUSH_GID:-1000}"
+    environment:
+      GORUSH_IOS_KEY_ID: ${GORUSH_IOS_KEY_ID:-}
+      GORUSH_IOS_TEAM_ID: ${GORUSH_IOS_TEAM_ID:-}
+    volumes:
+      - ./infra/docker/gorush/config.yml:/config.yml:ro
+      - ${GORUSH_CREDENTIALS_DIR:-./infra/docker/gorush/credentials}:/credentials:ro
+
   serverpod:
     build:
       context: ./backend
@@ -113,6 +134,9 @@ services:
       MQTT_PASSWORD: ${MQTT_BACKEND_PASSWORD:?defina em .env — rode ./scripts/dev/bootstrap_env.sh}
       MQTT_USE_TLS: "true"
       MQTT_CA_CERT_PATH: /app/certs/ca.crt
+      # mTLS: o broker exige certificado de cliente (CN = usuário MQTT).
+      MQTT_CLIENT_CERT_PATH: /app/certs/backend.crt
+      MQTT_CLIENT_KEY_PATH: /app/certs/backend.key
       # Sem esta variável o servidor caía num segredo de desenvolvimento fixo e
       # público, com o qual qualquer pessoa forjaria um token de ACS.
       JWT_SECRET: ${JWT_SECRET:?defina em .env — rode ./scripts/dev/bootstrap_env.sh}
@@ -124,6 +148,9 @@ services:
       # fora dele. PRECISA ser a mesma do health-data-seed abaixo, ou o
       # diretório de pacientes não decifra o que o seed gravou.
       HEALTH_DATA_ENCRYPTION_KEY: ${HEALTH_DATA_ENCRYPTION_KEY:-}
+      # Relé de push (RF14). Vazio desliga o envio de avisos; com o perfil `push`
+      # ativo, use GORUSH_URL=http://gorush:8088 no .env.
+      GORUSH_URL: ${GORUSH_URL:-}
       # Pepper do HMAC de `users.cpfHash` (RF01). PRECISA ser o mesmo valor que o
       # `cpf-hash-seed` recebe, pela mesma razão do
       # HEALTH_DATA_ENCRYPTION_KEY acima: o seed deriva o hash e o servidor o
@@ -136,6 +163,9 @@ services:
       CPF_HASH_PEPPER: ${CPF_HASH_PEPPER:-}
       APP_ENV: ${APP_ENV:-development}
       ENABLE_DEV_LOGIN: "${ENABLE_DEV_LOGIN:-true}"
+      # MFA (TOTP) obrigatória no login institucional do ACS. Em produção o
+      # padrão é `true`; este default é só da stack local.
+      REQUIRE_ACS_MFA: "${REQUIRE_ACS_MFA:-false}"
     # O RPC só é alcançável por HTTPS em :443. A publicação de 8080 foi
     # REMOVIDA de propósito: enquanto ela existisse, o TLS seria decorativo —
     # RNF04 pede TLS em todas as comunicações, e um caminho em texto claro ao
@@ -214,6 +244,8 @@ services:
       # Senha do ACS de desenvolvimento. Gerada por máquina — o script recusa
       # rodar fora de APP_ENV=development.
       DEV_ACS_PASSWORD: ${DEV_ACS_PASSWORD:?defina em .env — rode ./scripts/dev/bootstrap_env.sh}
+      # Senha do admin de desenvolvimento (ADM-001, backoffice).
+      DEV_ADMIN_PASSWORD: ${DEV_ADMIN_PASSWORD:?defina em .env — rode ./scripts/dev/bootstrap_env.sh}
       APP_ENV: ${APP_ENV:-development}
     entrypoint: ["./seed_acs_credentials"]
 

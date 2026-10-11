@@ -21,6 +21,7 @@ abstract class Ubs implements _i1.SerializableModel {
     required this.address,
     required this.city,
     required this.state,
+    this.contactPhone,
   });
 
   factory Ubs({
@@ -29,6 +30,7 @@ abstract class Ubs implements _i1.SerializableModel {
     required String address,
     required String city,
     required String state,
+    String? contactPhone,
   }) = _UbsImpl;
 
   factory Ubs.fromJson(Map<String, dynamic> jsonSerialization) {
@@ -40,6 +42,7 @@ abstract class Ubs implements _i1.SerializableModel {
       address: jsonSerialization['address'] as String,
       city: jsonSerialization['city'] as String,
       state: jsonSerialization['state'] as String,
+      contactPhone: jsonSerialization['contactPhone'] as String?,
     );
   }
 
@@ -56,6 +59,10 @@ abstract class Ubs implements _i1.SerializableModel {
 
   String state;
 
+  /// Telefone de contato da UBS para o ACS escalar um caso (RF13). Dado da
+  /// unidade, não de pessoa. `null` = ainda não cadastrado: o app avisa, não liga.
+  String? contactPhone;
+
   /// Returns a shallow copy of this [Ubs]
   /// with some or all fields replaced by the given arguments.
   @_i1.useResult
@@ -65,6 +72,7 @@ abstract class Ubs implements _i1.SerializableModel {
     String? address,
     String? city,
     String? state,
+    String? contactPhone,
   });
   @override
   Map<String, dynamic> toJson() {
@@ -75,6 +83,7 @@ abstract class Ubs implements _i1.SerializableModel {
       'address': address,
       'city': city,
       'state': state,
+      if (contactPhone != null) 'contactPhone': contactPhone,
     };
   }
 
@@ -93,12 +102,14 @@ class _UbsImpl extends Ubs {
     required String address,
     required String city,
     required String state,
+    String? contactPhone,
   }) : super._(
          id: id,
          name: name,
          address: address,
          city: city,
          state: state,
+         contactPhone: contactPhone,
        );
 
   /// Returns a shallow copy of this [Ubs]
@@ -111,6 +122,7 @@ class _UbsImpl extends Ubs {
     String? address,
     String? city,
     String? state,
+    Object? contactPhone = _Undefined,
   }) {
     return Ubs(
       id: id is _i1.UuidValue? ? id : this.id,
@@ -118,6 +130,7 @@ class _UbsImpl extends Ubs {
       address: address ?? this.address,
       city: city ?? this.city,
       state: state ?? this.state,
+      contactPhone: contactPhone is String? ? contactPhone : this.contactPhone,
     );
   }
 }

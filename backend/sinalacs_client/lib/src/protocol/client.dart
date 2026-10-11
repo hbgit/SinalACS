@@ -13,25 +13,338 @@
 
 import 'package:serverpod_client/serverpod_client.dart' as _i1;
 import 'dart:async' as _i2;
-import 'package:sinalacs_client/src/protocol/api/red_alert_result.dart' as _i3;
-import 'package:sinalacs_client/src/protocol/api/alert_ack_result.dart' as _i4;
-import 'package:sinalacs_client/src/protocol/api/alert_status_result.dart'
-    as _i5;
-import 'package:sinalacs_client/src/protocol/api/development_login_result.dart'
-    as _i6;
-import 'package:sinalacs_client/src/protocol/api/service_health.dart' as _i7;
-import 'package:sinalacs_client/src/protocol/api/enrollment_token_result.dart'
+import 'package:sinalacs_client/src/protocol/api/admin_indicators.dart' as _i3;
+import 'package:sinalacs_client/src/protocol/api/admin_micro_area.dart' as _i4;
+import 'package:sinalacs_client/src/protocol/api/admin_alert_page.dart' as _i5;
+import 'package:sinalacs_client/src/protocol/enums/alert_status.dart' as _i6;
+import 'package:sinalacs_client/src/protocol/api/admin_audit_page.dart' as _i7;
+import 'package:sinalacs_client/src/protocol/api/admin_data_subject_request_page.dart'
     as _i8;
-import 'package:sinalacs_client/src/protocol/api/enrollment_result.dart' as _i9;
-import 'package:sinalacs_client/src/protocol/api/micro_area_patient.dart'
+import 'package:sinalacs_client/src/protocol/enums/data_subject_request_status.dart'
+    as _i9;
+import 'package:sinalacs_client/src/protocol/api/admin_data_subject_request_detail.dart'
     as _i10;
-import 'package:sinalacs_client/src/protocol/api/patient_data_overview.dart'
-    as _i11;
-import 'package:sinalacs_client/src/protocol/api/triage_result.dart' as _i12;
-import 'package:sinalacs_client/src/protocol/api/visit_sync_result.dart'
+import 'package:sinalacs_client/src/protocol/api/admin_acs.dart' as _i11;
+import 'package:sinalacs_client/src/protocol/api/admin_staff.dart' as _i12;
+import 'package:sinalacs_client/src/protocol/api/admin_acs_creation_result.dart'
     as _i13;
-import 'package:sinalacs_client/src/protocol/api/visit_sync_entry.dart' as _i14;
-import 'protocol.dart' as _i15;
+import 'package:sinalacs_client/src/protocol/api/admin_password_reset_result.dart'
+    as _i14;
+import 'package:sinalacs_client/src/protocol/api/admin_staff_mfa_reset_result.dart'
+    as _i15;
+import 'package:sinalacs_client/src/protocol/api/red_alert_result.dart' as _i16;
+import 'package:sinalacs_client/src/protocol/api/alert_ack_result.dart' as _i17;
+import 'package:sinalacs_client/src/protocol/api/alert_status_result.dart'
+    as _i18;
+import 'package:sinalacs_client/src/protocol/api/development_login_result.dart'
+    as _i19;
+import 'package:sinalacs_client/src/protocol/api/totp_enrollment_start.dart'
+    as _i20;
+import 'package:sinalacs_client/src/protocol/api/service_health.dart' as _i21;
+import 'package:sinalacs_client/src/protocol/api/notice_send_result.dart'
+    as _i22;
+import 'package:sinalacs_client/src/protocol/api/enrollment_token_result.dart'
+    as _i23;
+import 'package:sinalacs_client/src/protocol/api/enrollment_result.dart'
+    as _i24;
+import 'package:sinalacs_client/src/protocol/api/micro_area_patient.dart'
+    as _i25;
+import 'package:sinalacs_client/src/protocol/api/patient_data_overview.dart'
+    as _i26;
+import 'package:sinalacs_client/src/protocol/api/patient_consent_record.dart'
+    as _i27;
+import 'package:sinalacs_client/src/protocol/enums/consent_purpose.dart'
+    as _i28;
+import 'package:sinalacs_client/src/protocol/api/terms_change_notice.dart'
+    as _i29;
+import 'package:sinalacs_client/src/protocol/api/patient_data_subject_request_record.dart'
+    as _i30;
+import 'package:sinalacs_client/src/protocol/api/triage_result.dart' as _i31;
+import 'package:sinalacs_client/src/protocol/api/ubs_contact.dart' as _i32;
+import 'package:sinalacs_client/src/protocol/api/visit_sync_result.dart'
+    as _i33;
+import 'package:sinalacs_client/src/protocol/api/visit_sync_entry.dart' as _i34;
+import 'protocol.dart' as _i35;
+
+/// Backoffice, só para `coordinator` e `admin`: leitura (issue #40), gestão de
+/// contas (issue #43) e atendimento de pedidos do titular (issue #42).
+///
+/// A leitura — indicadores, microáreas, alertas e auditoria — é do
+/// `AdminReadService`; a listagem de ACS e de equipe, o cadastro, o vínculo de
+/// microárea, a (des)ativação, as redefinições de senha/MFA do ACS e a
+/// redefinição da MFA do staff (com a emissão do código de ativação pela tela,
+/// o deferimento da #48) são do `AdminAccountService`; os pedidos do titular
+/// são do `DataSubjectCaseService` — sempre na mesma dupla serviço/store.
+///
+/// O papel, o escopo (sistema para o administrador, UBS para o coordenador), a
+/// paginação e a auditoria de cada operação são dos serviços; o endpoint só
+/// verifica o token e delega. Nenhum método devolve nome, CPF ou contato de
+/// paciente: o paciente é um rótulo (`#A18F`), e o que sai dos cadastros é a
+/// identificação **profissional** (nome, matrícula, UBS, microárea).
+/// {@category Endpoint}
+class EndpointAdmin extends EndpointAuthenticated {
+  EndpointAdmin(_i1.EndpointCaller caller) : super(caller);
+
+  @override
+  String get name => 'admin';
+
+  _i2.Future<_i3.AdminIndicators> indicators({required String accessToken}) =>
+      caller.callServerEndpoint<_i3.AdminIndicators>(
+        'admin',
+        'indicators',
+        {'accessToken': accessToken},
+      );
+
+  _i2.Future<List<_i4.AdminMicroArea>> microAreas({
+    required String accessToken,
+  }) => caller.callServerEndpoint<List<_i4.AdminMicroArea>>(
+    'admin',
+    'microAreas',
+    {'accessToken': accessToken},
+  );
+
+  _i2.Future<_i5.AdminAlertPage> alerts({
+    required String accessToken,
+    String? microAreaId,
+    _i6.AlertStatus? status,
+    required int limit,
+    required int offset,
+  }) => caller.callServerEndpoint<_i5.AdminAlertPage>(
+    'admin',
+    'alerts',
+    {
+      'accessToken': accessToken,
+      'microAreaId': microAreaId,
+      'status': status,
+      'limit': limit,
+      'offset': offset,
+    },
+  );
+
+  _i2.Future<_i7.AdminAuditPage> auditLogs({
+    required String accessToken,
+    required int limit,
+    int? beforeSequence,
+  }) => caller.callServerEndpoint<_i7.AdminAuditPage>(
+    'admin',
+    'auditLogs',
+    {
+      'accessToken': accessToken,
+      'limit': limit,
+      'beforeSequence': beforeSequence,
+    },
+  );
+
+  /// Pedidos do titular no escopo de quem chama, prazo mais próximo primeiro.
+  /// Nunca traz o texto do pedido nem a nota.
+  _i2.Future<_i8.AdminDataSubjectRequestPage> dataSubjectRequests({
+    required String accessToken,
+    _i9.DataSubjectRequestStatus? status,
+    required int limit,
+    required int offset,
+  }) => caller.callServerEndpoint<_i8.AdminDataSubjectRequestPage>(
+    'admin',
+    'dataSubjectRequests',
+    {
+      'accessToken': accessToken,
+      'status': status,
+      'limit': limit,
+      'offset': offset,
+    },
+  );
+
+  /// Detalhe de um pedido, com o texto decifrado. A leitura é auditada antes.
+  /// Inexistente e fora do escopo dão a mesma recusa.
+  _i2.Future<_i10.AdminDataSubjectRequestDetail> dataSubjectRequest({
+    required String accessToken,
+    required String id,
+  }) => caller.callServerEndpoint<_i10.AdminDataSubjectRequestDetail>(
+    'admin',
+    'dataSubjectRequest',
+    {
+      'accessToken': accessToken,
+      'id': id,
+    },
+  );
+
+  /// `open → inReview`.
+  _i2.Future<void> startDataSubjectReview({
+    required String accessToken,
+    required String id,
+  }) => caller.callServerEndpoint<void>(
+    'admin',
+    'startDataSubjectReview',
+    {
+      'accessToken': accessToken,
+      'id': id,
+    },
+  );
+
+  /// Atende o pedido. Correção exige [note]; exclusão anonimiza o titular na
+  /// mesma transação da mudança de status e da auditoria.
+  _i2.Future<void> completeDataSubjectRequest({
+    required String accessToken,
+    required String id,
+    String? note,
+  }) => caller.callServerEndpoint<void>(
+    'admin',
+    'completeDataSubjectRequest',
+    {
+      'accessToken': accessToken,
+      'id': id,
+      'note': note,
+    },
+  );
+
+  /// Recusa o pedido com um motivo de 3 a 500 caracteres, que o titular vê.
+  _i2.Future<void> rejectDataSubjectRequest({
+    required String accessToken,
+    required String id,
+    required String reason,
+  }) => caller.callServerEndpoint<void>(
+    'admin',
+    'rejectDataSubjectRequest',
+    {
+      'accessToken': accessToken,
+      'id': id,
+      'reason': reason,
+    },
+  );
+
+  /// ACS visíveis para o chamador: o administrador vê o sistema, o coordenador
+  /// só os da própria UBS.
+  _i2.Future<List<_i11.AdminAcs>> acs({required String accessToken}) =>
+      caller.callServerEndpoint<List<_i11.AdminAcs>>(
+        'admin',
+        'acs',
+        {'accessToken': accessToken},
+      );
+
+  /// Contas de equipe do backoffice — só o administrador.
+  _i2.Future<List<_i12.AdminStaff>> staff({required String accessToken}) =>
+      caller.callServerEndpoint<List<_i12.AdminStaff>>(
+        'admin',
+        'staff',
+        {'accessToken': accessToken},
+      );
+
+  /// Cadastra um ACS e devolve a senha inicial gerada, que **só** existe nesta
+  /// resposta: o servidor guarda apenas o hash (ver `AcsInitialPassword`).
+  /// A UBS vem da microárea, nunca do pedido.
+  _i2.Future<_i13.AdminAcsCreationResult> createAcs({
+    required String accessToken,
+    required String name,
+    required String enrollmentId,
+    required String microAreaId,
+  }) => caller.callServerEndpoint<_i13.AdminAcsCreationResult>(
+    'admin',
+    'createAcs',
+    {
+      'accessToken': accessToken,
+      'name': name,
+      'enrollmentId': enrollmentId,
+      'microAreaId': microAreaId,
+    },
+  );
+
+  /// Move um ACS existente para outra microárea — da própria UBS, para o
+  /// coordenador; de qualquer UBS, para o administrador. A UBS do vínculo sai
+  /// da microárea-alvo, nunca do pedido, e devolve a linha já no território
+  /// novo. O ACS renovará a sessão (refresh token) já no território novo; o JWT
+  /// em curso continua com o antigo até o refresh.
+  _i2.Future<_i11.AdminAcs> setAcsMicroArea({
+    required String accessToken,
+    required String acsId,
+    required String microAreaId,
+  }) => caller.callServerEndpoint<_i11.AdminAcs>(
+    'admin',
+    'setAcsMicroArea',
+    {
+      'accessToken': accessToken,
+      'acsId': acsId,
+      'microAreaId': microAreaId,
+    },
+  );
+
+  /// Liga/desliga o acesso de um ACS — da própria UBS, para o coordenador; de
+  /// qualquer UBS, para o administrador.
+  ///
+  /// Desativar revoga, na mesma transação da flag, todas as sessões (refresh
+  /// token) e todos os tokens de envio diferido da conta: o aparelho perde o
+  /// acesso na hora, inclusive o envio offline das visitas pendentes, e o login
+  /// por senha passa a recusar com `'Este acesso está inativo.'`. Reativar
+  /// devolve o acesso pelo login — os tokens revogados não voltam.
+  _i2.Future<_i11.AdminAcs> setAcsActive({
+    required String accessToken,
+    required String acsId,
+    required bool active,
+  }) => caller.callServerEndpoint<_i11.AdminAcs>(
+    'admin',
+    'setAcsActive',
+    {
+      'accessToken': accessToken,
+      'acsId': acsId,
+      'active': active,
+    },
+  );
+
+  /// Redefine a senha do ACS — da própria UBS, para o coordenador; de qualquer
+  /// UBS, para o administrador — e devolve a nova, que **só** existe nesta
+  /// resposta.
+  ///
+  /// A senha é sorteada pelo servidor (nunca escolhida pelo operador) e o
+  /// bloqueio da conta é zerado: a credencial nova não herda as tentativas da
+  /// antiga. As sessões em curso **não** são revogadas; cortá-las na hora é a
+  /// desativação.
+  _i2.Future<_i14.AdminPasswordResetResult> resetAcsPassword({
+    required String accessToken,
+    required String acsId,
+  }) => caller.callServerEndpoint<_i14.AdminPasswordResetResult>(
+    'admin',
+    'resetAcsPassword',
+    {
+      'accessToken': accessToken,
+      'acsId': acsId,
+    },
+  );
+
+  /// Redefine a MFA do ACS: apaga o segredo TOTP gravado, para ele ativar de
+  /// novo na próxima entrada (é o caminho que a recusa "Peça a redefinição à
+  /// coordenação" não tinha). A senha e o bloqueio não são tocados.
+  _i2.Future<void> resetAcsMfa({
+    required String accessToken,
+    required String acsId,
+  }) => caller.callServerEndpoint<void>(
+    'admin',
+    'resetAcsMfa',
+    {
+      'accessToken': accessToken,
+      'acsId': acsId,
+    },
+  );
+
+  /// Redefine a MFA de uma conta de equipe — só o administrador, nunca a
+  /// própria conta — e devolve o código de ativação novo, que **só** existe
+  /// nesta resposta (é o deferimento da #48: a CLI de operador era o único
+  /// emissor, e a emissão não entrava na trilha).
+  ///
+  /// As duas escritas — as quatro colunas `totp*` zeradas e o
+  /// `activationCodeHash`/validade/emissor gravados — são uma transação só, e a
+  /// linha `admin_staff`/`mfa_reset` entra em `audit_logs` com o id do alvo.
+  /// Quem redefine mostra o código uma vez; perdido de novo, o caminho é
+  /// redefinir outra vez, nunca recuperar.
+  _i2.Future<_i15.AdminStaffMfaResetResult> resetStaffMfa({
+    required String accessToken,
+    required String staffId,
+  }) => caller.callServerEndpoint<_i15.AdminStaffMfaResetResult>(
+    'admin',
+    'resetStaffMfa',
+    {
+      'accessToken': accessToken,
+      'staffId': staffId,
+    },
+  );
+}
 
 /// Ciclo do alerta vermelho.
 ///
@@ -54,12 +367,12 @@ class EndpointAlerts extends EndpointAuthenticated {
   @override
   String get name => 'alerts';
 
-  _i2.Future<_i3.RedAlertResult> createRedAlert({
+  _i2.Future<_i16.RedAlertResult> createRedAlert({
     required String accessToken,
     required String idempotencyKey,
     required String locationHash,
     String? locationCell,
-  }) => caller.callServerEndpoint<_i3.RedAlertResult>(
+  }) => caller.callServerEndpoint<_i16.RedAlertResult>(
     'alerts',
     'createRedAlert',
     {
@@ -70,10 +383,10 @@ class EndpointAlerts extends EndpointAuthenticated {
     },
   );
 
-  _i2.Future<_i4.AlertAckResult> acknowledge({
+  _i2.Future<_i17.AlertAckResult> acknowledge({
     required String accessToken,
     required String alertId,
-  }) => caller.callServerEndpoint<_i4.AlertAckResult>(
+  }) => caller.callServerEndpoint<_i17.AlertAckResult>(
     'alerts',
     'acknowledge',
     {
@@ -84,8 +397,8 @@ class EndpointAlerts extends EndpointAuthenticated {
 
   /// Status do alerta mais recente do PRÓPRIO paciente (RF05, decisão §5).
   /// `patientId` nunca é parâmetro — vem do token (INV-05).
-  _i2.Future<_i5.AlertStatusResult> statusFor({required String accessToken}) =>
-      caller.callServerEndpoint<_i5.AlertStatusResult>(
+  _i2.Future<_i18.AlertStatusResult> statusFor({required String accessToken}) =>
+      caller.callServerEndpoint<_i18.AlertStatusResult>(
         'alerts',
         'statusFor',
         {'accessToken': accessToken},
@@ -107,9 +420,9 @@ class EndpointAuth extends _i1.EndpointRef {
   @override
   String get name => 'auth';
 
-  _i2.Future<_i6.DevelopmentLoginResult> developmentLogin({
+  _i2.Future<_i19.DevelopmentLoginResult> developmentLogin({
     required String role,
-  }) => caller.callServerEndpoint<_i6.DevelopmentLoginResult>(
+  }) => caller.callServerEndpoint<_i19.DevelopmentLoginResult>(
     'auth',
     'developmentLogin',
     {'role': role},
@@ -122,17 +435,135 @@ class EndpointAuth extends _i1.EndpointRef {
   /// `AuthenticationFailedException`, com a mensagem que o serviço escolheu:
   /// mensagem idêntica para matrícula inexistente e senha errada (ver
   /// `InstitutionalAuthService`).
-  _i2.Future<_i6.DevelopmentLoginResult> loginInstitutional({
+  ///
+  /// MFA: com a verificação em duas etapas ativa, a senha certa sem
+  /// [totpCode] recebe `MfaRequiredException` (o app pede o código e repete a
+  /// chamada); com `REQUIRE_ACS_MFA` ligado e a MFA não ativada, recebe
+  /// `MfaEnrollmentRequiredException` (o app chama `beginTotpEnrollment`).
+  _i2.Future<_i19.DevelopmentLoginResult> loginInstitutional({
     required String matricula,
     required String password,
     String? deviceId,
-  }) => caller.callServerEndpoint<_i6.DevelopmentLoginResult>(
+    String? totpCode,
+  }) => caller.callServerEndpoint<_i19.DevelopmentLoginResult>(
     'auth',
     'loginInstitutional',
     {
       'matricula': matricula,
       'password': password,
       'deviceId': deviceId,
+      'totpCode': totpCode,
+    },
+  );
+
+  /// Login do backoffice (coordenador/administrador): matrícula + senha + TOTP.
+  ///
+  /// A MFA é obrigatória em todo ambiente (não há `REQUIRE_*_MFA` para o
+  /// staff). Sem refresh token e sem token de envio diferido: a sessão dura os
+  /// 15 minutos do JWT, e o `deviceId` do token é o sentinela de "sem
+  /// aparelho". O token sai com o papel gravado em `users` e **sem** microárea:
+  /// staff não é territorializado, e os caminhos do ACS o recusam por papel.
+  /// As recusas são as de [loginInstitutional]: mensagem única para matrícula
+  /// inexistente e senha errada, `MfaRequiredException` sem o código, e o mesmo
+  /// bloqueio por tentativas.
+  _i2.Future<_i19.DevelopmentLoginResult> loginStaff({
+    required String matricula,
+    required String password,
+    String? totpCode,
+  }) => caller.callServerEndpoint<_i19.DevelopmentLoginResult>(
+    'auth',
+    'loginStaff',
+    {
+      'matricula': matricula,
+      'password': password,
+      'totpCode': totpCode,
+    },
+  );
+
+  /// Começa a ativação da MFA do staff. Sem token: o staff prova matrícula,
+  /// senha **e o código de ativação de uso único** (#48), emitido fora de banda
+  /// por `bin/issue_staff_activation_code.dart`; a MFA é obrigatória, então não
+  /// há login possível antes dela. Código errado, expirado ou já usado recebe a
+  /// mesma recusa e conta como tentativa falha da conta.
+  _i2.Future<_i20.TotpEnrollmentStart> beginStaffTotpEnrollment({
+    required String matricula,
+    required String password,
+    required String activationCode,
+  }) => caller.callServerEndpoint<_i20.TotpEnrollmentStart>(
+    'auth',
+    'beginStaffTotpEnrollment',
+    {
+      'matricula': matricula,
+      'password': password,
+      'activationCode': activationCode,
+    },
+  );
+
+  /// Confirma a ativação da MFA do staff com o primeiro código do autenticador.
+  _i2.Future<void> confirmStaffTotpEnrollment({
+    required String matricula,
+    required String password,
+    required String activationCode,
+    required String code,
+  }) => caller.callServerEndpoint<void>(
+    'auth',
+    'confirmStaffTotpEnrollment',
+    {
+      'matricula': matricula,
+      'password': password,
+      'activationCode': activationCode,
+      'code': code,
+    },
+  );
+
+  /// Renova a sessão do ACS sem pedir senha nem TOTP (LGPD-RT06). Público por
+  /// desenho: quem chama já perdeu o JWT de 15 min — o refresh token, opaco e de
+  /// uso único, é a credencial. Toda recusa é a mesma `SessionExpiredException`.
+  _i2.Future<_i19.DevelopmentLoginResult> refreshSession({
+    required String refreshToken,
+    required String deviceId,
+  }) => caller.callServerEndpoint<_i19.DevelopmentLoginResult>(
+    'auth',
+    'refreshSession',
+    {
+      'refreshToken': refreshToken,
+      'deviceId': deviceId,
+    },
+  );
+
+  /// Encerra o turno: revoga a família inteira. Idempotente.
+  _i2.Future<void> logout({required String refreshToken}) =>
+      caller.callServerEndpoint<void>(
+        'auth',
+        'logout',
+        {'refreshToken': refreshToken},
+      );
+
+  /// Começa a ativação da MFA do ACS (RF07). Sem token: o ACS prova matrícula e senha.
+  _i2.Future<_i20.TotpEnrollmentStart> beginTotpEnrollment({
+    required String matricula,
+    required String password,
+  }) => caller.callServerEndpoint<_i20.TotpEnrollmentStart>(
+    'auth',
+    'beginTotpEnrollment',
+    {
+      'matricula': matricula,
+      'password': password,
+    },
+  );
+
+  /// Confirma a ativação com o primeiro código do autenticador.
+  _i2.Future<void> confirmTotpEnrollment({
+    required String matricula,
+    required String password,
+    required String code,
+  }) => caller.callServerEndpoint<void>(
+    'auth',
+    'confirmTotpEnrollment',
+    {
+      'matricula': matricula,
+      'password': password,
+      'code': code,
     },
   );
 
@@ -177,11 +608,11 @@ class EndpointAuth extends _i1.EndpointRef {
   ///
   /// Toda recusa chega ao app como `OtpRequestException`, com a mensagem que o
   /// serviço escolheu: uma só, para não dizer se aquele CPF existe.
-  _i2.Future<_i6.DevelopmentLoginResult> verifyOtp({
+  _i2.Future<_i19.DevelopmentLoginResult> verifyOtp({
     required String cpf,
     required String code,
     String? deviceId,
-  }) => caller.callServerEndpoint<_i6.DevelopmentLoginResult>(
+  }) => caller.callServerEndpoint<_i19.DevelopmentLoginResult>(
     'auth',
     'verifyOtp',
     {
@@ -207,6 +638,31 @@ abstract class EndpointAuthenticated extends _i1.EndpointRef {
   EndpointAuthenticated(_i1.EndpointCaller caller) : super(caller);
 }
 
+/// Aparelhos do paciente para avisos segmentados (RF14, decisão §3.2).
+/// {@category Endpoint}
+class EndpointDevices extends EndpointAuthenticated {
+  EndpointDevices(_i1.EndpointCaller caller) : super(caller);
+
+  @override
+  String get name => 'devices';
+
+  /// Registra o token de push do aparelho do paciente autenticado. Só grava com
+  /// o consentimento `segmentedPush` vigente; sem ele, [DataRightsException].
+  _i2.Future<void> registerPushToken({
+    required String accessToken,
+    required String token,
+    required String platform,
+  }) => caller.callServerEndpoint<void>(
+    'devices',
+    'registerPushToken',
+    {
+      'accessToken': accessToken,
+      'token': token,
+      'platform': platform,
+    },
+  );
+}
+
 /// Sonda de saúde.
 ///
 /// Preserva a forma do antigo `GET /health` — `{status, mqtt_connected,
@@ -223,12 +679,41 @@ class EndpointHealth extends _i1.EndpointRef {
   @override
   String get name => 'health';
 
-  _i2.Future<_i7.ServiceHealth> check() =>
-      caller.callServerEndpoint<_i7.ServiceHealth>(
+  _i2.Future<_i21.ServiceHealth> check() =>
+      caller.callServerEndpoint<_i21.ServiceHealth>(
         'health',
         'check',
         {},
       );
+}
+
+/// Avisos comunitários do ACS (RF14, decisão §3.2).
+/// {@category Endpoint}
+class EndpointNotices extends EndpointAuthenticated {
+  EndpointNotices(_i1.EndpointCaller caller) : super(caller);
+
+  @override
+  String get name => 'notices';
+
+  /// Envia um aviso segmentado aos pacientes da microárea do ACS que
+  /// consentiram com `segmentedPush`. A microárea vem do token, nunca de
+  /// parâmetro. Auditoria: uma linha `community_notice` com quem enviou e a
+  /// microárea; o texto do aviso nunca entra na trilha.
+  _i2.Future<_i22.NoticeSendResult> sendSegmented({
+    required String accessToken,
+    required String title,
+    required String message,
+    required String audience,
+  }) => caller.callServerEndpoint<_i22.NoticeSendResult>(
+    'notices',
+    'sendSegmented',
+    {
+      'accessToken': accessToken,
+      'title': title,
+      'message': message,
+      'audience': audience,
+    },
+  );
 }
 
 /// Onboarding do paciente por convite do ACS (RF02) e captura de
@@ -248,10 +733,10 @@ class EndpointOnboarding extends _i1.EndpointRef {
   String get name => 'onboarding';
 
   /// Chamado pelo app do ACS. Exige sessão de ACS.
-  _i2.Future<_i8.EnrollmentTokenResult> generateEnrollmentToken({
+  _i2.Future<_i23.EnrollmentTokenResult> generateEnrollmentToken({
     required String accessToken,
     required String patientId,
-  }) => caller.callServerEndpoint<_i8.EnrollmentTokenResult>(
+  }) => caller.callServerEndpoint<_i23.EnrollmentTokenResult>(
     'onboarding',
     'generateEnrollmentToken',
     {
@@ -262,12 +747,13 @@ class EndpointOnboarding extends _i1.EndpointRef {
 
   /// Chamado pelo app do paciente. Não exige sessão prévia — é a própria
   /// conclusão do onboarding que emite a primeira sessão.
-  _i2.Future<_i9.EnrollmentResult> completeEnrollment({
+  _i2.Future<_i24.EnrollmentResult> completeEnrollment({
     required String token,
     required bool healthDataConsent,
     required bool remindersConsent,
     required bool pushConsent,
-  }) => caller.callServerEndpoint<_i9.EnrollmentResult>(
+    required bool termsAccepted,
+  }) => caller.callServerEndpoint<_i24.EnrollmentResult>(
     'onboarding',
     'completeEnrollment',
     {
@@ -275,6 +761,7 @@ class EndpointOnboarding extends _i1.EndpointRef {
       'healthDataConsent': healthDataConsent,
       'remindersConsent': remindersConsent,
       'pushConsent': pushConsent,
+      'termsAccepted': termsAccepted,
     },
   );
 }
@@ -285,6 +772,9 @@ class EndpointOnboarding extends _i1.EndpointRef {
 /// (`alerts.createRedAlert`) publica só `riskLevel: 'red'` — emergência com
 /// SAMU —, e sem esta lista não havia como o ACS escolher um paciente para
 /// visitar fora do caminho reativo.
+///
+/// Serve também o próprio paciente: "Perfil clínico", "Meus Dados" e os
+/// direitos do titular (LGPD-RF05/RF08) — sempre escopados pelo id do token.
 /// {@category Endpoint}
 class EndpointPatients extends EndpointAuthenticated {
   EndpointPatients(_i1.EndpointCaller caller) : super(caller);
@@ -292,9 +782,9 @@ class EndpointPatients extends EndpointAuthenticated {
   @override
   String get name => 'patients';
 
-  _i2.Future<List<_i10.MicroAreaPatient>> listMicroArea({
+  _i2.Future<List<_i25.MicroAreaPatient>> listMicroArea({
     required String accessToken,
-  }) => caller.callServerEndpoint<List<_i10.MicroAreaPatient>>(
+  }) => caller.callServerEndpoint<List<_i25.MicroAreaPatient>>(
     'patients',
     'listMicroArea',
     {'accessToken': accessToken},
@@ -327,12 +817,106 @@ class EndpointPatients extends EndpointAuthenticated {
   /// Painel "Meus Dados" do próprio paciente autenticado (LGPD,
   /// spec/lgpd_design.md linhas 417/581-595): confirmação de existência de
   /// tratamento e acesso aos dados pessoais.
-  _i2.Future<_i11.PatientDataOverview> myData({required String accessToken}) =>
-      caller.callServerEndpoint<_i11.PatientDataOverview>(
+  _i2.Future<_i26.PatientDataOverview> myData({required String accessToken}) =>
+      caller.callServerEndpoint<_i26.PatientDataOverview>(
         'patients',
         'myData',
         {'accessToken': accessToken},
       );
+
+  /// Concede ou revoga, pelo próprio titular, uma finalidade opcional de
+  /// consentimento (LGPD-RF05): uma linha nova em `consent_logs`, nunca a
+  /// edição da anterior. `healthDataProcessing` volta como
+  /// [DataRightsException] — retirá-lo passa pelo pedido de exclusão.
+  _i2.Future<_i27.PatientConsentRecord> updateConsent({
+    required String accessToken,
+    required _i28.ConsentPurpose purpose,
+    required bool granted,
+  }) => caller.callServerEndpoint<_i27.PatientConsentRecord>(
+    'patients',
+    'updateConsent',
+    {
+      'accessToken': accessToken,
+      'purpose': purpose,
+      'granted': granted,
+    },
+  );
+
+  /// Aceite do Termo de Uso e da Política de Privacidade vigentes (LGPD-RF18)
+  /// por quem entrou por OTP sem passar pelo onboarding, ou aceitou uma versão
+  /// anterior. Só paciente; grava uma linha assinada em `consent_logs` só se a
+  /// versão vigente ainda não foi aceita — repetir devolve a existente.
+  _i2.Future<_i27.PatientConsentRecord> acceptTermsOfUse({
+    required String accessToken,
+  }) => caller.callServerEndpoint<_i27.PatientConsentRecord>(
+    'patients',
+    'acceptTermsOfUse',
+    {'accessToken': accessToken},
+  );
+
+  /// Se o paciente já aceitou o Termo de Uso e a Política de Privacidade da
+  /// versão vigente (LGPD-RF18). O app consulta depois do login por OTP para
+  /// decidir se mostra o convite ao aceite — um `bool`, sem ler o painel
+  /// "Meus Dados". Não grava auditoria: devolve ao próprio titular um fato
+  /// sobre o consentimento dele.
+  _i2.Future<bool> hasAcceptedCurrentTerms({required String accessToken}) =>
+      caller.callServerEndpoint<bool>(
+        'patients',
+        'hasAcceptedCurrentTerms',
+        {'accessToken': accessToken},
+      );
+
+  /// Se a decisão mais recente do titular para [purpose] é `granted` — um
+  /// `bool`, sem ler o painel "Meus Dados" e sem linha de auditoria de leitura.
+  /// O app pergunta isto a cada login antes de pedir o token ao provedor de
+  /// push (RF14).
+  _i2.Future<bool> hasGrantedConsent({
+    required String accessToken,
+    required _i28.ConsentPurpose purpose,
+  }) => caller.callServerEndpoint<bool>(
+    'patients',
+    'hasGrantedConsent',
+    {
+      'accessToken': accessToken,
+      'purpose': purpose,
+    },
+  );
+
+  /// Aviso de mudança dos termos ativo agora (LGPD-RF18, 15 dias de antecedência),
+  /// ou `null`. Só paciente. Sem leitura de banco e sem linha de auditoria: a
+  /// agenda é uma constante do repositório e nada do titular é lido nem gravado.
+  _i2.Future<_i29.TermsChangeNotice?> termsChangeNotice({
+    required String accessToken,
+  }) => caller.callServerEndpoint<_i29.TermsChangeNotice?>(
+    'patients',
+    'termsChangeNotice',
+    {'accessToken': accessToken},
+  );
+
+  /// Pedido de exclusão/anonimização dos próprios dados (LGPD-RF08).
+  /// Idempotente enquanto houver um pedido de exclusão em aberto.
+  _i2.Future<_i30.PatientDataSubjectRequestRecord> requestDataDeletion({
+    required String accessToken,
+  }) => caller.callServerEndpoint<_i30.PatientDataSubjectRequestRecord>(
+    'patients',
+    'requestDataDeletion',
+    {'accessToken': accessToken},
+  );
+
+  /// Pedido de correção de um dado (LGPD-RF08). [details] é texto livre do
+  /// titular, gravado cifrado; vazio ou acima de 500 caracteres volta como
+  /// [DataRightsException].
+  _i2.Future<_i30.PatientDataSubjectRequestRecord> requestDataCorrection({
+    required String accessToken,
+    required String details,
+  }) => caller.callServerEndpoint<_i30.PatientDataSubjectRequestRecord>(
+    'patients',
+    'requestDataCorrection',
+    {
+      'accessToken': accessToken,
+      'details': details,
+    },
+  );
 }
 
 /// Motor de triagem determinístico, inspirado no Protocolo de Manchester.
@@ -352,7 +936,7 @@ class EndpointTriage extends EndpointAuthenticated {
   @override
   String get name => 'triage';
 
-  _i2.Future<_i12.TriageResult> evaluate({
+  _i2.Future<_i31.TriageResult> evaluate({
     required String accessToken,
     required bool chestPain,
     required bool difficultyBreathing,
@@ -360,7 +944,7 @@ class EndpointTriage extends EndpointAuthenticated {
     required bool persistentVomiting,
     required bool bleeding,
     required bool severeWeakness,
-  }) => caller.callServerEndpoint<_i12.TriageResult>(
+  }) => caller.callServerEndpoint<_i31.TriageResult>(
     'triage',
     'evaluate',
     {
@@ -373,6 +957,22 @@ class EndpointTriage extends EndpointAuthenticated {
       'severeWeakness': severeWeakness,
     },
   );
+}
+
+/// Contato da UBS do ACS (RF13).
+/// {@category Endpoint}
+class EndpointUbs extends EndpointAuthenticated {
+  EndpointUbs(_i1.EndpointCaller caller) : super(caller);
+
+  @override
+  String get name => 'ubs';
+
+  _i2.Future<_i32.UbsContact> myContact({required String accessToken}) =>
+      caller.callServerEndpoint<_i32.UbsContact>(
+        'ubs',
+        'myContact',
+        {'accessToken': accessToken},
+      );
 }
 
 /// Sincronização das visitas domiciliares registradas offline.
@@ -391,10 +991,10 @@ class EndpointVisits extends EndpointAuthenticated {
   @override
   String get name => 'visits';
 
-  _i2.Future<List<_i13.VisitSyncResult>> sync({
+  _i2.Future<List<_i33.VisitSyncResult>> sync({
     required String accessToken,
-    required List<_i14.VisitSyncEntry> visits,
-  }) => caller.callServerEndpoint<List<_i13.VisitSyncResult>>(
+    required List<_i34.VisitSyncEntry> visits,
+  }) => caller.callServerEndpoint<List<_i33.VisitSyncResult>>(
     'visits',
     'sync',
     {
@@ -403,13 +1003,70 @@ class EndpointVisits extends EndpointAuthenticated {
     },
   );
 
+  /// Envio das visitas LEGADAS do aparelho (autoria desconhecida, D4 do plano
+  /// 2026-10-03): gravadas antes de existir dono por visita no banco local.
+  ///
+  /// A sessão do ACS é só o transporte — ver `VisitSyncService.syncLegacy`.
+  /// Mesma transação por lote e mesma tradução de erros de [sync].
+  _i2.Future<List<_i33.VisitSyncResult>> syncLegacy({
+    required String accessToken,
+    required String deviceId,
+    required List<_i34.VisitSyncEntry> visits,
+  }) => caller.callServerEndpoint<List<_i33.VisitSyncResult>>(
+    'visits',
+    'syncLegacy',
+    {
+      'accessToken': accessToken,
+      'deviceId': deviceId,
+      'visits': visits,
+    },
+  );
+
+  /// Envio DIFERIDO (D7 do plano 2026-10-03): sobe as visitas pendentes de um
+  /// ACS que pode já ter saído, autenticado pelo token de envio que o
+  /// `auth.loginInstitutional` emitiu para ele neste aparelho — não pelo JWT.
+  ///
+  /// Público por desenho para o `authenticate(...)`: o token opaco É a
+  /// credencial, e o único poder dele é este envio. O usuário resolvido é o
+  /// DONO do token, com a microárea relida do banco agora, e o lote passa
+  /// pelo MESMO `VisitSyncService.sync` do envio comum: autoria do dono,
+  /// território atual do dono, `localId` de outro agente recusado. Toda recusa
+  /// do token é a mesma `SessionExpiredException`, sem motivo e sem o token.
+  ///
+  /// No máximo `VisitSyncService.maxLegacyBatch` visitas por chamada, checado
+  /// antes de qualquer acesso ao banco. Um evento `visit_deferred_sync` por
+  /// lote gravado vai para `audit_logs`, com o dono e nada clínico.
+  _i2.Future<List<_i33.VisitSyncResult>> syncDeferred({
+    required String uploadToken,
+    required String deviceId,
+    required List<_i34.VisitSyncEntry> visits,
+  }) => caller.callServerEndpoint<List<_i33.VisitSyncResult>>(
+    'visits',
+    'syncDeferred',
+    {
+      'uploadToken': uploadToken,
+      'deviceId': deviceId,
+      'visits': visits,
+    },
+  );
+
+  /// Revoga o token de envio diferido (o app chama quando a fila do dono
+  /// zera). Público pelo mesmo motivo de [syncDeferred]; idempotente, e um
+  /// token desconhecido é ignorado em silêncio.
+  _i2.Future<void> revokeUploadToken({required String uploadToken}) =>
+      caller.callServerEndpoint<void>(
+        'visits',
+        'revokeUploadToken',
+        {'uploadToken': uploadToken},
+      );
+
   /// Sincronização central→dispositivo: visitas da microárea do ACS
   /// autenticado alteradas após `since`, para reconciliar um device que
   /// ficou offline ou foi reinstalado.
-  _i2.Future<List<_i14.VisitSyncEntry>> pull({
+  _i2.Future<List<_i34.VisitSyncEntry>> pull({
     required String accessToken,
     required DateTime since,
-  }) => caller.callServerEndpoint<List<_i14.VisitSyncEntry>>(
+  }) => caller.callServerEndpoint<List<_i34.VisitSyncEntry>>(
     'visits',
     'pull',
     {
@@ -439,7 +1096,7 @@ class Client extends _i1.ServerpodClientShared {
     bool? disconnectStreamsOnLostInternetConnection,
   }) : super(
          host,
-         _i15.Protocol(),
+         _i35.Protocol(),
          securityContext: securityContext,
          streamingConnectionTimeout: streamingConnectionTimeout,
          connectionTimeout: connectionTimeout,
@@ -448,20 +1105,30 @@ class Client extends _i1.ServerpodClientShared {
          disconnectStreamsOnLostInternetConnection:
              disconnectStreamsOnLostInternetConnection,
        ) {
+    admin = EndpointAdmin(this);
     alerts = EndpointAlerts(this);
     auth = EndpointAuth(this);
+    devices = EndpointDevices(this);
     health = EndpointHealth(this);
+    notices = EndpointNotices(this);
     onboarding = EndpointOnboarding(this);
     patients = EndpointPatients(this);
     triage = EndpointTriage(this);
+    ubs = EndpointUbs(this);
     visits = EndpointVisits(this);
   }
+
+  late final EndpointAdmin admin;
 
   late final EndpointAlerts alerts;
 
   late final EndpointAuth auth;
 
+  late final EndpointDevices devices;
+
   late final EndpointHealth health;
+
+  late final EndpointNotices notices;
 
   late final EndpointOnboarding onboarding;
 
@@ -469,16 +1136,22 @@ class Client extends _i1.ServerpodClientShared {
 
   late final EndpointTriage triage;
 
+  late final EndpointUbs ubs;
+
   late final EndpointVisits visits;
 
   @override
   Map<String, _i1.EndpointRef> get endpointRefLookup => {
+    'admin': admin,
     'alerts': alerts,
     'auth': auth,
+    'devices': devices,
     'health': health,
+    'notices': notices,
     'onboarding': onboarding,
     'patients': patients,
     'triage': triage,
+    'ubs': ubs,
     'visits': visits,
   };
 

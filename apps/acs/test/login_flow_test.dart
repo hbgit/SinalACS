@@ -705,7 +705,7 @@ void main() {
       // recusaria a visita por identificador inválido.
       final backend = FakeAcsBackend();
       final visitQueue = OfflineVisitQueue(
-        synchronizer: BackendVisitSynchronizer(backend: backend),
+        synchronizer: BackendVisitSynchronizer(backend: backend, ownerId: seedAcsId),
       );
       late FakeAlertFeed feed;
 
@@ -977,7 +977,7 @@ void main() {
       final backend = FakeAcsBackend()
         ..syncFailure = const BackendFailure('Sem conexão com o servidor.');
       final visitQueue = OfflineVisitQueue(
-        synchronizer: BackendVisitSynchronizer(backend: backend),
+        synchronizer: BackendVisitSynchronizer(backend: backend, ownerId: seedAcsId),
       );
       late FakeAlertFeed feed;
 
@@ -1021,7 +1021,7 @@ void main() {
               message: 'paciente fora da sua microárea',
             );
       final visitQueue = OfflineVisitQueue(
-        synchronizer: BackendVisitSynchronizer(backend: backend),
+        synchronizer: BackendVisitSynchronizer(backend: backend, ownerId: seedAcsId),
       );
       late FakeAlertFeed feed;
 
@@ -1369,6 +1369,7 @@ void main() {
       final queue = buildVisitQueue(
         backend: FakeAcsBackend(),
         store: InMemoryVisitStore(),
+        ownerId: seedAcsId,
       );
 
       expect(queue.synchronizer, isA<BackendVisitSynchronizer>());
@@ -1413,6 +1414,7 @@ void main() {
           backend: backend,
           cursorStore: SyncCursorStore(
             keyStore: InMemoryDatabaseKeyStore(),
+            owner: 'acs-a',
             databaseName: dbName,
             allowUnencryptedForTesting: true,
           ),
@@ -1551,6 +1553,7 @@ void main() {
           backend: backend,
           cursorStore: SyncCursorStore(
             keyStore: InMemoryDatabaseKeyStore(),
+            owner: 'acs-a',
             databaseName: dbName,
             allowUnencryptedForTesting: true,
           ),

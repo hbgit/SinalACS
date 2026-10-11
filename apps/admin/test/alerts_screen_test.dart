@@ -2,12 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sinalacs_admin/app/app.dart';
 import 'package:sinalacs_admin/core/data/admin_data_source.dart';
+import 'support/fake_admin_auth.dart';
+import 'support/layout_harness.dart';
 
 void main() {
   testWidgets('deve filtrar alertas por microárea sem permitir reclassificação de risco', (tester) async {
-    await tester.pumpWidget(SinalAdminApp());
-    await tester.tap(find.byKey(const Key('login_button')));
-    await tester.pumpAndSettle();
+    await tester.pumpWidget(SinalAdminApp(auth: FakeAdminAuth()));
+    await entrarComCredenciais(tester);
 
     await tester.tap(find.text('Alertas').last);
     await tester.pumpAndSettle();

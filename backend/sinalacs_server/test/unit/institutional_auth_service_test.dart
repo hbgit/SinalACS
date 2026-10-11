@@ -57,6 +57,9 @@ class _FakeStore implements AcsCredentialStore {
     fieldsWritten['restartCounter'] = restartCounter;
     final atual = record;
     if (atual != null) {
+      // Espelha o `CASE` de `lockStreak` do SQL: sobe só quando o bloqueio é
+      // aplicado; o reinício do contador preserva a escalada.
+      final streak = atual.lockStreak + (nextLockedUntil != null ? 1 : 0);
       record = AcsCredentialRecord(
         acsId: atual.acsId,
         microAreaId: atual.microAreaId,
@@ -64,6 +67,7 @@ class _FakeStore implements AcsCredentialStore {
         digest: atual.digest,
         failedAttempts: next,
         lockedUntil: nextLockedUntil,
+        lockStreak: streak,
       );
     }
   }
@@ -71,6 +75,18 @@ class _FakeStore implements AcsCredentialStore {
   @override
   Future<void> registerSuccessfulLogin(String acsId, DateTime at) async {
     fieldsWritten['resetAt'] = at;
+    final atual = record;
+    if (atual != null) {
+      record = AcsCredentialRecord(
+        acsId: atual.acsId,
+        microAreaId: atual.microAreaId,
+        active: atual.active,
+        digest: atual.digest,
+        failedAttempts: 0,
+        lockedUntil: null,
+        lockStreak: 0,
+      );
+    }
   }
 
   @override
@@ -141,7 +157,55 @@ void main() {
     );
   }
 
+  group('lockDurationFor (bloqueio progressivo)', () {
+    test('dobra a cada rodada de bloqueio, a partir de 15 min', () {
+      expect(InstitutionalAuthService.lockDurationFor(0), const Duration(minutes: 15));
+      expect(InstitutionalAuthService.lockDurationFor(1), const Duration(minutes: 30));
+      expect(InstitutionalAuthService.lockDurationFor(2), const Duration(hours: 1));
+      expect(InstitutionalAuthService.lockDurationFor(3), const Duration(hours: 2));
+    });
+
+    test('nunca passa de 24 h, mesmo com sequência enorme', () {
+      expect(InstitutionalAuthService.lockDurationFor(7), const Duration(hours: 24));
+      expect(InstitutionalAuthService.lockDurationFor(500), const Duration(hours: 24));
+    });
+
+    test('sequência negativa (linha corrompida) vale como zero', () {
+      expect(InstitutionalAuthService.lockDurationFor(-3), const Duration(minutes: 15));
+    });
+  });
+
   group('login institucional', () {
+    test('a segunda rodada de bloqueio dura o dobro; o login válido zera a escalada', () async {
+      final service = await build();
+      final store = service.store as _FakeStore;
+      final t0 = DateTime.utc(2026, 10, 5, 12);
+      for (var i = 0; i < InstitutionalAuthService.maxFailedAttempts; i++) {
+        await expectLater(
+          service.login(matricula: 'ACS-001', password: 'errada', now: t0),
+          throwsA(isA<AuthenticationFailedException>()),
+        );
+      }
+      expect(store.record!.lockedUntil, t0.add(const Duration(minutes: 15)));
+
+      // 16 min depois: o bloqueio venceu; mais cinco falhas bloqueiam por 30 min.
+      final t1 = t0.add(const Duration(minutes: 16));
+      for (var i = 0; i < InstitutionalAuthService.maxFailedAttempts; i++) {
+        await expectLater(
+          service.login(matricula: 'ACS-001', password: 'errada', now: t1),
+          throwsA(isA<AuthenticationFailedException>()),
+        );
+      }
+      expect(store.record!.lockedUntil, t1.add(const Duration(minutes: 30)));
+      expect(store.record!.lockStreak, 2);
+
+      // Vencido o segundo bloqueio, a senha certa entra e zera a escalada.
+      final t2 = t1.add(const Duration(minutes: 31));
+      await service.login(matricula: 'ACS-001', password: _senha, now: t2);
+      expect(store.record!.lockStreak, 0);
+      expect(store.record!.lockedUntil, isNull);
+    });
+
     test('aceita matrícula e senha corretas e devolve ACS territorializado', () async {
       final service = await build();
 

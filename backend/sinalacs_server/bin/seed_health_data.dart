@@ -5,11 +5,12 @@ import 'package:sinalacs_server/src/config/app_config.dart';
 import 'package:sinalacs_server/src/infrastructure/crypto/encrypted_json.dart';
 import 'package:sinalacs_server/src/infrastructure/crypto/health_data_cipher.dart';
 
-/// Segunda metade do seed de desenvolvimento: os campos clínicos CIFRADOS.
+/// Segunda metade do seed de desenvolvimento: os campos CIFRADOS de `patients`.
 ///
 /// `seeds/development.sql` é SQL puro, executado por `psql` fora do processo
 /// Dart, e por isso não consegue chamar [HealthDataCipher] —
-/// `patients.chronicConditionsEncrypted` é AES-256-GCM, não uma expressão que
+/// `patients.chronicConditionsEncrypted` e
+/// `patients.emergencyContactEncrypted` são AES-256-GCM, não expressões que
 /// o Postgres saiba montar. As duas alternativas eram colar um ciphertext
 /// literal no `.sql` (que quebra silenciosamente a cada mudança de algoritmo
 /// ou de chave) ou mover só esses campos para um passo Dart pós-boot. Este
@@ -27,6 +28,18 @@ const _chronicConditionsByPatient = <String, List<String>>{
   '00000000-0000-4000-8000-000000000007': ['diabetes', 'hipertensão'],
   '00000000-0000-4000-8000-000000000008': [],
   '00000000-0000-4000-8000-000000000009': [],
+};
+
+/// Contato de emergência sintético por paciente (PII de terceiro — cifrado
+/// pelo mesmo motivo de chronicConditions, RNF03/INV-04). Mesmos UUIDs do
+/// `development.sql`: o `.sql` grava ciphertext vazio e este script completa.
+const _emergencyContactByPatient = <String, String>{
+  '00000000-0000-4000-8000-000000000001': 'Contato de desenvolvimento',
+  '00000000-0000-4000-8000-000000000005': 'Contato de desenvolvimento',
+  '00000000-0000-4000-8000-000000000006': 'Contato de desenvolvimento',
+  '00000000-0000-4000-8000-000000000007': 'Contato de desenvolvimento',
+  '00000000-0000-4000-8000-000000000008': 'Contato de desenvolvimento',
+  '00000000-0000-4000-8000-000000000009': 'Contato de desenvolvimento',
 };
 
 Future<void> main(List<String> args) async {
@@ -57,10 +70,13 @@ Future<void> main(List<String> args) async {
   );
 
   try {
-    var atualizados = 0;
+    // Conjunto de pacientes tocados (não contador de linhas): dois laços
+    // separados de propósito — condições crônicas e contato de emergência
+    // podem evoluir independentemente no futuro.
+    final atualizados = <String>{};
     for (final entry in _chronicConditionsByPatient.entries) {
       final encrypted = await cipher.encryptJson(entry.value);
-      final result = await connection.execute(
+      await connection.execute(
         Sql.named(
           'UPDATE "patients" '
           '   SET "chronicConditionsEncrypted" = @ciphertext, '
@@ -73,11 +89,28 @@ Future<void> main(List<String> args) async {
           'id': entry.key,
         },
       );
-      atualizados += result.affectedRows;
+      atualizados.add(entry.key);
+    }
+    for (final entry in _emergencyContactByPatient.entries) {
+      final encrypted = await cipher.encryptJson(entry.value);
+      await connection.execute(
+        Sql.named(
+          'UPDATE "patients" '
+          '   SET "emergencyContactEncrypted" = @ciphertext, '
+          '       "emergencyContactKeyVersion" = @keyVersion '
+          ' WHERE "id" = @id',
+        ),
+        parameters: {
+          'ciphertext': encrypted.ciphertextBase64,
+          'keyVersion': encrypted.keyVersion,
+          'id': entry.key,
+        },
+      );
+      atualizados.add(entry.key);
     }
     stdout.writeln(
-      'Seed de dados clínicos cifrados: $atualizados linha(s) de patients '
-      'atualizada(s).',
+      'Seed de campos cifrados de patients: ${atualizados.length} paciente(s) '
+      'atualizado(s).',
     );
   } finally {
     await connection.close();

@@ -14,7 +14,8 @@
 import 'package:serverpod_client/serverpod_client.dart' as _i1;
 import '../api/patient_consent_record.dart' as _i2;
 import '../api/patient_risk_event.dart' as _i3;
-import 'package:sinalacs_client/src/protocol/protocol.dart' as _i4;
+import '../api/patient_data_subject_request_record.dart' as _i4;
+import 'package:sinalacs_client/src/protocol/protocol.dart' as _i5;
 
 /// Painel "Meus Dados" do próprio paciente autenticado — confirmação de
 /// existência de tratamento e acesso aos dados pessoais, critério de aceite
@@ -31,6 +32,7 @@ abstract class PatientDataOverview implements _i1.SerializableModel {
     required this.chronicConditions,
     required this.consents,
     required this.riskHistory,
+    required this.requests,
   });
 
   factory PatientDataOverview({
@@ -41,6 +43,7 @@ abstract class PatientDataOverview implements _i1.SerializableModel {
     required List<String> chronicConditions,
     required List<_i2.PatientConsentRecord> consents,
     required List<_i3.PatientRiskEvent> riskHistory,
+    required List<_i4.PatientDataSubjectRequestRecord> requests,
   }) = _PatientDataOverviewImpl;
 
   factory PatientDataOverview.fromJson(Map<String, dynamic> jsonSerialization) {
@@ -51,15 +54,19 @@ abstract class PatientDataOverview implements _i1.SerializableModel {
       ),
       emergencyContact: jsonSerialization['emergencyContact'] as String,
       isChronic: _i1.BoolJsonExtension.fromJson(jsonSerialization['isChronic']),
-      chronicConditions: _i4.Protocol().deserialize<List<String>>(
+      chronicConditions: _i5.Protocol().deserialize<List<String>>(
         jsonSerialization['chronicConditions'],
       ),
-      consents: _i4.Protocol().deserialize<List<_i2.PatientConsentRecord>>(
+      consents: _i5.Protocol().deserialize<List<_i2.PatientConsentRecord>>(
         jsonSerialization['consents'],
       ),
-      riskHistory: _i4.Protocol().deserialize<List<_i3.PatientRiskEvent>>(
+      riskHistory: _i5.Protocol().deserialize<List<_i3.PatientRiskEvent>>(
         jsonSerialization['riskHistory'],
       ),
+      requests: _i5.Protocol()
+          .deserialize<List<_i4.PatientDataSubjectRequestRecord>>(
+            jsonSerialization['requests'],
+          ),
     );
   }
 
@@ -77,6 +84,8 @@ abstract class PatientDataOverview implements _i1.SerializableModel {
 
   List<_i3.PatientRiskEvent> riskHistory;
 
+  List<_i4.PatientDataSubjectRequestRecord> requests;
+
   /// Returns a shallow copy of this [PatientDataOverview]
   /// with some or all fields replaced by the given arguments.
   @_i1.useResult
@@ -88,6 +97,7 @@ abstract class PatientDataOverview implements _i1.SerializableModel {
     List<String>? chronicConditions,
     List<_i2.PatientConsentRecord>? consents,
     List<_i3.PatientRiskEvent>? riskHistory,
+    List<_i4.PatientDataSubjectRequestRecord>? requests,
   });
   @override
   Map<String, dynamic> toJson() {
@@ -100,6 +110,7 @@ abstract class PatientDataOverview implements _i1.SerializableModel {
       'chronicConditions': chronicConditions.toJson(),
       'consents': consents.toJson(valueToJson: (v) => v.toJson()),
       'riskHistory': riskHistory.toJson(valueToJson: (v) => v.toJson()),
+      'requests': requests.toJson(valueToJson: (v) => v.toJson()),
     };
   }
 
@@ -118,6 +129,7 @@ class _PatientDataOverviewImpl extends PatientDataOverview {
     required List<String> chronicConditions,
     required List<_i2.PatientConsentRecord> consents,
     required List<_i3.PatientRiskEvent> riskHistory,
+    required List<_i4.PatientDataSubjectRequestRecord> requests,
   }) : super._(
          name: name,
          birthDate: birthDate,
@@ -126,6 +138,7 @@ class _PatientDataOverviewImpl extends PatientDataOverview {
          chronicConditions: chronicConditions,
          consents: consents,
          riskHistory: riskHistory,
+         requests: requests,
        );
 
   /// Returns a shallow copy of this [PatientDataOverview]
@@ -140,6 +153,7 @@ class _PatientDataOverviewImpl extends PatientDataOverview {
     List<String>? chronicConditions,
     List<_i2.PatientConsentRecord>? consents,
     List<_i3.PatientRiskEvent>? riskHistory,
+    List<_i4.PatientDataSubjectRequestRecord>? requests,
   }) {
     return PatientDataOverview(
       name: name ?? this.name,
@@ -151,6 +165,7 @@ class _PatientDataOverviewImpl extends PatientDataOverview {
       consents: consents ?? this.consents.map((e0) => e0.copyWith()).toList(),
       riskHistory:
           riskHistory ?? this.riskHistory.map((e0) => e0.copyWith()).toList(),
+      requests: requests ?? this.requests.map((e0) => e0.copyWith()).toList(),
     );
   }
 }

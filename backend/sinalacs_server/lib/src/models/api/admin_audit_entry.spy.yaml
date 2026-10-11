@@ -1,0 +1,11 @@
+### Linha de auditoria para o backoffice. Sem `ipHash`, `previousHash` nem
+### `entryHash`: a cadeia de hash é do servidor, não da tela.
+class: AdminAuditEntry
+fields:
+  id: String
+  sequence: int
+  userLabel: String
+  actionType: String
+  resourceType: String
+  timestamp: DateTime
+  result: String

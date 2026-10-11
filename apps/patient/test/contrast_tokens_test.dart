@@ -13,6 +13,9 @@ void main() {
   const largeTextOrUi = 3.0;
   const risk = PatientRiskColors.dark;
 
+  // Pares que o cartão de aviso de mudança dos termos usa e que o tema gera a
+  // partir do seed (não são tokens fixos), medidos contra o `Card` em que renderizam.
+  final scheme = buildPatientDarkTheme().colorScheme;
   final cases = <(String, Color, Color, double)>[
     ('branco sobre scaffold', Colors.white, PatientDarkColors.background, normalText),
     ('branco sobre card', Colors.white, PatientDarkColors.surfaceRaised, normalText),
@@ -24,6 +27,11 @@ void main() {
     ('dangerOnSurface sobre card', risk.dangerOnSurface, PatientDarkColors.surfaceRaised, normalText),
     ('dangerOnSurface sobre scaffold', risk.dangerOnSurface, PatientDarkColors.background, normalText),
     ('accentOnSurface sobre card', risk.accentOnSurface, PatientDarkColors.surfaceRaised, normalText),
+    // Círculo numerado do resumo da Política/Termo (`legal_screens.dart`).
+    ('branco sobre accentDark (passos do resumo legal)', Colors.white, PatientColors.accentDark, normalText),
+    ('texto do cartão de aviso (onSurface) sobre card', scheme.onSurface, PatientDarkColors.surfaceRaised, normalText),
+    ('TextButton do cartão de aviso (primary) sobre card', scheme.primary, PatientDarkColors.surfaceRaised, normalText),
+    ('ícone de fechar do cartão de aviso (onSurfaceVariant) sobre card', scheme.onSurfaceVariant, PatientDarkColors.surfaceRaised, largeTextOrUi),
     // Preenchimento de botão: continua correto sem token novo.
     ('branco sobre botão de pânico (danger fill)', Colors.white, PatientColors.danger, largeTextOrUi),
   ];

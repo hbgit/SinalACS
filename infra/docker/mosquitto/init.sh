@@ -81,6 +81,32 @@ EOF
   rm -f "$ext_file" "$certs_dir/server.csr"
 fi
 
+client_days=397
+
+# Certificado de CLIENTE (mTLS): CN = o usuário MQTT, assinado pela mesma CA do
+# servidor, só para autenticação de cliente. Renova quando vence, quando a CA
+# mudou (o `verify` falha) ou quando não existe — mesma regra do servidor.
+issue_client() {
+  cn="$1"
+  if [ -f "$certs_dir/$cn.crt" ] && [ -f "$certs_dir/$cn.key" ] \
+     && openssl x509 -in "$certs_dir/$cn.crt" -noout -checkend 86400 >/dev/null 2>&1 \
+     && openssl verify -CAfile "$certs_dir/ca.crt" "$certs_dir/$cn.crt" >/dev/null 2>&1; then
+    return 0
+  fi
+  echo "Gerando certificado de cliente para $cn..."
+  printf 'basicConstraints=CA:FALSE\nkeyUsage=digitalSignature\nextendedKeyUsage=clientAuth\n' \
+    > "$certs_dir/$cn.ext"
+  openssl req -newkey rsa:2048 -nodes -keyout "$certs_dir/$cn.key" \
+    -out "$certs_dir/$cn.csr" -subj "/CN=$cn"
+  openssl x509 -req -days "$client_days" -in "$certs_dir/$cn.csr" \
+    -CA "$certs_dir/ca.crt" -CAkey "$certs_dir/ca.key" -CAcreateserial \
+    -extfile "$certs_dir/$cn.ext" -out "$certs_dir/$cn.crt"
+  rm -f "$certs_dir/$cn.csr" "$certs_dir/$cn.ext"
+}
+
+issue_client backend
+issue_client acs-area-12
+
 # Regrava SEMPRE, em vez de só criar quando o arquivo falta.
 #
 # O arquivo é derivado das variáveis de ambiente, e recriá-lo é barato. Com o
@@ -100,3 +126,8 @@ mosquitto_passwd -b "$password_file" acs-area-12 "${MQTT_ACS_PASSWORD:?MQTT_ACS_
 
 chmod 755 "$runtime_dir" "$certs_dir"
 chmod 644 "$password_file" "$certs_dir"/*.crt "$certs_dir"/*.key
+# Exceção: a chave da CA só assina folhas, e quem a lê é este init.sh, como root.
+# As demais ficam em 644 porque são lidas por outro uid (o backend roda como uid
+# 1000 e lê backend.key; o sync_dev_ca.sh, como o usuário do host, lê
+# acs-area-12.key) — medido em 2026-10-05; ver PROGRESS.md.
+chmod 600 "$certs_dir/ca.key"

@@ -28,6 +28,8 @@ import 'dart:io';
 
 import 'package:sinalacs_patient/core/network/backend_client.dart';
 
+import 'support/host_login.dart';
+
 /// Caminho da CA de desenvolvimento do RPC (a que assina o certificado do
 /// Traefik em 443), dentro do repositório.
 ///
@@ -107,7 +109,7 @@ Future<void> main(List<String> args) async {
     stdout.writeln('  health ............. ${health.status} '
         '(db=${health.dbConnected} mqtt=${health.mqttConnected})');
 
-    final session = await backend.developmentLogin(role: 'patient');
+    final session = await loginPatientOnHost(backend);
     // O token nunca é impresso inteiro.
     stdout.writeln('  login .............. papel=${session.role} '
         'microárea=${session.microAreaId} expira=${session.expiresAt.toIso8601String()}');

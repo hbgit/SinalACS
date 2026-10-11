@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sinalacs_admin/app/app.dart';
+import 'support/fake_admin_auth.dart';
+import 'support/layout_harness.dart';
 
 Future<void> _login(WidgetTester tester) async {
-  await tester.pumpWidget(SinalAdminApp());
-  await tester.tap(find.byKey(const Key('login_button')));
-  await tester.pumpAndSettle();
+  await tester.pumpWidget(SinalAdminApp(auth: FakeAdminAuth()));
+  await entrarComCredenciais(tester);
 }
 
 void main() {
@@ -27,7 +28,7 @@ void main() {
     expect(find.byKey(const Key('admin_navigation_rail')), findsNothing);
   });
 
-  testWidgets('navega entre os quatro destinos do backoffice', (tester) async {
+  testWidgets('navega entre os cinco destinos do backoffice', (tester) async {
     await _login(tester);
 
     await tester.tap(find.text('Microáreas').last);
@@ -41,5 +42,9 @@ void main() {
     await tester.tap(find.text('Auditoria').last);
     await tester.pumpAndSettle();
     expect(find.text('Logs de auditoria'), findsOneWidget);
+
+    await tester.tap(find.text('Pedidos do titular').last);
+    await tester.pumpAndSettle();
+    expect(find.text('Pedidos do titular (LGPD)'), findsOneWidget);
   });
 }

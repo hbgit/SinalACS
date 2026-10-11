@@ -1,0 +1,7 @@
+### Resultado de `notices.sendSegmented` (RF14): quantos pacientes da microárea
+### consentiram em receber o aviso e quantas notificações o relé aceitou.
+### Só contagens — nunca a lista de destinatários.
+class: NoticeSendResult
+fields:
+  recipients: int
+  accepted: int

@@ -22,6 +22,7 @@ abstract class Ubs
     required this.address,
     required this.city,
     required this.state,
+    this.contactPhone,
   });
 
   factory Ubs({
@@ -30,6 +31,7 @@ abstract class Ubs
     required String address,
     required String city,
     required String state,
+    String? contactPhone,
   }) = _UbsImpl;
 
   factory Ubs.fromJson(Map<String, dynamic> jsonSerialization) {
@@ -41,6 +43,7 @@ abstract class Ubs
       address: jsonSerialization['address'] as String,
       city: jsonSerialization['city'] as String,
       state: jsonSerialization['state'] as String,
+      contactPhone: jsonSerialization['contactPhone'] as String?,
     );
   }
 
@@ -59,6 +62,10 @@ abstract class Ubs
 
   String state;
 
+  /// Telefone de contato da UBS para o ACS escalar um caso (RF13). Dado da
+  /// unidade, não de pessoa. `null` = ainda não cadastrado: o app avisa, não liga.
+  String? contactPhone;
+
   @override
   _i1.Table<_i1.UuidValue?> get table => t;
 
@@ -71,6 +78,7 @@ abstract class Ubs
     String? address,
     String? city,
     String? state,
+    String? contactPhone,
   });
   @override
   Map<String, dynamic> toJson() {
@@ -81,6 +89,7 @@ abstract class Ubs
       'address': address,
       'city': city,
       'state': state,
+      if (contactPhone != null) 'contactPhone': contactPhone,
     };
   }
 
@@ -93,6 +102,7 @@ abstract class Ubs
       'address': address,
       'city': city,
       'state': state,
+      if (contactPhone != null) 'contactPhone': contactPhone,
     };
   }
 
@@ -135,12 +145,14 @@ class _UbsImpl extends Ubs {
     required String address,
     required String city,
     required String state,
+    String? contactPhone,
   }) : super._(
          id: id,
          name: name,
          address: address,
          city: city,
          state: state,
+         contactPhone: contactPhone,
        );
 
   /// Returns a shallow copy of this [Ubs]
@@ -153,6 +165,7 @@ class _UbsImpl extends Ubs {
     String? address,
     String? city,
     String? state,
+    Object? contactPhone = _Undefined,
   }) {
     return Ubs(
       id: id is _i1.UuidValue? ? id : this.id,
@@ -160,6 +173,7 @@ class _UbsImpl extends Ubs {
       address: address ?? this.address,
       city: city ?? this.city,
       state: state ?? this.state,
+      contactPhone: contactPhone is String? ? contactPhone : this.contactPhone,
     );
   }
 }
@@ -186,6 +200,12 @@ class UbsUpdateTable extends _i1.UpdateTable<UbsTable> {
     table.state,
     value,
   );
+
+  _i1.ColumnValue<String, String> contactPhone(String? value) =>
+      _i1.ColumnValue(
+        table.contactPhone,
+        value,
+      );
 }
 
 class UbsTable extends _i1.Table<_i1.UuidValue?> {
@@ -207,6 +227,10 @@ class UbsTable extends _i1.Table<_i1.UuidValue?> {
       'state',
       this,
     );
+    contactPhone = _i1.ColumnString(
+      'contactPhone',
+      this,
+    );
   }
 
   late final UbsUpdateTable updateTable;
@@ -219,6 +243,10 @@ class UbsTable extends _i1.Table<_i1.UuidValue?> {
 
   late final _i1.ColumnString state;
 
+  /// Telefone de contato da UBS para o ACS escalar um caso (RF13). Dado da
+  /// unidade, não de pessoa. `null` = ainda não cadastrado: o app avisa, não liga.
+  late final _i1.ColumnString contactPhone;
+
   @override
   List<_i1.Column> get columns => [
     id,
@@ -226,6 +254,7 @@ class UbsTable extends _i1.Table<_i1.UuidValue?> {
     address,
     city,
     state,
+    contactPhone,
   ];
 }
 

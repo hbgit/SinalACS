@@ -1,13 +1,23 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:sinalacs_acs/core/network/auth_session.dart';
 import 'package:sinalacs_acs/core/network/backend_config.dart';
+import 'package:sinalacs_acs/core/security/session_token_store.dart';
+import 'package:sinalacs_acs/core/security/upload_token_store.dart';
 import 'package:sinalacs_client/sinalacs_client.dart';
 
 /// Falha já traduzida para a pessoa que está usando o app.
 ///
 /// O backend é RPC tipado, então o erro chega como exceção declarada no
 /// `.spy.yaml` — não como código HTTP.
+/// A sessão corrente não é a dona das visitas a enviar. Recuperável: o lote
+/// fica pendente até o dono entrar de novo.
+const sessionOwnerMismatch = BackendFailure(
+  'A sessão atual não é a dona destas visitas. Entre com a conta que '
+  'registrou as visitas.',
+);
+
 class BackendFailure implements Exception {
   const BackendFailure(this.message, {this.isRecoverable = true});
 
@@ -18,6 +28,24 @@ class BackendFailure implements Exception {
 
   @override
   String toString() => message;
+}
+
+/// O servidor recusou o token de envio diferido (D7): desconhecido, vencido,
+/// revogado, de outro aparelho ou de conta inativa — a recusa é única e não diz
+/// o motivo. Não recuperável: o token morreu, e só um novo login do dono emite
+/// outro. As visitas do dono continuam no aparelho.
+class UploadTokenRefused extends BackendFailure {
+  const UploadTokenRefused() : super('Envio não autorizado. Entre novamente.', isRecoverable: false);
+}
+
+/// O ACS tem MFA ativa e a senha conferiu: falta o código do autenticador.
+class MfaCodeRequired extends BackendFailure {
+  const MfaCodeRequired() : super('Informe o código do aplicativo autenticador.');
+}
+
+/// O servidor exige MFA e este ACS ainda não a ativou.
+class MfaEnrollmentRequired extends BackendFailure {
+  const MfaEnrollmentRequired() : super('Ative a verificação em duas etapas antes de entrar.', isRecoverable: false);
 }
 
 /// Recusa um host de RPC que não esteja em **HTTPS** (RNF04/L-08).
@@ -54,12 +82,43 @@ abstract class AcsBackend {
 
   bool get isAuthenticated;
 
+  /// Chamado quando a sessão venceu e **não** dá para renová-la sozinho (o
+  /// refresh token foi recusado ou não existe mais). A UI leva a pessoa de
+  /// volta ao login.
+  void Function()? onSessionExpired;
+
+  /// `true` se há um refresh token guardado no aparelho (a UI pode tentar
+  /// [resumeSession] na partida).
+  Future<bool> get hasStoredSession;
+
+  /// Desbloqueia o refresh token guardado (prompt do Keystore, se o store o
+  /// exige). `notRequired`: o chamador usa o portão de interface.
+  Future<SessionUnlock> unlockStoredSession({required String reason});
+
+  /// Tenta abrir uma sessão com o refresh token guardado. `null` se não há
+  /// token ou se ele foi recusado/não pôde ser usado agora. Não chama
+  /// [onSessionExpired]: na partida a UI já é a tela de login.
+  Future<AuthSession?> resumeSession();
+
+  /// Encerra a sessão: revoga o refresh token no servidor (best-effort) e
+  /// apaga o token local.
+  Future<void> logout();
+
   /// Autentica o ACS com matrícula e senha (RF07).
   ///
-  /// A credencial fica **apenas em memória** — ver `_credentials` em
-  /// [BackendClient] — para a reautenticação silenciosa que o app já fazia
-  /// quando o token de 15 minutos expirava. Nada é gravado em disco.
-  Future<AuthSession> login({required String matricula, required String senha});
+  /// A senha **não** é retida: a renovação silenciosa usa o refresh token
+  /// rotativo guardado no Keystore.
+  ///
+  /// [totpCode] é o código do autenticador (MFA); sem ele, um ACS com MFA ativa
+  /// recebe [MfaCodeRequired].
+  Future<AuthSession> login({required String matricula, required String senha, String? totpCode});
+
+  /// Começa a ativação da verificação em duas etapas. Sem token: vale a
+  /// matrícula e a senha.
+  Future<TotpEnrollmentStart> beginTotpEnrollment({required String matricula, required String senha});
+
+  /// Conclui a ativação com o primeiro código do autenticador.
+  Future<void> confirmTotpEnrollment({required String matricula, required String senha, required String code});
 
   /// Login de DESENVOLVIMENTO, para `tool/` e `integration_test/` contra a
   /// stack local. Só funciona com `ENABLE_DEV_LOGIN=true`; **não** é o caminho
@@ -68,7 +127,30 @@ abstract class AcsBackend {
 
   Future<AlertAckResult> acknowledge({required String alertId});
 
-  Future<List<VisitSyncResult>> syncVisits(List<VisitSyncEntry> visits);
+  /// [expectedUserId], quando presente, é o dono do lote: se a sessão que vai
+  /// assinar a chamada — conferida DEPOIS de o token ser resolvido (talvez por
+  /// renovação) e imediatamente antes da rede — não é dele, lança
+  /// [sessionOwnerMismatch] sem enviar nada. O servidor atribui a visita ao ACS
+  /// do token: o lote de A nunca pode sair com o token de B.
+  Future<List<VisitSyncResult>> syncVisits(List<VisitSyncEntry> visits, {String? expectedUserId});
+
+  /// Envia visitas LEGADAS (sem dono, D4) por `visits.syncLegacy`. A sessão
+  /// atual é só o transporte: o servidor grava autoria desconhecida e confere
+  /// o território do paciente contra o de quem transporta. No máximo 200 por
+  /// chamada (o servidor recusa acima disso).
+  Future<List<VisitSyncResult>> syncLegacyVisits(List<VisitSyncEntry> visits, {required String deviceId});
+
+  /// Envio DIFERIDO (D7) por `visits.syncDeferred`: sem sessão, autenticado
+  /// pelo token de envio do dono — o autor gravado é o dono do token. No máximo
+  /// 200 por chamada. Token recusado: [UploadTokenRefused].
+  Future<List<VisitSyncResult>> syncDeferredVisits({
+    required String uploadToken,
+    required String deviceId,
+    required List<VisitSyncEntry> visits,
+  });
+
+  /// Revoga o token de envio no servidor (a fila do dono zerou). Idempotente.
+  Future<void> revokeUploadToken(String uploadToken);
 
   /// Visitas da microárea alteradas desde `since` — reconciliação
   /// central→dispositivo (RF15, decisão §5).
@@ -80,6 +162,23 @@ abstract class AcsBackend {
   /// (emergência, com SAMU): sem esta lista, a aba "Visita" não tinha de onde
   /// partir fora do caminho reativo.
   Future<List<MicroAreaPatient>> listPatients();
+
+  /// Contato da UBS do ACS (RF13): nome e telefone, que pode não estar cadastrado.
+  Future<UbsContact> ubsContact();
+
+  /// Convite de onboarding de um paciente da própria microárea (RF02). O
+  /// token em claro volta só nesta resposta e vira o QR Code da tela
+  /// "Convidar paciente" — nunca é gravado no aparelho.
+  Future<EnrollmentTokenResult> generateInvite({required String patientId});
+
+  /// Envia um aviso comunitário aos pacientes da microárea do ACS que aceitaram
+  /// receber avisos (RF14). A microárea vem do token, nunca de parâmetro;
+  /// [chronicOnly] restringe a quem tem condição crônica.
+  Future<NoticeSendResult> sendNotice({
+    required String title,
+    required String message,
+    required bool chronicOnly,
+  });
 
   void close();
 }
@@ -106,17 +205,43 @@ class MisconfiguredBackend implements AcsBackend {
   final BackendFailure failure;
 
   @override
+  void Function()? get onSessionExpired => null;
+
+  @override
+  set onSessionExpired(void Function()? _) {}
+
+  @override
   AuthSession? get session => null;
 
   @override
   bool get isAuthenticated => false;
+
+  @override
+  Future<bool> get hasStoredSession async => false;
+
+  @override
+  Future<SessionUnlock> unlockStoredSession({required String reason}) async => SessionUnlock.notRequired;
+
+  @override
+  Future<AuthSession?> resumeSession() async => null;
+
+  @override
+  Future<void> logout() async {}
 
   /// Recusa uma chamada. `Never` avisa o analisador de que nada abaixo disto
   /// executa, então cada método abaixo é uma linha só.
   Never _recusar() => throw failure;
 
   @override
-  Future<AuthSession> login({required String matricula, required String senha}) async =>
+  Future<AuthSession> login({required String matricula, required String senha, String? totpCode}) async =>
+      _recusar();
+
+  @override
+  Future<TotpEnrollmentStart> beginTotpEnrollment({required String matricula, required String senha}) async =>
+      _recusar();
+
+  @override
+  Future<void> confirmTotpEnrollment({required String matricula, required String senha, required String code}) async =>
       _recusar();
 
   @override
@@ -126,13 +251,43 @@ class MisconfiguredBackend implements AcsBackend {
   Future<AlertAckResult> acknowledge({required String alertId}) async => _recusar();
 
   @override
-  Future<List<VisitSyncResult>> syncVisits(List<VisitSyncEntry> visits) async => _recusar();
+  Future<List<VisitSyncResult>> syncVisits(List<VisitSyncEntry> visits, {String? expectedUserId}) async =>
+      _recusar();
+
+  @override
+  Future<List<VisitSyncResult>> syncLegacyVisits(List<VisitSyncEntry> visits, {required String deviceId}) async =>
+      _recusar();
+
+  @override
+  Future<List<VisitSyncResult>> syncDeferredVisits({
+    required String uploadToken,
+    required String deviceId,
+    required List<VisitSyncEntry> visits,
+  }) async =>
+      _recusar();
+
+  @override
+  Future<void> revokeUploadToken(String uploadToken) async => _recusar();
 
   @override
   Future<List<VisitSyncEntry>> pullVisits({required DateTime since}) async => _recusar();
 
   @override
   Future<List<MicroAreaPatient>> listPatients() async => _recusar();
+
+  @override
+  Future<UbsContact> ubsContact() async => _recusar();
+
+  @override
+  Future<EnrollmentTokenResult> generateInvite({required String patientId}) async => _recusar();
+
+  @override
+  Future<NoticeSendResult> sendNotice({
+    required String title,
+    required String message,
+    required bool chronicOnly,
+  }) async =>
+      _recusar();
 
   /// Fechar **não** é uma chamada ao backend: não há o que fechar, e um `close`
   /// que lançasse derrubaria o `finally` de quem só queria encerrar.
@@ -148,8 +303,19 @@ class BackendClient implements AcsBackend {
   /// aceita às cegas. Nunca instale um `badCertificateCallback` que aceite tudo:
   /// este app já faz verificação de hostname no MQTT e ceder aqui anularia
   /// RNF04 no ponto onde ele mais importa.
-  BackendClient({String? host, List<int>? trustedCaBytes})
-      : _client = Client(
+  BackendClient({
+    String? host,
+    List<int>? trustedCaBytes,
+    SessionTokenStore? tokenStore,
+    DeviceIdStore? deviceIds,
+    UploadTokenStore? uploadTokens,
+  // Sem store, só memória: o Keystore (`secure_session_token_store.dart`)
+  // depende do Flutter e este arquivo roda também na VM (`tool/live_check.dart`).
+  // Quem liga o Keystore é o `main.dart`; sem ele, nada sobrevive ao app fechar.
+  })  : _tokenStore = tokenStore ?? MemorySessionTokenStore(),
+        _deviceIds = deviceIds ?? MemoryDeviceIdStore(),
+        _uploadTokens = uploadTokens ?? MemoryUploadTokenStore(),
+        _client = Client(
           // Só o host que veio do `--dart-define` (o default de compilação) é
           // validado. Um host **explícito** passa como veio: é o caminho dos
           // testes herméticos, que apontam para servidores fake em
@@ -179,17 +345,19 @@ class BackendClient implements AcsBackend {
 
   AuthSession? _session;
 
-  /// Credencial em memória, para reautenticar quando o token de 15 min expira.
-  ///
-  /// **Só em memória, nunca em disco.** É o que preserva o comportamento que o
-  /// app já tinha (reauth silencioso, que antes chamava `developmentLogin`) sem
-  /// persistir senha nenhuma. A correção durável é o refresh token rotativo que
-  /// `spec/lgpd_design.md` LGPD-RT06 exige e que este plano deliberadamente não
-  /// implementa — ver a lacuna registrada no plano.
-  ({String matricula, String senha})? _credentials;
+  final SessionTokenStore _tokenStore;
+  final DeviceIdStore _deviceIds;
+
+  /// Tokens de envio diferido, um por dono (D7). O login grava; o logout NÃO
+  /// apaga — quem revoga e apaga é o envio diferido, quando a fila do dono
+  /// zera.
+  final UploadTokenStore _uploadTokens;
 
   @override
   AuthSession? get session => _session;
+
+  @override
+  void Function()? onSessionExpired;
 
   @override
   bool get isAuthenticated {
@@ -203,13 +371,18 @@ class BackendClient implements AcsBackend {
   /// Reautentica sozinho quando o token de 15 minutos expirou — sem isso, um
   /// turno de campo longo passa a falhar com erro de permissão, que esconde a
   /// causa real.
-  Future<String> _requireToken() async {
+  Future<String> _requireToken() async => (await _requireSession()).accessToken;
+
+  /// Sessão válida (renovada se preciso). Quem precisa conferir o DONO do token
+  /// usa esta: o token enviado é o desta mesma sessão, sem janela entre a
+  /// conferência e a leitura.
+  Future<AuthSession> _requireSession() async {
     if (!isAuthenticated) await renewSession();
     final current = _session;
     if (current == null) {
       throw const BackendFailure('Sessão não iniciada.', isRecoverable: false);
     }
-    return current.accessToken;
+    return current;
   }
 
   /// Autentica contra `auth.loginInstitutional` (RF07).
@@ -220,11 +393,16 @@ class BackendClient implements AcsBackend {
   Future<AuthSession> login({
     required String matricula,
     required String senha,
+    String? totpCode,
   }) async {
+    final deviceId = await _storage(_deviceIds.readOrCreate);
     final result = await _guard(
       () => _client.auth.loginInstitutional(
         matricula: matricula,
         password: senha,
+        totpCode: totpCode,
+        // O servidor só emite refresh token a quem informa o aparelho.
+        deviceId: deviceId,
       ),
     );
 
@@ -236,35 +414,278 @@ class BackendClient implements AcsBackend {
       );
     }
 
-    _credentials = (matricula: matricula, senha: senha);
-    _session = session;
+    final refreshToken = result.refreshToken;
+    final uploadToken = result.uploadToken;
+    // Incremento da época, gravação do token e troca da sessão numa só seção
+    // crítica: uma renovação (talvez de OUTRO ACS, "Entrar com senha" no
+    // bloqueio) que já estava em voo fica obsoleta e não grava nada por cima
+    // deste login (INV-01/RNF06); uma que comece agora espera a seção acabar e
+    // lê o token NOVO — antes, ela lia o token antigo na janela entre o
+    // incremento e a troca da sessão e terminava "não obsoleta".
+    await _exclusive(() async {
+      _invalidateRenewal();
+      // Grava o refresh token ANTES de expor a sessão. Sem token na resposta,
+      // não deixa um token velho de outra conta para trás.
+      try {
+        if (refreshToken == null || refreshToken.isEmpty) {
+          await _tokenStore.clear();
+        } else {
+          await _tokenStore.write(refreshToken);
+        }
+      } catch (_) {
+        throw _storeLost;
+      }
+      // Token de envio diferido (D7), na MESMA seção: nunca fica gravado sob
+      // um dono com a sessão de outro. Só grava quando veio (o servidor só
+      // emite com `deviceId` real); resposta sem ele não apaga o do mesmo
+      // dono, que pode ainda ter visitas a subir. Falha do Keystore aqui não
+      // derruba o login: sem o token, as visitas deste dono só sobem pela
+      // sessão dele, como antes.
+      if (uploadToken != null && uploadToken.isNotEmpty) {
+        try {
+          await _uploadTokens.write(session.userId, uploadToken);
+        } catch (_) {}
+      }
+      _session = session;
+    });
     return session;
   }
 
-  /// Reautentica usando a credencial em memória.
+  /// Ativação da MFA: sem `_requireToken()` (ainda não há token) e sem reter a
+  /// senha.
+  @override
+  Future<TotpEnrollmentStart> beginTotpEnrollment({
+    required String matricula,
+    required String senha,
+  }) =>
+      _guard(() => _client.auth.beginTotpEnrollment(matricula: matricula, password: senha));
+
+  @override
+  Future<void> confirmTotpEnrollment({
+    required String matricula,
+    required String senha,
+    required String code,
+  }) =>
+      _guard(() => _client.auth.confirmTotpEnrollment(matricula: matricula, password: senha, code: code));
+
+  Future<AuthSession>? _renewal;
+
+  /// Geração da sessão. Login e logout a incrementam; uma renovação que
+  /// começou numa geração anterior é **obsoleta** e, ao terminar, não grava o
+  /// token, não expõe a sessão e não avisa a UI. Sem isto, a renovação lenta
+  /// do ACS A terminava depois do login do ACS B e sobrescrevia o token e a
+  /// sessão de B: o painel de B passava a usar o JWT de A (INV-01/RNF06).
+  int _epoch = 0;
+
+  /// Torna obsoleta qualquer renovação em voo. A próxima chamada a
+  /// [renewSession] não se junta a ela: abre uma nova, na geração atual.
   ///
-  /// Sem credencial guardada não há como renovar: quem chama recebe uma falha
-  /// não recuperável e a tela precisa mandar a pessoa entrar de novo.
-  Future<AuthSession> renewSession() async {
-    final credentials = _credentials;
-    if (credentials == null) {
+  /// Só pode ser chamada dentro de [_exclusive].
+  void _invalidateRenewal() {
+    _epoch++;
+    _renewal = null;
+  }
+
+  /// Cauda da fila de seções críticas. Sempre completa sem erro.
+  Future<void> _commitTail = Future<void>.value();
+
+  /// Seção crítica **serial e não reentrante**: só uma por vez mexe em
+  /// `_session`, no token do Keystore e em `_epoch`. Dentro dela: apenas E/S
+  /// local e atribuições. Nunca rede, nunca `renewSession()`, nunca outro
+  /// `_exclusive` (deadlock). Fecha a corrida em que uma renovação do usuário
+  /// anterior, iniciada entre o incremento da época do login e a troca da
+  /// sessão, lia o token antigo e sobrescrevia o login novo.
+  Future<T> _exclusive<T>(Future<T> Function() body) {
+    final done = Completer<void>();
+    final previous = _commitTail;
+    _commitTail = done.future;
+    return previous.then((_) => body()).whenComplete(done.complete);
+  }
+
+  /// A renovação obsoleta termina assim: recuperável (repetir usa a sessão
+  /// atual), sem `onSessionExpired` e sem tocar no token de quem entrou depois.
+  /// A família rotacionada por ela fica abandonada no servidor (vence sozinha
+  /// ou cai junto no logout).
+  static const _staleRenewal = BackendFailure('A sessão mudou neste aparelho. Tente de novo.');
+
+  /// Renova o JWT com o refresh token guardado. **Single-flight**: chamadas
+  /// simultâneas compartilham UMA renovação (o token rotativo só vale uma vez).
+  Future<AuthSession> renewSession({bool notify = true}) {
+    final pending = _renewal;
+    if (pending != null) return pending;
+    late final Future<AuthSession> flight;
+    flight = _doRenew(notify: notify).whenComplete(() {
+      // Só limpa se ainda é ela: um login no meio já trocou (ou zerou) o voo.
+      if (identical(_renewal, flight)) _renewal = null;
+    });
+    return _renewal = flight;
+  }
+
+  Future<AuthSession> _doRenew({required bool notify}) async {
+    // Época e token lidos JUNTOS, dentro da seção: um login que esteja no meio
+    // (época já incrementada, token novo ainda não gravado) termina antes, e
+    // esta renovação lê o token dele — nunca o da conta anterior.
+    late final int epoch;
+    late final String? token;
+    await _exclusive(() async {
+      epoch = _epoch;
+      token = await _storage(_tokenStore.read);
+      if (token == null) {
+        _expire(notify);
+        throw const BackendFailure('Sua sessão expirou. Entre novamente.', isRecoverable: false);
+      }
+    });
+    bool stale() => epoch != _epoch;
+    final refreshToken = token!;
+    // Fora do `_guard`: falha do armazenamento não é "sem conexão". Fora da
+    // seção também, como a rede abaixo: nada disto mexe em sessão ou token.
+    final deviceId = await _storage(_deviceIds.readOrCreate);
+    // `null` = o servidor recusou o refresh token. Tratado aqui, antes de o
+    // `_guard` transformar a exceção em "sem conexão".
+    // Falha de rede/timeout sai pelo `_guard` como recuperável, sem apagar o
+    // token: a repetição cai na tolerância de 30 s do servidor.
+    final result = await _guard(() async {
+      try {
+        return await _client.auth.refreshSession(refreshToken: refreshToken, deviceId: deviceId);
+      } on SessionExpiredException {
+        return null;
+      }
+    });
+    // Confirmação dentro da seção: a checagem de obsolescência é definitiva
+    // (ninguém intercala entre ela e as gravações abaixo).
+    return _exclusive(() async {
+      // Obsoleta: o token guardado agora é de outro login (ou foi apagado pelo
+      // logout). Nem a recusa nem o filho podem mexer nele.
+      if (stale()) throw _staleRenewal;
+      if (result == null) {
+        try {
+          await _tokenStore.clear();
+        } catch (_) {
+          // Best-effort: a sessão acabou de qualquer jeito.
+        }
+        _expire(notify);
+        throw const BackendFailure(
+          'Sua sessão expirou. Entre novamente com o código do autenticador.',
+          isRecoverable: false,
+        );
+      }
+      final next = result.refreshToken;
+      final hasNext = next != null && next.isNotEmpty;
+      // Grava o filho ANTES de qualquer outra coisa: o servidor já rotacionou,
+      // e perder o filho é perder o turno — mesmo se o JWT não puder ser lido.
+      if (hasNext) {
+        try {
+          await _tokenStore.write(next);
+        } catch (_) {
+          // O token novo se perdeu e o antigo já foi gasto: sessão acabou.
+          try {
+            await _tokenStore.clear();
+          } catch (_) {}
+          _expire(notify);
+          throw _storeLost;
+        }
+      }
+      final session = AuthSession.tryParse(result.accessToken, result.tokenType);
+      if (session == null || !hasNext) {
+        throw const BackendFailure(
+          'O servidor devolveu um token que o aplicativo não entendeu.',
+          isRecoverable: false,
+        );
+      }
+      return _session = session;
+    });
+  }
+
+  static const _storeLost = BackendFailure(
+    'Não foi possível guardar a sessão neste aparelho. Entre novamente.',
+    isRecoverable: false,
+  );
+
+  /// Executa uma operação do armazenamento seguro; qualquer exceção vira
+  /// [BackendFailure] (nunca uma `PlatformException` crua na UI).
+  Future<T> _storage<T>(Future<T> Function() op) async {
+    try {
+      return await op();
+    } catch (_) {
       throw const BackendFailure(
-        'Sua sessão expirou. Entre novamente.',
+        'Não foi possível acessar o armazenamento seguro deste aparelho.',
         isRecoverable: false,
       );
     }
-    return login(
-      matricula: credentials.matricula,
-      senha: credentials.senha,
-    );
+  }
+
+  void _expire(bool notify) {
+    _session = null;
+    if (notify) onSessionExpired?.call();
+  }
+
+  @override
+  Future<bool> get hasStoredSession async {
+    try {
+      return await _tokenStore.contains();
+    } catch (_) {
+      return false;
+    }
+  }
+
+  @override
+  Future<SessionUnlock> unlockStoredSession({required String reason}) async {
+    try {
+      return await _tokenStore.unlock(reason: reason);
+    } catch (_) {
+      return SessionUnlock.unavailable; // falha fechada
+    }
+  }
+
+  @override
+  Future<AuthSession?> resumeSession() async {
+    try {
+      if (await _tokenStore.read() == null) return null;
+      return await renewSession(notify: false);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  @override
+  Future<void> logout() async {
+    // Primeira seção, ANTES da chamada de rede: a renovação em voo fica
+    // obsoleta e não regrava o token nem ressuscita a sessão quando terminar.
+    final token = await _exclusive<String?>(() async {
+      _invalidateRenewal();
+      _session = null;
+      try {
+        return await _tokenStore.read();
+      } catch (_) {
+        return null;
+      }
+    });
+    // A rede fica fora da seção: uma renovação pode começar enquanto isto
+    // espera — e ainda achar o token guardado.
+    if (token != null) {
+      try {
+        await _client.auth.logout(refreshToken: token);
+      } catch (_) {
+        // Best-effort: o aparelho pode estar sem rede. O token local sai de
+        // qualquer jeito.
+      }
+    }
+    // Segunda seção, DEPOIS da rede: uma renovação que começou durante a
+    // chamada de logout (ainda achou o token guardado) também fica obsoleta, e
+    // a confirmação dela, que só roda depois desta seção, vê isso.
+    await _exclusive(() async {
+      _session = null;
+      _invalidateRenewal();
+      await _storage(_tokenStore.clear);
+    });
   }
 
   /// Login de desenvolvimento, para `tool/` e `integration_test/`.
   ///
   /// É a versão antiga de [login], preservada porque as ferramentas rodam
   /// contra a stack local com `ENABLE_DEV_LOGIN=true` e não têm — nem devem ter
-  /// — a senha institucional embutida. Não guarda `_credentials`: sem
-  /// credencial não há renovação, e quem usar isto em produção recebe a falha
+  /// — a senha institucional embutida. Não grava refresh token: sem
+  /// ele não há renovação, e quem usar isto em produção recebe a falha
   /// não recuperável de [renewSession] quando o token expirar.
   @override
   Future<AuthSession> developmentLogin({required String role}) async {
@@ -280,7 +701,10 @@ class BackendClient implements AcsBackend {
       );
     }
 
-    _session = session;
+    await _exclusive(() async {
+      _invalidateRenewal();
+      _session = session;
+    });
     return session;
   }
 
@@ -303,8 +727,12 @@ class BackendClient implements AcsBackend {
   /// O lote inteiro roda em uma transação no servidor, e cada visita volta com
   /// o próprio `syncStatus`: o app casa pelo `localId`, nunca pela posição.
   @override
-  Future<List<VisitSyncResult>> syncVisits(List<VisitSyncEntry> visits) async {
-    final token = await _requireToken();
+  Future<List<VisitSyncResult>> syncVisits(List<VisitSyncEntry> visits, {String? expectedUserId}) async {
+    final current = await _requireSession();
+    // Depois da resolução do token (a renovação pode ter esperado o login de
+    // OUTRO ACS e devolvido a sessão dele) e imediatamente antes da rede.
+    if (expectedUserId != null && current.userId != expectedUserId) throw sessionOwnerMismatch;
+    final token = current.accessToken;
     return _guard(
       () => _client.visits.sync(accessToken: token, visits: visits),
       // `visits.sync` reaproveita AlertPermissionException para token inválido
@@ -314,6 +742,35 @@ class BackendClient implements AcsBackend {
           'Sua sessão não autoriza sincronizar visitas. Entre novamente.',
     );
   }
+
+  @override
+  Future<List<VisitSyncResult>> syncLegacyVisits(List<VisitSyncEntry> visits, {required String deviceId}) async {
+    final token = await _requireToken();
+    return _guard(
+      () => _client.visits.syncLegacy(accessToken: token, deviceId: deviceId, visits: visits),
+      permissionMessage: 'Sua sessão não autoriza sincronizar visitas. Entre novamente.',
+    );
+  }
+
+  /// Sem `_requireToken()`: o dono do token de envio pode já ter saído.
+  @override
+  Future<List<VisitSyncResult>> syncDeferredVisits({
+    required String uploadToken,
+    required String deviceId,
+    required List<VisitSyncEntry> visits,
+  }) =>
+      _guard(() async {
+        try {
+          return await _client.visits.syncDeferred(uploadToken: uploadToken, deviceId: deviceId, visits: visits);
+        } on SessionExpiredException {
+          // A recusa única do servidor para o token de envio.
+          throw const UploadTokenRefused();
+        }
+      });
+
+  @override
+  Future<void> revokeUploadToken(String uploadToken) =>
+      _guard(() => _client.visits.revokeUploadToken(uploadToken: uploadToken));
 
   /// Reconciliação central→dispositivo: visitas da microárea alteradas desde
   /// `since` (RF15, decisão §5). Espelha [syncVisits] na tradução de falhas.
@@ -334,6 +791,44 @@ class BackendClient implements AcsBackend {
   }
 
   @override
+  Future<UbsContact> ubsContact() async {
+    final token = await _requireToken();
+    return _guard(() => _client.ubs.myContact(accessToken: token));
+  }
+
+  @override
+  Future<EnrollmentTokenResult> generateInvite({required String patientId}) async {
+    final token = await _requireToken();
+    return _guard(
+      () => _client.onboarding.generateEnrollmentToken(
+        accessToken: token,
+        patientId: patientId,
+      ),
+      // O servidor recusa com `AlertPermissionException` quando o paciente
+      // não é da microárea do ACS (INV-01) — "este alerta" não faria sentido.
+      permissionMessage: 'Este paciente não pertence à sua microárea.',
+    );
+  }
+
+  @override
+  Future<NoticeSendResult> sendNotice({
+    required String title,
+    required String message,
+    required bool chronicOnly,
+  }) async {
+    final token = await _requireToken();
+    return _guard(
+      () => _client.notices.sendSegmented(
+        accessToken: token,
+        title: title,
+        message: message,
+        audience: chronicOnly ? 'chronic' : 'everyone',
+      ),
+      permissionMessage: 'Somente o ACS pode enviar avisos à comunidade.',
+    );
+  }
+
+  @override
   void close() => _client.close();
 
   /// Traduz as exceções tipadas do backend para [BackendFailure].
@@ -346,11 +841,18 @@ class BackendClient implements AcsBackend {
   }) async {
     try {
       return await call();
+    } on BackendFailure {
+      // Já traduzida por quem chamou (ex.: [UploadTokenRefused]).
+      rethrow;
     } on EndpointDisabledException {
       throw const BackendFailure(
         'O acesso de desenvolvimento está desativado neste servidor.',
         isRecoverable: false,
       );
+    } on MfaRequiredException {
+      throw const MfaCodeRequired();
+    } on MfaEnrollmentRequiredException {
+      throw const MfaEnrollmentRequired();
     } on AuthenticationFailedException catch (error) {
       // A mensagem vem do servidor de propósito: é ela que diferencia "senha
       // inválida" de "acesso bloqueado por tentativas" — e é igual para
@@ -366,6 +868,12 @@ class BackendClient implements AcsBackend {
       );
     } on AlertValidationException catch (error) {
       throw BackendFailure(error.message, isRecoverable: false);
+    } on DataRightsException catch (error) {
+      // Recusa de negócio com texto pronto (aviso vazio ou longo demais).
+      throw BackendFailure(error.message, isRecoverable: false);
+    } on NoticeDeliveryException catch (error) {
+      // O relé de push está fora do ar: tentar de novo faz sentido.
+      throw BackendFailure(error.message);
     } on AlertDispatchUnavailableException {
       throw const BackendFailure(
         'Registrado. A rede está instável e a confirmação será entregue assim '

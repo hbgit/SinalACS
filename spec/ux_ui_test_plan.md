@@ -167,7 +167,7 @@ Complementa (não duplica) o teste funcional de `offline_visit_queue.dart` já c
 **Decisão Geral:** Todos os achados foram formalizados através de atualizações explícitas nas regras do arquivo `spec/ui_design.md`, sem necessidade de regressão no código nativo.
 
 * **[Resolvido] §1.1 e §3.4 (Container Responsivo):** Decisão de Produto (A) acatada. Confirmado que a restrição de container aplica-se apenas ao Login. Telas pós-login mantêm comportamento expansível nativo (borda a borda). Regra atualizada em `ui_design.md`.
-* **[Resolvido] §1.2 (Dark Mode):** Documentado formalmente como fixo/permanente no documento de design.
+* **[Resolvido, revisto em 2026-10-02] §1.2 (Dark Mode):** A decisão de "fixo/permanente" foi superada: o app passou a oferecer Claro/Escuro/Automático (`45ae667`). O documento de design foi atualizado; o teste de regressão é `theme_controller_test.dart` mais as duas matrizes de contraste.
 * **[Resolvido] §1.3 (Foco Suave):** Inspeção visual validada: o anel M3 padrão apresenta constraste funcional sobre o `surfaceRaised` sem necessidade de overrides.
 * **[Resolvido] §1.4 (Microinterações):** *Ripple* formalizado como equivalência intencional ao `active:scale`.
 * **[Resolvido] §2.1 (Fricção de Emergência):** Limiar formalizado de "≤ 4 toques e ≤ 10s" no design.

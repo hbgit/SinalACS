@@ -125,6 +125,45 @@ void main() {
     expect(event.userId, _patientId);
   });
 
+  test('devolve ao próprio titular a nota de resposta do pedido decidido (#42)', () async {
+    final comResposta = PatientDataSnapshot(
+      name: 'Paciente de Teste',
+      birthDate: DateTime.utc(1990, 1, 1),
+      emergencyContact: 'Contato de teste',
+      isChronic: false,
+      chronicConditions: const [],
+      consents: const [],
+      riskHistory: const [],
+      requests: [
+        DataSubjectRequestSnapshot(
+          id: 'pedido-1',
+          type: DataSubjectRequestType.correction,
+          status: DataSubjectRequestStatus.completed,
+          details: 'texto sintético do pedido',
+          createdAt: DateTime.utc(2026, 9, 30),
+          dueAt: DateTime.utc(2026, 10, 15),
+          resolution: 'nota sintética de resposta',
+        ),
+        DataSubjectRequestSnapshot(
+          id: 'pedido-2',
+          type: DataSubjectRequestType.deletion,
+          status: DataSubjectRequestStatus.open,
+          details: null,
+          createdAt: DateTime.utc(2026, 10, 1),
+          dueAt: DateTime.utc(2026, 10, 16),
+        ),
+      ],
+    );
+    store = FakePatientDataOverviewStore({_patientId: comResposta});
+    service = PatientDataOverviewService(store: store, audit: audit);
+
+    final result = await service.myData(_patient);
+    expect(result.requests.first.resolution, 'nota sintética de resposta');
+    expect(result.requests.first.status, DataSubjectRequestStatus.completed);
+    // Pedido ainda aberto: sem nota.
+    expect(result.requests.last.resolution, isNull);
+  });
+
   test('uma trilha de auditoria fora do ar não impede a leitura', () async {
     audit = FakeAuditTrail(failOnRecord: true);
     service = PatientDataOverviewService(store: store, audit: audit);

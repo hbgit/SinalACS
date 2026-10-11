@@ -56,7 +56,8 @@ abstract class AuditTrail {
       await record(event);
     } catch (error) {
       stderr.writeln(
-        'Falha ao gravar auditoria (${event.actionType}/${event.resourceType}): $error.',
+        'Falha ao gravar auditoria (${event.actionType}/${event.resourceType}, '
+        'erro ${error.runtimeType}).',
       );
     }
   }

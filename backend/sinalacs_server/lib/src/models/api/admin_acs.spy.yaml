@@ -1,0 +1,19 @@
+### ACS no backoffice (#43): identificação profissional, território e estado de
+### acesso. Nunca inclui CPF, senha ou contato.
+###
+### `mfaActive` é `user_credentials.totpEnabledAt IS NOT NULL` — MFA **ativa**,
+### não apenas iniciada: um enrollment pendente (`totpEnabledAt` nulo) não vale
+### como proteção e a tela precisa poder dizer isso.
+class: AdminAcs
+fields:
+  id: String
+  name: String
+  enrollmentId: String
+  ubsId: String
+  ubsName: String
+  ### Nulos enquanto o ACS não tem território (`users.microAreaId`). A listagem
+  ### inclui quem não tem microárea, para poder vinculá-lo.
+  microAreaId: String?
+  microAreaName: String?
+  active: bool
+  mfaActive: bool

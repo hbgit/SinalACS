@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sinalacs_acs/core/database/encrypted_database.dart';
+import 'package:sinalacs_acs/core/database/sqlcipher_visit_store.dart';
 import 'package:sinalacs_acs/core/database/sync_cursor_store.dart';
 import 'package:sinalacs_acs/core/security/database_key_store.dart';
 import 'package:sinalacs_acs/core/services/offline_visit_queue.dart';
@@ -39,6 +40,7 @@ void main() {
     backend = FakeAcsBackend();
     cursorStore = SyncCursorStore(
       keyStore: InMemoryDatabaseKeyStore(),
+      owner: 'acs-a',
       databaseName: dbName,
       allowUnencryptedForTesting: true,
     );
@@ -164,5 +166,61 @@ void main() {
     await service.pullAndMerge();
 
     expect(service.lastPulled, hasLength(2));
+  });
+
+  group('por dono', () {
+    late VisitDatabase db;
+    late SqlCipherVisitStorage storage;
+
+    setUp(() {
+      db = VisitDatabase(
+        keyStore: InMemoryDatabaseKeyStore(),
+        databaseName: dbName,
+        allowUnencryptedForTesting: true,
+      );
+      storage = SqlCipherVisitStorage(
+        keyStore: InMemoryDatabaseKeyStore(),
+        databaseName: dbName,
+        allowUnencryptedForTesting: true,
+      );
+    });
+    tearDown(() async {
+      await db.close();
+      await storage.close();
+    });
+
+    test('pullAndMerge de B usa since=epoch mesmo com cursor de A gravado', () async {
+      await SyncCursorStore.on(db, owner: 'acs-a').write(DateTime.utc(2026, 10, 3));
+      final service = VisitPullService(
+        backend: backend,
+        cursorStore: SyncCursorStore.on(db, owner: 'acs-b'),
+        localVisits: InMemoryVisitStore(),
+      );
+
+      await service.pullAndMerge();
+
+      expect(backend.pullSinceCalls.single, DateTime.utc(2000));
+    });
+
+    test('dedupe de localId enxerga so a fila do dono', () async {
+      await storage.forOwner('acs-a').save([
+        OfflineVisitRecord(
+          localId: 'local-a1',
+          patientId: seedPatientId,
+          risk: 'green',
+          status: 'PENDENTE',
+        ),
+      ]);
+      backend.pullEntries = [entry(localId: 'local-a1', syncAt: DateTime.utc(2026, 10, 3))];
+      final service = VisitPullService(
+        backend: backend,
+        cursorStore: SyncCursorStore.on(db, owner: 'acs-b'),
+        localVisits: storage.forOwner('acs-b'),
+      );
+
+      await service.pullAndMerge();
+
+      expect(service.lastPulled.map((e) => e.localId), ['local-a1']);
+    });
   });
 }

@@ -363,6 +363,62 @@ void main() {
     });
   });
 
+  group('certificado de cliente MQTT (mTLS)', () {
+    Map<String, String> producao({bool tls = true, String? cert, String? key}) => {
+          'APP_ENV': 'production',
+          'JWT_SECRET': 'a' * 64,
+          'AUDIT_CHAIN_SECRET': 'b' * 64,
+          'HEALTH_DATA_ENCRYPTION_KEY': 'c' * 64,
+          'CPF_HASH_PEPPER': 'd' * 64,
+          'SMS_GATEWAY': 'log',
+          if (tls) 'MQTT_USE_TLS': 'true',
+          'MQTT_CLIENT_CERT_PATH': ?cert,
+          'MQTT_CLIENT_KEY_PATH': ?key,
+        };
+
+    test('só o certificado, sem a chave, é erro', () {
+      expect(
+        () => AppConfig.fromMap({'MQTT_CLIENT_CERT_PATH': '/c/backend.crt'}),
+        throwsA(isA<StateError>().having(
+          (e) => e.message, 'message', contains('devem vir juntos'))),
+      );
+    });
+
+    test('os dois em development leem os caminhos', () {
+      final config = AppConfig.fromMap({
+        'MQTT_CLIENT_CERT_PATH': '/c/backend.crt',
+        'MQTT_CLIENT_KEY_PATH': '/c/backend.key',
+      });
+      expect(config.mqttClientCertificatePath, '/c/backend.crt');
+      expect(config.mqttClientKeyPath, '/c/backend.key');
+    });
+
+    test('nenhum em development é aceito', () {
+      final config = AppConfig.fromMap(const {});
+      expect(config.mqttClientCertificatePath, isNull);
+      expect(config.mqttClientKeyPath, isNull);
+    });
+
+    test('nenhum em production com TLS é erro', () {
+      expect(
+        () => AppConfig.fromMap(producao()),
+        throwsA(isA<StateError>().having(
+          (e) => e.message, 'message', contains('MQTT_CLIENT_CERT_PATH'))),
+      );
+    });
+
+    test('nenhum em production sem TLS é aceito (broker de teste do CI)', () {
+      // Fora de development nenhuma configuração é construível hoje (o único
+      // SMS_GATEWAY implementado é `log`); o que importa aqui é que o erro,
+      // se houver, NÃO seja o do certificado de cliente.
+      expect(
+        () => AppConfig.fromMap(producao(tls: false)),
+        throwsA(isA<StateError>().having(
+          (e) => e.message, 'message', isNot(contains('MQTT_CLIENT_CERT_PATH')))),
+      );
+    });
+  });
+
   group('defaults', () {
     test('um ambiente vazio produz a configuração de desenvolvimento', () {
       final config = AppConfig.fromMap(const {});
@@ -382,5 +438,101 @@ void main() {
       expect(AppConfig.fromMap(const {'ENABLE_DEV_LOGIN': 'TRUE'}).enableDevLogin, isFalse);
       expect(AppConfig.fromMap(const {'ENABLE_DEV_LOGIN': '1'}).enableDevLogin, isFalse);
     });
+  });
+
+  group('GORUSH_URL (RF14)', () {
+    AppConfig comGorush(String? url) => AppConfig.fromMap({
+          'APP_ENV': 'development',
+          'GORUSH_URL': ?url,
+        });
+
+    test('ausente desliga o envio', () {
+      expect(comGorush(null).gorushUrl, isNull);
+      expect(comGorush('   ').gorushUrl, isNull);
+    });
+
+    test('presente é lida sem espaços e sem barra final', () {
+      expect(comGorush(' http://gorush:8088/ ').gorushUrl, 'http://gorush:8088');
+    });
+
+    test('fora de http(s) é recusada', () {
+      expect(() => comGorush('ftp://x'), throwsA(isA<StateError>()));
+      expect(() => comGorush('gorush:8088'), throwsA(isA<StateError>()));
+    });
+
+    test('o tempo limite do envio é de 5 segundos', () {
+      expect(comGorush(null).gorushTimeout, const Duration(seconds: 5));
+    });
+  });
+
+  group('REQUIRE_ACS_MFA (RF07)', () {
+    // Fora de `development` nenhuma configuração inteira pode ser montada
+    // (ver o cabeçalho: `SMS_GATEWAY`), então a regra de produção é provada
+    // no resolvedor que o `fromMap` usa; o caso de development, pelo `fromMap`.
+    test('development sem a variável: desligado', () {
+      expect(AppConfig.fromMap(const {'APP_ENV': 'development'}).requireAcsMfa, isFalse);
+      expect(AppConfig.resolveRequireAcsMfa(value: null, appEnv: 'development'), isFalse);
+    });
+
+    test('production (ou qualquer ambiente fora de development) sem a variável: ligado', () {
+      expect(AppConfig.resolveRequireAcsMfa(value: null, appEnv: 'production'), isTrue);
+      expect(AppConfig.resolveRequireAcsMfa(value: null, appEnv: 'staging'), isTrue);
+    });
+
+    test('REQUIRE_ACS_MFA=false explícito desliga mesmo em produção', () {
+      expect(AppConfig.resolveRequireAcsMfa(value: 'false', appEnv: 'production'), isFalse);
+    });
+
+    test('REQUIRE_ACS_MFA=true explícito liga em development', () {
+      expect(
+        AppConfig.fromMap(const {'APP_ENV': 'development', 'REQUIRE_ACS_MFA': 'true'}).requireAcsMfa,
+        isTrue,
+      );
+    });
+  });
+
+  group('RETENTION_*_DAYS (LGPD-RF07)', () {
+    AppConfig buildRetention({
+      String? alert,
+      String? visit,
+      String? triage,
+    }) =>
+        AppConfig.fromMap({
+          'APP_ENV': 'development',
+          'RETENTION_ALERT_DAYS': ?alert,
+          'RETENTION_VISIT_DAYS': ?visit,
+          'RETENTION_TRIAGE_DAYS': ?triage,
+        });
+
+    test('ausentes: os defaults da tabela de lgpd_design §5.6', () {
+      final config = buildRetention();
+      expect(config.retentionAlertDays, 730);
+      expect(config.retentionVisitDays, 1825);
+      expect(config.retentionTriageDays, 1825);
+    });
+
+    test('valores válidos são aceitos', () {
+      final config = buildRetention(alert: '365', visit: '2555', triage: '1825');
+      expect(config.retentionAlertDays, 365);
+      expect(config.retentionVisitDays, 2555);
+      expect(config.retentionTriageDays, 1825);
+    });
+
+    test('valor vazio cai no default (variável declarada mas em branco)', () {
+      expect(buildRetention(alert: '  ').retentionAlertDays, 730);
+    });
+
+    for (final invalido in ['0', '-5', 'abc', '1.5', '36501']) {
+      test('"$invalido" é recusado no boot', () {
+        expect(
+          () => buildRetention(alert: invalido),
+          throwsA(isA<StateError>().having(
+            (error) => error.message,
+            'message',
+            contains('RETENTION_ALERT_DAYS inválido'),
+          )),
+        );
+      });
+    }
   });
 }

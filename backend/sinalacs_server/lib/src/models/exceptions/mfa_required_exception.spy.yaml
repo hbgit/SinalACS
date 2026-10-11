@@ -1,0 +1,5 @@
+### O ACS tem MFA ativa, a senha conferiu e faltou o código do autenticador.
+### Só é lançada DEPOIS de a senha estar certa: não revela matrícula nem senha.
+exception: MfaRequiredException
+fields:
+  message: String

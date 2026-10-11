@@ -1,0 +1,6 @@
+### O aviso comunitário não pôde ser entregue agora: o relé de push está fora do
+### ar, lento, ou o envio não está configurado neste ambiente. Mensagem pronta
+### para o ACS ler; nunca cita token, destinatário nem o texto enviado.
+exception: NoticeDeliveryException
+fields:
+  message: String

@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:postgres/postgres.dart';
+import 'package:sinalacs_server/src/application/auth/password_hasher.dart';
 import 'package:sinalacs_server/src/infrastructure/crypto/argon2_password_hasher.dart';
 
 /// Terceira metade do seed de desenvolvimento: a credencial institucional.
@@ -35,13 +36,28 @@ Future<void> main(List<String> args) async {
     exit(2);
   }
 
+  final adminPassword = env['DEV_ADMIN_PASSWORD'];
+  if (adminPassword == null || adminPassword.isEmpty) {
+    stderr.writeln(
+      'DEV_ADMIN_PASSWORD não definida. Acrescente-a ao .env (por exemplo '
+      '`echo "DEV_ADMIN_PASSWORD=\$(openssl rand -hex 32)" >> .env`) ou rode '
+      './scripts/dev/bootstrap_env.sh numa máquina nova.',
+    );
+    exit(2);
+  }
+
   // UUID do ACS semeado. `development.sql` cria a linha de `users` e a de `acs`
   // com ESTE mesmo UUID fixo, e é a de `acs` que carrega
   // `enrollmentId = 'ACS-001'` — o ACS do dev-login. `user_credentials.userId`
   // tem FK para `users`, então um UUID que não exista ali falha alto em vez de
   // gravar uma credencial órfã que ninguém consegue usar.
   const acsId = '00000000-0000-4000-8000-000000000002';
-  final digest = await const Argon2PasswordHasher().derive(password);
+  // UUID do admin do backoffice (`users` role admin + `staff_accounts`
+  // ADM-001, criados por `development.sql`). Mesma FK: id inexistente falha alto.
+  const adminId = '00000000-0000-4000-8000-000000000090';
+  const hasher = Argon2PasswordHasher();
+  final digest = await hasher.derive(password);
+  final adminDigest = await hasher.derive(adminPassword);
 
   final connection = await Connection.open(
     Endpoint(
@@ -59,7 +75,7 @@ Future<void> main(List<String> args) async {
   );
 
   try {
-    await connection.execute(
+    Future<void> grava(String userId, PasswordDigest d) => connection.execute(
       Sql.named(
         'INSERT INTO "user_credentials" '
         '  ("userId", "passwordHash", "passwordSalt", "memoryKb", '
@@ -72,16 +88,23 @@ Future<void> main(List<String> args) async {
         '  "lockedUntil" = NULL, "updatedAt" = NOW()',
       ),
       parameters: {
-        'userId': acsId,
-        'hash': digest.hashBase64,
-        'salt': digest.saltBase64,
-        'memoryKb': digest.memoryKb,
-        'iterations': digest.iterations,
-        'parallelism': digest.parallelism,
+        'userId': userId,
+        'hash': d.hashBase64,
+        'salt': d.saltBase64,
+        'memoryKb': d.memoryKb,
+        'iterations': d.iterations,
+        'parallelism': d.parallelism,
       },
     );
+
+    await grava(acsId, digest);
     stdout.writeln(
       'Credencial de desenvolvimento do ACS ${acsId.substring(0, 8)}… gravada.',
+    );
+    await grava(adminId, adminDigest);
+    stdout.writeln(
+      'Credencial de desenvolvimento do admin ${adminId.substring(0, 8)}… '
+      'gravada.',
     );
   } finally {
     await connection.close();

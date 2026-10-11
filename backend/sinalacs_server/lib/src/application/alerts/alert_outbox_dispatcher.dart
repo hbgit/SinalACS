@@ -68,7 +68,7 @@ class AlertOutboxDispatcher {
       );
       stderr.writeln(
         'Entrega do alerta ${entry.delivery.alertId} adiada '
-        '(tentativa ${entry.attempts}): $error',
+        '(tentativa ${entry.attempts}, erro ${error.runtimeType}).',
       );
       return false;
     }

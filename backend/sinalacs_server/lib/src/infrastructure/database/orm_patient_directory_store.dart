@@ -1,8 +1,12 @@
 import 'package:serverpod/serverpod.dart';
+import 'package:sinalacs_server/src/application/patients/data_subject_rights_service.dart'
+    show removedAccountMessage;
 import 'package:sinalacs_server/src/application/patients/patient_directory_service.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
 import 'package:sinalacs_server/src/infrastructure/crypto/encrypted_json.dart';
 import 'package:sinalacs_server/src/infrastructure/crypto/health_data_cipher.dart';
+import 'package:sinalacs_server/src/infrastructure/database/removed_account.dart';
+import 'package:sinalacs_server/src/infrastructure/database/subject_lock.dart';
 
 /// Implementação de [PatientDirectoryStore] sobre o ORM do Serverpod.
 ///
@@ -102,15 +106,22 @@ class OrmPatientDirectoryStore implements PatientDirectoryStore {
   }) async {
     final session = _session();
     final id = UuidValue.fromString(patientId);
-    final patient = await Patient.db.findById(session, id);
-    if (patient == null) {
-      throw StateError('Paciente $patientId não encontrado.');
-    }
-
     final encrypted = await _cipher.encryptJson(conditions);
-    patient
-      ..chronicConditionsEncrypted = encrypted.ciphertextBase64
-      ..chronicConditionsKeyVersion = encrypted.keyVersion;
-    await Patient.db.updateRow(session, patient);
+    // Sob o lock por titular (namespace 1), o mesmo da anonimização (#42): uma
+    // conta anonimizada com JWT ainda vivo não regrava dado de saúde.
+    await session.db.transaction((transaction) async {
+      await lockPerSubject(session, transaction, namespace: lockNamespaceDeletion, key: patientId);
+      if (await isRemovedAccount(session, id, transaction: transaction)) {
+        throw StateError(removedAccountMessage);
+      }
+      final patient = await Patient.db.findById(session, id, transaction: transaction);
+      if (patient == null) {
+        throw StateError('Paciente $patientId não encontrado.');
+      }
+      patient
+        ..chronicConditionsEncrypted = encrypted.ciphertextBase64
+        ..chronicConditionsKeyVersion = encrypted.keyVersion;
+      await Patient.db.updateRow(session, patient, transaction: transaction);
+    });
   }
 }

@@ -53,3 +53,7 @@ Permite preparar público-alvo e mensagem comunitária. O envio depende da futur
 - [Implementação Flutter](../apps/acs/lib/app/app.dart)
 - [Protótipos de referência](../spec/ui_acs)
 - [Guia visual](../spec/ui_design.md)
+
+## Captura de tela
+
+A janela do ACS é `FLAG_SECURE` em **todo** build: `adb screencap` e `screenrecord` saem pretos (inclusive `video/capture/lib.sh`). Para regenerar capturas ou gravar a demonstração, gere o APK de **debug** com `./scripts/dev/run_acs.sh --build --captura` (equivale a `-Psinalacs.allowScreenCapture=true`) e use dados sintéticos. A liberação é uma constante de compilação (`BuildConfig.ALLOW_SCREEN_CAPTURE`, `false` por padrão): o build de release **recusa** a propriedade, e não há menu, intent nem preferência que a altere em execução. Prova: `scripts/qa/acs_secure_window.sh [--captura]` e o cenário 6 de `scripts/qa/acs_release_signing.sh`.
