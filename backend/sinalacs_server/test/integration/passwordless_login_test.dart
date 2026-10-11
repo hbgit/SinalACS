@@ -9,6 +9,7 @@ import 'package:sinalacs_server/src/infrastructure/database/orm_otp_challenge_st
 import 'package:sinalacs_server/src/runtime/alert_runtime.dart';
 import 'package:test/test.dart';
 
+import '../support/health_data_fixtures.dart';
 import 'test_tools/runtime_harness.dart';
 import 'test_tools/serverpod_test_tools.dart';
 
@@ -734,12 +735,10 @@ Future<void> _seedPatient(Session session) async {
   );
   await Patient.db.insertRow(
     session,
-    Patient(
-      id: UuidValue.fromString(_patientId),
+    await encryptedPatient(
+      id: _patientId,
       emergencyContact: 'Contato sintético',
       isChronic: false,
-      chronicConditionsEncrypted: '',
-      chronicConditionsKeyVersion: 1,
     ),
   );
 }

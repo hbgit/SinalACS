@@ -481,7 +481,7 @@ void main() {
         final p = (await Patient.db.findById(session, a))!;
         expect(p.chronicConditionsEncrypted, '');
         expect(p.lastLocationHash, isNull);
-        expect(p.emergencyContact, '');
+        expect(p.emergencyContactEncrypted, '');
         expect(u.birthDate, DateTime.utc(1900, 1, 1));
 
         expect(await PushToken.db.count(session, where: (t) => t.userId.equals(a)), 0);

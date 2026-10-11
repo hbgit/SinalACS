@@ -8,6 +8,7 @@ import 'package:sinalacs_server/src/infrastructure/database/orm_admin_read_store
 import 'package:sinalacs_server/src/infrastructure/database/orm_audit_trail.dart';
 import 'package:test/test.dart';
 
+import '../support/health_data_fixtures.dart';
 import 'test_tools/serverpod_test_tools.dart';
 
 /// Leitura do backoffice (#40) contra Postgres real: escopo por UBS, TMRAV,
@@ -119,8 +120,8 @@ Future<void> _seed(Session s) async {
   await _usuario(s, _paciente, _pacienteNome, UserRole.patient, ma: _maA);
   await Patient.db.insertRow(
     s,
-    Patient(
-      id: UuidValue.fromString(_paciente),
+    await encryptedPatient(
+      id: _paciente,
       emergencyContact: 'x',
       isChronic: false,
     ),

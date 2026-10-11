@@ -490,4 +490,49 @@ void main() {
       );
     });
   });
+
+  group('RETENTION_*_DAYS (LGPD-RF07)', () {
+    AppConfig buildRetention({
+      String? alert,
+      String? visit,
+      String? triage,
+    }) =>
+        AppConfig.fromMap({
+          'APP_ENV': 'development',
+          'RETENTION_ALERT_DAYS': ?alert,
+          'RETENTION_VISIT_DAYS': ?visit,
+          'RETENTION_TRIAGE_DAYS': ?triage,
+        });
+
+    test('ausentes: os defaults da tabela de lgpd_design §5.6', () {
+      final config = buildRetention();
+      expect(config.retentionAlertDays, 730);
+      expect(config.retentionVisitDays, 1825);
+      expect(config.retentionTriageDays, 1825);
+    });
+
+    test('valores válidos são aceitos', () {
+      final config = buildRetention(alert: '365', visit: '2555', triage: '1825');
+      expect(config.retentionAlertDays, 365);
+      expect(config.retentionVisitDays, 2555);
+      expect(config.retentionTriageDays, 1825);
+    });
+
+    test('valor vazio cai no default (variável declarada mas em branco)', () {
+      expect(buildRetention(alert: '  ').retentionAlertDays, 730);
+    });
+
+    for (final invalido in ['0', '-5', 'abc', '1.5', '36501']) {
+      test('"$invalido" é recusado no boot', () {
+        expect(
+          () => buildRetention(alert: invalido),
+          throwsA(isA<StateError>().having(
+            (error) => error.message,
+            'message',
+            contains('RETENTION_ALERT_DAYS inválido'),
+          )),
+        );
+      });
+    }
+  });
 }

@@ -6,6 +6,7 @@ import 'package:sinalacs_server/src/generated/protocol.dart';
 import 'package:sinalacs_server/src/runtime/alert_runtime.dart';
 import 'package:test/test.dart';
 
+import '../support/health_data_fixtures.dart';
 import 'test_tools/serverpod_test_tools.dart';
 
 /// `admin.*` (#40) pelo endpoint, com tokens reais e Postgres real: papel,
@@ -111,8 +112,8 @@ Future<void> _seed(Session s) async {
   await _usuario(s, _paciente, _nomePaciente, UserRole.patient, ma: _maA);
   await Patient.db.insertRow(
     s,
-    Patient(
-      id: UuidValue.fromString(_paciente),
+    await encryptedPatient(
+      id: _paciente,
       emergencyContact: 'x',
       isChronic: false,
     ),

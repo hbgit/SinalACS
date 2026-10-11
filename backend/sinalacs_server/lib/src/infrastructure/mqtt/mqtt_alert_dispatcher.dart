@@ -40,7 +40,10 @@ class MqttAlertDispatcher implements AlertPublisher {
     try {
       await _connectOnce();
     } catch (error) {
-      stderr.writeln('Falha ao conectar ao broker MQTT: $error. Tentando novamente em segundo plano...');
+      stderr.writeln(
+        'Falha ao conectar ao broker MQTT (${error.runtimeType}). '
+        'Tentando novamente em segundo plano...',
+      );
       unawaited(_reconnectWithBackoff());
     }
   }
@@ -107,9 +110,13 @@ class MqttAlertDispatcher implements AlertPublisher {
       // (INV-03), por isso a falha é aguardada e registrada.
       try {
         await handler(ack);
-      } catch (error, stackTrace) {
+      } catch (error) {
+        // Só o id sintético e o TIPO do erro, nunca `$error`/`$stackTrace`
+        // brutos: um aggregator de log arquiva o stderr sem tratamento, e a
+        // exceção pode carregar atributos do alerta (VAZ-01).
         stderr.writeln(
-          'Falha ao processar ACK do alerta ${ack.alertId}: $error\n$stackTrace',
+          'Falha ao processar ACK do alerta ${ack.alertId} '
+          '(${error.runtimeType}).',
         );
       }
     }
@@ -137,7 +144,9 @@ class MqttAlertDispatcher implements AlertPublisher {
         await _connectOnce();
         break;
       } catch (error) {
-        stderr.writeln('Falha ao reconectar ao broker MQTT: $error.');
+        stderr.writeln(
+          'Falha ao reconectar ao broker MQTT (${error.runtimeType}).',
+        );
         _backoff = Duration(seconds: min(_backoff.inSeconds * 2, _maxBackoff.inSeconds));
       }
     }
