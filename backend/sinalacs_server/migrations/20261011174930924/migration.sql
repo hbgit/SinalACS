@@ -11,9 +11,9 @@ ALTER TABLE "patients" ADD COLUMN "emergencyContactKeyVersion" bigint NOT NULL D
 -- MIGRATION VERSION FOR sinalacs
 --
 INSERT INTO "serverpod_migrations" ("module", "version", "timestamp")
-    VALUES ('sinalacs', '20261008135543372', now())
+    VALUES ('sinalacs', '20261011174930924', now())
     ON CONFLICT ("module")
-    DO UPDATE SET "version" = '20261008135543372', "timestamp" = now();
+    DO UPDATE SET "version" = '20261011174930924', "timestamp" = now();
 
 --
 -- MIGRATION VERSION FOR serverpod

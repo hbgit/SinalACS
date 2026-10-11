@@ -169,7 +169,11 @@ CREATE TABLE "data_subject_requests" (
     "detailsKeyVersion" bigint NOT NULL,
     "status" text NOT NULL,
     "createdAt" timestamp without time zone NOT NULL,
-    "dueAt" timestamp without time zone NOT NULL
+    "dueAt" timestamp without time zone NOT NULL,
+    "decidedAt" timestamp without time zone,
+    "decidedBy" uuid,
+    "resolutionEncrypted" text,
+    "resolutionKeyVersion" bigint
 );
 
 -- Indexes
@@ -674,6 +678,12 @@ ALTER TABLE ONLY "data_subject_requests"
     REFERENCES "users"("id")
     ON DELETE NO ACTION
     ON UPDATE NO ACTION;
+ALTER TABLE ONLY "data_subject_requests"
+    ADD CONSTRAINT "data_subject_requests_fk_1"
+    FOREIGN KEY("decidedBy")
+    REFERENCES "users"("id")
+    ON DELETE NO ACTION
+    ON UPDATE NO ACTION;
 
 --
 -- Foreign relations for "enrollment_tokens" table
@@ -782,9 +792,9 @@ ALTER TABLE ONLY "serverpod_query_log"
 -- MIGRATION VERSION FOR sinalacs
 --
 INSERT INTO "serverpod_migrations" ("module", "version", "timestamp")
-    VALUES ('sinalacs', '20261008135543372', now())
+    VALUES ('sinalacs', '20261011174930924', now())
     ON CONFLICT ("module")
-    DO UPDATE SET "version" = '20261008135543372', "timestamp" = now();
+    DO UPDATE SET "version" = '20261011174930924', "timestamp" = now();
 
 --
 -- MIGRATION VERSION FOR serverpod

@@ -1190,6 +1190,34 @@
           "columnType": 4,
           "isNullable": false,
           "dartType": "DateTime"
+        },
+        {
+          "__className__": "serverpod.ColumnDefinition",
+          "name": "decidedAt",
+          "columnType": 4,
+          "isNullable": true,
+          "dartType": "DateTime?"
+        },
+        {
+          "__className__": "serverpod.ColumnDefinition",
+          "name": "decidedBy",
+          "columnType": 7,
+          "isNullable": true,
+          "dartType": "UuidValue?"
+        },
+        {
+          "__className__": "serverpod.ColumnDefinition",
+          "name": "resolutionEncrypted",
+          "columnType": 0,
+          "isNullable": true,
+          "dartType": "String?"
+        },
+        {
+          "__className__": "serverpod.ColumnDefinition",
+          "name": "resolutionKeyVersion",
+          "columnType": 6,
+          "isNullable": true,
+          "dartType": "int?"
         }
       ],
       "foreignKeys": [
@@ -1198,6 +1226,20 @@
           "constraintName": "data_subject_requests_fk_0",
           "columns": [
             "userId"
+          ],
+          "referenceTable": "users",
+          "referenceTableSchema": "public",
+          "referenceColumns": [
+            "id"
+          ],
+          "onUpdate": 3,
+          "onDelete": 3
+        },
+        {
+          "__className__": "serverpod.ForeignKeyDefinition",
+          "constraintName": "data_subject_requests_fk_1",
+          "columns": [
+            "decidedBy"
           ],
           "referenceTable": "users",
           "referenceTableSchema": "public",
