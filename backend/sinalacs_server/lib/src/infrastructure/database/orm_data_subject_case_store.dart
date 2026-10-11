@@ -336,7 +336,7 @@ class OrmDataSubjectCaseStore implements DataSubjectCaseStore {
       '''
       UPDATE patients
       SET "chronicConditionsEncrypted" = '', "lastLocationHash" = NULL,
-          "emergencyContact" = ''
+          "emergencyContactEncrypted" = ''
       WHERE id = @id::uuid
       ''',
       parameters: QueryParameters.named({'id': titular.uuid}),
