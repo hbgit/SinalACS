@@ -195,7 +195,14 @@ class AlertRuntime {
   /// publicação no broker falhar.
   RedAlertService serviceFor(Session session, {Transaction? transaction}) =>
       RedAlertService(
-        store: OrmAlertStore(session: () => session, transaction: transaction),
+        store: OrmAlertStore(
+          session: () => session,
+          transaction: transaction,
+          appendAudit: OrmAuditTrail(
+            session: () => session,
+            chainSecret: config.auditChainSecret,
+          ).recordInTransaction,
+        ),
         outbox: OrmAlertOutbox(session: () => session, transaction: transaction),
       );
 

@@ -2,6 +2,7 @@ import 'package:sinalacs_server/src/application/alerts/red_alert_service.dart';
 import 'package:sinalacs_server/src/application/auth/development_auth_service.dart';
 import 'package:sinalacs_server/src/domain/entities/alert_delivery.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
+import 'package:sinalacs_server/src/application/audit/audit_trail.dart';
 import 'package:test/test.dart';
 
 class FakeAlertPublisher implements AlertPublisher {
@@ -18,7 +19,12 @@ class FakeAlertStore implements AlertStore {
   Future<void> save(AlertDelivery alert, {required String deviceId}) async => saved.add(alert);
 
   @override
-  Future<bool> acknowledge({required String alertId, required String acsId, required String microAreaId}) async => true;
+  Future<bool> acknowledge({required String alertId, required String acsId, required String microAreaId, required AuditEvent audit}) async {
+    audits.add(audit);
+    return true;
+  }
+
+  final List<AuditEvent> audits = [];
 
   // Deduplicação agora vive no armazenamento, então o fake a implementa em
   // memória — mesma semântica, sem Postgres.
@@ -250,6 +256,28 @@ void main() {
           ),
         ),
         throwsA(isA<StateError>()),
+      );
+    });
+
+    test('acknowledge entrega ao store o evento de auditoria, sem PII (#44)', () async {
+      final store = FakeAlertStore();
+      final service = RedAlertService(store: store, outbox: FakeAlertOutbox());
+
+      final ok = await service.acknowledge(
+        user: const AuthenticatedUser(
+          id: 'acs-1',
+          role: UserRole.acs,
+          microAreaId: 'area-1',
+          deviceId: 'mqtt',
+        ),
+        alertId: 'alerta-1',
+      );
+
+      expect(ok, isTrue);
+      final e = store.audits.single;
+      expect(
+        [e.userId, e.actionType, e.resourceType, e.resourceId, e.result],
+        ['acs-1', 'write', 'alert', 'alerta-1', 'acknowledged'],
       );
     });
   });

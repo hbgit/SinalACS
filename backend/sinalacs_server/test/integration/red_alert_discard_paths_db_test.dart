@@ -16,8 +16,10 @@ import 'test_tools/serverpod_test_tools.dart';
 
 /// Parte com Postgres do inventário de rotas de descarte de alerta vermelho
 /// (#44, Task 3); a parte hermética está em
-/// `test/unit/red_alert_discard_paths_test.dart`. Itens `skip: 'Task 4'` falham
-/// hoje por buraco real (ids iguais aos do dev-login, para o RPC real rodar); a Task 4 corrige e tira o skip. Dados sintéticos.
+/// `test/unit/red_alert_discard_paths_test.dart`. Os buracos
+/// que a Task 3 provou (ACK sem auditoria, expurgo de vermelho pending) foram
+/// fechados na Task 4. Ids iguais aos do dev-login, para o RPC real rodar.
+/// Dados sintéticos.
 const _ubs = '00000000-0000-4000-8000-000000000004';
 const _ma = '00000000-0000-4000-8000-000000000003';
 const _pac = '00000000-0000-4000-8000-000000000001';
@@ -156,7 +158,6 @@ void main() {
           reason: 'ACK de alerta vermelho sem linha em audit_logs',
         );
       },
-      skip: 'Task 4: ACK por RPC não grava audit_logs',
     );
 
     test(
@@ -188,7 +189,6 @@ void main() {
           reason: 'ACK por MQTT sem linha em audit_logs',
         );
       },
-      skip: 'Task 4: ACK por MQTT não grava audit_logs',
     );
 
     test(
@@ -251,7 +251,6 @@ void main() {
         );
         expect(restante!.status, AlertStatus.pending);
       },
-      skip: 'Task 4: retenção apaga alerta vermelho pending vencido',
     );
 
     test(

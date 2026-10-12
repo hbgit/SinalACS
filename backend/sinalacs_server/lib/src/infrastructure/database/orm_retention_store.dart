@@ -16,6 +16,14 @@ class OrmRetentionStore implements RetentionStore {
   /// mas independente: expurgo e apêndice de auditoria não se serializam.
   static const _expurgeLockKey = 725100824;
 
+  /// D7 (#44): alerta vermelho ainda `pending` nunca é expurgado — o prazo de
+  /// retenção não pode descartar um chamado de urgência sem desfecho. O mesmo
+  /// predicado vale para o pai e para os filhos (nenhum filho de alerta
+  /// retido sai, e nenhuma FK quebra).
+  static const _expurgavel =
+      '"triggeredAt" < @cutoff '
+      'AND NOT ("riskLevel" = \'red\' AND "status" = \'pending\')';
+
   @override
   Future<ExpurgeCounts> purgeDue(RetentionCutoffs cutoffs) async {
     final session = _session();
@@ -29,25 +37,25 @@ class OrmRetentionStore implements RetentionStore {
       // B3: contagens ANTES dos DELETEs — são o único resíduo do que saiu.
       final counts = ExpurgeCounts(
         alerts: await _count(
-          'SELECT COUNT(*) FROM alerts WHERE "triggeredAt" < @cutoff',
+          'SELECT COUNT(*) FROM alerts WHERE $_expurgavel',
           cutoffs.alerts,
           transaction,
         ),
         alertDeliveries: await _count(
           'SELECT COUNT(*) FROM alert_deliveries WHERE "alertId" IN '
-          '(SELECT id FROM alerts WHERE "triggeredAt" < @cutoff)',
+          '(SELECT id FROM alerts WHERE $_expurgavel)',
           cutoffs.alerts,
           transaction,
         ),
         alertIdempotencyKeys: await _count(
           'SELECT COUNT(*) FROM alert_idempotency_keys WHERE "alertId" IN '
-          '(SELECT id FROM alerts WHERE "triggeredAt" < @cutoff)',
+          '(SELECT id FROM alerts WHERE $_expurgavel)',
           cutoffs.alerts,
           transaction,
         ),
         alertOutbox: await _count(
           'SELECT COUNT(*) FROM alert_outbox WHERE "alertId" IN '
-          '(SELECT id FROM alerts WHERE "triggeredAt" < @cutoff)',
+          '(SELECT id FROM alerts WHERE $_expurgavel)',
           cutoffs.alerts,
           transaction,
         ),
@@ -63,30 +71,36 @@ class OrmRetentionStore implements RetentionStore {
           transaction,
         ),
         alertsByRisk: await _alertsByRisk(cutoffs.alerts, transaction),
+        skippedPendingRed: await _count(
+          'SELECT COUNT(*) FROM alerts WHERE "triggeredAt" < @cutoff '
+          'AND "riskLevel" = \'red\' AND "status" = \'pending\'',
+          cutoffs.alerts,
+          transaction,
+        ),
       );
 
       // Ordem importa: as FKs dos dependentes de alerts são ON DELETE NO
       // ACTION, então saem antes do alerta pai.
       await _delete(
         'DELETE FROM alert_deliveries WHERE "alertId" IN '
-        '(SELECT id FROM alerts WHERE "triggeredAt" < @cutoff)',
+        '(SELECT id FROM alerts WHERE $_expurgavel)',
         cutoffs.alerts,
         transaction,
       );
       await _delete(
         'DELETE FROM alert_idempotency_keys WHERE "alertId" IN '
-        '(SELECT id FROM alerts WHERE "triggeredAt" < @cutoff)',
+        '(SELECT id FROM alerts WHERE $_expurgavel)',
         cutoffs.alerts,
         transaction,
       );
       await _delete(
         'DELETE FROM alert_outbox WHERE "alertId" IN '
-        '(SELECT id FROM alerts WHERE "triggeredAt" < @cutoff)',
+        '(SELECT id FROM alerts WHERE $_expurgavel)',
         cutoffs.alerts,
         transaction,
       );
       await _delete(
-        'DELETE FROM alerts WHERE "triggeredAt" < @cutoff',
+        'DELETE FROM alerts WHERE $_expurgavel',
         cutoffs.alerts,
         transaction,
       );
@@ -138,7 +152,7 @@ class OrmRetentionStore implements RetentionStore {
   ) async {
     final rows = await _session().db.unsafeQuery(
       'SELECT "riskLevel", COUNT(*) FROM alerts '
-      'WHERE "triggeredAt" < @cutoff GROUP BY "riskLevel"',
+      'WHERE $_expurgavel GROUP BY "riskLevel"',
       parameters: QueryParameters.named({'cutoff': cutoff}),
       transaction: transaction,
     );

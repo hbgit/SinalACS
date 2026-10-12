@@ -97,7 +97,7 @@ Future<void> _seed(Session session) async {
       triggeredAt: _cutoffAlerts.subtract(const Duration(days: 1)),
       riskLevel: RiskLevel.red,
       locationHash: 'hash-vencido',
-      status: AlertStatus.pending,
+      status: AlertStatus.acknowledged,
       mqttTopic: 'sinalacs/v1/alerts/retencao',
       deviceId: 'device-retencao',
       retryCount: 0,
@@ -251,6 +251,86 @@ void main() {
       expect(await Alert.db.count(session), 2);
       expect(await Visit.db.count(session), 2);
       expect(await TriageSession.db.count(session), 2);
+    });
+
+    test('D7: vermelho pending vencido sobrevive com os filhos; amarelo pending sai',
+        () async {
+      final session = sessionBuilder.build();
+      await _seed(session);
+      final antigo = _cutoffAlerts.subtract(const Duration(days: 30));
+      final vermelho = await Alert.db.insertRow(
+        session,
+        Alert(
+          patientId: UuidValue.fromString(_patientId),
+          triggeredAt: antigo,
+          riskLevel: RiskLevel.red,
+          locationHash: 'hash-retido',
+          status: AlertStatus.pending,
+          mqttTopic: 'sinalacs/v1/alerts/retencao',
+          deviceId: 'device-retencao',
+          retryCount: 0,
+          version: 0,
+        ),
+      );
+      await AlertDeliveryRecord.db.insertRow(
+        session,
+        AlertDeliveryRecord(
+          alertId: vermelho.id!,
+          acsId: UuidValue.fromString(_acsId),
+          acknowledgedAt: _now,
+        ),
+      );
+      await AlertIdempotencyKey.db.insertRow(
+        session,
+        AlertIdempotencyKey(
+          key: 'chave-retida',
+          alertId: vermelho.id!,
+          locationHash: 'hash-retido',
+          createdAt: _now,
+        ),
+      );
+      await AlertOutboxEntry.db.insertRow(
+        session,
+        AlertOutboxEntry(
+          alertId: vermelho.id!,
+          topic: 'sinalacs/v1/alerts/retencao',
+          payload: '{}',
+          createdAt: _now,
+          attempts: 1,
+          nextAttemptAt: _now,
+        ),
+      );
+      final amarelo = await Alert.db.insertRow(
+        session,
+        Alert(
+          patientId: UuidValue.fromString(_patientId),
+          triggeredAt: antigo,
+          riskLevel: RiskLevel.yellow,
+          locationHash: 'hash-amarelo',
+          status: AlertStatus.pending,
+          mqttTopic: 'sinalacs/v1/alerts/retencao',
+          deviceId: 'device-retencao',
+          retryCount: 0,
+          version: 0,
+        ),
+      );
+
+      final counts = await OrmRetentionStore(session: () => session)
+          .purgeDue(_cutoffs);
+
+      // Saíram o vermelho acknowledged (do seed) e o amarelo pending; o
+      // vermelho pending ficou e é contado como retido.
+      expect(counts.alerts, 2);
+      expect(counts.alertsByRisk, {'red': 1, 'yellow': 1});
+      expect(counts.skippedPendingRed, 1);
+      expect(counts.alertDeliveries, 1, reason: 'só o do alerta apagado');
+      expect(counts.alertIdempotencyKeys, 1);
+      expect(counts.alertOutbox, 1);
+      expect(await Alert.db.findById(session, vermelho.id!), isNotNull);
+      expect(await Alert.db.findById(session, amarelo.id!), isNull);
+      expect(await AlertDeliveryRecord.db.count(session), 1);
+      expect(await AlertIdempotencyKey.db.count(session), 1);
+      expect(await AlertOutboxEntry.db.count(session), 1);
     });
   });
 }

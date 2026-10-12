@@ -1,5 +1,6 @@
 import 'package:uuid/uuid.dart';
 
+import 'package:sinalacs_server/src/application/audit/audit_trail.dart';
 import 'package:sinalacs_server/src/application/auth/authorization.dart';
 import 'package:sinalacs_server/src/application/auth/development_auth_service.dart';
 import 'package:sinalacs_server/src/domain/entities/alert_delivery.dart';
@@ -14,7 +15,16 @@ abstract interface class AlertPublisher {
 abstract interface class AlertStore {
   Future<void> save(AlertDelivery alert, {required String deviceId});
 
-  Future<bool> acknowledge({required String alertId, required String acsId, required String microAreaId});
+  /// Confirma o alerta no território do ACS. Quando o alerta existe na
+  /// microárea, grava [audit] na MESMA transação da mudança de status (#44):
+  /// se a trilha falhar, o ACK é desfeito — nenhum alerta vermelho muda de
+  /// estado sem registro. Sem alerta na microárea, nada é gravado.
+  Future<bool> acknowledge({
+    required String alertId,
+    required String acsId,
+    required String microAreaId,
+    required AuditEvent audit,
+  });
 
   /// Recupera o alerta já criado para esta chave de idempotência, se houver.
   ///
@@ -182,7 +192,21 @@ class RedAlertService {
     if (alertId.trim().isEmpty) {
       throw ArgumentError('O identificador do alerta é obrigatório.');
     }
-    return _store.acknowledge(alertId: alertId, acsId: user.id, microAreaId: user.microAreaId!);
+    // Toda confirmação que encontra o alerta é auditada, inclusive a repetida
+    // do mesmo ACS: o log é append-only e registra cada ato (decisão #44).
+    // Sem identidade de paciente: só quem confirmou e qual alerta.
+    return _store.acknowledge(
+      alertId: alertId,
+      acsId: user.id,
+      microAreaId: user.microAreaId!,
+      audit: AuditEvent(
+        userId: user.id,
+        actionType: 'write',
+        resourceType: 'alert',
+        resourceId: alertId,
+        result: 'acknowledged',
+      ),
+    );
   }
 
   /// Status do alerta mais recente do próprio paciente autenticado (RF05,
