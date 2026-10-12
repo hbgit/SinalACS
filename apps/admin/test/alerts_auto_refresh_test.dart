@@ -254,6 +254,82 @@ void main() {
     expect(fonte.pulsos, 3, reason: 'e o ciclo de 30 s é retomado');
   });
 
+  testWidgets('inactive sozinho (janela sem foco) não pausa o timer nem encerra a sessão', (tester) async {
+    await montarAlertas(tester, controlador());
+    expect(fonte.pulsos, 1);
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    await tester.pump();
+    expect(fonte.monitoringSessionEnds, 0);
+
+    await tester.pump(const Duration(seconds: 30));
+    expect(fonte.pulsos, 2, reason: 'painel num segundo monitor segue atualizando');
+    await tester.pump(const Duration(seconds: 30));
+    expect(fonte.pulsos, 3);
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
+    expect(fonte.pulsos, 3, reason: 'voltar do inactive não gera pulso extra');
+    expect(fonte.monitoringSessionEnds, 0);
+  });
+
+  testWidgets('recarga pelo pulso relê só os alertas; filtro da pessoa relê as microáreas', (tester) async {
+    await montarAlertas(tester, controlador());
+    expect(fonte.buscasDeMicroareas, 1);
+
+    fonte.maxChangedAt = DateTime(2026, 10, 11, 9, 0, 10);
+    await ciclo(tester);
+    expect(fonte.buscasDeAlertas, 2);
+    expect(fonte.buscasDeMicroareas, 1, reason: 'cada leitura de microáreas é uma linha read a mais');
+    // As opções do filtro continuam lá.
+    await tester.tap(find.byKey(const Key('alerts_micro_area_filter')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Microárea 12 — Zona Rural').last);
+    await tester.pump();
+    await tester.pump();
+    expect(fonte.buscasDeMicroareas, 2, reason: 'filtro mudado pela pessoa: comportamento de hoje');
+    expect(find.byKey(const Key('alert_alert-3')), findsNothing);
+  });
+
+  testWidgets('recarga pelo pulso sem dado anterior busca também as microáreas', (tester) async {
+    fonte.falhaDasBuscas = StateError('primeiro carregamento falhou');
+    await montarAlertas(tester, controlador());
+    expect(find.text('Não foi possível carregar os alertas.'), findsOneWidget);
+    expect(fonte.buscasDeMicroareas, 0);
+
+    fonte
+      ..falhaDasBuscas = null
+      ..maxChangedAt = DateTime(2026, 10, 11, 9, 0, 10);
+    await ciclo(tester);
+    expect(fonte.buscasDeMicroareas, 1);
+    expect(find.byKey(const Key('alert_alert-1')), findsOneWidget);
+  });
+
+  testWidgets('pulso que nunca responde estoura o prazo do app e acende o selo', (tester) async {
+    await montarAlertas(tester, controlador());
+    // A partir daqui o transporte nunca responde (nem com erro).
+    fonte.pulsoPendurado = Completer<AlertsPulse>().future;
+
+    Future<void> avancar(int segundos) async {
+      for (var i = 0; i < segundos ~/ 10; i++) {
+        agora = agora.add(const Duration(seconds: 10));
+        await tester.pump(const Duration(seconds: 10));
+        await tester.pump();
+      }
+    }
+
+    await avancar(50); // pulso dos 30 s estoura aos 50 s: 50 s sem sucesso
+    expect(find.byKey(const Key('stale_badge')), findsNothing);
+    await avancar(30); // pulso dos 60 s estoura aos 80 s
+    expect(find.byKey(const Key('stale_badge')), findsOneWidget);
+    expect(find.byKey(const Key('alert_alert-1')), findsOneWidget);
+    expect(fonte.pulsos, 3, reason: 'o pulso vencido não engole o ciclo seguinte');
+
+    // Pulso em voo ao desmontar: o prazo é cancelado (nenhum Timer pendente).
+    await avancar(10);
+    await tester.pumpWidget(const SizedBox());
+  });
+
   testWidgets('pulso com sessão vencida segue o encerramento de sessão do app', (tester) async {
     fonte.falhaDoPulso = const AdminSessionExpired();
     await tester.pumpWidget(SinalAdminApp(dataSource: fonte, auth: FakeAdminAuth()));

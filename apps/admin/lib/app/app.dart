@@ -628,7 +628,7 @@ class _AlertsListState extends State<_AlertsList> {
   Future<void> _buscar({required bool pelaAtualizacao}) async {
     final geracao = ++_geracao;
     try {
-      final dados = await _load();
+      final dados = await _load(pelaAtualizacao: pelaAtualizacao);
       if (!mounted || geracao != _geracao) return;
       setState(() {
         _dados = dados;
@@ -656,9 +656,15 @@ class _AlertsListState extends State<_AlertsList> {
   /// uma lista fixa no código — senão uma microárea nova (ou uma fonte real,
   /// no lugar do mock) devolveria alertas para um valor que não existe mais
   /// como opção selecionável (achado da revisão do PR).
-  Future<_DadosDosAlertas> _load() async {
+  ///
+  /// Na recarga pelo pulso só os alertas são relidos: cada leitura de
+  /// microáreas grava mais uma linha `read` na auditoria, e as opções do
+  /// filtro não mudam com um alerta novo. Sem dado anterior (o 1º
+  /// carregamento falhou), as microáreas são buscadas também.
+  Future<_DadosDosAlertas> _load({bool pelaAtualizacao = false}) async {
     final alerts = await widget.dataSource.fetchAlerts(microAreaId: widget.microAreaFilter, status: widget.statusFilter);
-    final microAreas = await widget.dataSource.fetchMicroAreas();
+    final anteriores = pelaAtualizacao ? _dados?.microAreas : null;
+    final microAreas = anteriores ?? await widget.dataSource.fetchMicroAreas();
     return (alerts: alerts, microAreas: microAreas);
   }
 

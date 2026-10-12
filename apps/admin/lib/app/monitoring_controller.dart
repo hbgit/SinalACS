@@ -30,14 +30,23 @@ class MonitoringController extends ChangeNotifier with WidgetsBindingObserver {
   MonitoringController({
     required this.dataSource,
     this.pollInterval = const Duration(seconds: 30),
+    Duration? pulseTimeout,
     DateTime Function()? now,
     this.onSessionExpired,
-  }) : now = now ?? DateTime.now;
+  })  : pulseTimeout = pulseTimeout ?? pollInterval * (2 / 3),
+        now = now ?? DateTime.now;
 
   final AdminDataSource dataSource;
 
   /// Intervalo entre pulsos (ADR: 30 s).
   final Duration pollInterval;
+
+  /// Prazo do pulso no próprio app (padrão: 2/3 do intervalo, 20 s). A promessa
+  /// de "desatualizado após 60 s" não pode depender do prazo implícito do
+  /// transporte; menor que o intervalo para o pulso vencido não engolir o
+  /// ciclo seguinte (que seria pulado por haver um pulso em voo). Estourado,
+  /// conta como falha comum (selo), nunca como sessão vencida.
+  final Duration pulseTimeout;
 
   /// Relógio injetável: o estado [stale] é medido nele.
   final DateTime Function() now;
@@ -47,8 +56,12 @@ class MonitoringController extends ChangeNotifier with WidgetsBindingObserver {
   VoidCallback? onSessionExpired;
 
   /// Estados em que o app conta como fora de primeiro plano: o timer pausa.
+  ///
+  /// `inactive` fica de fora de propósito: no desktop e na web ele chega
+  /// quando a janela só perde o foco, e um painel aberto num segundo monitor
+  /// tem de continuar se atualizando. No Android o caminho para o fundo passa
+  /// por `hidden` antes de `paused`, então nada se perde.
   static const _foraDoPrimeiroPlano = {
-    AppLifecycleState.inactive,
     AppLifecycleState.hidden,
     AppLifecycleState.paused,
   };
@@ -57,6 +70,12 @@ class MonitoringController extends ChangeNotifier with WidgetsBindingObserver {
   Timer? _timer;
   bool _emSegundoPlano = false;
   bool _emVoo = false;
+
+  /// Pulso em voo e o prazo dele: cancelados ao parar ou ir para o fundo,
+  /// para nenhum `Timer` ficar pendente e o pulso pendurado não travar o
+  /// próximo ciclo.
+  Completer<AlertsPulse>? _pulsoEmVoo;
+  Timer? _prazoDoPulso;
   bool _sessaoAberta = false;
   bool _sessaoVencida = false;
   bool _descartado = false;
@@ -137,6 +156,7 @@ class MonitoringController extends ChangeNotifier with WidgetsBindingObserver {
   void _suspender() {
     _timer?.cancel();
     _timer = null;
+    _abandonarPulsoEmVoo();
     _encerrarSessao();
   }
 
@@ -154,7 +174,7 @@ class MonitoringController extends ChangeNotifier with WidgetsBindingObserver {
     _emVoo = true;
     _sessaoAberta = true;
     try {
-      final pulso = await dataSource.alertsPulse();
+      final pulso = await _pulsoComPrazo();
       if (_descartado || _telas == 0) return;
       final anterior = _ultimoPulso;
       if (anterior != null && _mudou(anterior, pulso)) _revisao++;
@@ -163,12 +183,47 @@ class MonitoringController extends ChangeNotifier with WidgetsBindingObserver {
       notifyListeners();
     } on AdminSessionExpired {
       _vencerSessao();
+    } on _PulsoAbandonado {
+      // Parado ou em segundo plano: o resultado não interessa mais.
     } catch (_) {
       if (_descartado || _telas == 0) return;
       notifyListeners();
     } finally {
       _emVoo = false;
     }
+  }
+
+  Future<AlertsPulse> _pulsoComPrazo() {
+    final completer = Completer<AlertsPulse>();
+    _pulsoEmVoo = completer;
+    _prazoDoPulso = Timer(pulseTimeout, () {
+      if (!completer.isCompleted) {
+        completer.completeError(TimeoutException('pulso sem resposta', pulseTimeout));
+      }
+    });
+    // `Future.sync`: uma fonte que lança de forma síncrona também chega como
+    // erro do futuro, e o completer nunca fica órfão (sem ninguém ouvindo).
+    Future<AlertsPulse>.sync(dataSource.alertsPulse).then(
+      (pulso) {
+        if (!completer.isCompleted) completer.complete(pulso);
+      },
+      onError: (Object erro, StackTrace pilha) {
+        if (!completer.isCompleted) completer.completeError(erro, pilha);
+      },
+    );
+    return completer.future.whenComplete(() {
+      _prazoDoPulso?.cancel();
+      _prazoDoPulso = null;
+      if (identical(_pulsoEmVoo, completer)) _pulsoEmVoo = null;
+    });
+  }
+
+  void _abandonarPulsoEmVoo() {
+    _prazoDoPulso?.cancel();
+    _prazoDoPulso = null;
+    final emVoo = _pulsoEmVoo;
+    if (emVoo != null && !emVoo.isCompleted) emVoo.completeError(const _PulsoAbandonado());
+    _pulsoEmVoo = null;
   }
 
   void _vencerSessao() {
@@ -219,6 +274,10 @@ class MonitoringController extends ChangeNotifier with WidgetsBindingObserver {
     _descartado = true;
     super.dispose();
   }
+}
+
+class _PulsoAbandonado implements Exception {
+  const _PulsoAbandonado();
 }
 
 /// Liga uma tela de monitoração ao [MonitoringController]: usa o injetado (o

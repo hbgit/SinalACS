@@ -14,6 +14,11 @@ class ScriptedPulseDataSource extends MockAdminDataSource {
   int pulsos = 0;
   int buscasDeAlertas = 0;
   int buscasDeIndicadores = 0;
+  int buscasDeMicroareas = 0;
+
+  /// Quando não nulo, o pulso devolve este futuro (por exemplo, um que nunca
+  /// completa, para provar o prazo do pulso no app).
+  Future<AlertsPulse>? pulsoPendurado;
   bool _dentroDoPulso = false;
 
   /// Substituem o campo correspondente do pulso do mock quando não nulos.
@@ -39,6 +44,8 @@ class ScriptedPulseDataSource extends MockAdminDataSource {
     pulsos++;
     final falha = falhaDoPulso;
     if (falha != null) throw falha;
+    final pendurado = pulsoPendurado;
+    if (pendurado != null) return pendurado;
     // O pulso do mock monta os indicadores por `fetchDashboardIndicators`:
     // essa chamada interna (síncrona, antes do primeiro `await` do mock) não
     // conta como leitura da tela.
@@ -52,6 +59,12 @@ class ScriptedPulseDataSource extends MockAdminDataSource {
       maxChangedAt: maxChangedAt ?? base.maxChangedAt,
       serverNow: base.serverNow,
     );
+  }
+
+  @override
+  Future<List<MicroAreaSummary>> fetchMicroAreas() {
+    buscasDeMicroareas++;
+    return super.fetchMicroAreas();
   }
 
   @override
