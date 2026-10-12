@@ -56,9 +56,9 @@ Código do backend: `backend/sinalacs_server/lib/src/infrastructure/mqtt/mqtt_al
 
 | Hipótese | Status |
 |---|---|
-| H1 | não reproduzida (10 execuções do cenário base + 3 variações, Task 5b; sem TLS) |
-| H2 | não reproduzida (mesmas execuções; a ordem observada foi sempre leitura/`onDone` antes de escrita) |
-| H3 | aberta |
+| H1 | **confirmada no Docker/TLS** (8/8 quedas em A e C, `SocketException` não capturada, sem pilha no log; a causa exata, escrita assíncrona vs. leitura, segue sem pilha) ; não reproduzida na sonda isolada sem TLS (10 execuções do cenário base + 3 variações, Task 5b) |
+| H2 | **compatível, não isolada**: a queda ocorre ≤ 0,6 s após o `unpause` (5/5), mas não se observou a ordem de eventos; na sonda sem TLS a ordem foi sempre leitura/`onDone` antes de escrita |
+| H3 | **refutada**: reinício do Mosquitto (B) não derruba (0/3, reconexão em ~2 s); a partição de rede (C) derruba (3/3) sem pausa artificial do backend |
 | H4 | aberta |
 | H5 | aberta |
 
@@ -71,5 +71,33 @@ Código do backend: `backend/sinalacs_server/lib/src/infrastructure/mqtt/mqtt_al
 | 5b-4 | Variação C: drop + `ignorePings` | idem, 1 execução | vivo, sem stderr, reconectou (2) | n/a | nenhuma | sim | <10 s | n/a |
 
 Notas 5b: o SIGSTOP atinge o próprio `dartvm` da sonda (não há processo lançador intermediário). **Não coberto:** TLS (a stack usa 8883; exigiria certificados no broker falso) e RST real com dados pendentes no lado do broker (o `destroy()` do Dart fecha com FIN/RST conforme o kernel; não foi forçado `SO_LINGER 0`). Conclusão honesta: com socket plano, a biblioteca recebe o fim da conexão antes de escrever, por isso o erro assíncrono de escrita não apareceu; H1 não está refutada para TLS nem para `docker pause` real.
+
+### Tarefas 5 e 6: experimentos no Docker (stack de desenvolvimento, MQTT sobre TLS 8883 com certificado de cliente)
+
+Stack usada: a **de desenvolvimento** em execução (`docker compose up -d`), não a de e2e; o `docker-compose.e2e.yml` não altera broker nem rede e o backend já usa `MQTT_USE_TLS=true` com `MQTT_CLIENT_CERT_PATH`/`MQTT_CLIENT_KEY_PATH`, portanto o canal é o mesmo do incidente (TLS 1.3, mTLS). PID 1 do backend = `./server` (sem `sh`): a exceção não tratada encerra o contêiner (exit 255, `RestartCount` continua 0 porque `RestartPolicy=no`; o script religou com `docker start`). Script: `scripts/qa/mqtt_resiliencia_e2e.sh todos` (A x5, B x3, C x3), executado em 2026-10-12 entre 21:02 e 21:29 UTC. Os horários abaixo vêm de `docker logs -t` do backend e do Mosquitto.
+
+| ID | Cenário | Resultado | Exit code | Erro (sanitizado) | Vivo? | Fim vs. evento | Reconexão |
+|---|---|---|---|---|---|---|---|
+| A1 | `docker pause` 120 s + `unpause` | **caiu** | 255 | `Unhandled exception: SocketException: Broken pipe (OS Error: Broken pipe, errno = 32), address = <x>, port = <x>`; sem pilha | não | `FinishedAt` 21:04:25.28 = `unpause` 21:04:25 | só após `docker start` manual (processo novo conecta ao broker em ~15 s) |
+| A2 | idem | **caiu** | 255 | idêntico (Broken pipe, errno 32) | não | fin 21:07:03.56 = unpause 21:07:03 | idem |
+| A3 | idem | **caiu** | 255 | idêntico | não | fin 21:09:41.83 = unpause 21:09:41 | idem |
+| A4 | idem | **caiu** | 255 | idêntico | não | fin 21:12:20.10 = unpause 21:12:20 | idem |
+| A5 | idem | **caiu** | 255 | idêntico | não | fin 21:14:58.38 = unpause 21:14:58 | idem |
+| B1 | `docker restart sinalacs-mosquitto` | sobreviveu | n/a | nenhum | sim (`rc=0` em +5/10/20/40 s) | n/a | 21:15:36.84 broker sobe, 21:15:38.64 backend reconecta (~2 s, primeiro backoff) |
+| B2 | idem | sobreviveu | n/a | nenhum | sim | n/a | 21:16:55.26 -> 21:16:57.04 (~2 s) |
+| B3 | idem | sobreviveu | n/a | nenhum | sim | n/a | 21:18:13.64 -> 21:18:15.45 (~2 s) |
+| C1 | broker fora da rede 100 s e reconectado com alias `mosquitto` | **caiu** | 255 | `Unhandled exception: SocketException: Connection reset by peer (OS Error: Connection reset by peer, errno = 104), address = <x>, port = <x>`; sem pilha | não | `FinishedAt` 21:21:18.39 ~ religação da rede (aprox.; ver nota) | só após `docker start` |
+| C2 | idem | **caiu** | 255 | idêntico (errno 104) | não | fin 21:24:45.75; religação calculada 21:24:45.5 | idem |
+| C3 | idem | **caiu** | 255 | idêntico (errno 104) | não | fin 21:28:18.79; religação calculada 21:28:19 | idem |
+
+Taxas: A 5/5 quedas, B 0/3, C 3/3. Durante a partição (C) o backend seguia vivo (`Running=true rc=0`) e o broker registrou `Client sinalacs-backend-* disconnected: exceeded timeout.` (também em A, 20 a 45 s após o início da pausa): o broker derruba o cliente silencioso, e o backend só descobre ao voltar a escrever/ler. Alias do broker conferido após cada `network connect` (`[mosquitto sinalacs-mosquitto]`); a stack voltou saudável.
+
+Notas e limites:
+- O log do contêiner não traz **nenhuma** linha de pilha (`#0`, `.dart:`): só `Unhandled exception:` e a mensagem do `SocketException`, o que é típico de erro assíncrono entregue sem `StackTrace`. A pilha completa continua desconhecida; para obtê-la seria preciso um `runZonedGuarded`/`PlatformDispatcher.onError` de diagnóstico no backend (fora do escopo desta tarefa, que não altera `lib/`).
+- Duas assinaturas: `EPIPE` (errno 32, A: escrita num socket já fechado pelo broker) e `ECONNRESET` (errno 104, C: o par responde RST ao primeiro pacote após a religação). Ambas aparecem como a mesma exceção não tratada, o que reforça H1 (erro de I/O de socket sem dono).
+- Diferença entre sonda e Docker: a sonda sem TLS (5b) não derrubou; o Docker com TLS 1.3/mTLS derrubou 8/8. A sonda também não fez o socket receber RST/EPIPE de verdade (o broker falso fechava antes). A diferença provável é TLS (o `SecureSocket` escreve/lê pela camada TLS) e o RST real do kernel; não foi isolado qual dos dois.
+- O script na 1ª execução filtrava `docker logs --since` pelo fuso errado (os arquivos `A*.back.log` ficaram vazios e a coluna de reconexão do script saiu `n/a`); corrigido no commit seguinte (`--since` em epoch). Os horários desta tabela foram extraídos manualmente do `docker logs -t`.
+- Efeito nos pendentes (alertas vermelhos durante a interrupção): não medido; é a Tarefa 10b.
+- Impacto: como o backend não reinicia (`RestartPolicy=no`) e a queda acontece com apenas 45 s de silêncio do broker/rede, uma partição de rede real derruba o backend de produção sem recuperação.
 
 ## Regressão final
