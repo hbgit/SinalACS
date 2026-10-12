@@ -72,6 +72,9 @@ conferir 'assert do teto de leituras (o pulso não grava read)' "grep -qF 'teto_
 conferir 'tetos de leitura por recurso' \
   "for r in 'teto admin_indicators 4' 'teto admin_alerts 9' 'teto admin_micro_areas 3' 'teto admin_audit_logs 0' 'teto_leituras=16'; do grep -qF \"\$r\" $s || exit 1; done"
 conferir 'nenhuma linha read do pulso' "grep -qF 'nenhuma linha read do pulso' $s && grep -qF \"'admin_pulse'\" $s"
+# A recusa do pulso grava `read`/`admin_pulse`/`denied` (AdminScopeResolver):
+# a contagem só exclui recusas se o SQL disser isso, como o comentário diz.
+conferir 'a contagem de read do pulso exclui as recusas' "grep -F \"'admin_pulse' and\" $s | grep -qF \"<> 'denied'\""
 conferir 'confere a cadeia de auditoria' "grep -qF 'audit_chain_check.dart' $s"
 
 # Regressão offline: opcional e desligada por padrão.

@@ -224,9 +224,11 @@ peloMenos() { # <descrição> <mínimo> <sql>
 }
 peloMenos 'monitoring_session_start do coordenador' 1 \
   "select count(*) from audit_logs where \"userId\" = '$coord_id' and \"actionType\" = 'monitoring_session_start' and \"resourceType\" = 'admin_monitoring'"
-# O pulso não grava `read`: nenhuma linha do recurso dele fora as recusas.
+# O pulso não grava `read`: nenhuma linha do recurso dele fora as recusas
+# (uma recusa do pulso grava `read`/`admin_pulse`/`denied`, pelo
+# AdminScopeResolver, e é contada à parte do que o pulso bem-sucedido faz).
 igual 'nenhuma linha read do pulso' 0 \
-  "select count(*) from audit_logs where \"resourceType\" = 'admin_pulse' and \"actionType\" = 'read'"
+  "select count(*) from audit_logs where \"resourceType\" = 'admin_pulse' and \"actionType\" = 'read' and \"result\" <> 'denied'"
 # Tetos das leituras do coordenador, por recurso. Esperadas numa execução
 # normal (o pulso não grava `read`; só montagens de tela, recargas da lista por
 # mudança no pulso e o RPC direto do teste):
