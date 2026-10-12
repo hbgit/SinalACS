@@ -56,7 +56,7 @@ Código do backend: `backend/sinalacs_server/lib/src/infrastructure/mqtt/mqtt_al
 
 | Hipótese | Status |
 |---|---|
-| H1 | **confirmada no Docker/TLS** (8/8 quedas em A e C, `SocketException` não capturada, sem pilha no log; a causa exata, escrita assíncrona vs. leitura, segue sem pilha) ; não reproduzida na sonda isolada sem TLS (10 execuções do cenário base + 3 variações, Task 5b) |
+| H1 | **confirmada no Docker/TLS** (8/8 quedas em A e C, `SocketException` não capturada, sem pilha no log; pilha e zona obtidas na Tarefa 6b: erro no `done` do sink do socket, sem ouvinte, na zona do `connect`) ; não reproduzida na sonda isolada sem TLS (10 execuções do cenário base + 3 variações, Task 5b) |
 | H2 | **compatível, não isolada**: a queda ocorre ≤ 0,6 s após o `unpause` (5/5), mas não se observou a ordem de eventos; na sonda sem TLS a ordem foi sempre leitura/`onDone` antes de escrita |
 | H3 | **refutada**: reinício do Mosquitto (B) não derruba (0/3, reconexão em ~2 s); a partição de rede (C) derruba (3/3) sem pausa artificial do backend |
 | H4 | aberta |
@@ -99,5 +99,43 @@ Notas e limites:
 - O script na 1ª execução filtrava `docker logs --since` pelo fuso errado (os arquivos `A*.back.log` ficaram vazios e a coluna de reconexão do script saiu `n/a`); corrigido no commit seguinte (`--since` em epoch). Os horários desta tabela foram extraídos manualmente do `docker logs -t`.
 - Efeito nos pendentes (alertas vermelhos durante a interrupção): não medido; é a Tarefa 10b.
 - Impacto: como o backend não reinicia (`RestartPolicy=no`) e a queda acontece com apenas 45 s de silêncio do broker/rede, uma partição de rede real derruba o backend de produção sem recuperação.
+
+### Tarefa 6b: pilha e zona do `SocketException` (sonda TLS/mTLS com `runZonedGuarded`)
+
+Sonda: `backend/sinalacs_server/test/support/mqtt_dispatcher_probe_tls.dart` (dispatcher real, TLS 1.3 + mTLS contra o Mosquitto real, `main` dentro de `runZonedGuarded` com `zoneValues {#marker}` e `ZoneSpecification.errorCallback`, que registra a pilha síncrona de onde o erro é anexado a um Future/Stream; saída em arquivo fora do repositório). Compilada com `dart compile exe` e executada **num contêiner `dart:3.12.2` na rede `sinalacs_default`**, falando com `mosquitto:8883`.
+
+**Desvio do método pedido (rodar no host):** a sonda no host contra a porta publicada (docker-proxy) **não reproduziu**: SIGSTOP de 60 s (broker registrou `exceeded timeout`) e `docker pause` do broker por 100 s, 1 execução cada, o processo seguiu vivo e sem erro (provavelmente porque o proxy do host mantém/fecha a conexão de outra forma que a ponte direta). Por isso a reprodução válida é a de dentro da rede Docker, equivalente ao backend real. Hostname `mosquitto` está no SAN do certificado do broker.
+
+| Cenário (n) | Zona do `connect` | Resultado |
+|---|---|---|
+| `docker pause` do contêiner da sonda 55 s + unpause (3) | guardada | erro capturado pelo guarda 3/3, `errno=32`, processo vivo |
+| idem (3) | **raiz** (`Zone.root.run`) | `Unhandled exception: SocketException: Broken pipe` e **exit 255** 3/3 |
+| broker fora da rede 100 s + `connect --alias mosquitto` (3) | guardada | capturado 3/3, `errno=104` (Connection reset by peer), vivo |
+| idem (1) | raiz | `Unhandled exception`, exit 255 |
+| `docker pause` do broker 100 s (3) | guardada | capturado 3/3, `errno=104` (2x "Connection reset by peer", 1x "Read failed (... errno = 104)"), vivo |
+
+**Pilha.** O erro final entregue ao handler **não tem pilha** (`StackTrace.empty`, 9/9 casos guardados): é erro de Future sem `StackTrace`. A pilha da origem foi obtida pelo `errorCallback` (pilha síncrona no ponto em que o erro é anexado). Frames sanitizados, de baixo para cima (a sequência é a mesma nos 9 casos):
+
+```
+_RawReceivePort._handleMessage            (dart:isolate-patch)   // evento nativo do socket
+_NativeSocket.multiplex                   (dart:io-patch/socket_patch)
+_NativeSocket.reportError
+new _RawSocket.<closure>  -> _StreamController.addError           // erro no stream do RawSocket
+_RawSecureSocket._reportError             (dart:io/secure_socket) // camada TLS
+_Socket._onError          (dart:io-patch)  -> _SocketStreamConsumer.done  (Completer.completeError)
+_StreamSinkImpl._completeDoneError        (dart:io/io_sink)       // completa o Future `done` do IOSink do socket
+```
+
+O último passo, em microtask (`_microtaskLoop`, `Future._propagateToListeners`, `_StreamSinkImpl._controller.<closure>`), completa o Future `Socket.done` com erro **sem ouvinte**: é este que vira exceção não tratada. Nenhum frame do `mqtt_client` nem do `MqttAlertDispatcher` aparece (nada de `_SecureFilterImpl` ou de ping explícito na pilha: a falha vem do evento nativo do socket).
+
+**Marcador de zona.** Em todo passo da cadeia `Zone.current[#marker]` era `ZONA_PROBE` (a zona onde o `connect` rodou). O `handler` do `runZonedGuarded` roda na zona **pai**, por isso lá o marcador vale `null` (esperado; não indica zona raiz). A prova de zona é comportamental: com o `connect` dentro da zona guardada o erro é capturado (9/9); com o `connect` em `Zone.root.run` e só `main` guardado, o erro **escapa** do guarda e derruba o processo (4/4, exit 255, mesma mensagem do log do backend). Ou seja, o erro é entregue à zona em que o socket foi criado (zona do `client.connect`), não à zona do chamador original nem sempre à raiz.
+
+**Escrita ou leitura?** Escrita no caso errno 32 (EPIPE só ocorre ao escrever: o keepalive PINGREQ de 30 s do cliente, ou publicação, num socket que o broker já fechou), reportada pelo evento nativo e propagada ao `done` do sink de saída. Nos casos errno 104, 2 de 3 execuções de `docker pause` do broker/partição mostraram "Connection reset by peer" no mesmo caminho do `done` do sink (escrita), e 1 mostrou "Read failed (errno 104)" (leitura); em todos o fim da cadeia é o mesmo Future `done` do sink sem ouvinte. Conclusão: a falha **na escrita** (ou o erro propagado ao `done`) é o que não tem dono; a distinção exata escrita/leitura por execução não é observável só com a pilha.
+
+**Status de H1: confirmada** (erro de I/O de socket entregue ao Future `Socket.done` do sink, sem ouvinte, na zona de criação do socket; reproduzido 9/9 na sonda com TLS no Docker e 4/4 em zona raiz com queda do processo). Limites: não testado dentro do `Serverpod` real (a zona do `connect` no servidor depende de onde `MqttAlertDispatcher.connect` é chamado em `server.dart`); a reconexão pós-erro na zona guardada não foi medida.
+
+**Implicação para a Tarefa 7.** O dado sustenta uma `Zone` (`runZonedGuarded`) **ao redor de `client.connect(...)`** (e de tudo que cria o `MqttServerClient`/socket): o socket e seu `Future done` nascem na zona corrente no momento do `connect`, e é nela que o erro é entregue. Reconexões partem de `Timer`/`Future.delayed` agendados dentro da zona (herdam a zona), mas **`_connectOnce` precisa ser chamado dentro da zona protegida em toda tentativa**, inclusive a iniciada por `_handleDisconnected` (callback registrado pelo `mqtt_client`, que roda na zona onde foi atribuído). Não basta guardar a criação do `MqttServerClient` sem o `connect`: o socket é criado no `connect`. Não basta envolver só o `main` do servidor se o `connect` for chamado em outra zona (por exemplo callbacks do Serverpod na raiz): como visto, `Zone.root.run` escapa do guarda. Recomenda-se o `runZonedGuarded` dentro de `_connectOnce` (zona própria por conexão), com o handler apenas registrando o tipo/errno e disparando a reconexão.
+
+Para restaurar: após os testes o broker foi religado com `--alias mosquitto` (perdeu o alias do nome do contêiner, resolvido por DNS do mesmo jeito), `docker compose up -d` e o `sinalacs-serverpod` (que caiu com a pausa/partição do broker, exatamente o defeito investigado) foi religado; tudo saudável ao final.
 
 ## Regressão final
