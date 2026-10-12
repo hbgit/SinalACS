@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:serverpod/serverpod.dart';
 
+import 'src/application/alerts/red_alert_service.dart';
 import 'src/application/auth/development_auth_service.dart';
 import 'src/application/retention/expurge_future_call.dart';
 import 'src/application/retention/expurge_service.dart';
@@ -154,7 +155,7 @@ Future<void> _connectAlertDispatcher(Serverpod pod) async {
                 id: ack.acsId,
                 role: UserRole.acs,
                 microAreaId: ack.microAreaId,
-                deviceId: 'mqtt',
+                deviceId: RedAlertService.mqttAckDeviceId,
               ),
               alertId: ack.alertId,
             );

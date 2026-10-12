@@ -268,7 +268,7 @@ void main() {
           id: 'acs-1',
           role: UserRole.acs,
           microAreaId: 'area-1',
-          deviceId: 'mqtt',
+          deviceId: 'device-1',
         ),
         alertId: 'alerta-1',
       );
@@ -280,5 +280,31 @@ void main() {
         ['acs-1', 'write', 'alert', 'alerta-1', 'acknowledged'],
       );
     });
+
+    test(
+      'ACK que chega por MQTT (sentinela de server.dart) é auditado como '
+      'acknowledged_mqtt, não como o ACK autenticado do RPC (F3)',
+      () async {
+        final store = FakeAlertStore();
+        final service = RedAlertService(store: store, outbox: FakeAlertOutbox());
+
+        final ok = await service.acknowledge(
+          user: const AuthenticatedUser(
+            id: 'acs-1',
+            role: UserRole.acs,
+            microAreaId: 'area-1',
+            deviceId: 'mqtt',
+          ),
+          alertId: 'alerta-1',
+        );
+
+        expect(ok, isTrue);
+        final e = store.audits.single;
+        expect(
+          [e.userId, e.actionType, e.resourceType, e.resourceId, e.result],
+          ['acs-1', 'write', 'alert', 'alerta-1', 'acknowledged_mqtt'],
+        );
+      },
+    );
   });
 }

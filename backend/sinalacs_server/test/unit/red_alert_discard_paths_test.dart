@@ -281,7 +281,8 @@ void main() {
   });
 
   group('alerts.acknowledge (serviço)', () {
-    test('o ACK entrega ao store o evento de auditoria do alerta', () async {
+    test('o ACK por MQTT entrega ao store o evento de auditoria do alerta, '
+        'marcado acknowledged_mqtt (não autenticado, F3)', () async {
       final store = _MemoryStore();
       final service = RedAlertService(store: store, outbox: _MemoryOutbox());
 
@@ -301,7 +302,7 @@ void main() {
       expect(e.actionType, 'write');
       expect(e.resourceType, 'alert');
       expect(e.resourceId, 'alerta-1');
-      expect(e.result, 'acknowledged');
+      expect(e.result, 'acknowledged_mqtt');
       expect(e.userId, 'acs-1');
     });
   });

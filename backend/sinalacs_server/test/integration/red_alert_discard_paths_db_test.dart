@@ -227,6 +227,15 @@ void main() {
           greaterThan(0),
           reason: 'ACK por MQTT sem linha em audit_logs',
         );
+        final linha = await AuditLog.db.findFirstRow(
+          session,
+          where: (t) => t.resourceId.equals(alerta.id!),
+        );
+        expect(
+          linha!.result,
+          'acknowledged_mqtt',
+          reason: 'o ACK por MQTT não é autenticado e não pode parecer o do RPC',
+        );
       },
     );
 

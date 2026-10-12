@@ -105,6 +105,12 @@ class AlertStatusSnapshot {
 final _locationCellFormat = RegExp(r'^-?\d{1,6}:-?\d{1,6}$');
 
 class RedAlertService {
+  /// `deviceId` sentinela do ACK que chega por MQTT (`lib/server.dart`): esse
+  /// caminho não tem token, e `acsId`/`microAreaId` vêm do payload. Único
+  /// lugar onde o valor existe; o servidor o usa ao montar o usuário do ACK e
+  /// [acknowledge] o usa para não auditar esse ACK como o do RPC (F3, #44).
+  static const mqttAckDeviceId = 'mqtt';
+
   RedAlertService({
     required AlertStore store,
     required AlertOutbox outbox,
@@ -194,7 +200,10 @@ class RedAlertService {
     }
     // Toda confirmação que encontra o alerta é auditada, inclusive a repetida
     // do mesmo ACS: o log é append-only e registra cada ato (decisão #44).
-    // Sem identidade de paciente: só quem confirmou e qual alerta.
+    // Sem identidade de paciente: só quem confirmou e qual alerta. O ACK por
+    // MQTT não é autenticado (a identidade vem do payload), então a trilha o
+    // marca `acknowledged_mqtt` em vez de atribuí-lo como um ACK do RPC.
+    final porMqtt = user.deviceId == mqttAckDeviceId;
     return _store.acknowledge(
       alertId: alertId,
       acsId: user.id,
@@ -204,7 +213,7 @@ class RedAlertService {
         actionType: 'write',
         resourceType: 'alert',
         resourceId: alertId,
-        result: 'acknowledged',
+        result: porMqtt ? 'acknowledged_mqtt' : 'acknowledged',
       ),
     );
   }
