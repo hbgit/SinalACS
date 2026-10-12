@@ -37,6 +37,15 @@ conferir 'o teste pede o alerta novo (linha marcadora)' "grep -qF \"print('E2E_D
 conferir 'o script atende o pedido do alerta novo' "grep -qF 'E2E_DISPARAR_ALERTA' $s"
 conferir 'o teste pede o corte do backend (linha marcadora)' "grep -qF \"print('E2E_CORTAR_BACKEND \" $t"
 conferir 'o script atende o pedido de corte' "grep -qF 'E2E_CORTAR_BACKEND' $s"
+# O Painel prova o pulso SEM troca de aba: o pedido do alerta novo sai com o
+# Painel aberto, ANTES da primeira ida a Alertas (trocar de aba remonta a tela e
+# relê, o que não provaria nada), e o script exige a linha de evidência.
+conferir 'o pedido do alerta novo sai antes da primeira ida a Alertas' \
+  "[[ \$(grep -n \"print('E2E_DISPARAR_ALERTA \" $t | head -1 | cut -d: -f1) -lt \$(grep -n \"_irPara(tester, const \\['Alertas'\\])\" $t | head -1 | cut -d: -f1) ]]"
+conferir 'o teste imprime a evidência do Painel (E2E_PAINEL_ATUALIZOU)' "grep -qF \"print('E2E_PAINEL_ATUALIZOU \" $t"
+conferir 'o script exige a evidência do Painel' "grep -qF \"grep -q 'E2E_PAINEL_ATUALIZOU atraso_ms='\" $s"
+conferir 'corte de 120 s no teste e no padrão do script' \
+  "grep -qF 'const _segundosDeCorte = 120;' $t && grep -qF '[[ -n \"\$segundos\" ]] || segundos=120' $s"
 # O alerta novo nasce no futuro pelo freshLead da fixture (20 s): a janela "no
 # prazo" tem de ser maior que um pulso.
 conferir 'alerta novo com triggeredAt 20 s à frente (freshLead)' \
@@ -60,6 +69,9 @@ conferir 'o resultado auditado é o do serviço' \
 conferir 'assert do alerta pendente escalonado pelo coordenador' "grep -qF 'escalatedBy' $s && grep -qF \"status = 'pending'\" $s"
 conferir 'assert da sessão de monitoramento' "grep -qF \"'monitoring_session_start'\" $s"
 conferir 'assert do teto de leituras (o pulso não grava read)' "grep -qF 'teto_leituras=' $s"
+conferir 'tetos de leitura por recurso' \
+  "for r in 'teto admin_indicators 4' 'teto admin_alerts 9' 'teto admin_micro_areas 3' 'teto admin_audit_logs 0' 'teto_leituras=16'; do grep -qF \"\$r\" $s || exit 1; done"
+conferir 'nenhuma linha read do pulso' "grep -qF 'nenhuma linha read do pulso' $s && grep -qF \"'admin_pulse'\" $s"
 conferir 'confere a cadeia de auditoria' "grep -qF 'audit_chain_check.dart' $s"
 
 # Regressão offline: opcional e desligada por padrão.

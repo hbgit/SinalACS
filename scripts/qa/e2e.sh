@@ -194,7 +194,7 @@ if [[ "$run_emulator" -eq 1 ]]; then
       tentar_flutter_test flutter test integration_test/admin_mobile_smoke_test.dart -d emulator-5554)
     echo 'admin com backend real: rode ./scripts/qa/admin_login_e2e.sh (troca a stack de dev pela de e2e).'
     echo 'pedidos do titular no admin: rode ./scripts/qa/admin_titular_e2e.sh (idem).'
-    echo 'escalonamento e tempo real no admin: rode ./scripts/qa/admin_alertas_escalonar_e2e.sh (idem; pausa o backend ~100 s).'
+    echo 'escalonamento e tempo real no admin: rode ./scripts/qa/admin_alertas_escalonar_e2e.sh (idem; pausa o backend ~120 s).'
   fi
 fi
 

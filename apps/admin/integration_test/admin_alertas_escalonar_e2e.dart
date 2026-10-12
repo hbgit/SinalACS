@@ -2,15 +2,21 @@
 /// do backoffice (issue #44) no emulador, contra o BANCO DE TESTE. Rodado por
 /// `scripts/qa/admin_alertas_escalonar_e2e.sh`.
 ///
-/// O coordenador sintético (relé, `/coordenador`) entra pela tela, abre Alertas
-/// e, **sem nenhuma atualização manual** (nem filtro, nem pull-to-refresh: só
-/// `tester.pump` e o tempo real passando), vê:
+/// O coordenador sintético (relé, `/coordenador`) entra pela tela e, **sem
+/// nenhuma atualização manual** nos trechos que provam o pulso (nem filtro, nem
+/// pull-to-refresh, nem troca de aba: só `tester.pump` e o tempo real
+/// passando), vê:
 ///
-/// 1. o alerta semeado já vencido com o botão "Escalonar" desde a abertura;
-/// 2. um alerta NOVO, inserido pelo script no meio do teste, aparecer sozinho
-///    na lista, ainda no prazo e **sem** o botão;
-/// 3. o botão aparecer sozinho depois do prazo (≤ 35 s nominais: um pulso de
-///    30 s mais a recarga);
+/// 1. no Painel, "Abertos (pendentes)" = 1 (o vencido semeado); o script insere
+///    o alerta novo e o Painel passa a 2 SOZINHO, no próximo pulso (≤ ~31 s).
+///    O Painel desenha `monitoring.lastPulse?.indicators`, e o
+///    `fetchDashboardIndicators` só roda ao montar a tela — por isso a prova é
+///    feita sem trocar de aba (trocar remontaria a tela e releria);
+/// 2. em Alertas (aberta DEPOIS, com leitura nova): o vencido semeado com o
+///    botão "Escalonar", e o novo ainda no prazo, **sem** o botão;
+/// 3. com a aba de Alertas parada, o botão do novo aparece sozinho depois do
+///    prazo (≤ 35 s nominais: um pulso de 30 s mais a recarga da lista, que o
+///    pulso dispara porque `overdueRed` muda);
 /// 4. o escalonamento pela tela, com motivo: a linha continua "Pendente" e
 ///    ganha "Escalonado às"; o painel continua contando o alerta como aberto;
 /// 5. o reescalonamento por RPC direto devolve `alreadyEscalated` com o MESMO
@@ -19,8 +25,16 @@
 ///    desatualizado aparece com os dados anteriores na tela e some sozinho
 ///    quando o backend volta.
 ///
+/// Linha do tempo (relógio do banco; I = instante do INSERT do novo, ~1 s
+/// depois de `E2E_DISPARAR_ALERTA`): `triggeredAt` = I + 20 s, prazo vence em
+/// I + 50 s. Pulso de 30 s com fase qualquer: o Painel vê o 2 em ≤ I + 30 s; a
+/// aba de Alertas abre em ≤ I + ~33 s, ainda ≥ 17 s antes do prazo (o novo
+/// entra sem botão); o botão aparece no 1º pulso depois de I + 50 s, ou seja
+/// em ≤ I + 80 s mais a recarga.
+///
 /// **A conversa com o script** é por linhas marcadoras impressas aqui
-/// (`E2E_DISPARAR_ALERTA`, `E2E_CORTAR_BACKEND`): o teste roda no aparelho e
+/// (`E2E_DISPARAR_ALERTA`, `E2E_CORTAR_BACKEND`; `E2E_PAINEL_ATUALIZOU` e
+/// `E2E_BOTAO_APARECEU` são só evidência, com o atraso medido): o teste roda no aparelho e
 /// não alcança o banco nem o Docker; o script lê a saída do `flutter test` em
 /// tempo real e age no host. Os ids dos alertas chegam por `--dart-define`
 /// (UUIDs sintéticos, não são segredo).
@@ -65,10 +79,15 @@ const _prazo = Duration(seconds: 30);
 /// diferença entre o relógio do aparelho e o do servidor.
 const _atrasoMaximoDoBotao = Duration(seconds: 40);
 
+/// Atraso máximo aceito para o Painel passar de 1 a 2 depois do pedido de
+/// disparo: um pulso (30 s) + o INSERT (~1 s) + folga.
+const _atrasoMaximoDoPainel = Duration(seconds: 40);
+
 /// Quanto tempo o script deixa o backend pausado depois de `E2E_CORTAR_BACKEND`.
-/// Maior que o pior caso do selo: último sucesso logo antes do corte + 2
-/// pulsos falhos (30 s + prazo de 20 s do pulso cada) = 80 s.
-const _segundosDeCorte = 100;
+/// O selo pode levar ~80–90 s depois do corte (último sucesso logo antes dele +
+/// 2 pulsos falhos de 30 s com prazo de 20 s cada, e o selo só é redesenhado
+/// quando um pulso falho notifica); 120 s deixa folga para vê-lo antes da volta.
+const _segundosDeCorte = 120;
 
 int _passo(DateTime t) => t.toUtc().millisecondsSinceEpoch ~/ 1000 ~/ 30;
 
@@ -140,6 +159,15 @@ Future<void> _pumpUntil(
 bool _existe(String chave) => find.byKey(Key(chave)).evaluate().isNotEmpty;
 
 bool get _painelAberto => find.text('Painel de Indicadores').evaluate().isNotEmpty;
+
+/// "Abertos (pendentes)" do Painel mostra [valor]? A linha é a `_InfoRow`
+/// (o `Padding` mais próximo do rótulo), para o número não casar com outro
+/// contador da tela.
+bool _abertosNoPainel(Finder rotulo, String valor) {
+  if (rotulo.evaluate().isEmpty) return false;
+  final linha = find.ancestor(of: rotulo, matching: find.byType(Padding)).first;
+  return find.descendant(of: linha, matching: find.text(valor)).evaluate().isNotEmpty;
+}
 
 Finder _cartao(String alertId) => find.byKey(Key('alert_$alertId'));
 
@@ -248,28 +276,37 @@ void main() {
     await _entrar(tester);
     expect(_painelAberto, isTrue);
 
-    // A partir daqui a tela de Alertas fica aberta e ninguém a recarrega à mão.
-    await _irPara(tester, const ['Alertas']);
-    await _pumpUntil(tester, () => _cartao(_alertaVencido).evaluate().isNotEmpty,
-        motivo: 'o alerta semeado na lista do coordenador');
-
-    // 1. Já vencido na abertura: o botão existe desde o início.
-    expect(_temBotaoEscalonar(_alertaVencido), isTrue, reason: 'o alerta de 10 min já venceu o prazo de 30 s');
-    expect(_cartao(_alertaNovo), findsNothing, reason: 'o alerta novo ainda não foi disparado');
-
-    // 2. O script insere o alerta novo (triggeredAt 20 s à frente do banco) e a
-    // lista o traz sozinha, pelo pulso, ainda no prazo e SEM o botão.
+    // 1. Painel parado: 1 vermelho aberto (o vencido semeado). Pede o alerta
+    // novo e espera o 2 SEM trocar de aba — só o pulso pode trazê-lo.
+    final rotuloAbertos = find.text('Abertos (pendentes)');
+    await tester.scrollUntilVisible(rotuloAbertos, 200, scrollable: find.byType(Scrollable).last, maxScrolls: 30);
+    await _pumpUntil(tester, () => _abertosNoPainel(rotuloAbertos, '1'), motivo: 'o painel com 1 vermelho aberto');
+    final pedido = DateTime.now();
     // ignore: avoid_print
     print('E2E_DISPARAR_ALERTA id=$_alertaNovo');
-    await _pumpUntil(tester, () => _cartao(_alertaNovo).evaluate().isNotEmpty,
-        timeout: const Duration(seconds: 90), motivo: 'o alerta novo aparecer sozinho (pulso)');
+    await _pumpUntil(tester, () => _abertosNoPainel(rotuloAbertos, '2'),
+        timeout: _atrasoMaximoDoPainel + const Duration(seconds: 20),
+        motivo: 'o painel passar a 2 abertos sozinho (pulso), sem troca de aba');
+    final atrasoDoPainel = DateTime.now().difference(pedido);
+    // ignore: avoid_print
+    print('E2E_PAINEL_ATUALIZOU atraso_ms=${atrasoDoPainel.inMilliseconds}');
+    expect(atrasoDoPainel, lessThanOrEqualTo(_atrasoMaximoDoPainel),
+        reason: 'o painel demorou ${atrasoDoPainel.inSeconds}s para refletir o alerta novo');
+
+    // 2. Alertas, aberta agora (leitura nova). Daqui até o escalonamento a aba
+    // fica parada e ninguém a recarrega à mão.
+    await _irPara(tester, const ['Alertas']);
+    await _pumpUntil(tester, () => _cartao(_alertaVencido).evaluate().isNotEmpty && _cartao(_alertaNovo).evaluate().isNotEmpty,
+        motivo: 'os dois alertas na lista do coordenador');
+    expect(_temBotaoEscalonar(_alertaVencido), isTrue, reason: 'o alerta de 10 min já venceu o prazo de 30 s');
     expect(_temBotaoEscalonar(_alertaNovo), isFalse, reason: 'antes do prazo não há botão');
     expect(_noCartao(_alertaNovo, find.text('Status: Pendente')), isTrue);
     final novoNoServidor = await _alertaNoServidor(_alertaNovo);
     expect(novoNoServidor.overdue, isFalse, reason: 'o servidor também o vê no prazo');
     final vence = novoNoServidor.triggeredAt.toUtc().add(_prazo);
 
-    // 3. Sem tocar em nada: o botão aparece depois do prazo.
+    // 3. Sem tocar em nada: o botão aparece depois do prazo (o pulso vê
+    // `overdueRed` mudar e a lista recarrega).
     await _pumpUntil(tester, () => _temBotaoEscalonar(_alertaNovo),
         timeout: vence.difference(DateTime.now().toUtc()) + _atrasoMaximoDoBotao + const Duration(seconds: 10),
         motivo: 'o botão Escalonar aparecer sozinho depois do prazo');
@@ -307,16 +344,14 @@ void main() {
         reason: 'o reescalonamento devolve o escalatedAt original');
 
     // 6. O painel continua contando os dois vermelhos como abertos: escalonar
-    // não tira o alerta da conta.
+    // não tira o alerta da conta. (A troca de aba aqui não prova o pulso — essa
+    // prova é a do passo 1; aqui só se confere que o número não caiu.)
     final indicadores = await client.admin.indicators(accessToken: _token);
     expect(indicadores.openRedAlerts, 2, reason: 'o vencido semeado + o novo escalonado, ambos pendentes');
     await _irPara(tester, const ['Painel', 'Indicadores']);
-    final rotuloAbertos = find.text('Abertos (pendentes)');
     await _pumpUntil(tester, () => _painelAberto, motivo: 'o painel');
     await tester.scrollUntilVisible(rotuloAbertos, 200, scrollable: find.byType(Scrollable).last, maxScrolls: 30);
-    final linhaAbertos = find.ancestor(of: rotuloAbertos, matching: find.byType(Padding)).first;
-    await _pumpUntil(tester, () => find.descendant(of: linhaAbertos, matching: find.text('2')).evaluate().isNotEmpty,
-        motivo: 'o painel com 2 vermelhos abertos');
+    await _pumpUntil(tester, () => _abertosNoPainel(rotuloAbertos, '2'), motivo: 'o painel com 2 vermelhos abertos');
 
     // 7. Perda de conexão: o script pausa o backend. O selo aparece com o dado
     // anterior na tela e some sozinho quando o backend volta.

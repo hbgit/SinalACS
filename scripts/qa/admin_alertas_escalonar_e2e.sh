@@ -8,7 +8,7 @@
 #   DEVICE=0087014315 ./scripts/qa/admin_alertas_escalonar_e2e.sh         # aparelho físico
 #
 # ATENÇÃO: substitui a stack de desenvolvimento pela de e2e (o container
-# sinalacs-serverpod é o mesmo) e PAUSA o backend por ~100 s no meio do teste.
+# sinalacs-serverpod é o mesmo) e PAUSA o backend por ~120 s no meio do teste.
 # Ao fim, `docker compose up -d` volta a de desenvolvimento.
 #
 # Passo a passo manual (o que este script automatiza):
@@ -23,9 +23,11 @@
 #        (já vencido) na UBS do coordenador sintético;
 #      - relé (credencial do coordenador em /coordenador, uma vez) e adb reverse;
 #      - o teste no aparelho; o script atende as linhas marcadoras dele:
-#          E2E_DISPARAR_ALERTA -> insere o alerta novo (triggeredAt = NOW() + 20 s,
-#                                 o `freshLead` da fixture);
-#          E2E_CORTAR_BACKEND  -> `docker pause sinalacs-serverpod` por 100 s e unpause;
+#          E2E_DISPARAR_ALERTA -> (com o Painel aberto e parado) insere o alerta novo
+#                                 (triggeredAt = NOW() + 20 s, o `freshLead` da fixture);
+#          E2E_CORTAR_BACKEND  -> `docker pause sinalacs-serverpod` por 120 s e unpause;
+#        e repete as linhas de evidência E2E_PAINEL_ATUALIZOU (Painel 1 -> 2 pelo
+#        pulso, sem troca de aba) e E2E_BOTAO_APARECEU (atraso do botão após o prazo);
 #      - conferências no banco de teste e a cadeia de auditoria.
 #   4. docker compose up -d                      # volta à stack de desenvolvimento
 #
@@ -118,22 +120,27 @@ novo_id="$(fx "d['escalationAlerts']['freshId']")"
 [[ -n "$coord_id" && -n "$vencido_id" && -n "$novo_id" && -n "$main_id" ]] \
   || { echo 'erro: o manifesto não tem o bloco escalationAlerts (seed antigo?)' >&2; exit 1; }
 
-# O alerta novo, sintético, do paciente `main` na microárea das fixtures. O
-# `triggeredAt` 20 s À FRENTE do relógio do banco (o `freshLead` de
-# `E2eEscalationAlerts`) faz a janela "no prazo" durar 50 s, mais que um pulso
-# de 30 s: a lista o traz sem o botão antes de ele vencer. Mesmas colunas do
-# seed (bin/seed_e2e_fixtures.dart).
+# O alerta novo, sintético, do paciente `main` na microárea das fixtures,
+# inserido por SQL (não por `alerts.createRedAlert`, que exigiria login OTP do
+# paciente e o MQTT) e só quando o teste pede: um alerta semeado ou criado
+# "agora" antes do build e do login já estaria vencido quando a tela abrisse.
+# O `triggeredAt` 20 s À FRENTE do relógio do banco (o `freshLead` de
+# `E2eEscalationAlerts`) faz a janela "no prazo" durar 50 s depois do INSERT
+# (I): o Painel o conta em ≤ I + 30 s (um pulso), a aba de Alertas abre em
+# ≤ I + ~33 s com ele ainda sem botão, e o botão vem no 1º pulso depois de
+# I + 50 s. Mesmas colunas do seed (bin/seed_e2e_fixtures.dart).
 inserir_alerta_novo() {
   sql "insert into alerts (id, \"patientId\", \"acsId\", \"microAreaId\", \"triggeredAt\", \"riskLevel\", \"locationHash\", status, \"mqttTopic\", \"deviceId\", \"retryCount\", version) values ('$novo_id', '$main_id', '$acs_id', '$area_id', NOW() + interval '20 seconds', 'red', 'hash-e2e', 'pending', 'sinalacs/v1/microareas/$area_id/alerts', 'device-e2e', 0, 0)" >/dev/null
   echo "  [script] alerta novo inserido ($(date +%T))" >&2
 }
 
 # O corte: congela o backend pelo tempo que o teste pediu na linha marcadora
-# (padrão 100 s) e o devolve. `pausado` garante o unpause no cleanup.
+# (padrão 120 s; o selo pode levar ~80–90 s para aparecer depois do corte) e o
+# devolve. `pausado` garante o unpause no cleanup.
 cortar_backend() {
   local segundos
   segundos="$(grep -o 'E2E_CORTAR_BACKEND segundos=[0-9]*' "$saida_teste" | tail -1 | sed 's/.*=//')"
-  [[ -n "$segundos" ]] || segundos=100
+  [[ -n "$segundos" ]] || segundos=120
   docker pause sinalacs-serverpod >/dev/null
   pausado=true
   echo "  [script] backend pausado por ${segundos}s ($(date +%T))" >&2
@@ -176,6 +183,9 @@ eco_pid=""
   || { echo "erro: o script não viu as linhas marcadoras (disparado=$disparado cortado=$cortado)" >&2; exit 1; }
 grep -q 'E2E_ESCALONAMENTO_OK' "$saida_teste" \
   || { echo 'erro: o teste terminou sem a linha E2E_ESCALONAMENTO_OK' >&2; exit 1; }
+grep -q 'E2E_PAINEL_ATUALIZOU atraso_ms=' "$saida_teste" \
+  || { echo 'erro: o teste não provou o Painel atualizado pelo pulso (linha E2E_PAINEL_ATUALIZOU)' >&2; exit 1; }
+grep -o 'E2E_PAINEL_ATUALIZOU atraso_ms=[-0-9]*' "$saida_teste" | tail -1 | sed 's/^/  /' || true
 grep -o 'E2E_BOTAO_APARECEU atraso_ms=[-0-9]*' "$saida_teste" | tail -1 | sed 's/^/  /' || true
 
 echo "== escalonamento no banco de teste (alerta $novo_id)"
@@ -217,19 +227,31 @@ peloMenos 'monitoring_session_start do coordenador' 1 \
 # O pulso não grava `read`: nenhuma linha do recurso dele fora as recusas.
 igual 'nenhuma linha read do pulso' 0 \
   "select count(*) from audit_logs where \"resourceType\" = 'admin_pulse' and \"actionType\" = 'read'"
-# Teto das leituras do coordenador. Esperadas, numa execução normal (~13):
-#   painel ao entrar (1) + Alertas ao abrir (alertas + microáreas, 2)
-#   + recargas da lista por mudança no pulso: o alerta novo (1), o vencimento
-#     dele (1), depois do escalonamento (até 2: a recarga e o pulso imediato)
-#   + RPC direto do teste: admin.alerts (2) e admin.indicators (1)
-#   + volta ao Painel (1) e de novo a Alertas (2).
-# A execução dura ~6 min (~12 pulsos de 30 s): uma leitura por pulso por tela
-# passaria do teto. O teto tem folga para recargas extras (o pulso que volta
-# depois do corte, um pulso repetido), não para uma linha por pulso.
-teto_leituras=25
+# Tetos das leituras do coordenador, por recurso. Esperadas numa execução
+# normal (o pulso não grava `read`; só montagens de tela, recargas da lista por
+# mudança no pulso e o RPC direto do teste):
+#   admin_indicators  3: Painel ao entrar, RPC do teste, volta ao Painel;
+#   admin_alerts      7: Alertas ao abrir, recarga do vencimento do novo,
+#                        recarga depois do escalonamento + a do pulso imediato
+#                        (até 2), RPC do teste (2), Alertas de novo;
+#   admin_micro_areas 2: cada montagem de Alertas (a recarga pelo pulso não relê);
+#   admin_audit_logs  0: a jornada não abre a Auditoria.
+# A execução dura ~6 min (~12 pulsos de 30 s): uma leitura por pulso estouraria
+# qualquer um destes tetos, que só têm folga de 1 para um pulso repetido.
+teto() { # <recurso> <teto>
+  local n
+  n="$(sql "select count(*) from audit_logs where \"userId\" = '$coord_id' and \"actionType\" = 'read' and \"resourceType\" = '$1'")"
+  echo "  leituras $1 do coordenador: $n (teto $2)"
+  [[ "$n" -le "$2" ]] || { echo "erro: $n leituras $1 > teto $2 (algo relê por pulso?)" >&2; exit 1; }
+}
+teto admin_indicators 4
+teto admin_alerts 9
+teto admin_micro_areas 3
+teto admin_audit_logs 0
+teto_leituras=16
 n_leituras="$(sql "select count(*) from audit_logs where \"userId\" = '$coord_id' and \"actionType\" = 'read'")"
 duracao="$(sql "select coalesce(extract(epoch from max(\"timestamp\") - min(\"timestamp\"))::int, 0) from audit_logs where \"userId\" = '$coord_id'")"
-echo "  leituras auditadas do coordenador: $n_leituras em ${duracao}s (~$(( duracao / 30 )) pulsos); teto $teto_leituras"
+echo "  leituras auditadas do coordenador: $n_leituras em ${duracao}s (~$(( duracao / 30 )) pulsos); teto $teto_leituras (esperado 12)"
 [[ "$n_leituras" -le "$teto_leituras" ]] \
   || { echo "erro: $n_leituras leituras > teto $teto_leituras (o pulso voltou a gravar read?)" >&2; exit 1; }
 
