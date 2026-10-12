@@ -132,6 +132,14 @@ class MonitoringController extends ChangeNotifier with WidgetsBindingObserver {
     notifyListeners();
   }
 
+  /// Pulso imediato fora do ciclo (por exemplo, depois de escalonar um alerta),
+  /// pelo mesmo caminho do pulso periódico: um pulso por vez, nada com o ciclo
+  /// parado, em segundo plano ou com a sessão vencida.
+  void refreshNow() {
+    if (_descartado || _telas == 0 || _emSegundoPlano || _sessaoVencida) return;
+    unawaited(_pulsar());
+  }
+
   void _iniciar() {
     WidgetsBinding.instance.addObserver(this);
     // Ciclo novo, linha de base nova: a tela recém-montada já carrega sozinha.

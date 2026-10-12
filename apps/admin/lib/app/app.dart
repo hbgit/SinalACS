@@ -5,6 +5,7 @@ import 'package:sinalacs_admin/app/admin_async_states.dart';
 import 'package:sinalacs_admin/app/admin_accounts.dart';
 import 'package:sinalacs_admin/app/admin_header.dart';
 import 'package:sinalacs_admin/app/data_requests_screen.dart';
+import 'package:sinalacs_admin/app/escalate_alert_dialog.dart';
 import 'package:sinalacs_admin/app/admin_layout.dart';
 import 'package:sinalacs_admin/app/login_screen.dart';
 import 'package:sinalacs_admin/app/monitoring_controller.dart';
@@ -668,6 +669,14 @@ class _AlertsListState extends State<_AlertsList> {
     return (alerts: alerts, microAreas: microAreas);
   }
 
+  /// Depois de escalonar (ou do servidor dizer que o estado mudou): relê a
+  /// lista pelo mesmo fluxo do pulso (filtros mantidos, dado antigo mantido em
+  /// falha) e pede um pulso para a linha de base não gerar outra recarga.
+  void _aposEscalonar() {
+    _buscar(pelaAtualizacao: true);
+    widget.monitoring.refreshNow();
+  }
+
   String? get microAreaFilter => widget.microAreaFilter;
   AlertStatus? get statusFilter => widget.statusFilter;
   void Function(String? microArea, AlertStatus? status) get onFilterChanged => widget.onFilterChanged;
@@ -741,6 +750,13 @@ class _AlertsListState extends State<_AlertsList> {
                           const SizedBox(height: 6),
                           Text('Risco: ${riskLabel(alert.riskLevel)}', style: TextStyle(color: adminOnSurface(riskColor(alert.riskLevel)), fontWeight: FontWeight.bold)),
                           Text('Status: ${statusLabel(alert.status)}'),
+                          if (alert.escalatedAt != null) ...[
+                            const SizedBox(height: 6),
+                            EscalatedBadge(alert.escalatedAt!),
+                          ] else if (alert.overdue) ...[
+                            const SizedBox(height: 8),
+                            EscalateAlertButton(alert: alert, dataSource: widget.dataSource, onChanged: _aposEscalonar),
+                          ],
                         ],
                       ),
                     ),
