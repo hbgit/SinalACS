@@ -146,6 +146,10 @@ também passa pelo FCM (Google): decisão de produto da §3.2, não tratada aqui
 | **Artigos LGPD** | 15, I e II; 16, I e II; 17 |
 | **Critério de Aceite** | ✓ Política de retenção documentada e aprovada<br>✓ Mecanismo automático de expurgo após prazo legal<br>✓ Dados de pacientes que revogam consentimento são excluídos em até 15 dias<br>✓ Logs de exclusão registrados |
 
+**Exceção do expurgo para alerta vermelho pendente (issue #44, INV-03).** O expurgo por retenção **não apaga** alerta vermelho ainda `pending`, mesmo vencido o prazo: a linha é retida, contada (`skippedPendingRed`) e registrada em log **sem identidade** (só a contagem). Apagá-lo seria descartar em silêncio um alerta que ninguém confirmou. O "encerramento forçado administrativo" desses alertas órfãos (para que o expurgo possa enfim alcançá-los) é **pendência**: não existe hoje (`PROGRESS.md`).
+
+**Auditoria de monitoramento (issue #44).** O painel do backoffice se atualiza por pulso a cada 30 s e **não** grava uma linha `read` por pulso. A leitura contínua é auditada como **sessão**: `monitoring_session_start` (antes de qualquer dado, fail-closed) e `monitoring_session_end` (best-effort), por usuário, com janela de inatividade de 90 s. O pulso carrega só contagens e instantes, sem identidade de titular. Escalonar grava `write`/`admin_alert` (`escalated:<motivo>`) na mesma transação do ato.
+
 ### LGPD-RF08 - Direitos do Titular dos Dados
 
 | Propriedade | Descrição |

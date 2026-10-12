@@ -1547,3 +1547,23 @@ Plano: `docs/superpowers/plans/2026-10-08-issue-42-pedidos-do-titular-admin.md`;
 **Decisões assumidas** (a validar com o encarregado/DPO): (1) quem decide: coordenador da própria UBS e admin; (2) exclusão = anonimização, não `DELETE` (`alerts`, `visits`, `audit_logs`, `consent_logs` ficam, pseudonimizados); (3) correção não reescreve campo, exige nota; (4) transições `open→inReview→completed|rejected` e `open→completed|rejected`, recusa exige motivo de 3 a 500 caracteres; (5) aviso push só para correção/recusa, com consentimento e token.
 
 **Ficou de fora, de propósito**: a correção não reescreve o campo; sem aviso por e-mail; sem prazo de expurgo de `consent_logs`; ficam também pseudônimos como hash de localização, hashes de aparelho, `visits.notesEncrypted` e `enrollment_tokens` (M-2/Task 4); iOS e aparelho físico; o app ACS não consome o cliente novo; `screen: my_data` do push não tem consumidor no app do paciente; o `e2e.sh --full` só indica o script (troca a stack) e o CI não o roda; `docs/telas-admin.md` ainda diz "quatro destinos" (recaptura de telas pendente).
+
+## Escalonar alerta e tempo quase real no backoffice (#44, 2026-10-12)
+
+Plano: `docs/superpowers/plans/2026-10-11-issue-44-acoes-operacionais-alertas.md`; decisão de transporte: `docs/superpowers/specs/2026-10-11-adr-tempo-real-alertas-admin.md`.
+
+**O que existe (entregue)**
+- Backend: colunas `alerts.escalatedAt/escalatedBy/escalationReason`; prazo `RED_ALERT_ESCALATION_SECONDS` (padrão 300, faixa 30–3600); `admin.escalateAlert` (coordenador da UBS ou admin, idempotente, auditado na mesma transação, reforço no outbox com `escalated: true`; o alerta **segue `pending`**); `admin.alertsPulse` e `admin.endMonitoringSession` (sessão de monitoramento auditada em vez de uma linha `read` por pulso); ACK auditado na mesma transação (fail-closed); expurgo LGPD não apaga vermelho `pending` (`skippedPendingRed`); inventário `red_alert_discard_paths_test`. Regra de negócio proposta no PRD como RF19 (a confirmar).
+- Admin: `MonitoringController` (pulso de 30 s, selo de dado desatualizado após 60 s), botão **Escalonar** com motivo fechado, atualização automática da lista e do painel. ACS: o cartão do alerta reforçado sobe ao topo com "Reforço da coordenação".
+
+**Provas (2026-10-12, medidas agora)**: backend `dart test` 983/983, `dart analyze` 71 `info` e nenhum warning; admin 252, acs 544, patient 259, todos verdes e `flutter analyze` limpo; `ci_invariants.sh`, `ci_invariants_test.sh` e os quatro `*_e2e_test.sh` estáticos do admin verdes. **O e2e do emulador (`scripts/qa/admin_alertas_escalonar_e2e.sh`) está escrito e verificado só estaticamente: NÃO foi executado num emulador até aqui.** Os itens que dependem dele (por exemplo, a linha de alerta renderizar sobre `surfaceRaised`) estão, portanto, não provados.
+
+**Abertos, nomeados**
+- Encerramento forçado administrativo de alerta vermelho órfão (D7): sem ele, vermelho `pending` nunca é expurgado.
+- `maxChangedAt` é cego a alerta que sai do escopo (expurgo, troca de microárea); mitigado pelo app, que também relê a lista quando as contagens do pulso mudam.
+- `acsId`/`microAreaId` do ACK por MQTT vêm do payload sem autenticação (ninguém publica hoje; a ACL do broker permite).
+- Dois primeiros pulsos concorrentes do mesmo usuário podem gravar dois `monitoring_session_start`; o END é best-effort (app morto não o envia; a sessão fecha por inatividade em 90 s).
+- O app do ACS não tem som, vibração nem notificação do SO: o reforço de um alerta já listado só é percebido com a lista aberta.
+- MQTT para o backoffice (ADR) só depois do provisionamento de certificado de cliente por aparelho.
+- Alerta sem microárea (só o admin o vê) escalona **sem reforço** e o resultado não avisa isso.
+- `AlertStatus.escalated` segue sem escritor (escalonar não muda o status), e o app do paciente o rotula "Encaminhado para o SAMU": risco se alguém passar a escrevê-lo.

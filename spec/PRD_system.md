@@ -149,6 +149,7 @@ events:
 | **RF16** | Motor de Triagem Determinístico (Manchester) | Sistema | **L** | **Crítico** | Nenhuma (local) |
 | **RF17** | Logs de Auditoria e Conformidade (LGPD) | Sistema | M | Alto | PostgreSQL |
 | **RF18** | Dark Mode Nativo (Modo Escuro) | UI | S | Baixo | Tema Flutter |
+| **RF19** *(proposto, issue #44)* | Escalonamento de Alerta Vermelho sem Confirmação: passado o prazo (`RED_ALERT_ESCALATION_SECONDS`, padrão 300 s, configurável de 30 a 3600 s) sem ACK, coordenador (da UBS) ou administrador pode escalonar. O alerta **nunca** é encerrado, ocultado ou silenciado (segue `pending` até o ACS confirmar, INV-03); o reforço é reentregue à microárea; a ação tem motivo de conjunto fechado, é auditada na mesma transação e é idempotente | Backoffice | M | **Crítico** | `admin.escalateAlert`, outbox MQTT, polling `admin.alertsPulse` |
 | **RNF01** | Latência MQTT < 500ms (p95) | Sistema | - | Alto | Mosquitto, Traefik |
 | **RNF02** | Sincronização Offline > 99.5% | Sistema | - | **Crítico** | `sqflite`, FSM |
 | **RNF03** | Criptografia AES-256 em repouso | Sistema | - | **Crítico** | SQLCipher |

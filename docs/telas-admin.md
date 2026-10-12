@@ -29,11 +29,15 @@ O roteiro desse fluxo está escrito em `apps/admin/integration_test/admin_login_
 
 Contadores por `RiskLevel` (vermelho/amarelo/verde), alertas vermelhos abertos vs. reconhecidos e o TMRAV (Tempo Médio de Resposta a Alerta Vermelho, a métrica North Star do PRD). Desde a issue #40 os números vêm do backend (`admin.indicators`): contagens reais por risco e o TMRAV real, média de `acknowledgedAt − triggeredAt` dos alertas vermelhos dos últimos 30 dias. Sem alerta vermelho reconhecido na janela o TMRAV aparece como "—", nunca como "0s". Cor usada exclusivamente como sinal clínico.
 
+Desde a issue #44 o painel se atualiza sozinho, pelo pulso de 30 s (`admin.alertsPulse`, que já traz os indicadores); não há botão de recarregar. Se o último pulso bem-sucedido passa de 60 s, uma faixa com ícone e texto ("Dados de HH:MM:SS — sem atualização há N min") avisa que os números estão desatualizados, e some no próximo pulso que der certo. A permanência na tela é registrada na auditoria como uma sessão de monitoramento (início e fim), não uma linha por pulso.
+
 ## Microáreas, vínculo ACS e gestão de contas
 
 ![Listagem de microáreas e ACS vinculado](screenshots/admin/03-microareas.png)
 
 Lista as microáreas da UBS com o ACS vinculado e seu status. Desde a issue #43 a tela **não é mais somente leitura**: abaixo da lista vêm as seções de gestão de contas (a captura acima é anterior à #43 e mostra só a lista). Não há nenhum controle de reclassificação de risco — a classificação é determinística e não alterável por intervenção humana (INV-02 do PRD).
+
+**Escalonar (issue #44).** O alerta vermelho pendente sem confirmação além do prazo (padrão 5 min, `RED_ALERT_ESCALATION_SECONDS`) ganha o botão **Escalonar**, só para coordenador (da UBS) e administrador; o servidor decide o vencimento, a tela só mostra o botão. A confirmação pede o motivo (sem resposta no prazo, ACS inalcançável, novo contato do paciente). Escalonar reenvia o alerta à microárea com o selo "Reforço da coordenação", grava quem escalonou e a linha passa a mostrar "Escalonado às HH:MM"; o alerta **continua pendente** — só o ACS, ao confirmar, o resolve. Repetir é inofensivo (vale o carimbo original). A lista se atualiza sozinha pelo pulso (relê quando algo mudou) e mostra a mesma faixa de dado desatualizado do painel.
 
 ### Gestão de contas de ACS (issue #43)
 
