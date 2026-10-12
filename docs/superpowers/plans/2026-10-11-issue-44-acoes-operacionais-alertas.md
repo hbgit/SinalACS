@@ -345,3 +345,12 @@ testWidgets('erro de permissão mostra mensagem e mantém o botão', ...);
 - **Placeholders:** os testes de widget/serviço estão listados por nome e comportamento; o corpo vem do esqueleto dos arquivos vizinhos (`admin_account_service_test.dart`, `alerts_filter_dynamic_test.dart`) que o executor deve abrir no Step 1 — é a única parte deliberadamente não transcrita, porque os fakes existentes têm assinatura que preciso conferir no momento da escrita.
 - **Consistência de tipos:** `EscalationReason`, `AdminEscalationResult`, `AdminAlertsPulse`, `overdue`, `escalatedAt` usados com os mesmos nomes nas Tasks 2, 5–7, 9–12.
 - **Decisões:** D1–D5 e D7 respondidas; única aberta é a ressalva técnica de D5 (END best-effort).
+
+---
+
+## Adendo (decisão do controlador, 2026-10-11) — Task 7b: o app do ACS exibe o reforço
+
+**Motivo:** a revisão da Task 6 achou que `apps/acs/lib/core/services/alert_queue.dart` (`upsert`, ~100-114, ligado em `alert_feed.dart:165`) trata o reforço (mesmo `alertId`, `escalated: true`) como o alerta original: substitui o cartão no lugar ou o descarta se o cartão já foi marcado como confirmado localmente. A D2 prometia que a microárea "receba um reforço"; sem esta tarefa ele só chega a quem perdeu a primeira entrega.
+**Escopo mínimo:** quando o envelope traz `escalated: true` e já existe cartão **não confirmado**, o cartão sobe ao topo, ganha o rótulo "Reforço da coordenação" e dispara o mesmo sinal (som/vibração) do alerta novo. Nunca desfaz uma confirmação, nunca altera a fila offline, e um reforço para alerta desconhecido vira alerta normal.
+**Arquivos:** `apps/acs/lib/core/services/alert_queue.dart`, `alert_feed.dart`, parser do envelope MQTT (`escalated` opcional), testes em `apps/acs/test/`.
+**Verificação:** `cd apps/acs && flutter test && flutter analyze`.
