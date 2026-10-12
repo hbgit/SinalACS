@@ -1,8 +1,8 @@
 import 'package:sinalacs_server/src/application/alerts/red_alert_service.dart';
+import 'package:sinalacs_server/src/application/audit/audit_trail.dart';
 import 'package:sinalacs_server/src/application/auth/development_auth_service.dart';
 import 'package:sinalacs_server/src/domain/entities/alert_delivery.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
-import 'package:sinalacs_server/src/application/audit/audit_trail.dart';
 import 'package:test/test.dart';
 
 class FakeAlertPublisher implements AlertPublisher {

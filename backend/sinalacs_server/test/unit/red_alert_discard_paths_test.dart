@@ -17,8 +17,8 @@ import 'package:test/test.dart';
 /// Postgres (ACK com auditoria, ACK por MQTT, retenção, anonimização, outbox
 /// real) estão em `test/integration/red_alert_discard_paths_db_test.dart`.
 ///
-/// Itens marcados `skip: 'Task 4'` FALHAM hoje por um buraco real no código de
-/// produção; a Task 4 corrige e tira o skip.
+/// Os buracos reais que a Task 3 provou (ACK sem auditoria, expurgo de
+/// vermelho pending) foram fechados na Task 4: todos os itens estão ativos.
 
 // ---------------------------------------------------------------------------
 // Varredura do fonte: quem pode escrever em `alerts`.
@@ -88,6 +88,7 @@ class _MemoryStore implements AlertStore {
   final Map<String, String> status = {};
   final Map<String, RedAlertRecord> keys = {};
   var saveCalls = 0;
+  final List<AuditEvent> audits = [];
 
   @override
   Future<void> save(AlertDelivery alert, {required String deviceId}) async {
@@ -103,6 +104,7 @@ class _MemoryStore implements AlertStore {
     required String microAreaId,
     required AuditEvent audit,
   }) async {
+    audits.add(audit);
     status[alertId] = 'acknowledged';
     return true;
   }
@@ -276,6 +278,32 @@ void main() {
         expect(store.status[first.delivery.alertId], 'pending');
       },
     );
+  });
+
+  group('alerts.acknowledge (serviço)', () {
+    test('o ACK entrega ao store o evento de auditoria do alerta', () async {
+      final store = _MemoryStore();
+      final service = RedAlertService(store: store, outbox: _MemoryOutbox());
+
+      final ok = await service.acknowledge(
+        user: const AuthenticatedUser(
+          id: 'acs-1',
+          role: UserRole.acs,
+          microAreaId: 'area-1',
+          deviceId: 'mqtt',
+        ),
+        alertId: 'alerta-1',
+      );
+
+      expect(ok, isTrue);
+      expect(store.status['alerta-1'], 'acknowledged');
+      final e = store.audits.single;
+      expect(e.actionType, 'write');
+      expect(e.resourceType, 'alert');
+      expect(e.resourceId, 'alerta-1');
+      expect(e.result, 'acknowledged');
+      expect(e.userId, 'acs-1');
+    });
   });
 
   group('outbox esgotando tentativas', () {

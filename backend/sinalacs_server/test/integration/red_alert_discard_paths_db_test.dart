@@ -1,11 +1,14 @@
 import 'package:serverpod/serverpod.dart';
 import 'package:sinalacs_server/src/application/admin/admin_scope.dart';
+import 'package:sinalacs_server/src/application/audit/audit_chain_verifier.dart';
 import 'package:sinalacs_server/src/application/audit/audit_trail.dart';
 import 'package:sinalacs_server/src/application/auth/development_auth_service.dart';
 import 'package:sinalacs_server/src/application/retention/expurge_service.dart';
 import 'package:sinalacs_server/src/config/app_config.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_alert_outbox.dart';
+import 'package:sinalacs_server/src/infrastructure/database/orm_alert_store.dart';
+import 'package:sinalacs_server/src/infrastructure/database/orm_audit_chain_reader.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_data_subject_case_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_retention_store.dart';
 import 'package:sinalacs_server/src/runtime/alert_runtime.dart';
@@ -157,8 +160,44 @@ void main() {
           greaterThan(0),
           reason: 'ACK de alerta vermelho sem linha em audit_logs',
         );
+        final verifier = AuditChainVerifier(
+          reader: OrmAuditChainReader(session: () => session),
+          secret: 'test-audit-chain-secret',
+        );
+        expect((await verifier.verify()).ok, isTrue);
       },
     );
+
+    test('ACK com a trilha de auditoria falhando é desfeito por inteiro', () async {
+      final alerta = await _alertaVermelho(session, em: _agora);
+      final store = OrmAlertStore(
+        session: () => session,
+        appendAudit: (s, t, e) async => throw StateError('trilha fora do ar'),
+      );
+
+      await expectLater(
+        store.acknowledge(
+          alertId: alerta.id!.uuid,
+          acsId: _acs,
+          microAreaId: _ma,
+          audit: const AuditEvent(
+            userId: _acs,
+            actionType: 'write',
+            resourceType: 'alert',
+            resourceId: _pac,
+            result: 'acknowledged',
+          ),
+        ),
+        throwsA(isA<StateError>()),
+      );
+
+      final depois = (await Alert.db.findById(session, alerta.id!))!;
+      expect(depois.status, AlertStatus.pending);
+      expect(depois.acknowledgedAt, isNull);
+      expect(depois.acsId, isNull);
+      expect(await AlertDeliveryRecord.db.count(session), 0);
+      expect(await AuditLog.db.count(session), 0);
+    });
 
     test(
       'ACK por MQTT (mesmo caminho do callback de server.dart)',
