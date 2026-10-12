@@ -84,7 +84,8 @@ class OrmAlertEscalationStore implements AlertEscalationStore {
       //    que ela gravou. O prazo é decidido aqui, em SQL, com o `@now` e o
       //    limite recebidos: vencido só se `now − triggeredAt > limite`,
       //    estritamente; `triggeredAt` no futuro dá intervalo negativo e nunca
-      //    vence.
+      //    vence. A concordância com `OrmAdminReadStore` (`overdue`) é pinada
+      //    por test/integration/admin_read_store_test.dart ('acordo: …').
       final linha = (await sessao.db.unsafeQuery(
         '''
         SELECT a."riskLevel", a.status, a."escalatedAt",

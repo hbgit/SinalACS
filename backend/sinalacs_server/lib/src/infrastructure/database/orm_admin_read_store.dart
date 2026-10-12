@@ -115,6 +115,8 @@ class OrmAdminReadStore implements AdminReadStore {
       '''
       SELECT a.id, a."patientId", m.name, a."riskLevel", a."status", a."triggeredAt",
              a."escalatedAt",
+             -- A concordância com o escalonamento é pinada por
+             -- test/integration/admin_read_store_test.dart ('acordo: overdue…').
              -- Mesma definição de "vencido" de `OrmAlertEscalationStore`: estrito
              -- e com o `@limite` em microssegundos; `triggeredAt` no futuro nunca
              -- vence. Só o vermelho pendente ainda não escalonado fica vencido.

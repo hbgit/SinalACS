@@ -1,10 +1,11 @@
 import 'dart:convert';
 
 import 'package:serverpod/serverpod.dart';
-import 'package:sinalacs_server/src/application/admin/admin_read_service.dart';
+import 'package:sinalacs_server/src/application/admin/alert_escalation_service.dart';
 import 'package:sinalacs_server/src/application/audit/audit_trail.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_admin_read_store.dart';
+import 'package:sinalacs_server/src/infrastructure/database/orm_alert_escalation_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_audit_trail.dart';
 import 'package:test/test.dart';
 
@@ -287,28 +288,44 @@ void main() {
       expect(soA.map((m) => m.name), ['Microárea A']);
     });
 
-    test('microárea com DOIS ACS aparece UMA vez (o id é a chave do filtro do app)', () async {
-      const segundoAcs = '00000000-0000-4000-8000-0000000000e9';
-      await _usuario(session, segundoAcs, 'Bruno ACS Sintético', UserRole.acs, ma: _maA);
-      await Acs.db.insertRow(
-        session,
-        Acs(
-          id: UuidValue.fromString(segundoAcs),
-          enrollmentId: 'ACS-ADM-RD-2',
-          ubsId: UuidValue.fromString(_ubsA),
-          active: false,
-        ),
-      );
+    test(
+      'microárea com DOIS ACS aparece UMA vez (o id é a chave do filtro do app)',
+      () async {
+        const segundoAcs = '00000000-0000-4000-8000-0000000000e9';
+        await _usuario(
+          session,
+          segundoAcs,
+          'Bruno ACS Sintético',
+          UserRole.acs,
+          ma: _maA,
+        );
+        await Acs.db.insertRow(
+          session,
+          Acs(
+            id: UuidValue.fromString(segundoAcs),
+            enrollmentId: 'ACS-ADM-RD-2',
+            ubsId: UuidValue.fromString(_ubsA),
+            active: false,
+          ),
+        );
 
-      final lista = await store.microAreas(const AdminScope.system());
+        final lista = await store.microAreas(const AdminScope.system());
 
-      expect(lista.map((m) => m.id).toSet(), hasLength(lista.length), reason: 'ids únicos');
-      final a = lista.singleWhere((m) => m.name == 'Microárea A');
-      expect(a.acsName, 'Carla ACS Sintética, Bruno ACS Sintético');
-      expect(a.acsEnrollmentId, 'ACS-ADM-RD-1, ACS-ADM-RD-2');
-      expect(a.acsActive, isTrue, reason: 'há ao menos um ACS ativo');
-      expect(lista.singleWhere((m) => m.name == 'Microárea B').acsActive, isFalse);
-    });
+        expect(
+          lista.map((m) => m.id).toSet(),
+          hasLength(lista.length),
+          reason: 'ids únicos',
+        );
+        final a = lista.singleWhere((m) => m.name == 'Microárea A');
+        expect(a.acsName, 'Carla ACS Sintética, Bruno ACS Sintético');
+        expect(a.acsEnrollmentId, 'ACS-ADM-RD-1, ACS-ADM-RD-2');
+        expect(a.acsActive, isTrue, reason: 'há ao menos um ACS ativo');
+        expect(
+          lista.singleWhere((m) => m.name == 'Microárea B').acsActive,
+          isFalse,
+        );
+      },
+    );
 
     test(
       'alertas: ordem triggeredAt desc, paginação por offset e nextOffset nulo no fim',
@@ -394,6 +411,7 @@ void main() {
         now: _t,
       );
       expect(reconhecidos.items, hasLength(3));
+      expect(reconhecidos.items.every((a) => !a.overdue), isTrue);
     });
 
     test(
@@ -409,7 +427,6 @@ void main() {
         expect(r.items, isEmpty);
       },
     );
-
 
     group('escalonamento (#44): escalatedAt e overdue calculado no servidor', () {
       // Limite padrão: 300 s. `_t` é o "agora" do servidor.
@@ -429,87 +446,276 @@ void main() {
         );
       }
 
-      test('vermelho pendente acima do limite: overdue=true, escalatedAt nulo',
-          () async {
-        final em = _t.subtract(limite + const Duration(seconds: 1));
-        await _alerta(session,
-            risco: RiskLevel.red, status: AlertStatus.pending, em: em, ma: _maA);
-        final a = await lido(em);
-        expect(a.overdue, isTrue);
-        expect(a.escalatedAt, isNull);
-      });
+      // Pina o acordo entre a leitura (`overdue`, OrmAdminReadStore) e o
+      // escalonamento (`vencido`, OrmAlertEscalationStore): o botão "Escalar"
+      // depende de os dois SQLs dizerem o mesmo. Se uma das regras mudar, este
+      // teste quebra. Referenciado nos dois pontos de SQL.
+      test(
+        'acordo: overdue da leitura == escalonar devolve escalated (mesmo now e limite)',
+        () async {
+          const us = Duration(microseconds: 1);
+          Future<Alert> semear(
+            RiskLevel risco,
+            DateTime em, {
+            DateTime? escalonadoEm,
+          }) => Alert.db.insertRow(
+            session,
+            Alert(
+              patientId: UuidValue.fromString(_paciente),
+              microAreaId: UuidValue.fromString(_maA),
+              triggeredAt: em,
+              escalatedAt: escalonadoEm,
+              riskLevel: risco,
+              locationHash: 'hash-sintetico',
+              status: AlertStatus.pending,
+              mqttTopic: 'sinalacs/v1/microareas/$_maA/alerts',
+              deviceId: 'device-sintetico',
+              retryCount: 0,
+              version: 0,
+            ),
+          );
+
+          // Instantes distintos entre si e dos fixtures do _seed.
+          final casos = <(String, Alert, bool, EscalationOutcome)>[
+            (
+              'exatamente o limite',
+              await semear(RiskLevel.red, _t.subtract(limite)),
+              false,
+              EscalationOutcome.notDue,
+            ),
+            (
+              'limite + 1 microssegundo',
+              await semear(RiskLevel.red, _t.subtract(limite + us)),
+              true,
+              EscalationOutcome.escalated,
+            ),
+            (
+              'limite - 1 microssegundo',
+              await semear(RiskLevel.red, _t.subtract(limite - us)),
+              false,
+              EscalationOutcome.notDue,
+            ),
+            (
+              'limite + 1 s',
+              await semear(
+                RiskLevel.red,
+                _t.subtract(limite + const Duration(seconds: 1)),
+              ),
+              true,
+              EscalationOutcome.escalated,
+            ),
+            (
+              'limite - 1 s',
+              await semear(
+                RiskLevel.red,
+                _t.subtract(limite - const Duration(seconds: 1)),
+              ),
+              false,
+              EscalationOutcome.notDue,
+            ),
+            (
+              'triggeredAt 2 h no futuro',
+              await semear(RiskLevel.red, _t.add(const Duration(hours: 2))),
+              false,
+              EscalationOutcome.notDue,
+            ),
+            (
+              'já escalonado',
+              await semear(
+                RiskLevel.red,
+                _t.subtract(const Duration(hours: 5, minutes: 11)),
+                escalonadoEm: _t.subtract(const Duration(minutes: 1)),
+              ),
+              false,
+              EscalationOutcome.alreadyEscalated,
+            ),
+            (
+              'amarelo',
+              await semear(
+                RiskLevel.yellow,
+                _t.subtract(const Duration(hours: 5, minutes: 12)),
+              ),
+              false,
+              EscalationOutcome.notRed,
+            ),
+          ];
+
+          // O microssegundo precisa sobreviver à ida e volta pelo Postgres;
+          // sem isso o caso "+1 µs" não exercitaria a unidade.
+          final mais1us = casos[1].$2;
+          expect(
+            (await Alert.db.findById(session, mais1us.id!))!.triggeredAt,
+            _t.subtract(limite + us),
+          );
+
+          // Leitura de TODOS antes de escalar qualquer um (escalar muta a linha).
+          final lista = await store.alerts(
+            const AdminScope.system(),
+            limit: 100,
+            offset: 0,
+            now: _t,
+          );
+          final overdue = {
+            for (final a in lista.items) a.id: a.overdue,
+          };
+
+          final escalonador = OrmAlertEscalationStore(
+            session: () => session,
+            appendAudit: OrmAuditTrail(
+              session: () => session,
+              chainSecret: 'segredo-sintetico-de-teste',
+            ).recordInTransaction,
+          );
+          for (final (nome, alerta, esperadoOverdue, esperadoDesfecho)
+              in casos) {
+            final id = alerta.id!.uuid;
+            final r = await escalonador.escalate(
+              const AdminScope.system(),
+              alertId: id,
+              actorId: _coordId,
+              reason: EscalationReason.noAckTimeout,
+              now: _t,
+              threshold: limite,
+              auditFor: (o) => AuditEvent(
+                userId: _coordId,
+                actionType: 'write',
+                resourceType: 'admin_alert',
+                resourceId: id,
+                result: 'escalated:no_ack_timeout',
+              ),
+            );
+            expect(r.outcome, esperadoDesfecho, reason: nome);
+            expect(overdue[id], esperadoOverdue, reason: 'leitura: $nome');
+            expect(
+              overdue[id],
+              r.outcome == EscalationOutcome.escalated,
+              reason: 'leitura e escalonamento discordam: $nome',
+            );
+          }
+        },
+      );
+
+      test(
+        'vermelho pendente acima do limite: overdue=true, escalatedAt nulo',
+        () async {
+          final em = _t.subtract(limite + const Duration(seconds: 1));
+          await _alerta(
+            session,
+            risco: RiskLevel.red,
+            status: AlertStatus.pending,
+            em: em,
+            ma: _maA,
+          );
+          final a = await lido(em);
+          expect(a.overdue, isTrue);
+          expect(a.escalatedAt, isNull);
+        },
+      );
 
       test('vermelho pendente dentro do prazo: overdue=false', () async {
         final em = _t.subtract(limite - const Duration(seconds: 1));
-        await _alerta(session,
-            risco: RiskLevel.red, status: AlertStatus.pending, em: em, ma: _maA);
+        await _alerta(
+          session,
+          risco: RiskLevel.red,
+          status: AlertStatus.pending,
+          em: em,
+          ma: _maA,
+        );
         expect((await lido(em)).overdue, isFalse);
       });
 
-      test('exatamente no limite: overdue=false (estrito, como o escalonamento)',
-          () async {
-        final em = _t.subtract(limite);
-        await _alerta(session,
-            risco: RiskLevel.red, status: AlertStatus.pending, em: em, ma: _maA);
-        expect((await lido(em)).overdue, isFalse);
-      });
+      test(
+        'exatamente no limite: overdue=false (estrito, como o escalonamento)',
+        () async {
+          final em = _t.subtract(limite);
+          await _alerta(
+            session,
+            risco: RiskLevel.red,
+            status: AlertStatus.pending,
+            em: em,
+            ma: _maA,
+          );
+          expect((await lido(em)).overdue, isFalse);
+        },
+      );
 
       test('triggeredAt no futuro nunca vence', () async {
         final em = _t.add(const Duration(hours: 1));
-        await _alerta(session,
-            risco: RiskLevel.red, status: AlertStatus.pending, em: em, ma: _maA);
+        await _alerta(
+          session,
+          risco: RiskLevel.red,
+          status: AlertStatus.pending,
+          em: em,
+          ma: _maA,
+        );
         expect((await lido(em)).overdue, isFalse);
       });
 
       test('reconhecido e amarelo antigos não são overdue', () async {
         final emAck = _t.subtract(const Duration(hours: 5, minutes: 3));
         final emAmarelo = _t.subtract(const Duration(hours: 5, minutes: 4));
-        await _alerta(session,
-            risco: RiskLevel.red,
-            status: AlertStatus.acknowledged,
-            em: emAck,
-            ma: _maA,
-            reconhecidoApos: const Duration(seconds: 10));
-        await _alerta(session,
-            risco: RiskLevel.yellow,
-            status: AlertStatus.pending,
-            em: emAmarelo,
-            ma: _maA);
+        await _alerta(
+          session,
+          risco: RiskLevel.red,
+          status: AlertStatus.acknowledged,
+          em: emAck,
+          ma: _maA,
+          reconhecidoApos: const Duration(seconds: 10),
+        );
+        await _alerta(
+          session,
+          risco: RiskLevel.yellow,
+          status: AlertStatus.pending,
+          em: emAmarelo,
+          ma: _maA,
+        );
         expect((await lido(emAck)).overdue, isFalse);
         expect((await lido(emAmarelo)).overdue, isFalse);
       });
 
       test(
-          'D3: escalonado continua pending, listado, no filtro pending e em openRedAlerts; overdue=false',
-          () async {
-        final antes = await store.indicators(const AdminScope.system(), now: _t);
-        final em = _t.subtract(const Duration(hours: 5, minutes: 7));
-        final escalonado = _t.subtract(const Duration(minutes: 1));
-        await _alerta(session,
+        'D3: escalonado continua pending, listado, no filtro pending e em openRedAlerts; overdue=false',
+        () async {
+          final antes = await store.indicators(
+            const AdminScope.system(),
+            now: _t,
+          );
+          final em = _t.subtract(const Duration(hours: 5, minutes: 7));
+          final escalonado = _t.subtract(const Duration(minutes: 1));
+          await _alerta(
+            session,
             risco: RiskLevel.red,
             status: AlertStatus.pending,
             em: em,
             ma: _maA,
-            escalonadoEm: escalonado);
+            escalonadoEm: escalonado,
+          );
 
-        final a = await lido(em);
-        expect(a.escalatedAt, escalonado);
-        expect(a.overdue, isFalse);
-        expect(a.status, AlertStatus.pending);
+          final a = await lido(em);
+          expect(a.escalatedAt, escalonado);
+          expect(a.overdue, isFalse);
+          expect(a.status, AlertStatus.pending);
 
-        final pendentes = await store.alerts(
-          const AdminScope.system(),
-          status: AlertStatus.pending,
-          limit: 100,
-          offset: 0,
-          now: _t,
-        );
-        expect(pendentes.items.any((x) => x.triggeredAt == em), isTrue);
+          final pendentes = await store.alerts(
+            const AdminScope.system(),
+            status: AlertStatus.pending,
+            limit: 100,
+            offset: 0,
+            now: _t,
+          );
+          expect(pendentes.items.any((x) => x.triggeredAt == em), isTrue);
 
-        final depois = await store.indicators(const AdminScope.system(), now: _t);
-        expect(depois.openRedAlerts, antes.openRedAlerts + 1,
-            reason: 'escalar nunca esconde o alerta (D3)');
-      });
+          final depois = await store.indicators(
+            const AdminScope.system(),
+            now: _t,
+          );
+          expect(
+            depois.openRedAlerts,
+            antes.openRedAlerts + 1,
+            reason: 'escalar nunca esconde o alerta (D3)',
+          );
+        },
+      );
 
       test('o limite é injetável: com 60 s, 2 min já vence', () async {
         final menor = OrmAdminReadStore(
@@ -517,20 +723,38 @@ void main() {
           escalationThreshold: const Duration(seconds: 60),
         );
         final em = _t.subtract(const Duration(minutes: 2));
-        await _alerta(session,
-            risco: RiskLevel.red, status: AlertStatus.pending, em: em, ma: _maA);
-        final p = await menor.alerts(const AdminScope.system(),
-            limit: 100, offset: 0, now: _t);
+        await _alerta(
+          session,
+          risco: RiskLevel.red,
+          status: AlertStatus.pending,
+          em: em,
+          ma: _maA,
+        );
+        final p = await menor.alerts(
+          const AdminScope.system(),
+          limit: 100,
+          offset: 0,
+          now: _t,
+        );
         expect(p.items.singleWhere((a) => a.triggeredAt == em).overdue, isTrue);
         expect((await lido(em)).overdue, isFalse);
       });
 
       test('coordenador de OUTRA UBS não enxerga o alerta vencido', () async {
         final em = _t.subtract(const Duration(hours: 5, minutes: 9));
-        await _alerta(session,
-            risco: RiskLevel.red, status: AlertStatus.pending, em: em, ma: _maA);
-        final p = await store.alerts(const AdminScope.ubs(_ubsB),
-            limit: 100, offset: 0, now: _t);
+        await _alerta(
+          session,
+          risco: RiskLevel.red,
+          status: AlertStatus.pending,
+          em: em,
+          ma: _maA,
+        );
+        final p = await store.alerts(
+          const AdminScope.ubs(_ubsB),
+          limit: 100,
+          offset: 0,
+          now: _t,
+        );
         expect(p.items.any((a) => a.triggeredAt == em), isFalse);
       });
     });
