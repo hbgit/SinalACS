@@ -16,9 +16,16 @@ import 'package:sinalacs_server/src/generated/protocol.dart';
 /// subconsulta de [auditLogs]), e staff não tem microárea: as linhas de staff só
 /// o escopo de sistema enxerga.
 class OrmAdminReadStore implements AdminReadStore {
-  OrmAdminReadStore({required Session Function() session}) : _session = session;
+  OrmAdminReadStore({
+    required Session Function() session,
+    this.escalationThreshold = const Duration(seconds: 300),
+  }) : _session = session;
 
   final Session Function() _session;
+
+  /// Prazo do alerta vermelho (`AppConfig.redAlertEscalationSeconds`) a partir
+  /// do qual `AdminAlert.overdue` vale.
+  final Duration escalationThreshold;
 
   static const _janelaDoTmrav = Duration(days: 30);
 
@@ -102,10 +109,19 @@ class OrmAdminReadStore implements AdminReadStore {
     AlertStatus? status,
     required int limit,
     required int offset,
+    required DateTime now,
   }) async {
     final rows = await _session().db.unsafeQuery(
       '''
-      SELECT a.id, a."patientId", m.name, a."riskLevel", a."status", a."triggeredAt"
+      SELECT a.id, a."patientId", m.name, a."riskLevel", a."status", a."triggeredAt",
+             a."escalatedAt",
+             -- Mesma definição de "vencido" de `OrmAlertEscalationStore`: estrito
+             -- e com o `@limite` em microssegundos; `triggeredAt` no futuro nunca
+             -- vence. Só o vermelho pendente ainda não escalonado fica vencido.
+             (a."riskLevel" = 'red' AND a."status" = 'pending'
+                AND a."escalatedAt" IS NULL
+                AND (@now::timestamp - a."triggeredAt")
+                  > (@limite::bigint * interval '1 microsecond')) AS vencido
       FROM alerts a
       LEFT JOIN micro_areas m ON m.id = a."microAreaId"
       WHERE $_escopo
@@ -118,6 +134,8 @@ class OrmAdminReadStore implements AdminReadStore {
         'ubs': scope.ubsId,
         'ma': microAreaId,
         'status': status?.name,
+        'now': now.toUtc(),
+        'limite': escalationThreshold.inMicroseconds,
         // Uma linha a mais só para saber se há próxima página.
         'limit': limit + 1,
         'offset': offset,
@@ -135,7 +153,8 @@ class OrmAdminReadStore implements AdminReadStore {
             riskLevel: RiskLevel.fromJson(r[3] as String),
             status: AlertStatus.fromJson(r[4] as String),
             triggeredAt: (r[5] as DateTime).toUtc(),
-            overdue: false,
+            escalatedAt: (r[6] as DateTime?)?.toUtc(),
+            overdue: r[7] as bool,
           ),
       ],
       nextOffset: haMais ? offset + limit : null,

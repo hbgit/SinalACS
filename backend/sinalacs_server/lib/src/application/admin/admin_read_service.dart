@@ -18,12 +18,17 @@ abstract interface class AdminReadStore implements AdminScopeStore {
 
   /// Mais recentes primeiro (`triggeredAt` desc, `id` desc: ordem estável).
   /// `nextOffset` nulo = fim da lista.
+  ///
+  /// [now] é o relógio do **servidor**: `AdminAlert.overdue` é calculado com ele
+  /// (#44), nunca com o do aparelho. Escalonar não tira o alerta da lista nem do
+  /// filtro `pending` (D3).
   Future<AdminAlertPage> alerts(
     AdminScope scope, {
     String? microAreaId,
     AlertStatus? status,
     required int limit,
     required int offset,
+    required DateTime now,
   });
 
   /// Mais recentes primeiro, por keyset (`sequence` menor que [beforeSequence]).
@@ -103,6 +108,7 @@ class AdminReadService {
       status: status,
       limit: limit,
       offset: offset,
+      now: _clock().toUtc(),
     );
   }
 

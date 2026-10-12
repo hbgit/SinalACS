@@ -228,7 +228,10 @@ class AlertRuntime {
   /// Leitura do backoffice (#40), para uma requisição. A trilha é a da
   /// requisição: cada leitura do staff vira uma linha encadeada em `audit_logs`.
   AdminReadService adminReadServiceFor(Session session) => AdminReadService(
-        store: OrmAdminReadStore(session: () => session),
+        store: OrmAdminReadStore(
+          session: () => session,
+          escalationThreshold: Duration(seconds: config.redAlertEscalationSeconds),
+        ),
         audit: auditTrailFor(session),
       );
 

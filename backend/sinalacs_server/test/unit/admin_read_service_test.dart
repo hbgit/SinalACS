@@ -15,6 +15,7 @@ class _Store implements AdminReadStore {
   AdminScope? ultimoEscopo;
   int chamadas = 0;
   int? ultimoLimit;
+  DateTime? ultimoAgoraDosAlertas;
   final Map<String, String?> ubs = {
     'coord-a': _ubsDoCoordenador,
     'coord-sem-ubs': null,
@@ -55,8 +56,10 @@ class _Store implements AdminReadStore {
     AlertStatus? status,
     required int limit,
     required int offset,
+    required DateTime now,
   }) async {
     _marca('alerts', scope);
+    ultimoAgoraDosAlertas = now;
     ultimoLimit = limit;
     return AdminAlertPage(items: []);
   }
@@ -113,6 +116,15 @@ void main() {
       clock: () => DateTime.utc(2026, 10, 7, 12),
     );
   });
+
+  test(
+    'alertas: o serviço passa ao store o relógio DO SERVIDOR, em UTC (vencido nunca vem do aparelho)',
+    () async {
+      await servico.alerts(admin);
+      expect(store.ultimoAgoraDosAlertas, DateTime.utc(2026, 10, 7, 12));
+      expect(store.ultimoAgoraDosAlertas!.isUtc, isTrue);
+    },
+  );
 
   test(
     'admin lê com escopo de sistema e a leitura é auditada ANTES do dado',
