@@ -9,6 +9,7 @@ import 'package:sinalacs_admin/app/escalate_alert_dialog.dart';
 import 'package:sinalacs_admin/app/admin_layout.dart';
 import 'package:sinalacs_admin/app/login_screen.dart';
 import 'package:sinalacs_admin/app/monitoring_controller.dart';
+import 'package:sinalacs_admin/app/overdue_red_banner.dart';
 import 'package:sinalacs_admin/app/stale_badge.dart';
 import 'package:sinalacs_admin/core/auth/admin_auth_backend.dart';
 import 'package:sinalacs_admin/core/auth/admin_auth_bootstrap.dart';
@@ -276,6 +277,13 @@ String statusLabel(AlertStatus status) => switch (status) {
       AlertStatus.escalated => 'Escalonado',
     };
 
+/// Opções do filtro de status da tela Alertas: todos menos `escalated`, que
+/// não tem escritor (ver o comentário no dropdown).
+final List<AlertStatus> _statusFiltraveis = [
+  for (final status in AlertStatus.values)
+    if (status != AlertStatus.escalated) status,
+];
+
 class IndicatorsScreen extends StatefulWidget {
   const IndicatorsScreen({required this.dataSource, this.monitoring, super.key});
 
@@ -321,7 +329,7 @@ class _IndicatorsScreenState extends State<IndicatorsScreen> with MonitoredScree
           final data = monitoring.lastPulse?.indicators ?? snapshot.data!;
           return _page([
             MonitoringStaleBadge(monitoring),
-            const Text('Painel de Indicadores', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+            TitleWithOverdueRed('Painel de Indicadores', monitoring),
             const SizedBox(height: 4),
             const Text('Contadores por risco clínico da UBS'),
             const SizedBox(height: 16),
@@ -693,7 +701,7 @@ class _AlertsListState extends State<_AlertsList> {
             padding: const EdgeInsets.all(20),
             children: [
               MonitoringStaleBadge(widget.monitoring),
-              const Text('Alertas da UBS', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+              TitleWithOverdueRed('Alertas da UBS', widget.monitoring),
               const SizedBox(height: 4),
               const Text('Consulta somente leitura — nenhuma reclassificação de risco é permitida aqui.'),
               const SizedBox(height: 16),
@@ -722,7 +730,11 @@ class _AlertsListState extends State<_AlertsList> {
                       decoration: const InputDecoration(labelText: 'Status'),
                       items: [
                         const DropdownMenuItem(value: null, child: Text('Todos')),
-                        for (final status in AlertStatus.values)
+                        // Sem "Escalonado" (F1, #44): nada grava `AlertStatus.escalated`
+                        // (escalonar mantém o alerta `pending`, D3), então o filtro só
+                        // devolveria vazio. O rótulo segue em [statusLabel] para as
+                        // linhas legadas.
+                        for (final status in _statusFiltraveis)
                           DropdownMenuItem(value: status, child: Text(statusLabel(status), overflow: TextOverflow.ellipsis)),
                       ],
                       onChanged: (value) => onFilterChanged(microAreaFilter, value),

@@ -330,6 +330,9 @@ void main() {
     testWidgets('sem overflow com fonte a ${(escala * 100).round()}% em ${tamanho.width.round()}dp', (tester) async {
       await montar(tester, _Fonte(now: () => agora), escala: escala, tamanho: tamanho);
       expect(tester.takeException(), isNull);
+      // A faixa "1 vermelho vencido" (#44, F2) desce o cartão: a 200% em 360dp
+      // o botão sai da área que o ListView constrói, então rola até ele.
+      await tester.scrollUntilVisible(botao, 200, scrollable: find.byType(Scrollable).first);
       await abrirDialogo(tester);
       expect(tester.takeException(), isNull);
       await escolherMotivo(tester, EscalationReasonCode.patientRecontact);

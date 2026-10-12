@@ -45,6 +45,9 @@ void main() {
     // Selo de dado desatualizado (#44): texto + ícone sobre o fundo
     // `surfaceRaised` do próprio selo, no painel e na lista de alertas.
     ('overdueOnSurface sobre card (selo de dado desatualizado)', AdminColors.overdueOnSurface, AdminColors.surfaceRaised, normalText),
+    // Faixa "N vermelhos vencidos" (#44): texto + ícone sobre o fundo
+    // `surfaceRaised` da própria faixa, no painel e na lista de alertas.
+    ('redOnSurface sobre card (faixa de vermelhos vencidos)', AdminColors.redOnSurface, AdminColors.surfaceRaised, normalText),
     // Preenchimento: texto branco sobre a cor de fundo — a prova de que não
     // precisamos trocar `red`/`accent` como fill.
     ('branco sobre red (faixa/chip de risco)', Colors.white, AdminColors.red, largeTextOrUi),
