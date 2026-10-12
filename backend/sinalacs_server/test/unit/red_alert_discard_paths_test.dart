@@ -23,25 +23,29 @@ import 'package:test/test.dart';
 // Varredura do fonte: quem pode escrever em `alerts`.
 // ---------------------------------------------------------------------------
 
-/// Escritas em `alerts`: SQL cru, chamadas de escrita do ORM e atribuição de
-/// `status: AlertStatus.…` (inclusive DTOs de leitura/resposta, que entram
-/// aqui de propósito para cada uso ter uma justificativa por escrito).
-final _writePattern = RegExp(
-  r'UPDATE\s+"?alerts"?\b|DELETE\s+FROM\s+"?alerts"?\b|INSERT\s+INTO\s+"?alerts"?\b'
-  r'|Alert\.db\.(updateRow|deleteRow|delete|update|insertRow|insert)\b'
-  r'|status:\s*AlertStatus\.',
-);
-
-/// Subconjunto estrito: operações que de fato alteram a tabela `alerts`.
+/// Mutações da tabela `alerts`: SQL cru (qualquer caixa, aspas opcionais,
+/// quebra de linha entre UPDATE/DELETE/INSERT e o nome) e escrita do ORM
+/// (`Alert.db.update*/delete*/insert*` e `db.update<Alert>(…)` etc.).
+///
+/// Escopo: SÓ `alerts`. `alert_deliveries`, `alert_outbox` e
+/// `alert_idempotency_keys` ficam de fora de propósito (o brief fala do alerta
+/// em si; o ACK também insere em `alert_deliveries`, o que não descarta nem
+/// reclassifica alerta). `DTO status: AlertStatus.` também fica de fora: não
+/// escreve em tabela; qualquer escrita de status passa por `Alert.db.update*`
+/// ou SQL, já cobertos.
 final _mutationPattern = RegExp(
-  r'UPDATE\s+"?alerts"?\b|DELETE\s+FROM\s+"?alerts"?\b|INSERT\s+INTO\s+"?alerts"?\b'
-  r'|Alert\.db\.(updateRow|deleteRow|delete|update|insertRow|insert)\b',
+  r'(UPDATE|DELETE\s+FROM|INSERT\s+INTO)\s+"?alerts"?(?![\w])'
+  r'|\bAlert\.db\.(update|delete|insert)\w*'
+  r'|\.(update|delete|insert)\w*<Alert>',
+  caseSensitive: false,
+  multiLine: true,
 );
 
-/// Arquivos autorizados a casar com [_writePattern], cada um com o motivo.
-/// `escalate` (Task 6) entra como `orm_alert_escalation_store.dart`; enquanto
-/// o arquivo não existe, a varredura exige só que todo escritor ENCONTRADO
-/// esteja aqui (subconjunto), não que todos existam.
+/// Arquivos autorizados a casar com [_mutationPattern]: só escritores reais,
+/// cada um com o motivo. Arquivos que apenas montam DTO ou leem não entram.
+/// `escalate` (Task 6) entra como `orm_alert_escalation_store.dart`; enquanto o
+/// arquivo não existe, a varredura exige só que todo escritor ENCONTRADO esteja
+/// aqui (subconjunto).
 const _allowedWriters = <String, String>{
   'infrastructure/database/orm_alert_store.dart':
       'save() insere o alerta como pending; acknowledge() leva a acknowledged '
@@ -51,12 +55,6 @@ const _allowedWriters = <String, String>{
       'status/risco (buraco, corrigido na Task 4)',
   'infrastructure/database/orm_alert_escalation_store.dart':
       'Task 6: UPDATE só de escalatedAt/colunas de escalonamento, nunca status',
-  'endpoints/alerts_endpoint.dart':
-      'só monta o DTO de resposta (RedAlertResult/AlertAckResult.status); '
-      'não escreve na tabela',
-  'infrastructure/database/orm_admin_read_store.dart':
-      'só LÊ a linha para o DTO do backoffice (AlertStatus.fromJson); '
-      'não escreve na tabela',
 };
 
 Map<String, List<String>> _grepSources(RegExp pattern) {
@@ -66,21 +64,16 @@ Map<String, List<String>> _grepSources(RegExp pattern) {
     if (entity is! File || !entity.path.endsWith('.dart')) continue;
     final relative = entity.path.substring('lib/src/'.length);
     if (relative.startsWith('generated/')) continue;
-    final lines = entity.readAsLinesSync();
-    for (var i = 0; i < lines.length; i++) {
-      final line = lines[i].trimLeft();
-      if (line.startsWith('//') || line.startsWith('///')) continue;
-      if (pattern.hasMatch(lines[i])) {
-        found
-            .putIfAbsent(relative, () => [])
-            .add('${i + 1}: ${lines[i].trim()}');
-      }
-    }
-    // SQL partido em várias linhas ("UPDATE\n alerts").
-    final whole = entity.readAsStringSync();
-    if (!found.containsKey(relative) && pattern.hasMatch(whole)) {
-      found[relative] = ['(multilinha)'];
-    }
+    // Texto inteiro (SQL pode quebrar linha), sem as linhas de comentário.
+    final code = entity
+        .readAsLinesSync()
+        .map((l) => l.trimLeft().startsWith('//') ? '' : l)
+        .join('\n');
+    final hits = pattern
+        .allMatches(code)
+        .map((m) => m.group(0)!.replaceAll(RegExp(r'\s+'), ' '))
+        .toList();
+    if (hits.isNotEmpty) found[relative] = hits;
   }
   return found;
 }
@@ -169,13 +162,48 @@ void main() {
   );
 
   group('varredura do fonte', () {
+    test('o padrão de mutação pega os escritores realistas e só eles', () {
+      const mustMatch = [
+        'Alert.db.updateRow(s, a)',
+        'Alert.db.updateWhere(s, where: w)',
+        'Alert.db.updateColumn(s, id)',
+        'Alert.db.deleteRow(s, a)',
+        'Alert.db.deleteWhere(s, where: w)',
+        'Alert.db.insertRow(s, a)',
+        'session.db.update<Alert>(rows)',
+        'db.delete<Alert>(rows)',
+        'db.insert<Alert>(rows)',
+        'DELETE FROM alerts WHERE x',
+        'delete from alerts',
+        'UPDATE\n  "alerts" SET status = 1',
+        'INSERT INTO alerts (id)',
+      ];
+      const mustNotMatch = [
+        'Alert.db.findById(s, id)',
+        'Alert.db.find(s)',
+        'Alert.db.count(s)',
+        // Fora de escopo de propósito (ver comentário do padrão).
+        'AlertDeliveryRecord.db.insertRow(s, r)',
+        'AlertOutboxEntry.db.updateRow(s, r)',
+        'UPDATE alert_outbox SET attempts = 1',
+        'DELETE FROM alert_deliveries WHERE x',
+        'INSERT INTO alert_idempotency_keys (k)',
+        'status: AlertStatus.pending,',
+      ];
+      for (final sample in mustMatch) {
+        expect(_mutationPattern.hasMatch(sample), isTrue, reason: sample);
+      }
+      for (final sample in mustNotMatch) {
+        expect(_mutationPattern.hasMatch(sample), isFalse, reason: sample);
+      }
+    });
+
     test(
-      'só os escritores conhecidos tocam alerts (subconjunto da allowlist)',
+      'só os escritores conhecidos mutam alerts (subconjunto da allowlist)',
       () {
-        final writers = _grepSources(_writePattern);
-        final unexpected = writers.keys
-            .where((file) => !_allowedWriters.containsKey(file))
-            .toList();
+        final unexpected = _grepSources(
+          _mutationPattern,
+        ).keys.where((file) => !_allowedWriters.containsKey(file)).toList();
         expect(
           unexpected,
           isEmpty,
@@ -188,8 +216,7 @@ void main() {
     );
 
     test('admin.* não escreve em alerts (só o futuro escalateAlert pode)', () {
-      final writers = _grepSources(_mutationPattern);
-      final adminWriters = writers.keys.where(
+      final adminWriters = _grepSources(_mutationPattern).keys.where(
         (f) =>
             f == 'endpoints/admin_endpoint.dart' ||
             f.startsWith('application/admin/') ||
@@ -198,21 +225,6 @@ void main() {
       );
       expect(adminWriters, isEmpty);
     });
-
-    test(
-      'a allowlist não aceita escritor de mutação fora dos três esperados',
-      () {
-        final writers = _grepSources(_mutationPattern).keys.toSet();
-        expect(
-          writers.difference({
-            'infrastructure/database/orm_alert_store.dart',
-            'infrastructure/database/orm_retention_store.dart',
-            'infrastructure/database/orm_alert_escalation_store.dart',
-          }),
-          isEmpty,
-        );
-      },
-    );
   });
 
   group('alerts.createRedAlert repetido (idempotência)', () {

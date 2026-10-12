@@ -156,36 +156,40 @@ void main() {
           reason: 'ACK de alerta vermelho sem linha em audit_logs',
         );
       },
-      skip: 'Task 4',
+      skip: 'Task 4: ACK por RPC não grava audit_logs',
     );
 
-    test('ACK por MQTT (mesmo caminho do callback de server.dart)', () async {
-      // server.dart: runtime.serviceFor(session).acknowledge(user com
-      // deviceId "mqtt"). O dispatcher só decodifica a mensagem e chama este
-      // callback; o broker real não é necessário para provar a escrita.
-      final alerta = await _alertaVermelho(session, em: _agora);
-      final ok = await AlertRuntime.instance
-          .serviceFor(session)
-          .acknowledge(
-            user: AuthenticatedUser(
-              id: _acs,
-              role: UserRole.acs,
-              microAreaId: _ma,
-              deviceId: 'mqtt',
-            ),
-            alertId: alerta.id!.uuid,
-          );
-      expect(ok, isTrue);
-      expect(
-        (await Alert.db.findById(session, alerta.id!))!.status,
-        AlertStatus.acknowledged,
-      );
-      expect(
-        await _auditoriaDoAlerta(session, alerta.id!),
-        greaterThan(0),
-        reason: 'ACK por MQTT sem linha em audit_logs',
-      );
-    }, skip: 'Task 4');
+    test(
+      'ACK por MQTT (mesmo caminho do callback de server.dart)',
+      () async {
+        // server.dart: runtime.serviceFor(session).acknowledge(user com
+        // deviceId "mqtt"). O dispatcher só decodifica a mensagem e chama este
+        // callback; o broker real não é necessário para provar a escrita.
+        final alerta = await _alertaVermelho(session, em: _agora);
+        final ok = await AlertRuntime.instance
+            .serviceFor(session)
+            .acknowledge(
+              user: AuthenticatedUser(
+                id: _acs,
+                role: UserRole.acs,
+                microAreaId: _ma,
+                deviceId: 'mqtt',
+              ),
+              alertId: alerta.id!.uuid,
+            );
+        expect(ok, isTrue);
+        expect(
+          (await Alert.db.findById(session, alerta.id!))!.status,
+          AlertStatus.acknowledged,
+        );
+        expect(
+          await _auditoriaDoAlerta(session, alerta.id!),
+          greaterThan(0),
+          reason: 'ACK por MQTT sem linha em audit_logs',
+        );
+      },
+      skip: 'Task 4: ACK por MQTT não grava audit_logs',
+    );
 
     test(
       'outbox esgotando tentativas: alerta segue pending e a entrega, viva',
@@ -224,27 +228,31 @@ void main() {
       },
     );
 
-    test('retenção LGPD: não apaga vermelho pending vencido (D7)', () async {
-      final velho = await _alertaVermelho(
-        session,
-        em: _agora.subtract(const Duration(days: 800)),
-      );
-      final cortes = RetentionCutoffs(
-        alerts: _agora.subtract(const Duration(days: 730)),
-        visits: _agora.subtract(const Duration(days: 1825)),
-        triageSessions: _agora.subtract(const Duration(days: 1825)),
-      );
+    test(
+      'retenção LGPD: não apaga vermelho pending vencido (D7)',
+      () async {
+        final velho = await _alertaVermelho(
+          session,
+          em: _agora.subtract(const Duration(days: 800)),
+        );
+        final cortes = RetentionCutoffs(
+          alerts: _agora.subtract(const Duration(days: 730)),
+          visits: _agora.subtract(const Duration(days: 1825)),
+          triageSessions: _agora.subtract(const Duration(days: 1825)),
+        );
 
-      await OrmRetentionStore(session: () => session).purgeDue(cortes);
+        await OrmRetentionStore(session: () => session).purgeDue(cortes);
 
-      final restante = await Alert.db.findById(session, velho.id!);
-      expect(
-        restante,
-        isNotNull,
-        reason: 'expurgo apagou alerta vermelho ainda pending',
-      );
-      expect(restante!.status, AlertStatus.pending);
-    }, skip: 'Task 4');
+        final restante = await Alert.db.findById(session, velho.id!);
+        expect(
+          restante,
+          isNotNull,
+          reason: 'expurgo apagou alerta vermelho ainda pending',
+        );
+        expect(restante!.status, AlertStatus.pending);
+      },
+      skip: 'Task 4: retenção apaga alerta vermelho pending vencido',
+    );
 
     test(
       'anonimização do titular: não apaga nem altera status de alerta',
