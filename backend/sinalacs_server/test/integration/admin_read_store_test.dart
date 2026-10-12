@@ -328,17 +328,21 @@ void main() {
     );
 
     test(
-      'alertas: ordem triggeredAt desc, paginação por offset e nextOffset nulo no fim',
+      'alertas: vencidos primeiro, depois triggeredAt desc, paginação por offset e nextOffset nulo no fim',
       () async {
         const sistema = AdminScope.system();
         final p1 = await store.alerts(sistema, limit: 3, offset: 0, now: _t);
         expect(p1.items, hasLength(3));
         expect(p1.nextOffset, 3);
+        // a1 (10 min) e n1 (180 min) são vermelhos pendentes além dos 300 s:
+        // vêm antes, entre si do mais recente ao mais antigo. b1 (5 min,
+        // exatamente o prazo) não vence e abre os demais.
         expect(p1.items.map((a) => a.triggeredAt).toList(), [
-          _t.subtract(const Duration(minutes: 5)),
           _t.subtract(const Duration(minutes: 10)),
-          _t.subtract(const Duration(minutes: 30)),
+          _t.subtract(const Duration(minutes: 180)),
+          _t.subtract(const Duration(minutes: 5)),
         ]);
+        expect(p1.items.map((a) => a.overdue).toList(), [true, true, false]);
         final p3 = await store.alerts(sistema, limit: 3, offset: 6, now: _t);
         expect(p3.items, hasLength(2));
         expect(p3.nextOffset, isNull);
@@ -347,6 +351,130 @@ void main() {
         expect(alem.nextOffset, isNull);
       },
     );
+
+    group('vencidos primeiro (#44): nenhum vencido fica além da 1ª página', () {
+      /// UBS B, microárea B: b1 (exatamente 300 s, não vence) + 54 vermelhos
+      /// recentes (1..54 s) + 1 vermelho pendente de 10 h atrás — o ÚNICO
+      /// vencido, e o mais antigo de todos. 56 alertas no escopo.
+      late DateTime vencidoEm;
+      setUp(() async {
+        for (var i = 1; i <= 54; i++) {
+          await _alerta(
+            session,
+            risco: i.isEven ? RiskLevel.red : RiskLevel.yellow,
+            status: AlertStatus.pending,
+            em: _t.subtract(Duration(seconds: i)),
+            ma: _maB,
+          );
+        }
+        vencidoEm = _t.subtract(const Duration(hours: 10));
+        await _alerta(
+          session,
+          risco: RiskLevel.red,
+          status: AlertStatus.pending,
+          em: vencidoEm,
+          ma: _maB,
+        );
+      });
+
+      test(
+        'o vencido mais antigo vem na 1ª página (limit 50), à frente de todos',
+        () async {
+          final p1 = await store.alerts(
+            const AdminScope.ubs(_ubsB),
+            limit: 50,
+            offset: 0,
+            now: _t,
+          );
+          expect(p1.items, hasLength(50));
+          expect(p1.items.first.triggeredAt, vencidoEm);
+          expect(p1.items.first.overdue, isTrue);
+          expect(p1.items.skip(1).any((a) => a.overdue), isFalse);
+        },
+      );
+
+      test('a ordem dos não vencidos segue triggeredAt desc', () async {
+        final p1 = await store.alerts(
+          const AdminScope.ubs(_ubsB),
+          limit: 50,
+          offset: 0,
+          now: _t,
+        );
+        final resto = p1.items.skip(1).map((a) => a.triggeredAt).toList();
+        expect(resto, [
+          for (var i = 1; i <= 49; i++) _t.subtract(Duration(seconds: i)),
+        ]);
+      });
+
+      test(
+        'paginação: nextOffset 50, 2ª página com 6 e nextOffset nulo, sem repetir nem perder linha',
+        () async {
+          const ubsB = AdminScope.ubs(_ubsB);
+          final p1 = await store.alerts(ubsB, limit: 50, offset: 0, now: _t);
+          expect(p1.nextOffset, 50);
+          final p2 = await store.alerts(
+            ubsB,
+            limit: 50,
+            offset: p1.nextOffset!,
+            now: _t,
+          );
+          expect(p2.items, hasLength(6));
+          expect(p2.nextOffset, isNull);
+          final ids = [...p1.items, ...p2.items].map((a) => a.id).toList();
+          expect(ids.toSet(), hasLength(56));
+          // O último da lista é b1, o mais antigo dos não vencidos.
+          expect(
+            p2.items.last.triggeredAt,
+            _t.subtract(const Duration(minutes: 5)),
+          );
+        },
+      );
+
+      test(
+        'filtros e escopo seguem valendo: microárea, status e UBS',
+        () async {
+          final soB = await store.alerts(
+            const AdminScope.system(),
+            microAreaId: _maB,
+            status: AlertStatus.pending,
+            limit: 50,
+            offset: 0,
+            now: _t,
+          );
+          expect(soB.items.first.triggeredAt, vencidoEm);
+          expect(
+            soB.items.every((a) => a.microAreaName == 'Microárea B'),
+            isTrue,
+          );
+
+          final reconhecidosB = await store.alerts(
+            const AdminScope.system(),
+            microAreaId: _maB,
+            status: AlertStatus.acknowledged,
+            limit: 50,
+            offset: 0,
+            now: _t,
+          );
+          expect(reconhecidosB.items, isEmpty);
+
+          // O coordenador da UBS A não vê o vencido da UBS B; o dele (a1)
+          // abre a lista dele.
+          final soA = await store.alerts(
+            const AdminScope.ubs(_ubsA),
+            limit: 50,
+            offset: 0,
+            now: _t,
+          );
+          expect(soA.items, hasLength(6));
+          expect(soA.items.any((a) => a.triggeredAt == vencidoEm), isFalse);
+          expect(
+            soA.items.first.triggeredAt,
+            _t.subtract(const Duration(minutes: 10)),
+          );
+          expect(soA.items.first.overdue, isTrue);
+        },
+      );
+    });
 
     test(
       'alertas trazem só rótulo do paciente, sem nome nem UUID inteiro',

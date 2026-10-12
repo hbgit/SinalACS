@@ -31,8 +31,9 @@ abstract interface class AdminReadStore implements AdminScopeStore {
     required Duration threshold,
   });
 
-  /// Mais recentes primeiro (`triggeredAt` desc, `id` desc: ordem estável).
-  /// `nextOffset` nulo = fim da lista.
+  /// Vencidos primeiro, depois mais recentes (`overdue` desc, `triggeredAt`
+  /// desc, `id` desc: ordem estável). Assim nenhum vermelho vencido fica além
+  /// da primeira página (#44). `nextOffset` nulo = fim da lista.
   ///
   /// [now] é o relógio do **servidor**: `AdminAlert.overdue` é calculado com ele
   /// (#44), nunca com o do aparelho. Escalonar não tira o alerta da lista nem do

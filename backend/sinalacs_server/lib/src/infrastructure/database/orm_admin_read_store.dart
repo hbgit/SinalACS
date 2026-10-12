@@ -158,7 +158,11 @@ class OrmAdminReadStore implements AdminReadStore {
       WHERE $_escopo
         AND (@ma::uuid IS NULL OR a."microAreaId" = @ma::uuid)
         AND (@status::text IS NULL OR a."status" = @status::text)
-      ORDER BY a."triggeredAt" DESC, a.id DESC
+      -- Vencidos primeiro (#44): um vencido além das primeiras linhas não
+      -- teria botão "Escalar" em tela nenhuma. Ordena pelo próprio `vencido`
+      -- (o mesmo fragmento, sem segunda cópia da regra); o desempate
+      -- `triggeredAt`/`id` mantém a ordem total, estável entre páginas.
+      ORDER BY vencido DESC, a."triggeredAt" DESC, a.id DESC
       LIMIT @limit OFFSET @offset
       ''',
       parameters: QueryParameters.named({
