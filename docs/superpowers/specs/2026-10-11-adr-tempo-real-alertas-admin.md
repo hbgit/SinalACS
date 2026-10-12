@@ -36,13 +36,14 @@ Fatos verificados no repositório:
 
 ### Política de auditoria da monitoração (D5)
 
-A tela de monitoração (lista de alertas e dashboard) é tratada como uma **sessão**. Os polls não gravam uma linha de auditoria cada.
+Hoje o servidor audita **toda** leitura do backoffice: `AdminReadService._auditar` grava uma linha `read` (`resourceType` `admin_alerts` ou `admin_indicators`) via `audit.record`, fail-closed, antes de devolver o dado. O `recordAccess` do app (`backend_admin_data_source.dart`) é um no-op justamente por isso. Com polling, esse desenho geraria uma linha por coordenador a cada 30 s. A tela de monitoração (lista de alertas e dashboard) passa a ser tratada como uma **sessão**:
 
-- `MONITORING_SESSION_START`: gravado ao abrir a tela, fail-closed (`record`). É a auditoria de visualização que o `recordAccess` já faz hoje.
-- `MONITORING_SESSION_END`: gravado ao descartar a tela ou perder o foco. É best-effort e usa `recordSafely`. É a única exceção justificada à regra do projeto de usar `record`, porque a linha de fim não protege dado algum. O app pode ser morto ou perder a rede, então o END pode não chegar.
-- O servidor compensa: um poll que chega mais de 3 vezes o intervalo (90 s) depois do anterior, sem END, **abre uma sessão nova** e grava START de novo. Sessões órfãs ficam visíveis na trilha.
-- **Recusas** (papel ou escopo) no poll são sempre auditadas.
-- A resposta de `admin.alertsPulse` traz só contagens e um carimbo de mudança. Não traz identidade.
+1. **O app consulta só `admin.alertsPulse`** (endpoint novo, previsto na Task 9). O pulso embute os `AdminIndicators` completos (contagens e TMRAV), mais `overdueRed`, `maxChangedAt` e `serverNow`. Não traz identidade. O dashboard se atualiza pelo pulso; `admin.indicators` não é consultado em loop.
+2. **A lista recarrega por `admin.alerts`** (existente) só quando `maxChangedAt` muda. Essa leitura continua auditada como hoje (`read`), porque lê dado de fato.
+3. **`MONITORING_SESSION_START` é gravado no servidor** por `admin.alertsPulse` quando o chamador não tem sessão viva, isto é, nenhum pulso nos 90 s anteriores (3 vezes o intervalo). O servidor guarda um mapa em processo `userId -> lastPulseAt` (backend de instância única, conforme o PRD; um reinício só abre uma sessão nova, na direção conservadora). Não há endpoint de início separado. É fail-closed (`record`): o primeiro pulso ao abrir a tela grava START, e se a linha falha, nenhum dado sai.
+4. **`MONITORING_SESSION_END`** vem de `admin.endMonitoringSession` (com checagem de papel e escopo), chamado ao descartar a tela ou perder o foco. É best-effort e usa `recordSafely`: a única exceção justificada à regra do projeto de usar `record`, porque a linha de fim não protege dado algum. O app pode ser morto ou perder a rede.
+5. **Sessão órfã:** o servidor compensa. Um pulso que chega mais de 90 s depois do anterior, sem END, abre uma sessão nova e grava START de novo; as órfãs ficam visíveis na trilha.
+6. **Recusas** (papel ou escopo) no pulso e no END são sempre auditadas.
 
 ### Intervalo e selo de desatualizado
 
@@ -54,6 +55,7 @@ A tela de monitoração (lista de alertas e dashboard) é tratada como uma **ses
 
 - Não há infraestrutura nova, nem credencial de broker no app do admin. O escopo por UBS continua com uma única implementação.
 - Latência de supervisão de até 30 s mais o RTT. É aceita explicitamente.
+- **Fim das linhas `read` por tela:** com polling, as chamadas de atualização das telas deixam de produzir uma linha `read` por leitura. Só geram linha o START, o END, as recusas e as recargas reais da lista por `admin.alerts` (quando `maxChangedAt` muda). Chamadas pontuais fora do polling (por exemplo, o primeiro carregamento) seguem auditadas como hoje.
 - **Custo da D5:** "leitura contínua = sessão". A trilha deixa de ter uma linha por leitura e passa a ter início e fim de sessão. A granularidade é menor, e o END é best-effort. A compensação por sessão órfã (90 s) e a auditoria sempre ligada das recusas limitam a perda. Quem audita lê a duração de uma sessão, não cada poll.
 - O endpoint de poll precisa guardar o instante do último poll por sessão para aplicar a regra dos 90 s.
 - **Limite conhecido:** o app do ACS não tem som nem vibração no alerta. Isso é independente desta decisão e continua pendência do app do ACS.
