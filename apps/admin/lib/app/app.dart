@@ -7,6 +7,8 @@ import 'package:sinalacs_admin/app/admin_header.dart';
 import 'package:sinalacs_admin/app/data_requests_screen.dart';
 import 'package:sinalacs_admin/app/admin_layout.dart';
 import 'package:sinalacs_admin/app/login_screen.dart';
+import 'package:sinalacs_admin/app/monitoring_controller.dart';
+import 'package:sinalacs_admin/app/stale_badge.dart';
 import 'package:sinalacs_admin/core/auth/admin_auth_backend.dart';
 import 'package:sinalacs_admin/core/auth/admin_auth_bootstrap.dart';
 import 'package:sinalacs_admin/app/admin_theme.dart';
@@ -104,9 +106,17 @@ class _AdminHomeShellState extends State<AdminHomeShell> {
   AdminDestination destination = AdminDestination.indicators;
   Timer? _vencimento;
 
+  /// Um só controlador de pulso (#44) para o painel e a lista de alertas. As
+  /// abas são trocadas por `switch` (não há IndexedStack): só a tela atual
+  /// fica viva, e a de Painel e a de Alertas se anexam ao mesmo controlador —
+  /// um timer e um pulso por ciclo, e a troca entre as duas não reabre a
+  /// sessão de monitoramento. Nas demais abas não há pulso.
+  late final MonitoringController _monitoramento;
+
   @override
   void initState() {
     super.initState();
+    _monitoramento = MonitoringController(dataSource: widget.dataSource, now: widget.now, onSessionExpired: _encerrar);
     final restante = widget.session.expiresAt.difference(widget.now());
     if (restante <= Duration.zero) {
       // Navegar durante o build não pode: adia para depois do primeiro frame.
@@ -120,6 +130,7 @@ class _AdminHomeShellState extends State<AdminHomeShell> {
   @override
   void dispose() {
     _vencimento?.cancel();
+    _monitoramento.dispose();
     super.dispose();
   }
 
@@ -146,10 +157,10 @@ class _AdminHomeShellState extends State<AdminHomeShell> {
   Widget _content() => AdminSessionScope(aoVencer: _encerrar, child: _telaAtual());
 
   Widget _telaAtual() => switch (destination) {
-        AdminDestination.indicators => IndicatorsScreen(dataSource: widget.dataSource),
+        AdminDestination.indicators => IndicatorsScreen(dataSource: widget.dataSource, monitoring: _monitoramento),
         AdminDestination.microAreas =>
           MicroAreasScreen(dataSource: widget.dataSource, role: widget.session.role),
-        AdminDestination.alerts => AlertsScreen(dataSource: widget.dataSource),
+        AdminDestination.alerts => AlertsScreen(dataSource: widget.dataSource, monitoring: _monitoramento),
         AdminDestination.auditLog => AuditLogScreen(dataSource: widget.dataSource),
         AdminDestination.dataRequests => DataRequestsScreen(dataSource: widget.dataSource, now: widget.now),
       };
@@ -265,19 +276,35 @@ String statusLabel(AlertStatus status) => switch (status) {
     };
 
 class IndicatorsScreen extends StatefulWidget {
-  const IndicatorsScreen({required this.dataSource, super.key});
+  const IndicatorsScreen({required this.dataSource, this.monitoring, super.key});
 
   final AdminDataSource dataSource;
+
+  /// Pulso compartilhado do shell (#44); sem ele a tela cria o próprio.
+  final MonitoringController? monitoring;
 
   @override
   State<IndicatorsScreen> createState() => _IndicatorsScreenState();
 }
 
-class _IndicatorsScreenState extends State<IndicatorsScreen> {
-  late Future<DashboardIndicators> _future = widget.dataSource.fetchDashboardIndicators();
+class _IndicatorsScreenState extends State<IndicatorsScreen> with MonitoredScreenState<IndicatorsScreen> {
+  @override
+  MonitoringController? get injectedMonitoring => widget.monitoring;
+  @override
+  AdminDataSource get monitoredDataSource => widget.dataSource;
+
+  late Future<DashboardIndicators> _future = _carregar();
+
+  /// Carregamento inicial (e retry). Depois dele os números vêm do pulso:
+  /// `fetchDashboardIndicators` nunca é chamado em laço (ADR D5).
+  Future<DashboardIndicators> _carregar() async {
+    final dados = await widget.dataSource.fetchDashboardIndicators();
+    monitoring.reportSuccess();
+    return dados;
+  }
 
   void _retry() => setState(() {
-        _future = widget.dataSource.fetchDashboardIndicators();
+        _future = _carregar();
       });
 
   @override
@@ -288,8 +315,11 @@ class _IndicatorsScreenState extends State<IndicatorsScreen> {
             return AdminAsyncError(error: snapshot.error, fallback: 'Não foi possível carregar os indicadores.', onRetry: _retry);
           }
           if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
-          final data = snapshot.data!;
+          // O pulso mais recente vence o carregamento inicial; falha do pulso
+          // mantém o último dado e só acende o selo.
+          final data = monitoring.lastPulse?.indicators ?? snapshot.data!;
           return _page([
+            MonitoringStaleBadge(monitoring),
             const Text('Painel de Indicadores', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
             const SizedBox(height: 4),
             const Text('Contadores por risco clínico da UBS'),
@@ -468,15 +498,27 @@ class _MicroAreasScreenState extends State<MicroAreasScreen> {
 }
 
 class AlertsScreen extends StatefulWidget {
-  const AlertsScreen({required this.dataSource, super.key});
+  const AlertsScreen({required this.dataSource, this.monitoring, super.key});
 
   final AdminDataSource dataSource;
+
+  /// Pulso compartilhado do shell (#44); sem ele a tela cria o próprio.
+  final MonitoringController? monitoring;
 
   @override
   State<AlertsScreen> createState() => _AlertsScreenState();
 }
 
-class _AlertsScreenState extends State<AlertsScreen> {
+class _AlertsScreenState extends State<AlertsScreen> with MonitoredScreenState<AlertsScreen> {
+  @override
+  MonitoringController? get injectedMonitoring => widget.monitoring;
+  @override
+  AdminDataSource get monitoredDataSource => widget.dataSource;
+
+  /// Quem reage ao pulso é a lista (`_AlertsList`), não esta casca.
+  @override
+  void onMonitoringChanged() {}
+
   String? _microAreaFilter;
   AlertStatus? _statusFilter;
   late Future<void> _accessRecorded = widget.dataSource.recordAccess(actionType: 'view', resourceType: 'alerts');
@@ -497,7 +539,7 @@ class _AlertsScreenState extends State<AlertsScreen> {
           if (accessSnapshot.connectionState != ConnectionState.done) {
             return const Center(child: CircularProgressIndicator());
           }
-          return _AlertsList(dataSource: widget.dataSource, microAreaFilter: _microAreaFilter, statusFilter: _statusFilter, onFilterChanged: (microArea, status) => setState(() {
+          return _AlertsList(dataSource: widget.dataSource, monitoring: monitoring, microAreaFilter: _microAreaFilter, statusFilter: _statusFilter, onFilterChanged: (microArea, status) => setState(() {
             _microAreaFilter = microArea;
             _statusFilter = status;
           }));
@@ -505,41 +547,137 @@ class _AlertsScreenState extends State<AlertsScreen> {
       );
 }
 
-class _AlertsList extends StatelessWidget {
+class _AlertsList extends StatefulWidget {
   const _AlertsList({
     required this.dataSource,
+    required this.monitoring,
     required this.microAreaFilter,
     required this.statusFilter,
     required this.onFilterChanged,
   });
 
   final AdminDataSource dataSource;
+  final MonitoringController monitoring;
   final String? microAreaFilter;
   final AlertStatus? statusFilter;
   final void Function(String? microArea, AlertStatus? status) onFilterChanged;
+
+  @override
+  State<_AlertsList> createState() => _AlertsListState();
+}
+
+typedef _DadosDosAlertas = ({List<AlertSummary> alerts, List<MicroAreaSummary> microAreas});
+
+/// A lista guarda o último dado bom: o pulso (#44) a recarrega quando a
+/// revisão do [MonitoringController] sobe, sem spinner e sem apagar nada, e
+/// uma falha dessa recarga só conta para o selo. Era `StatelessWidget` com o
+/// `Future` criado no `build`, o que relia tudo a cada reconstrução.
+class _AlertsListState extends State<_AlertsList> {
+  _DadosDosAlertas? _dados;
+  Object? _erro;
+  bool _carregando = true;
+
+  /// Descarta a resposta de uma leitura que um filtro novo já superou.
+  int _geracao = 0;
+  late int _revisaoVista;
+
+  @override
+  void initState() {
+    super.initState();
+    // Lida agora, não no primeiro aviso: o 1º pulso só faz a linha de base.
+    _revisaoVista = widget.monitoring.revision;
+    widget.monitoring.addListener(_aoPulsar);
+    _buscar(pelaAtualizacao: false);
+  }
+
+  @override
+  void didUpdateWidget(_AlertsList antigo) {
+    super.didUpdateWidget(antigo);
+    if (antigo.microAreaFilter != widget.microAreaFilter || antigo.statusFilter != widget.statusFilter) {
+      _carregar();
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.monitoring.removeListener(_aoPulsar);
+    super.dispose();
+  }
+
+  void _aoPulsar() {
+    final revisao = widget.monitoring.revision;
+    if (revisao != _revisaoVista) {
+      _revisaoVista = revisao;
+      _buscar(pelaAtualizacao: true);
+    }
+    // Rebuild para o selo (aparece ou some com o estado do controlador).
+    if (mounted) setState(() {});
+  }
+
+  /// Leitura pedida pela pessoa (filtro novo, retry): mostra o spinner e,
+  /// se falhar, o erro em tela. Mantém o dado anterior por baixo, como o
+  /// `FutureBuilder` mantinha, para os filtros não ficarem sem opções.
+  void _carregar() {
+    setState(() {
+      _erro = null;
+      _carregando = true;
+    });
+    _buscar(pelaAtualizacao: false);
+  }
+
+  Future<void> _buscar({required bool pelaAtualizacao}) async {
+    final geracao = ++_geracao;
+    try {
+      final dados = await _load();
+      if (!mounted || geracao != _geracao) return;
+      setState(() {
+        _dados = dados;
+        _erro = null;
+        _carregando = false;
+      });
+      widget.monitoring.reportSuccess();
+    } catch (erro) {
+      if (!mounted || geracao != _geracao) return;
+      // `_carregando`: a recarga do pulso superou uma leitura pedida pela
+      // pessoa, que ainda espera resposta; aí a falha vai para a tela.
+      if (pelaAtualizacao && !_carregando && erro is! AdminSessionExpired) {
+        // Falha da atualização automática: as linhas ficam, só o selo muda.
+        widget.monitoring.reportFailure();
+        return;
+      }
+      setState(() {
+        _erro = erro;
+        _carregando = false;
+      });
+    }
+  }
 
   /// Busca alertas e microáreas juntos. As opções do filtro vêm daqui, não de
   /// uma lista fixa no código — senão uma microárea nova (ou uma fonte real,
   /// no lugar do mock) devolveria alertas para um valor que não existe mais
   /// como opção selecionável (achado da revisão do PR).
-  Future<({List<AlertSummary> alerts, List<MicroAreaSummary> microAreas})> _load() async {
-    final alerts = await dataSource.fetchAlerts(microAreaId: microAreaFilter, status: statusFilter);
-    final microAreas = await dataSource.fetchMicroAreas();
+  Future<_DadosDosAlertas> _load() async {
+    final alerts = await widget.dataSource.fetchAlerts(microAreaId: widget.microAreaFilter, status: widget.statusFilter);
+    final microAreas = await widget.dataSource.fetchMicroAreas();
     return (alerts: alerts, microAreas: microAreas);
   }
 
+  String? get microAreaFilter => widget.microAreaFilter;
+  AlertStatus? get statusFilter => widget.statusFilter;
+  void Function(String? microArea, AlertStatus? status) get onFilterChanged => widget.onFilterChanged;
+
   @override
-  Widget build(BuildContext context) => FutureBuilder(
-        future: _load(),
-        builder: (context, snapshot) {
-          if (snapshot.hasError) {
-            return AdminAsyncError(error: snapshot.error, fallback: 'Não foi possível carregar os alertas.', onRetry: () => onFilterChanged(microAreaFilter, statusFilter));
+  Widget build(BuildContext context) => Builder(
+        builder: (context) {
+          if (_erro != null) {
+            return AdminAsyncError(error: _erro, fallback: 'Não foi possível carregar os alertas.', onRetry: _carregar);
           }
-          final alerts = snapshot.data?.alerts ?? const [];
-          final microAreas = snapshot.data?.microAreas ?? const [];
+          final alerts = _dados?.alerts ?? const <AlertSummary>[];
+          final microAreas = _dados?.microAreas ?? const <MicroAreaSummary>[];
           return ListView(
             padding: const EdgeInsets.all(20),
             children: [
+              MonitoringStaleBadge(widget.monitoring),
               const Text('Alertas da UBS', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
               const SizedBox(height: 4),
               const Text('Consulta somente leitura — nenhuma reclassificação de risco é permitida aqui.'),
@@ -576,7 +714,7 @@ class _AlertsList extends StatelessWidget {
                     ),
               ),
               const SizedBox(height: 16),
-              if (snapshot.connectionState == ConnectionState.waiting)
+              if (_carregando)
                 const Center(child: CircularProgressIndicator())
               else if (alerts.isEmpty)
                 const Padding(padding: EdgeInsets.only(top: 24), child: Text('Nenhum alerta para o filtro selecionado.'))
