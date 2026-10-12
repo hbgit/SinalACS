@@ -535,4 +535,43 @@ void main() {
       });
     }
   });
+
+  group('RED_ALERT_ESCALATION_SECONDS (issue #44)', () {
+    const baseEnv = {'APP_ENV': 'development'};
+
+    test('ausente vale 300', () {
+      expect(AppConfig.fromMap(baseEnv).redAlertEscalationSeconds, 300);
+    });
+
+    test('valor vazio cai no default', () {
+      expect(
+        AppConfig.fromMap({...baseEnv, 'RED_ALERT_ESCALATION_SECONDS': ' '})
+            .redAlertEscalationSeconds,
+        300,
+      );
+    });
+
+    test('limites 30 e 3600 são aceitos', () {
+      expect(
+        AppConfig.fromMap({...baseEnv, 'RED_ALERT_ESCALATION_SECONDS': '30'})
+            .redAlertEscalationSeconds,
+        30,
+      );
+      expect(
+        AppConfig.fromMap({...baseEnv, 'RED_ALERT_ESCALATION_SECONDS': '3600'})
+            .redAlertEscalationSeconds,
+        3600,
+      );
+    });
+
+    test('fora de 30..3600 ou não numérico falha o boot', () {
+      for (final invalido in ['5', '29', '3601', '-1', 'abc', '1.5']) {
+        expect(
+          () => AppConfig.fromMap({...baseEnv, 'RED_ALERT_ESCALATION_SECONDS': invalido}),
+          throwsArgumentError,
+          reason: invalido,
+        );
+      }
+    });
+  });
 }
