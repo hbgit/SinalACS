@@ -56,8 +56,8 @@ Código do backend: `backend/sinalacs_server/lib/src/infrastructure/mqtt/mqtt_al
 
 | Hipótese | Status |
 |---|---|
-| H1 | aberta |
-| H2 | aberta |
+| H1 | não reproduzida (10 execuções do cenário base + 3 variações, Task 5b; sem TLS) |
+| H2 | não reproduzida (mesmas execuções; a ordem observada foi sempre leitura/`onDone` antes de escrita) |
 | H3 | aberta |
 | H4 | aberta |
 | H5 | aberta |
@@ -65,5 +65,11 @@ Código do backend: `backend/sinalacs_server/lib/src/infrastructure/mqtt/mqtt_al
 ## Tabela de experimentos
 | ID | Cenário | Comando | Resultado | Exit code | Mensagem/pilha (sanitizada) | Processo vivo? | Tempo até reconectar | Efeito nos pendentes |
 |---|---|---|---|---|---|---|---|---|
+| 5b-1 | Sonda isolada (Linux, TCP plano, broker falso): SIGSTOP, `dropClients()`, 35 s, SIGCONT, 10 s | `dart test test/integration/mqtt_alert_dispatcher_resilience_test.dart -n 'processo congelado'` x10 | 10/10 passaram: sem queda, sem stderr, reconectou (`connectCount` 2) | n/a (vivo) | nenhuma | sim | <10 s após SIGCONT | n/a |
+| 5b-2 | Variação A: `ignorePings=true`, sem drop | script temporário (não versionado), 1 execução | processo vivo, sem stderr; não reconectou em 10 s (`connectCount` 1) | n/a | nenhuma | sim | não reconectou na janela | n/a |
+| 5b-3 | Variação B: 2000 bytes não lidos enviados ao cliente e depois `destroy()` (fechamento com dados pendentes) | idem, 1 execução | vivo, sem stderr, reconectou (2) | n/a | nenhuma | sim | <10 s | n/a |
+| 5b-4 | Variação C: drop + `ignorePings` | idem, 1 execução | vivo, sem stderr, reconectou (2) | n/a | nenhuma | sim | <10 s | n/a |
+
+Notas 5b: o SIGSTOP atinge o próprio `dartvm` da sonda (não há processo lançador intermediário). **Não coberto:** TLS (a stack usa 8883; exigiria certificados no broker falso) e RST real com dados pendentes no lado do broker (o `destroy()` do Dart fecha com FIN/RST conforme o kernel; não foi forçado `SO_LINGER 0`). Conclusão honesta: com socket plano, a biblioteca recebe o fim da conexão antes de escrever, por isso o erro assíncrono de escrita não apareceu; H1 não está refutada para TLS nem para `docker pause` real.
 
 ## Regressão final
