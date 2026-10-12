@@ -37,15 +37,26 @@ class EscalationAttempt {
 
 /// Porta do escalonamento sobre o banco. O serviço não conhece SQL.
 abstract interface class AlertEscalationStore implements AdminScopeStore {
-  /// Decide e escreve numa **única** transação: trava a linha, relê, avalia o
-  /// escopo, `status='pending'`, `riskLevel='red'`, `escalatedAt IS NULL` e o
-  /// prazo (`@now - triggeredAt > @threshold`, estritamente; `triggeredAt` no
-  /// futuro nunca vence) — o serviço não decide sobre estado velho.
+  /// Decide e escreve numa **única** transação: trava a linha, relê e avalia,
+  /// nesta ordem fixa de precedência (o primeiro que casar decide):
+  /// `notFound` (inexistente **ou** fora do escopo, pela UBS da microárea do
+  /// alerta; alerta sem microárea só existe para o administrador) > `notRed` >
+  /// `notPending` > `alreadyEscalated` (`escalatedAt` já preenchido) >
+  /// `notDue`. O serviço não decide sobre estado velho.
   ///
-  /// A auditoria de sucesso é gravada **pelo store**, na mesma transação do
-  /// `UPDATE`, a partir de [auditFor] (`escalated` / `alreadyEscalated`); se a
-  /// linha não grava, nada é escrito. Nas recusas o store não audita: quem
-  /// audita é o serviço. Nunca altera `AlertStatus` (o alerta segue pendente).
+  /// O prazo é decidido **no store** (em SQL no real), com o [now] e o
+  /// [threshold] recebidos: vence só se `now − triggeredAt > threshold`,
+  /// **estritamente** (exatamente no limite ainda não vence); `triggeredAt` no
+  /// futuro nunca vence.
+  ///
+  /// A auditoria é gravada **pelo store**, na mesma transação, a partir de
+  /// [auditFor], só em `escalated` (depois do `UPDATE` e do reforço no outbox)
+  /// e em `alreadyEscalated` — esta com o motivo **pedido agora**
+  /// (`already_escalated:<motivo pedido>`), sem tocar o alerta nem o outbox, e
+  /// devolvendo o `escalatedAt` ORIGINAL. Se a linha não grava, nada é
+  /// escrito. Nas recusas o store não audita: quem audita é o serviço. Nunca
+  /// altera `AlertStatus`, `acknowledgedAt`, `acsId` nem `version` (o alerta
+  /// segue pendente).
   Future<EscalationAttempt> escalate(
     AdminScope scope, {
     required String alertId,
