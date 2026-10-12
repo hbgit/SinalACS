@@ -25,6 +25,8 @@ abstract class AdminAlert implements _i1.SerializableModel {
     required this.riskLevel,
     required this.status,
     required this.triggeredAt,
+    this.escalatedAt,
+    required this.overdue,
   });
 
   factory AdminAlert({
@@ -34,6 +36,8 @@ abstract class AdminAlert implements _i1.SerializableModel {
     required _i2.RiskLevel riskLevel,
     required _i3.AlertStatus status,
     required DateTime triggeredAt,
+    DateTime? escalatedAt,
+    required bool overdue,
   }) = _AdminAlertImpl;
 
   factory AdminAlert.fromJson(Map<String, dynamic> jsonSerialization) {
@@ -48,6 +52,12 @@ abstract class AdminAlert implements _i1.SerializableModel {
       triggeredAt: _i1.DateTimeJsonExtension.fromJson(
         jsonSerialization['triggeredAt'],
       ),
+      escalatedAt: jsonSerialization['escalatedAt'] == null
+          ? null
+          : _i1.DateTimeJsonExtension.fromJson(
+              jsonSerialization['escalatedAt'],
+            ),
+      overdue: _i1.BoolJsonExtension.fromJson(jsonSerialization['overdue']),
     );
   }
 
@@ -63,6 +73,11 @@ abstract class AdminAlert implements _i1.SerializableModel {
 
   DateTime triggeredAt;
 
+  DateTime? escalatedAt;
+
+  /// Sem reconhecimento além do prazo configurado; calculado na leitura.
+  bool overdue;
+
   /// Returns a shallow copy of this [AdminAlert]
   /// with some or all fields replaced by the given arguments.
   @_i1.useResult
@@ -73,6 +88,8 @@ abstract class AdminAlert implements _i1.SerializableModel {
     _i2.RiskLevel? riskLevel,
     _i3.AlertStatus? status,
     DateTime? triggeredAt,
+    DateTime? escalatedAt,
+    bool? overdue,
   });
   @override
   Map<String, dynamic> toJson() {
@@ -84,6 +101,8 @@ abstract class AdminAlert implements _i1.SerializableModel {
       'riskLevel': riskLevel.toJson(),
       'status': status.toJson(),
       'triggeredAt': triggeredAt.toJson(),
+      if (escalatedAt != null) 'escalatedAt': escalatedAt?.toJson(),
+      'overdue': overdue,
     };
   }
 
@@ -93,6 +112,8 @@ abstract class AdminAlert implements _i1.SerializableModel {
   }
 }
 
+class _Undefined {}
+
 class _AdminAlertImpl extends AdminAlert {
   _AdminAlertImpl({
     required String id,
@@ -101,6 +122,8 @@ class _AdminAlertImpl extends AdminAlert {
     required _i2.RiskLevel riskLevel,
     required _i3.AlertStatus status,
     required DateTime triggeredAt,
+    DateTime? escalatedAt,
+    required bool overdue,
   }) : super._(
          id: id,
          patientLabel: patientLabel,
@@ -108,6 +131,8 @@ class _AdminAlertImpl extends AdminAlert {
          riskLevel: riskLevel,
          status: status,
          triggeredAt: triggeredAt,
+         escalatedAt: escalatedAt,
+         overdue: overdue,
        );
 
   /// Returns a shallow copy of this [AdminAlert]
@@ -121,6 +146,8 @@ class _AdminAlertImpl extends AdminAlert {
     _i2.RiskLevel? riskLevel,
     _i3.AlertStatus? status,
     DateTime? triggeredAt,
+    Object? escalatedAt = _Undefined,
+    bool? overdue,
   }) {
     return AdminAlert(
       id: id ?? this.id,
@@ -129,6 +156,8 @@ class _AdminAlertImpl extends AdminAlert {
       riskLevel: riskLevel ?? this.riskLevel,
       status: status ?? this.status,
       triggeredAt: triggeredAt ?? this.triggeredAt,
+      escalatedAt: escalatedAt is DateTime? ? escalatedAt : this.escalatedAt,
+      overdue: overdue ?? this.overdue,
     );
   }
 }

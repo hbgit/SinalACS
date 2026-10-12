@@ -8,3 +8,6 @@ fields:
   riskLevel: RiskLevel
   status: AlertStatus
   triggeredAt: DateTime
+  escalatedAt: DateTime?
+  ### Sem reconhecimento além do prazo configurado; calculado na leitura.
+  overdue: bool

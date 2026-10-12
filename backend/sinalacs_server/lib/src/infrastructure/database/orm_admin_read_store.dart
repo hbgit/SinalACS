@@ -135,6 +135,7 @@ class OrmAdminReadStore implements AdminReadStore {
             riskLevel: RiskLevel.fromJson(r[3] as String),
             status: AlertStatus.fromJson(r[4] as String),
             triggeredAt: (r[5] as DateTime).toUtc(),
+            overdue: false,
           ),
       ],
       nextOffset: haMais ? offset + limit : null,

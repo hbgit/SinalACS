@@ -14,6 +14,7 @@
 import 'package:serverpod/serverpod.dart' as _i1;
 import 'enums/risk_level.dart' as _i2;
 import 'enums/alert_status.dart' as _i3;
+import 'enums/escalation_reason.dart' as _i4;
 
 /// Alerta de urgência disparado pelo paciente.
 ///
@@ -39,6 +40,9 @@ abstract class Alert
     required this.deviceId,
     required this.retryCount,
     required this.version,
+    this.escalatedAt,
+    this.escalatedBy,
+    this.escalationReason,
   });
 
   factory Alert({
@@ -58,6 +62,9 @@ abstract class Alert
     required String deviceId,
     required int retryCount,
     required int version,
+    DateTime? escalatedAt,
+    _i1.UuidValue? escalatedBy,
+    _i4.EscalationReason? escalationReason,
   }) = _AlertImpl;
 
   factory Alert.fromJson(Map<String, dynamic> jsonSerialization) {
@@ -102,6 +109,21 @@ abstract class Alert
       deviceId: jsonSerialization['deviceId'] as String,
       retryCount: jsonSerialization['retryCount'] as int,
       version: jsonSerialization['version'] as int,
+      escalatedAt: jsonSerialization['escalatedAt'] == null
+          ? null
+          : _i1.DateTimeJsonExtension.fromJson(
+              jsonSerialization['escalatedAt'],
+            ),
+      escalatedBy: jsonSerialization['escalatedBy'] == null
+          ? null
+          : _i1.UuidValueJsonExtension.fromJson(
+              jsonSerialization['escalatedBy'],
+            ),
+      escalationReason: jsonSerialization['escalationReason'] == null
+          ? null
+          : _i4.EscalationReason.fromJson(
+              (jsonSerialization['escalationReason'] as String),
+            ),
     );
   }
 
@@ -144,6 +166,13 @@ abstract class Alert
 
   int version;
 
+  /// Escalonamento pelo backoffice (#44). Anuláveis: alerta não escalonado.
+  DateTime? escalatedAt;
+
+  _i1.UuidValue? escalatedBy;
+
+  _i4.EscalationReason? escalationReason;
+
   @override
   _i1.Table<_i1.UuidValue?> get table => t;
 
@@ -167,6 +196,9 @@ abstract class Alert
     String? deviceId,
     int? retryCount,
     int? version,
+    DateTime? escalatedAt,
+    _i1.UuidValue? escalatedBy,
+    _i4.EscalationReason? escalationReason,
   });
   @override
   Map<String, dynamic> toJson() {
@@ -188,6 +220,10 @@ abstract class Alert
       'deviceId': deviceId,
       'retryCount': retryCount,
       'version': version,
+      if (escalatedAt != null) 'escalatedAt': escalatedAt?.toJson(),
+      if (escalatedBy != null) 'escalatedBy': escalatedBy?.toJson(),
+      if (escalationReason != null)
+        'escalationReason': escalationReason?.toJson(),
     };
   }
 
@@ -211,6 +247,10 @@ abstract class Alert
       'deviceId': deviceId,
       'retryCount': retryCount,
       'version': version,
+      if (escalatedAt != null) 'escalatedAt': escalatedAt?.toJson(),
+      if (escalatedBy != null) 'escalatedBy': escalatedBy?.toJson(),
+      if (escalationReason != null)
+        'escalationReason': escalationReason?.toJson(),
     };
   }
 
@@ -264,6 +304,9 @@ class _AlertImpl extends Alert {
     required String deviceId,
     required int retryCount,
     required int version,
+    DateTime? escalatedAt,
+    _i1.UuidValue? escalatedBy,
+    _i4.EscalationReason? escalationReason,
   }) : super._(
          id: id,
          patientId: patientId,
@@ -281,6 +324,9 @@ class _AlertImpl extends Alert {
          deviceId: deviceId,
          retryCount: retryCount,
          version: version,
+         escalatedAt: escalatedAt,
+         escalatedBy: escalatedBy,
+         escalationReason: escalationReason,
        );
 
   /// Returns a shallow copy of this [Alert]
@@ -304,6 +350,9 @@ class _AlertImpl extends Alert {
     String? deviceId,
     int? retryCount,
     int? version,
+    Object? escalatedAt = _Undefined,
+    Object? escalatedBy = _Undefined,
+    Object? escalationReason = _Undefined,
   }) {
     return Alert(
       id: id is _i1.UuidValue? ? id : this.id,
@@ -326,6 +375,13 @@ class _AlertImpl extends Alert {
       deviceId: deviceId ?? this.deviceId,
       retryCount: retryCount ?? this.retryCount,
       version: version ?? this.version,
+      escalatedAt: escalatedAt is DateTime? ? escalatedAt : this.escalatedAt,
+      escalatedBy: escalatedBy is _i1.UuidValue?
+          ? escalatedBy
+          : this.escalatedBy,
+      escalationReason: escalationReason is _i4.EscalationReason?
+          ? escalationReason
+          : this.escalationReason,
     );
   }
 }
@@ -421,6 +477,26 @@ class AlertUpdateTable extends _i1.UpdateTable<AlertTable> {
     table.version,
     value,
   );
+
+  _i1.ColumnValue<DateTime, DateTime> escalatedAt(DateTime? value) =>
+      _i1.ColumnValue(
+        table.escalatedAt,
+        value,
+      );
+
+  _i1.ColumnValue<_i1.UuidValue, _i1.UuidValue> escalatedBy(
+    _i1.UuidValue? value,
+  ) => _i1.ColumnValue(
+    table.escalatedBy,
+    value,
+  );
+
+  _i1.ColumnValue<_i4.EscalationReason, _i4.EscalationReason> escalationReason(
+    _i4.EscalationReason? value,
+  ) => _i1.ColumnValue(
+    table.escalationReason,
+    value,
+  );
 }
 
 class AlertTable extends _i1.Table<_i1.UuidValue?> {
@@ -488,6 +564,19 @@ class AlertTable extends _i1.Table<_i1.UuidValue?> {
       'version',
       this,
     );
+    escalatedAt = _i1.ColumnDateTime(
+      'escalatedAt',
+      this,
+    );
+    escalatedBy = _i1.ColumnUuid(
+      'escalatedBy',
+      this,
+    );
+    escalationReason = _i1.ColumnEnum(
+      'escalationReason',
+      this,
+      _i1.EnumSerialization.byName,
+    );
   }
 
   late final AlertUpdateTable updateTable;
@@ -524,6 +613,13 @@ class AlertTable extends _i1.Table<_i1.UuidValue?> {
 
   late final _i1.ColumnInt version;
 
+  /// Escalonamento pelo backoffice (#44). Anuláveis: alerta não escalonado.
+  late final _i1.ColumnDateTime escalatedAt;
+
+  late final _i1.ColumnUuid escalatedBy;
+
+  late final _i1.ColumnEnum<_i4.EscalationReason> escalationReason;
+
   @override
   List<_i1.Column> get columns => [
     id,
@@ -542,6 +638,9 @@ class AlertTable extends _i1.Table<_i1.UuidValue?> {
     deviceId,
     retryCount,
     version,
+    escalatedAt,
+    escalatedBy,
+    escalationReason,
   ];
 }
 

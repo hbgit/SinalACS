@@ -1,0 +1,8 @@
+### Motivo do escalonamento de um alerta (#44). Conjunto fechado, sem texto
+### livre: texto livre num alerta de saúde é dado pessoal sensível (LGPD).
+enum: EscalationReason
+serialized: byName
+values:
+  - noAckTimeout
+  - acsUnreachable
+  - patientRecontact
