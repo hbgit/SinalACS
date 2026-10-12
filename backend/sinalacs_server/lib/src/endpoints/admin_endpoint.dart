@@ -51,6 +51,27 @@ class AdminEndpoint extends AuthenticatedEndpoint {
         offset: offset,
       );
 
+  /// Pulso da monitoração (#44, D5): indicadores, `overdueRed`, `maxChangedAt`
+  /// e o relógio do servidor, sem identidade. Não grava linha `read` por
+  /// chamada: a leitura contínua é uma sessão (`monitoring_session_start`
+  /// fail-closed quando não há pulso nos 90 s anteriores). Ver
+  /// `AdminMonitoringService`.
+  Future<AdminAlertsPulse> alertsPulse(
+    Session session, {
+    required String accessToken,
+  }) => AlertRuntime.instance
+      .adminMonitoringServiceFor(session)
+      .alertsPulse(authenticate(accessToken));
+
+  /// Fecha a sessão de monitoramento do chamador (`monitoring_session_end`,
+  /// best-effort). Idempotente: sem sessão aberta, não grava nada.
+  Future<void> endMonitoringSession(
+    Session session, {
+    required String accessToken,
+  }) => AlertRuntime.instance
+      .adminMonitoringServiceFor(session)
+      .endMonitoringSession(authenticate(accessToken));
+
   Future<AdminAuditPage> auditLogs(
     Session session, {
     required String accessToken,

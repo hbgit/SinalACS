@@ -2,6 +2,7 @@ import 'package:serverpod/serverpod.dart';
 import 'package:sinalacs_server/src/application/admin/admin_labels.dart';
 import 'package:sinalacs_server/src/application/admin/admin_read_service.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
+import 'package:sinalacs_server/src/infrastructure/database/alert_overdue_sql.dart';
 
 /// Leitura do backoffice sobre Postgres.
 ///
@@ -69,6 +70,39 @@ class OrmAdminReadStore implements AdminReadStore {
     );
   }
 
+  /// Um `SELECT` só de agregados: nenhuma coluna de alerta sai daqui. A
+  /// contagem usa o fragmento de `alert_overdue_sql.dart`, o mesmo de
+  /// [alerts] e do escalonamento.
+  @override
+  Future<AlertsPulseCounts> pulse(
+    AdminScope scope, {
+    required DateTime now,
+    required Duration threshold,
+  }) async {
+    final rows = await _session().db.unsafeQuery(
+      '''
+      SELECT
+        count(*) FILTER (WHERE $alertOverdueSql),
+        max(GREATEST(a."triggeredAt",
+                     COALESCE(a."acknowledgedAt", a."triggeredAt"),
+                     COALESCE(a."escalatedAt", a."triggeredAt")))
+      FROM alerts a
+      LEFT JOIN micro_areas m ON m.id = a."microAreaId"
+      WHERE $_escopo
+      ''',
+      parameters: QueryParameters.named({
+        'ubs': scope.ubsId,
+        'now': now.toUtc(),
+        'limite': threshold.inMicroseconds,
+      }),
+    );
+    final r = rows.single;
+    return (
+      overdueRed: r[0] as int,
+      maxChangedAt: (r[1] as DateTime?)?.toUtc(),
+    );
+  }
+
   /// Uma linha por microárea: o `id` é a chave do filtro de alertas no app (dois
   /// itens com o mesmo valor quebrariam o `DropdownButton`). Com mais de um ACS na
   /// área, nomes e matrículas vêm juntos, na ordem da matrícula, e `acsActive` vale
@@ -115,15 +149,10 @@ class OrmAdminReadStore implements AdminReadStore {
       '''
       SELECT a.id, a."patientId", m.name, a."riskLevel", a."status", a."triggeredAt",
              a."escalatedAt",
-             -- A concordância com o escalonamento é pinada por
+             -- Regra única de "vencido" (`alert_overdue_sql.dart`), a mesma de
+             -- `OrmAlertEscalationStore` e de [pulse]; o acordo é pinado por
              -- test/integration/admin_read_store_test.dart ('acordo: overdue…').
-             -- Mesma definição de "vencido" de `OrmAlertEscalationStore`: estrito
-             -- e com o `@limite` em microssegundos; `triggeredAt` no futuro nunca
-             -- vence. Só o vermelho pendente ainda não escalonado fica vencido.
-             (a."riskLevel" = 'red' AND a."status" = 'pending'
-                AND a."escalatedAt" IS NULL
-                AND (@now::timestamp - a."triggeredAt")
-                  > (@limite::bigint * interval '1 microsecond')) AS vencido
+             $alertOverdueSql AS vencido
       FROM alerts a
       LEFT JOIN micro_areas m ON m.id = a."microAreaId"
       WHERE $_escopo

@@ -7,6 +7,10 @@ import 'package:sinalacs_server/src/generated/protocol.dart';
 // `export` mantém o alcance de quem já importava este arquivo.
 export 'package:sinalacs_server/src/application/admin/admin_scope.dart';
 
+/// O que o pulso da monitoração (#44, D5) lê além dos indicadores: só uma
+/// contagem e um instante, nunca um alerta.
+typedef AlertsPulseCounts = ({int overdueRed, DateTime? maxChangedAt});
+
 /// Leitura do backoffice. Interface à parte do ORM, no espírito de
 /// `AlertStore`: o serviço e seus testes não conhecem SQL.
 abstract interface class AdminReadStore implements AdminScopeStore {
@@ -15,6 +19,17 @@ abstract interface class AdminReadStore implements AdminScopeStore {
   Future<AdminIndicators> indicators(AdminScope scope, {required DateTime now});
 
   Future<List<AdminMicroArea>> microAreas(AdminScope scope);
+
+  /// Pulso da monitoração (#44, D5), no escopo: `overdueRed` conta os alertas
+  /// com a MESMA regra de `AdminAlert.overdue` (vermelho, pendente, sem
+  /// escalonamento, estritamente além de [threshold] em [now]);
+  /// `maxChangedAt` é o maior instante de mudança (disparo, ACK ou
+  /// escalonamento) entre os alertas do escopo, nulo se não há alerta.
+  Future<AlertsPulseCounts> pulse(
+    AdminScope scope, {
+    required DateTime now,
+    required Duration threshold,
+  });
 
   /// Mais recentes primeiro (`triggeredAt` desc, `id` desc: ordem estável).
   /// `nextOffset` nulo = fim da lista.

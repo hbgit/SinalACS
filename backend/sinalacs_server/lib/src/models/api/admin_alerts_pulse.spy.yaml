@@ -1,0 +1,13 @@
+### Pulso da monitoração do backoffice (issue #44, D5): o que o painel consulta
+### a cada 30 s. Sem identidade nenhuma — nem o rótulo do paciente: só contagens
+### e instantes. O dashboard se atualiza por aqui (`indicators` são os mesmos de
+### `admin.indicators`, no mesmo escopo); a lista só é relida por `admin.alerts`
+### quando `maxChangedAt` muda. `overdueRed` segue a regra de `AdminAlert.overdue`.
+### `maxChangedAt` é nulo quando o escopo não tem alerta; `serverNow` é o
+### relógio do servidor, nunca o do aparelho.
+class: AdminAlertsPulse
+fields:
+  indicators: AdminIndicators
+  overdueRed: int
+  maxChangedAt: DateTime?
+  serverNow: DateTime

@@ -3,6 +3,7 @@ import 'package:sinalacs_server/src/application/admin/alert_escalation_service.d
 import 'package:sinalacs_server/src/application/audit/audit_trail.dart';
 import 'package:sinalacs_server/src/domain/entities/alert_delivery.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
+import 'package:sinalacs_server/src/infrastructure/database/alert_overdue_sql.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_alert_outbox.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_data_subject_case_store.dart'
     show AuditAppender;
@@ -84,13 +85,13 @@ class OrmAlertEscalationStore implements AlertEscalationStore {
       //    que ela gravou. O prazo é decidido aqui, em SQL, com o `@now` e o
       //    limite recebidos: vencido só se `now − triggeredAt > limite`,
       //    estritamente; `triggeredAt` no futuro dá intervalo negativo e nunca
-      //    vence. A concordância com `OrmAdminReadStore` (`overdue`) é pinada
-      //    por test/integration/admin_read_store_test.dart ('acordo: …').
+      //    vence. O fragmento é o de `alert_overdue_sql.dart`, o mesmo de
+      //    `OrmAdminReadStore` (`overdue`, `overdueRed`); a concordância é
+      //    pinada por test/integration/admin_read_store_test.dart ('acordo: …').
       final linha = (await sessao.db.unsafeQuery(
         '''
         SELECT a."riskLevel", a.status, a."escalatedAt",
-               (@now::timestamp - a."triggeredAt")
-                 > (@limite::bigint * interval '1 microsecond') AS vencido,
+               $alertDeadlinePassedSql AS vencido,
                a."patientId", a."microAreaId", a."locationHash",
                a."locationCell", a."triggeredAt"
         FROM alerts a

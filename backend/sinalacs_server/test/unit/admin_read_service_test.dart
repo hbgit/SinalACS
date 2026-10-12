@@ -43,6 +43,14 @@ class _Store implements AdminReadStore {
     );
   }
 
+  /// O pulso (D5) é do `AdminMonitoringService`; o serviço de leitura não o usa.
+  @override
+  Future<AlertsPulseCounts> pulse(
+    AdminScope scope, {
+    required DateTime now,
+    required Duration threshold,
+  }) => throw UnimplementedError();
+
   @override
   Future<List<AdminMicroArea>> microAreas(AdminScope scope) async {
     _marca('microAreas', scope);

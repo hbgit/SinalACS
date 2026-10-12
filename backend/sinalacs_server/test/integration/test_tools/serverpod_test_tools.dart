@@ -18,60 +18,62 @@ import 'package:sinalacs_server/src/generated/api/admin_indicators.dart' as _i4;
 import 'package:sinalacs_server/src/generated/api/admin_micro_area.dart' as _i5;
 import 'package:sinalacs_server/src/generated/api/admin_alert_page.dart' as _i6;
 import 'package:sinalacs_server/src/generated/enums/alert_status.dart' as _i7;
-import 'package:sinalacs_server/src/generated/api/admin_audit_page.dart' as _i8;
+import 'package:sinalacs_server/src/generated/api/admin_alerts_pulse.dart'
+    as _i8;
+import 'package:sinalacs_server/src/generated/api/admin_audit_page.dart' as _i9;
 import 'package:sinalacs_server/src/generated/api/admin_data_subject_request_page.dart'
-    as _i9;
-import 'package:sinalacs_server/src/generated/enums/data_subject_request_status.dart'
     as _i10;
-import 'package:sinalacs_server/src/generated/api/admin_data_subject_request_detail.dart'
+import 'package:sinalacs_server/src/generated/enums/data_subject_request_status.dart'
     as _i11;
-import 'package:sinalacs_server/src/generated/api/admin_acs.dart' as _i12;
-import 'package:sinalacs_server/src/generated/api/admin_staff.dart' as _i13;
+import 'package:sinalacs_server/src/generated/api/admin_data_subject_request_detail.dart'
+    as _i12;
+import 'package:sinalacs_server/src/generated/api/admin_acs.dart' as _i13;
+import 'package:sinalacs_server/src/generated/api/admin_staff.dart' as _i14;
 import 'package:sinalacs_server/src/generated/api/admin_acs_creation_result.dart'
-    as _i14;
-import 'package:sinalacs_server/src/generated/api/admin_password_reset_result.dart'
     as _i15;
-import 'package:sinalacs_server/src/generated/api/admin_staff_mfa_reset_result.dart'
+import 'package:sinalacs_server/src/generated/api/admin_password_reset_result.dart'
     as _i16;
-import 'package:sinalacs_server/src/generated/api/admin_escalation_result.dart'
+import 'package:sinalacs_server/src/generated/api/admin_staff_mfa_reset_result.dart'
     as _i17;
-import 'package:sinalacs_server/src/generated/enums/escalation_reason.dart'
+import 'package:sinalacs_server/src/generated/api/admin_escalation_result.dart'
     as _i18;
-import 'package:sinalacs_server/src/generated/api/red_alert_result.dart'
+import 'package:sinalacs_server/src/generated/enums/escalation_reason.dart'
     as _i19;
-import 'package:sinalacs_server/src/generated/api/alert_ack_result.dart'
+import 'package:sinalacs_server/src/generated/api/red_alert_result.dart'
     as _i20;
-import 'package:sinalacs_server/src/generated/api/alert_status_result.dart'
+import 'package:sinalacs_server/src/generated/api/alert_ack_result.dart'
     as _i21;
-import 'package:sinalacs_server/src/generated/api/development_login_result.dart'
+import 'package:sinalacs_server/src/generated/api/alert_status_result.dart'
     as _i22;
-import 'package:sinalacs_server/src/generated/api/totp_enrollment_start.dart'
+import 'package:sinalacs_server/src/generated/api/development_login_result.dart'
     as _i23;
-import 'package:sinalacs_server/src/generated/api/service_health.dart' as _i24;
+import 'package:sinalacs_server/src/generated/api/totp_enrollment_start.dart'
+    as _i24;
+import 'package:sinalacs_server/src/generated/api/service_health.dart' as _i25;
 import 'package:sinalacs_server/src/generated/api/notice_send_result.dart'
-    as _i25;
-import 'package:sinalacs_server/src/generated/api/enrollment_token_result.dart'
     as _i26;
-import 'package:sinalacs_server/src/generated/api/enrollment_result.dart'
+import 'package:sinalacs_server/src/generated/api/enrollment_token_result.dart'
     as _i27;
-import 'package:sinalacs_server/src/generated/api/micro_area_patient.dart'
+import 'package:sinalacs_server/src/generated/api/enrollment_result.dart'
     as _i28;
-import 'package:sinalacs_server/src/generated/api/patient_data_overview.dart'
+import 'package:sinalacs_server/src/generated/api/micro_area_patient.dart'
     as _i29;
-import 'package:sinalacs_server/src/generated/api/patient_consent_record.dart'
+import 'package:sinalacs_server/src/generated/api/patient_data_overview.dart'
     as _i30;
-import 'package:sinalacs_server/src/generated/enums/consent_purpose.dart'
+import 'package:sinalacs_server/src/generated/api/patient_consent_record.dart'
     as _i31;
-import 'package:sinalacs_server/src/generated/api/terms_change_notice.dart'
+import 'package:sinalacs_server/src/generated/enums/consent_purpose.dart'
     as _i32;
-import 'package:sinalacs_server/src/generated/api/patient_data_subject_request_record.dart'
+import 'package:sinalacs_server/src/generated/api/terms_change_notice.dart'
     as _i33;
-import 'package:sinalacs_server/src/generated/api/triage_result.dart' as _i34;
-import 'package:sinalacs_server/src/generated/api/ubs_contact.dart' as _i35;
+import 'package:sinalacs_server/src/generated/api/patient_data_subject_request_record.dart'
+    as _i34;
+import 'package:sinalacs_server/src/generated/api/triage_result.dart' as _i35;
+import 'package:sinalacs_server/src/generated/api/ubs_contact.dart' as _i36;
 import 'package:sinalacs_server/src/generated/api/visit_sync_result.dart'
-    as _i36;
-import 'package:sinalacs_server/src/generated/api/visit_sync_entry.dart'
     as _i37;
+import 'package:sinalacs_server/src/generated/api/visit_sync_entry.dart'
+    as _i38;
 import 'package:sinalacs_server/src/generated/protocol.dart';
 import 'package:sinalacs_server/src/generated/endpoints.dart';
 export 'package:serverpod_test/serverpod_test_public_exports.dart';
@@ -376,7 +378,69 @@ class _AdminEndpoint {
     });
   }
 
-  _i3.Future<_i8.AdminAuditPage> auditLogs(
+  _i3.Future<_i8.AdminAlertsPulse> alertsPulse(
+    _i1.TestSessionBuilder sessionBuilder, {
+    required String accessToken,
+  }) async {
+    return _i1.callAwaitableFunctionAndHandleExceptions(() async {
+      var _localUniqueSession =
+          (sessionBuilder as _i1.InternalTestSessionBuilder).internalBuild(
+            endpoint: 'admin',
+            method: 'alertsPulse',
+          );
+      try {
+        var _localCallContext = await _endpointDispatch.getMethodCallContext(
+          createSessionCallback: (_) => _localUniqueSession,
+          endpointPath: 'admin',
+          methodName: 'alertsPulse',
+          parameters: _i1.testObjectToJson({'accessToken': accessToken}),
+          serializationManager: _serializationManager,
+        );
+        var _localReturnValue =
+            await (_localCallContext.method.call(
+                  _localUniqueSession,
+                  _localCallContext.arguments,
+                )
+                as _i3.Future<_i8.AdminAlertsPulse>);
+        return _localReturnValue;
+      } finally {
+        await _localUniqueSession.close();
+      }
+    });
+  }
+
+  _i3.Future<void> endMonitoringSession(
+    _i1.TestSessionBuilder sessionBuilder, {
+    required String accessToken,
+  }) async {
+    return _i1.callAwaitableFunctionAndHandleExceptions(() async {
+      var _localUniqueSession =
+          (sessionBuilder as _i1.InternalTestSessionBuilder).internalBuild(
+            endpoint: 'admin',
+            method: 'endMonitoringSession',
+          );
+      try {
+        var _localCallContext = await _endpointDispatch.getMethodCallContext(
+          createSessionCallback: (_) => _localUniqueSession,
+          endpointPath: 'admin',
+          methodName: 'endMonitoringSession',
+          parameters: _i1.testObjectToJson({'accessToken': accessToken}),
+          serializationManager: _serializationManager,
+        );
+        var _localReturnValue =
+            await (_localCallContext.method.call(
+                  _localUniqueSession,
+                  _localCallContext.arguments,
+                )
+                as _i3.Future<void>);
+        return _localReturnValue;
+      } finally {
+        await _localUniqueSession.close();
+      }
+    });
+  }
+
+  _i3.Future<_i9.AdminAuditPage> auditLogs(
     _i1.TestSessionBuilder sessionBuilder, {
     required String accessToken,
     required int limit,
@@ -405,7 +469,7 @@ class _AdminEndpoint {
                   _localUniqueSession,
                   _localCallContext.arguments,
                 )
-                as _i3.Future<_i8.AdminAuditPage>);
+                as _i3.Future<_i9.AdminAuditPage>);
         return _localReturnValue;
       } finally {
         await _localUniqueSession.close();
@@ -413,10 +477,10 @@ class _AdminEndpoint {
     });
   }
 
-  _i3.Future<_i9.AdminDataSubjectRequestPage> dataSubjectRequests(
+  _i3.Future<_i10.AdminDataSubjectRequestPage> dataSubjectRequests(
     _i1.TestSessionBuilder sessionBuilder, {
     required String accessToken,
-    _i10.DataSubjectRequestStatus? status,
+    _i11.DataSubjectRequestStatus? status,
     required int limit,
     required int offset,
   }) async {
@@ -444,7 +508,7 @@ class _AdminEndpoint {
                   _localUniqueSession,
                   _localCallContext.arguments,
                 )
-                as _i3.Future<_i9.AdminDataSubjectRequestPage>);
+                as _i3.Future<_i10.AdminDataSubjectRequestPage>);
         return _localReturnValue;
       } finally {
         await _localUniqueSession.close();
@@ -452,7 +516,7 @@ class _AdminEndpoint {
     });
   }
 
-  _i3.Future<_i11.AdminDataSubjectRequestDetail> dataSubjectRequest(
+  _i3.Future<_i12.AdminDataSubjectRequestDetail> dataSubjectRequest(
     _i1.TestSessionBuilder sessionBuilder, {
     required String accessToken,
     required String id,
@@ -479,7 +543,7 @@ class _AdminEndpoint {
                   _localUniqueSession,
                   _localCallContext.arguments,
                 )
-                as _i3.Future<_i11.AdminDataSubjectRequestDetail>);
+                as _i3.Future<_i12.AdminDataSubjectRequestDetail>);
         return _localReturnValue;
       } finally {
         await _localUniqueSession.close();
@@ -596,7 +660,7 @@ class _AdminEndpoint {
     });
   }
 
-  _i3.Future<List<_i12.AdminAcs>> acs(
+  _i3.Future<List<_i13.AdminAcs>> acs(
     _i1.TestSessionBuilder sessionBuilder, {
     required String accessToken,
   }) async {
@@ -619,7 +683,7 @@ class _AdminEndpoint {
                   _localUniqueSession,
                   _localCallContext.arguments,
                 )
-                as _i3.Future<List<_i12.AdminAcs>>);
+                as _i3.Future<List<_i13.AdminAcs>>);
         return _localReturnValue;
       } finally {
         await _localUniqueSession.close();
@@ -627,7 +691,7 @@ class _AdminEndpoint {
     });
   }
 
-  _i3.Future<List<_i13.AdminStaff>> staff(
+  _i3.Future<List<_i14.AdminStaff>> staff(
     _i1.TestSessionBuilder sessionBuilder, {
     required String accessToken,
   }) async {
@@ -650,7 +714,7 @@ class _AdminEndpoint {
                   _localUniqueSession,
                   _localCallContext.arguments,
                 )
-                as _i3.Future<List<_i13.AdminStaff>>);
+                as _i3.Future<List<_i14.AdminStaff>>);
         return _localReturnValue;
       } finally {
         await _localUniqueSession.close();
@@ -658,7 +722,7 @@ class _AdminEndpoint {
     });
   }
 
-  _i3.Future<_i14.AdminAcsCreationResult> createAcs(
+  _i3.Future<_i15.AdminAcsCreationResult> createAcs(
     _i1.TestSessionBuilder sessionBuilder, {
     required String accessToken,
     required String name,
@@ -689,7 +753,7 @@ class _AdminEndpoint {
                   _localUniqueSession,
                   _localCallContext.arguments,
                 )
-                as _i3.Future<_i14.AdminAcsCreationResult>);
+                as _i3.Future<_i15.AdminAcsCreationResult>);
         return _localReturnValue;
       } finally {
         await _localUniqueSession.close();
@@ -697,7 +761,7 @@ class _AdminEndpoint {
     });
   }
 
-  _i3.Future<_i12.AdminAcs> setAcsMicroArea(
+  _i3.Future<_i13.AdminAcs> setAcsMicroArea(
     _i1.TestSessionBuilder sessionBuilder, {
     required String accessToken,
     required String acsId,
@@ -726,7 +790,7 @@ class _AdminEndpoint {
                   _localUniqueSession,
                   _localCallContext.arguments,
                 )
-                as _i3.Future<_i12.AdminAcs>);
+                as _i3.Future<_i13.AdminAcs>);
         return _localReturnValue;
       } finally {
         await _localUniqueSession.close();
@@ -734,7 +798,7 @@ class _AdminEndpoint {
     });
   }
 
-  _i3.Future<_i12.AdminAcs> setAcsActive(
+  _i3.Future<_i13.AdminAcs> setAcsActive(
     _i1.TestSessionBuilder sessionBuilder, {
     required String accessToken,
     required String acsId,
@@ -763,7 +827,7 @@ class _AdminEndpoint {
                   _localUniqueSession,
                   _localCallContext.arguments,
                 )
-                as _i3.Future<_i12.AdminAcs>);
+                as _i3.Future<_i13.AdminAcs>);
         return _localReturnValue;
       } finally {
         await _localUniqueSession.close();
@@ -771,7 +835,7 @@ class _AdminEndpoint {
     });
   }
 
-  _i3.Future<_i15.AdminPasswordResetResult> resetAcsPassword(
+  _i3.Future<_i16.AdminPasswordResetResult> resetAcsPassword(
     _i1.TestSessionBuilder sessionBuilder, {
     required String accessToken,
     required String acsId,
@@ -798,7 +862,7 @@ class _AdminEndpoint {
                   _localUniqueSession,
                   _localCallContext.arguments,
                 )
-                as _i3.Future<_i15.AdminPasswordResetResult>);
+                as _i3.Future<_i16.AdminPasswordResetResult>);
         return _localReturnValue;
       } finally {
         await _localUniqueSession.close();
@@ -841,7 +905,7 @@ class _AdminEndpoint {
     });
   }
 
-  _i3.Future<_i16.AdminStaffMfaResetResult> resetStaffMfa(
+  _i3.Future<_i17.AdminStaffMfaResetResult> resetStaffMfa(
     _i1.TestSessionBuilder sessionBuilder, {
     required String accessToken,
     required String staffId,
@@ -868,7 +932,7 @@ class _AdminEndpoint {
                   _localUniqueSession,
                   _localCallContext.arguments,
                 )
-                as _i3.Future<_i16.AdminStaffMfaResetResult>);
+                as _i3.Future<_i17.AdminStaffMfaResetResult>);
         return _localReturnValue;
       } finally {
         await _localUniqueSession.close();
@@ -876,11 +940,11 @@ class _AdminEndpoint {
     });
   }
 
-  _i3.Future<_i17.AdminEscalationResult> escalateAlert(
+  _i3.Future<_i18.AdminEscalationResult> escalateAlert(
     _i1.TestSessionBuilder sessionBuilder, {
     required String accessToken,
     required String alertId,
-    required _i18.EscalationReason reason,
+    required _i19.EscalationReason reason,
   }) async {
     return _i1.callAwaitableFunctionAndHandleExceptions(() async {
       var _localUniqueSession =
@@ -905,7 +969,7 @@ class _AdminEndpoint {
                   _localUniqueSession,
                   _localCallContext.arguments,
                 )
-                as _i3.Future<_i17.AdminEscalationResult>);
+                as _i3.Future<_i18.AdminEscalationResult>);
         return _localReturnValue;
       } finally {
         await _localUniqueSession.close();
@@ -924,7 +988,7 @@ class _AlertsEndpoint {
 
   final _i2.SerializationManager _serializationManager;
 
-  _i3.Future<_i19.RedAlertResult> createRedAlert(
+  _i3.Future<_i20.RedAlertResult> createRedAlert(
     _i1.TestSessionBuilder sessionBuilder, {
     required String accessToken,
     required String idempotencyKey,
@@ -955,7 +1019,7 @@ class _AlertsEndpoint {
                   _localUniqueSession,
                   _localCallContext.arguments,
                 )
-                as _i3.Future<_i19.RedAlertResult>);
+                as _i3.Future<_i20.RedAlertResult>);
         return _localReturnValue;
       } finally {
         await _localUniqueSession.close();
@@ -963,7 +1027,7 @@ class _AlertsEndpoint {
     });
   }
 
-  _i3.Future<_i20.AlertAckResult> acknowledge(
+  _i3.Future<_i21.AlertAckResult> acknowledge(
     _i1.TestSessionBuilder sessionBuilder, {
     required String accessToken,
     required String alertId,
@@ -990,7 +1054,7 @@ class _AlertsEndpoint {
                   _localUniqueSession,
                   _localCallContext.arguments,
                 )
-                as _i3.Future<_i20.AlertAckResult>);
+                as _i3.Future<_i21.AlertAckResult>);
         return _localReturnValue;
       } finally {
         await _localUniqueSession.close();
@@ -998,7 +1062,7 @@ class _AlertsEndpoint {
     });
   }
 
-  _i3.Future<_i21.AlertStatusResult> statusFor(
+  _i3.Future<_i22.AlertStatusResult> statusFor(
     _i1.TestSessionBuilder sessionBuilder, {
     required String accessToken,
   }) async {
@@ -1021,7 +1085,7 @@ class _AlertsEndpoint {
                   _localUniqueSession,
                   _localCallContext.arguments,
                 )
-                as _i3.Future<_i21.AlertStatusResult>);
+                as _i3.Future<_i22.AlertStatusResult>);
         return _localReturnValue;
       } finally {
         await _localUniqueSession.close();
@@ -1040,7 +1104,7 @@ class _AuthEndpoint {
 
   final _i2.SerializationManager _serializationManager;
 
-  _i3.Future<_i22.DevelopmentLoginResult> developmentLogin(
+  _i3.Future<_i23.DevelopmentLoginResult> developmentLogin(
     _i1.TestSessionBuilder sessionBuilder, {
     required String role,
   }) async {
@@ -1063,7 +1127,7 @@ class _AuthEndpoint {
                   _localUniqueSession,
                   _localCallContext.arguments,
                 )
-                as _i3.Future<_i22.DevelopmentLoginResult>);
+                as _i3.Future<_i23.DevelopmentLoginResult>);
         return _localReturnValue;
       } finally {
         await _localUniqueSession.close();
@@ -1071,7 +1135,7 @@ class _AuthEndpoint {
     });
   }
 
-  _i3.Future<_i22.DevelopmentLoginResult> loginInstitutional(
+  _i3.Future<_i23.DevelopmentLoginResult> loginInstitutional(
     _i1.TestSessionBuilder sessionBuilder, {
     required String matricula,
     required String password,
@@ -1102,7 +1166,7 @@ class _AuthEndpoint {
                   _localUniqueSession,
                   _localCallContext.arguments,
                 )
-                as _i3.Future<_i22.DevelopmentLoginResult>);
+                as _i3.Future<_i23.DevelopmentLoginResult>);
         return _localReturnValue;
       } finally {
         await _localUniqueSession.close();
@@ -1110,7 +1174,7 @@ class _AuthEndpoint {
     });
   }
 
-  _i3.Future<_i22.DevelopmentLoginResult> loginStaff(
+  _i3.Future<_i23.DevelopmentLoginResult> loginStaff(
     _i1.TestSessionBuilder sessionBuilder, {
     required String matricula,
     required String password,
@@ -1139,7 +1203,7 @@ class _AuthEndpoint {
                   _localUniqueSession,
                   _localCallContext.arguments,
                 )
-                as _i3.Future<_i22.DevelopmentLoginResult>);
+                as _i3.Future<_i23.DevelopmentLoginResult>);
         return _localReturnValue;
       } finally {
         await _localUniqueSession.close();
@@ -1147,7 +1211,7 @@ class _AuthEndpoint {
     });
   }
 
-  _i3.Future<_i23.TotpEnrollmentStart> beginStaffTotpEnrollment(
+  _i3.Future<_i24.TotpEnrollmentStart> beginStaffTotpEnrollment(
     _i1.TestSessionBuilder sessionBuilder, {
     required String matricula,
     required String password,
@@ -1176,7 +1240,7 @@ class _AuthEndpoint {
                   _localUniqueSession,
                   _localCallContext.arguments,
                 )
-                as _i3.Future<_i23.TotpEnrollmentStart>);
+                as _i3.Future<_i24.TotpEnrollmentStart>);
         return _localReturnValue;
       } finally {
         await _localUniqueSession.close();
@@ -1223,7 +1287,7 @@ class _AuthEndpoint {
     });
   }
 
-  _i3.Future<_i22.DevelopmentLoginResult> refreshSession(
+  _i3.Future<_i23.DevelopmentLoginResult> refreshSession(
     _i1.TestSessionBuilder sessionBuilder, {
     required String refreshToken,
     required String deviceId,
@@ -1250,7 +1314,7 @@ class _AuthEndpoint {
                   _localUniqueSession,
                   _localCallContext.arguments,
                 )
-                as _i3.Future<_i22.DevelopmentLoginResult>);
+                as _i3.Future<_i23.DevelopmentLoginResult>);
         return _localReturnValue;
       } finally {
         await _localUniqueSession.close();
@@ -1289,7 +1353,7 @@ class _AuthEndpoint {
     });
   }
 
-  _i3.Future<_i23.TotpEnrollmentStart> beginTotpEnrollment(
+  _i3.Future<_i24.TotpEnrollmentStart> beginTotpEnrollment(
     _i1.TestSessionBuilder sessionBuilder, {
     required String matricula,
     required String password,
@@ -1316,7 +1380,7 @@ class _AuthEndpoint {
                   _localUniqueSession,
                   _localCallContext.arguments,
                 )
-                as _i3.Future<_i23.TotpEnrollmentStart>);
+                as _i3.Future<_i24.TotpEnrollmentStart>);
         return _localReturnValue;
       } finally {
         await _localUniqueSession.close();
@@ -1396,7 +1460,7 @@ class _AuthEndpoint {
     });
   }
 
-  _i3.Future<_i22.DevelopmentLoginResult> verifyOtp(
+  _i3.Future<_i23.DevelopmentLoginResult> verifyOtp(
     _i1.TestSessionBuilder sessionBuilder, {
     required String cpf,
     required String code,
@@ -1425,7 +1489,7 @@ class _AuthEndpoint {
                   _localUniqueSession,
                   _localCallContext.arguments,
                 )
-                as _i3.Future<_i22.DevelopmentLoginResult>);
+                as _i3.Future<_i23.DevelopmentLoginResult>);
         return _localReturnValue;
       } finally {
         await _localUniqueSession.close();
@@ -1492,7 +1556,7 @@ class _HealthEndpoint {
 
   final _i2.SerializationManager _serializationManager;
 
-  _i3.Future<_i24.ServiceHealth> check(
+  _i3.Future<_i25.ServiceHealth> check(
     _i1.TestSessionBuilder sessionBuilder,
   ) async {
     return _i1.callAwaitableFunctionAndHandleExceptions(() async {
@@ -1514,7 +1578,7 @@ class _HealthEndpoint {
                   _localUniqueSession,
                   _localCallContext.arguments,
                 )
-                as _i3.Future<_i24.ServiceHealth>);
+                as _i3.Future<_i25.ServiceHealth>);
         return _localReturnValue;
       } finally {
         await _localUniqueSession.close();
@@ -1533,7 +1597,7 @@ class _NoticesEndpoint {
 
   final _i2.SerializationManager _serializationManager;
 
-  _i3.Future<_i25.NoticeSendResult> sendSegmented(
+  _i3.Future<_i26.NoticeSendResult> sendSegmented(
     _i1.TestSessionBuilder sessionBuilder, {
     required String accessToken,
     required String title,
@@ -1564,7 +1628,7 @@ class _NoticesEndpoint {
                   _localUniqueSession,
                   _localCallContext.arguments,
                 )
-                as _i3.Future<_i25.NoticeSendResult>);
+                as _i3.Future<_i26.NoticeSendResult>);
         return _localReturnValue;
       } finally {
         await _localUniqueSession.close();
@@ -1583,7 +1647,7 @@ class _OnboardingEndpoint {
 
   final _i2.SerializationManager _serializationManager;
 
-  _i3.Future<_i26.EnrollmentTokenResult> generateEnrollmentToken(
+  _i3.Future<_i27.EnrollmentTokenResult> generateEnrollmentToken(
     _i1.TestSessionBuilder sessionBuilder, {
     required String accessToken,
     required String patientId,
@@ -1610,7 +1674,7 @@ class _OnboardingEndpoint {
                   _localUniqueSession,
                   _localCallContext.arguments,
                 )
-                as _i3.Future<_i26.EnrollmentTokenResult>);
+                as _i3.Future<_i27.EnrollmentTokenResult>);
         return _localReturnValue;
       } finally {
         await _localUniqueSession.close();
@@ -1618,7 +1682,7 @@ class _OnboardingEndpoint {
     });
   }
 
-  _i3.Future<_i27.EnrollmentResult> completeEnrollment(
+  _i3.Future<_i28.EnrollmentResult> completeEnrollment(
     _i1.TestSessionBuilder sessionBuilder, {
     required String token,
     required bool healthDataConsent,
@@ -1651,7 +1715,7 @@ class _OnboardingEndpoint {
                   _localUniqueSession,
                   _localCallContext.arguments,
                 )
-                as _i3.Future<_i27.EnrollmentResult>);
+                as _i3.Future<_i28.EnrollmentResult>);
         return _localReturnValue;
       } finally {
         await _localUniqueSession.close();
@@ -1670,7 +1734,7 @@ class _PatientsEndpoint {
 
   final _i2.SerializationManager _serializationManager;
 
-  _i3.Future<List<_i28.MicroAreaPatient>> listMicroArea(
+  _i3.Future<List<_i29.MicroAreaPatient>> listMicroArea(
     _i1.TestSessionBuilder sessionBuilder, {
     required String accessToken,
   }) async {
@@ -1693,7 +1757,7 @@ class _PatientsEndpoint {
                   _localUniqueSession,
                   _localCallContext.arguments,
                 )
-                as _i3.Future<List<_i28.MicroAreaPatient>>);
+                as _i3.Future<List<_i29.MicroAreaPatient>>);
         return _localReturnValue;
       } finally {
         await _localUniqueSession.close();
@@ -1767,7 +1831,7 @@ class _PatientsEndpoint {
     });
   }
 
-  _i3.Future<_i29.PatientDataOverview> myData(
+  _i3.Future<_i30.PatientDataOverview> myData(
     _i1.TestSessionBuilder sessionBuilder, {
     required String accessToken,
   }) async {
@@ -1790,7 +1854,7 @@ class _PatientsEndpoint {
                   _localUniqueSession,
                   _localCallContext.arguments,
                 )
-                as _i3.Future<_i29.PatientDataOverview>);
+                as _i3.Future<_i30.PatientDataOverview>);
         return _localReturnValue;
       } finally {
         await _localUniqueSession.close();
@@ -1798,10 +1862,10 @@ class _PatientsEndpoint {
     });
   }
 
-  _i3.Future<_i30.PatientConsentRecord> updateConsent(
+  _i3.Future<_i31.PatientConsentRecord> updateConsent(
     _i1.TestSessionBuilder sessionBuilder, {
     required String accessToken,
-    required _i31.ConsentPurpose purpose,
+    required _i32.ConsentPurpose purpose,
     required bool granted,
   }) async {
     return _i1.callAwaitableFunctionAndHandleExceptions(() async {
@@ -1827,7 +1891,7 @@ class _PatientsEndpoint {
                   _localUniqueSession,
                   _localCallContext.arguments,
                 )
-                as _i3.Future<_i30.PatientConsentRecord>);
+                as _i3.Future<_i31.PatientConsentRecord>);
         return _localReturnValue;
       } finally {
         await _localUniqueSession.close();
@@ -1835,7 +1899,7 @@ class _PatientsEndpoint {
     });
   }
 
-  _i3.Future<_i30.PatientConsentRecord> acceptTermsOfUse(
+  _i3.Future<_i31.PatientConsentRecord> acceptTermsOfUse(
     _i1.TestSessionBuilder sessionBuilder, {
     required String accessToken,
   }) async {
@@ -1858,7 +1922,7 @@ class _PatientsEndpoint {
                   _localUniqueSession,
                   _localCallContext.arguments,
                 )
-                as _i3.Future<_i30.PatientConsentRecord>);
+                as _i3.Future<_i31.PatientConsentRecord>);
         return _localReturnValue;
       } finally {
         await _localUniqueSession.close();
@@ -1900,7 +1964,7 @@ class _PatientsEndpoint {
   _i3.Future<bool> hasGrantedConsent(
     _i1.TestSessionBuilder sessionBuilder, {
     required String accessToken,
-    required _i31.ConsentPurpose purpose,
+    required _i32.ConsentPurpose purpose,
   }) async {
     return _i1.callAwaitableFunctionAndHandleExceptions(() async {
       var _localUniqueSession =
@@ -1932,7 +1996,7 @@ class _PatientsEndpoint {
     });
   }
 
-  _i3.Future<_i32.TermsChangeNotice?> termsChangeNotice(
+  _i3.Future<_i33.TermsChangeNotice?> termsChangeNotice(
     _i1.TestSessionBuilder sessionBuilder, {
     required String accessToken,
   }) async {
@@ -1955,7 +2019,7 @@ class _PatientsEndpoint {
                   _localUniqueSession,
                   _localCallContext.arguments,
                 )
-                as _i3.Future<_i32.TermsChangeNotice?>);
+                as _i3.Future<_i33.TermsChangeNotice?>);
         return _localReturnValue;
       } finally {
         await _localUniqueSession.close();
@@ -1963,7 +2027,7 @@ class _PatientsEndpoint {
     });
   }
 
-  _i3.Future<_i33.PatientDataSubjectRequestRecord> requestDataDeletion(
+  _i3.Future<_i34.PatientDataSubjectRequestRecord> requestDataDeletion(
     _i1.TestSessionBuilder sessionBuilder, {
     required String accessToken,
   }) async {
@@ -1986,7 +2050,7 @@ class _PatientsEndpoint {
                   _localUniqueSession,
                   _localCallContext.arguments,
                 )
-                as _i3.Future<_i33.PatientDataSubjectRequestRecord>);
+                as _i3.Future<_i34.PatientDataSubjectRequestRecord>);
         return _localReturnValue;
       } finally {
         await _localUniqueSession.close();
@@ -1994,7 +2058,7 @@ class _PatientsEndpoint {
     });
   }
 
-  _i3.Future<_i33.PatientDataSubjectRequestRecord> requestDataCorrection(
+  _i3.Future<_i34.PatientDataSubjectRequestRecord> requestDataCorrection(
     _i1.TestSessionBuilder sessionBuilder, {
     required String accessToken,
     required String details,
@@ -2021,7 +2085,7 @@ class _PatientsEndpoint {
                   _localUniqueSession,
                   _localCallContext.arguments,
                 )
-                as _i3.Future<_i33.PatientDataSubjectRequestRecord>);
+                as _i3.Future<_i34.PatientDataSubjectRequestRecord>);
         return _localReturnValue;
       } finally {
         await _localUniqueSession.close();
@@ -2040,7 +2104,7 @@ class _TriageEndpoint {
 
   final _i2.SerializationManager _serializationManager;
 
-  _i3.Future<_i34.TriageResult> evaluate(
+  _i3.Future<_i35.TriageResult> evaluate(
     _i1.TestSessionBuilder sessionBuilder, {
     required String accessToken,
     required bool chestPain,
@@ -2077,7 +2141,7 @@ class _TriageEndpoint {
                   _localUniqueSession,
                   _localCallContext.arguments,
                 )
-                as _i3.Future<_i34.TriageResult>);
+                as _i3.Future<_i35.TriageResult>);
         return _localReturnValue;
       } finally {
         await _localUniqueSession.close();
@@ -2096,7 +2160,7 @@ class _UbsEndpoint {
 
   final _i2.SerializationManager _serializationManager;
 
-  _i3.Future<_i35.UbsContact> myContact(
+  _i3.Future<_i36.UbsContact> myContact(
     _i1.TestSessionBuilder sessionBuilder, {
     required String accessToken,
   }) async {
@@ -2119,7 +2183,7 @@ class _UbsEndpoint {
                   _localUniqueSession,
                   _localCallContext.arguments,
                 )
-                as _i3.Future<_i35.UbsContact>);
+                as _i3.Future<_i36.UbsContact>);
         return _localReturnValue;
       } finally {
         await _localUniqueSession.close();
@@ -2138,10 +2202,10 @@ class _VisitsEndpoint {
 
   final _i2.SerializationManager _serializationManager;
 
-  _i3.Future<List<_i36.VisitSyncResult>> sync(
+  _i3.Future<List<_i37.VisitSyncResult>> sync(
     _i1.TestSessionBuilder sessionBuilder, {
     required String accessToken,
-    required List<_i37.VisitSyncEntry> visits,
+    required List<_i38.VisitSyncEntry> visits,
   }) async {
     return _i1.callAwaitableFunctionAndHandleExceptions(() async {
       var _localUniqueSession =
@@ -2165,7 +2229,7 @@ class _VisitsEndpoint {
                   _localUniqueSession,
                   _localCallContext.arguments,
                 )
-                as _i3.Future<List<_i36.VisitSyncResult>>);
+                as _i3.Future<List<_i37.VisitSyncResult>>);
         return _localReturnValue;
       } finally {
         await _localUniqueSession.close();
@@ -2173,11 +2237,11 @@ class _VisitsEndpoint {
     });
   }
 
-  _i3.Future<List<_i36.VisitSyncResult>> syncLegacy(
+  _i3.Future<List<_i37.VisitSyncResult>> syncLegacy(
     _i1.TestSessionBuilder sessionBuilder, {
     required String accessToken,
     required String deviceId,
-    required List<_i37.VisitSyncEntry> visits,
+    required List<_i38.VisitSyncEntry> visits,
   }) async {
     return _i1.callAwaitableFunctionAndHandleExceptions(() async {
       var _localUniqueSession =
@@ -2202,7 +2266,7 @@ class _VisitsEndpoint {
                   _localUniqueSession,
                   _localCallContext.arguments,
                 )
-                as _i3.Future<List<_i36.VisitSyncResult>>);
+                as _i3.Future<List<_i37.VisitSyncResult>>);
         return _localReturnValue;
       } finally {
         await _localUniqueSession.close();
@@ -2210,11 +2274,11 @@ class _VisitsEndpoint {
     });
   }
 
-  _i3.Future<List<_i36.VisitSyncResult>> syncDeferred(
+  _i3.Future<List<_i37.VisitSyncResult>> syncDeferred(
     _i1.TestSessionBuilder sessionBuilder, {
     required String uploadToken,
     required String deviceId,
-    required List<_i37.VisitSyncEntry> visits,
+    required List<_i38.VisitSyncEntry> visits,
   }) async {
     return _i1.callAwaitableFunctionAndHandleExceptions(() async {
       var _localUniqueSession =
@@ -2239,7 +2303,7 @@ class _VisitsEndpoint {
                   _localUniqueSession,
                   _localCallContext.arguments,
                 )
-                as _i3.Future<List<_i36.VisitSyncResult>>);
+                as _i3.Future<List<_i37.VisitSyncResult>>);
         return _localReturnValue;
       } finally {
         await _localUniqueSession.close();
@@ -2278,7 +2342,7 @@ class _VisitsEndpoint {
     });
   }
 
-  _i3.Future<List<_i37.VisitSyncEntry>> pull(
+  _i3.Future<List<_i38.VisitSyncEntry>> pull(
     _i1.TestSessionBuilder sessionBuilder, {
     required String accessToken,
     required DateTime since,
@@ -2305,7 +2369,7 @@ class _VisitsEndpoint {
                   _localUniqueSession,
                   _localCallContext.arguments,
                 )
-                as _i3.Future<List<_i37.VisitSyncEntry>>);
+                as _i3.Future<List<_i38.VisitSyncEntry>>);
         return _localReturnValue;
       } finally {
         await _localUniqueSession.close();

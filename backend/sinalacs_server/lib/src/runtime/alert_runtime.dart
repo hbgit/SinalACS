@@ -1,4 +1,5 @@
 import 'package:sinalacs_server/src/application/admin/admin_account_service.dart';
+import 'package:sinalacs_server/src/application/admin/admin_monitoring_service.dart';
 import 'package:sinalacs_server/src/application/admin/admin_read_service.dart';
 import 'package:sinalacs_server/src/application/admin/alert_escalation_service.dart';
 import 'package:sinalacs_server/src/application/admin/data_subject_case_service.dart';
@@ -234,6 +235,34 @@ class AlertRuntime {
         ),
         audit: auditTrailFor(session),
       );
+
+  /// Sessões de monitoramento do backoffice (#44, D5): `userId → último
+  /// pulso`. Estado do PROCESSO, como o dispatcher MQTT — os endpoints são
+  /// construídos por requisição e perderiam o mapa. Instância única do
+  /// backend (PRD); um reinício só abre sessões novas (START de novo).
+  final Map<String, DateTime> _monitoringSessions = {};
+
+  /// Esvazia o mapa de sessões de monitoramento. Existe para os testes: o
+  /// harness desfaz o banco entre os casos, mas não o estado do processo.
+  @visibleForTesting
+  void resetMonitoringSessions() => _monitoringSessions.clear();
+
+  /// Pulso e sessão de monitoramento do backoffice (#44, D5), para uma
+  /// requisição: o store e a trilha são os da chamada; o mapa de sessões, o
+  /// do processo. O prazo é o mesmo de [adminReadServiceFor] e do
+  /// escalonamento.
+  AdminMonitoringService adminMonitoringServiceFor(Session session) {
+    final limite = Duration(seconds: config.redAlertEscalationSeconds);
+    return AdminMonitoringService(
+      store: OrmAdminReadStore(
+        session: () => session,
+        escalationThreshold: limite,
+      ),
+      audit: auditTrailFor(session),
+      sessions: _monitoringSessions,
+      threshold: limite,
+    );
+  }
 
   /// Atendimento de pedidos do titular no backoffice (#42), para uma
   /// requisição. A decisão é auditada DENTRO da transação do store

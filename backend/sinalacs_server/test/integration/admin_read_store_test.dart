@@ -559,6 +559,19 @@ void main() {
             for (final a in lista.items) a.id: a.overdue,
           };
 
+          // Terceiro uso da mesma regra: o `overdueRed` do pulso (D5) conta
+          // exatamente os `overdue` da leitura, no mesmo estado e limite.
+          final pulso = await store.pulse(
+            const AdminScope.system(),
+            now: _t,
+            threshold: limite,
+          );
+          expect(
+            pulso.overdueRed,
+            lista.items.where((a) => a.overdue).length,
+            reason: 'overdueRed do pulso e overdue da leitura discordam',
+          );
+
           final escalonador = OrmAlertEscalationStore(
             session: () => session,
             appendAudit: OrmAuditTrail(
