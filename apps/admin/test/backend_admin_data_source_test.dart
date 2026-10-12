@@ -88,6 +88,8 @@ void main() {
               riskLevel: api.RiskLevel.red,
               status: api.AlertStatus.acknowledged,
               triggeredAt: em,
+              escalatedAt: DateTime.utc(2026, 10, 7, 12, 20),
+              overdue: true,
             ),
           ],
         ),
@@ -109,8 +111,177 @@ void main() {
       expect(r.single.riskLevel, RiskLevel.red);
       expect(r.single.status, AlertStatus.acknowledged);
       expect(r.single.triggeredAt, em);
+      expect(r.single.overdue, isTrue, reason: 'vem do servidor, não do relógio do aparelho');
+      expect(r.single.escalatedAt, DateTime.utc(2026, 10, 7, 12, 20));
     },
   );
+
+  test('alertas: escalatedAt nulo e overdue falso passam como vieram', () async {
+    final caller = FakeEndpointCaller(
+      result: api.AdminAlertPage(
+        items: [
+          api.AdminAlert(
+            id: 'a2',
+            patientLabel: '#7C2E',
+            microAreaName: 'Microárea A',
+            riskLevel: api.RiskLevel.red,
+            status: api.AlertStatus.pending,
+            triggeredAt: DateTime.utc(2026, 10, 7, 12),
+            overdue: false,
+          ),
+        ],
+      ),
+    );
+    final r = await _fonte(caller).fetchAlerts();
+    expect(r.single.escalatedAt, isNull);
+    expect(r.single.overdue, isFalse);
+  });
+
+  group('escalonamento, pulso e fim de sessão (#44)', () {
+    test('escalateAlert manda token, id e motivo; mapeia o resultado', () async {
+      final em = DateTime.utc(2026, 10, 7, 12, 30);
+      final caller = FakeEndpointCaller(
+        result: api.AdminEscalationResult(alertId: 'a1', escalatedAt: em, alreadyEscalated: false),
+      );
+      final r = await _fonte(caller).escalateAlert('a1', EscalationReasonCode.acsUnreachable);
+      expect(caller.lastArgs, {
+        'accessToken': 'token-de-teste',
+        'alertId': 'a1',
+        'reason': api.EscalationReason.acsUnreachable,
+      });
+      expect(r.escalatedAt, em);
+      expect(r.alreadyEscalated, isFalse);
+    });
+
+    test('escalateAlert: reaplicação devolve alreadyEscalated', () async {
+      final em = DateTime.utc(2026, 10, 7, 12, 30);
+      final caller = FakeEndpointCaller(
+        result: api.AdminEscalationResult(alertId: 'a1', escalatedAt: em, alreadyEscalated: true),
+      );
+      final r = await _fonte(caller).escalateAlert('a1', EscalationReasonCode.noAckTimeout);
+      expect(r.alreadyEscalated, isTrue);
+      expect(r.escalatedAt, em);
+    });
+
+    test('escalateAlert: cada motivo do app vira o motivo do cliente de mesmo nome', () async {
+      for (final m in EscalationReasonCode.values) {
+        final caller = FakeEndpointCaller(
+          result: api.AdminEscalationResult(
+            alertId: 'a1',
+            escalatedAt: DateTime.utc(2026),
+            alreadyEscalated: false,
+          ),
+        );
+        await _fonte(caller).escalateAlert('a1', m);
+        expect(caller.lastArgs!['reason'], api.EscalationReason.values.byName(m.name));
+      }
+    });
+
+    test('escalateAlert: textos de recusa do servidor chegam em português', () async {
+      for (final texto in [
+        'Alerta não encontrado.',
+        'O prazo para escalonar este alerta ainda não venceu.',
+        'Alerta já confirmado.',
+        'Só alertas vermelhos podem ser escalonados.',
+        'Identificador de alerta inválido.',
+      ]) {
+        await expectLater(
+          _fonte(
+            FakeEndpointCaller(error: api.AdminInvalidRequestException(message: texto)),
+          ).escalateAlert('a1', EscalationReasonCode.noAckTimeout),
+          throwsA(isA<AdminValidationFailure>().having((e) => e.message, 'message', texto)),
+        );
+      }
+    });
+
+    test('escalateAlert: permissão, sessão vencida e rede reaproveitam a tradução existente', () async {
+      await expectLater(
+        _fonte(
+          FakeEndpointCaller(error: api.AlertPermissionException(message: 'acesso restrito ao backoffice')),
+        ).escalateAlert('a1', EscalationReasonCode.noAckTimeout),
+        throwsA(isA<AdminDataFailure>().having((e) => e.message, 'message', 'Acesso restrito ao backoffice.')),
+      );
+      await expectLater(
+        _fonte(
+          FakeEndpointCaller(error: api.ServerpodClientUnauthorized()),
+        ).escalateAlert('a1', EscalationReasonCode.noAckTimeout),
+        throwsA(isA<AdminSessionExpired>()),
+      );
+      await expectLater(
+        _fonte(
+          FakeEndpointCaller(error: const SocketException('x')),
+        ).escalateAlert('a1', EscalationReasonCode.noAckTimeout),
+        throwsA(isA<AdminDataFailure>().having((e) => e.message, 'message', 'Não foi possível conectar ao servidor.')),
+      );
+    });
+
+    test('alertsPulse mapeia indicadores, vermelhos vencidos, marca e relógio do servidor', () async {
+      final agora = DateTime.utc(2026, 10, 7, 13);
+      final marca = DateTime.utc(2026, 10, 7, 12, 59);
+      final caller = FakeEndpointCaller(
+        result: api.AdminAlertsPulse(
+          indicators: api.AdminIndicators(
+            red: 2,
+            yellow: 1,
+            green: 0,
+            openRedAlerts: 2,
+            acknowledgedRedAlerts: 0,
+            tmravSeconds: null,
+          ),
+          overdueRed: 1,
+          maxChangedAt: marca,
+          serverNow: agora,
+        ),
+      );
+      final r = await _fonte(caller).alertsPulse();
+      expect(caller.lastArgs, {'accessToken': 'token-de-teste'});
+      expect(r.indicators.countsByRisk[RiskLevel.red], 2);
+      expect(r.indicators.openRedAlerts, 2);
+      expect(r.indicators.tmravSeconds, isNull);
+      expect(r.overdueRed, 1);
+      expect(r.maxChangedAt, marca);
+      expect(r.serverNow, agora);
+    });
+
+    test('alertsPulse: maxChangedAt nulo passa como veio; falhas usam a guarda das leituras', () async {
+      final caller = FakeEndpointCaller(
+        result: api.AdminAlertsPulse(
+          indicators: api.AdminIndicators(
+            red: 0,
+            yellow: 0,
+            green: 0,
+            openRedAlerts: 0,
+            acknowledgedRedAlerts: 0,
+          ),
+          overdueRed: 0,
+          serverNow: DateTime.utc(2026, 10, 7),
+        ),
+      );
+      expect((await _fonte(caller).alertsPulse()).maxChangedAt, isNull);
+      await expectLater(
+        _fonte(FakeEndpointCaller(error: api.ServerpodClientUnauthorized())).alertsPulse(),
+        throwsA(isA<AdminSessionExpired>()),
+      );
+    });
+
+    test('endMonitoringSession chama o servidor com o token', () async {
+      final caller = FakeEndpointCaller();
+      await _fonte(caller).endMonitoringSession();
+      expect(caller.lastArgs, {'accessToken': 'token-de-teste'});
+    });
+
+    test('endMonitoringSession nunca lança, qualquer que seja a falha', () async {
+      for (final erro in <Object>[
+        api.AlertPermissionException(message: 'x'),
+        api.ServerpodClientUnauthorized(),
+        const SocketException('sem rede'),
+        TimeoutException('x'),
+        StateError('qualquer coisa'),
+      ]) {
+        await _fonte(FakeEndpointCaller(error: erro)).endMonitoringSession();
+      }
+    });
+  });
 
   test('auditoria: mapeia o rótulo do usuário e o instante', () async {
     final em = DateTime.utc(2026, 10, 7, 12, 30);

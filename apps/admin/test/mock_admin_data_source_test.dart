@@ -167,4 +167,87 @@ void main() {
       expect(conta.mfaActive, isFalse);
     });
   });
+
+  group('escalonamento, pulso e fim de sessão (#44)', () {
+    final t0 = DateTime(2026, 10, 7, 12);
+
+    // alert-1 é vermelho e pendente, disparado às 8h12 de 11/09 (já vencido
+    // para qualquer relógio posterior); o relógio injetado controla o prazo.
+    MockAdminDataSource fonte(DateTime agora) => MockAdminDataSource(now: () => agora);
+
+    test('vermelho pendente vencido: escalona, segue pendente e listado, com escalatedAt', () async {
+      final ds = fonte(t0);
+      final antes = await ds.fetchAlerts();
+      expect(antes.firstWhere((a) => a.id == 'alert-1').overdue, isTrue);
+
+      final r = await ds.escalateAlert('alert-1', EscalationReasonCode.noAckTimeout);
+      expect(r.alreadyEscalated, isFalse);
+      expect(r.escalatedAt, t0);
+
+      final depois = await ds.fetchAlerts();
+      expect(depois, hasLength(antes.length), reason: 'escalonar não tira o alerta da lista');
+      final a = depois.firstWhere((a) => a.id == 'alert-1');
+      expect(a.status, AlertStatus.pending, reason: 'o escalonamento não confirma nem muda o status');
+      expect(a.escalatedAt, t0);
+    });
+
+    test('segunda chamada devolve alreadyEscalated com o horário original', () async {
+      var agora = t0;
+      final ds = MockAdminDataSource(now: () => agora);
+      final primeira = await ds.escalateAlert('alert-1', EscalationReasonCode.acsUnreachable);
+      agora = t0.add(const Duration(minutes: 5));
+      final segunda = await ds.escalateAlert('alert-1', EscalationReasonCode.patientRecontact);
+      expect(segunda.alreadyEscalated, isTrue);
+      expect(segunda.escalatedAt, primeira.escalatedAt);
+    });
+
+    test('alerta ainda no prazo: mesma recusa do servidor', () async {
+      // Um minuto depois do disparo de alert-1, o prazo não venceu.
+      final ds = fonte(DateTime(2026, 9, 11, 8, 13));
+      await expectLater(
+        ds.escalateAlert('alert-1', EscalationReasonCode.noAckTimeout),
+        throwsA(isA<AdminValidationFailure>().having(
+          (e) => e.message,
+          'message',
+          'O prazo para escalonar este alerta ainda não venceu.',
+        )),
+      );
+    });
+
+    test('recusas: confirmado, não vermelho e inexistente', () async {
+      final ds = fonte(t0);
+      Matcher falha(String m) => throwsA(isA<AdminValidationFailure>().having((e) => e.message, 'message', m));
+      await expectLater(ds.escalateAlert('alert-2', EscalationReasonCode.noAckTimeout), falha('Alerta já confirmado.'));
+      await expectLater(
+        ds.escalateAlert('alert-3', EscalationReasonCode.noAckTimeout),
+        falha('Só alertas vermelhos podem ser escalonados.'),
+      );
+      await expectLater(
+        ds.escalateAlert('nao-existe', EscalationReasonCode.noAckTimeout),
+        falha('Alerta não encontrado.'),
+      );
+    });
+
+    test('alertsPulse reflete indicadores, vencidos, marca e relógio', () async {
+      final ds = fonte(t0);
+      final p = await ds.alertsPulse();
+      expect(p.serverNow, t0);
+      expect(p.overdueRed, 1);
+      expect(p.indicators.openRedAlerts, 1);
+      final antes = p.maxChangedAt;
+      await ds.escalateAlert('alert-1', EscalationReasonCode.noAckTimeout);
+      final depois = await ds.alertsPulse();
+      expect(depois.maxChangedAt, isNotNull);
+      expect(antes == null || !depois.maxChangedAt!.isBefore(antes), isTrue);
+      expect(depois.maxChangedAt, t0, reason: 'o escalonamento é uma mudança observável');
+    });
+
+    test('endMonitoringSession é registrado', () async {
+      final ds = MockAdminDataSource();
+      expect(ds.monitoringSessionEnds, 0);
+      await ds.endMonitoringSession();
+      await ds.endMonitoringSession();
+      expect(ds.monitoringSessionEnds, 2);
+    });
+  });
 }
