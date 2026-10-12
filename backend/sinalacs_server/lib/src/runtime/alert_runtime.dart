@@ -1,9 +1,11 @@
 import 'package:sinalacs_server/src/application/admin/admin_account_service.dart';
 import 'package:sinalacs_server/src/application/admin/admin_read_service.dart';
+import 'package:sinalacs_server/src/application/admin/alert_escalation_service.dart';
 import 'package:sinalacs_server/src/application/admin/data_subject_case_service.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_data_subject_case_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_admin_account_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_admin_read_store.dart';
+import 'package:sinalacs_server/src/infrastructure/database/orm_alert_escalation_store.dart';
 import 'package:meta/meta.dart';
 import 'package:serverpod/serverpod.dart';
 import 'package:sinalacs_server/src/application/alerts/alert_outbox_dispatcher.dart';
@@ -272,6 +274,24 @@ class AlertRuntime {
       audit: auditTrailFor(session),
     );
   }
+
+  /// Escalonamento de alerta vermelho pelo backoffice (#44), para uma
+  /// requisição. O escalonamento gravado é auditado DENTRO da transação do
+  /// store (`recordInTransaction`), junto do `UPDATE` e do reforço no outbox;
+  /// as recusas usam a trilha comum da requisição. O reforço não é publicado
+  /// aqui: a varredura periódica do outbox (`server.dart`) o entrega.
+  AlertEscalationService alertEscalationServiceFor(Session session) =>
+      AlertEscalationService(
+        store: OrmAlertEscalationStore(
+          session: () => session,
+          appendAudit: OrmAuditTrail(
+            session: () => session,
+            chainSecret: config.auditChainSecret,
+          ).recordInTransaction,
+        ),
+        audit: auditTrailFor(session),
+        threshold: Duration(seconds: config.redAlertEscalationSeconds),
+      );
 
   /// Contato da UBS do ACS (RF13), para uma requisição.
   UbsContactService ubsContactServiceFor(Session session) =>

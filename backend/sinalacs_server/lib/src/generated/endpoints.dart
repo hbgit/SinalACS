@@ -26,10 +26,12 @@ import '../endpoints/visits_endpoint.dart' as _i12;
 import 'package:sinalacs_server/src/generated/enums/alert_status.dart' as _i13;
 import 'package:sinalacs_server/src/generated/enums/data_subject_request_status.dart'
     as _i14;
-import 'package:sinalacs_server/src/generated/enums/consent_purpose.dart'
+import 'package:sinalacs_server/src/generated/enums/escalation_reason.dart'
     as _i15;
-import 'package:sinalacs_server/src/generated/api/visit_sync_entry.dart'
+import 'package:sinalacs_server/src/generated/enums/consent_purpose.dart'
     as _i16;
+import 'package:sinalacs_server/src/generated/api/visit_sync_entry.dart'
+    as _i17;
 
 class Endpoints extends _i1.EndpointDispatch {
   @override
@@ -568,6 +570,37 @@ class Endpoints extends _i1.EndpointDispatch {
                     session,
                     accessToken: params['accessToken'],
                     staffId: params['staffId'],
+                  ),
+        ),
+        'escalateAlert': _i1.MethodConnector(
+          name: 'escalateAlert',
+          params: {
+            'accessToken': _i1.ParameterDescription(
+              name: 'accessToken',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'alertId': _i1.ParameterDescription(
+              name: 'alertId',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'reason': _i1.ParameterDescription(
+              name: 'reason',
+              type: _i1.getType<_i15.EscalationReason>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async =>
+                  (endpoints['admin'] as _i2.AdminEndpoint).escalateAlert(
+                    session,
+                    accessToken: params['accessToken'],
+                    alertId: params['alertId'],
+                    reason: params['reason'],
                   ),
         ),
       },
@@ -1235,7 +1268,7 @@ class Endpoints extends _i1.EndpointDispatch {
             ),
             'purpose': _i1.ParameterDescription(
               name: 'purpose',
-              type: _i1.getType<_i15.ConsentPurpose>(),
+              type: _i1.getType<_i16.ConsentPurpose>(),
               nullable: false,
             ),
             'granted': _i1.ParameterDescription(
@@ -1304,7 +1337,7 @@ class Endpoints extends _i1.EndpointDispatch {
             ),
             'purpose': _i1.ParameterDescription(
               name: 'purpose',
-              type: _i1.getType<_i15.ConsentPurpose>(),
+              type: _i1.getType<_i16.ConsentPurpose>(),
               nullable: false,
             ),
           },
@@ -1482,7 +1515,7 @@ class Endpoints extends _i1.EndpointDispatch {
             ),
             'visits': _i1.ParameterDescription(
               name: 'visits',
-              type: _i1.getType<List<_i16.VisitSyncEntry>>(),
+              type: _i1.getType<List<_i17.VisitSyncEntry>>(),
               nullable: false,
             ),
           },
@@ -1511,7 +1544,7 @@ class Endpoints extends _i1.EndpointDispatch {
             ),
             'visits': _i1.ParameterDescription(
               name: 'visits',
-              type: _i1.getType<List<_i16.VisitSyncEntry>>(),
+              type: _i1.getType<List<_i17.VisitSyncEntry>>(),
               nullable: false,
             ),
           },
@@ -1542,7 +1575,7 @@ class Endpoints extends _i1.EndpointDispatch {
             ),
             'visits': _i1.ParameterDescription(
               name: 'visits',
-              type: _i1.getType<List<_i16.VisitSyncEntry>>(),
+              type: _i1.getType<List<_i17.VisitSyncEntry>>(),
               nullable: false,
             ),
           },

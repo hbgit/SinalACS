@@ -4,7 +4,8 @@ import 'package:sinalacs_server/src/generated/protocol.dart';
 import 'package:sinalacs_server/src/runtime/alert_runtime.dart';
 
 /// Backoffice, só para `coordinator` e `admin`: leitura (issue #40), gestão de
-/// contas (issue #43) e atendimento de pedidos do titular (issue #42).
+/// contas (issue #43), atendimento de pedidos do titular (issue #42) e
+/// escalonamento de alerta vermelho (issue #44, `AlertEscalationService`).
 ///
 /// A leitura — indicadores, microáreas, alertas e auditoria — é do
 /// `AdminReadService`; a listagem de ACS e de equipe, o cadastro, o vínculo de
@@ -233,4 +234,18 @@ class AdminEndpoint extends AuthenticatedEndpoint {
   }) => AlertRuntime.instance
       .adminAccountServiceFor(session)
       .resetStaffMfa(authenticate(accessToken), staffId: staffId);
+
+  /// Escalona um alerta vermelho pendente cujo prazo sem confirmação venceu
+  /// (#44). Grava data, autor e motivo fechado, reenfileira **uma** entrega de
+  /// reforço para o tópico da microárea e audita — numa transação só; o alerta
+  /// segue pendente. Repetir é idempotente (`alreadyEscalated`, carimbo
+  /// original). A resposta não traz identidade: só id, carimbo e o indicador.
+  Future<AdminEscalationResult> escalateAlert(
+    Session session, {
+    required String accessToken,
+    required String alertId,
+    required EscalationReason reason,
+  }) => AlertRuntime.instance
+      .alertEscalationServiceFor(session)
+      .escalate(authenticate(accessToken), alertId: alertId, reason: reason);
 }
