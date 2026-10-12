@@ -50,9 +50,15 @@ conferir 'corte de 120 s no teste e no padrão do script' \
 # prazo" tem de ser maior que um pulso.
 conferir 'alerta novo com triggeredAt 20 s à frente (freshLead)' \
   "grep -qF \"NOW() + interval '20 seconds'\" $s && grep -qF 'freshLead = Duration(seconds: 20)' backend/sinalacs_server/lib/src/infrastructure/testing/e2e_fixtures.dart"
-conferir 'o corte é pausar o backend e devolvê-lo' "grep -qF 'docker pause sinalacs-serverpod' $s && grep -qF 'docker unpause sinalacs-serverpod' $s"
-conferir 'o cleanup despausa o backend antes do down' \
-  "awk '/^cleanup\\(\\)/,/^}/' $s | grep -qF 'docker unpause sinalacs-serverpod'"
+# A queda é da ROTA (Traefik), nunca do backend: pausar o backend derrubou o
+# processo na 1ª execução real (keepalive MQTT perdido -> Broken pipe no unpause).
+conferir 'o corte pausa o Traefik e o devolve' "grep -qF 'docker pause sinalacs-traefik' $s && grep -qF 'docker unpause sinalacs-traefik' $s"
+conferir 'o script nunca pausa o backend' "! grep -qF 'docker pause sinalacs-serverpod' $s"
+conferir 'o cleanup sempre despausa o Traefik (e o backend, por defesa)' \
+  "awk '/^cleanup\\(\\)/,/^}/' $s | grep -qF 'docker unpause sinalacs-traefik' && awk '/^cleanup\\(\\)/,/^}/' $s | grep -qF 'docker unpause sinalacs-serverpod'"
+conferir 'o Traefik do compose se chama sinalacs-traefik' "grep -qF 'container_name: sinalacs-traefik' docker-compose.yml"
+conferir 'depois da queda confere o backend vivo e sem reinício' \
+  "grep -qF '{{.State.Running}} {{.State.StartedAt}}' $s && grep -qF 'backend caiu durante a queda' $s && grep -qF 'docker logs --tail 20 sinalacs-serverpod' $s"
 conferir 'o teste recebe os ids dos alertas por dart-define' \
   "grep -qF -- '--dart-define=E2E_ALERTA_VENCIDO=' $s && grep -qF -- '--dart-define=E2E_ALERTA_NOVO=' $s"
 

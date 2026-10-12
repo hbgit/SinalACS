@@ -8,7 +8,8 @@
 #   DEVICE=0087014315 ./scripts/qa/admin_alertas_escalonar_e2e.sh         # aparelho físico
 #
 # ATENÇÃO: substitui a stack de desenvolvimento pela de e2e (o container
-# sinalacs-serverpod é o mesmo) e PAUSA o backend por ~120 s no meio do teste.
+# sinalacs-serverpod é o mesmo) e PAUSA o Traefik (sinalacs-traefik) por ~120 s
+# no meio do teste — o backend fica no ar.
 # Ao fim, `docker compose up -d` volta a de desenvolvimento.
 #
 # Passo a passo manual (o que este script automatiza):
@@ -25,18 +26,30 @@
 #      - o teste no aparelho; o script atende as linhas marcadoras dele:
 #          E2E_DISPARAR_ALERTA -> (com o Painel aberto e parado) insere o alerta novo
 #                                 (triggeredAt = NOW() + 20 s, o `freshLead` da fixture);
-#          E2E_CORTAR_BACKEND  -> `docker pause sinalacs-serverpod` por 120 s e unpause;
+#          E2E_CORTAR_BACKEND  -> `docker pause sinalacs-traefik` por 120 s e unpause
+#                                 (o nome do marcador ficou; quem cai é a ROTA, não o
+#                                 backend), depois confere que o backend seguiu vivo;
 #        e repete as linhas de evidência E2E_PAINEL_ATUALIZOU (Painel 1 -> 2 pelo
 #        pulso, sem troca de aba) e E2E_BOTAO_APARECEU (atraso do botão após o prazo);
 #      - conferências no banco de teste e a cadeia de auditoria.
 #   4. docker compose up -d                      # volta à stack de desenvolvimento
 #
-# Por que pausar o backend e não cortar a rede do aparelho: o RPC chega ao
-# emulador por `adb reverse` (o canal do adb, não o Wi-Fi/dados do Android), e
-# `svc wifi disable` não o derruba. `docker pause` congela o processo: o
-# Traefik segura ou recusa as chamadas, o pulso do app estoura o prazo de 20 s
-# e o selo aparece; o `unpause` devolve o mesmo processo, com o mesmo banco e o
-# mesmo segredo de JWT, então a sessão do coordenador segue válida.
+# Por que pausar o Traefik (e não cortar a rede do aparelho nem pausar o
+# backend): o app chega ao backend por UM caminho só — `SINALACS_HOST=
+# https://localhost:8443/` no aparelho -> `adb reverse tcp:8443 tcp:443` -> :443
+# do host -> sinalacs-traefik (a única porta publicada do RPC; o 8080 do
+# backend não é publicado) -> serverpod:8080 na rede do Compose. `svc wifi
+# disable` não derruba o canal do adb. Com o Traefik congelado a conexão TCP
+# ainda é aceita pelo docker-proxy, mas ninguém responde ao TLS: a chamada
+# fica pendurada até o prazo de 20 s do pulso, e o selo aparece. O backend não
+# passa pelo Traefik para nada — MQTT vai direto a mosquitto:8883, Gorush a
+# gorush:8088 e o Postgres a postgres-test:5432 —, então a conexão MQTT dele
+# não é perturbada. A 1ª versão pausava o próprio backend: congelado, ele não
+# mandava keepalive MQTT, o broker fechou a conexão e, no `unpause`, a escrita
+# no socket morto derrubou o processo (SocketException: Broken pipe, exit 255;
+# defeito latente do despachante, fora da #44). Depois do `unpause` o script
+# confere que o backend seguiu no ar sem reiniciar; se caiu, diz isso com o fim
+# do log, em vez de o teste falhar esperando o selo sumir.
 #
 # Depois confere no banco de teste o que só o servidor sabe: UMA linha
 # `escalated:no_ack_timeout` e UMA `already_escalated:no_ack_timeout` do alerta
@@ -66,12 +79,14 @@ adb -s "$dev" get-state >/dev/null 2>&1 || { echo "aparelho $dev não encontrado
 relay_pid=""
 teste_pid=""
 eco_pid=""
-pausado=false
 saida_teste="$(mktemp)"
 cleanup() {
   # Primeiro o backend: um script morto no meio do corte não pode deixá-lo
   # congelado (nem o `down` abaixo, nem a stack de dev o descongelariam).
-  [[ "$pausado" == true ]] && docker unpause sinalacs-serverpod >/dev/null 2>&1 || true
+  # Sempre: despausar quem não está pausado só falha, em silêncio. O backend
+  # entra por defesa (a 1ª versão deste script o pausava).
+  docker unpause sinalacs-traefik >/dev/null 2>&1 || true
+  docker unpause sinalacs-serverpod >/dev/null 2>&1 || true
   if [[ -n "$teste_pid" ]]; then pkill -P "$teste_pid" 2>/dev/null || true; kill "$teste_pid" 2>/dev/null || true; fi
   [[ -n "$eco_pid" ]] && kill "$eco_pid" 2>/dev/null || true
   rm -f "$saida_teste"
@@ -134,20 +149,32 @@ inserir_alerta_novo() {
   echo "  [script] alerta novo inserido ($(date +%T))" >&2
 }
 
-# O corte: congela o backend pelo tempo que o teste pediu na linha marcadora
-# (padrão 120 s; o selo pode levar ~80–90 s para aparecer depois do corte) e o
-# devolve. `pausado` garante o unpause no cleanup.
+# O corte: congela o Traefik (a rota do app até o backend) pelo tempo que o
+# teste pediu na linha marcadora (padrão 120 s; o selo pode levar ~80–90 s para
+# aparecer depois do corte) e o devolve. O `cleanup` sempre despausa.
+inicio_do_backend() { docker inspect -f '{{.State.Running}} {{.State.StartedAt}}' sinalacs-serverpod 2>/dev/null || true; }
 cortar_backend() {
-  local segundos
+  local segundos antes depois=""
   segundos="$(grep -o 'E2E_CORTAR_BACKEND segundos=[0-9]*' "$saida_teste" | tail -1 | sed 's/.*=//')"
   [[ -n "$segundos" ]] || segundos=120
-  docker pause sinalacs-serverpod >/dev/null
-  pausado=true
-  echo "  [script] backend pausado por ${segundos}s ($(date +%T))" >&2
+  antes="$(inicio_do_backend)"
+  [[ "$antes" == true\ * ]] || { echo "erro: o backend já não estava no ar antes da queda ($antes)" >&2; exit 1; }
+  docker pause sinalacs-traefik >/dev/null
+  echo "  [script] Traefik pausado por ${segundos}s ($(date +%T)); o backend segue no ar" >&2
   sleep "$segundos"
-  docker unpause sinalacs-serverpod >/dev/null
-  pausado=false
-  echo "  [script] backend de volta ($(date +%T))" >&2
+  docker unpause sinalacs-traefik >/dev/null
+  echo "  [script] Traefik de volta ($(date +%T))" >&2
+  # O backend tem de ter atravessado a queda: no ar e com o MESMO StartedAt (sem
+  # reinício nem saída no meio). Espera limitada a 60 s.
+  for _ in $(seq 1 60); do
+    depois="$(inicio_do_backend)"
+    [[ "$depois" == "$antes" ]] && { echo "  [script] backend vivo, sem reinício ($(date +%T))" >&2; return 0; }
+    [[ "$depois" == true\ * ]] && break   # no ar, mas reiniciou: diagnóstico abaixo
+    sleep 1
+  done
+  echo "erro: backend caiu durante a queda (antes: $antes; agora: ${depois:-ausente}); últimas linhas do log:" >&2
+  docker logs --tail 20 sinalacs-serverpod 2>&1 | sed 's/^/    /' >&2 || true
+  exit 1
 }
 
 echo "== escalonamento e tempo real no emulador"

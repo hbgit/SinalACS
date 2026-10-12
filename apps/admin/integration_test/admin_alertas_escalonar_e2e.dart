@@ -21,9 +21,10 @@
 ///    ganha "Escalonado às"; o painel continua contando o alerta como aberto;
 /// 5. o reescalonamento por RPC direto devolve `alreadyEscalated` com o MESMO
 ///    `escalatedAt`;
-/// 6. a perda de conexão (o script pausa o backend): o selo de dado
-///    desatualizado aparece com os dados anteriores na tela e some sozinho
-///    quando o backend volta.
+/// 6. a perda de conexão (o script pausa o Traefik, a única rota do aparelho
+///    até o backend; o backend e a conexão MQTT dele ficam no ar): o selo de
+///    dado desatualizado aparece com os dados anteriores na tela e some
+///    sozinho quando a rota volta.
 ///
 /// Linha do tempo (relógio do banco; I = instante do INSERT do novo, ~1 s
 /// depois de `E2E_DISPARAR_ALERTA`): `triggeredAt` = I + 20 s, prazo vence em
@@ -83,7 +84,8 @@ const _atrasoMaximoDoBotao = Duration(seconds: 40);
 /// disparo: um pulso (30 s) + o INSERT (~1 s) + folga.
 const _atrasoMaximoDoPainel = Duration(seconds: 40);
 
-/// Quanto tempo o script deixa o backend pausado depois de `E2E_CORTAR_BACKEND`.
+/// Quanto tempo o script deixa o Traefik pausado depois de `E2E_CORTAR_BACKEND`
+/// (o nome do marcador ficou da 1ª versão, que pausava o backend).
 /// O selo pode levar ~80–90 s depois do corte (último sucesso logo antes dele +
 /// 2 pulsos falhos de 30 s com prazo de 20 s cada, e o selo só é redesenhado
 /// quando um pulso falho notifica); 120 s deixa folga para vê-lo antes da volta.
@@ -353,8 +355,8 @@ void main() {
     await tester.scrollUntilVisible(rotuloAbertos, 200, scrollable: find.byType(Scrollable).last, maxScrolls: 30);
     await _pumpUntil(tester, () => _abertosNoPainel(rotuloAbertos, '2'), motivo: 'o painel com 2 vermelhos abertos');
 
-    // 7. Perda de conexão: o script pausa o backend. O selo aparece com o dado
-    // anterior na tela e some sozinho quando o backend volta.
+    // 7. Perda de conexão: o script pausa o Traefik (o backend fica no ar). O
+    // selo aparece com o dado anterior na tela e some sozinho quando a rota volta.
     await _irPara(tester, const ['Alertas']);
     await _pumpUntil(tester, () => _temSeloEscalonado(_alertaNovo), motivo: 'a lista de volta, com o escalonado');
     expect(_existe('stale_badge'), isFalse, reason: 'com o backend no ar o dado está em dia');
@@ -362,14 +364,14 @@ void main() {
     print('E2E_CORTAR_BACKEND segundos=$_segundosDeCorte');
     await _pumpUntil(tester, () => _existe('stale_badge'),
         timeout: const Duration(seconds: _segundosDeCorte + 30), step: const Duration(milliseconds: 500),
-        motivo: 'o selo de desatualizado com o backend pausado');
+        motivo: 'o selo de desatualizado com o Traefik pausado');
     expect(find.descendant(of: find.byKey(const Key('stale_badge')), matching: find.textContaining('sem atualização há')),
         findsOneWidget);
     expect(_temSeloEscalonado(_alertaNovo), isTrue, reason: 'a queda não apaga o dado anterior');
     expect(_cartao(_alertaVencido), findsOneWidget);
     await _pumpUntil(tester, () => !_existe('stale_badge'),
         timeout: const Duration(seconds: _segundosDeCorte + 90), step: const Duration(milliseconds: 500),
-        motivo: 'o selo sumir sozinho com o backend de volta');
+        motivo: 'o selo sumir sozinho com a rota de volta');
     expect(_temSeloEscalonado(_alertaNovo), isTrue);
     // ignore: avoid_print
     print('E2E_ESCALONAMENTO_OK');
