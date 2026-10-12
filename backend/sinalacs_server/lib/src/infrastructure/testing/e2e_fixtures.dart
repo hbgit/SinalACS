@@ -110,6 +110,37 @@ class E2eStaff {
   String toString() => 'E2eStaff(${id.substring(0, 8)}…)';
 }
 
+/// Prazo do alerta vermelho na stack de e2e (`RED_ALERT_ESCALATION_SECONDS` em
+/// `docker-compose.e2e.yml`): o mínimo que o `AppConfig` aceita, para o e2e do
+/// escalonamento (#44) não esperar os 5 min do padrão.
+const e2eEscalationThresholdSeconds = 30;
+
+/// Os dois alertas vermelhos do e2e do escalonamento (#44), ambos do paciente
+/// `main`, na microárea das fixtures (UBS do coordenador):
+///
+/// * [overdueId] é semeado com `E2E_SEED_ALERT_ESCALATION=1`, disparado há
+///   [overdueAge]: já vencido quando a tela abre, com o botão desde o início.
+/// * [freshId] **não** é semeado: o script o insere no meio do teste, quando a
+///   tela de Alertas já está aberta, com `triggeredAt` [freshLead] à frente do
+///   relógio do banco. É o que deixa a janela "ainda no prazo" maior que um
+///   pulso (30 s) — com o prazo de 30 s e o disparo em `NOW()`, a primeira
+///   recarga podia já trazê-lo vencido e o "antes não há botão" ficaria sem
+///   prova. O instante futuro é um arranjo SINTÉTICO do teste.
+class E2eEscalationAlerts {
+  const E2eEscalationAlerts({required this.overdueId, required this.freshId});
+
+  final String overdueId;
+  final String freshId;
+
+  static const overdueAge = Duration(minutes: 10);
+  static const freshLead = Duration(seconds: 20);
+
+  Map<String, Object?> toJson() => {'overdueId': overdueId, 'freshId': freshId};
+
+  factory E2eEscalationAlerts.fromJson(Map<String, Object?> j) =>
+      E2eEscalationAlerts(overdueId: j['overdueId']! as String, freshId: j['freshId']! as String);
+}
+
 class E2eFixtures {
   const E2eFixtures({
     required this.ubsId,
@@ -120,6 +151,7 @@ class E2eFixtures {
     required this.staff,
     required this.coordinator,
     required this.adminAlertIds,
+    required this.escalationAlerts,
     required this.patients,
   });
 
@@ -147,6 +179,9 @@ class E2eFixtures {
   /// pendente, todos na microárea das fixtures. O painel deve mostrar Vermelho 2,
   /// Verde 1, 1 aberto, 1 reconhecido e TMRAV 60s.
   final List<String> adminAlertIds;
+
+  /// Alertas do e2e do escalonamento (#44); ver [E2eEscalationAlerts].
+  final E2eEscalationAlerts escalationAlerts;
   final List<E2ePatient> patients;
 
   E2ePatient byRole(String role) => patients.singleWhere((p) => p.role == role);
@@ -160,6 +195,7 @@ class E2eFixtures {
         'staff': staff.toJson(),
         'coordinator': coordinator.toJson(),
         'adminAlertIds': adminAlertIds,
+        'escalationAlerts': escalationAlerts.toJson(),
         'patients': [for (final p in patients) p.toJson()],
       };
 
@@ -172,6 +208,7 @@ class E2eFixtures {
         staff: E2eStaff.fromJson((j['staff']! as Map).cast<String, Object?>()),
         coordinator: E2eStaff.fromJson((j['coordinator']! as Map).cast<String, Object?>()),
         adminAlertIds: [for (final id in (j['adminAlertIds']! as List)) id as String],
+        escalationAlerts: E2eEscalationAlerts.fromJson((j['escalationAlerts']! as Map).cast<String, Object?>()),
         patients: [
           for (final p in (j['patients']! as List)) E2ePatient.fromJson((p as Map).cast<String, Object?>()),
         ],
@@ -276,6 +313,7 @@ E2eFixtures generateE2eFixtures(Random random) {
       activationCode: StaffActivationCode.generate(random),
     ),
     adminAlertIds: [for (var i = 0; i < 3; i++) generateUuidV4(random)],
+    escalationAlerts: E2eEscalationAlerts(overdueId: generateUuidV4(random), freshId: generateUuidV4(random)),
     patients: [
       patient('main', 'Paciente E2E Principal', chronic: false, microAreaId: microAreaId),
       patient('chronic', 'Paciente E2E Crônico', chronic: true, microAreaId: microAreaId),
