@@ -1,0 +1,14 @@
+### Ponto de verificação da cadeia de `audit_logs` (#45): `entryHash` na
+### posição `sequence`, assinado, para detectar truncamento do final da cadeia.
+class: AuditChainCheckpoint
+table: audit_chain_checkpoints
+fields:
+  id: UuidValue?, defaultPersist=random
+  sequence: int
+  entryHash: String
+  signature: String
+  createdAt: DateTime
+indexes:
+  audit_chain_checkpoints_sequence_idx:
+    fields: sequence
+    unique: true

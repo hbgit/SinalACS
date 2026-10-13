@@ -1,0 +1,20 @@
+### Registro de cada exportação da trilha de auditoria (#45). Append-only:
+### guarda quem exportou, os filtros, o intervalo de `sequence` coberto e o
+### SHA-256 do conteúdo, para que a própria exportação seja auditável.
+class: AuditExport
+table: audit_exports
+fields:
+  id: UuidValue?, defaultPersist=random
+  requestedBy: UuidValue, relation(parent=users)
+  requestedAt: DateTime
+  filtersJson: String
+  format: String
+  rowCount: int
+  firstSequence: int?
+  lastSequence: int?
+  contentSha256: String
+  ### Resultado da verificação da cadeia no momento da exportação.
+  chainState: String
+indexes:
+  audit_exports_requested_at_idx:
+    fields: requestedAt
