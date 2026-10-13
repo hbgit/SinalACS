@@ -8,6 +8,7 @@ import 'package:mqtt_client/mqtt_server_client.dart';
 import 'package:sinalacs_server/src/application/alerts/red_alert_service.dart';
 import 'package:sinalacs_server/src/config/app_config.dart';
 import 'package:sinalacs_server/src/domain/entities/alert_delivery.dart';
+import 'package:sinalacs_server/src/runtime/uncaught_error_policy.dart';
 
 class MqttUnavailableException implements Exception {
   const MqttUnavailableException(this.message);
@@ -253,13 +254,7 @@ class MqttAlertDispatcher implements AlertPublisher {
     if (!_reconnecting) unawaited(_reconnectWithBackoff());
   }
 
-  bool _isTransient(Object e) =>
-      e is SocketException ||
-      e is TlsException || // inclui HandshakeException
-      e is TimeoutException ||
-      e is ConnectionException ||
-      e is NoConnectionException ||
-      e is StateError && e.message == 'socket is null';
+  bool _isTransient(Object e) => isTransientIoError(e);
 
   /// Handler da zona protegida. Registra só o tipo (e o errno de um
   /// `SocketException`), nunca a mensagem, a pilha ou o endereço (VAZ-01).

@@ -183,3 +183,25 @@ Testes em `backend/sinalacs_server/test/integration/red_alert_cycle_test.dart`, 
 - Ajustes nos publishers falsos dos testes (`implements AlertPublisher` em `test/integration/red_alert_cycle_test.dart`, `test/unit/red_alert_service_test.dart`, `test/unit/alert_outbox_dispatcher_test.dart`, `test/unit/red_alert_lifecycle_test.dart` e `test/unit/red_alert_discard_paths_test.dart`; o único chamador de `publish` em `lib/` é `alert_outbox_dispatcher.dart:60`), e inversão dos dois testes H5.
 
 ## Regressão final
+
+### Tarefa 10: `runZonedGuarded` global em `bin/main.dart` (defesa em profundidade)
+
+Sonda mínima (`dart run`, script fora do repositório): `runZonedGuarded` com handler que só anota o tipo; dentro dele, `Future.error(SocketException)` em várias configurações. Resultados:
+
+| Caso | Quem recebeu |
+|---|---|
+| E0: `Future.error(SocketException)` num `Timer` criado **fora** da zona (sonda sem zona) | ninguém: `Unhandled exception: SocketException` no stderr e o processo cai (a assinatura da #56) |
+| E1: `Future.error` sem dono criado dentro da zona | global |
+| E2: `Timer.periodic` criado dentro com callback `async` que lança (caso do `_startOutboxSweeper`) | global |
+| E3: zona filha de `Zone.root` com `handleUncaughtError` próprio (como a do dispatcher) | só a filha; global **não** viu |
+| E4: zona filha de `Zone.current` com handler próprio | só a filha; global não viu (sem log duplicado) |
+| E5: zona filha de `Zone.current` **sem** handler | global (o erro sobe) |
+| E7: `async` sem await que lança depois de `run` retornar (`run` é `void ... async`) | global |
+
+Respostas às 6 perguntas:
+1. A zona global intercepta erros de Futures/Timers criados dentro dela (E1, E2, E7) e de zonas filhas sem handler (E5). Não intercepta: o que nasce em zona criada de `Zone.root` (E3), isolates, sockets/timers criados antes dela (E0). O `Serverpod.start()` já roda o próprio `runZonedGuarded` (serverpod 3.4.13, `serverpod.dart:685`), com `ExitException` -> `exit(code)` e demais erros logados com `_exitCode = 1`: esses nunca sobem à global. O `Timer.periodic` do outbox é criado após `await pod.start()`, ou seja, na continuação de `run`, na zona global (E2); o `catch` dele já cobre o caso comum.
+2. Dispatcher x global: não há log duplicado; o erro tratado na zona do dispatcher não sobe (E3, E4). O global só vê o que o dispatcher não alcança.
+3. A zona do dispatcher é bifurcada de `Zone.root` (Tarefa 7), não de `Zone.current`; logo **não** é filha da global. Consequência: o global não cobre o cliente MQTT (e não precisa; a local é que decide). O que a global cobre é o resto do processo (outbox, `unawaited(_connectAlertDispatcher)`, FutureCalls fora do guarda do Serverpod).
+4. Política aplicada (`lib/src/runtime/uncaught_error_policy.dart`): `isTransientIoError` (a mesma lista do dispatcher, agora compartilhada) -> registra tipo (+errno) e mantém vivo; qualquer outro -> registra só o tipo e `exit(70)`. Verificado com a sonda: `SocketException` errno 104 -> processo vivo, rc=0; `StateError` -> `[processo] Erro assíncrono não tratado (StateError); encerrando.` e rc=70, sem texto da mensagem nem pilha.
+5. Log: prefixo `[processo]` (o dispatcher usa `MQTT`), só tipo e errno (VAZ-01), coberto por teste de unidade.
+6. Risco ao Serverpod: `exit()` não depende de zona; sinais (`ProcessSignal.watch`) e o shutdown do Serverpod não passam por erro de zona; `args` seguem iguais. `dart compile exe bin/main.dart` compila. Não subi o servidor completo (a stack Docker de dev não foi tocada); a verificação do boot completo fica para a E2E da Tarefa 10b/11. Decisão: **aplicada**.
