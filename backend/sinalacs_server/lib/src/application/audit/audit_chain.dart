@@ -57,12 +57,37 @@ class AuditChain {
   /// Compara em tempo constante, no mesmo molde de
   /// `DevelopmentAuthService._matchesSignature` — o campo é uma assinatura,
   /// então comparar com `==` vazaria timing.
-  bool matches(AuditChainFields fields, String entryHash) {
-    final expected = computeEntryHash(fields);
-    if (expected.length != entryHash.length) return false;
+  bool matches(AuditChainFields fields, String entryHash) =>
+      _constantTimeEquals(computeEntryHash(fields), entryHash);
+
+  /// Assinatura de um checkpoint de cauda (#45, Task 7, D4):
+  /// HMAC-SHA256(segredo, `"checkpoint" ␟ sequence ␟ entryHash`), em hex.
+  ///
+  /// Mesmo segredo e mesmo separador da linha, mas domínio separado: o
+  /// payload de linha começa por um inteiro, este pela palavra
+  /// `checkpoint`, então nenhuma assinatura de checkpoint serve de
+  /// `entryHash` de linha (nem o contrário).
+  String computeCheckpointSignature(int sequence, String entryHash) =>
+      Hmac(sha256, _secret)
+          .convert(
+            utf8.encode(
+              ['checkpoint', sequence.toString(), entryHash].join(_separator),
+            ),
+          )
+          .toString();
+
+  /// Confere a assinatura de um checkpoint em tempo constante.
+  bool checkpointMatches(int sequence, String entryHash, String signature) =>
+      _constantTimeEquals(
+        computeCheckpointSignature(sequence, entryHash),
+        signature,
+      );
+
+  static bool _constantTimeEquals(String expected, String actual) {
+    if (expected.length != actual.length) return false;
     var difference = 0;
     for (var index = 0; index < expected.length; index++) {
-      difference |= expected.codeUnitAt(index) ^ entryHash.codeUnitAt(index);
+      difference |= expected.codeUnitAt(index) ^ actual.codeUnitAt(index);
     }
     return difference == 0;
   }

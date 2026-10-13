@@ -47,6 +47,7 @@ class AuditChainVerification {
     this.brokenAtSequence,
     this.reason,
     this.reasonCode,
+    this.headEntryHash,
   });
 
   final bool ok;
@@ -54,6 +55,11 @@ class AuditChainVerification {
   final int? brokenAtSequence;
   final String? reason;
   final AuditChainReason? reasonCode;
+
+  /// `entryHash` da última linha conferida (a de `sequence == checked`), só
+  /// quando `ok` e `checked > 0`. Uso interno: é o que o checkpoint de cauda
+  /// (#45, Task 7) assina. Nunca vai ao cliente.
+  final String? headEntryHash;
 }
 
 /// Verifica a integridade da cadeia de hash de `audit_logs` (LGPD-RT03).
@@ -189,6 +195,11 @@ class AuditChainVerifier {
       }
     }
 
-    return AuditChainVerification(ok: true, checked: expectedSequence - 1);
+    final checked = expectedSequence - 1;
+    return AuditChainVerification(
+      ok: true,
+      checked: checked,
+      headEntryHash: checked > 0 ? expectedPreviousHash : null,
+    );
   }
 }

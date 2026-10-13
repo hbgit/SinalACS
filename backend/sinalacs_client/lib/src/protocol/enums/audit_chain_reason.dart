@@ -18,7 +18,10 @@ import 'package:serverpod_client/serverpod_client.dart' as _i1;
 /// verificador: nunca vai hash, segredo nem conteúdo de linha.
 /// `hashMismatch` = HMAC da linha não confere; `linkBroken` = `previousHash`
 /// não aponta para a anterior; `sequenceGap` = `sequence` descontínua;
-/// `tailTruncated` = cadeia termina antes do último checkpoint (Task 7);
+/// `tailTruncated` = cadeia termina antes do último checkpoint válido, ou o
+/// `entryHash` naquela `sequence` diverge do checkpoint (Task 7);
+/// `checkpointInvalid` = cadeia íntegra, mas há checkpoint com assinatura
+/// inválida — ignorado e sinalizado, nunca aceito (Task 7; estado inconclusive);
 /// `timeBudget` = orçamento de tempo esgotado antes do fim (resultado parcial,
 /// nunca íntegro); `databaseError` = falha ao ler; `secretUnavailable` =
 /// segredo da cadeia ausente.
@@ -27,6 +30,7 @@ enum AuditChainReason implements _i1.SerializableModel {
   linkBroken,
   sequenceGap,
   tailTruncated,
+  checkpointInvalid,
   timeBudget,
   databaseError,
   secretUnavailable;
@@ -41,6 +45,8 @@ enum AuditChainReason implements _i1.SerializableModel {
         return AuditChainReason.sequenceGap;
       case 'tailTruncated':
         return AuditChainReason.tailTruncated;
+      case 'checkpointInvalid':
+        return AuditChainReason.checkpointInvalid;
       case 'timeBudget':
         return AuditChainReason.timeBudget;
       case 'databaseError':

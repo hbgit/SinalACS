@@ -8,6 +8,7 @@ import 'package:sinalacs_server/src/application/admin/data_subject_case_service.
 import 'package:sinalacs_server/src/infrastructure/database/orm_data_subject_case_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_admin_account_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_admin_read_store.dart';
+import 'package:sinalacs_server/src/infrastructure/database/orm_audit_checkpoint_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_alert_escalation_store.dart';
 import 'package:meta/meta.dart';
 import 'package:serverpod/serverpod.dart';
@@ -250,14 +251,22 @@ class AlertRuntime {
   void resetAuditChainStatusCache() => _auditChainStatusCache.reset();
 
   /// `admin.verifyAuditChain` (#45, Task 6), para uma requisição: reader,
-  /// store e trilha da chamada; cache e single-flight do processo; o mesmo
-  /// `AUDIT_CHAIN_SECRET` que grava a trilha.
+  /// store, checkpoints de cauda (Task 7) e trilha da chamada; cache e
+  /// single-flight do processo; o mesmo `AUDIT_CHAIN_SECRET` que grava a
+  /// trilha e assina os checkpoints.
   AuditChainStatusService auditChainStatusServiceFor(Session session) =>
       AuditChainStatusService(
         store: OrmAdminReadStore(session: () => session),
         audit: auditTrailFor(session),
         reader: OrmAuditChainReader(session: () => session),
         secret: config.auditChainSecret,
+        checkpoints: OrmAuditCheckpointStore(session: () => session),
+        // Só o tipo do erro: nada de hash, assinatura ou SQL no log.
+        onCheckpointWriteFailure: (erro) => session.log(
+          'Falha ao gravar checkpoint da cadeia de auditoria '
+          '(${erro.runtimeType}); a verificação segue verified.',
+          level: LogLevel.warning,
+        ),
         cache: _auditChainStatusCache,
       );
 

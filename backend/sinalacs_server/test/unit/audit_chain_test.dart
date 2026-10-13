@@ -198,6 +198,71 @@ void main() {
     });
   });
 
+  group('AuditChain — assinatura de checkpoint (#45, Task 7, D4)', () {
+    final hash = 'a' * 64;
+
+    test('é HMAC-SHA256 de "checkpoint" ␟ sequence ␟ entryHash', () {
+      final chain = AuditChain(secret: secret);
+      final assinatura = chain.computeCheckpointSignature(7, hash);
+      // Hex de 64 dígitos, determinística.
+      expect(assinatura, matches(RegExp(r'^[0-9a-f]{64}$')));
+      expect(chain.computeCheckpointSignature(7, hash), assinatura);
+      expect(chain.checkpointMatches(7, hash, assinatura), isTrue);
+    });
+
+    test('muda com sequence, entryHash e segredo', () {
+      final chain = AuditChain(secret: secret);
+      final base = chain.computeCheckpointSignature(7, hash);
+      expect(chain.computeCheckpointSignature(8, hash), isNot(base));
+      expect(chain.computeCheckpointSignature(7, 'b' * 64), isNot(base));
+      expect(
+        AuditChain(secret: 'outro').computeCheckpointSignature(7, hash),
+        isNot(base),
+      );
+    });
+
+    test('assinatura adulterada, de outro sequence ou de outro segredo '
+        'não confere', () {
+      final chain = AuditChain(secret: secret);
+      final boa = chain.computeCheckpointSignature(7, hash);
+      expect(chain.checkpointMatches(8, hash, boa), isFalse);
+      expect(chain.checkpointMatches(7, 'b' * 64, boa), isFalse);
+      expect(
+        chain.checkpointMatches(
+          7,
+          hash,
+          AuditChain(secret: 'outro').computeCheckpointSignature(7, hash),
+        ),
+        isFalse,
+      );
+      expect(chain.checkpointMatches(7, hash, ''), isFalse);
+      expect(chain.checkpointMatches(7, hash, boa.substring(1)), isFalse);
+      final trocada = '${boa[0] == '0' ? '1' : '0'}${boa.substring(1)}';
+      expect(chain.checkpointMatches(7, hash, trocada), isFalse);
+    });
+
+    test('não colide com o entryHash de uma linha (domínio separado)', () {
+      // O payload de linha começa por um inteiro; o de checkpoint, pela
+      // palavra "checkpoint" — uma assinatura nunca serve de entryHash.
+      final chain = AuditChain(secret: secret);
+      final fields = AuditChainFields(
+        sequence: 7,
+        previousHash: hash,
+        userId: 'user-1',
+        actionType: 'read',
+        resourceType: 'r',
+        resourceId: null,
+        timestamp: DateTime.utc(2026, 1, 1),
+        ipHash: 'ip',
+        result: 'success',
+      );
+      expect(
+        chain.computeCheckpointSignature(7, hash),
+        isNot(chain.computeEntryHash(fields)),
+      );
+    });
+  });
+
   group('AuditChainVerifier', () {
     test('uma cadeia vazia é íntegra por vacuidade', () async {
       final verifier =

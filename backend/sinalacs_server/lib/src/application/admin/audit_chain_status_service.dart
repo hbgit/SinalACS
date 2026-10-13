@@ -1,6 +1,8 @@
 import 'dart:async';
 
 import 'package:sinalacs_server/src/application/admin/admin_scope.dart';
+import 'package:sinalacs_server/src/application/audit/audit_chain.dart';
+import 'package:sinalacs_server/src/application/audit/audit_chain_checkpoint_store.dart';
 import 'package:sinalacs_server/src/application/audit/audit_chain_verifier.dart';
 import 'package:sinalacs_server/src/application/audit/audit_trail.dart';
 import 'package:sinalacs_server/src/application/auth/development_auth_service.dart';
@@ -68,21 +70,51 @@ class AuditChainStatusCache {
 /// o `reasonCode` fechado. Segredo trocado aparece como `broken` já na
 /// `sequence` 1 (Review Focus 3): "falha", não necessariamente adulteração.
 ///
-/// Ponto de extensão da Task 7 (checkpoint de cauda): [_verificarCadeia] é o
-/// único lugar que produz o resultado global; a âncora de cauda entra ali,
-/// depois do verificador, sem mudar a projeção nem o cache.
+/// 6. **Checkpoint de cauda (Task 7, D4):** o verificador sozinho não vê
+///    linhas apagadas do **fim** da cadeia (a cadeia mais curta continua
+///    contígua e encadeada). Depois de uma cadeia `ok`, [_ancorarCauda] lê os
+///    [checkpointWindow] checkpoints mais recentes e confere a assinatura de
+///    cada um com a MESMA [AuditChain] da escrita
+///    ([AuditChain.checkpointMatches]). O mais recente **válido** é a âncora:
+///    se a linha daquela `sequence` não existe mais, ou existe com outro
+///    `entryHash` (cauda apagada e a aplicação regravou por cima), o
+///    resultado é `broken/tailTruncated`. Checkpoint com assinatura inválida
+///    é **ignorado** como âncora e **sinalizado**: sem truncamento provado
+///    pela âncora válida, o resultado é `inconclusive/checkpointInvalid`,
+///    nunca `verified` — e a linha não é apagada (é evidência). Falha ao ler
+///    checkpoints é `unavailable/databaseError`: sem âncora conferida, não há
+///    `verified`.
+///
+///    Só um resultado final `verified` grava checkpoint novo
+///    (`headSequence`, `headEntryHash`), e só se avança: a âncora lida já em
+///    `sequence >= head` não regrava, e o store recusa atomicamente qualquer
+///    `sequence` menor ou igual à maior gravada (corrida de duas
+///    verificações no mesmo `sequence` termina sem erro). Gravar é melhor
+///    esforço: falha (Exception ou Error) **não** muda o `verified` — a
+///    cadeia foi conferida — nem derruba a resposta, mas também não some:
+///    vai para [onCheckpointWriteFailure] (log de servidor, sem hash).
+///
+///    **Limites conhecidos (registrados em Pendências do plano):** restaurar
+///    o banco inteiro de um backup mais antigo — cadeia **e** checkpoints
+///    juntos — passa como íntegro, porque os dois voltam coerentes entre si;
+///    e quem tem escrita no banco e apaga a cauda também pode apagar os
+///    checkpoints (sem forjar um novo, que exige o segredo). O checkpoint
+///    reduz o risco do truncamento, não o elimina.
 class AuditChainStatusService {
   AuditChainStatusService({
     required this.store,
     required this.audit,
     required AuditChainReader reader,
     required String secret,
+    required AuditChainCheckpointStore checkpoints,
     required this.cache,
+    this.onCheckpointWriteFailure,
     this.budget = defaultBudget,
     this.readTimeout = defaultReadTimeout,
     DateTime Function()? clock,
   }) : _reader = reader,
        _secret = secret,
+       _checkpoints = checkpoints,
        _clock = clock ?? DateTime.now;
 
   final AuditChainScopeStore store;
@@ -96,9 +128,19 @@ class AuditChainStatusService {
   /// `unavailable/databaseError`, não uma requisição presa.
   final Duration readTimeout;
 
+  /// Chamado quando gravar o checkpoint falha. Recebe o erro; nunca o
+  /// hash. Se ele próprio lançar, é engolido: a resposta não cai por log.
+  final void Function(Object error)? onCheckpointWriteFailure;
+
   final AuditChainReader _reader;
   final String _secret;
+  final AuditChainCheckpointStore _checkpoints;
   final DateTime Function() _clock;
+
+  /// Quantos checkpoints mais recentes são conferidos a cada verificação.
+  /// Um inválido entre eles já basta para `inconclusive`; o válido mais novo
+  /// entre eles é a âncora.
+  static const checkpointWindow = 100;
 
   static const defaultBudget = Duration(seconds: 10);
   static const defaultReadTimeout = Duration(seconds: 10);
@@ -138,7 +180,8 @@ class AuditChainStatusService {
       AuditChainReason.linkBroken ||
       AuditChainReason.sequenceGap ||
       AuditChainReason.tailTruncated => AuditIntegrityState.broken,
-      AuditChainReason.timeBudget => AuditIntegrityState.inconclusive,
+      AuditChainReason.timeBudget ||
+      AuditChainReason.checkpointInvalid => AuditIntegrityState.inconclusive,
       AuditChainReason.databaseError ||
       AuditChainReason.secretUnavailable ||
       null => AuditIntegrityState.unavailable,
@@ -168,14 +211,22 @@ class AuditChainStatusService {
   }
 
   /// Nunca lança: qualquer falha da leitura — `Exception` ou `Error` — é
-  /// `databaseError`. (Task 7: a âncora de cauda entra aqui.)
+  /// `databaseError`. A âncora de cauda (Task 7) entra depois do
+  /// verificador; a gravação do checkpoint, depois do estado final.
   Future<AuditChainSnapshot> _verificarCadeia() async {
+    final reader = _ReaderComPrazo(_reader, readTimeout);
     AuditChainVerification resultado;
+    int? maiorCheckpoint;
     try {
       resultado = await AuditChainVerifier(
-        reader: _ReaderComPrazo(_reader, readTimeout),
+        reader: reader,
         secret: _secret,
       ).verify(budget: budget, clock: _clock);
+      if (resultado.ok) {
+        final ancorado = await _ancorarCauda(resultado, reader);
+        resultado = ancorado.resultado;
+        maiorCheckpoint = ancorado.maiorValido;
+      }
     } catch (_) {
       resultado = const AuditChainVerification(
         ok: false,
@@ -183,7 +234,98 @@ class AuditChainStatusService {
         reasonCode: AuditChainReason.databaseError,
       );
     }
+    if (stateOf(resultado) == AuditIntegrityState.verified) {
+      await _gravarCheckpoint(resultado, maiorCheckpoint);
+    }
     return AuditChainSnapshot(verification: resultado, at: _clock().toUtc());
+  }
+
+  /// Confere a cadeia `ok` [v] contra o checkpoint válido mais recente.
+  /// Lança em falha de leitura (o chamador transforma em `databaseError`).
+  Future<({AuditChainVerification resultado, int? maiorValido})>
+  _ancorarCauda(AuditChainVerification v, AuditChainReader reader) async {
+    final chain = AuditChain(secret: _secret);
+    final lidos = await _checkpoints
+        .latest(limit: checkpointWindow)
+        .timeout(readTimeout);
+
+    AuditChainCheckpointRecord? ancora;
+    var invalido = false;
+    for (final c in lidos) {
+      if (chain.checkpointMatches(c.sequence, c.entryHash, c.signature)) {
+        // Lidos em ordem decrescente: o primeiro válido é o mais recente.
+        if (ancora == null || c.sequence > ancora.sequence) ancora = c;
+      } else {
+        invalido = true;
+      }
+    }
+
+    if (ancora != null) {
+      // `entryAt`, não `checked`: se a cadeia cresceu enquanto era lida, a
+      // linha do checkpoint pode estar além do que o verificador viu — e
+      // existir com o mesmo hash não é truncamento.
+      final linha = await reader.entryAt(ancora.sequence);
+      if (linha == null || linha.entryHash != ancora.entryHash) {
+        return (
+          resultado: AuditChainVerification(
+            ok: false,
+            checked: v.checked,
+            brokenAtSequence: ancora.sequence,
+            reason: linha == null
+                ? 'a cadeia termina antes do último checkpoint '
+                      '(cauda apagada)'
+                : 'entryHash diverge do checkpoint '
+                      '(cauda apagada e regravada)',
+            reasonCode: AuditChainReason.tailTruncated,
+          ),
+          maiorValido: ancora.sequence,
+        );
+      }
+    }
+
+    if (invalido) {
+      return (
+        resultado: AuditChainVerification(
+          ok: false,
+          checked: v.checked,
+          reason:
+              'checkpoint com assinatura inválida ignorado '
+              '(adulteração ou segredo trocado)',
+          reasonCode: AuditChainReason.checkpointInvalid,
+        ),
+        maiorValido: ancora?.sequence,
+      );
+    }
+    return (resultado: v, maiorValido: ancora?.sequence);
+  }
+
+  /// Melhor esforço: nunca lança e nunca muda o resultado.
+  Future<void> _gravarCheckpoint(
+    AuditChainVerification v,
+    int? maiorExistente,
+  ) async {
+    final hash = v.headEntryHash;
+    if (hash == null || v.checked < 1) return;
+    if (maiorExistente != null && maiorExistente >= v.checked) return;
+    try {
+      await _checkpoints
+          .advanceTo(
+            AuditChainCheckpointRecord(
+              sequence: v.checked,
+              entryHash: hash,
+              signature: AuditChain(
+                secret: _secret,
+              ).computeCheckpointSignature(v.checked, hash),
+            ),
+          )
+          .timeout(readTimeout);
+    } catch (erro) {
+      try {
+        onCheckpointWriteFailure?.call(erro);
+      } catch (_) {
+        // O log também falhou; a resposta segue.
+      }
+    }
   }
 
   Future<AdminAuditChainStatus> _projetar(

@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:sinalacs_server/src/application/admin/audit_chain_status_service.dart';
 import 'package:sinalacs_server/src/application/audit/audit_chain.dart';
+import 'package:sinalacs_server/src/application/audit/audit_chain_checkpoint_store.dart';
 import 'package:sinalacs_server/src/application/audit/audit_chain_verifier.dart';
 import 'package:sinalacs_server/src/application/audit/audit_trail.dart';
 import 'package:sinalacs_server/src/application/auth/development_auth_service.dart';
@@ -103,6 +104,26 @@ class _Reader implements AuditChainReader {
   }
 }
 
+/// Leitura em lotes que para na linha 5, enquanto `entryAt` já vê as linhas
+/// gravadas depois: a cadeia cresceu durante a verificação.
+class _ReaderAteCinco implements AuditChainReader {
+  _ReaderAteCinco(this._todas);
+
+  final _Reader _todas;
+
+  @override
+  Future<List<AuditChainEntry>> readBatch({
+    required int afterSequence,
+    required int limit,
+  }) async => (await _todas.readBatch(
+    afterSequence: afterSequence,
+    limit: limit,
+  )).where((e) => e.fields.sequence <= 5).toList();
+
+  @override
+  Future<AuditChainEntry?> entryAt(int sequence) => _todas.entryAt(sequence);
+}
+
 class _Store implements AuditChainScopeStore {
   final Map<String, String?> ubs = {
     'coord-a': _ubsA,
@@ -138,6 +159,47 @@ class _Audit extends AuditTrail {
   }
 }
 
+/// Checkpoints em memória, com a mesma regra do store ORM: só grava se
+/// avança (nenhuma `sequence` >= já existe).
+class _Checkpoints implements AuditChainCheckpointStore {
+  final linhas = <AuditChainCheckpointRecord>[];
+  Object? falharLeitura;
+  Object? falharEscrita;
+  bool travarLeitura = false;
+  final tentativas = <int>[];
+
+  void assinado(int sequence, String entryHash, {String segredo = _segredo}) =>
+      linhas.add(
+        AuditChainCheckpointRecord(
+          sequence: sequence,
+          entryHash: entryHash,
+          signature: AuditChain(
+            secret: segredo,
+          ).computeCheckpointSignature(sequence, entryHash),
+        ),
+      );
+
+  @override
+  Future<List<AuditChainCheckpointRecord>> latest({required int limit}) async {
+    _ordem.add('checkpoints:latest');
+    if (travarLeitura) await Completer<void>().future;
+    final erro = falharLeitura;
+    if (erro != null) throw erro;
+    final ordenadas = List.of(linhas)
+      ..sort((a, b) => b.sequence.compareTo(a.sequence));
+    return ordenadas.take(limit).toList();
+  }
+
+  @override
+  Future<void> advanceTo(AuditChainCheckpointRecord c) async {
+    tentativas.add(c.sequence);
+    final erro = falharEscrita;
+    if (erro != null) throw erro;
+    if (linhas.any((l) => l.sequence >= c.sequence)) return;
+    linhas.add(c);
+  }
+}
+
 AuthenticatedUser _u(String id, UserRole role, {String? ma}) =>
     AuthenticatedUser(
       id: id,
@@ -150,6 +212,8 @@ void main() {
   late _Cadeia cadeia;
   late _Store store;
   late _Audit audit;
+  late _Checkpoints checkpoints;
+  late List<Object> falhasDeGravacao;
   late AuditChainStatusCache cache;
   late DateTime agora;
   final t0 = DateTime.utc(2026, 10, 13, 15);
@@ -165,12 +229,14 @@ void main() {
     }
     store = _Store();
     audit = _Audit();
+    checkpoints = _Checkpoints();
+    falhasDeGravacao = [];
     cache = AuditChainStatusCache();
     agora = t0;
   });
 
   AuditChainStatusService servico(
-    _Reader reader, {
+    AuditChainReader reader, {
     String segredo = _segredo,
     Duration budget = AuditChainStatusService.defaultBudget,
     Duration readTimeout = AuditChainStatusService.defaultReadTimeout,
@@ -180,6 +246,8 @@ void main() {
     audit: audit,
     reader: reader,
     secret: segredo,
+    checkpoints: checkpoints,
+    onCheckpointWriteFailure: falhasDeGravacao.add,
     cache: cache,
     budget: budget,
     readTimeout: readTimeout,
@@ -470,7 +538,11 @@ void main() {
     test('grava read/admin_audit_chain/success ANTES de ler', () async {
       await servico(_Reader(cadeia.entries)).verify(admin);
       expect(_ordem.first, 'audit:read:admin_audit_chain:success');
-      expect(_ordem.skip(1), everyElement('reader:readBatch'));
+      // A cadeia primeiro, a âncora de cauda (Task 7) depois.
+      expect(_ordem.skip(1), [
+        'reader:readBatch',
+        'checkpoints:latest',
+      ]);
     });
 
     test('trilha fora do ar ⇒ a exceção sobe e nada é lido', () async {
@@ -544,6 +616,239 @@ void main() {
       agora = t0.subtract(const Duration(minutes: 5));
       await servico(r).verify(admin);
       expect(r.lotes, hasLength(2));
+    });
+  });
+
+  group('checkpoint de cauda (Task 7, D4)', () {
+    String hashDa(int sequence) => cadeia.entries[sequence - 1].entryHash;
+
+    test('verified grava (headSequence, headEntryHash) com assinatura da '
+        'mesma AuditChain', () async {
+      final s = await servico(_Reader(cadeia.entries)).verify(admin);
+      expect(s.state, AuditIntegrityState.verified);
+      expect(checkpoints.linhas, hasLength(1));
+      final c = checkpoints.linhas.single;
+      expect(c.sequence, 5);
+      expect(c.entryHash, hashDa(5));
+      expect(
+        c.signature,
+        AuditChain(secret: _segredo).computeCheckpointSignature(5, hashDa(5)),
+      );
+      expect(falhasDeGravacao, isEmpty);
+    });
+
+    test('cauda apagada (3 últimas) depois do checkpoint ⇒ '
+        'broken/tailTruncated na sequence do checkpoint', () async {
+      checkpoints.assinado(5, hashDa(5));
+      final s = await servico(
+        _Reader(cadeia.entries.take(2).toList()),
+      ).verify(admin);
+      expect(s.state, AuditIntegrityState.broken);
+      expect(s.reasonCode, AuditChainReason.tailTruncated);
+      expect(s.firstBrokenSequence, 5);
+      expect(s.brokenInScope, isTrue);
+      expect(s.headSequence, isNull);
+      // Nada é gravado sobre uma cadeia quebrada: o checkpoint antigo fica.
+      expect(checkpoints.tentativas, isEmpty);
+      expect(checkpoints.linhas.single.sequence, 5);
+    });
+
+    test('cauda apagada e regravada por cima com HMAC válido ⇒ '
+        'entryHash diverge no checkpoint ⇒ tailTruncated', () async {
+      checkpoints.assinado(5, hashDa(5));
+      // A aplicação continua gravando depois do truncamento: as linhas 3..5
+      // existem de novo, legítimas, mas com outro conteúdo.
+      final outra = _Cadeia()
+        ..entries.addAll(cadeia.entries.take(2))
+        ..append(userId: 'outro')
+        ..append(userId: 'outro')
+        ..append(userId: 'outro');
+      final s = await servico(_Reader(outra.entries)).verify(admin);
+      expect(s.state, AuditIntegrityState.broken);
+      expect(s.reasonCode, AuditChainReason.tailTruncated);
+      expect(s.firstBrokenSequence, 5);
+      expect(checkpoints.tentativas, isEmpty);
+    });
+
+    test('todas as linhas apagadas com checkpoint ⇒ tailTruncated, '
+        'não inconclusive', () async {
+      checkpoints.assinado(5, hashDa(5));
+      final s = await servico(_Reader(const [])).verify(admin);
+      expect(s.state, AuditIntegrityState.broken);
+      expect(s.reasonCode, AuditChainReason.tailTruncated);
+    });
+
+    test('linha nova por cima ⇒ verified e o checkpoint avança', () async {
+      checkpoints.assinado(5, hashDa(5));
+      cadeia.append();
+      final s = await servico(_Reader(cadeia.entries)).verify(admin);
+      expect(s.state, AuditIntegrityState.verified);
+      expect(checkpoints.linhas.map((c) => c.sequence), [5, 6]);
+      expect(checkpoints.linhas.last.entryHash, hashDa(6));
+    });
+
+    test('cabeça igual ao checkpoint ⇒ verified, sem gravar de novo', () async {
+      checkpoints.assinado(5, hashDa(5));
+      final s = await servico(_Reader(cadeia.entries)).verify(admin);
+      expect(s.state, AuditIntegrityState.verified);
+      expect(checkpoints.tentativas, isEmpty);
+    });
+
+    test('checkpoint à frente da leitura, mas a linha existe com o mesmo '
+        'hash (cadeia cresceu durante a verificação) ⇒ verified, nunca grava '
+        'sequence menor', () async {
+      cadeia.append();
+      cadeia.append();
+      checkpoints.assinado(7, hashDa(7));
+      // readBatch enxerga 5; entryAt(7) enxerga a linha que chegou depois.
+      final lento = _ReaderAteCinco(_Reader(cadeia.entries));
+      final s = await servico(lento).verify(admin);
+      expect(s.state, AuditIntegrityState.verified);
+      expect(s.checkedRows, 5);
+      expect(checkpoints.tentativas, isEmpty);
+      expect(checkpoints.linhas.map((c) => c.sequence), [7]);
+    });
+
+    test('checkpoint com assinatura inválida ⇒ ignorado e sinalizado: '
+        'inconclusive/checkpointInvalid, nada gravado, nada apagado', () async {
+      checkpoints.linhas.add(
+        AuditChainCheckpointRecord(
+          sequence: 50,
+          entryHash: hashDa(5),
+          signature: 'f' * 64,
+        ),
+      );
+      final s = await servico(_Reader(cadeia.entries)).verify(admin);
+      expect(s.state, AuditIntegrityState.inconclusive);
+      expect(s.reasonCode, AuditChainReason.checkpointInvalid);
+      expect(s.headSequence, isNull);
+      // Não foi aceito (a sequence 50 não existe e não virou tailTruncated) e
+      // não foi descartado em silêncio (não virou verified).
+      expect(checkpoints.tentativas, isEmpty);
+      expect(checkpoints.linhas, hasLength(1));
+    });
+
+    test('checkpoint assinado com outro segredo ⇒ inconclusive', () async {
+      checkpoints.assinado(5, hashDa(5), segredo: 'outro-segredo');
+      final s = await servico(_Reader(cadeia.entries)).verify(admin);
+      expect(s.state, AuditIntegrityState.inconclusive);
+      expect(s.reasonCode, AuditChainReason.checkpointInvalid);
+    });
+
+    test('inválido mais novo não esconde o válido mais antigo: truncamento '
+        'continua broken/tailTruncated', () async {
+      checkpoints.assinado(5, hashDa(5));
+      checkpoints.linhas.add(
+        AuditChainCheckpointRecord(
+          sequence: 9,
+          entryHash: 'x',
+          signature: 'y',
+        ),
+      );
+      final s = await servico(
+        _Reader(cadeia.entries.take(3).toList()),
+      ).verify(admin);
+      expect(s.state, AuditIntegrityState.broken);
+      expect(s.reasonCode, AuditChainReason.tailTruncated);
+      expect(s.firstBrokenSequence, 5);
+    });
+
+    test('coordenador: motivo visível no inconclusive do checkpoint', () async {
+      checkpoints.linhas.add(
+        const AuditChainCheckpointRecord(
+          sequence: 1,
+          entryHash: 'x',
+          signature: 'y',
+        ),
+      );
+      final s = await servico(_Reader(cadeia.entries)).verify(coordA);
+      expect(s.state, AuditIntegrityState.inconclusive);
+      expect(s.reasonCode, AuditChainReason.checkpointInvalid);
+      expect(s.checkedRows, isNull);
+    });
+
+    test('falha ao LER checkpoints ⇒ unavailable/databaseError, nunca '
+        'verified', () async {
+      for (final erro in <Object>[
+        Exception('banco fora'),
+        StateError('erro'),
+      ]) {
+        cache.reset();
+        checkpoints.falharLeitura = erro;
+        final s = await servico(_Reader(cadeia.entries)).verify(admin);
+        expect(s.state, AuditIntegrityState.unavailable);
+        expect(s.reasonCode, AuditChainReason.databaseError);
+        expect(checkpoints.tentativas, isEmpty);
+      }
+    });
+
+    test('leitura de checkpoints travada ⇒ prazo ⇒ unavailable', () async {
+      checkpoints.travarLeitura = true;
+      final s = await servico(
+        _Reader(cadeia.entries),
+        readTimeout: const Duration(milliseconds: 20),
+        clock: DateTime.now,
+      ).verify(admin);
+      expect(s.state, AuditIntegrityState.unavailable);
+      expect(s.reasonCode, AuditChainReason.databaseError);
+    });
+
+    test('falha ao GRAVAR o checkpoint ⇒ continua verified, sem 500, e a '
+        'falha é reportada (não mascarada)', () async {
+      for (final erro in <Object>[Exception('unique'), StateError('erro')]) {
+        cache.reset();
+        falhasDeGravacao.clear();
+        checkpoints.falharEscrita = erro;
+        final s = await servico(_Reader(cadeia.entries)).verify(admin);
+        expect(s.state, AuditIntegrityState.verified);
+        expect(s.checkedRows, 5);
+        expect(falhasDeGravacao, [erro]);
+      }
+    });
+
+    test('callback de falha que também lança não derruba a resposta',
+        () async {
+      checkpoints.falharEscrita = Exception('x');
+      final s = await AuditChainStatusService(
+        store: store,
+        audit: audit,
+        reader: _Reader(cadeia.entries),
+        secret: _segredo,
+        checkpoints: checkpoints,
+        onCheckpointWriteFailure: (_) => throw StateError('log fora'),
+        cache: cache,
+        clock: () => agora,
+      ).verify(admin);
+      expect(s.state, AuditIntegrityState.verified);
+    });
+
+    test('quebra e cadeia vazia sem checkpoint não gravam checkpoint',
+        () async {
+      final quebrada = [
+        ...cadeia.entries.take(2),
+        ...cadeia.entries.skip(3),
+      ];
+      expect(
+        (await servico(_Reader(quebrada)).verify(admin)).state,
+        AuditIntegrityState.broken,
+      );
+      cache.reset();
+      expect(
+        (await servico(_Reader(const [])).verify(admin)).state,
+        AuditIntegrityState.inconclusive,
+      );
+      expect(checkpoints.tentativas, isEmpty);
+      expect(checkpoints.linhas, isEmpty);
+    });
+
+    test('resposta não carrega hash nem assinatura do checkpoint', () async {
+      checkpoints.assinado(5, hashDa(5));
+      final s = await servico(
+        _Reader(cadeia.entries.take(2).toList()),
+      ).verify(admin);
+      final texto = jsonEncode(s.toJson());
+      expect(texto, isNot(contains(hashDa(5))));
+      expect(texto, isNot(contains(checkpoints.linhas.single.signature)));
     });
   });
 
