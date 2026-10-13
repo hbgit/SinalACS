@@ -172,6 +172,7 @@ que roda contra o harness local.
 
 ## Limitações conhecidas deste piloto
 
+- A política de reinício do processo (o `restart: unless-stopped` do `docker-compose.yml` vale só para o Compose local) é responsabilidade do hospedeiro.
 - Render free hiberna após inatividade — o primeiro request após acordar tem
   latência alta (cold start); considere um ping externo periódico em
   `/health/check` durante janelas de demonstração.

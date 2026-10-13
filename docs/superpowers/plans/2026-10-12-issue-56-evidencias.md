@@ -10,7 +10,7 @@ Coletada em 2026-10-12, branch `fix/issue-56-mqtt-queda-processo`, sem alterar `
 - **Rede:** `sinalacs_default` (único bridge do projeto; `sinalacs-mosquitto` com aliases `sinalacs-mosquitto` e `mosquitto`).
 - **`docker-compose.e2e.yml`:** só sobrescreve o `serverpod` (banco `sinalacs_e2e` em `postgres-test`, `ENABLE_DEV_LOGIN=false`, `REQUIRE_ACS_MFA=false`, `SMS_GATEWAY=log`, `RED_ALERT_ESCALATION_SECONDS=30`, `GORUSH_URL`); não altera broker nem rede.
 - **Estado da stack no momento:** `sinalacs-serverpod` Up (healthy), `sinalacs-mosquitto` Up, `sinalacs-postgres` e `-test` healthy, `sinalacs-traefik` Up, `sinalacs-gorush-1` Up (healthy).
-- **PID 1 do backend:** o `ENTRYPOINT` do Dockerfile (l.85) está em forma shell (`./server --mode=$runmode ...`), mas dentro do contêiner `/proc/1/cmdline` = `./server --mode=production --server-id=default --logging=normal --role=monolith`. Ou seja, o shell fez `exec` e o **PID 1 é o próprio `./server`** (sem `sh` intermediário): a morte do processo Dart encerra o contêiner, e sinais (`docker pause`/`stop`) chegam direto ao Dart.
+- **PID 1 do backend:** o `ENTRYPOINT` do Dockerfile (l.85) está em forma shell (`./server --mode=$runmode ...`), mas dentro do contêiner `/proc/1/cmdline` = `./server --mode=production --server-id=default --logging=normal --role=monolith`. Ou seja, o shell fez `exec` e o **PID 1 é o próprio `./server`** (sem `sh` intermediário; reconfirmado na Tarefa 11: `docker inspect .Path` = `/bin/sh -c ./server ...`, mas a lista de processos do contêiner só tem PID 1 = `./server`): a morte do processo Dart encerra o contêiner, e sinais (`docker pause`/`stop`) chegam direto ao Dart.
 - **CI (`.github/workflows/ci.yml`, job `serverpod-backend`, l.49):** `working-directory: backend`; o passo de testes é `dart test` (l.111) com `working-directory: backend/sinalacs_server`, suíte completa (unit + integration) contra Postgres de serviço efêmero.
 - **Linha de base dos testes relevantes** (`cd backend/sinalacs_server && dart test test/integration/mqtt_alert_dispatcher_test.dart test/unit/alert_outbox_dispatcher_test.dart`, sem Postgres):
   - Resultado real: `00:00 +6: All tests passed!` (6 testes, 0 falhas). Saída inclui apenas logs esperados de stderr (`Entrega do alerta alerta-1 adiada (tentativa N, erro _Exception)` e `Falha ao conectar ao broker MQTT (SocketException). Tentando novamente em segundo plano...`).
@@ -309,3 +309,21 @@ Fluxo padrão (base, B, C) 3 vezes; as 3 saíram com `EXIT 0` ("OK"). Em cada ex
 | 3 | C_FIM | 1 -> 1 | 1 | 47 s | false | 5 |
 
 Total: 12 alertas criados, 12 entregues, cada um exatamente 1 vez (tabela final do assinante: 4 alertas por execução, contagem 1); nenhum perdido, nenhuma duplicata. Para B o "atraso" é contado desde o broker de volta; para C desde o religamento à rede (o atraso maior de C_INICIO reflete o backoff acumulado do outbox, 7 tentativas). Conclusão: a suíte agora está verde (3 de 3) e confirma, em execuções repetidas, a explicação anterior: o vermelho em C_FIM era falso negativo do assinante `-C 1`, não perda de alerta. O cenário A (`--com-pausa-do-backend`) não foi reexecutado nesta rodada. A stack de desenvolvimento foi restaurada (`docker compose up -d`: serverpod healthy, `rc=0`, broker na rede com os aliases, arquivos temporários do assinante removidos do contêiner).
+
+
+## Tarefa 11: `restart: unless-stopped` no serviço `serverpod`
+
+**Comportamento esperado e limites (fixados antes da alteração):**
+- Reinicia em saída diferente de 0 (inclusive 255 e o `exit(70)` do handler global de `bin/main.dart`, Tarefa 10). Não reinicia após `docker stop`/`docker compose stop`. `docker pause` não aciona a política.
+- O reinício não reavalia `depends_on`: se o Postgres ainda não está de pé, o backend cai e o Docker o relança com backoff exponencial (aceitável).
+- O boot reaplica migrações (`SERVERPOD_APPLY_MIGRATIONS: "true"`), de forma idempotente (log: `Latest database migration already applied.`).
+- Não recupera o que depende do processo vivo: ACKs MQTT chegados na janela de queda se perdem (sessão limpa no broker); o alerta pendente só sai quando o backend sobe e o sweeper do outbox roda. Não substitui as Tarefas 7 e 9b (defesa em profundidade).
+- Pode mascarar regressão (crash seguido de restart parece "de pé"). Por isso `mqtt_resiliencia_e2e.sh` e `admin_alertas_escalonar_e2e.sh` exigem `RestartCount` 0 (testes `*_e2e_test.sh` o afirmam).
+- `docker-compose.yml` e `docker-compose.e2e.yml`: o override de e2e só altera `environment`; herda o `restart`.
+
+**PID 1 (empírico):** `/proc/1/cmdline` = `./server --mode=production ...`; a lista de processos tem só o PID 1 (`./server`). O `sh` do ENTRYPOINT em forma shell fez `exec`.
+
+**Observado (2026-10-13, stack de dev, `docker compose up -d serverpod`; política `unless-stopped` confirmada em `HostConfig.RestartPolicy`):**
+1. `docker kill -s KILL sinalacs-serverpod`: contêiner ficou `exited`, exit=137, **RestartCount=0 após 2 minutos**. O Docker trata `docker kill` como parada manual: não dispara a política. Não serve para simular crash.
+2. Morte real do processo: `kill -9` no PID do host (`docker inspect .State.Pid`; de dentro do contêiner o SIGKILL ao PID 1 é ignorado pelo kernel). Resultado: `running healthy rc=1` em até 5 s de polling; `GET /` 200; `POST /health/check` = `{"status":"ok","mqttConnected":true,"dbConnected":true}`; o Mosquitto registrou nova conexão do `backend`; log do backend mostra migração já aplicada.
+3. `docker stop` + 25 s: `exited`, **não** reiniciou. `docker compose up -d` restaurou o backend para `healthy`.
