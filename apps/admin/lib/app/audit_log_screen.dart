@@ -55,24 +55,23 @@ class AuditLogScreen extends StatefulWidget {
 
   final AdminDataSource dataSource;
 
-  /// Relógio do período relativo do filtro ("últimos 7 dias"); só os testes o trocam.
+  /// Relógio dos atalhos de período ("últimos 7 dias") e do valor inicial do
+  /// seletor de data; só os testes o trocam.
   final DateTime Function()? now;
 
   @override
   State<AuditLogScreen> createState() => _AuditLogScreenState();
 }
 
-/// Período relativo oferecido pelo filtro. `to` fica aberto (até agora).
-enum _Periodo {
-  qualquer('Qualquer período', null),
-  dia('Últimas 24 horas', Duration(hours: 24)),
-  semana('Últimos 7 dias', Duration(days: 7)),
-  mes('Últimos 30 dias', Duration(days: 30));
+/// Atalhos de período: preenchem só o início (o fim fica aberto, até agora).
+const _atalhos = [
+  ('audit_filter_preset_24h', 'Últimas 24 h', Duration(hours: 24)),
+  ('audit_filter_preset_7d', 'Últimos 7 dias', Duration(days: 7)),
+  ('audit_filter_preset_30d', 'Últimos 30 dias', Duration(days: 30)),
+];
 
-  const _Periodo(this.rotulo, this.janela);
-  final String rotulo;
-  final Duration? janela;
-}
+/// Janela máxima entre início e fim, a mesma do servidor (D1).
+const _janelaMaxima = Duration(days: 366);
 
 const _rotuloDoPapel = {
   AuditActorRole.patient: 'Paciente',
@@ -99,13 +98,17 @@ class _AuditLogScreenState extends State<AuditLogScreen> {
   final _resultado = TextEditingController();
   AuditActorRole? _papel;
   String? _acao;
-  _Periodo _periodo = _Periodo.qualquer;
+  // Período, em hora local enquanto rascunho; vai ao filtro em UTC.
+  DateTime? _inicio;
+  DateTime? _fim;
   String? _erroDoFiltro;
 
   /// Muda a cada "Limpar": recria os campos do formulário, porque um
   /// `DropdownButtonFormField` guarda o próprio valor e ignora um
   /// `initialValue` novo.
   int _limpezas = 0;
+
+  bool _filtrosAbertos = false;
 
   // Lista paginada por keyset.
   final List<AuditLogEntry> _itens = [];
@@ -268,13 +271,22 @@ class _AuditLogScreenState extends State<AuditLogScreen> {
     } else if (resultado != null && !_rotuloValido.hasMatch(resultado)) {
       erro = 'Resultado: use só letras sem acento, números, "_" ou ":".';
     }
+    final de = _inicio?.toUtc();
+    final ate = _fim?.toUtc();
+    if (erro == null && de != null && ate != null) {
+      // Mesmas regras do servidor (D1): `to` é exclusivo, então fim igual ao
+      // início é período vazio e é recusado como o servidor recusaria.
+      if (!de.isBefore(ate)) {
+        erro = 'O início do período deve ser anterior ao fim.';
+      } else if (ate.difference(de) > _janelaMaxima) {
+        erro = 'O período é de no máximo 366 dias.';
+      }
+    }
     if (erro != null) {
       setState(() => _erroDoFiltro = erro);
       return;
     }
 
-    final janela = _periodo.janela;
-    final agora = (widget.now ?? DateTime.now)().toUtc();
     _erroDoFiltro = null;
     _filtro = AuditLogFilter(
       search: busca,
@@ -283,10 +295,71 @@ class _AuditLogScreenState extends State<AuditLogScreen> {
       actionType: _acao,
       resourceType: recurso,
       result: resultado,
-      from: janela == null ? null : agora.subtract(janela),
+      from: de,
+      to: ate,
     );
     unawaited(_recarregarLista());
   }
+
+  DateTime _agora() => (widget.now ?? DateTime.now)().toLocal();
+
+  /// Data (digitada, dd/mm/aaaa; o ícone do diálogo troca para o calendário)
+  /// e depois hora (relógio de 24 h) pelos seletores do Material, no locale
+  /// pt-BR. Cancelar qualquer um dos dois não muda nada.
+  Future<void> _escolherInstante({required bool inicio}) async {
+    final agora = _agora();
+    final atual = (inicio ? _inicio : _fim) ?? agora;
+    final rotulo = inicio ? 'Início do período' : 'Fim do período';
+    final data = await showDatePicker(
+      context: context,
+      initialDate: atual,
+      firstDate: DateTime(2000),
+      lastDate: DateTime(agora.year + 1, 12, 31),
+      initialEntryMode: DatePickerEntryMode.input,
+      helpText: rotulo,
+      cancelText: 'Cancelar',
+      confirmText: 'Confirmar',
+      fieldLabelText: 'Data (dd/mm/aaaa)',
+      errorFormatText: 'Data inválida. Use dd/mm/aaaa.',
+      errorInvalidText: 'Data fora do intervalo permitido.',
+    );
+    if (data == null || !mounted) return;
+    final hora = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.fromDateTime(atual),
+      // Relógio, e não digitação, como modo inicial: o modo de digitação do
+      // `showTimePicker` estoura o próprio diálogo com fonte ≥ 150% (defeito
+      // do Material medido nesta tarefa); o relógio aguenta 200% em 320dp. O
+      // ícone de teclado do diálogo continua disponível.
+      initialEntryMode: TimePickerEntryMode.dial,
+      helpText: inicio ? 'Hora do início' : 'Hora do fim',
+      cancelText: 'Cancelar',
+      confirmText: 'Confirmar',
+      hourLabelText: 'Hora',
+      minuteLabelText: 'Minuto',
+      errorInvalidText: 'Hora inválida.',
+      // Relógio de 24 h, o formato da trilha; sem isso o seletor segue a
+      // preferência do aparelho e pode pedir AM/PM.
+      builder: (context, child) => MediaQuery(
+        data: MediaQuery.of(context).copyWith(alwaysUse24HourFormat: true),
+        child: child!,
+      ),
+    );
+    if (hora == null || !mounted) return;
+    final valor = DateTime(data.year, data.month, data.day, hora.hour, hora.minute);
+    setState(() {
+      if (inicio) {
+        _inicio = valor;
+      } else {
+        _fim = valor;
+      }
+    });
+  }
+
+  void _aplicarAtalho(Duration janela) => setState(() {
+        _inicio = _agora().subtract(janela);
+        _fim = null;
+      });
 
   void _limparFiltros() {
     _busca.clear();
@@ -295,7 +368,8 @@ class _AuditLogScreenState extends State<AuditLogScreen> {
     _resultado.clear();
     _papel = null;
     _acao = null;
-    _periodo = _Periodo.qualquer;
+    _inicio = null;
+    _fim = null;
     _erroDoFiltro = null;
     _limpezas++;
     _filtro = const AuditLogFilter();
@@ -428,6 +502,10 @@ class _AuditLogScreenState extends State<AuditLogScreen> {
     return Card(
       child: ExpansionTile(
         key: const Key('audit_filters_toggle'),
+        // A lista descarta o que sai da janela: o estado aberto/fechado mora
+        // aqui, senão os filtros se fechariam sozinhos ao rolar e voltar.
+        initiallyExpanded: _filtrosAbertos,
+        onExpansionChanged: (aberto) => setState(() => _filtrosAbertos = aberto),
         shape: const Border(),
         collapsedShape: const Border(),
         minTileHeight: 56,
@@ -541,20 +619,36 @@ class _AuditLogScreenState extends State<AuditLogScreen> {
                   ),
                 ),
                 campo(
-                  DropdownButtonFormField<_Periodo>(
-                    key: const Key('audit_filter_period'),
-                    initialValue: _periodo,
-                    isExpanded: true,
-                    decoration: const InputDecoration(labelText: 'Período'),
-                    items: [
-                      for (final p in _Periodo.values)
-                        DropdownMenuItem(
-                          value: p,
-                          child: Text(p.rotulo, overflow: TextOverflow.ellipsis),
-                        ),
-                    ],
-                    onChanged: (v) => setState(() => _periodo = v ?? _Periodo.qualquer),
+                  _CampoDeInstante(
+                    chave: 'audit_filter_from',
+                    rotulo: 'Início',
+                    valor: _inicio,
+                    onEscolher: () => _escolherInstante(inicio: true),
+                    onLimpar: () => setState(() => _inicio = null),
                   ),
+                ),
+                campo(
+                  _CampoDeInstante(
+                    chave: 'audit_filter_to',
+                    rotulo: 'Fim',
+                    valor: _fim,
+                    onEscolher: () => _escolherInstante(inicio: false),
+                    onLimpar: () => setState(() => _fim = null),
+                  ),
+                ),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 4,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    for (final (chave, rotulo, janela) in _atalhos)
+                      TextButton(
+                        key: Key(chave),
+                        style: TextButton.styleFrom(minimumSize: _alvoMinimo),
+                        onPressed: () => _aplicarAtalho(janela),
+                        child: Text(rotulo),
+                      ),
+                  ],
                 ),
               ],
             ),
@@ -604,6 +698,51 @@ class _AuditLogScreenState extends State<AuditLogScreen> {
       );
     },
   );
+}
+
+/// Um extremo do período: botão que abre data + hora e, preenchido, um botão
+/// para limpar só ele. O rótulo visível é o nome acessível (WCAG 2.5.3).
+class _CampoDeInstante extends StatelessWidget {
+  const _CampoDeInstante({
+    required this.chave,
+    required this.rotulo,
+    required this.valor,
+    required this.onEscolher,
+    required this.onLimpar,
+  });
+
+  final String chave;
+  final String rotulo;
+  final DateTime? valor;
+  final VoidCallback onEscolher;
+  final VoidCallback onLimpar;
+
+  @override
+  Widget build(BuildContext context) {
+    final v = valor;
+    final texto = v == null ? '$rotulo: não definido' : '$rotulo: ${formatAuditTimestamp(v)}';
+    return Row(
+      children: [
+        Expanded(
+          child: OutlinedButton.icon(
+            key: Key(chave),
+            style: OutlinedButton.styleFrom(minimumSize: _alvoMinimo, alignment: Alignment.centerLeft),
+            onPressed: onEscolher,
+            icon: const Icon(Icons.event_outlined),
+            label: Text(texto),
+          ),
+        ),
+        if (v != null)
+          IconButton(
+            key: Key('${chave}_clear'),
+            tooltip: 'Limpar ${rotulo.toLowerCase()} do período',
+            constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+            onPressed: onLimpar,
+            icon: const Icon(Icons.close),
+          ),
+      ],
+    );
+  }
 }
 
 /// Uma linha da trilha com o selo que o servidor deu a ela.
@@ -788,24 +927,38 @@ class _PainelDaCadeia extends StatelessWidget {
 
   (Widget, Color?, String, List<String>) _conteudo() {
     final s = status;
-    if (s == null) {
-      if (erro != null) {
-        final detalhe = erro is AdminDataFailure ? (erro! as AdminDataFailure).message : null;
-        return (
-          const Icon(Icons.sync_problem, color: Colors.white70),
-          null,
-          'Não foi possível verificar a integridade agora.',
-          [?detalhe, _naoEIntegra],
-        );
-      }
+    if (verificando) {
+      // Durante a verificação o resultado anterior nunca aparece como atual:
+      // o título é "Verificando…" e o anterior vira uma linha rotulada.
+      final anterior = s == null
+          ? null
+          : 'Resultado anterior: ${_doResultado(s).$3} (verificado em ${formatAuditTimestamp(s.verifiedAt)}).';
       return (
-        const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2)),
+        const SizedBox(
+          key: Key('audit_chain_verifying'),
+          width: 24,
+          height: 24,
+          child: CircularProgressIndicator(strokeWidth: 2),
+        ),
         null,
         'Verificando a integridade da trilha…',
-        const [],
+        [?anterior],
       );
     }
+    if (s == null) {
+      final detalhe = erro is AdminDataFailure ? (erro! as AdminDataFailure).message : null;
+      return (
+        const Icon(Icons.sync_problem, color: Colors.white70),
+        null,
+        'Não foi possível verificar a integridade agora.',
+        [?detalhe, _naoEIntegra],
+      );
+    }
+    return _doResultado(s);
+  }
 
+  /// Título, ícone, cor e linhas de um resultado do servidor, exatamente como veio.
+  (Widget, Color?, String, List<String>) _doResultado(ChainStatus s) {
     final motivo = s.reasonCode == null ? null : auditChainReasonText(s.reasonCode!);
     final conferidos = s.checkedRows == null
         ? null

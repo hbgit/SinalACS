@@ -11,6 +11,10 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  # Textos pt-BR dos seletores de data/hora do Material (período da Auditoria,
+  # #45): formato dd/MM/aaaa e relógio de 24 h. Vem do SDK, sem pacote externo.
+  flutter_localizations:
+    sdk: flutter
   # Cliente RPC tipado (auth.loginStaff). Os dados seguem no mock (#41).
   sinalacs_client:
     path: ../../backend/sinalacs_client

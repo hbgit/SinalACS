@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'dart:async';
 
 export 'package:sinalacs_admin/app/audit_log_screen.dart' show AuditLogScreen, auditChainReasonText, formatAuditTimestamp;
@@ -42,6 +43,11 @@ class SinalAdminApp extends StatelessWidget {
         title: 'SinalACS Admin',
         debugShowCheckedModeBanner: false,
         theme: buildAdminTheme(),
+        // pt-BR fixo: o backoffice só tem textos em português, e os seletores
+        // de data/hora do Material seguem o locale (dd/MM/aaaa, 24 h).
+        locale: const Locale('pt', 'BR'),
+        supportedLocales: const [Locale('pt', 'BR')],
+        localizationsDelegates: GlobalMaterialLocalizations.delegates,
         home: LoginScreen(auth: auth, dataSourceFor: dataSourceFor),
       );
 }

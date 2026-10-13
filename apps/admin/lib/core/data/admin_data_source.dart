@@ -153,7 +153,6 @@ class AuditLogEntry {
     required this.timestamp,
     required this.result,
     required this.seal,
-    this.resourceLabel,
   });
 
   final String id;
@@ -168,10 +167,6 @@ class AuditLogEntry {
 
   /// Selo calculado pelo servidor para esta linha.
   final AuditRowSeal seal;
-
-  /// Rótulo minimizado do recurso (`#A18F`), nunca o UUID. O servidor ainda
-  /// não o envia na consulta (só a exportação o terá, D6): hoje é sempre nulo.
-  final String? resourceLabel;
 }
 
 /// Filtros da consulta da trilha (#45, D1). Todos opcionais e combinados em E;

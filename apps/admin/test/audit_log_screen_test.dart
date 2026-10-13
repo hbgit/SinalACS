@@ -275,6 +275,28 @@ void main() {
       expect(textos[AuditChainReason.checkpointInvalid], contains('ponto de conferência'));
     });
 
+    testWidgets('"Verificar novamente" mostra "Verificando…" e nunca o resultado antigo como atual', (tester) async {
+      final fonte = _VerificacaoPendurada();
+      await _abrir(tester, fonte);
+      expect(find.text('Cadeia íntegra'), findsOneWidget);
+
+      // Sem `pumpAndSettle`: o indicador gira enquanto a verificação não volta.
+      await _rolarAte(tester, find.byKey(const Key('audit_chain_retry')));
+      await tester.tap(find.byKey(const Key('audit_chain_retry')));
+      await tester.pump();
+
+      expect(find.descendant(of: painel(), matching: find.text('Verificando a integridade da trilha…')), findsOneWidget);
+      expect(find.text('Cadeia íntegra'), findsNothing, reason: 'o resultado anterior não aparece como atual');
+      expect(find.descendant(of: painel(), matching: find.textContaining('Resultado anterior: Cadeia íntegra')), findsOneWidget);
+      expect(find.byKey(const Key('audit_chain_verifying')), findsOneWidget);
+
+      fonte.segunda.complete(_cadeia(AuditIntegrityState.inconclusive, reasonCode: AuditChainReason.timeBudget));
+      await tester.pumpAndSettle();
+      expect(find.text('Verificação inconclusiva'), findsOneWidget);
+      expect(find.textContaining('Resultado anterior'), findsNothing);
+      expect(find.byKey(const Key('audit_chain_verifying')), findsNothing);
+    });
+
     testWidgets('falha ao consultar o estado não vira sucesso e oferece verificar de novo', (tester) async {
       final mock = MockAdminDataSource()..chainStatusError = const AdminDataFailure('Não foi possível conectar ao servidor.');
       await _abrir(tester, mock);
@@ -396,6 +418,127 @@ void main() {
     });
   });
 
+  group('período com início e fim (RF1)', () {
+    /// Escolhe data e hora pelos seletores do Material (pt-BR), digitando.
+    Future<void> instante(WidgetTester tester, String chave, String data, String hora, String minuto) async {
+      await _abrirFiltros(tester);
+      await _tocar(tester, find.byKey(Key(chave)));
+      final campoDeData = find.descendant(of: find.byType(Dialog), matching: find.byType(TextField));
+      await tester.enterText(campoDeData.first, data);
+      await tester.tap(find.text('Confirmar'));
+      await tester.pumpAndSettle();
+      // A hora abre no relógio; o ícone de teclado troca para a digitação.
+      await tester.tap(find.byIcon(Icons.keyboard_outlined));
+      await tester.pumpAndSettle();
+      final camposDeHora = find.descendant(of: find.byType(Dialog), matching: find.byType(TextField));
+      await tester.enterText(camposDeHora.at(0), hora);
+      await tester.enterText(camposDeHora.at(1), minuto);
+      await tester.tap(find.text('Confirmar'));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('início e fim escolhidos vão ao filtro em UTC, e o rótulo mostra o instante', (tester) async {
+      final mock = MockAdminDataSource();
+      await _abrir(tester, mock);
+
+      await instante(tester, 'audit_filter_from', '01/10/2026', '09', '30');
+      await instante(tester, 'audit_filter_to', '05/10/2026', '18', '05');
+      expect(find.text('Início: 01/10/2026 09:30'), findsOneWidget);
+      expect(find.text('Fim: 05/10/2026 18:05'), findsOneWidget);
+      await _tocar(tester, find.byKey(const Key('audit_filter_apply')));
+
+      final filtro = mock.auditQueries.last.filter;
+      expect(filtro.from, DateTime(2026, 10, 1, 9, 30).toUtc());
+      expect(filtro.to, DateTime(2026, 10, 5, 18, 5).toUtc());
+      expect(filtro.from!.isUtc && filtro.to!.isUtc, isTrue);
+      expect(mock.auditQueries.last.beforeSequence, isNull);
+    });
+
+    testWidgets('só o início (ou só o fim) é uma consulta válida', (tester) async {
+      final mock = MockAdminDataSource();
+      await _abrir(tester, mock);
+
+      await instante(tester, 'audit_filter_to', '05/10/2026', '18', '00');
+      await _tocar(tester, find.byKey(const Key('audit_filter_apply')));
+      expect(mock.auditQueries.last.filter.from, isNull);
+      expect(mock.auditQueries.last.filter.to, DateTime(2026, 10, 5, 18).toUtc());
+
+      await _tocar(tester, find.byKey(const Key('audit_filter_to_clear')));
+      await instante(tester, 'audit_filter_from', '01/10/2026', '08', '00');
+      await _tocar(tester, find.byKey(const Key('audit_filter_apply')));
+      expect(mock.auditQueries.last.filter.from, DateTime(2026, 10, 1, 8).toUtc());
+      expect(mock.auditQueries.last.filter.to, isNull);
+    });
+
+    testWidgets('fim igual ou anterior ao início: erro em português e nenhuma consulta', (tester) async {
+      final mock = MockAdminDataSource();
+      await _abrir(tester, mock);
+      await instante(tester, 'audit_filter_from', '05/10/2026', '10', '00');
+      await instante(tester, 'audit_filter_to', '05/10/2026', '10', '00');
+      final consultas = mock.auditQueries.length;
+
+      await _tocar(tester, find.byKey(const Key('audit_filter_apply')));
+
+      expect(mock.auditQueries.length, consultas);
+      expect(find.text('O início do período deve ser anterior ao fim.'), findsOneWidget);
+    });
+
+    testWidgets('janela maior que 366 dias: erro em português e nenhuma consulta', (tester) async {
+      final mock = MockAdminDataSource();
+      await _abrir(tester, mock);
+      await instante(tester, 'audit_filter_from', '01/01/2025', '00', '00');
+      await instante(tester, 'audit_filter_to', '03/01/2026', '00', '00');
+      final consultas = mock.auditQueries.length;
+
+      await _tocar(tester, find.byKey(const Key('audit_filter_apply')));
+
+      expect(mock.auditQueries.length, consultas);
+      expect(find.text('O período é de no máximo 366 dias.'), findsOneWidget);
+    });
+
+    testWidgets('"Limpar" zera início e fim', (tester) async {
+      final mock = MockAdminDataSource();
+      await _abrir(tester, mock);
+      await instante(tester, 'audit_filter_from', '01/10/2026', '09', '30');
+      await instante(tester, 'audit_filter_to', '05/10/2026', '18', '05');
+      await _tocar(tester, find.byKey(const Key('audit_filter_apply')));
+
+      await _tocar(tester, find.byKey(const Key('audit_filter_clear')));
+
+      expect(mock.auditQueries.last.filter.from, isNull);
+      expect(mock.auditQueries.last.filter.to, isNull);
+      expect(find.text('Início: não definido'), findsOneWidget);
+      expect(find.text('Fim: não definido'), findsOneWidget);
+    });
+
+    testWidgets('mudar o período zera o cursor', (tester) async {
+      final mock = MockAdminDataSource(auditSeed: [for (var s = 60; s >= 1; s--) _linha(s)]);
+      await _abrir(tester, mock);
+      await _tocar(tester, find.byKey(const Key('audit_load_more')));
+      expect(mock.auditQueries.last.beforeSequence, isNotNull);
+
+      await instante(tester, 'audit_filter_from', '01/10/2026', '00', '00');
+      await _tocar(tester, find.byKey(const Key('audit_filter_apply')));
+
+      expect(mock.auditQueries.last.beforeSequence, isNull);
+      expect(mock.auditQueries.last.filter.from, DateTime(2026, 10, 1).toUtc());
+    });
+
+    testWidgets('atalho "Últimos 7 dias" preenche só o início, a partir do relógio', (tester) async {
+      final mock = MockAdminDataSource();
+      await _abrir(tester, mock);
+      await _abrirFiltros(tester);
+      final antes = DateTime.now();
+      await _tocar(tester, find.byKey(const Key('audit_filter_preset_7d')));
+      await _tocar(tester, find.byKey(const Key('audit_filter_apply')));
+
+      final de = mock.auditQueries.last.filter.from!;
+      expect(de.isUtc, isTrue);
+      expect(antes.subtract(const Duration(days: 7)).difference(de).inMinutes.abs(), lessThanOrEqualTo(1));
+      expect(mock.auditQueries.last.filter.to, isNull);
+    });
+  });
+
   group('estados da lista', () {
     testWidgets('carregando mostra o indicador da lista', (tester) async {
       final fonte = _ListaPendurada();
@@ -486,18 +629,58 @@ void main() {
       }
     }
 
+    for (final largura in const [320.0, 360.0]) {
+      testWidgets('seletores de data e hora e o período preenchido não estouram em ${largura.toInt()}dp a 200%', (tester) async {
+        final mock = MockAdminDataSource();
+        await abrirBackoffice(tester, tamanho: Size(largura, 800), escalaDeFonte: 2.0, dataSource: mock);
+        await irPara(tester, 'Auditoria');
+        await _abrirFiltros(tester);
+
+        await _tocar(tester, find.byKey(const Key('audit_filter_from')));
+        esperarSemEstouroDeLayout(tester, 'seletor de data ${largura.toInt()}dp');
+        await tester.enterText(find.descendant(of: find.byType(Dialog), matching: find.byType(TextField)).first, '01/10/2026');
+        await tester.tap(find.text('Confirmar'));
+        await tester.pumpAndSettle();
+        esperarSemEstouroDeLayout(tester, 'seletor de hora ${largura.toInt()}dp');
+        expect(find.text('Hora do início'), findsOneWidget);
+        await tester.tap(find.text('Confirmar'));
+        await tester.pumpAndSettle();
+
+        expect(find.byKey(const Key('audit_filter_from_clear')), findsOneWidget);
+        await _topo(tester);
+        await percorrerTelaInteira(tester, 'período preenchido ${largura.toInt()}dp', lista: rolagemDaAuditoria());
+      });
+    }
+
     testWidgets('botões novos e o cabeçalho dos filtros têm alvo de pelo menos 48dp', (tester) async {
       final mock = MockAdminDataSource(auditSeed: [for (var s = 60; s >= 1; s--) _linha(s)]);
       await _abrir(tester, mock, tamanho: const Size(360, 800));
       await _abrirFiltros(tester);
 
-      for (final chave in ['audit_chain_retry', 'audit_filter_apply', 'audit_filter_clear', 'audit_load_more']) {
+      for (final chave in [
+        'audit_chain_retry',
+        'audit_filter_from',
+        'audit_filter_to',
+        'audit_filter_preset_24h',
+        'audit_filter_preset_7d',
+        'audit_filter_preset_30d',
+        'audit_filter_apply',
+        'audit_filter_clear',
+        'audit_load_more',
+      ]) {
         final alvo = find.byKey(Key(chave));
         await _rolarAte(tester, alvo);
         expect(tester.getSize(alvo).height, greaterThanOrEqualTo(48), reason: chave);
         final tinta = find.descendant(of: alvo, matching: find.byType(Material)).first;
         expect(tester.getSize(tinta).height, greaterThanOrEqualTo(48), reason: '$chave (altura pintada)');
       }
+      // O botão que limpa um extremo do período só existe preenchido.
+      await _topo(tester);
+      await _tocar(tester, find.byKey(const Key('audit_filter_preset_24h')));
+      final limparInicio = find.byKey(const Key('audit_filter_from_clear'));
+      await _rolarAte(tester, limparInicio);
+      expect(tester.getSize(limparInicio).height, greaterThanOrEqualTo(48), reason: 'limpar início');
+      expect(tester.getSize(limparInicio).width, greaterThanOrEqualTo(48), reason: 'limpar início');
       final cabecalho = find.descendant(of: find.byKey(const Key('audit_filters_toggle')), matching: find.byType(ListTile));
       await _rolarAte(tester, cabecalho);
       expect(tester.getSize(cabecalho).height, greaterThanOrEqualTo(48), reason: 'cabeçalho dos filtros');
@@ -532,4 +715,17 @@ class _ListaPendurada extends MockAdminDataSource {
     int? beforeSequence,
   }) =>
       pagina.future;
+}
+
+/// Primeira verificação íntegra; a segunda só responde quando o teste completa [segunda].
+class _VerificacaoPendurada extends MockAdminDataSource {
+  final segunda = Completer<ChainStatus>();
+  var _chamadas = 0;
+
+  @override
+  Future<ChainStatus> verifyAuditChain() {
+    _chamadas++;
+    if (_chamadas == 1) return Future.value(_cadeia(AuditIntegrityState.verified));
+    return segunda.future;
+  }
 }

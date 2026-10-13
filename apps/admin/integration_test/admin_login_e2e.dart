@@ -217,6 +217,14 @@ void main() {
     // Desde a #45 o painel da cadeia e os filtros ficam acima da lista, que é
     // preguiçosa: num celular a linha de indicadores nasce abaixo da dobra.
     await _pumpUntil(tester, () => find.byKey(const Key('audit_count')).evaluate().isNotEmpty);
+    // A verificação da cadeia (#45) é a 5ª leitura `admin_*` que o script
+    // confere no banco: espera-se ela voltar, com o painel ainda no topo e
+    // antes de rolar, para a chamada não ficar em voo quando o app fechar.
+    await _pumpUntil(tester, () {
+      final titulo = find.byKey(const Key('audit_chain_title'), skipOffstage: false);
+      if (titulo.evaluate().isEmpty) return false;
+      return tester.widget<Text>(titulo).data != 'Verificando a integridade da trilha…';
+    });
     await tester.scrollUntilVisible(
       find.textContaining('admin_indicators'),
       300,
