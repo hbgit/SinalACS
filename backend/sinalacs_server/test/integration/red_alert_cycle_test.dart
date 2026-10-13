@@ -1,12 +1,15 @@
 import 'package:serverpod/serverpod.dart';
+import 'package:sinalacs_server/src/application/alerts/alert_outbox_dispatcher.dart';
 import 'package:sinalacs_server/src/application/alerts/red_alert_service.dart';
 import 'package:sinalacs_server/src/config/app_config.dart';
 import 'package:sinalacs_server/src/domain/entities/alert_delivery.dart';
 import 'package:sinalacs_server/src/endpoints/health_endpoint.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
+import 'package:sinalacs_server/src/infrastructure/mqtt/mqtt_alert_dispatcher.dart';
 import 'package:sinalacs_server/src/runtime/alert_runtime.dart';
 import 'package:test/test.dart';
 
+import '../support/fake_mqtt_broker.dart';
 import '../support/health_data_fixtures.dart';
 import 'test_tools/serverpod_test_tools.dart';
 
@@ -53,6 +56,55 @@ AppConfig _config({required bool enableDevLogin}) => AppConfig(
       appEnv: 'development',
       enableDevLogin: enableDevLogin,
     );
+
+/// Dispatcher MQTT real apontado ao [FakeMqttBroker] (TCP plano em
+/// 127.0.0.1). O canal de produção é TLS/mTLS: a queda por RST/EPIPE real do
+/// socket TLS foi provada no Docker (Tarefa 7v da #56); aqui o que se prova é o
+/// caminho outbox → dispatcher → reconexão, que não depende da camada TLS.
+AppConfig _mqttConfig(int port) => AppConfig(
+      mqttBroker: '127.0.0.1:$port',
+      jwtSecret: 'test-secret',
+      auditChainSecret: 'test-audit-chain-secret',
+      healthDataEncryptionKey: AppConfig.developmentHealthDataEncryptionKey,
+      cpfHashPepper: AppConfig.developmentCpfHashPepper,
+      smsGateway: 'log',
+      mqttUsername: null,
+      mqttPassword: null,
+      mqttUseTls: false,
+      mqttCaCertificatePath: null,
+      appEnv: 'development',
+      enableDevLogin: true,
+    );
+
+/// Polling a cada 25 ms até [cond] valer; falha depois de [timeout].
+Future<void> _until(
+  bool Function() cond, {
+  Duration timeout = const Duration(seconds: 5),
+}) async {
+  final limite = DateTime.now().add(timeout);
+  while (!cond()) {
+    if (DateTime.now().isAfter(limite)) fail('timeout');
+    await Future<void>.delayed(const Duration(milliseconds: 25));
+  }
+}
+
+/// Publisher que executa [antes] e só então delega ao dispatcher real.
+///
+/// Usado no experimento H5 para derrubar o socket no instante exato entre a
+/// checagem de estado e a escrita: o dispatcher ainda vê `connected` porque o
+/// evento de fim de conexão só é processado num turno seguinte do event loop.
+class _PublisherComGancho implements AlertPublisher {
+  _PublisherComGancho(this._real, this.antes);
+
+  final AlertPublisher _real;
+  void Function() antes;
+
+  @override
+  void publish(AlertDelivery alert) {
+    antes();
+    _real.publish(alert);
+  }
+}
 
 Future<void> _seed(Session session) async {
   await Ubs.db.insertRow(
@@ -388,6 +440,177 @@ void main() {
         alertId: criado.alertId,
       );
       expect(confirmado.acknowledged, isTrue);
+    });
+
+    group('com o MqttAlertDispatcher real e o broker falso', () {
+      late FakeMqttBroker broker;
+      late MqttAlertDispatcher dispatcher;
+      late List<Object> fatais;
+
+      setUp(() async {
+        broker = await FakeMqttBroker.start();
+        fatais = <Object>[];
+        dispatcher = MqttAlertDispatcher(
+          config: _mqttConfig(broker.port),
+          initialBackoff: const Duration(milliseconds: 100),
+          maxBackoff: const Duration(milliseconds: 400),
+          onFatal: fatais.add,
+          log: (_) {},
+        );
+        AlertRuntime.instance.overridePublisher(dispatcher);
+      });
+
+      tearDown(() async {
+        await dispatcher.close();
+        await broker.close();
+        expect(fatais, isEmpty, reason: 'onFatal não devia ser chamado');
+      });
+
+      Future<RedAlertResult> criarAlerta(String chave) async {
+        final token = await endpoints.auth
+            .developmentLogin(sessionBuilder, role: 'patient');
+        return endpoints.alerts.createRedAlert(
+          sessionBuilder,
+          accessToken: token.accessToken,
+          idempotencyKey: chave,
+          locationHash: 'hash-$chave',
+        );
+      }
+
+      Future<bool> confirmar(String alertId) async {
+        final tokenAcs =
+            await endpoints.auth.developmentLogin(sessionBuilder, role: 'acs');
+        final ack = await endpoints.alerts.acknowledge(
+          sessionBuilder,
+          accessToken: tokenAcs.accessToken,
+          alertId: alertId,
+        );
+        return ack.acknowledged;
+      }
+
+      AlertOutboxDispatcher drenador(Session session) =>
+          AlertRuntime.instance.dispatcherFor(
+            session,
+            clock: () =>
+                DateTime.now().toUtc().add(const Duration(minutes: 5)),
+          );
+
+      test(
+          'alerta criado com o broker fora é entregue depois da reconexão, '
+          'uma vez só (#56)', () async {
+        final session = sessionBuilder.build();
+        await _seed(session);
+
+        await dispatcher.connect();
+        expect(dispatcher.isConnected, isTrue);
+
+        // Interrupção: o broker some (conexões e porta).
+        final porta = broker.port;
+        await broker.close();
+        await _until(() => !dispatcher.isConnected);
+
+        final criado = await criarAlerta('queda-1');
+        final alertId = criado.alertId;
+        // Aceito e enfileirado, não recusado (INV-03).
+        expect(criado.published, isFalse);
+        expect(await Alert.db.find(session), hasLength(1));
+        final pendentes = await AlertOutboxEntry.db.find(session);
+        expect(pendentes, hasLength(1));
+        expect(pendentes.single.publishedAt, isNull);
+
+        // O broker volta na MESMA porta; o dispatcher reconecta sozinho.
+        broker = await FakeMqttBroker.start(port: porta);
+        await _until(() => dispatcher.isConnected && broker.connectCount >= 1);
+
+        // A tentativa imediata adiou a entrada pelo backoff do outbox: o
+        // relógio adiantado faz a varredura reclamá-la.
+        final publicadas = await drenador(session).drainOnce();
+        expect(publicadas, 1);
+        await _until(() => broker.publishCount == 1);
+        final depois = await AlertOutboxEntry.db.find(session);
+        expect(depois.single.publishedAt, isNotNull);
+
+        // Segunda varredura: nada a publicar, sem duplicidade.
+        expect(await drenador(session).drainOnce(), 0);
+        await Future<void>.delayed(const Duration(milliseconds: 200));
+        expect(broker.publishCount, 1);
+
+        expect(await confirmar(alertId), isTrue);
+      });
+
+      // H5 (#56) — LACUNA DOCUMENTADA, NÃO CORRIGIDA NESTA TAREFA.
+      //
+      // Estes dois testes afirmam o comportamento ATUAL, que viola INV-03:
+      // `publish()` é síncrono e devolve assim que a mensagem vai para o
+      // buffer do socket, sem esperar PUBACK, e o outbox marca `publishedAt`
+      // logo depois. Uma reconexão cria um cliente MQTT NOVO (sessão limpa),
+      // então a mensagem QoS 1 em voo do cliente antigo nunca é retransmitida.
+      // Quando a correção (publicação confirmada por PUBACK) entrar, estes
+      // testes devem falhar e ser invertidos.
+      test(
+          'H5 (lacuna, comportamento atual): socket morto antes de o '
+          'dispatcher perceber — outbox marca publicado e o broker nunca '
+          'recebe', () async {
+        final session = sessionBuilder.build();
+        await _seed(session);
+        await dispatcher.connect();
+        expect(dispatcher.isConnected, isTrue);
+
+        // O broker derruba as conexões no mesmo turno em que o dispatcher
+        // vai escrever: o estado da biblioteca ainda diz `connected`.
+        final gancho = _PublisherComGancho(dispatcher, broker.dropClients);
+        AlertRuntime.instance.overridePublisher(gancho);
+
+        final criado = await criarAlerta('h5-socket-morto');
+        gancho.antes = () {};
+
+        // publish() devolveu sem erro: o endpoint relata entrega.
+        expect(criado.published, isTrue);
+        final entrada = (await AlertOutboxEntry.db.find(session)).single;
+        expect(entrada.publishedAt, isNotNull,
+            reason: 'H5: marcado publicado sem PUBACK');
+
+        // O dispatcher percebe a queda e reconecta com um cliente novo.
+        await _until(() => broker.connectCount >= 2 && dispatcher.isConnected);
+        await Future<void>.delayed(const Duration(milliseconds: 500));
+        expect(broker.publishCount, 0,
+            reason: 'H5: nem o cliente antigo entregou, nem o novo retransmite');
+
+        // E o outbox não tem mais o que entregar: a mensagem está perdida
+        // para o canal MQTT (o alerta segue gravado e pendente no banco).
+        expect(await drenador(session).drainOnce(), 0);
+        expect(broker.publishCount, 0);
+        final alerta = (await Alert.db.find(session)).single;
+        expect(alerta.id.toString(), criado.alertId);
+        expect(alerta.status, AlertStatus.pending);
+      });
+
+      test(
+          'H5 (lacuna, comportamento atual): broker recebe o PUBLISH, não '
+          'responde PUBACK e cai — outbox já marcou publicado e não há '
+          'retransmissão', () async {
+        final session = sessionBuilder.build();
+        await _seed(session);
+        await dispatcher.connect();
+        expect(dispatcher.isConnected, isTrue);
+        broker.dropOnPublish = true;
+
+        final criado = await criarAlerta('h5-sem-puback');
+
+        expect(criado.published, isTrue);
+        final entrada = (await AlertOutboxEntry.db.find(session)).single;
+        expect(entrada.publishedAt, isNotNull,
+            reason: 'H5: marcado publicado antes de qualquer PUBACK');
+
+        await _until(() => broker.publishCount == 1);
+        broker.dropOnPublish = false;
+        await _until(() => broker.connectCount >= 2 && dispatcher.isConnected);
+        await Future<void>.delayed(const Duration(milliseconds: 500));
+        // Sem PUBACK, o QoS 1 pediria retransmissão; o cliente novo não a faz.
+        expect(broker.publishCount, 1);
+        expect(await drenador(session).drainOnce(), 0);
+        expect(broker.publishCount, 1);
+      });
     });
 
     test('a mesma chave com outra localização é rejeitada', () async {

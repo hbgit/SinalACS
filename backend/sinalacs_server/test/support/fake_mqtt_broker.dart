@@ -17,6 +17,10 @@ class FakeMqttBroker {
   int publishCount = 0;
   bool ignorePings = false;
 
+  /// H5 (#56): conta o PUBLISH, mas não responde PUBACK e derruba a conexão
+  /// logo em seguida, como um broker que cai com a mensagem em voo.
+  bool dropOnPublish = false;
+
   int get port => _server.port;
 
   static Future<FakeMqttBroker> start({int port = 0}) async {
@@ -84,6 +88,10 @@ class FakeMqttBroker {
         if (!ignorePings) socket.add([0xD0, 0x00]);
       case 3: // PUBLISH
         publishCount++;
+        if (dropOnPublish) {
+          socket.destroy();
+          return;
+        }
         if ((header >> 1) & 3 == 1) {
           final topicLength = (body[0] << 8) | body[1];
           socket.add([0x40, 0x02, body[2 + topicLength], body[3 + topicLength]]);
