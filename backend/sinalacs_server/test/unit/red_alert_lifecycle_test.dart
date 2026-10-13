@@ -1,5 +1,6 @@
 import 'package:sinalacs_server/src/application/alerts/alert_outbox_dispatcher.dart';
 import 'package:sinalacs_server/src/application/alerts/red_alert_service.dart';
+import 'package:sinalacs_server/src/application/audit/audit_trail.dart';
 import 'package:sinalacs_server/src/application/auth/development_auth_service.dart';
 import 'package:sinalacs_server/src/domain/entities/alert_delivery.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
@@ -20,7 +21,7 @@ class RecordingStore implements AlertStore {
   Future<void> save(AlertDelivery alert, {required String deviceId}) async => saved.add(alert);
 
   @override
-  Future<bool> acknowledge({required String alertId, required String acsId, required String microAreaId}) async {
+  Future<bool> acknowledge({required String alertId, required String acsId, required String microAreaId, required AuditEvent audit}) async {
     if (alertId.trim().isEmpty) return false;
     acknowledgedAlertIds.add(alertId);
     return true;

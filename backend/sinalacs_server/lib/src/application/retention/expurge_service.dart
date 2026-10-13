@@ -59,6 +59,7 @@ class ExpurgeCounts {
     required this.visits,
     required this.triageSessions,
     required this.alertsByRisk,
+    this.skippedPendingRed = 0,
   });
 
   final int alerts;
@@ -71,6 +72,10 @@ class ExpurgeCounts {
   /// `alerts` desdobrados por `riskLevel` — a parte "série epidemiológica" que
   /// a contagem preserva antes do DELETE físico.
   final Map<String, int> alertsByRisk;
+
+  /// Alertas vermelhos vencidos que o expurgo PULOU por ainda estarem
+  /// `pending` (D7, #44). Fora de [alerts]: não saíram.
+  final int skippedPendingRed;
 }
 
 /// Persistência do expurgo: conta e remove as linhas vencidas de forma
@@ -110,6 +115,13 @@ class ExpurgeResult {
         'visitas<${cutoffs.visits.toIso8601String()}, '
         'triagens<${cutoffs.triageSessions.toIso8601String()}';
   }
+
+  /// Aviso operacional dos vermelhos pendentes retidos; `null` quando não há
+  /// nenhum. Só a contagem, sem identidade.
+  String? describeRetained() => counts.skippedPendingRed > 0
+      ? 'Expurgo: ${counts.skippedPendingRed} alerta(s) vermelho(s) '
+          'pendente(s) retido(s)'
+      : null;
 }
 
 /// Rotina de retenção (LGPD-RF07): calcula os cortes e delega a contagem +

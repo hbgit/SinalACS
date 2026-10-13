@@ -1,5 +1,6 @@
 import 'package:serverpod/serverpod.dart';
 import 'package:sinalacs_server/src/application/alerts/red_alert_service.dart';
+import 'package:sinalacs_server/src/application/audit/audit_trail.dart';
 import 'package:sinalacs_server/src/domain/entities/alert_delivery.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
 
@@ -17,9 +18,19 @@ import 'package:sinalacs_server/src/generated/protocol.dart';
 class OrmAlertStore implements AlertStore {
   OrmAlertStore({
     required Session Function() session,
+    required Future<void> Function(
+      Session session,
+      Transaction transaction,
+      AuditEvent event,
+    ) appendAudit,
     Transaction? transaction,
   })  : _session = session,
+        _appendAudit = appendAudit,
         _transaction = transaction;
+
+  /// Grava a auditoria DENTRO da transação do ACK (fail-closed): em produção é
+  /// `OrmAuditTrail.recordInTransaction`.
+  final Future<void> Function(Session, Transaction, AuditEvent) _appendAudit;
 
   final Session Function() _session;
   final Transaction? _transaction;
@@ -96,6 +107,7 @@ class OrmAlertStore implements AlertStore {
     required String alertId,
     required String acsId,
     required String microAreaId,
+    required AuditEvent audit,
   }) async {
     final session = _session();
     final alertUuid = UuidValue.fromString(alertId);
@@ -122,6 +134,10 @@ class OrmAlertStore implements AlertStore {
           acknowledgedAt: alert.acknowledgedAt ?? now,
           status: AlertStatus.acknowledged,
         ),
+        // Só as colunas do ACK: a linha foi lida sem lock, e um escalonamento
+        // (#44) gravado entre a leitura e esta escrita seria apagado por um
+        // UPDATE da linha inteira com os valores velhos.
+        columns: (t) => [t.acsId, t.receivedAt, t.acknowledgedAt, t.status],
         transaction: transaction,
       );
 
@@ -143,6 +159,10 @@ class OrmAlertStore implements AlertStore {
           transaction: transaction,
         );
       }
+
+      // Fail-closed: se a trilha falhar, a transação inteira (status incluso)
+      // é desfeita. Roda por último, pois o lock da cadeia nunca precede outro.
+      await _appendAudit(session, transaction, audit);
 
       return true;
     }

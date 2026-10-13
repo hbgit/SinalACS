@@ -188,9 +188,56 @@ class BackendAdminDataSource implements AdminDataSource {
           riskLevel: RiskLevel.values.byName(a.riskLevel.name),
           status: AlertStatus.values.byName(a.status.name),
           triggeredAt: a.triggeredAt,
+          escalatedAt: a.escalatedAt,
+          overdue: a.overdue,
         ),
     ];
   });
+
+  @override
+  Future<EscalationOutcome> escalateAlert(
+    String alertId,
+    EscalationReasonCode reason,
+  ) => _guardEscrita(() async {
+    final r = await _admin.escalateAlert(
+      accessToken: _accessToken,
+      alertId: alertId,
+      reason: api.EscalationReason.values.byName(reason.name),
+    );
+    return EscalationOutcome(
+      escalatedAt: r.escalatedAt,
+      alreadyEscalated: r.alreadyEscalated,
+    );
+  });
+
+  @override
+  Future<AlertsPulse> alertsPulse() => _guard(() async {
+    final p = await _admin.alertsPulse(accessToken: _accessToken);
+    final i = p.indicators;
+    return AlertsPulse(
+      indicators: DashboardIndicators(
+        countsByRisk: {
+          RiskLevel.red: i.red,
+          RiskLevel.yellow: i.yellow,
+          RiskLevel.green: i.green,
+        },
+        openRedAlerts: i.openRedAlerts,
+        acknowledgedRedAlerts: i.acknowledgedRedAlerts,
+        tmravSeconds: i.tmravSeconds,
+      ),
+      overdueRed: p.overdueRed,
+      maxChangedAt: p.maxChangedAt,
+      serverNow: p.serverNow,
+    );
+  });
+
+  @override
+  Future<void> endMonitoringSession() async {
+    // Melhor esforço: a tela está fechando. Qualquer falha é engolida.
+    try {
+      await _admin.endMonitoringSession(accessToken: _accessToken);
+    } catch (_) {}
+  }
 
   @override
   Future<List<AuditLogEntry>> fetchAuditLogs({int limit = 50}) =>

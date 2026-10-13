@@ -26,6 +26,7 @@ class AppConfig {
     this.retentionAlertDays = defaultRetentionAlertDays,
     this.retentionVisitDays = defaultRetentionVisitDays,
     this.retentionTriageDays = defaultRetentionTriageDays,
+    this.redAlertEscalationSeconds = defaultRedAlertEscalationSeconds,
   });
 
   final String mqttBroker;
@@ -114,6 +115,13 @@ class AppConfig {
   final int retentionVisitDays;
   final int retentionTriageDays;
 
+  /// `RED_ALERT_ESCALATION_SECONDS`: prazo, em segundos, para o alerta vermelho
+  /// ser reconhecido antes de ficar elegível a escalonamento (issue #44).
+  /// Opcional; padrão 300 (5 min). Só inteiro de 30 a 3600: abaixo disso o
+  /// escalonamento dispara por ruído, acima o alerta fica sem resposta tempo
+  /// demais. Fora da faixa, falha no boot.
+  final int redAlertEscalationSeconds;
+
   bool get isProduction => appEnv == 'production';
 
   /// Segredo usado quando `JWT_SECRET` não é informado em desenvolvimento.
@@ -150,6 +158,11 @@ class AppConfig {
   static const defaultRetentionAlertDays = 730; // 2 anos
   static const defaultRetentionVisitDays = 1825; // 5 anos
   static const defaultRetentionTriageDays = 1825; // 5 anos
+
+  /// Prazo padrão e faixa válida do escalonamento do alerta vermelho (#44).
+  static const defaultRedAlertEscalationSeconds = 300;
+  static const minRedAlertEscalationSeconds = 30;
+  static const maxRedAlertEscalationSeconds = 3600;
 
   static const _knownSmsGateways = {'log'};
 
@@ -271,7 +284,29 @@ class AppConfig {
         fallback: defaultRetentionTriageDays,
         envVarName: 'RETENTION_TRIAGE_DAYS',
       ),
+      redAlertEscalationSeconds: _resolveEscalationSeconds(
+        environment['RED_ALERT_ESCALATION_SECONDS'],
+      ),
     );
+  }
+
+  /// Inteiro de segundos entre 30 e 3600; vazio vale o padrão. Malformado ou
+  /// fora da faixa falha no boot em vez de escalonar cedo ou tarde demais.
+  static int _resolveEscalationSeconds(String? value) {
+    final raw = value?.trim() ?? '';
+    if (raw.isEmpty) return defaultRedAlertEscalationSeconds;
+    final seconds = int.tryParse(raw);
+    if (seconds == null ||
+        seconds < minRedAlertEscalationSeconds ||
+        seconds > maxRedAlertEscalationSeconds) {
+      throw ArgumentError.value(
+        value,
+        'RED_ALERT_ESCALATION_SECONDS',
+        'use um inteiro de segundos entre $minRedAlertEscalationSeconds e '
+            '$maxRedAlertEscalationSeconds.',
+      );
+    }
+    return seconds;
   }
 
   /// Inteiro positivo de dias, com teto sanitário de 36500 (100 anos) — um

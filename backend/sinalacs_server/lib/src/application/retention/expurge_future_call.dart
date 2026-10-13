@@ -43,6 +43,11 @@ class ExpurgeFutureCall extends FutureCall<SerializableModel> {
       final result = await service.run();
       stdout.writeln('Expurgo LGPD-RF07 concluído: ${result.describe()}.');
       session.log('retention_expurge: ${result.describe()}');
+      final retidos = result.describeRetained();
+      if (retidos != null) {
+        stdout.writeln(retidos);
+        session.log(retidos);
+      }
     } catch (error) {
       // VAZ-01: só o tipo da falha, nunca o objeto bruto.
       stderr.writeln('Falha no expurgo LGPD-RF07 (${error.runtimeType}).');

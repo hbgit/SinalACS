@@ -16,4 +16,8 @@ services:
       # o valor do .env impede que um REQUIRE_ACS_MFA=true local derrube a jornada.
       REQUIRE_ACS_MFA: "false"
       SMS_GATEWAY: log
+      # Prazo do alerta vermelho (#44): o mínimo aceito (30 s), para o e2e do
+      # escalonamento não esperar os 300 s do padrão da stack de desenvolvimento.
+      # Mesmo valor de `e2eEscalationThresholdSeconds` (e2e_fixtures.dart).
+      RED_ALERT_ESCALATION_SECONDS: "30"
       GORUSH_URL: http://gorush:8088

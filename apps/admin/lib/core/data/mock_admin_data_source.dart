@@ -24,6 +24,15 @@ class MockAdminDataSource implements AdminDataSource {
   final List<AcsSummary> _acs;
   final List<StaffSummary> _staff;
   final List<AuditLogEntry> _auditLog = [];
+
+  /// Escalonamentos (#44): id -> instante. O alerta segue pendente e listado.
+  final Map<String, DateTime> _escalados = {};
+
+  /// Mesmo prazo do servidor (`redAlertEscalationSeconds`).
+  static const _prazoDoVermelho = Duration(seconds: 300);
+
+  /// Chamadas a `endMonitoringSession`, para os testes.
+  int monitoringSessionEnds = 0;
   int _auditSeq = 0;
   int _acsSeq = _seedAcs.length;
 
@@ -236,7 +245,65 @@ class MockAdminDataSource implements AdminDataSource {
       if (microAreaId != null && alert.microAreaName != nome) return false;
       if (status != null && alert.status != status) return false;
       return true;
-    }).skip(offset).take(limit).toList();
+    }).skip(offset).take(limit).map(_comEscalonamento).toList();
+  }
+
+  bool _venceu(AlertSummary a) => _now().difference(a.triggeredAt) > _prazoDoVermelho;
+
+  /// Regra do servidor: vermelho pendente, não escalonado e além do prazo.
+  AlertSummary _comEscalonamento(AlertSummary a) {
+    final em = _escalados[a.id];
+    return AlertSummary(
+      id: a.id,
+      patientLabel: a.patientLabel,
+      microAreaName: a.microAreaName,
+      riskLevel: a.riskLevel,
+      status: a.status,
+      triggeredAt: a.triggeredAt,
+      escalatedAt: em,
+      overdue: em == null && a.riskLevel == RiskLevel.red && a.status == AlertStatus.pending && _venceu(a),
+    );
+  }
+
+  @override
+  Future<EscalationOutcome> escalateAlert(String alertId, EscalationReasonCode reason) async {
+    final a = _alerts.where((x) => x.id == alertId).firstOrNull;
+    // Mesma precedência e textos do servidor (AlertEscalationService).
+    if (a == null) throw const AdminValidationFailure('Alerta não encontrado.');
+    if (a.riskLevel != RiskLevel.red) {
+      throw const AdminValidationFailure('Só alertas vermelhos podem ser escalonados.');
+    }
+    if (a.status != AlertStatus.pending) throw const AdminValidationFailure('Alerta já confirmado.');
+    final anterior = _escalados[alertId];
+    if (anterior != null) return EscalationOutcome(escalatedAt: anterior, alreadyEscalated: true);
+    if (!_venceu(a)) {
+      throw const AdminValidationFailure('O prazo para escalonar este alerta ainda não venceu.');
+    }
+    final agora = _now();
+    _escalados[alertId] = agora;
+    return EscalationOutcome(escalatedAt: agora, alreadyEscalated: false);
+  }
+
+  @override
+  Future<AlertsPulse> alertsPulse() async {
+    final lista = _alerts.map(_comEscalonamento).toList();
+    DateTime? maior;
+    for (final a in lista) {
+      for (final t in [a.triggeredAt, a.escalatedAt]) {
+        if (t != null && (maior == null || t.isAfter(maior))) maior = t;
+      }
+    }
+    return AlertsPulse(
+      indicators: await fetchDashboardIndicators(),
+      overdueRed: lista.where((a) => a.overdue).length,
+      maxChangedAt: maior,
+      serverNow: _now(),
+    );
+  }
+
+  @override
+  Future<void> endMonitoringSession() async {
+    monitoringSessionEnds++;
   }
 
   @override

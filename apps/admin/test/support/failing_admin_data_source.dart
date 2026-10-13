@@ -11,6 +11,17 @@ class FailingAdminDataSource implements AdminDataSource {
 
   final AdminDataSource inner;
 
+  // Escalonamento, pulso e fim de sessão (#44): repassados ao `inner`.
+  @override
+  Future<EscalationOutcome> escalateAlert(String alertId, EscalationReasonCode reason) =>
+      inner.escalateAlert(alertId, reason);
+
+  @override
+  Future<AlertsPulse> alertsPulse() => inner.alertsPulse();
+
+  @override
+  Future<void> endMonitoringSession() => inner.endMonitoringSession();
+
   bool failNextIndicators = false;
   bool failNextMicroAreas = false;
   bool failNextAcs = false;

@@ -148,6 +148,7 @@ class ReceivedMqttAlert {
     required this.locationHash,
     this.locationCell,
     required this.triggeredAt,
+    this.escalated = false,
   });
 
   final String alertId;
@@ -162,6 +163,11 @@ class ReceivedMqttAlert {
   /// fabrica posição a partir de [locationHash].
   final String? locationCell;
   final DateTime triggeredAt;
+
+  /// Reforço da coordenação (#44): o backend republica o MESMO alerta com
+  /// `"escalated": true`. Opcional; só `true` literal conta — ausente, `false`
+  /// ou de outro tipo é `false`. Não carrega identidade de quem escalonou.
+  final bool escalated;
 
   static ReceivedMqttAlert? tryParse(String body) {
     try {
@@ -179,6 +185,7 @@ class ReceivedMqttAlert {
         locationHash: (json['location_hash'] as String?) ?? (json['location_hash'] ?? 'unknown') as String,
         locationCell: json['location_cell'] as String?,
         triggeredAt: DateTime.parse(triggeredAtRaw),
+        escalated: json['escalated'] == true,
       );
     } on FormatException {
       return null;

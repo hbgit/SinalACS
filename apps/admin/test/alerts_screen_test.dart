@@ -15,7 +15,7 @@ void main() {
 
     expect(find.text('Alertas da UBS'), findsOneWidget);
     expect(find.byKey(const Key('alert_alert-1')), findsOneWidget);
-    expect(find.byKey(const Key('alert_alert-3')), findsOneWidget);
+    expect(find.byKey(const Key('alert_alert-3'), skipOffstage: false), findsOneWidget);
 
     await tester.tap(find.byKey(const Key('alerts_micro_area_filter')));
     await tester.pumpAndSettle();
@@ -24,7 +24,7 @@ void main() {
 
     expect(find.byKey(const Key('alert_alert-1')), findsOneWidget);
     expect(find.byKey(const Key('alert_alert-2')), findsOneWidget);
-    expect(find.byKey(const Key('alert_alert-3')), findsNothing);
+    expect(find.byKey(const Key('alert_alert-3'), skipOffstage: false), findsNothing);
 
     // Consulta somente leitura: não há dropdown/campo para alterar RiskLevel.
     expect(find.byType(DropdownButtonFormField<RiskLevel>), findsNothing);

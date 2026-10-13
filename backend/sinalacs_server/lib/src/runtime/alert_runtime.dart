@@ -1,9 +1,12 @@
 import 'package:sinalacs_server/src/application/admin/admin_account_service.dart';
+import 'package:sinalacs_server/src/application/admin/admin_monitoring_service.dart';
 import 'package:sinalacs_server/src/application/admin/admin_read_service.dart';
+import 'package:sinalacs_server/src/application/admin/alert_escalation_service.dart';
 import 'package:sinalacs_server/src/application/admin/data_subject_case_service.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_data_subject_case_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_admin_account_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_admin_read_store.dart';
+import 'package:sinalacs_server/src/infrastructure/database/orm_alert_escalation_store.dart';
 import 'package:meta/meta.dart';
 import 'package:serverpod/serverpod.dart';
 import 'package:sinalacs_server/src/application/alerts/alert_outbox_dispatcher.dart';
@@ -195,7 +198,14 @@ class AlertRuntime {
   /// publicação no broker falhar.
   RedAlertService serviceFor(Session session, {Transaction? transaction}) =>
       RedAlertService(
-        store: OrmAlertStore(session: () => session, transaction: transaction),
+        store: OrmAlertStore(
+          session: () => session,
+          transaction: transaction,
+          appendAudit: OrmAuditTrail(
+            session: () => session,
+            chainSecret: config.auditChainSecret,
+          ).recordInTransaction,
+        ),
         outbox: OrmAlertOutbox(session: () => session, transaction: transaction),
       );
 
@@ -219,9 +229,40 @@ class AlertRuntime {
   /// Leitura do backoffice (#40), para uma requisição. A trilha é a da
   /// requisição: cada leitura do staff vira uma linha encadeada em `audit_logs`.
   AdminReadService adminReadServiceFor(Session session) => AdminReadService(
-        store: OrmAdminReadStore(session: () => session),
+        store: OrmAdminReadStore(
+          session: () => session,
+          escalationThreshold: Duration(seconds: config.redAlertEscalationSeconds),
+        ),
         audit: auditTrailFor(session),
       );
+
+  /// Sessões de monitoramento do backoffice (#44, D5): `userId → último
+  /// pulso`. Estado do PROCESSO, como o dispatcher MQTT — os endpoints são
+  /// construídos por requisição e perderiam o mapa. Instância única do
+  /// backend (PRD); um reinício só abre sessões novas (START de novo).
+  final Map<String, DateTime> _monitoringSessions = {};
+
+  /// Esvazia o mapa de sessões de monitoramento. Existe para os testes: o
+  /// harness desfaz o banco entre os casos, mas não o estado do processo.
+  @visibleForTesting
+  void resetMonitoringSessions() => _monitoringSessions.clear();
+
+  /// Pulso e sessão de monitoramento do backoffice (#44, D5), para uma
+  /// requisição: o store e a trilha são os da chamada; o mapa de sessões, o
+  /// do processo. O prazo é o mesmo de [adminReadServiceFor] e do
+  /// escalonamento.
+  AdminMonitoringService adminMonitoringServiceFor(Session session) {
+    final limite = Duration(seconds: config.redAlertEscalationSeconds);
+    return AdminMonitoringService(
+      store: OrmAdminReadStore(
+        session: () => session,
+        escalationThreshold: limite,
+      ),
+      audit: auditTrailFor(session),
+      sessions: _monitoringSessions,
+      threshold: limite,
+    );
+  }
 
   /// Atendimento de pedidos do titular no backoffice (#42), para uma
   /// requisição. A decisão é auditada DENTRO da transação do store
@@ -265,6 +306,24 @@ class AlertRuntime {
       audit: auditTrailFor(session),
     );
   }
+
+  /// Escalonamento de alerta vermelho pelo backoffice (#44), para uma
+  /// requisição. O escalonamento gravado é auditado DENTRO da transação do
+  /// store (`recordInTransaction`), junto do `UPDATE` e do reforço no outbox;
+  /// as recusas usam a trilha comum da requisição. O reforço não é publicado
+  /// aqui: a varredura periódica do outbox (`server.dart`) o entrega.
+  AlertEscalationService alertEscalationServiceFor(Session session) =>
+      AlertEscalationService(
+        store: OrmAlertEscalationStore(
+          session: () => session,
+          appendAudit: OrmAuditTrail(
+            session: () => session,
+            chainSecret: config.auditChainSecret,
+          ).recordInTransaction,
+        ),
+        audit: auditTrailFor(session),
+        threshold: Duration(seconds: config.redAlertEscalationSeconds),
+      );
 
   /// Contato da UBS do ACS (RF13), para uma requisição.
   UbsContactService ubsContactServiceFor(Session session) =>

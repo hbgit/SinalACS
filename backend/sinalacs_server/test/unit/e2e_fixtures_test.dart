@@ -132,6 +132,47 @@ void main() {
     expect(ids, hasLength(3 + f.patients.length + 3), reason: 'nenhum id repetido entre as entidades');
   });
 
+  test('o escalonamento (#44) tem 2 alertas de fixture — vencido e novo —, distintos de todo o resto', () {
+    final f = generateE2eFixtures(Random(44));
+    final ids = [f.escalationAlerts.overdueId, f.escalationAlerts.freshId];
+    expect(ids.toSet(), hasLength(2));
+    for (final id in ids) {
+      expect(id.startsWith('00000000-0000-4000-8000'), isFalse);
+      expect(RegExp(r'^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$').hasMatch(id), isTrue);
+    }
+    final todos = {
+      f.ubsId,
+      f.microAreaId,
+      f.otherMicroAreaId,
+      f.staff.id,
+      f.coordinator.id,
+      f.acs.id,
+      f.secondAcs.id,
+      ...f.patients.map((p) => p.id),
+      ...f.adminAlertIds,
+      ...ids,
+    };
+    expect(todos, hasLength(7 + f.patients.length + 3 + 2), reason: 'nenhum id repetido entre as entidades');
+    expect(f.toJson()['escalationAlerts'], {'overdueId': ids[0], 'freshId': ids[1]});
+    final volta = E2eFixtures.fromJson(f.toJson()).escalationAlerts;
+    expect((volta.overdueId, volta.freshId), (ids[0], ids[1]));
+  });
+
+  test('o alerta vencido do escalonamento nasce além do prazo da stack de e2e, com folga', () {
+    // A stack de e2e fixa RED_ALERT_ESCALATION_SECONDS=30 (docker-compose.e2e.yml);
+    // o vencido precisa estar além dele já na abertura da tela, depois do build
+    // e do login (minutos), e o novo precisa ficar AQUÉM do prazo por mais de um
+    // pulso (30 s), para a tela mostrá-lo sem o botão antes de vencer.
+    expect(E2eEscalationAlerts.overdueAge, greaterThan(const Duration(seconds: e2eEscalationThresholdSeconds)));
+    expect(E2eEscalationAlerts.overdueAge, greaterThanOrEqualTo(const Duration(minutes: 10)));
+    expect(
+      E2eEscalationAlerts.freshLead + const Duration(seconds: e2eEscalationThresholdSeconds),
+      greaterThan(const Duration(seconds: 30 + 15)),
+      reason: 'um pulso (30 s) mais a recarga da lista antes de o novo vencer',
+    );
+    expect(e2eEscalationThresholdSeconds, inInclusiveRange(30, 3600), reason: 'a faixa que o AppConfig aceita');
+  });
+
   group('guarda do seeder (e2eSeedRefusal)', () {
     const ok = {
       'APP_ENV': 'development',

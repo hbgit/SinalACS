@@ -1,5 +1,6 @@
 import 'package:uuid/uuid.dart';
 
+import 'package:sinalacs_server/src/application/audit/audit_trail.dart';
 import 'package:sinalacs_server/src/application/auth/authorization.dart';
 import 'package:sinalacs_server/src/application/auth/development_auth_service.dart';
 import 'package:sinalacs_server/src/domain/entities/alert_delivery.dart';
@@ -14,7 +15,16 @@ abstract interface class AlertPublisher {
 abstract interface class AlertStore {
   Future<void> save(AlertDelivery alert, {required String deviceId});
 
-  Future<bool> acknowledge({required String alertId, required String acsId, required String microAreaId});
+  /// Confirma o alerta no território do ACS. Quando o alerta existe na
+  /// microárea, grava [audit] na MESMA transação da mudança de status (#44):
+  /// se a trilha falhar, o ACK é desfeito — nenhum alerta vermelho muda de
+  /// estado sem registro. Sem alerta na microárea, nada é gravado.
+  Future<bool> acknowledge({
+    required String alertId,
+    required String acsId,
+    required String microAreaId,
+    required AuditEvent audit,
+  });
 
   /// Recupera o alerta já criado para esta chave de idempotência, se houver.
   ///
@@ -95,6 +105,12 @@ class AlertStatusSnapshot {
 final _locationCellFormat = RegExp(r'^-?\d{1,6}:-?\d{1,6}$');
 
 class RedAlertService {
+  /// `deviceId` sentinela do ACK que chega por MQTT (`lib/server.dart`): esse
+  /// caminho não tem token, e `acsId`/`microAreaId` vêm do payload. Único
+  /// lugar onde o valor existe; o servidor o usa ao montar o usuário do ACK e
+  /// [acknowledge] o usa para não auditar esse ACK como o do RPC (F3, #44).
+  static const mqttAckDeviceId = 'mqtt';
+
   RedAlertService({
     required AlertStore store,
     required AlertOutbox outbox,
@@ -182,7 +198,24 @@ class RedAlertService {
     if (alertId.trim().isEmpty) {
       throw ArgumentError('O identificador do alerta é obrigatório.');
     }
-    return _store.acknowledge(alertId: alertId, acsId: user.id, microAreaId: user.microAreaId!);
+    // Toda confirmação que encontra o alerta é auditada, inclusive a repetida
+    // do mesmo ACS: o log é append-only e registra cada ato (decisão #44).
+    // Sem identidade de paciente: só quem confirmou e qual alerta. O ACK por
+    // MQTT não é autenticado (a identidade vem do payload), então a trilha o
+    // marca `acknowledged_mqtt` em vez de atribuí-lo como um ACK do RPC.
+    final porMqtt = user.deviceId == mqttAckDeviceId;
+    return _store.acknowledge(
+      alertId: alertId,
+      acsId: user.id,
+      microAreaId: user.microAreaId!,
+      audit: AuditEvent(
+        userId: user.id,
+        actionType: 'write',
+        resourceType: 'alert',
+        resourceId: alertId,
+        result: porMqtt ? 'acknowledged_mqtt' : 'acknowledged',
+      ),
+    );
   }
 
   /// Status do alerta mais recente do próprio paciente autenticado (RF05,

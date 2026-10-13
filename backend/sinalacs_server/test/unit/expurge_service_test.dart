@@ -140,5 +140,33 @@ void main() {
       expect(line, contains('triagens=5'));
       expect(line, contains('cortes:'));
     });
+
+    test('aviso de retidos só existe com vermelho pendente retido, sem identidade', () {
+      final cutoffs = const RetentionPolicy(
+        alertsDays: 730,
+        visitsDays: 1825,
+        triageSessionsDays: 1825,
+      ).cutoffsAt(DateTime.utc(2026, 10, 7, 3));
+      ExpurgeResult com(int n) => ExpurgeResult(
+            ranAtUtc: DateTime.utc(2026, 10, 7, 3),
+            cutoffs: cutoffs,
+            counts: ExpurgeCounts(
+              alerts: 0,
+              alertDeliveries: 0,
+              alertIdempotencyKeys: 0,
+              alertOutbox: 0,
+              visits: 0,
+              triageSessions: 0,
+              alertsByRisk: const {},
+              skippedPendingRed: n,
+            ),
+          );
+
+      expect(com(0).describeRetained(), isNull);
+      expect(
+        com(3).describeRetained(),
+        'Expurgo: 3 alerta(s) vermelho(s) pendente(s) retido(s)',
+      );
+    });
   });
 }

@@ -66,6 +66,47 @@ void main() {
     });
   });
 
+  test('reforço de escalonamento (#44): marcador aditivo, sobrevive ao outbox', () {
+    final base = AlertDelivery(
+      alertId: 'alert-123',
+      patientId: 'patient-456',
+      microAreaId: 'area-12',
+      riskLevel: 'red',
+      locationHash: '6gyf4bf',
+      triggeredAt: DateTime.utc(2026, 9, 1, 12),
+    );
+    // Entrega comum: o envelope não muda (sem a chave).
+    expect(jsonDecode(base.toJson()).containsKey('escalated'), isFalse);
+    expect(AlertDelivery.tryParse(base.toJson())!.escalated, isFalse);
+
+    final reforco = AlertDelivery(
+      alertId: base.alertId,
+      patientId: base.patientId,
+      microAreaId: base.microAreaId,
+      riskLevel: base.riskLevel,
+      locationHash: base.locationHash,
+      triggeredAt: base.triggeredAt,
+      escalated: true,
+    );
+    final json = jsonDecode(reforco.toJson()) as Map<String, dynamic>;
+    expect(json['escalated'], isTrue);
+    expect(json['version'], 1, reason: 'aditivo: o app do ACS segue lendo v1');
+    expect(json.keys.toSet(), {
+      'version',
+      'alert_id',
+      'patient_id',
+      'micro_area_id',
+      'risk_level',
+      'location_hash',
+      'triggered_at',
+      'escalated',
+    });
+    // O drenador reidrata o payload gravado e republica: o marcador não se perde.
+    final reidratado = AlertDelivery.tryParse(reforco.toJson())!;
+    expect(reidratado.escalated, isTrue);
+    expect(jsonDecode(reidratado.toJson())['escalated'], isTrue);
+  });
+
   test('vincula o ACK ao alerta e ao ACS que o confirmou', () {
     final acknowledgement = AlertDeliveryAck(
       alertId: 'alert-123',

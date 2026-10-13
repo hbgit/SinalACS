@@ -567,8 +567,10 @@ PrioritizedAlert testAlert({
   // "sem GPS no paciente", que é o estado mais comum e não deve fabricar
   // marcador nenhum no mapa.
   String? locationCell,
+  bool escalated = false,
 }) {
   return PrioritizedAlert(
+    escalated: escalated,
     alertId: alertId,
     patientId: seedPatientId,
     microAreaId: microAreaId,

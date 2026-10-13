@@ -9,6 +9,7 @@ class AlertDelivery {
     required this.locationHash,
     this.locationCell,
     required this.triggeredAt,
+    this.escalated = false,
   });
 
   static const topicPrefix = 'sinalacs/v1/microareas';
@@ -26,6 +27,12 @@ class AlertDelivery {
   final String? locationCell;
   final DateTime triggeredAt;
 
+  /// Reforço de um alerta já entregue, enfileirado pelo escalonamento do
+  /// backoffice (#44, D2). Aditivo: só vai no envelope quando `true`, e o app
+  /// do ACS (que ignora chaves desconhecidas) segue lendo a versão 1. Não
+  /// carrega quem escalonou nem o motivo — nenhuma identidade a mais.
+  final bool escalated;
+
   String get topic => '$topicPrefix/$microAreaId/alerts';
 
   String toJson() => jsonEncode({
@@ -37,6 +44,7 @@ class AlertDelivery {
         'location_hash': locationHash,
         if (locationCell != null) 'location_cell': locationCell,
         'triggered_at': triggeredAt.toUtc().toIso8601String(),
+        if (escalated) 'escalated': true,
       });
 
   /// Reidrata um envelope gravado no outbox.
@@ -60,6 +68,8 @@ class AlertDelivery {
         locationHash: json['location_hash'] as String,
         locationCell: json['location_cell'] as String?,
         triggeredAt: DateTime.parse(triggeredAtRaw),
+        // Sem isto o drenador republicaria o reforço sem o marcador.
+        escalated: json['escalated'] == true,
       );
     } on FormatException {
       return null;

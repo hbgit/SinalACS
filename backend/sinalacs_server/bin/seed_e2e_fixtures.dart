@@ -158,6 +158,28 @@ Future<void> main(List<String> args) async {
       await alerta(fixtures.adminAlertIds[1], 'red', 'acknowledged', reconhecidoEmSegundos: 60);
       await alerta(fixtures.adminAlertIds[2], 'green', 'pending');
       }
+      // Escalonamento (#44), OPT-IN (`E2E_SEED_ALERT_ESCALATION=1`, só por
+      // `admin_alertas_escalonar_e2e.sh`): um vermelho pendente do paciente
+      // `main`, na microárea das fixtures (UBS do coordenador), disparado há
+      // `overdueAge` — já vencido com o prazo de 30 s da stack de e2e. O
+      // segundo alerta (`freshId`) NÃO nasce aqui: o script o insere no meio do
+      // teste (ver `E2eEscalationAlerts`).
+      if (env['E2E_SEED_ALERT_ESCALATION'] == '1') {
+        await tx.execute(
+          Sql.named('INSERT INTO "alerts" ("id","patientId","acsId","microAreaId","triggeredAt",'
+              '"riskLevel","locationHash","status","mqttTopic","deviceId","retryCount","version") '
+              "VALUES (@id,@patient,@acs,@ma,NOW() - (@idade::int * interval '1 second'),"
+              "'red','hash-e2e','pending',@topic,'device-e2e',0,0)"),
+          parameters: {
+            'id': fixtures.escalationAlerts.overdueId,
+            'patient': fixtures.byRole('main').id,
+            'acs': fixtures.acs.id,
+            'ma': fixtures.microAreaId,
+            'idade': E2eEscalationAlerts.overdueAge.inSeconds,
+            'topic': 'sinalacs/v1/microareas/${fixtures.microAreaId}/alerts',
+          },
+        );
+      }
       // Pedidos do titular (#42), OPT-IN (`E2E_SEED_DATA_REQUESTS=1`, só por
       // `admin_titular_e2e.sh`): uma correção JÁ VENCIDA (paciente `main`) e uma
       // exclusão no prazo (paciente `chronic`, com um token de push para provar a

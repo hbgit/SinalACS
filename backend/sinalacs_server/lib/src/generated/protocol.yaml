@@ -2,6 +2,8 @@ admin:
   - indicators:
   - microAreas:
   - alerts:
+  - alertsPulse:
+  - endMonitoringSession:
   - auditLogs:
   - dataSubjectRequests:
   - dataSubjectRequest:
@@ -16,6 +18,7 @@ admin:
   - resetAcsPassword:
   - resetAcsMfa:
   - resetStaffMfa:
+  - escalateAlert:
 alerts:
   - createRedAlert:
   - acknowledge:

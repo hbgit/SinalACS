@@ -59,6 +59,8 @@ class AlertSummary {
     required this.riskLevel,
     required this.status,
     required this.triggeredAt,
+    this.escalatedAt,
+    this.overdue = false,
   });
 
   final String id;
@@ -67,6 +69,51 @@ class AlertSummary {
   final RiskLevel riskLevel;
   final AlertStatus status;
   final DateTime triggeredAt;
+
+  /// Instante do escalonamento pelo backoffice (#44), se houve. O alerta segue
+  /// `pending` e listado: escalonar não o confirma nem o tira da lista.
+  final DateTime? escalatedAt;
+
+  /// Vencido: vermelho pendente, não escalonado e além do prazo. Vem do
+  /// **servidor** (relógio dele); a tela nunca recalcula com o relógio do aparelho.
+  final bool overdue;
+}
+
+/// Espelha `EscalationReason`. Conjunto fechado: nunca texto livre.
+enum EscalationReasonCode {
+  noAckTimeout('Sem confirmação no prazo'),
+  acsUnreachable('ACS inacessível'),
+  patientRecontact('Novo contato do paciente');
+
+  const EscalationReasonCode(this.label);
+
+  /// Texto da tela, em português.
+  final String label;
+}
+
+/// Resultado de `escalateAlert`. Com [alreadyEscalated], [escalatedAt] é o
+/// instante original.
+class EscalationOutcome {
+  const EscalationOutcome({required this.escalatedAt, required this.alreadyEscalated});
+
+  final DateTime escalatedAt;
+  final bool alreadyEscalated;
+}
+
+/// Pulso do monitoramento (#44, D5). [serverNow] é o relógio do servidor;
+/// [maxChangedAt] o maior instante de mudança no escopo (`null` sem alertas).
+class AlertsPulse {
+  const AlertsPulse({
+    required this.indicators,
+    required this.overdueRed,
+    required this.maxChangedAt,
+    required this.serverNow,
+  });
+
+  final DashboardIndicators indicators;
+  final int overdueRed;
+  final DateTime? maxChangedAt;
+  final DateTime serverNow;
 }
 
 /// Espelha `AuditLog` (`audit_log.spy.yaml`).
@@ -322,6 +369,16 @@ abstract interface class AdminDataSource {
   });
 
   Future<List<AuditLogEntry>> fetchAuditLogs({int limit = 50});
+
+  /// Escalona um alerta vermelho pendente vencido (#44). Idempotente. A recusa
+  /// de negócio sai como [AdminValidationFailure] com o texto do servidor.
+  Future<EscalationOutcome> escalateAlert(String alertId, EscalationReasonCode reason);
+
+  /// Pulso do monitoramento: indicadores, vermelhos vencidos e marca de mudança.
+  Future<AlertsPulse> alertsPulse();
+
+  /// Encerra a sessão de monitoramento. Melhor esforço: **nunca lança**.
+  Future<void> endMonitoringSession();
 
   /// Registra o próprio acesso do admin a uma tela sensível (PRD §4.2.2:
   /// "Administrador (Sistema): R (auditado)").

@@ -2,6 +2,7 @@ import 'package:serverpod/serverpod.dart';
 import 'package:sinalacs_server/src/application/admin/admin_labels.dart';
 import 'package:sinalacs_server/src/application/admin/admin_read_service.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
+import 'package:sinalacs_server/src/infrastructure/database/alert_overdue_sql.dart';
 
 /// Leitura do backoffice sobre Postgres.
 ///
@@ -16,9 +17,16 @@ import 'package:sinalacs_server/src/generated/protocol.dart';
 /// subconsulta de [auditLogs]), e staff não tem microárea: as linhas de staff só
 /// o escopo de sistema enxerga.
 class OrmAdminReadStore implements AdminReadStore {
-  OrmAdminReadStore({required Session Function() session}) : _session = session;
+  OrmAdminReadStore({
+    required Session Function() session,
+    this.escalationThreshold = const Duration(seconds: 300),
+  }) : _session = session;
 
   final Session Function() _session;
+
+  /// Prazo do alerta vermelho (`AppConfig.redAlertEscalationSeconds`) a partir
+  /// do qual `AdminAlert.overdue` vale.
+  final Duration escalationThreshold;
 
   static const _janelaDoTmrav = Duration(days: 30);
 
@@ -62,6 +70,39 @@ class OrmAdminReadStore implements AdminReadStore {
     );
   }
 
+  /// Um `SELECT` só de agregados: nenhuma coluna de alerta sai daqui. A
+  /// contagem usa o fragmento de `alert_overdue_sql.dart`, o mesmo de
+  /// [alerts] e do escalonamento.
+  @override
+  Future<AlertsPulseCounts> pulse(
+    AdminScope scope, {
+    required DateTime now,
+    required Duration threshold,
+  }) async {
+    final rows = await _session().db.unsafeQuery(
+      '''
+      SELECT
+        count(*) FILTER (WHERE $alertOverdueSql),
+        max(GREATEST(a."triggeredAt",
+                     COALESCE(a."acknowledgedAt", a."triggeredAt"),
+                     COALESCE(a."escalatedAt", a."triggeredAt")))
+      FROM alerts a
+      LEFT JOIN micro_areas m ON m.id = a."microAreaId"
+      WHERE $_escopo
+      ''',
+      parameters: QueryParameters.named({
+        'ubs': scope.ubsId,
+        'now': now.toUtc(),
+        'limite': threshold.inMicroseconds,
+      }),
+    );
+    final r = rows.single;
+    return (
+      overdueRed: r[0] as int,
+      maxChangedAt: (r[1] as DateTime?)?.toUtc(),
+    );
+  }
+
   /// Uma linha por microárea: o `id` é a chave do filtro de alertas no app (dois
   /// itens com o mesmo valor quebrariam o `DropdownButton`). Com mais de um ACS na
   /// área, nomes e matrículas vêm juntos, na ordem da matrícula, e `acsActive` vale
@@ -102,22 +143,34 @@ class OrmAdminReadStore implements AdminReadStore {
     AlertStatus? status,
     required int limit,
     required int offset,
+    required DateTime now,
   }) async {
     final rows = await _session().db.unsafeQuery(
       '''
-      SELECT a.id, a."patientId", m.name, a."riskLevel", a."status", a."triggeredAt"
+      SELECT a.id, a."patientId", m.name, a."riskLevel", a."status", a."triggeredAt",
+             a."escalatedAt",
+             -- Regra única de "vencido" (`alert_overdue_sql.dart`), a mesma de
+             -- `OrmAlertEscalationStore` e de [pulse]; o acordo é pinado por
+             -- test/integration/admin_read_store_test.dart ('acordo: overdue…').
+             $alertOverdueSql AS vencido
       FROM alerts a
       LEFT JOIN micro_areas m ON m.id = a."microAreaId"
       WHERE $_escopo
         AND (@ma::uuid IS NULL OR a."microAreaId" = @ma::uuid)
         AND (@status::text IS NULL OR a."status" = @status::text)
-      ORDER BY a."triggeredAt" DESC, a.id DESC
+      -- Vencidos primeiro (#44): um vencido além das primeiras linhas não
+      -- teria botão "Escalar" em tela nenhuma. Ordena pelo próprio `vencido`
+      -- (o mesmo fragmento, sem segunda cópia da regra); o desempate
+      -- `triggeredAt`/`id` mantém a ordem total, estável entre páginas.
+      ORDER BY vencido DESC, a."triggeredAt" DESC, a.id DESC
       LIMIT @limit OFFSET @offset
       ''',
       parameters: QueryParameters.named({
         'ubs': scope.ubsId,
         'ma': microAreaId,
         'status': status?.name,
+        'now': now.toUtc(),
+        'limite': escalationThreshold.inMicroseconds,
         // Uma linha a mais só para saber se há próxima página.
         'limit': limit + 1,
         'offset': offset,
@@ -135,6 +188,8 @@ class OrmAdminReadStore implements AdminReadStore {
             riskLevel: RiskLevel.fromJson(r[3] as String),
             status: AlertStatus.fromJson(r[4] as String),
             triggeredAt: (r[5] as DateTime).toUtc(),
+            escalatedAt: (r[6] as DateTime?)?.toUtc(),
+            overdue: r[7] as bool,
           ),
       ],
       nextOffset: haMais ? offset + limit : null,

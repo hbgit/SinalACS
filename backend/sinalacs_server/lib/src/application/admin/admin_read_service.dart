@@ -7,6 +7,10 @@ import 'package:sinalacs_server/src/generated/protocol.dart';
 // `export` mantém o alcance de quem já importava este arquivo.
 export 'package:sinalacs_server/src/application/admin/admin_scope.dart';
 
+/// O que o pulso da monitoração (#44, D5) lê além dos indicadores: só uma
+/// contagem e um instante, nunca um alerta.
+typedef AlertsPulseCounts = ({int overdueRed, DateTime? maxChangedAt});
+
 /// Leitura do backoffice. Interface à parte do ORM, no espírito de
 /// `AlertStore`: o serviço e seus testes não conhecem SQL.
 abstract interface class AdminReadStore implements AdminScopeStore {
@@ -16,14 +20,31 @@ abstract interface class AdminReadStore implements AdminScopeStore {
 
   Future<List<AdminMicroArea>> microAreas(AdminScope scope);
 
-  /// Mais recentes primeiro (`triggeredAt` desc, `id` desc: ordem estável).
-  /// `nextOffset` nulo = fim da lista.
+  /// Pulso da monitoração (#44, D5), no escopo: `overdueRed` conta os alertas
+  /// com a MESMA regra de `AdminAlert.overdue` (vermelho, pendente, sem
+  /// escalonamento, estritamente além de [threshold] em [now]);
+  /// `maxChangedAt` é o maior instante de mudança (disparo, ACK ou
+  /// escalonamento) entre os alertas do escopo, nulo se não há alerta.
+  Future<AlertsPulseCounts> pulse(
+    AdminScope scope, {
+    required DateTime now,
+    required Duration threshold,
+  });
+
+  /// Vencidos primeiro, depois mais recentes (`overdue` desc, `triggeredAt`
+  /// desc, `id` desc: ordem estável). Assim nenhum vermelho vencido fica além
+  /// da primeira página (#44). `nextOffset` nulo = fim da lista.
+  ///
+  /// [now] é o relógio do **servidor**: `AdminAlert.overdue` é calculado com ele
+  /// (#44), nunca com o do aparelho. Escalonar não tira o alerta da lista nem do
+  /// filtro `pending` (D3).
   Future<AdminAlertPage> alerts(
     AdminScope scope, {
     String? microAreaId,
     AlertStatus? status,
     required int limit,
     required int offset,
+    required DateTime now,
   });
 
   /// Mais recentes primeiro, por keyset (`sequence` menor que [beforeSequence]).
@@ -103,6 +124,7 @@ class AdminReadService {
       status: status,
       limit: limit,
       offset: offset,
+      now: _clock().toUtc(),
     );
   }
 

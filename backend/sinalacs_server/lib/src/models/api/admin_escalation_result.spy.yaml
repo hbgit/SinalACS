@@ -1,0 +1,7 @@
+### Resultado de escalonar um alerta pelo backoffice. `alreadyEscalated` torna
+### a operação idempotente: repetir o pedido não duplica o escalonamento.
+class: AdminEscalationResult
+fields:
+  alertId: String
+  escalatedAt: DateTime
+  alreadyEscalated: bool

@@ -2325,6 +2325,7 @@ class _AlertCard extends StatelessWidget {
           Semantics(
             container: true,
             label: 'Paciente ${alert.patientId.substring(0, 8)}, $label'
+                '${alert.escalated ? ', reforço da coordenação' : ''}'
                 '${alert.acknowledged ? ', recebimento confirmado' : ''}, '
                 'recebido às ${_time(alert.triggeredAt)}',
             excludeSemantics: true,
@@ -2334,6 +2335,18 @@ class _AlertCard extends StatelessWidget {
               Text('Paciente ${alert.patientId.substring(0, 8)}', style: const TextStyle(fontWeight: FontWeight.bold)),
               const SizedBox(height: 6),
               Text(label, style: TextStyle(color: textColor, fontWeight: FontWeight.bold)),
+              // Rótulo + ícone, não só cor (WCAG 1.4.1); cor de texto pelo token
+              // *OnSurface, medido sobre o Card.
+              if (alert.escalated) Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Row(children: [
+                  Icon(Icons.campaign, size: 16, color: textColor),
+                  const SizedBox(width: 6),
+                  Text('Reforço da coordenação',
+                      key: Key('escalated_${alert.alertId}'),
+                      style: TextStyle(color: textColor, fontWeight: FontWeight.bold)),
+                ]),
+              ),
               const SizedBox(height: 6),
               Text('Recebido às ${_time(alert.triggeredAt)} • local ${alert.locationHash}'),
               if (alert.acknowledged) Padding(

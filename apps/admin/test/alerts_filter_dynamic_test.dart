@@ -13,6 +13,16 @@ class _CustomAreaDataSource implements AdminDataSource {
   static const newArea = 'Microárea 99 — Nova Área';
 
   @override
+  Future<EscalationOutcome> escalateAlert(String alertId, EscalationReasonCode reason) =>
+      throw UnimplementedError();
+
+  @override
+  Future<AlertsPulse> alertsPulse() => throw UnimplementedError();
+
+  @override
+  Future<void> endMonitoringSession() async {}
+
+  @override
   Future<DashboardIndicators> fetchDashboardIndicators() async => const DashboardIndicators(
         countsByRisk: {},
         openRedAlerts: 0,

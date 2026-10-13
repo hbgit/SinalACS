@@ -13,6 +13,7 @@ class PrioritizedAlert {
     this.locationCell,
     required this.triggeredAt,
     this.acknowledged = false,
+    this.escalated = false,
   });
 
   factory PrioritizedAlert.fromMqtt(ReceivedMqttAlert alert) {
@@ -24,6 +25,7 @@ class PrioritizedAlert {
       locationHash: alert.locationHash,
       locationCell: alert.locationCell,
       triggeredAt: alert.triggeredAt,
+      escalated: alert.escalated,
     );
   }
 
@@ -43,7 +45,11 @@ class PrioritizedAlert {
   final DateTime triggeredAt;
   final bool acknowledged;
 
-  PrioritizedAlert copyWith({bool? acknowledged}) => PrioritizedAlert(
+  /// O backoffice reforçou este alerta (#44). Só existe em memória: não é
+  /// gravado no aparelho nem carrega quem escalonou.
+  final bool escalated;
+
+  PrioritizedAlert copyWith({bool? acknowledged, bool? escalated}) => PrioritizedAlert(
         alertId: alertId,
         patientId: patientId,
         microAreaId: microAreaId,
@@ -52,6 +58,7 @@ class PrioritizedAlert {
         locationCell: locationCell,
         triggeredAt: triggeredAt,
         acknowledged: acknowledged ?? this.acknowledged,
+        escalated: escalated ?? this.escalated,
       );
 
   /// Peso da ordenação. Menor vem primeiro.
@@ -97,6 +104,18 @@ class AlertQueue extends ChangeNotifier {
   ///   apontado a um tópico mais amplo;
   /// - **duplicata**: com QoS 1 a entrega é *at-least-once*, então a mesma
   ///   mensagem pode chegar mais de uma vez e não pode virar dois cartões.
+  ///
+  /// O `true` é o "sinal de alerta novo" deste app (não há som nem vibração
+  /// próprios: o `ChangeNotifier` move a lista, o contador e o banner).
+  ///
+  /// **Reforço** (`escalated`, #44): para um alerta ainda não confirmado,
+  /// marca o cartão, sobe-o à frente dos demais do mesmo risco e devolve
+  /// `true` (mesmo sinal). Um reforço sobre alerta já confirmado devolve
+  /// `false`, como qualquer reentrega: nunca desfaz a confirmação nem sinaliza.
+  /// Idempotência do QoS 1: cartão já marcado `escalated` recebendo outro
+  /// reforço é duplicata (`false`); o backend escalona cada alerta uma só
+  /// vez, então o marcador basta. Uma reentrega do original (sem o marcador)
+  /// não apaga o reforço.
   bool upsert(PrioritizedAlert alert) {
     if (alert.microAreaId != microAreaId) return false;
 
@@ -106,7 +125,8 @@ class AlertQueue extends ChangeNotifier {
       // um alerta que o ACS já atendeu.
       final existing = _alerts[index];
       if (existing.acknowledged) return false;
-      _alerts[index] = alert;
+      if (alert.escalated && existing.escalated) return false;
+      _alerts[index] = existing.escalated ? alert.copyWith(escalated: true) : alert;
     } else {
       _alerts.add(alert);
     }
@@ -133,6 +153,8 @@ class AlertQueue extends ChangeNotifier {
       if (a.acknowledged != b.acknowledged) return a.acknowledged ? 1 : -1;
       final byRisk = a._riskRank.compareTo(b._riskRank);
       if (byRisk != 0) return byRisk;
+      // Reforço da coordenação vem à frente dos demais do mesmo risco.
+      if (a.escalated != b.escalated) return a.escalated ? -1 : 1;
       return a.triggeredAt.compareTo(b.triggeredAt);
     });
   }
