@@ -27,7 +27,7 @@ Código do backend: `backend/sinalacs_server/lib/src/infrastructure/mqtt/mqtt_al
 | Ping do keepalive | `sendMessage(pingMsg)` dentro de `try { } catch (e)` (L:mqtt_client_mqtt_connection_keep_alive.dart:117-130); `pingRequired` é callback de `Timer` (L:keep_alive:91, 140) | síncrono apenas |
 | Resposta a PINGREQ do broker (`MqttPingResponseMessage`) | `_connectionHandler.sendMessage(pingMsg)` em L:keep_alive:190, **sem** `try/catch` (envio síncrono; o erro assíncrono do socket continua sem dono) | a verificar (H1) |
 | **Escrita** `client?.add(bytes)` (`send`) | L:server/mqtt_client_mqtt_server_secure_connection.dart:168-171 (`client?.add(messageBytes.toList())`); `Socket.add` não lança em falha de I/O: o erro vai ao `done`/zona de criação do socket | **a verificar (H1)** |
-| `publish()` → `publishMessage` | D:156-165: confere `client != null` e `state == connected`, chama `publishMessage` (síncrono, devolve sem esperar PUBACK) e retorna; `_publishOne` chama `markPublished` logo depois (O:58-62) | **a verificar (H5)** |
+| `publish()` → `publishMessage` | D:156-165: confere `client != null` e `state == connected`, chama `publishMessage` (síncrono, devolve sem esperar PUBACK) e retorna; `_publishOne` chama `markPublished` logo depois (O:58-62) | **não (H5 confirmada, Tarefa 9)** |
 | `_teardownCurrentConnection` → `previousClient?.disconnect()` | D:125-132; sem `try/catch`; `disconnect()` sem `auto` chama `onDone()` (L:base:89-95) que roda `onDisconnected` do cliente velho | **a verificar (H4)** |
 | `_handleDisconnected` | D:134-137: só testa `_closed`/`_reconnecting`, não identifica *qual* cliente chamou; callback do cliente velho (D:131 → L:base:77-85) é tratado como queda do atual quando `_reconnecting` é falso (ex.: caminho de `connect()` inicial ou `close()` com `_closed` falso) | **a verificar (H4)** |
 | Ouvinte de mensagens `_handleMessages` | `try/catch` ao redor de `await handler(ack)` (D:111-121); log só com `runtimeType` | sim |
@@ -60,7 +60,7 @@ Código do backend: `backend/sinalacs_server/lib/src/infrastructure/mqtt/mqtt_al
 | H2 | **compatível, não isolada**: a queda ocorre ≤ 0,6 s após o `unpause` (5/5), mas não se observou a ordem de eventos; na sonda sem TLS a ordem foi sempre leitura/`onDone` antes de escrita |
 | H3 | **refutada**: reinício do Mosquitto (B) não derruba (0/3, reconexão em ~2 s); a partição de rede (C) derruba (3/3) sem pausa artificial do backend |
 | H4 | aberta |
-| H5 | aberta |
+| H5 | **confirmada** (Tarefa 9, broker falso TCP plano + banco de teste): o outbox marca `publishedAt` sem PUBACK e, numa queda nesse instante, a mensagem se perde sem retransmissão; correção **não aplicada** (muda o contrato de `AlertPublisher`, aguarda decisão do usuário) |
 
 ## Tabela de experimentos
 | ID | Cenário | Comando | Resultado | Exit code | Mensagem/pilha (sanitizada) | Processo vivo? | Tempo até reconectar | Efeito nos pendentes |
@@ -161,5 +161,25 @@ Imagem reconstruída com `docker compose up -d --build serverpod` (HEAD `85d802d
 VAZ-01: nos logs do backend de todas as execuções só aparecem tipo e errno; busca por IP, `:8883`, `mosquitto`, `localhost` e `payload` nos `*.back.log` sem nenhuma ocorrência. Comando: `scripts/qa/mqtt_resiliencia_e2e.sh A 5`, `C 3`, `B 3` (o script passou a imprimir também `started=` em cada RESULT).
 
 Conclusão: a correção da Tarefa 7 resolve A e C na stack Docker real com TLS; B segue sem queda. Limite: não há criação de alerta durante a interrupção (Tarefa 10).
+
+## Tarefa 9: recuperação do outbox e experimento H5
+
+Testes em `backend/sinalacs_server/test/integration/red_alert_cycle_test.dart`, grupo `com o MqttAlertDispatcher real e o broker falso`: `MqttAlertDispatcher` real (backoff 100 ms, `onFatal` gravado) injetado por `AlertRuntime.overridePublisher`, `FakeMqttBroker` em `127.0.0.1` (TCP plano) e o Postgres de teste do harness (`sinalacs-postgres-test`). O broker falso ganhou `dropOnPublish` (conta o PUBLISH, não responde PUBACK e destrói a conexão). Limite: sem TLS; a queda real do socket TLS (RST/EPIPE) foi provada no Docker na Tarefa 7v, e o caminho aqui testado (outbox → `publish` → reconexão) não passa pela camada TLS.
+
+**Regressão (Step 1-2), PASS (8/8 execuções do grupo):** broker fechado → `createRedAlert` aceito com `published == false`, 1 `Alert` e 1 `AlertOutboxEntry` com `publishedAt == null` → broker novo na **mesma porta** → dispatcher reconecta sozinho → `drainOnce` com relógio +5 min publica 1 (`publishCount == 1`, `publishedAt` preenchido) → segundo `drainOnce` publica 0 e `publishCount` segue 1 → `alerts.acknowledge` devolve `acknowledged == true`.
+
+**Experimento H5 (Step 3).** Leitura do código: `publish()` (D:347-364) é `void` e chama `client.publishMessage`, que monta a mensagem, a guarda em `publishedMessages` do `PublishingManager` **do cliente atual** e chama `sendMessage` → `Socket.add` (assíncrono: falha de E/S vai ao `done`/zona, não ao chamador). `_publishOne` (O:58-62) chama `markPublished` logo em seguida. Não há espera de PUBACK. A biblioteca 10.11.11 não tem nenhum código de retransmissão de QoS 1 (busca por `resend`/`retransmi`/`republish` em `lib/src`: só um comentário sobre recepção duplicada), e o dispatcher cria um `MqttServerClient` **novo** a cada reconexão, descartando o mapa `publishedMessages` do anterior.
+
+| Variante | `publish()` | `createRedAlert.published` | `publishedAt` no outbox | Broker recebeu | Após reconexão (cliente novo) | `drainOnce` seguinte |
+|---|---|---|---|---|---|---|
+| Socket destruído pelo broker no mesmo turno, imediatamente antes de `publish` (o dispatcher ainda vê `connected`; gancho `_PublisherComGancho` chama `broker.dropClients()`) | devolveu sem erro | `true` | preenchido | **0 PUBLISH** | reconectou (`connectCount` 2), `publishCount` continua 0 após 500 ms | 0 (nada pendente) |
+| Broker recebe o PUBLISH, não responde PUBACK e derruba a conexão (`dropOnPublish`) | devolveu sem erro | `true` | preenchido antes de qualquer PUBACK | 1 PUBLISH, sem PUBACK | reconectou, sem retransmissão (`publishCount` continua 1) | 0 |
+
+**Status de H5: confirmada.** Um alerta vermelho pode ficar marcado como publicado no outbox enquanto a mensagem MQTT nunca chegou ao broker (variante 1), e nenhum mecanismo a reentrega: o outbox já a deu por entregue e o cliente novo não herda a mensagem em voo. O alerta segue gravado e `pending` no banco (o escalonamento da #44 e a consulta do paciente continuam vendo-o), mas o canal de entrega ao ACS falhou em silêncio, o que viola INV-03. A variante 2 mostra a mesma ausência de confirmação; com um broker real, que pode ter roteado a mensagem antes de cair, ela é "entrega não confirmada", não necessariamente perda. Os dois testes afirmam o comportamento **atual** e estão rotulados `H5 (lacuna, comportamento atual)`: devem falhar e ser invertidos quando a correção entrar.
+
+**Correção proposta (não aplicada, decisão do usuário pendente):**
+- `AlertPublisher.publish` passa a `Future<void>` que completa no PUBACK do `messageIdentifier` devolvido por `publishMessage` (escutar `client.published`, ou o callback `onPublished`, filtrando pelo id) e falha com `MqttUnavailableException` em queda da conexão ou num tempo limite (ex.: 10 s). Arquivos: `lib/src/application/alerts/red_alert_service.dart` (interface), `lib/src/infrastructure/mqtt/mqtt_alert_dispatcher.dart` (mapa id → `Completer`, completado no PUBACK e falhado em `_markConnectionLost`/`close`).
+- `AlertOutboxDispatcher._publishOne` faz `await _publisher.publish(...)` e só então `markPublished`; falha ou tempo limite → `markFailed` com backoff (a entrega pode duplicar, o que o QoS 1 já admite e o ACK idempotente absorve). Arquivo: `lib/src/application/alerts/alert_outbox_dispatcher.dart`.
+- Ajustes nos publishers falsos dos testes (`implements AlertPublisher` em `test/integration/red_alert_cycle_test.dart`, `test/unit/red_alert_service_test.dart`, `test/unit/alert_outbox_dispatcher_test.dart`, `test/unit/red_alert_lifecycle_test.dart` e `test/unit/red_alert_discard_paths_test.dart`; o único chamador de `publish` em `lib/` é `alert_outbox_dispatcher.dart:60`), e inversão dos dois testes H5.
 
 ## Regressão final
