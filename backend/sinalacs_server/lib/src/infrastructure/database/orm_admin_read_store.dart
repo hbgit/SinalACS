@@ -1,6 +1,7 @@
 import 'package:serverpod/serverpod.dart';
 import 'package:sinalacs_server/src/application/admin/admin_labels.dart';
 import 'package:sinalacs_server/src/application/admin/admin_read_service.dart';
+import 'package:sinalacs_server/src/application/admin/audit_chain_status_service.dart';
 import 'package:sinalacs_server/src/application/audit/audit_chain.dart';
 import 'package:sinalacs_server/src/application/audit/audit_chain_verifier.dart';
 import 'package:sinalacs_server/src/application/audit/audit_row_sealer.dart';
@@ -25,7 +26,7 @@ String escaparLike(String texto) =>
 /// não há microárea na linha — ela pertence ao **autor** (`users."microAreaId"`,
 /// subconsulta de [auditLogs]), e staff não tem microárea: as linhas de staff só
 /// o escopo de sistema enxerga.
-class OrmAdminReadStore implements AdminReadStore {
+class OrmAdminReadStore implements AdminReadStore, AuditChainScopeStore {
   OrmAdminReadStore({
     required Session Function() session,
     this.escalationThreshold = const Duration(seconds: 300),
@@ -319,6 +320,25 @@ class OrmAdminReadStore implements AdminReadStore {
       items: items,
       nextBeforeSequence: haMais ? items.last.entry.sequence : null,
     );
+  }
+
+  /// Pertencimento de uma linha de `audit_logs` à UBS (#45, Task 6): a mesma
+  /// regra do escopo de [auditLogs] — o **autor** tem microárea na UBS. Por
+  /// igualdade no índice único de `sequence`; só devolve um booleano.
+  @override
+  Future<bool> auditRowInUbs(int sequence, String ubsId) async {
+    final rows = await _session().db.unsafeQuery(
+      '''
+      SELECT 1
+      FROM audit_logs l
+      JOIN users u ON u.id = l."userId"
+      JOIN micro_areas m ON m.id = u."microAreaId"
+      WHERE l.sequence = @seq::bigint AND m."ubsId" = @ubs::uuid
+      LIMIT 1
+      ''',
+      parameters: QueryParameters.named({'seq': sequence, 'ubs': ubsId}),
+    );
+    return rows.isNotEmpty;
   }
 
   @override

@@ -5,6 +5,7 @@ admin:
   - alertsPulse:
   - endMonitoringSession:
   - auditLogs:
+  - verifyAuditChain:
   - dataSubjectRequests:
   - dataSubjectRequest:
   - startDataSubjectReview:

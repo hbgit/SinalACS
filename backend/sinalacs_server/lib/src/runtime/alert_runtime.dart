@@ -3,6 +3,7 @@ import 'package:sinalacs_server/src/application/admin/admin_account_service.dart
 import 'package:sinalacs_server/src/application/admin/admin_monitoring_service.dart';
 import 'package:sinalacs_server/src/application/admin/admin_read_service.dart';
 import 'package:sinalacs_server/src/application/admin/alert_escalation_service.dart';
+import 'package:sinalacs_server/src/application/admin/audit_chain_status_service.dart';
 import 'package:sinalacs_server/src/application/admin/data_subject_case_service.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_data_subject_case_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_admin_account_store.dart';
@@ -38,6 +39,7 @@ import 'package:sinalacs_server/src/infrastructure/database/orm_refresh_token_st
 import 'package:sinalacs_server/src/infrastructure/database/orm_upload_token_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_alert_outbox.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_alert_store.dart';
+import 'package:sinalacs_server/src/infrastructure/database/orm_audit_chain_reader.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_audit_trail.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_onboarding_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_otp_challenge_store.dart';
@@ -236,6 +238,27 @@ class AlertRuntime {
         ),
         audit: auditTrailFor(session),
         auditChain: AuditChain(secret: config.auditChainSecret),
+      );
+
+  /// Single-flight e cache de 60 s da verificação global da cadeia (#45, D9).
+  /// Estado do PROCESSO, como [_monitoringSessions].
+  final AuditChainStatusCache _auditChainStatusCache = AuditChainStatusCache();
+
+  /// Esvazia o cache e o single-flight da verificação da cadeia. Existe para
+  /// os testes: o harness desfaz o banco entre os casos, não o processo.
+  @visibleForTesting
+  void resetAuditChainStatusCache() => _auditChainStatusCache.reset();
+
+  /// `admin.verifyAuditChain` (#45, Task 6), para uma requisição: reader,
+  /// store e trilha da chamada; cache e single-flight do processo; o mesmo
+  /// `AUDIT_CHAIN_SECRET` que grava a trilha.
+  AuditChainStatusService auditChainStatusServiceFor(Session session) =>
+      AuditChainStatusService(
+        store: OrmAdminReadStore(session: () => session),
+        audit: auditTrailFor(session),
+        reader: OrmAuditChainReader(session: () => session),
+        secret: config.auditChainSecret,
+        cache: _auditChainStatusCache,
       );
 
   /// Sessões de monitoramento do backoffice (#44, D5): `userId → último

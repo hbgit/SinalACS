@@ -1,0 +1,259 @@
+import 'dart:async';
+
+import 'package:sinalacs_server/src/application/admin/admin_scope.dart';
+import 'package:sinalacs_server/src/application/audit/audit_chain_verifier.dart';
+import 'package:sinalacs_server/src/application/audit/audit_trail.dart';
+import 'package:sinalacs_server/src/application/auth/development_auth_service.dart';
+import 'package:sinalacs_server/src/generated/protocol.dart';
+
+/// O que a verificação global precisa saber do mundo além da cadeia: a UBS do
+/// coordenador ([AdminScopeStore]) e se uma linha de `audit_logs` pertence a
+/// uma UBS — pelo **autor** da linha, a mesma regra de escopo de
+/// `admin.auditLogs`.
+abstract interface class AuditChainScopeStore implements AdminScopeStore {
+  /// `true` se a linha de [sequence] existe e o autor dela tem microárea na
+  /// UBS [ubsId]. Linha inexistente, autor sem microárea (staff) ou de outra
+  /// UBS: `false`.
+  Future<bool> auditRowInUbs(int sequence, String ubsId);
+}
+
+/// Uma verificação global concluída: o resultado do verificador e o instante
+/// em que terminou. Interna; nunca serializa.
+class AuditChainSnapshot {
+  const AuditChainSnapshot({required this.verification, required this.at});
+
+  final AuditChainVerification verification;
+  final DateTime at;
+}
+
+/// Estado do **processo** da verificação global (#45, D9): o `Future` em
+/// andamento (single-flight) e o último resultado (cache de
+/// [AuditChainStatusService.cacheTtl]). Vive no `AlertRuntime`, porque os
+/// endpoints são construídos por requisição; o backend é de instância única
+/// (PRD), então um por processo basta.
+class AuditChainStatusCache {
+  Future<AuditChainSnapshot>? inFlight;
+  AuditChainSnapshot? last;
+
+  void reset() {
+    inFlight = null;
+    last = null;
+  }
+}
+
+/// `admin.verifyAuditChain` (#45, Task 6; decisões D3 e D9).
+///
+/// 1. **Papel e escopo primeiro** ([AdminScopeResolver], recurso
+///    `admin_audit_chain`): `acs`/`patient`/coordenador sem UBS são recusados
+///    com `denied` auditado, sem ler a cadeia.
+/// 2. **Auditoria antes de verificar:** `read`/`admin_audit_chain`/`success`
+///    com `record` (fail-closed) — também quando a resposta sai do cache.
+/// 3. **Single-flight e cache:** uma verificação em andamento é compartilhada
+///    por todas as chamadas do processo; a concluída vale por [cacheTtl] no
+///    [AuditChainStatusCache]. Relógio injetável; relógio que volta no tempo
+///    invalida o cache. A verificação compartilhada usa o reader da requisição
+///    que a iniciou (e que a espera, então a sessão dela segue aberta).
+/// 4. **Nada além de cadeia íntegra e não vazia vira `verified`** ([stateOf]):
+///    quebra ⇒ `broken`; banco, prazo de leitura, `Error` ou segredo ausente ⇒
+///    `unavailable`; cadeia vazia ou orçamento esgotado ⇒ `inconclusive`.
+///    Nenhuma falha vira 500 genérico: tudo que a leitura lança — `Exception`
+///    **ou** `Error` — é `unavailable/databaseError`.
+/// 5. **Projeção por papel (D9, Review Focus 7):** o administrador recebe o
+///    status completo; o coordenador recebe o estado (um `broken` continua
+///    `broken`: o painel não pode dizer íntegra), mas `firstBrokenSequence` e
+///    `reasonCode` da quebra só se a linha quebrada for de um autor da UBS
+///    dele, e nunca `checkedRows`/`headSequence` (volume do sistema).
+///
+/// O texto livre `reason` do verificador não sai daqui: o cliente recebe só
+/// o `reasonCode` fechado. Segredo trocado aparece como `broken` já na
+/// `sequence` 1 (Review Focus 3): "falha", não necessariamente adulteração.
+///
+/// Ponto de extensão da Task 7 (checkpoint de cauda): [_verificarCadeia] é o
+/// único lugar que produz o resultado global; a âncora de cauda entra ali,
+/// depois do verificador, sem mudar a projeção nem o cache.
+class AuditChainStatusService {
+  AuditChainStatusService({
+    required this.store,
+    required this.audit,
+    required AuditChainReader reader,
+    required String secret,
+    required this.cache,
+    this.budget = defaultBudget,
+    this.readTimeout = defaultReadTimeout,
+    DateTime Function()? clock,
+  }) : _reader = reader,
+       _secret = secret,
+       _clock = clock ?? DateTime.now;
+
+  final AuditChainScopeStore store;
+  final AuditTrail audit;
+  final AuditChainStatusCache cache;
+
+  /// Orçamento da verificação (D9), conferido entre lotes pelo verificador.
+  final Duration budget;
+
+  /// Prazo de cada leitura de lote: uma consulta que não volta vira
+  /// `unavailable/databaseError`, não uma requisição presa.
+  final Duration readTimeout;
+
+  final AuditChainReader _reader;
+  final String _secret;
+  final DateTime Function() _clock;
+
+  static const defaultBudget = Duration(seconds: 10);
+  static const defaultReadTimeout = Duration(seconds: 10);
+  static const cacheTtl = Duration(seconds: 60);
+  static const recurso = 'admin_audit_chain';
+
+  late final AdminScopeResolver _resolver = AdminScopeResolver(
+    store: store,
+    audit: audit,
+  );
+
+  Future<AdminAuditChainStatus> verify(AuthenticatedUser user) async {
+    final escopo = await _resolver.resolve(user, recurso: recurso);
+    await audit.record(
+      AuditEvent(
+        userId: user.id,
+        actionType: 'read',
+        resourceType: recurso,
+        result: 'success',
+      ),
+    );
+    final retrato = await _resultadoGlobal();
+    return _projetar(retrato, escopo);
+  }
+
+  /// Estado de integridade de um resultado do verificador (D3). Público e
+  /// puro para o teste de propriedade: só `ok` com pelo menos uma linha é
+  /// `verified`.
+  static AuditIntegrityState stateOf(AuditChainVerification v) {
+    if (v.ok) {
+      return v.checked > 0
+          ? AuditIntegrityState.verified
+          : AuditIntegrityState.inconclusive;
+    }
+    return switch (v.reasonCode) {
+      AuditChainReason.hashMismatch ||
+      AuditChainReason.linkBroken ||
+      AuditChainReason.sequenceGap ||
+      AuditChainReason.tailTruncated => AuditIntegrityState.broken,
+      AuditChainReason.timeBudget => AuditIntegrityState.inconclusive,
+      AuditChainReason.databaseError ||
+      AuditChainReason.secretUnavailable ||
+      null => AuditIntegrityState.unavailable,
+    };
+  }
+
+  Future<AuditChainSnapshot> _resultadoGlobal() {
+    final agora = _clock().toUtc();
+    final ultimo = cache.last;
+    if (ultimo != null) {
+      final idade = agora.difference(ultimo.at);
+      if (!idade.isNegative && idade < cacheTtl) return Future.value(ultimo);
+    }
+    final andamento = cache.inFlight;
+    if (andamento != null) return andamento;
+
+    final novo = _verificarCadeia().then((retrato) {
+      cache.last = retrato;
+      return retrato;
+    });
+    cache.inFlight = novo;
+    // Limpa só se ainda for o mesmo (um reset de teste pode ter trocado).
+    novo.whenComplete(() {
+      if (identical(cache.inFlight, novo)) cache.inFlight = null;
+    });
+    return novo;
+  }
+
+  /// Nunca lança: qualquer falha da leitura — `Exception` ou `Error` — é
+  /// `databaseError`. (Task 7: a âncora de cauda entra aqui.)
+  Future<AuditChainSnapshot> _verificarCadeia() async {
+    AuditChainVerification resultado;
+    try {
+      resultado = await AuditChainVerifier(
+        reader: _ReaderComPrazo(_reader, readTimeout),
+        secret: _secret,
+      ).verify(budget: budget, clock: _clock);
+    } catch (_) {
+      resultado = const AuditChainVerification(
+        ok: false,
+        checked: 0,
+        reasonCode: AuditChainReason.databaseError,
+      );
+    }
+    return AuditChainSnapshot(verification: resultado, at: _clock().toUtc());
+  }
+
+  Future<AdminAuditChainStatus> _projetar(
+    AuditChainSnapshot retrato,
+    AdminScope escopo,
+  ) async {
+    final v = retrato.verification;
+    final estado = stateOf(v);
+    final quebrada = estado == AuditIntegrityState.broken;
+    final ubs = escopo.ubsId;
+
+    if (ubs == null) {
+      return AdminAuditChainStatus(
+        state: estado,
+        checkedRows: v.checked,
+        headSequence: estado == AuditIntegrityState.verified ? v.checked : null,
+        firstBrokenSequence: quebrada ? v.brokenAtSequence : null,
+        brokenInScope: quebrada ? true : null,
+        reasonCode: v.ok ? null : v.reasonCode,
+        verifiedAt: retrato.at,
+      );
+    }
+
+    if (!quebrada) {
+      return AdminAuditChainStatus(
+        state: estado,
+        reasonCode: v.ok ? null : v.reasonCode,
+        verifiedAt: retrato.at,
+      );
+    }
+
+    bool? noEscopo;
+    final seq = v.brokenAtSequence;
+    if (seq == null) {
+      noEscopo = false;
+    } else {
+      try {
+        noEscopo = await store.auditRowInUbs(seq, ubs);
+      } catch (_) {
+        // Pertencimento desconhecido: continua `broken`, sem sequence.
+        noEscopo = null;
+      }
+    }
+    return AdminAuditChainStatus(
+      state: estado,
+      firstBrokenSequence: noEscopo == true ? seq : null,
+      brokenInScope: noEscopo,
+      reasonCode: noEscopo == true ? v.reasonCode : null,
+      verifiedAt: retrato.at,
+    );
+  }
+}
+
+/// Aplica [_prazo] a cada leitura de lote: estourar lança
+/// `TimeoutException`, que o verificador já trata como `databaseError`.
+class _ReaderComPrazo implements AuditChainReader {
+  _ReaderComPrazo(this._interno, this._prazo);
+
+  final AuditChainReader _interno;
+  final Duration _prazo;
+
+  @override
+  Future<List<AuditChainEntry>> readBatch({
+    required int afterSequence,
+    required int limit,
+  }) => _interno
+      .readBatch(afterSequence: afterSequence, limit: limit)
+      .timeout(_prazo);
+
+  @override
+  Future<AuditChainEntry?> entryAt(int sequence) =>
+      _interno.entryAt(sequence).timeout(_prazo);
+}

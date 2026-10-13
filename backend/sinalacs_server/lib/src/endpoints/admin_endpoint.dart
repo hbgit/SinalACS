@@ -89,6 +89,17 @@ class AdminEndpoint extends AuthenticatedEndpoint {
         beforeSequence: beforeSequence,
       );
 
+  /// Verificação global da cadeia de `audit_logs` (#45, D3/D9). Só `verified`
+  /// é íntegra; o coordenador não recebe `sequence` nem motivo de quebra fora
+  /// da UBS dele. Auditada antes de verificar; single-flight e cache de 60 s
+  /// por processo. Ver `AuditChainStatusService`.
+  Future<AdminAuditChainStatus> verifyAuditChain(
+    Session session, {
+    required String accessToken,
+  }) => AlertRuntime.instance
+      .auditChainStatusServiceFor(session)
+      .verify(authenticate(accessToken));
+
   /// Pedidos do titular no escopo de quem chama, prazo mais próximo primeiro.
   /// Nunca traz o texto do pedido nem a nota.
   Future<AdminDataSubjectRequestPage> dataSubjectRequests(
