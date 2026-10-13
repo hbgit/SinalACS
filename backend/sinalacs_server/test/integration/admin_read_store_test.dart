@@ -1285,6 +1285,29 @@ void main() {
         );
       });
 
+      test(
+        'result com ":" (escalated:no_ack_timeout) filtra por igualdade',
+        () async {
+          await linha(
+            13,
+            _adminId,
+            'write',
+            'admin_alert',
+            'escalated:no_ack_timeout',
+            t0 + h * 11,
+          );
+          expect(
+            await nums(AdminAuditFilter(result: 'escalated:no_ack_timeout')),
+            [13],
+          );
+          expect(
+            await nums(AdminAuditFilter(result: 'escalated')),
+            isEmpty,
+            reason: 'igualdade, não prefixo',
+          );
+        },
+      );
+
       test('busca nunca casa ipHash nem entryHash', () async {
         expect(await nums(AdminAuditFilter(search: 'cafe')), isEmpty);
       });

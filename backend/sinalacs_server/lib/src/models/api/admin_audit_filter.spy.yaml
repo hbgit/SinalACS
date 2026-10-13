@@ -6,7 +6,8 @@
 ### - `actorEnrollmentId`: matrícula do autor (ACS ou staff), igualdade sem
 ###   caixa, 1 a 32 caracteres. Paciente não é filtrável por identificador.
 ### - `actionType`: `read`, `write`, `login` ou `export`.
-### - `resourceType`, `result`: `^[a-z_]{1,64}$`, igualdade.
+### - `resourceType`, `result`: `^[a-z0-9_:]{1,64}$`, igualdade (o `:` e os
+###   dígitos cobrem resultados como `escalated:no_ack_timeout`, da #44).
 ### - `from`/`to`: UTC; `from` inclusivo, `to` exclusivo, `from < to` e janela
 ###   de no máximo 366 dias quando os dois vêm.
 ### - `search`: 2 a 64 caracteres; casa só o início da matrícula do autor,

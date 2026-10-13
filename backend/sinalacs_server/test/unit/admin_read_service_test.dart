@@ -268,6 +268,11 @@ void main() {
       'resourceType vazio': AdminAuditFilter(resourceType: ''),
       'resourceType com 65': AdminAuditFilter(resourceType: 'a' * 65),
       'result com espaço': AdminAuditFilter(result: 'denied x'),
+      'result com %': AdminAuditFilter(result: 'escalated:%'),
+      'result com ;': AdminAuditFilter(result: 'denied;drop'),
+      'result com maiúscula': AdminAuditFilter(result: 'Escalated:no_ack'),
+      'resourceType com espaço': AdminAuditFilter(resourceType: 'admin alert'),
+      'resourceType com ;': AdminAuditFilter(resourceType: 'alert;'),
       'result com aspas': AdminAuditFilter(result: "x' OR '1'='1"),
       'actionType desconhecida': AdminAuditFilter(actionType: 'delete'),
       'from == to': AdminAuditFilter(from: de, to: de),
@@ -356,6 +361,23 @@ void main() {
         expect(store.ultimoFiltro, same(filtro));
         expect(store.ultimoLimit, 20);
         expect(store.ultimoEscopo!.ubsId, _ubsDoCoordenador);
+      },
+    );
+
+    test(
+      'resourceType/result aceitam dígito e ":" (ex.: escalated:no_ack_timeout)',
+      () async {
+        final f = AdminAuditFilter(
+          resourceType: 'admin_alert',
+          result: 'escalated:no_ack_timeout',
+        );
+        await servico.auditLogs(admin, filter: f);
+        expect(store.ultimoFiltro, same(f));
+        await servico.auditLogs(
+          admin,
+          filter: AdminAuditFilter(result: 'already_escalated:x1'),
+        );
+        expect(store.chamadas, 2);
       },
     );
 

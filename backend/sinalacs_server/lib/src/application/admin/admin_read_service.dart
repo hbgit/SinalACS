@@ -160,7 +160,7 @@ class AdminReadService {
   /// Janela máxima entre `from` e `to` (D1).
   static const janelaMaximaDoFiltro = Duration(days: 366);
 
-  static final _rotulo = RegExp(r'^[a-z_]{1,64}$');
+  static final _rotulo = RegExp(r'^[a-z0-9_:]{1,64}$');
   static const _filtroInvalido = 'Filtro de auditoria inválido.';
 
   /// Regras do [AdminAuditFilter] (D1/D2), puras e públicas para a exportação
