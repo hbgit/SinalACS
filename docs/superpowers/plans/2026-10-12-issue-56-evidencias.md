@@ -205,3 +205,30 @@ Respostas às 6 perguntas:
 4. Política aplicada (`lib/src/runtime/uncaught_error_policy.dart`): `isTransientIoError` (a mesma lista do dispatcher, agora compartilhada) -> registra tipo (+errno) e mantém vivo; qualquer outro -> registra só o tipo e `exit(70)`. Verificado com a sonda: `SocketException` errno 104 -> processo vivo, rc=0; `StateError` -> `[processo] Erro assíncrono não tratado (StateError); encerrando.` e rc=70, sem texto da mensagem nem pilha.
 5. Log: prefixo `[processo]` (o dispatcher usa `MQTT`), só tipo e errno (VAZ-01), coberto por teste de unidade.
 6. Risco ao Serverpod: `exit()` não depende de zona; sinais (`ProcessSignal.watch`) e o shutdown do Serverpod não passam por erro de zona; `args` seguem iguais. `dart compile exe bin/main.dart` compila. Não subi o servidor completo (a stack Docker de dev não foi tocada); a verificação do boot completo fica para a E2E da Tarefa 10b/11. Decisão: **aplicada**.
+
+### Tarefa 10b: cenários do broker com alerta vermelho real (`mqtt_resiliencia_e2e.sh`)
+
+Logs completos: `docs/superpowers/plans/2026-10-12-issue-56-e2e.log` (no disco; `*.log` é ignorado pelo git, por isso não versionado). Stack de e2e (banco `sinalacs_e2e`), imagem com a correção da Tarefa 7 e a zona global da Tarefa 10 (45e4a98). O alerta é criado pelo login OTP real do paciente `main` da fixture (`apps/patient/tool/live_check.dart`). Depois de restaurar: (a) `RestartCount`/`StartedAt`; (b) `alert_outbox."publishedAt"` (só contagem); (c) entrega pelo broker a um assinante QoS 1 de sessão persistente (`mosquitto_sub` dentro do contêiner do broker, usuário/certificado do backend). O card no app do ACS **não** foi verificado: o ACL só libera ao `acs-area-12` a microárea do seed de dev, e a das fixtures é sorteada.
+
+**Boot real com a zona global (pendência da Tarefa 10):** `docker compose up -d --build serverpod` com 45e4a98 -> `running healthy`, `rc=0`, `GET https://localhost/` -> 200, migrações e webserver normais, backend conectado ao broker.
+
+| Execução | Cenário | Processo (a) | Outbox (b) | Broker entregou (c) | `published` na resposta |
+|---|---|---|---|---|---|
+| 1 | base | vivo, rc=0 | 1 (1 tentativa) | sim | true |
+| 1 | B (stop, alerta, start) | vivo, rc=0, mesmo StartedAt | 1 (3 tentativas) | sim | false |
+| 1 | C_INICIO (+49 s de partição) | vivo, rc=0 | 1 (1 tentativa) | **não** | **true** |
+| 1 | C_FIM (+114 s de partição) | vivo, rc=0 | 1 (1 tentativa) | **não** | **true** |
+| 2 | base | vivo, rc=0 | 1 | sim | true |
+| 2 | B | vivo, rc=0 | 1 (3 tentativas) | sim | false |
+| 2 | C_INICIO / C_FIM | vivo, rc=0 | 1 / 1 | **não / não** | **true / true** |
+| 2 | A (pausa 120 s, alerta logo após o unpause; diagnóstico) | vivo, rc=0 | 1 (2 tentativas) | sim | false |
+
+(O `ATRASO_C` de 5 s virou ~49 s porque o login do C_INICIO esperou o intervalo de 60 s do OTP desde o login do B.)
+
+**H5 reproduzida no Docker/TLS, em cenário realista (partição de rede), 4/4 alertas perdidos.** No broker, o cliente `sinalacs-backend-*` caiu por `exceeded timeout` ~45 s depois da partição (1,5 x keepalive de 30 s). O backend **não** percebeu a queda durante toda a partição (100 s + espera do login): só detectou ao religar a rede, com `SocketException errno=104` (o broker respondeu RST aos segmentos retransmitidos), e reconectou ~5 s depois. Nesse intervalo `publish()` aceitou as duas mensagens, `createRedAlert` respondeu `published=true`, o outbox carimbou `publishedAt` e nada foi reentregue após a reconexão: o assinante esperou 120 s sem receber. O alerta continua `pending` no banco (visível ao escalonamento da #44), mas a entrega MQTT ao ACS se perdeu em silêncio (INV-03).
+
+Achado novo, que agrava H5: a janela "socket morto, estado connected" não é de milissegundos. O `mqtt_client` envia PINGREQ a cada 30 s, mas não derruba a conexão quando o PINGRESP não chega (o dispatcher não configura timeout de resposta do ping; a opção do pacote, `disconnectOnNoResponsePeriod`, existe na 10.11.11 com padrão 0 = desligada, e não é usada), então numa partição sem FIN/RST o backend fica "conectado" até a rede voltar ou o TCP desistir. A correção proposta na Tarefa 9 (aguardar PUBACK com prazo antes de `markPublished`) fecha a perda; um timeout de PINGRESP reduziria a janela. Nenhuma das duas foi aplicada (decisão do usuário).
+
+B e A passaram: com FIN/RST imediato (B) ou erro de escrita no unpause (A, `errno=32`), o dispatcher marca a queda antes do `publish`, o outbox registra a falha (`MqttUnavailableException`) e reentrega após a reconexão. Em nenhuma execução o processo caiu ou reiniciou (`rc=0`, `StartedAt` constante em cada execução).
+
+`admin_alertas_escalonar_e2e.sh --com-regressao-offline` (emulator-5554, sem pausa do backend, agora exigindo também `RestartCount 0`): verde. Painel atualizado pelo pulso em 29,9 s, botão 8,3 s após o prazo, Traefik pausado 120 s com o backend vivo e sem reinício, asserts do banco e cadeia de auditoria ok (21 linhas), e a jornada offline do ACS (`acs_full_e2e.sh`, 5 testes) verde.
