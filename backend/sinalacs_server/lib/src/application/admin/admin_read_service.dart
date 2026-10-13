@@ -18,10 +18,23 @@ typedef AlertsPulseCounts = ({int overdueRed, DateTime? maxChangedAt});
 /// servidor vê ([seal]: campos da cadeia e `entryHash` da `sequence - 1`).
 /// Interno: não é modelo `.spy.yaml`, não serializa, não sai do servidor.
 class AdminAuditRow {
-  const AdminAuditRow({required this.entry, required this.seal});
+  const AdminAuditRow({
+    required this.entry,
+    required this.seal,
+    this.actorRole,
+    this.actorEnrollmentId,
+  });
 
   final AdminAuditEntry entry;
   final AuditSealInput seal;
+
+  /// Papel do autor (`users.role`), nulo se o autor não existe mais. Só para
+  /// a exportação (#45, Task 10: colunas `autor`/`papel_autor` de D6).
+  final String? actorRole;
+
+  /// Matrícula do autor (ACS ou staff), nula para paciente. Só para a
+  /// exportação; a tela continua com o `userLabel` pronto.
+  final String? actorEnrollmentId;
 }
 
 /// Página do store da auditoria, por keyset (mesmo contrato de

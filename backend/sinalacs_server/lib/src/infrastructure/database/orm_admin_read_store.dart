@@ -229,7 +229,6 @@ class OrmAdminReadStore implements AdminReadStore, AuditChainScopeStore {
     required int limit,
     int? beforeSequence,
   }) async {
-    final busca = filter?.search;
     // Colunas 0–8: o que a tela pode ver. 9–13: só para o selo interno
     // (nunca vão para o AdminAuditEntry).
     final rows = await _session().db.unsafeQuery(
@@ -240,42 +239,13 @@ class OrmAdminReadStore implements AdminReadStore, AuditChainScopeStore {
              p."entryHash"
       FROM audit_logs l
       LEFT JOIN audit_logs p ON p.sequence = l.sequence - 1
-      LEFT JOIN users u ON u.id = l."userId"
-      LEFT JOIN acs ON acs.id = l."userId"
-      LEFT JOIN staff_accounts s ON s.id = l."userId"
-      WHERE (@before::bigint IS NULL OR l.sequence < @before::bigint)
-        AND (@ubs::uuid IS NULL OR l."userId" IN (
-              SELECT u.id FROM users u
-              JOIN micro_areas m ON m.id = u."microAreaId"
-              WHERE m."ubsId" = @ubs::uuid))
-        AND (@action::text IS NULL OR l."actionType" = @action::text)
-        AND (@rtype::text IS NULL OR l."resourceType" = @rtype::text)
-        AND (@result::text IS NULL OR l.result = @result::text)
-        AND (@from::timestamp IS NULL OR l."timestamp" >= @from::timestamp)
-        AND (@to::timestamp IS NULL OR l."timestamp" < @to::timestamp)
-        AND (@role::text IS NULL OR u.role = @role::text)
-        AND (@enroll::text IS NULL
-             OR lower(COALESCE(acs."enrollmentId", s."enrollmentId"))
-                = lower(@enroll::text))
-        AND (@q::text IS NULL OR (
-                COALESCE(acs."enrollmentId", s."enrollmentId", '')
-                  ILIKE @q::text || '%' ESCAPE '\\'
-             OR l."resourceType" ILIKE '%' || @q::text || '%' ESCAPE '\\'
-             OR l.result ILIKE '%' || @q::text || '%' ESCAPE '\\'))
+      $_juncoesDaAuditoria
+      $_filtroDaAuditoria
       ORDER BY l.sequence DESC
       LIMIT @limit
       ''',
       parameters: QueryParameters.named({
-        'before': beforeSequence,
-        'ubs': scope.ubsId,
-        'action': filter?.actionType,
-        'rtype': filter?.resourceType,
-        'result': filter?.result,
-        'from': filter?.from?.toUtc(),
-        'to': filter?.to?.toUtc(),
-        'role': filter?.actorRole?.name,
-        'enroll': filter?.actorEnrollmentId,
-        'q': busca == null ? null : escaparLike(busca),
+        ..._parametrosDaAuditoria(scope, filter, beforeSequence),
         'limit': limit + 1,
       }),
     );
@@ -314,12 +284,94 @@ class OrmAdminReadStore implements AdminReadStore, AuditChainScopeStore {
             ),
             previousEntryHash: r[13] as String?,
           ),
+          actorRole: r[3] as String?,
+          actorEnrollmentId: r[4] as String?,
         ),
     ];
     return AdminAuditRowPage(
       items: items,
       nextBeforeSequence: haMais ? items.last.entry.sequence : null,
     );
+  }
+
+  /// FROM e WHERE da trilha de auditoria: escopo pelo autor, keyset e as 8
+  /// condições do [AdminAuditFilter], todas `@p IS NULL OR …` (#45). Um só
+  /// texto para a página ([auditLogs]) e para a contagem da exportação
+  /// ([auditLogsCount]): as duas nunca divergem sobre o que é "o recorte".
+  /// Usa os aliases `l` (`audit_logs`), `u` (`users`), `acs` e `s`
+  /// (`staff_accounts`) declarados por [_juncoesDaAuditoria].
+  static const _juncoesDaAuditoria = '''
+      LEFT JOIN users u ON u.id = l."userId"
+      LEFT JOIN acs ON acs.id = l."userId"
+      LEFT JOIN staff_accounts s ON s.id = l."userId"''';
+
+  static const _filtroDaAuditoria = r'''WHERE (@before::bigint IS NULL OR l.sequence < @before::bigint)
+        AND (@ubs::uuid IS NULL OR l."userId" IN (
+              SELECT u.id FROM users u
+              JOIN micro_areas m ON m.id = u."microAreaId"
+              WHERE m."ubsId" = @ubs::uuid))
+        AND (@action::text IS NULL OR l."actionType" = @action::text)
+        AND (@rtype::text IS NULL OR l."resourceType" = @rtype::text)
+        AND (@result::text IS NULL OR l.result = @result::text)
+        AND (@from::timestamp IS NULL OR l."timestamp" >= @from::timestamp)
+        AND (@to::timestamp IS NULL OR l."timestamp" < @to::timestamp)
+        AND (@role::text IS NULL OR u.role = @role::text)
+        AND (@enroll::text IS NULL
+             OR lower(COALESCE(acs."enrollmentId", s."enrollmentId"))
+                = lower(@enroll::text))
+        AND (@q::text IS NULL OR (
+                COALESCE(acs."enrollmentId", s."enrollmentId", '')
+                  ILIKE @q::text || '%' ESCAPE '\'
+             OR l."resourceType" ILIKE '%' || @q::text || '%' ESCAPE '\'
+             OR l.result ILIKE '%' || @q::text || '%' ESCAPE '\'))''';
+
+  static Map<String, Object?> _parametrosDaAuditoria(
+    AdminScope scope,
+    AdminAuditFilter? filter,
+    int? beforeSequence,
+  ) {
+    final busca = filter?.search;
+    return {
+      'before': beforeSequence,
+      'ubs': scope.ubsId,
+      'action': filter?.actionType,
+      'rtype': filter?.resourceType,
+      'result': filter?.result,
+      'from': filter?.from?.toUtc(),
+      'to': filter?.to?.toUtc(),
+      'role': filter?.actorRole?.name,
+      'enroll': filter?.actorEnrollmentId,
+      'q': busca == null ? null : escaparLike(busca),
+    };
+  }
+
+  /// Quantas linhas o recorte de [auditLogs] teria (mesmo escopo, filtro e
+  /// keyset), **limitado a [cap]**: a contagem para em `cap` linhas em vez de
+  /// varrer a janela inteira (#45, Task 10: o teto da exportação só precisa
+  /// saber se passou de `maxRows`). Devolve `min(total, cap)`.
+  Future<int> auditLogsCount(
+    AdminScope scope, {
+    AdminAuditFilter? filter,
+    int? beforeSequence,
+    required int cap,
+  }) async {
+    if (cap < 1) throw ArgumentError.value(cap, 'cap', 'deve ser >= 1');
+    final rows = await _session().db.unsafeQuery(
+      '''
+      SELECT count(*) FROM (
+        SELECT 1
+        FROM audit_logs l
+        $_juncoesDaAuditoria
+        $_filtroDaAuditoria
+        LIMIT @cap
+      ) recorte
+      ''',
+      parameters: QueryParameters.named({
+        ..._parametrosDaAuditoria(scope, filter, beforeSequence),
+        'cap': cap,
+      }),
+    );
+    return rows.single[0] as int;
   }
 
   /// Pertencimento de uma linha de `audit_logs` à UBS (#45, Task 6): a mesma

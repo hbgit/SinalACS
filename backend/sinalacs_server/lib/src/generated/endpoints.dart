@@ -280,6 +280,31 @@ class Endpoints extends _i1.EndpointDispatch {
                     accessToken: params['accessToken'],
                   ),
         ),
+        'exportAuditLogs': _i1.MethodConnector(
+          name: 'exportAuditLogs',
+          params: {
+            'accessToken': _i1.ParameterDescription(
+              name: 'accessToken',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'filter': _i1.ParameterDescription(
+              name: 'filter',
+              type: _i1.getType<_i14.AdminAuditFilter>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async =>
+                  (endpoints['admin'] as _i2.AdminEndpoint).exportAuditLogs(
+                    session,
+                    accessToken: params['accessToken'],
+                    filter: params['filter'],
+                  ),
+        ),
         'dataSubjectRequests': _i1.MethodConnector(
           name: 'dataSubjectRequests',
           params: {

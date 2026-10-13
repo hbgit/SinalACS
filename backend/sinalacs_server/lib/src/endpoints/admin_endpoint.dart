@@ -100,6 +100,20 @@ class AdminEndpoint extends AuthenticatedEndpoint {
       .auditChainStatusServiceFor(session)
       .verify(authenticate(accessToken));
 
+  /// Exportação da trilha de auditoria em CSV (#45, D5–D8). **Só o
+  /// administrador**; o filtro exige `from` e `to` (janela ≤ 366 dias); teto
+  /// de `AuditExportService.maxRows` linhas (acima: `refused_limit` e
+  /// `AdminInvalidRequestException`). O recorte é fixado antes do evento
+  /// `export`, que entra na mesma transação do registro em `audit_exports` —
+  /// o arquivo nunca contém a própria exportação. Ver `AuditExportService`.
+  Future<AdminAuditExport> exportAuditLogs(
+    Session session, {
+    required String accessToken,
+    required AdminAuditFilter filter,
+  }) => AlertRuntime.instance
+      .auditExportServiceFor(session)
+      .export(authenticate(accessToken), filter);
+
   /// Pedidos do titular no escopo de quem chama, prazo mais próximo primeiro.
   /// Nunca traz o texto do pedido nem a nota.
   Future<AdminDataSubjectRequestPage> dataSubjectRequests(

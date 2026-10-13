@@ -1,0 +1,24 @@
+### Resultado de `admin.exportAuditLogs` (#45, D5–D8). Só o administrador
+### exporta. O arquivo é o CSV de `AuditCsv` (colunas fixas de D6: nunca
+### `userId`, `resourceId`, `ipHash`, `previousHash`, `entryHash` nem segredo).
+### - `fileName`: `auditoria_<from>_<to>.csv` em UTC compacto; sem dado pessoal.
+### - `csv`: o conteúdo (UTF-8, RFC 4180, CRLF), gerado em memória no servidor.
+### - `rowCount`, `firstSequence`, `lastSequence`: o recorte exportado (as duas
+###   sequences são nulas com recorte vazio). O próprio evento `export` fica
+###   sempre FORA do arquivo (`sequence` maior que `lastSequence`).
+### - `contentSha256`: SHA-256 (hex minúsculo) dos bytes UTF-8 de `csv`, o mesmo
+###   gravado em `audit_exports`.
+### - `chainState`: estado da verificação global da cadeia no momento da
+###   exportação (cache de 60 s); qualquer coisa diferente de `verified` é
+###   registrada e devolvida como está.
+### - `generatedAt`: instante da exportação (UTC), o `requestedAt` gravado.
+class: AdminAuditExport
+fields:
+  fileName: String
+  csv: String
+  rowCount: int
+  firstSequence: int?
+  lastSequence: int?
+  contentSha256: String
+  chainState: AuditIntegrityState
+  generatedAt: DateTime

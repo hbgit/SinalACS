@@ -166,6 +166,14 @@ class AuditChainStatusService {
     return _projetar(retrato, escopo);
   }
 
+  /// Só o estado global (mesmo single-flight e cache de 60 s de [verify]),
+  /// **sem** papel, escopo nem linha de auditoria própria: para quem já
+  /// autorizou e audita o ato maior — a exportação (#45, Task 10), que grava o
+  /// estado em `audit_exports.chainState`. Nunca lança (ver
+  /// [_verificarCadeia]).
+  Future<AuditIntegrityState> currentState() async =>
+      stateOf((await _resultadoGlobal()).verification);
+
   /// Estado de integridade de um resultado do verificador (D3). Público e
   /// puro para o teste de propriedade: só `ok` com pelo menos uma linha é
   /// `verified`.

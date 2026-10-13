@@ -4,11 +4,13 @@ import 'package:sinalacs_server/src/application/admin/admin_monitoring_service.d
 import 'package:sinalacs_server/src/application/admin/admin_read_service.dart';
 import 'package:sinalacs_server/src/application/admin/alert_escalation_service.dart';
 import 'package:sinalacs_server/src/application/admin/audit_chain_status_service.dart';
+import 'package:sinalacs_server/src/application/admin/audit_export_service.dart';
 import 'package:sinalacs_server/src/application/admin/data_subject_case_service.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_data_subject_case_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_admin_account_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_admin_read_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_audit_checkpoint_store.dart';
+import 'package:sinalacs_server/src/infrastructure/database/orm_audit_export_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_alert_escalation_store.dart';
 import 'package:meta/meta.dart';
 import 'package:serverpod/serverpod.dart';
@@ -268,6 +270,31 @@ class AlertRuntime {
           level: LogLevel.warning,
         ),
         cache: _auditChainStatusCache,
+      );
+
+  /// `admin.exportAuditLogs` (#45, Task 10), para uma requisição. A
+  /// exportação e o evento `export` gravam na MESMA transação
+  /// (`OrmAuditTrail.recordInTransaction`, mesmo `AUDIT_CHAIN_SECRET`); as
+  /// recusas e falhas usam a trilha comum. O estado da cadeia vem da
+  /// verificação global do processo (cache de 60 s), sem uma segunda linha
+  /// de auditoria. A falha vai para o log só com o TIPO do erro: nunca
+  /// mensagem do banco, linha ou trecho do CSV.
+  AuditExportService auditExportServiceFor(Session session) =>
+      AuditExportService(
+        store: OrmAuditExportStore(
+          session: () => session,
+          appendAudit: OrmAuditTrail(
+            session: () => session,
+            chainSecret: config.auditChainSecret,
+          ).recordInTransaction,
+        ),
+        audit: auditTrailFor(session),
+        auditChain: AuditChain(secret: config.auditChainSecret),
+        chainState: () => auditChainStatusServiceFor(session).currentState(),
+        onFailure: (erro) => session.log(
+          'Falha na exportação da auditoria (${erro.runtimeType}).',
+          level: LogLevel.warning,
+        ),
       );
 
   /// Sessões de monitoramento do backoffice (#44, D5): `userId → último
