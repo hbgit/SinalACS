@@ -49,7 +49,7 @@ restaura() {
 }
 trap restaura EXIT
 
-estado() { docker inspect -f '{{.State.Status}} exit={{.State.ExitCode}} fin={{.State.FinishedAt}} rc={{.RestartCount}}' "$BACK"; }
+estado() { docker inspect -f '{{.State.Status}} exit={{.State.ExitCode}} fin={{.State.FinishedAt}} rc={{.RestartCount}} started={{.State.StartedAt}}' "$BACK"; }
 
 # Primeira conexão do backend ao broker depois de $1 (epoch, s); imprime segundos desde $1 ou "n/a".
 reconectou_em() {

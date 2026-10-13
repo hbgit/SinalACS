@@ -148,4 +148,18 @@ Para restaurar: após os testes o broker foi religado com `--alias mosquitto` (p
 - Revisão (rodada 1): erro depois de `close()` não chama `onFatal`; uma queda na janela da troca de cliente, com o laço de reconexão ainda ativo, zera `_client` e o laço tenta de novo (antes saía com um cliente morto).
 - Ainda pendente: reexecução dos cenários A e C no Docker com TLS (o gate real).
 
+## Tarefa 7v: re-execução com a correção
+
+Imagem reconstruída com `docker compose up -d --build serverpod` (HEAD `85d802d`; imagem criada às 21:09:32 -04, depois do commit de 21:05; container recriado, saudável, e o Mosquitto registrou o `sinalacs-backend-*` da nova instância). `StartedAt` do backend: `2026-10-13T01:09:36Z`, **idêntico antes e depois de todas as execuções**; `RestartCount=0`, `ExitCode=0`, `State.Status=running` em todas as 11 execuções (o script não precisou de `docker start`). Nenhum `crash.log` foi gerado. Nenhuma execução derrubou o processo.
+
+| Cenário | Antes (sem a correção) | Depois (7v) | Reconexão ao broker (novo `sinalacs-backend-*`) | stderr do backend (sanitizado) |
+|---|---|---|---|---|
+| A: `docker pause` do backend 120 s | queda 5/5 (exit 255) | **0/5 quedas**, vivo 5/5 | 5/5, ~2 s após o `unpause` (122,1 s contados desde o `pause`) | 4/5: `Erro de E/S no cliente MQTT (SocketException, errno=32); reconectando.`; 1/5 (A2): nenhuma linha de erro |
+| C: broker fora da rede 100 s | queda 3/3 | **0/3 quedas**, vivo 3/3 | 3/3: 103,8 s, 108,9 s, 105,0 s desde a desconexão | 3/3: `... (SocketException, errno=104); reconectando.` |
+| B: `docker restart` do Mosquitto | sem queda 0/3 | **0/3 quedas**, vivo 3/3 | 3/3, 2,0 s após o início do restart | nenhuma linha de erro |
+
+VAZ-01: nos logs do backend de todas as execuções só aparecem tipo e errno; busca por IP, `:8883`, `mosquitto`, `localhost` e `payload` nos `*.back.log` sem nenhuma ocorrência. Comando: `scripts/qa/mqtt_resiliencia_e2e.sh A 5`, `C 3`, `B 3` (o script passou a imprimir também `started=` em cada RESULT).
+
+Conclusão: a correção da Tarefa 7 resolve A e C na stack Docker real com TLS; B segue sem queda. Limite: não há criação de alerta durante a interrupção (Tarefa 10).
+
 ## Regressão final
