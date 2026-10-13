@@ -32,13 +32,18 @@
 #       igual ao de antes do cenário;
 #   (b) a linha do `alert_outbox` daquele alerta chega a `publishedAt IS NOT
 #       NULL` em até ESPERA_PUBLICACAO s (padrão 120); só contagens via psql;
-#   (c) o broker ENTREGA a mensagem daquele alerta a um assinante QoS 1 de
-#       sessão persistente no tópico da microárea das fixtures (mosquitto_sub
-#       dentro do container do broker, com o usuário/certificado do backend;
-#       só o fato "recebido", nunca o payload). Isto prova a entrega pelo
-#       broker, que é mais do que o carimbo do outbox: com a lacuna H5 (o
-#       outbox marca publicado sem PUBACK — evidências, "Tarefa 9") o carimbo
-#       pode existir e a mensagem ter se perdido.
+#   (c) o broker ENTREGA a mensagem daquele alerta a UM assinante QoS 1 de
+#       sessão persistente (id fixo), iniciado ANTES dos alertas no container
+#       do broker, com o usuário/certificado do backend. Ele registra, para
+#       CADA mensagem recebida, só `hora alert_id` (sintético; nunca outro
+#       campo do payload) num arquivo; cada cenário confere que o seu
+#       alert_id aparece >= 1 vez e registra quantas (duplicata é reportada,
+#       não é falha). Um assinante `-C 1` por consulta engolia a mensagem do
+#       OUTRO alerta (o backoff do outbox entrega fora de ordem): ver
+#       evidências, "Tarefa 9b-v". O assinante é relançado depois do
+#       `docker stop` do B (o arquivo sobrevive ao stop/start). Prova a
+#       entrega pelo broker, mais do que o carimbo do outbox (lacuna H5: o
+#       outbox marcava publicado sem PUBACK).
 #   O CARD NO APP DO ACS NÃO É VERIFICADO AQUI: o ACL do broker só libera ao
 #   usuário do ACS (`acs-area-12`) o tópico da microárea do seed de
 #   desenvolvimento, e as fixtures de e2e sorteiam a microárea a cada execução.
@@ -85,6 +90,9 @@ mkdir -p "$ART"
 INTERVALO_OTP=65
 SUB_ID="qa-resiliencia-$$"
 OPTS=/tmp/qa-resiliencia-$$.opts   # dentro do container do broker
+SUB_SH=/tmp/qa-resiliencia-$$.sh   # laço do assinante (idem)
+SUB_LOG=/tmp/qa-resiliencia-$$.log # `hora alert_id` de cada entrega (idem)
+RESTAURADO_EM=0                    # epoch da restauração do cenário corrente
 
 relay_pid=""
 rede=""
@@ -97,8 +105,9 @@ cleanup() {
   [[ "$(docker inspect -f '{{.State.Running}}' "$BROKER" 2>/dev/null)" == true ]] || docker start "$BROKER" >/dev/null 2>&1
   # Sessão persistente do assinante: um CONNECT com sessão limpa a descarta.
   if [[ -n "$rede" ]]; then
+    parar_assinante
     mqtt_sub -i "$SUB_ID" -t 'sinalacs/v1/qa/fim' -E >/dev/null 2>&1
-    docker exec "$BROKER" rm -f "$OPTS" >/dev/null 2>&1
+    docker exec "$BROKER" rm -f "$OPTS" "$SUB_SH" "$SUB_LOG" >/dev/null 2>&1
   fi
   [[ -n "$relay_pid" ]] && kill "$relay_pid" 2>/dev/null
   rm -f .e2e/fixtures.json   # primeiro: tem as senhas sintéticas, mesmo se o down falhar
@@ -158,9 +167,35 @@ mqtt_sub() {
     "$@"
 }
 
-# Cria a sessão persistente (QoS 1) do assinante: o broker guarda para ela o
-# que for publicado no tópico enquanto ela está desconectada.
-mqtt_sub -c -i "$SUB_ID" -q 1 -t "$topico" -E >/dev/null
+# Assinante persistente: um laço no container do broker (reconecta se o
+# mosquitto_sub sair) que grava `hora alert_id` de CADA mensagem. Só o
+# alert_id é extraído; nenhum outro campo do payload chega ao arquivo.
+parar_assinante() {
+  docker exec "$BROKER" pkill -f "[q]a-resiliencia-$$" >/dev/null 2>&1 || true
+}
+iniciar_assinante() {
+  parar_assinante
+  mqtt_sub -c -i "$SUB_ID" -q 1 -t "$topico" -E >/dev/null   # cria a sessão e reescreve $OPTS
+  docker exec -i "$BROKER" sh -c "cat > $SUB_SH" <<EOF
+while :; do
+  mosquitto_sub -o $OPTS -h localhost -p 8883 \\
+    --cafile /mosquitto/certs/ca.crt --cert /mosquitto/certs/backend.crt --key /mosquitto/certs/backend.key \\
+    -c -i $SUB_ID -q 1 -t $topico -F '%p' 2>/dev/null |
+  while IFS= read -r l; do
+    case "\$l" in *'"alert_id":"'*) r=\${l#*'"alert_id":"'}; echo "\$(date +%s) \${r%%\"*}" >> $SUB_LOG ;; esac
+  done
+  sleep 1
+done
+EOF
+  docker exec -d "$BROKER" sh "$SUB_SH"
+  sleep 3   # conecta antes de o primeiro alerta existir
+}
+iniciar_assinante
+
+# Entregas registradas do alerta $1: "<vezes> <hora da primeira>".
+entregas_de() {
+  docker exec "$BROKER" sh -c "grep -F ' $1' $SUB_LOG 2>/dev/null | awk 'NR==1{p=\$1} END{print NR+0, p+0}'" 2>/dev/null || echo '0 0'
+}
 
 estado_back() { docker inspect -f '{{.State.Running}} {{.State.StartedAt}} rc={{.RestartCount}}' "$BACK" 2>/dev/null || true; }
 broker_no_ar() {
@@ -201,20 +236,29 @@ criar_alerta() { # <rótulo>
   echo "  [script] alerta $rotulo criado ($(date +%T)): $ALERTA_ID publicado_na_resposta=$ALERTA_PUBLICADO"
 }
 
-# (c) o broker entrega a mensagem do alerta $1 ao assinante (até ESPERA_PUBLICACAO s).
+# (c) o broker entregou a mensagem do alerta $1 ao assinante persistente
+# (>= 1 vez, até ESPERA_PUBLICACAO s). Define ENTREGAS e ATRASO_ENTREGA (s
+# depois de RESTAURADO_EM).
 recebido_no_broker() {
-  local id=$1 fim msg
+  local id=$1 fim r primeira
+  ENTREGAS=0; ATRASO_ENTREGA=n/a
   fim=$(( $(date +%s) + ESPERA_PUBLICACAO ))
-  while (( $(date +%s) < fim )); do
-    msg="$(mqtt_sub -c -i "$SUB_ID" -q 1 -t "$topico" -C 1 -W 20 2>/dev/null || true)"
-    [[ "$msg" == *"\"alert_id\":\"$id\""* ]] && return 0
+  while :; do
+    r="$(entregas_de "$id")"
+    ENTREGAS=${r%% *}; primeira=${r##* }
+    if (( ENTREGAS >= 1 )); then
+      ATRASO_ENTREGA=$(( primeira - ${RESTAURADO_EM%.*} ))
+      return 0
+    fi
+    (( $(date +%s) < fim )) || return 1
+    sleep 2
   done
-  return 1
 }
 
 falhas=()
 resultados=()
 conferir() { # <rótulo> <alertId> <estado antes> <t0 epoch>
+  ENTREGAS=0; ATRASO_ENTREGA=n/a
   local rotulo=$1 id=$2 antes=$3 t0=$4 depois="" ok=true publicado=0 tentativas recebido=nao pendente t
   # (a) mesmo processo: no ar, mesmo StartedAt, RestartCount 0 (espera até 30 s).
   for _ in $(seq 1 30); do
@@ -244,7 +288,7 @@ conferir() { # <rótulo> <alertId> <estado antes> <t0 epoch>
   fi
   docker logs -t --since "${t0%.*}" "$BACK" 2>&1 | sanitiza >"$ART/$rotulo.back.log" || true
   docker logs -t --since "${t0%.*}" "$BROKER" 2>&1 | sanitiza >"$ART/$rotulo.broker.log" || true
-  local linha="RESULT $rotulo ok=$ok backend=[$depois] outbox_publicado=$publicado tentativas=$tentativas alerta_pendente=$pendente recebido_no_broker=$recebido publicado_na_resposta=$ALERTA_PUBLICADO reconectou_apos=$(reconectou_em "$t0")s"
+  local linha="RESULT $rotulo ok=$ok backend=[$depois] outbox_publicado=$publicado tentativas=$tentativas alerta_pendente=$pendente recebido_no_broker=$recebido entregas=$ENTREGAS atraso_entrega_apos_restauracao=${ATRASO_ENTREGA}s publicado_na_resposta=$ALERTA_PUBLICADO reconectou_apos=$(reconectou_em "$t0")s"
   echo "$linha"
   resultados+=("$linha")
   [[ "$ok" == true ]] || falhas+=("$rotulo")
@@ -255,6 +299,7 @@ cenario_base() {
   local antes t0; echo "== base (sem interrupção)"
   antes="$(estado_back)"; t0=$(date +%s.%N)
   criar_alerta base || { falhas+=(base); return; }
+  RESTAURADO_EM=$ultimo_login
   conferir base "$ALERTA_ID" "$antes" "$t0"
 }
 
@@ -267,6 +312,8 @@ cenario_B() {
   docker start "$BROKER" >/dev/null
   broker_no_ar || echo "aviso: o broker não voltou em 30 s" >&2
   echo "  [script] broker de volta ($(date +%T))"
+  RESTAURADO_EM=$(date +%s)
+  iniciar_assinante   # a parada do broker matou o laço do assinante; o arquivo ficou
   [[ -n "$ALERTA_ID" ]] || { falhas+=(B); return; }
   conferir B "$ALERTA_ID" "$antes" "$t0"
 }
@@ -290,6 +337,7 @@ cenario_C() {
   echo "  durante: backend [$(estado_back)]"
   docker network connect --alias mosquitto --alias "$BROKER" "$rede" "$BROKER"
   echo "  [script] broker de volta à rede ($(date +%T))"
+  RESTAURADO_EM=$(date +%s)
   if [[ -n "$id_inicio" ]]; then ALERTA_PUBLICADO="$pub_inicio"; conferir C_INICIO "$id_inicio" "$antes" "$t0"; else falhas+=(C_INICIO); fi
   if [[ -n "$id_fim" ]]; then ALERTA_PUBLICADO="$pub_fim"; conferir C_FIM "$id_fim" "$antes" "$t0"; else falhas+=(C_FIM); fi
 }
@@ -301,6 +349,7 @@ cenario_A() {
   sleep "$PAUSA"
   docker unpause "$BACK" >/dev/null
   echo "  [script] backend despausado ($(date +%T))"
+  RESTAURADO_EM=$(date +%s)
   criar_alerta A || { falhas+=(A); return; }
   conferir A "$ALERTA_ID" "$antes" "$t0"
 }
@@ -312,6 +361,8 @@ if [[ "$com_pausa_do_backend" == true ]]; then cenario_A; fi
 
 echo "== resumo"
 printf '%s\n' "${resultados[@]}"
+echo "  entregas finais por alerta (assinante persistente; >1 = duplicata, não falha):"
+docker exec "$BROKER" sh -c "awk '{n[\$2]++} END{for(i in n) print \"    \" i, n[i]}' $SUB_LOG" 2>/dev/null || true
 echo "  (card no app do ACS: NÃO VERIFICADO por este script — ver cabeçalho)"
 if (( ${#falhas[@]} > 0 )); then
   echo "FALHOU: ${falhas[*]}" >&2

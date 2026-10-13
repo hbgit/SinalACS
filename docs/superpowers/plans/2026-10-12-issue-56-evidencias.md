@@ -286,3 +286,26 @@ Nenhuma duplicata. O broker log da execução 4 mostra 3 conexões do assinante 
 **A (pausa de 120 s do backend):** passou (`ok=true`), 1 alerta criado e 1 entregue (9 s após o unpause, 2 tentativas, `errno=32` na escrita), sem reinício. **B:** passou nas 4 execuções (3 tentativas, entregue ~15 s após o broker voltar). **base:** passou nas 4.
 
 Execuções: 1 a 4 acima. Uma 5ª, com o script alterado, foi abortada e o script revertido (o estado do repositório é o de 365e388). A stack de desenvolvimento foi restaurada (`docker compose up -d`: serverpod healthy, rc=0; broker na rede com os aliases `mosquitto`/`sinalacs-mosquitto`).
+
+#### Reexecução com assinante corrigido
+
+`recebido_no_broker()` foi reescrito: em vez de um `mosquitto_sub -C 1` por consulta (que consumia e confirmava a mensagem do OUTRO alerta), há UM assinante QoS 1 de sessão persistente (id fixo), iniciado antes dos alertas dentro do contêiner do broker, que grava só `hora alert_id` de CADA mensagem (nenhum outro campo do payload; VAZ-01). Cada cenário exige o seu `alert_id` >= 1 vez e registra a contagem (duplicata é reportada, não é falha). O laço morre com o `docker stop` do B e é relançado após o `docker start` (o arquivo sobrevive ao stop/start). Nenhuma expectativa foi afrouxada. Backend: imagem de 365e388 (criada antes da execução, `healthy`, `rc=0`).
+
+Fluxo padrão (base, B, C) 3 vezes; as 3 saíram com `EXIT 0` ("OK"). Em cada execução o backend manteve `RestartCount 0` e o mesmo `StartedAt` do começo ao fim (o `StartedAt` muda entre execuções porque `e2e_stack.sh up` recria o contêiner); 0 ocorrências de `Unhandled`/`[processo]` nos logs; nenhum IP, `:8883` ou `locationHash` nos `*.back.log`.
+
+| Execução | Alerta | Criado -> entregue | Vezes entregue | Atraso após a restauração | `createRedAlert.published` | Tentativas do outbox |
+|---|---|---|---|---|---|---|
+| 1 | base | 1 -> 1 | 1 | 1 s | true | 1 |
+| 1 | B | 1 -> 1 | 1 | 26 s | false | 4 |
+| 1 | C_INICIO | 1 -> 1 | 1 | 96 s | false | 7 |
+| 1 | C_FIM | 1 -> 1 | 1 | 46 s | false | 5 |
+| 2 | base | 1 -> 1 | 1 | 1 s | true | 1 |
+| 2 | B | 1 -> 1 | 1 | 45 s | false | 5 |
+| 2 | C_INICIO | 1 -> 1 | 1 | 90 s | false | 7 |
+| 2 | C_FIM | 1 -> 1 | 1 | 40 s | false | 5 |
+| 3 | base | 1 -> 1 | 1 | 1 s | true | 1 |
+| 3 | B | 1 -> 1 | 1 | 26 s | false | 4 |
+| 3 | C_INICIO | 1 -> 1 | 1 | 87 s | false | 7 |
+| 3 | C_FIM | 1 -> 1 | 1 | 47 s | false | 5 |
+
+Total: 12 alertas criados, 12 entregues, cada um exatamente 1 vez (tabela final do assinante: 4 alertas por execução, contagem 1); nenhum perdido, nenhuma duplicata. Para B o "atraso" é contado desde o broker de volta; para C desde o religamento à rede (o atraso maior de C_INICIO reflete o backoff acumulado do outbox, 7 tentativas). Conclusão: a suíte agora está verde (3 de 3) e confirma, em execuções repetidas, a explicação anterior: o vermelho em C_FIM era falso negativo do assinante `-C 1`, não perda de alerta. O cenário A (`--com-pausa-do-backend`) não foi reexecutado nesta rodada. A stack de desenvolvimento foi restaurada (`docker compose up -d`: serverpod healthy, `rc=0`, broker na rede com os aliases, arquivos temporários do assinante removidos do contêiner).

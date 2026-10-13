@@ -47,8 +47,17 @@ conferir 'C religa o broker com os aliases do Compose' "corpo cenario_C | grep -
 conferir '(a) RestartCount e StartedAt no estado do backend' "grep -qF '{{.State.Running}} {{.State.StartedAt}} rc={{.RestartCount}}' $s"
 conferir '(a) exige RestartCount 0 e o mesmo estado' "corpo conferir | grep -qF '\"\$depois\" != *\" rc=0\"' && corpo conferir | grep -qF '\"\$depois\" != \"\$antes\"'"
 conferir '(b) outbox publicado por contagem' "grep -qF 'from alert_outbox where \\\"alertId\\\" = '\\''\$id'\\'' and \\\"publishedAt\\\" is not null' $s"
-conferir '(c) entrega conferida no broker pelo alert_id' "corpo recebido_no_broker | grep -qF 'alert_id'"
-conferir '(c) assinante de sessão persistente QoS 1' "grep -qF 'mqtt_sub -c -i \"\$SUB_ID\" -q 1 -t \"\$topico\" -E' $s"
+conferir '(c) entrega conferida no broker pelo alert_id, no registro do assinante' "corpo recebido_no_broker | grep -qF 'entregas_de' && corpo entregas_de | grep -qF 'grep -F'"
+conferir '(c) um assinante persistente QoS 1 com id fixo' "corpo iniciar_assinante | grep -qF 'mqtt_sub -c -i \"\$SUB_ID\" -q 1 -t \"\$topico\" -E' && corpo iniciar_assinante | grep -qF -- '-c -i \$SUB_ID -q 1 -t \$topico -F '\''%p'\'''"
+conferir '(c) o assinante nasce antes de qualquer alerta' \
+  "[[ \$(grep -n '^iniciar_assinante\$' $s | head -1 | cut -d: -f1) -lt \$(grep -n '^cenario_base\$' $s | head -1 | cut -d: -f1) ]]"
+conferir '(c) o assinante registra só hora e alert_id (nunca o payload)' \
+  "corpo iniciar_assinante | grep -F 'echo ' | grep -F '>> \$SUB_LOG' | grep -qF 'date +%s' && [[ \$(corpo iniciar_assinante | grep -c 'echo \"') -eq 1 ]]"
+conferir '(c) nenhuma consulta consome com -C 1' "! grep -qE 'mosquitto_sub.* -C 1|mqtt_sub.* -C 1' $s"
+conferir '(c) o B relança o assinante depois do docker start' \
+  "corpo cenario_B | awk '/docker start/{a=NR} /iniciar_assinante/{b=NR} END{exit !(a && b && a<b)}'"
+conferir '(c) duplicata é reportada, não é falha' "grep -qF 'entregas=\$ENTREGAS' $s && grep -qF 'duplicata, não falha' $s"
+conferir '(c) o cleanup para o assinante e apaga o registro' "corpo cleanup | grep -qF 'parar_assinante' && corpo cleanup | grep -qF '\$SUB_LOG'"
 conferir 'publicado sem entrega é apontado como H5' "grep -qF 'lacuna H5' $s"
 conferir 'qualquer falha sai com código != 0' "grep -qF 'FALHOU: \${falhas[*]}' $s && grep -qxF '  exit 1' $s"
 
