@@ -177,7 +177,7 @@ Testes em `backend/sinalacs_server/test/integration/red_alert_cycle_test.dart`, 
 
 **Status de H5: confirmada.** Um alerta vermelho pode ficar marcado como publicado no outbox enquanto a mensagem MQTT nunca chegou ao broker (variante 1), e nenhum mecanismo a reentrega: o outbox já a deu por entregue e o cliente novo não herda a mensagem em voo. O alerta segue gravado e `pending` no banco (o escalonamento da #44 e a consulta do paciente continuam vendo-o), mas o canal de entrega ao ACS falhou em silêncio, o que viola INV-03. A variante 2 mostra a mesma ausência de confirmação; com um broker real, que pode ter roteado a mensagem antes de cair, ela é "entrega não confirmada", não necessariamente perda. Os dois testes afirmam o comportamento **atual** e estão rotulados `H5 (lacuna, comportamento atual)`: devem falhar e ser invertidos quando a correção entrar.
 
-**Correção proposta (não aplicada, decisão do usuário pendente):**
+**Correção proposta (aplicada na Tarefa 9b, commit fde520d):**
 - `AlertPublisher.publish` passa a `Future<void>` que completa no PUBACK do `messageIdentifier` devolvido por `publishMessage` (escutar `client.published`, ou o callback `onPublished`, filtrando pelo id) e falha com `MqttUnavailableException` em queda da conexão ou num tempo limite (ex.: 10 s). Arquivos: `lib/src/application/alerts/red_alert_service.dart` (interface), `lib/src/infrastructure/mqtt/mqtt_alert_dispatcher.dart` (mapa id → `Completer`, completado no PUBACK e falhado em `_markConnectionLost`/`close`).
 - `AlertOutboxDispatcher._publishOne` faz `await _publisher.publish(...)` e só então `markPublished`; falha ou tempo limite → `markFailed` com backoff (a entrega pode duplicar, o que o QoS 1 já admite e o ACK idempotente absorve). Arquivo: `lib/src/application/alerts/alert_outbox_dispatcher.dart`.
 - Ajustes nos publishers falsos dos testes (`implements AlertPublisher` em `test/integration/red_alert_cycle_test.dart`, `test/unit/red_alert_service_test.dart`, `test/unit/alert_outbox_dispatcher_test.dart`, `test/unit/red_alert_lifecycle_test.dart` e `test/unit/red_alert_discard_paths_test.dart`; o único chamador de `publish` em `lib/` é `alert_outbox_dispatcher.dart:60`), e inversão dos dois testes H5.
@@ -249,3 +249,40 @@ Achado novo, que agrava H5: a janela "socket morto, estado connected" não é de
 B e A passaram: com FIN/RST imediato (B) ou erro de escrita no unpause (A, `errno=32`), o dispatcher marca a queda antes do `publish`, o outbox registra a falha (`MqttUnavailableException`) e reentrega após a reconexão. Em nenhuma execução o processo caiu ou reiniciou (`rc=0`, `StartedAt` constante em cada execução).
 
 `admin_alertas_escalonar_e2e.sh --com-regressao-offline` (emulator-5554, sem pausa do backend, agora exigindo também `RestartCount 0`): verde. Painel atualizado pelo pulso em 29,9 s, botão 8,3 s após o prazo, Traefik pausado 120 s com o backend vivo e sem reinício, asserts do banco e cadeia de auditoria ok (21 linhas), e a jornada offline do ACS (`acs_full_e2e.sh`, 5 testes) verde.
+
+### Tarefa 9b-v: cenário C com a correção (Docker/TLS)
+
+Imagem reconstruída com 365e388 (`docker compose up -d --build serverpod`, sem `down` nem apagar volumes): `running healthy`, `rc=0`, backend conectado ao broker. `scripts/qa/mqtt_resiliencia_e2e.sh` (base, B, C) executado 4 vezes (a 4ª com `--com-pausa-do-backend`, que inclui A). Em todas: backend vivo, `RestartCount 0`, mesmo `StartedAt` do começo ao fim de cada execução; nenhum `Unhandled`/`[processo]` no log.
+
+**Antes (Tarefa 10b, 45e4a98) x depois (365e388), cenário C:**
+
+| | Antes | Depois |
+|---|---|---|
+| `createRedAlert.published` | true (falso positivo) | false (correto: não houve PUBACK) |
+| `publishedAt` no outbox | carimbado sem entrega | só após a reconexão e o PUBACK |
+| Alertas entregues pelo broker | 0 de 4 (perdidos) | 2 de 2 provados por observador independente (execução 4); as execuções 1 a 3 (4 alertas) só têm o outbox e o padrão idêntico; o script reporta 4 de 8 (C_INICIO) e 0 de 4 em C_FIM, ver abaixo |
+| Processo | vivo | vivo |
+
+**Resultado da suíte e a ressalva sobre o assinante do script.** As 4 execuções reportam `C_INICIO ok=true` e `C_FIM ok=false` ("não entregou ... compatível com H5"). Investigação: o `outbox_publicado` de `C_FIM` é 1 com `tentativas=2`, e a causa não é perda no broker. As entregas chegam **fora de ordem** (o backoff do outbox é por alerta: C_FIM, com 2 tentativas, é publicado antes de C_INICIO, com 6), e `recebido_no_broker()` usa `mosquitto_sub -C 1`, que consome e confirma (PUBACK) a primeira mensagem, mesmo que seja a do outro alerta, e a descarta. Ao procurar `C_INICIO` o script engole `C_FIM`, que depois "não aparece". Prova na execução 4, com um **observador independente** (assinante QoS 1 persistente à parte, sem `-C`, registrando hora e `alert_id` de cada entrega; executado dentro do contêiner do broker):
+
+| Alerta (execução 4) | Restauração da rede | Entregue ao observador | Após a restauração | Vezes entregue |
+|---|---|---|---|---|
+| C_FIM `24666e30` | 06:03:17Z | 06:03:22Z | 5 s | 1 |
+| C_INICIO `7682cd51` | 06:03:17Z | 06:03:42Z | 25 s | 1 |
+| A `ecdc2994` | (unpause 06:07:43Z) | 06:07:52Z | 9 s | 1 |
+| B `7f3e3b25` | (broker de volta 06:01:07Z) | 06:01:22Z | 15 s | 1 |
+| base `68989836` | n/a | 06:00:02Z | imediato | 1 |
+
+Nenhuma duplicata. O broker log da execução 4 mostra 3 conexões do assinante do script em 06:03:42 (`session taken over`) consumindo as mensagens em rajada, coerente com a explicação. Nas execuções 1 a 3 o observador não gravou (defeito do meu observador, não do sistema: faltava `\n` no formato e o arquivo de opções sumia após o `docker stop` do B), então nelas só valem o outbox e o log do script; o padrão (C_FIM `tentativas=2`, C_INICIO `tentativas=6`, mesma assinatura do broker) é idêntico. **Portanto: a suíte, como escrita, ainda sai vermelha em C_FIM; a evidência independente indica falso negativo do assinante, mas isso foi provado em 1 de 4 execuções.** O script não foi alterado (uma correção para acumular o que o assinante recebe foi tentada e revertida; fica como proposta ao controlador).
+
+**Cronologia do cenário C (execução 4; UTC, partição em 06:01:22):**
+- 06:02:08, 46 s após a partição: o Mosquitto derruba o cliente do backend (`exceeded timeout`, 1,5 x keepalive de 30 s).
+- O backend percebeu a partição **antes** de 06:02:12: o `C_INICIO` criado nesse instante (06:02:12.89) já recebeu `MqttUnavailableException` na primeira tentativa, em ~46 ms após o login (falha rápida; `createRedAlert` respondeu `published=false` sem esperar 10 s). Antes da correção o mesmo alerta era carimbado como publicado. A hora exata da detecção não foi medida (o log não registra a queda por PINGRESP, apenas as falhas de reconexão `SocketException` a partir de 06:02:18); o limite teórico é keepalive + 10 s = 40 s depois do último PINGRESP, compatível com a partição em 06:01:22 e a detecção antes de 06:02:12.
+- Durante a partição: reconexões falham (`SocketException`, ~uma a cada 20 s), tentativas do outbox 1 a 5 com `MqttUnavailableException` e backoff.
+- 06:03:17 rede de volta; 06:03:18.19 o backend reconecta (1 s) e as pendentes saem pelo outbox: C_FIM em +5 s, C_INICIO em +25 s.
+
+**Log do backend (VAZ-01):** só tipos e errno (`MqttUnavailableException`, `SocketException`, `errno=32` no A). Nenhuma ocorrência de IP, `:8883`, `mosquitto`, `localhost` ou `payload` nos `*.back.log` das 4 execuções (grep). Os códigos OTP aparecem como `<otp>` (sanitizados pelo script).
+
+**A (pausa de 120 s do backend):** passou (`ok=true`), 1 alerta criado e 1 entregue (9 s após o unpause, 2 tentativas, `errno=32` na escrita), sem reinício. **B:** passou nas 4 execuções (3 tentativas, entregue ~15 s após o broker voltar). **base:** passou nas 4.
+
+Execuções: 1 a 4 acima. Uma 5ª, com o script alterado, foi abortada e o script revertido (o estado do repositório é o de 365e388). A stack de desenvolvimento foi restaurada (`docker compose up -d`: serverpod healthy, rc=0; broker na rede com os aliases `mosquitto`/`sinalacs-mosquitto`).
