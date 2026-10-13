@@ -152,23 +152,27 @@ inserir_alerta_novo() {
 # O corte: congela o Traefik (a rota do app até o backend) pelo tempo que o
 # teste pediu na linha marcadora (padrão 120 s; o selo pode levar ~80–90 s para
 # aparecer depois do corte) e o devolve. O `cleanup` sempre despausa.
-inicio_do_backend() { docker inspect -f '{{.State.Running}} {{.State.StartedAt}}' sinalacs-serverpod 2>/dev/null || true; }
+# `rc=` (RestartCount) junto do StartedAt: um reinício pela política do Docker
+# (#56) muda o RestartCount; comparar só o StartedAt já o pegaria, mas um
+# RestartCount > 0 herdado de antes da queda também tem de falhar.
+inicio_do_backend() { docker inspect -f '{{.State.Running}} {{.State.StartedAt}} rc={{.RestartCount}}' sinalacs-serverpod 2>/dev/null || true; }
 cortar_backend() {
   local segundos antes depois=""
   segundos="$(grep -o 'E2E_CORTAR_BACKEND segundos=[0-9]*' "$saida_teste" | tail -1 | sed 's/.*=//')"
   [[ -n "$segundos" ]] || segundos=120
   antes="$(inicio_do_backend)"
   [[ "$antes" == true\ * ]] || { echo "erro: o backend já não estava no ar antes da queda ($antes)" >&2; exit 1; }
+  [[ "$antes" == *' rc=0' ]] || { echo "erro: o backend já tinha reiniciado antes da queda ($antes)" >&2; exit 1; }
   docker pause sinalacs-traefik >/dev/null
   echo "  [script] Traefik pausado por ${segundos}s ($(date +%T)); o backend segue no ar" >&2
   sleep "$segundos"
   docker unpause sinalacs-traefik >/dev/null
   echo "  [script] Traefik de volta ($(date +%T))" >&2
-  # O backend tem de ter atravessado a queda: no ar e com o MESMO StartedAt (sem
-  # reinício nem saída no meio). Espera limitada a 60 s.
+  # O backend tem de ter atravessado a queda: no ar, com o MESMO StartedAt e
+  # RestartCount 0 (sem reinício nem saída no meio). Espera limitada a 60 s.
   for _ in $(seq 1 60); do
     depois="$(inicio_do_backend)"
-    [[ "$depois" == "$antes" ]] && { echo "  [script] backend vivo, sem reinício ($(date +%T))" >&2; return 0; }
+    [[ "$depois" == "$antes" && "$depois" == *' rc=0' ]] && { echo "  [script] backend vivo, sem reinício ($(date +%T))" >&2; return 0; }
     [[ "$depois" == true\ * ]] && break   # no ar, mas reiniciou: diagnóstico abaixo
     sleep 1
   done

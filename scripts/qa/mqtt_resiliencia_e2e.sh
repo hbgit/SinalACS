@@ -1,117 +1,320 @@
 #!/usr/bin/env bash
 #
-# Resiliência da conexão MQTT do backend (issue #56): cenários de DIAGNÓSTICO
-# contra a stack local em execução (sinalacs-serverpod + sinalacs-mosquitto).
+# Resiliência da conexão MQTT do backend (issue #56) contra o BANCO DE TESTE,
+# com alerta vermelho de verdade criado DURANTE a interrupção do broker.
 #
-#   ./scripts/qa/mqtt_resiliencia_e2e.sh A [N]   # docker pause do backend por PAUSA s (padrão 120)
-#   ./scripts/qa/mqtt_resiliencia_e2e.sh B [N]   # docker restart do Mosquitto
-#   ./scripts/qa/mqtt_resiliencia_e2e.sh C [N]   # broker desconectado da rede por PARTICAO s (padrão 100)
-#   ./scripts/qa/mqtt_resiliencia_e2e.sh todos   # A(5) + B(3) + C(3)
+#   ./scripts/qa/mqtt_resiliencia_e2e.sh                          # base + B + C
+#   ./scripts/qa/mqtt_resiliencia_e2e.sh --com-pausa-do-backend   # + A (DIAGNÓSTICO)
 #
-# Variáveis: PAUSA, PARTICAO, ART (diretório de artefatos; padrão em /tmp).
+# Opcional e manual (suíte de resiliência; não é job de CI nem check
+# obrigatório). Não precisa de emulador.
 #
-# O que mede por execução: estado e exit code do container do backend,
-# FinishedAt (e se coincide com o unpause), RestartCount, se o processo segue
-# vivo, tempo até o broker registrar um novo `sinalacs-backend-*` e o erro do
-# log do backend SANITIZADO (sem host/porta/IP; ficam tipo de exceção, errno e
-# nomes de quadros da pilha). Para execuções em que o backend cai, o log
-# completo (sanitizado) vai para $ART/<cenario><n>.crash.log.
+# Cenários (cada um cria UM alerta vermelho pelo RPC do paciente da fixture,
+# login OTP real via relé, com `apps/patient/tool/live_check.dart` — o mesmo
+# caminho do `e2e.sh`/`patient_full_e2e.sh`, sem duplicar o login):
+#   base  sem interrupção: prova que o caminho (RPC -> outbox -> broker) funciona
+#         e aquece a compilação do `dart run`.
+#   B     reinício do Mosquitto: `docker stop` do broker, alerta criado com o
+#         broker parado, `docker start`. O backend recebe FIN/RST na hora.
+#   C     broker fora da rede (`docker network disconnect`, descarta sem FIN/RST)
+#         por PARTICAO s (padrão 100). DOIS alertas: um logo no começo
+#         (C_INICIO, +ATRASO_C s, padrão 5 — o socket já está morto mas o
+#         backend ainda não percebeu: é a janela da lacuna H5) e um perto do fim
+#         (C_FIM, depois de o keepalive de 30 s ter derrubado a conexão).
+#   A     (só com --com-pausa-do-backend; DIAGNÓSTICO, desligado por padrão)
+#         `docker pause` do backend por PAUSA s (padrão 120); o alerta é criado
+#         logo após o `unpause`. Antes da correção da #56 este cenário derrubava
+#         o processo (Broken pipe); fica como diagnóstico, não como regressão
+#         padrão, porque congelar o processo não é uma falha realista do broker.
 #
-# ATENÇÃO: mexe em sinalacs-serverpod e sinalacs-mosquitto (pause, restart,
-# desconexão da rede). O container do backend tem RestartPolicy=no: se o
-# processo cair, ele NÃO volta sozinho; o script o religa com `docker start` e
-# registra isso. NÃO cria alertas (isso é da Tarefa 10) e não apaga volumes.
-# O `trap` sempre: unpause, reconecta o broker com o alias `mosquitto`,
-# `docker compose up -d` e confere `docker compose ps`.
+# Em cada alerta, depois de restaurar a conexão, afirma:
+#   (a) o backend NÃO reiniciou: no ar, `RestartCount == 0` e `StartedAt`
+#       igual ao de antes do cenário;
+#   (b) a linha do `alert_outbox` daquele alerta chega a `publishedAt IS NOT
+#       NULL` em até ESPERA_PUBLICACAO s (padrão 120); só contagens via psql;
+#   (c) o broker ENTREGA a mensagem daquele alerta a um assinante QoS 1 de
+#       sessão persistente no tópico da microárea das fixtures (mosquitto_sub
+#       dentro do container do broker, com o usuário/certificado do backend;
+#       só o fato "recebido", nunca o payload). Isto prova a entrega pelo
+#       broker, que é mais do que o carimbo do outbox: com a lacuna H5 (o
+#       outbox marca publicado sem PUBACK — evidências, "Tarefa 9") o carimbo
+#       pode existir e a mensagem ter se perdido.
+#   O CARD NO APP DO ACS NÃO É VERIFICADO AQUI: o ACL do broker só libera ao
+#   usuário do ACS (`acs-area-12`) o tópico da microárea do seed de
+#   desenvolvimento, e as fixtures de e2e sorteiam a microárea a cada execução.
+#   O ciclo broker -> app do ACS fica com `integration_test/red_alert_cycle_test.dart`
+#   (stack de desenvolvimento, `e2e.sh --emulator --full`).
+#
+# Variáveis: PAUSA, PARTICAO, ATRASO_C, ESPERA_PUBLICACAO, ART (artefatos).
+#
+# ATENÇÃO: substitui a stack de desenvolvimento pela de e2e (e2e_stack.sh; o
+# container sinalacs-serverpod é o mesmo) e mexe em sinalacs-mosquitto (stop,
+# desconexão da rede) e, com a flag, pausa sinalacs-serverpod. Não apaga
+# volumes. O `trap` sempre: despausa o backend, religa o broker à rede com os
+# aliases, garante o broker no ar, encerra o relé, apaga a sessão do assinante
+# e o manifesto, `e2e_stack.sh down` e `docker compose up -d` (stack de
+# desenvolvimento de volta, esperando o backend saudável).
+#
+# Sem nenhuma coluna protegida na saída: do banco só contagens e booleanos; o
+# log do backend guardado em $ART é sanitizado (sem IP/host/porta nem código
+# OTP).
 set -euo pipefail
-cd "$(dirname "$0")/../.."
+source "$(dirname "${BASH_SOURCE[0]}")/lib_rele.sh"
+
+com_pausa_do_backend=false
+for arg in "$@"; do
+  case "$arg" in
+    --com-pausa-do-backend) com_pausa_do_backend=true ;;
+    *) echo "argumento desconhecido: $arg" >&2; exit 2 ;;
+  esac
+done
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+cd "$repo_root"
+export PATH="$PATH:$HOME/flutter/bin:$HOME/.pub-cache/bin"
 
 BACK=sinalacs-serverpod
 BROKER=sinalacs-mosquitto
 PAUSA="${PAUSA:-120}"
 PARTICAO="${PARTICAO:-100}"
-ART="${ART:-/tmp/mqtt_resiliencia.$(date +%Y%m%d-%H%M%S)}"
+ATRASO_C="${ATRASO_C:-5}"
+ESPERA_PUBLICACAO="${ESPERA_PUBLICACAO:-120}"
+ART="${ART:-$(mktemp -d "${TMPDIR:-/tmp}/mqtt_resiliencia.XXXXXX")}"
 mkdir -p "$ART"
-REDE=$(docker inspect -f '{{range $k,$v := .NetworkSettings.Networks}}{{$k}}{{end}}' "$BROKER")
+# Intervalo mínimo entre dois logins OTP do MESMO paciente (o servidor impõe 60 s).
+INTERVALO_OTP=65
+SUB_ID="qa-resiliencia-$$"
+OPTS=/tmp/qa-resiliencia-$$.opts   # dentro do container do broker
 
-# Remove IPs, host:porta e nomes de host do texto; mantém exceções, errno e quadros.
-sanitiza() {
-  sed -E 's/[0-9]{1,3}(\.[0-9]{1,3}){3}(:[0-9]+)?/<ip>/g; s/(address|host|port) = [^,)]+/\1 = <x>/g; s/(mosquitto|localhost)(:[0-9]+)?/<host>/g; s/sinalacs-backend-[0-9]+/sinalacs-backend-<id>/g'
-}
-
-restaura() {
+relay_pid=""
+rede=""
+cleanup() {
   set +e
   docker unpause "$BACK" >/dev/null 2>&1
-  docker network connect --alias mosquitto --alias "$BROKER" "$REDE" "$BROKER" >/dev/null 2>&1
-  [ "$(docker inspect -f '{{.State.Running}}' "$BACK" 2>/dev/null)" = true ] || docker start "$BACK" >/dev/null 2>&1
-  docker compose up -d >/dev/null 2>&1
-  docker compose ps
+  if [[ -n "$rede" ]]; then
+    docker network connect --alias mosquitto --alias "$BROKER" "$rede" "$BROKER" >/dev/null 2>&1
+  fi
+  [[ "$(docker inspect -f '{{.State.Running}}' "$BROKER" 2>/dev/null)" == true ]] || docker start "$BROKER" >/dev/null 2>&1
+  # Sessão persistente do assinante: um CONNECT com sessão limpa a descarta.
+  if [[ -n "$rede" ]]; then
+    mqtt_sub -i "$SUB_ID" -t 'sinalacs/v1/qa/fim' -E >/dev/null 2>&1
+    docker exec "$BROKER" rm -f "$OPTS" >/dev/null 2>&1
+  fi
+  [[ -n "$relay_pid" ]] && kill "$relay_pid" 2>/dev/null
+  rm -f .e2e/fixtures.json   # primeiro: tem as senhas sintéticas, mesmo se o down falhar
+  ./scripts/qa/e2e_stack.sh down >/dev/null 2>&1 \
+    || echo 'aviso: e2e_stack.sh down falhou; o banco sinalacs_e2e pode ter sobrado' >&2
+  echo '== volta da stack de desenvolvimento (docker compose up -d)'
+  docker compose up -d >/dev/null 2>&1 || echo 'aviso: docker compose up -d falhou; rode-o à mão' >&2
+  for _ in $(seq 1 60); do
+    [[ "$(docker inspect -f '{{.State.Health.Status}}' "$BACK" 2>/dev/null)" == healthy ]] && break
+    sleep 2
+  done
+  echo "  backend de desenvolvimento: $(docker inspect -f '{{.State.Status}} {{.State.Health.Status}}' "$BACK" 2>/dev/null)"
+  echo "artefatos em $ART"
 }
-trap restaura EXIT
+trap cleanup EXIT
 
-estado() { docker inspect -f '{{.State.Status}} exit={{.State.ExitCode}} fin={{.State.FinishedAt}} rc={{.RestartCount}} started={{.State.StartedAt}}' "$BACK"; }
+if porta_ocupada 8765; then
+  echo 'erro: a porta 8765 já está ocupada (relé antigo?). Encerre-o: pkill -f scripts/qa/otp_relay.py' >&2
+  exit 1
+fi
 
-# Primeira conexão do backend ao broker depois de $1 (epoch, s); imprime segundos desde $1 ou "n/a".
+echo "== stack de e2e (banco de teste)"
+./scripts/qa/e2e_stack.sh up
+./scripts/qa/e2e_stack.sh seed
+./scripts/dev/sync_dev_ca.sh >/dev/null 2>&1 || true
+set -a; source .env; set +a
+rede=$(docker inspect -f '{{range $k,$v := .NetworkSettings.Networks}}{{$k}}{{end}}' "$BROKER")
+
+E2E_FIXTURES_FILE="$repo_root/.e2e/fixtures.json" python3 scripts/qa/otp_relay.py >/dev/null 2>&1 &
+relay_pid=$!
+for _ in $(seq 1 20); do
+  curl -fs http://127.0.0.1:8765/now >/dev/null 2>&1 && break
+  sleep 0.25
+done
+kill -0 "$relay_pid" 2>/dev/null || { echo 'erro: o relé não subiu' >&2; exit 1; }
+
+area_id="$(python3 -c "import json;print(json.load(open('.e2e/fixtures.json'))['microAreaId'])")"
+topico="sinalacs/v1/microareas/$area_id/alerts"
+(cd apps/patient && dart pub get >/dev/null)
+
+sql() { ./scripts/qa/e2e_stack.sh psql "$1"; }
+
+# Remove IPs, host:porta, nomes de host e códigos OTP; mantém exceções e errno.
+sanitiza() {
+  sed -E 's/[0-9]{1,3}(\.[0-9]{1,3}){3}(:[0-9]+)?/<ip>/g; s/(address|host|port) = [^,)]+/\1 = <x>/g; s/(mosquitto|localhost)(:[0-9]+)?/<host>/g; s/sinalacs-backend-[0-9]+/sinalacs-backend-<id>/g; s/código de acesso: [0-9]{6}/código de acesso: <otp>/g'
+}
+
+# Assinante MQTT dentro do container do broker, com o usuário e o certificado
+# do backend (ACL `sinalacs/v1/#`). A senha vai num arquivo de opções 600 no
+# container, nunca no argv (`ps`). Reescrito a cada uso: o `docker stop` do
+# cenário B não o apaga, mas um container recriado sim.
+mqtt_sub() {
+  printf -- '-u backend\n-P %s\n' "$MQTT_BACKEND_PASSWORD" \
+    | docker exec -i "$BROKER" sh -c "umask 077; cat > $OPTS"
+  docker exec "$BROKER" mosquitto_sub -o "$OPTS" -h localhost -p 8883 \
+    --cafile /mosquitto/certs/ca.crt --cert /mosquitto/certs/backend.crt --key /mosquitto/certs/backend.key \
+    "$@"
+}
+
+# Cria a sessão persistente (QoS 1) do assinante: o broker guarda para ela o
+# que for publicado no tópico enquanto ela está desconectada.
+mqtt_sub -c -i "$SUB_ID" -q 1 -t "$topico" -E >/dev/null
+
+estado_back() { docker inspect -f '{{.State.Running}} {{.State.StartedAt}} rc={{.RestartCount}}' "$BACK" 2>/dev/null || true; }
+broker_no_ar() {
+  for _ in $(seq 1 30); do
+    [[ "$(docker inspect -f '{{.State.Running}}' "$BROKER")" == true ]] && return 0
+    sleep 1
+  done
+  return 1
+}
+
+# Primeira conexão do backend ao broker depois de $1 (epoch, s); "n/a" se nenhuma.
 reconectou_em() {
-  local t0=$1 iso linha ts
-  iso=${t0%.*}   # epoch inteiro: `--since` sem fuso seria lido no fuso local do cliente
-  linha=$(docker logs -t --since "$iso" "$BROKER" 2>&1 | grep 'New client connected.*sinalacs-backend-' | head -1 || true)
-  [ -n "$linha" ] || { echo n/a; return; }
+  local t0=$1 linha ts
+  linha=$(docker logs -t --since "${t0%.*}" "$BROKER" 2>&1 | grep 'New client connected.*sinalacs-backend-' | head -1 || true)
+  [[ -n "$linha" ]] || { echo n/a; return; }
   ts=$(date -d "${linha%% *}" +%s.%N)
   awk -v a="$ts" -v b="$t0" 'BEGIN{printf "%.1f", a-b}'
 }
 
-# Garante o backend de pé e conectado antes de cada execução.
-prepara() {
-  [ "$(docker inspect -f '{{.State.Running}}' "$BACK")" = true ] || { echo "backend parado; docker start (registrado)"; docker start "$BACK" >/dev/null; sleep 20; }
-  docker unpause "$BACK" >/dev/null 2>&1 || true
-  sleep 3
+# Cria um alerta vermelho como o paciente `main` da fixture (login OTP real).
+# Define ALERTA_ID e ALERTA_PUBLICADO (o `published` da resposta do RPC).
+ultimo_login=0
+criar_alerta() { # <rótulo>
+  local rotulo=$1 espera linha
+  espera=$(( ultimo_login + INTERVALO_OTP - $(date +%s) ))
+  if (( espera > 0 )); then echo "  [script] aguardando ${espera}s (intervalo do OTP)"; sleep "$espera"; fi
+  ultimo_login=$(date +%s)
+  ALERTA_ID=""; ALERTA_PUBLICADO=""
+  ( cd apps/patient && E2E_FIXTURES_FILE="$repo_root/.e2e/fixtures.json" dart run tool/live_check.dart ) \
+    >"$ART/$rotulo.live.log" 2>&1 || true
+  linha="$(sed -n 's/.*alerta vermelho \.* \([0-9a-fA-F-]\{36\}\) (publicado=\([a-z]*\)).*/\1 \2/p' "$ART/$rotulo.live.log" | head -1)"
+  ALERTA_ID="${linha%% *}"; ALERTA_PUBLICADO="${linha##* }"
+  if [[ -z "$ALERTA_ID" ]]; then
+    echo "erro: o alerta do cenário $rotulo não foi criado; fim do live_check:" >&2
+    tail -n 8 "$ART/$rotulo.live.log" | sed 's/^/    /' >&2
+    return 1
+  fi
+  echo "  [script] alerta $rotulo criado ($(date +%T)): $ALERTA_ID publicado_na_resposta=$ALERTA_PUBLICADO"
 }
 
-registra() { # cenario n t_evento
-  local c=$1 n=$2 t0=$3 est vivo rec
-  local desde=${t0%.*}
-  est=$(estado)
-  vivo=$(docker inspect -f '{{.State.Running}}' "$BACK")
-  rec=$(reconectou_em "$t0")
-  docker logs -t --since "$desde" "$BACK" 2>&1 | sanitiza > "$ART/$c$n.back.log" || true
-  docker logs -t --since "$desde" "$BROKER" 2>&1 | sanitiza > "$ART/$c$n.broker.log" || true
-  if [ "$vivo" != true ]; then docker logs "$BACK" 2>&1 | sanitiza > "$ART/$c$n.crash.log" || true; fi
-  echo "RESULT $c$n vivo=$vivo $est reconectou_apos=${rec}s"
-  grep -iE 'Unhandled|Exception|Error|errno|#[0-9]+ ' "$ART/$c$n.back.log" | head -12 | sed 's/^/  log: /' || true
+# (c) o broker entrega a mensagem do alerta $1 ao assinante (até ESPERA_PUBLICACAO s).
+recebido_no_broker() {
+  local id=$1 fim msg
+  fim=$(( $(date +%s) + ESPERA_PUBLICACAO ))
+  while (( $(date +%s) < fim )); do
+    msg="$(mqtt_sub -c -i "$SUB_ID" -q 1 -t "$topico" -C 1 -W 20 2>/dev/null || true)"
+    [[ "$msg" == *"\"alert_id\":\"$id\""* ]] && return 0
+  done
+  return 1
 }
 
-cenario_A() { # pausa o backend
-  local t0 t1
-  prepara; t0=$(date +%s.%N)
-  docker pause "$BACK" >/dev/null; sleep "$PAUSA"
-  t1=$(date +%s.%N); docker unpause "$BACK" >/dev/null; echo "unpause_epoch=${t1%.*}"
-  sleep 15
-  registra A "$1" "$t0"
-}
-cenario_B() { # reinicia o broker
-  local t0; prepara; t0=$(date +%s.%N)
-  docker restart "$BROKER" >/dev/null
-  for t in 5 10 20 40; do sleep "$t"; echo "  t+${t}s $(docker inspect -f '{{.State.Running}} rc={{.RestartCount}}' "$BACK")"; done
-  registra B "$1" "$t0"
-}
-cenario_C() { # tira o broker da rede (descarta sem FIN/RST)
-  local t0; prepara; t0=$(date +%s.%N)
-  docker network disconnect "$REDE" "$BROKER"; sleep "$PARTICAO"
-  echo "  durante: $(docker inspect -f '{{.State.Running}} rc={{.RestartCount}}' "$BACK")"
-  docker network connect --alias mosquitto --alias "$BROKER" "$REDE" "$BROKER"
-  echo "  alias: $(docker inspect -f '{{range $k,$v := .NetworkSettings.Networks}}{{$v.Aliases}}{{end}}' "$BROKER")"
-  sleep 90
-  registra C "$1" "$t0"
+falhas=()
+resultados=()
+conferir() { # <rótulo> <alertId> <estado antes> <t0 epoch>
+  local rotulo=$1 id=$2 antes=$3 t0=$4 depois="" ok=true publicado=0 tentativas recebido=nao pendente t
+  # (a) mesmo processo: no ar, mesmo StartedAt, RestartCount 0 (espera até 30 s).
+  for _ in $(seq 1 30); do
+    depois="$(estado_back)"
+    [[ "$depois" == "$antes" ]] && break
+    sleep 1
+  done
+  if [[ "$depois" != "$antes" || "$depois" != *" rc=0" || "$depois" != true\ * ]]; then
+    ok=false
+    echo "erro: [$rotulo] o backend reiniciou ou caiu (antes: $antes; agora: ${depois:-ausente}); fim do log:" >&2
+    docker logs --tail 20 "$BACK" 2>&1 | sanitiza | sed 's/^/    /' >&2 || true
+  fi
+  # (b) outbox publicado (só contagem).
+  for t in $(seq 1 "$ESPERA_PUBLICACAO"); do
+    publicado="$(sql "select count(*) from alert_outbox where \"alertId\" = '$id' and \"publishedAt\" is not null")"
+    [[ "$publicado" -ge 1 ]] && break
+    sleep 1
+  done
+  tentativas="$(sql "select coalesce(max(attempts), -1) from alert_outbox where \"alertId\" = '$id'")"
+  pendente="$(sql "select count(*) from alerts where id = '$id' and status = 'pending'")"
+  [[ "$publicado" -ge 1 ]] || { ok=false; echo "erro: [$rotulo] outbox do alerta $id sem publishedAt após ${ESPERA_PUBLICACAO}s" >&2; }
+  # (c) entrega pelo broker.
+  if recebido_no_broker "$id"; then recebido=sim; else
+    ok=false
+    echo "erro: [$rotulo] o broker não entregou a mensagem do alerta $id ao assinante em ${ESPERA_PUBLICACAO}s" >&2
+    [[ "$publicado" -ge 1 ]] && echo "  -> outbox marcado como publicado SEM entrega no broker: compatível com a lacuna H5 (sem PUBACK)" >&2
+  fi
+  docker logs -t --since "${t0%.*}" "$BACK" 2>&1 | sanitiza >"$ART/$rotulo.back.log" || true
+  docker logs -t --since "${t0%.*}" "$BROKER" 2>&1 | sanitiza >"$ART/$rotulo.broker.log" || true
+  local linha="RESULT $rotulo ok=$ok backend=[$depois] outbox_publicado=$publicado tentativas=$tentativas alerta_pendente=$pendente recebido_no_broker=$recebido publicado_na_resposta=$ALERTA_PUBLICADO reconectou_apos=$(reconectou_em "$t0")s"
+  echo "$linha"
+  resultados+=("$linha")
+  [[ "$ok" == true ]] || falhas+=("$rotulo")
+  grep -iE 'Unhandled|Exception|errno|\[processo\]|adiada' "$ART/$rotulo.back.log" | head -8 | sed 's/^/  log: /' || true
 }
 
-rodar() { local c=$1 n=$2 i; for i in $(seq "$n"); do echo "== $c$i"; "cenario_$c" "$i"; done; }
+cenario_base() {
+  local antes t0; echo "== base (sem interrupção)"
+  antes="$(estado_back)"; t0=$(date +%s.%N)
+  criar_alerta base || { falhas+=(base); return; }
+  conferir base "$ALERTA_ID" "$antes" "$t0"
+}
 
-case "${1:-}" in
-  A) rodar A "${2:-5}" ;;
-  B) rodar B "${2:-3}" ;;
-  C) rodar C "${2:-3}" ;;
-  todos) rodar A 5; rodar B 3; rodar C 3 ;;
-  *) echo "uso: $0 A|B|C [N] | todos" >&2; exit 2 ;;
-esac
-echo "artefatos em $ART"
+cenario_B() {
+  local antes t0; echo "== B (reinício do Mosquitto, alerta com o broker parado)"
+  antes="$(estado_back)"; t0=$(date +%s.%N)
+  docker stop "$BROKER" >/dev/null
+  echo "  [script] broker parado ($(date +%T))"
+  criar_alerta B || true
+  docker start "$BROKER" >/dev/null
+  broker_no_ar || echo "aviso: o broker não voltou em 30 s" >&2
+  echo "  [script] broker de volta ($(date +%T))"
+  [[ -n "$ALERTA_ID" ]] || { falhas+=(B); return; }
+  conferir B "$ALERTA_ID" "$antes" "$t0"
+}
+
+cenario_C() {
+  local antes t0 id_inicio pub_inicio id_fim="" pub_fim="" resto
+  echo "== C (broker fora da rede por ${PARTICAO}s)"
+  antes="$(estado_back)"; t0=$(date +%s.%N)
+  docker network disconnect "$rede" "$BROKER"
+  echo "  [script] broker fora da rede ($(date +%T))"
+  sleep "$ATRASO_C"
+  criar_alerta C_INICIO || true
+  id_inicio="$ALERTA_ID"; pub_inicio="$ALERTA_PUBLICADO"
+  # O segundo alerta sai perto do fim, depois do keepalive (30 s) ter acusado a queda.
+  resto=$(( ${t0%.*} + PARTICAO - 15 - $(date +%s) ))
+  (( resto > 0 )) && sleep "$resto"
+  criar_alerta C_FIM || true
+  id_fim="$ALERTA_ID"; pub_fim="$ALERTA_PUBLICADO"
+  resto=$(( ${t0%.*} + PARTICAO - $(date +%s) ))
+  (( resto > 0 )) && sleep "$resto"
+  echo "  durante: backend [$(estado_back)]"
+  docker network connect --alias mosquitto --alias "$BROKER" "$rede" "$BROKER"
+  echo "  [script] broker de volta à rede ($(date +%T))"
+  if [[ -n "$id_inicio" ]]; then ALERTA_PUBLICADO="$pub_inicio"; conferir C_INICIO "$id_inicio" "$antes" "$t0"; else falhas+=(C_INICIO); fi
+  if [[ -n "$id_fim" ]]; then ALERTA_PUBLICADO="$pub_fim"; conferir C_FIM "$id_fim" "$antes" "$t0"; else falhas+=(C_FIM); fi
+}
+
+cenario_A() {
+  local antes t0; echo "== A (DIAGNÓSTICO: docker pause do backend por ${PAUSA}s)"
+  antes="$(estado_back)"; t0=$(date +%s.%N)
+  docker pause "$BACK" >/dev/null
+  sleep "$PAUSA"
+  docker unpause "$BACK" >/dev/null
+  echo "  [script] backend despausado ($(date +%T))"
+  criar_alerta A || { falhas+=(A); return; }
+  conferir A "$ALERTA_ID" "$antes" "$t0"
+}
+
+cenario_base
+cenario_B
+cenario_C
+if [[ "$com_pausa_do_backend" == true ]]; then cenario_A; fi
+
+echo "== resumo"
+printf '%s\n' "${resultados[@]}"
+echo "  (card no app do ACS: NÃO VERIFICADO por este script — ver cabeçalho)"
+if (( ${#falhas[@]} > 0 )); then
+  echo "FALHOU: ${falhas[*]}" >&2
+  exit 1
+fi
+echo 'OK — o backend atravessou as quedas do broker sem reiniciar e entregou os alertas'
