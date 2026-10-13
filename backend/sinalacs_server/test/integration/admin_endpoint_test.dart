@@ -591,6 +591,65 @@ void main() {
           );
         },
       );
+
+      test(
+        'resposta serializada de consulta filtrada não vaza hash, nome nem UUID',
+        () async {
+          await endpoints.patients.listMicroArea(
+            sessionBuilder,
+            accessToken: _token(_acs, UserRole.acs, ma: _maA),
+          );
+          final t = _token(_admin, UserRole.admin);
+          await endpoints.admin.indicators(sessionBuilder, accessToken: t);
+
+          final pagina = await endpoints.admin.auditLogs(
+            sessionBuilder,
+            limit: 50,
+            accessToken: t,
+            filter: AdminAuditFilter(
+              actionType: 'read',
+              search: 'directory',
+            ),
+          );
+          expect(pagina.items, isNotEmpty);
+          final json = jsonEncode(pagina.toJson());
+          for (final proibido in [
+            'ipHash',
+            'previousHash',
+            'entryHash',
+            _nomePaciente,
+            'Joana',
+          ]) {
+            expect(json, isNot(contains(proibido)), reason: proibido);
+          }
+          // O `id` da própria linha de auditoria é o identificador público da
+          // entrada (chave do keyset/UI), não um resourceId nem um userId.
+          final semIdDaLinha = jsonEncode([
+            for (final e in pagina.items) (e.toJson()..remove('id')),
+          ]);
+          expect(
+            RegExp(
+              r'[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}',
+            ).hasMatch(semIdDaLinha),
+            isFalse,
+            reason: 'nenhum UUID completo de resourceId/userId: $semIdDaLinha',
+          );
+        },
+      );
+
+      test('coordenador da UBS A filtrando actorRole=admin: vazio', () async {
+        await endpoints.admin.indicators(
+          sessionBuilder,
+          accessToken: _token(_admin, UserRole.admin),
+        );
+        final pagina = await endpoints.admin.auditLogs(
+          sessionBuilder,
+          limit: 50,
+          accessToken: _token(_coordA, UserRole.coordinator),
+          filter: AdminAuditFilter(actorRole: UserRole.admin),
+        );
+        expect(pagina.items, isEmpty);
+      });
     });
 
     group('pedidos do titular (#42), ponta a ponta pelo endpoint', () {
