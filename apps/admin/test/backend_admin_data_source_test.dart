@@ -283,7 +283,7 @@ void main() {
     });
   });
 
-  test('auditoria: mapeia o rótulo do usuário e o instante', () async {
+  test('auditoria: mapeia o rótulo do usuário, o instante, a sequence e o selo', () async {
     final em = DateTime.utc(2026, 10, 7, 12, 30);
     final caller = FakeEndpointCaller(
       result: api.AdminAuditPage(
@@ -296,19 +296,147 @@ void main() {
             resourceType: 'admin_alerts',
             timestamp: em,
             result: 'success',
+            integrity: api.AuditRowSeal.invalid,
+          ),
+        ],
+        nextBeforeSequence: 9,
+      ),
+    );
+    final r = await _fonte(caller).fetchAuditLogs(limit: 10);
+    // Sem filtro e sem cursor, o cliente gerado manda `filter: null` e
+    // `beforeSequence: null` junto com o resto.
+    expect(caller.lastArgs, {
+      'accessToken': 'token-de-teste',
+      'filter': null,
+      'limit': 10,
+      'beforeSequence': null,
+    });
+    expect(r.items.single.userLabel, 'ADM-1 (Administrador)');
+    expect(r.items.single.timestamp, em);
+    expect(r.items.single.sequence, 9);
+    expect(r.items.single.seal, AuditRowSeal.invalid);
+    expect(r.nextBeforeSequence, 9);
+  });
+
+  test('auditoria: selo ausente na resposta vira "não verificável", nunca íntegro', () async {
+    final caller = FakeEndpointCaller(
+      result: api.AdminAuditPage(
+        items: [
+          api.AdminAuditEntry(
+            id: 'l1',
+            sequence: 1,
+            userLabel: 'ADM-1 (Administrador)',
+            actionType: 'read',
+            resourceType: 'admin_alerts',
+            timestamp: DateTime.utc(2026, 10, 7),
+            result: 'success',
           ),
         ],
       ),
     );
-    final r = await _fonte(caller).fetchAuditLogs(limit: 10);
-    // O cliente gerado manda `beforeSequence: null` (sem cursor) junto com o resto.
-    expect(caller.lastArgs, {
-      'accessToken': 'token-de-teste',
-      'limit': 10,
-      'beforeSequence': null,
-    });
-    expect(r.single.userLabel, 'ADM-1 (Administrador)');
-    expect(r.single.timestamp, em);
+    final r = await _fonte(caller).fetchAuditLogs();
+    expect(r.items.single.seal, AuditRowSeal.unverifiable);
+    expect(r.nextBeforeSequence, isNull);
+  });
+
+  test('auditoria: traduz o filtro por nome e passa o cursor', () async {
+    final de = DateTime.utc(2026, 10, 1);
+    final ate = DateTime.utc(2026, 10, 8);
+    final caller = FakeEndpointCaller(result: api.AdminAuditPage(items: []));
+    await _fonte(caller).fetchAuditLogs(
+      filter: AuditLogFilter(
+        actorEnrollmentId: 'ACS-12',
+        actorRole: AuditActorRole.coordinator,
+        actionType: 'write',
+        resourceType: 'admin_acs',
+        result: 'created',
+        from: de,
+        to: ate,
+        search: 'adm',
+      ),
+      limit: 20,
+      beforeSequence: 300,
+    );
+    final f = caller.lastArgs!['filter'] as api.AdminAuditFilter;
+    expect(f.actorEnrollmentId, 'ACS-12');
+    expect(f.actorRole, api.UserRole.coordinator);
+    expect(f.actionType, 'write');
+    expect(f.resourceType, 'admin_acs');
+    expect(f.result, 'created');
+    expect(f.from, de);
+    expect(f.to, ate);
+    expect(f.search, 'adm');
+    expect(caller.lastArgs!['limit'], 20);
+    expect(caller.lastArgs!['beforeSequence'], 300);
+  });
+
+  test('auditoria: filtro recusado pelo servidor vira texto fixo sobre o filtro', () async {
+    final caller = FakeEndpointCaller(
+      error: api.AdminInvalidRequestException(message: 'detalhe interno do servidor'),
+    );
+    await expectLater(
+      _fonte(caller).fetchAuditLogs(filter: const AuditLogFilter(search: 'xx')),
+      throwsA(
+        isA<AdminDataFailure>()
+            .having((f) => f.message, 'message', 'Filtro de auditoria inválido. Revise os campos.')
+            .having((f) => f.message, 'message', isNot(contains('interno'))),
+      ),
+    );
+  });
+
+  test('cadeia: mapeia estado, contagens, motivo e brokenInScope nulo como nulo', () async {
+    final em = DateTime.utc(2026, 10, 13, 9);
+    final caller = FakeEndpointCaller(
+      result: api.AdminAuditChainStatus(
+        state: api.AuditIntegrityState.broken,
+        checkedRows: 120,
+        headSequence: 130,
+        firstBrokenSequence: 77,
+        reasonCode: api.AuditChainReason.checkpointInvalid,
+        verifiedAt: em,
+      ),
+    );
+    final s = await _fonte(caller).verifyAuditChain();
+    expect(caller.lastArgs, {'accessToken': 'token-de-teste'});
+    expect(s.state, AuditIntegrityState.broken);
+    expect(s.checkedRows, 120);
+    expect(s.headSequence, 130);
+    expect(s.firstBrokenSequence, 77);
+    expect(s.brokenInScope, isNull, reason: 'nulo é "não informado", não false');
+    expect(s.reasonCode, AuditChainReason.checkpointInvalid);
+    expect(s.verifiedAt, em);
+  });
+
+  test('cadeia: todo estado e todo motivo do cliente têm par no app, por nome', () async {
+    for (final e in api.AuditIntegrityState.values) {
+      final caller = FakeEndpointCaller(
+        result: api.AdminAuditChainStatus(state: e, verifiedAt: DateTime.utc(2026), brokenInScope: false),
+      );
+      final s = await _fonte(caller).verifyAuditChain();
+      expect(s.state.name, e.name);
+      expect(s.brokenInScope, isFalse);
+    }
+    for (final r in api.AuditChainReason.values) {
+      final caller = FakeEndpointCaller(
+        result: api.AdminAuditChainStatus(
+          state: api.AuditIntegrityState.unavailable,
+          reasonCode: r,
+          verifiedAt: DateTime.utc(2026),
+        ),
+      );
+      expect((await _fonte(caller).verifyAuditChain()).reasonCode!.name, r.name);
+    }
+    expect(AuditRowSeal.values.map((s) => s.name), api.AuditRowSeal.values.map((s) => s.name));
+  });
+
+  test('cadeia: recusa de papel vira falha genérica', () async {
+    final caller = FakeEndpointCaller(
+      error: api.AlertPermissionException(message: 'detalhe interno do servidor'),
+    );
+    await expectLater(
+      _fonte(caller).verifyAuditChain(),
+      throwsA(isA<AdminDataFailure>().having((f) => f.message, 'message', 'Acesso restrito ao backoffice.')),
+    );
   });
 
   test(

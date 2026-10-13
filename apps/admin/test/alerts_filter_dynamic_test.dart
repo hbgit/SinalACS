@@ -48,7 +48,16 @@ class _CustomAreaDataSource implements AdminDataSource {
       ].where((a) => microAreaId == null || microAreaId == 'ma-99').toList();
 
   @override
-  Future<List<AuditLogEntry>> fetchAuditLogs({int limit = 50}) async => const [];
+  Future<AuditLogPage> fetchAuditLogs({
+    AuditLogFilter filter = const AuditLogFilter(),
+    int limit = 50,
+    int? beforeSequence,
+  }) async =>
+      const AuditLogPage(items: []);
+
+  @override
+  Future<ChainStatus> verifyAuditChain() async =>
+      ChainStatus(state: AuditIntegrityState.inconclusive, verifiedAt: DateTime(2026, 9, 15));
 
   @override
   Future<void> recordAccess({required String actionType, required String resourceType}) async {}

@@ -33,11 +33,76 @@ void main() {
     await dataSource.recordAccess(actionType: 'view', resourceType: 'micro_areas');
     await dataSource.recordAccess(actionType: 'view', resourceType: 'alerts');
 
-    final log = await dataSource.fetchAuditLogs();
+    final log = (await dataSource.fetchAuditLogs()).items;
 
     expect(log, hasLength(2));
     expect(log.first.resourceType, 'alerts');
     expect(log.last.resourceType, 'micro_areas');
+    expect(log.first.sequence, greaterThan(log.last.sequence));
+    expect(log.map((e) => e.seal), everyElement(AuditRowSeal.verified));
+  });
+
+  group('auditoria (#45): filtro, cursor e estado da cadeia configuráveis', () {
+    AuditLogEntry linha(int seq, String label, String acao) => AuditLogEntry(
+          id: 'e$seq',
+          sequence: seq,
+          userLabel: label,
+          actionType: acao,
+          resourceType: 'session',
+          timestamp: DateTime.utc(2026, 10, 1).add(Duration(hours: seq)),
+          result: 'success',
+          seal: seq.isEven ? AuditRowSeal.verified : AuditRowSeal.invalid,
+        );
+
+    test('keyset por sequence decrescente: a página seguinte começa abaixo do cursor', () async {
+      final ds = MockAdminDataSource(auditSeed: [for (var s = 5; s >= 1; s--) linha(s, 'ADM-1 (Administrador)', 'read')]);
+      final p1 = await ds.fetchAuditLogs(limit: 2);
+      expect(p1.items.map((e) => e.sequence), [5, 4]);
+      expect(p1.nextBeforeSequence, 4);
+      final p2 = await ds.fetchAuditLogs(limit: 2, beforeSequence: p1.nextBeforeSequence);
+      expect(p2.items.map((e) => e.sequence), [3, 2]);
+      final p3 = await ds.fetchAuditLogs(limit: 2, beforeSequence: p2.nextBeforeSequence);
+      expect(p3.items.map((e) => e.sequence), [1]);
+      expect(p3.nextBeforeSequence, isNull);
+      expect(ds.auditQueries.map((q) => q.beforeSequence), [null, 4, 2]);
+    });
+
+    test('filtros combinam em E e o selo vem da semente, sem recalcular', () async {
+      final ds = MockAdminDataSource(auditSeed: [
+        linha(4, 'ACS-12 (ACS)', 'read'),
+        linha(3, 'ACS-12 (ACS)', 'write'),
+        linha(2, 'COORD-1 (Coordenador)', 'read'),
+        linha(1, 'Paciente #A18F', 'login'),
+      ]);
+      final acsLeitura = await ds.fetchAuditLogs(
+        filter: const AuditLogFilter(actorRole: AuditActorRole.acs, actionType: 'read'),
+      );
+      expect(acsLeitura.items.map((e) => e.id), ['e4']);
+      final paciente = await ds.fetchAuditLogs(filter: const AuditLogFilter(actorRole: AuditActorRole.patient));
+      expect(paciente.items.map((e) => e.id), ['e1']);
+      expect(paciente.items.single.seal, AuditRowSeal.invalid);
+      final busca = await ds.fetchAuditLogs(filter: const AuditLogFilter(search: 'coord'));
+      expect(busca.items.map((e) => e.id), ['e2']);
+    });
+
+    test('estado da cadeia é o configurado; sem configuração, verified', () async {
+      final ds = MockAdminDataSource();
+      expect((await ds.verifyAuditChain()).state, AuditIntegrityState.verified);
+      ds.chainStatus = ChainStatus(state: AuditIntegrityState.unavailable, verifiedAt: DateTime.utc(2026));
+      expect((await ds.verifyAuditChain()).state, AuditIntegrityState.unavailable);
+      expect(ds.verifyChainCalls, 2);
+    });
+  });
+
+  test('AuditLogFilter: isEmpty, copyWith que limpa campo e igualdade por valor', () {
+    const vazio = AuditLogFilter();
+    expect(vazio.isEmpty, isTrue);
+    final f = vazio.copyWith(search: 'ab', actorRole: AuditActorRole.acs);
+    expect(f.isEmpty, isFalse);
+    expect(f, const AuditLogFilter(search: 'ab', actorRole: AuditActorRole.acs));
+    expect(f.copyWith(search: null).search, isNull);
+    expect(f.copyWith(search: null).actorRole, AuditActorRole.acs);
+    expect(f.copyWith(search: null, actorRole: null).isEmpty, isTrue);
   });
 
   test('pedidos do titular: fixtures sintéticas ordenadas por prazo, com um vencido', () async {

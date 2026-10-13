@@ -143,7 +143,11 @@ Future<void> percorrerTelaInteira(WidgetTester tester, String contexto, {Finder?
 Future<void> percorrerBackofficeInteiro(WidgetTester tester, String contexto) async {
   for (final destino in destinosDoBackoffice) {
     await irPara(tester, destino);
-    await percorrerTelaInteira(tester, '$contexto / $destino');
+    await percorrerTelaInteira(
+      tester,
+      '$contexto / $destino',
+      lista: destino == 'Auditoria' ? rolagemDaAuditoria() : null,
+    );
   }
 }
 
@@ -165,6 +169,12 @@ void esperarCaberNaLargura(WidgetTester tester, Finder alvo, String contexto) {
   final larguraDaJanela = tester.view.physicalSize.width / tester.view.devicePixelRatio;
   expect(tester.getSize(alvo).width, lessThanOrEqualTo(larguraDaJanela), reason: contexto);
 }
+
+/// A rolagem da página de Auditoria, e não a de um campo do filtro (todo
+/// `TextField` também é `Scrollable`, e `find.byType(Scrollable).last` cairia
+/// nele sem rolar nada — cobertura perdida sem teste vermelho).
+Finder rolagemDaAuditoria() =>
+    find.descendant(of: find.byType(AuditLogScreen), matching: find.byType(Scrollable)).first;
 
 /// A rolagem da página de pedidos do titular (fila ou detalhe), e não a do
 /// campo de resposta, que também é `Scrollable`.

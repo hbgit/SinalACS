@@ -125,13 +125,33 @@ class FailingAdminDataSource implements AdminDataSource {
   }
 
   @override
-  Future<List<AuditLogEntry>> fetchAuditLogs({int limit = 50}) async {
+  Future<AuditLogPage> fetchAuditLogs({
+    AuditLogFilter filter = const AuditLogFilter(),
+    int limit = 50,
+    int? beforeSequence,
+  }) async {
     await _lancaSeProgramado();
     if (failNextAuditLogs) {
       failNextAuditLogs = false;
       throw StateError('falha simulada: auditoria');
     }
-    return inner.fetchAuditLogs(limit: limit);
+    return inner.fetchAuditLogs(filter: filter, limit: limit, beforeSequence: beforeSequence);
+  }
+
+  /// Erro lançado (uma vez) pela próxima verificação da cadeia, depois do
+  /// próximo frame — como [nextError], mas só para esta chamada.
+  Object? failNextChainStatusWith;
+
+  @override
+  Future<ChainStatus> verifyAuditChain() async {
+    await _lancaSeProgramado();
+    final erro = failNextChainStatusWith;
+    if (erro != null) {
+      failNextChainStatusWith = null;
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+      throw erro;
+    }
+    return inner.verifyAuditChain();
   }
 
   @override

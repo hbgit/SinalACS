@@ -116,23 +116,175 @@ class AlertsPulse {
   final DateTime serverNow;
 }
 
-/// Espelha `AuditLog` (`audit_log.spy.yaml`).
+/// Selo de uma linha da trilha (#45, D3). Espelha `AuditRowSeal`. Vem **sempre**
+/// do servidor: o app não tem o segredo da cadeia e nunca decide integridade.
+enum AuditRowSeal { verified, invalid, unverifiable }
+
+/// Estado da verificação global da cadeia (#45, D3). Espelha
+/// `AuditIntegrityState`. Só [verified] é sucesso; os outros três nunca são
+/// mostrados como cadeia íntegra.
+enum AuditIntegrityState { verified, broken, unavailable, inconclusive }
+
+/// Motivo fechado da verificação que não terminou em `verified` (#45, D9).
+/// Espelha `AuditChainReason`; o texto livre do verificador não chega ao app.
+enum AuditChainReason {
+  hashMismatch,
+  linkBroken,
+  sequenceGap,
+  tailTruncated,
+  checkpointInvalid,
+  timeBudget,
+  databaseError,
+  secretUnavailable,
+}
+
+/// Papel do autor de uma linha da trilha, para o filtro (#45, D1). Espelha
+/// `UserRole`, traduzido **por nome**.
+enum AuditActorRole { patient, acs, coordinator, admin }
+
+/// Espelha `AdminAuditEntry` (`admin_audit_entry.spy.yaml`).
 class AuditLogEntry {
   const AuditLogEntry({
     required this.id,
+    required this.sequence,
     required this.userLabel,
     required this.actionType,
     required this.resourceType,
     required this.timestamp,
     required this.result,
+    required this.seal,
+    this.resourceLabel,
   });
 
   final String id;
+
+  /// Posição na cadeia (única, monotônica): é a ordem e o cursor da lista.
+  final int sequence;
   final String userLabel;
   final String actionType;
   final String resourceType;
   final DateTime timestamp;
   final String result;
+
+  /// Selo calculado pelo servidor para esta linha.
+  final AuditRowSeal seal;
+
+  /// Rótulo minimizado do recurso (`#A18F`), nunca o UUID. O servidor ainda
+  /// não o envia na consulta (só a exportação o terá, D6): hoje é sempre nulo.
+  final String? resourceLabel;
+}
+
+/// Filtros da consulta da trilha (#45, D1). Todos opcionais e combinados em E;
+/// [to] é exclusivo. O vazio é a trilha inteira do escopo.
+class AuditLogFilter {
+  const AuditLogFilter({
+    this.actorEnrollmentId,
+    this.actorRole,
+    this.actionType,
+    this.resourceType,
+    this.result,
+    this.from,
+    this.to,
+    this.search,
+  });
+
+  final String? actorEnrollmentId;
+  final AuditActorRole? actorRole;
+
+  /// `read`, `write`, `login` ou `export`.
+  final String? actionType;
+  final String? resourceType;
+  final String? result;
+  final DateTime? from;
+  final DateTime? to;
+
+  /// 2 a 64 caracteres; casa só matrícula do autor, tipo de recurso e resultado (D2).
+  final String? search;
+
+  bool get isEmpty =>
+      actorEnrollmentId == null &&
+      actorRole == null &&
+      actionType == null &&
+      resourceType == null &&
+      result == null &&
+      from == null &&
+      to == null &&
+      search == null;
+
+  /// Campo omitido mantém o valor; passado como `null`, limpa.
+  AuditLogFilter copyWith({
+    Object? actorEnrollmentId = _manter,
+    Object? actorRole = _manter,
+    Object? actionType = _manter,
+    Object? resourceType = _manter,
+    Object? result = _manter,
+    Object? from = _manter,
+    Object? to = _manter,
+    Object? search = _manter,
+  }) =>
+      AuditLogFilter(
+        actorEnrollmentId: identical(actorEnrollmentId, _manter) ? this.actorEnrollmentId : actorEnrollmentId as String?,
+        actorRole: identical(actorRole, _manter) ? this.actorRole : actorRole as AuditActorRole?,
+        actionType: identical(actionType, _manter) ? this.actionType : actionType as String?,
+        resourceType: identical(resourceType, _manter) ? this.resourceType : resourceType as String?,
+        result: identical(result, _manter) ? this.result : result as String?,
+        from: identical(from, _manter) ? this.from : from as DateTime?,
+        to: identical(to, _manter) ? this.to : to as DateTime?,
+        search: identical(search, _manter) ? this.search : search as String?,
+      );
+
+  @override
+  bool operator ==(Object other) =>
+      other is AuditLogFilter &&
+      other.actorEnrollmentId == actorEnrollmentId &&
+      other.actorRole == actorRole &&
+      other.actionType == actionType &&
+      other.resourceType == resourceType &&
+      other.result == result &&
+      other.from == from &&
+      other.to == to &&
+      other.search == search;
+
+  @override
+  int get hashCode => Object.hash(actorEnrollmentId, actorRole, actionType, resourceType, result, from, to, search);
+}
+
+const Object _manter = Object();
+
+/// Uma página da trilha, mais recente primeiro. [nextBeforeSequence] é o
+/// cursor da próxima (keyset por `sequence`); nulo no fim.
+class AuditLogPage {
+  const AuditLogPage({required this.items, this.nextBeforeSequence});
+
+  final List<AuditLogEntry> items;
+  final int? nextBeforeSequence;
+}
+
+/// Resultado da verificação global da cadeia (#45, D9). Espelha
+/// `AdminAuditChainStatus`. Para o coordenador o servidor não manda contagens
+/// nem `sequence` fora do escopo dele: os campos chegam nulos.
+class ChainStatus {
+  const ChainStatus({
+    required this.state,
+    this.checkedRows,
+    this.headSequence,
+    this.firstBrokenSequence,
+    this.brokenInScope,
+    this.reasonCode,
+    required this.verifiedAt,
+  });
+
+  final AuditIntegrityState state;
+  final int? checkedRows;
+  final int? headSequence;
+  final int? firstBrokenSequence;
+
+  /// Só em [AuditIntegrityState.broken]: a falha atinge registros que quem
+  /// consulta enxerga. `null` é "não informado" (fora de `broken`, ou o
+  /// servidor não conseguiu decidir), **nunca** lido como `false`.
+  final bool? brokenInScope;
+  final AuditChainReason? reasonCode;
+  final DateTime verifiedAt;
 }
 
 /// Espelha `DataSubjectRequestType` (`enums/data_subject_request_type.spy.yaml`).
@@ -368,7 +520,17 @@ abstract interface class AdminDataSource {
     int offset = 0,
   });
 
-  Future<List<AuditLogEntry>> fetchAuditLogs({int limit = 50});
+  /// Trilha de auditoria no escopo da sessão, mais recente primeiro (#45).
+  /// [beforeSequence] é o cursor devolvido pela página anterior; um filtro
+  /// novo começa sempre sem cursor. Cada linha traz o selo do servidor.
+  Future<AuditLogPage> fetchAuditLogs({
+    AuditLogFilter filter = const AuditLogFilter(),
+    int limit = 50,
+    int? beforeSequence,
+  });
+
+  /// Verificação global da cadeia, feita pelo servidor (#45, D9).
+  Future<ChainStatus> verifyAuditChain();
 
   /// Escalona um alerta vermelho pendente vencido (#44). Idempotente. A recusa
   /// de negócio sai como [AdminValidationFailure] com o texto do servidor.
