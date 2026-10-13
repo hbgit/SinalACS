@@ -72,15 +72,19 @@ class AdminEndpoint extends AuthenticatedEndpoint {
       .adminMonitoringServiceFor(session)
       .endMonitoringSession(authenticate(accessToken));
 
+  /// Trilha de auditoria no escopo de quem chama, por keyset. [filter] (#45)
+  /// é opcional e só restringe; inválido vira [AdminInvalidRequestException].
   Future<AdminAuditPage> auditLogs(
     Session session, {
     required String accessToken,
+    AdminAuditFilter? filter,
     int limit = 50,
     int? beforeSequence,
   }) => AlertRuntime.instance
       .adminReadServiceFor(session)
       .auditLogs(
         authenticate(accessToken),
+        filter: filter,
         limit: limit,
         beforeSequence: beforeSequence,
       );

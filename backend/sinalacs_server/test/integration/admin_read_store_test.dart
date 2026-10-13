@@ -26,10 +26,16 @@ const _acsId = '00000000-0000-4000-8000-0000000000e5';
 const _coordId = '00000000-0000-4000-8000-0000000000e6';
 const _adminId = '00000000-0000-4000-8000-0000000000e7';
 const _semUbsId = '00000000-0000-4000-8000-0000000000e8';
+const _acsBId = '00000000-0000-4000-8000-0000000000e9';
 const _pacienteNome = 'Maria Sintética da Silva';
 const _paciente = '00000000-0000-4000-8000-0000000000f1';
 
 final _t = DateTime.utc(2026, 10, 7, 12);
+
+/// Aritmética de instante legível nas fixtures da auditoria com filtros.
+extension on DateTime {
+  DateTime operator +(Duration d) => add(d);
+}
 
 Future<void> _usuario(
   Session s,
@@ -1058,5 +1064,306 @@ void main() {
         );
       },
     );
+
+    group('auditoria com filtros (#45, D1/D2/D10)', () {
+      // 12 linhas de 3 autores (admin, ACS da UBS A, ACS da UBS B), gravadas
+      // direto no ORM para controlar `timestamp` e hashes. A leitura não
+      // verifica a cadeia; só o filtro e o keyset estão em teste aqui.
+      // Linhas 5 e 6 têm o MESMO timestamp; a 8 tem sequence maior e
+      // timestamp menor que a 7. A 12 tem ipHash/entryHash com "cafe".
+      final t0 = DateTime.utc(2026, 10, 1);
+      const h = Duration(hours: 1);
+      late int base;
+
+      Future<void> linha(
+        int n,
+        String quem,
+        String acao,
+        String recurso,
+        String resultado,
+        DateTime em, {
+        String hash = '',
+      }) => AuditLog.db
+          .insertRow(
+            session,
+            AuditLog(
+              userId: UuidValue.fromString(quem),
+              actionType: acao,
+              resourceType: recurso,
+              timestamp: em,
+              ipHash: hash.isEmpty ? '0' * 64 : hash,
+              result: resultado,
+              sequence: base + n - 1,
+              previousHash: '0' * 64,
+              entryHash: hash.isEmpty ? '1' * 64 : hash,
+            ),
+          )
+          .then((_) {});
+
+      setUp(() async {
+        await _usuario(
+          session,
+          _acsBId,
+          'Bruno ACS Sintético',
+          UserRole.acs,
+          ma: _maB,
+        );
+        await Acs.db.insertRow(
+          session,
+          Acs(
+            id: UuidValue.fromString(_acsBId),
+            enrollmentId: 'ACS-ADM-RD-2',
+            ubsId: UuidValue.fromString(_ubsB),
+            active: true,
+          ),
+        );
+        final max = await session.db.unsafeQuery(
+          'SELECT COALESCE(max(sequence), 0) FROM audit_logs',
+        );
+        base = (max.single[0] as int) + 1;
+        await linha(1, _adminId, 'read', 'admin_indicators', 'success', t0 + h);
+        await linha(
+          2,
+          _adminId,
+          'read',
+          'admin_audit_logs',
+          'success',
+          t0 + h * 2,
+        );
+        await linha(3, _acsId, 'login', 'session', 'granted', t0 + h * 3);
+        await linha(
+          4,
+          _acsId,
+          'read',
+          'patient_directory',
+          'granted',
+          t0 + h * 4,
+        );
+        await linha(
+          5,
+          _acsId,
+          'write',
+          'visit',
+          'denied_territory',
+          t0 + h * 5,
+        );
+        await linha(6, _acsBId, 'login', 'session', 'granted', t0 + h * 5);
+        await linha(
+          7,
+          _acsBId,
+          'read',
+          'patient_directory',
+          'granted',
+          t0 + h * 6,
+        );
+        await linha(
+          8,
+          _acsBId,
+          'write',
+          'visit',
+          'success',
+          t0 + h * 2 + h ~/ 2,
+        );
+        await linha(9, _adminId, 'write', 'admin_acs', 'created', t0 + h * 7);
+        await linha(10, _acsId, 'read', 'alert', 'denied', t0 + h * 8);
+        await linha(11, _acsBId, 'write', 'alert', 'acknowledged', t0 + h * 9);
+        await linha(
+          12,
+          _adminId,
+          'login',
+          'staff_session',
+          'granted',
+          t0 + h * 10,
+          hash: 'cafe' * 16,
+        );
+      });
+
+      /// Números (1..12) das linhas devolvidas, na ordem da página.
+      Future<List<int>> nums(
+        AdminAuditFilter? f, {
+        AdminScope scope = const AdminScope.system(),
+        int limit = 50,
+      }) async => [
+        for (final e in (await store.auditLogs(
+          scope,
+          filter: f,
+          limit: limit,
+        )).items)
+          e.sequence - base + 1,
+      ];
+
+      test('sem filtro: as 12, sequence desc', () async {
+        expect(await nums(null), [12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1]);
+        expect(await nums(AdminAuditFilter()), hasLength(12));
+      });
+
+      test('cada filtro isolado', () async {
+        expect(await nums(AdminAuditFilter(actionType: 'login')), [12, 6, 3]);
+        expect(
+          await nums(AdminAuditFilter(resourceType: 'session')),
+          [6, 3],
+          reason: 'igualdade: staff_session não entra',
+        );
+        expect(
+          await nums(AdminAuditFilter(result: 'granted')),
+          [12, 7, 6, 4, 3],
+        );
+        expect(
+          await nums(AdminAuditFilter(from: t0 + h * 5)),
+          [12, 11, 10, 9, 7, 6, 5],
+          reason: 'from inclusivo: 5 e 6 (mesmo timestamp) entram',
+        );
+        expect(
+          await nums(AdminAuditFilter(to: t0 + h * 5)),
+          [8, 4, 3, 2, 1],
+          reason: 'to exclusivo: 5 e 6 ficam de fora; 8 (tempo menor) entra',
+        );
+        expect(
+          await nums(AdminAuditFilter(actorRole: UserRole.admin)),
+          [12, 9, 2, 1],
+        );
+        expect(
+          await nums(AdminAuditFilter(actorRole: UserRole.acs)),
+          [11, 10, 8, 7, 6, 5, 4, 3],
+        );
+        expect(
+          await nums(AdminAuditFilter(actorEnrollmentId: 'acs-adm-rd-2')),
+          [11, 8, 7, 6],
+          reason: 'matrícula por igualdade, sem caixa',
+        );
+        expect(
+          await nums(AdminAuditFilter(actorEnrollmentId: 'ACS-ADM-RD')),
+          isEmpty,
+          reason: 'matrícula é igualdade, não prefixo',
+        );
+      });
+
+      test('fronteira de to: um microssegundo depois inclui 5 e 6', () async {
+        expect(
+          await nums(
+            AdminAuditFilter(
+              from: t0 + h * 5,
+              to: t0 + h * 5 + const Duration(microseconds: 1),
+            ),
+          ),
+          [6, 5],
+        );
+      });
+
+      test('busca: prefixo da matrícula, resourceType e result', () async {
+        expect(
+          await nums(AdminAuditFilter(search: 'acs-adm-rd-2')),
+          [11, 8, 7, 6],
+        );
+        expect(
+          await nums(AdminAuditFilter(search: 'ADM-RD')),
+          [12, 9, 2, 1],
+          reason: 'prefixo da matrícula do admin, sem caixa',
+        );
+        expect(
+          await nums(AdminAuditFilter(search: 'RD-1')),
+          isEmpty,
+          reason: 'na matrícula é só prefixo, não substring',
+        );
+        expect(await nums(AdminAuditFilter(search: 'directory')), [7, 4]);
+        expect(await nums(AdminAuditFilter(search: 'territ')), [5]);
+      });
+
+      test('busca: curingas do usuário são literais', () async {
+        expect(await nums(AdminAuditFilter(search: '%')), isEmpty);
+        expect(await nums(AdminAuditFilter(search: '%%')), isEmpty);
+        expect(
+          await nums(AdminAuditFilter(search: 'a_')),
+          isEmpty,
+          reason: '"_" sem escape casaria "al" de alert e "ad" de admin',
+        );
+        expect(await nums(AdminAuditFilter(search: r'\')), isEmpty);
+        expect(
+          await nums(AdminAuditFilter(search: 'n_a')),
+          [9, 2],
+          reason: '"_" literal ainda casa admin_acs e admin_audit_logs',
+        );
+      });
+
+      test('busca nunca casa ipHash nem entryHash', () async {
+        expect(await nums(AdminAuditFilter(search: 'cafe')), isEmpty);
+      });
+
+      test('todos os filtros combinados (AND)', () async {
+        final f = AdminAuditFilter(
+          actorRole: UserRole.acs,
+          actionType: 'write',
+          resourceType: 'visit',
+          from: t0 + h * 2,
+          to: t0 + h * 6,
+          search: 'vis',
+        );
+        expect(await nums(f), [8, 5]);
+        expect(
+          await nums(f.copyWith(actorEnrollmentId: 'ACS-ADM-RD-1')),
+          [5],
+        );
+        expect(await nums(f.copyWith(result: 'success')), [8]);
+      });
+
+      test(
+        'coordenador: o filtro nunca fura o escopo da UBS',
+        () async {
+          const soA = AdminScope.ubs(_ubsA);
+          expect(await nums(null, scope: soA), [10, 5, 4, 3]);
+          expect(
+            await nums(
+              AdminAuditFilter(actorEnrollmentId: 'ACS-ADM-RD-2'),
+              scope: soA,
+            ),
+            isEmpty,
+            reason: 'matrícula de outra UBS não traz linha',
+          );
+          expect(
+            await nums(AdminAuditFilter(search: 'acs-adm-rd-2'), scope: soA),
+            isEmpty,
+          );
+          expect(
+            await nums(AdminAuditFilter(actorRole: UserRole.admin), scope: soA),
+            isEmpty,
+            reason: 'linhas de staff seguem invisíveis',
+          );
+          expect(
+            await nums(AdminAuditFilter(resourceType: 'session'), scope: soA),
+            [3],
+          );
+        },
+      );
+
+      test(
+        'keyset com filtro: linha nova no topo não repete nem pula',
+        () async {
+          final f = AdminAuditFilter(actorRole: UserRole.acs);
+          final p1 = await store.auditLogs(
+            const AdminScope.system(),
+            filter: f,
+            limit: 3,
+          );
+          expect(p1.items.map((e) => e.sequence - base + 1), [11, 10, 8]);
+          expect(p1.nextBeforeSequence, base + 8 - 1);
+
+          await linha(13, _acsBId, 'read', 'alert', 'granted', t0 + h * 11);
+
+          final vistos = [...p1.items.map((e) => e.sequence - base + 1)];
+          int? antes = p1.nextBeforeSequence;
+          while (antes != null) {
+            final p = await store.auditLogs(
+              const AdminScope.system(),
+              filter: f,
+              limit: 3,
+              beforeSequence: antes,
+            );
+            vistos.addAll(p.items.map((e) => e.sequence - base + 1));
+            antes = p.nextBeforeSequence;
+          }
+          expect(vistos, [11, 10, 8, 7, 6, 5, 4, 3]);
+        },
+      );
+    });
   });
 }

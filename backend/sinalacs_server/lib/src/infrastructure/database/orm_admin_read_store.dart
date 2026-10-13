@@ -4,6 +4,12 @@ import 'package:sinalacs_server/src/application/admin/admin_read_service.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
 import 'package:sinalacs_server/src/infrastructure/database/alert_overdue_sql.dart';
 
+/// Escapa `\`, `%` e `_` para que o texto do usuário seja literal num `LIKE`/
+/// `ILIKE ... ESCAPE '\'` (#45, D2): `'%'` busca o caractere `%`, não "tudo".
+/// O `\` vem primeiro, senão os escapes acrescentados seriam escapados de novo.
+String escaparLike(String texto) =>
+    texto.replaceAll(r'\', r'\\').replaceAll('%', r'\%').replaceAll('_', r'\_');
+
 /// Leitura do backoffice sobre Postgres.
 ///
 /// SQL direto (`unsafeQuery` com parâmetros nomeados, como `orm_alert_outbox`):
@@ -200,12 +206,20 @@ class OrmAdminReadStore implements AdminReadStore {
   /// `users` a `micro_areas` (#43 — o que a #40 havia adiado). `@ubs` nulo
   /// (administrador) não filtra nada; ninguém de staff tem microárea, então
   /// só o administrador lê as linhas de staff.
+  ///
+  /// O [filter] (#45, D1/D2) só acrescenta condições ao `WHERE`, todas por
+  /// parâmetro nomeado no formato `@p IS NULL OR …`: o texto da consulta é
+  /// fixo, e o escopo e o `ORDER BY sequence DESC` não mudam com ele. A busca
+  /// chega escapada por [escaparLike] e casa só o início da matrícula do
+  /// autor, `resourceType` e `result` — nunca hash, IP nem UUID.
   @override
   Future<AdminAuditPage> auditLogs(
     AdminScope scope, {
+    AdminAuditFilter? filter,
     required int limit,
     int? beforeSequence,
   }) async {
+    final busca = filter?.search;
     // Só as colunas que a tela pode ver: nunca ipHash, previousHash nem entryHash.
     final rows = await _session().db.unsafeQuery(
       '''
@@ -220,12 +234,34 @@ class OrmAdminReadStore implements AdminReadStore {
               SELECT u.id FROM users u
               JOIN micro_areas m ON m.id = u."microAreaId"
               WHERE m."ubsId" = @ubs::uuid))
+        AND (@action::text IS NULL OR l."actionType" = @action::text)
+        AND (@rtype::text IS NULL OR l."resourceType" = @rtype::text)
+        AND (@result::text IS NULL OR l.result = @result::text)
+        AND (@from::timestamp IS NULL OR l."timestamp" >= @from::timestamp)
+        AND (@to::timestamp IS NULL OR l."timestamp" < @to::timestamp)
+        AND (@role::text IS NULL OR u.role = @role::text)
+        AND (@enroll::text IS NULL
+             OR lower(COALESCE(acs."enrollmentId", s."enrollmentId"))
+                = lower(@enroll::text))
+        AND (@q::text IS NULL OR (
+                COALESCE(acs."enrollmentId", s."enrollmentId", '')
+                  ILIKE @q::text || '%' ESCAPE '\\'
+             OR l."resourceType" ILIKE '%' || @q::text || '%' ESCAPE '\\'
+             OR l.result ILIKE '%' || @q::text || '%' ESCAPE '\\'))
       ORDER BY l.sequence DESC
       LIMIT @limit
       ''',
       parameters: QueryParameters.named({
         'before': beforeSequence,
         'ubs': scope.ubsId,
+        'action': filter?.actionType,
+        'rtype': filter?.resourceType,
+        'result': filter?.result,
+        'from': filter?.from?.toUtc(),
+        'to': filter?.to?.toUtc(),
+        'role': filter?.actorRole?.name,
+        'enroll': filter?.actorEnrollmentId,
+        'q': busca == null ? null : escaparLike(busca),
         'limit': limit + 1,
       }),
     );

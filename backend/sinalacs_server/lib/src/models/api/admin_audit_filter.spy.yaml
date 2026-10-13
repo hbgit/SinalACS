@@ -1,0 +1,25 @@
+### Filtro da trilha de auditoria do backoffice (#45, D1/D2/D10). Todos os
+### campos são opcionais e combinados por AND; nulo = sem restrição. Nunca
+### alarga o escopo: o coordenador continua vendo só os autores da UBS dele.
+###
+### Validação no `AdminReadService` (antes de auditar a leitura):
+### - `actorEnrollmentId`: matrícula do autor (ACS ou staff), igualdade sem
+###   caixa, 1 a 32 caracteres. Paciente não é filtrável por identificador.
+### - `actionType`: `read`, `write`, `login` ou `export`.
+### - `resourceType`, `result`: `^[a-z_]{1,64}$`, igualdade.
+### - `from`/`to`: UTC; `from` inclusivo, `to` exclusivo, `from < to` e janela
+###   de no máximo 366 dias quando os dois vêm.
+### - `search`: 2 a 64 caracteres; casa só o início da matrícula do autor,
+###   `resourceType` e `result` (sem caixa, curingas escapados). Nunca hash,
+###   IP, UUID ou nome.
+### Não há filtro por `resourceId` (D10: pode ser id de paciente).
+class: AdminAuditFilter
+fields:
+  actorEnrollmentId: String?
+  actorRole: UserRole?
+  actionType: String?
+  resourceType: String?
+  result: String?
+  from: DateTime?
+  to: DateTime?
+  search: String?

@@ -2,6 +2,8 @@ import 'package:sinalacs_server/src/application/admin/admin_read_service.dart';
 import 'package:sinalacs_server/src/application/audit/audit_trail.dart';
 import 'package:sinalacs_server/src/application/auth/development_auth_service.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
+import 'package:sinalacs_server/src/infrastructure/database/orm_admin_read_store.dart'
+    show escaparLike;
 import 'package:test/test.dart';
 
 /// Regras do backoffice (#40) sem banco: papel, escopo, auditoria que vem ANTES
@@ -15,6 +17,7 @@ class _Store implements AdminReadStore {
   AdminScope? ultimoEscopo;
   int chamadas = 0;
   int? ultimoLimit;
+  AdminAuditFilter? ultimoFiltro;
   DateTime? ultimoAgoraDosAlertas;
   final Map<String, String?> ubs = {
     'coord-a': _ubsDoCoordenador,
@@ -75,11 +78,13 @@ class _Store implements AdminReadStore {
   @override
   Future<AdminAuditPage> auditLogs(
     AdminScope scope, {
+    AdminAuditFilter? filter,
     required int limit,
     int? beforeSequence,
   }) async {
     _marca('auditLogs', scope);
     ultimoLimit = limit;
+    ultimoFiltro = filter;
     return AdminAuditPage(items: []);
   }
 
@@ -253,5 +258,130 @@ void main() {
     await servico.alerts(admin, limit: 1);
     await servico.alerts(admin, limit: 100);
     expect(store.ultimoLimit, 100);
+  });
+
+  group('filtro da auditoria (#45, D1/D2)', () {
+    final de = DateTime.utc(2026, 10, 1);
+    final invalidos = <String, AdminAuditFilter>{
+      'resourceType com maiúscula': AdminAuditFilter(resourceType: 'Session'),
+      'resourceType com curinga': AdminAuditFilter(resourceType: 'sess%'),
+      'resourceType vazio': AdminAuditFilter(resourceType: ''),
+      'resourceType com 65': AdminAuditFilter(resourceType: 'a' * 65),
+      'result com espaço': AdminAuditFilter(result: 'denied x'),
+      'result com aspas': AdminAuditFilter(result: "x' OR '1'='1"),
+      'actionType desconhecida': AdminAuditFilter(actionType: 'delete'),
+      'from == to': AdminAuditFilter(from: de, to: de),
+      'from > to': AdminAuditFilter(
+        from: de,
+        to: de.subtract(const Duration(seconds: 1)),
+      ),
+      'janela de 366 d + 1 µs': AdminAuditFilter(
+        from: de,
+        to: de.add(const Duration(days: 366, microseconds: 1)),
+      ),
+      'busca com 1': AdminAuditFilter(search: 'a'),
+      'busca vazia': AdminAuditFilter(search: ''),
+      'busca com 65': AdminAuditFilter(search: 'a' * 65),
+      'matrícula com 33': AdminAuditFilter(actorEnrollmentId: 'A' * 33),
+      'matrícula vazia': AdminAuditFilter(actorEnrollmentId: ''),
+    };
+
+    for (final MapEntry(key: caso, value: filtro) in invalidos.entries) {
+      test(
+        'inválido ($caso) ⇒ AdminInvalidRequestException, sem auditoria e sem store',
+        () async {
+          await expectLater(
+            servico.auditLogs(admin, filter: filtro),
+            throwsA(
+              isA<AdminInvalidRequestException>().having(
+                (e) => e.message,
+                'message',
+                startsWith('Filtro de auditoria inválido.'),
+              ),
+            ),
+          );
+          expect(
+            audit.events,
+            isEmpty,
+            reason: 'entrada inválida não é acesso',
+          );
+          expect(store.chamadas, 0);
+        },
+      );
+    }
+
+    test('a mensagem de recusa nunca ecoa o valor recebido', () async {
+      const valor = "zz' OR 1=1 --";
+      await expectLater(
+        servico.auditLogs(admin, filter: AdminAuditFilter(result: valor)),
+        throwsA(
+          isA<AdminInvalidRequestException>().having(
+            (e) => e.message,
+            'message',
+            isNot(contains(valor)),
+          ),
+        ),
+      );
+    });
+
+    test(
+      'acs com filtro inválido continua recusado por papel (denied auditado)',
+      () async {
+        await expectLater(
+          servico.auditLogs(
+            _u('acs-1', UserRole.acs),
+            filter: AdminAuditFilter(search: 'a'),
+          ),
+          throwsA(isA<AlertPermissionException>()),
+        );
+        expect(audit.events.single.result, 'denied');
+      },
+    );
+
+    test(
+      'válido ⇒ audita success ANTES do store e repassa o filtro intacto',
+      () async {
+        final filtro = AdminAuditFilter(
+          actorEnrollmentId: 'ACS-0001',
+          actorRole: UserRole.acs,
+          actionType: 'export',
+          resourceType: 'admin_audit_logs',
+          result: 'denied_territory',
+          from: de,
+          to: de.add(const Duration(days: 366)),
+          search: '%_',
+        );
+        await servico.auditLogs(coordA, filter: filtro, limit: 20);
+        expect(_ordem, ['audit:admin_audit_logs:success', 'store:auditLogs']);
+        expect(store.ultimoFiltro, same(filtro));
+        expect(store.ultimoLimit, 20);
+        expect(store.ultimoEscopo!.ubsId, _ubsDoCoordenador);
+      },
+    );
+
+    test('só from, só to e busca com 2 e 64 passam', () async {
+      for (final f in [
+        AdminAuditFilter(from: de),
+        AdminAuditFilter(to: de),
+        AdminAuditFilter(search: 'ab'),
+        AdminAuditFilter(search: 'a' * 64),
+        AdminAuditFilter(actorEnrollmentId: 'A' * 32),
+        AdminAuditFilter(resourceType: 'a' * 64),
+      ]) {
+        await servico.auditLogs(admin, filter: f);
+      }
+      expect(store.chamadas, 6);
+    });
+  });
+
+  group('escaparLike', () {
+    test('escapa \\, % e _ (a barra primeiro)', () {
+      expect(escaparLike('%'), r'\%');
+      expect(escaparLike('_'), r'\_');
+      expect(escaparLike(r'\'), r'\\');
+      expect(escaparLike(r'a\%_b'), r'a\\\%\_b');
+      expect(escaparLike('admin'), 'admin');
+      expect(escaparLike(''), '');
+    });
   });
 }

@@ -73,6 +73,7 @@ class _Store implements AdminReadStore {
   @override
   Future<AdminAuditPage> auditLogs(
     AdminScope scope, {
+    AdminAuditFilter? filter,
     required int limit,
     int? beforeSequence,
   }) => throw UnimplementedError();

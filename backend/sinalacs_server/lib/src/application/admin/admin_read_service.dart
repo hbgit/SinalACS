@@ -52,8 +52,12 @@ abstract interface class AdminReadStore implements AdminScopeStore {
   /// O escopo não filtra só o recurso auditado: filtra o **autor** da linha — o
   /// coordenador só vê linhas de atores com microárea na UBS dele; linhas de
   /// staff (sem microárea) não aparecem para ele.
+  ///
+  /// [filter] (#45) já chega validado pelo serviço e só **restringe** o
+  /// escopo, nunca o alarga: nulo = sem filtro.
   Future<AdminAuditPage> auditLogs(
     AdminScope scope, {
+    AdminAuditFilter? filter,
     required int limit,
     int? beforeSequence,
   });
@@ -128,20 +132,76 @@ class AdminReadService {
     );
   }
 
+  /// Trilha de auditoria no escopo, com [filter] opcional (#45). Papel e
+  /// escopo primeiro (a recusa é auditada `denied`); depois paginação e
+  /// filtro — entrada inválida não é acesso, então não grava `success`.
   Future<AdminAuditPage> auditLogs(
     AuthenticatedUser user, {
+    AdminAuditFilter? filter,
     int limit = 50,
     int? beforeSequence,
   }) async {
     const recurso = 'admin_audit_logs';
     final escopo = await _resolver.resolve(user, recurso: recurso);
     _validarPagina(limit, 0);
+    validarFiltroDeAuditoria(filter);
     await _auditar(user, recurso, 'success');
     return store.auditLogs(
       escopo,
+      filter: filter,
       limit: limit,
       beforeSequence: beforeSequence,
     );
+  }
+
+  /// Ações que existem em `audit_logs.actionType` (D1).
+  static const acoesDeAuditoria = {'read', 'write', 'login', 'export'};
+
+  /// Janela máxima entre `from` e `to` (D1).
+  static const janelaMaximaDoFiltro = Duration(days: 366);
+
+  static final _rotulo = RegExp(r'^[a-z_]{1,64}$');
+  static const _filtroInvalido = 'Filtro de auditoria inválido.';
+
+  /// Regras do [AdminAuditFilter] (D1/D2), puras e públicas para a exportação
+  /// (Task 10) usar a mesma. Lança [AdminInvalidRequestException] com uma
+  /// mensagem sobre a própria entrada; nunca ecoa o valor recebido.
+  static void validarFiltroDeAuditoria(AdminAuditFilter? f) {
+    if (f == null) return;
+    void recusar(String detalhe) => throw AdminInvalidRequestException(
+      message: '$_filtroInvalido $detalhe',
+    );
+
+    final matricula = f.actorEnrollmentId;
+    if (matricula != null && (matricula.isEmpty || matricula.length > 32)) {
+      recusar('A matrícula deve ter de 1 a 32 caracteres.');
+    }
+    final acao = f.actionType;
+    if (acao != null && !acoesDeAuditoria.contains(acao)) {
+      recusar('Ação desconhecida.');
+    }
+    final tipo = f.resourceType;
+    if (tipo != null && !_rotulo.hasMatch(tipo)) {
+      recusar('Tipo de recurso inválido.');
+    }
+    final resultado = f.result;
+    if (resultado != null && !_rotulo.hasMatch(resultado)) {
+      recusar('Resultado inválido.');
+    }
+    final de = f.from;
+    final ate = f.to;
+    if (de != null && ate != null) {
+      if (!de.isBefore(ate)) {
+        recusar('O início do período deve ser anterior ao fim.');
+      }
+      if (ate.difference(de) > janelaMaximaDoFiltro) {
+        recusar('O período é de no máximo 366 dias.');
+      }
+    }
+    final busca = f.search;
+    if (busca != null && (busca.length < 2 || busca.length > 64)) {
+      recusar('A busca deve ter de 2 a 64 caracteres.');
+    }
   }
 
   void _validarPagina(int limit, int offset) {
