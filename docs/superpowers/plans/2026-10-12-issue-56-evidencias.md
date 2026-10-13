@@ -56,11 +56,20 @@ Código do backend: `backend/sinalacs_server/lib/src/infrastructure/mqtt/mqtt_al
 
 | Hipótese | Status |
 |---|---|
-| H1 | **confirmada no Docker/TLS** (8/8 quedas em A e C, `SocketException` não capturada, sem pilha no log; pilha e zona obtidas na Tarefa 6b: erro no `done` do sink do socket, sem ouvinte, na zona do `connect`) ; não reproduzida na sonda isolada sem TLS (10 execuções do cenário base + 3 variações, Task 5b) |
-| H2 | **compatível, não isolada**: a queda ocorre ≤ 0,6 s após o `unpause` (5/5), mas não se observou a ordem de eventos; na sonda sem TLS a ordem foi sempre leitura/`onDone` antes de escrita |
-| H3 | **refutada**: reinício do Mosquitto (B) não derruba (0/3, reconexão em ~2 s); a partição de rede (C) derruba (3/3) sem pausa artificial do backend |
-| H4 | aberta |
-| H5 | **confirmada** (Tarefa 9, broker falso TCP plano + banco de teste): o outbox marca `publishedAt` sem PUBACK e, numa queda nesse instante, a mensagem se perde sem retransmissão; correção **aplicada no código na Tarefa 9b** (publicação confirmada por PUBACK + timeout de PINGRESP; testes invertidos verdes); reexecução do cenário C no Docker pendente |
+| H1 | **confirmada** no Docker/TLS (8/8 quedas em A e C; pilha e zona obtidas na Tarefa 6b: erro assíncrono do `done` do sink do socket TLS, sem ouvinte, entregue à zona onde `client.connect` criou o socket; sem tratamento, saída 255). Não reproduzida na sonda sem TLS (Task 5b). Corrigida (Tarefas 7 e 10): A 0/5 e C 0/3 quedas |
+| H2 | **compatível, não isolada**: a queda ocorre ≤ 0,6 s após o `unpause` (5/5), mas a ordem de eventos não foi observada; na sonda sem TLS a ordem foi sempre leitura/`onDone` antes de escrita |
+| H3 | **refutada**: reinício do Mosquitto (B) não derruba (0/3, reconexão em ~2 s); a partição de rede (C) derruba (3/3) sem pausar o backend |
+| H4 | **confirmada e corrigida** (Tarefa 7): `onDisconnected` de um cliente já substituído podia agir sobre o cliente atual; o callback agora carrega o cliente de origem e é ignorado se obsoleto |
+| H5 | **confirmada e corrigida** (Tarefas 9, 9b e 9b-v): o outbox marcava `publishedAt` sem PUBACK e, numa queda nesse instante, o alerta vermelho se perdia (4/4 perdidos na partição C); agora só marca após o PUBACK (timeout 10 s) e o PINGRESP tem timeout de 10 s (`disconnectOnNoResponsePeriod`); base/B/C entregam 12/12, exatamente uma vez |
+
+**Resumo dos experimentos (detalhe nas seções seguintes).**
+
+| Cenário | Antes da correção | Depois da correção |
+|---|---|---|
+| A: `docker pause` 120 s | queda 5/5 (exit 255) | 0/5 quedas (Tarefa 7v) |
+| B: reinício do Mosquitto | 0/3 quedas | 0/3 quedas; alerta entregue após a reconexão |
+| C: partição de rede 100 s | queda 3/3; alertas vermelhos criados na partição 4/4 perdidos (H5) | 0/3 quedas; entrega 12/12 exatamente uma vez (Tarefa 9b-v) |
+| Sonda TCP plano, broker falso | sem queda (10/10) | sem queda |
 
 ## Tabela de experimentos
 | ID | Cenário | Comando | Resultado | Exit code | Mensagem/pilha (sanitizada) | Processo vivo? | Tempo até reconectar | Efeito nos pendentes |
@@ -327,3 +336,19 @@ Total: 12 alertas criados, 12 entregues, cada um exatamente 1 vez (tabela final 
 1. `docker kill -s KILL sinalacs-serverpod`: contêiner ficou `exited`, exit=137, **RestartCount=0 após 2 minutos**. O Docker trata `docker kill` como parada manual: não dispara a política. Não serve para simular crash.
 2. Morte real do processo: `kill -9` no PID do host (`docker inspect .State.Pid`; de dentro do contêiner o SIGKILL ao PID 1 é ignorado pelo kernel). Resultado: `running healthy rc=1` em até 5 s de polling; `GET /` 200; `POST /health/check` = `{"status":"ok","mqttConnected":true,"dbConnected":true}`; o Mosquitto registrou nova conexão do `backend`; log do backend mostra migração já aplicada.
 3. `docker stop` + 25 s: `exited`, **não** reiniciou. `docker compose up -d` restaurou o backend para `healthy`.
+
+## Riscos residuais
+
+Não bloqueiam o fechamento da #56; cada item é limitação conhecida ou continuação nomeada.
+
+1. **Duplicatas sob carga.** `claimDue` não tem lease; no pior caso a entrega é N² e a mesma mensagem pode ser publicada mais de uma vez. Aceitável pelo INV-03 (alerta nunca perdido, repetição tolerada). Não foi verificado como o app do ACS trata um segundo PUBLISH do mesmo `alertId`.
+2. **`publishNow` serial.** Espera, em série, os PUBACKs de todo o lote reivindicado; numa conexão morta mas ainda não percebida a resposta ao paciente pode levar até ~10 s.
+3. **Atraso após a rede voltar.** Até ~96 s (backoff acumulado do outbox) em C_INICIO.
+4. **Cartão no app do ACS não verificado** nos e2e de B e C (ACL do broker e microárea); a conferência foi no assinante do broker.
+5. **Fluxo novo no emulador** coberto só pela regressão do e2e da #44.
+6. **Partição TLS provada só no Docker**, não na CI.
+7. **`AlertOutbox.markFailed`** grava `error.toString()` em coluna do banco (pode carregar texto de exceção; fora do escopo de logs do VAZ-01). Seguimento.
+8. **ACK MQTT sem autenticação** segue aberto (inalterado, fora do escopo).
+9. **`exit(70)`** (erro desconhecido) não faz o desligamento ordenado do Serverpod.
+10. **`restart: unless-stopped`** vale só para o Compose local; a hospedagem define a sua política.
+11. Menores: dispensador de message-id é singleton; identidade do timer; testes de SIGSTOP/RST só em Linux.
