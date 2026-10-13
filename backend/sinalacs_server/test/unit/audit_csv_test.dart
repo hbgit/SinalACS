@@ -13,18 +13,17 @@ AuditExportRow _row({
   String rotuloRecurso = 'Paciente #A1B2',
   String resultado = 'success',
   String selo = 'valid',
-}) =>
-    AuditExportRow(
-      sequence: sequence,
-      timestampUtc: timestamp ?? DateTime.utc(2026, 10, 13, 12, 30, 5),
-      autor: autor,
-      papelAutor: papelAutor,
-      acao: acao,
-      recurso: recurso,
-      rotuloRecurso: rotuloRecurso,
-      resultado: resultado,
-      selo: selo,
-    );
+}) => AuditExportRow(
+  sequence: sequence,
+  timestampUtc: timestamp ?? DateTime.utc(2026, 10, 13, 12, 30, 5),
+  autor: autor,
+  papelAutor: papelAutor,
+  acao: acao,
+  recurso: recurso,
+  rotuloRecurso: rotuloRecurso,
+  resultado: resultado,
+  selo: selo,
+);
 
 void main() {
   const cabecalho =
@@ -46,15 +45,17 @@ void main() {
     });
 
     test('AuditExportRow tem exatamente nove campos', () {
-      final fonte =
-          File('lib/src/application/audit/audit_csv.dart').readAsStringSync();
+      final fonte = File(
+        'lib/src/application/audit/audit_csv.dart',
+      ).readAsStringSync();
       final inicio = fonte.indexOf('class AuditExportRow');
       expect(inicio, greaterThanOrEqualTo(0));
       final bloco = fonte.substring(inicio);
       final fim = bloco.indexOf('\n}\n');
-      final campos = RegExp(r'^\s+final\s+\S+\s+\w+;', multiLine: true)
-          .allMatches(bloco.substring(0, fim))
-          .length;
+      final campos = RegExp(
+        r'^\s+final\s+\S+\s+\w+;',
+        multiLine: true,
+      ).allMatches(bloco.substring(0, fim)).length;
       expect(campos, AuditCsv.columns.length);
       expect(campos, 9);
     });
@@ -108,11 +109,19 @@ void main() {
       });
     }
 
-    test('apos TAB/CR iniciais tambem recebe prefixo', () {
-      final csv = AuditCsv.build([_row(rotuloRecurso: '\t=1+1')]);
-      expect(csv, contains("'\t=1+1"));
-      final csv2 = AuditCsv.build([_row(rotuloRecurso: '\r+1')]);
-      expect(csv2, contains("\"'\r+1\""));
+    test('apos espaco, TAB, CR ou LF iniciais tambem recebe prefixo', () {
+      expect(AuditCsv.build([_row(autor: ' =1')]), contains(",' =1,"));
+      expect(AuditCsv.build([_row(autor: '\t@x')]), contains(",'\t@x,"));
+      expect(AuditCsv.build([_row(autor: ' +1')]), contains(",' +1,"));
+      expect(AuditCsv.build([_row(autor: '\n=1')]), contains(",\"'\n=1\","));
+      expect(AuditCsv.build([_row(autor: '\r+1')]), contains(",\"'\r+1\","));
+    });
+
+    test('espaco inicial sem fórmula e "-" no meio nao recebem prefixo', () {
+      final csv = AuditCsv.build([_row(autor: ' abc', rotuloRecurso: 'a-b')]);
+      expect(csv, contains(', abc,'));
+      expect(csv, contains(',a-b,'));
+      expect(csv, isNot(contains("'")));
     });
 
     test('sequence e timestamp numericos nao sofrem prefixo', () {
@@ -128,27 +137,16 @@ void main() {
   });
 
   group('PII', () {
-    test('a linha so tem as nove colunas: nada alem delas vaza', () {
-      const uuid = '3f2b8c1e-9d4a-4e7b-8a61-5c0d2f9e7a11';
-      final hash64 = 'a1b2c3d4' * 8;
-      const ip = '192.168.10.77';
-      const nomeSintetico = 'Fulano Sintetico da Silva';
-      // Campos de origem (fora das colunas permitidas) que o servico tem em
-      // maos; o gerador nunca os recebe.
-      final origem = {
-        'resourceId': uuid,
-        'entryHash': hash64,
-        'ipHash': ip,
-        'nome': nomeSintetico,
-      };
-      expect(origem, hasLength(4));
+    const uuid = '3f2b8c1e-9d4a-4e7b-8a61-5c0d2f9e7a11';
+    final hash64 = 'a1b2c3d4' * 8;
+    const ip = '192.168.10.77';
+    const nome = 'Fulano Sintetico da Silva';
 
+    int ocorrencias(String texto, String trecho) =>
+        trecho.allMatches(texto).length;
+
+    test('o gerador nao inventa UUID, hash de 64 hex nem IP', () {
       final csv = AuditCsv.build([_row(), _row(sequence: 2)]);
-
-      expect(csv, isNot(contains(uuid)));
-      expect(csv, isNot(contains(hash64)));
-      expect(csv, isNot(contains(ip)));
-      expect(csv, isNot(contains(nomeSintetico)));
       expect(
         RegExp(
           r'[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}',
@@ -158,5 +156,27 @@ void main() {
       expect(RegExp(r'[0-9a-fA-F]{64}').hasMatch(csv), isFalse);
       expect(RegExp(r'\b\d{1,3}(\.\d{1,3}){3}\b').hasMatch(csv), isFalse);
     });
+
+    test('valores sensiveis em autor/rotulo saem so onde foram postos', () {
+      final csv = AuditCsv.build([
+        _row(autor: nome, rotuloRecurso: '$uuid $hash64 $ip'),
+      ]);
+      final linhas = csv.split('\r\n');
+      expect(linhas[0], isNot(contains(nome)));
+      for (final v in [nome, uuid, hash64, ip]) {
+        expect(ocorrencias(csv, v), 1, reason: v);
+      }
+      // autor e a 3a coluna, rotulo a 7a: nenhuma outra coluna os repete.
+      final campos = linhas[1].split(',');
+      expect(campos[2], nome);
+      expect(campos[6], contains(uuid));
+      for (final i in [0, 1, 3, 4, 5, 7, 8]) {
+        expect(campos[i], isNot(contains(uuid)));
+        expect(campos[i], isNot(contains(nome)));
+      }
+    });
+
+    // A garantia estrutural contra vazamento de ipHash/entryHash/resourceId e
+    // o teste "lista fechada" acima: o gerador so conhece nove campos.
   });
 }

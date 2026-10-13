@@ -57,31 +57,30 @@ abstract final class AuditCsv {
       // apenas por engano um valor legítimo. Todo o resto é texto de origem
       // externa e é neutralizado.
       out
-        ..write([
-          r.sequence.toString(),
-          r.timestampUtc.toUtc().toIso8601String(),
-          _texto(r.autor),
-          _texto(r.papelAutor),
-          _texto(r.acao),
-          _texto(r.recurso),
-          _texto(r.rotuloRecurso),
-          _texto(r.resultado),
-          _texto(r.selo),
-        ].map(_escape).join(','))
+        ..write(
+          [
+            r.sequence.toString(),
+            r.timestampUtc.toUtc().toIso8601String(),
+            _texto(r.autor),
+            _texto(r.papelAutor),
+            _texto(r.acao),
+            _texto(r.recurso),
+            _texto(r.rotuloRecurso),
+            _texto(r.resultado),
+            _texto(r.selo),
+          ].map(_escape).join(','),
+        )
         ..write(_crlf);
     }
     return out.toString();
   }
 
   /// Injeção de fórmula (CSV injection): célula que começa com `=`, `+`, `-`
-  /// ou `@` (também depois de TAB/CR iniciais) ganha o prefixo `'`.
-  static String _texto(String valor) {
-    final primeiro = valor.replaceFirst(RegExp(r'^[\t\r]+'), '');
-    if (primeiro.isNotEmpty && '=+-@'.contains(primeiro[0])) {
-      return "'$valor";
-    }
-    return valor;
-  }
+  /// ou `@` (também depois de TAB/CR/LF/espaços iniciais) ganha o prefixo `'`.
+  static final _inicioDeFormula = RegExp(r'^[\t\r\n ]*[=+\-@]');
+
+  static String _texto(String valor) =>
+      _inicioDeFormula.hasMatch(valor) ? "'$valor" : valor;
 
   static String _escape(String campo) {
     if (campo.contains(RegExp(r'[",\r\n]'))) {
