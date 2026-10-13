@@ -138,4 +138,13 @@ O último passo, em microtask (`_microtaskLoop`, `Future._propagateToListeners`,
 
 Para restaurar: após os testes o broker foi religado com `--alias mosquitto` (perdeu o alias do nome do contêiner, resolvido por DNS do mesmo jeito), `docker compose up -d` e o `sinalacs-serverpod` (que caiu com a pausa/partição do broker, exatamente o defeito investigado) foi religado; tudo saudável ao final.
 
+### Tarefa 7: correção no dispatcher (zona protegida em volta de `client.connect`)
+
+- Cada `_connectOnce` roda `client.connect(...)` numa zona derivada de `Zone.current` com `handleUncaughtError`; o resultado volta ao chamador por um `Completer` externo (um `await _zone.run(...)` direto ficava pendurado numa falha de `connect`, porque um `Future` com erro não cruza fronteiras de zona de erro).
+- Política: `SocketException`, `TlsException` (inclui `HandshakeException`), `TimeoutException`, `ConnectionException`, `NoConnectionException` e `StateError('socket is null')` viram queda de conexão (descarta o cliente, `publish` passa a lançar `MqttUnavailableException`, reconexão com backoff). Qualquer outro erro: registro só do tipo e `onFatal` (padrão `exit(70)`).
+- Cliente obsoleto: `onDisconnected` carrega o cliente que o registrou e é ignorado se ele não for mais o atual (H4 corrigida no código).
+- Prova com socket real (antes da correção falhava, depois 20/20): `FakeMqttBroker.resetClients()` fecha com RST (`SO_LINGER 0`); o `SocketException` errno 104 completa o `Socket.done` do cliente e, antes da correção, escapava para a zona do teste; com a correção é tratado e o dispatcher reconecta e publica.
+- Achado colateral: o próprio broker falso não escutava o `done` dos sockets aceitos; um EPIPE do lado do broker caía na zona do teste. Corrigido no fixture.
+- Ainda pendente: reexecução dos cenários A e C no Docker com TLS (o gate real).
+
 ## Regressão final

@@ -28,6 +28,10 @@ class FakeMqttBroker {
 
   void _accept(Socket socket) {
     _clients.add(socket);
+    // O lado do broker também escreve (CONNACK, PINGRESP...) num socket que o
+    // cliente pode ter fechado: o EPIPE completaria o `done` do sink sem
+    // ouvinte e cairia na zona do teste, mascarando o que se quer medir.
+    socket.done.then<void>((_) {}, onError: (Object _) {});
     socket.listen(
       (data) => _onData(socket, data),
       onError: (_) {},
@@ -90,6 +94,23 @@ class FakeMqttBroker {
   /// Fecha todas as conexões abertas, mas continua aceitando novas.
   void dropClients() {
     for (final socket in List.of(_clients)) {
+      socket.destroy();
+    }
+  }
+
+  /// Derruba todas as conexões com RST (SO_LINGER 0) em vez de FIN, como uma
+  /// partição ou um par que some: no cliente, o erro (errno 104) completa o
+  /// `Socket.done` do sink de escrita sem ouvinte, o mesmo caminho da #56.
+  void resetClients() {
+    final linger = Uint8List(8);
+    linger.buffer.asByteData()
+      ..setInt32(0, 1, Endian.host) // l_onoff
+      ..setInt32(4, 0, Endian.host); // l_linger
+    for (final socket in List.of(_clients)) {
+      // SOL_SOCKET/SO_LINGER do Linux (13); em outro SO a opção pode falhar.
+      socket.setRawOption(
+        RawSocketOption(RawSocketOption.levelSocket, 13, linger),
+      );
       socket.destroy();
     }
   }
