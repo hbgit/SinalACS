@@ -27,7 +27,7 @@ class _RecordingPublisher implements AlertPublisher {
   bool offline = false;
 
   @override
-  void publish(AlertDelivery alert) {
+  Future<void> publish(AlertDelivery alert) async {
     if (offline) throw Exception('broker indisponível');
     published.add(alert);
   }
@@ -100,9 +100,9 @@ class _PublisherComGancho implements AlertPublisher {
   void Function() antes;
 
   @override
-  void publish(AlertDelivery alert) {
+  Future<void> publish(AlertDelivery alert) {
     antes();
-    _real.publish(alert);
+    return _real.publish(alert);
   }
 }
 
@@ -454,6 +454,8 @@ void main() {
           config: _mqttConfig(broker.port),
           initialBackoff: const Duration(milliseconds: 100),
           maxBackoff: const Duration(milliseconds: 400),
+          // Curto para o teste do PUBACK retido não esperar 10 s.
+          publishAckTimeout: const Duration(milliseconds: 500),
           onFatal: fatais.add,
           log: (_) {},
         );
@@ -538,19 +540,15 @@ void main() {
         expect(await confirmar(alertId), isTrue);
       });
 
-      // H5 (#56) — LACUNA DOCUMENTADA, NÃO CORRIGIDA NESTA TAREFA.
-      //
-      // Estes dois testes afirmam o comportamento ATUAL, que viola INV-03:
-      // `publish()` é síncrono e devolve assim que a mensagem vai para o
-      // buffer do socket, sem esperar PUBACK, e o outbox marca `publishedAt`
-      // logo depois. Uma reconexão cria um cliente MQTT NOVO (sessão limpa),
-      // então a mensagem QoS 1 em voo do cliente antigo nunca é retransmitida.
-      // Quando a correção (publicação confirmada por PUBACK) entrar, estes
-      // testes devem falhar e ser invertidos.
+      // H5 (#56) — CORRIGIDA (Tarefa 9b). Antes, `publish()` devolvia assim
+      // que a mensagem ia para o buffer do socket e o outbox carimbava
+      // `publishedAt` sem PUBACK; uma reconexão cria um cliente MQTT novo
+      // (sessão limpa), então a mensagem em voo nunca era retransmitida e o
+      // alerta se perdia para o canal MQTT. Agora o outbox só marca publicado
+      // depois do PUBACK: sem ele a entrada fica pendente e é reentregue.
       test(
-          'H5 (lacuna, comportamento atual): socket morto antes de o '
-          'dispatcher perceber — outbox marca publicado e o broker nunca '
-          'recebe', () async {
+          'H5: socket morto antes de o dispatcher perceber — a entrada NÃO é '
+          'marcada publicada e é entregue depois da reconexão', () async {
         final session = sessionBuilder.build();
         await _seed(session);
         await dispatcher.connect();
@@ -564,31 +562,31 @@ void main() {
         final criado = await criarAlerta('h5-socket-morto');
         gancho.antes = () {};
 
-        // publish() devolveu sem erro: o endpoint relata entrega.
-        expect(criado.published, isTrue);
+        // Sem PUBACK o endpoint não relata entrega, e o outbox segue pendente.
+        expect(criado.published, isFalse);
         final entrada = (await AlertOutboxEntry.db.find(session)).single;
-        expect(entrada.publishedAt, isNotNull,
-            reason: 'H5: marcado publicado sem PUBACK');
-
-        // O dispatcher percebe a queda e reconecta com um cliente novo.
-        await _until(() => broker.connectCount >= 2 && dispatcher.isConnected);
-        await Future<void>.delayed(const Duration(milliseconds: 500));
-        expect(broker.publishCount, 0,
-            reason: 'H5: nem o cliente antigo entregou, nem o novo retransmite');
-
-        // E o outbox não tem mais o que entregar: a mensagem está perdida
-        // para o canal MQTT (o alerta segue gravado e pendente no banco).
-        expect(await drenador(session).drainOnce(), 0);
+        expect(entrada.publishedAt, isNull,
+            reason: 'H5: nada de publicado sem PUBACK');
+        expect(entrada.lastError, isNotNull);
         expect(broker.publishCount, 0);
-        final alerta = (await Alert.db.find(session)).single;
-        expect(alerta.id.toString(), criado.alertId);
-        expect(alerta.status, AlertStatus.pending);
+
+        // O dispatcher reconecta com um cliente novo e a varredura reentrega.
+        await _until(() => broker.connectCount >= 2 && dispatcher.isConnected);
+        expect(await drenador(session).drainOnce(), 1);
+        expect(broker.publishCount, 1);
+        expect(broker.pubackCount, 1);
+        final depois = (await AlertOutboxEntry.db.find(session)).single;
+        expect(depois.publishedAt, isNotNull);
+
+        // Nada mais a entregar, e o ACK fecha o ciclo.
+        expect(await drenador(session).drainOnce(), 0);
+        expect(broker.publishCount, 1);
+        expect(await confirmar(criado.alertId), isTrue);
       });
 
       test(
-          'H5 (lacuna, comportamento atual): broker recebe o PUBLISH, não '
-          'responde PUBACK e cai — outbox já marcou publicado e não há '
-          'retransmissão', () async {
+          'H5: broker recebe o PUBLISH, não responde PUBACK e cai — a entrada '
+          'fica pendente e é reentregue (pelo menos uma vez)', () async {
         final session = sessionBuilder.build();
         await _seed(session);
         await dispatcher.connect();
@@ -597,19 +595,52 @@ void main() {
 
         final criado = await criarAlerta('h5-sem-puback');
 
-        expect(criado.published, isTrue);
+        expect(criado.published, isFalse);
+        expect(broker.publishCount, 1);
         final entrada = (await AlertOutboxEntry.db.find(session)).single;
-        expect(entrada.publishedAt, isNotNull,
-            reason: 'H5: marcado publicado antes de qualquer PUBACK');
+        expect(entrada.publishedAt, isNull,
+            reason: 'H5: nada de publicado antes do PUBACK');
 
-        await _until(() => broker.publishCount == 1);
         broker.dropOnPublish = false;
         await _until(() => broker.connectCount >= 2 && dispatcher.isConnected);
-        await Future<void>.delayed(const Duration(milliseconds: 500));
-        // Sem PUBACK, o QoS 1 pediria retransmissão; o cliente novo não a faz.
-        expect(broker.publishCount, 1);
+        expect(await drenador(session).drainOnce(), 1);
+        // Duplicata aceita (QoS 1, ACK idempotente); perda, não.
+        expect(broker.publishCount, 2);
+        expect(broker.pubackCount, 1);
+        expect((await AlertOutboxEntry.db.find(session)).single.publishedAt,
+            isNotNull);
         expect(await drenador(session).drainOnce(), 0);
+        expect(broker.publishCount, 2);
+      });
+
+      test(
+          'H5: conexão morta sem FIN/RST (o broker some sem PUBACK, cenário C) '
+          '— falha no prazo, reconecta e a entrega acontece', () async {
+        final session = sessionBuilder.build();
+        await _seed(session);
+        await dispatcher.connect();
+        final antigo = dispatcher.clientForTest;
+        broker.withholdPuback = true;
+
+        final criado = await criarAlerta('h5-particao');
+
+        expect(criado.published, isFalse);
         expect(broker.publishCount, 1);
+        expect(broker.pubackCount, 0);
+        expect((await AlertOutboxEntry.db.find(session)).single.publishedAt,
+            isNull);
+        // O tempo limite do PUBACK deu a conexão como perdida.
+        expect(identical(dispatcher.clientForTest, antigo), isFalse);
+
+        broker.withholdPuback = false;
+        await _until(() => broker.connectCount >= 2 && dispatcher.isConnected);
+        expect(await drenador(session).drainOnce(), 1);
+        expect(broker.pubackCount, 1);
+        expect((await AlertOutboxEntry.db.find(session)).single.publishedAt,
+            isNotNull);
+        final alerta = (await Alert.db.find(session)).single;
+        expect(alerta.status, AlertStatus.pending);
+        expect(await confirmar(criado.alertId), isTrue);
       });
     });
 

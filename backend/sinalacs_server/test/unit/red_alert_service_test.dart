@@ -9,7 +9,7 @@ class FakeAlertPublisher implements AlertPublisher {
   final List<AlertDelivery> published = [];
 
   @override
-  void publish(AlertDelivery alert) => published.add(alert);
+  Future<void> publish(AlertDelivery alert) async => published.add(alert);
 }
 
 class FakeAlertStore implements AlertStore {

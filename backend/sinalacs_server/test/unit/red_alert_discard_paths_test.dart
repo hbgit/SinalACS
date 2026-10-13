@@ -154,7 +154,8 @@ class _MemoryOutbox implements AlertOutbox {
 
 class _DeadPublisher implements AlertPublisher {
   @override
-  void publish(AlertDelivery alert) => throw Exception('broker indisponível');
+  Future<void> publish(AlertDelivery alert) async =>
+      throw Exception('broker indisponível');
 }
 
 void main() {

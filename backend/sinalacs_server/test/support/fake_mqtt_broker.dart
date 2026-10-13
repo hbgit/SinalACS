@@ -4,7 +4,7 @@ import 'dart:typed_data';
 
 /// Broker MQTT 3.1.1 mínimo sobre TCP real, só para testar o dispatcher.
 ///
-/// Cobre CONNECT, SUBSCRIBE, PINGREQ e PUBLISH QoS 1. Qualquer outro pacote
+/// Cobre CONNECT, SUBSCRIBE, PINGREQ e PUBLISH QoS 1 (com PUBACK). Qualquer outro pacote
 /// é ignorado, não rejeitado.
 class FakeMqttBroker {
   FakeMqttBroker._(this._server);
@@ -20,6 +20,13 @@ class FakeMqttBroker {
   /// H5 (#56): conta o PUBLISH, mas não responde PUBACK e derruba a conexão
   /// logo em seguida, como um broker que cai com a mensagem em voo.
   bool dropOnPublish = false;
+
+  /// H5 (#56): conta o PUBLISH e mantém a conexão aberta, mas nunca responde
+  /// PUBACK, como um par que some sem FIN/RST (partição de rede).
+  bool withholdPuback = false;
+
+  /// Número de PUBACKs enviados.
+  int pubackCount = 0;
 
   int get port => _server.port;
 
@@ -92,9 +99,11 @@ class FakeMqttBroker {
           socket.destroy();
           return;
         }
+        if (withholdPuback) return;
         if ((header >> 1) & 3 == 1) {
           final topicLength = (body[0] << 8) | body[1];
           socket.add([0x40, 0x02, body[2 + topicLength], body[3 + topicLength]]);
+          pubackCount++;
         }
     }
   }

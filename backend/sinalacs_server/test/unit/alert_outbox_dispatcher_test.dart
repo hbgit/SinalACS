@@ -12,7 +12,7 @@ class _FlakyPublisher implements AlertPublisher {
   final List<AlertDelivery> published = [];
 
   @override
-  void publish(AlertDelivery alert) {
+  Future<void> publish(AlertDelivery alert) async {
     if (failures > 0) {
       failures--;
       throw Exception('broker indisponível');
@@ -86,7 +86,7 @@ class _StderrCapturado implements Stdout {
 
 class _PublisherQueLanca implements AlertPublisher {
   @override
-  void publish(AlertDelivery alert) => throw SocketException(
+  Future<void> publish(AlertDelivery alert) async => throw SocketException(
         'Broken pipe sentinela-vaz01-local localhost',
         osError: const OSError('Broken pipe', 32),
         address: InternetAddress('127.0.0.1'),

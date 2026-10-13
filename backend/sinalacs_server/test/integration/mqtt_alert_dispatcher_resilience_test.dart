@@ -6,6 +6,8 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:mqtt_client/mqtt_client.dart' show MqttConnectionHandlerBase;
+import 'package:sinalacs_server/src/application/alerts/alert_outbox_dispatcher.dart';
+import 'package:sinalacs_server/src/application/alerts/red_alert_service.dart';
 import 'package:sinalacs_server/src/config/app_config.dart';
 import 'package:sinalacs_server/src/domain/entities/alert_delivery.dart';
 import 'package:sinalacs_server/src/infrastructure/mqtt/mqtt_alert_dispatcher.dart';
@@ -37,6 +39,34 @@ AlertDelivery _delivery() => AlertDelivery(
       triggeredAt: DateTime.utc(2026, 9, 16, 10),
     );
 
+/// Outbox em memória para medir uma rodada de `drainOnce` contra o dispatcher
+/// real: [n] entradas pendentes, publicadas e falhas registradas.
+class _OutboxEmMemoria implements AlertOutbox {
+  _OutboxEmMemoria(int n)
+      : _pendentes = [
+          for (var i = 0; i < n; i++)
+            PendingDelivery(entryId: 'e$i', delivery: _delivery(), attempts: 1),
+        ];
+
+  final List<PendingDelivery> _pendentes;
+  final publicadas = <String>[];
+  final falhas = <String>[];
+
+  @override
+  Future<void> enqueue(AlertDelivery alert) async {}
+
+  @override
+  Future<List<PendingDelivery>> claimDue({int limit = 32}) async =>
+      _pendentes.take(limit).toList();
+
+  @override
+  Future<void> markPublished(String entryId) async => publicadas.add(entryId);
+
+  @override
+  Future<void> markFailed(String entryId, String error, DateTime next) async =>
+      falhas.add(entryId);
+}
+
 /// Polling a cada 25 ms até [cond] valer; falha com `timeout` depois de [timeout].
 Future<void> _until(
   bool Function() cond, {
@@ -63,6 +93,9 @@ class _Ambiente {
 Future<_Ambiente> _ambiente({
   Duration backoff = const Duration(milliseconds: 100),
   bool esperaFatal = false,
+  Duration publishAckTimeout = const Duration(seconds: 10),
+  int keepAliveSeconds = 30,
+  int pingResponseTimeoutSeconds = 10,
 }) async {
   final broker = await FakeMqttBroker.start();
   final fatais = <Object>[];
@@ -72,6 +105,9 @@ Future<_Ambiente> _ambiente({
     initialBackoff: backoff,
     onFatal: fatais.add,
     log: logs.writeln,
+    publishAckTimeout: publishAckTimeout,
+    keepAliveSeconds: keepAliveSeconds,
+    pingResponseTimeoutSeconds: pingResponseTimeoutSeconds,
   );
   addTearDown(() async {
     await d.close();
@@ -221,8 +257,8 @@ void main() {
       a.broker.dropClients();
       await _until(() => a.broker.connectCount >= 2 && a.d.isConnected);
 
-      a.d.publish(_delivery());
-      await _until(() => a.broker.publishCount == 1);
+      await a.d.publish(_delivery());
+      expect(a.broker.publishCount, 1);
     });
 
     test('durante a queda publish lança MqttUnavailableException', () async {
@@ -230,8 +266,8 @@ void main() {
       await a.d.connect();
       await a.broker.close(); // nada mais aceita conexões
       await _until(() => !a.d.isConnected);
-      expect(
-        () => a.d.publish(_delivery()),
+      await expectLater(
+        a.d.publish(_delivery()),
         throwsA(isA<MqttUnavailableException>()),
       );
     });
@@ -251,8 +287,8 @@ void main() {
       });
       // O erro do socket real chegou ao handler (e não ao processo).
       expect(a.logs.toString(), contains('errno=104'));
-      a.d.publish(_delivery());
-      await _until(() => a.broker.publishCount == 1);
+      await a.d.publish(_delivery());
+      expect(a.broker.publishCount, 1);
     }, skip: Platform.isLinux ? false : 'SO_LINGER usa o número do Linux');
 
     test(
@@ -328,8 +364,8 @@ void main() {
       await _until(() => a.broker.connectCount >= 3 && a.d.isConnected);
       expect(injetado, isTrue);
 
-      a.d.publish(_delivery());
-      await _until(() => a.broker.publishCount == 1);
+      await a.d.publish(_delivery());
+      expect(a.broker.publishCount, 1);
     });
 
     test('erro desconhecido não é engolido: é registrado e chama onFatal',
@@ -499,6 +535,177 @@ void main() {
       expect(texto, contains('Falha ao conectar ao broker MQTT'));
       expect(texto, contains('SocketException'));
       _semVazamento(texto);
+    });
+  });
+
+  group('publicação confirmada por PUBACK (H5, #56)', () {
+    test('completa só depois do PUBACK do broker', () async {
+      final a = await _ambiente();
+      await a.d.connect();
+
+      await a.d.publish(_delivery());
+
+      expect(a.broker.publishCount, 1);
+      expect(a.broker.pubackCount, 1);
+    });
+
+    test(
+        'sem PUBACK: falha no prazo, dá a conexão como perdida, reconecta e a '
+        'publicação seguinte é confirmada', () async {
+      final a = await _ambiente(
+        publishAckTimeout: const Duration(milliseconds: 300),
+      );
+      await a.d.connect();
+      final antigo = a.d.clientForTest;
+      a.broker.withholdPuback = true;
+
+      final inicio = DateTime.now();
+      await expectLater(
+        a.d.publish(_delivery()),
+        throwsA(isA<MqttUnavailableException>()),
+      );
+      expect(DateTime.now().difference(inicio),
+          greaterThanOrEqualTo(const Duration(milliseconds: 250)));
+      expect(a.broker.publishCount, 1, reason: 'o PUBLISH saiu');
+      // O tempo limite derrubou o cliente na hora: nada de "connected" morto.
+      expect(identical(a.d.clientForTest, antigo), isFalse);
+
+      a.broker.withholdPuback = false;
+      await _until(() => a.broker.connectCount >= 2 && a.d.isConnected);
+      await a.d.publish(_delivery());
+      expect(a.broker.pubackCount, 1);
+      expect(a.logs.toString(), contains('PUBACK não recebido'));
+    });
+
+    test(
+        'depois de um tempo limite as publicações seguintes falham na hora, '
+        'sem esperar outro prazo inteiro', () async {
+      final a = await _ambiente(
+        backoff: const Duration(seconds: 30),
+        publishAckTimeout: const Duration(milliseconds: 500),
+      );
+      await a.d.connect();
+      a.broker.withholdPuback = true;
+
+      await expectLater(
+        a.d.publish(_delivery()),
+        throwsA(isA<MqttUnavailableException>()),
+      );
+      final inicio = DateTime.now();
+      for (var i = 0; i < 5; i++) {
+        await expectLater(
+          a.d.publish(_delivery()),
+          throwsA(isA<MqttUnavailableException>()),
+        );
+      }
+      expect(DateTime.now().difference(inicio),
+          lessThan(const Duration(milliseconds: 200)));
+      expect(a.broker.publishCount, 1, reason: 'só a primeira chegou a sair');
+    });
+
+    test(
+        'publicações em voo falham com MqttUnavailableException quando a '
+        'conexão cai antes do PUBACK', () async {
+      final a = await _ambiente();
+      await a.d.connect();
+      a.broker.withholdPuback = true;
+
+      final emVoo = [
+        a.d.publish(_delivery()),
+        a.d.publish(_delivery()),
+        a.d.publish(_delivery()),
+      ];
+      await _until(() => a.broker.publishCount == 3);
+      final inicio = DateTime.now();
+      a.broker.dropClients();
+
+      for (final f in emVoo) {
+        await expectLater(f, throwsA(isA<MqttUnavailableException>()));
+      }
+      // Pela queda, não pelo prazo de 10 s.
+      expect(DateTime.now().difference(inicio),
+          lessThan(const Duration(seconds: 5)));
+
+      a.broker.withholdPuback = false;
+      await _until(() => a.broker.connectCount >= 2 && a.d.isConnected);
+      await a.d.publish(_delivery());
+    });
+
+    test('close() falha as publicações em voo', () async {
+      final a = await _ambiente();
+      await a.d.connect();
+      a.broker.withholdPuback = true;
+      final emVoo = a.d.publish(_delivery());
+      await _until(() => a.broker.publishCount == 1);
+
+      await a.d.close();
+
+      await expectLater(emVoo, throwsA(isA<MqttUnavailableException>()));
+    });
+
+    test(
+        'partição sem FIN/RST: sem PINGRESP no prazo a biblioteca derruba a '
+        'conexão e o dispatcher reconecta', () async {
+      final a = await _ambiente(keepAliveSeconds: 1, pingResponseTimeoutSeconds: 1);
+      await _guardado(() async {
+        await a.d.connect();
+        final antigo = a.d.clientForTest;
+        a.broker.ignorePings = true;
+        // PINGREQ em ~1 s, sem resposta por 1 s: queda detectada em ~2 s.
+        await _until(
+          () => !identical(a.d.clientForTest, antigo),
+          timeout: const Duration(seconds: 6),
+        );
+        a.broker.ignorePings = false;
+        await _until(() => a.broker.connectCount >= 2 && a.d.isConnected);
+      });
+      await a.d.publish(_delivery());
+      expect(a.broker.pubackCount, 1);
+    });
+
+    test(
+        'outbox: lote de 32 com o broker mudo leva um prazo de PUBACK, não 32, '
+        'e nenhuma entrada é marcada publicada', () async {
+      final a = await _ambiente(
+        backoff: const Duration(seconds: 30),
+        publishAckTimeout: const Duration(milliseconds: 400),
+      );
+      await a.d.connect();
+      a.broker.withholdPuback = true;
+      final outbox = _OutboxEmMemoria(32);
+      final drenador = AlertOutboxDispatcher(outbox: outbox, publisher: a.d);
+
+      final inicio = DateTime.now();
+      final publicadas = await drenador.drainOnce();
+      final duracao = DateTime.now().difference(inicio);
+
+      expect(publicadas, 0);
+      expect(outbox.publicadas, isEmpty);
+      expect(outbox.falhas, hasLength(32));
+      expect(duracao, lessThan(const Duration(seconds: 2)),
+          reason: '32 x 400 ms seriam 12,8 s');
+      expect(a.broker.publishCount, 1, reason: 'as outras falham na hora');
+    });
+
+    test('VAZ-01: a falha de confirmação registra só o tipo, sem identidade',
+        () async {
+      final a = await _ambiente(
+        publishAckTimeout: const Duration(milliseconds: 200),
+      );
+      await a.d.connect();
+      a.broker.withholdPuback = true;
+      await expectLater(
+        a.d.publish(_delivery()),
+        throwsA(isA<MqttUnavailableException>()),
+      );
+      a.broker.withholdPuback = false;
+      await _until(() => a.broker.connectCount >= 2 && a.d.isConnected);
+      final texto = a.logs.toString();
+      expect(texto, contains('PUBACK não recebido'));
+      _semVazamento(texto);
+      expect(texto, isNot(contains('sem-local-00')), reason: 'locationHash');
+      expect(texto, isNot(contains('000000000003')), reason: 'microárea');
+      expect(texto, isNot(contains('000000000001')), reason: 'paciente');
     });
   });
 }

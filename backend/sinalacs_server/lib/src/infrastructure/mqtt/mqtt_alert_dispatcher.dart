@@ -26,7 +26,13 @@ class MqttAlertDispatcher implements AlertPublisher {
     Duration maxBackoff = const Duration(seconds: 60),
     void Function(Object error)? onFatal,
     void Function(String line)? log,
+    Duration publishAckTimeout = const Duration(seconds: 10),
+    int keepAliveSeconds = 30,
+    int pingResponseTimeoutSeconds = 10,
   })  : _config = config,
+        _ackTimeout = publishAckTimeout,
+        _keepAliveSecs = keepAliveSeconds,
+        _pingTimeoutSecs = pingResponseTimeoutSeconds,
         _initialBackoff = initialBackoff,
         // Teto menor que o piso faria o backoff encolher a cada falha.
         _maxBackoff = maxBackoff < initialBackoff ? initialBackoff : maxBackoff,
@@ -48,6 +54,22 @@ class MqttAlertDispatcher implements AlertPublisher {
   final Duration _maxBackoff;
   final void Function(Object error) _onFatal;
   final void Function(String line) _log;
+
+  /// Prazo para o PUBACK de uma publicação QoS 1 (H5, #56). Estourado, a
+  /// publicação falha e a conexão do cliente é dada como perdida.
+  final Duration _ackTimeout;
+
+  /// PINGREQ a cada [_keepAliveSecs] (o `keepAlivePeriod` do cliente).
+  final int _keepAliveSecs;
+
+  /// `disconnectOnNoResponsePeriod` do cliente: sem PINGRESP neste prazo
+  /// depois de um PINGREQ, a biblioteca derruba a conexão e chama
+  /// `onDisconnected` (H5, #56). Ver [_connectOnce].
+  final int _pingTimeoutSecs;
+
+  /// Publicações à espera de PUBACK, por cliente e por id de mensagem. O id
+  /// é do dispensador do cliente, por isso o mapa vive com ele.
+  final _pendingAcks = Expando<Map<int, Completer<void>>>('PUBACKs pendentes');
 
   /// Zona protegida de cada cliente (ver [_zoneFor]).
   final _zones = Expando<Zone>('zona protegida do cliente MQTT');
@@ -110,7 +132,16 @@ class MqttAlertDispatcher implements AlertPublisher {
     final clientId = 'sinalacs-backend-${DateTime.now().microsecondsSinceEpoch}';
     late final MqttServerClient client;
     client = MqttServerClient.withPort(broker.host, clientId, broker.port)
-      ..keepAlivePeriod = 30
+      ..keepAlivePeriod = _keepAliveSecs
+      // Partição sem FIN/RST (#56, cenário C): sem isto (padrão 0, desligado)
+      // o cliente seguia `connected` enquanto a rede não voltasse, mesmo
+      // com o broker já tendo expirado a sessão. A biblioteca manda PINGREQ a
+      // cada `keepAlivePeriod` e, se o PINGRESP não chega neste prazo,
+      // destrói o socket e chama `onDisconnected` (o timer nasce dentro de
+      // `connect`, logo na zona protegida). Pior caso de detecção:
+      // keepalive + este prazo (30 + 10 = 40 s), antes de o broker desistir
+      // do cliente (1,5 x keepalive = 45 s).
+      ..disconnectOnNoResponsePeriod = _pingTimeoutSecs
       ..secure = _config.mqttUseTls
       ..autoReconnect = false
       // O callback carrega o cliente que o registrou: um aviso tardio de um
@@ -145,9 +176,17 @@ class MqttAlertDispatcher implements AlertPublisher {
       if (_closed) {
         throw StateError('Dispatcher MQTT encerrado durante a conexão.');
       }
-      _zoneFor(client).run(
-        () => client.subscribe('sinalacs/v1/alerts/+/acks', MqttQos.atLeastOnce),
-      );
+      _zoneFor(client).run(() {
+        client.subscribe('sinalacs/v1/alerts/+/acks', MqttQos.atLeastOnce);
+        // PUBACK das publicações QoS 1: a biblioteca só emite em `published`
+        // quando há ouvinte. O stream fecha quando o cliente desconecta; aí
+        // as publicações em voo deste cliente falham (nunca ficam penduradas).
+        client.published?.listen(
+          (message) => _onPublishAck(client, message),
+          onDone: () => _failPendingAcks(client),
+          onError: (Object _) => _failPendingAcks(client),
+        );
+      });
     } catch (_) {
       _disconnectQuietly(client);
       rethrow;
@@ -226,6 +265,7 @@ class MqttAlertDispatcher implements AlertPublisher {
 
   void _disconnectQuietly(MqttServerClient? client) {
     if (client == null) return;
+    _failPendingAcks(client);
     try {
       client.disconnect();
     } catch (error) {
@@ -339,23 +379,82 @@ class MqttAlertDispatcher implements AlertPublisher {
     }
   }
 
+  /// Publica [alert] com QoS 1 e completa só quando o broker confirma com
+  /// PUBACK (H5, #56): antes, `publish` devolvia assim que a mensagem ia para
+  /// o buffer do socket e o outbox a dava por entregue mesmo com a conexão
+  /// morta.
+  ///
+  /// Falha com [MqttUnavailableException] quando não há conexão, quando a
+  /// conexão cai antes do PUBACK ou quando ele não chega em
+  /// `publishAckTimeout`. No tempo limite a conexão é dada como perdida (a
+  /// reconexão começa e as publicações seguintes falham na hora, sem esperar
+  /// outro prazo inteiro). Entrega é pelo menos uma vez: uma mensagem que o
+  /// broker recebeu sem o PUBACK chegar volta a ser publicada pelo outbox.
   @override
-  void publish(AlertDelivery alert) {
+  Future<void> publish(AlertDelivery alert) async {
     final client = _client;
     if (client == null || client.connectionStatus?.state != MqttConnectionState.connected) {
       throw const MqttUnavailableException('O dispatcher MQTT não está conectado.');
     }
 
     final payload = MqttClientPayloadBuilder()..addString(alert.toJson());
-    // A escrita vai para o socket nascido na zona protegida; rodar aqui também
-    // mantém nela qualquer timer de retransmissão que a biblioteca crie.
-    _zoneFor(client).run(
+    // O Completer nasce na zona do chamador: o erro precisa chegar a quem
+    // aguarda, e um Future com erro não cruza para outra zona de erro.
+    final confirmacao = Completer<void>();
+    final pendentes = _pendingAcks[client] ??= <int, Completer<void>>{};
+    // A escrita vai para o socket nascido na zona protegida. `publishMessage`
+    // é síncrono até a escrita, e o PUBACK só é processado num turno
+    // seguinte do event loop: registrar o id logo depois não perde a
+    // confirmação.
+    final messageId = _zoneFor(client).run(
       () => client.publishMessage(
         alert.topic,
         MqttQos.atLeastOnce,
         payload.payload!,
       ),
     );
+    pendentes[messageId] = confirmacao;
+
+    final prazo = Timer(_ackTimeout, () {
+      if (!identical(pendentes[messageId], confirmacao)) return;
+      pendentes.remove(messageId);
+      _log(
+        'PUBACK não recebido em ${_ackTimeout.inMilliseconds} ms; '
+        'conexão MQTT dada como perdida.',
+      );
+      confirmacao.completeError(
+        const MqttUnavailableException('O broker MQTT não confirmou a publicação no prazo.'),
+      );
+      unawaited(_markConnectionLost(client));
+    });
+    try {
+      await confirmacao.future;
+    } finally {
+      prazo.cancel();
+    }
+  }
+
+  void _onPublishAck(MqttServerClient client, MqttPublishMessage message) {
+    final id = message.variableHeader?.messageIdentifier;
+    if (id == null) return;
+    final confirmacao = _pendingAcks[client]?.remove(id);
+    if (confirmacao != null && !confirmacao.isCompleted) confirmacao.complete();
+  }
+
+  /// A conexão de [client] acabou: nenhuma publicação dele terá PUBACK. Falha
+  /// todas, para o outbox registrar a falha e reentregar depois.
+  void _failPendingAcks(MqttServerClient client) {
+    final pendentes = _pendingAcks[client];
+    if (pendentes == null || pendentes.isEmpty) return;
+    final emVoo = List.of(pendentes.values);
+    pendentes.clear();
+    for (final confirmacao in emVoo) {
+      if (!confirmacao.isCompleted) {
+        confirmacao.completeError(
+          const MqttUnavailableException('A conexão MQTT caiu antes da confirmação da publicação.'),
+        );
+      }
+    }
   }
 
   Future<void> close() async {

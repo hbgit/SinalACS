@@ -9,7 +9,11 @@ import 'package:sinalacs_server/src/generated/protocol.dart';
 const _uuid = Uuid();
 
 abstract interface class AlertPublisher {
-  void publish(AlertDelivery alert);
+  /// Completa quando o broker confirma a entrega (PUBACK do QoS 1) e falha
+  /// quando não há conexão, quando ela cai antes da confirmação ou quando a
+  /// confirmação não chega no prazo (H5, #56). Só depois de completar a
+  /// entrega pode ser dada como publicada.
+  Future<void> publish(AlertDelivery alert);
 }
 
 abstract interface class AlertStore {
