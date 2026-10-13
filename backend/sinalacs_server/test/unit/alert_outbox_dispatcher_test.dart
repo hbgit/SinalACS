@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:sinalacs_server/src/application/alerts/alert_outbox_dispatcher.dart';
 import 'package:sinalacs_server/src/application/alerts/red_alert_service.dart';
 import 'package:sinalacs_server/src/domain/entities/alert_delivery.dart';
@@ -68,6 +70,29 @@ AlertDelivery _delivery(String id) => AlertDelivery(
       locationHash: '6gyf4bf',
       triggeredAt: DateTime.utc(2026, 9, 1, 12),
     );
+
+class _StderrCapturado implements Stdout {
+  final buffer = StringBuffer();
+
+  @override
+  void writeln([Object? object = '']) => buffer.writeln(object);
+
+  @override
+  void write(Object? object) => buffer.write(object);
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => null;
+}
+
+class _PublisherQueLanca implements AlertPublisher {
+  @override
+  void publish(AlertDelivery alert) => throw SocketException(
+        'Broken pipe sentinela-vaz01-local localhost',
+        osError: const OSError('Broken pipe', 32),
+        address: InternetAddress('127.0.0.1'),
+        port: 8883,
+      );
+}
 
 void main() {
   final now = DateTime.utc(2026, 9, 1, 12);
@@ -154,5 +179,49 @@ void main() {
     // Não lança: o alerta já está gravado, e a varredura assume a entrega.
     expect(await dispatcher.publishNow('alerta-1'), isFalse);
     expect(await dispatcher.publishNow('alerta-1'), isTrue);
+  });
+
+  test(
+      'VAZ-01: o log da entrega adiada traz só o id sintético, a tentativa e o '
+      'tipo do erro', () async {
+    final outbox = _RecordingOutbox();
+    await outbox.enqueue(
+      AlertDelivery(
+        alertId: '00000000-0000-4000-8000-0000000000aa',
+        patientId: 'patient-001',
+        microAreaId: 'area-12',
+        riskLevel: 'red',
+        locationHash: 'sentinela-vaz01-local',
+        triggeredAt: now,
+      ),
+    );
+    final dispatcher = AlertOutboxDispatcher(
+      outbox: outbox,
+      publisher: _PublisherQueLanca(),
+      clock: () => now,
+    );
+    final capturado = _StderrCapturado();
+
+    await IOOverrides.runZoned(
+      () => dispatcher.drainOnce(),
+      stderr: () => capturado,
+    );
+
+    expect(
+      capturado.buffer.toString().trim(),
+      'Entrega do alerta 00000000-0000-4000-8000-0000000000aa adiada '
+      '(tentativa 1, erro SocketException).',
+    );
+    for (final proibido in [
+      'sentinela-vaz01-local',
+      'localhost',
+      '127.0.0.1',
+      'Broken pipe',
+      'patient-001',
+      'area-12',
+      '#0 ',
+    ]) {
+      expect(capturado.buffer.toString(), isNot(contains(proibido)));
+    }
   });
 }

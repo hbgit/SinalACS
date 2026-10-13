@@ -5,6 +5,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:mqtt_client/mqtt_client.dart' show MqttConnectionHandlerBase;
 import 'package:sinalacs_server/src/config/app_config.dart';
 import 'package:sinalacs_server/src/domain/entities/alert_delivery.dart';
 import 'package:sinalacs_server/src/infrastructure/mqtt/mqtt_alert_dispatcher.dart';
@@ -97,6 +98,71 @@ Future<void> _guardado(Future<void> Function() body) {
 
 const _brokenPipe =
     SocketException('Broken pipe', osError: OSError('Broken pipe', 32));
+
+/// Sentinelas de VAZ-01: nada disto pode aparecer num log do dispatcher.
+const _proibidos = [
+  'sentinela-vaz01-local',
+  '0000000000aa',
+  'localhost',
+  '127.0.0.1',
+  'sinalacs-backend-',
+  'Broken pipe',
+  'StackTrace',
+  '#0 ',
+];
+
+void _semVazamento(String capturado) {
+  for (final proibido in _proibidos) {
+    expect(capturado, isNot(contains(proibido)), reason: 'vazou "$proibido"');
+  }
+}
+
+/// Erro que carrega, de propósito, tudo o que um log bruto vazaria: mensagem
+/// com sentinelas, endereço, porta e o texto do errno.
+SocketException _erroCarregado() => SocketException(
+      'Broken pipe sentinela-vaz01-local 0000000000aa localhost',
+      osError: const OSError('Broken pipe', 32),
+      address: InternetAddress('127.0.0.1'),
+      port: 8883,
+    );
+
+/// Handler de conexão cujo uso sempre lança [_erroCarregado].
+class _HandlerQueLanca implements MqttConnectionHandlerBase {
+  @override
+  dynamic noSuchMethod(Invocation invocation) => throw _erroCarregado();
+}
+
+/// `stderr` do processo de teste capturado (a parte que o dispatcher escreve
+/// quando não recebe `log`).
+class _StderrCapturado implements Stdout {
+  final buffer = StringBuffer();
+
+  @override
+  void writeln([Object? object = '']) => buffer.writeln(object);
+
+  @override
+  void write(Object? object) => buffer.write(object);
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => null;
+}
+
+/// Sobe a sonda de processo contra [brokerAddr] e devolve o stderr acumulado.
+Future<({Process probe, StringBuffer stderrText})> _sonda(
+  String brokerAddr,
+) async {
+  final probe = await Process.start(
+    'dart',
+    ['run', 'test/support/mqtt_dispatcher_probe.dart'],
+    environment: {'MQTT_BROKER': brokerAddr},
+  );
+  final stderrText = StringBuffer();
+  probe.stderr.transform(utf8.decoder).listen(stderrText.write);
+  await probe.stdout
+      .transform(utf8.decoder)
+      .firstWhere((s) => s.contains('PRONTO'));
+  return (probe: probe, stderrText: stderrText);
+}
 
 void main() {
   group('MqttAlertDispatcher resiliência', () {
@@ -319,6 +385,120 @@ void main() {
       expect(texto, isNot(contains('texto-que-nao-pode-vazar')));
       expect(texto, isNot(contains('10.9.8.7')));
       expect(texto, isNot(contains('reset by peer')));
+    });
+  });
+
+  group('VAZ-01: o log não carrega identidade, local nem payload (#56)', () {
+    test('queda transitória: só tipo e errno', () async {
+      final a = await _ambiente();
+      await a.d.connect();
+      await a.d.simulateAsyncErrorForTest(_erroCarregado());
+      await _until(() => a.broker.connectCount >= 2 && a.d.isConnected);
+      final texto = a.logs.toString();
+      expect(texto, contains('SocketException'));
+      expect(texto, contains('errno=32'));
+      _semVazamento(texto);
+    });
+
+    test('falha de reconexão: só o tipo', () async {
+      final a = await _ambiente();
+      await a.d.connect();
+      await a.broker.close();
+      a.broker.dropClients();
+      await _until(
+        () => a.logs.toString().contains('Falha ao reconectar'),
+      );
+      final texto = a.logs.toString();
+      expect(texto, contains('SocketException'));
+      _semVazamento(texto);
+    });
+
+    test('falha na conexão inicial: só o tipo, também no stderr real',
+        () async {
+      final broker = await FakeMqttBroker.start();
+      final porta = broker.port;
+      await broker.close();
+      final capturado = _StderrCapturado();
+      final d = MqttAlertDispatcher(
+        config: _config(porta),
+        initialBackoff: const Duration(seconds: 30),
+        onFatal: (_) {},
+      );
+      await IOOverrides.runZoned(
+        () => d.connect(),
+        stderr: () => capturado,
+      );
+      await d.close();
+      final texto = capturado.buffer.toString();
+      expect(texto, contains('Falha ao conectar ao broker MQTT'));
+      expect(texto, contains('SocketException'));
+      _semVazamento(texto);
+    });
+
+    test('erro fatal via onFatal: tipo no log, mensagem nunca', () async {
+      final a = await _ambiente(esperaFatal: true);
+      await _guardado(() async {
+        await a.d.connect();
+        await a.d.simulateAsyncErrorForTest(
+          StateError('Broken pipe sentinela-vaz01-local 0000000000aa localhost'),
+        );
+      });
+      final texto = a.logs.toString();
+      expect(a.fatais, [isA<StateError>()]);
+      expect(texto, contains('StateError'));
+      _semVazamento(texto);
+    });
+
+    test('erro tardio depois de close(): só o tipo e o errno', () async {
+      final a = await _ambiente();
+      await a.d.connect();
+      final antigo = a.d.clientForTest!;
+      await a.d.close();
+      await a.d.simulateAsyncErrorForTest(_erroCarregado(), from: antigo);
+      final texto = a.logs.toString();
+      expect(texto, contains('SocketException'));
+      expect(texto, contains('encerrado'));
+      _semVazamento(texto);
+    });
+
+    test('erro de teardown: só o tipo', () async {
+      final a = await _ambiente();
+      await a.d.connect();
+      // Qualquer acesso do cliente ao seu handler lança o erro carregado:
+      // o `disconnect()` do teardown falha e cai no `catch` do dispatcher.
+      // ignore: invalid_use_of_protected_member
+      a.d.clientForTest!.connectionHandler = _HandlerQueLanca();
+      await a.d.close();
+      final texto = a.logs.toString();
+      expect(texto, contains('Falha ao encerrar cliente MQTT antigo ('));
+      expect(texto, contains('SocketException'));
+      _semVazamento(texto);
+    });
+
+    test('processo real: stderr da sonda traz só tipo e errno', () async {
+      final broker = await FakeMqttBroker.start();
+      final s = await _sonda('localhost:${broker.port}');
+      broker.resetClients();
+      await _until(() => broker.connectCount >= 2);
+      await broker.close();
+      await Future<void>.delayed(const Duration(seconds: 3));
+      s.probe.kill();
+      final texto = s.stderrText.toString();
+      expect(texto, contains('SocketException'));
+      _semVazamento(texto);
+    }, skip: Platform.isLinux ? false : 'SO_LINGER usa o número do Linux');
+
+    test('processo real: conexão inicial recusada loga só o tipo', () async {
+      final broker = await FakeMqttBroker.start();
+      final porta = broker.port;
+      await broker.close();
+      final s = await _sonda('localhost:$porta');
+      await Future<void>.delayed(const Duration(seconds: 3));
+      s.probe.kill();
+      final texto = s.stderrText.toString();
+      expect(texto, contains('Falha ao conectar ao broker MQTT'));
+      expect(texto, contains('SocketException'));
+      _semVazamento(texto);
     });
   });
 }
