@@ -71,7 +71,7 @@ class _Store implements AdminReadStore {
   }) => throw UnimplementedError();
 
   @override
-  Future<AdminAuditPage> auditLogs(
+  Future<AdminAuditRowPage> auditLogs(
     AdminScope scope, {
     AdminAuditFilter? filter,
     required int limit,

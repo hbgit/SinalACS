@@ -1,4 +1,6 @@
 import 'package:sinalacs_server/src/application/admin/admin_scope.dart';
+import 'package:sinalacs_server/src/application/audit/audit_chain.dart';
+import 'package:sinalacs_server/src/application/audit/audit_row_sealer.dart';
 import 'package:sinalacs_server/src/application/audit/audit_trail.dart';
 import 'package:sinalacs_server/src/application/auth/development_auth_service.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
@@ -10,6 +12,26 @@ export 'package:sinalacs_server/src/application/admin/admin_scope.dart';
 /// O que o pulso da monitoração (#44, D5) lê além dos indicadores: só uma
 /// contagem e um instante, nunca um alerta.
 typedef AlertsPulseCounts = ({int overdueRed, DateTime? maxChangedAt});
+
+/// Uma linha da auditoria como o store a devolve (#45, Task 5): o que a tela
+/// vê ([entry], com `integrity` ainda no padrão `unverifiable`) e o que só o
+/// servidor vê ([seal]: campos da cadeia e `entryHash` da `sequence - 1`).
+/// Interno: não é modelo `.spy.yaml`, não serializa, não sai do servidor.
+class AdminAuditRow {
+  const AdminAuditRow({required this.entry, required this.seal});
+
+  final AdminAuditEntry entry;
+  final AuditSealInput seal;
+}
+
+/// Página do store da auditoria, por keyset (mesmo contrato de
+/// [AdminAuditPage]), com as entradas de selo internas.
+class AdminAuditRowPage {
+  const AdminAuditRowPage({required this.items, this.nextBeforeSequence});
+
+  final List<AdminAuditRow> items;
+  final int? nextBeforeSequence;
+}
 
 /// Leitura do backoffice. Interface à parte do ORM, no espírito de
 /// `AlertStore`: o serviço e seus testes não conhecem SQL.
@@ -55,7 +77,11 @@ abstract interface class AdminReadStore implements AdminScopeStore {
   ///
   /// [filter] (#45) já chega validado pelo serviço e só **restringe** o
   /// escopo, nunca o alarga: nulo = sem filtro.
-  Future<AdminAuditPage> auditLogs(
+  ///
+  /// Cada linha traz também o [AuditSealInput] (#45, Task 5): os campos da
+  /// cadeia e o `entryHash` da linha `sequence - 1` lido do banco (nulo se
+  /// ela não existe) — o vizinho da cadeia, não o da página.
+  Future<AdminAuditRowPage> auditLogs(
     AdminScope scope, {
     AdminAuditFilter? filter,
     required int limit,
@@ -83,11 +109,16 @@ class AdminReadService {
   AdminReadService({
     required this.store,
     required this.audit,
+    required AuditChain auditChain,
     DateTime Function()? clock,
-  }) : _clock = clock ?? DateTime.now;
+  }) : _sealer = AuditRowSealer(auditChain),
+       _clock = clock ?? DateTime.now;
 
   final AdminReadStore store;
   final AuditTrail audit;
+
+  /// Sela cada linha da auditoria com a MESMA [AuditChain] que grava a trilha.
+  final AuditRowSealer _sealer;
   final DateTime Function() _clock;
 
   /// A regra única de papel/escopo, sobre o [store] (que também é a porta da
@@ -135,6 +166,9 @@ class AdminReadService {
   /// Trilha de auditoria no escopo, com [filter] opcional (#45). Papel e
   /// escopo primeiro (a recusa é auditada `denied`); depois paginação e
   /// filtro — entrada inválida não é acesso, então não grava `success`.
+  ///
+  /// Toda linha devolvida sai selada pelo [AuditRowSealer] (D3); o
+  /// `integrity` de cada uma é sempre reescrito aqui, nunca herdado do store.
   Future<AdminAuditPage> auditLogs(
     AuthenticatedUser user, {
     AdminAuditFilter? filter,
@@ -146,11 +180,18 @@ class AdminReadService {
     _validarPagina(limit, 0);
     validarFiltroDeAuditoria(filter);
     await _auditar(user, recurso, 'success');
-    return store.auditLogs(
+    final pagina = await store.auditLogs(
       escopo,
       filter: filter,
       limit: limit,
       beforeSequence: beforeSequence,
+    );
+    return AdminAuditPage(
+      items: [
+        for (final linha in pagina.items)
+          linha.entry.copyWith(integrity: _sealer.sealInput(linha.seal)),
+      ],
+      nextBeforeSequence: pagina.nextBeforeSequence,
     );
   }
 

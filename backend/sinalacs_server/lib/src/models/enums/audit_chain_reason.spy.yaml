@@ -1,0 +1,19 @@
+### Motivo fechado de uma verificação da cadeia de `audit_logs` que não deu
+### `ok` (#45, D9). Substitui, para o cliente, o texto livre `reason` do
+### verificador: nunca vai hash, segredo nem conteúdo de linha.
+### `hashMismatch` = HMAC da linha não confere; `linkBroken` = `previousHash`
+### não aponta para a anterior; `sequenceGap` = `sequence` descontínua;
+### `tailTruncated` = cadeia termina antes do último checkpoint (Task 7);
+### `timeBudget` = orçamento de tempo esgotado antes do fim (resultado parcial,
+### nunca íntegro); `databaseError` = falha ao ler; `secretUnavailable` =
+### segredo da cadeia ausente.
+enum: AuditChainReason
+serialized: byName
+values:
+  - hashMismatch
+  - linkBroken
+  - sequenceGap
+  - tailTruncated
+  - timeBudget
+  - databaseError
+  - secretUnavailable

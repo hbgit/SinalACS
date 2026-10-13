@@ -1,6 +1,7 @@
 import 'package:sinalacs_server/src/application/audit/audit_chain.dart';
 import 'package:sinalacs_server/src/application/audit/audit_chain_verifier.dart';
 import 'package:sinalacs_server/src/application/audit/audit_trail.dart';
+import 'package:sinalacs_server/src/generated/protocol.dart';
 import 'package:test/test.dart';
 
 class _ThrowingAuditTrail extends AuditTrail {
@@ -50,13 +51,63 @@ class _ChainBuilder {
   List<AuditChainEntry> build() => List.of(_entries);
 }
 
+/// Leitor em memória com o contrato de `readBatch`: `sequence >
+/// afterSequence`, ordem crescente, no máximo `limit`. Conta as chamadas para
+/// provar a leitura em lotes. As entradas são ordenadas por `sequence`, como o
+/// `ORDER BY` do banco faria.
 class _FakeReader implements AuditChainReader {
-  _FakeReader(this.entries);
+  _FakeReader(List<AuditChainEntry> entries, {this.falharNoLote})
+      : entries = List.of(entries)
+          ..sort((a, b) => a.fields.sequence.compareTo(b.fields.sequence));
 
   final List<AuditChainEntry> entries;
+  final int? falharNoLote;
+  final lotes = <({int afterSequence, int limit})>[];
 
   @override
-  Future<List<AuditChainEntry>> readInOrder() async => entries;
+  Future<List<AuditChainEntry>> readBatch({
+    required int afterSequence,
+    required int limit,
+  }) async {
+    lotes.add((afterSequence: afterSequence, limit: limit));
+    if (falharNoLote == lotes.length) {
+      throw Exception('banco fora do ar (sintético)');
+    }
+    return entries
+        .where((e) => e.fields.sequence > afterSequence)
+        .take(limit)
+        .toList();
+  }
+
+  @override
+  Future<AuditChainEntry?> entryAt(int sequence) async {
+    for (final e in entries) {
+      if (e.fields.sequence == sequence) return e;
+    }
+    return null;
+  }
+}
+
+/// A versão antiga do verificador (lia tudo de uma vez), mantida no teste como
+/// oráculo: a leitura em lotes tem de dar o MESMO resultado.
+Future<({bool ok, int checked, int? brokenAt})> _verificarDeUmaVez(
+  List<AuditChainEntry> entries,
+  String secret,
+) async {
+  final chain = AuditChain(secret: secret);
+  var expectedSequence = 1;
+  var expectedPreviousHash = AuditChain.genesisHash;
+  for (final entry in entries) {
+    final f = entry.fields;
+    if (f.sequence != expectedSequence ||
+        f.previousHash != expectedPreviousHash ||
+        !chain.matches(f, entry.entryHash)) {
+      return (ok: false, checked: expectedSequence - 1, brokenAt: f.sequence);
+    }
+    expectedPreviousHash = entry.entryHash;
+    expectedSequence++;
+  }
+  return (ok: true, checked: entries.length, brokenAt: null);
 }
 
 AuditChainFields _withResult(AuditChainFields fields, String result) =>
@@ -207,6 +258,7 @@ void main() {
       expect(result.brokenAtSequence, 2);
       expect(result.checked, 1);
       expect(result.reason, contains('adulteração'));
+      expect(result.reasonCode, AuditChainReason.hashMismatch);
     });
 
     test('apagar uma linha do meio quebra a contiguidade', () async {
@@ -226,6 +278,7 @@ void main() {
       expect(result.brokenAtSequence, 3);
       expect(result.checked, 1);
       expect(result.reason, contains('descontínua'));
+      expect(result.reasonCode, AuditChainReason.sequenceGap);
     });
 
     test('renumerar uma linha para ocupar o lugar de outra apagada quebra o elo',
@@ -255,6 +308,7 @@ void main() {
       expect(result.ok, isFalse);
       expect(result.checked, 1);
       expect(result.reason, contains('elo quebrado'));
+      expect(result.reasonCode, AuditChainReason.linkBroken);
     });
 
     test('verificar com o segredo errado rejeita uma cadeia legítima',
@@ -270,6 +324,191 @@ void main() {
       expect(result.ok, isFalse);
       expect(result.brokenAtSequence, 1);
       expect(result.reason, contains('adulteração'));
+      expect(result.reasonCode, AuditChainReason.hashMismatch);
+    });
+  });
+
+  group('AuditChainVerifier em lotes (#45, G5)', () {
+    List<AuditChainEntry> cadeia(int n) {
+      final b = _ChainBuilder(secret: secret);
+      for (var i = 0; i < n; i++) {
+        b.append(result: i.isEven ? 'granted' : 'denied');
+      }
+      return b.build();
+    }
+
+    test('2500 linhas ⇒ 3 lotes de até 1000, mesmo resultado da versão antiga',
+        () async {
+      final entries = cadeia(2500);
+      final reader = _FakeReader(entries);
+      final result =
+          await AuditChainVerifier(reader: reader, secret: secret).verify();
+
+      expect(AuditChainVerifier.batchSize, 1000);
+      expect(reader.lotes, hasLength(3));
+      expect(reader.lotes.map((l) => l.limit).toSet(), {1000});
+      expect(reader.lotes[1].afterSequence, 1000);
+      expect(reader.lotes[2].afterSequence, 2000);
+
+      final antigo = await _verificarDeUmaVez(entries, secret);
+      expect(result.ok, antigo.ok);
+      expect(result.ok, isTrue);
+      expect(result.checked, antigo.checked);
+      expect(result.checked, 2500);
+      expect(result.reasonCode, isNull);
+      expect(result.brokenAtSequence, isNull);
+    });
+
+    test('múltiplo exato do lote ⇒ lê um lote vazio e termina íntegro',
+        () async {
+      final reader = _FakeReader(cadeia(2000));
+      final result =
+          await AuditChainVerifier(reader: reader, secret: secret).verify();
+      expect(result.ok, isTrue);
+      expect(result.checked, 2000);
+      expect(reader.lotes, hasLength(3));
+    });
+
+    test('remoção DENTRO de um lote é detectada', () async {
+      final entries = cadeia(2500)..removeAt(1499); // apaga a sequence 1500
+      final result =
+          await AuditChainVerifier(reader: _FakeReader(entries), secret: secret)
+              .verify();
+      final antigo = await _verificarDeUmaVez(entries, secret);
+
+      expect(result.ok, isFalse);
+      expect(result.reasonCode, AuditChainReason.sequenceGap);
+      expect(result.brokenAtSequence, 1501);
+      expect(result.checked, 1499);
+      expect(
+        (result.ok, result.checked, result.brokenAtSequence),
+        (antigo.ok, antigo.checked, antigo.brokenAt),
+      );
+    });
+
+    test('remoção NA FRONTEIRA entre lotes é detectada', () async {
+      // Apaga a sequence 1001: o 1º lote termina íntegro em 1000 e o 2º
+      // começa em 1002.
+      final entries = cadeia(2500)..removeAt(1000);
+      final result =
+          await AuditChainVerifier(reader: _FakeReader(entries), secret: secret)
+              .verify();
+
+      expect(result.ok, isFalse);
+      expect(result.reasonCode, AuditChainReason.sequenceGap);
+      expect(result.brokenAtSequence, 1002);
+      expect(result.checked, 1000);
+    });
+
+    test('remoção da ÚLTIMA linha de um lote é detectada', () async {
+      final entries = cadeia(2500)..removeAt(999); // apaga a sequence 1000
+      final result =
+          await AuditChainVerifier(reader: _FakeReader(entries), secret: secret)
+              .verify();
+
+      expect(result.ok, isFalse);
+      expect(result.reasonCode, AuditChainReason.sequenceGap);
+      expect(result.brokenAtSequence, 1001);
+      expect(result.checked, 999);
+    });
+
+    test('edição no 3º lote ⇒ hashMismatch na sequence certa', () async {
+      final entries = cadeia(2500);
+      entries[2100] = AuditChainEntry(
+        fields: _withResult(entries[2100].fields, 'adulterado'),
+        entryHash: entries[2100].entryHash,
+      );
+      final result =
+          await AuditChainVerifier(reader: _FakeReader(entries), secret: secret)
+              .verify();
+
+      expect(result.ok, isFalse);
+      expect(result.reasonCode, AuditChainReason.hashMismatch);
+      expect(result.brokenAtSequence, 2101);
+      expect(result.checked, 2100);
+    });
+
+    test('linha com sequence 0 inserida antes da gênese é detectada', () async {
+      final entries = cadeia(3);
+      final intrusa = AuditChainEntry(
+        fields: _withSequence(entries[0].fields, 0),
+        entryHash: entries[0].entryHash,
+      );
+      final result = await AuditChainVerifier(
+        reader: _FakeReader([intrusa, ...entries]),
+        secret: secret,
+      ).verify();
+
+      expect(result.ok, isFalse);
+      expect(result.reasonCode, AuditChainReason.sequenceGap);
+      expect(result.brokenAtSequence, 0);
+    });
+
+    test('orçamento esgotado ⇒ ok:false com timeBudget, NUNCA ok:true',
+        () async {
+      // Relógio que anda 1 s a cada leitura: o orçamento de 1500 ms acaba
+      // depois do 1º lote, com 1500 linhas ainda por ler.
+      var agora = DateTime.utc(2026, 10, 13, 12);
+      DateTime relogio() {
+        final t = agora;
+        agora = agora.add(const Duration(seconds: 1));
+        return t;
+      }
+
+      final reader = _FakeReader(cadeia(2500));
+      final result = await AuditChainVerifier(reader: reader, secret: secret)
+          .verify(budget: const Duration(milliseconds: 1500), clock: relogio);
+
+      expect(result.ok, isFalse);
+      expect(result.reasonCode, AuditChainReason.timeBudget);
+      expect(result.brokenAtSequence, isNull);
+      expect(result.checked, lessThan(2500));
+      expect(result.checked, greaterThan(0));
+      expect(reader.lotes.length, lessThan(3));
+    });
+
+    test('orçamento folgado ⇒ íntegro normalmente', () async {
+      final result = await AuditChainVerifier(
+        reader: _FakeReader(cadeia(1500)),
+        secret: secret,
+      ).verify(budget: const Duration(minutes: 1));
+      expect(result.ok, isTrue);
+      expect(result.checked, 1500);
+    });
+
+    test('quebra achada antes do fim do orçamento vence o timeBudget',
+        () async {
+      final entries = cadeia(1500)..removeAt(10);
+      var agora = DateTime.utc(2026, 10, 13, 12);
+      final result = await AuditChainVerifier(
+        reader: _FakeReader(entries),
+        secret: secret,
+      ).verify(
+        budget: const Duration(milliseconds: 1500),
+        clock: () => agora = agora.add(const Duration(seconds: 1)),
+      );
+      expect(result.reasonCode, AuditChainReason.sequenceGap);
+      expect(result.brokenAtSequence, 12);
+    });
+
+    test('falha ao ler o banco ⇒ ok:false com databaseError', () async {
+      final reader = _FakeReader(cadeia(2500), falharNoLote: 2);
+      final result =
+          await AuditChainVerifier(reader: reader, secret: secret).verify();
+      expect(result.ok, isFalse);
+      expect(result.reasonCode, AuditChainReason.databaseError);
+      expect(result.checked, 1000);
+      expect(result.brokenAtSequence, isNull);
+    });
+
+    test('segredo vazio ⇒ ok:false com secretUnavailable, sem ler o banco',
+        () async {
+      final reader = _FakeReader(cadeia(3));
+      final result =
+          await AuditChainVerifier(reader: reader, secret: '').verify();
+      expect(result.ok, isFalse);
+      expect(result.reasonCode, AuditChainReason.secretUnavailable);
+      expect(reader.lotes, isEmpty);
     });
   });
 

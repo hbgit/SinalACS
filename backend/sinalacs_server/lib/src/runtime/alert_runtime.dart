@@ -1,3 +1,4 @@
+import 'package:sinalacs_server/src/application/audit/audit_chain.dart';
 import 'package:sinalacs_server/src/application/admin/admin_account_service.dart';
 import 'package:sinalacs_server/src/application/admin/admin_monitoring_service.dart';
 import 'package:sinalacs_server/src/application/admin/admin_read_service.dart';
@@ -234,6 +235,7 @@ class AlertRuntime {
           escalationThreshold: Duration(seconds: config.redAlertEscalationSeconds),
         ),
         audit: auditTrailFor(session),
+        auditChain: AuditChain(secret: config.auditChainSecret),
       );
 
   /// Sessões de monitoramento do backoffice (#44, D5): `userId → último

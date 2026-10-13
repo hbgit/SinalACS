@@ -1,4 +1,7 @@
 import 'package:sinalacs_server/src/application/admin/admin_read_service.dart';
+import 'package:sinalacs_server/src/application/audit/audit_chain.dart';
+import 'package:sinalacs_server/src/application/audit/audit_chain_verifier.dart';
+import 'package:sinalacs_server/src/application/audit/audit_row_sealer.dart';
 import 'package:sinalacs_server/src/application/audit/audit_trail.dart';
 import 'package:sinalacs_server/src/application/auth/development_auth_service.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
@@ -9,6 +12,49 @@ import 'package:test/test.dart';
 /// Regras do backoffice (#40) sem banco: papel, escopo, auditoria que vem ANTES
 /// do dado e validação de paginação. Dados sintéticos.
 const _ubsDoCoordenador = 'ubs-a';
+const _segredoDaCadeia = 'segredo-sintetico-do-servico';
+
+/// Linha de auditoria como o store a devolve: [integridadeDoStore] é o que o
+/// store pôs no `entry` (o serviço tem de ignorar), e a cadeia é montada com
+/// [segredo].
+AdminAuditRow _linha(
+  int sequence, {
+  required String previousHash,
+  String? previousEntryHash,
+  String segredo = _segredoDaCadeia,
+  AuditRowSeal integridadeDoStore = AuditRowSeal.unverifiable,
+}) {
+  final campos = AuditChainFields(
+    sequence: sequence,
+    previousHash: previousHash,
+    userId: 'u-$sequence',
+    actionType: 'read',
+    resourceType: 'admin_audit_logs',
+    resourceId: null,
+    timestamp: DateTime.utc(2026, 10, 13, 12, sequence),
+    ipHash: 'ip-$sequence',
+    result: 'success',
+  );
+  return AdminAuditRow(
+    entry: AdminAuditEntry(
+      id: 'id-$sequence',
+      sequence: sequence,
+      userLabel: 'X (Administrador)',
+      actionType: 'read',
+      resourceType: 'admin_audit_logs',
+      timestamp: campos.timestamp,
+      result: 'success',
+      integrity: integridadeDoStore,
+    ),
+    seal: AuditSealInput(
+      row: AuditChainEntry(
+        fields: campos,
+        entryHash: AuditChain(secret: segredo).computeEntryHash(campos),
+      ),
+      previousEntryHash: previousEntryHash,
+    ),
+  );
+}
 
 /// Registra cada chamada com a ordem global, para provar "auditoria antes do dado".
 final _ordem = <String>[];
@@ -18,6 +64,8 @@ class _Store implements AdminReadStore {
   int chamadas = 0;
   int? ultimoLimit;
   AdminAuditFilter? ultimoFiltro;
+  List<AdminAuditRow> proximaPagina = [];
+  int? proximoCursor;
   DateTime? ultimoAgoraDosAlertas;
   final Map<String, String?> ubs = {
     'coord-a': _ubsDoCoordenador,
@@ -76,7 +124,7 @@ class _Store implements AdminReadStore {
   }
 
   @override
-  Future<AdminAuditPage> auditLogs(
+  Future<AdminAuditRowPage> auditLogs(
     AdminScope scope, {
     AdminAuditFilter? filter,
     required int limit,
@@ -85,7 +133,10 @@ class _Store implements AdminReadStore {
     _marca('auditLogs', scope);
     ultimoLimit = limit;
     ultimoFiltro = filter;
-    return AdminAuditPage(items: []);
+    return AdminAuditRowPage(
+      items: proximaPagina,
+      nextBeforeSequence: proximoCursor,
+    );
   }
 
   @override
@@ -126,6 +177,7 @@ void main() {
     servico = AdminReadService(
       store: store,
       audit: audit,
+      auditChain: AuditChain(secret: _segredoDaCadeia),
       clock: () => DateTime.utc(2026, 10, 7, 12),
     );
   });
@@ -189,6 +241,50 @@ void main() {
     );
     expect(store.chamadas, 0, reason: 'nenhum dado sai');
     expect(audit.events.single.result, 'denied');
+  });
+
+  group('selo por linha (#45, D3)', () {
+    test('o serviço sela cada linha e ignora o integrity que o store pôs',
+        () async {
+      final l1 = _linha(1, previousHash: AuditChain.genesisHash);
+      final l2 = _linha(
+        2,
+        previousHash: l1.seal.row.entryHash,
+        previousEntryHash: l1.seal.row.entryHash,
+      );
+      // Store "mente" verified numa linha forjada com outro segredo.
+      final forjada = _linha(
+        3,
+        previousHash: l2.seal.row.entryHash,
+        previousEntryHash: l2.seal.row.entryHash,
+        segredo: 'segredo-do-atacante',
+        integridadeDoStore: AuditRowSeal.verified,
+      );
+      // Vizinho 9 ausente no banco.
+      final orfa = _linha(10, previousHash: 'f' * 64);
+      store.proximaPagina = [orfa, forjada, l2, l1];
+
+      final pagina = await servico.auditLogs(admin);
+
+      expect(
+        {for (final e in pagina.items) e.sequence: e.integrity},
+        {
+          10: AuditRowSeal.unverifiable,
+          3: AuditRowSeal.invalid,
+          2: AuditRowSeal.verified,
+          1: AuditRowSeal.verified,
+        },
+      );
+      expect(pagina.items.map((e) => e.sequence), [10, 3, 2, 1],
+          reason: 'a ordem do store (sequence desc) é preservada');
+    });
+
+    test('o cursor do store passa adiante sem mudar', () async {
+      store.proximaPagina = [_linha(1, previousHash: AuditChain.genesisHash)];
+      store.proximoCursor = 1;
+      final pagina = await servico.auditLogs(admin, limit: 1);
+      expect(pagina.nextBeforeSequence, 1);
+    });
   });
 
   test('admin lê a auditoria com escopo de sistema', () async {

@@ -929,25 +929,26 @@ void main() {
         }
         final p = await store.auditLogs(const AdminScope.system(), limit: 2);
         expect(p.items, hasLength(2));
-        expect(p.nextBeforeSequence, p.items.last.sequence);
-        expect(p.items.first.sequence, greaterThan(p.items.last.sequence));
+        expect(p.nextBeforeSequence, p.items.last.entry.sequence);
+        expect(p.items.first.entry.sequence, greaterThan(p.items.last.entry.sequence));
         final proxima = await store.auditLogs(
           const AdminScope.system(),
           limit: 2,
           beforeSequence: p.nextBeforeSequence,
         );
-        expect(proxima.items.first.sequence, lessThan(p.items.last.sequence));
+        expect(proxima.items.first.entry.sequence, lessThan(p.items.last.entry.sequence));
 
         final todas = await store.auditLogs(
           const AdminScope.system(),
           limit: 50,
         );
-        final rotulos = todas.items.map((e) => e.userLabel).toSet();
+        final rotulos = todas.items.map((e) => e.entry.userLabel).toSet();
         expect(
           rotulos,
           containsAll(['ADM-RD-1 (Administrador)', 'ACS-ADM-RD-1 (ACS)']),
         );
-        final json = jsonEncode(todas.toJson());
+        // O que a tela recebe é o `entry`; o selo interno não serializa.
+        final json = jsonEncode([for (final r in todas.items) r.entry.toJson()]);
         expect(json, isNot(contains('Admin Sintético')));
         expect(json, isNot(contains('Hash')));
         expect(json, isNot(contains('ip')));
@@ -991,12 +992,12 @@ void main() {
         );
         expect(daUbsA.items, hasLength(2));
         expect(
-          daUbsA.items.map((e) => e.userLabel).toSet(),
+          daUbsA.items.map((e) => e.entry.userLabel).toSet(),
           {'ACS-ADM-RD-1 (ACS)', 'Paciente #00F1'},
           reason: 'só atores com microárea na UBS A',
         );
         expect(
-          daUbsA.items.map((e) => e.resourceType).toSet(),
+          daUbsA.items.map((e) => e.entry.resourceType).toSet(),
           {'session', 'triage_session'},
           reason:
               'as linhas de staff (admin_indicators, admin_audit_logs) ficam de fora',
@@ -1035,7 +1036,7 @@ void main() {
         final soA = const AdminScope.ubs(_ubsA);
         final p1 = await store.auditLogs(soA, limit: 1);
         expect(p1.items, hasLength(1));
-        expect(p1.nextBeforeSequence, p1.items.last.sequence);
+        expect(p1.nextBeforeSequence, p1.items.last.entry.sequence);
 
         final p2 = await store.auditLogs(
           soA,
@@ -1043,7 +1044,7 @@ void main() {
           beforeSequence: p1.nextBeforeSequence,
         );
         expect(p2.items, hasLength(1));
-        expect(p2.items.first.sequence, lessThan(p1.items.first.sequence));
+        expect(p2.items.first.entry.sequence, lessThan(p1.items.first.entry.sequence));
         expect(
           p2.nextBeforeSequence,
           isNull,
@@ -1189,7 +1190,7 @@ void main() {
           filter: f,
           limit: limit,
         )).items)
-          e.sequence - base + 1,
+          e.entry.sequence - base + 1,
       ];
 
       test('sem filtro: as 12, sequence desc', () async {
@@ -1367,12 +1368,12 @@ void main() {
             filter: f,
             limit: 3,
           );
-          expect(p1.items.map((e) => e.sequence - base + 1), [11, 10, 8]);
+          expect(p1.items.map((e) => e.entry.sequence - base + 1), [11, 10, 8]);
           expect(p1.nextBeforeSequence, base + 8 - 1);
 
           await linha(13, _acsBId, 'read', 'alert', 'granted', t0 + h * 11);
 
-          final vistos = [...p1.items.map((e) => e.sequence - base + 1)];
+          final vistos = [...p1.items.map((e) => e.entry.sequence - base + 1)];
           int? antes = p1.nextBeforeSequence;
           while (antes != null) {
             final p = await store.auditLogs(
@@ -1381,7 +1382,7 @@ void main() {
               limit: 3,
               beforeSequence: antes,
             );
-            vistos.addAll(p.items.map((e) => e.sequence - base + 1));
+            vistos.addAll(p.items.map((e) => e.entry.sequence - base + 1));
             antes = p.nextBeforeSequence;
           }
           expect(vistos, [11, 10, 8, 7, 6, 5, 4, 3]);
