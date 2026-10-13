@@ -48,34 +48,65 @@ Future<void> _until(
   }
 }
 
-/// `stderr` falso para conferir o que o dispatcher registra (VAZ-01).
-class _StderrCapturado implements Stdout {
-  final linhas = StringBuffer();
+/// Broker falso + dispatcher com `onFatal` e `log` gravados, já com o
+/// encerramento registrado antes de qualquer `await` do teste.
+class _Ambiente {
+  _Ambiente(this.broker, this.d, this.fatais, this.logs);
 
-  @override
-  void writeln([Object? object = '']) => linhas.writeln(object);
-
-  @override
-  void write(Object? object) => linhas.write(object);
-
-  @override
-  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+  final FakeMqttBroker broker;
+  final MqttAlertDispatcher d;
+  final List<Object> fatais;
+  final StringBuffer logs;
 }
+
+Future<_Ambiente> _ambiente({
+  Duration backoff = const Duration(milliseconds: 100),
+  bool esperaFatal = false,
+}) async {
+  final broker = await FakeMqttBroker.start();
+  final fatais = <Object>[];
+  final logs = StringBuffer();
+  final d = MqttAlertDispatcher(
+    config: _config(broker.port),
+    initialBackoff: backoff,
+    onFatal: fatais.add,
+    log: logs.writeln,
+  );
+  addTearDown(() async {
+    await d.close();
+    await broker.close();
+    if (!esperaFatal) {
+      expect(fatais, isEmpty, reason: 'onFatal não devia ser chamado');
+    }
+  });
+  return _Ambiente(broker, d, fatais, logs);
+}
+
+/// Roda [body] numa zona guardada. Erro que escape para essa zona falha o
+/// teste na hora (em vez de pendurar o `await` de um `runZonedGuarded`).
+Future<void> _guardado(Future<void> Function() body) {
+  final fim = Completer<void>();
+  runZonedGuarded(() async {
+    await body();
+    if (!fim.isCompleted) fim.complete();
+  }, (e, s) {
+    if (!fim.isCompleted) fim.completeError(e, s);
+  });
+  return fim.future;
+}
+
+const _brokenPipe =
+    SocketException('Broken pipe', osError: OSError('Broken pipe', 32));
 
 void main() {
   group('MqttAlertDispatcher resiliência', () {
     test('conecta ao broker falso', () async {
-      final broker = await FakeMqttBroker.start();
-      final dispatcher = MqttAlertDispatcher(config: _config(broker.port));
-      addTearDown(() async {
-        await dispatcher.close();
-        await broker.close();
-      });
+      final a = await _ambiente();
 
-      await dispatcher.connect();
+      await a.d.connect();
 
-      expect(dispatcher.isConnected, isTrue);
-      expect(broker.connectCount, 1);
+      expect(a.d.isConnected, isTrue);
+      expect(a.broker.connectCount, 1);
     });
 
     test(
@@ -117,185 +148,172 @@ void main() {
 
     test('reconecta depois que o broker derruba a conexão e volta a publicar',
         () async {
-      final broker = await FakeMqttBroker.start();
-      final d = MqttAlertDispatcher(
-        config: _config(broker.port),
-        initialBackoff: const Duration(milliseconds: 100),
-      );
-      addTearDown(() async {
-        await d.close();
-        await broker.close();
-      });
-      await d.connect();
-      expect(d.isConnected, isTrue);
+      final a = await _ambiente();
+      await a.d.connect();
+      expect(a.d.isConnected, isTrue);
 
-      broker.dropClients();
-      await _until(() => broker.connectCount >= 2 && d.isConnected);
+      a.broker.dropClients();
+      await _until(() => a.broker.connectCount >= 2 && a.d.isConnected);
 
-      d.publish(_delivery());
-      await _until(() => broker.publishCount == 1);
+      a.d.publish(_delivery());
+      await _until(() => a.broker.publishCount == 1);
     });
 
     test('durante a queda publish lança MqttUnavailableException', () async {
-      final broker = await FakeMqttBroker.start();
-      final d = MqttAlertDispatcher(
-        config: _config(broker.port),
-        initialBackoff: const Duration(seconds: 5),
-      );
-      addTearDown(d.close);
-      await d.connect();
-      await broker.close(); // nada mais aceita conexões
-      await _until(() => !d.isConnected);
+      final a = await _ambiente(backoff: const Duration(seconds: 5));
+      await a.d.connect();
+      await a.broker.close(); // nada mais aceita conexões
+      await _until(() => !a.d.isConnected);
       expect(
-        () => d.publish(_delivery()),
+        () => a.d.publish(_delivery()),
         throwsA(isA<MqttUnavailableException>()),
       );
     });
 
     test(
-        'socket real: RST do broker completa o Socket.done com erro, que não '
-        'escapa da zona do dispatcher, e ele reconecta', () async {
-      final broker = await FakeMqttBroker.start();
-      final escapou = <Object>[];
-      late MqttAlertDispatcher d;
-      await runZonedGuarded(() async {
-        d = MqttAlertDispatcher(
-          config: _config(broker.port),
-          initialBackoff: const Duration(milliseconds: 100),
-        );
-        await d.connect();
-        expect(d.isConnected, isTrue);
+        'socket real: RST do broker completa o Socket.done com erro, que é '
+        'tratado na zona do dispatcher, e ele reconecta', () async {
+      final a = await _ambiente();
+      await _guardado(() async {
+        await a.d.connect();
+        expect(a.d.isConnected, isTrue);
 
-        broker.resetClients();
-        await _until(() => broker.connectCount >= 2 && d.isConnected);
+        a.broker.resetClients();
+        await _until(() => a.broker.connectCount >= 2 && a.d.isConnected);
         // Margem para um erro tardio do socket antigo aparecer.
         await Future<void>.delayed(const Duration(milliseconds: 200));
-      }, (e, _) => escapou.add(e));
-      addTearDown(() async {
-        await d.close();
-        await broker.close();
       });
-      expect(escapou.map((e) => e.runtimeType), isEmpty);
-      d.publish(_delivery());
-      await _until(() => broker.publishCount == 1);
+      // O erro do socket real chegou ao handler (e não ao processo).
+      expect(a.logs.toString(), contains('errno=104'));
+      a.d.publish(_delivery());
+      await _until(() => a.broker.publishCount == 1);
     }, skip: Platform.isLinux ? false : 'SO_LINGER usa o número do Linux');
 
     test(
         'política do handler (seam, não socket real): erro transitório '
         'assíncrono não escapa e aciona reconexão', () async {
-      final broker = await FakeMqttBroker.start();
-      final escapou = <Object>[];
-      late MqttAlertDispatcher d;
-      await runZonedGuarded(() async {
-        d = MqttAlertDispatcher(
-          config: _config(broker.port),
-          initialBackoff: const Duration(milliseconds: 100),
-        );
-        await d.connect();
-        await d.simulateAsyncErrorForTest(
-          const SocketException(
-            'Broken pipe',
-            osError: OSError('Broken pipe', 32),
-          ),
-        );
-        await _until(() => broker.connectCount >= 2 && d.isConnected);
-      }, (e, _) => escapou.add(e));
-      addTearDown(() async {
-        await d.close();
-        await broker.close();
+      final a = await _ambiente();
+      await _guardado(() async {
+        await a.d.connect();
+        await a.d.simulateAsyncErrorForTest(_brokenPipe);
+        await _until(() => a.broker.connectCount >= 2 && a.d.isConnected);
       });
-      expect(escapou, isEmpty);
     });
 
     test('cliente obsoleto: onDisconnected antigo não derruba a conexão nova',
         () async {
-      final broker = await FakeMqttBroker.start();
-      final d = MqttAlertDispatcher(
-        config: _config(broker.port),
-        initialBackoff: const Duration(milliseconds: 100),
-      );
-      addTearDown(() async {
-        await d.close();
-        await broker.close();
-      });
-      await d.connect();
-      final antigo = d.clientForTest!;
+      final a = await _ambiente();
+      await a.d.connect();
+      final antigo = a.d.clientForTest!;
 
-      broker.dropClients();
-      await _until(() => broker.connectCount >= 2 && d.isConnected);
-      final novo = d.clientForTest!;
+      a.broker.dropClients();
+      await _until(() => a.broker.connectCount >= 2 && a.d.isConnected);
+      final novo = a.d.clientForTest!;
       expect(identical(antigo, novo), isFalse);
 
       // O callback do cliente anterior dispara de novo, já com o novo ativo.
       antigo.onDisconnected!();
       await Future<void>.delayed(const Duration(milliseconds: 500));
 
-      expect(broker.connectCount, 2);
-      expect(d.isConnected, isTrue);
-      expect(identical(d.clientForTest, novo), isTrue);
+      expect(a.broker.connectCount, 2);
+      expect(a.d.isConnected, isTrue);
+      expect(identical(a.d.clientForTest, novo), isTrue);
+    });
+
+    test(
+        'cliente obsoleto: erro assíncrono tardio na zona do cliente antigo '
+        'não derruba a conexão nova', () async {
+      final a = await _ambiente();
+      await a.d.connect();
+      final antigo = a.d.clientForTest!;
+
+      a.broker.dropClients();
+      await _until(() => a.broker.connectCount >= 2 && a.d.isConnected);
+      final novo = a.d.clientForTest!;
+
+      await a.d.simulateAsyncErrorForTest(_brokenPipe, from: antigo);
+      await Future<void>.delayed(const Duration(milliseconds: 500));
+
+      expect(a.broker.connectCount, 2);
+      expect(a.d.isConnected, isTrue);
+      expect(identical(a.d.clientForTest, novo), isTrue);
+    });
+
+    test(
+        'queda na troca de cliente durante a reconexão não deixa o '
+        'dispatcher com um cliente morto', () async {
+      final a = await _ambiente();
+      await a.d.connect();
+      var injetado = false;
+      // A queda chega exatamente na janela entre `_client = novo` e o fim da
+      // troca, com `_reconnecting` ainda verdadeiro.
+      a.d.afterClientSwapForTest = () async {
+        if (injetado) return;
+        injetado = true;
+        await a.d.simulateAsyncErrorForTest(
+          const SocketException(
+            'reset',
+            osError: OSError('Connection reset by peer', 104),
+          ),
+        );
+      };
+
+      a.broker.dropClients();
+      await _until(() => a.broker.connectCount >= 3 && a.d.isConnected);
+      expect(injetado, isTrue);
+
+      a.d.publish(_delivery());
+      await _until(() => a.broker.publishCount == 1);
     });
 
     test('erro desconhecido não é engolido: é registrado e chama onFatal',
         () async {
-      final broker = await FakeMqttBroker.start();
-      final fatais = <Object>[];
-      final escapou = <Object>[];
-      final saida = _StderrCapturado();
-      late MqttAlertDispatcher d;
-      await IOOverrides.runZoned(
-        () => runZonedGuarded(() async {
-          d = MqttAlertDispatcher(
-            config: _config(broker.port),
-            initialBackoff: const Duration(milliseconds: 100),
-            onFatal: fatais.add,
-          );
-          await d.connect();
-          await d.simulateAsyncErrorForTest(StateError('detalhe-interno'));
-        }, (e, _) => escapou.add(e)),
-        stderr: () => saida,
-      );
-      addTearDown(() async {
-        await d.close();
-        await broker.close();
+      final a = await _ambiente(esperaFatal: true);
+      await _guardado(() async {
+        await a.d.connect();
+        await a.d.simulateAsyncErrorForTest(StateError('detalhe-interno'));
       });
-      expect(escapou, isEmpty);
-      expect(fatais, [isA<StateError>()]);
-      expect(saida.linhas.toString(), contains('StateError'));
-      expect(saida.linhas.toString(), isNot(contains('detalhe-interno')));
+      expect(a.fatais, [isA<StateError>()]);
+      expect(a.logs.toString(), contains('StateError'));
+      expect(a.logs.toString(), isNot(contains('detalhe-interno')));
       // Erro fatal não é tratado como queda: nada de reconexão.
       await Future<void>.delayed(const Duration(milliseconds: 300));
-      expect(broker.connectCount, 1);
+      expect(a.broker.connectCount, 1);
+    });
+
+    test('erro depois de close() não chama onFatal', () async {
+      final a = await _ambiente();
+      await a.d.connect();
+      final antigo = a.d.clientForTest!;
+      await a.d.close();
+
+      await a.d.simulateAsyncErrorForTest(
+        StateError('detalhe-interno'),
+        from: antigo,
+      );
+      await a.d.simulateAsyncErrorForTest(_brokenPipe, from: antigo);
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+
+      expect(a.fatais, isEmpty);
+      expect(a.logs.toString(), contains('StateError'));
+      expect(a.logs.toString(), isNot(contains('detalhe-interno')));
+      expect(a.broker.connectCount, 1);
     });
 
     test('o registro do erro transitório traz só tipo e errno (VAZ-01)',
         () async {
-      final broker = await FakeMqttBroker.start();
-      final saida = _StderrCapturado();
-      late MqttAlertDispatcher d;
-      await IOOverrides.runZoned(
-        () async {
-          d = MqttAlertDispatcher(
-            config: _config(broker.port),
-            initialBackoff: const Duration(milliseconds: 100),
-          );
-          await d.connect();
-          await d.simulateAsyncErrorForTest(
-            SocketException(
-              'texto-que-nao-pode-vazar',
-              osError: const OSError('Connection reset by peer', 104),
-              address: InternetAddress('10.9.8.7'),
-              port: 8883,
-            ),
-          );
-          await _until(() => broker.connectCount >= 2 && d.isConnected);
-        },
-        stderr: () => saida,
+      final a = await _ambiente();
+      await a.d.connect();
+      await a.d.simulateAsyncErrorForTest(
+        SocketException(
+          'texto-que-nao-pode-vazar',
+          osError: const OSError('Connection reset by peer', 104),
+          address: InternetAddress('10.9.8.7'),
+          port: 8883,
+        ),
       );
-      addTearDown(() async {
-        await d.close();
-        await broker.close();
-      });
-      final texto = saida.linhas.toString();
+      await _until(() => a.broker.connectCount >= 2 && a.d.isConnected);
+      final texto = a.logs.toString();
       expect(texto, contains('SocketException'));
       expect(texto, contains('errno=104'));
       expect(texto, isNot(contains('texto-que-nao-pode-vazar')));

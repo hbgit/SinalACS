@@ -24,26 +24,18 @@ class MqttAlertDispatcher implements AlertPublisher {
     Duration initialBackoff = const Duration(seconds: 2),
     Duration maxBackoff = const Duration(seconds: 60),
     void Function(Object error)? onFatal,
+    void Function(String line)? log,
   })  : _config = config,
         _initialBackoff = initialBackoff,
         // Teto menor que o piso faria o backoff encolher a cada falha.
         _maxBackoff = maxBackoff < initialBackoff ? initialBackoff : maxBackoff,
         _backoff = initialBackoff,
-        _onFatal = onFatal ?? _exitFatal {
-    // Zona protegida (#56): o `Socket` do cliente MQTT nasce dentro de
-    // `client.connect(...)`, e um erro de E/S do socket (EPIPE/ECONNRESET)
-    // completa o `Socket.done` do sink de escrita, que nem o mqtt_client nem
-    // ninguém escuta. Esse erro é entregue à zona em que o socket foi criado;
-    // sem handler ali, ele sobe até a zona raiz e derruba o processo inteiro
-    // (provado na Tarefa 6b). Um `try/catch` em volta de `connect`/`publish`
-    // não o vê, por isso cada `connect` roda nesta zona.
-    _zone = Zone.current.fork(
-      specification: ZoneSpecification(
-        handleUncaughtError: (self, parent, zone, error, stack) =>
-            _onAsyncError(error, stack),
-      ),
-    );
-  }
+        _onFatal = onFatal ?? _exitFatal,
+        _log = log ?? _stderrLog;
+
+  /// Destino padrão das linhas de log (`log` no construtor troca, nos testes).
+  /// Toda linha leva só tipo e errno, nunca mensagem, pilha ou endereço.
+  static void _stderrLog(String line) => stderr.writeln(line);
 
   /// EX_SOFTWARE: falha não prevista no cliente MQTT. O processo sai de forma
   /// controlada (o motivo já foi registrado só pelo tipo) e o orquestrador o
@@ -54,7 +46,15 @@ class MqttAlertDispatcher implements AlertPublisher {
   final Duration _initialBackoff;
   final Duration _maxBackoff;
   final void Function(Object error) _onFatal;
-  late final Zone _zone;
+  final void Function(String line) _log;
+
+  /// Zona protegida de cada cliente (ver [_zoneFor]).
+  final _zones = Expando<Zone>('zona protegida do cliente MQTT');
+
+  /// Gancho de teste chamado logo depois de um cliente novo assumir, antes de
+  /// o anterior ser descartado: a janela em que uma queda já foi perdida.
+  @visibleForTesting
+  Future<void> Function()? afterClientSwapForTest;
   MqttServerClient? _client;
   StreamSubscription<List<MqttReceivedMessage<MqttMessage>>>? _subscription;
   Future<void> Function(AlertDeliveryAck ack)? _onAcknowledgement;
@@ -68,6 +68,27 @@ class MqttAlertDispatcher implements AlertPublisher {
   @visibleForTesting
   MqttServerClient? get clientForTest => _client;
 
+  /// Zona protegida (#56) de uma tentativa de conexão.
+  ///
+  /// O `Socket` do cliente MQTT nasce dentro de `client.connect(...)`, e um
+  /// erro de E/S do socket (EPIPE/ECONNRESET) completa o `Socket.done` do sink
+  /// de escrita, que nem o mqtt_client nem ninguém escuta. Esse erro é entregue
+  /// à zona em que o socket foi criado; sem handler ali, ele sobe até a zona
+  /// raiz e derruba o processo inteiro (provado na Tarefa 6b). Um `try/catch`
+  /// em volta de `connect`/`publish` não o vê, por isso cada `connect` roda
+  /// numa zona própria, e o handler sabe de QUAL cliente veio o erro: um erro
+  /// tardio do socket de um cliente já substituído não derruba o atual.
+  ///
+  /// Deriva da zona raiz, não de `Zone.current`: o dispatcher é criado sob
+  /// demanda e pode nascer dentro da zona de uma requisição do Serverpod, cujos
+  /// valores não devem viver junto com a conexão MQTT do processo.
+  Zone _zoneFor(MqttServerClient client) => _zones[client] ??= Zone.root.fork(
+        specification: ZoneSpecification(
+          handleUncaughtError: (self, parent, zone, error, stack) =>
+              _onAsyncError(error, stack, client),
+        ),
+      );
+
   Future<void> connect({
     Future<void> Function(AlertDeliveryAck ack)? onAcknowledgement,
   }) async {
@@ -75,7 +96,7 @@ class MqttAlertDispatcher implements AlertPublisher {
     try {
       await _connectOnce();
     } catch (error) {
-      stderr.writeln(
+      _log(
         'Falha ao conectar ao broker MQTT (${error.runtimeType}). '
         'Tentando novamente em segundo plano...',
       );
@@ -114,6 +135,7 @@ class MqttAlertDispatcher implements AlertPublisher {
     try {
       // O socket (e o timer do keepalive) nascem aqui: dentro da zona.
       await _runProtected(
+        _zoneFor(client),
         () => client.connect(_config.mqttUsername, _config.mqttPassword),
       );
       if (client.connectionStatus?.state != MqttConnectionState.connected) {
@@ -122,7 +144,7 @@ class MqttAlertDispatcher implements AlertPublisher {
       if (_closed) {
         throw StateError('Dispatcher MQTT encerrado durante a conexão.');
       }
-      _zone.run(
+      _zoneFor(client).run(
         () => client.subscribe('sinalacs/v1/alerts/+/acks', MqttQos.atLeastOnce),
       );
     } catch (_) {
@@ -141,19 +163,21 @@ class MqttAlertDispatcher implements AlertPublisher {
     _subscription = client.updates?.listen(_handleMessages);
     _client = client;
     _backoff = _initialBackoff;
+    final gancho = afterClientSwapForTest;
+    if (gancho != null) await gancho();
     await previousSubscription?.cancel();
     _disconnectQuietly(previousClient);
   }
 
-  /// Roda [body] na zona protegida e devolve o resultado na zona do chamador.
+  /// Roda [body] em [zone] (protegida) e devolve o resultado na zona do chamador.
   ///
   /// Um `Future` que falha dentro de uma zona com handler de erro não cruza
-  /// para outra zona de erro: `await _zone.run(...)` ficaria pendurado para
+  /// para outra zona de erro: `await zone.run(...)` ficaria pendurado para
   /// sempre numa falha de `connect` (o erro iria só para o handler). O
   /// `Completer` criado aqui fora entrega valor e erro ao chamador.
-  Future<T> _runProtected<T>(Future<T> Function() body) {
+  Future<T> _runProtected<T>(Zone zone, Future<T> Function() body) {
     final resultado = Completer<T>();
-    _zone.run(() {
+    zone.run(() {
       body().then(resultado.complete, onError: resultado.completeError);
     });
     return resultado.future;
@@ -182,7 +206,7 @@ class MqttAlertDispatcher implements AlertPublisher {
         // Só o id sintético e o TIPO do erro, nunca `$error`/`$stackTrace`
         // brutos: um aggregator de log arquiva o stderr sem tratamento, e a
         // exceção pode carregar atributos do alerta (VAZ-01).
-        stderr.writeln(
+        _log(
           'Falha ao processar ACK do alerta ${ack.alertId} '
           '(${error.runtimeType}).',
         );
@@ -204,7 +228,7 @@ class MqttAlertDispatcher implements AlertPublisher {
     try {
       client.disconnect();
     } catch (error) {
-      stderr.writeln(
+      _log(
         'Falha ao encerrar cliente MQTT antigo (${error.runtimeType}).',
       );
     }
@@ -219,11 +243,14 @@ class MqttAlertDispatcher implements AlertPublisher {
   /// [MqttUnavailableException] mesmo que a biblioteca ainda o dê por
   /// conectado) e agenda a reconexão. Idempotente: a checagem de identidade e
   /// a troca de `_client` acontecem sem `await` entre elas, então o
-  /// `onDisconnected` e o erro de E/S da mesma queda abrem um único laço.
+  /// `onDisconnected` e o erro de E/S da mesma queda descartam o cliente uma
+  /// vez só. Não volta cedo por `_reconnecting`: uma queda do cliente recém-
+  /// conectado, ainda dentro do laço de reconexão, precisa zerar `_client`
+  /// para o laço ver que a conexão já caiu e tentar de novo.
   Future<void> _markConnectionLost(MqttServerClient client) async {
-    if (_closed || _reconnecting || !identical(client, _client)) return;
+    if (_closed || !identical(client, _client)) return;
     await _teardownCurrentConnection();
-    unawaited(_reconnectWithBackoff());
+    if (!_reconnecting) unawaited(_reconnectWithBackoff());
   }
 
   bool _isTransient(Object e) =>
@@ -236,18 +263,27 @@ class MqttAlertDispatcher implements AlertPublisher {
 
   /// Handler da zona protegida. Registra só o tipo (e o errno de um
   /// `SocketException`), nunca a mensagem, a pilha ou o endereço (VAZ-01).
-  void _onAsyncError(Object error, StackTrace stack) {
+  void _onAsyncError(Object error, StackTrace stack, MqttServerClient client) {
+    if (_closed) {
+      // Encerrado: nada a reconectar e nenhum motivo para derrubar o processo
+      // por um erro tardio de um socket que já foi descartado.
+      _log(
+        'Erro tardio no cliente MQTT encerrado '
+        '(${error.runtimeType}${_errno(error)}); ignorado.',
+      );
+      return;
+    }
     if (_isTransient(error)) {
-      if (_closed) return;
-      stderr.writeln(
+      _log(
         'Erro de E/S no cliente MQTT (${error.runtimeType}${_errno(error)}); '
         'reconectando.',
       );
-      final c = _client;
-      if (c != null) unawaited(_markConnectionLost(c));
+      // Só derruba a conexão se o erro veio do cliente atual (identidade
+      // checada em _markConnectionLost).
+      unawaited(_markConnectionLost(client));
       return;
     }
-    stderr.writeln('Erro fatal no cliente MQTT (${error.runtimeType}).');
+    _log('Erro fatal no cliente MQTT (${error.runtimeType}).');
     _onFatal(error);
   }
 
@@ -262,9 +298,16 @@ class MqttAlertDispatcher implements AlertPublisher {
   /// Entrega [error] à zona protegida como erro assíncrono não tratado. Prova
   /// a política do handler, não o comportamento de um socket real (esse é o
   /// teste de RST do broker falso e os cenários no Docker).
+  ///
+  /// [from] escolhe a zona de um cliente específico (padrão: o atual).
   @visibleForTesting
-  Future<void> simulateAsyncErrorForTest(Object error) async {
-    _zone.run(() {
+  Future<void> simulateAsyncErrorForTest(
+    Object error, {
+    MqttServerClient? from,
+  }) async {
+    final client = from ?? _client;
+    if (client == null) throw StateError('sem cliente MQTT para simular erro');
+    _zoneFor(client).run(() {
       Future<void>.error(error);
     });
     await Future<void>.delayed(Duration.zero);
@@ -279,9 +322,13 @@ class MqttAlertDispatcher implements AlertPublisher {
         if (_closed) break;
         try {
           await _connectOnce();
-          break;
+          // A conexão nova pode ter caído na própria troca de cliente
+          // (_markConnectionLost zera `_client`); nesse caso, tenta de novo
+          // em vez de sair do laço com um cliente morto.
+          if (_client != null && isConnected) break;
+          _log('Conexão MQTT caiu logo após reconectar; tentando de novo.');
         } catch (error) {
-          stderr.writeln(
+          _log(
             'Falha ao reconectar ao broker MQTT (${error.runtimeType}).',
           );
           _backoff = Duration(
@@ -307,7 +354,7 @@ class MqttAlertDispatcher implements AlertPublisher {
     final payload = MqttClientPayloadBuilder()..addString(alert.toJson());
     // A escrita vai para o socket nascido na zona protegida; rodar aqui também
     // mantém nela qualquer timer de retransmissão que a biblioteca crie.
-    _zone.run(
+    _zoneFor(client).run(
       () => client.publishMessage(
         alert.topic,
         MqttQos.atLeastOnce,
