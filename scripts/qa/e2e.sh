@@ -195,6 +195,7 @@ if [[ "$run_emulator" -eq 1 ]]; then
     echo 'admin com backend real: rode ./scripts/qa/admin_login_e2e.sh (troca a stack de dev pela de e2e).'
     echo 'pedidos do titular no admin: rode ./scripts/qa/admin_titular_e2e.sh (idem).'
     echo 'escalonamento e tempo real no admin: rode ./scripts/qa/admin_alertas_escalonar_e2e.sh (idem; pausa o Traefik ~120 s).'
+    echo 'trilha de auditoria no admin: rode ./scripts/qa/admin_auditoria_e2e.sh (idem; adultera uma linha só no banco de e2e).'
   fi
 fi
 
