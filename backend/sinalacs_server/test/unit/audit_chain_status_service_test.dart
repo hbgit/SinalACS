@@ -522,6 +522,29 @@ void main() {
       expect(store.consultas, isEmpty);
     });
 
+    test('coordenador com orçamento esgotado ⇒ inconclusive SEM reasonCode '
+        '(não revela o tamanho da cadeia global)', () async {
+      final grande = _Cadeia();
+      for (var i = 0; i < AuditChainVerifier.batchSize + 10; i++) {
+        grande.append();
+      }
+      var tique = t0;
+      final s = await servico(
+        _Reader(grande.entries),
+        budget: Duration.zero,
+        clock: () => tique = tique.add(const Duration(milliseconds: 1)),
+      ).verify(coordA);
+      expect(s.state, AuditIntegrityState.inconclusive);
+      expect(s.reasonCode, isNull);
+    });
+
+    test('coordenador vê databaseError (unavailable)', () async {
+      final r = _Reader(cadeia.entries)..lancar = Exception('fora do ar');
+      final s = await servico(r).verify(coordA);
+      expect(s.state, AuditIntegrityState.unavailable);
+      expect(s.reasonCode, AuditChainReason.databaseError);
+    });
+
     test('coordenador vê o motivo de unavailable/inconclusive', () async {
       final s = await servico(
         _Reader(cadeia.entries),

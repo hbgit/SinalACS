@@ -407,9 +407,15 @@ class AuditChainStatusService {
     }
 
     if (!quebrada) {
+      // O coordenador só aprende o motivo de falha de infraestrutura
+      // (`unavailable`) ou de checkpoint inválido; `timeBudget` (e qualquer
+      // outro motivo de `inconclusive`) revelaria o tamanho da cadeia global.
+      final motivoVisivel =
+          estado == AuditIntegrityState.unavailable ||
+          v.reasonCode == AuditChainReason.checkpointInvalid;
       return AdminAuditChainStatus(
         state: estado,
-        reasonCode: v.ok ? null : v.reasonCode,
+        reasonCode: !v.ok && motivoVisivel ? v.reasonCode : null,
         verifiedAt: retrato.at,
       );
     }
