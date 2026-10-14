@@ -109,7 +109,7 @@ class _CountingStore implements ScheduledNoticeStore {
     at: at,
   );
   @override
-  Future<int> markStaleSendingUnknown({
+  Future<List<StuckNotice>> markStaleSendingUnknown({
     required DateTime before,
     required String reason,
     required DateTime at,
@@ -190,19 +190,19 @@ class _FakeStore implements ScheduledNoticeStore {
   }
 
   @override
-  Future<int> markStaleSendingUnknown({
+  Future<List<StuckNotice>> markStaleSendingUnknown({
     required DateTime before,
     required String reason,
     required DateTime at,
   }) async {
-    var n = 0;
+    final moved = <StuckNotice>[];
     for (final r in rows.values.toList()) {
       if (r.status == ScheduledNoticeStatus.sending && r.scheduledFor.isBefore(before)) {
         await finish(r.id, status: ScheduledNoticeStatus.unknown, failureReason: reason, at: at);
-        n++;
+        moved.add(StuckNotice(id: r.id, createdBy: r.createdBy));
       }
     }
-    return n;
+    return moved;
   }
 
   @override
@@ -783,6 +783,43 @@ void main() {
       expect(store.rows[recent]!.status, ScheduledNoticeStatus.sending);
       expect(store.rows[pending]!.status, ScheduledNoticeStatus.pending);
       expect(sends, 0, reason: 'a varredura nunca reenvia');
+    });
+
+    test('grava uma linha de auditoria por aviso movido, sem o texto', () async {
+      final a = await row(const Duration(minutes: 11), ScheduledNoticeStatus.sending);
+      final b = await row(const Duration(minutes: 30), ScheduledNoticeStatus.sending);
+      await row(const Duration(minutes: 2), ScheduledNoticeStatus.sending);
+      expect(await service.recoverStuckSending(), 2);
+      expect(audit.events.map((e) => e.resourceId), unorderedEquals([a, b]));
+      for (final e in audit.events) {
+        expect(e.result, 'unknown_after_restart');
+        expect(e.resourceType, 'community_notice');
+        expect(e.actionType, 'write');
+        expect(e.userId, 'adm-1');
+      }
+      expect(audit.events.map((e) => '${e.userId}${e.resourceId}${e.result}').join(),
+          isNot(contains('Mensagem secreta')));
+      audit.events.clear();
+      expect(await service.recoverStuckSending(), 0);
+      expect(audit.events, isEmpty);
+    });
+
+    test('auditoria fora do ar não impede a varredura (recordSafely)', () async {
+      await row(const Duration(minutes: 11), ScheduledNoticeStatus.sending);
+      final svc = NoticeSchedulingService(
+        store: store,
+        audit: _ThrowingAudit(),
+        clock: () => now,
+        sendNow: ({
+          required microAreaId,
+          required audience,
+          required title,
+          required message,
+          required actorId,
+          auditResourceId,
+        }) async => const NoticeSendSnapshot(recipients: 0, accepted: 0),
+      );
+      expect(await svc.recoverStuckSending(), 1);
     });
   });
 

@@ -141,7 +141,7 @@ class OrmScheduledNoticeStore implements ScheduledNoticeStore {
   }
 
   @override
-  Future<int> markStaleSendingUnknown({
+  Future<List<StuckNotice>> markStaleSendingUnknown({
     required DateTime before,
     required String reason,
     required DateTime at,
@@ -151,11 +151,17 @@ class OrmScheduledNoticeStore implements ScheduledNoticeStore {
       UPDATE scheduled_notices
       SET "status" = 'unknown', "failureReason" = @reason
       WHERE "status" = 'sending' AND "scheduledFor" < @before
-      RETURNING "id"
+      RETURNING "id", "createdBy"
       ''',
       parameters: QueryParameters.named({'reason': reason, 'before': before.toUtc()}),
     );
-    return rows.length;
+    return [
+      for (final r in rows)
+        StuckNotice(
+          id: r.toColumnMap()['id'].toString(),
+          createdBy: r.toColumnMap()['createdBy'].toString(),
+        ),
+    ];
   }
 
   @override

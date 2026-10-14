@@ -124,6 +124,15 @@ const String noticeStuckSendingReason =
 const int noticeHistoryDefaultLimit = 50;
 const int noticeHistoryMaxLimit = 100;
 
+/// Aviso que a varredura de partida levou de `sending` a `unknown`: só id e
+/// autor, nunca o texto.
+class StuckNotice {
+  const StuckNotice({required this.id, required this.createdBy});
+
+  final String id;
+  final String createdBy;
+}
+
 /// Persistência dos avisos agendados. A implementação ORM fica em
 /// `infrastructure/` (Task 1.5).
 abstract interface class ScheduledNoticeStore {
@@ -162,8 +171,8 @@ abstract interface class ScheduledNoticeStore {
 
   /// Varredura de partida: leva `sending` com `scheduledFor` anterior a
   /// [before] a `unknown` (nunca de volta a `pending`: não há reenvio
-  /// automático). Devolve quantas linhas moveu.
-  Future<int> markStaleSendingUnknown({
+  /// automático). Devolve os avisos que moveu (id e autor), para a trilha.
+  Future<List<StuckNotice>> markStaleSendingUnknown({
     required DateTime before,
     required String reason,
     required DateTime at,
@@ -367,12 +376,27 @@ class NoticeSchedulingService {
 
   /// Varredura de partida: `sending` há mais de [noticeStuckSendingAfter] vira
   /// `unknown` (o processo caiu entre a reserva e o fim; o envio pode ter
-  /// ocorrido, então jamais volta a `pending`). Devolve quantas linhas moveu.
-  Future<int> recoverStuckSending() => _store.markStaleSendingUnknown(
-        before: _clock().toUtc().subtract(noticeStuckSendingAfter),
-        reason: noticeStuckSendingReason,
-        at: _clock().toUtc(),
-      );
+  /// ocorrido, então jamais volta a `pending`). Grava uma linha de auditoria
+  /// (`unknown_after_restart`, autor = quem agendou, recurso = o aviso) por aviso
+  /// movido, com `recordSafely`: é a partida do servidor e a trilha não pode
+  /// impedir o boot. Devolve quantas linhas moveu.
+  Future<int> recoverStuckSending() async {
+    final moved = await _store.markStaleSendingUnknown(
+      before: _clock().toUtc().subtract(noticeStuckSendingAfter),
+      reason: noticeStuckSendingReason,
+      at: _clock().toUtc(),
+    );
+    for (final notice in moved) {
+      await _audit.recordSafely(AuditEvent(
+        userId: notice.createdBy,
+        actionType: 'write',
+        resourceType: 'community_notice',
+        resourceId: notice.id,
+        result: 'unknown_after_restart',
+      ));
+    }
+    return moved.length;
+  }
 
   Future<void> _failed(ScheduledNoticeSnapshot notice, String reason) async {
     await _finish(notice, ScheduledNoticeStatus.failed, reason: reason);

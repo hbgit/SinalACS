@@ -258,13 +258,20 @@ void main() {
         scheduledFor: now.add(const Duration(hours: 1)),
         createdAt: now,
       );
+      audit.events.clear();
       expect(await service.recoverStuckSending(), 1);
+      expect(audit.events, hasLength(1));
+      expect(audit.events.single.result, 'unknown_after_restart');
+      expect(audit.events.single.resourceId, velho);
+      expect(audit.events.single.userId, _admin);
+      expect(audit.events.single.resourceType, 'community_notice');
       final r = await row(velho);
       expect(r['status'], 'unknown');
       expect(r['failureReason'], noticeStuckSendingReason);
       expect((await row(recente))['status'], 'sending');
       expect((await row(pendente))['status'], 'pending');
       expect(await service.recoverStuckSending(), 0);
+      expect(audit.events, hasLength(1), reason: 'sem avisos presos, nada novo na trilha');
       expect(sent, isEmpty, reason: 'a varredura nunca reenvia');
     });
   });

@@ -1618,6 +1618,7 @@ Plano: `docs/superpowers/plans/2026-10-14-issue-46-avisos-e-termos.md`; achados 
 
 **O que NÃO está provado / limites assumidos**
 - A varredura de aviso preso em `sending` roda **só na partida** e olha `scheduledFor` (sem coluna `claimedAt`); vale para instância única do servidor.
+- Limitação da varredura: um aviso que fica `sending` com `scheduledFor` a menos de 10 min do reinício permanece `sending` (invisível como preso) até um reinício posterior; não há reenvio. Cada aviso que a varredura move a `unknown` gera uma linha `community_notice` / `unknown_after_restart` (autor = quem agendou, recurso = id do aviso, `recordSafely` para não impedir o boot).
 - A constante `upcomingTermsChange` foi mantida (`null`) e dois testes a leem (`terms_change_schedule_test.dart` no backend, `upcoming_legal_documents_test.dart` no app do paciente).
 - A revisão jurídica do texto real dos termos continua pendente (fora do código).
 - iOS fora do projeto. 
