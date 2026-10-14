@@ -195,9 +195,37 @@ class BackendAdminDataSource implements AdminDataSource {
   });
 
   @override
-  Future<List<NoticeHistoryItem>> fetchNoticeHistory({String? microAreaId, int limit = 50, int offset = 0}) =>
-      throw const AdminDataFailure('Avisos e termos ainda não ligados ao backend (task 3.2).');
+  Future<List<NoticeHistoryItem>> fetchNoticeHistory({
+    String? microAreaId,
+    int limit = 50,
+    int offset = 0,
+  }) => _guard(() async {
+    final pagina = await _admin.noticeHistory(
+      accessToken: _accessToken,
+      microAreaId: microAreaId,
+      limit: limit,
+      offset: offset,
+    );
+    return [
+      for (final e in pagina.entries)
+        NoticeHistoryItem(
+          id: e.id,
+          microAreaId: e.microAreaId,
+          microAreaName: e.microAreaName,
+          audience: NoticeAudience.values.byName(e.audience),
+          title: e.title,
+          status: NoticeStatus.values.byName(e.status.name),
+          scheduledFor: e.scheduledFor,
+          createdByLabel: e.createdByLabel,
+          sentAt: e.sentAt,
+          recipients: e.recipients,
+          accepted: e.accepted,
+          failureReason: e.failureReason,
+        ),
+    ];
+  });
 
+  /// O texto do aviso só trafega nesta chamada: não é guardado nem devolvido.
   @override
   Future<String> scheduleNotice({
     required String microAreaId,
@@ -205,26 +233,67 @@ class BackendAdminDataSource implements AdminDataSource {
     required String title,
     required String message,
     required DateTime scheduledFor,
-  }) => throw const AdminDataFailure('Avisos e termos ainda não ligados ao backend (task 3.2).');
+  }) => _guardEscrita(
+    () => _admin.scheduleNotice(
+      accessToken: _accessToken,
+      microAreaId: microAreaId,
+      audience: audience.name,
+      title: title,
+      message: message,
+      scheduledFor: scheduledFor.toUtc(),
+    ),
+  );
 
   @override
-  Future<void> cancelScheduledNotice(String id) => throw const AdminDataFailure('Avisos e termos ainda não ligados ao backend (task 3.2).');
+  Future<void> cancelScheduledNotice(String id) => _guardEscrita(
+    () => _admin.cancelScheduledNotice(accessToken: _accessToken, id: id),
+  );
 
   @override
-  Future<List<TermsVersionSummary>> fetchTermsVersions() => throw const AdminDataFailure('Avisos e termos ainda não ligados ao backend (task 3.2).');
+  Future<List<TermsVersionSummary>> fetchTermsVersions() => _guard(() async {
+    final lista = await _admin.termsVersions(accessToken: _accessToken);
+    return [for (final t in lista) _termoDoCliente(t)];
+  });
 
   @override
   Future<TermsVersionSummary> draftTermsVersion({
     required String version,
     required String summary,
     required DateTime effectiveFrom,
-  }) => throw const AdminDataFailure('Avisos e termos ainda não ligados ao backend (task 3.2).');
+  }) => _guardEscrita(() async {
+    final t = await _admin.draftTermsVersion(
+      accessToken: _accessToken,
+      version: version,
+      summary: summary,
+      effectiveFrom: effectiveFrom.toUtc(),
+    );
+    return _termoDoCliente(t);
+  });
 
   @override
-  Future<TermsVersionSummary> markTermsReviewed(String id) => throw const AdminDataFailure('Avisos e termos ainda não ligados ao backend (task 3.2).');
+  Future<TermsVersionSummary> markTermsReviewed(String id) =>
+      _guardEscrita(() async {
+        final t = await _admin.markTermsReviewed(accessToken: _accessToken, id: id);
+        return _termoDoCliente(t);
+      });
 
   @override
-  Future<TermsVersionSummary> publishTermsVersion(String id) => throw const AdminDataFailure('Avisos e termos ainda não ligados ao backend (task 3.2).');
+  Future<TermsVersionSummary> publishTermsVersion(String id) =>
+      _guardEscrita(() async {
+        final t = await _admin.publishTermsVersion(accessToken: _accessToken, id: id);
+        return _termoDoCliente(t);
+      });
+
+  static TermsVersionSummary _termoDoCliente(api.TermsVersionEntry t) =>
+      TermsVersionSummary(
+        id: t.id,
+        version: t.version,
+        summary: t.summary,
+        effectiveFrom: t.effectiveFrom,
+        createdAt: t.createdAt,
+        legallyReviewedAt: t.legallyReviewedAt,
+        publishedAt: t.publishedAt,
+      );
 
   @override
   Future<EscalationOutcome> escalateAlert(
