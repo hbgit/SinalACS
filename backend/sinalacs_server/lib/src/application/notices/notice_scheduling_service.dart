@@ -159,8 +159,6 @@ class NoticeSchedulingService {
 
   final ScheduledNoticeStore _store;
   final AuditTrail _audit;
-  // Usado pelo despacho (Task 1.4); o agendamento não envia nada.
-  // ignore: unused_field
   final NoticeSender _sendNow;
   final DateTime Function() _clock;
 
@@ -267,16 +265,16 @@ class NoticeSchedulingService {
     int offset = 0,
   }) async {
     if (!Authorization.staffRoles.contains(user.role)) {
-      await _deny(user, microAreaId ?? '', 'denied_role');
+      await _deny(user, microAreaId ?? '', 'denied_role', actionType: 'read');
     }
     String? ubsId;
     if (user.role == UserRole.coordinator) {
       ubsId = await _store.ubsOfStaff(user.id);
       if (ubsId == null) {
-        await _deny(user, microAreaId ?? '', 'denied_territory');
+        await _deny(user, microAreaId ?? '', 'denied_territory', actionType: 'read');
       }
       if (microAreaId != null && await _store.ubsOfMicroArea(microAreaId) != ubsId) {
-        await _deny(user, microAreaId, 'denied_territory');
+        await _deny(user, microAreaId, 'denied_territory', actionType: 'read');
       }
     }
     final rows = await _store.history(
@@ -294,13 +292,88 @@ class NoticeSchedulingService {
     return rows.map(NoticeHistoryItem.from).toList();
   }
 
-  /// Grava a negação (só ator e microárea; nunca o texto) e lança.
-  Future<Never> _deny(AuthenticatedUser user, String microAreaId, String result) async {
+  /// Dispara os avisos vencidos. A reserva `pending -> sending` é atômica
+  /// ([ScheduledNoticeStore.claimDue]), então duas chamadas nunca enviam o mesmo
+  /// aviso. Sem reenvio automático: falha vira `failed`, resultado desconhecido
+  /// vira `unknown`. Um erro num aviso nunca derruba os demais. Devolve quantos
+  /// avisos esta chamada processou.
+  Future<int> dispatchDue() async {
+    final claimed = await _store.claimDue(_clock().toUtc());
+    for (final notice in claimed) {
+      try {
+        final r = await _sendNow(
+          microAreaId: notice.microAreaId,
+          audience: notice.audience,
+          title: notice.title,
+          message: notice.message,
+          actorId: notice.createdBy,
+        );
+        await _finish(notice, ScheduledNoticeStatus.sent,
+            recipients: r.recipients, accepted: r.accepted);
+      } on NoticeDeliveryException catch (e) {
+        if (isNoticeOutcomeUnknown(e)) {
+          // Já auditado como `unknown` por quem enviou.
+          await _finish(notice, ScheduledNoticeStatus.unknown, reason: e.message);
+        } else {
+          await _failed(notice, e.message);
+        }
+      } catch (_) {
+        await _failed(notice, 'Falha inesperada ao enviar o aviso.');
+      }
+    }
+    return claimed.length;
+  }
+
+  Future<void> _failed(ScheduledNoticeSnapshot notice, String reason) async {
+    await _finish(notice, ScheduledNoticeStatus.failed, reason: reason);
     await _audit.recordSafely(AuditEvent(
-      userId: user.id,
+      userId: notice.createdBy,
       actionType: 'write',
       resourceType: 'community_notice',
-      resourceId: microAreaId,
+      resourceId: notice.id,
+      result: 'failed',
+    ));
+  }
+
+  Future<void> _finish(
+    ScheduledNoticeSnapshot notice,
+    ScheduledNoticeStatus status, {
+    int? recipients,
+    int? accepted,
+    String? reason,
+  }) async {
+    try {
+      await _store.finish(
+        notice.id,
+        status: status,
+        recipients: recipients,
+        accepted: accepted,
+        failureReason: reason,
+        at: _clock().toUtc(),
+      );
+    } catch (_) {
+      // Não derruba o laço: a linha fica `sending` (nunca reenviada).
+    }
+  }
+
+  static final _uuid = RegExp(
+    r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$',
+  );
+
+  /// Grava a negação (só ator e microárea; nunca o texto) e lança. O
+  /// `resourceId` vem do cliente: só vai se for UUID, senão a trilha ORM lançaria
+  /// e `recordSafely` engoliria a negação.
+  Future<Never> _deny(
+    AuthenticatedUser user,
+    String microAreaId,
+    String result, {
+    String actionType = 'write',
+  }) async {
+    await _audit.recordSafely(AuditEvent(
+      userId: user.id,
+      actionType: actionType,
+      resourceType: 'community_notice',
+      resourceId: _uuid.hasMatch(microAreaId) ? microAreaId : null,
       result: result,
     ));
     throw StateError('Sem permissão para agendar avisos nesta microárea.');

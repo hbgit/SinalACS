@@ -10,6 +10,14 @@ const int noticeMessageMaxLength = 240;
 /// Quem recebe: todos os consentidos da microárea, ou só os crônicos.
 const Set<String> noticeAudiences = {'everyone', 'chronic'};
 
+/// Mensagem da falha com resultado desconhecido (o pedido saiu e a resposta não
+/// voltou). A exceção gerada só tem `message`, então ela é o discriminador.
+const String noticeOutcomeUnknownMessage = 'O envio demorou e o resultado é desconhecido: '
+    'alguns pacientes podem já ter recebido o aviso. Confira antes de reenviar.';
+
+bool isNoticeOutcomeUnknown(Object error) =>
+    error is NoticeDeliveryException && error.message == noticeOutcomeUnknownMessage;
+
 /// Resolve os destinatários de um aviso. Interface aqui, implementação ORM em
 /// `infrastructure/`, mesmo padrão dos demais stores.
 abstract interface class NoticeRecipientStore {
@@ -79,6 +87,30 @@ class NoticeService {
     if (!noticeAudiences.contains(audience)) {
       throw DataRightsException(message: 'Público do aviso desconhecido.');
     }
+    return sendToMicroArea(
+      microAreaId: user.microAreaId!,
+      audience: audience,
+      title: cleanTitle,
+      message: cleanMessage,
+      actorId: user.id,
+    );
+  }
+
+  /// Envio já validado a uma microárea, sem checar papel: quem chama decide a
+  /// autorização (ACS pelo token em [sendSegmented]; o despacho dos agendados,
+  /// que foram autorizados na criação). Audita com [actorId] e a microárea.
+  ///
+  /// Resultado desconhecido lança [NoticeDeliveryException] com a mensagem
+  /// [noticeOutcomeUnknownMessage]; use [isNoticeOutcomeUnknown] para distinguir.
+  Future<NoticeSendSnapshot> sendToMicroArea({
+    required String microAreaId,
+    required String audience,
+    required String title,
+    required String message,
+    required String actorId,
+  }) async {
+    final cleanTitle = title;
+    final cleanMessage = message;
     final sender = _sender;
     if (sender == null) {
       throw NoticeDeliveryException(
@@ -86,13 +118,12 @@ class NoticeService {
       );
     }
 
-    final microAreaId = user.microAreaId!;
     final targets = await _store.consentedTargets(
       microAreaId: microAreaId,
       chronicOnly: audience == 'chronic',
     );
     if (targets.isEmpty) {
-      await _record(user, microAreaId, 'no_recipients');
+      await _record(actorId, microAreaId, 'no_recipients');
       return const NoticeSendSnapshot(recipients: 0, accepted: 0);
     }
 
@@ -106,10 +137,9 @@ class NoticeService {
       if (error.outcomeUnknown) {
         // O pedido saiu e a resposta não voltou: parte dos pacientes pode já ter
         // recebido. Dizer "tente de novo" levaria ao aviso em duplicata.
-        await _record(user, microAreaId, 'unknown');
+        await _record(actorId, microAreaId, 'unknown');
         throw NoticeDeliveryException(
-          message: 'O envio demorou e o resultado é desconhecido: alguns pacientes '
-              'podem já ter recebido o aviso. Confira antes de reenviar.',
+          message: noticeOutcomeUnknownMessage,
         );
       }
       throw NoticeDeliveryException(
@@ -123,14 +153,14 @@ class NoticeService {
         // A poda é higiene: o aviso já saiu, e um erro aqui levaria o ACS a reenviar.
       }
     }
-    await _record(user, microAreaId, report.accepted > 0 ? 'granted' : 'not_delivered');
+    await _record(actorId, microAreaId, report.accepted > 0 ? 'granted' : 'not_delivered');
     return NoticeSendSnapshot(recipients: targets.length, accepted: report.accepted);
   }
 
   /// Só quem enviou e para qual microárea; o texto do aviso nunca entra aqui.
-  Future<void> _record(AuthenticatedUser user, String microAreaId, String result) =>
+  Future<void> _record(String actorId, String microAreaId, String result) =>
       _audit.recordSafely(AuditEvent(
-        userId: user.id,
+        userId: actorId,
         actionType: 'write',
         resourceType: 'community_notice',
         resourceId: microAreaId,

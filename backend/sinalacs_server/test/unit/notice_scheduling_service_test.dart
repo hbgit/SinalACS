@@ -66,7 +66,16 @@ class _FakeStore implements ScheduledNoticeStore {
   }
 
   @override
-  Future<List<ScheduledNoticeSnapshot>> claimDue(DateTime now, {int limit = 20}) async => [];
+  Future<List<ScheduledNoticeSnapshot>> claimDue(DateTime now, {int limit = 20}) async {
+    final due = rows.values
+        .where((r) => r.status == ScheduledNoticeStatus.pending && !r.scheduledFor.isAfter(now))
+        .take(limit)
+        .toList();
+    for (final r in due) {
+      rows[r.id] = _copy(r, status: ScheduledNoticeStatus.sending);
+    }
+    return due;
+  }
 
   @override
   Future<void> finish(
@@ -76,7 +85,24 @@ class _FakeStore implements ScheduledNoticeStore {
     int? accepted,
     String? failureReason,
     required DateTime at,
-  }) async {}
+  }) async {
+    final r = rows[id]!;
+    rows[id] = ScheduledNoticeSnapshot(
+      id: r.id,
+      createdBy: r.createdBy,
+      microAreaId: r.microAreaId,
+      audience: r.audience,
+      title: r.title,
+      message: r.message,
+      scheduledFor: r.scheduledFor,
+      status: status,
+      createdAt: r.createdAt,
+      recipients: recipients,
+      accepted: accepted,
+      failureReason: failureReason,
+      sentAt: status == ScheduledNoticeStatus.sent ? at : null,
+    );
+  }
 
   @override
   Future<List<ScheduledNoticeSnapshot>> history({
@@ -118,6 +144,7 @@ void main() {
   late _RecordingAudit audit;
   late NoticeSchedulingService service;
   var sends = 0;
+  late Future<NoticeSendSnapshot> Function(String microAreaId) onSend;
 
   Future<void> schedule(
     AuthenticatedUser user, {
@@ -141,6 +168,7 @@ void main() {
     store.ubsOfMicroAreaMap[_ma1] = 'ubs-1';
     audit = _RecordingAudit();
     sends = 0;
+    onSend = (_) async => const NoticeSendSnapshot(recipients: 0, accepted: 0);
     service = NoticeSchedulingService(
       store: store,
       audit: audit,
@@ -153,7 +181,7 @@ void main() {
         required actorId,
       }) async {
         sends++;
-        return const NoticeSendSnapshot(recipients: 0, accepted: 0);
+        return onSend(microAreaId);
       },
     );
   });
@@ -464,6 +492,137 @@ void main() {
       await service.history(admin, limit: 20, offset: -5);
       expect(store.lastHistoryLimit, 20);
       expect(store.lastHistoryOffset, 0);
+    });
+  });
+
+  group('dispatchDue', () {
+    final admin = _user(UserRole.admin, id: 'adm-1');
+    Future<String> due({String title = 'Titulo', String message = 'TextoSecretoDoAviso'}) async {
+      final id = await store.insert(
+        createdBy: 'adm-1',
+        microAreaId: _ma1,
+        audience: 'everyone',
+        title: title,
+        message: message,
+        scheduledFor: now.subtract(const Duration(minutes: 5)),
+        createdAt: now.subtract(const Duration(hours: 1)),
+      );
+      return id;
+    }
+
+    String dump() => audit.events
+        .map((e) => '${e.userId}|${e.actionType}|${e.resourceType}|${e.resourceId}|${e.result}')
+        .join('\n');
+
+    test('2 vencidos enviam 2 e viram sent com contagens', () async {
+      final a = await due();
+      final b = await due();
+      onSend = (_) async => const NoticeSendSnapshot(recipients: 5, accepted: 4);
+      expect(await service.dispatchDue(), 2);
+      expect(sends, 2);
+      for (final id in [a, b]) {
+        final r = store.rows[id]!;
+        expect(r.status, ScheduledNoticeStatus.sent);
+        expect(r.recipients, 5);
+        expect(r.accepted, 4);
+        expect(r.sentAt, now);
+      }
+    });
+
+    test('segunda chamada não reenvia', () async {
+      await due();
+      expect(await service.dispatchDue(), 1);
+      expect(await service.dispatchDue(), 0);
+      expect(sends, 1);
+    });
+
+    test('futuro não é disparado', () async {
+      await service.schedule(admin,
+          microAreaId: _ma1,
+          audience: 'everyone',
+          title: 'T',
+          message: 'M',
+          scheduledFor: now.add(const Duration(hours: 1)));
+      expect(await service.dispatchDue(), 0);
+      expect(sends, 0);
+    });
+
+    test('NoticeDeliveryException simples vira failed e não repete', () async {
+      final id = await due();
+      onSend = (_) async => throw NoticeDeliveryException(message: 'Gorush fora');
+      expect(await service.dispatchDue(), 1);
+      expect(store.rows[id]!.status, ScheduledNoticeStatus.failed);
+      expect(store.rows[id]!.failureReason, 'Gorush fora');
+      await service.dispatchDue();
+      expect(sends, 1);
+      final e = audit.events.last;
+      expect(e.result, 'failed');
+      expect(e.resourceType, 'community_notice');
+      expect(e.resourceId, id);
+      expect(e.userId, 'adm-1');
+    });
+
+    test('resultado desconhecido vira unknown e não repete', () async {
+      final id = await due();
+      onSend = (_) async => throw NoticeDeliveryException(message: noticeOutcomeUnknownMessage);
+      await service.dispatchDue();
+      expect(store.rows[id]!.status, ScheduledNoticeStatus.unknown);
+      await service.dispatchDue();
+      expect(sends, 1);
+    });
+
+    test('erro inesperado de um aviso não impede o seguinte', () async {
+      final a = await due();
+      final b = await due();
+      var n = 0;
+      onSend = (_) async {
+        if (++n == 1) throw StateError('boom TextoSecretoDoAviso');
+        return const NoticeSendSnapshot(recipients: 1, accepted: 1);
+      };
+      expect(await service.dispatchDue(), 2);
+      expect(store.rows[a]!.status, ScheduledNoticeStatus.failed);
+      expect(store.rows[a]!.failureReason, isNot(contains('boom')));
+      expect(store.rows[b]!.status, ScheduledNoticeStatus.sent);
+    });
+
+    test('auditoria de failed usa createdBy e o id do aviso, sem texto', () async {
+      final id = await due();
+      onSend = (_) async => throw StateError('x');
+      await service.dispatchDue();
+      expect(audit.events, hasLength(1));
+      expect(audit.events.single.resourceId, id);
+      expect(audit.events.single.userId, 'adm-1');
+      expect(dump(), isNot(contains('TextoSecretoDoAviso')));
+    });
+  });
+
+  group('negação com resourceId do cliente', () {
+    test('microAreaId vazio ou malformado grava evento com resourceId nulo', () async {
+      for (final bad in ['', 'nao-e-uuid']) {
+        audit.events.clear();
+        await expectLater(
+          service.schedule(_user(UserRole.acs, microAreaId: _ma1),
+              microAreaId: bad,
+              audience: 'everyone',
+              title: 'T',
+              message: 'M',
+              scheduledFor: now.add(const Duration(hours: 2))),
+          throwsA(isA<StateError>()),
+        );
+        expect(audit.events, hasLength(1));
+        expect(audit.events.single.resourceId, isNull);
+        expect(audit.events.single.result, 'denied_role');
+      }
+    });
+
+    test('UUID válido é preservado e a negação de history é read', () async {
+      await expectLater(service.history(_user(UserRole.acs), microAreaId: _ma1), throwsA(isA<StateError>()));
+      expect(audit.events.single.resourceId, _ma1);
+      expect(audit.events.single.actionType, 'read');
+      audit.events.clear();
+      await expectLater(service.history(_user(UserRole.patient)), throwsA(isA<StateError>()));
+      expect(audit.events.single.resourceId, isNull);
+      expect(audit.events.single.actionType, 'read');
     });
   });
 }
