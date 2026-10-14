@@ -100,6 +100,9 @@ class NoticeService {
   /// autorização (ACS pelo token em [sendSegmented]; o despacho dos agendados,
   /// que foram autorizados na criação). Audita com [actorId] e a microárea.
   ///
+  /// [auditResourceId] é o `resourceId` da auditoria (padrão: a microárea; o
+  /// despacho agendado passa o id do aviso).
+  ///
   /// Resultado desconhecido lança [NoticeDeliveryException] com a mensagem
   /// [noticeOutcomeUnknownMessage]; use [isNoticeOutcomeUnknown] para distinguir.
   Future<NoticeSendSnapshot> sendToMicroArea({
@@ -108,9 +111,9 @@ class NoticeService {
     required String title,
     required String message,
     required String actorId,
+    String? auditResourceId,
   }) async {
-    final cleanTitle = title;
-    final cleanMessage = message;
+    final auditId = auditResourceId ?? microAreaId;
     final sender = _sender;
     if (sender == null) {
       throw NoticeDeliveryException(
@@ -123,21 +126,21 @@ class NoticeService {
       chronicOnly: audience == 'chronic',
     );
     if (targets.isEmpty) {
-      await _record(actorId, microAreaId, 'no_recipients');
+      await _record(actorId, auditId, 'no_recipients');
       return const NoticeSendSnapshot(recipients: 0, accepted: 0);
     }
 
     final PushSendReport report;
     try {
       report = await sender.send(
-        PushMessage(title: cleanTitle, body: cleanMessage, data: const {'screen': 'notices'}),
+        PushMessage(title: title, body: message, data: const {'screen': 'notices'}),
         targets,
       );
     } on PushGatewayException catch (error) {
       if (error.outcomeUnknown) {
         // O pedido saiu e a resposta não voltou: parte dos pacientes pode já ter
         // recebido. Dizer "tente de novo" levaria ao aviso em duplicata.
-        await _record(actorId, microAreaId, 'unknown');
+        await _record(actorId, auditId, 'unknown');
         throw NoticeDeliveryException(
           message: noticeOutcomeUnknownMessage,
         );
@@ -153,17 +156,17 @@ class NoticeService {
         // A poda é higiene: o aviso já saiu, e um erro aqui levaria o ACS a reenviar.
       }
     }
-    await _record(actorId, microAreaId, report.accepted > 0 ? 'granted' : 'not_delivered');
+    await _record(actorId, auditId, report.accepted > 0 ? 'granted' : 'not_delivered');
     return NoticeSendSnapshot(recipients: targets.length, accepted: report.accepted);
   }
 
   /// Só quem enviou e para qual microárea; o texto do aviso nunca entra aqui.
-  Future<void> _record(String actorId, String microAreaId, String result) =>
+  Future<void> _record(String actorId, String resourceId, String result) =>
       _audit.recordSafely(AuditEvent(
         userId: actorId,
         actionType: 'write',
         resourceType: 'community_notice',
-        resourceId: microAreaId,
+        resourceId: resourceId,
         result: result,
       ));
 }

@@ -3,6 +3,7 @@ import 'package:sinalacs_server/src/application/auth/development_auth_service.da
 import 'package:sinalacs_server/src/application/notices/notice_scheduling_service.dart';
 import 'package:sinalacs_server/src/application/notices/notice_service.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
+import 'package:sinalacs_server/src/infrastructure/push/gorush_client.dart';
 import 'package:test/test.dart';
 
 const _ma1 = '00000000-0000-4000-8000-000000000003';
@@ -15,6 +16,32 @@ class _RecordingAudit extends AuditTrail {
 
   @override
   Future<void> record(AuditEvent event) async => events.add(event);
+}
+
+class _RecipientStore implements NoticeRecipientStore {
+  List<PushTarget> targets = const [PushTarget(token: 'tok', platform: 'android')];
+
+  @override
+  Future<List<PushTarget>> consentedTargets({
+    required String microAreaId,
+    required bool chronicOnly,
+  }) async =>
+      targets;
+
+  @override
+  Future<int> deleteTokens(List<String> tokens) async => tokens.length;
+}
+
+class _Sender implements PushSender {
+  PushSendReport report = const PushSendReport(accepted: 1, invalidTokens: []);
+  PushGatewayException? failure;
+
+  @override
+  Future<PushSendReport> send(PushMessage message, List<PushTarget> targets) async {
+    final f = failure;
+    if (f != null) throw f;
+    return report;
+  }
 }
 
 class _FakeStore implements ScheduledNoticeStore {
@@ -179,6 +206,7 @@ void main() {
         required title,
         required message,
         required actorId,
+        auditResourceId,
       }) async {
         sends++;
         return onSend(microAreaId);
@@ -623,6 +651,62 @@ void main() {
       await expectLater(service.history(_user(UserRole.patient)), throwsA(isA<StateError>()));
       expect(audit.events.single.resourceId, isNull);
       expect(audit.events.single.actionType, 'read');
+    });
+  });
+
+  group('auditoria do disparo com o NoticeService real', () {
+    late _RecipientStore recipients;
+    late _Sender sender;
+    late NoticeSchedulingService real;
+
+    setUp(() {
+      recipients = _RecipientStore();
+      sender = _Sender();
+      final notices = NoticeService(store: recipients, sender: sender, audit: audit);
+      real = NoticeSchedulingService(
+        store: store,
+        audit: audit,
+        clock: () => now,
+        sendNow: notices.sendToMicroArea,
+      );
+    });
+
+    Future<String> due() => store.insert(
+          createdBy: 'adm-1',
+          microAreaId: _ma1,
+          audience: 'everyone',
+          title: 'T',
+          message: 'M',
+          scheduledFor: now.subtract(const Duration(minutes: 1)),
+          createdAt: now.subtract(const Duration(hours: 1)),
+        );
+
+    Future<void> expectResult(String audit0, ScheduledNoticeStatus status) async {
+      final id = await due();
+      await real.dispatchDue();
+      final e = audit.events.single;
+      expect(e.result, audit0);
+      expect(e.resourceType, 'community_notice');
+      expect(e.resourceId, id);
+      expect(e.userId, 'adm-1');
+      expect(store.rows[id]!.status, status);
+    }
+
+    test('granted', () => expectResult('granted', ScheduledNoticeStatus.sent));
+
+    test('no_recipients', () {
+      recipients.targets = const [];
+      return expectResult('no_recipients', ScheduledNoticeStatus.sent);
+    });
+
+    test('not_delivered', () {
+      sender.report = const PushSendReport(accepted: 0, invalidTokens: []);
+      return expectResult('not_delivered', ScheduledNoticeStatus.sent);
+    });
+
+    test('unknown', () {
+      sender.failure = const PushGatewayException('demorou', outcomeUnknown: true);
+      return expectResult('unknown', ScheduledNoticeStatus.unknown);
     });
   });
 }

@@ -12,6 +12,7 @@ typedef NoticeSender = Future<NoticeSendSnapshot> Function({
   required String title,
   required String message,
   required String actorId,
+  String? auditResourceId,
 });
 
 /// Antecedência mínima entre o pedido e o horário agendado.
@@ -66,7 +67,8 @@ class NoticeHistoryItem {
     this.sentAt,
   });
 
-  factory NoticeHistoryItem.from(ScheduledNoticeSnapshot s) => NoticeHistoryItem(
+  factory NoticeHistoryItem.from(ScheduledNoticeSnapshot s) =>
+      NoticeHistoryItem(
         id: s.id,
         createdBy: s.createdBy,
         microAreaId: s.microAreaId,
@@ -307,6 +309,7 @@ class NoticeSchedulingService {
           title: notice.title,
           message: notice.message,
           actorId: notice.createdBy,
+          auditResourceId: notice.id,
         );
         await _finish(notice, ScheduledNoticeStatus.sent,
             recipients: r.recipients, accepted: r.accepted);
@@ -376,6 +379,6 @@ class NoticeSchedulingService {
       resourceId: _uuid.hasMatch(microAreaId) ? microAreaId : null,
       result: result,
     ));
-    throw StateError('Sem permissão para agendar avisos nesta microárea.');
+    throw StateError('Sem permissão para esta operação de avisos.');
   }
 }

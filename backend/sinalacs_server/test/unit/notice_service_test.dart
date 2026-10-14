@@ -198,4 +198,31 @@ void main() {
       expect(e.resourceType, 'community_notice');
     }
   });
+
+  test('isNoticeOutcomeUnknown reconhece só a mensagem real de resultado desconhecido', () async {
+    sender.failure = const PushGatewayException('demorou', outcomeUnknown: true);
+    Object? unknown;
+    try {
+      await service.sendSegmented(_acs, title: 't', message: 'm', audience: 'everyone');
+    } catch (e) {
+      unknown = e;
+    }
+    expect(unknown, isA<NoticeDeliveryException>());
+    expect(isNoticeOutcomeUnknown(unknown!), isTrue);
+
+    sender.failure = const PushGatewayException('recusou');
+    Object? simple;
+    try {
+      await service.sendSegmented(_acs, title: 't', message: 'm', audience: 'everyone');
+    } catch (e) {
+      simple = e;
+    }
+    expect(simple, isA<NoticeDeliveryException>());
+    expect(isNoticeOutcomeUnknown(simple!), isFalse);
+  });
+
+  test('sendSegmented audita com resourceId = microAreaId', () async {
+    await service.sendSegmented(_acs, title: 't', message: 'm', audience: 'everyone');
+    expect(audit.events.single.resourceId, _microAreaId);
+  });
 }
