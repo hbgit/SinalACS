@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 #
+# Nota: quando rodado de um diretório com nome diferente do checkout padrão (por exemplo,
+# um `git worktree`), exporte COMPOSE_PROJECT_NAME=sinalacs; senão o nome do projeto Compose
+# deriva do diretório e conflita com os contêineres `sinalacs-*`.
 # Ponta a ponta do RF14 no emulador: o ACS envia um aviso e ele chega à bandeja do
 # aparelho, passando por backend -> Gorush -> FCM.
 #

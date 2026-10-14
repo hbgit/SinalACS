@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Nota: quando rodado de um diretório com nome diferente do checkout padrão (por exemplo,
+# um `git worktree`), exporte COMPOSE_PROJECT_NAME=sinalacs; senão o nome do projeto Compose
+# deriva do diretório e conflita com os contêineres `sinalacs-*`.
 # Sobe/derruba a stack de e2e contra o banco de teste. Ver docker-compose.e2e.yml.
 #   e2e_stack.sh up | seed | schedule-notice | down | psql "<sql>"
 set -euo pipefail
