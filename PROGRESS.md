@@ -1607,3 +1607,17 @@ Plano: `docs/superpowers/plans/2026-10-13-issue-45-trilha-de-auditoria-completa.
 - Menores de teste/estrutura diferidos: índice `audit_exports_requested_at_idx` sem medição; teste de schema e o de "nove campos" dependem do cwd; integração paralela tem contenção intermitente (rodar com `-j 1`); `_escaparLike` mora na infraestrutura e o unit a importa de lá; testes de `actorRole=admin` sem controle positivo e de nome/`resourceId` só como guarda de regressão; sem teste dedicado para `-`/`-x` isolados no CSV; `AuditRowSealer` não checa segredo vazio (o `app_config` já recusa); `entryAt` só é usado pelo checkpoint.
 - **Exceção do verde:** "Cadeia íntegra" e o selo "Íntegro" usam verde, reservado ao risco clínico em `spec/ui_design.md`; mantida (sempre ícone + texto) e **pendente de aceite do dono**.
 - A captura `docs/screenshots/admin/05-auditoria.png` é anterior à #45.
+
+## Avisos agendados e versões dos termos (#46, 2026-10-14)
+
+Plano: `docs/superpowers/plans/2026-10-14-issue-46-avisos-e-termos.md`; achados da investigação: `docs/superpowers/plans/2026-10-14-issue-46-fase0-achados.md`; contratos: `backend/CLAUDE.md` (seção "Avisos agendados e versões dos termos"). **Backend entregue (Fases 1–2); app admin (Fase 3) e e2e pendentes.**
+
+**O que existe (entregue)**
+- Tabelas `scheduled_notices` e `terms_versions`; `NoticeSchedulingService` e `NoticeDispatchLoop` (disparo a cada 30 s, reserva atômica `pending → sending`); `TermsPublicationService` (revisão jurídica e 15 dias de antecedência); sete métodos novos no `AdminEndpoint` (`scheduleNotice`, `cancelScheduledNotice`, `noticeHistory`, `termsVersions`, `draftTermsVersion`, `markTermsReviewed`, `publishTermsVersion`). O cartão do paciente lê a agenda publicada. `NoticesEndpoint.sendSegmented` continua ACS-imediato.
+- Regressão do backend: `dart test` +1289 verdes (unidade e integração, Postgres real), `dart analyze` sem erro nem warning (87 `info`).
+
+**O que NÃO está provado / limites assumidos**
+- A varredura de aviso preso em `sending` roda **só na partida** e olha `scheduledFor` (sem coluna `claimedAt`); vale para instância única do servidor.
+- A constante `upcomingTermsChange` foi mantida (`null`) e dois testes a leem (`terms_change_schedule_test.dart` no backend, `upcoming_legal_documents_test.dart` no app do paciente).
+- A revisão jurídica do texto real dos termos continua pendente (fora do código).
+- iOS fora do projeto. Sem UI no `apps/admin` e sem e2e no emulador para agendamento e termos.
