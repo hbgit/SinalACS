@@ -171,13 +171,15 @@ void main() {
   late _Store store;
   var estadoDaCadeia = AuditIntegrityState.verified;
   final falhasLogadas = <Object>[];
+  final pedidosDeEstado = <DateTime>[];
 
   AuditExportService servico() => AuditExportService(
     store: store,
     audit: audit,
     auditChain: AuditChain(secret: _segredo),
-    chainState: () async {
+    chainState: (notBefore) async {
       _ordem.add('chain:state');
+      pedidosDeEstado.add(notBefore);
       return estadoDaCadeia;
     },
     clock: () => _agora,
@@ -188,6 +190,7 @@ void main() {
   setUp(() {
     _ordem.clear();
     falhasLogadas.clear();
+    pedidosDeEstado.clear();
     audit = _Audit();
     store = _Store(_cadeia(4))..head = 4;
     estadoDaCadeia = AuditIntegrityState.verified;
@@ -288,6 +291,9 @@ void main() {
         'chain:state',
         'tx:export+audit',
       ]);
+      // O estado da cadeia é pedido FRESCO: verificação iniciada a partir do
+      // início desta exportação, nunca um retrato anterior a ela.
+      expect(pedidosDeEstado, [_agora]);
       // Sem linha de auditoria FORA da transação no caminho feliz.
       expect(audit.eventos, isEmpty);
       expect(store.headPedido, 4);

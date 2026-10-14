@@ -18,9 +18,8 @@ import 'package:sinalacs_server/src/infrastructure/database/orm_data_subject_cas
 class OrmAuditExportStore implements AuditExportStore {
   OrmAuditExportStore({
     required Session Function() session,
-    required AuditAppender appendAudit,
+    required this._appendAudit,
   }) : _session = session,
-       _appendAudit = appendAudit,
        _leitura = OrmAdminReadStore(session: session);
 
   final Session Function() _session;

@@ -77,8 +77,10 @@ class AuditExportFailedException implements Exception {
 /// 4. `COUNT` limitado; acima de [maxRows] ⇒ `refused_limit` auditado
 ///    (`record`, fail-closed) e `AdminInvalidRequestException`.
 /// 5. Lê as linhas e os selos, gera o CSV ([AuditCsv]) e o SHA-256 em memória
-///    (sem arquivo em disco), e pega o estado da cadeia ([chainState], cache
-///    de 60 s da verificação global).
+///    (sem arquivo em disco), e pega o estado da cadeia ([chainState]) de uma
+///    verificação global **iniciada depois do início da exportação** (nunca
+///    o retrato em cache anterior a ela). `unavailable`/`inconclusive`/
+///    `broken` são gravados como estão.
 /// 6. **Uma transação:** `audit_exports` + `export/admin_audit_logs/success`
 ///    com `resourceId` = id da exportação ([AuditExportStore.commitExport]).
 ///    Só depois do commit o CSV é devolvido.
@@ -98,12 +100,11 @@ class AuditExportService {
     required this.store,
     required this.audit,
     required AuditChain auditChain,
-    required Future<AuditIntegrityState> Function() chainState,
+    required this._chainState,
     this.onFailure,
     DateTime Function()? clock,
     String Function()? newId,
   }) : _sealer = AuditRowSealer(auditChain),
-       _chainState = chainState,
        _clock = clock ?? DateTime.now,
        _newId = newId ?? (() => const Uuid().v4());
 
@@ -115,7 +116,7 @@ class AuditExportService {
   final void Function(Object error)? onFailure;
 
   final AuditRowSealer _sealer;
-  final Future<AuditIntegrityState> Function() _chainState;
+  final Future<AuditIntegrityState> Function(DateTime notBefore) _chainState;
   final DateTime Function() _clock;
   final String Function() _newId;
 
@@ -146,6 +147,9 @@ class AuditExportService {
     AuthenticatedUser user,
     AdminAuditFilter? filter,
   ) async {
+    // Início da exportação: o estado da cadeia gravado tem de vir de uma
+    // verificação iniciada a partir daqui, nunca de um retrato anterior.
+    final inicio = _clock().toUtc();
     await _resolver.requireAdmin(
       user,
       recurso: recursoDaRecusa,
@@ -184,7 +188,7 @@ class AuditExportService {
       quantidade = rows.length;
       primeira = rows.isEmpty ? null : rows.first.sequence;
       ultima = rows.isEmpty ? null : rows.last.sequence;
-      estado = await _chainState();
+      estado = await _chainState(inicio);
     } catch (erro) {
       return _falhar(user, erro);
     }

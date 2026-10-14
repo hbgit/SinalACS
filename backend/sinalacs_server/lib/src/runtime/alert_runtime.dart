@@ -290,7 +290,8 @@ class AlertRuntime {
         ),
         audit: auditTrailFor(session),
         auditChain: AuditChain(secret: config.auditChainSecret),
-        chainState: () => auditChainStatusServiceFor(session).currentState(),
+        chainState: (inicio) =>
+            auditChainStatusServiceFor(session).currentState(notBefore: inicio),
         onFailure: (erro) => session.log(
           'Falha na exportação da auditoria (${erro.runtimeType}).',
           level: LogLevel.warning,

@@ -76,6 +76,13 @@ abstract class AuditExport
 
   DateTime requestedAt;
 
+  /// Só os parâmetros do filtro (`AdminAuditFilter.toJson`, chaves
+  /// `from`/`to` e as opcionais), nunca linhas exportadas. LGPD: guarda o
+  /// `search` e o `actorEnrollmentId` digitados pelo administrador — texto
+  /// livre de até 64 caracteres que casa só com matrícula do autor,
+  /// `resourceType` e `result` (nunca nome, CPF, UUID ou hash), mas que o
+  /// operador pode preencher com qualquer coisa: tratar como dado pessoal
+  /// do staff (identificação profissional) e não ecoar em log.
   String filtersJson;
 
   String format;
@@ -331,6 +338,13 @@ class AuditExportTable extends _i1.Table<_i1.UuidValue?> {
 
   late final _i1.ColumnDateTime requestedAt;
 
+  /// Só os parâmetros do filtro (`AdminAuditFilter.toJson`, chaves
+  /// `from`/`to` e as opcionais), nunca linhas exportadas. LGPD: guarda o
+  /// `search` e o `actorEnrollmentId` digitados pelo administrador — texto
+  /// livre de até 64 caracteres que casa só com matrícula do autor,
+  /// `resourceType` e `result` (nunca nome, CPF, UUID ou hash), mas que o
+  /// operador pode preencher com qualquer coisa: tratar como dado pessoal
+  /// do staff (identificação profissional) e não ecoar em log.
   late final _i1.ColumnString filtersJson;
 
   late final _i1.ColumnString format;

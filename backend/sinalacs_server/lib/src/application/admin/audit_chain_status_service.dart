@@ -22,10 +22,19 @@ abstract interface class AuditChainScopeStore implements AdminScopeStore {
 /// Uma verificação global concluída: o resultado do verificador e o instante
 /// em que terminou. Interna; nunca serializa.
 class AuditChainSnapshot {
-  const AuditChainSnapshot({required this.verification, required this.at});
+  const AuditChainSnapshot({
+    required this.verification,
+    required this.at,
+    required this.startedAt,
+  });
 
   final AuditChainVerification verification;
   final DateTime at;
+
+  /// Quando a verificação começou a ler a cadeia. É o que decide se o
+  /// retrato serve a quem exige uma verificação posterior a um instante
+  /// (`currentState(notBefore:)`).
+  final DateTime startedAt;
 }
 
 /// Estado do **processo** da verificação global (#45, D9): o `Future` em
@@ -35,10 +44,14 @@ class AuditChainSnapshot {
 /// (PRD), então um por processo basta.
 class AuditChainStatusCache {
   Future<AuditChainSnapshot>? inFlight;
+
+  /// Início da verificação em [inFlight].
+  DateTime? inFlightStartedAt;
   AuditChainSnapshot? last;
 
   void reset() {
     inFlight = null;
+    inFlightStartedAt = null;
     last = null;
   }
 }
@@ -166,13 +179,22 @@ class AuditChainStatusService {
     return _projetar(retrato, escopo);
   }
 
-  /// Só o estado global (mesmo single-flight e cache de 60 s de [verify]),
-  /// **sem** papel, escopo nem linha de auditoria própria: para quem já
-  /// autorizou e audita o ato maior — a exportação (#45, Task 10), que grava o
-  /// estado em `audit_exports.chainState`. Nunca lança (ver
-  /// [_verificarCadeia]).
-  Future<AuditIntegrityState> currentState() async =>
-      stateOf((await _resultadoGlobal()).verification);
+  /// Só o estado global, **sem** papel, escopo nem linha de auditoria
+  /// própria: para quem já autorizou e audita o ato maior — a exportação
+  /// (#45, Task 10), que grava o estado em `audit_exports.chainState`.
+  ///
+  /// **Fresco:** só serve um retrato de verificação **iniciada** em
+  /// [notBefore] ou depois. O cache de 60 s e um single-flight iniciado
+  /// antes são ignorados (uma adulteração feita entre a verificação em cache
+  /// e a exportação não pode sair como `verified`); a verificação nova é a
+  /// mesma de [verify] — single-flight para quem vier depois, orçamento,
+  /// prazos, `Exception`/`Error` ⇒ `unavailable` — e atualiza o cache. Nunca
+  /// lança (ver [_verificarCadeia]).
+  Future<AuditIntegrityState> currentState({
+    required DateTime notBefore,
+  }) async => stateOf(
+    (await _resultadoGlobal(notBefore: notBefore.toUtc())).verification,
+  );
 
   /// Estado de integridade de um resultado do verificador (D3). Público e
   /// puro para o teste de propriedade: só `ok` com pelo menos uma linha é
@@ -196,24 +218,43 @@ class AuditChainStatusService {
     };
   }
 
-  Future<AuditChainSnapshot> _resultadoGlobal() {
+  /// [notBefore] (UTC) exige retrato de verificação iniciada nesse instante
+  /// ou depois; nulo = qualquer um dentro do [cacheTtl].
+  Future<AuditChainSnapshot> _resultadoGlobal({DateTime? notBefore}) {
     final agora = _clock().toUtc();
+    bool serve(DateTime inicio) =>
+        notBefore == null || !inicio.isBefore(notBefore);
+
     final ultimo = cache.last;
-    if (ultimo != null) {
+    if (ultimo != null && serve(ultimo.startedAt)) {
       final idade = agora.difference(ultimo.at);
       if (!idade.isNegative && idade < cacheTtl) return Future.value(ultimo);
     }
     final andamento = cache.inFlight;
-    if (andamento != null) return andamento;
+    final inicioDoAndamento = cache.inFlightStartedAt;
+    if (andamento != null &&
+        inicioDoAndamento != null &&
+        serve(inicioDoAndamento)) {
+      return andamento;
+    }
 
-    final novo = _verificarCadeia().then((retrato) {
-      cache.last = retrato;
+    final novo = _verificarCadeia(inicio: agora).then((retrato) {
+      // Um single-flight antigo que termine depois não sobrescreve um
+      // retrato mais novo.
+      final atual = cache.last;
+      if (atual == null || !retrato.startedAt.isBefore(atual.startedAt)) {
+        cache.last = retrato;
+      }
       return retrato;
     });
     cache.inFlight = novo;
+    cache.inFlightStartedAt = agora;
     // Limpa só se ainda for o mesmo (um reset de teste pode ter trocado).
     novo.whenComplete(() {
-      if (identical(cache.inFlight, novo)) cache.inFlight = null;
+      if (identical(cache.inFlight, novo)) {
+        cache.inFlight = null;
+        cache.inFlightStartedAt = null;
+      }
     });
     return novo;
   }
@@ -221,7 +262,9 @@ class AuditChainStatusService {
   /// Nunca lança: qualquer falha da leitura — `Exception` ou `Error` — é
   /// `databaseError`. A âncora de cauda (Task 7) entra depois do
   /// verificador; a gravação do checkpoint, depois do estado final.
-  Future<AuditChainSnapshot> _verificarCadeia() async {
+  Future<AuditChainSnapshot> _verificarCadeia({
+    required DateTime inicio,
+  }) async {
     final reader = _ReaderComPrazo(_reader, readTimeout);
     AuditChainVerification resultado;
     int? maiorCheckpoint;
@@ -245,13 +288,19 @@ class AuditChainStatusService {
     if (stateOf(resultado) == AuditIntegrityState.verified) {
       await _gravarCheckpoint(resultado, maiorCheckpoint);
     }
-    return AuditChainSnapshot(verification: resultado, at: _clock().toUtc());
+    return AuditChainSnapshot(
+      verification: resultado,
+      at: _clock().toUtc(),
+      startedAt: inicio,
+    );
   }
 
   /// Confere a cadeia `ok` [v] contra o checkpoint válido mais recente.
   /// Lança em falha de leitura (o chamador transforma em `databaseError`).
-  Future<({AuditChainVerification resultado, int? maiorValido})>
-  _ancorarCauda(AuditChainVerification v, AuditChainReader reader) async {
+  Future<({AuditChainVerification resultado, int? maiorValido})> _ancorarCauda(
+    AuditChainVerification v,
+    AuditChainReader reader,
+  ) async {
     final chain = AuditChain(secret: _secret);
     final lidos = await _checkpoints
         .latest(limit: checkpointWindow)

@@ -166,7 +166,7 @@ Future<T> _capturandoLog<T>(StringBuffer saida, Future<T> Function() corpo) {
     () => runZoned(
       corpo,
       zoneSpecification: ZoneSpecification(
-        print: (_, __, ___, linha) => saida.writeln(linha),
+        print: (_, _, _, linha) => saida.writeln(linha),
       ),
     ),
     stdout: () => _Stdout(fakeOut),
@@ -296,6 +296,7 @@ void main() {
           // Sentinelas: provam que a captura vê stdout, stderr e print.
           stdout.writeln('sentinela-stdout');
           stderr.writeln('sentinela-stderr');
+          // ignore: avoid_print
           print('sentinela-print');
           return exportar(_janela());
         });
@@ -444,6 +445,66 @@ void main() {
       },
     );
 
+    Future<void> verificarECachear() async {
+      final s = await endpoints.admin.verifyAuditChain(
+        sessionBuilder,
+        accessToken: _token(_admin, UserRole.admin),
+      );
+      expect(s.state, AuditIntegrityState.verified);
+    }
+
+    test(
+      'cache verified + UPDATE direto numa linha + exportar dentro dos 60 s '
+      '⇒ chainState gravado e devolvido é broken (verificação fresca)',
+      () async {
+        await linha(_acsA, 'patient_directory');
+        await linha(_acsA, 'triage_session');
+        await linha(_acsA, 'patient_directory');
+        await verificarECachear();
+        await session.db.unsafeExecute(
+          "UPDATE audit_logs SET result = 'x' WHERE sequence = 2",
+        );
+
+        final r = await exportar(_janela());
+        expect(r.chainState, AuditIntegrityState.broken);
+        final reg = (await AuditExport.db.find(session)).single;
+        expect(reg.chainState, 'broken');
+      },
+    );
+
+    test(
+      'cache verified (com checkpoint) + cauda apagada + exportar dentro dos '
+      '60 s ⇒ chainState broken (tailTruncated), nunca verified',
+      () async {
+        for (var i = 0; i < 4; i++) {
+          await linha(_acsA, 'patient_directory');
+        }
+        // A verificação grava o checkpoint na cabeça (a linha `read` dela).
+        await verificarECachear();
+        final cabeca = (await AuditLog.db.findFirstRow(
+          session,
+          orderBy: (t) => t.sequence,
+          orderDescending: true,
+        ))!.sequence;
+        await session.db.unsafeExecute(
+          'DELETE FROM audit_logs WHERE sequence >= @s',
+          parameters: QueryParameters.named({'s': cabeca - 1}),
+        );
+
+        final r = await exportar(_janela());
+        expect(r.chainState, AuditIntegrityState.broken);
+        expect(
+          (await AuditExport.db.find(session)).single.chainState,
+          'broken',
+        );
+        final status = await endpoints.admin.verifyAuditChain(
+          sessionBuilder,
+          accessToken: _token(_admin, UserRole.admin),
+        );
+        expect(status.reasonCode, AuditChainReason.tailTruncated);
+      },
+    );
+
     test(
       'coordenador, ACS e paciente ⇒ AlertPermissionException, denied '
       'auditado, nada exportado',
@@ -583,7 +644,7 @@ void main() {
           ),
           audit: OrmAuditTrail(session: () => session, chainSecret: _segredo),
           auditChain: AuditChain(secret: _segredo),
-          chainState: () async => AuditIntegrityState.verified,
+          chainState: (_) async => AuditIntegrityState.verified,
         );
         await expectLater(
           servico.export(

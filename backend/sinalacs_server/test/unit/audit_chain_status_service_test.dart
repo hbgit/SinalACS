@@ -37,12 +37,20 @@ class _Cadeia {
       actionType: 'read',
       resourceType: 'recurso_sintetico',
       resourceId: null,
-      timestamp: DateTime.utc(2026, 10, 13, 12).add(Duration(seconds: sequence)),
+      timestamp: DateTime.utc(
+        2026,
+        10,
+        13,
+        12,
+      ).add(Duration(seconds: sequence)),
       ipHash: 'ip-$sequence',
       result: result,
     );
     entries.add(
-      AuditChainEntry(fields: fields, entryHash: _chain.computeEntryHash(fields)),
+      AuditChainEntry(
+        fields: fields,
+        entryHash: _chain.computeEntryHash(fields),
+      ),
     );
   }
 }
@@ -154,7 +162,9 @@ class _Audit extends AuditTrail {
   @override
   Future<void> record(AuditEvent event) async {
     if (falhar) throw StateError('auditoria indisponível');
-    _ordem.add('audit:${event.actionType}:${event.resourceType}:${event.result}');
+    _ordem.add(
+      'audit:${event.actionType}:${event.resourceType}:${event.result}',
+    );
     events.add(event);
   }
 }
@@ -350,37 +360,43 @@ void main() {
       },
     );
 
-    test('leitura que não responde ⇒ timeout ⇒ unavailable/databaseError',
-        () async {
-      final r = _Reader(cadeia.entries)..travar = true;
-      final s = await servico(
-        r,
-        readTimeout: const Duration(milliseconds: 20),
-      ).verify(admin);
-      expect(s.state, AuditIntegrityState.unavailable);
-      expect(s.reasonCode, AuditChainReason.databaseError);
-    });
+    test(
+      'leitura que não responde ⇒ timeout ⇒ unavailable/databaseError',
+      () async {
+        final r = _Reader(cadeia.entries)..travar = true;
+        final s = await servico(
+          r,
+          readTimeout: const Duration(milliseconds: 20),
+        ).verify(admin);
+        expect(s.state, AuditIntegrityState.unavailable);
+        expect(s.reasonCode, AuditChainReason.databaseError);
+      },
+    );
 
-    test('segredo vazio ⇒ unavailable/secretUnavailable, sem ler o banco',
-        () async {
-      for (final vazio in ['', '   ']) {
-        cache.reset();
-        final r = _Reader(cadeia.entries);
-        final s = await servico(r, segredo: vazio).verify(admin);
-        expect(s.state, AuditIntegrityState.unavailable, reason: '"$vazio"');
-        expect(s.reasonCode, AuditChainReason.secretUnavailable);
-        expect(r.lotes, isEmpty);
-      }
-    });
+    test(
+      'segredo vazio ⇒ unavailable/secretUnavailable, sem ler o banco',
+      () async {
+        for (final vazio in ['', '   ']) {
+          cache.reset();
+          final r = _Reader(cadeia.entries);
+          final s = await servico(r, segredo: vazio).verify(admin);
+          expect(s.state, AuditIntegrityState.unavailable, reason: '"$vazio"');
+          expect(s.reasonCode, AuditChainReason.secretUnavailable);
+          expect(r.lotes, isEmpty);
+        }
+      },
+    );
 
-    test('cadeia vazia ⇒ inconclusive (nada a atestar), nunca verified',
-        () async {
-      final s = await servico(_Reader(const [])).verify(admin);
-      expect(s.state, AuditIntegrityState.inconclusive);
-      expect(s.reasonCode, isNull);
-      expect(s.checkedRows, 0);
-      expect(s.headSequence, isNull);
-    });
+    test(
+      'cadeia vazia ⇒ inconclusive (nada a atestar), nunca verified',
+      () async {
+        final s = await servico(_Reader(const [])).verify(admin);
+        expect(s.state, AuditIntegrityState.inconclusive);
+        expect(s.reasonCode, isNull);
+        expect(s.checkedRows, 0);
+        expect(s.headSequence, isNull);
+      },
+    );
 
     test('orçamento esgotado ⇒ inconclusive/timeBudget', () async {
       final grande = _Cadeia();
@@ -456,7 +472,9 @@ void main() {
       'sem sequence, sem motivo e sem volume',
       () async {
         store.donoDa[3] = 'ubs-b';
-        final s = await servico(_Reader(editada3(cadeia.entries))).verify(coordA);
+        final s = await servico(
+          _Reader(editada3(cadeia.entries)),
+        ).verify(coordA);
         expect(s.state, AuditIntegrityState.broken);
         expect(s.brokenInScope, isFalse);
         expect(s.firstBrokenSequence, isNull);
@@ -472,7 +490,9 @@ void main() {
       'sequence e motivo',
       () async {
         store.donoDa[3] = _ubsA;
-        final s = await servico(_Reader(editada3(cadeia.entries))).verify(coordA);
+        final s = await servico(
+          _Reader(editada3(cadeia.entries)),
+        ).verify(coordA);
         expect(s.state, AuditIntegrityState.broken);
         expect(s.brokenInScope, isTrue);
         expect(s.firstBrokenSequence, 3);
@@ -485,7 +505,9 @@ void main() {
       'pertencimento que falha ⇒ broken, brokenInScope nulo, sem sequence',
       () async {
         store.falharPertencimento = true;
-        final s = await servico(_Reader(editada3(cadeia.entries))).verify(coordA);
+        final s = await servico(
+          _Reader(editada3(cadeia.entries)),
+        ).verify(coordA);
         expect(s.state, AuditIntegrityState.broken);
         expect(s.brokenInScope, isNull);
         expect(s.firstBrokenSequence, isNull);
@@ -525,7 +547,11 @@ void main() {
           );
         }
         expect(r.lotes, isEmpty);
-        expect(audit.events.map((e) => e.result), ['denied', 'denied', 'denied']);
+        expect(audit.events.map((e) => e.result), [
+          'denied',
+          'denied',
+          'denied',
+        ]);
         expect(
           audit.events.map((e) => e.resourceType).toSet(),
           {'admin_audit_chain'},
@@ -609,6 +635,88 @@ void main() {
       expect(doCoord.firstBrokenSequence, isNull);
       expect(doCoord.brokenInScope, isFalse);
     });
+
+    test(
+      'currentState(notBefore): retrato verified de 30 s atrás é ignorado; '
+      'nova verificação grava o resultado novo (broken)',
+      () async {
+        final r = _Reader(cadeia.entries);
+        expect(
+          (await servico(r).verify(admin)).state,
+          AuditIntegrityState.verified,
+        );
+        expect(r.lotes, hasLength(1));
+
+        // Adulteração depois do retrato em cache.
+        r.entries = [
+          ...cadeia.entries.take(2),
+          AuditChainEntry(
+            fields: _copia(cadeia.entries[2].fields, result: 'x'),
+            entryHash: cadeia.entries[2].entryHash,
+          ),
+          ...cadeia.entries.skip(3),
+        ];
+        agora = t0.add(const Duration(seconds: 30));
+        // Sem notBefore o cache ainda serviria verified (controle).
+        expect(
+          (await servico(r).verify(admin)).state,
+          AuditIntegrityState.verified,
+        );
+        expect(r.lotes, hasLength(1));
+
+        final estado = await servico(r).currentState(notBefore: agora);
+        expect(estado, AuditIntegrityState.broken);
+        expect(r.lotes, hasLength(2));
+        // O cache passa a ser o retrato novo.
+        expect(
+          (await servico(r).verify(admin)).state,
+          AuditIntegrityState.broken,
+        );
+        expect(r.lotes, hasLength(2));
+      },
+    );
+
+    test(
+      'currentState(notBefore) não reaproveita single-flight iniciado antes; '
+      'reaproveita o iniciado depois',
+      () async {
+        final r = _Reader(cadeia.entries)..portao = Completer<void>();
+        final antiga = servico(r).verify(admin);
+        await Future<void>.delayed(Duration.zero);
+        agora = t0.add(const Duration(seconds: 1));
+        final fresca = servico(r).currentState(notBefore: agora);
+        final mesma = servico(r).currentState(notBefore: agora);
+        await Future<void>.delayed(Duration.zero);
+        await Future<void>.delayed(Duration.zero);
+        r.portao!.complete();
+        await antiga;
+        expect(await fresca, AuditIntegrityState.verified);
+        expect(await mesma, AuditIntegrityState.verified);
+        // Uma leitura da verificação antiga + UMA da fresca (compartilhada).
+        expect(r.lotes, hasLength(2));
+      },
+    );
+
+    test('currentState(notBefore) com leitura falhando ⇒ unavailable, '
+        'nunca verified do cache', () async {
+      final r = _Reader(cadeia.entries);
+      await servico(r).verify(admin);
+      r.lancar = Exception('banco fora');
+      agora = t0.add(const Duration(seconds: 5));
+      expect(
+        await servico(r).currentState(notBefore: agora),
+        AuditIntegrityState.unavailable,
+      );
+    });
+
+    test(
+      'currentState(notBefore) não grava linha de auditoria própria',
+      () async {
+        final r = _Reader(cadeia.entries);
+        await servico(r).currentState(notBefore: agora);
+        expect(_ordem.where((o) => o.startsWith('audit:')), isEmpty);
+      },
+    );
 
     test('relógio voltando no tempo não estende o cache para sempre', () async {
       final r = _Reader(cadeia.entries);
@@ -806,8 +914,7 @@ void main() {
       }
     });
 
-    test('callback de falha que também lança não derruba a resposta',
-        () async {
+    test('callback de falha que também lança não derruba a resposta', () async {
       checkpoints.falharEscrita = Exception('x');
       final s = await AuditChainStatusService(
         store: store,
@@ -822,24 +929,26 @@ void main() {
       expect(s.state, AuditIntegrityState.verified);
     });
 
-    test('quebra e cadeia vazia sem checkpoint não gravam checkpoint',
-        () async {
-      final quebrada = [
-        ...cadeia.entries.take(2),
-        ...cadeia.entries.skip(3),
-      ];
-      expect(
-        (await servico(_Reader(quebrada)).verify(admin)).state,
-        AuditIntegrityState.broken,
-      );
-      cache.reset();
-      expect(
-        (await servico(_Reader(const [])).verify(admin)).state,
-        AuditIntegrityState.inconclusive,
-      );
-      expect(checkpoints.tentativas, isEmpty);
-      expect(checkpoints.linhas, isEmpty);
-    });
+    test(
+      'quebra e cadeia vazia sem checkpoint não gravam checkpoint',
+      () async {
+        final quebrada = [
+          ...cadeia.entries.take(2),
+          ...cadeia.entries.skip(3),
+        ];
+        expect(
+          (await servico(_Reader(quebrada)).verify(admin)).state,
+          AuditIntegrityState.broken,
+        );
+        cache.reset();
+        expect(
+          (await servico(_Reader(const [])).verify(admin)).state,
+          AuditIntegrityState.inconclusive,
+        );
+        expect(checkpoints.tentativas, isEmpty);
+        expect(checkpoints.linhas, isEmpty);
+      },
+    );
 
     test('resposta não carrega hash nem assinatura do checkpoint', () async {
       checkpoints.assinado(5, hashDa(5));
