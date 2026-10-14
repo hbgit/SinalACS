@@ -60,6 +60,12 @@ espera_ok() {
   fi
 }
 
+# Grupos de concorrência (issue #23). GRUPO_NOVO é o esperado: número do PR no
+# ramo da esquerda do `||`, ref e SHA no da direita. GRUPO_ANTIGO é o que
+# existia antes: só o SHA no ramo de push/dispatch.
+GRUPO_NOVO='ci-${{ github.event_name }}-${{ github.event_name == '"'"'pull_request'"'"' && github.event.pull_request.number || format('"'"'{0}-{1}'"'"', github.ref, github.sha) }}'
+GRUPO_ANTIGO='ci-${{ github.event_name }}-${{ github.event_name == '"'"'pull_request'"'"' && github.event.pull_request.number || github.sha }}'
+
 # Workflow mínimo que passa por TODAS as outras checagens do ci_invariants.sh
 # (jobs documentados, gatilhos, concurrency, versões de ação, runner, limpeza
 # do pg_data, credenciais do FCM) — assim, o único jeito de uma fixture
@@ -68,6 +74,7 @@ espera_ok() {
 # dentro do job admin-app (indentação de 4 espaços já incluída no marcador).
 workflow_base() {
   local extra_admin_app="${1:-}"
+  local grupo="${GRUPO_CONCORRENCIA:-$GRUPO_NOVO}"
   cat <<YAML
 on:
   push:
@@ -75,7 +82,7 @@ on:
   pull_request: {}
   workflow_dispatch: {}
 concurrency:
-  group: ci-\${{ github.event_name }}-\${{ github.event.pull_request.number }}-\${{ github.sha }}
+  group: ${grupo}
   cancel-in-progress: true
 jobs:
   workflow-lint:
@@ -135,6 +142,14 @@ escreve() {
   printf '%s' "$caminho"
 }
 
+escreve_grupo() {
+  local nome="$1"
+  local grupo="$2"
+  local caminho="$tmp_dir/$nome.yml"
+  GRUPO_CONCORRENCIA="$grupo" workflow_base '' > "$caminho"
+  printf '%s' "$caminho"
+}
+
 echo '== Controle de base: a fixture limpa não deve acusar nada ='
 base_fixture="$(escreve base '')"
 rodar "$base_fixture"
@@ -170,6 +185,26 @@ espera_falha 'positivo (needs: android-e2e, não obrigatório)' \
 espera_ok 'negativo (needs: acs-app, também obrigatório)' \
   "$(escreve needs_dentro '    needs: acs-app')" \
   'admin-app (obrigatório) tem needs:'
+
+echo '== concurrency.group de push/dispatch precisa conter o ref (issue #23) =='
+espera_falha 'positivo (grupo antigo, só SHA)' \
+  "$(escreve_grupo grupo_sem_ref "$GRUPO_ANTIGO")" \
+  'sem ref (github.ref ou github.ref_name) no ramo de push/dispatch'
+espera_falha 'positivo (ref só no lado do PR)' \
+  "$(escreve_grupo grupo_ref_no_pr 'ci-${{ github.event_name }}-${{ github.event_name == '"'"'pull_request'"'"' && format('"'"'{0}-{1}'"'"', github.ref, github.event.pull_request.number) || github.sha }}')" \
+  'sem ref (github.ref ou github.ref_name) no ramo de push/dispatch'
+espera_falha 'positivo (ref sem SHA no ramo de push)' \
+  "$(escreve_grupo grupo_ref_sem_sha 'ci-${{ github.event_name }}-${{ github.event_name == '"'"'pull_request'"'"' && github.event.pull_request.number || github.ref }}')" \
+  'sem github.sha no ramo de push/dispatch'
+espera_falha 'positivo (sem número do PR à esquerda)' \
+  "$(escreve_grupo grupo_sem_pr 'ci-${{ github.event_name }}-${{ format('"'"'{0}-{1}'"'"', github.ref, github.sha) }}')" \
+  'sem github.event.pull_request.number no ramo de PR'
+espera_ok 'negativo (nova expressão com github.ref)' \
+  "$(escreve_grupo grupo_novo "$GRUPO_NOVO")" \
+  'FINDING-7'
+espera_ok 'negativo (variante com github.ref_name)' \
+  "$(escreve_grupo grupo_ref_name 'ci-${{ github.event_name }}-${{ github.event_name == '"'"'pull_request'"'"' && github.event.pull_request.number || format('"'"'{0}-{1}'"'"', github.ref_name, github.sha) }}')" \
+  'FINDING-7'
 
 echo
 if [[ "$falhas" -eq 0 ]]; then

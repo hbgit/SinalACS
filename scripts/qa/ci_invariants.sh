@@ -132,11 +132,24 @@ def check_concorrencia():
         falhas.append('FINDING-7: sem bloco concurrency no nível do workflow')
         return
     grupo = str(c.get('group', ''))
-    # Sem o SHA, dois pushes seguidos em develop cairiam no mesmo grupo e o
-    # segundo apagaria o resultado do primeiro — o FINDING-4 de novo.
-    for termo in ('github.event_name', 'github.event.pull_request.number', 'github.sha'):
-        if termo not in grupo:
-            falhas.append(f'FINDING-7: concurrency.group sem {termo}: {grupo}')
+    # Forma esperada: "<prefixo> ${{ PR && número || ref-e-sha }}". O ramo da
+    # direita do `||` é o de push/dispatch. O SHA nele evita que dois pushes
+    # seguidos na mesma branch se cancelem (FINDING-4); o ref evita que main e
+    # develop, no mesmo SHA, se cancelem (issue #23). Checar a string inteira
+    # aceitaria o ref só no lado do PR, onde ele não protege nada.
+    esquerda, _, direita = grupo.rpartition('||')
+    if 'github.event_name' not in grupo:
+        falhas.append(f'FINDING-7: concurrency.group sem github.event_name: {grupo}')
+    if 'github.event.pull_request.number' not in esquerda:
+        falhas.append(
+            f'FINDING-7: concurrency.group sem github.event.pull_request.number no ramo de PR: {grupo}')
+    if 'github.sha' not in direita:
+        falhas.append(f'FINDING-7: concurrency.group sem github.sha no ramo de push/dispatch: {grupo}')
+    # github.ref é o preferido (distingue tag de branch homônimas);
+    # github.ref_name é aceito. `\b` evita casar github.ref_type.
+    if not re.search(r'github\.ref(_name)?\b', direita):
+        falhas.append(
+            f'FINDING-7: concurrency.group sem ref (github.ref ou github.ref_name) no ramo de push/dispatch: {grupo}')
     if c.get('cancel-in-progress') is not True:
         falhas.append('FINDING-7: concurrency sem cancel-in-progress: true')
 
