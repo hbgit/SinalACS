@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:sinalacs_server/src/application/audit/audit_trail.dart';
 import 'package:sinalacs_server/src/application/auth/authorization.dart';
 import 'package:sinalacs_server/src/application/auth/development_auth_service.dart';
@@ -6,6 +8,7 @@ import 'package:sinalacs_server/src/application/onboarding/onboarding_service.da
 import 'package:sinalacs_server/src/application/patients/patient_data_overview_service.dart'
     show ConsentRecordSnapshot, DataSubjectRequestSnapshot;
 import 'package:sinalacs_server/src/application/patients/terms_change_schedule.dart';
+import 'package:sinalacs_server/src/application/patients/terms_publication_service.dart' show TermsVersionStore;
 import 'package:sinalacs_server/src/generated/protocol.dart';
 
 /// Recusa de escrita para a conta já anonimizada por uma exclusão atendida
@@ -97,16 +100,44 @@ class DataSubjectRightsService {
     required DataSubjectRightsStore store,
     required AuditTrail audit,
     DateTime Function()? clock,
-    TermsChangeSchedule? Function()? termsChangeReader,
+    Future<TermsChangeSchedule?> Function()? termsChangeReader,
+    TermsVersionStore? termsVersionStore,
   })  : _store = store,
         _audit = audit,
-        _termsChangeReader = termsChangeReader ?? (() => upcomingTermsChange),
+        _termsVersionStore = termsVersionStore,
+        _termsChangeReaderOverride = termsChangeReader,
         _clock = clock ?? DateTime.now;
 
   final DataSubjectRightsStore _store;
   final AuditTrail _audit;
   final DateTime Function() _clock;
-  final TermsChangeSchedule? Function() _termsChangeReader;
+  final TermsVersionStore? _termsVersionStore;
+  final Future<TermsChangeSchedule?> Function()? _termsChangeReaderOverride;
+
+  /// Agenda publicada em `terms_versions`. Uma linha cuja vigência esteja a
+  /// menos de 15 dias da publicação (dado inconsistente; a publicação já valida)
+  /// não derruba o app do paciente: vira "sem aviso", e só o tipo do erro é
+  /// registrado.
+  Future<TermsChangeSchedule?> _readSchedule() async {
+    final override = _termsChangeReaderOverride;
+    if (override != null) return override();
+    final store = _termsVersionStore;
+    if (store == null) return null;
+    final row = await store.currentPublished(_clock().toUtc());
+    final publishedAt = row?.publishedAt;
+    if (row == null || publishedAt == null) return null;
+    try {
+      return TermsChangeSchedule(
+        version: row.version,
+        publishedAt: publishedAt.toUtc(),
+        effectiveFrom: row.effectiveFrom.toUtc(),
+        summary: row.summary,
+      );
+    } on ArgumentError catch (error) {
+      stderr.writeln('termsChangeNotice: linha de terms_versions inválida (${error.runtimeType})');
+      return null;
+    }
+  }
 
   /// Concede ou revoga uma finalidade opcional. `healthDataProcessing` é
   /// recusado nas duas direções: é a base legal do app inteiro — inclusive do
@@ -168,10 +199,11 @@ class DataSubjectRightsService {
   }
 
   /// Aviso de mudança dos termos ativo agora, ou `null` (LGPD-RF18, 15 dias de
-  /// antecedência). Sem I/O: a agenda é uma constante do repositório.
-  TermsChangeNoticeSnapshot? termsChangeNotice(AuthenticatedUser user) {
+  /// antecedência). Lê a agenda publicada pelo admin em `terms_versions`; não
+  /// grava nem audita nada do titular.
+  Future<TermsChangeNoticeSnapshot?> termsChangeNotice(AuthenticatedUser user) async {
     _requirePatient(user);
-    final schedule = _termsChangeReader();
+    final schedule = await _readSchedule();
     if (schedule == null || !schedule.isActiveAt(_clock().toUtc())) return null;
     return TermsChangeNoticeSnapshot(
       version: schedule.version,

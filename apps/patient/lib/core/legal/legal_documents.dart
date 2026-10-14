@@ -70,7 +70,8 @@ class LegalDocument {
 /// Texto da versão que **ainda não vale** e já foi anunciada (LGPD-RF18, 15 dias).
 ///
 /// O app embarca o texto ANTES de o servidor publicar o aviso: publique uma versão
-/// do app com este valor, só depois troque `upcomingTermsChange` no backend, e na
+/// do app com este valor, só depois publique a versão (agenda em `terms_versions`,
+/// publicada pelo admin no backoffice; `upcomingTermsChange` é só o espelho), e na
 /// vigência mude `legalDocumentsVersion` e `consentPolicyVersion`, mova o texto
 /// para [privacyPolicy]/[termsOfUse] e volte as duas constantes para `null`.
 /// `test/upcoming_legal_documents_test.dart` falha se as duas pontas divergirem.

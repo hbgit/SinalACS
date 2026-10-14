@@ -14,6 +14,7 @@ import 'package:sinalacs_server/src/infrastructure/database/orm_audit_export_sto
 import 'package:sinalacs_server/src/infrastructure/database/orm_alert_escalation_store.dart';
 import 'package:sinalacs_server/src/application/notices/notice_scheduling_service.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_scheduled_notice_store.dart';
+import 'package:sinalacs_server/src/infrastructure/database/orm_terms_version_store.dart';
 import 'package:meta/meta.dart';
 import 'package:serverpod/serverpod.dart';
 import 'package:sinalacs_server/src/application/alerts/alert_outbox_dispatcher.dart';
@@ -423,6 +424,7 @@ class AlertRuntime {
           cipher: healthDataCipher,
         ),
         audit: auditTrailFor(session),
+        termsVersionStore: OrmTermsVersionStore(session: () => session),
       );
 
   /// Aviso push ao titular; mesmo remetente do aviso comunitário. Sem relé,

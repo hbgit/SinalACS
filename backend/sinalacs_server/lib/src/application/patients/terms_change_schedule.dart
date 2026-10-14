@@ -14,9 +14,11 @@ const Duration termsChangeNoticePeriod = Duration(days: 15);
 /// prova que o aviso chegou a alguém 15 dias antes (um `publishedAt` retroativo
 /// passa). Não é `const` porque `DateTime.difference` não é constante.
 ///
-/// Para agendar uma mudança: acrescente uma `LegalVersion` no app, troque
-/// [upcomingTermsChange] por uma agenda com a versão nova e só depois — na data de
-/// vigência — mude `consentPolicyVersion` e `legalDocumentsVersion`.
+/// A agenda vem de `terms_versions`: o admin rascunha, a revisão jurídica
+/// registra e só então publica (`TermsPublicationService`); o cartão do paciente
+/// lê a publicada mais recente. Para agendar uma mudança: acrescente o texto no
+/// app (`upcomingLegalDocuments`), publique a versão no backoffice e só depois —
+/// na data de vigência — mude `consentPolicyVersion` e `legalDocumentsVersion`.
 class TermsChangeSchedule {
   TermsChangeSchedule({
     required this.version,
@@ -46,5 +48,7 @@ class TermsChangeSchedule {
   bool isActiveAt(DateTime now) => !now.isBefore(publishedAt) && now.isBefore(effectiveFrom);
 }
 
-/// Nada agendado hoje.
+/// Espelho de referência da versão embarcada no app: o backend NÃO a lê mais para
+/// o aviso (a agenda é `terms_versions`); `upcoming_legal_documents_test.dart` do
+/// app ainda a usa para exigir que o texto novo esteja embarcado. Fica `null`.
 final TermsChangeSchedule? upcomingTermsChange = null;

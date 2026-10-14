@@ -4,6 +4,7 @@ import 'package:sinalacs_server/src/application/onboarding/onboarding_service.da
 import 'package:sinalacs_server/src/application/patients/data_subject_rights_service.dart';
 import 'package:sinalacs_server/src/application/patients/patient_data_overview_service.dart';
 import 'package:sinalacs_server/src/application/patients/terms_change_schedule.dart';
+import 'package:sinalacs_server/src/application/patients/terms_publication_service.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
 import 'package:test/test.dart';
 
@@ -25,6 +26,24 @@ const _acs = AuthenticatedUser(
 );
 
 final _now = DateTime.utc(2026, 9, 28, 12);
+
+/// Faz o papel de `currentPublished`: só devolve a linha quando publicada e com
+/// vigência ainda por vir, como o SQL do store real.
+class _StoreDeTermos implements TermsVersionStore {
+  _StoreDeTermos(this.linha);
+  final TermsVersionSnapshot? linha;
+
+  @override
+  Future<TermsVersionSnapshot?> currentPublished(DateTime now) async {
+    final l = linha;
+    if (l == null || l.publishedAt == null) return null;
+    if (!l.effectiveFrom.isAfter(now) || l.publishedAt!.isAfter(now)) return null;
+    return l;
+  }
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => throw UnimplementedError();
+}
 
 class FakeDataSubjectRightsStore implements DataSubjectRightsStore {
   final consents = <ConsentLogEntry>[];
@@ -169,54 +188,123 @@ void main() {
           store: store,
           audit: audit,
           clock: clock,
-          termsChangeReader: () => agenda,
+          termsChangeReader: () async => agenda,
         );
 
-    test('um leitor que devolve null vence a constante do repositório', () {
+    test('um leitor que devolve null vence a constante do repositório', () async {
       final svc = DataSubjectRightsService(
         store: store,
         audit: audit,
         clock: () => _now,
-        termsChangeReader: () => null,
+        termsChangeReader: () async => null,
       );
-      expect(svc.termsChangeNotice(_patient), isNull);
+      expect(await svc.termsChangeNotice(_patient), isNull);
     });
 
-    test('sem agenda, não há aviso', () {
-      expect(service.termsChangeNotice(_patient), isNull);
+    test('sem agenda, não há aviso', () async {
+      expect(await service.termsChangeNotice(_patient), isNull);
     });
 
-    test('com agenda ativa, devolve versão, vigência e resumo', () {
-      final notice = comAgenda(() => _now).termsChangeNotice(_patient)!;
+    test('com agenda ativa, devolve versão, vigência e resumo', () async {
+      final notice = (await comAgenda(() => _now).termsChangeNotice(_patient))!;
       expect(notice.version, '2026.2');
       expect(notice.effectiveFrom, agenda.effectiveFrom);
       expect(notice.summary, 'Novo canal de dúvidas.');
     });
 
-    test('exatamente na vigência não há mais aviso', () {
-      expect(comAgenda(() => agenda.effectiveFrom).termsChangeNotice(_patient), isNull);
+    test('exatamente na vigência não há mais aviso', () async {
+      expect(await comAgenda(() => agenda.effectiveFrom).termsChangeNotice(_patient), isNull);
     });
 
-    test('antes da publicação não há aviso', () {
+    test('antes da publicação não há aviso', () async {
       expect(
-        comAgenda(() => agenda.publishedAt.subtract(const Duration(seconds: 1)))
+        await comAgenda(() => agenda.publishedAt.subtract(const Duration(seconds: 1)))
             .termsChangeNotice(_patient),
         isNull,
       );
     });
 
-    test('só paciente', () {
-      expect(() => comAgenda(() => _now).termsChangeNotice(_acs), throwsA(isA<StateError>()));
+    test('só paciente', () async {
+      await expectLater(comAgenda(() => _now).termsChangeNotice(_acs), throwsA(isA<StateError>()));
     });
 
-    test('não grava nada nem audita (leitura sem I/O)', () {
-      comAgenda(() => _now).termsChangeNotice(_patient);
+    test('não grava nada nem audita (leitura sem I/O)', () async {
+      await comAgenda(() => _now).termsChangeNotice(_patient);
       expect(store.consents, isEmpty);
       expect(audit.events, isEmpty);
     });
+
+    group('lendo a agenda publicada do store (#46)', () {
+      final pub = _now.subtract(const Duration(days: 1));
+      final vig = _now.add(const Duration(days: 14));
+
+      TermsVersionSnapshot linha({
+        DateTime? publishedAt,
+        DateTime? effectiveFrom,
+        DateTime? reviewedAt,
+      }) =>
+          TermsVersionSnapshot(
+            id: 't1',
+            version: '2026.2',
+            summary: 'Novo canal.',
+            effectiveFrom: effectiveFrom ?? vig,
+            createdAt: _now.subtract(const Duration(days: 3)),
+            legallyReviewedAt: reviewedAt,
+            publishedAt: publishedAt,
+          );
+
+      DataSubjectRightsService comStore(_StoreDeTermos termos, DateTime now) =>
+          DataSubjectRightsService(
+            store: store,
+            audit: audit,
+            clock: () => now,
+            termsVersionStore: termos,
+          );
+
+      test('publicada e now entre publishedAt e effectiveFrom devolve o aviso', () async {
+        final n = (await comStore(_StoreDeTermos(linha(publishedAt: pub)), _now)
+            .termsChangeNotice(_patient))!;
+        expect(n.version, '2026.2');
+        expect(n.effectiveFrom, vig);
+        expect(n.summary, 'Novo canal.');
+      });
+
+      test('antes de publishedAt não há aviso', () async {
+        final svc = comStore(_StoreDeTermos(linha(publishedAt: pub)), pub.subtract(const Duration(seconds: 1)));
+        expect(await svc.termsChangeNotice(_patient), isNull);
+      });
+
+      test('na vigência ou depois não há aviso', () async {
+        expect(await comStore(_StoreDeTermos(linha(publishedAt: pub)), vig).termsChangeNotice(_patient), isNull);
+      });
+
+      test('rascunho ou só revisada não têm aviso', () async {
+        expect(await comStore(_StoreDeTermos(linha()), _now).termsChangeNotice(_patient), isNull);
+        expect(
+          await comStore(_StoreDeTermos(linha(reviewedAt: pub)), _now).termsChangeNotice(_patient),
+          isNull,
+        );
+      });
+
+      test('sem linhas não há aviso', () async {
+        expect(await comStore(_StoreDeTermos(null), _now).termsChangeNotice(_patient), isNull);
+      });
+
+      test('linha inconsistente (menos de 15 dias) vira null, sem lançar', () async {
+        final ruim = linha(publishedAt: pub, effectiveFrom: pub.add(const Duration(days: 3)));
+        expect(await comStore(_StoreDeTermos(ruim), _now).termsChangeNotice(_patient), isNull);
+      });
+
+      test('outro papel continua recusado', () async {
+        await expectLater(
+          comStore(_StoreDeTermos(linha(publishedAt: pub)), _now).termsChangeNotice(_acs),
+          throwsA(isA<StateError>()),
+        );
+      });
+    });
   });
 
-  group('acceptTermsOfUse (LGPD-RF18)', () {
+group('acceptTermsOfUse (LGPD-RF18)', () {
     test('grava "granted" para termsOfUse com a versão vigente e audita', () async {
       final record = await service.acceptTermsOfUse(_patient);
 
