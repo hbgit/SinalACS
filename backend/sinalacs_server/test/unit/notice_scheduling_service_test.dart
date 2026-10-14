@@ -82,6 +82,22 @@ class _FakeStore implements ScheduledNoticeStore {
   }
 
   @override
+  Future<int> markStaleSendingUnknown({
+    required DateTime before,
+    required String reason,
+    required DateTime at,
+  }) async {
+    var n = 0;
+    for (final r in rows.values.toList()) {
+      if (r.status == ScheduledNoticeStatus.sending && r.scheduledFor.isBefore(before)) {
+        await finish(r.id, status: ScheduledNoticeStatus.unknown, failureReason: reason, at: at);
+        n++;
+      }
+    }
+    return n;
+  }
+
+  @override
   Future<ScheduledNoticeSnapshot?> findById(String id) async => rows[id];
 
   @override
@@ -621,6 +637,44 @@ void main() {
       expect(audit.events.single.resourceId, id);
       expect(audit.events.single.userId, 'adm-1');
       expect(dump(), isNot(contains('TextoSecretoDoAviso')));
+    });
+  });
+
+  group('recoverStuckSending (varredura de partida)', () {
+    Future<String> row(Duration age, ScheduledNoticeStatus status) async {
+      final id = await store.insert(
+        createdBy: 'adm-1',
+        microAreaId: _ma1,
+        audience: 'everyone',
+        title: 't',
+        message: 'm',
+        scheduledFor: now.subtract(age),
+        createdAt: now.subtract(const Duration(days: 1)),
+      );
+      if (status == ScheduledNoticeStatus.sending) {
+        await store.claimDue(now);
+      }
+      return id;
+    }
+
+    test('sending há mais de 10 min vira unknown com motivo fixo, nunca pending', () async {
+      final old = await row(const Duration(minutes: 11), ScheduledNoticeStatus.sending);
+      final recent = await row(const Duration(minutes: 9), ScheduledNoticeStatus.sending);
+      final pending = await store.insert(
+        createdBy: 'adm-1',
+        microAreaId: _ma1,
+        audience: 'everyone',
+        title: 't',
+        message: 'm',
+        scheduledFor: now.add(const Duration(hours: 1)),
+        createdAt: now,
+      );
+      expect(await service.recoverStuckSending(), 1);
+      expect(store.rows[old]!.status, ScheduledNoticeStatus.unknown);
+      expect(store.rows[old]!.failureReason, noticeStuckSendingReason);
+      expect(store.rows[recent]!.status, ScheduledNoticeStatus.sending);
+      expect(store.rows[pending]!.status, ScheduledNoticeStatus.pending);
+      expect(sends, 0, reason: 'a varredura nunca reenvia');
     });
   });
 

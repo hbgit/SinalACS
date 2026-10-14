@@ -95,6 +95,12 @@ class NoticeHistoryItem {
   final DateTime? sentAt;
 }
 
+/// Janela após a qual um aviso preso em `sending` é dado como de resultado
+/// desconhecido na partida.
+const Duration noticeStuckSendingAfter = Duration(minutes: 10);
+const String noticeStuckSendingReason =
+    'Resultado desconhecido: o servidor reiniciou durante o envio';
+
 /// Limites de paginação do histórico.
 const int noticeHistoryDefaultLimit = 50;
 const int noticeHistoryMaxLimit = 100;
@@ -132,6 +138,15 @@ abstract interface class ScheduledNoticeStore {
     int? recipients,
     int? accepted,
     String? failureReason,
+    required DateTime at,
+  });
+
+  /// Varredura de partida: leva `sending` com `scheduledFor` anterior a
+  /// [before] a `unknown` (nunca de volta a `pending`: não há reenvio
+  /// automático). Devolve quantas linhas moveu.
+  Future<int> markStaleSendingUnknown({
+    required DateTime before,
+    required String reason,
     required DateTime at,
   });
 
@@ -326,6 +341,15 @@ class NoticeSchedulingService {
     }
     return claimed.length;
   }
+
+  /// Varredura de partida: `sending` há mais de [noticeStuckSendingAfter] vira
+  /// `unknown` (o processo caiu entre a reserva e o fim; o envio pode ter
+  /// ocorrido, então jamais volta a `pending`). Devolve quantas linhas moveu.
+  Future<int> recoverStuckSending() => _store.markStaleSendingUnknown(
+        before: _clock().toUtc().subtract(noticeStuckSendingAfter),
+        reason: noticeStuckSendingReason,
+        at: _clock().toUtc(),
+      );
 
   Future<void> _failed(ScheduledNoticeSnapshot notice, String reason) async {
     await _finish(notice, ScheduledNoticeStatus.failed, reason: reason);
