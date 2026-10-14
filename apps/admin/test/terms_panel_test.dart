@@ -175,6 +175,22 @@ void main() {
     expect(_publicar(tester, ok.id).onPressed, isNotNull);
   });
 
+  testWidgets('borda dos 15 dias: vigência em now+15d exatos habilita; 1 s a menos desabilita', (tester) async {
+    final f = _Fake();
+    final exato = await f.draftTermsVersion(
+        version: '2026.5', summary: _texto, effectiveFrom: _agora.add(const Duration(days: 15)));
+    final curto = await f.draftTermsVersion(
+        version: '2026.6',
+        summary: _texto,
+        effectiveFrom: _agora.add(const Duration(days: 15)).subtract(const Duration(seconds: 1)));
+    await f.markTermsReviewed(exato.id);
+    await f.markTermsReviewed(curto.id);
+    await _abrir(tester, f);
+    expect(_publicar(tester, exato.id).onPressed, isNotNull);
+    expect(_publicar(tester, curto.id).onPressed, isNull);
+    expect(find.text('Prazo de 15 dias esgotado: crie uma nova versão com vigência posterior.'), findsOneWidget);
+  });
+
   testWidgets('erro do servidor na publicação vira SnackBar', (tester) async {
     final f = _Fake()..erroNaPublicacao = const AdminValidationFailure('A vigência exige 15 dias de antecedência.');
     final t = await _rascunho(f);

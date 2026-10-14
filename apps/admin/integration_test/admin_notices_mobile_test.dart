@@ -64,9 +64,8 @@ void main() {
     expect(find.text('Versão 2099.1'), findsOneWidget);
     expect(find.text('Aguardando revisão jurídica'), findsOneWidget);
     final publicar = find.widgetWithText(FilledButton, 'Publicar');
-    if (publicar.evaluate().isNotEmpty) {
-      expect(tester.widget<FilledButton>(publicar.first).onPressed, isNull);
-    }
+    expect(publicar, findsOneWidget);
+    expect(tester.widget<FilledButton>(publicar).onPressed, isNull);
 
     await tocar(tester, find.textContaining('Marcar como revisado').first);
     await tocar(tester, find.byKey(const Key('terms_review_confirm')));

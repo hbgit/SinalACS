@@ -118,6 +118,32 @@ void main() {
     expect(find.byKey(const Key('notice_title')), findsOneWidget);
   });
 
+  // O horário padrão é agora + 1 h truncada ao minuto (10:00); o relógio é movido
+  // depois de abrir o diálogo para a distância ficar exatamente na borda.
+  testWidgets('borda de 1 minuto: exatamente 60 s à frente é aceito', (tester) async {
+    var agora = _agora;
+    final fonte = _FakeAgendamento();
+    await _abrir(tester, fonte, relogio: () => agora);
+    await _preencher(tester);
+    agora = DateTime(2026, 10, 14, 9, 59); // 10:00 - 60 s
+    await tester.tap(find.byKey(const Key('notice_submit')));
+    await tester.pumpAndSettle();
+    expect(fonte.agendados, hasLength(1));
+    expect(fonte.agendados.single.scheduledFor, DateTime(2026, 10, 14, 10));
+  });
+
+  testWidgets('borda de 1 minuto: 59 s à frente é recusado sem chamar o data source', (tester) async {
+    var agora = _agora;
+    final fonte = _FakeAgendamento();
+    await _abrir(tester, fonte, relogio: () => agora);
+    await _preencher(tester);
+    agora = DateTime(2026, 10, 14, 9, 59, 1); // 10:00 - 59 s
+    await tester.tap(find.byKey(const Key('notice_submit')));
+    await tester.pumpAndSettle();
+    expect(find.text('O horário do aviso deve ser pelo menos 1 minuto à frente.'), findsOneWidget);
+    expect(fonte.agendados, isEmpty);
+  });
+
   testWidgets('envio válido: uma chamada com os valores escolhidos, fecha e recarrega o histórico', (tester) async {
     final fonte = _FakeAgendamento();
     await _abrir(tester, fonte);

@@ -19,13 +19,10 @@ String _dois(int v) => v.toString().padLeft(2, '0');
 String _dataHora(DateTime d) => '${_dois(d.day)}/${_dois(d.month)}/${d.year} ${_dois(d.hour)}:${_dois(d.minute)}';
 
 class NoticeFormDialog extends StatefulWidget {
-  const NoticeFormDialog({required this.dataSource, required this.now, this.initialSchedule, this.aoVencer, super.key});
+  const NoticeFormDialog({required this.dataSource, required this.now, this.aoVencer, super.key});
 
   final AdminDataSource dataSource;
   final DateTime Function() now;
-
-  /// Só para testes: horário inicial no lugar de agora + 1 hora.
-  final DateTime? initialSchedule;
 
   /// Capturado de quem abre: a rota do diálogo fica fora do [AdminSessionScope].
   final VoidCallback? aoVencer;
@@ -54,7 +51,7 @@ class _NoticeFormDialogState extends State<NoticeFormDialog> {
   late final Future<List<MicroAreaSummary>> _areas = widget.dataSource.fetchMicroAreas();
   String? _areaId;
   NoticeAudience _publico = NoticeAudience.everyone;
-  late DateTime _quando = widget.initialSchedule ?? _padrao();
+  late DateTime _quando = _padrao();
   bool _enviando = false;
   String? _erro;
 
