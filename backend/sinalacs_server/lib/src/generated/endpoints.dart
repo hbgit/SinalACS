@@ -692,6 +692,223 @@ class Endpoints extends _i1.EndpointDispatch {
                     reason: params['reason'],
                   ),
         ),
+        'scheduleNotice': _i1.MethodConnector(
+          name: 'scheduleNotice',
+          params: {
+            'accessToken': _i1.ParameterDescription(
+              name: 'accessToken',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'microAreaId': _i1.ParameterDescription(
+              name: 'microAreaId',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'audience': _i1.ParameterDescription(
+              name: 'audience',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'title': _i1.ParameterDescription(
+              name: 'title',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'message': _i1.ParameterDescription(
+              name: 'message',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'scheduledFor': _i1.ParameterDescription(
+              name: 'scheduledFor',
+              type: _i1.getType<DateTime>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async =>
+                  (endpoints['admin'] as _i2.AdminEndpoint).scheduleNotice(
+                    session,
+                    accessToken: params['accessToken'],
+                    microAreaId: params['microAreaId'],
+                    audience: params['audience'],
+                    title: params['title'],
+                    message: params['message'],
+                    scheduledFor: params['scheduledFor'],
+                  ),
+        ),
+        'cancelScheduledNotice': _i1.MethodConnector(
+          name: 'cancelScheduledNotice',
+          params: {
+            'accessToken': _i1.ParameterDescription(
+              name: 'accessToken',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'id': _i1.ParameterDescription(
+              name: 'id',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async => (endpoints['admin'] as _i2.AdminEndpoint)
+                  .cancelScheduledNotice(
+                    session,
+                    accessToken: params['accessToken'],
+                    id: params['id'],
+                  ),
+        ),
+        'noticeHistory': _i1.MethodConnector(
+          name: 'noticeHistory',
+          params: {
+            'accessToken': _i1.ParameterDescription(
+              name: 'accessToken',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'microAreaId': _i1.ParameterDescription(
+              name: 'microAreaId',
+              type: _i1.getType<String?>(),
+              nullable: true,
+            ),
+            'limit': _i1.ParameterDescription(
+              name: 'limit',
+              type: _i1.getType<int>(),
+              nullable: false,
+            ),
+            'offset': _i1.ParameterDescription(
+              name: 'offset',
+              type: _i1.getType<int>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async =>
+                  (endpoints['admin'] as _i2.AdminEndpoint).noticeHistory(
+                    session,
+                    accessToken: params['accessToken'],
+                    microAreaId: params['microAreaId'],
+                    limit: params['limit'],
+                    offset: params['offset'],
+                  ),
+        ),
+        'termsVersions': _i1.MethodConnector(
+          name: 'termsVersions',
+          params: {
+            'accessToken': _i1.ParameterDescription(
+              name: 'accessToken',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async =>
+                  (endpoints['admin'] as _i2.AdminEndpoint).termsVersions(
+                    session,
+                    accessToken: params['accessToken'],
+                  ),
+        ),
+        'draftTermsVersion': _i1.MethodConnector(
+          name: 'draftTermsVersion',
+          params: {
+            'accessToken': _i1.ParameterDescription(
+              name: 'accessToken',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'version': _i1.ParameterDescription(
+              name: 'version',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'summary': _i1.ParameterDescription(
+              name: 'summary',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'effectiveFrom': _i1.ParameterDescription(
+              name: 'effectiveFrom',
+              type: _i1.getType<DateTime>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async =>
+                  (endpoints['admin'] as _i2.AdminEndpoint).draftTermsVersion(
+                    session,
+                    accessToken: params['accessToken'],
+                    version: params['version'],
+                    summary: params['summary'],
+                    effectiveFrom: params['effectiveFrom'],
+                  ),
+        ),
+        'markTermsReviewed': _i1.MethodConnector(
+          name: 'markTermsReviewed',
+          params: {
+            'accessToken': _i1.ParameterDescription(
+              name: 'accessToken',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'id': _i1.ParameterDescription(
+              name: 'id',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async =>
+                  (endpoints['admin'] as _i2.AdminEndpoint).markTermsReviewed(
+                    session,
+                    accessToken: params['accessToken'],
+                    id: params['id'],
+                  ),
+        ),
+        'publishTermsVersion': _i1.MethodConnector(
+          name: 'publishTermsVersion',
+          params: {
+            'accessToken': _i1.ParameterDescription(
+              name: 'accessToken',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'id': _i1.ParameterDescription(
+              name: 'id',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async =>
+                  (endpoints['admin'] as _i2.AdminEndpoint).publishTermsVersion(
+                    session,
+                    accessToken: params['accessToken'],
+                    id: params['id'],
+                  ),
+        ),
       },
     );
     connectors['alerts'] = _i1.EndpointConnector(

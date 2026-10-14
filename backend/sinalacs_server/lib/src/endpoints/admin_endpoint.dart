@@ -1,4 +1,5 @@
 import 'package:serverpod/serverpod.dart';
+import 'package:sinalacs_server/src/application/patients/terms_publication_service.dart';
 import 'package:sinalacs_server/src/endpoints/authenticated_endpoint.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
 import 'package:sinalacs_server/src/runtime/alert_runtime.dart';
@@ -298,4 +299,179 @@ class AdminEndpoint extends AuthenticatedEndpoint {
   }) => AlertRuntime.instance
       .alertEscalationServiceFor(session)
       .escalate(authenticate(accessToken), alertId: alertId, reason: reason);
+
+  /// Agenda um aviso comunitário a uma microárea (#46) e devolve o id. Só
+  /// `coordinator`/`admin`; o coordenador só na própria UBS. A negação já vem
+  /// auditada do serviço; o texto nunca entra na trilha.
+  Future<String> scheduleNotice(
+    Session session, {
+    required String accessToken,
+    required String microAreaId,
+    required String audience,
+    required String title,
+    required String message,
+    required DateTime scheduledFor,
+  }) async {
+    final user = authenticate(accessToken);
+    try {
+      return await AlertRuntime.instance
+          .noticeSchedulingServiceFor(session)
+          .schedule(
+            user,
+            microAreaId: microAreaId,
+            audience: audience,
+            title: title,
+            message: message,
+            scheduledFor: scheduledFor,
+          );
+    } on StateError catch (error) {
+      throw AlertPermissionException(message: error.message);
+    }
+  }
+
+  /// Cancela um aviso ainda `pending` (#46). Aviso já reservado/enviado:
+  /// [AdminInvalidRequestException].
+  Future<void> cancelScheduledNotice(
+    Session session, {
+    required String accessToken,
+    required String id,
+  }) async {
+    final user = authenticate(accessToken);
+    try {
+      await AlertRuntime.instance
+          .noticeSchedulingServiceFor(session)
+          .cancel(user, id);
+    } on StateError catch (error) {
+      throw AlertPermissionException(message: error.message);
+    }
+  }
+
+  /// Histórico de avisos, mais recentes primeiro, **sem o texto** (#46).
+  /// Coordenador: só a própria UBS.
+  Future<NoticeHistoryPage> noticeHistory(
+    Session session, {
+    required String accessToken,
+    String? microAreaId,
+    int limit = 50,
+    int offset = 0,
+  }) async {
+    final user = authenticate(accessToken);
+    try {
+      final items = await AlertRuntime.instance
+          .noticeSchedulingServiceFor(session)
+          .history(user, microAreaId: microAreaId, limit: limit, offset: offset);
+      return NoticeHistoryPage(
+        entries: [
+          for (final i in items)
+            NoticeHistoryEntry(
+              id: i.id,
+              microAreaId: i.microAreaId,
+              microAreaName: i.microAreaName ?? '—',
+              audience: i.audience,
+              title: i.title,
+              status: i.status,
+              scheduledFor: i.scheduledFor,
+              sentAt: i.sentAt,
+              recipients: i.recipients,
+              accepted: i.accepted,
+              failureReason: i.failureReason,
+              createdByLabel: i.createdByLabel ?? '—',
+            ),
+        ],
+      );
+    } on StateError catch (error) {
+      throw AlertPermissionException(message: error.message);
+    }
+  }
+
+  // --- Versões dos termos (#46, LGPD-RF18). Só `admin`; a negação já vem
+  // auditada do serviço e o resumo nunca entra na trilha. ---
+
+  static TermsVersionEntry _termsEntry(TermsVersionSnapshot r) =>
+      TermsVersionEntry(
+        id: r.id,
+        version: r.version,
+        summary: r.summary,
+        effectiveFrom: r.effectiveFrom,
+        createdAt: r.createdAt,
+        legallyReviewedAt: r.legallyReviewedAt,
+        publishedAt: r.publishedAt,
+      );
+
+  /// Versões dos termos, mais recentes primeiro.
+  Future<List<TermsVersionEntry>> termsVersions(
+    Session session, {
+    required String accessToken,
+  }) async {
+    final user = authenticate(accessToken);
+    try {
+      final rows = await AlertRuntime.instance
+          .termsPublicationServiceFor(session)
+          .list(user);
+      return [for (final r in rows) _termsEntry(r)];
+    } on StateError catch (error) {
+      throw AlertPermissionException(message: error.message);
+    }
+  }
+
+  /// Rascunha uma versão dos termos.
+  Future<TermsVersionEntry> draftTermsVersion(
+    Session session, {
+    required String accessToken,
+    required String version,
+    required String summary,
+    required DateTime effectiveFrom,
+  }) async {
+    final user = authenticate(accessToken);
+    try {
+      return _termsEntry(
+        await AlertRuntime.instance
+            .termsPublicationServiceFor(session)
+            .draft(
+              user,
+              version: version,
+              summary: summary,
+              effectiveFrom: effectiveFrom,
+            ),
+      );
+    } on StateError catch (error) {
+      throw AlertPermissionException(message: error.message);
+    }
+  }
+
+  /// Registra a revisão jurídica de uma versão.
+  Future<TermsVersionEntry> markTermsReviewed(
+    Session session, {
+    required String accessToken,
+    required String id,
+  }) async {
+    final user = authenticate(accessToken);
+    try {
+      return _termsEntry(
+        await AlertRuntime.instance
+            .termsPublicationServiceFor(session)
+            .markReviewed(user, id),
+      );
+    } on StateError catch (error) {
+      throw AlertPermissionException(message: error.message);
+    }
+  }
+
+  /// Publica uma versão revisada, com vigência a pelo menos 15 dias.
+  Future<TermsVersionEntry> publishTermsVersion(
+    Session session, {
+    required String accessToken,
+    required String id,
+  }) async {
+    final user = authenticate(accessToken);
+    try {
+      return _termsEntry(
+        await AlertRuntime.instance
+            .termsPublicationServiceFor(session)
+            .publish(user, id),
+      );
+    } on StateError catch (error) {
+      throw AlertPermissionException(message: error.message);
+    }
+  }
 }

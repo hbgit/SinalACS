@@ -1607,3 +1607,40 @@ Plano: `docs/superpowers/plans/2026-10-13-issue-45-trilha-de-auditoria-completa.
 - Menores de teste/estrutura diferidos: índice `audit_exports_requested_at_idx` sem medição; teste de schema e o de "nove campos" dependem do cwd; integração paralela tem contenção intermitente (rodar com `-j 1`); `_escaparLike` mora na infraestrutura e o unit a importa de lá; testes de `actorRole=admin` sem controle positivo e de nome/`resourceId` só como guarda de regressão; sem teste dedicado para `-`/`-x` isolados no CSV; `AuditRowSealer` não checa segredo vazio (o `app_config` já recusa); `entryAt` só é usado pelo checkpoint.
 - **Exceção do verde:** "Cadeia íntegra" e o selo "Íntegro" usam verde, reservado ao risco clínico em `spec/ui_design.md`; mantida (sempre ícone + texto) e **pendente de aceite do dono**.
 - A captura `docs/screenshots/admin/05-auditoria.png` é anterior à #45.
+
+## Avisos agendados e versões dos termos (#46, 2026-10-14)
+
+Plano: `docs/superpowers/plans/2026-10-14-issue-46-avisos-e-termos.md`; achados da investigação: `docs/superpowers/plans/2026-10-14-issue-46-fase0-achados.md`; contratos: `backend/CLAUDE.md` (seção "Avisos agendados e versões dos termos"). **Backend (Fases 1–2), app admin (Fase 3) e e2e (Fase 4) entregues; ver "Continua em aberto" abaixo.**
+
+**O que existe (entregue)**
+- Tabelas `scheduled_notices` e `terms_versions`; `NoticeSchedulingService` e `NoticeDispatchLoop` (disparo a cada 30 s, reserva atômica `pending → sending`); `TermsPublicationService` (revisão jurídica e 15 dias de antecedência); sete métodos novos no `AdminEndpoint` (`scheduleNotice`, `cancelScheduledNotice`, `noticeHistory`, `termsVersions`, `draftTermsVersion`, `markTermsReviewed`, `publishTermsVersion`). O cartão do paciente lê a agenda publicada. `NoticesEndpoint.sendSegmented` continua ACS-imediato.
+- Regressão do backend: `dart test` +1289 verdes (unidade e integração, Postgres real), `dart analyze` sem erro nem warning (87 `info`).
+
+**O que NÃO está provado / limites assumidos**
+- A varredura de aviso preso em `sending` roda **só na partida** e olha `scheduledFor` (sem coluna `claimedAt`); vale para instância única do servidor.
+- Limitação da varredura: um aviso que fica `sending` com `scheduledFor` a menos de 10 min do reinício permanece `sending` (invisível como preso) até um reinício posterior; não há reenvio. Cada aviso que a varredura move a `unknown` gera uma linha `community_notice` / `unknown_after_restart` (autor = quem agendou, recurso = id do aviso, `recordSafely` para não impedir o boot).
+- A constante `upcomingTermsChange` foi mantida (`null`) e dois testes a leem (`terms_change_schedule_test.dart` no backend, `upcoming_legal_documents_test.dart` no app do paciente).
+- A revisão jurídica do texto real dos termos continua pendente (fora do código).
+- iOS fora do projeto. 
+
+**Entregue no app admin e no e2e**
+- App admin Android com a aba **Avisos** (agendar, cancelar, histórico) e a sub-aba **Termos** (rascunho, revisão jurídica, publicação; só admin): `notices_screen.dart`, `notice_form_dialog.dart`, `terms_panel.dart`, `terms_form_dialog.dart`.
+- Testes de widget e de acessibilidade, e teste de integração hermético no emulador `emulator-5554` (`admin_notices_mobile_test.dart`).
+- `./scripts/qa/push_e2e.sh --e2e-db --negativos` verde em 2026-10-14, com o caso do aviso agendado contra Gorush e FCM reais no emulador; log em `docs/superpowers/plans/2026-10-14-issue-46-e2e.log`.
+- Regressão final (2026-10-14): backend `dart analyze` sem erro (87 `info`) e `dart test` +1289 verdes; paciente `flutter test` +259; ACS `flutter test` +544; admin `flutter analyze` sem problemas e `flutter test` +453; `scripts/qa/ci_invariants.sh` ok.
+- Regressão após a revisão final (2026-10-14): backend `dart analyze` sem erro nem warning (87 `info`) e `dart test -j 1` +1307 verdes; paciente `flutter test` +259; ACS `flutter test` +544; admin `flutter analyze` sem problemas e `flutter test` +456; `integration_test/admin_notices_mobile_test.dart` 2/2 e smoke 4/4 no `emulator-5554`; `scripts/qa/ci_invariants.sh` ok; `push_e2e.sh --e2e-db --negativos` reexecutado e verde ("OK — o aviso chegou ao emulador"), log em `docs/superpowers/plans/2026-10-14-issue-46-e2e.log`.
+
+**Continua em aberto**
+- Revisão jurídica do texto real dos termos.
+- Retenção e expurgo de `scheduled_notices.message`: o texto digitado pelo staff fica guardado sem prazo nem dono (definir com o encarregado de dados).
+- Troca manual de `consentPolicyVersion` e `legalDocumentsVersion` na data de vigência: a publicação só **anuncia**, nada passa a valer sozinho.
+- O disparo não reconfere o autor: um coordenador desativado ou trocado de UBS depois de agendar ainda tem o aviso enviado em nome dele (o admin pode cancelar).
+- Revisão e publicação por um único admin, sem segregação de funções; e rascunho sem editar nem descartar (a versão fica "queimada" se a revisão estourar os 15 dias).
+- Histórico de avisos sem paginação na UI (50 fixos).
+- Fuso: a comparação `timestamp without time zone` com parâmetro `DateTime` só foi provada com o Postgres em UTC.
+- Validação manual do cartão de termos (`terms_change_notice_card`) no emulador: **não** foi automatizada; roteiro em `docs/superpowers/plans/2026-10-14-issue-46-validacao-manual.md` (cobertura automatizada: `admin_endpoint_terms_test.dart` no backend e `terms_change_notice_test.dart` no paciente).
+- Os roteiros de emulador do admin editados para o fallback de tooltip (`admin_auditoria_e2e.dart`, `admin_login_e2e.dart`, `admin_acs_gestao_e2e.dart`) **não** foram reexecutados contra o backend real.
+- Os rótulos curtos da barra inferior do admin mudaram ('Áreas', 'Trilha'): decisão de produto a confirmar.
+- `upcomingTermsChange` morta mantida; varredura de `sending` só na partida e para instância única.
+- O endpoint HTTP de agendamento não é exercitado no `push_e2e` (coberto por integração do backend).
+- Após o e2e, `sinalacs-serverpod` e o Postgres de desenvolvimento ficaram parados: `docker compose up -d`.

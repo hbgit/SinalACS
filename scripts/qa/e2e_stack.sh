@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
+# Nota: quando rodado de um diretório com nome diferente do checkout padrão (por exemplo,
+# um `git worktree`), exporte COMPOSE_PROJECT_NAME=sinalacs; senão o nome do projeto Compose
+# deriva do diretório e conflita com os contêineres `sinalacs-*`.
 # Sobe/derruba a stack de e2e contra o banco de teste. Ver docker-compose.e2e.yml.
-#   e2e_stack.sh up | seed | down | psql "<sql>"
+#   e2e_stack.sh up | seed | schedule-notice | down | psql "<sql>"
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 [[ -f .env ]] || { echo 'erro: rode ./scripts/dev/bootstrap_env.sh'; exit 1; }
@@ -51,6 +54,13 @@ case "${1:-}" in
       SERVERPOD_DATABASE_NAME=$db SERVERPOD_DATABASE_USER=postgres \
       SERVERPOD_DATABASE_PASSWORD="$TEST_DATABASE_PASSWORD" \
       dart run bin/seed_e2e_fixtures.dart ../../.e2e/fixtures.json ) ;;
+  schedule-notice)
+    # Aviso agendado (#46) para daqui a ~20 s, que o laço do servidor dispara.
+    ( cd backend/sinalacs_server && \
+      SERVERPOD_DATABASE_HOST=localhost SERVERPOD_DATABASE_PORT=9090 \
+      SERVERPOD_DATABASE_NAME=$db SERVERPOD_DATABASE_USER=postgres \
+      SERVERPOD_DATABASE_PASSWORD="$TEST_DATABASE_PASSWORD" \
+      dart run bin/seed_e2e_scheduled_notice.dart ../../.e2e/fixtures.json ) ;;
   down)
     # O manifesto (com a senha do ACS) sai primeiro: se o drop falhar, ele não sobra.
     rm -f .e2e/fixtures.json
@@ -58,5 +68,5 @@ case "${1:-}" in
     pg "drop database if exists $db with (force)" postgres >/dev/null
     echo 'A stack de e2e parou (o container sinalacs-serverpod é o mesmo da de desenvolvimento): rode `docker compose up -d` para voltar à de desenvolvimento.' ;;
   psql) pg "$2" ;;
-  *) echo 'uso: e2e_stack.sh up|seed|down|psql "<sql>"'; exit 2 ;;
+  *) echo 'uso: e2e_stack.sh up|seed|schedule-notice|down|psql "<sql>"'; exit 2 ;;
 esac

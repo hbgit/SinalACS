@@ -1,0 +1,11 @@
+### Versão dos termos de uso no backoffice (#46, LGPD-RF18). Sem os campos de
+### quem revisou/publicou: o admin vê quando, não a identidade.
+class: TermsVersionEntry
+fields:
+  id: String
+  version: String
+  summary: String
+  effectiveFrom: DateTime
+  createdAt: DateTime
+  legallyReviewedAt: DateTime?
+  publishedAt: DateTime?

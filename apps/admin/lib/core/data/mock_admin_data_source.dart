@@ -296,6 +296,143 @@ class MockAdminDataSource implements AdminDataSource {
     );
   }
 
+  // Avisos e termos (#46): mesmas regras e textos do servidor. O papel é
+  // imposto pelo servidor, não pelo mock. A mensagem fica só aqui dentro.
+  final List<NoticeHistoryItem> _avisos = [];
+  final Map<String, String> _mensagensDosAvisos = {};
+  final List<TermsVersionSummary> _termos = [];
+  int _seqAviso = 0;
+  int _seqTermo = 0;
+
+  @override
+  Future<List<NoticeHistoryItem>> fetchNoticeHistory({String? microAreaId, int limit = 50, int offset = 0}) async {
+    final l = _avisos.where((a) => microAreaId == null || a.microAreaId == microAreaId).toList()
+      ..sort((a, b) => b.scheduledFor.compareTo(a.scheduledFor));
+    return l.skip(offset).take(limit).toList();
+  }
+
+  @override
+  Future<String> scheduleNotice({
+    required String microAreaId,
+    required NoticeAudience audience,
+    required String title,
+    required String message,
+    required DateTime scheduledFor,
+  }) async {
+    final t = title.trim();
+    final m = message.trim();
+    if (t.isEmpty || m.isEmpty) throw const AdminValidationFailure('Informe o título e a mensagem do aviso.');
+    if (t.length > 60) throw const AdminValidationFailure('O título pode ter no máximo 60 caracteres.');
+    if (m.length > 240) throw const AdminValidationFailure('A mensagem pode ter no máximo 240 caracteres.');
+    final area = _microAreas.where((x) => x.id == microAreaId).firstOrNull;
+    if (area == null) throw const AdminValidationFailure('Microárea não encontrada.');
+    if (scheduledFor.isBefore(_now().add(const Duration(minutes: 1)))) {
+      throw const AdminValidationFailure('O horário do aviso deve ser pelo menos 1 minuto à frente.');
+    }
+    final id = 'aviso-${++_seqAviso}';
+    _mensagensDosAvisos[id] = m;
+    _avisos.add(NoticeHistoryItem(
+      id: id,
+      microAreaId: area.id,
+      microAreaName: area.name,
+      audience: audience,
+      title: t,
+      status: NoticeStatus.pending,
+      scheduledFor: scheduledFor,
+      createdByLabel: 'ADM-001',
+    ));
+    return id;
+  }
+
+  @override
+  Future<void> cancelScheduledNotice(String id) async {
+    final i = _avisos.indexWhere((a) => a.id == id);
+    if (i < 0) throw const AdminValidationFailure('Aviso não encontrado.');
+    final a = _avisos[i];
+    if (a.status != NoticeStatus.pending) {
+      throw const AdminValidationFailure('Só avisos pendentes podem ser cancelados.');
+    }
+    _avisos[i] = NoticeHistoryItem(
+      id: a.id,
+      microAreaId: a.microAreaId,
+      microAreaName: a.microAreaName,
+      audience: a.audience,
+      title: a.title,
+      status: NoticeStatus.cancelled,
+      scheduledFor: a.scheduledFor,
+      createdByLabel: a.createdByLabel,
+    );
+  }
+
+  @override
+  Future<List<TermsVersionSummary>> fetchTermsVersions() async =>
+      (List.of(_termos)..sort((a, b) => b.effectiveFrom.compareTo(a.effectiveFrom)));
+
+  @override
+  Future<TermsVersionSummary> draftTermsVersion({
+    required String version,
+    required String summary,
+    required DateTime effectiveFrom,
+  }) async {
+    final v = version.trim();
+    final s = summary.trim();
+    if (v.isEmpty) throw const AdminValidationFailure('Informe o número da versão.');
+    if (s.isEmpty || s.length > 280) throw const AdminValidationFailure('O resumo deve ter de 1 a 280 caracteres.');
+    if (_termos.any((t) => t.version == v)) {
+      throw const AdminValidationFailure('Já existe uma versão com este número.');
+    }
+    if (!effectiveFrom.isAfter(_now())) throw const AdminValidationFailure('A vigência deve ser futura.');
+    final t = TermsVersionSummary(
+      id: 'termo-${++_seqTermo}',
+      version: v,
+      summary: s,
+      effectiveFrom: effectiveFrom,
+      createdAt: _now(),
+    );
+    _termos.add(t);
+    return t;
+  }
+
+  TermsVersionSummary _substituiTermo(TermsVersionSummary t, {DateTime? reviewed, DateTime? published}) {
+    final n = TermsVersionSummary(
+      id: t.id,
+      version: t.version,
+      summary: t.summary,
+      effectiveFrom: t.effectiveFrom,
+      createdAt: t.createdAt,
+      legallyReviewedAt: reviewed ?? t.legallyReviewedAt,
+      publishedAt: published ?? t.publishedAt,
+    );
+    _termos[_termos.indexWhere((x) => x.id == t.id)] = n;
+    return n;
+  }
+
+  TermsVersionSummary _termo(String id) {
+    final t = _termos.where((x) => x.id == id).firstOrNull;
+    if (t == null) throw const AdminValidationFailure('Versão não encontrada.');
+    return t;
+  }
+
+  @override
+  Future<TermsVersionSummary> markTermsReviewed(String id) async {
+    final t = _termo(id);
+    if (t.legallyReviewedAt != null) throw const AdminValidationFailure('A versão já foi revisada.');
+    return _substituiTermo(t, reviewed: _now());
+  }
+
+  @override
+  Future<TermsVersionSummary> publishTermsVersion(String id) async {
+    final t = _termo(id);
+    if (t.publishedAt != null) throw const AdminValidationFailure('A versão já foi publicada.');
+    if (t.legallyReviewedAt == null) {
+      throw const AdminValidationFailure('A versão ainda não foi revisada juridicamente.');
+    }
+    if (t.effectiveFrom.isBefore(_now().add(const Duration(days: 15)))) {
+      throw const AdminValidationFailure('A vigência exige 15 dias de antecedência.');
+    }
+    return _substituiTermo(t, published: _now());
+  }
+
   @override
   Future<EscalationOutcome> escalateAlert(String alertId, EscalationReasonCode reason) async {
     final a = _alerts.where((x) => x.id == alertId).firstOrNull;

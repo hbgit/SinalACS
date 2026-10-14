@@ -12,6 +12,10 @@ import 'package:sinalacs_server/src/infrastructure/database/orm_admin_read_store
 import 'package:sinalacs_server/src/infrastructure/database/orm_audit_checkpoint_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_audit_export_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_alert_escalation_store.dart';
+import 'package:sinalacs_server/src/application/notices/notice_scheduling_service.dart';
+import 'package:sinalacs_server/src/infrastructure/database/orm_scheduled_notice_store.dart';
+import 'package:sinalacs_server/src/infrastructure/database/orm_terms_version_store.dart';
+import 'package:sinalacs_server/src/application/patients/terms_publication_service.dart';
 import 'package:meta/meta.dart';
 import 'package:serverpod/serverpod.dart';
 import 'package:sinalacs_server/src/application/alerts/alert_outbox_dispatcher.dart';
@@ -421,6 +425,7 @@ class AlertRuntime {
           cipher: healthDataCipher,
         ),
         audit: auditTrailFor(session),
+        termsVersionStore: OrmTermsVersionStore(session: () => session),
       );
 
   /// Aviso push ao titular; mesmo remetente do aviso comunitário. Sem relé,
@@ -451,6 +456,32 @@ class AlertRuntime {
       audit: auditTrailFor(session),
     );
   }
+
+  /// Agendamento e disparo de avisos comunitários (RF14, #46). O envio usa o
+  /// mesmo [NoticeService] de [noticeServiceFor], então a auditoria do disparo
+  /// é a do envio imediato. [clock] existe para os testes.
+  NoticeSchedulingService noticeSchedulingServiceFor(
+    Session session, {
+    DateTime Function()? clock,
+  }) =>
+      NoticeSchedulingService(
+        store: OrmScheduledNoticeStore(session: () => session),
+        audit: auditTrailFor(session),
+        sendNow: noticeServiceFor(session).sendToMicroArea,
+        clock: clock,
+      );
+
+  /// Rascunho, revisão jurídica e publicação dos termos (LGPD-RF18, #46).
+  /// [clock] existe para os testes.
+  TermsPublicationService termsPublicationServiceFor(
+    Session session, {
+    DateTime Function()? clock,
+  }) =>
+      TermsPublicationService(
+        store: OrmTermsVersionStore(session: () => session),
+        audit: auditTrailFor(session),
+        clock: clock,
+      );
 
   GorushClient _gorushClientFor(String url) {
     if (_gorush == null || _gorushUrl != url) {

@@ -28,8 +28,8 @@ import 'fake_admin_auth.dart';
 /// checado sem que nada fique vermelho — por isso [percorrerTelaInteira] hoje
 /// **falha** ao gastar [tetoDeRolagem] passos.
 
-/// Nomes dos cinco destinos, na ordem de `AdminDestination`.
-const destinosDoBackoffice = ['Indicadores', 'Microáreas', 'Alertas', 'Auditoria', 'Pedidos do titular'];
+/// Nomes dos seis destinos, na ordem de `AdminDestination`.
+const destinosDoBackoffice = ['Indicadores', 'Microáreas', 'Alertas', 'Auditoria', 'Pedidos do titular', 'Avisos'];
 
 /// Abre o backoffice já logado, numa janela de tamanho e escala de fonte fixos.
 ///

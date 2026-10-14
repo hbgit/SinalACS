@@ -13,6 +13,7 @@ import 'package:sinalacs_admin/app/escalate_alert_dialog.dart';
 import 'package:sinalacs_admin/app/admin_layout.dart';
 import 'package:sinalacs_admin/app/login_screen.dart';
 import 'package:sinalacs_admin/app/monitoring_controller.dart';
+import 'package:sinalacs_admin/app/notices_screen.dart';
 import 'package:sinalacs_admin/app/overdue_red_banner.dart';
 import 'package:sinalacs_admin/app/stale_badge.dart';
 import 'package:sinalacs_admin/core/auth/admin_auth_backend.dart';
@@ -52,7 +53,7 @@ class SinalAdminApp extends StatelessWidget {
       );
 }
 
-enum AdminDestination { indicators, microAreas, alerts, auditLog, dataRequests }
+enum AdminDestination { indicators, microAreas, alerts, auditLog, dataRequests, notices }
 
 extension on AdminDestination {
   String get label => switch (this) {
@@ -61,6 +62,7 @@ extension on AdminDestination {
         AdminDestination.alerts => 'Alertas',
         AdminDestination.auditLog => 'Auditoria',
         AdminDestination.dataRequests => 'Pedidos do titular',
+        AdminDestination.notices => 'Avisos',
       };
 
   /// Rótulo da barra inferior do celular, onde com cinco destinos cada um tem
@@ -71,6 +73,9 @@ extension on AdminDestination {
   String get shortLabel => switch (this) {
         AdminDestination.indicators => 'Painel',
         AdminDestination.dataRequests => 'Pedidos',
+        // Com seis destinos (#46) "Microáreas" quebrava e era cortada em 320–360dp.
+        AdminDestination.microAreas => 'Áreas',
+        AdminDestination.auditLog => 'Trilha',
         _ => label,
       };
 
@@ -80,6 +85,7 @@ extension on AdminDestination {
         AdminDestination.alerts => Icons.warning_amber_outlined,
         AdminDestination.auditLog => Icons.fact_check_outlined,
         AdminDestination.dataRequests => Icons.privacy_tip_outlined,
+        AdminDestination.notices => Icons.campaign_outlined,
       };
 }
 
@@ -174,6 +180,8 @@ class _AdminHomeShellState extends State<AdminHomeShell> {
         AdminDestination.alerts => AlertsScreen(dataSource: widget.dataSource, monitoring: _monitoramento),
         AdminDestination.auditLog => AuditLogScreen(dataSource: widget.dataSource, role: widget.session.role),
         AdminDestination.dataRequests => DataRequestsScreen(dataSource: widget.dataSource, now: widget.now),
+        AdminDestination.notices =>
+          NoticesScreen(dataSource: widget.dataSource, role: widget.session.role, now: widget.now),
       };
 
   void _select(int index) {

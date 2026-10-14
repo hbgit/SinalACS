@@ -57,7 +57,7 @@ void main() {
   for (final largura in const [320.0, 360.0]) {
     for (final escala in const [1.0, 1.3, 2.0]) {
       final rotulo = '${largura.toInt()}dp, fonte a ${(escala * 100).toInt()}%';
-      testWidgets('os cinco destinos cabem na barra inferior em $rotulo, sem rótulo cortado', (tester) async {
+      testWidgets('os seis destinos cabem na barra inferior em $rotulo, sem rótulo cortado', (tester) async {
         await abrirBackoffice(tester, tamanho: Size(largura, 640), escalaDeFonte: escala);
 
         final barra = find.byKey(const Key('admin_navigation_bar'));

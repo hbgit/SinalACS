@@ -1,0 +1,23 @@
+### Aviso comunitário agendado por staff (RF14, #46). O texto fica aqui porque o
+### staff o digitou para ser enviado; ele nunca vai para audit_logs.
+class: ScheduledNotice
+table: scheduled_notices
+fields:
+  id: UuidValue?, defaultPersist=random
+  createdBy: UuidValue, relation(parent=users)
+  microAreaId: UuidValue, relation(parent=micro_areas)
+  audience: String
+  title: String
+  message: String
+  scheduledFor: DateTime
+  status: ScheduledNoticeStatus
+  recipients: int?
+  accepted: int?
+  failureReason: String?
+  createdAt: DateTime
+  sentAt: DateTime?
+indexes:
+  scheduled_notices_due_idx:
+    fields: status, scheduledFor
+  scheduled_notices_area_idx:
+    fields: microAreaId, createdAt

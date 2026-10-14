@@ -21,6 +21,13 @@ admin:
   - resetAcsMfa:
   - resetStaffMfa:
   - escalateAlert:
+  - scheduleNotice:
+  - cancelScheduledNotice:
+  - noticeHistory:
+  - termsVersions:
+  - draftTermsVersion:
+  - markTermsReviewed:
+  - publishTermsVersion:
 alerts:
   - createRedAlert:
   - acknowledge:
