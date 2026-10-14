@@ -23,6 +23,16 @@ class _RecordingAudit extends AuditTrail {
       ];
 }
 
+class _ThrowingAudit extends AuditTrail {
+  var calls = 0;
+
+  @override
+  Future<void> record(AuditEvent event) async {
+    calls++;
+    throw StateError('auditoria fora do ar');
+  }
+}
+
 class _FakeStore implements TermsVersionStore {
   final rows = <String, TermsVersionSnapshot>{};
   var _seq = 0;
@@ -275,4 +285,133 @@ void main() {
     ]);
     expect(audit.dump.join().contains('PLACEHOLDER'), isFalse);
   });
+
+  group('auditoria fail-closed (record, nunca recordSafely)', () {
+    late _ThrowingAudit broken;
+    late TermsPublicationService svc;
+    final falha = throwsA(
+      isA<StateError>().having(
+        (e) => e.message,
+        'message',
+        'auditoria fora do ar',
+      ),
+    );
+
+    setUp(() {
+      broken = _ThrowingAudit();
+      svc = TermsPublicationService(
+        store: store,
+        audit: broken,
+        clock: () => now,
+      );
+    });
+
+    Future<TermsVersionSnapshot> seeded({bool reviewed = false}) async {
+      final d = await draft();
+      if (reviewed) await service.markReviewed(admin, d.id);
+      return d;
+    }
+
+    test('draft: auditoria falha propaga o erro', () async {
+      await expectLater(
+        svc.draft(
+          admin,
+          version: '2099.9',
+          summary: _placeholder,
+          effectiveFrom: now.add(const Duration(days: 20)),
+        ),
+        falha,
+      );
+    });
+
+    test('markReviewed: auditoria falha propaga o erro', () async {
+      final d = await seeded();
+      await expectLater(svc.markReviewed(admin, d.id), falha);
+    });
+
+    test(
+      'publish: auditoria falha propaga o erro (sucesso e denied_not_reviewed)',
+      () async {
+        final d = await seeded();
+        await expectLater(
+          svc.publish(admin, d.id),
+          falha,
+        ); // denied_not_reviewed
+        await service.markReviewed(admin, d.id);
+        await expectLater(svc.publish(admin, d.id), falha); // published
+      },
+    );
+
+    test(
+      'negação por papel continua negando: erro da trilha sobe, nada é gravado',
+      () async {
+        final d = await seeded();
+        await expectLater(
+          svc.publish(_user(UserRole.coordinator), d.id),
+          falha,
+        );
+        expect(store.rows[d.id]!.publishedAt, isNull);
+        expect(broken.calls, 1);
+      },
+    );
+
+    test('list: se a leitura não grava, o store NÃO é listado', () async {
+      await seeded();
+      final listados = <int>[];
+      final spy = _ListSpy(store, () => listados.add(1));
+      final s = TermsPublicationService(
+        store: spy,
+        audit: broken,
+        clock: () => now,
+      );
+      await expectLater(s.list(admin), falha);
+      expect(listados, isEmpty);
+    });
+  });
+}
+
+class _ListSpy implements TermsVersionStore {
+  _ListSpy(this._i, this._onList);
+  final _FakeStore _i;
+  final void Function() _onList;
+
+  @override
+  Future<List<TermsVersionSnapshot>> list() {
+    _onList();
+    return _i.list();
+  }
+
+  @override
+  Future<String> insertDraft({
+    required String version,
+    required String summary,
+    required DateTime effectiveFrom,
+    required String createdBy,
+    required DateTime createdAt,
+  }) => _i.insertDraft(
+    version: version,
+    summary: summary,
+    effectiveFrom: effectiveFrom,
+    createdBy: createdBy,
+    createdAt: createdAt,
+  );
+  @override
+  Future<TermsVersionSnapshot?> findById(String id) => _i.findById(id);
+  @override
+  Future<bool> versionExists(String v) => _i.versionExists(v);
+  @override
+  Future<bool> markReviewed(
+    String id, {
+    required String reviewedBy,
+    required DateTime at,
+  }) => _i.markReviewed(id, reviewedBy: reviewedBy, at: at);
+  @override
+  Future<bool> markPublished(
+    String id, {
+    required String publishedBy,
+    required DateTime at,
+  }) => _i.markPublished(id, publishedBy: publishedBy, at: at);
+  @override
+  Future<TermsVersionSnapshot?> currentPublished(DateTime n) =>
+      _i.currentPublished(n);
 }

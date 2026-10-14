@@ -168,14 +168,14 @@ class TermsPublicationService {
 
   Future<List<TermsVersionSnapshot>> list(AuthenticatedUser user) async {
     await _requireAdmin(user, null, actionType: 'read');
-    final rows = await _store.list();
-    await _audit.recordSafely(AuditEvent(
+    // Fail-closed: audita ANTES de listar.
+    await _audit.record(AuditEvent(
       userId: user.id,
       actionType: 'read',
       resourceType: 'terms_version',
       result: 'granted',
     ));
-    return rows;
+    return _store.list();
   }
 
   Future<TermsVersionSnapshot> _find(String id) async {
@@ -187,7 +187,7 @@ class TermsPublicationService {
   }
 
   Future<void> _write(AuthenticatedUser user, String id, String result) =>
-      _audit.recordSafely(AuditEvent(
+      _audit.record(AuditEvent(
         userId: user.id,
         actionType: 'write',
         resourceType: 'terms_version',
@@ -206,7 +206,7 @@ class TermsPublicationService {
     String actionType = 'write',
   }) async {
     if (user.role == UserRole.admin) return;
-    await _audit.recordSafely(AuditEvent(
+    await _audit.record(AuditEvent(
       userId: user.id,
       actionType: actionType,
       resourceType: 'terms_version',

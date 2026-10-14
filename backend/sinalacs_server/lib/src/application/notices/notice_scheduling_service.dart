@@ -253,7 +253,7 @@ class NoticeSchedulingService {
       scheduledFor: scheduledFor.toUtc(),
       createdAt: now.toUtc(),
     );
-    await _audit.recordSafely(AuditEvent(
+    await _audit.record(AuditEvent(
       userId: user.id,
       actionType: 'write',
       resourceType: 'community_notice',
@@ -283,7 +283,7 @@ class NoticeSchedulingService {
     if (!await _store.cancelIfPending(id)) {
       throw AdminInvalidRequestException(message: 'Só avisos pendentes podem ser cancelados.');
     }
-    await _audit.recordSafely(AuditEvent(
+    await _audit.record(AuditEvent(
       userId: user.id,
       actionType: 'write',
       resourceType: 'community_notice',
@@ -312,18 +312,19 @@ class NoticeSchedulingService {
         await _deny(user, microAreaId, 'denied_territory', actionType: 'read');
       }
     }
+    // Fail-closed: audita ANTES de consultar; se não grava, o store não é chamado.
+    await _audit.record(AuditEvent(
+      userId: user.id,
+      actionType: 'read',
+      resourceType: 'community_notice',
+      result: 'granted',
+    ));
     final rows = await _store.history(
       microAreaId: microAreaId,
       ubsId: ubsId,
       limit: limit.clamp(1, noticeHistoryMaxLimit),
       offset: offset < 0 ? 0 : offset,
     );
-    await _audit.recordSafely(AuditEvent(
-      userId: user.id,
-      actionType: 'read',
-      resourceType: 'community_notice',
-      result: 'granted',
-    ));
     return rows.map(NoticeHistoryItem.from).toList();
   }
 
@@ -405,16 +406,17 @@ class NoticeSchedulingService {
     r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$',
   );
 
-  /// Grava a negação (só ator e microárea; nunca o texto) e lança. O
-  /// `resourceId` vem do cliente: só vai se for UUID, senão a trilha ORM lançaria
-  /// e `recordSafely` engoliria a negação.
+  /// Grava a negação (só ator e microárea; nunca o texto) e lança. Fail-closed:
+  /// `record` (não `recordSafely`), então se a gravação falha a exceção sobe e a
+  /// operação continua negada. O `resourceId` vem do cliente: só vai se for UUID,
+  /// senão a trilha ORM lançaria.
   Future<Never> _deny(
     AuthenticatedUser user,
     String microAreaId,
     String result, {
     String actionType = 'write',
   }) async {
-    await _audit.recordSafely(AuditEvent(
+    await _audit.record(AuditEvent(
       userId: user.id,
       actionType: actionType,
       resourceType: 'community_notice',

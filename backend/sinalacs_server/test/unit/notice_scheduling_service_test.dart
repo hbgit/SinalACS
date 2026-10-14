@@ -18,6 +18,111 @@ class _RecordingAudit extends AuditTrail {
   Future<void> record(AuditEvent event) async => events.add(event);
 }
 
+class _ThrowingAudit extends AuditTrail {
+  var calls = 0;
+
+  @override
+  Future<void> record(AuditEvent event) async {
+    calls++;
+    throw StateError('auditoria fora do ar');
+  }
+}
+
+class _OrderAudit extends AuditTrail {
+  _OrderAudit(this.order);
+  final List<String> order;
+
+  @override
+  Future<void> record(AuditEvent event) async => order.add('audit');
+}
+
+/// Embrulha o fake e conta chamadas a `history`.
+class _CountingStore implements ScheduledNoticeStore {
+  _CountingStore(this._inner, this._onHistory);
+  final _FakeStore _inner;
+  final void Function() _onHistory;
+
+  @override
+  Future<List<ScheduledNoticeSnapshot>> history({
+    String? microAreaId,
+    String? ubsId,
+    required int limit,
+    required int offset,
+  }) {
+    _onHistory();
+    return _inner.history(
+      microAreaId: microAreaId,
+      ubsId: ubsId,
+      limit: limit,
+      offset: offset,
+    );
+  }
+
+  @override
+  Future<String?> ubsOfStaff(String userId) => _inner.ubsOfStaff(userId);
+  @override
+  Future<String?> ubsOfMicroArea(String id) => _inner.ubsOfMicroArea(id);
+  @override
+  Future<String> insert({
+    required String createdBy,
+    required String microAreaId,
+    required String audience,
+    required String title,
+    required String message,
+    required DateTime scheduledFor,
+    required DateTime createdAt,
+  }) => _inner.insert(
+    createdBy: createdBy,
+    microAreaId: microAreaId,
+    audience: audience,
+    title: title,
+    message: message,
+    scheduledFor: scheduledFor,
+    createdAt: createdAt,
+  );
+  @override
+  Future<ScheduledNoticeSnapshot?> findById(String id) => _inner.findById(id);
+  @override
+  Future<bool> cancelIfPending(String id) => _inner.cancelIfPending(id);
+  @override
+  Future<List<ScheduledNoticeSnapshot>> claimDue(
+    DateTime now, {
+    int limit = 20,
+  }) => _inner.claimDue(now, limit: limit);
+  @override
+  Future<void> finish(
+    String id, {
+    required ScheduledNoticeStatus status,
+    int? recipients,
+    int? accepted,
+    String? failureReason,
+    required DateTime at,
+  }) => _inner.finish(
+    id,
+    status: status,
+    recipients: recipients,
+    accepted: accepted,
+    failureReason: failureReason,
+    at: at,
+  );
+  @override
+  Future<int> markStaleSendingUnknown({
+    required DateTime before,
+    required String reason,
+    required DateTime at,
+  }) => _inner.markStaleSendingUnknown(before: before, reason: reason, at: at);
+}
+
+Future<String> _insertNotice(_FakeStore s) => s.insert(
+  createdBy: 'u',
+  microAreaId: _ma1,
+  audience: 'everyone',
+  title: 'T',
+  message: 'M',
+  scheduledFor: DateTime.utc(2030),
+  createdAt: DateTime.utc(2026),
+);
+
 class _RecipientStore implements NoticeRecipientStore {
   List<PushTarget> targets = const [PushTarget(token: 'tok', platform: 'android')];
 
@@ -762,5 +867,157 @@ void main() {
       sender.failure = const PushGatewayException('demorou', outcomeUnknown: true);
       return expectResult('unknown', ScheduledNoticeStatus.unknown);
     });
+  });
+
+  group('auditoria fail-closed (record, nunca recordSafely)', () {
+    late _ThrowingAudit broken;
+    late _FakeStore s2;
+    late NoticeSchedulingService svc;
+    var storeReads = 0;
+
+    setUp(() {
+      broken = _ThrowingAudit();
+      s2 = _FakeStore()..ubsOfMicroAreaMap[_ma1] = 'ubs-1';
+      storeReads = 0;
+      svc = NoticeSchedulingService(
+        store: _CountingStore(s2, () => storeReads++),
+        audit: broken,
+        clock: () => now,
+        sendNow:
+            ({
+              required microAreaId,
+              required audience,
+              required title,
+              required message,
+              required actorId,
+              auditResourceId,
+            }) async => const NoticeSendSnapshot(recipients: 0, accepted: 0),
+      );
+    });
+
+    test(
+      'negação por papel: se a auditoria falha, a exceção da trilha sobe (não vira sucesso)',
+      () async {
+        await expectLater(
+          svc.schedule(
+            _user(UserRole.acs, microAreaId: _ma1),
+            microAreaId: _ma1,
+            audience: 'everyone',
+            title: 'T',
+            message: 'M',
+            scheduledFor: now.add(const Duration(hours: 2)),
+          ),
+          throwsA(
+            isA<StateError>().having(
+              (e) => e.message,
+              'message',
+              'auditoria fora do ar',
+            ),
+          ),
+        );
+        expect(broken.calls, 1);
+        expect(s2.rows, isEmpty);
+      },
+    );
+
+    test('schedule: escrita ok mas auditoria falha propaga o erro', () async {
+      await expectLater(
+        svc.schedule(
+          _user(UserRole.admin),
+          microAreaId: _ma1,
+          audience: 'everyone',
+          title: 'T',
+          message: 'M',
+          scheduledFor: now.add(const Duration(hours: 2)),
+        ),
+        throwsA(
+          isA<StateError>().having(
+            (e) => e.message,
+            'message',
+            'auditoria fora do ar',
+          ),
+        ),
+      );
+      expect(broken.calls, 1);
+    });
+
+    test(
+      'cancel: auditoria falha propaga o erro (e negação continua negando)',
+      () async {
+        final id = await _insertNotice(s2);
+        await expectLater(
+          svc.cancel(_user(UserRole.admin), id),
+          throwsA(
+            isA<StateError>().having(
+              (e) => e.message,
+              'message',
+              'auditoria fora do ar',
+            ),
+          ),
+        );
+        await expectLater(
+          svc.cancel(_user(UserRole.patient), id),
+          throwsA(
+            isA<StateError>().having(
+              (e) => e.message,
+              'message',
+              'auditoria fora do ar',
+            ),
+          ),
+        );
+      },
+    );
+
+    test('history: se a leitura não grava, o store NÃO é chamado', () async {
+      await expectLater(
+        svc.history(_user(UserRole.admin)),
+        throwsA(
+          isA<StateError>().having(
+            (e) => e.message,
+            'message',
+            'auditoria fora do ar',
+          ),
+        ),
+      );
+      expect(storeReads, 0);
+      expect(s2.lastHistoryLimit, isNull);
+    });
+
+    test(
+      'history: negação com auditoria fora do ar propaga o erro da trilha',
+      () async {
+        await expectLater(
+          svc.history(_user(UserRole.patient)),
+          throwsA(
+            isA<StateError>().having(
+              (e) => e.message,
+              'message',
+              'auditoria fora do ar',
+            ),
+          ),
+        );
+        expect(s2.lastHistoryLimit, isNull);
+      },
+    );
+  });
+
+  test('history audita ANTES de consultar o store', () async {
+    final order = <String>[];
+    final svc = NoticeSchedulingService(
+      store: _CountingStore(store, () => order.add('store')),
+      audit: _OrderAudit(order),
+      clock: () => now,
+      sendNow:
+          ({
+            required microAreaId,
+            required audience,
+            required title,
+            required message,
+            required actorId,
+            auditResourceId,
+          }) async => const NoticeSendSnapshot(recipients: 0, accepted: 0),
+    );
+    await svc.history(_user(UserRole.admin));
+    expect(order, ['audit', 'store']);
   });
 }
