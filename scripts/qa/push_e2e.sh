@@ -184,9 +184,9 @@ echo "$saida"
 grep -q 'recipients=1 accepted=1' <<<"$saida" || { echo 'FALHOU: esperado recipients=1 accepted=1'; exit 1; }
 # A entrega pelo FCM leva de 1 a dezenas de segundos: espera o texto aparecer em vez de
 # dormir um tempo fixo (um `sleep` curto é uma corrida com a rede do emulador).
-na_bandeja() { # $1 = texto que deve estar na bandeja do app; espera até 45 s
+na_bandeja() { # $1 = texto que deve estar na bandeja do app; $2 = espera máxima em s (padrão 45)
   local _ dump
-  for _ in $(seq 1 45); do
+  for _ in $(seq 1 "${2:-45}"); do
     # Captura antes de filtrar: `grep -q` fecha o pipe no 1º achado, e sob `pipefail` o
     # SIGPIPE do `grep -A` viraria um "não achou" falso.
     dump="$(adb -s "$dev" shell dumpsys notification --noredact 2>/dev/null || true)"
@@ -200,6 +200,34 @@ na_bandeja 'Teste do Gorush' || { echo 'FALHOU: texto não está na bandeja'; ex
 [[ "$(psql_q "select result from audit_logs where \"resourceType\"='community_notice' order by timestamp desc limit 1" | head -1)" == granted ]] \
   || { echo 'FALHOU: auditoria não é granted'; exit 1; }
 echo 'caminho feliz: OK'
+
+# -- aviso agendado (#46) --------------------------------------------------------
+# O login de staff exige TOTP e não é scriptável aqui: o aviso entra direto na fila
+# (seed_e2e_scheduled_notice.dart) e o laço REAL do servidor (NoticeDispatchLoop, 30 s)
+# faz a reserva, o envio por Gorush/FCM e a auditoria. O endpoint HTTP e as negações por
+# papel são cobertos por admin_endpoint_notices_test.dart.
+if [[ "$e2e_db" -eq 1 ]]; then
+  echo "== aviso agendado (disparado pelo laço do servidor)"
+  adb -s "$dev" shell cmd notification cancel_all >/dev/null 2>&1 || true
+  adb -s "$dev" shell input keyevent KEYCODE_HOME
+  saida="$(./scripts/qa/e2e_stack.sh schedule-notice)"
+  echo "$saida"
+  agendado_id="$(sed -n 's/.*id=\([0-9a-f-]\{36\}\)).*/\1/p' <<<"$saida" | head -1)"
+  [[ -n "$agendado_id" ]] || { echo 'FALHOU: o aviso agendado não foi criado'; exit 1; }
+  # 20 s até o vencimento + até 30 s do ciclo do laço + a entrega pelo FCM.
+  na_bandeja 'SinalACS agendado e2e' 90 || { echo 'FALHOU: título do aviso agendado não está na bandeja'; exit 1; }
+  na_bandeja 'Aviso agendado do Gorush' 10 || { echo 'FALHOU: texto do aviso agendado não está na bandeja'; exit 1; }
+  linha="$(psql_q "select status, coalesce(recipients,0), coalesce(accepted,0) from scheduled_notices where id='$agendado_id'" | head -1)"
+  [[ "$linha" =~ ^sent\|([0-9]+)\|([0-9]+)$ ]] && (( BASH_REMATCH[1] >= 1 && BASH_REMATCH[2] >= 1 )) \
+    || { echo "FALHOU: esperado status=sent com recipients>=1 e accepted>=1; obtido: ${linha:-nenhuma linha}"; exit 1; }
+  admin_id="$(python3 -c "import json;print(json.load(open('.e2e/fixtures.json'))['staff']['id'])")"
+  auditado="$(psql_q "select count(*) from audit_logs where \"resourceType\"='community_notice' and result='granted' and \"resourceId\"='$agendado_id' and \"userId\"='$admin_id'" | head -1)"
+  [[ "$auditado" -ge 1 ]] \
+    || { echo 'FALHOU: auditoria community_notice/granted do aviso agendado (resourceId = id do aviso, userId = admin) não encontrada'; exit 1; }
+  echo 'aviso agendado: OK'
+else
+  echo '(aviso agendado pulado: exige --e2e-db, pois o staff do banco de desenvolvimento não tem fixtures)'
+fi
 
 # -- casos negativos -------------------------------------------------------------
 if [[ "$negativos" -eq 1 ]]; then

@@ -1,0 +1,27 @@
+# push_e2e.sh --e2e-db --negativos, 2026-10-14 (resumo; sem tokens/segredos)
+chave ok
+== stack de e2e (banco de teste) com o Gorush
+Fixtures de e2e gravadas (5 pacientes, 2 ACS, 1 admin, 1 coordenador) em ../../.e2e/fixtures.json.
+== registro do token FCM real (segura o app por 240 s)
+tokens no banco: 1
+== envio do ACS
+recipients=1 accepted=1 rc=0
+caminho feliz: OK
+== aviso agendado (disparado pelo laço do servidor)
+Aviso agendado de e2e criado (id=3ae3dc96-997b-48ad-afeb-bf1b1ba48505).
+aviso agendado: OK
+== token falso (android) + token ios, com o real vivo
+recipients=3 accepted=2 rc=0
+token falso podado, ios mantido, token real recebeu: OK
+== Gorush parado, com tokens no banco
+falhou: Não foi possível entregar o aviso agora. Tente de novo em instantes. rc=2
+Gorush parado: OK
+== revogar zera os destinatários
+(aguardando 5s: intervalo mínimo entre dois OTP do mesmo paciente)
+consent=revoked
+recipients=0 accepted=0 rc=0
+(aguardando 62s: intervalo mínimo entre dois OTP do mesmo paciente)
+consent=granted
+revogação: OK
+
+OK — o aviso chegou ao emulador
