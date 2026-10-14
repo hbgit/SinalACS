@@ -278,7 +278,10 @@ Future<void> _abrirApp(WidgetTester tester) async {
 }
 
 Future<void> _irPara(WidgetTester tester, String destino) async {
-  await _tocar(tester, find.text(destino).last);
+  // Na barra inferior do celular o rótulo é curto ('Áreas'); o nome completo
+  // fica no tooltip.
+  final porTexto = find.text(destino);
+  await _tocar(tester, (porTexto.evaluate().isNotEmpty ? porTexto : find.byTooltip(destino)).last);
   await tester.pump(const Duration(milliseconds: 300));
 }
 

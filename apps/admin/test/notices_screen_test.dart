@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:sinalacs_admin/app/admin_async_states.dart';
 import 'package:sinalacs_admin/app/admin_theme.dart';
 import 'package:sinalacs_admin/app/notices_screen.dart';
 import 'package:sinalacs_admin/core/data/admin_data_source.dart';
@@ -21,10 +22,25 @@ class _FakeAvisos extends MockAdminDataSource {
   final List<String> cancelados = [];
   Completer<void>? portao;
   Object? erroNoCancelamento;
+  Object? erroNaCarga;
+  final List<(String, String)> acessos = [];
+  final List<(int, int)> leituras = [];
+
+  @override
+  Future<void> recordAccess({required String actionType, required String resourceType}) async {
+    acessos.add((actionType, resourceType));
+  }
 
   @override
   Future<List<NoticeHistoryItem>> fetchNoticeHistory({String? microAreaId, int limit = 50, int offset = 0}) async =>
-      [for (final i in itens) i];
+      _ler(limit, offset);
+
+  Future<List<NoticeHistoryItem>> _ler(int limit, int offset) async {
+    leituras.add((limit, offset));
+    final erro = erroNaCarga;
+    if (erro != null) throw erro;
+    return [for (final i in itens) i];
+  }
 
   @override
   Future<void> cancelScheduledNotice(String id) async {
@@ -60,16 +76,27 @@ NoticeHistoryItem _item(
       failureReason: failureReason,
     );
 
-Future<void> _abrir(WidgetTester tester, AdminDataSource fonte, {String role = 'admin'}) async {
+Future<void> _abrir(WidgetTester tester, AdminDataSource fonte, {String role = 'admin', VoidCallback? aoVencer, bool assentar = true}) async {
   redimensionar(tester, const Size(1024, 900));
   addTearDown(tester.view.reset);
   await tester.pumpWidget(
     MaterialApp(
       theme: buildAdminTheme(),
-      home: Scaffold(body: NoticesScreen(dataSource: fonte, role: role, now: () => _agora)),
+      home: Scaffold(
+        body: AdminSessionScope(
+          aoVencer: aoVencer ?? () {},
+          child: NoticesScreen(dataSource: fonte, role: role, now: () => _agora),
+        ),
+      ),
     ),
   );
-  await tester.pumpAndSettle();
+  // Sessão vencida deixa um spinner girando: pumpAndSettle nunca assentaria.
+  if (assentar) {
+    await tester.pumpAndSettle();
+  } else {
+    await tester.pump();
+    await tester.pump();
+  }
 }
 
 Future<void> _tocar(WidgetTester tester, Finder alvo) async {
@@ -184,6 +211,51 @@ void main() {
     await _tocar(tester, find.byKey(const Key('notice_cancel_n-pend')));
     await _tocar(tester, find.byKey(const Key('notice_cancel_confirm')));
     expect(find.text('Só avisos pendentes podem ser cancelados.'), findsOneWidget);
+  });
+
+  testWidgets('selos de unknown, failed e cancelled com texto exato e ícone', (tester) async {
+    final fonte = _FakeAvisos([
+      _item('n-unk', status: NoticeStatus.unknown),
+      _item('n-fail', status: NoticeStatus.failed),
+      _item('n-can', status: NoticeStatus.cancelled),
+      _item('n-sent', status: NoticeStatus.sent),
+    ]);
+    await _abrir(tester, fonte);
+    expect(find.text('Resultado desconhecido — confira antes de reenviar'), findsOneWidget);
+    expect(find.text('Falhou'), findsOneWidget);
+    expect(find.text('Cancelado'), findsOneWidget);
+    for (final (id, icone) in [
+      ('n-unk', Icons.help_outline),
+      ('n-fail', Icons.error_outline),
+      ('n-can', Icons.block),
+      ('n-sent', Icons.check_circle_outline),
+    ]) {
+      expect(find.descendant(of: find.byKey(Key('notice_row_$id')), matching: find.byIcon(icone)), findsOneWidget, reason: id);
+    }
+  });
+
+  testWidgets('a carga registra o acesso e lê o histórico com limit 50, offset 0', (tester) async {
+    final fonte = _FakeAvisos([]);
+    await _abrir(tester, fonte);
+    expect(fonte.acessos, [('view', 'community_notices')]);
+    expect(fonte.leituras, [(50, 0)]);
+  });
+
+  testWidgets('AdminSessionExpired na carga chama o callback da sessão', (tester) async {
+    var chamadas = 0;
+    final fonte = _FakeAvisos([])..erroNaCarga = const AdminSessionExpired();
+    await _abrir(tester, fonte, aoVencer: () => chamadas++, assentar: false);
+    expect(chamadas, greaterThanOrEqualTo(1));
+  });
+
+  testWidgets('AdminSessionExpired no cancelamento chama o callback da sessão', (tester) async {
+    var chamadas = 0;
+    final fonte = _FakeAvisos([_item('n-pend', status: NoticeStatus.pending)])
+      ..erroNoCancelamento = const AdminSessionExpired();
+    await _abrir(tester, fonte, aoVencer: () => chamadas++);
+    await _tocar(tester, find.byKey(const Key('notice_cancel_n-pend')));
+    await _tocar(tester, find.byKey(const Key('notice_cancel_confirm')));
+    expect(chamadas, 1);
   });
 
   testWidgets('histórico vazio mostra mensagem própria', (tester) async {

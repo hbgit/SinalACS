@@ -249,7 +249,10 @@ Future<void> _abrirApp(WidgetTester tester) async {
 }
 
 Future<void> _abrirAuditoria(WidgetTester tester) async {
-  final destino = find.text('Auditoria');
+  // Na barra inferior do celular o rótulo curto é 'Trilha'; o nome completo
+  // fica no tooltip.
+  final porTexto = find.text('Auditoria');
+  final destino = porTexto.evaluate().isNotEmpty ? porTexto : find.byTooltip('Auditoria');
   expect(destino, findsWidgets, reason: 'a navegação não tem "Auditoria"');
   await tester.tap(destino.last);
   await tester.pump(const Duration(milliseconds: 500));

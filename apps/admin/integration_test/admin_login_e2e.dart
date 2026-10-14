@@ -212,7 +212,8 @@ void main() {
     expect(find.textContaining('Paciente E2E'), findsNothing, reason: 'nome de paciente nunca aparece');
 
     // Auditoria: a leitura do próprio admin ficou registrada pelo servidor.
-    await tester.tap(find.text('Auditoria').last);
+    final auditoriaPorTexto = find.text('Auditoria');
+    await tester.tap((auditoriaPorTexto.evaluate().isNotEmpty ? auditoriaPorTexto : find.byTooltip('Auditoria')).last);
     await tester.pump(const Duration(milliseconds: 300));
     // Desde a #45 o painel da cadeia e os filtros ficam acima da lista, que é
     // preguiçosa: num celular a linha de indicadores nasce abaixo da dobra.
