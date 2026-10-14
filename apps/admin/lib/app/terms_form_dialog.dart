@@ -140,56 +140,56 @@ class _TermsFormDialogState extends State<TermsFormDialog> {
           content: SizedBox(
             width: 560,
             child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  TextField(
-                    key: const Key('terms_version'),
-                    controller: _versao,
-                    autofocus: true,
-                    enabled: !_enviando,
-                    decoration: const InputDecoration(labelText: 'Versão'),
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                TextField(
+                  key: const Key('terms_version'),
+                  controller: _versao,
+                  autofocus: true,
+                  enabled: !_enviando,
+                  decoration: const InputDecoration(labelText: 'Versão'),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  key: const Key('terms_summary'),
+                  controller: _resumo,
+                  enabled: !_enviando,
+                  maxLength: 280,
+                  minLines: 3,
+                  maxLines: 5,
+                  decoration: const InputDecoration(
+                    labelText: 'Resumo',
+                    helperText: 'Resumo público exibido no cartão do paciente.',
                   ),
-                  const SizedBox(height: 8),
-                  TextField(
-                    key: const Key('terms_summary'),
-                    controller: _resumo,
-                    enabled: !_enviando,
-                    maxLength: 280,
-                    minLines: 3,
-                    maxLines: 5,
-                    decoration: const InputDecoration(
-                      labelText: 'Resumo',
-                      helperText: 'Resumo público exibido no cartão do paciente.',
+                ),
+                const SizedBox(height: 8),
+                OutlinedButton.icon(
+                  key: const Key('terms_date'),
+                  style: OutlinedButton.styleFrom(minimumSize: _alvoMinimo),
+                  onPressed: _enviando ? null : _escolherData,
+                  icon: const Icon(Icons.calendar_today),
+                  label: Text('Vigora em ${formatarDataTermos(_vigencia)}'),
+                ),
+                const SizedBox(height: 8),
+                const Text('A vigência exige 15 dias de antecedência para publicar.'),
+                if (_erro != null) ...[
+                  const SizedBox(height: 12),
+                  Semantics(
+                    liveRegion: true,
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Icon(Icons.error_outline, size: 18, color: AdminColors.redOnSurface),
+                        const SizedBox(width: 6),
+                        Flexible(
+                          child: Text(_erro!, style: const TextStyle(color: AdminColors.redOnSurface, fontWeight: FontWeight.bold)),
+                        ),
+                      ],
                     ),
                   ),
-                  const SizedBox(height: 8),
-                  OutlinedButton.icon(
-                    key: const Key('terms_date'),
-                    style: OutlinedButton.styleFrom(minimumSize: _alvoMinimo),
-                    onPressed: _enviando ? null : _escolherData,
-                    icon: const Icon(Icons.calendar_today),
-                    label: Text('Vigora em ${formatarDataTermos(_vigencia)}'),
-                  ),
-                  const SizedBox(height: 8),
-                  const Text('A vigência exige 15 dias de antecedência para publicar.'),
-                  if (_erro != null) ...[
-                    const SizedBox(height: 12),
-                    Semantics(
-                      liveRegion: true,
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Icon(Icons.error_outline, size: 18, color: AdminColors.redOnSurface),
-                          const SizedBox(width: 6),
-                          Flexible(
-                            child: Text(_erro!, style: const TextStyle(color: AdminColors.redOnSurface, fontWeight: FontWeight.bold)),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
                 ],
+              ],
             ),
           ),
           actions: [

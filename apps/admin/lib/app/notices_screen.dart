@@ -72,8 +72,8 @@ class NoticesScreen extends StatelessWidget {
         children: [
           TabBar(
             tabs: [
-              const Tab(key: Key('notices_tab_history'), text: 'Avisos'),
-              if (admin) const Tab(key: Key('notices_tab_terms'), text: 'Termos'),
+              const Tab(key: Key('notices_tab_history'), height: 48, text: 'Avisos'),
+              if (admin) const Tab(key: Key('notices_tab_terms'), height: 48, text: 'Termos'),
             ],
           ),
           Expanded(

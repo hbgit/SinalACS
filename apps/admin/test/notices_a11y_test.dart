@@ -29,7 +29,26 @@ DateTime _emDias(int dias) {
 }
 
 class _Dados extends MockAdminDataSource {
-  _Dados({this.vazio = false, this.falhaNoAgendamento, this.falhaNoRascunho});
+  _Dados({this.vazio = false, this.falhaNoAgendamento, this.falhaNoRascunho, this.nomeDaArea});
+
+  /// Nome de microárea forçado (para o caso de nome longo).
+  final String? nomeDaArea;
+
+  @override
+  Future<List<MicroAreaSummary>> fetchMicroAreas() async {
+    final areas = await super.fetchMicroAreas();
+    final nome = nomeDaArea;
+    if (nome == null) return areas;
+    return [
+      MicroAreaSummary(
+        id: areas.first.id,
+        name: nome,
+        acsName: areas.first.acsName,
+        acsEnrollmentId: areas.first.acsEnrollmentId,
+        acsActive: areas.first.acsActive,
+      ),
+    ];
+  }
 
   final bool vazio;
   final Object? falhaNoAgendamento;
@@ -212,6 +231,21 @@ const _termosPorEstado = <String, (String, IconData)>{
 
 void main() {
   group('alvos de toque >= 48dp (altura pintada e alvo)', () {
+    testWidgets('sub-abas Avisos e Termos (admin) têm alvo de 48dp', (tester) async {
+      await _abrirAvisos(tester);
+      for (final chave in const ['notices_tab_history', 'notices_tab_terms']) {
+        final aba = find.byKey(Key(chave));
+        expect(aba, findsOneWidget, reason: chave);
+        // A Tab não tem Material interno: o próprio alvo é o que se pinta.
+        expect(tester.getSize(aba).height, greaterThanOrEqualTo(_alvo), reason: '$chave (alvo de toque)');
+      }
+    });
+
+    testWidgets('sub-aba Avisos (coordenador) tem alvo de 48dp', (tester) async {
+      await _abrirAvisos(tester, papel: 'coordinator');
+      expect(tester.getSize(find.byKey(const Key('notices_tab_history'))).height, greaterThanOrEqualTo(_alvo));
+    });
+
     testWidgets('aba Avisos: Novo aviso, Cancelar do cartão e diálogo de cancelamento', (tester) async {
       await _abrirAvisos(tester);
 
@@ -350,6 +384,18 @@ void main() {
           esperarSemEstouroDeLayout(tester, 'formulário de aviso com erro, rodapé ($cenario)');
         });
 
+        testWidgets('formulário de aviso com nome de microárea LONGO, $cenario', (tester) async {
+          await _abrirAvisos(
+            tester,
+            tamanho: tamanho,
+            escala: escala,
+            dados: _Dados(nomeDaArea: 'Microárea 01 - Conjunto Habitacional Vila Nova Esperança, Ruas das Acácias e dos Ipês Amarelos'),
+          );
+          await _tocar(tester, find.byKey(const Key('notice_new_button')));
+          final rolagem = find.descendant(of: find.byType(AlertDialog), matching: find.byType(Scrollable)).first;
+          await percorrerTelaInteira(tester, 'formulário de aviso, nome longo ($cenario)', lista: rolagem);
+        });
+
         testWidgets('Termos (admin): rascunho, revisada, prazo esgotado e publicada, $cenario', (tester) async {
           await _abrirTermos(tester, tamanho: tamanho, escala: escala);
           await percorrerTelaInteira(tester, 'Termos ($cenario)');
@@ -471,16 +517,16 @@ void main() {
   });
 
   group('semântica', () {
-    testWidgets('não há botão só-ícone sem tooltip nas duas abas', (tester) async {
+    testWidgets('premissa: as telas novas não têm botão só-ícone (todo botão tem rótulo de texto)', (tester) async {
+      // Se alguém introduzir um IconButton aqui, este teste força a decisão:
+      // dar-lhe tooltip e cobri-lo nos testes de alvo e de semântica.
       await _abrirTermos(tester);
-      for (final botao in tester.widgetList<IconButton>(find.byType(IconButton))) {
-        expect(botao.tooltip, isNotNull, reason: 'IconButton sem tooltip');
-      }
+      expect(find.byType(IconButton), findsNothing, reason: 'aba Termos');
       await tester.tap(find.byKey(const Key('notices_tab_history')));
       await tester.pumpAndSettle();
-      for (final botao in tester.widgetList<IconButton>(find.byType(IconButton))) {
-        expect(botao.tooltip, isNotNull, reason: 'IconButton sem tooltip');
-      }
+      expect(find.byType(IconButton), findsNothing, reason: 'aba Avisos');
+      await _tocar(tester, find.byKey(const Key('notice_new_button')));
+      expect(find.byType(IconButton), findsNothing, reason: 'formulário de aviso');
     });
 
     testWidgets('selos de aviso têm ícone E texto (não dependem só de cor)', (tester) async {
