@@ -9,6 +9,7 @@ import 'package:flutter/material.dart';
 import 'package:sinalacs_admin/app/admin_async_states.dart';
 import 'package:sinalacs_admin/app/admin_theme.dart';
 import 'package:sinalacs_admin/app/notice_form_dialog.dart';
+import 'package:sinalacs_admin/app/terms_panel.dart';
 import 'package:sinalacs_admin/core/data/admin_data_source.dart';
 
 String noticeStatusLabel(NoticeStatus status) => switch (status) {
@@ -79,8 +80,7 @@ class NoticesScreen extends StatelessWidget {
             child: TabBarView(
               children: [
                 _NoticeHistory(dataSource: dataSource, now: now),
-                // provisório: a Task 3.5 troca por TermsPanel
-                if (admin) const Center(child: Text('Termos')),
+                if (admin) TermsPanel(dataSource: dataSource, now: now),
               ],
             ),
           ),

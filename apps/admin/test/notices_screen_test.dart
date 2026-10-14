@@ -123,6 +123,9 @@ void main() {
     await _abrir(tester, MockAdminDataSource(now: () => _agora), role: 'admin');
     expect(find.byKey(const Key('notices_tab_terms')), findsOneWidget);
     expect(find.byKey(const Key('notice_new_button')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('notices_tab_terms')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('terms_new_button')), findsOneWidget);
   });
 
   testWidgets('histórico: título, microárea, status e contagens; a mensagem nunca aparece', (tester) async {
