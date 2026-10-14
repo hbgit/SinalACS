@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'admin_data_source.dart';
 
 /// Implementação mock de [AdminDataSource]. Todos os dados são fictícios
@@ -31,6 +33,16 @@ class MockAdminDataSource implements AdminDataSource {
   /// Chamadas a [verifyAuditChain] e consultas à trilha, para os testes.
   int verifyChainCalls = 0;
   final List<AuditQuery> auditQueries = [];
+
+  /// Exportação (#45, Task 11). [exportResult] fixa o resultado (sem ele, o
+  /// mock monta um a partir do recorte semeado); [exportError], quando não
+  /// nulo, é lançado; [exportGate] segura a resposta até o teste completá-lo.
+  /// [exportCalls] conta toda chamada, inclusive as que falham.
+  AuditExportResult? exportResult;
+  Object? exportError;
+  Completer<void>? exportGate;
+  int exportCalls = 0;
+  AuditLogFilter? lastExportFilter;
 
   final DateTime Function() _now;
 
@@ -388,6 +400,40 @@ class MockAdminDataSource implements AdminDataSource {
           headSequence: _auditSeq,
           verifiedAt: _now(),
         );
+  }
+
+  @override
+  Future<AuditExportResult> exportAuditLogs(AuditLogFilter filter) async {
+    exportCalls++;
+    lastExportFilter = filter;
+    if (filter.from == null || filter.to == null) {
+      // O servidor recusaria; a tela nunca pede assim (botão desabilitado).
+      throw ArgumentError('exportação exige início e fim do período');
+    }
+    final portao = exportGate;
+    if (portao != null) await portao.future;
+    final erro = exportError;
+    if (erro != null) throw erro;
+    final pronto = exportResult;
+    if (pronto != null) return pronto;
+
+    final recorte = [for (final e in _auditLog) if (_casa(e, filter)) e];
+    final csv = StringBuffer('sequence,timestamp_utc,autor,papel_autor,acao,recurso,rotulo_recurso,resultado,selo\r\n');
+    for (final e in recorte) {
+      csv.write('${e.sequence},${e.timestamp.toUtc().toIso8601String()},${e.userLabel},,'
+          '${e.actionType},${e.resourceType},,${e.result},${e.seal.name}\r\n');
+    }
+    return AuditExportResult(
+      fileName: 'auditoria_mock.csv',
+      csv: csv.toString(),
+      rowCount: recorte.length,
+      firstSequence: recorte.isEmpty ? null : recorte.first.sequence,
+      lastSequence: recorte.isEmpty ? null : recorte.last.sequence,
+      // Fictício: o mock não calcula hash (sem pacote de criptografia no app).
+      contentSha256: '0' * 64,
+      chainState: AuditIntegrityState.verified,
+      generatedAt: _now().toUtc(),
+    );
   }
 
   @override

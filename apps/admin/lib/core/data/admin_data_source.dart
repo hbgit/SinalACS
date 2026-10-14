@@ -282,6 +282,72 @@ class ChainStatus {
   final DateTime verifiedAt;
 }
 
+/// Resultado de uma exportação da trilha (#45, Task 11). Espelha
+/// `AdminAuditExport`. [csv] é o arquivo inteiro e só vive em memória, no
+/// estado da tela, até o usuário fechar o resultado ou sair dela: o app nunca o
+/// grava em disco nem o registra em log.
+class AuditExportResult {
+  const AuditExportResult({
+    required this.fileName,
+    required this.csv,
+    required this.rowCount,
+    this.firstSequence,
+    this.lastSequence,
+    required this.contentSha256,
+    required this.chainState,
+    required this.generatedAt,
+  });
+
+  final String fileName;
+  final String csv;
+  final int rowCount;
+
+  /// Nulas com recorte vazio.
+  final int? firstSequence;
+  final int? lastSequence;
+
+  /// SHA-256 (hex minúsculo) do CSV, o mesmo gravado no servidor.
+  final String contentSha256;
+
+  /// Estado da cadeia no momento da exportação, exatamente como veio: só
+  /// [AuditIntegrityState.verified] é íntegro.
+  final AuditIntegrityState chainState;
+  final DateTime generatedAt;
+}
+
+/// Por que uma exportação falhou. O texto de cada uma é fixo do app: o motivo
+/// do servidor nunca chega à tela.
+enum AuditExportFailureKind {
+  /// Recorte acima do teto do servidor (`AdminInvalidRequestException`).
+  tooManyRows,
+
+  /// Recusa de papel ou escopo (`AlertPermissionException` dentro da sessão).
+  forbidden,
+
+  /// Qualquer outra falha: erro do servidor (500 sem mensagem), rede, tempo.
+  failed,
+}
+
+/// Falha de [AdminDataSource.exportAuditLogs]. Sessão vencida não é esta
+/// falha: continua [AdminSessionExpired], que leva ao login.
+class AuditExportFailure implements Exception {
+  const AuditExportFailure(this.kind);
+
+  final AuditExportFailureKind kind;
+
+  String get message => switch (kind) {
+        AuditExportFailureKind.tooManyRows => 'Há registros demais; estreite o período.',
+        AuditExportFailureKind.forbidden => 'Você não tem permissão para exportar a trilha de auditoria.',
+        AuditExportFailureKind.failed => 'Não foi possível gerar a exportação. Tente novamente.',
+      };
+
+  /// Só uma falha geral vale tentar de novo: as outras falhariam igual.
+  bool get canRetry => kind == AuditExportFailureKind.failed;
+
+  @override
+  String toString() => 'AuditExportFailure: ${kind.name}';
+}
+
 /// Espelha `DataSubjectRequestType` (`enums/data_subject_request_type.spy.yaml`).
 enum DataRequestType { deletion, correction }
 
@@ -526,6 +592,12 @@ abstract interface class AdminDataSource {
 
   /// Verificação global da cadeia, feita pelo servidor (#45, D9).
   Future<ChainStatus> verifyAuditChain();
+
+  /// Exporta em CSV o recorte de [filter] (#45, D5–D8). Só o administrador
+  /// exporta e o servidor exige [AuditLogFilter.from] e [AuditLogFilter.to].
+  /// Cada exportação, inclusive a recusada, é registrada na trilha. Falhas
+  /// saem como [AuditExportFailure] ou [AdminSessionExpired].
+  Future<AuditExportResult> exportAuditLogs(AuditLogFilter filter);
 
   /// Escalona um alerta vermelho pendente vencido (#44). Idempotente. A recusa
   /// de negócio sai como [AdminValidationFailure] com o texto do servidor.

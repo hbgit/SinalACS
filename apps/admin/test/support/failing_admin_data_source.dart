@@ -155,6 +155,12 @@ class FailingAdminDataSource implements AdminDataSource {
   }
 
   @override
+  Future<AuditExportResult> exportAuditLogs(AuditLogFilter filter) async {
+    await _lancaSeProgramado();
+    return inner.exportAuditLogs(filter);
+  }
+
+  @override
   Future<void> recordAccess({required String actionType, required String resourceType}) async {
     recordAccessCalls++;
     if (failNextRecordAccess) {

@@ -288,6 +288,40 @@ class BackendAdminDataSource implements AdminDataSource {
   });
 
   @override
+  Future<AuditExportResult> exportAuditLogs(AuditLogFilter filter) async {
+    try {
+      final r = await _admin.exportAuditLogs(
+        accessToken: _accessToken,
+        filter: _filtroDoCliente(filter),
+      );
+      return AuditExportResult(
+        fileName: r.fileName,
+        csv: r.csv,
+        rowCount: r.rowCount,
+        firstSequence: r.firstSequence,
+        lastSequence: r.lastSequence,
+        contentSha256: r.contentSha256,
+        chainState: AuditIntegrityState.values.byName(r.chainState.name),
+        generatedAt: r.generatedAt,
+      );
+    } on api.ServerpodClientUnauthorized {
+      throw const AdminSessionExpired();
+    } on api.AlertPermissionException {
+      final venceu = _expiresAt != null && !_now().isBefore(_expiresAt);
+      if (venceu) throw const AdminSessionExpired();
+      throw const AuditExportFailure(AuditExportFailureKind.forbidden);
+    } on api.AdminInvalidRequestException {
+      // A tela só pede com início e fim válidos (as mesmas regras do servidor),
+      // então a recusa que sobra é o teto de linhas.
+      throw const AuditExportFailure(AuditExportFailureKind.tooManyRows);
+    } on Exception {
+      // `AuditExportFailedException` do servidor não é serializável: chega como
+      // 500 sem mensagem, igual a qualquer outra falha. Rede e tempo idem.
+      throw const AuditExportFailure(AuditExportFailureKind.failed);
+    }
+  }
+
+  @override
   Future<List<DataRequestSummary>> fetchDataRequests({
     DataRequestStatus? status,
     int limit = 50,

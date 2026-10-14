@@ -701,4 +701,125 @@ void main() {
       );
     });
   });
+
+  group('exportação da trilha (#45, Task 11)', () {
+    final em = DateTime.utc(2026, 10, 13, 12);
+    final filtro = AuditLogFilter(
+      from: DateTime.utc(2026, 10, 1, 12),
+      to: DateTime.utc(2026, 10, 5, 21),
+      actorRole: AuditActorRole.acs,
+      search: 'ACS',
+    );
+
+    test('manda token e filtro (papel por nome, período em UTC) e mapeia o resultado', () async {
+      final caller = FakeEndpointCaller(
+        result: api.AdminAuditExport(
+          fileName: 'auditoria_x.csv',
+          csv: 'sequence\r\n3\r\n',
+          rowCount: 1,
+          firstSequence: 3,
+          lastSequence: 3,
+          contentSha256: 'ab' * 32,
+          chainState: api.AuditIntegrityState.inconclusive,
+          generatedAt: em,
+        ),
+      );
+      final r = await _fonte(caller).exportAuditLogs(filtro);
+
+      expect(caller.lastArgs!['accessToken'], 'token-de-teste');
+      final enviado = caller.lastArgs!['filter'] as api.AdminAuditFilter;
+      expect(enviado.from, filtro.from);
+      expect(enviado.to, filtro.to);
+      expect(enviado.actorRole, api.UserRole.acs);
+      expect(enviado.search, 'ACS');
+
+      expect(r.fileName, 'auditoria_x.csv');
+      expect(r.csv, 'sequence\r\n3\r\n');
+      expect(r.rowCount, 1);
+      expect(r.firstSequence, 3);
+      expect(r.lastSequence, 3);
+      expect(r.contentSha256, 'ab' * 32);
+      expect(r.chainState, AuditIntegrityState.inconclusive, reason: 'o estado vem como está, nunca promovido');
+      expect(r.generatedAt, em);
+    });
+
+    test('recorte vazio: sequences nulas continuam nulas', () async {
+      final caller = FakeEndpointCaller(
+        result: api.AdminAuditExport(
+          fileName: 'f.csv',
+          csv: 'h\r\n',
+          rowCount: 0,
+          contentSha256: 'cd' * 32,
+          chainState: api.AuditIntegrityState.verified,
+          generatedAt: em,
+        ),
+      );
+      final r = await _fonte(caller).exportAuditLogs(filtro);
+      expect(r.firstSequence, isNull);
+      expect(r.lastSequence, isNull);
+    });
+
+    test('teto de linhas (AdminInvalidRequestException) vira tooManyRows, sem o texto do servidor', () async {
+      final caller = FakeEndpointCaller(
+        error: api.AdminInvalidRequestException(message: 'O recorte passa de 5000 linhas. detalhe do servidor'),
+      );
+      await expectLater(
+        _fonte(caller).exportAuditLogs(filtro),
+        throwsA(
+          isA<AuditExportFailure>()
+              .having((f) => f.kind, 'kind', AuditExportFailureKind.tooManyRows)
+              .having((f) => f.message, 'message', 'Há registros demais; estreite o período.'),
+        ),
+      );
+    });
+
+    test('recusa de permissão vira forbidden com texto fixo, sem o motivo', () async {
+      final caller = FakeEndpointCaller(
+        error: api.AlertPermissionException(message: 'coordenador não exporta: motivo interno'),
+      );
+      await expectLater(
+        _fonte(caller).exportAuditLogs(filtro),
+        throwsA(
+          isA<AuditExportFailure>()
+              .having((f) => f.kind, 'kind', AuditExportFailureKind.forbidden)
+              .having((f) => f.message, 'message', 'Você não tem permissão para exportar a trilha de auditoria.')
+              .having((f) => f.message, 'message', isNot(contains('motivo'))),
+        ),
+      );
+    });
+
+    test('recusa depois do vencimento da sessão vira AdminSessionExpired; 401 também', () async {
+      final vencida = BackendAdminDataSource(
+        api.EndpointAdmin(FakeEndpointCaller(error: api.AlertPermissionException(message: 'x'))),
+        accessToken: 't',
+        expiresAt: em,
+        now: () => em.add(const Duration(seconds: 1)),
+      );
+      await expectLater(vencida.exportAuditLogs(filtro), throwsA(isA<AdminSessionExpired>()));
+      await expectLater(
+        _fonte(FakeEndpointCaller(error: api.ServerpodClientUnauthorized())).exportAuditLogs(filtro),
+        throwsA(isA<AdminSessionExpired>()),
+      );
+    });
+
+    test('500 genérico, rede, tempo esgotado e TLS viram failed com texto fixo', () async {
+      for (final erro in <Object>[
+        const api.ServerpodClientException('Internal server error', 500),
+        const api.ServerpodClientException('Connection refused', -1),
+        const SocketException('sem rede'),
+        TimeoutException('x'),
+        const HandshakeException('x'),
+      ]) {
+        await expectLater(
+          _fonte(FakeEndpointCaller(error: erro)).exportAuditLogs(filtro),
+          throwsA(
+            isA<AuditExportFailure>()
+                .having((f) => f.kind, 'kind', AuditExportFailureKind.failed)
+                .having((f) => f.message, 'message', 'Não foi possível gerar a exportação. Tente novamente.'),
+          ),
+          reason: '$erro',
+        );
+      }
+    });
+  });
 }

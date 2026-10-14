@@ -60,6 +60,10 @@ class _CustomAreaDataSource implements AdminDataSource {
       ChainStatus(state: AuditIntegrityState.inconclusive, verifiedAt: DateTime(2026, 9, 15));
 
   @override
+  Future<AuditExportResult> exportAuditLogs(AuditLogFilter filter) =>
+      throw UnimplementedError('a tela de alertas não exporta');
+
+  @override
   Future<void> recordAccess({required String actionType, required String resourceType}) async {}
 
   // Pedidos do titular (#42): fora do escopo deste teste.

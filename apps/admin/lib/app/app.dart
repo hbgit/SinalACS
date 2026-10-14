@@ -172,7 +172,7 @@ class _AdminHomeShellState extends State<AdminHomeShell> {
         AdminDestination.microAreas =>
           MicroAreasScreen(dataSource: widget.dataSource, role: widget.session.role),
         AdminDestination.alerts => AlertsScreen(dataSource: widget.dataSource, monitoring: _monitoramento),
-        AdminDestination.auditLog => AuditLogScreen(dataSource: widget.dataSource),
+        AdminDestination.auditLog => AuditLogScreen(dataSource: widget.dataSource, role: widget.session.role),
         AdminDestination.dataRequests => DataRequestsScreen(dataSource: widget.dataSource, now: widget.now),
       };
 

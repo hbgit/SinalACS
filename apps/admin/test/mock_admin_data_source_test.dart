@@ -315,4 +315,50 @@ void main() {
       expect(ds.monitoringSessionEnds, 2);
     });
   });
+
+  group('exportação da trilha (#45, Task 11)', () {
+    AuditLogEntry linha(int seq, DateTime em) => AuditLogEntry(
+          id: 'e$seq',
+          sequence: seq,
+          userLabel: 'ADM-001 (Administrador)',
+          actionType: 'read',
+          resourceType: 'admin_alerts',
+          timestamp: em,
+          result: 'success',
+          seal: AuditRowSeal.verified,
+        );
+
+    test('sem resultado configurado, exporta o recorte semeado do período e conta a chamada', () async {
+      final ds = MockAdminDataSource(auditSeed: [
+        linha(1, DateTime.utc(2026, 9, 30)),
+        linha(2, DateTime.utc(2026, 10, 2)),
+        linha(3, DateTime.utc(2026, 10, 3)),
+        linha(4, DateTime.utc(2026, 10, 9)),
+      ]);
+      final filtro = AuditLogFilter(from: DateTime.utc(2026, 10, 1), to: DateTime.utc(2026, 10, 5));
+
+      final r = await ds.exportAuditLogs(filtro);
+
+      expect(ds.exportCalls, 1);
+      expect(ds.lastExportFilter, filtro);
+      expect(r.rowCount, 2);
+      expect(r.firstSequence, 2);
+      expect(r.lastSequence, 3);
+      expect(r.csv, startsWith('sequence,timestamp_utc,autor,papel_autor,acao,recurso,rotulo_recurso,resultado,selo\r\n'));
+      expect(r.contentSha256, hasLength(64));
+      expect(r.chainState, AuditIntegrityState.verified);
+    });
+
+    test('erro configurado é lançado e a chamada ainda é contada', () async {
+      final ds = MockAdminDataSource()..exportError = const AuditExportFailure(AuditExportFailureKind.tooManyRows);
+      final filtro = AuditLogFilter(from: DateTime.utc(2026, 10, 1), to: DateTime.utc(2026, 10, 5));
+      await expectLater(ds.exportAuditLogs(filtro), throwsA(isA<AuditExportFailure>()));
+      expect(ds.exportCalls, 1);
+    });
+
+    test('sem início e fim é erro de programação: a tela nunca pede assim', () async {
+      final ds = MockAdminDataSource();
+      await expectLater(ds.exportAuditLogs(const AuditLogFilter()), throwsArgumentError);
+    });
+  });
 }

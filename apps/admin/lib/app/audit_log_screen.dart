@@ -9,11 +9,20 @@
 /// íntegra"); `broken`, `unavailable` e `inconclusive` têm textos próprios e
 /// nenhum deles reaproveita o texto de sucesso (D3). A cor nunca é o único
 /// sinal: todo estado tem ícone, rótulo e `Semantics` (WCAG 1.4.1).
+///
+/// **Exportação (Task 11, D5).** Só aparece para o administrador (o servidor
+/// continua sendo a autoridade e recusa os outros papéis) e só com um período
+/// de início **e** fim aplicado. O CSV volta na resposta do RPC e fica apenas
+/// no estado desta tela: nunca é gravado em disco nem em preferências, nunca é
+/// registrado em log e é descartado ao fechar o resultado, mudar o filtro ou
+/// sair da tela. A entrega é pela área de transferência ("Copiar CSV"); baixar
+/// um arquivo de verdade é pendência (P5).
 library;
 
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'package:sinalacs_admin/app/admin_async_states.dart';
 import 'package:sinalacs_admin/app/admin_layout.dart';
@@ -51,9 +60,14 @@ String auditChainReasonText(AuditChainReason motivo) => switch (motivo) {
 const _alvoMinimo = Size(48, 52);
 
 class AuditLogScreen extends StatefulWidget {
-  const AuditLogScreen({required this.dataSource, this.now, super.key});
+  const AuditLogScreen({required this.dataSource, required this.role, this.now, super.key});
 
   final AdminDataSource dataSource;
+
+  /// Papel da sessão (`AdminSession.role`, pelo nome do `UserRole` do
+  /// servidor). Só decide se o botão de exportar aparece: quem autoriza é o
+  /// servidor.
+  final String role;
 
   /// Relógio dos atalhos de período ("últimos 7 dias") e do valor inicial do
   /// seletor de data; só os testes o trocam.
@@ -129,6 +143,14 @@ class _AuditLogScreenState extends State<AuditLogScreen> {
   Object? _erroDaCadeia;
   bool _verificando = false;
 
+  // Exportação (só administrador). O CSV mora só aqui, em memória.
+  bool _confirmandoExportacao = false;
+  bool _exportando = false;
+  AuditExportResult? _exportacao;
+  AuditExportFailure? _erroDaExportacao;
+
+  bool get _podeExportar => widget.role == 'admin';
+
   @override
   void initState() {
     super.initState();
@@ -137,6 +159,8 @@ class _AuditLogScreenState extends State<AuditLogScreen> {
 
   @override
   void dispose() {
+    // O CSV não sobrevive à tela.
+    _exportacao = null;
     _busca.dispose();
     _matricula.dispose();
     _recurso.dispose();
@@ -288,6 +312,7 @@ class _AuditLogScreenState extends State<AuditLogScreen> {
     }
 
     _erroDoFiltro = null;
+    _descartarExportacao();
     _filtro = AuditLogFilter(
       search: busca,
       actorEnrollmentId: matricula,
@@ -299,6 +324,64 @@ class _AuditLogScreenState extends State<AuditLogScreen> {
       to: ate,
     );
     unawaited(_recarregarLista());
+  }
+
+  /// O resultado e o erro da exportação valem para o filtro em que foram
+  /// pedidos: um filtro novo os descarta (e o CSV com eles).
+  void _descartarExportacao() {
+    _exportacao = null;
+    _erroDaExportacao = null;
+  }
+
+  /// A exportação exige início e fim no filtro APLICADO (o que a lista mostra);
+  /// as demais regras do período já foram checadas ao aplicar.
+  bool get _periodoParaExportar => _filtro.from != null && _filtro.to != null;
+
+  Future<void> _exportar() async {
+    // Toque duplo: a segunda chamada chega antes do quadro que desabilita o botão.
+    if (_confirmandoExportacao || _exportando || !_periodoParaExportar) return;
+    final filtro = _filtro;
+    setState(() => _confirmandoExportacao = true);
+    final confirmou = await showDialog<bool>(
+      context: context,
+      builder: (context) => _ConfirmacaoDeExportacao(filtro: filtro),
+    );
+    if (!mounted) return;
+    if (confirmou != true) {
+      setState(() => _confirmandoExportacao = false);
+      return;
+    }
+    setState(() {
+      _confirmandoExportacao = false;
+      _exportando = true;
+      _descartarExportacao();
+    });
+    try {
+      final resultado = await widget.dataSource.exportAuditLogs(filtro);
+      if (!mounted) return;
+      setState(() {
+        _exportacao = resultado;
+        _exportando = false;
+      });
+    } on AdminSessionExpired {
+      if (!mounted) return;
+      AdminSessionScope.maybeOf(context)?.call();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        // Nada do erro vai ao log nem à tela além do texto fixo da falha.
+        _erroDaExportacao = e is AuditExportFailure ? e : const AuditExportFailure(AuditExportFailureKind.failed);
+        _exportando = false;
+      });
+    }
+  }
+
+  Future<void> _copiarCsv(AuditExportResult r) async {
+    await Clipboard.setData(ClipboardData(text: r.csv));
+    if (!mounted) return;
+    ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+      const SnackBar(content: Text('CSV copiado para a área de transferência.')),
+    );
   }
 
   DateTime _agora() => (widget.now ?? DateTime.now)().toLocal();
@@ -372,6 +455,7 @@ class _AuditLogScreenState extends State<AuditLogScreen> {
     _fim = null;
     _erroDoFiltro = null;
     _limpezas++;
+    _descartarExportacao();
     _filtro = const AuditLogFilter();
     unawaited(_recarregarLista());
   }
@@ -409,6 +493,19 @@ class _AuditLogScreenState extends State<AuditLogScreen> {
         const SizedBox(height: 16),
         _formularioDeFiltros(),
         const SizedBox(height: 16),
+        if (_podeExportar) ...[
+          _SecaoDeExportacao(
+            filtro: _filtro,
+            periodoCompleto: _periodoParaExportar,
+            exportando: _exportando,
+            resultado: _exportacao,
+            erro: _erroDaExportacao,
+            onExportar: (_confirmandoExportacao || _exportando || !_periodoParaExportar) ? null : _exportar,
+            onCopiar: _copiarCsv,
+            onFechar: () => setState(_descartarExportacao),
+          ),
+          const SizedBox(height: 16),
+        ],
         ..._lista(),
       ],
     );
@@ -698,6 +795,285 @@ class _AuditLogScreenState extends State<AuditLogScreen> {
       );
     },
   );
+}
+
+/// Período do filtro em texto, para a seção e a confirmação.
+String _periodoEmTexto(AuditLogFilter f) {
+  final de = f.from, ate = f.to;
+  if (de == null || ate == null) return 'período não definido';
+  return '${formatAuditTimestamp(de)} a ${formatAuditTimestamp(ate)}';
+}
+
+/// Confirmação antes de exportar. O botão de confirmar só fecha o diálogo se
+/// ele ainda é a rota do topo: um segundo toque durante a animação de saída
+/// fecharia a tela de baixo.
+class _ConfirmacaoDeExportacao extends StatelessWidget {
+  const _ConfirmacaoDeExportacao({required this.filtro});
+
+  final AuditLogFilter filtro;
+
+  @override
+  Widget build(BuildContext context) {
+    void fechar(bool valor) {
+      if (ModalRoute.of(context)?.isCurrent ?? false) Navigator.of(context).pop(valor);
+    }
+
+    return AlertDialog(
+      scrollable: true,
+      title: const Text('Exportar a trilha em CSV?'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Registros de ${_periodoEmTexto(filtro)}, com os filtros aplicados.'),
+          const SizedBox(height: 12),
+          const Text(
+            'Será registrado na trilha de auditoria: quem exportou, quando, os filtros, '
+            'a quantidade de registros e o SHA-256 do arquivo.',
+            style: TextStyle(fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 12),
+          const Text('O arquivo não é salvo neste aparelho: depois de gerado, copie-o pela área de transferência.'),
+        ],
+      ),
+      actions: [
+        TextButton(
+          key: const Key('audit_export_cancel'),
+          style: TextButton.styleFrom(minimumSize: _alvoMinimo),
+          onPressed: () => fechar(false),
+          child: const Text('Cancelar'),
+        ),
+        FilledButton(
+          key: const Key('audit_export_confirm'),
+          style: FilledButton.styleFrom(minimumSize: _alvoMinimo),
+          onPressed: () => fechar(true),
+          child: const Text('Exportar'),
+        ),
+      ],
+    );
+  }
+}
+
+/// Seção de exportação (só administrador): botão, motivo de estar desabilitado,
+/// erro com texto fixo e o resultado da última exportação.
+class _SecaoDeExportacao extends StatelessWidget {
+  const _SecaoDeExportacao({
+    required this.filtro,
+    required this.periodoCompleto,
+    required this.exportando,
+    required this.resultado,
+    required this.erro,
+    required this.onExportar,
+    required this.onCopiar,
+    required this.onFechar,
+  });
+
+  final AuditLogFilter filtro;
+  final bool periodoCompleto;
+  final bool exportando;
+  final AuditExportResult? resultado;
+  final AuditExportFailure? erro;
+  final VoidCallback? onExportar;
+  final ValueChanged<AuditExportResult> onCopiar;
+  final VoidCallback onFechar;
+
+  @override
+  Widget build(BuildContext context) {
+    final r = resultado;
+    final e = erro;
+    return Card(
+      key: const Key('audit_export_section'),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Exportar trilha (CSV)', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 4),
+            const Text(
+              'Gera um CSV do período e dos filtros aplicados, com até 5 mil registros. '
+              'Cada exportação é registrada na trilha.',
+            ),
+            const SizedBox(height: 8),
+            if (periodoCompleto)
+              Text('Período aplicado: ${_periodoEmTexto(filtro)}.')
+            else
+              const Row(
+                key: Key('audit_export_hint'),
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(Icons.info_outline, color: Colors.white70, size: 20),
+                  SizedBox(width: 8),
+                  Expanded(child: Text('Para exportar, aplique um período com início e fim.')),
+                ],
+              ),
+            const SizedBox(height: 12),
+            FilledButton.icon(
+              key: const Key('audit_export_button'),
+              style: FilledButton.styleFrom(minimumSize: _alvoMinimo),
+              onPressed: onExportar,
+              icon: exportando
+                  ? const SizedBox(
+                      key: Key('audit_export_progress'),
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.download_outlined),
+              label: Text(exportando ? 'Exportando…' : 'Exportar CSV'),
+            ),
+            if (e != null) ...[
+              const SizedBox(height: 12),
+              Semantics(
+                liveRegion: true,
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Icon(Icons.error_outline, color: AdminColors.redOnSurface, size: 20),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        e.message,
+                        key: const Key('audit_export_error'),
+                        style: const TextStyle(color: AdminColors.redOnSurface),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (e.canRetry) ...[
+                const SizedBox(height: 8),
+                OutlinedButton.icon(
+                  key: const Key('audit_export_retry'),
+                  style: OutlinedButton.styleFrom(minimumSize: _alvoMinimo),
+                  onPressed: onExportar,
+                  icon: const Icon(Icons.refresh),
+                  label: const Text('Tentar novamente'),
+                ),
+              ],
+            ],
+            if (r != null) ...[
+              const SizedBox(height: 16),
+              _ResultadoDaExportacao(resultado: r, onCopiar: () => onCopiar(r), onFechar: onFechar),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Estado da cadeia no momento da exportação, com a mesma regra da tela: só
+/// `verified` é íntegra; os outros três têm texto de atenção próprio.
+({IconData icone, Color cor, String texto}) _cadeiaNaExportacao(AuditIntegrityState estado) => switch (estado) {
+  AuditIntegrityState.verified => (
+    icone: Icons.verified_outlined,
+    cor: AdminColors.green,
+    texto: 'Cadeia íntegra no momento da exportação.',
+  ),
+  AuditIntegrityState.broken => (
+    icone: Icons.gpp_bad_outlined,
+    cor: AdminColors.redOnSurface,
+    texto: 'Atenção: a cadeia apresentou falha de integridade no momento da exportação. '
+        'O arquivo foi gerado, mas não comprova uma trilha sem alteração. Avise a administração do sistema.',
+  ),
+  AuditIntegrityState.unavailable => (
+    icone: Icons.warning_amber_outlined,
+    cor: AdminColors.overdueOnSurface,
+    texto: 'Atenção: a verificação da cadeia estava indisponível no momento da exportação. '
+        'O arquivo não comprova uma trilha sem alteração.',
+  ),
+  AuditIntegrityState.inconclusive => (
+    icone: Icons.warning_amber_outlined,
+    cor: AdminColors.overdueOnSurface,
+    texto: 'Atenção: a verificação da cadeia foi inconclusiva no momento da exportação. '
+        'O arquivo não comprova uma trilha sem alteração.',
+  ),
+};
+
+class _ResultadoDaExportacao extends StatelessWidget {
+  const _ResultadoDaExportacao({required this.resultado, required this.onCopiar, required this.onFechar});
+
+  final AuditExportResult resultado;
+  final VoidCallback onCopiar;
+  final VoidCallback onFechar;
+
+  @override
+  Widget build(BuildContext context) {
+    final r = resultado;
+    final n = r.rowCount;
+    final resumo = n == 1 ? '1 registro exportado' : '$n registros exportados';
+    final intervalo = (n == 0 || r.firstSequence == null || r.lastSequence == null)
+        ? 'Nenhum registro no período.'
+        : 'Registros de nº ${r.firstSequence} a nº ${r.lastSequence}.';
+    final cadeia = _cadeiaNaExportacao(r.chainState);
+    return DecoratedBox(
+      key: const Key('audit_export_result'),
+      decoration: BoxDecoration(
+        border: Border.all(color: AdminColors.border),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Semantics(
+              key: const Key('audit_export_summary'),
+              container: true,
+              liveRegion: true,
+              child: Text(resumo, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            ),
+            const SizedBox(height: 4),
+            Text(intervalo),
+            Text('Arquivo: ${r.fileName}'),
+            Text('Gerado em ${formatAuditTimestamp(r.generatedAt)}.'),
+            const SizedBox(height: 8),
+            const Text('SHA-256 do arquivo:', style: TextStyle(color: Colors.white70)),
+            SelectableText(r.contentSha256, key: const Key('audit_export_sha256')),
+            const SizedBox(height: 8),
+            Semantics(
+              liveRegion: true,
+              child: Row(
+                key: const Key('audit_export_chain'),
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(cadeia.icone, color: cadeia.cor, size: 20),
+                  const SizedBox(width: 8),
+                  Expanded(child: Text(cadeia.texto, style: TextStyle(color: cadeia.cor))),
+                ],
+              ),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'O CSV não é salvo neste aparelho. Copie agora: ao fechar, mudar o filtro ou sair desta tela, ele é descartado.',
+            ),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 12,
+              runSpacing: 8,
+              children: [
+                FilledButton.icon(
+                  key: const Key('audit_export_copy'),
+                  style: FilledButton.styleFrom(minimumSize: _alvoMinimo),
+                  onPressed: onCopiar,
+                  icon: const Icon(Icons.copy_outlined),
+                  label: const Text('Copiar CSV'),
+                ),
+                OutlinedButton.icon(
+                  key: const Key('audit_export_close'),
+                  style: OutlinedButton.styleFrom(minimumSize: _alvoMinimo),
+                  onPressed: onFechar,
+                  icon: const Icon(Icons.close),
+                  label: const Text('Fechar'),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 /// Um extremo do período: botão que abre data + hora e, preenchido, um botão
