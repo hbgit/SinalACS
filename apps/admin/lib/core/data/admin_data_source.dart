@@ -534,10 +534,96 @@ class AdminValidationFailure implements Exception {
   String toString() => 'AdminValidationFailure: $message';
 }
 
+enum NoticeAudience { everyone, chronic }
+
+/// Mesmos nomes do enum do servidor.
+enum NoticeStatus { pending, sending, sent, unknown, failed, cancelled }
+
+/// Linha do histórico de avisos (#46). Nunca carrega o texto da mensagem.
+class NoticeHistoryItem {
+  const NoticeHistoryItem({
+    required this.id,
+    required this.microAreaId,
+    required this.microAreaName,
+    required this.audience,
+    required this.title,
+    required this.status,
+    required this.scheduledFor,
+    required this.createdByLabel,
+    this.sentAt,
+    this.recipients,
+    this.accepted,
+    this.failureReason,
+  });
+  final String id;
+  final String microAreaId;
+  final String microAreaName;
+  final NoticeAudience audience;
+  final String title; // nunca a mensagem: o histórico não a devolve
+  final NoticeStatus status;
+  final DateTime scheduledFor;
+  final String createdByLabel;
+  final DateTime? sentAt;
+  final int? recipients;
+  final int? accepted;
+  final String? failureReason;
+}
+
+enum TermsVersionState { draft, reviewed, published }
+
+class TermsVersionSummary {
+  const TermsVersionSummary({
+    required this.id,
+    required this.version,
+    required this.summary,
+    required this.effectiveFrom,
+    required this.createdAt,
+    this.legallyReviewedAt,
+    this.publishedAt,
+  });
+  final String id;
+  final String version;
+  final String summary;
+  final DateTime effectiveFrom;
+  final DateTime createdAt;
+  final DateTime? legallyReviewedAt;
+  final DateTime? publishedAt;
+
+  TermsVersionState get state => publishedAt != null
+      ? TermsVersionState.published
+      : legallyReviewedAt != null
+          ? TermsVersionState.reviewed
+          : TermsVersionState.draft;
+}
+
 /// Camada de dados isolada atrás de interface (no espírito de `AlertPublisher`/
 /// `AlertStore` do backend): a produção fala com o `admin.*` do backend pelo
 /// `sinalacs_client` e as telas seguem herméticas sobre [MockAdminDataSource].
 abstract interface class AdminDataSource {
+  Future<List<NoticeHistoryItem>> fetchNoticeHistory({String? microAreaId, int limit = 50, int offset = 0});
+
+  Future<String> scheduleNotice({
+    required String microAreaId,
+    required NoticeAudience audience,
+    required String title,
+    required String message,
+    required DateTime scheduledFor,
+  });
+
+  Future<void> cancelScheduledNotice(String id);
+
+  Future<List<TermsVersionSummary>> fetchTermsVersions();
+
+  Future<TermsVersionSummary> draftTermsVersion({
+    required String version,
+    required String summary,
+    required DateTime effectiveFrom,
+  });
+
+  Future<TermsVersionSummary> markTermsReviewed(String id);
+
+  Future<TermsVersionSummary> publishTermsVersion(String id);
+
   Future<DashboardIndicators> fetchDashboardIndicators();
 
   Future<List<MicroAreaSummary>> fetchMicroAreas();

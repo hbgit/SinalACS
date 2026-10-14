@@ -13,6 +13,38 @@ class _CustomAreaDataSource implements AdminDataSource {
   static const newArea = 'Microárea 99 — Nova Área';
 
   @override
+  Future<List<NoticeHistoryItem>> fetchNoticeHistory({String? microAreaId, int limit = 50, int offset = 0}) =>
+      throw UnimplementedError();
+
+  @override
+  Future<String> scheduleNotice({
+    required String microAreaId,
+    required NoticeAudience audience,
+    required String title,
+    required String message,
+    required DateTime scheduledFor,
+  }) => throw UnimplementedError();
+
+  @override
+  Future<void> cancelScheduledNotice(String id) => throw UnimplementedError();
+
+  @override
+  Future<List<TermsVersionSummary>> fetchTermsVersions() => throw UnimplementedError();
+
+  @override
+  Future<TermsVersionSummary> draftTermsVersion({
+    required String version,
+    required String summary,
+    required DateTime effectiveFrom,
+  }) => throw UnimplementedError();
+
+  @override
+  Future<TermsVersionSummary> markTermsReviewed(String id) => throw UnimplementedError();
+
+  @override
+  Future<TermsVersionSummary> publishTermsVersion(String id) => throw UnimplementedError();
+
+  @override
   Future<EscalationOutcome> escalateAlert(String alertId, EscalationReasonCode reason) =>
       throw UnimplementedError();
 

@@ -11,6 +11,40 @@ class FailingAdminDataSource implements AdminDataSource {
 
   final AdminDataSource inner;
 
+  // Avisos e termos (#46): repassados ao `inner`.
+  @override
+  Future<List<NoticeHistoryItem>> fetchNoticeHistory({String? microAreaId, int limit = 50, int offset = 0}) =>
+      inner.fetchNoticeHistory(microAreaId: microAreaId, limit: limit, offset: offset);
+
+  @override
+  Future<String> scheduleNotice({
+    required String microAreaId,
+    required NoticeAudience audience,
+    required String title,
+    required String message,
+    required DateTime scheduledFor,
+  }) => inner.scheduleNotice(
+      microAreaId: microAreaId, audience: audience, title: title, message: message, scheduledFor: scheduledFor);
+
+  @override
+  Future<void> cancelScheduledNotice(String id) => inner.cancelScheduledNotice(id);
+
+  @override
+  Future<List<TermsVersionSummary>> fetchTermsVersions() => inner.fetchTermsVersions();
+
+  @override
+  Future<TermsVersionSummary> draftTermsVersion({
+    required String version,
+    required String summary,
+    required DateTime effectiveFrom,
+  }) => inner.draftTermsVersion(version: version, summary: summary, effectiveFrom: effectiveFrom);
+
+  @override
+  Future<TermsVersionSummary> markTermsReviewed(String id) => inner.markTermsReviewed(id);
+
+  @override
+  Future<TermsVersionSummary> publishTermsVersion(String id) => inner.publishTermsVersion(id);
+
   // Escalonamento, pulso e fim de sessão (#44): repassados ao `inner`.
   @override
   Future<EscalationOutcome> escalateAlert(String alertId, EscalationReasonCode reason) =>

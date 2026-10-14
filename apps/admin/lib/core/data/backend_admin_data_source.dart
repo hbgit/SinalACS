@@ -195,6 +195,38 @@ class BackendAdminDataSource implements AdminDataSource {
   });
 
   @override
+  Future<List<NoticeHistoryItem>> fetchNoticeHistory({String? microAreaId, int limit = 50, int offset = 0}) =>
+      throw const AdminDataFailure('Avisos e termos ainda não ligados ao backend (task 3.2).');
+
+  @override
+  Future<String> scheduleNotice({
+    required String microAreaId,
+    required NoticeAudience audience,
+    required String title,
+    required String message,
+    required DateTime scheduledFor,
+  }) => throw const AdminDataFailure('Avisos e termos ainda não ligados ao backend (task 3.2).');
+
+  @override
+  Future<void> cancelScheduledNotice(String id) => throw const AdminDataFailure('Avisos e termos ainda não ligados ao backend (task 3.2).');
+
+  @override
+  Future<List<TermsVersionSummary>> fetchTermsVersions() => throw const AdminDataFailure('Avisos e termos ainda não ligados ao backend (task 3.2).');
+
+  @override
+  Future<TermsVersionSummary> draftTermsVersion({
+    required String version,
+    required String summary,
+    required DateTime effectiveFrom,
+  }) => throw const AdminDataFailure('Avisos e termos ainda não ligados ao backend (task 3.2).');
+
+  @override
+  Future<TermsVersionSummary> markTermsReviewed(String id) => throw const AdminDataFailure('Avisos e termos ainda não ligados ao backend (task 3.2).');
+
+  @override
+  Future<TermsVersionSummary> publishTermsVersion(String id) => throw const AdminDataFailure('Avisos e termos ainda não ligados ao backend (task 3.2).');
+
+  @override
   Future<EscalationOutcome> escalateAlert(
     String alertId,
     EscalationReasonCode reason,
