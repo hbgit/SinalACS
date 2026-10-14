@@ -318,7 +318,8 @@ class AuditExportResult {
 /// Por que uma exportação falhou. O texto de cada uma é fixo do app: o motivo
 /// do servidor nunca chega à tela.
 enum AuditExportFailureKind {
-  /// Recorte acima do teto do servidor (`AdminInvalidRequestException`).
+  /// `AdminInvalidRequestException`: recorte acima do teto **ou** filtro
+  /// recusado — o servidor usa a mesma exceção para os dois.
   tooManyRows,
 
   /// Recusa de papel ou escopo (`AlertPermissionException` dentro da sessão).
@@ -336,7 +337,9 @@ class AuditExportFailure implements Exception {
   final AuditExportFailureKind kind;
 
   String get message => switch (kind) {
-        AuditExportFailureKind.tooManyRows => 'Há registros demais; estreite o período.',
+        // O servidor usa a mesma exceção para o teto e para filtro recusado.
+        AuditExportFailureKind.tooManyRows =>
+          'Há registros demais ou o filtro foi recusado; estreite o período ou revise os filtros.',
         AuditExportFailureKind.forbidden => 'Você não tem permissão para exportar a trilha de auditoria.',
         AuditExportFailureKind.failed => 'Não foi possível gerar a exportação. Tente novamente.',
       };

@@ -112,6 +112,15 @@ Future<void> _exportar(WidgetTester tester) async {
   await tester.pumpAndSettle();
 }
 
+/// Como [_exportar], mas sem `pumpAndSettle` depois de confirmar: com a
+/// exportação presa no `exportGate` o indicador gira e nunca assenta.
+Future<void> _exportarSemAssentar(WidgetTester tester) async {
+  await _tocar(tester, _botao);
+  await tester.tap(_confirmar);
+  await tester.pump();
+  await tester.pump(const Duration(milliseconds: 400));
+}
+
 /// Rola até o cartão de resultado e devolve os textos de dentro dele.
 Future<String> _textoDoCartao(WidgetTester tester) async {
   await _rolarAte(tester, _cartao);
@@ -155,13 +164,19 @@ void main() {
   });
 
   group('período obrigatório', () {
-    testWidgets('sem período aplicado o botão fica desabilitado e diz por quê', (tester) async {
-      await _abrir(tester, MockAdminDataSource());
+    testWidgets('sem período aplicado o botão fica desabilitado, diz por quê e tocar não exporta', (tester) async {
+      final mock = MockAdminDataSource();
+      await _abrir(tester, mock);
       await _rolarAte(tester, _botao);
 
       expect(_habilitado(tester), isFalse);
       expect(find.byKey(const Key('audit_export_hint')), findsOneWidget);
       expect(find.text('Para exportar, aplique um período com início e fim.'), findsOneWidget);
+
+      await tester.tap(_botao, warnIfMissed: false);
+      await tester.pumpAndSettle();
+      expect(find.byType(AlertDialog), findsNothing);
+      expect(mock.exportCalls, 0);
     });
 
     testWidgets('só o início aplicado não basta; início e fim habilitam', (tester) async {
@@ -246,12 +261,19 @@ void main() {
       expect(texto, contains('auditoria_20261001T0930Z_20261005T1805Z.csv'));
       // O conteúdo do CSV nunca é desenhado na tela.
       expect(texto, isNot(contains('ADM-001,admin')));
+      // Nada promete que o CSV não sai do app: só que o app não o grava.
+      expect(texto, isNot(contains('não é salvo neste aparelho')));
+      expect(find.byKey(const Key('audit_export_clipboard_warning')), findsNothing, reason: 'só depois de copiar');
 
       await _tocar(tester, find.byKey(const Key('audit_export_copy')));
       final copias = chamadasDaPlataforma.where((c) => c.method == 'Clipboard.setData').toList();
       expect(copias, hasLength(1));
       expect((copias.single.arguments as Map)['text'], _csvSintetico);
-      expect(find.text('CSV copiado para a área de transferência.'), findsOneWidget);
+      const aviso = 'CSV copiado. Ele fica na área de transferência do sistema até você copiar outra coisa '
+          'e pode ser lido por outros apps e teclados. Cole onde precisa e depois copie outro texto.';
+      // SnackBar e aviso fixo no cartão dizem o mesmo.
+      expect(find.text(aviso), findsNWidgets(2));
+      expect(find.byKey(const Key('audit_export_clipboard_warning')), findsOneWidget);
     });
 
     testWidgets('cadeia verified: "íntegra" no momento da exportação', (tester) async {
@@ -332,7 +354,7 @@ void main() {
   });
 
   group('falhas com texto fixo', () {
-    testWidgets('teto de linhas: "Há registros demais; estreite o período." sem "Tentar novamente"', (tester) async {
+    testWidgets('teto de linhas ou filtro recusado: texto fixo dos dois casos, sem "Tentar novamente"', (tester) async {
       final mock = MockAdminDataSource()
         ..exportError = const AuditExportFailure(AuditExportFailureKind.tooManyRows);
       await _abrir(tester, mock);
@@ -340,7 +362,10 @@ void main() {
       await _exportar(tester);
 
       await _rolarAte(tester, find.byKey(const Key('audit_export_error')));
-      expect(find.text('Há registros demais; estreite o período.'), findsOneWidget);
+      expect(
+        find.text('Há registros demais ou o filtro foi recusado; estreite o período ou revise os filtros.'),
+        findsOneWidget,
+      );
       expect(find.byKey(const Key('audit_export_retry')), findsNothing);
       expect(_cartao, findsNothing);
     });
@@ -428,6 +453,81 @@ void main() {
     });
   });
 
+  group('filtro trocado durante a exportação', () {
+    Finder semRolar(String chave) => find.byKey(Key(chave), skipOffstage: false);
+    bool ativo(WidgetTester tester, String chave) =>
+        tester.widget<ButtonStyleButton>(semRolar(chave)).onPressed != null;
+
+    testWidgets('aplicar, limpar, período e atalhos ficam desabilitados enquanto exporta', (tester) async {
+      final portao = Completer<void>();
+      final mock = MockAdminDataSource()
+        ..exportResult = _resultado()
+        ..exportGate = portao;
+      await _abrir(tester, mock);
+      await _aplicarPeriodo(tester);
+      for (final chave in ['audit_filter_apply', 'audit_filter_clear', 'audit_filter_from', 'audit_filter_to']) {
+        expect(ativo(tester, chave), isTrue, reason: '$chave antes');
+      }
+
+      await _exportarSemAssentar(tester);
+
+      for (final chave in [
+        'audit_filter_apply',
+        'audit_filter_clear',
+        'audit_filter_from',
+        'audit_filter_to',
+        'audit_filter_preset_24h',
+        'audit_filter_preset_7d',
+        'audit_filter_preset_30d',
+      ]) {
+        expect(ativo(tester, chave), isFalse, reason: '$chave durante a exportação');
+      }
+      final limparInicio = semRolar('audit_filter_from_clear');
+      expect(tester.widget<IconButton>(limparInicio).onPressed, isNull);
+      final consultas = mock.auditQueries.length;
+      await tester.tap(semRolar('audit_filter_apply'), warnIfMissed: false);
+      await tester.pump();
+      expect(mock.auditQueries.length, consultas, reason: 'nenhuma consulta nova');
+
+      portao.complete();
+      await tester.pumpAndSettle();
+      expect(ativo(tester, 'audit_filter_apply'), isTrue);
+      expect(await _textoDoCartao(tester), contains('5 registros exportados'));
+    });
+
+    for (final falha in [false, true]) {
+      testWidgets(
+          '${falha ? 'erro' : 'resultado'} de um filtro não aparece sob o filtro trocado por Enter num campo',
+          (tester) async {
+        final portao = Completer<void>();
+        final mock = MockAdminDataSource()
+          ..exportResult = _resultado()
+          ..exportError = falha ? const AuditExportFailure(AuditExportFailureKind.failed) : null
+          ..exportGate = portao;
+        await _abrir(tester, mock);
+        await _aplicarPeriodo(tester);
+        await _abrirFiltros(tester);
+        await _rolarAte(tester, find.byKey(const Key('audit_filter_search')));
+        await _exportarSemAssentar(tester);
+        expect(mock.exportCalls, 1);
+
+        // Outro caminho que troca o filtro: Enter no campo de busca.
+        await tester.enterText(find.byKey(const Key('audit_filter_search')), 'ADM');
+        await tester.testTextInput.receiveAction(TextInputAction.search);
+        await tester.pump();
+        expect(mock.auditQueries.last.filter.search, 'ADM', reason: 'o filtro aplicado mudou');
+
+        portao.complete();
+        await tester.pumpAndSettle();
+        expect(find.byKey(const Key('audit_export_result'), skipOffstage: false), findsNothing);
+        expect(find.byKey(const Key('audit_export_error'), skipOffstage: false), findsNothing);
+        expect(find.textContaining(_sha, skipOffstage: false), findsNothing);
+        await _rolarAte(tester, _botao);
+        expect(_habilitado(tester), isTrue, reason: 'a exportação terminou');
+      });
+    }
+  });
+
   group('layout (WCAG 1.4.4/1.4.10/2.5.5)', () {
     for (final largura in const [320.0, 360.0]) {
       testWidgets('cartão de exportação e resultado sem estouro em ${largura.toInt()}dp a 200%', (tester) async {
@@ -511,6 +611,30 @@ void main() {
       expect(
         tester.getSemantics(resumo),
         isSemantics(isLiveRegion: true, label: '5 registros exportados'),
+      );
+      expect(
+        tester.getSemantics(find.byKey(const Key('audit_export_chain_region'))),
+        isSemantics(
+          isLiveRegion: true,
+          label: 'Atenção: a cadeia apresentou falha de integridade no momento da exportação. '
+              'O arquivo foi gerado, mas não comprova uma trilha sem alteração. Avise a administração do sistema.',
+        ),
+      );
+      handle.dispose();
+    });
+
+    testWidgets('erro da exportação chega ao leitor de tela (liveRegion)', (tester) async {
+      final handle = tester.ensureSemantics();
+      final mock = MockAdminDataSource()..exportError = const AuditExportFailure(AuditExportFailureKind.forbidden);
+      await _abrir(tester, mock);
+      await _aplicarPeriodo(tester);
+      await _exportar(tester);
+      final regiao = find.byKey(const Key('audit_export_error_region'));
+      await _rolarAte(tester, regiao);
+
+      expect(
+        tester.getSemantics(regiao),
+        isSemantics(isLiveRegion: true, label: 'Você não tem permissão para exportar a trilha de auditoria.'),
       );
       handle.dispose();
     });

@@ -768,7 +768,11 @@ void main() {
         throwsA(
           isA<AuditExportFailure>()
               .having((f) => f.kind, 'kind', AuditExportFailureKind.tooManyRows)
-              .having((f) => f.message, 'message', 'Há registros demais; estreite o período.'),
+              .having(
+                (f) => f.message,
+                'message',
+                'Há registros demais ou o filtro foi recusado; estreite o período ou revise os filtros.',
+              ),
         ),
       );
     });

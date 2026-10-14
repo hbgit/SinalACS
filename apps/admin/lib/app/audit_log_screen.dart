@@ -149,6 +149,9 @@ class _AuditLogScreenState extends State<AuditLogScreen> {
   AuditExportResult? _exportacao;
   AuditExportFailure? _erroDaExportacao;
 
+  /// O CSV do resultado atual já foi para a área de transferência do sistema.
+  bool _csvCopiado = false;
+
   bool get _podeExportar => widget.role == 'admin';
 
   @override
@@ -331,6 +334,7 @@ class _AuditLogScreenState extends State<AuditLogScreen> {
   void _descartarExportacao() {
     _exportacao = null;
     _erroDaExportacao = null;
+    _csvCopiado = false;
   }
 
   /// A exportação exige início e fim no filtro APLICADO (o que a lista mostra);
@@ -360,8 +364,10 @@ class _AuditLogScreenState extends State<AuditLogScreen> {
       final resultado = await widget.dataSource.exportAuditLogs(filtro);
       if (!mounted) return;
       setState(() {
-        _exportacao = resultado;
         _exportando = false;
+        // Filtro trocado durante a chamada (Enter num campo de texto): o
+        // resultado é de outro recorte e não pode aparecer sob o filtro novo.
+        if (identical(_filtro, filtro)) _exportacao = resultado;
       });
     } on AdminSessionExpired {
       if (!mounted) return;
@@ -369,9 +375,12 @@ class _AuditLogScreenState extends State<AuditLogScreen> {
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        // Nada do erro vai ao log nem à tela além do texto fixo da falha.
-        _erroDaExportacao = e is AuditExportFailure ? e : const AuditExportFailure(AuditExportFailureKind.failed);
         _exportando = false;
+        // Nada do erro vai ao log nem à tela além do texto fixo da falha; e,
+        // como o resultado, só vale para o filtro em que foi pedido.
+        if (identical(_filtro, filtro)) {
+          _erroDaExportacao = e is AuditExportFailure ? e : const AuditExportFailure(AuditExportFailureKind.failed);
+        }
       });
     }
   }
@@ -379,10 +388,15 @@ class _AuditLogScreenState extends State<AuditLogScreen> {
   Future<void> _copiarCsv(AuditExportResult r) async {
     await Clipboard.setData(ClipboardData(text: r.csv));
     if (!mounted) return;
+    setState(() => _csvCopiado = true);
     ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-      const SnackBar(content: Text('CSV copiado para a área de transferência.')),
+      const SnackBar(content: Text(_avisoDaAreaDeTransferencia)),
     );
   }
+
+  /// Enquanto a confirmação está aberta ou a exportação corre, o filtro
+  /// aplicado não muda pelos botões (aplicar, limpar, período, atalhos).
+  bool get _exportacaoEmCurso => _confirmandoExportacao || _exportando;
 
   DateTime _agora() => (widget.now ?? DateTime.now)().toLocal();
 
@@ -500,6 +514,7 @@ class _AuditLogScreenState extends State<AuditLogScreen> {
             exportando: _exportando,
             resultado: _exportacao,
             erro: _erroDaExportacao,
+            copiado: _csvCopiado,
             onExportar: (_confirmandoExportacao || _exportando || !_periodoParaExportar) ? null : _exportar,
             onCopiar: _copiarCsv,
             onFechar: () => setState(_descartarExportacao),
@@ -720,8 +735,8 @@ class _AuditLogScreenState extends State<AuditLogScreen> {
                     chave: 'audit_filter_from',
                     rotulo: 'Início',
                     valor: _inicio,
-                    onEscolher: () => _escolherInstante(inicio: true),
-                    onLimpar: () => setState(() => _inicio = null),
+                    onEscolher: _exportacaoEmCurso ? null : () => _escolherInstante(inicio: true),
+                    onLimpar: _exportacaoEmCurso ? null : () => setState(() => _inicio = null),
                   ),
                 ),
                 campo(
@@ -729,8 +744,8 @@ class _AuditLogScreenState extends State<AuditLogScreen> {
                     chave: 'audit_filter_to',
                     rotulo: 'Fim',
                     valor: _fim,
-                    onEscolher: () => _escolherInstante(inicio: false),
-                    onLimpar: () => setState(() => _fim = null),
+                    onEscolher: _exportacaoEmCurso ? null : () => _escolherInstante(inicio: false),
+                    onLimpar: _exportacaoEmCurso ? null : () => setState(() => _fim = null),
                   ),
                 ),
                 Wrap(
@@ -742,7 +757,7 @@ class _AuditLogScreenState extends State<AuditLogScreen> {
                       TextButton(
                         key: Key(chave),
                         style: TextButton.styleFrom(minimumSize: _alvoMinimo),
-                        onPressed: () => _aplicarAtalho(janela),
+                        onPressed: _exportacaoEmCurso ? null : () => _aplicarAtalho(janela),
                         child: Text(rotulo),
                       ),
                   ],
@@ -778,14 +793,14 @@ class _AuditLogScreenState extends State<AuditLogScreen> {
               FilledButton.icon(
                 key: const Key('audit_filter_apply'),
                 style: FilledButton.styleFrom(minimumSize: _alvoMinimo),
-                onPressed: _aplicarFiltros,
+                onPressed: _exportacaoEmCurso ? null : _aplicarFiltros,
                 icon: const Icon(Icons.filter_alt_outlined),
                 label: const Text('Aplicar filtros'),
               ),
               OutlinedButton.icon(
                 key: const Key('audit_filter_clear'),
                 style: OutlinedButton.styleFrom(minimumSize: _alvoMinimo),
-                onPressed: _limparFiltros,
+                onPressed: _exportacaoEmCurso ? null : _limparFiltros,
                 icon: const Icon(Icons.clear),
                 label: const Text('Limpar'),
               ),
@@ -796,6 +811,11 @@ class _AuditLogScreenState extends State<AuditLogScreen> {
     },
   );
 }
+
+/// Aviso depois de "Copiar CSV": a área de transferência é do sistema, não do app.
+const _avisoDaAreaDeTransferencia =
+    'CSV copiado. Ele fica na área de transferência do sistema até você copiar outra coisa '
+    'e pode ser lido por outros apps e teclados. Cole onde precisa e depois copie outro texto.';
 
 /// Período do filtro em texto, para a seção e a confirmação.
 String _periodoEmTexto(AuditLogFilter f) {
@@ -833,7 +853,10 @@ class _ConfirmacaoDeExportacao extends StatelessWidget {
             style: TextStyle(fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 12),
-          const Text('O arquivo não é salvo neste aparelho: depois de gerado, copie-o pela área de transferência.'),
+          const Text(
+            'O app não grava o arquivo. Depois de gerado, ele pode ser copiado para a área de transferência '
+            'do sistema, onde fica até você copiar outra coisa.',
+          ),
         ],
       ),
       actions: [
@@ -863,6 +886,7 @@ class _SecaoDeExportacao extends StatelessWidget {
     required this.exportando,
     required this.resultado,
     required this.erro,
+    required this.copiado,
     required this.onExportar,
     required this.onCopiar,
     required this.onFechar,
@@ -873,6 +897,7 @@ class _SecaoDeExportacao extends StatelessWidget {
   final bool exportando;
   final AuditExportResult? resultado;
   final AuditExportFailure? erro;
+  final bool copiado;
   final VoidCallback? onExportar;
   final ValueChanged<AuditExportResult> onCopiar;
   final VoidCallback onFechar;
@@ -925,6 +950,8 @@ class _SecaoDeExportacao extends StatelessWidget {
             if (e != null) ...[
               const SizedBox(height: 12),
               Semantics(
+                key: const Key('audit_export_error_region'),
+                container: true,
                 liveRegion: true,
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -954,7 +981,7 @@ class _SecaoDeExportacao extends StatelessWidget {
             ],
             if (r != null) ...[
               const SizedBox(height: 16),
-              _ResultadoDaExportacao(resultado: r, onCopiar: () => onCopiar(r), onFechar: onFechar),
+              _ResultadoDaExportacao(resultado: r, copiado: copiado, onCopiar: () => onCopiar(r), onFechar: onFechar),
             ],
           ],
         ),
@@ -992,9 +1019,17 @@ class _SecaoDeExportacao extends StatelessWidget {
 };
 
 class _ResultadoDaExportacao extends StatelessWidget {
-  const _ResultadoDaExportacao({required this.resultado, required this.onCopiar, required this.onFechar});
+  const _ResultadoDaExportacao({
+    required this.resultado,
+    required this.copiado,
+    required this.onCopiar,
+    required this.onFechar,
+  });
 
   final AuditExportResult resultado;
+
+  /// O CSV já foi copiado: mostra o aviso da área de transferência.
+  final bool copiado;
   final VoidCallback onCopiar;
   final VoidCallback onFechar;
 
@@ -1033,6 +1068,8 @@ class _ResultadoDaExportacao extends StatelessWidget {
             SelectableText(r.contentSha256, key: const Key('audit_export_sha256')),
             const SizedBox(height: 8),
             Semantics(
+              key: const Key('audit_export_chain_region'),
+              container: true,
               liveRegion: true,
               child: Row(
                 key: const Key('audit_export_chain'),
@@ -1046,8 +1083,27 @@ class _ResultadoDaExportacao extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             const Text(
-              'O CSV não é salvo neste aparelho. Copie agora: ao fechar, mudar o filtro ou sair desta tela, ele é descartado.',
+              'O app não grava o CSV em arquivo. Ao fechar, mudar o filtro ou sair desta tela, ele some daqui; '
+              'o que você copiar fica na área de transferência do sistema.',
             ),
+            if (copiado) ...[
+              const SizedBox(height: 8),
+              Semantics(
+                key: const Key('audit_export_clipboard_warning'),
+                container: true,
+                liveRegion: true,
+                child: const Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(Icons.content_paste_outlined, color: AdminColors.overdueOnSurface, size: 20),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(_avisoDaAreaDeTransferencia, style: TextStyle(color: AdminColors.overdueOnSurface)),
+                    ),
+                  ],
+                ),
+              ),
+            ],
             const SizedBox(height: 12),
             Wrap(
               spacing: 12,
@@ -1090,8 +1146,8 @@ class _CampoDeInstante extends StatelessWidget {
   final String chave;
   final String rotulo;
   final DateTime? valor;
-  final VoidCallback onEscolher;
-  final VoidCallback onLimpar;
+  final VoidCallback? onEscolher;
+  final VoidCallback? onLimpar;
 
   @override
   Widget build(BuildContext context) {
