@@ -1631,6 +1631,12 @@ Plano: `docs/superpowers/plans/2026-10-14-issue-46-avisos-e-termos.md`; achados 
 
 **Continua em aberto**
 - Revisão jurídica do texto real dos termos.
+- Retenção e expurgo de `scheduled_notices.message`: o texto digitado pelo staff fica guardado sem prazo nem dono (definir com o encarregado de dados).
+- Troca manual de `consentPolicyVersion` e `legalDocumentsVersion` na data de vigência: a publicação só **anuncia**, nada passa a valer sozinho.
+- O disparo não reconfere o autor: um coordenador desativado ou trocado de UBS depois de agendar ainda tem o aviso enviado em nome dele (o admin pode cancelar).
+- Revisão e publicação por um único admin, sem segregação de funções; e rascunho sem editar nem descartar (a versão fica "queimada" se a revisão estourar os 15 dias).
+- Histórico de avisos sem paginação na UI (50 fixos).
+- Fuso: a comparação `timestamp without time zone` com parâmetro `DateTime` só foi provada com o Postgres em UTC.
 - Validação manual do cartão de termos (`terms_change_notice_card`) no emulador: **não** foi automatizada; roteiro em `docs/superpowers/plans/2026-10-14-issue-46-validacao-manual.md` (cobertura automatizada: `admin_endpoint_terms_test.dart` no backend e `terms_change_notice_test.dart` no paciente).
 - Os roteiros de emulador do admin editados para o fallback de tooltip (`admin_auditoria_e2e.dart`, `admin_login_e2e.dart`, `admin_acs_gestao_e2e.dart`) **não** foram reexecutados contra o backend real.
 - Os rótulos curtos da barra inferior do admin mudaram ('Áreas', 'Trilha'): decisão de produto a confirmar.
