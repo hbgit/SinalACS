@@ -130,6 +130,20 @@ A tabela abaixo consolida o mapeamento exaustivo de dados persistidos pelo backe
 | | `timestamp` | `timestamp without time zone` | Metadado Legal / Técnico | Timestamp do evento | Linha temporal imutável de acesso. |
 | | `ipHash` | `text` | Pseudonimizado | **HMAC-SHA-256 com chave rotativa diária** (`RotatingIpHasher`) | **Atualizado (2026-10-07):** o SHA-256 puro foi substituído — sem o segredo não há pré-computação; ver §2.1/§2.6. |
 | | `result` | `text` | Metadado Técnico | Enum textual (`SUCCESS`, `FAILURE`, `DENIED`) | Desfecho da tentativa de acesso. |
+| **audit_exports** | `id` | `uuid` | Pseudonimizado | UUID v4; é o `resourceId` do evento `export` em `audit_logs` (dentro do HMAC) | Único elo entre a cadeia e o detalhe da exportação. |
+| | `requestedBy` | `uuid` | Pseudonimizado | `users.id` do admin que exportou | Identifica o operador; o detalhe da exportação fica fora da cadeia. |
+| | `requestedAt` | `timestamp without time zone` | Metadado Legal / Técnico | UTC | Índice `audit_exports_requested_at_idx`, sem medição de uso. |
+| | `filtersJson` | `text` | Identificável (Funcional) — possível | JSON só com as chaves do filtro (D1), nunca linhas | `search`/`actorEnrollmentId` digitados pelo admin podem ser uma matrícula (dado pessoal funcional do staff/ACS); não ecoar em log. |
+| | `format` | `text` | Metadado Técnico | `csv` | — |
+| | `rowCount` | `bigint` | Metadado Técnico | Contagem | Volume exportado. |
+| | `firstSequence` / `lastSequence` | `bigint` (anuláveis) | Metadado Técnico | Intervalo de `sequence` | Nulos em exportação vazia. |
+| | `contentSha256` | `text` | Metadado Técnico | SHA-256 do CSV entregue | Permite provar o conteúdo sem guardá-lo; não reverte ao CSV. |
+| | `chainState` | `text` | Metadado Técnico | Estado da cadeia na verificação fresca da exportação (`verified`/`broken`/`unavailable`/`inconclusive`) | Atesta a cadeia no instante da verificação, não do commit. Tabela **fora** da cadeia: edição direta não é detectada. Retenção sem política definida (aberta com o encarregado). |
+| **audit_chain_checkpoints** | `id` | `uuid` | Metadado Técnico | UUID v4 | — |
+| | `sequence` | `bigint` | Metadado Técnico | Índice único; cauda da cadeia no momento da verificação `verified` | Âncora contra truncamento de cauda (D4). |
+| | `entryHash` | `text` | Metadado Técnico | `entryHash` da linha da cauda | Não é PII; só serve a quem tem o segredo. Nunca vai ao cliente. |
+| | `signature` | `text` | Metadado Técnico | HMAC-SHA-256 (`AUDIT_CHAIN_SECRET`, domínio `checkpoint`) | Assinatura inválida ⇒ `inconclusive`. Sem poda: ~1 linha/min/processo; só os 100 mais recentes são conferidos. |
+| | `createdAt` | `timestamp without time zone` | Metadado Técnico | UTC | — |
 | **acs** | `id` | `uuid` | Pseudonimizado | UUID (vínculo com `users.id`) | Identificador de cadastro funcional do agente de saúde. |
 | | `enrollmentId` | `text` | Identificável (Funcional) | Matrícula funcional em texto claro | Identificador de agente público; passível de correlação direta com portais municipais de transparência. |
 | | `ubsId` | `uuid` | Pseudonimizado / Organizacional | Chave estrangeira (`ubs.id`) | Lotação institucional do profissional de saúde. |
