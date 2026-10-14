@@ -115,12 +115,22 @@ void main() {
       final dataSource = FailingAdminDataSource(inner: MockAdminDataSource())..failNextAuditLogs = true;
       await _loginTo(tester, dataSource, 'Auditoria');
 
-      expect(find.text('Não foi possível carregar os logs de auditoria.'), findsOneWidget);
-      expect(find.text('Nenhum acesso registrado ainda.'), findsNothing);
+      // Desde a Task 11 a seção de exportação (admin) também fica acima da
+      // lista e empurra o erro para baixo da dobra a 800x600: as duas buscas
+      // olham fora da janela, a negativa para não passar só por estar abaixo.
+      expect(find.text('Não foi possível carregar os logs de auditoria.', skipOffstage: false), findsOneWidget);
+      expect(find.text('Nenhum acesso registrado ainda.', skipOffstage: false), findsNothing);
 
+      // Desde a #45 o painel da cadeia e os filtros ficam acima da lista: a
+      // 800x600 o botão nasce perto da dobra e é trazido à janela antes do toque
+      // (um toque fora da janela acerta o vazio sem falhar).
+      await tester.scrollUntilVisible(find.text('Tentar novamente'), 200, scrollable: rolagemDaAuditoria());
+      await tester.pumpAndSettle();
       await tester.tap(find.text('Tentar novamente'));
       await tester.pumpAndSettle();
 
+      await tester.ensureVisible(find.textContaining('view • audit_logs', skipOffstage: false));
+      await tester.pumpAndSettle();
       expect(find.textContaining('view • audit_logs'), findsOneWidget);
     });
   });

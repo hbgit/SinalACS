@@ -1,9 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'dart:async';
+
+export 'package:sinalacs_admin/app/audit_log_screen.dart' show AuditLogScreen, auditChainReasonText, formatAuditTimestamp;
 
 import 'package:sinalacs_admin/app/admin_async_states.dart';
 import 'package:sinalacs_admin/app/admin_accounts.dart';
 import 'package:sinalacs_admin/app/admin_header.dart';
+import 'package:sinalacs_admin/app/audit_log_screen.dart';
 import 'package:sinalacs_admin/app/data_requests_screen.dart';
 import 'package:sinalacs_admin/app/escalate_alert_dialog.dart';
 import 'package:sinalacs_admin/app/admin_layout.dart';
@@ -39,6 +43,11 @@ class SinalAdminApp extends StatelessWidget {
         title: 'SinalACS Admin',
         debugShowCheckedModeBanner: false,
         theme: buildAdminTheme(),
+        // pt-BR fixo: o backoffice só tem textos em português, e os seletores
+        // de data/hora do Material seguem o locale (dd/MM/aaaa, 24 h).
+        locale: const Locale('pt', 'BR'),
+        supportedLocales: const [Locale('pt', 'BR')],
+        localizationsDelegates: GlobalMaterialLocalizations.delegates,
         home: LoginScreen(auth: auth, dataSourceFor: dataSourceFor),
       );
 }
@@ -163,7 +172,7 @@ class _AdminHomeShellState extends State<AdminHomeShell> {
         AdminDestination.microAreas =>
           MicroAreasScreen(dataSource: widget.dataSource, role: widget.session.role),
         AdminDestination.alerts => AlertsScreen(dataSource: widget.dataSource, monitoring: _monitoramento),
-        AdminDestination.auditLog => AuditLogScreen(dataSource: widget.dataSource),
+        AdminDestination.auditLog => AuditLogScreen(dataSource: widget.dataSource, role: widget.session.role),
         AdminDestination.dataRequests => DataRequestsScreen(dataSource: widget.dataSource, now: widget.now),
       };
 
@@ -256,19 +265,6 @@ Color riskColor(RiskLevel level) => switch (level) {
       RiskLevel.yellow => AdminColors.yellow,
       RiskLevel.green => AdminColors.green,
     };
-
-/// Timestamp de auditoria em `dd/MM/aaaa HH:mm`, hora local.
-///
-/// A tela imprimia `DateTime.toString()` cru — `2026-09-15 08:32:11.000Z` —
-/// que é largo e cheio de ruído (milissegundos, sufixo Z) sem valor nenhum
-/// para quem audita. Sem `intl` de propósito: o backoffice não tem nenhuma
-/// dependência externa hoje e um formato pt-BR fixo basta; internacionalização
-/// não está no escopo.
-String formatAuditTimestamp(DateTime timestamp) {
-  final local = timestamp.toLocal();
-  String dois(int valor) => valor.toString().padLeft(2, '0');
-  return '${dois(local.day)}/${dois(local.month)}/${local.year} ${dois(local.hour)}:${dois(local.minute)}';
-}
 
 String statusLabel(AlertStatus status) => switch (status) {
       AlertStatus.pending => 'Pendente',
@@ -808,70 +804,6 @@ class _FiltrosDeAlertas extends StatelessWidget {
       );
 }
 
-class AuditLogScreen extends StatefulWidget {
-  const AuditLogScreen({required this.dataSource, super.key});
-
-  final AdminDataSource dataSource;
-
-  @override
-  State<AuditLogScreen> createState() => _AuditLogScreenState();
-}
-
-class _AuditLogScreenState extends State<AuditLogScreen> {
-  late Future<void> _selfAuditRecorded = widget.dataSource.recordAccess(actionType: 'view', resourceType: 'audit_logs');
-
-  @override
-  Widget build(BuildContext context) => FutureBuilder<void>(
-        future: _selfAuditRecorded,
-        builder: (context, recordSnapshot) {
-          if (recordSnapshot.hasError) {
-            return AdminAsyncError(
-              error: recordSnapshot.error,
-              fallback: 'Não foi possível registrar o acesso a esta tela.',
-              onRetry: () => setState(() {
-                _selfAuditRecorded = widget.dataSource.recordAccess(actionType: 'view', resourceType: 'audit_logs');
-              }),
-            );
-          }
-          if (recordSnapshot.connectionState != ConnectionState.done) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          return FutureBuilder<List<AuditLogEntry>>(
-            future: widget.dataSource.fetchAuditLogs(),
-            builder: (context, snapshot) {
-              if (snapshot.hasError) {
-                return AdminAsyncError(error: snapshot.error, fallback: 'Não foi possível carregar os logs de auditoria.', onRetry: () => setState(() {}));
-              }
-              final entries = snapshot.data ?? const [];
-              return ListView(
-                padding: const EdgeInsets.all(20),
-                children: [
-                  const Text('Logs de auditoria', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 4),
-                  const Text('Somente leitura. O próprio acesso a esta tela também é auditado. A coordenação vê apenas os registros dos autores com microárea na sua UBS.'),
-                  const SizedBox(height: 16),
-                  if (entries.isEmpty)
-                    const Padding(padding: EdgeInsets.only(top: 24), child: Text('Nenhum acesso registrado ainda.'))
-                  else
-                    for (final entry in entries)
-                      Card(
-                        key: Key('audit_${entry.id}'),
-                        margin: const EdgeInsets.only(bottom: 8),
-                        child: _LinhaComSelo(
-                          icone: const Icon(Icons.verified_user_outlined),
-                          titulo: Text('${entry.actionType} • ${entry.resourceType}'),
-                          descricao: Text('${entry.userLabel} — ${formatAuditTimestamp(entry.timestamp)}'),
-                          selo: Text(entry.result),
-                        ),
-                      ),
-                ],
-              );
-            },
-          );
-        },
-      );
-}
-
 Widget _page(List<Widget> children) => ListView(
       padding: const EdgeInsets.all(20),
       children: [
@@ -890,22 +822,20 @@ Widget _page(List<Widget> children) => ListView(
 /// celular e espremia o título contra a borda. Abaixo do ponto de quebra o selo
 /// vira mais uma linha do conteúdo, em vez de competir por largura.
 ///
-/// Usado pelas telas de Microáreas e de Auditoria, que tinham exatamente o
-/// mesmo formato e o mesmo problema.
+/// Usado pela tela de Microáreas. A de Auditoria (`audit_log_screen.dart`)
+/// tem a mesma regra na própria linha, que ganhou o selo de integridade (#45).
 class _LinhaComSelo extends StatelessWidget {
-  const _LinhaComSelo({required this.titulo, required this.descricao, required this.selo, this.icone});
+  const _LinhaComSelo({required this.titulo, required this.descricao, required this.selo});
 
   final Widget titulo;
   final Widget descricao;
   final Widget selo;
-  final Widget? icone;
 
   @override
   Widget build(BuildContext context) => LayoutBuilder(
         builder: (context, constraints) {
           final compacto = constraints.maxWidth < AdminBreakpoints.stacked;
           return ListTile(
-            leading: icone,
             title: titulo,
             isThreeLine: compacto,
             subtitle: compacto

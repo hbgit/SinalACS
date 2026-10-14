@@ -1,11 +1,16 @@
+import 'package:sinalacs_server/src/application/audit/audit_chain.dart';
 import 'package:sinalacs_server/src/application/admin/admin_account_service.dart';
 import 'package:sinalacs_server/src/application/admin/admin_monitoring_service.dart';
 import 'package:sinalacs_server/src/application/admin/admin_read_service.dart';
 import 'package:sinalacs_server/src/application/admin/alert_escalation_service.dart';
+import 'package:sinalacs_server/src/application/admin/audit_chain_status_service.dart';
+import 'package:sinalacs_server/src/application/admin/audit_export_service.dart';
 import 'package:sinalacs_server/src/application/admin/data_subject_case_service.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_data_subject_case_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_admin_account_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_admin_read_store.dart';
+import 'package:sinalacs_server/src/infrastructure/database/orm_audit_checkpoint_store.dart';
+import 'package:sinalacs_server/src/infrastructure/database/orm_audit_export_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_alert_escalation_store.dart';
 import 'package:meta/meta.dart';
 import 'package:serverpod/serverpod.dart';
@@ -37,6 +42,7 @@ import 'package:sinalacs_server/src/infrastructure/database/orm_refresh_token_st
 import 'package:sinalacs_server/src/infrastructure/database/orm_upload_token_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_alert_outbox.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_alert_store.dart';
+import 'package:sinalacs_server/src/infrastructure/database/orm_audit_chain_reader.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_audit_trail.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_onboarding_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_otp_challenge_store.dart';
@@ -234,6 +240,62 @@ class AlertRuntime {
           escalationThreshold: Duration(seconds: config.redAlertEscalationSeconds),
         ),
         audit: auditTrailFor(session),
+        auditChain: AuditChain(secret: config.auditChainSecret),
+      );
+
+  /// Single-flight e cache de 60 s da verificação global da cadeia (#45, D9).
+  /// Estado do PROCESSO, como [_monitoringSessions].
+  final AuditChainStatusCache _auditChainStatusCache = AuditChainStatusCache();
+
+  /// Esvazia o cache e o single-flight da verificação da cadeia. Existe para
+  /// os testes: o harness desfaz o banco entre os casos, não o processo.
+  @visibleForTesting
+  void resetAuditChainStatusCache() => _auditChainStatusCache.reset();
+
+  /// `admin.verifyAuditChain` (#45, Task 6), para uma requisição: reader,
+  /// store, checkpoints de cauda (Task 7) e trilha da chamada; cache e
+  /// single-flight do processo; o mesmo `AUDIT_CHAIN_SECRET` que grava a
+  /// trilha e assina os checkpoints.
+  AuditChainStatusService auditChainStatusServiceFor(Session session) =>
+      AuditChainStatusService(
+        store: OrmAdminReadStore(session: () => session),
+        audit: auditTrailFor(session),
+        reader: OrmAuditChainReader(session: () => session),
+        secret: config.auditChainSecret,
+        checkpoints: OrmAuditCheckpointStore(session: () => session),
+        // Só o tipo do erro: nada de hash, assinatura ou SQL no log.
+        onCheckpointWriteFailure: (erro) => session.log(
+          'Falha ao gravar checkpoint da cadeia de auditoria '
+          '(${erro.runtimeType}); a verificação segue verified.',
+          level: LogLevel.warning,
+        ),
+        cache: _auditChainStatusCache,
+      );
+
+  /// `admin.exportAuditLogs` (#45, Task 10), para uma requisição. A
+  /// exportação e o evento `export` gravam na MESMA transação
+  /// (`OrmAuditTrail.recordInTransaction`, mesmo `AUDIT_CHAIN_SECRET`); as
+  /// recusas e falhas usam a trilha comum. O estado da cadeia vem da
+  /// verificação global do processo (cache de 60 s), sem uma segunda linha
+  /// de auditoria. A falha vai para o log só com o TIPO do erro: nunca
+  /// mensagem do banco, linha ou trecho do CSV.
+  AuditExportService auditExportServiceFor(Session session) =>
+      AuditExportService(
+        store: OrmAuditExportStore(
+          session: () => session,
+          appendAudit: OrmAuditTrail(
+            session: () => session,
+            chainSecret: config.auditChainSecret,
+          ).recordInTransaction,
+        ),
+        audit: auditTrailFor(session),
+        auditChain: AuditChain(secret: config.auditChainSecret),
+        chainState: (inicio) =>
+            auditChainStatusServiceFor(session).currentState(notBefore: inicio),
+        onFailure: (erro) => session.log(
+          'Falha na exportação da auditoria (${erro.runtimeType}).',
+          level: LogLevel.warning,
+        ),
       );
 
   /// Sessões de monitoramento do backoffice (#44, D5): `userId → último

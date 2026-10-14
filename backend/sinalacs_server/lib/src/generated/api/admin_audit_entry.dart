@@ -12,6 +12,7 @@
 // ignore_for_file: no_leading_underscores_for_library_prefixes
 
 import 'package:serverpod/serverpod.dart' as _i1;
+import '../enums/audit_row_seal.dart' as _i2;
 
 /// Linha de auditoria para o backoffice. Sem `ipHash`, `previousHash` nem
 /// `entryHash`: a cadeia de hash é do servidor, não da tela.
@@ -25,7 +26,8 @@ abstract class AdminAuditEntry
     required this.resourceType,
     required this.timestamp,
     required this.result,
-  });
+    _i2.AuditRowSeal? integrity,
+  }) : integrity = integrity ?? _i2.AuditRowSeal.unverifiable;
 
   factory AdminAuditEntry({
     required String id,
@@ -35,6 +37,7 @@ abstract class AdminAuditEntry
     required String resourceType,
     required DateTime timestamp,
     required String result,
+    _i2.AuditRowSeal? integrity,
   }) = _AdminAuditEntryImpl;
 
   factory AdminAuditEntry.fromJson(Map<String, dynamic> jsonSerialization) {
@@ -48,6 +51,11 @@ abstract class AdminAuditEntry
         jsonSerialization['timestamp'],
       ),
       result: jsonSerialization['result'] as String,
+      integrity: jsonSerialization['integrity'] == null
+          ? null
+          : _i2.AuditRowSeal.fromJson(
+              (jsonSerialization['integrity'] as String),
+            ),
     );
   }
 
@@ -65,6 +73,10 @@ abstract class AdminAuditEntry
 
   String result;
 
+  /// Selo da linha (#45, D3), calculado no servidor. O padrão é
+  /// `unverifiable` — nunca `verified` por omissão.
+  _i2.AuditRowSeal integrity;
+
   /// Returns a shallow copy of this [AdminAuditEntry]
   /// with some or all fields replaced by the given arguments.
   @_i1.useResult
@@ -76,6 +88,7 @@ abstract class AdminAuditEntry
     String? resourceType,
     DateTime? timestamp,
     String? result,
+    _i2.AuditRowSeal? integrity,
   });
   @override
   Map<String, dynamic> toJson() {
@@ -88,6 +101,7 @@ abstract class AdminAuditEntry
       'resourceType': resourceType,
       'timestamp': timestamp.toJson(),
       'result': result,
+      'integrity': integrity.toJson(),
     };
   }
 
@@ -102,6 +116,7 @@ abstract class AdminAuditEntry
       'resourceType': resourceType,
       'timestamp': timestamp.toJson(),
       'result': result,
+      'integrity': integrity.toJson(),
     };
   }
 
@@ -120,6 +135,7 @@ class _AdminAuditEntryImpl extends AdminAuditEntry {
     required String resourceType,
     required DateTime timestamp,
     required String result,
+    _i2.AuditRowSeal? integrity,
   }) : super._(
          id: id,
          sequence: sequence,
@@ -128,6 +144,7 @@ class _AdminAuditEntryImpl extends AdminAuditEntry {
          resourceType: resourceType,
          timestamp: timestamp,
          result: result,
+         integrity: integrity,
        );
 
   /// Returns a shallow copy of this [AdminAuditEntry]
@@ -142,6 +159,7 @@ class _AdminAuditEntryImpl extends AdminAuditEntry {
     String? resourceType,
     DateTime? timestamp,
     String? result,
+    _i2.AuditRowSeal? integrity,
   }) {
     return AdminAuditEntry(
       id: id ?? this.id,
@@ -151,6 +169,7 @@ class _AdminAuditEntryImpl extends AdminAuditEntry {
       resourceType: resourceType ?? this.resourceType,
       timestamp: timestamp ?? this.timestamp,
       result: result ?? this.result,
+      integrity: integrity ?? this.integrity,
     );
   }
 }

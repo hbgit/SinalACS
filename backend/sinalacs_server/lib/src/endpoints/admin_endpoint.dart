@@ -72,18 +72,47 @@ class AdminEndpoint extends AuthenticatedEndpoint {
       .adminMonitoringServiceFor(session)
       .endMonitoringSession(authenticate(accessToken));
 
+  /// Trilha de auditoria no escopo de quem chama, por keyset. [filter] (#45)
+  /// é opcional e só restringe; inválido vira [AdminInvalidRequestException].
   Future<AdminAuditPage> auditLogs(
     Session session, {
     required String accessToken,
+    AdminAuditFilter? filter,
     int limit = 50,
     int? beforeSequence,
   }) => AlertRuntime.instance
       .adminReadServiceFor(session)
       .auditLogs(
         authenticate(accessToken),
+        filter: filter,
         limit: limit,
         beforeSequence: beforeSequence,
       );
+
+  /// Verificação global da cadeia de `audit_logs` (#45, D3/D9). Só `verified`
+  /// é íntegra; o coordenador não recebe `sequence` nem motivo de quebra fora
+  /// da UBS dele. Auditada antes de verificar; single-flight e cache de 60 s
+  /// por processo. Ver `AuditChainStatusService`.
+  Future<AdminAuditChainStatus> verifyAuditChain(
+    Session session, {
+    required String accessToken,
+  }) => AlertRuntime.instance
+      .auditChainStatusServiceFor(session)
+      .verify(authenticate(accessToken));
+
+  /// Exportação da trilha de auditoria em CSV (#45, D5–D8). **Só o
+  /// administrador**; o filtro exige `from` e `to` (janela ≤ 366 dias); teto
+  /// de `AuditExportService.maxRows` linhas (acima: `refused_limit` e
+  /// `AdminInvalidRequestException`). O recorte é fixado antes do evento
+  /// `export`, que entra na mesma transação do registro em `audit_exports` —
+  /// o arquivo nunca contém a própria exportação. Ver `AuditExportService`.
+  Future<AdminAuditExport> exportAuditLogs(
+    Session session, {
+    required String accessToken,
+    required AdminAuditFilter filter,
+  }) => AlertRuntime.instance
+      .auditExportServiceFor(session)
+      .export(authenticate(accessToken), filter);
 
   /// Pedidos do titular no escopo de quem chama, prazo mais próximo primeiro.
   /// Nunca traz o texto do pedido nem a nota.

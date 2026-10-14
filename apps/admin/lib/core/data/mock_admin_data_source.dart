@@ -1,17 +1,48 @@
+import 'dart:async';
+
 import 'admin_data_source.dart';
 
 /// Implementação mock de [AdminDataSource]. Todos os dados são fictícios
 /// (nenhum dado real de paciente/UBS/ACS), no espírito do `AlertStore`/
 /// `AlertPublisher` fake usados nos testes do backend.
 class MockAdminDataSource implements AdminDataSource {
-  MockAdminDataSource({DateTime Function()? now})
+  /// [auditSeed] semeia a trilha (#45) com linhas sintéticas e selos
+  /// escolhidos pelo teste; [chainStatus] fixa o estado da cadeia. O mock só
+  /// devolve o que foi semeado: nunca calcula integridade.
+  MockAdminDataSource({DateTime Function()? now, List<AuditLogEntry>? auditSeed, this.chainStatus})
       : _microAreas = List.unmodifiable(_seedMicroAreas),
         _alerts = List.unmodifiable(_seedAlerts),
         _acs = [..._seedAcs],
         _staff = [..._seedStaff],
         _now = now ?? DateTime.now {
     _pedidos.addAll(_seedPedidos(_now()));
+    if (auditSeed != null) {
+      _auditLog.addAll([...auditSeed]..sort((a, b) => a.sequence.compareTo(b.sequence)));
+      for (final e in auditSeed) {
+        if (e.sequence > _auditSeq) _auditSeq = e.sequence;
+      }
+    }
   }
+
+  /// Estado devolvido por [verifyAuditChain]; `null` = cadeia íntegra.
+  ChainStatus? chainStatus;
+
+  /// Quando não nulo, [verifyAuditChain] lança este erro.
+  Object? chainStatusError;
+
+  /// Chamadas a [verifyAuditChain] e consultas à trilha, para os testes.
+  int verifyChainCalls = 0;
+  final List<AuditQuery> auditQueries = [];
+
+  /// Exportação (#45, Task 11). [exportResult] fixa o resultado (sem ele, o
+  /// mock monta um a partir do recorte semeado); [exportError], quando não
+  /// nulo, é lançado; [exportGate] segura a resposta até o teste completá-lo.
+  /// [exportCalls] conta toda chamada, inclusive as que falham.
+  AuditExportResult? exportResult;
+  Object? exportError;
+  Completer<void>? exportGate;
+  int exportCalls = 0;
+  AuditLogFilter? lastExportFilter;
 
   final DateTime Function() _now;
 
@@ -307,19 +338,116 @@ class MockAdminDataSource implements AdminDataSource {
   }
 
   @override
-  Future<List<AuditLogEntry>> fetchAuditLogs({int limit = 50}) async =>
-      List.unmodifiable(_auditLog.reversed.take(limit));
+  Future<AuditLogPage> fetchAuditLogs({
+    AuditLogFilter filter = const AuditLogFilter(),
+    int limit = 50,
+    int? beforeSequence,
+  }) async {
+    final candidatas = [
+      for (final e in _auditLog.reversed)
+        if ((beforeSequence == null || e.sequence < beforeSequence) && _casa(e, filter)) e,
+    ];
+    final itens = List<AuditLogEntry>.unmodifiable(candidatas.take(limit));
+    final proximo = candidatas.length > limit ? itens.last.sequence : null;
+    auditQueries.add(AuditQuery(
+      filter: filter,
+      limit: limit,
+      beforeSequence: beforeSequence,
+      nextBeforeSequence: proximo,
+    ));
+    return AuditLogPage(items: itens, nextBeforeSequence: proximo);
+  }
+
+  /// Mesmas regras do servidor (D1/D2), sobre o rótulo do autor: matrícula
+  /// é o que vem antes de " (", o papel sai do rótulo.
+  static bool _casa(AuditLogEntry e, AuditLogFilter f) {
+    final rotulo = e.userLabel;
+    final matricula = rotulo.contains(' (') ? rotulo.substring(0, rotulo.indexOf(' (')) : rotulo;
+    if (f.actorEnrollmentId != null && matricula.toLowerCase() != f.actorEnrollmentId!.toLowerCase()) return false;
+    if (f.actorRole != null && _papelDoRotulo(rotulo) != f.actorRole) return false;
+    if (f.actionType != null && e.actionType != f.actionType) return false;
+    if (f.resourceType != null && e.resourceType != f.resourceType) return false;
+    if (f.result != null && e.result != f.result) return false;
+    if (f.from != null && e.timestamp.isBefore(f.from!)) return false;
+    if (f.to != null && !e.timestamp.isBefore(f.to!)) return false;
+    final busca = f.search?.toLowerCase();
+    if (busca != null &&
+        !matricula.toLowerCase().startsWith(busca) &&
+        !e.resourceType.toLowerCase().contains(busca) &&
+        !e.result.toLowerCase().contains(busca)) {
+      return false;
+    }
+    return true;
+  }
+
+  static AuditActorRole? _papelDoRotulo(String rotulo) {
+    if (rotulo.startsWith('Paciente')) return AuditActorRole.patient;
+    if (rotulo.endsWith('(ACS)')) return AuditActorRole.acs;
+    if (rotulo.endsWith('(Coordenador)')) return AuditActorRole.coordinator;
+    if (rotulo.endsWith('(Administrador)')) return AuditActorRole.admin;
+    return null;
+  }
+
+  @override
+  Future<ChainStatus> verifyAuditChain() async {
+    verifyChainCalls++;
+    final erro = chainStatusError;
+    if (erro != null) throw erro;
+    return chainStatus ??
+        ChainStatus(
+          state: AuditIntegrityState.verified,
+          checkedRows: _auditLog.length,
+          headSequence: _auditSeq,
+          verifiedAt: _now(),
+        );
+  }
+
+  @override
+  Future<AuditExportResult> exportAuditLogs(AuditLogFilter filter) async {
+    exportCalls++;
+    lastExportFilter = filter;
+    if (filter.from == null || filter.to == null) {
+      // O servidor recusaria; a tela nunca pede assim (botão desabilitado).
+      throw ArgumentError('exportação exige início e fim do período');
+    }
+    final portao = exportGate;
+    if (portao != null) await portao.future;
+    final erro = exportError;
+    if (erro != null) throw erro;
+    final pronto = exportResult;
+    if (pronto != null) return pronto;
+
+    final recorte = [for (final e in _auditLog) if (_casa(e, filter)) e];
+    final csv = StringBuffer('sequence,timestamp_utc,autor,papel_autor,acao,recurso,rotulo_recurso,resultado,selo\r\n');
+    for (final e in recorte) {
+      csv.write('${e.sequence},${e.timestamp.toUtc().toIso8601String()},${e.userLabel},,'
+          '${e.actionType},${e.resourceType},,${e.result},${e.seal.name}\r\n');
+    }
+    return AuditExportResult(
+      fileName: 'auditoria_mock.csv',
+      csv: csv.toString(),
+      rowCount: recorte.length,
+      firstSequence: recorte.isEmpty ? null : recorte.first.sequence,
+      lastSequence: recorte.isEmpty ? null : recorte.last.sequence,
+      // Fictício: o mock não calcula hash (sem pacote de criptografia no app).
+      contentSha256: '0' * 64,
+      chainState: AuditIntegrityState.verified,
+      generatedAt: _now().toUtc(),
+    );
+  }
 
   @override
   Future<void> recordAccess({required String actionType, required String resourceType}) async {
     _auditSeq++;
     _auditLog.add(AuditLogEntry(
       id: 'audit-$_auditSeq',
+      sequence: _auditSeq,
       userLabel: 'admin.dev (Administrador)',
       actionType: actionType,
       resourceType: resourceType,
       timestamp: DateTime.now(),
       result: 'success',
+      seal: AuditRowSeal.verified,
     ));
   }
 
@@ -484,4 +612,19 @@ class MockAdminDataSource implements AdminDataSource {
     if (i < 0) throw StateError('Conta de equipe desconhecida no mock: $id');
     return i;
   }
+}
+
+/// Uma consulta à trilha feita ao mock, com o cursor que ela devolveu.
+class AuditQuery {
+  const AuditQuery({
+    required this.filter,
+    required this.limit,
+    required this.beforeSequence,
+    required this.nextBeforeSequence,
+  });
+
+  final AuditLogFilter filter;
+  final int limit;
+  final int? beforeSequence;
+  final int? nextBeforeSequence;
 }

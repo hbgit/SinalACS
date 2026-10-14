@@ -17,6 +17,10 @@ import 'package:sinalacs_server/src/runtime/alert_runtime.dart';
 /// por quê. Não sobe nenhum listener HTTP — só abre uma sessão interna para
 /// ler o banco, no mesmo padrão de script avulso que o Serverpod documenta
 /// para tarefas de manutenção.
+///
+/// Lê a tabela em lotes (`AuditChainVerifier.batchSize`), sem orçamento de
+/// tempo: a CLI vai até o fim. Falha de leitura ou segredo ausente também sai
+/// `1` — verificação que não terminou nunca é "íntegra".
 Future<void> main(List<String> args) async {
   final pod = Serverpod(args, Protocol(), Endpoints());
   final session = await pod.createSession();
@@ -35,7 +39,8 @@ Future<void> main(List<String> args) async {
       exitCode = 0;
     } else {
       stderr.writeln(
-        'FALHA na sequence ${result.brokenAtSequence}: ${result.reason} '
+        'FALHA [${result.reasonCode?.name}] na sequence '
+        '${result.brokenAtSequence ?? '-'}: ${result.reason} '
         '(${result.checked} linha(s) íntegra(s) antes da quebra)',
       );
       exitCode = 1;

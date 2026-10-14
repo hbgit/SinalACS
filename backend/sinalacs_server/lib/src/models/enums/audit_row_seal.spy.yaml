@@ -1,0 +1,11 @@
+### Selo de integridade de UMA linha de `audit_logs` (#45, D3), calculado no
+### servidor com a mesma `AuditChain` que grava a trilha. Só `verified` é verde:
+### `invalid` = o HMAC da linha ou o elo com a `sequence - 1` não confere;
+### `unverifiable` = a linha `sequence - 1` não existe no banco (o elo não pôde
+### ser conferido). Nunca carrega hash nem segredo.
+enum: AuditRowSeal
+serialized: byName
+values:
+  - verified
+  - invalid
+  - unverifiable

@@ -9,3 +9,6 @@ fields:
   resourceType: String
   timestamp: DateTime
   result: String
+  ### Selo da linha (#45, D3), calculado no servidor. O padrão é
+  ### `unverifiable` — nunca `verified` por omissão.
+  integrity: AuditRowSeal, default=unverifiable

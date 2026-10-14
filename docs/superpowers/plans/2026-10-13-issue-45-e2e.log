@@ -1,0 +1,475 @@
+# Issue #45 — Task 12a — e2e da trilha de auditoria no emulador (emulator-5554), banco sinalacs_e2e
+# Comando: ./scripts/qa/admin_auditoria_e2e.sh   (branch feat/issue-45-trilha-auditoria-completa, 2026-10-13)
+# Dado sintético (fixtures geradas por execução). Quatro execuções; as três primeiras falharam por defeitos do TESTE/SCRIPT,
+# não do produto; cada uma está abaixo, integral, com o diagnóstico e a correção.
+#
+# Execução 1 — FALHOU: os $(fx ...) dos --dart-define rodavam depois do 'cd apps/admin' (manifesto não achado -> defines 0);
+#   coordenador: toque no botão de login sem pump depois do ensureVisible (errou o alvo). O 'syntax error' no fim é do script
+#   ter sido editado em disco durante a execução (bash lê o arquivo aos poucos). Correção: valores do manifesto lidos antes; _tocarFora.
+################################################################ EXECUÇÃO 1
+== stack de e2e (banco de teste)
+aviso: o backend em execução (sinalacs-serverpod) será substituído pelo de e2e; ao final, rode `docker compose up -d` para voltar à stack de desenvolvimento.
+NOTICE:  database "sinalacs_e2e" does not exist, skipping
+Fixtures de e2e gravadas (5 pacientes, 2 ACS, 1 admin, 1 coordenador) em ../../.e2e/fixtures.json.
+  linhas semeadas na trilha: 60
+    OK — 60 linha(s) verificada(s), cadeia íntegra.
+  verificador CLI antes do teste: exit=0
+== trilha de auditoria no emulador
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    import json,sys;d=json.load(open('.e2e/fixtures.json'));print(eval(sys.argv[1]))
+                                ~~~~^^^^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: '.e2e/fixtures.json'
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    import json,sys;d=json.load(open('.e2e/fixtures.json'));print(eval(sys.argv[1]))
+                                ~~~~^^^^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: '.e2e/fixtures.json'
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    import json,sys;d=json.load(open('.e2e/fixtures.json'));print(eval(sys.argv[1]))
+                                ~~~~^^^^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: '.e2e/fixtures.json'
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    import json,sys;d=json.load(open('.e2e/fixtures.json'));print(eval(sys.argv[1]))
+                                ~~~~^^^^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: '.e2e/fixtures.json'
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    import json,sys;d=json.load(open('.e2e/fixtures.json'));print(eval(sys.argv[1]))
+                                ~~~~^^^^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: '.e2e/fixtures.json'
+Resolving dependencies...
+Downloading packages...
+  clock 1.1.2 (1.1.3 available)
+  flutter_lints 3.0.2 (6.0.0 available)
+  intl 0.20.2 (0.20.3 available)
+  lints 3.0.0 (6.1.0 available)
+  matcher 0.12.19 (0.12.20 available)
+  material_color_utilities 0.13.0 (0.13.1 available)
+  meta 1.18.0 (1.19.0 available)
+  qr 3.0.2 (4.0.0 available)
+  serverpod_auth_core_client 3.4.13 (4.0.4 available)
+  serverpod_auth_idp_client 3.4.13 (4.0.4 available)
+  serverpod_client 3.4.13 (4.0.4 available)
+  serverpod_serialization 3.4.13 (4.0.4 available)
+  stack_trace 1.12.1 (1.12.2 available)
+  test_api 0.7.11 (0.7.15 available)
+  vector_math 2.2.0 (2.4.3 available)
+Got dependencies!
+15 packages have newer versions incompatible with dependency constraints.
+Try `flutter pub outdated` for more information.
+00:00 +0: loading /home/rock/Documents/Dev/APPs/SinalACS/apps/admin/integration_test/admin_auditoria_e2e.dart
+Running Gradle task 'assembleDebug'...                          
+WARNING: A restricted method in java.lang.System has been called
+WARNING: java.lang.System::load has been called by net.rubygrapefruit.platform.internal.NativeLibraryLoader in an unnamed module (file:/home/rock/.gradle/wrapper/dists/gradle-9.1.0-all/7wzd0jkjit61aq2p43wpjgij9/gradle-9.1.0/lib/native-platform-0.22-milestone-28.jar)
+WARNING: Use --enable-native-access=ALL-UNNAMED to avoid a warning for callers in this module
+WARNING: Restricted methods will be blocked in a future release unless native access is enabled
+
+Warning: SDK processing. This version only understands SDK XML versions up to 3 but an SDK XML file of version 4 was encountered. This can happen if you use versions of Android Studio and the command-line tools that were released at different times.
+Running Gradle task 'assembleDebug'...                             28.6s
+✓ Built build/app/outputs/flutter-apk/app-debug.apk
+Installing build/app/outputs/flutter-apk/app-debug.apk...          522ms
+00:00 +0: admin consulta, filtra e pagina a trilha, vê a adulteração e exporta o CSV
+══╡ EXCEPTION CAUGHT BY FLUTTER TEST FRAMEWORK ╞════════════════════════════════════════════════════
+The following TestFailure was thrown running a test:
+Expected: be in range from 0 (inclusive) to 0 (inclusive)
+  Actual: <50>
+
+When the exception was thrown, this was the stack:
+#4      main.<anonymous closure> (file:///home/rock/Documents/Dev/APPs/SinalACS/apps/admin/integration_test/admin_auditoria_e2e.dart:422:5)
+#5      testWidgets.<anonymous closure>.<anonymous closure> (package:flutter_test/src/widget_tester.dart:192:29)
+<asynchronous suspension>
+#6      TestWidgetsFlutterBinding._runTestBody (package:flutter_test/src/binding.dart:1952:5)
+<asynchronous suspension>
+<asynchronous suspension>
+(elided one frame from package:stack_trace)
+
+This was caught by the test expectation on the following line:
+  file:///home/rock/Documents/Dev/APPs/SinalACS/apps/admin/integration_test/admin_auditoria_e2e.dart line 422
+The test description was:
+  admin consulta, filtra e pagina a trilha, vê a adulteração e exporta o CSV
+════════════════════════════════════════════════════════════════════════════════════════════════════
+00:00 +0 -1: admin consulta, filtra e pagina a trilha, vê a adulteração e exporta o CSV [E]
+  Test failed. See exception logs above.
+  The test description was: admin consulta, filtra e pagina a trilha, vê a adulteração e exporta o CSV
+  
+00:00 +0 -1: coordenador vê só a UBS dele, não tem "Exportar" e a exportação por RPC é recusada
+
+Warning: A call to tap() with finder "Found 1 widget with key [<'login_button'>]: [
+  FilledButton-[<'login_button'>](style: ButtonStyle#3ff60(textStyle: WidgetStatePropertyAll(null), minimumSize: WidgetStatePropertyAll(Size(48.0, 52.0)), mouseCursor: WidgetStateMapper<MouseCursor?>({WidgetState.disabled: null, WidgetState.any: null})), dependencies: [IconTheme, InheritedCupertinoTheme, MediaQuery, _InheritedTheme, _LocalizationsScope-[GlobalKey#4a84f], _ScrollableScope], state: _ButtonStyleState#87e44),
+]" derived an Offset (Offset(205.7, 637.0)) that would not hit test on the specified widget.
+Maybe the widget is actually off-screen, or another widget is obscuring it, or the widget cannot receive pointer events.
+The finder corresponds to this RenderBox: RenderSemanticsAnnotations#55ebf relayoutBoundary=up15
+The hit test result at that offset is: HitTestResult(_RenderInkFeatures#fb952@Offset(205.7, 637.0), RenderPhysicalModel#b7133@Offset(205.7, 637.0), RenderSemanticsAnnotations#69379@Offset(205.7, 637.0), RenderRepaintBoundary#5b95b@Offset(205.7, 637.0), RenderIgnorePointer#d0d9d@Offset(205.7, 637.0), RenderAnimatedOpacity#10536@Offset(205.7, 637.0), RenderAnimatedOpacity#c4e4d@Offset(205.7, 637.0), _RenderColoredBox#ad4fc@Offset(205.7, 637.0), RenderAnimatedOpacity#92288@Offset(205.7, 637.0), RenderIgnorePointer#c02d3@Offset(205.7, 637.0), RenderAnimatedOpacity#d78f6@Offset(205.7, 637.0), RenderRepaintBoundary#ae3dc@Offset(205.7, 637.0), RenderSemanticsAnnotations#749ca@Offset(205.7, 637.0), RenderOffstage#f0fd2@Offset(205.7, 637.0), RenderSemanticsAnnotations#2eddd@Offset(205.7, 637.0), _RenderTheater#b3d67@Offset(205.7, 637.0), RenderAbsorbPointer#93e44@Offset(205.7, 637.0), RenderPointerListener#5af03@Offset(205.7, 637.0), RenderSemanticsAnnotations#58a04@Offset(205.7, 637.0), RenderSemanticsAnnotations#aa132@Offset(205.7, 637.0), RenderSemanticsAnnotations#7f1a5@Offset(205.7, 637.0), RenderSemanticsAnnotations#e9c56@Offset(205.7, 637.0), RenderTapRegionSurface#0392f@Offset(205.7, 637.0), RenderSemanticsAnnotations#954a6@Offset(205.7, 637.0), RenderSemanticsAnnotations#e65bb@Offset(205.7, 637.0), HitTestEntry<HitTestTarget>#b1ab4(_ReusableRenderView#5157e), HitTestEntry<HitTestTarget>#6dd01(<IntegrationTestWidgetsFlutterBinding>))
+#0      WidgetController._getElementPoint (package:flutter_test/src/controller.dart:2165:25)
+#1      WidgetController.getCenter (package:flutter_test/src/controller.dart:1947:12)
+#2      WidgetController.tap (package:flutter_test/src/controller.dart:1080:7)
+#3      _entrar (file:///home/rock/Documents/Dev/APPs/SinalACS/apps/admin/integration_test/admin_auditoria_e2e.dart:222:18)
+<asynchronous suspension>
+#4      main.<anonymous closure> (file:///home/rock/Documents/Dev/APPs/SinalACS/apps/admin/integration_test/admin_auditoria_e2e.dart:581:5)
+<asynchronous suspension>
+#5      testWidgets.<anonymous closure>.<anonymous closure> (package:flutter_test/src/widget_tester.dart:192:15)
+<asynchronous suspension>
+#6      TestWidgetsFlutterBinding._runTestBody (package:flutter_test/src/binding.dart:1952:5)
+<asynchronous suspension>
+#7      StackZoneSpecification._registerCallback.<anonymous closure> (package:stack_trace/src/stack_zone_specification.dart:114:42)
+<asynchronous suspension>
+To silence this warning, pass "warnIfMissed: false" to "tap()".
+To make this warning fatal, set WidgetController.hitTestWarningShouldBeFatal to true.
+
+══╡ EXCEPTION CAUGHT BY FLUTTER TEST FRAMEWORK ╞════════════════════════════════════════════════════
+The following TestFailure was thrown running a test:
+condição não atingida em 60s; tela: ADM | SinalACS | Backoffice administrativo | Matrícula / CNS |
+Senha de acesso | Verificação ativada. Entre com o código do aplicativo. | Código do autenticador (6
+dígitos) | 6/6 | Entrar | BACKOFFICE SINALACS | Acesso administrativo
+
+When the exception was thrown, this was the stack:
+#0      fail (package:matcher/src/expect/expect.dart:187:31)
+#1      _pumpUntil (file:///home/rock/Documents/Dev/APPs/SinalACS/apps/admin/integration_test/admin_auditoria_e2e.dart:140:3)
+<asynchronous suspension>
+#2      _entrar (file:///home/rock/Documents/Dev/APPs/SinalACS/apps/admin/integration_test/admin_auditoria_e2e.dart:224:3)
+<asynchronous suspension>
+#3      main.<anonymous closure> (file:///home/rock/Documents/Dev/APPs/SinalACS/apps/admin/integration_test/admin_auditoria_e2e.dart:581:5)
+<asynchronous suspension>
+#4      testWidgets.<anonymous closure>.<anonymous closure> (package:flutter_test/src/widget_tester.dart:192:15)
+<asynchronous suspension>
+#5      TestWidgetsFlutterBinding._runTestBody (package:flutter_test/src/binding.dart:1952:5)
+<asynchronous suspension>
+<asynchronous suspension>
+(elided one frame from package:stack_trace)
+
+The test description was:
+  coordenador vê só a UBS dele, não tem "Exportar" e a exportação por RPC é recusada
+════════════════════════════════════════════════════════════════════════════════════════════════════
+01:11 +0 -2: coordenador vê só a UBS dele, não tem "Exportar" e a exportação por RPC é recusada [E]
+  Test failed. See exception logs above.
+  The test description was: coordenador vê só a UBS dele, não tem "Exportar" e a exportação por RPC é recusada
+  
+01:11 +0 -2: (tearDownAll)
+01:11 +0 -2: Some tests failed.
+
+Failing tests:
+  /home/rock/Documents/Dev/APPs/SinalACS/apps/admin/integration_test/admin_auditoria_e2e.dart: admin consulta, filtra e pagina a trilha, vê a adulteração e exporta o CSV
+  /home/rock/Documents/Dev/APPs/SinalACS/apps/admin/integration_test/admin_auditoria_e2e.dart: coordenador vê só a UBS dele, não tem "Exportar" e a exportação por RPC é recusada
+./scripts/qa/admin_auditoria_e2e.sh: line 159: syntax error near unexpected token `)'
+A stack de desenvolvimento foi substituída pela de e2e: rode `docker compose up -d` para voltá-la.
+exit=2
+
+# Execução 2 — FALHOU: _abrirFiltros achava 'fechado' com a lista rolada (formulário fora da árvore preguiçosa) e o toque FECHAVA;
+#   coordenador: título da cadeia lido com a lista no fim (painel fora da árvore). O escopo do coordenador já aparece certo (só autores ACS).
+#   Correção: perguntar rolando até o formulário; voltar ao topo antes de ler o painel.
+################################################################ EXECUÇÃO 2
+== stack de e2e (banco de teste)
+NOTICE:  database "sinalacs_e2e" does not exist, skipping
+Fixtures de e2e gravadas (5 pacientes, 2 ACS, 1 admin, 1 coordenador) em ../../.e2e/fixtures.json.
+  linhas semeadas na trilha: 60
+    OK — 60 linha(s) verificada(s), cadeia íntegra.
+  verificador CLI antes do teste: exit=0
+== trilha de auditoria no emulador
+Resolving dependencies...
+Downloading packages...
+  clock 1.1.2 (1.1.3 available)
+  flutter_lints 3.0.2 (6.0.0 available)
+  intl 0.20.2 (0.20.3 available)
+  lints 3.0.0 (6.1.0 available)
+  matcher 0.12.19 (0.12.20 available)
+  material_color_utilities 0.13.0 (0.13.1 available)
+  meta 1.18.0 (1.19.0 available)
+  qr 3.0.2 (4.0.0 available)
+  serverpod_auth_core_client 3.4.13 (4.0.4 available)
+  serverpod_auth_idp_client 3.4.13 (4.0.4 available)
+  serverpod_client 3.4.13 (4.0.4 available)
+  serverpod_serialization 3.4.13 (4.0.4 available)
+  stack_trace 1.12.1 (1.12.2 available)
+  test_api 0.7.11 (0.7.15 available)
+  vector_math 2.2.0 (2.4.3 available)
+Got dependencies!
+15 packages have newer versions incompatible with dependency constraints.
+Try `flutter pub outdated` for more information.
+00:00 +0: loading /home/rock/Documents/Dev/APPs/SinalACS/apps/admin/integration_test/admin_auditoria_e2e.dart
+Running Gradle task 'assembleDebug'...                          
+WARNING: A restricted method in java.lang.System has been called
+WARNING: java.lang.System::load has been called by net.rubygrapefruit.platform.internal.NativeLibraryLoader in an unnamed module (file:/home/rock/.gradle/wrapper/dists/gradle-9.1.0-all/7wzd0jkjit61aq2p43wpjgij9/gradle-9.1.0/lib/native-platform-0.22-milestone-28.jar)
+WARNING: Use --enable-native-access=ALL-UNNAMED to avoid a warning for callers in this module
+WARNING: Restricted methods will be blocked in a future release unless native access is enabled
+
+Running Gradle task 'assembleDebug'...                              9.5s
+✓ Built build/app/outputs/flutter-apk/app-debug.apk
+Installing build/app/outputs/flutter-apk/app-debug.apk...          511ms
+00:00 +0: admin consulta, filtra e pagina a trilha, vê a adulteração e exporta o CSV
+E2E_CADEIA_INTEGRA
+══╡ EXCEPTION CAUGHT BY FLUTTER TEST FRAMEWORK ╞════════════════════════════════════════════════════
+The following TestFailure was thrown running a test:
+Expected: true
+  Actual: <false>
+os filtros não abriram
+
+When the exception was thrown, this was the stack:
+#4      _abrirFiltros (file:///home/rock/Documents/Dev/APPs/SinalACS/apps/admin/integration_test/admin_auditoria_e2e.dart:297:3)
+<asynchronous suspension>
+#5      _limpar (file:///home/rock/Documents/Dev/APPs/SinalACS/apps/admin/integration_test/admin_auditoria_e2e.dart:307:3)
+<asynchronous suspension>
+#6      main.<anonymous closure> (file:///home/rock/Documents/Dev/APPs/SinalACS/apps/admin/integration_test/admin_auditoria_e2e.dart:470:12)
+<asynchronous suspension>
+#7      testWidgets.<anonymous closure>.<anonymous closure> (package:flutter_test/src/widget_tester.dart:192:15)
+<asynchronous suspension>
+#8      TestWidgetsFlutterBinding._runTestBody (package:flutter_test/src/binding.dart:1952:5)
+<asynchronous suspension>
+<asynchronous suspension>
+(elided one frame from package:stack_trace)
+
+This was caught by the test expectation on the following line:
+  file:///home/rock/Documents/Dev/APPs/SinalACS/apps/admin/integration_test/admin_auditoria_e2e.dart line 297
+The test description was:
+  admin consulta, filtra e pagina a trilha, vê a adulteração e exporta o CSV
+════════════════════════════════════════════════════════════════════════════════════════════════════
+00:37 +0 -1: admin consulta, filtra e pagina a trilha, vê a adulteração e exporta o CSV [E]
+  Test failed. See exception logs above.
+  The test description was: admin consulta, filtra e pagina a trilha, vê a adulteração e exporta o CSV
+  
+00:37 +0 -1: coordenador vê só a UBS dele, não tem "Exportar" e a exportação por RPC é recusada
+══╡ EXCEPTION CAUGHT BY FLUTTER TEST FRAMEWORK ╞════════════════════════════════════════════════════
+The following TestFailure was thrown running a test:
+condição não atingida em 60s; tela: read • admin_alerts | E2E-2598 (ACS) — 16/09/2026 14:54 |
+Resultado: success · nº 17 | Íntegro | read • visit | E2E-2598 (ACS) — 10/09/2026 12:54 | Resultado:
+denied · nº 14 | Íntegro | read • admin_micro_areas | E2E-2598 (ACS) — 09/09/2026 00:54 | Resultado:
+success · nº 11 | Íntegro | write • visit | E2E-2598 (ACS) — 07/09/2026 12:54 | Resultado: created ·
+nº 8 | Íntegro | login • session | E2E-2598 (ACS) — 06/09/2026 00:54 | Resultado: success · nº 5 |
+Íntegro | write • visit | E2E-2598 (ACS) — 04/09/2026 12:54 | Resultado: created · nº 2 | Íntegro |
+BACKOFFICE • COORDENADOR | Painel administrativo | Painel | Microáreas | Alertas | Auditoria |
+Pedidos
+
+When the exception was thrown, this was the stack:
+#0      fail (package:matcher/src/expect/expect.dart:187:31)
+#1      _pumpUntil (file:///home/rock/Documents/Dev/APPs/SinalACS/apps/admin/integration_test/admin_auditoria_e2e.dart:140:3)
+<asynchronous suspension>
+#2      main.<anonymous closure> (file:///home/rock/Documents/Dev/APPs/SinalACS/apps/admin/integration_test/admin_auditoria_e2e.dart:616:5)
+<asynchronous suspension>
+#3      testWidgets.<anonymous closure>.<anonymous closure> (package:flutter_test/src/widget_tester.dart:192:15)
+<asynchronous suspension>
+#4      TestWidgetsFlutterBinding._runTestBody (package:flutter_test/src/binding.dart:1952:5)
+<asynchronous suspension>
+<asynchronous suspension>
+(elided one frame from package:stack_trace)
+
+The test description was:
+  coordenador vê só a UBS dele, não tem "Exportar" e a exportação por RPC é recusada
+════════════════════════════════════════════════════════════════════════════════════════════════════
+02:01 +0 -2: coordenador vê só a UBS dele, não tem "Exportar" e a exportação por RPC é recusada [E]
+  Test failed. See exception logs above.
+  The test description was: coordenador vê só a UBS dele, não tem "Exportar" e a exportação por RPC é recusada
+  
+02:01 +0 -2: (tearDownAll)
+02:01 +0 -2: Some tests failed.
+
+Failing tests:
+  /home/rock/Documents/Dev/APPs/SinalACS/apps/admin/integration_test/admin_auditoria_e2e.dart: admin consulta, filtra e pagina a trilha, vê a adulteração e exporta o CSV
+  /home/rock/Documents/Dev/APPs/SinalACS/apps/admin/integration_test/admin_auditoria_e2e.dart: coordenador vê só a UBS dele, não tem "Exportar" e a exportação por RPC é recusada
+erro: a trilha de auditoria no emulador falhou (código 1)
+A stack de desenvolvimento foi substituída pela de e2e: rode `docker compose up -d` para voltá-la.
+exit=1
+
+# Execução 3 — FALHOU: _esperarLista aceitava 'Nenhum filtro aplicado' como texto de lista vazia (prefixo 'Nenhum ').
+#   O 'Falha de integridade' esperado do coordenador falhou só porque o 1º teste parou antes da adulteração (cadeia íntegra: correto).
+#   Correção: só 'Nenhum registro'/'Nenhum acesso'.
+################################################################ EXECUÇÃO 3
+== stack de e2e (banco de teste)
+NOTICE:  database "sinalacs_e2e" does not exist, skipping
+Fixtures de e2e gravadas (5 pacientes, 2 ACS, 1 admin, 1 coordenador) em ../../.e2e/fixtures.json.
+  linhas semeadas na trilha: 60
+    OK — 60 linha(s) verificada(s), cadeia íntegra.
+  verificador CLI antes do teste: exit=0
+== trilha de auditoria no emulador
+Resolving dependencies...
+Downloading packages...
+  clock 1.1.2 (1.1.3 available)
+  flutter_lints 3.0.2 (6.0.0 available)
+  intl 0.20.2 (0.20.3 available)
+  lints 3.0.0 (6.1.0 available)
+  matcher 0.12.19 (0.12.20 available)
+  material_color_utilities 0.13.0 (0.13.1 available)
+  meta 1.18.0 (1.19.0 available)
+  qr 3.0.2 (4.0.0 available)
+  serverpod_auth_core_client 3.4.13 (4.0.4 available)
+  serverpod_auth_idp_client 3.4.13 (4.0.4 available)
+  serverpod_client 3.4.13 (4.0.4 available)
+  serverpod_serialization 3.4.13 (4.0.4 available)
+  stack_trace 1.12.1 (1.12.2 available)
+  test_api 0.7.11 (0.7.15 available)
+  vector_math 2.2.0 (2.4.3 available)
+Got dependencies!
+15 packages have newer versions incompatible with dependency constraints.
+Try `flutter pub outdated` for more information.
+00:00 +0: loading /home/rock/Documents/Dev/APPs/SinalACS/apps/admin/integration_test/admin_auditoria_e2e.dart
+Running Gradle task 'assembleDebug'...                          
+WARNING: A restricted method in java.lang.System has been called
+WARNING: java.lang.System::load has been called by net.rubygrapefruit.platform.internal.NativeLibraryLoader in an unnamed module (file:/home/rock/.gradle/wrapper/dists/gradle-9.1.0-all/7wzd0jkjit61aq2p43wpjgij9/gradle-9.1.0/lib/native-platform-0.22-milestone-28.jar)
+WARNING: Use --enable-native-access=ALL-UNNAMED to avoid a warning for callers in this module
+WARNING: Restricted methods will be blocked in a future release unless native access is enabled
+
+Running Gradle task 'assembleDebug'...                              9.0s
+✓ Built build/app/outputs/flutter-apk/app-debug.apk
+Installing build/app/outputs/flutter-apk/app-debug.apk...          510ms
+00:00 +0: admin consulta, filtra e pagina a trilha, vê a adulteração e exporta o CSV
+E2E_CADEIA_INTEGRA
+══╡ EXCEPTION CAUGHT BY FLUTTER TEST FRAMEWORK ╞════════════════════════════════════════════════════
+The following TestFailure was thrown running a test:
+a lista não terminou de carregar; tela: Filtros | Nenhum filtro aplicado | Busca | Início da
+matrícula, tipo de recurso ou resultado. | Matrícula do autor | Todos os papéis | Papel do autor |
+Todas as ações | Ação | Tipo de recurso | Resultado | Início: não definido | Fim: não definido |
+Últimas 24 h | Últimos 7 dias | Últimos 30 dias | Aplicar filtros | Limpar | BACKOFFICE •
+ADMINISTRADOR | Painel administrativo | Painel | Microáreas | Alertas | Auditoria | Pedidos
+
+When the exception was thrown, this was the stack:
+#0      fail (package:matcher/src/expect/expect.dart:187:31)
+#1      _esperarLista (file:///home/rock/Documents/Dev/APPs/SinalACS/apps/admin/integration_test/admin_auditoria_e2e.dart:290:3)
+<asynchronous suspension>
+#2      main.<anonymous closure> (file:///home/rock/Documents/Dev/APPs/SinalACS/apps/admin/integration_test/admin_auditoria_e2e.dart:473:12)
+<asynchronous suspension>
+#3      testWidgets.<anonymous closure>.<anonymous closure> (package:flutter_test/src/widget_tester.dart:192:15)
+<asynchronous suspension>
+#4      TestWidgetsFlutterBinding._runTestBody (package:flutter_test/src/binding.dart:1952:5)
+<asynchronous suspension>
+<asynchronous suspension>
+(elided one frame from package:stack_trace)
+
+The test description was:
+  admin consulta, filtra e pagina a trilha, vê a adulteração e exporta o CSV
+════════════════════════════════════════════════════════════════════════════════════════════════════
+01:10 +0 -1: admin consulta, filtra e pagina a trilha, vê a adulteração e exporta o CSV [E]
+  Test failed. See exception logs above.
+  The test description was: admin consulta, filtra e pagina a trilha, vê a adulteração e exporta o CSV
+  
+01:10 +0 -1: coordenador vê só a UBS dele, não tem "Exportar" e a exportação por RPC é recusada
+══╡ EXCEPTION CAUGHT BY FLUTTER TEST FRAMEWORK ╞════════════════════════════════════════════════════
+The following TestFailure was thrown running a test:
+Expected: 'Falha de integridade na cadeia'
+  Actual: 'Cadeia íntegra'
+   Which: is different.
+          Expected: Falha de i ...
+            Actual: Cadeia ínt ...
+                    ^
+           Differ at offset 0
+
+When the exception was thrown, this was the stack:
+#4      main.<anonymous closure> (file:///home/rock/Documents/Dev/APPs/SinalACS/apps/admin/integration_test/admin_auditoria_e2e.dart:626:5)
+<asynchronous suspension>
+#5      testWidgets.<anonymous closure>.<anonymous closure> (package:flutter_test/src/widget_tester.dart:192:15)
+<asynchronous suspension>
+#6      TestWidgetsFlutterBinding._runTestBody (package:flutter_test/src/binding.dart:1952:5)
+<asynchronous suspension>
+<asynchronous suspension>
+(elided one frame from package:stack_trace)
+
+This was caught by the test expectation on the following line:
+  file:///home/rock/Documents/Dev/APPs/SinalACS/apps/admin/integration_test/admin_auditoria_e2e.dart line 626
+The test description was:
+  coordenador vê só a UBS dele, não tem "Exportar" e a exportação por RPC é recusada
+════════════════════════════════════════════════════════════════════════════════════════════════════
+01:44 +0 -2: coordenador vê só a UBS dele, não tem "Exportar" e a exportação por RPC é recusada [E]
+  Test failed. See exception logs above.
+  The test description was: coordenador vê só a UBS dele, não tem "Exportar" e a exportação por RPC é recusada
+  
+01:44 +0 -2: (tearDownAll)
+01:44 +0 -2: Some tests failed.
+
+Failing tests:
+  /home/rock/Documents/Dev/APPs/SinalACS/apps/admin/integration_test/admin_auditoria_e2e.dart: admin consulta, filtra e pagina a trilha, vê a adulteração e exporta o CSV
+  /home/rock/Documents/Dev/APPs/SinalACS/apps/admin/integration_test/admin_auditoria_e2e.dart: coordenador vê só a UBS dele, não tem "Exportar" e a exportação por RPC é recusada
+erro: a trilha de auditoria no emulador falhou (código 1)
+A stack de desenvolvimento foi substituída pela de e2e: rode `docker compose up -d` para voltá-la.
+exit=1
+
+# Execução 4 — PASSOU (exit=0). Caminho da área de transferência: Clipboard.getData no aparelho (E2E_CLIPBOARD caminho=clipboard),
+#   conferido pelo SHA-256 que o servidor devolveu; não foi preciso o caminho alternativo por RPC.
+################################################################ EXECUÇÃO 4
+== stack de e2e (banco de teste)
+NOTICE:  database "sinalacs_e2e" does not exist, skipping
+Fixtures de e2e gravadas (5 pacientes, 2 ACS, 1 admin, 1 coordenador) em ../../.e2e/fixtures.json.
+  linhas semeadas na trilha: 60
+    OK — 60 linha(s) verificada(s), cadeia íntegra.
+  verificador CLI antes do teste: exit=0
+== trilha de auditoria no emulador
+Resolving dependencies...
+Downloading packages...
+  clock 1.1.2 (1.1.3 available)
+  flutter_lints 3.0.2 (6.0.0 available)
+  intl 0.20.2 (0.20.3 available)
+  lints 3.0.0 (6.1.0 available)
+  matcher 0.12.19 (0.12.20 available)
+  material_color_utilities 0.13.0 (0.13.1 available)
+  meta 1.18.0 (1.19.0 available)
+  qr 3.0.2 (4.0.0 available)
+  serverpod_auth_core_client 3.4.13 (4.0.4 available)
+  serverpod_auth_idp_client 3.4.13 (4.0.4 available)
+  serverpod_client 3.4.13 (4.0.4 available)
+  serverpod_serialization 3.4.13 (4.0.4 available)
+  stack_trace 1.12.1 (1.12.2 available)
+  test_api 0.7.11 (0.7.15 available)
+  vector_math 2.2.0 (2.4.3 available)
+Got dependencies!
+15 packages have newer versions incompatible with dependency constraints.
+Try `flutter pub outdated` for more information.
+00:00 +0: loading /home/rock/Documents/Dev/APPs/SinalACS/apps/admin/integration_test/admin_auditoria_e2e.dart
+Running Gradle task 'assembleDebug'...                          
+WARNING: A restricted method in java.lang.System has been called
+WARNING: java.lang.System::load has been called by net.rubygrapefruit.platform.internal.NativeLibraryLoader in an unnamed module (file:/home/rock/.gradle/wrapper/dists/gradle-9.1.0-all/7wzd0jkjit61aq2p43wpjgij9/gradle-9.1.0/lib/native-platform-0.22-milestone-28.jar)
+WARNING: Use --enable-native-access=ALL-UNNAMED to avoid a warning for callers in this module
+WARNING: Restricted methods will be blocked in a future release unless native access is enabled
+
+Running Gradle task 'assembleDebug'...                              8.9s
+✓ Built build/app/outputs/flutter-apk/app-debug.apk
+Installing build/app/outputs/flutter-apk/app-debug.apk...          477ms
+00:00 +0: admin consulta, filtra e pagina a trilha, vê a adulteração e exporta o CSV
+E2E_CADEIA_INTEGRA
+E2E_FILTROS_OK paginas=2 linhas=76
+E2E_ADULTERAR sequence=50
+  [script] linha 50 adulterada no sinalacs_e2e (result 'success' -> 'x') (21:01:54)
+E2E_ADULTERACAO_DETECTADA sequence=50 linhas=83
+E2E_CLIPBOARD caminho=clipboard
+E2E_EXPORT_FEITO linhas=45 primeira=16 ultima=60
+01:54 +1: coordenador vê só a UBS dele, não tem "Exportar" e a exportação por RPC é recusada
+E2E_COORDENADOR_OK linhas=20
+E2E_FIM
+02:24 +2: (tearDownAll)
+02:24 +2: All tests passed!
+  E2E_CLIPBOARD caminho=clipboard
+== exportação e recusa no banco de teste
+  uma linha export/success gravada no teste: 1
+  ela é do administrador, sobre admin_audit_logs, ligada a audit_exports: true
+  uma recusa export/denied do coordenador: 1
+  nenhuma exportação do coordenador concluída: 0
+  uma única linha em audit_exports: 1
+  audit_exports com o recorte do período e a cadeia quebrada no momento: 45|16|60|broken|csv
+  filtersJson só com chaves de filtro: ['from', 'to']
+== cadeia de auditoria (verificador CLI)
+    FALHA [hashMismatch] na sequence 50: hash não confere com o conteúdo da linha (possível adulteração) (49 linha(s) íntegra(s) antes da quebra)
+  com a linha 50 adulterada: exit=1
+  [script] linha 50 restaurada (result 'x' -> 'success')
+    OK — 99 linha(s) verificada(s), cadeia íntegra.
+  depois de restaurada: exit=0
+OK — trilha de auditoria do backoffice contra o banco de teste
+A stack de desenvolvimento foi substituída pela de e2e: rode `docker compose up -d` para voltá-la.
+exit=0
+
+################################################################ REGRESSÃO (depois da execução 4)
+$ bash scripts/qa/admin_auditoria_e2e_test.sh
+ok
+exit=0
+$ ./scripts/qa/ci_invariants.sh
+ok: 9 grupos de invariantes do CI
+exit=0
+$ ./scripts/qa/ci_invariants_test.sh
+
+OK — as checagens de check obrigatório "verde sem rodar" (issue #20) conferem.
+exit=0
+$ (backend) dart analyze bin/seed_e2e_fixtures.dart
+No issues found!
+$ (apps/admin) flutter analyze
+No issues found! (ran in 0.7s)
+$ (apps/admin) flutter test
+00:22 +345: All tests passed!
+$ (backend) dart test test/unit
+00:01 +797: All tests passed!

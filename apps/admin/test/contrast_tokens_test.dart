@@ -48,6 +48,13 @@ void main() {
     // Faixa "N vermelhos vencidos" (#44): texto + ícone sobre o fundo
     // `surfaceRaised` da própria faixa, no painel e na lista de alertas.
     ('redOnSurface sobre card (faixa de vermelhos vencidos)', AdminColors.redOnSurface, AdminColors.surfaceRaised, normalText),
+    // Trilha de auditoria (#45): selo por linha e painel do estado da cadeia,
+    // texto + ícone dentro de Card. Só o estado `verified` usa verde; falha
+    // usa o token de texto do vermelho; indisponível/inconclusivo/não
+    // verificável usam o branco atenuado, com ícone e rótulo próprios.
+    ('green sobre card (selo "Íntegro" / "Cadeia íntegra")', AdminColors.green, AdminColors.surfaceRaised, normalText),
+    ('redOnSurface sobre card (selo "Adulterado?" / falha de integridade)', AdminColors.redOnSurface, AdminColors.surfaceRaised, normalText),
+    ('white70 sobre card (selo "Não verificável" / verificação indisponível)', Colors.white70, AdminColors.surfaceRaised, normalText),
     // Preenchimento: texto branco sobre a cor de fundo — a prova de que não
     // precisamos trocar `red`/`accent` como fill.
     ('branco sobre red (faixa/chip de risco)', Colors.white, AdminColors.red, largeTextOrUi),

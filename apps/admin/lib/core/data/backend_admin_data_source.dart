@@ -240,24 +240,86 @@ class BackendAdminDataSource implements AdminDataSource {
   }
 
   @override
-  Future<List<AuditLogEntry>> fetchAuditLogs({int limit = 50}) =>
-      _guard(() async {
-        final pagina = await _admin.auditLogs(
-          accessToken: _accessToken,
-          limit: limit,
-        );
-        return [
-          for (final e in pagina.items)
-            AuditLogEntry(
-              id: e.id,
-              userLabel: e.userLabel,
-              actionType: e.actionType,
-              resourceType: e.resourceType,
-              timestamp: e.timestamp,
-              result: e.result,
-            ),
-        ];
-      });
+  Future<AuditLogPage> fetchAuditLogs({
+    AuditLogFilter filter = const AuditLogFilter(),
+    int limit = 50,
+    int? beforeSequence,
+  }) => _guard(() async {
+    final pagina = await _admin.auditLogs(
+      accessToken: _accessToken,
+      filter: filter.isEmpty ? null : _filtroDoCliente(filter),
+      limit: limit,
+      beforeSequence: beforeSequence,
+    );
+    return AuditLogPage(
+      items: [
+        for (final e in pagina.items)
+          AuditLogEntry(
+            id: e.id,
+            sequence: e.sequence,
+            userLabel: e.userLabel,
+            actionType: e.actionType,
+            resourceType: e.resourceType,
+            timestamp: e.timestamp,
+            result: e.result,
+            // Selo ausente na resposta já chega `unverifiable` (padrão do
+            // modelo gerado), nunca íntegro: o app não decide integridade.
+            seal: AuditRowSeal.values.byName(e.integrity.name),
+          ),
+      ],
+      nextBeforeSequence: pagina.nextBeforeSequence,
+    );
+  }, invalido: 'Filtro de auditoria inválido. Revise os campos.');
+
+  @override
+  Future<ChainStatus> verifyAuditChain() => _guard(() async {
+    final s = await _admin.verifyAuditChain(accessToken: _accessToken);
+    return ChainStatus(
+      state: AuditIntegrityState.values.byName(s.state.name),
+      checkedRows: s.checkedRows,
+      headSequence: s.headSequence,
+      firstBrokenSequence: s.firstBrokenSequence,
+      brokenInScope: s.brokenInScope,
+      reasonCode: s.reasonCode == null
+          ? null
+          : AuditChainReason.values.byName(s.reasonCode!.name),
+      verifiedAt: s.verifiedAt,
+    );
+  });
+
+  @override
+  Future<AuditExportResult> exportAuditLogs(AuditLogFilter filter) async {
+    try {
+      final r = await _admin.exportAuditLogs(
+        accessToken: _accessToken,
+        filter: _filtroDoCliente(filter),
+      );
+      return AuditExportResult(
+        fileName: r.fileName,
+        csv: r.csv,
+        rowCount: r.rowCount,
+        firstSequence: r.firstSequence,
+        lastSequence: r.lastSequence,
+        contentSha256: r.contentSha256,
+        chainState: AuditIntegrityState.values.byName(r.chainState.name),
+        generatedAt: r.generatedAt,
+      );
+    } on api.ServerpodClientUnauthorized {
+      throw const AdminSessionExpired();
+    } on api.AlertPermissionException {
+      final venceu = _expiresAt != null && !_now().isBefore(_expiresAt);
+      if (venceu) throw const AdminSessionExpired();
+      throw const AuditExportFailure(AuditExportFailureKind.forbidden);
+    } on api.AdminInvalidRequestException {
+      // A tela só pede com início e fim válidos (as mesmas regras do servidor),
+      // então a recusa que sobra é o teto de linhas.
+      throw const AuditExportFailure(AuditExportFailureKind.tooManyRows);
+    } on Exception {
+      // `AuditExportFailedException` do servidor não é serializável: chega como
+      // 500 sem mensagem, igual a qualquer outra falha. Rede e tempo idem.
+      throw const AuditExportFailure(AuditExportFailureKind.failed);
+    }
+  }
 
   @override
   Future<List<DataRequestSummary>> fetchDataRequests({
@@ -419,6 +481,21 @@ class BackendAdminDataSource implements AdminDataSource {
     }
   }
 }
+
+/// Filtro do app para o `AdminAuditFilter` do cliente; o papel vai por nome.
+/// O período segue em UTC, como o servidor o compara.
+api.AdminAuditFilter _filtroDoCliente(AuditLogFilter f) => api.AdminAuditFilter(
+  actorEnrollmentId: f.actorEnrollmentId,
+  actorRole: f.actorRole == null
+      ? null
+      : api.UserRole.values.byName(f.actorRole!.name),
+  actionType: f.actionType,
+  resourceType: f.resourceType,
+  result: f.result,
+  from: f.from?.toUtc(),
+  to: f.to?.toUtc(),
+  search: f.search,
+);
 
 /// `AdminAcs` do cliente para o modelo do app. Só campos simples: os enums do
 /// backoffice que exigem tradução por nome (`UserRole`) entram onde aparecem.

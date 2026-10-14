@@ -1,4 +1,6 @@
 import 'package:sinalacs_server/src/application/admin/admin_scope.dart';
+import 'package:sinalacs_server/src/application/audit/audit_chain.dart';
+import 'package:sinalacs_server/src/application/audit/audit_row_sealer.dart';
 import 'package:sinalacs_server/src/application/audit/audit_trail.dart';
 import 'package:sinalacs_server/src/application/auth/development_auth_service.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
@@ -10,6 +12,39 @@ export 'package:sinalacs_server/src/application/admin/admin_scope.dart';
 /// O que o pulso da monitoração (#44, D5) lê além dos indicadores: só uma
 /// contagem e um instante, nunca um alerta.
 typedef AlertsPulseCounts = ({int overdueRed, DateTime? maxChangedAt});
+
+/// Uma linha da auditoria como o store a devolve (#45, Task 5): o que a tela
+/// vê ([entry], com `integrity` ainda no padrão `unverifiable`) e o que só o
+/// servidor vê ([seal]: campos da cadeia e `entryHash` da `sequence - 1`).
+/// Interno: não é modelo `.spy.yaml`, não serializa, não sai do servidor.
+class AdminAuditRow {
+  const AdminAuditRow({
+    required this.entry,
+    required this.seal,
+    this.actorRole,
+    this.actorEnrollmentId,
+  });
+
+  final AdminAuditEntry entry;
+  final AuditSealInput seal;
+
+  /// Papel do autor (`users.role`), nulo se o autor não existe mais. Só para
+  /// a exportação (#45, Task 10: colunas `autor`/`papel_autor` de D6).
+  final String? actorRole;
+
+  /// Matrícula do autor (ACS ou staff), nula para paciente. Só para a
+  /// exportação; a tela continua com o `userLabel` pronto.
+  final String? actorEnrollmentId;
+}
+
+/// Página do store da auditoria, por keyset (mesmo contrato de
+/// [AdminAuditPage]), com as entradas de selo internas.
+class AdminAuditRowPage {
+  const AdminAuditRowPage({required this.items, this.nextBeforeSequence});
+
+  final List<AdminAuditRow> items;
+  final int? nextBeforeSequence;
+}
 
 /// Leitura do backoffice. Interface à parte do ORM, no espírito de
 /// `AlertStore`: o serviço e seus testes não conhecem SQL.
@@ -52,8 +87,16 @@ abstract interface class AdminReadStore implements AdminScopeStore {
   /// O escopo não filtra só o recurso auditado: filtra o **autor** da linha — o
   /// coordenador só vê linhas de atores com microárea na UBS dele; linhas de
   /// staff (sem microárea) não aparecem para ele.
-  Future<AdminAuditPage> auditLogs(
+  ///
+  /// [filter] (#45) já chega validado pelo serviço e só **restringe** o
+  /// escopo, nunca o alarga: nulo = sem filtro.
+  ///
+  /// Cada linha traz também o [AuditSealInput] (#45, Task 5): os campos da
+  /// cadeia e o `entryHash` da linha `sequence - 1` lido do banco (nulo se
+  /// ela não existe) — o vizinho da cadeia, não o da página.
+  Future<AdminAuditRowPage> auditLogs(
     AdminScope scope, {
+    AdminAuditFilter? filter,
     required int limit,
     int? beforeSequence,
   });
@@ -79,11 +122,16 @@ class AdminReadService {
   AdminReadService({
     required this.store,
     required this.audit,
+    required AuditChain auditChain,
     DateTime Function()? clock,
-  }) : _clock = clock ?? DateTime.now;
+  }) : _sealer = AuditRowSealer(auditChain),
+       _clock = clock ?? DateTime.now;
 
   final AdminReadStore store;
   final AuditTrail audit;
+
+  /// Sela cada linha da auditoria com a MESMA [AuditChain] que grava a trilha.
+  final AuditRowSealer _sealer;
   final DateTime Function() _clock;
 
   /// A regra única de papel/escopo, sobre o [store] (que também é a porta da
@@ -128,20 +176,86 @@ class AdminReadService {
     );
   }
 
+  /// Trilha de auditoria no escopo, com [filter] opcional (#45). Papel e
+  /// escopo primeiro (a recusa é auditada `denied`); depois paginação e
+  /// filtro — entrada inválida não é acesso, então não grava `success`.
+  ///
+  /// Toda linha devolvida sai selada pelo [AuditRowSealer] (D3); o
+  /// `integrity` de cada uma é sempre reescrito aqui, nunca herdado do store.
   Future<AdminAuditPage> auditLogs(
     AuthenticatedUser user, {
+    AdminAuditFilter? filter,
     int limit = 50,
     int? beforeSequence,
   }) async {
     const recurso = 'admin_audit_logs';
     final escopo = await _resolver.resolve(user, recurso: recurso);
     _validarPagina(limit, 0);
+    validarFiltroDeAuditoria(filter);
     await _auditar(user, recurso, 'success');
-    return store.auditLogs(
+    final pagina = await store.auditLogs(
       escopo,
+      filter: filter,
       limit: limit,
       beforeSequence: beforeSequence,
     );
+    return AdminAuditPage(
+      items: [
+        for (final linha in pagina.items)
+          linha.entry.copyWith(integrity: _sealer.sealInput(linha.seal)),
+      ],
+      nextBeforeSequence: pagina.nextBeforeSequence,
+    );
+  }
+
+  /// Ações que existem em `audit_logs.actionType` (D1).
+  static const acoesDeAuditoria = {'read', 'write', 'login', 'export'};
+
+  /// Janela máxima entre `from` e `to` (D1).
+  static const janelaMaximaDoFiltro = Duration(days: 366);
+
+  static final _rotulo = RegExp(r'^[a-z0-9_:]{1,64}$');
+  static const _filtroInvalido = 'Filtro de auditoria inválido.';
+
+  /// Regras do [AdminAuditFilter] (D1/D2), puras e públicas para a exportação
+  /// (Task 10) usar a mesma. Lança [AdminInvalidRequestException] com uma
+  /// mensagem sobre a própria entrada; nunca ecoa o valor recebido.
+  static void validarFiltroDeAuditoria(AdminAuditFilter? f) {
+    if (f == null) return;
+    void recusar(String detalhe) => throw AdminInvalidRequestException(
+      message: '$_filtroInvalido $detalhe',
+    );
+
+    final matricula = f.actorEnrollmentId;
+    if (matricula != null && (matricula.isEmpty || matricula.length > 32)) {
+      recusar('A matrícula deve ter de 1 a 32 caracteres.');
+    }
+    final acao = f.actionType;
+    if (acao != null && !acoesDeAuditoria.contains(acao)) {
+      recusar('Ação desconhecida.');
+    }
+    final tipo = f.resourceType;
+    if (tipo != null && !_rotulo.hasMatch(tipo)) {
+      recusar('Tipo de recurso inválido.');
+    }
+    final resultado = f.result;
+    if (resultado != null && !_rotulo.hasMatch(resultado)) {
+      recusar('Resultado inválido.');
+    }
+    final de = f.from;
+    final ate = f.to;
+    if (de != null && ate != null) {
+      if (!de.isBefore(ate)) {
+        recusar('O início do período deve ser anterior ao fim.');
+      }
+      if (ate.difference(de) > janelaMaximaDoFiltro) {
+        recusar('O período é de no máximo 366 dias.');
+      }
+    }
+    final busca = f.search;
+    if (busca != null && (busca.length < 2 || busca.length > 64)) {
+      recusar('A busca deve ter de 2 a 64 caracteres.');
+    }
   }
 
   void _validarPagina(int limit, int offset) {

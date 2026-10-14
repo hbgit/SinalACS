@@ -470,6 +470,188 @@ void main() {
       },
     );
 
+    group('auditoria com filtro (#45), pelo endpoint', () {
+      final filtro = AdminAuditFilter(
+        actionType: 'read',
+        resourceType: 'patient_directory',
+      );
+
+      test('sem token ou com token inválido: recusa de autenticação', () async {
+        for (final t in ['', 'lixo']) {
+          await expectLater(
+            endpoints.admin.auditLogs(
+              sessionBuilder,
+              limit: 50,
+              accessToken: t,
+              filter: filtro,
+            ),
+            throwsA(isA<AlertPermissionException>()),
+          );
+        }
+        expect(await _auditoriasAdmin(session, 'success'), 0);
+      });
+
+      test(
+        'acs e patient com filtro: AlertPermissionException e linha denied',
+        () async {
+          for (final (id, role) in [
+            (_acs, UserRole.acs),
+            (_paciente, UserRole.patient),
+          ]) {
+            await expectLater(
+              endpoints.admin.auditLogs(
+                sessionBuilder,
+                limit: 50,
+                accessToken: _token(id, role, ma: _maA),
+                filter: filtro,
+              ),
+              throwsA(isA<AlertPermissionException>()),
+            );
+          }
+          expect(await _auditoriasAdmin(session, 'denied'), 2);
+          expect(await _auditoriasAdmin(session, 'success'), 0);
+        },
+      );
+
+      test('coordenador sem UBS com filtro é recusado', () async {
+        await expectLater(
+          endpoints.admin.auditLogs(
+            sessionBuilder,
+            limit: 50,
+            accessToken: _token(_coordSemUbs, UserRole.coordinator),
+            filter: filtro,
+          ),
+          throwsA(isA<AlertPermissionException>()),
+        );
+        expect(await _auditoriasAdmin(session, 'denied'), 1);
+      });
+
+      test(
+        'filtro inválido: AdminInvalidRequestException, sem linha de sucesso',
+        () async {
+          await expectLater(
+            endpoints.admin.auditLogs(
+              sessionBuilder,
+              limit: 50,
+              accessToken: _token(_admin, UserRole.admin),
+              filter: AdminAuditFilter(search: '%'),
+            ),
+            throwsA(isA<AdminInvalidRequestException>()),
+          );
+          expect(await _auditoriasAdmin(session, 'success'), 0);
+        },
+      );
+
+      test(
+        'filtro válido atravessa o protocolo e restringe as linhas',
+        () async {
+          await endpoints.patients.listMicroArea(
+            sessionBuilder,
+            accessToken: _token(_acs, UserRole.acs, ma: _maA),
+          );
+          final t = _token(_admin, UserRole.admin);
+          await endpoints.admin.indicators(sessionBuilder, accessToken: t);
+
+          final pagina = await endpoints.admin.auditLogs(
+            sessionBuilder,
+            limit: 50,
+            accessToken: t,
+            filter: filtro.copyWith(
+              actorEnrollmentId: 'acs-ep-1',
+              search: 'directory',
+            ),
+          );
+          expect(pagina.items, isNotEmpty);
+          expect(
+            pagina.items.map((e) => (e.userLabel, e.resourceType)).toSet(),
+            {('ACS-EP-1 (ACS)', 'patient_directory')},
+          );
+
+          final doCoordenador = await endpoints.admin.auditLogs(
+            sessionBuilder,
+            limit: 50,
+            accessToken: _token(_coordA, UserRole.coordinator),
+            filter: AdminAuditFilter(actorRole: UserRole.admin),
+          );
+          expect(
+            doCoordenador.items,
+            isEmpty,
+            reason: 'o filtro não fura o escopo: staff segue invisível',
+          );
+
+          final semFiltro = await endpoints.admin.auditLogs(
+            sessionBuilder,
+            limit: 50,
+            accessToken: t,
+          );
+          expect(
+            semFiltro.items.length,
+            greaterThan(pagina.items.length),
+            reason: 'o parâmetro é opcional: sem ele, nada é filtrado',
+          );
+        },
+      );
+
+      test(
+        'resposta serializada de consulta filtrada não vaza hash, nome nem UUID',
+        () async {
+          await endpoints.patients.listMicroArea(
+            sessionBuilder,
+            accessToken: _token(_acs, UserRole.acs, ma: _maA),
+          );
+          final t = _token(_admin, UserRole.admin);
+          await endpoints.admin.indicators(sessionBuilder, accessToken: t);
+
+          final pagina = await endpoints.admin.auditLogs(
+            sessionBuilder,
+            limit: 50,
+            accessToken: t,
+            filter: AdminAuditFilter(
+              actionType: 'read',
+              search: 'directory',
+            ),
+          );
+          expect(pagina.items, isNotEmpty);
+          final json = jsonEncode(pagina.toJson());
+          for (final proibido in [
+            'ipHash',
+            'previousHash',
+            'entryHash',
+            _nomePaciente,
+            'Joana',
+          ]) {
+            expect(json, isNot(contains(proibido)), reason: proibido);
+          }
+          // O `id` da própria linha de auditoria é o identificador público da
+          // entrada (chave do keyset/UI), não um resourceId nem um userId.
+          final semIdDaLinha = jsonEncode([
+            for (final e in pagina.items) (e.toJson()..remove('id')),
+          ]);
+          expect(
+            RegExp(
+              r'[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}',
+            ).hasMatch(semIdDaLinha),
+            isFalse,
+            reason: 'nenhum UUID completo de resourceId/userId: $semIdDaLinha',
+          );
+        },
+      );
+
+      test('coordenador da UBS A filtrando actorRole=admin: vazio', () async {
+        await endpoints.admin.indicators(
+          sessionBuilder,
+          accessToken: _token(_admin, UserRole.admin),
+        );
+        final pagina = await endpoints.admin.auditLogs(
+          sessionBuilder,
+          limit: 50,
+          accessToken: _token(_coordA, UserRole.coordinator),
+          filter: AdminAuditFilter(actorRole: UserRole.admin),
+        );
+        expect(pagina.items, isEmpty);
+      });
+    });
+
     group('pedidos do titular (#42), ponta a ponta pelo endpoint', () {
       String tPaciente() => _token(_paciente, UserRole.patient, ma: _maA);
       String tCoordA() => _token(_coordA, UserRole.coordinator);

@@ -3,12 +3,14 @@ import 'dart:io';
 import 'dart:math';
 
 import 'package:postgres/postgres.dart';
+import 'package:sinalacs_server/src/application/audit/audit_chain.dart';
 import 'package:sinalacs_server/src/application/auth/cpf.dart';
 import 'package:sinalacs_server/src/config/app_config.dart';
 import 'package:sinalacs_server/src/infrastructure/crypto/argon2_password_hasher.dart';
 import 'package:sinalacs_server/src/infrastructure/crypto/encrypted_json.dart';
 import 'package:sinalacs_server/src/infrastructure/crypto/health_data_cipher.dart';
 import 'package:sinalacs_server/src/infrastructure/crypto/hmac_cpf_hasher.dart';
+import 'package:sinalacs_server/src/infrastructure/crypto/rotating_ip_hasher.dart';
 import 'package:sinalacs_server/src/infrastructure/testing/e2e_fixtures.dart';
 import 'package:sinalacs_server/src/application/auth/staff_activation_code.dart';
 
@@ -50,6 +52,7 @@ Future<void> main(List<String> args) async {
     settings: const ConnectionSettings(sslMode: SslMode.disable),
   );
 
+  Map<String, Object?>? trilha;
   try {
     await connection.runTx((tx) async {
       await tx.execute(
@@ -263,13 +266,154 @@ Future<void> main(List<String> args) async {
           'parallelism': coordinatorDigest.parallelism,
         },
       );
+      // Trilha de auditoria (#45), OPT-IN (`E2E_SEED_AUDIT_TRAIL=1`, só por
+      // `admin_auditoria_e2e.sh`): ver [_semearTrilha].
+      if (env['E2E_SEED_AUDIT_TRAIL'] == '1') {
+        trilha = await _semearTrilha(tx, fixtures, config.auditChainSecret);
+      }
     });
   } finally {
     await connection.close();
   }
 
   final out = File(args.isNotEmpty ? args.first : '.e2e/fixtures.json');
-  writeManifestPrivately(out, jsonEncode(fixtures.toJson()));
+  final manifesto = fixtures.toJson();
+  if (trilha != null) manifesto['auditTrail'] = trilha;
+  writeManifestPrivately(out, jsonEncode(manifesto));
   stdout.writeln('Fixtures de e2e gravadas (${fixtures.patients.length} pacientes, 2 ACS, 1 admin, 1 coordenador) '
       'em ${out.path}.');
 }
+
+/// Trilha de auditoria sintética do e2e da #45 (`admin_auditoria_e2e.sh`).
+///
+/// [_linhasDaTrilha] linhas encadeadas a partir da gênese — o banco de e2e
+/// nasce vazio e nada grava `audit_logs` antes do seed —, com a MESMA
+/// [AuditChain] e o MESMO [RotatingIpHasher] que o `OrmAuditTrail` usa (e o
+/// mesmo `AUDIT_CHAIN_SECRET` do `.env` que o servidor lê). Não passa pelo
+/// `OrmAuditTrail` porque ele exige uma `Session` do Serverpod e carimba
+/// `DateTime.now()`: a jornada precisa de linhas no passado (filtro de
+/// período) e de duas com o MESMO `timestamp` (ordem estável por `sequence`).
+///
+/// Desenho (ver o teste `apps/admin/integration_test/admin_auditoria_e2e.dart`):
+/// * autores em rodízio: administrador, coordenador e o ACS das fixtures
+///   (o único com microárea: é o que o coordenador enxerga);
+/// * linhas 1–15 com 40 a 33 dias de idade (fora do período do teste, de 30
+///   dias até ontem) e 16–60 com 28 a ~2,3 dias (dentro): margem de dias para
+///   as duas pontas do período, que a tela define em minutos;
+/// * as linhas 30 e 31 com o mesmo `timestamp`;
+/// * uma única `escalated:no_ack_timeout` (alvo da busca);
+/// * a linha [_sequenciaAdulterada] é a que o script adultera no meio do teste.
+///
+/// Timestamps em segundos inteiros, gravados como texto sem fuso (a coluna é
+/// `timestamp without time zone` em UTC, como o Serverpod grava): o
+/// `toIso8601String` do HMAC é o mesmo que o verificador recalcula ao ler.
+///
+/// Devolve o bloco `auditTrail` do manifesto, com as contagens que o teste
+/// confere — derivadas das linhas aqui, nunca duplicadas à mão no teste.
+Future<Map<String, Object?>> _semearTrilha(TxSession tx, E2eFixtures fixtures, String segredo) async {
+  final chain = AuditChain(secret: segredo);
+  final ipHasher = RotatingIpHasher(secret: segredo);
+  final random = Random.secure();
+  final agora = DateTime.now().toUtc();
+  final base = DateTime.utc(agora.year, agora.month, agora.day, agora.hour, agora.minute, agora.second);
+
+  final autores = [
+    (id: fixtures.staff.id, papel: 'admin'),
+    (id: fixtures.coordinator.id, papel: 'coordinator'),
+    (id: fixtures.acs.id, papel: 'acs'),
+  ];
+  const leituras = ['patient_record', 'admin_alerts', 'visit', 'admin_micro_areas'];
+
+  var previous = AuditChain.genesisHash;
+  DateTime? anterior;
+  var exportacoes = 0, noPeriodo = 0, doAcs = 0, escalonadas = 0;
+  int? primeiroNoPeriodo, ultimoNoPeriodo;
+  for (var seq = 1; seq <= _linhasDaTrilha; seq++) {
+    final autor = autores[seq % 3];
+    final idade = seq <= 15
+        ? const Duration(days: 40) - Duration(hours: 12 * (seq - 1))
+        : const Duration(days: 28) - Duration(hours: 14 * (seq - 16));
+    // Linhas 30 e 31: o mesmo instante (empate de timestamp).
+    final timestamp = seq == 31 ? anterior! : base.subtract(idade);
+    anterior = timestamp;
+
+    final String acao, recurso, resultado;
+    String? resourceId;
+    if (seq == 37) {
+      // A única linha que a busca "escalated" encontra.
+      (acao, recurso, resultado) = ('write', 'admin_alert', 'escalated:no_ack_timeout');
+      resourceId = generateUuidV4(random);
+    } else if (autor.papel == 'admin' && seq % 2 == 0) {
+      (acao, recurso, resultado) = ('export', 'admin_audit_logs', 'success');
+      resourceId = generateUuidV4(random);
+    } else if (seq % 7 == 0) {
+      (acao, recurso, resultado) = ('read', leituras[seq % leituras.length], 'denied');
+    } else if (seq % 5 == 0) {
+      (acao, recurso, resultado) = ('login', autor.papel == 'acs' ? 'session' : 'staff_session', 'success');
+    } else if (autor.papel == 'acs' && seq % 2 == 0) {
+      (acao, recurso, resultado) = ('write', 'visit', 'created');
+      resourceId = generateUuidV4(random);
+    } else {
+      (acao, recurso, resultado) = ('read', leituras[seq % leituras.length], 'success');
+      if (recurso == 'patient_record') resourceId = generateUuidV4(random);
+    }
+
+    final ipHash = ipHasher.hash('e2e-seed-$seq');
+    final entryHash = chain.computeEntryHash(AuditChainFields(
+      sequence: seq,
+      previousHash: previous,
+      userId: autor.id,
+      actionType: acao,
+      resourceType: recurso,
+      resourceId: resourceId,
+      timestamp: timestamp,
+      ipHash: ipHash,
+      result: resultado,
+    ));
+    await tx.execute(
+      Sql.named('INSERT INTO "audit_logs" ("userId","actionType","resourceType","resourceId","timestamp","ipHash",'
+          '"result","sequence","previousHash","entryHash") VALUES (@u,@a,@r,@rid::uuid,@ts::timestamp,@ip,@res,@seq,@prev,@hash)'),
+      parameters: {
+        'u': autor.id,
+        'a': acao,
+        'r': recurso,
+        'rid': resourceId,
+        // Sem o `Z`: a coluna não tem fuso e guarda o instante UTC.
+        'ts': timestamp.toIso8601String().replaceFirst('Z', ''),
+        'ip': ipHash,
+        'res': resultado,
+        'seq': seq,
+        'prev': previous,
+        'hash': entryHash,
+      },
+    );
+    previous = entryHash;
+
+    if (acao == 'export') exportacoes++;
+    if (autor.papel == 'acs') doAcs++;
+    if (resultado == 'escalated:no_ack_timeout') escalonadas++;
+    if (seq >= 16) {
+      noPeriodo++;
+      primeiroNoPeriodo ??= seq;
+      ultimoNoPeriodo = seq;
+    }
+  }
+  return {
+    'rows': _linhasDaTrilha,
+    'exportRows': exportacoes,
+    'acsRows': doAcs,
+    'escalatedRows': escalonadas,
+    'periodRows': noPeriodo,
+    'periodFirstSequence': primeiroNoPeriodo,
+    'periodLastSequence': ultimoNoPeriodo,
+    'sameTimestampSequences': [30, 31],
+    'tamperSequence': _sequenciaAdulterada,
+  };
+}
+
+/// Mais que uma página da tela (50): "Carregar mais" tem o que trazer mesmo
+/// antes das linhas que o próprio teste gera.
+const _linhasDaTrilha = 60;
+
+/// Dentro do período do teste e de autoria do ACS (visível ao coordenador).
+const _sequenciaAdulterada = 50;

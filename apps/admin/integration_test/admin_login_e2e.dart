@@ -214,7 +214,22 @@ void main() {
     // Auditoria: a leitura do próprio admin ficou registrada pelo servidor.
     await tester.tap(find.text('Auditoria').last);
     await tester.pump(const Duration(milliseconds: 300));
-    await _pumpUntil(tester, () => find.textContaining('admin_indicators').evaluate().isNotEmpty);
+    // Desde a #45 o painel da cadeia e os filtros ficam acima da lista, que é
+    // preguiçosa: num celular a linha de indicadores nasce abaixo da dobra.
+    await _pumpUntil(tester, () => find.byKey(const Key('audit_count')).evaluate().isNotEmpty);
+    // A verificação da cadeia (#45) é a 5ª leitura `admin_*` que o script
+    // confere no banco: espera-se ela voltar, com o painel ainda no topo e
+    // antes de rolar, para a chamada não ficar em voo quando o app fechar.
+    await _pumpUntil(tester, () {
+      final titulo = find.byKey(const Key('audit_chain_title'), skipOffstage: false);
+      if (titulo.evaluate().isEmpty) return false;
+      return tester.widget<Text>(titulo).data != 'Verificando a integridade da trilha…';
+    });
+    await tester.scrollUntilVisible(
+      find.textContaining('admin_indicators'),
+      300,
+      scrollable: find.descendant(of: find.byType(AuditLogScreen), matching: find.byType(Scrollable)).first,
+    );
     expect(find.textContaining('(Administrador)'), findsWidgets);
   });
 }
