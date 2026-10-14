@@ -31,14 +31,17 @@ void main() {
   }
 
   Future<void> irPara(WidgetTester tester, String destino) async {
-    final alvo = find.text(destino).last;
+    // Em celular a barra inferior usa rótulos curtos ('Áreas', 'Trilha'); o
+    // nome completo fica no tooltip.
+    final porTexto = find.text(destino);
+    final alvo = porTexto.evaluate().isNotEmpty ? porTexto.last : find.byTooltip(destino).last;
     await tester.ensureVisible(alvo);
     await tester.pumpAndSettle();
     await tester.tap(alvo);
     await tester.pumpAndSettle();
   }
 
-  testWidgets('abre o backoffice no dispositivo e navega pelos quatro destinos', (tester) async {
+  testWidgets('abre o backoffice no dispositivo e navega pelos destinos', (tester) async {
     await entrar(tester);
 
     expect(find.text('Painel de Indicadores'), findsOneWidget);
@@ -48,6 +51,8 @@ void main() {
     expect(find.text('Alertas da UBS'), findsOneWidget);
     await irPara(tester, 'Auditoria');
     expect(find.text('Logs de auditoria'), findsOneWidget);
+    await irPara(tester, 'Avisos');
+    expect(find.text('Avisos às comunidades'), findsOneWidget);
   });
 
   testWidgets('escolhe a navegação conforme a largura real do aparelho', (tester) async {
