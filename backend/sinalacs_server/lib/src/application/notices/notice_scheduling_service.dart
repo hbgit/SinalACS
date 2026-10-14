@@ -125,12 +125,15 @@ class NoticeSchedulingService {
     if (!Authorization.staffRoles.contains(user.role)) {
       await _deny(user, microAreaId, 'denied_role');
     }
+    final target = await _store.ubsOfMicroArea(microAreaId);
     if (user.role == UserRole.coordinator) {
       final own = await _store.ubsOfStaff(user.id);
-      final target = await _store.ubsOfMicroArea(microAreaId);
       if (own == null || target == null || own != target) {
         await _deny(user, microAreaId, 'denied_territory');
       }
+    } else if (target == null) {
+      // Admin: microárea inexistente é entrada inválida, não negação.
+      throw AdminInvalidRequestException(message: 'Microárea não encontrada.');
     }
 
     final cleanTitle = title.trim();
@@ -164,8 +167,8 @@ class NoticeSchedulingService {
       audience: audience,
       title: cleanTitle,
       message: cleanMessage,
-      scheduledFor: scheduledFor,
-      createdAt: now,
+      scheduledFor: scheduledFor.toUtc(),
+      createdAt: now.toUtc(),
     );
     await _audit.recordSafely(AuditEvent(
       userId: user.id,

@@ -105,6 +105,7 @@ void main() {
 
   setUp(() {
     store = _FakeStore();
+    store.ubsOfMicroAreaMap[_ma1] = 'ubs-1';
     audit = _RecordingAudit();
     sends = 0;
     service = NoticeSchedulingService(
@@ -150,12 +151,41 @@ void main() {
   });
 
   test('coordenador sem UBS é recusado (fail-closed)', () async {
-    store.ubsOfMicroAreaMap[_ma1] = 'ubs-1';
     await expectLater(
       schedule(_user(UserRole.coordinator, id: 'c-sem-ubs')),
       throwsA(isA<StateError>()),
     );
     expect(audit.events.last.result, 'denied_territory');
+    // Ambos nulos: só a checagem `own == null` não basta para passar.
+    store.ubsOfMicroAreaMap[_ma1] = null;
+    await expectLater(
+      schedule(_user(UserRole.coordinator, id: 'c-sem-ubs')),
+      throwsA(isA<StateError>()),
+    );
+    expect(audit.events.last.result, 'denied_territory');
+  });
+
+  test('admin com microárea inexistente: entrada inválida, sem auditoria', () async {
+    await expectLater(
+      schedule(_user(UserRole.admin), microAreaId: 'ma-inexistente'),
+      throwsA(isA<AdminInvalidRequestException>()),
+    );
+    expect(audit.events, isEmpty);
+    expect(store.rows, isEmpty);
+  });
+
+  test('datas gravadas no store em UTC', () async {
+    final local = DateTime(2026, 10, 14, 15);
+    final id = await service.schedule(
+      _user(UserRole.admin),
+      microAreaId: _ma1,
+      audience: 'everyone',
+      title: 'T',
+      message: 'M',
+      scheduledFor: local.add(const Duration(days: 1)),
+    );
+    expect(store.rows[id]!.scheduledFor.isUtc, isTrue);
+    expect(store.rows[id]!.createdAt.isUtc, isTrue);
   });
 
   test('coordenador agenda na própria UBS', () async {
@@ -232,8 +262,7 @@ void main() {
     expect(event.actionType, 'write');
     expect(event.resourceType, 'community_notice');
     expect(event.resourceId, id);
-    final dump = '${event.userId}|${event.actionType}|${event.resourceType}|'
-        '${event.resourceId}|${event.result}';
+    final dump = audit.events.map((e) => e.toString()).join();
     expect(dump, isNot(contains('TituloUnico')));
     expect(dump, isNot(contains('MensagemUnica')));
     expect(sends, 0);
