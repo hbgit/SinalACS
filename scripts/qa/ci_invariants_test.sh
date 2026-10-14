@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 #
-# Controles positivo e negativo das três checagens que a issue #20 pediu para
-# scripts/qa/ci_invariants.sh: um check obrigatório que passa verde sem ter
-# rodado por causa de continue-on-error, strategy.matrix ou needs: apontando
-# para um job fora de CHECKS_OBRIGATORIOS.
+# Controles positivo e negativo de checagens de scripts/qa/ci_invariants.sh:
+# as três da issue #20 (um check obrigatório que passa verde sem ter rodado
+# por causa de continue-on-error, strategy.matrix ou needs: apontando para um
+# job fora de CHECKS_OBRIGATORIOS) e as do concurrency.group das issues #23 e
+# #63 (ref e SHA no ramo de push/dispatch, número do PR no outro, evento no
+# prefixo, e as limitações conhecidas da guarda por substring).
 #
 # Por que existe: sem fixture sintética, as três checagens só seriam
 # exercitadas contra o .github/workflows/ci.yml real do momento — que, por
@@ -224,9 +226,29 @@ espera_ok 'negativo (event_name no prefixo dentro de format)' \
   "$(escreve_grupo evento_em_format 'ci-${{ format('"'"'{0}'"'"', github.event_name) }}-${{ github.event_name == '"'"'pull_request'"'"' && github.event.pull_request.number || format('"'"'{0}-{1}'"'"', github.ref, github.sha) }}')" \
   'FINDING-7'
 
+echo '== limitações conhecidas da guarda por substring (issue #63) =='
+# Formas legítimas não canônicas são RECUSADAS de propósito: a guarda só lê
+# a forma canônica. Se uma destas passar a ser aceita, atualize o comentário
+# de check_concorrencia no ci_invariants.sh.
+espera_falha 'recusa por forma (ref no prefixo, fora do ramo de push)' \
+  "$(escreve_grupo ref_no_prefixo 'ci-${{ github.event_name }}-${{ github.ref }}-${{ github.event_name == '"'"'pull_request'"'"' && github.event.pull_request.number || github.sha }}')" \
+  'sem github.ref no ramo de push/dispatch'
+espera_falha 'recusa por forma (github['"'"'ref'"'"'] em vez de github.ref)' \
+  "$(escreve_grupo ref_indexado 'ci-${{ github.event_name }}-${{ github.event_name == '"'"'pull_request'"'"' && github.event.pull_request.number || format('"'"'{0}-{1}'"'"', github['"'"'ref'"'"'], github.sha) }}')" \
+  'sem github.ref no ramo de push/dispatch'
+espera_falha 'recusa por forma (ternário invertido)' \
+  "$(escreve_grupo ternario_invertido 'ci-${{ github.event_name }}-${{ github.event_name != '"'"'pull_request'"'"' && format('"'"'{0}-{1}'"'"', github.ref, github.sha) || github.event.pull_request.number }}')" \
+  'sem github.sha no ramo de push/dispatch'
+# Falso negativo ACEITO: o ref só citado, sem entrar no grupo resolvido. Só o
+# ci_concurrency_act.sh pega. Este caso existe para que, se a guarda um dia
+# passar a pegá-lo, o comentário e esta fixture mudem juntos.
+espera_ok 'limitação aceita (ref como argumento sobrando de format)' \
+  "$(escreve_grupo ref_sobrando 'ci-${{ github.event_name }}-${{ github.event_name == '"'"'pull_request'"'"' && github.event.pull_request.number || format('"'"'{0}'"'"', github.sha, github.ref) }}')" \
+  'FINDING-7'
+
 echo
 if [[ "$falhas" -eq 0 ]]; then
-  echo 'OK — as checagens de check obrigatório "verde sem rodar" (issue #20) conferem.'
+  echo 'OK — as checagens de "verde sem rodar" (issue #20) e do grupo de concorrência (issues #23 e #63) conferem.'
 else
   echo "FALHOU — $falhas asserção(ões) não conferem." >&2
 fi
