@@ -59,7 +59,14 @@ payload_pr() {
   printf '{"action":"synchronize","number":%s,"pull_request":{"number":%s}}' "$1" "$1" > "$tmp_dir/pr$1.json"
   printf '%s' "$tmp_dir/pr$1.json"
 }
-echo '{}' > "$tmp_dir/vazio.json"
+
+# O act NÃO deriva github.ref da branch em checkout: ele lê o campo `ref` do
+# payload e, sem ele, cai na branch padrão (main). O GitHub real manda `ref` em
+# push e dispatch, então o payload simulado também manda.
+payload_ref() {
+  printf '{"ref":"refs/heads/%s"}' "$1" > "$tmp_dir/ref-${1//\//_}.json"
+  printf '%s' "$tmp_dir/ref-${1//\//_}.json"
+}
 
 # roda_act <branch> <evento> <payload>  → imprime o grupo resolvido
 roda_act() {
@@ -82,10 +89,10 @@ confere() { # descrição, 1=iguais|0=distintos, a, b
   fi
 }
 
-push_main="$(roda_act main push "$tmp_dir/vazio.json")"
-push_dev="$(roda_act develop push "$tmp_dir/vazio.json")"
-disp_main="$(roda_act main workflow_dispatch "$tmp_dir/vazio.json")"
-disp_dev="$(roda_act develop workflow_dispatch "$tmp_dir/vazio.json")"
+push_main="$(roda_act main push "$(payload_ref main)")"
+push_dev="$(roda_act develop push "$(payload_ref develop)")"
+disp_main="$(roda_act main workflow_dispatch "$(payload_ref main)")"
+disp_dev="$(roda_act develop workflow_dispatch "$(payload_ref develop)")"
 pr7_a="$(roda_act develop pull_request "$(payload_pr 7)")"
 pr7_b="$(roda_act main pull_request "$(payload_pr 7)")"
 pr8="$(roda_act develop pull_request "$(payload_pr 8)")"
