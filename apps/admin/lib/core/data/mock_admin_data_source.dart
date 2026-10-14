@@ -321,12 +321,13 @@ class MockAdminDataSource implements AdminDataSource {
   }) async {
     final t = title.trim();
     final m = message.trim();
-    if (t.isEmpty || t.length > 60) throw const AdminValidationFailure('O título deve ter de 1 a 60 caracteres.');
-    if (m.isEmpty || m.length > 240) throw const AdminValidationFailure('A mensagem deve ter de 1 a 240 caracteres.');
+    if (t.isEmpty || m.isEmpty) throw const AdminValidationFailure('Informe o título e a mensagem do aviso.');
+    if (t.length > 60) throw const AdminValidationFailure('O título pode ter no máximo 60 caracteres.');
+    if (m.length > 240) throw const AdminValidationFailure('A mensagem pode ter no máximo 240 caracteres.');
     final area = _microAreas.where((x) => x.id == microAreaId).firstOrNull;
     if (area == null) throw const AdminValidationFailure('Microárea não encontrada.');
     if (scheduledFor.isBefore(_now().add(const Duration(minutes: 1)))) {
-      throw const AdminValidationFailure('Agende para pelo menos 1 minuto à frente.');
+      throw const AdminValidationFailure('O horário do aviso deve ser pelo menos 1 minuto à frente.');
     }
     final id = 'aviso-${++_seqAviso}';
     _mensagensDosAvisos[id] = m;
