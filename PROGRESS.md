@@ -1610,7 +1610,7 @@ Plano: `docs/superpowers/plans/2026-10-13-issue-45-trilha-de-auditoria-completa.
 
 ## Avisos agendados e versões dos termos (#46, 2026-10-14)
 
-Plano: `docs/superpowers/plans/2026-10-14-issue-46-avisos-e-termos.md`; achados da investigação: `docs/superpowers/plans/2026-10-14-issue-46-fase0-achados.md`; contratos: `backend/CLAUDE.md` (seção "Avisos agendados e versões dos termos"). **Backend entregue (Fases 1–2); app admin (Fase 3) e e2e pendentes.**
+Plano: `docs/superpowers/plans/2026-10-14-issue-46-avisos-e-termos.md`; achados da investigação: `docs/superpowers/plans/2026-10-14-issue-46-fase0-achados.md`; contratos: `backend/CLAUDE.md` (seção "Avisos agendados e versões dos termos"). **Backend (Fases 1–2), app admin (Fase 3) e e2e (Fase 4) entregues; ver "Continua em aberto" abaixo.**
 
 **O que existe (entregue)**
 - Tabelas `scheduled_notices` e `terms_versions`; `NoticeSchedulingService` e `NoticeDispatchLoop` (disparo a cada 30 s, reserva atômica `pending → sending`); `TermsPublicationService` (revisão jurídica e 15 dias de antecedência); sete métodos novos no `AdminEndpoint` (`scheduleNotice`, `cancelScheduledNotice`, `noticeHistory`, `termsVersions`, `draftTermsVersion`, `markTermsReviewed`, `publishTermsVersion`). O cartão do paciente lê a agenda publicada. `NoticesEndpoint.sendSegmented` continua ACS-imediato.
@@ -1620,4 +1620,19 @@ Plano: `docs/superpowers/plans/2026-10-14-issue-46-avisos-e-termos.md`; achados 
 - A varredura de aviso preso em `sending` roda **só na partida** e olha `scheduledFor` (sem coluna `claimedAt`); vale para instância única do servidor.
 - A constante `upcomingTermsChange` foi mantida (`null`) e dois testes a leem (`terms_change_schedule_test.dart` no backend, `upcoming_legal_documents_test.dart` no app do paciente).
 - A revisão jurídica do texto real dos termos continua pendente (fora do código).
-- iOS fora do projeto. Sem UI no `apps/admin` e sem e2e no emulador para agendamento e termos.
+- iOS fora do projeto. 
+
+**Entregue no app admin e no e2e**
+- App admin Android com a aba **Avisos** (agendar, cancelar, histórico) e a sub-aba **Termos** (rascunho, revisão jurídica, publicação; só admin): `notices_screen.dart`, `notice_form_dialog.dart`, `terms_panel.dart`, `terms_form_dialog.dart`.
+- Testes de widget e de acessibilidade, e teste de integração hermético no emulador `emulator-5554` (`admin_notices_mobile_test.dart`).
+- `./scripts/qa/push_e2e.sh --e2e-db --negativos` verde em 2026-10-14, com o caso do aviso agendado contra Gorush e FCM reais no emulador; log em `docs/superpowers/plans/2026-10-14-issue-46-e2e.log`.
+- Regressão final (2026-10-14): backend `dart analyze` sem erro (87 `info`) e `dart test` +1289 verdes; paciente `flutter test` +259; ACS `flutter test` +544; admin `flutter analyze` sem problemas e `flutter test` +453; `scripts/qa/ci_invariants.sh` ok.
+
+**Continua em aberto**
+- Revisão jurídica do texto real dos termos.
+- Validação manual do cartão de termos (`terms_change_notice_card`) no emulador: **não** foi automatizada; roteiro em `docs/superpowers/plans/2026-10-14-issue-46-validacao-manual.md` (cobertura automatizada: `admin_endpoint_terms_test.dart` no backend e `terms_change_notice_test.dart` no paciente).
+- Os roteiros de emulador do admin editados para o fallback de tooltip (`admin_auditoria_e2e.dart`, `admin_login_e2e.dart`, `admin_acs_gestao_e2e.dart`) **não** foram reexecutados contra o backend real.
+- Os rótulos curtos da barra inferior do admin mudaram ('Áreas', 'Trilha'): decisão de produto a confirmar.
+- `upcomingTermsChange` morta mantida; varredura de `sending` só na partida e para instância única.
+- O endpoint HTTP de agendamento não é exercitado no `push_e2e` (coberto por integração do backend).
+- Após o e2e, `sinalacs-serverpod` e o Postgres de desenvolvimento ficaram parados: `docker compose up -d`.

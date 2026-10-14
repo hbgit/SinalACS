@@ -1,6 +1,6 @@
 # SinalACS — Backoffice Admin
 
-Backoffice administrativo (Flutter Web e Android, desktop-first com layout compacto para celular): login institucional real (matrícula + senha + TOTP, `auth.loginStaff`), painel de indicadores por risco clínico, listagem de microáreas **com a gestão de contas de ACS** (cadastro, vínculo de microárea, redefinição de senha e de MFA, ativação/desativação) e a seção Equipe do backoffice para o administrador, consulta filtrável de alertas e logs de auditoria (escopados à UBS para o coordenador desde a #43).
+Backoffice administrativo (Flutter Web e Android, desktop-first com layout compacto para celular): login institucional real (matrícula + senha + TOTP, `auth.loginStaff`), painel de indicadores por risco clínico, listagem de microáreas **com a gestão de contas de ACS** (cadastro, vínculo de microárea, redefinição de senha e de MFA, ativação/desativação) e a seção Equipe do backoffice para o administrador, consulta filtrável de alertas e logs de auditoria (escopados à UBS para o coordenador desde a #43), **avisos agendados** (agendar, cancelar, histórico) e, só para o administrador, **versões dos termos** (rascunho, revisão jurídica, publicação com 15 dias de antecedência), desde a #46.
 
 ## Rodar no Android
 
