@@ -99,22 +99,23 @@ import 'patient.dart' as _i85;
 import 'push_token.dart' as _i86;
 import 'scheduled_notice.dart' as _i87;
 import 'staff_account.dart' as _i88;
-import 'triage_answer.dart' as _i89;
-import 'triage_session.dart' as _i90;
-import 'ubs.dart' as _i91;
-import 'user.dart' as _i92;
-import 'user_credential.dart' as _i93;
-import 'visit.dart' as _i94;
+import 'terms_version.dart' as _i89;
+import 'triage_answer.dart' as _i90;
+import 'triage_session.dart' as _i91;
+import 'ubs.dart' as _i92;
+import 'user.dart' as _i93;
+import 'user_credential.dart' as _i94;
+import 'visit.dart' as _i95;
 import 'package:sinalacs_server/src/generated/api/admin_micro_area.dart'
-    as _i95;
-import 'package:sinalacs_server/src/generated/api/admin_acs.dart' as _i96;
-import 'package:sinalacs_server/src/generated/api/admin_staff.dart' as _i97;
+    as _i96;
+import 'package:sinalacs_server/src/generated/api/admin_acs.dart' as _i97;
+import 'package:sinalacs_server/src/generated/api/admin_staff.dart' as _i98;
 import 'package:sinalacs_server/src/generated/api/micro_area_patient.dart'
-    as _i98;
-import 'package:sinalacs_server/src/generated/api/visit_sync_result.dart'
     as _i99;
-import 'package:sinalacs_server/src/generated/api/visit_sync_entry.dart'
+import 'package:sinalacs_server/src/generated/api/visit_sync_result.dart'
     as _i100;
+import 'package:sinalacs_server/src/generated/api/visit_sync_entry.dart'
+    as _i101;
 export 'acs.dart';
 export 'acs_refresh_token.dart';
 export 'acs_upload_token.dart';
@@ -201,6 +202,7 @@ export 'patient.dart';
 export 'push_token.dart';
 export 'scheduled_notice.dart';
 export 'staff_account.dart';
+export 'terms_version.dart';
 export 'triage_answer.dart';
 export 'triage_session.dart';
 export 'ubs.dart';
@@ -2250,6 +2252,136 @@ class Protocol extends _i1.SerializationManagerServer {
       managed: true,
     ),
     _i2.TableDefinition(
+      name: 'terms_versions',
+      dartName: 'TermsVersion',
+      schema: 'public',
+      module: 'sinalacs',
+      columns: [
+        _i2.ColumnDefinition(
+          name: 'id',
+          columnType: _i2.ColumnType.uuid,
+          isNullable: false,
+          dartType: 'UuidValue?',
+          columnDefault: 'gen_random_uuid()',
+        ),
+        _i2.ColumnDefinition(
+          name: 'version',
+          columnType: _i2.ColumnType.text,
+          isNullable: false,
+          dartType: 'String',
+        ),
+        _i2.ColumnDefinition(
+          name: 'summary',
+          columnType: _i2.ColumnType.text,
+          isNullable: false,
+          dartType: 'String',
+        ),
+        _i2.ColumnDefinition(
+          name: 'effectiveFrom',
+          columnType: _i2.ColumnType.timestampWithoutTimeZone,
+          isNullable: false,
+          dartType: 'DateTime',
+        ),
+        _i2.ColumnDefinition(
+          name: 'createdBy',
+          columnType: _i2.ColumnType.uuid,
+          isNullable: false,
+          dartType: 'UuidValue',
+        ),
+        _i2.ColumnDefinition(
+          name: 'createdAt',
+          columnType: _i2.ColumnType.timestampWithoutTimeZone,
+          isNullable: false,
+          dartType: 'DateTime',
+        ),
+        _i2.ColumnDefinition(
+          name: 'legallyReviewedAt',
+          columnType: _i2.ColumnType.timestampWithoutTimeZone,
+          isNullable: true,
+          dartType: 'DateTime?',
+        ),
+        _i2.ColumnDefinition(
+          name: 'legallyReviewedBy',
+          columnType: _i2.ColumnType.uuid,
+          isNullable: true,
+          dartType: 'UuidValue?',
+        ),
+        _i2.ColumnDefinition(
+          name: 'publishedAt',
+          columnType: _i2.ColumnType.timestampWithoutTimeZone,
+          isNullable: true,
+          dartType: 'DateTime?',
+        ),
+        _i2.ColumnDefinition(
+          name: 'publishedBy',
+          columnType: _i2.ColumnType.uuid,
+          isNullable: true,
+          dartType: 'UuidValue?',
+        ),
+      ],
+      foreignKeys: [
+        _i2.ForeignKeyDefinition(
+          constraintName: 'terms_versions_fk_0',
+          columns: ['createdBy'],
+          referenceTable: 'users',
+          referenceTableSchema: 'public',
+          referenceColumns: ['id'],
+          onUpdate: _i2.ForeignKeyAction.noAction,
+          onDelete: _i2.ForeignKeyAction.noAction,
+          matchType: null,
+        ),
+        _i2.ForeignKeyDefinition(
+          constraintName: 'terms_versions_fk_1',
+          columns: ['legallyReviewedBy'],
+          referenceTable: 'users',
+          referenceTableSchema: 'public',
+          referenceColumns: ['id'],
+          onUpdate: _i2.ForeignKeyAction.noAction,
+          onDelete: _i2.ForeignKeyAction.noAction,
+          matchType: null,
+        ),
+        _i2.ForeignKeyDefinition(
+          constraintName: 'terms_versions_fk_2',
+          columns: ['publishedBy'],
+          referenceTable: 'users',
+          referenceTableSchema: 'public',
+          referenceColumns: ['id'],
+          onUpdate: _i2.ForeignKeyAction.noAction,
+          onDelete: _i2.ForeignKeyAction.noAction,
+          matchType: null,
+        ),
+      ],
+      indexes: [
+        _i2.IndexDefinition(
+          indexName: 'terms_versions_pkey',
+          tableSpace: null,
+          elements: [
+            _i2.IndexElementDefinition(
+              type: _i2.IndexElementDefinitionType.column,
+              definition: 'id',
+            ),
+          ],
+          type: 'btree',
+          isUnique: true,
+          isPrimary: true,
+        ),
+        _i2.IndexDefinition(
+          indexName: 'terms_versions_version_key',
+          tableSpace: null,
+          elements: [
+            _i2.IndexElementDefinition(
+              type: _i2.IndexElementDefinitionType.column,
+              definition: 'version',
+            ),
+          ],
+          type: 'btree',
+          isUnique: true,
+          isPrimary: false,
+        ),
+      ],
+      managed: true,
+    ),
+    _i2.TableDefinition(
       name: 'triage_sessions',
       dartName: 'TriageSession',
       schema: 'public',
@@ -3105,23 +3237,26 @@ class Protocol extends _i1.SerializationManagerServer {
     if (t == _i88.StaffAccount) {
       return _i88.StaffAccount.fromJson(data) as T;
     }
-    if (t == _i89.TriageAnswer) {
-      return _i89.TriageAnswer.fromJson(data) as T;
+    if (t == _i89.TermsVersion) {
+      return _i89.TermsVersion.fromJson(data) as T;
     }
-    if (t == _i90.TriageSession) {
-      return _i90.TriageSession.fromJson(data) as T;
+    if (t == _i90.TriageAnswer) {
+      return _i90.TriageAnswer.fromJson(data) as T;
     }
-    if (t == _i91.Ubs) {
-      return _i91.Ubs.fromJson(data) as T;
+    if (t == _i91.TriageSession) {
+      return _i91.TriageSession.fromJson(data) as T;
     }
-    if (t == _i92.User) {
-      return _i92.User.fromJson(data) as T;
+    if (t == _i92.Ubs) {
+      return _i92.Ubs.fromJson(data) as T;
     }
-    if (t == _i93.UserCredential) {
-      return _i93.UserCredential.fromJson(data) as T;
+    if (t == _i93.User) {
+      return _i93.User.fromJson(data) as T;
     }
-    if (t == _i94.Visit) {
-      return _i94.Visit.fromJson(data) as T;
+    if (t == _i94.UserCredential) {
+      return _i94.UserCredential.fromJson(data) as T;
+    }
+    if (t == _i95.Visit) {
+      return _i95.Visit.fromJson(data) as T;
     }
     if (t == _i1.getType<_i3.Acs?>()) {
       return (data != null ? _i3.Acs.fromJson(data) : null) as T;
@@ -3443,23 +3578,26 @@ class Protocol extends _i1.SerializationManagerServer {
     if (t == _i1.getType<_i88.StaffAccount?>()) {
       return (data != null ? _i88.StaffAccount.fromJson(data) : null) as T;
     }
-    if (t == _i1.getType<_i89.TriageAnswer?>()) {
-      return (data != null ? _i89.TriageAnswer.fromJson(data) : null) as T;
+    if (t == _i1.getType<_i89.TermsVersion?>()) {
+      return (data != null ? _i89.TermsVersion.fromJson(data) : null) as T;
     }
-    if (t == _i1.getType<_i90.TriageSession?>()) {
-      return (data != null ? _i90.TriageSession.fromJson(data) : null) as T;
+    if (t == _i1.getType<_i90.TriageAnswer?>()) {
+      return (data != null ? _i90.TriageAnswer.fromJson(data) : null) as T;
     }
-    if (t == _i1.getType<_i91.Ubs?>()) {
-      return (data != null ? _i91.Ubs.fromJson(data) : null) as T;
+    if (t == _i1.getType<_i91.TriageSession?>()) {
+      return (data != null ? _i91.TriageSession.fromJson(data) : null) as T;
     }
-    if (t == _i1.getType<_i92.User?>()) {
-      return (data != null ? _i92.User.fromJson(data) : null) as T;
+    if (t == _i1.getType<_i92.Ubs?>()) {
+      return (data != null ? _i92.Ubs.fromJson(data) : null) as T;
     }
-    if (t == _i1.getType<_i93.UserCredential?>()) {
-      return (data != null ? _i93.UserCredential.fromJson(data) : null) as T;
+    if (t == _i1.getType<_i93.User?>()) {
+      return (data != null ? _i93.User.fromJson(data) : null) as T;
     }
-    if (t == _i1.getType<_i94.Visit?>()) {
-      return (data != null ? _i94.Visit.fromJson(data) : null) as T;
+    if (t == _i1.getType<_i94.UserCredential?>()) {
+      return (data != null ? _i94.UserCredential.fromJson(data) : null) as T;
+    }
+    if (t == _i1.getType<_i95.Visit?>()) {
+      return (data != null ? _i95.Visit.fromJson(data) : null) as T;
     }
     if (t == List<_i12.AdminAlert>) {
       return (data as List).map((e) => deserialize<_i12.AdminAlert>(e)).toList()
@@ -3510,38 +3648,38 @@ class Protocol extends _i1.SerializationManagerServer {
           )
           as T;
     }
-    if (t == List<_i95.AdminMicroArea>) {
+    if (t == List<_i96.AdminMicroArea>) {
       return (data as List)
-              .map((e) => deserialize<_i95.AdminMicroArea>(e))
+              .map((e) => deserialize<_i96.AdminMicroArea>(e))
               .toList()
           as T;
     }
-    if (t == List<_i96.AdminAcs>) {
-      return (data as List).map((e) => deserialize<_i96.AdminAcs>(e)).toList()
+    if (t == List<_i97.AdminAcs>) {
+      return (data as List).map((e) => deserialize<_i97.AdminAcs>(e)).toList()
           as T;
     }
-    if (t == List<_i97.AdminStaff>) {
-      return (data as List).map((e) => deserialize<_i97.AdminStaff>(e)).toList()
+    if (t == List<_i98.AdminStaff>) {
+      return (data as List).map((e) => deserialize<_i98.AdminStaff>(e)).toList()
           as T;
     }
-    if (t == List<_i98.MicroAreaPatient>) {
+    if (t == List<_i99.MicroAreaPatient>) {
       return (data as List)
-              .map((e) => deserialize<_i98.MicroAreaPatient>(e))
+              .map((e) => deserialize<_i99.MicroAreaPatient>(e))
               .toList()
           as T;
     }
     if (t == List<String>) {
       return (data as List).map((e) => deserialize<String>(e)).toList() as T;
     }
-    if (t == List<_i99.VisitSyncResult>) {
+    if (t == List<_i100.VisitSyncResult>) {
       return (data as List)
-              .map((e) => deserialize<_i99.VisitSyncResult>(e))
+              .map((e) => deserialize<_i100.VisitSyncResult>(e))
               .toList()
           as T;
     }
-    if (t == List<_i100.VisitSyncEntry>) {
+    if (t == List<_i101.VisitSyncEntry>) {
       return (data as List)
-              .map((e) => deserialize<_i100.VisitSyncEntry>(e))
+              .map((e) => deserialize<_i101.VisitSyncEntry>(e))
               .toList()
           as T;
     }
@@ -3640,12 +3778,13 @@ class Protocol extends _i1.SerializationManagerServer {
       _i86.PushToken => 'PushToken',
       _i87.ScheduledNotice => 'ScheduledNotice',
       _i88.StaffAccount => 'StaffAccount',
-      _i89.TriageAnswer => 'TriageAnswer',
-      _i90.TriageSession => 'TriageSession',
-      _i91.Ubs => 'Ubs',
-      _i92.User => 'User',
-      _i93.UserCredential => 'UserCredential',
-      _i94.Visit => 'Visit',
+      _i89.TermsVersion => 'TermsVersion',
+      _i90.TriageAnswer => 'TriageAnswer',
+      _i91.TriageSession => 'TriageSession',
+      _i92.Ubs => 'Ubs',
+      _i93.User => 'User',
+      _i94.UserCredential => 'UserCredential',
+      _i95.Visit => 'Visit',
       _ => null,
     };
   }
@@ -3832,17 +3971,19 @@ class Protocol extends _i1.SerializationManagerServer {
         return 'ScheduledNotice';
       case _i88.StaffAccount():
         return 'StaffAccount';
-      case _i89.TriageAnswer():
+      case _i89.TermsVersion():
+        return 'TermsVersion';
+      case _i90.TriageAnswer():
         return 'TriageAnswer';
-      case _i90.TriageSession():
+      case _i91.TriageSession():
         return 'TriageSession';
-      case _i91.Ubs():
+      case _i92.Ubs():
         return 'Ubs';
-      case _i92.User():
+      case _i93.User():
         return 'User';
-      case _i93.UserCredential():
+      case _i94.UserCredential():
         return 'UserCredential';
-      case _i94.Visit():
+      case _i95.Visit():
         return 'Visit';
     }
     className = _i2.Protocol().getClassNameForObject(data);
@@ -4116,23 +4257,26 @@ class Protocol extends _i1.SerializationManagerServer {
     if (dataClassName == 'StaffAccount') {
       return deserialize<_i88.StaffAccount>(data['data']);
     }
+    if (dataClassName == 'TermsVersion') {
+      return deserialize<_i89.TermsVersion>(data['data']);
+    }
     if (dataClassName == 'TriageAnswer') {
-      return deserialize<_i89.TriageAnswer>(data['data']);
+      return deserialize<_i90.TriageAnswer>(data['data']);
     }
     if (dataClassName == 'TriageSession') {
-      return deserialize<_i90.TriageSession>(data['data']);
+      return deserialize<_i91.TriageSession>(data['data']);
     }
     if (dataClassName == 'Ubs') {
-      return deserialize<_i91.Ubs>(data['data']);
+      return deserialize<_i92.Ubs>(data['data']);
     }
     if (dataClassName == 'User') {
-      return deserialize<_i92.User>(data['data']);
+      return deserialize<_i93.User>(data['data']);
     }
     if (dataClassName == 'UserCredential') {
-      return deserialize<_i93.UserCredential>(data['data']);
+      return deserialize<_i94.UserCredential>(data['data']);
     }
     if (dataClassName == 'Visit') {
-      return deserialize<_i94.Visit>(data['data']);
+      return deserialize<_i95.Visit>(data['data']);
     }
     if (dataClassName.startsWith('serverpod.')) {
       data['className'] = dataClassName.substring(10);
@@ -4188,16 +4332,18 @@ class Protocol extends _i1.SerializationManagerServer {
         return _i87.ScheduledNotice.t;
       case _i88.StaffAccount:
         return _i88.StaffAccount.t;
-      case _i90.TriageSession:
-        return _i90.TriageSession.t;
-      case _i91.Ubs:
-        return _i91.Ubs.t;
-      case _i92.User:
-        return _i92.User.t;
-      case _i93.UserCredential:
-        return _i93.UserCredential.t;
-      case _i94.Visit:
-        return _i94.Visit.t;
+      case _i89.TermsVersion:
+        return _i89.TermsVersion.t;
+      case _i91.TriageSession:
+        return _i91.TriageSession.t;
+      case _i92.Ubs:
+        return _i92.Ubs.t;
+      case _i93.User:
+        return _i93.User.t;
+      case _i94.UserCredential:
+        return _i94.UserCredential.t;
+      case _i95.Visit:
+        return _i95.Visit.t;
     }
     return null;
   }

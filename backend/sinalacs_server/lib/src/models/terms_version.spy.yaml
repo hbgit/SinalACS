@@ -1,0 +1,19 @@
+### Versão dos termos anunciada ao paciente (LGPD-RF18, #46). O TEXTO jurídico
+### não fica aqui: vive no app do paciente. Aqui só o anúncio e a revisão.
+class: TermsVersion
+table: terms_versions
+fields:
+  id: UuidValue?, defaultPersist=random
+  version: String
+  summary: String
+  effectiveFrom: DateTime
+  createdBy: UuidValue, relation(parent=users)
+  createdAt: DateTime
+  legallyReviewedAt: DateTime?
+  legallyReviewedBy: UuidValue?, relation(parent=users)
+  publishedAt: DateTime?
+  publishedBy: UuidValue?, relation(parent=users)
+indexes:
+  terms_versions_version_key:
+    fields: version
+    unique: true
