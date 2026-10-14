@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 
 import 'package:sinalacs_admin/app/admin_async_states.dart';
 import 'package:sinalacs_admin/app/admin_theme.dart';
+import 'package:sinalacs_admin/app/notice_form_dialog.dart';
 import 'package:sinalacs_admin/core/data/admin_data_source.dart';
 
 String noticeStatusLabel(NoticeStatus status) => switch (status) {
@@ -77,7 +78,7 @@ class NoticesScreen extends StatelessWidget {
           Expanded(
             child: TabBarView(
               children: [
-                _NoticeHistory(dataSource: dataSource),
+                _NoticeHistory(dataSource: dataSource, now: now),
                 // provisório: a Task 3.5 troca por TermsPanel
                 if (admin) const Center(child: Text('Termos')),
               ],
@@ -90,9 +91,10 @@ class NoticesScreen extends StatelessWidget {
 }
 
 class _NoticeHistory extends StatefulWidget {
-  const _NoticeHistory({required this.dataSource});
+  const _NoticeHistory({required this.dataSource, required this.now});
 
   final AdminDataSource dataSource;
+  final DateTime Function() now;
 
   @override
   State<_NoticeHistory> createState() => _NoticeHistoryState();
@@ -114,6 +116,13 @@ class _NoticeHistoryState extends State<_NoticeHistory> {
   void _mensagem(String texto) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(texto)));
+  }
+
+  Future<void> _novo() async {
+    final agendou = await NoticeFormDialog.show(context, dataSource: widget.dataSource, now: widget.now);
+    if (agendou != true || !mounted) return;
+    _recarregar();
+    _mensagem('Aviso agendado.');
   }
 
   Future<void> _cancelar(NoticeHistoryItem aviso) async {
@@ -177,8 +186,7 @@ class _NoticeHistoryState extends State<_NoticeHistory> {
                 child: FilledButton.icon(
                   key: const Key('notice_new_button'),
                   style: FilledButton.styleFrom(minimumSize: _alvoMinimo),
-                  // A Task 3.4 liga o formulário de novo aviso aqui.
-                  onPressed: () {},
+                  onPressed: _novo,
                   icon: const Icon(Icons.add),
                   label: const Text('Novo aviso'),
                 ),
