@@ -15,19 +15,36 @@
 #
 #   ./scripts/qa/ci_concurrency_act.sh
 #
-# Precisa de act, docker, git e python3 com PyYAML. Sai com 2 se faltar algo.
+# Precisa de act, docker, git, python3 com PyYAML e da imagem do runner já
+# baixada (o act roda com --pull=false). Sai com 2 se faltar algo, 1 se uma
+# asserção não conferir — nesse caso os logs do act ficam no disco e o
+# caminho é impresso. Testado sem Docker por ci_concurrency_act_test.sh.
 set -uo pipefail
 
 ACT_TESTADO='0.2.89'
 IMAGEM_RUNNER='ubuntu-24.04=catthehacker/ubuntu:act-24.04'
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 tmp_dir="$(mktemp -d)"
-trap 'rm -rf "$tmp_dir"' EXIT
+manter_logs=0
+limpa() {
+  if [[ "$manter_logs" == 1 ]]; then
+    echo "logs do act mantidos em $tmp_dir/logs" >&2
+  else
+    rm -rf "$tmp_dir"
+  fi
+}
+trap limpa EXIT
+mkdir -p "$tmp_dir/logs"
 
 for bin in act docker git python3; do
   command -v "$bin" >/dev/null || { echo "faltando: $bin (testado com act $ACT_TESTADO)" >&2; exit 2; }
 done
 docker info >/dev/null 2>&1 || { echo 'docker não está acessível' >&2; exit 2; }
+python3 -I -c 'import yaml' 2>/dev/null || {
+  echo 'faltando: PyYAML (python3-yaml no apt, ou pip install pyyaml)' >&2; exit 2; }
+imagem="${IMAGEM_RUNNER#*=}"
+docker image inspect "$imagem" >/dev/null 2>&1 || {
+  echo "faltando a imagem do runner: docker pull $imagem" >&2; exit 2; }
 
 grupo="$(python3 -I - "$repo_root/.github/workflows/ci.yml" <<'PY'
 import sys, yaml
@@ -50,8 +67,14 @@ jobs:
       - run: echo "GRUPO=${grupo}"
 YAML
 git -C "$sonda" init -q -b main
+# A sonda não herda assinatura nem hooks de quem roda: um gpgsign=true global
+# ou um core.hooksPath com pre-commit derrubaria o commit, e um post-checkout
+# rodaria a cada `switch`. Config local vence a global.
+git -C "$sonda" config commit.gpgsign false
+git -C "$sonda" config core.hooksPath /dev/null
 git -C "$sonda" add -A
-git -C "$sonda" -c user.name=t -c user.email=t@t commit -q -m sonda
+git -C "$sonda" -c user.name=t -c user.email=t@t commit -q -m sonda || {
+  echo 'não consegui criar o commit da sonda' >&2; exit 2; }
 git -C "$sonda" branch develop
 
 # Payload de PR simulado: só o número importa para o grupo.
@@ -68,12 +91,14 @@ payload_ref() {
   printf '%s' "$tmp_dir/ref-${1//\//_}.json"
 }
 
-# roda_act <branch> <evento> <payload>  → imprime o grupo resolvido
+# roda_act <branch> <evento> <payload>  → imprime o grupo resolvido. A saída
+# inteira do act vai para um log por chamada, mantido se algo falhar.
 roda_act() {
+  local log="$tmp_dir/logs/$1-$2-$(basename "$3" .json).log"
   git -C "$sonda" switch -q "$1"
   ( cd "$sonda" && act "$2" -W .github/workflows/sonda.yml --eventpath "$3" \
-      -P "$IMAGEM_RUNNER" --pull=false 2>&1 ) \
-    | sed -n 's/.*| GRUPO=\(.*\)$/\1/p' | tail -1
+      -P "$IMAGEM_RUNNER" --pull=false ) > "$log" 2>&1
+  sed -n 's/.*| GRUPO=\(.*\)$/\1/p' "$log" | tail -1
 }
 
 falhas=0
@@ -108,6 +133,7 @@ echo
 if [[ "$falhas" -eq 0 ]]; then
   echo 'OK — o grupo real do ci.yml se comporta como a issue #23 pede.'
 else
+  manter_logs=1
   echo "FALHOU — $falhas asserção(ões) não conferem." >&2
 fi
 [[ "$falhas" -eq 0 ]]
