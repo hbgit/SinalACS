@@ -1628,6 +1628,7 @@ Plano: `docs/superpowers/plans/2026-10-14-issue-46-avisos-e-termos.md`; achados 
 - Testes de widget e de acessibilidade, e teste de integração hermético no emulador `emulator-5554` (`admin_notices_mobile_test.dart`).
 - `./scripts/qa/push_e2e.sh --e2e-db --negativos` verde em 2026-10-14, com o caso do aviso agendado contra Gorush e FCM reais no emulador; log em `docs/superpowers/plans/2026-10-14-issue-46-e2e.log`.
 - Regressão final (2026-10-14): backend `dart analyze` sem erro (87 `info`) e `dart test` +1289 verdes; paciente `flutter test` +259; ACS `flutter test` +544; admin `flutter analyze` sem problemas e `flutter test` +453; `scripts/qa/ci_invariants.sh` ok.
+- Regressão após a revisão final (2026-10-14): backend `dart analyze` sem erro nem warning (87 `info`) e `dart test -j 1` +1307 verdes; paciente `flutter test` +259; ACS `flutter test` +544; admin `flutter analyze` sem problemas e `flutter test` +456; `integration_test/admin_notices_mobile_test.dart` 2/2 e smoke 4/4 no `emulator-5554`; `scripts/qa/ci_invariants.sh` ok; `push_e2e.sh --e2e-db --negativos` reexecutado e verde ("OK — o aviso chegou ao emulador"), log em `docs/superpowers/plans/2026-10-14-issue-46-e2e.log`.
 
 **Continua em aberto**
 - Revisão jurídica do texto real dos termos.

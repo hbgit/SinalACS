@@ -25,3 +25,8 @@ consent=granted
 revogação: OK
 
 OK — o aviso chegou ao emulador
+
+== Nova execução após a revisão final (2026-10-14), COMPOSE_PROJECT_NAME=sinalacs ./scripts/qa/push_e2e.sh --e2e-db --negativos
+Passos: caminho feliz; aviso agendado (disparado pelo laço do servidor, id sintético): OK; token falso podado, ios mantido, token real recebeu: OK;
+Gorush parado com tokens no banco: falha tipada (rc=2): OK; revogar zera os destinatários (recipients=0): OK.
+Resultado final: "OK — o aviso chegou ao emulador" (saída 0). Esta execução cobre a partida do servidor com a varredura que agora audita (unknown_after_restart).
