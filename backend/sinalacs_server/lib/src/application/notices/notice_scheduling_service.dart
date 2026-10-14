@@ -50,6 +50,53 @@ class ScheduledNoticeSnapshot {
   final DateTime? sentAt;
 }
 
+/// Item do histórico: deliberadamente SEM o texto da mensagem (o backoffice
+/// lista títulos e contagens; o texto só existe no aviso e no envio).
+class NoticeHistoryItem {
+  const NoticeHistoryItem({
+    required this.id,
+    required this.createdBy,
+    required this.microAreaId,
+    required this.audience,
+    required this.title,
+    required this.scheduledFor,
+    required this.status,
+    this.recipients,
+    this.accepted,
+    this.sentAt,
+  });
+
+  factory NoticeHistoryItem.from(ScheduledNoticeSnapshot s) => NoticeHistoryItem(
+        id: s.id,
+        createdBy: s.createdBy,
+        microAreaId: s.microAreaId,
+        audience: s.audience,
+        title: s.title,
+        scheduledFor: s.scheduledFor,
+        status: s.status,
+        recipients: s.recipients,
+        accepted: s.accepted,
+        sentAt: s.sentAt,
+      );
+
+  final String id;
+
+  /// Quem criou o aviso (id do usuário; o endpoint o traduz em matrícula).
+  final String createdBy;
+  final String microAreaId;
+  final String audience;
+  final String title;
+  final DateTime scheduledFor;
+  final ScheduledNoticeStatus status;
+  final int? recipients;
+  final int? accepted;
+  final DateTime? sentAt;
+}
+
+/// Limites de paginação do histórico.
+const int noticeHistoryDefaultLimit = 50;
+const int noticeHistoryMaxLimit = 100;
+
 /// Persistência dos avisos agendados. A implementação ORM fica em
 /// `infrastructure/` (Task 1.5).
 abstract interface class ScheduledNoticeStore {
@@ -68,6 +115,9 @@ abstract interface class ScheduledNoticeStore {
     required DateTime scheduledFor,
     required DateTime createdAt,
   });
+
+  /// Linha pelo id, ou `null` se não existe.
+  Future<ScheduledNoticeSnapshot?> findById(String id);
 
   Future<bool> cancelIfPending(String id);
 
@@ -178,6 +228,70 @@ class NoticeSchedulingService {
       result: 'scheduled',
     ));
     return id;
+  }
+
+  /// Cancela um aviso ainda `pending`. Coordenador só cancela o da própria UBS.
+  Future<void> cancel(AuthenticatedUser user, String id) async {
+    if (!Authorization.staffRoles.contains(user.role)) {
+      await _deny(user, id, 'denied_role');
+    }
+    final notice = await _store.findById(id);
+    if (notice == null) {
+      throw AdminInvalidRequestException(message: 'Aviso não encontrado.');
+    }
+    if (user.role == UserRole.coordinator) {
+      final own = await _store.ubsOfStaff(user.id);
+      final target = await _store.ubsOfMicroArea(notice.microAreaId);
+      if (own == null || target == null || own != target) {
+        await _deny(user, id, 'denied_territory');
+      }
+    }
+    // Atômico: se o despacho reservou o aviso entre a leitura e aqui, recusa.
+    if (!await _store.cancelIfPending(id)) {
+      throw AdminInvalidRequestException(message: 'Só avisos pendentes podem ser cancelados.');
+    }
+    await _audit.recordSafely(AuditEvent(
+      userId: user.id,
+      actionType: 'write',
+      resourceType: 'community_notice',
+      resourceId: id,
+      result: 'cancelled',
+    ));
+  }
+
+  /// Histórico de avisos, sem o texto. Coordenador: só a própria UBS.
+  Future<List<NoticeHistoryItem>> history(
+    AuthenticatedUser user, {
+    String? microAreaId,
+    int limit = noticeHistoryDefaultLimit,
+    int offset = 0,
+  }) async {
+    if (!Authorization.staffRoles.contains(user.role)) {
+      await _deny(user, microAreaId ?? '', 'denied_role');
+    }
+    String? ubsId;
+    if (user.role == UserRole.coordinator) {
+      ubsId = await _store.ubsOfStaff(user.id);
+      if (ubsId == null) {
+        await _deny(user, microAreaId ?? '', 'denied_territory');
+      }
+      if (microAreaId != null && await _store.ubsOfMicroArea(microAreaId) != ubsId) {
+        await _deny(user, microAreaId, 'denied_territory');
+      }
+    }
+    final rows = await _store.history(
+      microAreaId: microAreaId,
+      ubsId: ubsId,
+      limit: limit.clamp(1, noticeHistoryMaxLimit),
+      offset: offset < 0 ? 0 : offset,
+    );
+    await _audit.recordSafely(AuditEvent(
+      userId: user.id,
+      actionType: 'read',
+      resourceType: 'community_notice',
+      result: 'granted',
+    ));
+    return rows.map(NoticeHistoryItem.from).toList();
   }
 
   /// Grava a negação (só ator e microárea; nunca o texto) e lança.

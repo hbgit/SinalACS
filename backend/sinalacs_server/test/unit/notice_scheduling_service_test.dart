@@ -55,7 +55,15 @@ class _FakeStore implements ScheduledNoticeStore {
   }
 
   @override
-  Future<bool> cancelIfPending(String id) async => false;
+  Future<ScheduledNoticeSnapshot?> findById(String id) async => rows[id];
+
+  @override
+  Future<bool> cancelIfPending(String id) async {
+    final row = rows[id];
+    if (row == null || row.status != ScheduledNoticeStatus.pending) return false;
+    rows[id] = _copy(row, status: ScheduledNoticeStatus.cancelled);
+    return true;
+  }
 
   @override
   Future<List<ScheduledNoticeSnapshot>> claimDue(DateTime now, {int limit = 20}) async => [];
@@ -76,7 +84,32 @@ class _FakeStore implements ScheduledNoticeStore {
     String? ubsId,
     required int limit,
     required int offset,
-  }) async => [];
+  }) async {
+    lastHistoryUbsId = ubsId;
+    lastHistoryLimit = limit;
+    lastHistoryOffset = offset;
+    return rows.values
+        .where((r) => microAreaId == null || r.microAreaId == microAreaId)
+        .where((r) => ubsId == null || ubsOfMicroAreaMap[r.microAreaId] == ubsId)
+        .toList();
+  }
+
+  String? lastHistoryUbsId;
+  int? lastHistoryLimit;
+  int? lastHistoryOffset;
+
+  static ScheduledNoticeSnapshot _copy(ScheduledNoticeSnapshot r, {required ScheduledNoticeStatus status}) =>
+      ScheduledNoticeSnapshot(
+        id: r.id,
+        createdBy: r.createdBy,
+        microAreaId: r.microAreaId,
+        audience: r.audience,
+        title: r.title,
+        message: r.message,
+        scheduledFor: r.scheduledFor,
+        status: status,
+        createdAt: r.createdAt,
+      );
 }
 
 void main() {
@@ -269,5 +302,168 @@ void main() {
     expect(dump, isNot(contains('TituloUnico')));
     expect(dump, isNot(contains('MensagemUnica')));
     expect(sends, 0);
+  });
+
+  group('cancel', () {
+    Future<String> pendente() => service.schedule(
+          _user(UserRole.admin),
+          microAreaId: _ma1,
+          audience: 'everyone',
+          title: 'T',
+          message: 'MensagemSecreta',
+          scheduledFor: now.add(const Duration(hours: 2)),
+        );
+
+    test('admin cancela aviso pending e audita cancelled com resourceId = id', () async {
+      final id = await pendente();
+      await service.cancel(_user(UserRole.admin), id);
+      expect(store.rows[id]!.status, ScheduledNoticeStatus.cancelled);
+      final e = audit.events.last;
+      expect(e.result, 'cancelled');
+      expect(e.resourceType, 'community_notice');
+      expect(e.resourceId, id);
+    });
+
+    test('coordenador cancela aviso da própria UBS', () async {
+      final id = await pendente();
+      store.ubsOfStaffMap['c-1'] = 'ubs-1';
+      await service.cancel(_user(UserRole.coordinator, id: 'c-1'), id);
+      expect(store.rows[id]!.status, ScheduledNoticeStatus.cancelled);
+    });
+
+    test('aviso que não está pending recusa', () async {
+      final id = await pendente();
+      store.rows[id] = _FakeStore._copy(store.rows[id]!, status: ScheduledNoticeStatus.sent);
+      await expectLater(
+        service.cancel(_user(UserRole.admin), id),
+        throwsA(isA<AdminInvalidRequestException>()),
+      );
+      expect(store.rows[id]!.status, ScheduledNoticeStatus.sent);
+    });
+
+    test('aviso inexistente recusa', () async {
+      await expectLater(
+        service.cancel(_user(UserRole.admin), 'nao-existe'),
+        throwsA(isA<AdminInvalidRequestException>()),
+      );
+    });
+
+    test('paciente e ACS: denied_role auditado', () async {
+      final id = await pendente();
+      for (final role in [UserRole.patient, UserRole.acs]) {
+        await expectLater(
+          service.cancel(_user(role, microAreaId: _ma1), id),
+          throwsA(isA<StateError>()),
+        );
+        expect(audit.events.last.result, 'denied_role');
+        expect(audit.events.last.resourceType, 'community_notice');
+      }
+      expect(store.rows[id]!.status, ScheduledNoticeStatus.pending);
+    });
+
+    test('coordenador de outra UBS e sem UBS: denied_territory, nada cancelado', () async {
+      final id = await pendente();
+      store.ubsOfStaffMap['c-2'] = 'ubs-2';
+      for (final uid in ['c-2', 'c-sem-ubs']) {
+        await expectLater(
+          service.cancel(_user(UserRole.coordinator, id: uid), id),
+          throwsA(isA<StateError>()),
+        );
+        expect(audit.events.last.result, 'denied_territory');
+      }
+      expect(store.rows[id]!.status, ScheduledNoticeStatus.pending);
+    });
+  });
+
+  group('history', () {
+    setUp(() {
+      store.ubsOfMicroAreaMap['ma-2'] = 'ubs-2';
+    });
+
+    Future<void> seed() async {
+      for (final ma in [_ma1, 'ma-2']) {
+        await service.schedule(
+          _user(UserRole.admin),
+          microAreaId: ma,
+          audience: 'everyone',
+          title: 'Titulo-$ma',
+          message: 'MensagemSecreta-$ma',
+          scheduledFor: now.add(const Duration(hours: 2)),
+        );
+      }
+    }
+
+    test('coordenador só vê a própria UBS; admin vê todas', () async {
+      await seed();
+      store.ubsOfStaffMap['c-1'] = 'ubs-1';
+      final doCoord = await service.history(_user(UserRole.coordinator, id: 'c-1'));
+      expect(doCoord.map((i) => i.microAreaId), [_ma1]);
+      expect(store.lastHistoryUbsId, 'ubs-1');
+      final doAdmin = await service.history(_user(UserRole.admin));
+      expect(doAdmin, hasLength(2));
+      expect(store.lastHistoryUbsId, isNull);
+    });
+
+    test('paciente e ACS: denied_role auditado', () async {
+      for (final role in [UserRole.patient, UserRole.acs]) {
+        await expectLater(
+          service.history(_user(role, microAreaId: _ma1)),
+          throwsA(isA<StateError>()),
+        );
+        expect(audit.events.last.result, 'denied_role');
+      }
+    });
+
+    test('coordenador sem UBS ou filtrando microárea de outra UBS: denied_territory', () async {
+      await seed();
+      await expectLater(
+        service.history(_user(UserRole.coordinator, id: 'c-sem-ubs')),
+        throwsA(isA<StateError>()),
+      );
+      expect(audit.events.last.result, 'denied_territory');
+      store.ubsOfStaffMap['c-1'] = 'ubs-1';
+      await expectLater(
+        service.history(_user(UserRole.coordinator, id: 'c-1'), microAreaId: 'ma-2'),
+        throwsA(isA<StateError>()),
+      );
+      expect(audit.events.last.result, 'denied_territory');
+    });
+
+    test('filtro por microárea própria funciona', () async {
+      await seed();
+      final r = await service.history(_user(UserRole.admin), microAreaId: 'ma-2');
+      expect(r.map((i) => i.microAreaId), ['ma-2']);
+    });
+
+    test('o item não carrega a mensagem e a leitura é auditada sem texto', () async {
+      await seed();
+      final r = await service.history(_user(UserRole.admin));
+      final item = r.first;
+      expect(item.title, startsWith('Titulo-'));
+      expect(item.status, ScheduledNoticeStatus.pending);
+      expect(item.createdBy, 'u-1');
+      expect(item.toString(), isNot(contains('MensagemSecreta')));
+      final e = audit.events.last;
+      expect(e.actionType, 'read');
+      expect(e.resourceType, 'community_notice');
+      expect(e.result, 'granted');
+      final dump = audit.events
+          .map((e) => '${e.userId}|${e.actionType}|${e.resourceType}|${e.resourceId}|${e.result}')
+          .join('\n');
+      expect(dump, isNot(contains('MensagemSecreta')));
+    });
+
+    test('limit é limitado a 1..100 (padrão 50) e offset a >= 0', () async {
+      final admin = _user(UserRole.admin);
+      await service.history(admin);
+      expect(store.lastHistoryLimit, 50);
+      await service.history(admin, limit: 0);
+      expect(store.lastHistoryLimit, 1);
+      await service.history(admin, limit: 1000);
+      expect(store.lastHistoryLimit, 100);
+      await service.history(admin, limit: 20, offset: -5);
+      expect(store.lastHistoryLimit, 20);
+      expect(store.lastHistoryOffset, 0);
+    });
   });
 }
