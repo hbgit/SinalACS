@@ -24,6 +24,10 @@ admin:
   - scheduleNotice:
   - cancelScheduledNotice:
   - noticeHistory:
+  - termsVersions:
+  - draftTermsVersion:
+  - markTermsReviewed:
+  - publishTermsVersion:
 alerts:
   - createRedAlert:
   - acknowledge:

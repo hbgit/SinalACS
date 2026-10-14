@@ -15,6 +15,7 @@ import 'package:sinalacs_server/src/infrastructure/database/orm_alert_escalation
 import 'package:sinalacs_server/src/application/notices/notice_scheduling_service.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_scheduled_notice_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_terms_version_store.dart';
+import 'package:sinalacs_server/src/application/patients/terms_publication_service.dart';
 import 'package:meta/meta.dart';
 import 'package:serverpod/serverpod.dart';
 import 'package:sinalacs_server/src/application/alerts/alert_outbox_dispatcher.dart';
@@ -467,6 +468,18 @@ class AlertRuntime {
         store: OrmScheduledNoticeStore(session: () => session),
         audit: auditTrailFor(session),
         sendNow: noticeServiceFor(session).sendToMicroArea,
+        clock: clock,
+      );
+
+  /// Rascunho, revisão jurídica e publicação dos termos (LGPD-RF18, #46).
+  /// [clock] existe para os testes.
+  TermsPublicationService termsPublicationServiceFor(
+    Session session, {
+    DateTime Function()? clock,
+  }) =>
+      TermsPublicationService(
+        store: OrmTermsVersionStore(session: () => session),
+        audit: auditTrailFor(session),
         clock: clock,
       );
 

@@ -803,6 +803,112 @@ class Endpoints extends _i1.EndpointDispatch {
                     offset: params['offset'],
                   ),
         ),
+        'termsVersions': _i1.MethodConnector(
+          name: 'termsVersions',
+          params: {
+            'accessToken': _i1.ParameterDescription(
+              name: 'accessToken',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async =>
+                  (endpoints['admin'] as _i2.AdminEndpoint).termsVersions(
+                    session,
+                    accessToken: params['accessToken'],
+                  ),
+        ),
+        'draftTermsVersion': _i1.MethodConnector(
+          name: 'draftTermsVersion',
+          params: {
+            'accessToken': _i1.ParameterDescription(
+              name: 'accessToken',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'version': _i1.ParameterDescription(
+              name: 'version',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'summary': _i1.ParameterDescription(
+              name: 'summary',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'effectiveFrom': _i1.ParameterDescription(
+              name: 'effectiveFrom',
+              type: _i1.getType<DateTime>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async =>
+                  (endpoints['admin'] as _i2.AdminEndpoint).draftTermsVersion(
+                    session,
+                    accessToken: params['accessToken'],
+                    version: params['version'],
+                    summary: params['summary'],
+                    effectiveFrom: params['effectiveFrom'],
+                  ),
+        ),
+        'markTermsReviewed': _i1.MethodConnector(
+          name: 'markTermsReviewed',
+          params: {
+            'accessToken': _i1.ParameterDescription(
+              name: 'accessToken',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'id': _i1.ParameterDescription(
+              name: 'id',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async =>
+                  (endpoints['admin'] as _i2.AdminEndpoint).markTermsReviewed(
+                    session,
+                    accessToken: params['accessToken'],
+                    id: params['id'],
+                  ),
+        ),
+        'publishTermsVersion': _i1.MethodConnector(
+          name: 'publishTermsVersion',
+          params: {
+            'accessToken': _i1.ParameterDescription(
+              name: 'accessToken',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'id': _i1.ParameterDescription(
+              name: 'id',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async =>
+                  (endpoints['admin'] as _i2.AdminEndpoint).publishTermsVersion(
+                    session,
+                    accessToken: params['accessToken'],
+                    id: params['id'],
+                  ),
+        ),
       },
     );
     connectors['alerts'] = _i1.EndpointConnector(

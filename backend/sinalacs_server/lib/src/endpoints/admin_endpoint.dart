@@ -1,4 +1,5 @@
 import 'package:serverpod/serverpod.dart';
+import 'package:sinalacs_server/src/application/patients/terms_publication_service.dart';
 import 'package:sinalacs_server/src/endpoints/authenticated_endpoint.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
 import 'package:sinalacs_server/src/runtime/alert_runtime.dart';
@@ -377,6 +378,97 @@ class AdminEndpoint extends AuthenticatedEndpoint {
               createdByLabel: i.createdByLabel ?? '—',
             ),
         ],
+      );
+    } on StateError catch (error) {
+      throw AlertPermissionException(message: error.message);
+    }
+  }
+
+  // --- Versões dos termos (#46, LGPD-RF18). Só `admin`; a negação já vem
+  // auditada do serviço e o resumo nunca entra na trilha. ---
+
+  static TermsVersionEntry _termsEntry(TermsVersionSnapshot r) =>
+      TermsVersionEntry(
+        id: r.id,
+        version: r.version,
+        summary: r.summary,
+        effectiveFrom: r.effectiveFrom,
+        createdAt: r.createdAt,
+        legallyReviewedAt: r.legallyReviewedAt,
+        publishedAt: r.publishedAt,
+      );
+
+  /// Versões dos termos, mais recentes primeiro.
+  Future<List<TermsVersionEntry>> termsVersions(
+    Session session, {
+    required String accessToken,
+  }) async {
+    final user = authenticate(accessToken);
+    try {
+      final rows = await AlertRuntime.instance
+          .termsPublicationServiceFor(session)
+          .list(user);
+      return [for (final r in rows) _termsEntry(r)];
+    } on StateError catch (error) {
+      throw AlertPermissionException(message: error.message);
+    }
+  }
+
+  /// Rascunha uma versão dos termos.
+  Future<TermsVersionEntry> draftTermsVersion(
+    Session session, {
+    required String accessToken,
+    required String version,
+    required String summary,
+    required DateTime effectiveFrom,
+  }) async {
+    final user = authenticate(accessToken);
+    try {
+      return _termsEntry(
+        await AlertRuntime.instance
+            .termsPublicationServiceFor(session)
+            .draft(
+              user,
+              version: version,
+              summary: summary,
+              effectiveFrom: effectiveFrom,
+            ),
+      );
+    } on StateError catch (error) {
+      throw AlertPermissionException(message: error.message);
+    }
+  }
+
+  /// Registra a revisão jurídica de uma versão.
+  Future<TermsVersionEntry> markTermsReviewed(
+    Session session, {
+    required String accessToken,
+    required String id,
+  }) async {
+    final user = authenticate(accessToken);
+    try {
+      return _termsEntry(
+        await AlertRuntime.instance
+            .termsPublicationServiceFor(session)
+            .markReviewed(user, id),
+      );
+    } on StateError catch (error) {
+      throw AlertPermissionException(message: error.message);
+    }
+  }
+
+  /// Publica uma versão revisada, com vigência a pelo menos 15 dias.
+  Future<TermsVersionEntry> publishTermsVersion(
+    Session session, {
+    required String accessToken,
+    required String id,
+  }) async {
+    final user = authenticate(accessToken);
+    try {
+      return _termsEntry(
+        await AlertRuntime.instance
+            .termsPublicationServiceFor(session)
+            .publish(user, id),
       );
     } on StateError catch (error) {
       throw AlertPermissionException(message: error.message);
