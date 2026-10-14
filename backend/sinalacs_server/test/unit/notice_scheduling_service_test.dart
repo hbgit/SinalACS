@@ -262,7 +262,10 @@ void main() {
     expect(event.actionType, 'write');
     expect(event.resourceType, 'community_notice');
     expect(event.resourceId, id);
-    final dump = audit.events.map((e) => e.toString()).join();
+    // AuditEvent não sobrescreve toString: monta-se o dump pelos campos.
+    final dump = audit.events
+        .map((e) => '${e.userId}|${e.actionType}|${e.resourceType}|${e.resourceId}|${e.result}')
+        .join('\n');
     expect(dump, isNot(contains('TituloUnico')));
     expect(dump, isNot(contains('MensagemUnica')));
     expect(sends, 0);
