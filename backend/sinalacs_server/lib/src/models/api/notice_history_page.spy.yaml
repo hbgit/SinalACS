@@ -1,0 +1,4 @@
+### Página do histórico de avisos agendados (#46), mais recentes primeiro.
+class: NoticeHistoryPage
+fields:
+  entries: List<NoticeHistoryEntry>

@@ -298,4 +298,88 @@ class AdminEndpoint extends AuthenticatedEndpoint {
   }) => AlertRuntime.instance
       .alertEscalationServiceFor(session)
       .escalate(authenticate(accessToken), alertId: alertId, reason: reason);
+
+  /// Agenda um aviso comunitário a uma microárea (#46) e devolve o id. Só
+  /// `coordinator`/`admin`; o coordenador só na própria UBS. A negação já vem
+  /// auditada do serviço; o texto nunca entra na trilha.
+  Future<String> scheduleNotice(
+    Session session, {
+    required String accessToken,
+    required String microAreaId,
+    required String audience,
+    required String title,
+    required String message,
+    required DateTime scheduledFor,
+  }) async {
+    final user = authenticate(accessToken);
+    try {
+      return await AlertRuntime.instance
+          .noticeSchedulingServiceFor(session)
+          .schedule(
+            user,
+            microAreaId: microAreaId,
+            audience: audience,
+            title: title,
+            message: message,
+            scheduledFor: scheduledFor,
+          );
+    } on StateError catch (error) {
+      throw AlertPermissionException(message: error.message);
+    }
+  }
+
+  /// Cancela um aviso ainda `pending` (#46). Aviso já reservado/enviado:
+  /// [AdminInvalidRequestException].
+  Future<void> cancelScheduledNotice(
+    Session session, {
+    required String accessToken,
+    required String id,
+  }) async {
+    final user = authenticate(accessToken);
+    try {
+      await AlertRuntime.instance
+          .noticeSchedulingServiceFor(session)
+          .cancel(user, id);
+    } on StateError catch (error) {
+      throw AlertPermissionException(message: error.message);
+    }
+  }
+
+  /// Histórico de avisos, mais recentes primeiro, **sem o texto** (#46).
+  /// Coordenador: só a própria UBS.
+  Future<NoticeHistoryPage> noticeHistory(
+    Session session, {
+    required String accessToken,
+    String? microAreaId,
+    int limit = 50,
+    int offset = 0,
+  }) async {
+    final user = authenticate(accessToken);
+    try {
+      final items = await AlertRuntime.instance
+          .noticeSchedulingServiceFor(session)
+          .history(user, microAreaId: microAreaId, limit: limit, offset: offset);
+      return NoticeHistoryPage(
+        entries: [
+          for (final i in items)
+            NoticeHistoryEntry(
+              id: i.id,
+              microAreaId: i.microAreaId,
+              microAreaName: i.microAreaName ?? '—',
+              audience: i.audience,
+              title: i.title,
+              status: i.status,
+              scheduledFor: i.scheduledFor,
+              sentAt: i.sentAt,
+              recipients: i.recipients,
+              accepted: i.accepted,
+              failureReason: i.failureReason,
+              createdByLabel: i.createdByLabel ?? '—',
+            ),
+        ],
+      );
+    } on StateError catch (error) {
+      throw AlertPermissionException(message: error.message);
+    }
+  }
 }

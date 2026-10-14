@@ -1,0 +1,20 @@
+### Linha do histórico de avisos agendados (#46). Deliberadamente SEM o texto
+### da mensagem: o backoffice lista título, alvo e resultado.
+###
+### `createdByLabel` é a matrícula de quem agendou ("—" se a conta não tem).
+### `recipients`/`accepted` só existem depois do envio; `failureReason` só em
+### `failed`/`unknown`.
+class: NoticeHistoryEntry
+fields:
+  id: String
+  microAreaId: String
+  microAreaName: String
+  audience: String
+  title: String
+  status: ScheduledNoticeStatus
+  scheduledFor: DateTime
+  sentAt: DateTime?
+  recipients: int?
+  accepted: int?
+  failureReason: String?
+  createdByLabel: String

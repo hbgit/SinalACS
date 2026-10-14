@@ -34,11 +34,18 @@ class ScheduledNoticeSnapshot {
     this.accepted,
     this.failureReason,
     this.sentAt,
+    this.microAreaName,
+    this.createdByLabel,
   });
 
   final String id;
   final String createdBy;
   final String microAreaId;
+
+  /// Nome da microárea e matrícula de quem criou: só o `history` do store os
+  /// resolve (JOIN); nas demais leituras ficam nulos.
+  final String? microAreaName;
+  final String? createdByLabel;
   final String audience;
   final String title;
   final String message;
@@ -65,6 +72,9 @@ class NoticeHistoryItem {
     this.recipients,
     this.accepted,
     this.sentAt,
+    this.failureReason,
+    this.microAreaName,
+    this.createdByLabel,
   });
 
   factory NoticeHistoryItem.from(ScheduledNoticeSnapshot s) =>
@@ -79,6 +89,9 @@ class NoticeHistoryItem {
         recipients: s.recipients,
         accepted: s.accepted,
         sentAt: s.sentAt,
+        failureReason: s.failureReason,
+        microAreaName: s.microAreaName,
+        createdByLabel: s.createdByLabel,
       );
 
   final String id;
@@ -93,6 +106,11 @@ class NoticeHistoryItem {
   final int? recipients;
   final int? accepted;
   final DateTime? sentAt;
+  final String? failureReason;
+  final String? microAreaName;
+
+  /// Matrícula de quem criou (nunca nome de paciente).
+  final String? createdByLabel;
 }
 
 /// Janela após a qual um aviso preso em `sending` é dado como de resultado

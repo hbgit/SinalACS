@@ -20,7 +20,8 @@ class OrmScheduledNoticeStore implements ScheduledNoticeStore {
   static const _historyColumns =
       's."id", s."createdBy", s."microAreaId", s."audience", s."title", '
       's."message", s."scheduledFor", s."status", s."recipients", s."accepted", '
-      's."failureReason", s."createdAt", s."sentAt"';
+      's."failureReason", s."createdAt", s."sentAt", '
+      'm."name" AS "microAreaName", sa."enrollmentId" AS "createdByLabel"';
 
   @override
   Future<String?> ubsOfStaff(String userId) async {
@@ -169,6 +170,7 @@ class OrmScheduledNoticeStore implements ScheduledNoticeStore {
       SELECT $_historyColumns
       FROM scheduled_notices s
       JOIN micro_areas m ON m."id" = s."microAreaId"
+      LEFT JOIN staff_accounts sa ON sa."id" = s."createdBy"
       WHERE (@micro::uuid IS NULL OR s."microAreaId" = @micro::uuid)
         AND (@ubs::uuid IS NULL OR m."ubsId" = @ubs::uuid)
       ORDER BY s."scheduledFor" DESC, s."id" DESC
@@ -198,6 +200,8 @@ class OrmScheduledNoticeStore implements ScheduledNoticeStore {
         failureReason: c['failureReason'] as String?,
         createdAt: _utc(c['createdAt'] as DateTime),
         sentAt: c['sentAt'] == null ? null : _utc(c['sentAt'] as DateTime),
+        microAreaName: c['microAreaName'] as String?,
+        createdByLabel: c['createdByLabel'] as String?,
       );
 
   static DateTime _utc(DateTime d) => d.isUtc ? d : DateTime.utc(

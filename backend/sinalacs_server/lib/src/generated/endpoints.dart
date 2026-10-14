@@ -692,6 +692,117 @@ class Endpoints extends _i1.EndpointDispatch {
                     reason: params['reason'],
                   ),
         ),
+        'scheduleNotice': _i1.MethodConnector(
+          name: 'scheduleNotice',
+          params: {
+            'accessToken': _i1.ParameterDescription(
+              name: 'accessToken',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'microAreaId': _i1.ParameterDescription(
+              name: 'microAreaId',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'audience': _i1.ParameterDescription(
+              name: 'audience',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'title': _i1.ParameterDescription(
+              name: 'title',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'message': _i1.ParameterDescription(
+              name: 'message',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'scheduledFor': _i1.ParameterDescription(
+              name: 'scheduledFor',
+              type: _i1.getType<DateTime>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async =>
+                  (endpoints['admin'] as _i2.AdminEndpoint).scheduleNotice(
+                    session,
+                    accessToken: params['accessToken'],
+                    microAreaId: params['microAreaId'],
+                    audience: params['audience'],
+                    title: params['title'],
+                    message: params['message'],
+                    scheduledFor: params['scheduledFor'],
+                  ),
+        ),
+        'cancelScheduledNotice': _i1.MethodConnector(
+          name: 'cancelScheduledNotice',
+          params: {
+            'accessToken': _i1.ParameterDescription(
+              name: 'accessToken',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'id': _i1.ParameterDescription(
+              name: 'id',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async => (endpoints['admin'] as _i2.AdminEndpoint)
+                  .cancelScheduledNotice(
+                    session,
+                    accessToken: params['accessToken'],
+                    id: params['id'],
+                  ),
+        ),
+        'noticeHistory': _i1.MethodConnector(
+          name: 'noticeHistory',
+          params: {
+            'accessToken': _i1.ParameterDescription(
+              name: 'accessToken',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'microAreaId': _i1.ParameterDescription(
+              name: 'microAreaId',
+              type: _i1.getType<String?>(),
+              nullable: true,
+            ),
+            'limit': _i1.ParameterDescription(
+              name: 'limit',
+              type: _i1.getType<int>(),
+              nullable: false,
+            ),
+            'offset': _i1.ParameterDescription(
+              name: 'offset',
+              type: _i1.getType<int>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async =>
+                  (endpoints['admin'] as _i2.AdminEndpoint).noticeHistory(
+                    session,
+                    accessToken: params['accessToken'],
+                    microAreaId: params['microAreaId'],
+                    limit: params['limit'],
+                    offset: params['offset'],
+                  ),
+        ),
       },
     );
     connectors['alerts'] = _i1.EndpointConnector(
