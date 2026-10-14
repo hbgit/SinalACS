@@ -1,5 +1,6 @@
 import 'package:sinalacs_server/src/application/audit/audit_trail.dart';
 import 'package:sinalacs_server/src/application/auth/development_auth_service.dart';
+import 'package:sinalacs_server/src/application/common/uuid_format.dart';
 import 'package:sinalacs_server/src/application/onboarding/onboarding_service.dart'
     show consentPolicyVersion;
 import 'package:sinalacs_server/src/application/patients/terms_change_schedule.dart';
@@ -179,6 +180,9 @@ class TermsPublicationService {
   }
 
   Future<TermsVersionSnapshot> _find(String id) async {
+    if (!isUuidFormat(id)) {
+      throw AdminInvalidRequestException(message: 'Identificador inválido.');
+    }
     final row = await _store.findById(id);
     if (row == null) {
       throw AdminInvalidRequestException(message: 'Versão não encontrada.');
@@ -191,13 +195,9 @@ class TermsPublicationService {
         userId: user.id,
         actionType: 'write',
         resourceType: 'terms_version',
-        resourceId: _uuid.hasMatch(id) ? id : null,
+        resourceId: isUuidFormat(id) ? id : null,
         result: result,
       ));
-
-  static final _uuid = RegExp(
-    r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$',
-  );
 
   /// Só `admin`. Grava a negação (await) antes de lançar; `resourceId` só se UUID.
   Future<void> _requireAdmin(
@@ -210,7 +210,7 @@ class TermsPublicationService {
       userId: user.id,
       actionType: actionType,
       resourceType: 'terms_version',
-      resourceId: id != null && _uuid.hasMatch(id) ? id : null,
+      resourceId: id != null && isUuidFormat(id) ? id : null,
       result: 'denied_role',
     ));
     throw StateError('Sem permissão para esta operação dos termos.');

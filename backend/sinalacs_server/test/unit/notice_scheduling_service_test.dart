@@ -7,6 +7,9 @@ import 'package:sinalacs_server/src/infrastructure/push/gorush_client.dart';
 import 'package:test/test.dart';
 
 const _ma1 = '00000000-0000-4000-8000-000000000003';
+const _ma2 = '00000000-0000-4000-8000-000000000004';
+const _maX = '00000000-0000-4000-8000-000000000005';
+const _maInexistente = '00000000-0000-4000-8000-000000000006';
 
 AuthenticatedUser _user(UserRole role, {String id = 'u-1', String? microAreaId}) =>
     AuthenticatedUser(id: id, role: role, microAreaId: microAreaId, deviceId: 'dev-1');
@@ -171,7 +174,7 @@ class _FakeStore implements ScheduledNoticeStore {
     required DateTime scheduledFor,
     required DateTime createdAt,
   }) async {
-    final id = 'notice-${++_seq}';
+    final id = '00000000-0000-4000-8000-${(++_seq).toString().padLeft(12, '0')}';
     rows[id] = ScheduledNoticeSnapshot(
       id: id,
       createdBy: createdBy,
@@ -350,9 +353,9 @@ void main() {
 
   test('coordenador não agenda para microárea de outra UBS: denied_territory', () async {
     store.ubsOfStaffMap['c-1'] = 'ubs-1';
-    store.ubsOfMicroAreaMap['ma-x'] = 'ubs-2';
+    store.ubsOfMicroAreaMap[_maX] = 'ubs-2';
     await expectLater(
-      schedule(_user(UserRole.coordinator, id: 'c-1'), microAreaId: 'ma-x'),
+      schedule(_user(UserRole.coordinator, id: 'c-1'), microAreaId: _maX),
       throwsA(isA<StateError>()),
     );
     expect(audit.events.last.result, 'denied_territory');
@@ -377,7 +380,7 @@ void main() {
 
   test('admin com microárea inexistente: entrada inválida, sem auditoria', () async {
     await expectLater(
-      schedule(_user(UserRole.admin), microAreaId: 'ma-inexistente'),
+      schedule(_user(UserRole.admin), microAreaId: _maInexistente),
       throwsA(isA<AdminInvalidRequestException>()),
     );
     expect(audit.events, isEmpty);
@@ -520,7 +523,7 @@ void main() {
 
     test('aviso inexistente recusa', () async {
       await expectLater(
-        service.cancel(_user(UserRole.admin), 'nao-existe'),
+        service.cancel(_user(UserRole.admin), '00000000-0000-4000-8000-0000000000ff'),
         throwsA(isA<AdminInvalidRequestException>()),
       );
     });
@@ -554,11 +557,11 @@ void main() {
 
   group('history', () {
     setUp(() {
-      store.ubsOfMicroAreaMap['ma-2'] = 'ubs-2';
+      store.ubsOfMicroAreaMap[_ma2] = 'ubs-2';
     });
 
     Future<void> seed() async {
-      for (final ma in [_ma1, 'ma-2']) {
+      for (final ma in [_ma1, _ma2]) {
         await service.schedule(
           _user(UserRole.admin),
           microAreaId: ma,
@@ -600,7 +603,7 @@ void main() {
       expect(audit.events.last.result, 'denied_territory');
       store.ubsOfStaffMap['c-1'] = 'ubs-1';
       await expectLater(
-        service.history(_user(UserRole.coordinator, id: 'c-1'), microAreaId: 'ma-2'),
+        service.history(_user(UserRole.coordinator, id: 'c-1'), microAreaId: _ma2),
         throwsA(isA<StateError>()),
       );
       expect(audit.events.last.result, 'denied_territory');
@@ -608,8 +611,8 @@ void main() {
 
     test('filtro por microárea própria funciona', () async {
       await seed();
-      final r = await service.history(_user(UserRole.admin), microAreaId: 'ma-2');
-      expect(r.map((i) => i.microAreaId), ['ma-2']);
+      final r = await service.history(_user(UserRole.admin), microAreaId: _ma2);
+      expect(r.map((i) => i.microAreaId), [_ma2]);
     });
 
     test('o item não carrega a mensagem e a leitura é auditada sem texto', () async {
@@ -1019,5 +1022,47 @@ void main() {
     );
     await svc.history(_user(UserRole.admin));
     expect(order, ['audit', 'store']);
+  });
+
+  group('identificador que não é UUID (entrada inválida, antes do store)', () {
+    const ruins = ['', 'abc', 'notice-1', '00000000-0000-4000-8000-00000000000g', "x'; drop"];
+
+    Matcher invalido() => throwsA(isA<AdminInvalidRequestException>()
+        .having((e) => e.message, 'message', 'Identificador inválido.'));
+
+    test('schedule, cancel e history recusam sem chamar o store nem auditar', () async {
+      final admin = _user(UserRole.admin);
+      for (final ruim in ruins) {
+        await expectLater(schedule(admin, microAreaId: ruim), invalido());
+        await expectLater(service.cancel(admin, ruim), invalido());
+        await expectLater(service.history(admin, microAreaId: ruim), invalido());
+      }
+      expect(store.rows, isEmpty);
+      expect(store.lastHistoryLimit, isNull);
+      expect(audit.events, isEmpty);
+    });
+
+    test('coordenador também recebe entrada inválida (não vira denied_territory)', () async {
+      store.ubsOfStaffMap['c-1'] = 'ubs-1';
+      final c = _user(UserRole.coordinator, id: 'c-1');
+      await expectLater(schedule(c, microAreaId: 'abc'), invalido());
+      await expectLater(service.cancel(c, 'abc'), invalido());
+      await expectLater(service.history(c, microAreaId: 'abc'), invalido());
+      expect(audit.events, isEmpty);
+    });
+
+    test('a autorização de papel vem ANTES: paciente e ACS recebem denied_role auditado', () async {
+      for (final role in [UserRole.patient, UserRole.acs]) {
+        await expectLater(
+            schedule(_user(role, microAreaId: _ma1), microAreaId: 'abc'), throwsA(isA<StateError>()));
+        expect(audit.events.last.result, 'denied_role');
+        await expectLater(service.cancel(_user(role), 'abc'), throwsA(isA<StateError>()));
+        expect(audit.events.last.result, 'denied_role');
+        await expectLater(
+            service.history(_user(role), microAreaId: 'abc'), throwsA(isA<StateError>()));
+        expect(audit.events.last.result, 'denied_role');
+        expect(audit.events.last.actionType, 'read');
+      }
+    });
   });
 }

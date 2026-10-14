@@ -1,6 +1,7 @@
 import 'package:sinalacs_server/src/application/audit/audit_trail.dart';
 import 'package:sinalacs_server/src/application/auth/authorization.dart';
 import 'package:sinalacs_server/src/application/auth/development_auth_service.dart';
+import 'package:sinalacs_server/src/application/common/uuid_format.dart';
 import 'package:sinalacs_server/src/application/notices/notice_service.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
 
@@ -208,6 +209,7 @@ class NoticeSchedulingService {
     if (!Authorization.staffRoles.contains(user.role)) {
       await _deny(user, microAreaId, 'denied_role');
     }
+    _requireUuid(microAreaId);
     final target = await _store.ubsOfMicroArea(microAreaId);
     if (user.role == UserRole.coordinator) {
       final own = await _store.ubsOfStaff(user.id);
@@ -268,6 +270,7 @@ class NoticeSchedulingService {
     if (!Authorization.staffRoles.contains(user.role)) {
       await _deny(user, id, 'denied_role');
     }
+    _requireUuid(id);
     final notice = await _store.findById(id);
     if (notice == null) {
       throw AdminInvalidRequestException(message: 'Aviso não encontrado.');
@@ -302,6 +305,7 @@ class NoticeSchedulingService {
     if (!Authorization.staffRoles.contains(user.role)) {
       await _deny(user, microAreaId ?? '', 'denied_role', actionType: 'read');
     }
+    if (microAreaId != null) _requireUuid(microAreaId);
     String? ubsId;
     if (user.role == UserRole.coordinator) {
       ubsId = await _store.ubsOfStaff(user.id);
@@ -402,9 +406,13 @@ class NoticeSchedulingService {
     }
   }
 
-  static final _uuid = RegExp(
-    r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$',
-  );
+  /// Identificador do cliente que não é UUID é entrada inválida, não erro 500
+  /// do `::uuid` do SQL. Vem depois da autorização e antes de qualquer store.
+  static void _requireUuid(String value) {
+    if (!isUuidFormat(value)) {
+      throw AdminInvalidRequestException(message: 'Identificador inválido.');
+    }
+  }
 
   /// Grava a negação (só ator e microárea; nunca o texto) e lança. Fail-closed:
   /// `record` (não `recordSafely`), então se a gravação falha a exceção sobe e a
@@ -420,7 +428,7 @@ class NoticeSchedulingService {
       userId: user.id,
       actionType: actionType,
       resourceType: 'community_notice',
-      resourceId: _uuid.hasMatch(microAreaId) ? microAreaId : null,
+      resourceId: isUuidFormat(microAreaId) ? microAreaId : null,
       result: result,
     ));
     throw StateError('Sem permissão para esta operação de avisos.');

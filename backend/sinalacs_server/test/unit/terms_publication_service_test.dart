@@ -286,6 +286,27 @@ void main() {
     expect(audit.dump.join().contains('PLACEHOLDER'), isFalse);
   });
 
+  test('identificador que não é UUID: Identificador inválido, sem tocar o store', () async {
+    for (final ruim in ['', 'abc', 'x; drop', '0000-4000']) {
+      await expectLater(
+        service.markReviewed(admin, ruim),
+        throwsA(isA<AdminInvalidRequestException>()
+            .having((e) => e.message, 'message', 'Identificador inválido.')),
+      );
+      await expectLater(
+        service.publish(admin, ruim),
+        throwsA(isA<AdminInvalidRequestException>()
+            .having((e) => e.message, 'message', 'Identificador inválido.')),
+      );
+    }
+    expect(audit.events, isEmpty);
+  });
+
+  test('identificador inválido: o papel vem antes (coordenador recebe denied_role)', () async {
+    await expectLater(service.publish(_user(UserRole.coordinator), 'abc'), throwsA(isA<StateError>()));
+    expect(audit.events.last.result, 'denied_role');
+  });
+
   group('auditoria fail-closed (record, nunca recordSafely)', () {
     late _ThrowingAudit broken;
     late TermsPublicationService svc;
