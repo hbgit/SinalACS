@@ -205,6 +205,8 @@ class _NoticeFormDialogState extends State<NoticeFormDialog> {
         DropdownButtonFormField<String>(
           key: const Key('notice_area'),
           initialValue: _areaId,
+          // Sem isto o item pede a largura natural do nome e estoura o diálogo em celular.
+          isExpanded: true,
           decoration: const InputDecoration(labelText: 'Microárea'),
           items: [for (final a in areas) DropdownMenuItem(value: a.id, child: Text(a.name))],
           onChanged: _enviando ? null : (v) => setState(() => _areaId = v),

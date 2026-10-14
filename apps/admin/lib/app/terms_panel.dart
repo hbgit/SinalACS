@@ -215,6 +215,11 @@ class _CartaoDoTermo extends StatelessWidget {
     final prazoEsgotado =
         estado == TermsVersionState.reviewed && termo.effectiveFrom.isBefore(agora.add(const Duration(days: 15)));
     final publicarHabilitado = estado == TermsVersionState.reviewed && !prazoEsgotado && !ocupado;
+    final motivo = estado == TermsVersionState.draft
+        ? 'Aguardando revisão jurídica'
+        : prazoEsgotado
+            ? 'Prazo de 15 dias esgotado: crie uma nova versão com vigência posterior.'
+            : null;
     return Card(
       key: Key('terms_row_${termo.id}'),
       margin: const EdgeInsets.only(bottom: 12),
@@ -229,7 +234,7 @@ class _CartaoDoTermo extends StatelessWidget {
               children: [
                 Icon(_estadoIcone(estado), size: 18, color: cor),
                 const SizedBox(width: 6),
-                Text(_estadoRotulo(estado), style: TextStyle(color: cor, fontWeight: FontWeight.bold)),
+                Flexible(child: Text(_estadoRotulo(estado), style: TextStyle(color: cor, fontWeight: FontWeight.bold))),
               ],
             ),
             const SizedBox(height: 4),
@@ -248,7 +253,7 @@ class _CartaoDoTermo extends StatelessWidget {
               Wrap(
                 spacing: 12,
                 runSpacing: 8,
-                crossAxisAlignment: WrapCrossAlignment.center,
+                crossAxisAlignment: WrapCrossAlignment.start,
                 children: [
                   if (estado == TermsVersionState.draft)
                     OutlinedButton(
@@ -257,21 +262,26 @@ class _CartaoDoTermo extends StatelessWidget {
                       onPressed: ocupado ? null : onRevisar,
                       child: const Text('Marcar como revisado'),
                     ),
-                  FilledButton(
-                    key: Key('terms_publish_${termo.id}'),
-                    style: FilledButton.styleFrom(minimumSize: _alvoMinimo),
-                    onPressed: publicarHabilitado ? onPublicar : null,
-                    child: const Text('Publicar'),
+                  // Botão e motivo da recusa formam UM nó de semântica: um botão
+                  // desabilitado só diz "Publicar", e o leitor de tela precisa ouvir
+                  // por que não pode. O texto visível é o mesmo, sem segundo anúncio.
+                  MergeSemantics(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        FilledButton(
+                          key: Key('terms_publish_${termo.id}'),
+                          style: FilledButton.styleFrom(minimumSize: _alvoMinimo),
+                          onPressed: publicarHabilitado ? onPublicar : null,
+                          child: const Text('Publicar'),
+                        ),
+                        if (motivo != null) Padding(padding: const EdgeInsets.only(top: 6), child: Text(motivo)),
+                      ],
+                    ),
                   ),
                 ],
               ),
-              if (estado == TermsVersionState.draft)
-                const Padding(padding: EdgeInsets.only(top: 6), child: Text('Aguardando revisão jurídica')),
-              if (prazoEsgotado)
-                const Padding(
-                  padding: EdgeInsets.only(top: 6),
-                  child: Text('Prazo de 15 dias esgotado: crie uma nova versão com vigência posterior.'),
-                ),
             ],
           ],
         ),

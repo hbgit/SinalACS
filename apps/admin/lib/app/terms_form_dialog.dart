@@ -134,10 +134,12 @@ class _TermsFormDialogState extends State<TermsFormDialog> {
         canPop: !_enviando,
         child: AlertDialog(
           title: const Text('Nova versão dos termos'),
+          // Título e corpo rolam juntos; só as ações ficam fixas. Sem isto, com
+          // fonte a 200% em 320x568 o título e as ações sozinhos passam da altura.
+          scrollable: true,
           content: SizedBox(
             width: 560,
-            child: SingleChildScrollView(
-              child: Column(
+            child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -188,7 +190,6 @@ class _TermsFormDialogState extends State<TermsFormDialog> {
                     ),
                   ],
                 ],
-              ),
             ),
           ),
           actions: [
