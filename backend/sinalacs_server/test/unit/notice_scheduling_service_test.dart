@@ -66,6 +66,8 @@ class _CountingStore implements ScheduledNoticeStore {
   @override
   Future<String?> ubsOfMicroArea(String id) => _inner.ubsOfMicroArea(id);
   @override
+  Future<StaffAuthority?> authorityOf(String userId) => _inner.authorityOf(userId);
+  @override
   Future<String> insert({
     required String createdBy,
     required String microAreaId,
@@ -155,6 +157,18 @@ class _Sender implements PushSender {
 class _FakeStore implements ScheduledNoticeStore {
   final ubsOfStaffMap = <String, String?>{};
   final ubsOfMicroAreaMap = <String, String?>{};
+  /// Autoridade do autor no disparo. Sem entrada: admin ativo, para os testes
+  /// antigos de `dispatchDue` (que agendam como `adm-1`) continuarem a enviar.
+  final authorityMap = <String, StaffAuthority?>{};
+  var authorityThrows = false;
+
+  @override
+  Future<StaffAuthority?> authorityOf(String userId) async {
+    if (authorityThrows) throw StateError('banco fora do ar');
+    return authorityMap.containsKey(userId)
+        ? authorityMap[userId]
+        : const StaffAuthority(role: UserRole.admin, active: true);
+  }
   final rows = <String, ScheduledNoticeSnapshot>{};
   var _seq = 0;
 
@@ -745,6 +759,97 @@ void main() {
       expect(audit.events.single.resourceId, id);
       expect(audit.events.single.userId, 'adm-1');
       expect(dump(), isNot(contains('TextoSecretoDoAviso')));
+    });
+
+    group('autoridade de quem agendou no disparo', () {
+      Future<String> dueBy(String author) => store.insert(
+            createdBy: author,
+            microAreaId: _ma1,
+            audience: 'everyone',
+            title: 'Titulo',
+            message: 'TextoSecretoDoAviso',
+            scheduledFor: now.subtract(const Duration(minutes: 5)),
+            createdAt: now.subtract(const Duration(hours: 1)),
+          );
+
+      Future<void> expectRefused(String id, String author) async {
+        expect(await service.dispatchDue(), 1);
+        expect(sends, 0, reason: 'o aviso não pode sair');
+        final r = store.rows[id]!;
+        expect(r.status, ScheduledNoticeStatus.failed);
+        expect(r.failureReason, noticeAuthorRevokedReason);
+        final e = audit.events.last;
+        expect(e.result, 'denied_author_revoked');
+        expect(e.resourceType, 'community_notice');
+        expect(e.resourceId, id);
+        expect(e.userId, author);
+        expect(dump(), isNot(contains('TextoSecretoDoAviso')));
+      }
+
+      test('coordenador desativado depois de agendar: não envia', () async {
+        store.authorityMap['c-1'] =
+            const StaffAuthority(role: UserRole.coordinator, active: false, ubsId: 'ubs-1');
+        await expectRefused(await dueBy('c-1'), 'c-1');
+      });
+
+      test('coordenador trocado de UBS depois de agendar: não envia', () async {
+        store.authorityMap['c-1'] =
+            const StaffAuthority(role: UserRole.coordinator, active: true, ubsId: 'ubs-2');
+        await expectRefused(await dueBy('c-1'), 'c-1');
+      });
+
+      test('coordenador sem UBS: não envia (fail-closed)', () async {
+        store.authorityMap['c-1'] = const StaffAuthority(role: UserRole.coordinator, active: true);
+        await expectRefused(await dueBy('c-1'), 'c-1');
+      });
+
+      test('autor sem conta de staff: não envia', () async {
+        store.authorityMap['x-1'] = null;
+        await expectRefused(await dueBy('x-1'), 'x-1');
+      });
+
+      test('autor rebaixado a ACS: não envia', () async {
+        store.authorityMap['c-1'] =
+            const StaffAuthority(role: UserRole.acs, active: true, ubsId: 'ubs-1');
+        await expectRefused(await dueBy('c-1'), 'c-1');
+      });
+
+      test('admin desativado: não envia', () async {
+        store.authorityMap['adm-1'] = const StaffAuthority(role: UserRole.admin, active: false);
+        await expectRefused(await dueBy('adm-1'), 'adm-1');
+      });
+
+      test('coordenador ativo da mesma UBS: envia', () async {
+        store.authorityMap['c-1'] =
+            const StaffAuthority(role: UserRole.coordinator, active: true, ubsId: 'ubs-1');
+        final id = await dueBy('c-1');
+        expect(await service.dispatchDue(), 1);
+        expect(sends, 1);
+        expect(store.rows[id]!.status, ScheduledNoticeStatus.sent);
+      });
+
+      test('consulta de autoridade que lança: failed, sem envio, laço segue', () async {
+        store.authorityThrows = true;
+        final a = await dueBy('adm-1');
+        final b = await dueBy('adm-1');
+        expect(await service.dispatchDue(), 2);
+        expect(sends, 0);
+        for (final id in [a, b]) {
+          expect(store.rows[id]!.status, ScheduledNoticeStatus.failed);
+        }
+        expect(audit.events.where((e) => e.result == 'failed'), hasLength(2));
+      });
+
+      test('recusa de um não impede o envio do outro', () async {
+        store.authorityMap['c-1'] =
+            const StaffAuthority(role: UserRole.coordinator, active: false, ubsId: 'ubs-1');
+        final recusado = await dueBy('c-1');
+        final enviado = await dueBy('adm-1');
+        expect(await service.dispatchDue(), 2);
+        expect(sends, 1);
+        expect(store.rows[recusado]!.status, ScheduledNoticeStatus.failed);
+        expect(store.rows[enviado]!.status, ScheduledNoticeStatus.sent);
+      });
     });
   });
 

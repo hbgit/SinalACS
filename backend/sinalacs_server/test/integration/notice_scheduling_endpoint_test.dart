@@ -71,6 +71,15 @@ Future<void> _seed(Session s) async {
       ubsId: UuidValue.fromString(_ubsA),
     ),
   );
+  await StaffAccount.db.insertRow(
+    s,
+    StaffAccount(
+      id: UuidValue.fromString(_admin),
+      enrollmentId: 'ADM-AVISO-1',
+      active: true,
+      ubsId: null,
+    ),
+  );
 }
 
 void main() {
@@ -273,6 +282,39 @@ void main() {
       expect(await service.recoverStuckSending(), 0);
       expect(audit.events, hasLength(1), reason: 'sem avisos presos, nada novo na trilha');
       expect(sent, isEmpty, reason: 'a varredura nunca reenvia');
+    });
+
+    test('authorityOf lê papel, situação e UBS; sem conta de staff devolve null', () async {
+      final adm = (await store.authorityOf(_admin))!;
+      expect(adm.role, UserRole.admin);
+      expect(adm.active, isTrue);
+      expect(adm.ubsId, isNull);
+      final coo = (await store.authorityOf(_coordA))!;
+      expect(coo.role, UserRole.coordinator);
+      expect(coo.ubsId, _ubsA);
+      expect(await store.authorityOf('00000000-0000-4000-8000-0000000000ff'), isNull);
+    });
+
+    test('coordenador desativado depois de agendar: o disparo não envia', () async {
+      final id = await service.schedule(
+        _user(_coordA, UserRole.coordinator),
+        microAreaId: _maA,
+        audience: 'everyone',
+        title: 'Título sintético',
+        message: 'Mensagem sintética',
+        scheduledFor: now.add(const Duration(minutes: 5)),
+      );
+      await session.db.unsafeExecute(
+        'UPDATE staff_accounts SET "active" = false WHERE "id" = @id::uuid',
+        parameters: QueryParameters.named({'id': _coordA}),
+      );
+      clock = now.add(const Duration(minutes: 10));
+      expect(await service.dispatchDue(), 1);
+      expect(sent, isEmpty);
+      final r = await row(id);
+      expect(r['status'], 'failed');
+      expect(r['failureReason'], noticeAuthorRevokedReason);
+      expect(audit.events.last.result, 'denied_author_revoked');
     });
   });
 }

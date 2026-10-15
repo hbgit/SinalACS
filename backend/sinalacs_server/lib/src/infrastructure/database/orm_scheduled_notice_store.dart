@@ -44,6 +44,23 @@ class OrmScheduledNoticeStore implements ScheduledNoticeStore {
   }
 
   @override
+  Future<StaffAuthority?> authorityOf(String userId) async {
+    final rows = await _session().db.unsafeQuery(
+      'SELECT u."role", sa."active", sa."ubsId" FROM users u '
+      'JOIN staff_accounts sa ON sa."id" = u."id" WHERE u."id" = @id::uuid',
+      parameters: QueryParameters.named({'id': userId}),
+    );
+    if (rows.isEmpty) return null;
+    final m = rows.first.toColumnMap();
+    return StaffAuthority(
+      // `UserRole` é `serialized: byName`: a coluna guarda o nome.
+      role: UserRole.fromJson(m['role'] as String),
+      active: m['active'] as bool,
+      ubsId: m['ubsId']?.toString(),
+    );
+  }
+
+  @override
   Future<String> insert({
     required String createdBy,
     required String microAreaId,
