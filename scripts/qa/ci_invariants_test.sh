@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 #
-# Controles positivo e negativo das três checagens que a issue #20 pediu para
-# scripts/qa/ci_invariants.sh: um check obrigatório que passa verde sem ter
-# rodado por causa de continue-on-error, strategy.matrix ou needs: apontando
-# para um job fora de CHECKS_OBRIGATORIOS.
+# Controles positivo e negativo de checagens de scripts/qa/ci_invariants.sh:
+# as três da issue #20 (um check obrigatório que passa verde sem ter rodado
+# por causa de continue-on-error, strategy.matrix ou needs: apontando para um
+# job fora de CHECKS_OBRIGATORIOS) e as do concurrency.group das issues #23 e
+# #63 (ref e SHA no ramo de push/dispatch, número do PR no outro, evento no
+# prefixo, e as limitações conhecidas da guarda por substring).
 #
 # Por que existe: sem fixture sintética, as três checagens só seriam
 # exercitadas contra o .github/workflows/ci.yml real do momento — que, por
@@ -186,29 +188,67 @@ espera_ok 'negativo (needs: acs-app, também obrigatório)' \
   "$(escreve needs_dentro '    needs: acs-app')" \
   'admin-app (obrigatório) tem needs:'
 
-echo '== concurrency.group de push/dispatch precisa conter o ref (issue #23) =='
+echo '== concurrency.group de push/dispatch precisa conter github.ref (issues #23 e #63) =='
 espera_falha 'positivo (grupo antigo, só SHA)' \
   "$(escreve_grupo grupo_sem_ref "$GRUPO_ANTIGO")" \
-  'sem ref (github.ref ou github.ref_name) no ramo de push/dispatch'
+  'sem github.ref no ramo de push/dispatch'
 espera_falha 'positivo (ref só no lado do PR)' \
   "$(escreve_grupo grupo_ref_no_pr 'ci-${{ github.event_name }}-${{ github.event_name == '"'"'pull_request'"'"' && format('"'"'{0}-{1}'"'"', github.ref, github.event.pull_request.number) || github.sha }}')" \
-  'sem ref (github.ref ou github.ref_name) no ramo de push/dispatch'
+  'sem github.ref no ramo de push/dispatch'
 espera_falha 'positivo (ref sem SHA no ramo de push)' \
   "$(escreve_grupo grupo_ref_sem_sha 'ci-${{ github.event_name }}-${{ github.event_name == '"'"'pull_request'"'"' && github.event.pull_request.number || github.ref }}')" \
   'sem github.sha no ramo de push/dispatch'
 espera_falha 'positivo (sem número do PR à esquerda)' \
   "$(escreve_grupo grupo_sem_pr 'ci-${{ github.event_name }}-${{ format('"'"'{0}-{1}'"'"', github.ref, github.sha) }}')" \
   'sem github.event.pull_request.number no ramo de PR'
+# #63: ref_name colide tag e branch homônimas num dispatch; o ci.yml já
+# justifica github.ref, a guarda passa a exigi-lo.
+espera_falha 'positivo (github.ref_name em vez de github.ref)' \
+  "$(escreve_grupo grupo_ref_name 'ci-${{ github.event_name }}-${{ github.event_name == '"'"'pull_request'"'"' && github.event.pull_request.number || format('"'"'{0}-{1}'"'"', github.ref_name, github.sha) }}')" \
+  'sem github.ref no ramo de push/dispatch (github.ref_name não basta'
+espera_falha 'positivo (github.ref_type não é github.ref)' \
+  "$(escreve_grupo grupo_ref_type 'ci-${{ github.event_name }}-${{ github.event_name == '"'"'pull_request'"'"' && github.event.pull_request.number || format('"'"'{0}-{1}'"'"', github.ref_type, github.sha) }}')" \
+  'sem github.ref no ramo de push/dispatch'
 espera_ok 'negativo (nova expressão com github.ref)' \
   "$(escreve_grupo grupo_novo "$GRUPO_NOVO")" \
   'FINDING-7'
-espera_ok 'negativo (variante com github.ref_name)' \
-  "$(escreve_grupo grupo_ref_name 'ci-${{ github.event_name }}-${{ github.event_name == '"'"'pull_request'"'"' && github.event.pull_request.number || format('"'"'{0}-{1}'"'"', github.ref_name, github.sha) }}')" \
+
+echo '== github.event_name tem de estar no prefixo, fora do ternário (issue #63) =='
+# Só no ternário, push e dispatch no mesmo ref+SHA resolvem para o mesmo
+# grupo (o ramo da direita não carrega o evento) e um cancela o outro.
+espera_falha 'positivo (event_name só na condição do ternário)' \
+  "$(escreve_grupo evento_so_no_ternario 'ci-${{ github.event_name == '"'"'pull_request'"'"' && github.event.pull_request.number || format('"'"'{0}-{1}'"'"', github.ref, github.sha) }}')" \
+  'sem github.event_name no prefixo'
+espera_falha 'positivo (sem expressão nenhuma)' \
+  "$(escreve_grupo grupo_literal 'ci-fixo')" \
+  'sem github.event_name no prefixo'
+espera_ok 'negativo (event_name no prefixo dentro de format)' \
+  "$(escreve_grupo evento_em_format 'ci-${{ format('"'"'{0}'"'"', github.event_name) }}-${{ github.event_name == '"'"'pull_request'"'"' && github.event.pull_request.number || format('"'"'{0}-{1}'"'"', github.ref, github.sha) }}')" \
+  'FINDING-7'
+
+echo '== limitações conhecidas da guarda por substring (issue #63) =='
+# Formas legítimas não canônicas são RECUSADAS de propósito: a guarda só lê
+# a forma canônica. Se uma destas passar a ser aceita, atualize o comentário
+# de check_concorrencia no ci_invariants.sh.
+espera_falha 'recusa por forma (ref no prefixo, fora do ramo de push)' \
+  "$(escreve_grupo ref_no_prefixo 'ci-${{ github.event_name }}-${{ github.ref }}-${{ github.event_name == '"'"'pull_request'"'"' && github.event.pull_request.number || github.sha }}')" \
+  'sem github.ref no ramo de push/dispatch'
+espera_falha 'recusa por forma (github['"'"'ref'"'"'] em vez de github.ref)' \
+  "$(escreve_grupo ref_indexado 'ci-${{ github.event_name }}-${{ github.event_name == '"'"'pull_request'"'"' && github.event.pull_request.number || format('"'"'{0}-{1}'"'"', github['"'"'ref'"'"'], github.sha) }}')" \
+  'sem github.ref no ramo de push/dispatch'
+espera_falha 'recusa por forma (ternário invertido)' \
+  "$(escreve_grupo ternario_invertido 'ci-${{ github.event_name }}-${{ github.event_name != '"'"'pull_request'"'"' && format('"'"'{0}-{1}'"'"', github.ref, github.sha) || github.event.pull_request.number }}')" \
+  'sem github.sha no ramo de push/dispatch'
+# Falso negativo ACEITO: o ref só citado, sem entrar no grupo resolvido. Só o
+# ci_concurrency_act.sh pega. Este caso existe para que, se a guarda um dia
+# passar a pegá-lo, o comentário e esta fixture mudem juntos.
+espera_ok 'limitação aceita (ref como argumento sobrando de format)' \
+  "$(escreve_grupo ref_sobrando 'ci-${{ github.event_name }}-${{ github.event_name == '"'"'pull_request'"'"' && github.event.pull_request.number || format('"'"'{0}'"'"', github.sha, github.ref) }}')" \
   'FINDING-7'
 
 echo
 if [[ "$falhas" -eq 0 ]]; then
-  echo 'OK — as checagens de check obrigatório "verde sem rodar" (issue #20) conferem.'
+  echo 'OK — as checagens de "verde sem rodar" (issue #20) e do grupo de concorrência (issues #23 e #63) conferem.'
 else
   echo "FALHOU — $falhas asserção(ões) não conferem." >&2
 fi

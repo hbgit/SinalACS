@@ -132,24 +132,41 @@ def check_concorrencia():
         falhas.append('FINDING-7: sem bloco concurrency no nível do workflow')
         return
     grupo = str(c.get('group', ''))
-    # Forma esperada: "<prefixo> ${{ PR && número || ref-e-sha }}". O ramo da
-    # direita do `||` é o de push/dispatch. O SHA nele evita que dois pushes
+    # Forma canônica: "<prefixo com github.event_name>${{ PR && número ||
+    # format(ref, sha) }}". O prefixo (tudo antes do último `${{`) separa push
+    # de dispatch: o ramo da direita não carrega o evento, então sem
+    # event_name no prefixo um push e um dispatch no mesmo ref+SHA se
+    # cancelariam (issue #63). O SHA no ramo da direita evita que dois pushes
     # seguidos na mesma branch se cancelem (FINDING-4); o ref evita que main e
     # develop, no mesmo SHA, se cancelem (issue #23). Checar a string inteira
     # aceitaria o ref só no lado do PR, onde ele não protege nada.
-    esquerda, _, direita = grupo.rpartition('||')
-    if 'github.event_name' not in grupo:
-        falhas.append(f'FINDING-7: concurrency.group sem github.event_name: {grupo}')
+    #
+    # Limitações conhecidas (issue #63), aceitas porque isto é busca de
+    # substring, não um avaliador de expressão:
+    # - Aceita o ref citado sem entrar no grupo: argumento sobrando em
+    #   `format('{0}', github.sha, github.ref)` ou `github.ref` dentro de um
+    #   literal. Quem pega é scripts/qa/ci_concurrency_act.sh, que avalia a
+    #   expressão com o act — mas ele precisa de Docker e não roda na CI.
+    # - Rejeita formas legítimas não canônicas: ref no prefixo, `github['ref']`,
+    #   ternário invertido (`!= 'pull_request' && ref-e-sha || número`). De
+    #   propósito: a guarda só sabe ler a forma canônica.
+    prefixo, _, expressao = grupo.rpartition('${{')
+    esquerda, _, direita = expressao.rpartition('||')
+    if 'github.event_name' not in prefixo:
+        falhas.append(
+            f'FINDING-7: concurrency.group sem github.event_name no prefixo (fora do ternário): {grupo}')
     if 'github.event.pull_request.number' not in esquerda:
         falhas.append(
             f'FINDING-7: concurrency.group sem github.event.pull_request.number no ramo de PR: {grupo}')
     if 'github.sha' not in direita:
         falhas.append(f'FINDING-7: concurrency.group sem github.sha no ramo de push/dispatch: {grupo}')
-    # github.ref é o preferido (distingue tag de branch homônimas);
-    # github.ref_name é aceito. `\b` evita casar github.ref_type.
-    if not re.search(r'github\.ref(_name)?\b', direita):
+    # github.ref estrito: ref_name colide tag e branch homônimas num dispatch
+    # (justificativa no comentário do ci.yml). `\b` depois de `ref` recusa
+    # github.ref_name e github.ref_type, porque `_` é caractere de palavra.
+    if not re.search(r'github\.ref\b', direita):
         falhas.append(
-            f'FINDING-7: concurrency.group sem ref (github.ref ou github.ref_name) no ramo de push/dispatch: {grupo}')
+            'FINDING-7: concurrency.group sem github.ref no ramo de push/dispatch '
+            f'(github.ref_name não basta: tag e branch homônimas colidem): {grupo}')
     if c.get('cancel-in-progress') is not True:
         falhas.append('FINDING-7: concurrency sem cancel-in-progress: true')
 
