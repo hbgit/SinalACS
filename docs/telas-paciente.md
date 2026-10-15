@@ -14,11 +14,11 @@ A tela inicial pede CPF e data de nascimento e envia um código de uso único (O
 
 ![Estado inicial do alerta de urgência](screenshots/patient/01-emergencia.png)
 
-O botão circular de emergência pede confirmação e então cria um alerta vermelho real no backend (`alerts.createRedAlert`), idempotente, publicado para o ACS da microárea. A localização, quando disponível, segue apenas como hash (`locationHash`), nunca as coordenadas brutas. A confirmação de recebimento pela equipe aparece na aba Status.
+O botão circular de emergência pede confirmação e então cria um alerta vermelho real no backend (`alerts.createRedAlert`), idempotente, publicado para o ACS da microárea. A localização, quando disponível, segue como hash (`locationHash`, para deduplicar) e como uma célula de baixa resolução (~1,1 km, `locationCell`), legível pelo servidor, para o mapa do ACS desenhar uma área de incerteza — nunca as coordenadas exatas. A confirmação de recebimento pela equipe aparece na aba Status.
 
 ## Triagem rápida
 
-Fluxo de três perguntas com indicador de progresso e uma alternativa por etapa. A classificação é determinística e não pode ser editada pela pessoa usuária. Ao finalizar, encaminha para o acompanhamento da solicitação.
+Seis perguntas de sim ou não (dor no peito, falta de ar, sangramento, fraqueza intensa ou desmaio, febre, vômitos que não param), uma por etapa, com indicador de progresso. O risco é calculado pelo servidor (`triage.evaluate`), de forma determinística, e não pode ser editado pela pessoa usuária. Ao finalizar, encaminha para o acompanhamento da solicitação.
 
 ## Perfil clínico
 

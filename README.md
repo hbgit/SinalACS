@@ -24,7 +24,9 @@ operação em conectividade instável.
 
 **App do ACS** (`apps/acs`)
 - Login institucional com matrícula, senha (Argon2id) e TOTP; refresh token
-  rotativo guardado no Keystore e liberado por biometria; bloqueio após 30 s em
+  rotativo guardado no Keystore e liberado por biometria (provado só no
+  emulador API 36; no API 30+ o PIN do aparelho também libera e uma digital
+  nova não invalida a chave); bloqueio após 30 s em
   segundo plano e `FLAG_SECURE` na janela.
 - Fila de visitas priorizada por risco, restrita à microárea do ACS (RBAC),
   com mapa, territorialização e geofencing.
@@ -66,7 +68,8 @@ video/       Roteiro e material do vídeo de apresentação
 
 ## Pré-requisitos
 
-- Flutter com Dart `^3.8.0` para os três apps; a CI usa Flutter 3.44.8.
+- Flutter com Dart 3.12 ou mais recente para os três apps (o piso efetivo vem
+  de `backend/sinalacs_client`, dependência dos apps); a CI usa Flutter 3.44.8.
 - Dart `^3.12.0` para o backend (`backend/pubspec.yaml`).
 - Android SDK com API 36 e JDK 17 para gerar ou executar os apps no Android.
 - Docker Engine com Docker Compose v2 para subir a stack local.
@@ -224,9 +227,12 @@ Com a stack de pé e as CAs copiadas (`./scripts/dev/sync_dev_ca.sh`):
 ```bash
 cd apps/admin
 flutter pub get
-flutter run -d chrome                 # web
 flutter run -d emulator-5554          # Android; SINALACS_HOST padrão: https://10.0.2.2/
 ```
+
+No navegador (`flutter run -d chrome --dart-define=SINALACS_HOST=https://localhost/`)
+o TLS é validado pelo próprio navegador, que não confia na CA de
+desenvolvimento do RPC; esse caminho não foi validado ponta a ponta.
 
 O seed cria o administrador `ADM-001`, com a senha de `DEV_ADMIN_PASSWORD`
 (`.env`), **sem TOTP e sem código de ativação**. Antes do primeiro login, emita
@@ -234,10 +240,13 @@ um código (válido por 24 h, mostrado uma única vez):
 
 ```bash
 cd backend/sinalacs_server
-dart run bin/issue_staff_activation_code.dart ADM-001 --issued-by <seu-nome>
+SERVERPOD_DATABASE_PASSWORD="$(grep -E '^POSTGRES_PASSWORD=' ../../.env | cut -d= -f2-)" \
+  dart run bin/issue_staff_activation_code.dart ADM-001 --issued-by seu-nome
 ```
 
-A ferramenta lê as variáveis `SERVERPOD_DATABASE_*`; veja
+A ferramenta lê as variáveis `SERVERPOD_DATABASE_*` (padrões `localhost:5432`,
+`sinalacs_db`, `sinalacs_user`); a senha não tem padrão e é a
+`POSTGRES_PASSWORD` do `.env`. Troque `seu-nome` por quem emite. Veja
 [backend/CLAUDE.md](backend/CLAUDE.md). Na tela de login, a conta usa esse
 código para ativar a verificação em duas etapas.
 

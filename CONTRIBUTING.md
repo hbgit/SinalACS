@@ -44,7 +44,7 @@ com uma convenção genérica, a documentação do projeto prevalece.
 
 ## Pré-requisitos
 
-- Flutter SDK com Dart `^3.8.0` para os três aplicativos (`apps/patient`, `apps/acs`, `apps/admin`); a CI usa Flutter 3.44.8.
+- Flutter SDK com Dart 3.12 ou mais recente para os três aplicativos (`apps/patient`, `apps/acs`, `apps/admin`): eles declaram `^3.8.0`, mas dependem de `backend/sinalacs_client`, que exige `^3.12.0`; a CI usa Flutter 3.44.8.
 - Dart SDK `^3.12.0` para o backend.
 - Docker Engine com Docker Compose v2.
 - Android SDK API 36 e JDK 17 para executar ou gerar os aplicativos Android.
