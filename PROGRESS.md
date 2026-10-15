@@ -1630,17 +1630,21 @@ Plano: `docs/superpowers/plans/2026-10-14-issue-46-avisos-e-termos.md`; achados 
 - Regressão final (2026-10-14): backend `dart analyze` sem erro (87 `info`) e `dart test` +1289 verdes; paciente `flutter test` +259; ACS `flutter test` +544; admin `flutter analyze` sem problemas e `flutter test` +453; `scripts/qa/ci_invariants.sh` ok.
 - Regressão após a revisão final (2026-10-14): backend `dart analyze` sem erro nem warning (87 `info`) e `dart test -j 1` +1307 verdes; paciente `flutter test` +259; ACS `flutter test` +544; admin `flutter analyze` sem problemas e `flutter test` +456; `integration_test/admin_notices_mobile_test.dart` 2/2 e smoke 4/4 no `emulator-5554`; `scripts/qa/ci_invariants.sh` ok; `push_e2e.sh --e2e-db --negativos` reexecutado e verde ("OK — o aviso chegou ao emulador"), log em `docs/superpowers/plans/2026-10-14-issue-46-e2e.log`.
 
+**Fechamento (2026-10-14)**
+- O disparo reconfere a autoridade atual de quem agendou (`ScheduledNoticeStore.authorityOf`, `noticeAuthorRevokedReason`; auditoria `community_notice`/`denied_author_revoked`): coordenador desativado, sem conta de staff ou fora da UBS da microárea não envia mais o aviso (vai a `failed`). Commit `a373a6f`.
+- `./scripts/qa/push_e2e.sh --e2e-db --negativos` verde em 2026-10-14 agendando pelo endpoint real `admin.scheduleNotice` (`apps/admin/tool/schedule_notice.dart`: login de staff com MFA/TOTP, aviso a +70 s; o seed direto `seed_e2e_scheduled_notice.dart` saiu). Log: `docs/superpowers/plans/2026-10-14-issue-46-fechamento-e2e.log`.
+- Roteiros de emulador do admin reexecutados contra o backend real no `emulator-5554`, todos com saída 0: `admin_login_e2e.sh`, `admin_auditoria_e2e.sh`, `admin_acs_gestao_e2e.sh`. Log: `docs/superpowers/plans/2026-10-14-issue-46-fechamento-emulador.log`.
+- Regressão final (2026-10-14): backend `dart analyze` sem erro nem warning (87 `info`) e `dart test -j 1` +1318 verdes; paciente `flutter test` +259; admin `flutter analyze` sem problemas e `flutter test` +459; `scripts/qa/ci_invariants.sh` ok. Linha de base: `docs/superpowers/plans/2026-10-14-issue-46-fechamento-baseline.log`.
+
 **Continua em aberto**
-- Revisão jurídica do texto real dos termos.
-- Retenção e expurgo de `scheduled_notices.message`: o texto digitado pelo staff fica guardado sem prazo nem dono (definir com o encarregado de dados).
-- Troca manual de `consentPolicyVersion` e `legalDocumentsVersion` na data de vigência: a publicação só **anuncia**, nada passa a valer sozinho.
-- O disparo não reconfere o autor: um coordenador desativado ou trocado de UBS depois de agendar ainda tem o aviso enviado em nome dele (o admin pode cancelar).
-- Revisão e publicação por um único admin, sem segregação de funções; e rascunho sem editar nem descartar (a versão fica "queimada" se a revisão estourar os 15 dias).
-- Histórico de avisos sem paginação na UI (50 fixos).
-- Fuso: a comparação `timestamp without time zone` com parâmetro `DateTime` só foi provada com o Postgres em UTC.
-- Validação manual do cartão de termos (`terms_change_notice_card`) no emulador: **não** foi automatizada; roteiro em `docs/superpowers/plans/2026-10-14-issue-46-validacao-manual.md` (cobertura automatizada: `admin_endpoint_terms_test.dart` no backend e `terms_change_notice_test.dart` no paciente).
-- Os roteiros de emulador do admin editados para o fallback de tooltip (`admin_auditoria_e2e.dart`, `admin_login_e2e.dart`, `admin_acs_gestao_e2e.dart`) **não** foram reexecutados contra o backend real.
+- Revisão jurídica do texto real dos termos. (issue a abrir)
+- Retenção e expurgo de `scheduled_notices.message`: o texto digitado pelo staff fica guardado sem prazo nem dono (definir com o encarregado de dados). (issue a abrir)
+- Troca manual de `consentPolicyVersion` e `legalDocumentsVersion` na data de vigência: a publicação só **anuncia**, nada passa a valer sozinho. (issue a abrir)
+- Revisão e publicação por um único admin, sem segregação de funções; e rascunho sem editar nem descartar (a versão fica "queimada" se a revisão estourar os 15 dias). (issue a abrir)
+- Histórico de avisos sem paginação na UI (50 fixos). (issue a abrir, junto com a varredura de `sending` e o fuso)
+- Fuso: a comparação `timestamp without time zone` com parâmetro `DateTime` só foi provada com o Postgres em UTC. (issue a abrir)
+- Validação manual do cartão de termos (`terms_change_notice_card`) no emulador: **não** foi automatizada e continua pendente (a cargo do responsável pelo produto); roteiro em `docs/superpowers/plans/2026-10-14-issue-46-validacao-manual.md` (cobertura automatizada: `admin_endpoint_terms_test.dart` no backend e `terms_change_notice_test.dart` no paciente).
 - Os rótulos curtos da barra inferior do admin mudaram ('Áreas', 'Trilha'): decisão de produto a confirmar.
-- `upcomingTermsChange` morta mantida; varredura de `sending` só na partida e para instância única.
-- O endpoint HTTP de agendamento não é exercitado no `push_e2e` (coberto por integração do backend).
+- `upcomingTermsChange` morta mantida; varredura de `sending` só na partida e para instância única. (issue a abrir)
+- Guarda "texto novo embarcado no app" perdida (issue a abrir): `upcoming_legal_documents_test.dart` compara com `upcomingTermsChange`, constante morta desde que a agenda passou a `terms_versions`; o admin pode publicar uma versão cujo texto o app não embarca (o cartão aparece sem "Ler o texto novo").
 - Após o e2e, `sinalacs-serverpod` e o Postgres de desenvolvimento ficaram parados: `docker compose up -d`.
