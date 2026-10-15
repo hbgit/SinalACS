@@ -17,6 +17,9 @@ on:
 # develop, no mesmo SHA (fast-forward de uma para a outra), se cancelem
 # (issue #23). github.ref, e não ref_name, para uma tag não colidir com uma
 # branch de mesmo nome num dispatch.
+# Este texto é comparado por igualdade com GRUPO_CONCORRENCIA em
+# scripts/qa/ci_invariants.sh (issue #24): mudou aqui, muda lá e em GRUPO_NOVO
+# de scripts/qa/ci_invariants_test.sh no mesmo commit.
 concurrency:
   group: ci-${{ github.event_name }}-${{ github.event_name == 'pull_request' && github.event.pull_request.number || format('{0}-{1}', github.ref, github.sha) }}
   cancel-in-progress: true
