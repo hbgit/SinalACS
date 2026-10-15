@@ -6,8 +6,10 @@
 - [Roteiro de vídeo para o sponsor](roteiro-video-sponsor.md)
 - [AVD Android para validação](android-avd.md)
 - [Publicação na Google Play](publicacao-google-play.md)
+- [Auditoria da CI (2026-09-28)](ci-audit/2026-09-28-avaliacao-ci-develop.md)
+- [Apresentação (showcase)](showcase/slides.md)
 
-As capturas de tela usam dados sintéticos e representam o estado atual de protótipo das interfaces Flutter.
+As capturas de tela usam dados sintéticos e podem estar defasadas em relação às telas atuais; a data de cada captura é a do commit que a adicionou.
 
 **Duas CAs de desenvolvimento, de propósito.** A stack gera uma CA própria para o
 Mosquitto (broker MQTT em 8883) e outra para o RPC (HTTPS em 443, terminado pelo
