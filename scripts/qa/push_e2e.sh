@@ -205,10 +205,10 @@ na_bandeja 'Teste do Gorush' || { echo 'FALHOU: texto não está na bandeja'; ex
 echo 'caminho feliz: OK'
 
 # -- aviso agendado (#46) --------------------------------------------------------
-# O login de staff exige TOTP e não é scriptável aqui: o aviso entra direto na fila
-# (seed_e2e_scheduled_notice.dart) e o laço REAL do servidor (NoticeDispatchLoop, 30 s)
-# faz a reserva, o envio por Gorush/FCM e a auditoria. O endpoint HTTP e as negações por
-# papel são cobertos por admin_endpoint_notices_test.dart.
+# O aviso é agendado pelo endpoint HTTP real (apps/admin/tool/schedule_notice.dart:
+# login de staff com MFA/TOTP e admin.scheduleNotice) e o laço REAL do servidor
+# (NoticeDispatchLoop, 30 s) faz a reserva, o envio por Gorush/FCM e a auditoria.
+# As negações por papel seguem cobertas por admin_endpoint_notices_test.dart.
 if [[ "$e2e_db" -eq 1 ]]; then
   echo "== aviso agendado (disparado pelo laço do servidor)"
   adb -s "$dev" shell cmd notification cancel_all >/dev/null 2>&1 || true
@@ -217,8 +217,8 @@ if [[ "$e2e_db" -eq 1 ]]; then
   echo "$saida"
   agendado_id="$(sed -n 's/.*id=\([0-9a-f-]\{36\}\)).*/\1/p' <<<"$saida" | head -1)"
   [[ -n "$agendado_id" ]] || { echo 'FALHOU: o aviso agendado não foi criado'; exit 1; }
-  # 20 s até o vencimento + até 30 s do ciclo do laço + a entrega pelo FCM.
-  na_bandeja 'SinalACS agendado e2e' 90 || { echo 'FALHOU: título do aviso agendado não está na bandeja'; exit 1; }
+  # 70 s até o vencimento + até 30 s do ciclo do laço + a entrega pelo FCM.
+  na_bandeja 'SinalACS agendado e2e' 150 || { echo 'FALHOU: título do aviso agendado não está na bandeja'; exit 1; }
   na_bandeja 'Aviso agendado do Gorush' 10 || { echo 'FALHOU: texto do aviso agendado não está na bandeja'; exit 1; }
   linha="$(psql_q "select status, coalesce(recipients,0), coalesce(accepted,0) from scheduled_notices where id='$agendado_id'" | head -1)"
   [[ "$linha" =~ ^sent\|([0-9]+)\|([0-9]+)$ ]] && (( BASH_REMATCH[1] >= 1 && BASH_REMATCH[2] >= 1 )) \

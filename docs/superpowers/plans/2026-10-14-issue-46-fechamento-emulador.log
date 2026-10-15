@@ -1,0 +1,6 @@
+Provas de emulador do fechamento da #46 (emulator-5554) - 2026-10-14
+./scripts/qa/admin_login_e2e.sh      exit=0  OK — login real do backoffice contra o banco de teste
+./scripts/qa/admin_auditoria_e2e.sh  exit=0  OK — trilha de auditoria do backoffice contra o banco de teste
+./scripts/qa/admin_acs_gestao_e2e.sh exit=0  00:57 +3: All tests passed!
+docker compose up -d (stack de desenvolvimento restaurada): ok
+Cartão de termos (roteiro manual): PENDENTE — validação manual pelo usuário, roteiro em docs/superpowers/plans/2026-10-14-issue-46-validacao-manual.md

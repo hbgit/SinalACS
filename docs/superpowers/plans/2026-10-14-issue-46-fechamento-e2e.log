@@ -1,0 +1,18 @@
+== stack de e2e (banco de teste) com o Gorush
+== registro do token FCM real (segura o app por 240 s)
+== envio do ACS
+recipients=1 accepted=1 rc=0
+caminho feliz: OK
+== aviso agendado (disparado pelo laço do servidor)
+Aviso agendado de e2e criado (id=92196c9f-24ea-46d8-baed-d1643bebcbc2).
+aviso agendado: OK
+== token falso (android) + token ios, com o real vivo
+recipients=3 accepted=2 rc=0
+token falso podado, ios mantido, token real recebeu: OK
+== Gorush parado, com tokens no banco
+falhou: Não foi possível entregar o aviso agora. Tente de novo em instantes. rc=2
+Gorush parado: OK
+== revogar zera os destinatários
+recipients=0 accepted=0 rc=0
+revogação: OK
+OK — o aviso chegou ao emulador

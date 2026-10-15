@@ -120,6 +120,23 @@ const Duration noticeStuckSendingAfter = Duration(minutes: 10);
 const String noticeStuckSendingReason =
     'Resultado desconhecido: o servidor reiniciou durante o envio';
 
+/// Motivo gravado quando o disparo recusa o aviso porque quem o agendou já não
+/// pode enviar para a microárea (desativado, sem conta de staff, papel ou UBS
+/// trocados). Não há reenvio: o aviso termina `failed`.
+const String noticeAuthorRevokedReason =
+    'Quem agendou já não pode enviar avisos para esta microárea';
+
+/// Autoridade atual de um usuário de staff, lida no disparo (não no token).
+class StaffAuthority {
+  const StaffAuthority({required this.role, required this.active, this.ubsId});
+
+  final UserRole role;
+  final bool active;
+
+  /// UBS do coordenador; nula para administrador.
+  final String? ubsId;
+}
+
 /// Limites de paginação do histórico.
 const int noticeHistoryDefaultLimit = 50;
 const int noticeHistoryMaxLimit = 100;
@@ -141,6 +158,10 @@ abstract interface class ScheduledNoticeStore {
 
   /// UBS da microárea, ou `null` se a microárea não existe.
   Future<String?> ubsOfMicroArea(String microAreaId);
+
+  /// Papel, situação e UBS atuais do usuário de staff, ou `null` se ele não tem
+  /// linha em `staff_accounts` (o disparo trata isso como recusa).
+  Future<StaffAuthority?> authorityOf(String userId);
 
   Future<String> insert({
     required String createdBy,
@@ -345,11 +366,24 @@ class NoticeSchedulingService {
   /// ([ScheduledNoticeStore.claimDue]), então duas chamadas nunca enviam o mesmo
   /// aviso. Sem reenvio automático: falha vira `failed`, resultado desconhecido
   /// vira `unknown`. Um erro num aviso nunca derruba os demais. Devolve quantos
-  /// avisos esta chamada processou.
+  /// avisos esta chamada processou. Antes de enviar, reconfere a autoridade de
+  /// quem agendou ([_authorMayStillSend]): quem perdeu o direito não envia, e o
+  /// aviso termina `failed`.
   Future<int> dispatchDue() async {
     final claimed = await _store.claimDue(_clock().toUtc());
     for (final notice in claimed) {
       try {
+        if (!await _authorMayStillSend(notice)) {
+          await _finish(notice, ScheduledNoticeStatus.failed, reason: noticeAuthorRevokedReason);
+          await _audit.recordSafely(AuditEvent(
+            userId: notice.createdBy,
+            actionType: 'write',
+            resourceType: 'community_notice',
+            resourceId: notice.id,
+            result: 'denied_author_revoked',
+          ));
+          continue;
+        }
         final r = await _sendNow(
           microAreaId: notice.microAreaId,
           audience: notice.audience,
@@ -396,6 +430,19 @@ class NoticeSchedulingService {
       ));
     }
     return moved.length;
+  }
+
+  /// Regra do agendamento reaplicada no disparo, com o estado de AGORA: staff
+  /// ativo; coordenador só para microárea da própria UBS. Fail-closed.
+  Future<bool> _authorMayStillSend(ScheduledNoticeSnapshot notice) async {
+    final authority = await _store.authorityOf(notice.createdBy);
+    if (authority == null || !authority.active) return false;
+    if (!Authorization.staffRoles.contains(authority.role)) return false;
+    if (authority.role == UserRole.coordinator) {
+      final target = await _store.ubsOfMicroArea(notice.microAreaId);
+      return authority.ubsId != null && target != null && authority.ubsId == target;
+    }
+    return true;
   }
 
   Future<void> _failed(ScheduledNoticeSnapshot notice, String reason) async {
