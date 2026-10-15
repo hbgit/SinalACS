@@ -55,12 +55,9 @@ case "${1:-}" in
       SERVERPOD_DATABASE_PASSWORD="$TEST_DATABASE_PASSWORD" \
       dart run bin/seed_e2e_fixtures.dart ../../.e2e/fixtures.json ) ;;
   schedule-notice)
-    # Aviso agendado (#46) para daqui a ~20 s, que o laço do servidor dispara.
-    ( cd backend/sinalacs_server && \
-      SERVERPOD_DATABASE_HOST=localhost SERVERPOD_DATABASE_PORT=9090 \
-      SERVERPOD_DATABASE_NAME=$db SERVERPOD_DATABASE_USER=postgres \
-      SERVERPOD_DATABASE_PASSWORD="$TEST_DATABASE_PASSWORD" \
-      dart run bin/seed_e2e_scheduled_notice.dart ../../.e2e/fixtures.json ) ;;
+    # Aviso agendado (#46) pelo endpoint REAL admin.scheduleNotice (login de staff
+    # com ativação de MFA e TOTP), ~70 s à frente; o laço do servidor o dispara.
+    ( cd apps/admin && dart run tool/schedule_notice.dart ../../.e2e/fixtures.json ) ;;
   down)
     # O manifesto (com a senha do ACS) sai primeiro: se o drop falhar, ele não sobra.
     rm -f .e2e/fixtures.json
