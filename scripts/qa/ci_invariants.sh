@@ -107,9 +107,17 @@ def check_jobs():
 
 
 def check_gatilhos():
-    push = (gatilhos.get('push') or {}).get('branches') or []
-    if 'develop' not in push:
-        falhas.append(f'FINDING-2: push não dispara o CI em develop (branches: {push})')
+    # Só dict (ou nulo) carrega `branches:`; `push: true` ou `push: [main]`
+    # quebravam com AttributeError no `.get()` em vez de dizer o que está
+    # errado. O tipo é a mensagem — o FINDING-2 seria o mesmo defeito
+    # contado duas vezes (issue #68).
+    cfg_push = gatilhos.get('push')
+    if cfg_push is not None and not isinstance(cfg_push, dict):
+        falhas.append(f'push: tem tipo inesperado ({type(cfg_push).__name__}): {cfg_push!r}')
+    else:
+        push = (cfg_push or {}).get('branches') or []
+        if 'develop' not in push:
+            falhas.append(f'FINDING-2: push não dispara o CI em develop (branches: {push})')
     if 'workflow_dispatch' not in gatilhos:
         falhas.append('FINDING-2: sem workflow_dispatch, não há como disparar o CI à mão')
     if 'pull_request' not in gatilhos:
@@ -140,7 +148,14 @@ def check_sem_filtro_de_paths():
     # Um check obrigatório que não roda nunca reporta, e a PR fica esperando
     # para sempre. Filtro de paths faria isso com toda PR só de documentação.
     for evento in ('push', 'pull_request'):
-        cfg = gatilhos.get(evento) or {}
+        cfg = gatilhos.get(evento)
+        # Fora de dict não há filtro a ler, e check_gatilhos já acusa o tipo.
+        # Sem este desvio, `in` quebrava com TypeError num bool/int (e o
+        # traceback engolia as falhas já acumuladas) ou virava busca de
+        # substring numa string: `pull_request: "paths-ignore"` acusava
+        # paths e paths-ignore que não existem (issue #68).
+        if not isinstance(cfg, dict):
+            continue
         for chave in ('paths', 'paths-ignore'):
             if chave in cfg:
                 falhas.append(f'{evento}.{chave} faria checks obrigatórios nunca reportarem')

@@ -8,6 +8,8 @@
 # busca por substring pegava, e as que ela deixava passar, são casos aqui).
 # E a dos filtros de pull_request (issue #19): branches, branches-ignore ou
 # types fazem PRs fora do filtro nunca reportarem os checks obrigatórios.
+# E a de push/pull_request que não são dict (issue #68): mensagem de tipo, sem
+# traceback que engula as outras falhas e sem paths acusado por substring.
 #
 # Por que existe: sem fixture sintética, as três checagens só seriam
 # exercitadas contra o .github/workflows/ci.yml real do momento — que, por
@@ -83,10 +85,13 @@ workflow_base() {
   # verdade, passe a string 'null' (issue #19).
   local pr_cfg="${PULL_REQUEST_CFG:-}"
   [[ -n "$pr_cfg" ]] || pr_cfg='{}'
+  # PUSH_CFG vazio mantém o bloco de sempre (branches: [main, develop]);
+  # qualquer outro valor vira `push: <valor>` numa linha só (issue #68).
+  local push_bloco=$'push:\n    branches: [main, develop]'
+  [[ -z "${PUSH_CFG:-}" ]] || push_bloco="push: ${PUSH_CFG}"
   cat <<YAML
 on:
-  push:
-    branches: [main, develop]
+  ${push_bloco}
   pull_request: ${pr_cfg}
   workflow_dispatch: {}
 concurrency:
@@ -165,6 +170,15 @@ escreve_pr() {
   local cfg="$2"
   local caminho="$tmp_dir/$nome.yml"
   PULL_REQUEST_CFG="$cfg" workflow_base '' > "$caminho"
+  printf '%s' "$caminho"
+}
+
+# $2 é o valor de `push:` em YAML de uma linha só, como em escreve_pr.
+escreve_push() {
+  local nome="$1"
+  local cfg="$2"
+  local caminho="$tmp_dir/$nome.yml"
+  PUSH_CFG="$cfg" workflow_base '' > "$caminho"
   printf '%s' "$caminho"
 }
 
@@ -326,9 +340,43 @@ on_lista="$tmp_dir/on_lista.yml"
 espera_ok 'negativo (on: em lista)' "$on_lista" 'pull_request'
 espera_ok 'negativo (on: em lista, sem traceback)' "$on_lista" 'Traceback'
 
+echo '== push/pull_request que não são dict: mensagem de tipo, sem traceback nem paths falso (issue #68) =='
+pr_true="$(escreve_pr pr_true 'true')"
+espera_falha 'pull_request: true acusa o tipo' "$pr_true" 'pull_request: tem tipo inesperado (bool)'
+espera_ok 'pull_request: true sem traceback' "$pr_true" 'Traceback'
+pr_int="$(escreve_pr pr_int '5')"
+espera_falha 'pull_request: 5 acusa o tipo' "$pr_int" 'pull_request: tem tipo inesperado (int)'
+espera_ok 'pull_request: 5 sem traceback' "$pr_int" 'Traceback'
+# Uma string é iterável: `'paths' in 'paths-ignore'` é True e acusava paths
+# que não existe. O tipo já é a mensagem certa.
+pr_str="$(escreve_pr pr_str '"paths-ignore"')"
+espera_falha 'pull_request: "paths-ignore" acusa o tipo' "$pr_str" 'pull_request: tem tipo inesperado (str)'
+espera_ok 'pull_request: "paths-ignore" não acusa paths' "$pr_str" 'pull_request.paths'
+
+push_true="$(escreve_push push_true 'true')"
+espera_falha 'push: true acusa o tipo' "$push_true" 'push: tem tipo inesperado (bool)'
+espera_ok 'push: true sem traceback' "$push_true" 'Traceback'
+push_str="$(escreve_push push_str '"paths"')"
+espera_falha 'push: "paths" acusa o tipo' "$push_str" 'push: tem tipo inesperado (str)'
+espera_ok 'push: "paths" não acusa paths' "$push_str" 'push.paths'
+# Lista em push é inválida no Actions; uma mensagem por defeito — o tipo, não
+# também o FINDING-2.
+push_lista="$(escreve_push push_lista '[main, develop]')"
+espera_falha 'push: [main, develop] acusa o tipo' "$push_lista" 'push: tem tipo inesperado (list)'
+espera_ok 'push: [main, develop] sem traceback' "$push_lista" 'Traceback'
+espera_ok 'push: [main, develop] sem FINDING-2 duplicado' "$push_lista" 'push não dispara o CI em develop'
+
+# Controles: o dict com paths continua acusado, e push nulo não é tipo errado.
+espera_falha 'push dict com paths continua acusado' \
+  "$(escreve_push push_paths '{ branches: [main, develop], paths: [docs/**] }')" \
+  'push.paths faria checks obrigatórios nunca reportarem'
+push_nulo="$(escreve_push push_nulo 'null')"
+espera_ok 'push: nulo não é tipo inesperado' "$push_nulo" 'tem tipo inesperado'
+espera_ok 'push: nulo sem traceback' "$push_nulo" 'Traceback'
+
 echo
 if [[ "$falhas" -eq 0 ]]; then
-  echo 'OK — as checagens de "verde sem rodar" (issue #20), do grupo de concorrência (issues #23, #63 e #24) e dos filtros de pull_request (issue #19) conferem.'
+  echo 'OK — as checagens de "verde sem rodar" (issue #20), do grupo de concorrência (issues #23, #63 e #24), dos filtros de pull_request (issue #19) e dos gatilhos que não são dict (issue #68) conferem.'
 else
   echo "FALHOU — $falhas asserção(ões) não conferem." >&2
 fi
