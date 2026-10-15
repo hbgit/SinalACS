@@ -8,17 +8,17 @@ Os destinos principais são **Urgência**, **Triagem** e **Status**. O item **Ma
 
 ## Autenticação inclusiva
 
-A tela inicial apresenta CPF, data de nascimento, entrada sem senha e acesso de QR Code. O fluxo atual encaminha diretamente para a triagem; OTP e leitura de QR Code ainda dependem de integração.
+A tela inicial pede CPF e data de nascimento e envia um código de uso único (OTP); não há senha. O primeiro acesso também pode vir de um convite em QR Code gerado pela equipe, que leva ao cadastro e ao aceite obrigatório dos Termos de Uso e da Política de Privacidade. Quem entra por OTP sem ter aceitado a versão vigente dos Termos recebe um aviso para aceitar — um aviso, não um bloqueio: o alerta de urgência nunca espera pelo aceite.
 
 ## Alerta de urgência
 
 ![Estado inicial do alerta de urgência](screenshots/patient/01-emergencia.png)
 
-O botão circular de emergência possui confirmação antes de alterar o estado local. A tela informa que a localização disponível será incluída. Nesta fase, o alerta é um estado local demonstrativo: MQTT, geolocalização real e confirmação de entrega ainda não estão conectados.
+O botão circular de emergência pede confirmação e então cria um alerta vermelho real no backend (`alerts.createRedAlert`), idempotente, publicado para o ACS da microárea. A localização, quando disponível, segue como hash (`locationHash`, para deduplicar) e como uma célula de baixa resolução (~1,1 km, `locationCell`), legível pelo servidor, para o mapa do ACS desenhar uma área de incerteza — nunca as coordenadas exatas. A confirmação de recebimento pela equipe aparece na aba Status.
 
 ## Triagem rápida
 
-Fluxo de três perguntas com indicador de progresso e uma alternativa por etapa. A classificação é determinística e não pode ser editada pela pessoa usuária. Ao finalizar, encaminha para o acompanhamento da solicitação.
+Seis perguntas de sim ou não (dor no peito, falta de ar, sangramento, fraqueza intensa ou desmaio, febre, vômitos que não param), uma por etapa, com indicador de progresso. O risco é calculado pelo servidor (`triage.evaluate`), de forma determinística, e não pode ser editado pela pessoa usuária. Ao finalizar, encaminha para o acompanhamento da solicitação.
 
 ## Perfil clínico
 
@@ -26,11 +26,11 @@ Permite marcar condições crônicas (diabetes, hipertensão, uso contínuo de i
 
 ## Acompanhamento de solicitação
 
-Apresenta a linha do tempo `Enviado`, `Visualizado`, `Em análise` e `Agendado`, acompanhada de risco e atualização de exemplo da equipe ACS. Os dados são locais e sintéticos.
+Mostra o último alerta da pessoa a partir do backend (`alerts.statusFor`): a classificação de risco e o estado — `Enviado — aguardando confirmação da equipe`, `Recebido pela equipe de saúde`, `Atendimento concluído` ou `Encaminhado para o SAMU` —, com os horários de disparo e de confirmação. Atualiza ao abrir a aba, a cada 5 minutos e pelo botão manual.
 
 ## Lembretes
 
-Lista lembretes de medicamentos e de rotina, com controles de ativação. A criação e o agendamento de notificações do sistema ainda não foram integrados.
+Lista lembretes de medicamentos e de rotina, com controles de ativação; cada lembrete ativo agenda uma notificação local do sistema. Avisos à comunidade enviados pela equipe chegam por push (Gorush + FCM).
 
 ## Meus dados
 

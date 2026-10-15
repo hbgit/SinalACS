@@ -5,26 +5,51 @@ SinalACS transforma sinais clínicos estruturados em uma fila de trabalho para
 o Agente Comunitário de Saúde (ACS), priorizada por risco e preparada para
 operação em conectividade instável.
 
-> **Estado atual:** protótipo funcional da Fase 2 validado localmente em stack
-> Docker. O backend já executa autenticação, criação de alerta vermelho,
-> idempotência por microárea, publicação no broker e confirmação de recebimento
-> pelo ACS. Integrações de produção com MQTT autenticado, identidade e deploy
-> operacional ainda não estão concluídas.
+> **Estado atual:** protótipo funcional, validado localmente em stack Docker
+> (PostgreSQL, Mosquitto, backend Serverpod e Traefik) e em emulador Android.
+> **Não está pronto para produção:** não há deploy de produção, iOS, nem
+> integração com um provedor de identidade real. A lista completa do que falta,
+> com responsáveis, está em [PROGRESS.md](PROGRESS.md).
 
 ## Funcionalidades atuais
 
-- App do paciente com acesso inicial, triagem estruturada e status da solicitação.
-- App ACS com login institucional demonstrativo, painel de priorização,
-	territorialização e registro local de visitas.
-- Motor de triagem determinístico, com classificação verde, amarela ou vermelha.
-- Fila de visitas offline com sincronização simulada, retry e detecção de conflitos.
-- Backend com fluxo real de alerta vermelho, incluindo autenticação, idempotência,
-	publicação em tópico de microárea e ACK do ACS.
-- Contrato de alerta MQTT com configuração TLS/WSS e validação local do ciclo de entrega.
-- Persistência local preparada para SQLCipher.
+**App do paciente** (`apps/patient`)
+- Login sem senha: CPF + data de nascimento + código de uso único (OTP), e
+  cadastro por convite em QR Code.
+- Alerta de urgência real (`alerts.createRedAlert`) com acompanhamento de
+  entrega, triagem estruturada determinística e status da solicitação.
+- "Meus Dados" (LGPD): exportação, histórico de consentimentos, revogação e
+  pedidos de correção e exclusão; aceite dos Termos de Uso.
+- Lembretes locais e recebimento de avisos à comunidade por push (Gorush + FCM).
+
+**App do ACS** (`apps/acs`)
+- Login institucional com matrícula, senha (Argon2id) e TOTP; refresh token
+  rotativo guardado no Keystore e liberado por biometria (provado só no
+  emulador API 36; no API 30+ o PIN do aparelho também libera e uma digital
+  nova não invalida a chave); bloqueio após 30 s em
+  segundo plano e `FLAG_SECURE` na janela.
+- Fila de visitas priorizada por risco, restrita à microárea do ACS (RBAC),
+  com mapa, territorialização e geofencing.
+- Registro de visitas offline em banco local cifrado (SQLCipher), com fila por
+  dono, reenvio e detecção de conflito; recebimento de alertas vermelhos por
+  MQTT com TLS e confirmação (ACK).
+
+**Backoffice** (`apps/admin`, Flutter Web e Android)
+- Login de coordenador/administrador com senha e TOTP obrigatório.
+- Indicadores, microáreas, alertas (com escalonamento do alerta vermelho não
+  confirmado), auditoria com selo por linha, verificação da cadeia e
+  exportação CSV, gestão de contas de ACS e de MFA, pedidos do titular (LGPD),
+  avisos agendados e versões dos Termos.
+
+**Backend** (`backend/`, Serverpod)
+- Motor de triagem determinístico (verde, amarelo, vermelho), alerta vermelho
+  idempotente por microárea publicado no broker, sincronização de visitas,
+  colunas clínicas cifradas em repouso (AES-256-GCM) e trilha de auditoria
+  encadeada.
 
 Consulte [PROGRESS.md](PROGRESS.md) para o status detalhado dos milestones e
 [spec/PRD_system.md](spec/PRD_system.md) para requisitos e decisões técnicas.
+As telas estão documentadas em [docs/README.md](docs/README.md).
 
 ## Estrutura
 
@@ -33,21 +58,62 @@ apps/
 	acs/       Aplicativo Flutter do Agente Comunitário de Saúde
 	patient/   Aplicativo Flutter do paciente
 	admin/     Backoffice administrativo (Flutter Web e Android)
-backend/     Backend Dart (dart:io, sem framework) e regras de domínio
-infra/       Configuração local de infraestrutura
+backend/     Workspace Dart: servidor Serverpod (sinalacs_server) e cliente gerado (sinalacs_client)
+infra/       Configuração local de infraestrutura (Mosquitto, Traefik, Gorush)
+scripts/     dev/ (configuração e execução local), qa/ (validação e e2e), ci/
 spec/        PRD, UX, privacidade e fluxos do produto
-tests/       Testes compartilhados
+docs/        Telas, guias operacionais e planos de implementação
+video/       Roteiro e material do vídeo de apresentação
 ```
 
 ## Pré-requisitos
 
-- Flutter SDK compatível com Dart `>=3.3.0 <4.0.0`.
-- Android SDK com API 36 e JDK 17 para gerar ou executar os apps ACS, paciente e admin no Android.
+- Flutter com Dart 3.12 ou mais recente para os três apps (o piso efetivo vem
+  de `backend/sinalacs_client`, dependência dos apps); a CI usa Flutter 3.44.8.
+- Dart `^3.12.0` para o backend (`backend/pubspec.yaml`).
+- Android SDK com API 36 e JDK 17 para gerar ou executar os apps no Android.
 - Docker Engine com Docker Compose v2 para subir a stack local.
-- Um emulador Android ou dispositivo físico, opcional para execução mobile.
+- Emulador Android ou aparelho físico, opcional para execução mobile.
 
-As versões usadas pela CI estão definidas em
+As versões usadas pela CI estão em
 [.github/workflows/ci.yml](.github/workflows/ci.yml).
+
+## Configuração
+
+**Antes do primeiro `docker compose up`, gere a configuração local:**
+
+```bash
+./scripts/dev/bootstrap_env.sh
+```
+
+O script cria o `.env` com segredos aleatórios desta máquina —
+`POSTGRES_PASSWORD`, `TEST_DATABASE_PASSWORD`, `MQTT_BACKEND_PASSWORD`,
+`MQTT_ACS_PASSWORD`, `JWT_SECRET`, `AUDIT_CHAIN_SECRET`,
+`HEALTH_DATA_ENCRYPTION_KEY`, `CPF_HASH_PEPPER`, `DEV_ACS_PASSWORD` e
+`DEV_ADMIN_PASSWORD` — e gera `backend/sinalacs_server/config/passwords.yaml`
+(gitignored; sem ele a suíte do Serverpod morre sem imprimir nada). Os dois
+arquivos ficam com `chmod 600` e nenhum entra no git. O script nunca
+sobrescreve sem `--force`; rodado sem `--force` sobre um `.env` antigo, só
+acrescenta `DEV_ADMIN_PASSWORD`, se ela faltar.
+
+[.env.example](.env.example) é a referência completa das variáveis. O
+`docker-compose.yml` declara cada segredo como `${VAR:?...}`: se faltar, o
+Compose falha dizendo qual, em vez de subir com uma senha embutida no arquivo
+versionado.
+
+**Trocar `POSTGRES_PASSWORD` ou `HEALTH_DATA_ENCRYPTION_KEY` com um `pg_data/`
+já existente quebra o ambiente:** a senha só vale na primeira inicialização do
+volume e as colunas clínicas já cifradas ficam ilegíveis. Para adotar valores
+novos: `docker compose down && rm -rf pg_data/`.
+
+Configuração de servidor e banco vem de `sinalacs_server/config/*.yaml` e pode
+ser sobrescrita por variáveis de ambiente (`SERVERPOD_DATABASE_HOST` e
+companhia, `SERVERPOD_APPLY_MIGRATIONS`, `SERVERPOD_REDIS_ENABLED`,
+`SERVERPOD_INSIGHTS_SERVER_PORT`). O MQTT tem variáveis próprias, lidas por
+`sinalacs_server/lib/src/config/app_config.dart`, assim como `JWT_SECRET`,
+`APP_ENV` e `ENABLE_DEV_LOGIN` (desligado por padrão). Fora de `development`, o
+servidor **recusa subir** se `JWT_SECRET` estiver ausente, vazio ou igual ao
+valor de desenvolvimento. Detalhes em [backend/CLAUDE.md](backend/CLAUDE.md).
 
 ## Execução local
 
@@ -115,6 +181,10 @@ flutter devices
 ./scripts/dev/run_acs.sh --build
 ```
 
+O ACS de desenvolvimento entra com a matrícula `ACS-001` e a senha de
+`DEV_ACS_PASSWORD` (`.env`), gravada pelo seed
+`backend/sinalacs_server/bin/seed_acs_credentials.dart`.
+
 ### Aplicativo do paciente
 
 O paciente não usa MQTT: o default de `SINALACS_HOST` já serve no emulador.
@@ -150,6 +220,36 @@ Sem essa cópia **nada fica vermelho na hora de compilar**: `flutter build` e
 se denuncia depois, no handshake do TLS. O único comando que reclama é o
 `flutter analyze`, pelo diretório que o `pubspec.yaml` declara e não existe.
 
+### Backoffice (admin)
+
+Com a stack de pé e as CAs copiadas (`./scripts/dev/sync_dev_ca.sh`):
+
+```bash
+cd apps/admin
+flutter pub get
+flutter run -d emulator-5554          # Android; SINALACS_HOST padrão: https://10.0.2.2/
+```
+
+No navegador (`flutter run -d chrome --dart-define=SINALACS_HOST=https://localhost/`)
+o TLS é validado pelo próprio navegador, que não confia na CA de
+desenvolvimento do RPC; esse caminho não foi validado ponta a ponta.
+
+O seed cria o administrador `ADM-001`, com a senha de `DEV_ADMIN_PASSWORD`
+(`.env`), **sem TOTP e sem código de ativação**. Antes do primeiro login, emita
+um código (válido por 24 h, mostrado uma única vez):
+
+```bash
+cd backend/sinalacs_server
+SERVERPOD_DATABASE_PASSWORD="$(grep -E '^POSTGRES_PASSWORD=' ../../.env | cut -d= -f2-)" \
+  dart run bin/issue_staff_activation_code.dart ADM-001 --issued-by seu-nome
+```
+
+A ferramenta lê as variáveis `SERVERPOD_DATABASE_*` (padrões `localhost:5432`,
+`sinalacs_db`, `sinalacs_user`); a senha não tem padrão e é a
+`POSTGRES_PASSWORD` do `.env`. Troque `seu-nome` por quem emite. Veja
+[backend/CLAUDE.md](backend/CLAUDE.md). Na tela de login, a conta usa esse
+código para ativar a verificação em duas etapas.
+
 ## Build
 
 ### APK Android de depuração
@@ -172,10 +272,12 @@ O mesmo procedimento pode ser aplicado ao app do paciente, substituindo
 
 ### Build de release
 
-A configuração Android atual assina builds de release com a chave de debug,
-adequada apenas para testes internos. Antes de qualquer distribuição, defina
-um `applicationId` próprio, configure assinatura de release e forneça os
-segredos por variáveis de ambiente ou um cofre de segredos.
+O app **ACS** recusa gerar release assinada com a chave de debug: sem chave de
+release configurada, `flutter build apk --release` falha. Para um teste local
+consciente, `-Psinalacs.allowDebugSigning=true` libera a chave de debug — nunca
+para distribuição. Os apps **paciente** e **admin** ainda assinam release com a
+chave de debug. Nenhum dos três tem chave de release provisionada; veja
+[docs/publicacao-google-play.md](docs/publicacao-google-play.md).
 
 ## Testes e análise
 
@@ -183,61 +285,25 @@ Execute cada conjunto a partir do respectivo diretório:
 
 ```bash
 cd backend && dart pub get && dart analyze
-cd backend/sinalacs_server && dart test
+cd backend/sinalacs_server && dart test            # unitários + integração
+cd backend/sinalacs_server && dart test test/unit  # só os herméticos, sem banco
 cd apps/acs && flutter pub get && flutter analyze && flutter test
 cd apps/patient && flutter pub get && flutter analyze && flutter test
+cd apps/admin && flutter pub get && flutter analyze && flutter test
 ```
 
-O backend é um workspace Dart com dois pacotes: `sinalacs_server` (servidor
-Serverpod) e `sinalacs_client` (cliente tipado gerado). A suíte tem 25 testes —
-16 unitários herméticos, que não precisam de banco, e 9 de integração sobre o
-harness do Serverpod, que exigem um Postgres em `localhost:9090` conforme
-`sinalacs_server/config/test.yaml`. Para rodar só os herméticos:
-`dart test test/unit`.
+Os testes de integração do backend usam o harness do Serverpod e exigem o
+Postgres de teste em `localhost:9090` (`sinalacs_server/config/test.yaml`). A
+validação ponta a ponta contra a stack real (scripts em `scripts/qa/`,
+`integration_test/` no emulador) está descrita em
+[CONTRIBUTING.md](CONTRIBUTING.md) e no README de cada app.
 
-A última validação local cobriu o ciclo crítico ponta a ponta em stack Docker —
-autenticação, idempotência, publicação no broker e ACK do ACS. A CI
-(`.github/workflows/ci.yml`) roda quatro jobs em pushes para main e pull
-requests: `serverpod-backend` (sobe o Postgres de teste e roda `dart analyze`
-mais a suíte completa), `backend-docker-build` (valida que a imagem builda),
-`patient-app` e `acs-app`.
-
-### Configuração
-
-**Antes do primeiro `docker compose up`, gere a configuração local:**
-
-```bash
-./scripts/dev/bootstrap_env.sh
-```
-
-O script cria `.env` com segredos aleatórios desta máquina (senha do Postgres,
-as duas do broker MQTT e o `JWT_SECRET`) e gera
-`backend/sinalacs_server/config/passwords.yaml`, que é gitignored e por isso não
-existe num clone limpo — sem ele a suíte de testes do Serverpod morre sem
-imprimir nada. Nenhum dos dois entra no git.
-
-[.env.example](.env.example) é a referência completa de todas as variáveis, com
-um comentário por bloco dizendo quem consome cada uma. O `docker-compose.yml`
-declara cada segredo como `${VAR:?...}`: se faltar, o Compose falha dizendo qual
-variável está ausente, em vez de subir com uma senha embutida no arquivo
-versionado.
-
-Configuração de servidor e banco vem dos arquivos `sinalacs_server/config/*.yaml`
-e pode ser sobrescrita por variáveis de ambiente: `SERVERPOD_DATABASE_HOST` e
-companhia, `SERVERPOD_APPLY_MIGRATIONS` (aplica as migrações no boot),
-`SERVERPOD_REDIS_ENABLED` (Redis é opcional e fica desligado) e
-`SERVERPOD_INSIGHTS_SERVER_PORT`. O MQTT não faz parte do Serverpod e mantém as
-próprias variáveis, lidas por `sinalacs_server/lib/src/config/app_config.dart`:
-`MQTT_BROKER`/`MQTT_USERNAME`/`MQTT_PASSWORD`/`MQTT_USE_TLS`/`MQTT_CA_CERT_PATH`,
-mais `JWT_SECRET`, `APP_ENV` e `ENABLE_DEV_LOGIN` (por padrão desligado — sem
-ele, `auth.developmentLogin` falha como se o endpoint não existisse).
-
-Fora de `development`, o servidor **recusa subir** se `JWT_SECRET` estiver
-ausente, vazio ou igual ao valor de desenvolvimento (que é público, por estar no
-código versionado). O token carrega o papel e a microárea, então assinar com uma
-chave conhecida permitiria forjar um acesso de ACS a qualquer território. Veja
-[backend/DEPLOY.md](backend/DEPLOY.md) para o runbook completo do piloto de
-deploy free-tier.
+A CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) roda em toda PR,
+em pushes para `main`/`develop` e sob demanda, com nove jobs:
+`workflow-lint`, `serverpod-backend`, `backend-docker-build`, `patient-app`,
+`acs-app`, `admin-app`, `coverage-report`, `android-e2e` (o único que sobe um
+emulador contra a stack) e `admin-android-build`. Todos menos `android-e2e`
+são obrigatórios para o merge em `main` e `develop`.
 
 ## Deploy
 
@@ -266,9 +332,16 @@ desenho de privacidade em [spec/lgpd_design.md](spec/lgpd_design.md).
 
 O projeto lida com dados de saúde. Não inclua dados reais de pacientes em
 testes, logs, capturas de tela ou configurações de desenvolvimento. A
-classificação de risco é determinística e alertas vermelhos não devem ser
-descartados silenciosamente. As garantias de autenticação, autorização por
-microárea e entrega MQTT com ACK permanecem pendentes de integração real.
+classificação de risco é determinística e não pode ser alterada manualmente,
+alertas vermelhos não são descartados em silêncio e o acesso do ACS fica
+restrito à própria microárea.
+
+Autenticação, RBAC por microárea, TLS no RPC e no broker (com senha, ACL e
+certificado de cliente) estão implementados **na stack local**. Ainda faltam,
+entre outros: provisionamento de certificado de cliente por aparelho em
+produção, refresh token para o paciente, imposição de append-only da trilha de
+auditoria no banco e o deploy de produção — ver [PROGRESS.md](PROGRESS.md) e a
+[política de segurança](.github/SECURITY.md).
 
 ## Licença
 

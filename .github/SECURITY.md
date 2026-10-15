@@ -22,9 +22,10 @@ explique como os mantenedores podem reproduzir o problema sem retê-la.
 
 Esta política abrange vulnerabilidades nos componentes versionados do SinalACS:
 
-- Aplicativos em `apps/acs` e `apps/patient`.
+- Aplicativos em `apps/acs`, `apps/patient` e `apps/admin` (backoffice).
 - Backend em `backend` e seus clientes gerados.
 - Infraestrutura, arquivos Docker Compose e configurações sob `infra`.
+- Scripts de desenvolvimento, validação e CI sob `scripts/`.
 - Workflows de CI e dependências declaradas no repositório.
 
 Relatos são bem-vindos inclusive para limitações já documentadas quando
