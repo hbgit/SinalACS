@@ -1647,4 +1647,3 @@ Plano: `docs/superpowers/plans/2026-10-14-issue-46-avisos-e-termos.md`; achados 
 - Os rótulos curtos da barra inferior do admin mudaram ('Áreas', 'Trilha'): decisão de produto a confirmar.
 - `upcomingTermsChange` morta mantida; varredura de `sending` só na partida e para instância única. (issue a abrir)
 - Guarda "texto novo embarcado no app" perdida (issue a abrir): `upcoming_legal_documents_test.dart` compara com `upcomingTermsChange`, constante morta desde que a agenda passou a `terms_versions`; o admin pode publicar uma versão cujo texto o app não embarca (o cartão aparece sem "Ler o texto novo").
-- Após o e2e, `sinalacs-serverpod` e o Postgres de desenvolvimento ficaram parados: `docker compose up -d`.
