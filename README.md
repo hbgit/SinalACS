@@ -5,26 +5,49 @@ SinalACS transforma sinais clínicos estruturados em uma fila de trabalho para
 o Agente Comunitário de Saúde (ACS), priorizada por risco e preparada para
 operação em conectividade instável.
 
-> **Estado atual:** protótipo funcional da Fase 2 validado localmente em stack
-> Docker. O backend já executa autenticação, criação de alerta vermelho,
-> idempotência por microárea, publicação no broker e confirmação de recebimento
-> pelo ACS. Integrações de produção com MQTT autenticado, identidade e deploy
-> operacional ainda não estão concluídas.
+> **Estado atual:** protótipo funcional, validado localmente em stack Docker
+> (PostgreSQL, Mosquitto, backend Serverpod e Traefik) e em emulador Android.
+> **Não está pronto para produção:** não há deploy de produção, iOS, nem
+> integração com um provedor de identidade real. A lista completa do que falta,
+> com responsáveis, está em [PROGRESS.md](PROGRESS.md).
 
 ## Funcionalidades atuais
 
-- App do paciente com acesso inicial, triagem estruturada e status da solicitação.
-- App ACS com login institucional demonstrativo, painel de priorização,
-	territorialização e registro local de visitas.
-- Motor de triagem determinístico, com classificação verde, amarela ou vermelha.
-- Fila de visitas offline com sincronização simulada, retry e detecção de conflitos.
-- Backend com fluxo real de alerta vermelho, incluindo autenticação, idempotência,
-	publicação em tópico de microárea e ACK do ACS.
-- Contrato de alerta MQTT com configuração TLS/WSS e validação local do ciclo de entrega.
-- Persistência local preparada para SQLCipher.
+**App do paciente** (`apps/patient`)
+- Login sem senha: CPF + data de nascimento + código de uso único (OTP), e
+  cadastro por convite em QR Code.
+- Alerta de urgência real (`alerts.createRedAlert`) com acompanhamento de
+  entrega, triagem estruturada determinística e status da solicitação.
+- "Meus Dados" (LGPD): exportação, histórico de consentimentos, revogação e
+  pedidos de correção e exclusão; aceite dos Termos de Uso.
+- Lembretes locais e recebimento de avisos à comunidade por push (Gorush + FCM).
+
+**App do ACS** (`apps/acs`)
+- Login institucional com matrícula, senha (Argon2id) e TOTP; refresh token
+  rotativo guardado no Keystore e liberado por biometria; bloqueio após 30 s em
+  segundo plano e `FLAG_SECURE` na janela.
+- Fila de visitas priorizada por risco, restrita à microárea do ACS (RBAC),
+  com mapa, territorialização e geofencing.
+- Registro de visitas offline em banco local cifrado (SQLCipher), com fila por
+  dono, reenvio e detecção de conflito; recebimento de alertas vermelhos por
+  MQTT com TLS e confirmação (ACK).
+
+**Backoffice** (`apps/admin`, Flutter Web e Android)
+- Login de coordenador/administrador com senha e TOTP obrigatório.
+- Indicadores, microáreas, alertas (com escalonamento do alerta vermelho não
+  confirmado), auditoria com selo por linha, verificação da cadeia e
+  exportação CSV, gestão de contas de ACS e de MFA, pedidos do titular (LGPD),
+  avisos agendados e versões dos Termos.
+
+**Backend** (`backend/`, Serverpod)
+- Motor de triagem determinístico (verde, amarelo, vermelho), alerta vermelho
+  idempotente por microárea publicado no broker, sincronização de visitas,
+  colunas clínicas cifradas em repouso (AES-256-GCM) e trilha de auditoria
+  encadeada.
 
 Consulte [PROGRESS.md](PROGRESS.md) para o status detalhado dos milestones e
 [spec/PRD_system.md](spec/PRD_system.md) para requisitos e decisões técnicas.
+As telas estão documentadas em [docs/README.md](docs/README.md).
 
 ## Estrutura
 
@@ -33,10 +56,12 @@ apps/
 	acs/       Aplicativo Flutter do Agente Comunitário de Saúde
 	patient/   Aplicativo Flutter do paciente
 	admin/     Backoffice administrativo (Flutter Web e Android)
-backend/     Backend Dart (dart:io, sem framework) e regras de domínio
-infra/       Configuração local de infraestrutura
+backend/     Workspace Dart: servidor Serverpod (sinalacs_server) e cliente gerado (sinalacs_client)
+infra/       Configuração local de infraestrutura (Mosquitto, Traefik, Gorush)
+scripts/     dev/ (configuração e execução local), qa/ (validação e e2e), ci/
 spec/        PRD, UX, privacidade e fluxos do produto
-tests/       Testes compartilhados
+docs/        Telas, guias operacionais e planos de implementação
+video/       Roteiro e material do vídeo de apresentação
 ```
 
 ## Pré-requisitos
@@ -266,9 +291,16 @@ desenho de privacidade em [spec/lgpd_design.md](spec/lgpd_design.md).
 
 O projeto lida com dados de saúde. Não inclua dados reais de pacientes em
 testes, logs, capturas de tela ou configurações de desenvolvimento. A
-classificação de risco é determinística e alertas vermelhos não devem ser
-descartados silenciosamente. As garantias de autenticação, autorização por
-microárea e entrega MQTT com ACK permanecem pendentes de integração real.
+classificação de risco é determinística e não pode ser alterada manualmente,
+alertas vermelhos não são descartados em silêncio e o acesso do ACS fica
+restrito à própria microárea.
+
+Autenticação, RBAC por microárea, TLS no RPC e no broker (com senha, ACL e
+certificado de cliente) estão implementados **na stack local**. Ainda faltam,
+entre outros: provisionamento de certificado de cliente por aparelho em
+produção, refresh token para o paciente, imposição de append-only da trilha de
+auditoria no banco e o deploy de produção — ver [PROGRESS.md](PROGRESS.md) e a
+[política de segurança](.github/SECURITY.md).
 
 ## Licença
 
