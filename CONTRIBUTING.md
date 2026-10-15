@@ -44,12 +44,19 @@ com uma convenção genérica, a documentação do projeto prevalece.
 
 ## Pré-requisitos
 
-- Flutter SDK compatível com Dart `>=3.8.0 <4.0.0` (`apps/patient`, `apps/acs`) ou `>=3.3.0 <4.0.0` (`apps/admin`); a CI usa Flutter 3.44.8.
-- Dart SDK `>=3.8.0` para o backend.
+- Flutter SDK com Dart `^3.8.0` para os três aplicativos (`apps/patient`, `apps/acs`, `apps/admin`); a CI usa Flutter 3.44.8.
+- Dart SDK `^3.12.0` para o backend.
 - Docker Engine com Docker Compose v2.
 - Android SDK API 36 e JDK 17 para executar ou gerar os aplicativos Android.
 
 ## Ambiente local
+
+Num clone limpo, gere antes a configuração local (detalhes em
+[README.md](README.md#configuração)):
+
+```bash
+./scripts/dev/bootstrap_env.sh
+```
 
 Para iniciar PostgreSQL, Mosquitto, backend e Traefik, execute na raiz:
 
@@ -117,6 +124,7 @@ Para executar um aplicativo em dispositivo ou emulador:
 ```bash
 ./scripts/dev/run_acs.sh      # ACS: preenche os dart-defines a partir do .env
 cd apps/patient && flutter run
+cd apps/admin && flutter run  # exige código de ativação no primeiro login; ver apps/admin/README.md
 ```
 
 O ACS precisa do script: a senha do broker é constante de compilação, sem valor
@@ -216,3 +224,12 @@ formato específico para nomes de branches ou mensagens de commit.
 Os mantenedores definem prioridade, revisão e merge. Contribuições não devem
 assumir autenticação institucional, infraestrutura de produção ou integrações
 clínicas que ainda não estejam implementadas.
+
+Ao alterar documentação, confira os links relativos:
+
+```bash
+bash scripts/qa/check_documentation_links.sh
+```
+
+O script lista cada `link local ausente` e sai com 1 se houver algum. Evite
+gravar contagens de testes nos documentos: elas envelhecem a cada PR.
