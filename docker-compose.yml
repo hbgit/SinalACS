@@ -109,6 +109,10 @@ services:
     # declarar o mesmo `build:` e reconstruí-la.
     image: sinalacs/server:local
     container_name: sinalacs-serverpod
+    # Defesa em profundidade (#56): reinicia após saída != 0 (inclusive o
+    # exit(70) do handler global de bin/main.dart). Não substitui o outbox
+    # nem o PUBACK; os e2e falham se RestartCount > 0 para não mascarar crash.
+    restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy

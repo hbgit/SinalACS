@@ -59,6 +59,9 @@ conferir 'o cleanup sempre despausa o Traefik (e o backend, por defesa)' \
 conferir 'o Traefik do compose se chama sinalacs-traefik' "grep -qF 'container_name: sinalacs-traefik' docker-compose.yml"
 conferir 'depois da queda confere o backend vivo e sem reinício' \
   "grep -qF '{{.State.Running}} {{.State.StartedAt}}' $s && grep -qF 'backend caiu durante a queda' $s && grep -qF 'docker logs --tail 20 sinalacs-serverpod' $s"
+# #56: RestartCount > 0 também falha (antes e depois da queda), não só StartedAt diferente.
+conferir 'a conferência do backend exige RestartCount 0' \
+  "grep -qF '{{.State.Running}} {{.State.StartedAt}} rc={{.RestartCount}}' $s && [[ \$(grep -cF \"*' rc=0'\" $s) -ge 2 ]]"
 conferir 'o teste recebe os ids dos alertas por dart-define' \
   "grep -qF -- '--dart-define=E2E_ALERTA_VENCIDO=' $s && grep -qF -- '--dart-define=E2E_ALERTA_NOVO=' $s"
 
