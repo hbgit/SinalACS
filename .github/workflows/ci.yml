@@ -6,6 +6,9 @@ on:
     # de develop rodava CI — foi assim que 74d89c0 ficou sem um run sequer
     # (FINDING-2/FINDING-4 da avaliação de 2026-09-28).
     branches: [main, master, develop]
+  # Sem filtro nenhum (branches, branches-ignore, types, paths): uma PR fora
+  # do filtro nunca reporta os checks obrigatórios e espera para sempre.
+  # check_gatilhos em scripts/qa/ci_invariants.sh falha se aparecer um (issue #19).
   pull_request:
   # Para gerar o dado sem precisar abrir PR: `gh workflow run CI --ref <branch>`.
   workflow_dispatch:

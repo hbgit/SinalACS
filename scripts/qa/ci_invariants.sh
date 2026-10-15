@@ -114,6 +114,26 @@ def check_gatilhos():
         falhas.append('FINDING-2: sem workflow_dispatch, não há como disparar o CI à mão')
     if 'pull_request' not in gatilhos:
         falhas.append('pull_request deixou de disparar o CI')
+        return
+    # Qualquer filtro em pull_request decide QUAIS PRs rodam o CI: com
+    # `branches: [main]`, uma PR contra develop não dispara nada, os 8 checks
+    # obrigatórios nunca reportam e ela fica em "Waiting for status" para
+    # sempre — com este workflow-lint verde (issue #19). A regra é sem filtro
+    # nenhum, até os que hoje não excluem nada: não envelhece quando surgir
+    # uma branch protegida nova. paths/paths-ignore ficam com
+    # check_sem_filtro_de_paths, para não acusar o mesmo defeito duas vezes.
+    cfg_pr = gatilhos['pull_request']
+    if cfg_pr is None:
+        return
+    if not isinstance(cfg_pr, dict):
+        falhas.append(f'pull_request: tem tipo inesperado ({type(cfg_pr).__name__}): {cfg_pr!r}')
+        return
+    for chave in sorted(set(cfg_pr) - {'paths', 'paths-ignore'}):
+        falhas.append(
+            f'pull_request.{chave} restringe quais PRs disparam o CI — uma PR fora '
+            'do filtro nunca reporta os checks obrigatórios e espera para sempre; '
+            'deixe pull_request sem filtro (issue #19)'
+        )
 
 
 def check_sem_filtro_de_paths():
