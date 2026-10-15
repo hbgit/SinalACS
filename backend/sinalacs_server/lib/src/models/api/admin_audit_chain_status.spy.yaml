@@ -1,0 +1,24 @@
+### Resultado de `admin.verifyAuditChain` (#45, D3/D9). Nunca carrega hash,
+### segredo nem conteúdo de linha.
+### - `state`: só `verified` é verde; qualquer outro, nunca.
+### - `checkedRows`: linhas conferidas antes da quebra (ou o total). Só para o
+###   administrador; nulo para o coordenador (não infere volume de outra UBS).
+### - `headSequence`: última `sequence` da cadeia íntegra. Só administrador e
+###   só com `verified`.
+### - `firstBrokenSequence`: onde a cadeia quebrou. Para o coordenador, só se
+###   a linha quebrada for de um autor da UBS dele; senão nulo.
+### - `brokenInScope`: com `broken`, se a quebra é visível no escopo de quem
+###   chama (sempre `true` para o administrador); nulo nos outros estados ou se
+###   o pertencimento não pôde ser apurado.
+### - `reasonCode`: motivo fechado; o texto livre do verificador não sai do
+###   servidor. Para o coordenador, quebra fora do escopo vem sem motivo.
+### - `verifiedAt`: quando a verificação servida terminou (cache de 60 s).
+class: AdminAuditChainStatus
+fields:
+  state: AuditIntegrityState
+  checkedRows: int?
+  headSequence: int?
+  firstBrokenSequence: int?
+  brokenInScope: bool?
+  reasonCode: AuditChainReason?
+  verifiedAt: DateTime

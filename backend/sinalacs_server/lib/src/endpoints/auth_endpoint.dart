@@ -1,6 +1,7 @@
 import 'package:serverpod/serverpod.dart';
 import 'package:sinalacs_server/src/application/auth/cpf.dart';
 import 'package:sinalacs_server/src/application/auth/development_auth_service.dart';
+import 'package:sinalacs_server/src/application/auth/institutional_auth_service.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
 import 'package:sinalacs_server/src/runtime/alert_runtime.dart';
 
@@ -17,7 +18,8 @@ class AuthEndpoint extends Endpoint {
   bool get requireLogin => false;
 
   /// TTL da sessão do paciente (LGPD-RT06). O ACS continua nos 15 minutos
-  /// padrão — a renovação dele é silenciosa, por credencial em memória.
+  /// padrão, e a renovação dele é o refresh token rotativo (`refreshSession`):
+  /// sem senha nem TOTP, mas só para quem ainda guarda o token opaco do aparelho.
   static const patientSessionLifetime = Duration(hours: 1);
 
   /// UUIDs fixos do seed de desenvolvimento. Dados sintéticos.
@@ -68,11 +70,17 @@ class AuthEndpoint extends Endpoint {
   /// `AuthenticationFailedException`, com a mensagem que o serviço escolheu:
   /// mensagem idêntica para matrícula inexistente e senha errada (ver
   /// `InstitutionalAuthService`).
+  ///
+  /// MFA: com a verificação em duas etapas ativa, a senha certa sem
+  /// [totpCode] recebe `MfaRequiredException` (o app pede o código e repete a
+  /// chamada); com `REQUIRE_ACS_MFA` ligado e a MFA não ativada, recebe
+  /// `MfaEnrollmentRequiredException` (o app chama `beginTotpEnrollment`).
   Future<DevelopmentLoginResult> loginInstitutional(
     Session session, {
     required String matricula,
     required String password,
     String? deviceId,
+    String? totpCode,
   }) async {
     final runtime = AlertRuntime.instance;
 
@@ -80,13 +88,141 @@ class AuthEndpoint extends Endpoint {
           matricula: matricula,
           password: password,
           deviceId: deviceId,
+          totpCode: totpCode,
         );
 
+    // Sem `deviceId` real não há aparelho a que amarrar o refresh token: o
+    // valor sentinela de `InstitutionalAuthService` é público e qualquer um o
+    // apresentaria, anulando a amarração. Então o login só devolve o JWT. O
+    // próprio sentinela, enviado pelo cliente, conta como "sem aparelho" pelo
+    // mesmo motivo — e porque `UploadTokenService.issue` o recusaria DEPOIS de
+    // o refresh token já estar gravado.
+    final temAparelho = deviceId != null &&
+        deviceId.trim().isNotEmpty &&
+        deviceId != InstitutionalAuthService.deviceIdAbsent;
+    final refreshToken = temAparelho
+        ? await runtime.refreshTokenServiceFor(session).issue(user)
+        : null;
+    // Token de envio diferido (D7 do plano 2026-10-03), pela mesma regra do
+    // aparelho: serve só a `visits.syncDeferred`, com a autoria deste ACS, e
+    // sobrevive ao fim da sessão. Um novo login no mesmo aparelho revoga o
+    // anterior.
+    final uploadToken = temAparelho
+        ? await runtime.uploadTokenServiceFor(session).issue(user)
+        : null;
+    return DevelopmentLoginResult(
+      accessToken: runtime.auth.issueToken(user),
+      tokenType: 'Bearer',
+      refreshToken: refreshToken,
+      uploadToken: uploadToken,
+    );
+  }
+
+  /// Login do backoffice (coordenador/administrador): matrícula + senha + TOTP.
+  ///
+  /// A MFA é obrigatória em todo ambiente (não há `REQUIRE_*_MFA` para o
+  /// staff). Sem refresh token e sem token de envio diferido: a sessão dura os
+  /// 15 minutos do JWT, e o `deviceId` do token é o sentinela de "sem
+  /// aparelho". O token sai com o papel gravado em `users` e **sem** microárea:
+  /// staff não é territorializado, e os caminhos do ACS o recusam por papel.
+  /// As recusas são as de [loginInstitutional]: mensagem única para matrícula
+  /// inexistente e senha errada, `MfaRequiredException` sem o código, e o mesmo
+  /// bloqueio por tentativas.
+  Future<DevelopmentLoginResult> loginStaff(
+    Session session, {
+    required String matricula,
+    required String password,
+    String? totpCode,
+  }) async {
+    final runtime = AlertRuntime.instance;
+    final user = await runtime.staffAuthServiceFor(session).login(
+          matricula: matricula,
+          password: password,
+          totpCode: totpCode,
+        );
     return DevelopmentLoginResult(
       accessToken: runtime.auth.issueToken(user),
       tokenType: 'Bearer',
     );
   }
+
+  /// Começa a ativação da MFA do staff. Sem token: o staff prova matrícula,
+  /// senha **e o código de ativação de uso único** (#48), emitido fora de banda
+  /// por `bin/issue_staff_activation_code.dart`; a MFA é obrigatória, então não
+  /// há login possível antes dela. Código errado, expirado ou já usado recebe a
+  /// mesma recusa e conta como tentativa falha da conta.
+  Future<TotpEnrollmentStart> beginStaffTotpEnrollment(
+    Session session, {
+    required String matricula,
+    required String password,
+    required String activationCode,
+  }) =>
+      AlertRuntime.instance.staffAuthServiceFor(session).beginTotpEnrollment(
+            matricula: matricula,
+            password: password,
+            activationCode: activationCode,
+          );
+
+  /// Confirma a ativação da MFA do staff com o primeiro código do autenticador.
+  Future<void> confirmStaffTotpEnrollment(
+    Session session, {
+    required String matricula,
+    required String password,
+    required String activationCode,
+    required String code,
+  }) =>
+      AlertRuntime.instance.staffAuthServiceFor(session).confirmTotpEnrollment(
+            matricula: matricula,
+            password: password,
+            activationCode: activationCode,
+            code: code,
+          );
+
+  /// Renova a sessão do ACS sem pedir senha nem TOTP (LGPD-RT06). Público por
+  /// desenho: quem chama já perdeu o JWT de 15 min — o refresh token, opaco e de
+  /// uso único, é a credencial. Toda recusa é a mesma `SessionExpiredException`.
+  Future<DevelopmentLoginResult> refreshSession(
+    Session session, {
+    required String refreshToken,
+    required String deviceId,
+  }) async {
+    final runtime = AlertRuntime.instance;
+    final renewed = await runtime
+        .refreshTokenServiceFor(session)
+        .refresh(refreshToken: refreshToken, deviceId: deviceId);
+    return DevelopmentLoginResult(
+      accessToken: runtime.auth.issueToken(renewed.user),
+      tokenType: 'Bearer',
+      refreshToken: renewed.refreshToken,
+    );
+  }
+
+  /// Encerra o turno: revoga a família inteira. Idempotente.
+  Future<void> logout(Session session, {required String refreshToken}) =>
+      AlertRuntime.instance
+          .refreshTokenServiceFor(session)
+          .revoke(refreshToken);
+
+  /// Começa a ativação da MFA do ACS (RF07). Sem token: o ACS prova matrícula e senha.
+  Future<TotpEnrollmentStart> beginTotpEnrollment(
+    Session session, {
+    required String matricula,
+    required String password,
+  }) =>
+      AlertRuntime.instance
+          .institutionalAuthServiceFor(session)
+          .beginTotpEnrollment(matricula: matricula, password: password);
+
+  /// Confirma a ativação com o primeiro código do autenticador.
+  Future<void> confirmTotpEnrollment(
+    Session session, {
+    required String matricula,
+    required String password,
+    required String code,
+  }) =>
+      AlertRuntime.instance
+          .institutionalAuthServiceFor(session)
+          .confirmTotpEnrollment(matricula: matricula, password: password, code: code);
 
   /// Pedido do código de acesso (RF01). Público por definição: quem chama
   /// ainda não tem sessão. A resposta é sempre a mesma — não revela se o CPF
@@ -152,10 +288,10 @@ class AuthEndpoint extends Endpoint {
 
     return DevelopmentLoginResult(
       // 1 hora **neste caminho**, o de login com OTP verificado — que é o que
-      // `spec/lgpd_design.md` LGPD-RT06 exige para o paciente. Não é o TTL de
-      // toda sessão de paciente: há dois caminhos de emissão, e o de onboarding
-      // (`onboarding_endpoint.dart`) ainda emite o padrão de 15 minutos, lacuna
-      // do RF02 registrada no plano.
+      // `spec/lgpd_design.md` LGPD-RT06 exige para o paciente. Os dois caminhos
+      // de emissão — este e `onboarding.completeEnrollment` — usam
+      // `patientSessionLifetime`; `onboarding_endpoint_test.dart` prende o
+      // segundo.
       // Com o padrão de 15 minutos, e sem refresh token, o paciente teria de
       // receber um SMS novo a cada 15 minutos: o código OTP não pode ser
       // reapresentado como a senha do ACS pode, então não existe renovação

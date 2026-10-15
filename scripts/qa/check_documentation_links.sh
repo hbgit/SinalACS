@@ -31,6 +31,8 @@ done < <(
   find "$repo_root" \
     -path "$repo_root/.git" -prune -o \
     -path "$repo_root/.superpowers" -prune -o \
+    -path "$repo_root/.worktrees" -prune -o \
+    -path "$repo_root/docs/superpowers/plans" -prune -o \
     -path "$repo_root/pg_data" -prune -o \
     -path '*/node_modules' -prune -o \
     -type f \( -name '*.md' -o -name '*.markdown' \) -print

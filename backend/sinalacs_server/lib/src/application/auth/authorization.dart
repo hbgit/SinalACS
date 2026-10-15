@@ -16,6 +16,10 @@ import 'package:sinalacs_server/src/generated/protocol.dart';
 /// serializada ao cliente. Uma guarda que lançasse um tipo próprio quebraria as
 /// duas traduções de uma vez.
 abstract final class Authorization {
+  /// Papéis do backoffice. Os endpoints de staff (issue #40) usam este conjunto
+  /// com `requireMicroArea: false`: staff não é territorializado.
+  static const Set<UserRole> staffRoles = {UserRole.coordinator, UserRole.admin};
+
   /// Exige que [user] tenha um dos [roles] e, quando [requireMicroArea], que o
   /// token carregue um território.
   ///

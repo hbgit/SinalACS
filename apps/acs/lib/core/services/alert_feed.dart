@@ -33,6 +33,10 @@ enum AlertFeedFailureKind {
   /// Falta o certificado da CA nos assets (`scripts/dev/sync_dev_ca.sh`).
   missingCaAsset,
 
+  /// Falta o certificado de cliente do ACS nos assets
+  /// (`scripts/dev/sync_dev_ca.sh`): sem ele o broker (mTLS) recusa.
+  missingClientCertificate,
+
   /// O broker respondeu e recusou (credencial, identificador, indisponível).
   refused,
 
@@ -64,7 +68,7 @@ class AlertFeedFailure implements Exception {
 
   /// Se vale a pena tentar de novo sozinho, sem intervenção humana.
   ///
-  /// `missingPassword`/`missingCaAsset` exigem recompilar; `refused` herda o
+  /// `missingPassword`/`missingCaAsset`/`missingClientCertificate` exigem recompilar; `refused` herda o
   /// veredito do CONNACK; `unreachable` é sempre transitória — falta de rede
   /// é o caso comum de um ACS em campo.
   final bool transient;
@@ -124,6 +128,21 @@ class MqttAlertFeed implements AlertFeed {
       );
     }
 
+    // Certificado e chave de CLIENTE (mTLS), também assets gitignorados.
+    final ByteData clientCertificate;
+    final ByteData clientPrivateKey;
+    try {
+      clientCertificate = await rootBundle.load(BackendConfig.mqttClientCertAsset);
+      clientPrivateKey = await rootBundle.load(BackendConfig.mqttClientKeyAsset);
+    } catch (error) {
+      throw AlertFeedFailure(
+        AlertFeedFailureKind.missingClientCertificate,
+        title: 'Falta o certificado de cliente da central neste aplicativo.',
+        detail: 'Sem ele o broker recusa a conexão.',
+        cause: error,
+      );
+    }
+
     final client = MqttSecureClient(
       config: SecureMqttConfig(
         brokerHost: BackendConfig.mqttHost,
@@ -136,6 +155,8 @@ class MqttAlertFeed implements AlertFeed {
         username: BackendConfig.mqttUsername,
         password: BackendConfig.mqttPassword,
         caCertificate: caCertificate.buffer.asUint8List(),
+        clientCertificate: clientCertificate.buffer.asUint8List(),
+        clientPrivateKey: clientPrivateKey.buffer.asUint8List(),
       ),
     );
 

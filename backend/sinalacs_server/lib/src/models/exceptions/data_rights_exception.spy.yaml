@@ -1,0 +1,6 @@
+### Recusa de negócio de uma operação do titular sobre os próprios dados
+### (consentimento obrigatório, texto de correção vazio ou longo demais).
+### Mensagem pronta para a pessoa ler; nunca cita dado do paciente.
+exception: DataRightsException
+fields:
+  message: String

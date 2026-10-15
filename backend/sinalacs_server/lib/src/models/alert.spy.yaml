@@ -24,6 +24,10 @@ fields:
   deviceId: String
   retryCount: int
   version: int
+  ### Escalonamento pelo backoffice (#44). Anuláveis: alerta não escalonado.
+  escalatedAt: DateTime?
+  escalatedBy: UuidValue?
+  escalationReason: EscalationReason?
 indexes:
   alerts_micro_area_status_idx:
     fields: microAreaId, status, triggeredAt

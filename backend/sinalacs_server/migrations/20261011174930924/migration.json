@@ -1,0 +1,65 @@
+{
+  "__className__": "serverpod.DatabaseMigration",
+  "actions": [
+    {
+      "__className__": "serverpod.DatabaseMigrationAction",
+      "type": "alterTable",
+      "alterTable": {
+        "__className__": "serverpod.TableMigration",
+        "name": "patients",
+        "schema": "public",
+        "addColumns": [
+          {
+            "__className__": "serverpod.ColumnDefinition",
+            "name": "emergencyContactEncrypted",
+            "columnType": 0,
+            "isNullable": false,
+            "columnDefault": "''::text",
+            "dartType": "String"
+          },
+          {
+            "__className__": "serverpod.ColumnDefinition",
+            "name": "emergencyContactKeyVersion",
+            "columnType": 6,
+            "isNullable": false,
+            "columnDefault": "1",
+            "dartType": "int"
+          }
+        ],
+        "deleteColumns": [
+          "emergencyContact"
+        ],
+        "modifyColumns": [],
+        "addIndexes": [],
+        "deleteIndexes": [],
+        "addForeignKeys": [],
+        "deleteForeignKeys": [],
+        "warnings": [
+          {
+            "__className__": "serverpod.DatabaseMigrationWarning",
+            "type": "columnDropped",
+            "message": "Column \"emergencyContact\" of table \"patients\" will be dropped.",
+            "table": "patients",
+            "columns": [
+              "emergencyContact"
+            ],
+            "destrucive": true
+          }
+        ]
+      }
+    }
+  ],
+  "warnings": [
+    {
+      "__className__": "serverpod.DatabaseMigrationWarning",
+      "type": "columnDropped",
+      "message": "Column \"emergencyContact\" of table \"patients\" will be dropped.",
+      "table": "patients",
+      "columns": [
+        "emergencyContact"
+      ],
+      "destrucive": true
+    }
+  ],
+  "migrationApiVersion": 1
+}

@@ -24,6 +24,13 @@ abstract final class AdminColors {
   /// compartilhada é o passo -400 da mesma cor, não o valor literal.
   static const redOnSurface = Color(0xFFF87171);
   static const accentOnSurface = Color(0xFF818CF8);
+
+  /// Prazo LGPD vencido num pedido do titular (#42), como TEXTO/ÍCONE sobre
+  /// `surfaceRaised`/`background`. Laranja-400 de propósito: vermelho, amarelo
+  /// e verde são só risco clínico (`spec/ui_design.md`), e prazo não é risco.
+  /// Nunca aparece sozinho: vem com ícone e o texto "Vencido há N dias"
+  /// (WCAG 1.4.1). Contraste em `test/contrast_tokens_test.dart`.
+  static const overdueOnSurface = Color(0xFFFB923C);
 }
 
 /// Cor de texto/ícone equivalente a uma cor clínica de preenchimento.

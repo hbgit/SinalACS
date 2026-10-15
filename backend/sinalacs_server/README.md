@@ -1,15 +1,23 @@
 # sinalacs_server
 
-This is the starting point for your Serverpod server.
+Servidor Serverpod do SinalACS: endpoints RPC (`lib/src/endpoints/`), regras de
+domínio, migrações (`migrations/`) e ferramentas de operador (`bin/`).
 
-To run your server, you first need to start Postgres and Redis. It's easiest to do with Docker.
+Não suba este servidor sozinho: a stack de desenvolvimento (PostgreSQL,
+Mosquitto, Traefik e os seeds) fica na raiz do repositório.
 
-    docker compose up --build --detach
+```bash
+./scripts/dev/bootstrap_env.sh   # na raiz, uma vez
+docker compose up --build        # na raiz
+```
 
-Then you can start the Serverpod server.
+Testes:
 
-    dart bin/main.dart
+```bash
+dart test             # unitários + integração (Postgres de teste em localhost:9090)
+dart test test/unit   # só os herméticos
+```
 
-When you are finished, you can shut down Serverpod with `Ctrl-C`, then stop Postgres and Redis.
-
-    docker compose stop
+Comandos do Serverpod, migrações, segredos, seeds e camadas de `lib/src/`:
+[backend/CLAUDE.md](../CLAUDE.md). Visão geral e configuração:
+[README.md](../../README.md).

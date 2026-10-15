@@ -100,13 +100,15 @@ abstract class PatientBackend {
     String? locationCell,
   });
 
-  /// Conclui o onboarding a partir de um convite do ACS, gravando os 3
-  /// consentimentos por finalidade (LGPD-RF02) e ativando a sessão.
+  /// Conclui o onboarding a partir de um convite do ACS, gravando os 4
+  /// registros de consentimento, incluindo o aceite do Termo de Uso
+  /// (LGPD-RF02/RF18), e ativando a sessão.
   Future<AuthSession> completeEnrollment({
     required String token,
     required bool healthDataConsent,
     required bool remindersConsent,
     required bool pushConsent,
+    required bool termsAccepted,
   });
 
   /// Condições crônicas do próprio paciente autenticado (tela "Perfil
@@ -121,6 +123,46 @@ abstract class PatientBackend {
   /// Painel "Meus Dados" (LGPD): confirmação de existência de tratamento e
   /// acesso aos dados pessoais do próprio paciente autenticado.
   Future<PatientDataOverview> myData();
+
+  /// Concede ou revoga uma finalidade opcional de consentimento (LGPD-RF05).
+  /// O servidor grava uma linha nova em `consent_logs`; `healthDataProcessing`
+  /// é recusado com [BackendFailure] não recuperável.
+  Future<PatientConsentRecord> updateConsent({
+    required ConsentPurpose purpose,
+    required bool granted,
+  });
+
+  /// Aceita o Termo de Uso e a Política de Privacidade vigentes (LGPD-RF18),
+  /// para quem entrou por OTP sem passar pelo onboarding. O servidor grava uma
+  /// linha `termsOfUse` `granted` em `consent_logs` só se a versão vigente ainda
+  /// não foi aceita; repetir devolve a existente.
+  Future<PatientConsentRecord> acceptTermsOfUse();
+
+  /// Registra o token de push do aparelho (RF14). Falha se não houver
+  /// consentimento `segmentedPush` vigente; quem chama ignora a falha.
+  Future<void> registerPushToken({required String token, required String platform});
+
+  /// Aviso de mudança dos termos ativo agora (LGPD-RF18, 15 dias de antecedência),
+  /// ou `null`. O app ignora falha e lentidão: sem aviso, sem cartão.
+  Future<TermsChangeNotice?> termsChangeNotice();
+
+  /// Se o paciente já aceitou o Termo de Uso e a Política de Privacidade da
+  /// versão vigente (LGPD-RF18). O login por OTP consulta isto para decidir se
+  /// mostra o convite ao aceite.
+  Future<bool> hasAcceptedCurrentTerms();
+
+  /// Se a decisão mais recente do titular para [purpose] é `granted`. Um `bool`
+  /// vindo do servidor, sem o painel "Meus Dados" e sem auditoria de leitura: o
+  /// app pergunta isto a cada login antes de falar com o provedor de push.
+  Future<bool> hasGrantedConsent(ConsentPurpose purpose);
+
+  /// Pede a exclusão dos próprios dados (LGPD-RF08). Pedir de novo com um
+  /// pedido aberto devolve o mesmo.
+  Future<PatientDataSubjectRequestRecord> requestDataDeletion();
+
+  /// Pede a correção de um dado (LGPD-RF08). O servidor faz o `trim` e recusa
+  /// texto vazio ou acima de 500 caracteres.
+  Future<PatientDataSubjectRequestRecord> requestDataCorrection(String details);
 
   void close();
 }
@@ -198,6 +240,7 @@ class MisconfiguredBackend implements PatientBackend {
     required bool healthDataConsent,
     required bool remindersConsent,
     required bool pushConsent,
+    required bool termsAccepted,
   }) async =>
       _recusar();
 
@@ -209,6 +252,36 @@ class MisconfiguredBackend implements PatientBackend {
 
   @override
   Future<PatientDataOverview> myData() async => _recusar();
+
+  @override
+  Future<PatientConsentRecord> updateConsent({
+    required ConsentPurpose purpose,
+    required bool granted,
+  }) async =>
+      _recusar();
+
+  @override
+  Future<PatientConsentRecord> acceptTermsOfUse() async => _recusar();
+
+  @override
+  Future<bool> hasAcceptedCurrentTerms() async => _recusar();
+
+  @override
+  Future<bool> hasGrantedConsent(ConsentPurpose purpose) async => _recusar();
+
+  @override
+  Future<TermsChangeNotice?> termsChangeNotice() async => _recusar();
+
+  @override
+  Future<void> registerPushToken({required String token, required String platform}) async =>
+      _recusar();
+
+  @override
+  Future<PatientDataSubjectRequestRecord> requestDataDeletion() async => _recusar();
+
+  @override
+  Future<PatientDataSubjectRequestRecord> requestDataCorrection(String details) async =>
+      _recusar();
 
   /// Fechar **não** é uma chamada ao backend: não há o que fechar, e um `close`
   /// que lançasse derrubaria o `finally` de quem só queria encerrar.
@@ -428,6 +501,7 @@ class BackendClient implements PatientBackend {
     required bool healthDataConsent,
     required bool remindersConsent,
     required bool pushConsent,
+    required bool termsAccepted,
   }) async {
     final result = await _guard(
       () => _client.onboarding.completeEnrollment(
@@ -435,6 +509,7 @@ class BackendClient implements PatientBackend {
         healthDataConsent: healthDataConsent,
         remindersConsent: remindersConsent,
         pushConsent: pushConsent,
+        termsAccepted: termsAccepted,
       ),
     );
     final session = AuthSession.tryParse(result.accessToken, result.tokenType);
@@ -474,6 +549,64 @@ class BackendClient implements PatientBackend {
   }
 
   @override
+  Future<PatientConsentRecord> updateConsent({
+    required ConsentPurpose purpose,
+    required bool granted,
+  }) async {
+    final token = await _requireToken();
+    return _guard(
+      () => _client.patients.updateConsent(accessToken: token, purpose: purpose, granted: granted),
+    );
+  }
+
+  @override
+  Future<PatientConsentRecord> acceptTermsOfUse() async {
+    final token = await _requireToken();
+    return _guard(() => _client.patients.acceptTermsOfUse(accessToken: token));
+  }
+
+  @override
+  Future<void> registerPushToken({required String token, required String platform}) async {
+    final accessToken = await _requireToken();
+    return _guard(
+      () => _client.devices
+          .registerPushToken(accessToken: accessToken, token: token, platform: platform),
+    );
+  }
+
+  @override
+  Future<TermsChangeNotice?> termsChangeNotice() async {
+    final token = await _requireToken();
+    return _guard(() => _client.patients.termsChangeNotice(accessToken: token));
+  }
+
+  @override
+  Future<bool> hasAcceptedCurrentTerms() async {
+    final token = await _requireToken();
+    return _guard(() => _client.patients.hasAcceptedCurrentTerms(accessToken: token));
+  }
+
+  @override
+  Future<bool> hasGrantedConsent(ConsentPurpose purpose) async {
+    final token = await _requireToken();
+    return _guard(() => _client.patients.hasGrantedConsent(accessToken: token, purpose: purpose));
+  }
+
+  @override
+  Future<PatientDataSubjectRequestRecord> requestDataDeletion() async {
+    final token = await _requireToken();
+    return _guard(() => _client.patients.requestDataDeletion(accessToken: token));
+  }
+
+  @override
+  Future<PatientDataSubjectRequestRecord> requestDataCorrection(String details) async {
+    final token = await _requireToken();
+    return _guard(
+      () => _client.patients.requestDataCorrection(accessToken: token, details: details),
+    );
+  }
+
+  @override
   void close() => _client.close();
 
   /// Traduz as exceções tipadas do backend para [BackendFailure].
@@ -502,6 +635,11 @@ class BackendClient implements PatientBackend {
       // Recusa do login passwordless (RF01). A mensagem é a do servidor de
       // propósito: ela já é única para todas as causas, para não dizer se
       // aquele CPF está cadastrado.
+      throw BackendFailure(error.message, isRecoverable: false);
+    } on DataRightsException catch (error) {
+      // Recusa de negócio de um direito do titular (consentimento obrigatório,
+      // texto de correção inválido). A mensagem é do servidor, pronta para a
+      // pessoa ler; tentar de novo sem mudar nada dá a mesma recusa.
       throw BackendFailure(error.message, isRecoverable: false);
     } on AlertDispatchUnavailableException {
       // O alerta FOI gravado; só a publicação imediata falhou. Dizer que

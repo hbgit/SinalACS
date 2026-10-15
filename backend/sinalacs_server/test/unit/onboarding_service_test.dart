@@ -91,7 +91,7 @@ void main() {
   });
 
   group('completeEnrollment', () {
-    test('consome o token, grava 3 consent_logs e emite sessão', () async {
+    test('consome o token, grava 4 consent_logs e emite sessão', () async {
       final generated = await service.generateToken(acs, patientId: 'patient-1');
 
       final user = await service.completeEnrollment(
@@ -100,14 +100,15 @@ void main() {
           ConsentPurpose.healthDataProcessing: true,
           ConsentPurpose.localReminders: false,
           ConsentPurpose.segmentedPush: true,
+          ConsentPurpose.termsOfUse: true,
         },
       );
 
       expect(user.id, 'patient-1');
       expect(user.role, UserRole.patient);
       expect(user.microAreaId, 'area-1');
-      expect(store.consentLogs, hasLength(3));
-      // Asserção por finalidade, não por Set: um Set de 3 ações colapsa
+      expect(store.consentLogs, hasLength(4));
+      // Asserção por finalidade, não por Set: um Set de 4 ações colapsa
       // 'granted'/'granted'/'denied' em {'granted', 'denied'} e não prova
       // qual finalidade recebeu qual ação — checar por chave é o que de fato
       // verifica que cada consentimento foi gravado com a ação correta.
@@ -115,19 +116,26 @@ void main() {
       expect(byPurpose[ConsentPurpose.healthDataProcessing], 'granted');
       expect(byPurpose[ConsentPurpose.localReminders], 'denied');
       expect(byPurpose[ConsentPurpose.segmentedPush], 'granted');
+      expect(byPurpose[ConsentPurpose.termsOfUse], 'granted');
     });
 
     test('um segundo uso do mesmo token falha, não reconsome em silêncio', () async {
       final generated = await service.generateToken(acs, patientId: 'patient-1');
       await service.completeEnrollment(
         token: generated.token,
-        consents: const {ConsentPurpose.healthDataProcessing: true},
+        consents: const {
+          ConsentPurpose.healthDataProcessing: true,
+          ConsentPurpose.termsOfUse: true,
+        },
       );
 
       expect(
         () => service.completeEnrollment(
           token: generated.token,
-          consents: const {ConsentPurpose.healthDataProcessing: true},
+          consents: const {
+          ConsentPurpose.healthDataProcessing: true,
+          ConsentPurpose.termsOfUse: true,
+        },
         ),
         throwsA(isA<EnrollmentException>()),
       );
@@ -162,10 +170,58 @@ void main() {
       expect(
         () => laterService.completeEnrollment(
           token: generated.token,
-          consents: const {ConsentPurpose.healthDataProcessing: true},
+          consents: const {
+          ConsentPurpose.healthDataProcessing: true,
+          ConsentPurpose.termsOfUse: true,
+        },
         ),
         throwsA(isA<EnrollmentException>()),
       );
+    });
+
+    test('recusa concluir sem aceitar o Termo de Uso, e o convite continua válido', () async {
+      final generated = await service.generateToken(acs, patientId: 'patient-1');
+
+      await expectLater(
+        () => service.completeEnrollment(
+          token: generated.token,
+          consents: const {
+            ConsentPurpose.healthDataProcessing: true,
+            ConsentPurpose.termsOfUse: false,
+          },
+        ),
+        throwsA(isA<EnrollmentException>().having(
+          (e) => e.message,
+          'message',
+          'É preciso aceitar o Termo de Uso e a Política de Privacidade.',
+        )),
+      );
+      expect(store.consentLogs, isEmpty);
+
+      // Mesma regra do consentimento obrigatório de saúde: a recusa não
+      // consome o convite, a pessoa pode aceitar e tentar de novo.
+      final user = await service.completeEnrollment(
+        token: generated.token,
+        consents: const {
+          ConsentPurpose.healthDataProcessing: true,
+          ConsentPurpose.termsOfUse: true,
+        },
+      );
+      expect(user.id, 'patient-1');
+    });
+
+    test('o aceite do termo leva a versão vigente dos documentos', () async {
+      final generated = await service.generateToken(acs, patientId: 'patient-1');
+      await service.completeEnrollment(
+        token: generated.token,
+        consents: const {
+          ConsentPurpose.healthDataProcessing: true,
+          ConsentPurpose.termsOfUse: true,
+        },
+      );
+      final terms = store.consentLogs.singleWhere((e) => e.purpose == ConsentPurpose.termsOfUse);
+      expect(terms.action, 'granted');
+      expect(terms.version, consentPolicyVersion);
     });
   });
 }

@@ -1,0 +1,22 @@
+### Token de push (FCM/APNs) do aparelho de um paciente que consentiu com
+### `segmentedPush` (RF14, decisão §3.2). Uma linha por token: se o mesmo token
+### aparece para outro titular, a linha muda de dono, nunca duplica.
+###
+### O token identifica um aparelho, não uma pessoa, mas junto de `userId` liga
+### aparelho a titular — por isso some na revogação do consentimento.
+class: PushToken
+table: push_tokens
+fields:
+  id: UuidValue?, defaultPersist=random
+  userId: UuidValue, relation(parent=users)
+  microAreaId: UuidValue?
+  token: String
+  platform: String
+  createdAt: DateTime
+  updatedAt: DateTime
+indexes:
+  push_tokens_token_key:
+    fields: token
+    unique: true
+  push_tokens_user_id_idx:
+    fields: userId

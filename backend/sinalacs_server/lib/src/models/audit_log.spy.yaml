@@ -33,3 +33,11 @@ indexes:
   audit_logs_sequence_idx:
     fields: sequence
     unique: true
+  ### Consulta do backoffice (#45): filtro por período e ordenação por tempo.
+  ### Medido com 50 mil linhas: Seq Scan + Sort (5 ms) -> Index Scan (0,06 ms).
+  audit_logs_timestamp_idx:
+    fields: timestamp
+  ### Filtro por ator, paginado por `sequence`. Para ator pouco frequente o
+  ### plano passa de Seq Scan para Bitmap Index Scan (1,8 ms -> 0,06 ms).
+  audit_logs_user_sequence_idx:
+    fields: userId, sequence

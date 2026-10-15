@@ -210,6 +210,7 @@ void main() {
     );
     await tester.pump();
     await tocar(tester, 'onboarding_consent_health');
+    await tocar(tester, 'onboarding_terms_accept');
     await tocar(tester, 'complete_enrollment_button');
 
     final erro = tester.widget<Text>(find.byKey(const Key('onboarding_error'))).data!;

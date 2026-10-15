@@ -1,0 +1,13 @@
+### Alerta para o backoffice. `patientLabel` é `#` + 4 hex do UUID: o backoffice
+### identifica, não qualifica (spec/lgpd_design.md). Nunca nome, CPF ou contato.
+class: AdminAlert
+fields:
+  id: String
+  patientLabel: String
+  microAreaName: String
+  riskLevel: RiskLevel
+  status: AlertStatus
+  triggeredAt: DateTime
+  escalatedAt: DateTime?
+  ### Sem reconhecimento além do prazo configurado; calculado na leitura.
+  overdue: bool

@@ -32,9 +32,14 @@ abstract class UserCredential implements _i1.SerializableModel {
     required this.parallelism,
     required this.failedAttempts,
     this.lockedUntil,
+    int? lockStreak,
     required this.createdAt,
     required this.updatedAt,
-  });
+    this.totpSecretEncrypted,
+    this.totpKeyVersion,
+    this.totpEnabledAt,
+    this.totpLastStep,
+  }) : lockStreak = lockStreak ?? 0;
 
   factory UserCredential({
     _i1.UuidValue? id,
@@ -46,8 +51,13 @@ abstract class UserCredential implements _i1.SerializableModel {
     required int parallelism,
     required int failedAttempts,
     DateTime? lockedUntil,
+    int? lockStreak,
     required DateTime createdAt,
     required DateTime updatedAt,
+    String? totpSecretEncrypted,
+    int? totpKeyVersion,
+    DateTime? totpEnabledAt,
+    int? totpLastStep,
   }) = _UserCredentialImpl;
 
   factory UserCredential.fromJson(Map<String, dynamic> jsonSerialization) {
@@ -67,12 +77,21 @@ abstract class UserCredential implements _i1.SerializableModel {
           : _i1.DateTimeJsonExtension.fromJson(
               jsonSerialization['lockedUntil'],
             ),
+      lockStreak: jsonSerialization['lockStreak'] as int?,
       createdAt: _i1.DateTimeJsonExtension.fromJson(
         jsonSerialization['createdAt'],
       ),
       updatedAt: _i1.DateTimeJsonExtension.fromJson(
         jsonSerialization['updatedAt'],
       ),
+      totpSecretEncrypted: jsonSerialization['totpSecretEncrypted'] as String?,
+      totpKeyVersion: jsonSerialization['totpKeyVersion'] as int?,
+      totpEnabledAt: jsonSerialization['totpEnabledAt'] == null
+          ? null
+          : _i1.DateTimeJsonExtension.fromJson(
+              jsonSerialization['totpEnabledAt'],
+            ),
+      totpLastStep: jsonSerialization['totpLastStep'] as int?,
     );
   }
 
@@ -103,9 +122,25 @@ abstract class UserCredential implements _i1.SerializableModel {
   /// `null` = não bloqueado.
   DateTime? lockedUntil;
 
+  /// Rodadas de bloqueio seguidas, sem um login válido no meio. Alimenta o
+  /// bloqueio progressivo (15 min x 2^lockStreak, teto 24 h). Zera no login válido.
+  int lockStreak;
+
   DateTime createdAt;
 
   DateTime updatedAt;
+
+  /// MFA por TOTP (RFC 6238). `null` = sem segredo gravado. O segredo é cifrado
+  /// (AES-256-GCM, a mesma chave dos dados clínicos); **nunca** em claro.
+  String? totpSecretEncrypted;
+
+  int? totpKeyVersion;
+
+  /// `null` = enrollment começou e não foi confirmado: a MFA ainda NÃO vale.
+  DateTime? totpEnabledAt;
+
+  /// Último passo de 30 s aceito. O mesmo código não entra duas vezes (replay).
+  int? totpLastStep;
 
   /// Returns a shallow copy of this [UserCredential]
   /// with some or all fields replaced by the given arguments.
@@ -120,8 +155,13 @@ abstract class UserCredential implements _i1.SerializableModel {
     int? parallelism,
     int? failedAttempts,
     DateTime? lockedUntil,
+    int? lockStreak,
     DateTime? createdAt,
     DateTime? updatedAt,
+    String? totpSecretEncrypted,
+    int? totpKeyVersion,
+    DateTime? totpEnabledAt,
+    int? totpLastStep,
   });
   @override
   Map<String, dynamic> toJson() {
@@ -136,8 +176,14 @@ abstract class UserCredential implements _i1.SerializableModel {
       'parallelism': parallelism,
       'failedAttempts': failedAttempts,
       if (lockedUntil != null) 'lockedUntil': lockedUntil?.toJson(),
+      'lockStreak': lockStreak,
       'createdAt': createdAt.toJson(),
       'updatedAt': updatedAt.toJson(),
+      if (totpSecretEncrypted != null)
+        'totpSecretEncrypted': totpSecretEncrypted,
+      if (totpKeyVersion != null) 'totpKeyVersion': totpKeyVersion,
+      if (totpEnabledAt != null) 'totpEnabledAt': totpEnabledAt?.toJson(),
+      if (totpLastStep != null) 'totpLastStep': totpLastStep,
     };
   }
 
@@ -160,8 +206,13 @@ class _UserCredentialImpl extends UserCredential {
     required int parallelism,
     required int failedAttempts,
     DateTime? lockedUntil,
+    int? lockStreak,
     required DateTime createdAt,
     required DateTime updatedAt,
+    String? totpSecretEncrypted,
+    int? totpKeyVersion,
+    DateTime? totpEnabledAt,
+    int? totpLastStep,
   }) : super._(
          id: id,
          userId: userId,
@@ -172,8 +223,13 @@ class _UserCredentialImpl extends UserCredential {
          parallelism: parallelism,
          failedAttempts: failedAttempts,
          lockedUntil: lockedUntil,
+         lockStreak: lockStreak,
          createdAt: createdAt,
          updatedAt: updatedAt,
+         totpSecretEncrypted: totpSecretEncrypted,
+         totpKeyVersion: totpKeyVersion,
+         totpEnabledAt: totpEnabledAt,
+         totpLastStep: totpLastStep,
        );
 
   /// Returns a shallow copy of this [UserCredential]
@@ -190,8 +246,13 @@ class _UserCredentialImpl extends UserCredential {
     int? parallelism,
     int? failedAttempts,
     Object? lockedUntil = _Undefined,
+    int? lockStreak,
     DateTime? createdAt,
     DateTime? updatedAt,
+    Object? totpSecretEncrypted = _Undefined,
+    Object? totpKeyVersion = _Undefined,
+    Object? totpEnabledAt = _Undefined,
+    Object? totpLastStep = _Undefined,
   }) {
     return UserCredential(
       id: id is _i1.UuidValue? ? id : this.id,
@@ -203,8 +264,19 @@ class _UserCredentialImpl extends UserCredential {
       parallelism: parallelism ?? this.parallelism,
       failedAttempts: failedAttempts ?? this.failedAttempts,
       lockedUntil: lockedUntil is DateTime? ? lockedUntil : this.lockedUntil,
+      lockStreak: lockStreak ?? this.lockStreak,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
+      totpSecretEncrypted: totpSecretEncrypted is String?
+          ? totpSecretEncrypted
+          : this.totpSecretEncrypted,
+      totpKeyVersion: totpKeyVersion is int?
+          ? totpKeyVersion
+          : this.totpKeyVersion,
+      totpEnabledAt: totpEnabledAt is DateTime?
+          ? totpEnabledAt
+          : this.totpEnabledAt,
+      totpLastStep: totpLastStep is int? ? totpLastStep : this.totpLastStep,
     );
   }
 }

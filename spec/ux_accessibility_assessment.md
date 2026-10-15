@@ -122,7 +122,7 @@ passava pelo mapeamento, confirmado e corrigido junto com a auditoria de contras
 | Paciente | Botões de Login e Envio de Triagem | `48 x 52 dp` | 48 x 48 dp | Conforme |
 | ACS | Ações de Login, Confirmar Recebimento e Sincronizar | `48 x 52 dp` | 48 x 48 dp | Conforme |
 | ACS | "Ligar para o SAMU (192)" | ~~`48x52 dp`~~ **sem `minimumSize` → 40dp de altura visual** | 60 x 60 dp | **Corrigido para `64x60 dp`** — a medição anterior ("48x52 dp") estava incorreta; o botão não declarava `minimumSize` e caía no default do Material 3. |
-| ACS | "Salvar e enfileirar sincronização", "Descartar recusada(s)", "Encaminhar para UBS Central", "Iniciar rota de visita" (escalonamento) | sem `minimumSize` (40dp) | 48 x 48 dp | **Corrigido para `48x52 dp`**, não detectados no relatório anterior |
+| ACS | "Salvar e enfileirar sincronização", "Descartar recusada(s)", "Ligar para a UBS", "Iniciar rota de visita" (escalonamento) | sem `minimumSize` (40dp) | 48 x 48 dp | **Corrigido para `48x52 dp`**, não detectados no relatório anterior |
 
 Reprodução: `meetsGuideline(androidTapTargetGuideline)` em ambos os apps (`login_flow_test.dart`,
 `patient_app_mvp_test.dart`).

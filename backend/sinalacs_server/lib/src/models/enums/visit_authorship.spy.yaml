@@ -1,0 +1,11 @@
+### Quem é o autor de uma visita (D4 do plano 2026-10-03).
+###
+### `acs`: o ACS da sessão que a enviou por `visits.sync` — `visits.acsId` é
+### ele. `legacyUnclaimed`: visita gravada no aparelho antes de existir dono por
+### visita (migração v7 do banco local do app); a autoria é DESCONHECIDA e
+### `visits.acsId` fica nulo. Só `visits.syncLegacy` grava este valor.
+enum: VisitAuthorship
+serialized: byName
+values:
+  - acs
+  - legacyUnclaimed

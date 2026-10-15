@@ -1,0 +1,34 @@
+### Refresh token do ACS (LGPD-RT06). Uma linha por token emitido; os tokens de
+### um mesmo login formam uma *família* (`familyId`) e a rotação encadeia
+### dentro dela.
+###
+### **Nunca** o token: só o SHA-256 dele em hex. O token é 256 bits aleatórios,
+### então um hash simples basta (não há senha humana para adivinhar).
+class: AcsRefreshToken
+table: acs_refresh_tokens
+fields:
+  id: UuidValue?, defaultPersist=random
+  userId: UuidValue, relation(parent=users)
+  ### Todos os tokens nascidos do mesmo login por senha+TOTP.
+  familyId: UuidValue
+  tokenHash: String
+  ### Aparelho que recebeu o token. Token apresentado por outro aparelho
+  ### revoga a família.
+  deviceId: String
+  issuedAt: DateTime
+  ### Janela ociosa: renovada a cada rotação, nunca além de `absoluteExpiresAt`.
+  idleExpiresAt: DateTime
+  ### Teto do turno, fixado no login por senha+TOTP e herdado pelos filhos.
+  absoluteExpiresAt: DateTime
+  ### `null` = ainda não usado. Preenchido na rotação.
+  rotatedAt: DateTime?
+  ### `null` = vigente. Preenchido na revogação da família ou no logout.
+  revokedAt: DateTime?
+indexes:
+  acs_refresh_tokens_hash_key:
+    fields: tokenHash
+    unique: true
+  acs_refresh_tokens_family_idx:
+    fields: familyId
+  acs_refresh_tokens_user_idx:
+    fields: userId

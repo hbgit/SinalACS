@@ -14,6 +14,7 @@
 import 'package:serverpod_client/serverpod_client.dart' as _i1;
 import 'enums/risk_level.dart' as _i2;
 import 'enums/alert_status.dart' as _i3;
+import 'enums/escalation_reason.dart' as _i4;
 
 /// Alerta de urgência disparado pelo paciente.
 ///
@@ -38,6 +39,9 @@ abstract class Alert implements _i1.SerializableModel {
     required this.deviceId,
     required this.retryCount,
     required this.version,
+    this.escalatedAt,
+    this.escalatedBy,
+    this.escalationReason,
   });
 
   factory Alert({
@@ -57,6 +61,9 @@ abstract class Alert implements _i1.SerializableModel {
     required String deviceId,
     required int retryCount,
     required int version,
+    DateTime? escalatedAt,
+    _i1.UuidValue? escalatedBy,
+    _i4.EscalationReason? escalationReason,
   }) = _AlertImpl;
 
   factory Alert.fromJson(Map<String, dynamic> jsonSerialization) {
@@ -101,6 +108,21 @@ abstract class Alert implements _i1.SerializableModel {
       deviceId: jsonSerialization['deviceId'] as String,
       retryCount: jsonSerialization['retryCount'] as int,
       version: jsonSerialization['version'] as int,
+      escalatedAt: jsonSerialization['escalatedAt'] == null
+          ? null
+          : _i1.DateTimeJsonExtension.fromJson(
+              jsonSerialization['escalatedAt'],
+            ),
+      escalatedBy: jsonSerialization['escalatedBy'] == null
+          ? null
+          : _i1.UuidValueJsonExtension.fromJson(
+              jsonSerialization['escalatedBy'],
+            ),
+      escalationReason: jsonSerialization['escalationReason'] == null
+          ? null
+          : _i4.EscalationReason.fromJson(
+              (jsonSerialization['escalationReason'] as String),
+            ),
     );
   }
 
@@ -141,6 +163,13 @@ abstract class Alert implements _i1.SerializableModel {
 
   int version;
 
+  /// Escalonamento pelo backoffice (#44). Anuláveis: alerta não escalonado.
+  DateTime? escalatedAt;
+
+  _i1.UuidValue? escalatedBy;
+
+  _i4.EscalationReason? escalationReason;
+
   /// Returns a shallow copy of this [Alert]
   /// with some or all fields replaced by the given arguments.
   @_i1.useResult
@@ -161,6 +190,9 @@ abstract class Alert implements _i1.SerializableModel {
     String? deviceId,
     int? retryCount,
     int? version,
+    DateTime? escalatedAt,
+    _i1.UuidValue? escalatedBy,
+    _i4.EscalationReason? escalationReason,
   });
   @override
   Map<String, dynamic> toJson() {
@@ -182,6 +214,10 @@ abstract class Alert implements _i1.SerializableModel {
       'deviceId': deviceId,
       'retryCount': retryCount,
       'version': version,
+      if (escalatedAt != null) 'escalatedAt': escalatedAt?.toJson(),
+      if (escalatedBy != null) 'escalatedBy': escalatedBy?.toJson(),
+      if (escalationReason != null)
+        'escalationReason': escalationReason?.toJson(),
     };
   }
 
@@ -211,6 +247,9 @@ class _AlertImpl extends Alert {
     required String deviceId,
     required int retryCount,
     required int version,
+    DateTime? escalatedAt,
+    _i1.UuidValue? escalatedBy,
+    _i4.EscalationReason? escalationReason,
   }) : super._(
          id: id,
          patientId: patientId,
@@ -228,6 +267,9 @@ class _AlertImpl extends Alert {
          deviceId: deviceId,
          retryCount: retryCount,
          version: version,
+         escalatedAt: escalatedAt,
+         escalatedBy: escalatedBy,
+         escalationReason: escalationReason,
        );
 
   /// Returns a shallow copy of this [Alert]
@@ -251,6 +293,9 @@ class _AlertImpl extends Alert {
     String? deviceId,
     int? retryCount,
     int? version,
+    Object? escalatedAt = _Undefined,
+    Object? escalatedBy = _Undefined,
+    Object? escalationReason = _Undefined,
   }) {
     return Alert(
       id: id is _i1.UuidValue? ? id : this.id,
@@ -273,6 +318,13 @@ class _AlertImpl extends Alert {
       deviceId: deviceId ?? this.deviceId,
       retryCount: retryCount ?? this.retryCount,
       version: version ?? this.version,
+      escalatedAt: escalatedAt is DateTime? ? escalatedAt : this.escalatedAt,
+      escalatedBy: escalatedBy is _i1.UuidValue?
+          ? escalatedBy
+          : this.escalatedBy,
+      escalationReason: escalationReason is _i4.EscalationReason?
+          ? escalationReason
+          : this.escalationReason,
     );
   }
 }

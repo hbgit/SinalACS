@@ -1,0 +1,10 @@
+### Ciclo de um aviso agendado. `sending` é a reserva atômica anti-duplicidade.
+enum: ScheduledNoticeStatus
+serialized: byName
+values:
+  - pending
+  - sending
+  - sent
+  - unknown
+  - failed
+  - cancelled

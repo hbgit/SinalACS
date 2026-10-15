@@ -13,14 +13,18 @@
 
 import 'package:serverpod/serverpod.dart' as _i1;
 
-/// As três finalidades de consentimento do onboarding (decisão §2.2 de
+/// As finalidades de consentimento do onboarding (decisão §2.2 de
 /// docs/superpowers/specs/2026-09-16-decisoes-produto-pos-validacao.md).
-/// `healthDataProcessing` é obrigatória para usar o app; as outras duas
-/// podem ser recusadas sem impedir o restante do fluxo.
+/// `healthDataProcessing` e `termsOfUse` são obrigatórias para usar o app;
+/// as outras duas podem ser recusadas sem impedir o restante do fluxo.
+/// `termsOfUse` registra o aceite do Termo de Uso e da Política de
+/// Privacidade na versão `consentPolicyVersion` (LGPD-RF18/RF19) — não é
+/// consentimento revogável pelo painel, é a condição de uso do app.
 enum ConsentPurpose implements _i1.SerializableModel {
   healthDataProcessing,
   localReminders,
-  segmentedPush;
+  segmentedPush,
+  termsOfUse;
 
   static ConsentPurpose fromJson(String name) {
     switch (name) {
@@ -30,6 +34,8 @@ enum ConsentPurpose implements _i1.SerializableModel {
         return ConsentPurpose.localReminders;
       case 'segmentedPush':
         return ConsentPurpose.segmentedPush;
+      case 'termsOfUse':
+        return ConsentPurpose.termsOfUse;
       default:
         throw ArgumentError(
           'Value "$name" cannot be converted to "ConsentPurpose"',

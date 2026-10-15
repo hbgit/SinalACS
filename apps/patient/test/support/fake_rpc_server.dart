@@ -60,6 +60,10 @@ class FakeRpcServer {
   /// Idem para `verifyOtp`.
   String? rejectVerifyWith;
 
+  /// Definida, faz `updateConsent`/`requestDataDeletion`/`requestDataCorrection`
+  /// recusarem com esta mensagem, no formato de `DataRightsException`.
+  String? rejectDataRightsWith;
+
   /// Endereço para passar a `BackendClient(host: ...)`. Porta efêmera do SO:
   /// dois testes em paralelo não brigam por porta.
   String get host => 'http://127.0.0.1:${_server.port}/';
@@ -97,6 +101,19 @@ class FakeRpcServer {
       await _respond(request, HttpStatus.badRequest, {
         'className': 'OtpRequestException',
         'data': {'__className__': 'OtpRequestException', 'message': recusa},
+      });
+      return;
+    }
+
+    final recusaDeDireitos = switch (method) {
+      'updateConsent' || 'requestDataDeletion' || 'requestDataCorrection' =>
+        rejectDataRightsWith,
+      _ => null,
+    };
+    if (recusaDeDireitos != null) {
+      await _respond(request, HttpStatus.badRequest, {
+        'className': 'DataRightsException',
+        'data': {'__className__': 'DataRightsException', 'message': recusaDeDireitos},
       });
       return;
     }

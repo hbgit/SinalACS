@@ -1,0 +1,8 @@
+### Aviso de mudança dos termos (LGPD-RF18): a versão que passa a valer, a data
+### de vigência e um resumo do que muda. Publicado com pelo menos 15 dias de
+### antecedência (`TermsChangeSchedule`). Só texto público; nada do titular.
+class: TermsChangeNotice
+fields:
+  version: String
+  effectiveFrom: DateTime
+  summary: String

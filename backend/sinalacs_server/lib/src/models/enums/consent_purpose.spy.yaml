@@ -1,10 +1,14 @@
-### As três finalidades de consentimento do onboarding (decisão §2.2 de
+### As finalidades de consentimento do onboarding (decisão §2.2 de
 ### docs/superpowers/specs/2026-09-16-decisoes-produto-pos-validacao.md).
-### `healthDataProcessing` é obrigatória para usar o app; as outras duas
-### podem ser recusadas sem impedir o restante do fluxo.
+### `healthDataProcessing` e `termsOfUse` são obrigatórias para usar o app;
+### as outras duas podem ser recusadas sem impedir o restante do fluxo.
+### `termsOfUse` registra o aceite do Termo de Uso e da Política de
+### Privacidade na versão `consentPolicyVersion` (LGPD-RF18/RF19) — não é
+### consentimento revogável pelo painel, é a condição de uso do app.
 enum: ConsentPurpose
 serialized: byName
 values:
   - healthDataProcessing
   - localReminders
   - segmentedPush
+  - termsOfUse

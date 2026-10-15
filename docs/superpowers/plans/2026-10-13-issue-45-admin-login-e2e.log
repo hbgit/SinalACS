@@ -1,0 +1,51 @@
+# Issue #45 — regressão do admin_login_e2e.sh (Task 8 editou o .sh/.dart para 5 recursos admin_*), emulator-5554, 2026-10-13
+# Comando: ./scripts/qa/admin_login_e2e.sh — PASSOU na 1ª execução; a contagem 5 confere (sem correção).
+== stack de e2e (banco de teste)
+NOTICE:  database "sinalacs_e2e" does not exist, skipping
+Fixtures de e2e gravadas (5 pacientes, 2 ACS, 1 admin, 1 coordenador) em ../../.e2e/fixtures.json.
+== login do backoffice no emulador
+Resolving dependencies...
+Downloading packages...
+  clock 1.1.2 (1.1.3 available)
+  flutter_lints 3.0.2 (6.0.0 available)
+  intl 0.20.2 (0.20.3 available)
+  lints 3.0.0 (6.1.0 available)
+  matcher 0.12.19 (0.12.20 available)
+  material_color_utilities 0.13.0 (0.13.1 available)
+  meta 1.18.0 (1.19.0 available)
+  qr 3.0.2 (4.0.0 available)
+  serverpod_auth_core_client 3.4.13 (4.0.4 available)
+  serverpod_auth_idp_client 3.4.13 (4.0.4 available)
+  serverpod_client 3.4.13 (4.0.4 available)
+  serverpod_serialization 3.4.13 (4.0.4 available)
+  stack_trace 1.12.1 (1.12.2 available)
+  test_api 0.7.11 (0.7.15 available)
+  vector_math 2.2.0 (2.4.3 available)
+Got dependencies!
+15 packages have newer versions incompatible with dependency constraints.
+Try `flutter pub outdated` for more information.
+00:00 +0: loading /home/rock/Documents/Dev/APPs/SinalACS/apps/admin/integration_test/admin_login_e2e.dart
+Running Gradle task 'assembleDebug'...                          
+WARNING: A restricted method in java.lang.System has been called
+WARNING: java.lang.System::load has been called by net.rubygrapefruit.platform.internal.NativeLibraryLoader in an unnamed module (file:/home/rock/.gradle/wrapper/dists/gradle-9.1.0-all/7wzd0jkjit61aq2p43wpjgij9/gradle-9.1.0/lib/native-platform-0.22-milestone-28.jar)
+WARNING: Use --enable-native-access=ALL-UNNAMED to avoid a warning for callers in this module
+WARNING: Restricted methods will be blocked in a future release unless native access is enabled
+
+Running Gradle task 'assembleDebug'...                              8.6s
+✓ Built build/app/outputs/flutter-apk/app-debug.apk
+Installing build/app/outputs/flutter-apk/app-debug.apk...          496ms
+00:00 +0: senha errada: recusa com a mensagem genérica e o painel não abre
+00:02 +1: código de ativação errado: recusado, e o QR não aparece (#48)
+00:04 +2: primeiro acesso: pede a ativação da MFA, mostra o segredo e confirma com o código
+00:07 +3: código TOTP errado: recusado, e o painel não abre
+00:09 +4: com o código do passo seguinte à ativação, o login abre o Painel de Indicadores
+00:13 +5: (tearDownAll)
+00:13 +5: All tests passed!
+== conta de staff no banco de teste
+  TOTP ativado e passo registrado: true|true
+  código de ativação apagado após a ativação: true|true
+  leituras do painel auditadas (5 recursos, read/success): 5|true
+  tentativas falhas zeradas pelo login: 0
+OK — login real do backoffice contra o banco de teste
+A stack de desenvolvimento foi substituída pela de e2e: rode `docker compose up -d` para voltá-la.
+exit=0

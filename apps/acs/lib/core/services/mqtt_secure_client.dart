@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
 import 'package:mqtt_client/mqtt_client.dart';
@@ -68,6 +69,24 @@ String? mqttRefusalReason(MqttConnectReturnCode? code) => switch (code) {
 bool mqttRefusalIsTransient(MqttConnectReturnCode? code) =>
     code == MqttConnectReturnCode.brokerUnavailable;
 
+/// Contexto TLS do cliente MQTT: confia **só** na CA do projeto e, se houver
+/// certificado de cliente, o apresenta (mTLS). Hostname segue verificado.
+SecurityContext buildMqttSecurityContext(SecureMqttConfig config) {
+  final contexto = SecurityContext(withTrustedRoots: false);
+  final ca = config.caCertificate;
+  if (ca != null) {
+    contexto.setTrustedCertificatesBytes(ca);
+  }
+  final cert = config.clientCertificate;
+  final chave = config.clientPrivateKey;
+  if (cert != null && chave != null) {
+    contexto
+      ..useCertificateChainBytes(cert)
+      ..usePrivateKeyBytes(chave);
+  }
+  return contexto;
+}
+
 class SecureMqttConfig {
   const SecureMqttConfig({
     required this.brokerHost,
@@ -79,6 +98,8 @@ class SecureMqttConfig {
     this.username,
     this.password,
     this.caCertificate,
+    this.clientCertificate,
+    this.clientPrivateKey,
   });
 
   final String brokerHost;
@@ -102,6 +123,11 @@ class SecureMqttConfig {
   /// dentro do APK, onde não existe caminho no sistema de arquivos.
   final List<int>? caCertificate;
 
+  /// Certificado e chave privada de CLIENTE (PEM) para o mTLS do broker. Só
+  /// valem juntos; sem os dois, o cliente não apresenta certificado.
+  final Uint8List? clientCertificate;
+  final Uint8List? clientPrivateKey;
+
   String get connectionUri {
     if (useWebSocket) {
       final scheme = useTls ? 'wss' : 'ws';
@@ -122,6 +148,7 @@ class ReceivedMqttAlert {
     required this.locationHash,
     this.locationCell,
     required this.triggeredAt,
+    this.escalated = false,
   });
 
   final String alertId;
@@ -136,6 +163,11 @@ class ReceivedMqttAlert {
   /// fabrica posição a partir de [locationHash].
   final String? locationCell;
   final DateTime triggeredAt;
+
+  /// Reforço da coordenação (#44): o backend republica o MESMO alerta com
+  /// `"escalated": true`. Opcional; só `true` literal conta — ausente, `false`
+  /// ou de outro tipo é `false`. Não carrega identidade de quem escalonou.
+  final bool escalated;
 
   static ReceivedMqttAlert? tryParse(String body) {
     try {
@@ -153,6 +185,7 @@ class ReceivedMqttAlert {
         locationHash: (json['location_hash'] as String?) ?? (json['location_hash'] ?? 'unknown') as String,
         locationCell: json['location_cell'] as String?,
         triggeredAt: DateTime.parse(triggeredAtRaw),
+        escalated: json['escalated'] == true,
       );
     } on FormatException {
       return null;
@@ -287,8 +320,7 @@ class MqttSecureClient {
       // é o que o certificado com subjectAltName (infra/docker/mosquitto/init.sh)
       // passou a satisfazer. Não desligue com `onBadCertificate`: seria abrir o
       // caminho de spoofing do tópico de alertas.
-      client.securityContext = SecurityContext(withTrustedRoots: false)
-        ..setTrustedCertificatesBytes(caCertificate);
+      client.securityContext = buildMqttSecurityContext(config);
     }
 
     // O cliente é assumido ANTES de conectar. Com `autoReconnect`, uma falha de

@@ -1,0 +1,360 @@
+/* @theme sinalacs
+ *
+ * Tema Marp para o deck de showcase do SinalACS — versão fundo claro,
+ * a pedido do orientador.
+ *
+ * Nota sobre a mudança de fundo escuro -> branco: os apps do SinalACS
+ * usam tema escuro nativamente, mas o deck de apresentação é uma peça
+ * separada — não precisa espelhar 1:1 os tokens de cada *_theme.dart.
+ * Por isso a distinção .app-patient (que antes ajustava surface/border
+ * para bater com o tom mais frio do tema escuro do app Paciente) foi
+ * removida: num fundo branco essa diferença deixa de fazer sentido.
+ *
+ * Todas as cores de texto e marcador de risco abaixo foram trocadas
+ * por variantes mais escuras (equivalentes a Tailwind *-700/-800) para
+ * manter contraste AA contra fundo branco — as cores originais do app
+ * (mais claras, pensadas para contraste contra fundo escuro) ficariam
+ * ilegíveis aqui. As cores "fill" saturadas (usadas em fundo de
+ * etiqueta com texto branco) foram mantidas.
+ */
+
+section {
+  --bg: #ffffff;
+  --surface: #f3f4f6;
+  --surface-raised: #e5e7eb;
+  --border: #d1d5db;
+  --text: #111827;
+  --text-muted: #4b5563;
+
+  --patient-fill: #0d9488;
+  --patient-text: #0f766e;
+  --acs-fill: #2563eb;
+  --acs-text: #1d4ed8;
+  --admin-fill: #4f46e5;
+  --admin-text: #4338ca;
+
+  /* Marcador (borda/fundo saturado) vs. texto (variante escura, AA) */
+  --risk-red: #dc2626;
+  --risk-red-text: #b91c1c;
+  --risk-yellow: #f59e0b;
+  --risk-yellow-text: #b45309;
+  --risk-green: #10b981;
+  --risk-green-text: #047857;
+
+  background: var(--bg);
+  color: var(--text);
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 24px;
+  padding: 56px 64px;
+}
+
+h1 {
+  font-size: 44px;
+  font-weight: 700;
+  color: var(--text);
+  margin: 0 0 8px 0;
+}
+
+h2 {
+  font-size: 36px;
+  font-weight: 700;
+  color: var(--text);
+  margin: 0 0 16px 0;
+}
+
+p, li {
+  font-size: 22px;
+  line-height: 1.5;
+}
+
+strong {
+  color: var(--text);
+}
+
+a {
+  color: var(--acs-text);
+}
+
+/* ---------- Capa ---------- */
+section.cover {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 96px;
+}
+section.cover h1 {
+  font-size: 64px;
+  margin-bottom: 4px;
+}
+section.cover .tagline {
+  font-size: 26px;
+  color: var(--text-muted);
+  margin-bottom: 40px;
+}
+section.cover .kicker {
+  display: inline-block;
+  font-size: 16px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--acs-text);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 6px 16px;
+  margin-bottom: 24px;
+}
+
+/* ---------- Cartela central (frases-chave, arquitetura, cartelas de bloco) ---------- */
+section.statement {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+}
+section.statement h1 {
+  font-size: 48px;
+  max-width: 900px;
+}
+section.statement p {
+  max-width: 760px;
+  color: var(--text-muted);
+}
+
+/* ---------- Layout dividido: moldura de tela à esquerda, texto à direita ---------- */
+.split {
+  display: flex;
+  align-items: center;
+  gap: 56px;
+  height: 100%;
+}
+.split .frame-col {
+  flex: 0 0 38%;
+  display: flex;
+  justify-content: center;
+}
+.split .info-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+.split .info-col ul {
+  margin: 0;
+  padding-left: 24px;
+}
+.split .info-col li {
+  margin-bottom: 10px;
+}
+
+/* Moldura de celular simplificada — usar mockuphone.com/Figma para a
+   versão final se quiser um bezel realista; isto já é suficiente para
+   revisão em PR. Bezel preto funciona igual em fundo claro ou escuro. */
+.phone-frame {
+  width: 260px;
+  border: 10px solid #000;
+  border-radius: 36px;
+  background: #000;
+  box-shadow: 0 12px 32px rgba(17, 24, 39, 0.18);
+  overflow: hidden;
+}
+.phone-frame img {
+  display: block;
+  width: 100%;
+  border-radius: 8px;
+}
+
+/* Duas telas lado a lado (uso pontual, no máximo) */
+.phone-pair {
+  display: flex;
+  gap: 24px;
+}
+.phone-pair .phone-frame {
+  width: 200px;
+}
+
+/* Placeholder para capturas ainda não feitas — visível de propósito,
+   para não deixar passar despercebido num export de PDF. */
+.placeholder {
+  width: 260px;
+  aspect-ratio: 9 / 19.5;
+  border: 2px dashed #9ca3af;
+  border-radius: 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 24px;
+  color: var(--text-muted);
+  font-size: 16px;
+  background: var(--surface);
+}
+.placeholder .icon {
+  font-size: 32px;
+  margin-bottom: 12px;
+}
+
+/* Trio de placeholders menores, para slides que resumem 3 telas */
+.placeholder-row {
+  display: flex;
+  gap: 20px;
+}
+.placeholder-row .placeholder {
+  width: 150px;
+  font-size: 13px;
+}
+
+/* ---------- Etiqueta de app (rodapé do slide de tela) ---------- */
+.app-tag {
+  position: absolute;
+  bottom: 32px;
+  left: 64px;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 6px 16px;
+  border-radius: 999px;
+}
+.app-tag.patient {
+  background: var(--patient-fill);
+  color: #ffffff;
+}
+.app-tag.acs {
+  background: var(--acs-fill);
+  color: #ffffff;
+}
+.app-tag.admin {
+  background: var(--admin-fill);
+  color: #ffffff;
+}
+
+/* ---------- Chips de risco — reservados exclusivamente para
+   classificação clínica (ver spec/ui_design.md); nunca usar como
+   decoração genérica. Marcador (border-left) na cor saturada do app;
+   texto na variante escura, para manter contraste AA em fundo claro. */
+.risk-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 15px;
+  font-weight: 700;
+  padding: 4px 12px;
+  border-radius: 8px;
+  border-left: 4px solid transparent;
+  background: var(--surface-raised);
+}
+.risk-chip.red { border-left-color: var(--risk-red); color: var(--risk-red-text); }
+.risk-chip.yellow { border-left-color: var(--risk-yellow); color: var(--risk-yellow-text); }
+.risk-chip.green { border-left-color: var(--risk-green); color: var(--risk-green-text); }
+
+/* ---------- Card genérico (arquitetura, colunas do slide 3, LGPD) ---------- */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 24px;
+}
+.card h3 {
+  font-size: 20px;
+  margin: 0 0 8px 0;
+  color: var(--text);
+}
+.card p {
+  font-size: 16px;
+  color: var(--text-muted);
+  margin: 0;
+}
+.card-grid {
+  display: grid;
+  gap: 20px;
+}
+.card-grid.cols-3 { grid-template-columns: repeat(3, 1fr); }
+.card-grid.cols-4 { grid-template-columns: repeat(4, 1fr); }
+
+/* ---------- Roadmap (barra de fases) ---------- */
+.roadmap {
+  display: flex;
+  gap: 16px;
+  margin-top: 24px;
+}
+.roadmap .phase {
+  flex: 1;
+  border-radius: 12px;
+  padding: 16px;
+  border: 1px solid var(--border);
+}
+.roadmap .phase.done {
+  background: #ecfdf5;
+  border-color: var(--risk-green);
+}
+.roadmap .phase.pending {
+  background: var(--surface);
+  color: var(--text-muted);
+}
+.roadmap .phase .status {
+  font-size: 14px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.roadmap .phase.done .status { color: var(--risk-green-text); }
+
+/* Selo de "alvo"/"hipótese" — obrigatório em qualquer métrica ainda
+   não medida em campo (ver guardrails do roteiro de vídeo). */
+.badge-target {
+  display: inline-block;
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--risk-yellow-text);
+  border: 1px solid var(--risk-yellow);
+  border-radius: 6px;
+  padding: 2px 8px;
+  margin-left: 8px;
+}
+
+/* Selo de roadmap/stub — para mapa, geofencing, SAMU, push */
+.badge-roadmap {
+  display: inline-block;
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 2px 8px;
+  margin-left: 8px;
+}
+
+/* ---------- Encerramento ---------- */
+section.closing {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+}
+section.closing .bignums {
+  display: flex;
+  gap: 48px;
+  margin: 32px 0;
+}
+section.closing .bignums .num {
+  font-size: 56px;
+  font-weight: 700;
+  color: var(--acs-text);
+}
+section.closing .bignums .label {
+  font-size: 16px;
+  color: var(--text-muted);
+}
+
+/* Rodapé padrão do Marp (paginação) */
+section::after {
+  color: var(--text-muted);
+  font-size: 14px;
+}

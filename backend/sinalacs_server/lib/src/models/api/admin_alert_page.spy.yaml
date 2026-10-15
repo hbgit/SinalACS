@@ -1,0 +1,5 @@
+### Página de alertas. `nextOffset` nulo = não há mais páginas.
+class: AdminAlertPage
+fields:
+  items: List<AdminAlert>
+  nextOffset: int?

@@ -1,0 +1,6 @@
+### Contato da UBS do ACS autenticado (RF13). Só o que o botão "Ligar para a UBS"
+### precisa: o nome para a mensagem e o telefone para o discador.
+class: UbsContact
+fields:
+  name: String
+  phone: String?

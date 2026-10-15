@@ -1,3 +1,21 @@
+import 'package:sinalacs_server/src/application/audit/audit_chain.dart';
+import 'package:sinalacs_server/src/application/admin/admin_account_service.dart';
+import 'package:sinalacs_server/src/application/admin/admin_monitoring_service.dart';
+import 'package:sinalacs_server/src/application/admin/admin_read_service.dart';
+import 'package:sinalacs_server/src/application/admin/alert_escalation_service.dart';
+import 'package:sinalacs_server/src/application/admin/audit_chain_status_service.dart';
+import 'package:sinalacs_server/src/application/admin/audit_export_service.dart';
+import 'package:sinalacs_server/src/application/admin/data_subject_case_service.dart';
+import 'package:sinalacs_server/src/infrastructure/database/orm_data_subject_case_store.dart';
+import 'package:sinalacs_server/src/infrastructure/database/orm_admin_account_store.dart';
+import 'package:sinalacs_server/src/infrastructure/database/orm_admin_read_store.dart';
+import 'package:sinalacs_server/src/infrastructure/database/orm_audit_checkpoint_store.dart';
+import 'package:sinalacs_server/src/infrastructure/database/orm_audit_export_store.dart';
+import 'package:sinalacs_server/src/infrastructure/database/orm_alert_escalation_store.dart';
+import 'package:sinalacs_server/src/application/notices/notice_scheduling_service.dart';
+import 'package:sinalacs_server/src/infrastructure/database/orm_scheduled_notice_store.dart';
+import 'package:sinalacs_server/src/infrastructure/database/orm_terms_version_store.dart';
+import 'package:sinalacs_server/src/application/patients/terms_publication_service.dart';
 import 'package:meta/meta.dart';
 import 'package:serverpod/serverpod.dart';
 import 'package:sinalacs_server/src/application/alerts/alert_outbox_dispatcher.dart';
@@ -6,27 +24,43 @@ import 'package:sinalacs_server/src/application/audit/audit_trail.dart';
 import 'package:sinalacs_server/src/application/auth/development_auth_service.dart';
 import 'package:sinalacs_server/src/application/auth/cpf_hasher.dart';
 import 'package:sinalacs_server/src/application/auth/institutional_auth_service.dart';
+import 'package:sinalacs_server/src/application/auth/refresh_token_service.dart';
+import 'package:sinalacs_server/src/application/auth/upload_token_service.dart';
 import 'package:sinalacs_server/src/application/auth/password_hasher.dart';
 import 'package:sinalacs_server/src/application/auth/passwordless_auth_service.dart';
 import 'package:sinalacs_server/src/application/auth/sms_gateway.dart';
 import 'package:sinalacs_server/src/application/onboarding/onboarding_service.dart';
+import 'package:sinalacs_server/src/application/patients/data_subject_rights_service.dart';
 import 'package:sinalacs_server/src/application/patients/patient_data_overview_service.dart';
 import 'package:sinalacs_server/src/application/patients/patient_directory_service.dart';
 import 'package:sinalacs_server/src/application/triage/triage_session_service.dart';
+import 'package:sinalacs_server/src/application/ubs/ubs_contact_service.dart';
 import 'package:sinalacs_server/src/application/visits/visit_sync_service.dart';
 import 'package:sinalacs_server/src/config/app_config.dart';
 import 'package:sinalacs_server/src/infrastructure/crypto/argon2_password_hasher.dart';
+import 'package:sinalacs_server/src/infrastructure/crypto/health_cipher_totp_vault.dart';
 import 'package:sinalacs_server/src/infrastructure/crypto/health_data_cipher.dart';
 import 'package:sinalacs_server/src/infrastructure/crypto/hmac_cpf_hasher.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_acs_credential_store.dart';
+import 'package:sinalacs_server/src/infrastructure/database/orm_refresh_token_store.dart';
+import 'package:sinalacs_server/src/infrastructure/database/orm_upload_token_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_alert_outbox.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_alert_store.dart';
+import 'package:sinalacs_server/src/infrastructure/database/orm_audit_chain_reader.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_audit_trail.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_onboarding_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_otp_challenge_store.dart';
+import 'package:sinalacs_server/src/infrastructure/database/orm_data_subject_rights_store.dart';
+import 'package:sinalacs_server/src/infrastructure/database/orm_notice_recipient_store.dart';
+import 'package:sinalacs_server/src/infrastructure/database/orm_push_token_store.dart';
+import 'package:sinalacs_server/src/infrastructure/push/data_subject_push_notifier.dart';
+import 'package:sinalacs_server/src/infrastructure/push/gorush_client.dart';
+import 'package:sinalacs_server/src/application/notices/notice_service.dart';
+import 'package:sinalacs_server/src/application/patients/push_token_service.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_patient_data_overview_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_patient_directory_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_triage_session_store.dart';
+import 'package:sinalacs_server/src/infrastructure/database/orm_ubs_contact_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_visit_store.dart';
 import 'package:sinalacs_server/src/infrastructure/mqtt/mqtt_alert_dispatcher.dart';
 
@@ -44,6 +78,12 @@ class AlertRuntime {
   static final AlertRuntime instance = AlertRuntime._();
 
   AppConfig? _config;
+  PushSender? Function()? _noticeSenderOverride;
+
+  /// Um único [GorushClient] por processo (e por URL): um `HttpClient` novo por
+  /// requisição nunca era fechado.
+  GorushClient? _gorush;
+  String? _gorushUrl;
   MqttAlertDispatcher? _dispatcher;
   DevelopmentAuthService? _auth;
   HealthDataCipher? _healthDataCipher;
@@ -116,6 +156,13 @@ class AlertRuntime {
 
   bool get isMqttConnected => _dispatcher?.isConnected ?? false;
 
+  /// Troca o relé de push dos avisos comunitários (RF14) por um duplo de teste.
+  /// `null` volta a montar o [GorushClient] a partir de `GORUSH_URL`.
+  @visibleForTesting
+  void overrideNoticeSender(PushSender? Function()? factory) {
+    _noticeSenderOverride = factory;
+  }
+
   /// Substitui a configuração lida do ambiente.
   ///
   /// Existe para os testes de integração, que precisam exercitar o caminho com
@@ -124,6 +171,9 @@ class AlertRuntime {
   @visibleForTesting
   void overrideConfig(AppConfig? value) {
     _config = value;
+    _gorush?.close();
+    _gorush = null;
+    _gorushUrl = null;
     // O serviço de auth deriva do segredo, então precisa ser reconstruído.
     _auth = null;
     // Idem para a cifra: ela guarda a chave AES derivada de
@@ -158,7 +208,14 @@ class AlertRuntime {
   /// publicação no broker falhar.
   RedAlertService serviceFor(Session session, {Transaction? transaction}) =>
       RedAlertService(
-        store: OrmAlertStore(session: () => session, transaction: transaction),
+        store: OrmAlertStore(
+          session: () => session,
+          transaction: transaction,
+          appendAudit: OrmAuditTrail(
+            session: () => session,
+            chainSecret: config.auditChainSecret,
+          ).recordInTransaction,
+        ),
         outbox: OrmAlertOutbox(session: () => session, transaction: transaction),
       );
 
@@ -179,6 +236,165 @@ class AlertRuntime {
         audit: auditTrailFor(session),
       );
 
+  /// Leitura do backoffice (#40), para uma requisição. A trilha é a da
+  /// requisição: cada leitura do staff vira uma linha encadeada em `audit_logs`.
+  AdminReadService adminReadServiceFor(Session session) => AdminReadService(
+        store: OrmAdminReadStore(
+          session: () => session,
+          escalationThreshold: Duration(seconds: config.redAlertEscalationSeconds),
+        ),
+        audit: auditTrailFor(session),
+        auditChain: AuditChain(secret: config.auditChainSecret),
+      );
+
+  /// Single-flight e cache de 60 s da verificação global da cadeia (#45, D9).
+  /// Estado do PROCESSO, como [_monitoringSessions].
+  final AuditChainStatusCache _auditChainStatusCache = AuditChainStatusCache();
+
+  /// Esvazia o cache e o single-flight da verificação da cadeia. Existe para
+  /// os testes: o harness desfaz o banco entre os casos, não o processo.
+  @visibleForTesting
+  void resetAuditChainStatusCache() => _auditChainStatusCache.reset();
+
+  /// `admin.verifyAuditChain` (#45, Task 6), para uma requisição: reader,
+  /// store, checkpoints de cauda (Task 7) e trilha da chamada; cache e
+  /// single-flight do processo; o mesmo `AUDIT_CHAIN_SECRET` que grava a
+  /// trilha e assina os checkpoints.
+  AuditChainStatusService auditChainStatusServiceFor(Session session) =>
+      AuditChainStatusService(
+        store: OrmAdminReadStore(session: () => session),
+        audit: auditTrailFor(session),
+        reader: OrmAuditChainReader(session: () => session),
+        secret: config.auditChainSecret,
+        checkpoints: OrmAuditCheckpointStore(session: () => session),
+        // Só o tipo do erro: nada de hash, assinatura ou SQL no log.
+        onCheckpointWriteFailure: (erro) => session.log(
+          'Falha ao gravar checkpoint da cadeia de auditoria '
+          '(${erro.runtimeType}); a verificação segue verified.',
+          level: LogLevel.warning,
+        ),
+        cache: _auditChainStatusCache,
+      );
+
+  /// `admin.exportAuditLogs` (#45, Task 10), para uma requisição. A
+  /// exportação e o evento `export` gravam na MESMA transação
+  /// (`OrmAuditTrail.recordInTransaction`, mesmo `AUDIT_CHAIN_SECRET`); as
+  /// recusas e falhas usam a trilha comum. O estado da cadeia vem da
+  /// verificação global do processo (cache de 60 s), sem uma segunda linha
+  /// de auditoria. A falha vai para o log só com o TIPO do erro: nunca
+  /// mensagem do banco, linha ou trecho do CSV.
+  AuditExportService auditExportServiceFor(Session session) =>
+      AuditExportService(
+        store: OrmAuditExportStore(
+          session: () => session,
+          appendAudit: OrmAuditTrail(
+            session: () => session,
+            chainSecret: config.auditChainSecret,
+          ).recordInTransaction,
+        ),
+        audit: auditTrailFor(session),
+        auditChain: AuditChain(secret: config.auditChainSecret),
+        chainState: (inicio) =>
+            auditChainStatusServiceFor(session).currentState(notBefore: inicio),
+        onFailure: (erro) => session.log(
+          'Falha na exportação da auditoria (${erro.runtimeType}).',
+          level: LogLevel.warning,
+        ),
+      );
+
+  /// Sessões de monitoramento do backoffice (#44, D5): `userId → último
+  /// pulso`. Estado do PROCESSO, como o dispatcher MQTT — os endpoints são
+  /// construídos por requisição e perderiam o mapa. Instância única do
+  /// backend (PRD); um reinício só abre sessões novas (START de novo).
+  final Map<String, DateTime> _monitoringSessions = {};
+
+  /// Esvazia o mapa de sessões de monitoramento. Existe para os testes: o
+  /// harness desfaz o banco entre os casos, mas não o estado do processo.
+  @visibleForTesting
+  void resetMonitoringSessions() => _monitoringSessions.clear();
+
+  /// Pulso e sessão de monitoramento do backoffice (#44, D5), para uma
+  /// requisição: o store e a trilha são os da chamada; o mapa de sessões, o
+  /// do processo. O prazo é o mesmo de [adminReadServiceFor] e do
+  /// escalonamento.
+  AdminMonitoringService adminMonitoringServiceFor(Session session) {
+    final limite = Duration(seconds: config.redAlertEscalationSeconds);
+    return AdminMonitoringService(
+      store: OrmAdminReadStore(
+        session: () => session,
+        escalationThreshold: limite,
+      ),
+      audit: auditTrailFor(session),
+      sessions: _monitoringSessions,
+      threshold: limite,
+    );
+  }
+
+  /// Atendimento de pedidos do titular no backoffice (#42), para uma
+  /// requisição. A decisão é auditada DENTRO da transação do store
+  /// (`recordInTransaction`), com o mesmo `AUDIT_CHAIN_SECRET` da trilha; o
+  /// mesmo segredo assina o `denied` de push da anonimização, como no painel do
+  /// titular (`OrmDataSubjectRightsStore`). Leituras e recusas usam a trilha
+  /// comum da requisição.
+  DataSubjectCaseService dataSubjectCaseServiceFor(Session session) =>
+      DataSubjectCaseService(
+        store: OrmDataSubjectCaseStore(
+          session,
+          healthDataCipher,
+          chainSecret: config.auditChainSecret,
+          appendAudit: OrmAuditTrail(
+            session: () => session,
+            chainSecret: config.auditChainSecret,
+          ).recordInTransaction,
+        ),
+        audit: auditTrailFor(session),
+        notifier: _dataSubjectNotifierFor(session),
+      );
+  /// Gestão de contas do backoffice (#43), para uma requisição. Mesmo arranjo
+  /// de [adminReadServiceFor]: os stores são amarrados à sessão da chamada e a
+  /// trilha é a da requisição — cada operação vira uma linha encadeada em
+  /// `audit_logs`. A credencial do ACS e o estado da MFA vivem na mesma tabela
+  /// (`user_credentials`), por isso um store só serve às duas portas; o código
+  /// de ativação é do staff (`staff_accounts`), daí a segunda instância.
+  ///
+  /// Não há porta de refresh token nem de envio diferido aqui: a desativação
+  /// revoga as duas **dentro da transação do `OrmAdminAccountStore`**, para a
+  /// flag e as revogações serem um só estado (ver `setAcsActive`), e as demais
+  /// operações da #43 não tocam em token.
+  AdminAccountService adminAccountServiceFor(Session session) {
+    final credenciais = OrmAcsCredentialStore(session: () => session);
+    return AdminAccountService(
+      store: OrmAdminAccountStore(session: () => session),
+      credentials: credenciais,
+      totpStore: credenciais,
+      activationStore: OrmAcsCredentialStore(session: () => session, staff: true),
+      hasher: passwordHasher,
+      audit: auditTrailFor(session),
+    );
+  }
+
+  /// Escalonamento de alerta vermelho pelo backoffice (#44), para uma
+  /// requisição. O escalonamento gravado é auditado DENTRO da transação do
+  /// store (`recordInTransaction`), junto do `UPDATE` e do reforço no outbox;
+  /// as recusas usam a trilha comum da requisição. O reforço não é publicado
+  /// aqui: a varredura periódica do outbox (`server.dart`) o entrega.
+  AlertEscalationService alertEscalationServiceFor(Session session) =>
+      AlertEscalationService(
+        store: OrmAlertEscalationStore(
+          session: () => session,
+          appendAudit: OrmAuditTrail(
+            session: () => session,
+            chainSecret: config.auditChainSecret,
+          ).recordInTransaction,
+        ),
+        audit: auditTrailFor(session),
+        threshold: Duration(seconds: config.redAlertEscalationSeconds),
+      );
+
+  /// Contato da UBS do ACS (RF13), para uma requisição.
+  UbsContactService ubsContactServiceFor(Session session) =>
+      UbsContactService(store: OrmUbsContactStore(session));
+
   /// Constrói o diretório de pacientes da microárea para uma requisição.
   PatientDirectoryService patientDirectoryServiceFor(Session session) =>
       PatientDirectoryService(
@@ -196,6 +412,90 @@ class AlertRuntime {
           session: () => session,
           cipher: healthDataCipher,
         ),
+        audit: auditTrailFor(session),
+      );
+
+  /// Constrói o serviço de direitos do titular (LGPD-RF05/RF08) para uma
+  /// requisição.
+  DataSubjectRightsService dataSubjectRightsServiceFor(Session session) =>
+      DataSubjectRightsService(
+        store: OrmDataSubjectRightsStore(
+          session: () => session,
+          chainSecret: config.auditChainSecret,
+          cipher: healthDataCipher,
+        ),
+        audit: auditTrailFor(session),
+        termsVersionStore: OrmTermsVersionStore(session: () => session),
+      );
+
+  /// Aviso push ao titular; mesmo remetente do aviso comunitário. Sem relé,
+  /// sem notificador.
+  DataSubjectNotifier? _dataSubjectNotifierFor(Session session) {
+    final override = _noticeSenderOverride;
+    final url = config.gorushUrl;
+    final sender = override != null
+        ? override()
+        : (url == null ? null : _gorushClientFor(url));
+    if (sender == null) return null;
+    return GorushDataSubjectNotifier(
+      targets: OrmDataSubjectPushTargets(session: () => session),
+      sender: sender,
+    );
+  }
+
+  /// Aviso comunitário do ACS (RF14). Sem `GORUSH_URL` o serviço nasce sem relé e
+  /// recusa o envio com uma mensagem clara.
+  NoticeService noticeServiceFor(Session session) {
+    final override = _noticeSenderOverride;
+    final url = config.gorushUrl;
+    return NoticeService(
+      store: OrmNoticeRecipientStore(session: () => session),
+      sender: override != null
+          ? override()
+          : (url == null ? null : _gorushClientFor(url)),
+      audit: auditTrailFor(session),
+    );
+  }
+
+  /// Agendamento e disparo de avisos comunitários (RF14, #46). O envio usa o
+  /// mesmo [NoticeService] de [noticeServiceFor], então a auditoria do disparo
+  /// é a do envio imediato. [clock] existe para os testes.
+  NoticeSchedulingService noticeSchedulingServiceFor(
+    Session session, {
+    DateTime Function()? clock,
+  }) =>
+      NoticeSchedulingService(
+        store: OrmScheduledNoticeStore(session: () => session),
+        audit: auditTrailFor(session),
+        sendNow: noticeServiceFor(session).sendToMicroArea,
+        clock: clock,
+      );
+
+  /// Rascunho, revisão jurídica e publicação dos termos (LGPD-RF18, #46).
+  /// [clock] existe para os testes.
+  TermsPublicationService termsPublicationServiceFor(
+    Session session, {
+    DateTime Function()? clock,
+  }) =>
+      TermsPublicationService(
+        store: OrmTermsVersionStore(session: () => session),
+        audit: auditTrailFor(session),
+        clock: clock,
+      );
+
+  GorushClient _gorushClientFor(String url) {
+    if (_gorush == null || _gorushUrl != url) {
+      _gorush?.close();
+      _gorush = GorushClient(baseUrl: url, timeout: config.gorushTimeout);
+      _gorushUrl = url;
+    }
+    return _gorush!;
+  }
+
+  /// Registro do aparelho para avisos segmentados (RF14).
+  PushTokenService pushTokenServiceFor(Session session) =>
+      PushTokenService(
+        store: OrmPushTokenStore(session: () => session),
         audit: auditTrailFor(session),
       );
 
@@ -224,18 +524,54 @@ class AlertRuntime {
         ),
       );
 
+  /// Refresh token do ACS (LGPD-RT06): store no ORM da sessão da chamada e a
+  /// trilha de auditoria da requisição.
+  RefreshTokenService refreshTokenServiceFor(Session session) =>
+      RefreshTokenService(
+        store: OrmRefreshTokenStore(session: () => session),
+        audit: auditTrailFor(session),
+      );
+
+  /// Token de envio diferido do ACS (D7 do plano 2026-10-03): mesmo arranjo do
+  /// refresh token, store no ORM da sessão e trilha da requisição.
+  UploadTokenService uploadTokenServiceFor(Session session) =>
+      UploadTokenService(
+        store: OrmUploadTokenStore(session: () => session),
+        audit: auditTrailFor(session),
+      );
+
   /// Serviço de login institucional para uma requisição.
   ///
   /// Mesmo arranjo dos outros `*ServiceFor`: o store recebe a sessão por
   /// chamada e a trilha de auditoria é a da requisição, para que cada
   /// tentativa (granted, denied_credentials, denied_locked…) vire uma linha
   /// encadeada em `audit_logs`.
-  InstitutionalAuthService institutionalAuthServiceFor(Session session) =>
-      InstitutionalAuthService(
-        store: OrmAcsCredentialStore(session: () => session),
-        hasher: passwordHasher,
-        audit: auditTrailFor(session),
-      );
+  InstitutionalAuthService institutionalAuthServiceFor(Session session) {
+    final store = OrmAcsCredentialStore(session: () => session);
+    return InstitutionalAuthService(
+      store: store,
+      hasher: passwordHasher,
+      audit: auditTrailFor(session),
+      totpStore: store,
+      vault: HealthCipherTotpVault(healthDataCipher),
+      requireMfa: config.requireAcsMfa,
+    );
+  }
+
+  /// Login do backoffice: mesma regra do ACS, outra tabela de matrículas, MFA
+  /// sempre obrigatória e token sem microárea.
+  InstitutionalAuthService staffAuthServiceFor(Session session) {
+    final store = OrmAcsCredentialStore(session: () => session, staff: true);
+    return InstitutionalAuthService(
+      store: store,
+      hasher: passwordHasher,
+      audit: auditTrailFor(session),
+      totpStore: store,
+      activationStore: store,
+      vault: HealthCipherTotpVault(healthDataCipher),
+      audience: CredentialAudience.staff,
+    );
+  }
 
   /// Serviço de login passwordless do paciente (RF01) para uma requisição.
   ///

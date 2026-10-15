@@ -1,0 +1,15 @@
+### Conta de equipe do backoffice (#43): identificação profissional, papel,
+### UBS e estado de acesso. Nunca inclui CPF, senha ou contato.
+###
+### `ubsName` é nulo para o administrador (vê o sistema inteiro) e para o
+### coordenador ainda sem UBS — que é recusado em tudo até ter uma.
+### `mfaActive` tem a mesma leitura de `AdminAcs`: `totpEnabledAt` preenchido.
+class: AdminStaff
+fields:
+  id: String
+  name: String
+  enrollmentId: String
+  role: UserRole
+  ubsName: String?
+  active: bool
+  mfaActive: bool

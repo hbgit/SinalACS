@@ -1,0 +1,66 @@
+# Issue #44 — execução real do e2e (2026-10-12, 2ª execução, emulador, banco sinalacs_e2e)
+# Comando: ./scripts/qa/admin_alertas_escalonar_e2e.sh --com-regressao-offline
+# Resumido: saída do terminal sem a resolução de dependências (flutter pub get) nem os avisos do Gradle.
+# A 1ª execução falhou na volta da queda de rede (o script pausava o backend e ele morreu com
+# SocketException: Broken pipe -> mosquitto); ver PROGRESS.md. Esta é a execução com a queda pelo Traefik.
+
+== stack de e2e (banco de teste, prazo do alerta vermelho de 30 s)
+Fixtures de e2e gravadas (5 pacientes, 2 ACS, 1 admin, 1 coordenador)
+== escalonamento e tempo real no emulador
+00:00 +0: coordenador escalona o alerta vencido sem atualizar a tela e vê o selo de desatualizado na queda
+E2E_DISPARAR_ALERTA id=c722ae8b-da61-4ac7-b127-f67d9cf5b5a1
+  [script] alerta novo inserido (16:17:03)
+E2E_PAINEL_ATUALIZOU atraso_ms=29897
+E2E_BOTAO_APARECEU atraso_ms=8120
+E2E_CORTAR_BACKEND segundos=120
+  [script] Traefik pausado por 120s (16:18:05); o backend segue no ar
+  [script] Traefik de volta (16:20:05)
+  [script] backend vivo, sem reinício (16:20:05)
+E2E_ESCALONAMENTO_OK
+03:23 +1: (tearDownAll)
+03:23 +1: All tests passed!
+== escalonamento no banco de teste (alerta c722ae8b-da61-4ac7-b127-f67d9cf5b5a1)
+  uma linha escalated:no_ack_timeout do alerta novo: 1
+  uma linha already_escalated:no_ack_timeout do alerta novo: 1
+  nenhuma outra escrita de escalonamento (nem recusa): 2
+  as duas escritas são do coordenador: true
+  alerta novo pendente, escalonado pelo coordenador, sem confirmação: true
+  um único reforço no outbox para o alerta novo: 1
+  o vencido semeado intocado (pendente, sem escalonamento): true
+  os dois vermelhos seguem abertos: 2
+== monitoramento no banco de teste
+  monitoring_session_start do coordenador: 2
+  nenhuma linha read do pulso: 0
+  leituras admin_indicators do coordenador: 3 (teto 4)
+  leituras admin_alerts do coordenador: 7 (teto 9)
+  leituras admin_micro_areas do coordenador: 2 (teto 3)
+  leituras admin_audit_logs do coordenador: 0 (teto 0)
+  leituras auditadas do coordenador: 12 em 201s (~6 pulsos); teto 16 (esperado 12)
+== cadeia de auditoria
+OK — 21 linha(s) verificada(s), cadeia íntegra.
+OK — escalonamento e tempo real do backoffice contra o banco de teste
+== regressão offline (acs_full_e2e.sh)
+00:00 +0: login real, seletor por microárea, visita e sincronização
+00:04 +1: 100 visitas offline sobem em menos de 5 s (M2.4)
+rajada: 100 visitas em 98 ms
+00:05 +2: RF08: a microárea fica no aparelho, sobrevive à queda de rede e está cifrada
+00:05 +3: MFA: com a verificação ativa, o login pela tela pede e aceita o código; o refresh token renova sem reautenticação e retoma a sessão na partida
+00:21 +4: fila por dono: A sai com visita pendente, B não a vê, o envio diferido sobe a de A com a autoria de A e a legada sem autor; o wipe recusa com pendência e apaga com tudo enviado
+00:56 +5: (tearDownAll)
+00:56 +5: All tests passed!
+== refresh token no banco de teste
+  tokens emitidos com deviceId: 7
+  tokens rotacionados: 2
+  tokens revogados pelo Sair: 4
+  audit_logs refresh_granted: 2
+  audit_logs session_refresh negados: 0
+== fila por dono, envio diferido e legado no banco de teste
+  visita de A: acsId|authorship: 7a2d1ce2-e353-443b-96ee-b16c9bec24d1|acs
+  visita legada: acsId nulo|authorship|originDeviceId preenchido: nulo|legacyUnclaimed|true
+  audit_logs visit_deferred_sync de A: 1
+  audit_logs visit_legacy_sync (B transportou): 1
+  audit_logs visit_legacy_sync_item da visita legada: 1
+  token de envio de A revogado (fila zerou): 5
+  token de envio de B revogado (wipe): 1
+  tokens de envio de A ou B ainda ativos: 0
+OK — jornada completa do ACS contra o banco de teste

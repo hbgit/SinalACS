@@ -33,9 +33,14 @@ abstract class UserCredential
     required this.parallelism,
     required this.failedAttempts,
     this.lockedUntil,
+    int? lockStreak,
     required this.createdAt,
     required this.updatedAt,
-  });
+    this.totpSecretEncrypted,
+    this.totpKeyVersion,
+    this.totpEnabledAt,
+    this.totpLastStep,
+  }) : lockStreak = lockStreak ?? 0;
 
   factory UserCredential({
     _i1.UuidValue? id,
@@ -47,8 +52,13 @@ abstract class UserCredential
     required int parallelism,
     required int failedAttempts,
     DateTime? lockedUntil,
+    int? lockStreak,
     required DateTime createdAt,
     required DateTime updatedAt,
+    String? totpSecretEncrypted,
+    int? totpKeyVersion,
+    DateTime? totpEnabledAt,
+    int? totpLastStep,
   }) = _UserCredentialImpl;
 
   factory UserCredential.fromJson(Map<String, dynamic> jsonSerialization) {
@@ -68,12 +78,21 @@ abstract class UserCredential
           : _i1.DateTimeJsonExtension.fromJson(
               jsonSerialization['lockedUntil'],
             ),
+      lockStreak: jsonSerialization['lockStreak'] as int?,
       createdAt: _i1.DateTimeJsonExtension.fromJson(
         jsonSerialization['createdAt'],
       ),
       updatedAt: _i1.DateTimeJsonExtension.fromJson(
         jsonSerialization['updatedAt'],
       ),
+      totpSecretEncrypted: jsonSerialization['totpSecretEncrypted'] as String?,
+      totpKeyVersion: jsonSerialization['totpKeyVersion'] as int?,
+      totpEnabledAt: jsonSerialization['totpEnabledAt'] == null
+          ? null
+          : _i1.DateTimeJsonExtension.fromJson(
+              jsonSerialization['totpEnabledAt'],
+            ),
+      totpLastStep: jsonSerialization['totpLastStep'] as int?,
     );
   }
 
@@ -106,9 +125,25 @@ abstract class UserCredential
   /// `null` = não bloqueado.
   DateTime? lockedUntil;
 
+  /// Rodadas de bloqueio seguidas, sem um login válido no meio. Alimenta o
+  /// bloqueio progressivo (15 min x 2^lockStreak, teto 24 h). Zera no login válido.
+  int lockStreak;
+
   DateTime createdAt;
 
   DateTime updatedAt;
+
+  /// MFA por TOTP (RFC 6238). `null` = sem segredo gravado. O segredo é cifrado
+  /// (AES-256-GCM, a mesma chave dos dados clínicos); **nunca** em claro.
+  String? totpSecretEncrypted;
+
+  int? totpKeyVersion;
+
+  /// `null` = enrollment começou e não foi confirmado: a MFA ainda NÃO vale.
+  DateTime? totpEnabledAt;
+
+  /// Último passo de 30 s aceito. O mesmo código não entra duas vezes (replay).
+  int? totpLastStep;
 
   @override
   _i1.Table<_i1.UuidValue?> get table => t;
@@ -126,8 +161,13 @@ abstract class UserCredential
     int? parallelism,
     int? failedAttempts,
     DateTime? lockedUntil,
+    int? lockStreak,
     DateTime? createdAt,
     DateTime? updatedAt,
+    String? totpSecretEncrypted,
+    int? totpKeyVersion,
+    DateTime? totpEnabledAt,
+    int? totpLastStep,
   });
   @override
   Map<String, dynamic> toJson() {
@@ -142,8 +182,14 @@ abstract class UserCredential
       'parallelism': parallelism,
       'failedAttempts': failedAttempts,
       if (lockedUntil != null) 'lockedUntil': lockedUntil?.toJson(),
+      'lockStreak': lockStreak,
       'createdAt': createdAt.toJson(),
       'updatedAt': updatedAt.toJson(),
+      if (totpSecretEncrypted != null)
+        'totpSecretEncrypted': totpSecretEncrypted,
+      if (totpKeyVersion != null) 'totpKeyVersion': totpKeyVersion,
+      if (totpEnabledAt != null) 'totpEnabledAt': totpEnabledAt?.toJson(),
+      if (totpLastStep != null) 'totpLastStep': totpLastStep,
     };
   }
 
@@ -160,8 +206,14 @@ abstract class UserCredential
       'parallelism': parallelism,
       'failedAttempts': failedAttempts,
       if (lockedUntil != null) 'lockedUntil': lockedUntil?.toJson(),
+      'lockStreak': lockStreak,
       'createdAt': createdAt.toJson(),
       'updatedAt': updatedAt.toJson(),
+      if (totpSecretEncrypted != null)
+        'totpSecretEncrypted': totpSecretEncrypted,
+      if (totpKeyVersion != null) 'totpKeyVersion': totpKeyVersion,
+      if (totpEnabledAt != null) 'totpEnabledAt': totpEnabledAt?.toJson(),
+      if (totpLastStep != null) 'totpLastStep': totpLastStep,
     };
   }
 
@@ -208,8 +260,13 @@ class _UserCredentialImpl extends UserCredential {
     required int parallelism,
     required int failedAttempts,
     DateTime? lockedUntil,
+    int? lockStreak,
     required DateTime createdAt,
     required DateTime updatedAt,
+    String? totpSecretEncrypted,
+    int? totpKeyVersion,
+    DateTime? totpEnabledAt,
+    int? totpLastStep,
   }) : super._(
          id: id,
          userId: userId,
@@ -220,8 +277,13 @@ class _UserCredentialImpl extends UserCredential {
          parallelism: parallelism,
          failedAttempts: failedAttempts,
          lockedUntil: lockedUntil,
+         lockStreak: lockStreak,
          createdAt: createdAt,
          updatedAt: updatedAt,
+         totpSecretEncrypted: totpSecretEncrypted,
+         totpKeyVersion: totpKeyVersion,
+         totpEnabledAt: totpEnabledAt,
+         totpLastStep: totpLastStep,
        );
 
   /// Returns a shallow copy of this [UserCredential]
@@ -238,8 +300,13 @@ class _UserCredentialImpl extends UserCredential {
     int? parallelism,
     int? failedAttempts,
     Object? lockedUntil = _Undefined,
+    int? lockStreak,
     DateTime? createdAt,
     DateTime? updatedAt,
+    Object? totpSecretEncrypted = _Undefined,
+    Object? totpKeyVersion = _Undefined,
+    Object? totpEnabledAt = _Undefined,
+    Object? totpLastStep = _Undefined,
   }) {
     return UserCredential(
       id: id is _i1.UuidValue? ? id : this.id,
@@ -251,8 +318,19 @@ class _UserCredentialImpl extends UserCredential {
       parallelism: parallelism ?? this.parallelism,
       failedAttempts: failedAttempts ?? this.failedAttempts,
       lockedUntil: lockedUntil is DateTime? ? lockedUntil : this.lockedUntil,
+      lockStreak: lockStreak ?? this.lockStreak,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
+      totpSecretEncrypted: totpSecretEncrypted is String?
+          ? totpSecretEncrypted
+          : this.totpSecretEncrypted,
+      totpKeyVersion: totpKeyVersion is int?
+          ? totpKeyVersion
+          : this.totpKeyVersion,
+      totpEnabledAt: totpEnabledAt is DateTime?
+          ? totpEnabledAt
+          : this.totpEnabledAt,
+      totpLastStep: totpLastStep is int? ? totpLastStep : this.totpLastStep,
     );
   }
 }
@@ -302,6 +380,11 @@ class UserCredentialUpdateTable extends _i1.UpdateTable<UserCredentialTable> {
         value,
       );
 
+  _i1.ColumnValue<int, int> lockStreak(int value) => _i1.ColumnValue(
+    table.lockStreak,
+    value,
+  );
+
   _i1.ColumnValue<DateTime, DateTime> createdAt(DateTime value) =>
       _i1.ColumnValue(
         table.createdAt,
@@ -313,6 +396,28 @@ class UserCredentialUpdateTable extends _i1.UpdateTable<UserCredentialTable> {
         table.updatedAt,
         value,
       );
+
+  _i1.ColumnValue<String, String> totpSecretEncrypted(String? value) =>
+      _i1.ColumnValue(
+        table.totpSecretEncrypted,
+        value,
+      );
+
+  _i1.ColumnValue<int, int> totpKeyVersion(int? value) => _i1.ColumnValue(
+    table.totpKeyVersion,
+    value,
+  );
+
+  _i1.ColumnValue<DateTime, DateTime> totpEnabledAt(DateTime? value) =>
+      _i1.ColumnValue(
+        table.totpEnabledAt,
+        value,
+      );
+
+  _i1.ColumnValue<int, int> totpLastStep(int? value) => _i1.ColumnValue(
+    table.totpLastStep,
+    value,
+  );
 }
 
 class UserCredentialTable extends _i1.Table<_i1.UuidValue?> {
@@ -351,12 +456,33 @@ class UserCredentialTable extends _i1.Table<_i1.UuidValue?> {
       'lockedUntil',
       this,
     );
+    lockStreak = _i1.ColumnInt(
+      'lockStreak',
+      this,
+      hasDefault: true,
+    );
     createdAt = _i1.ColumnDateTime(
       'createdAt',
       this,
     );
     updatedAt = _i1.ColumnDateTime(
       'updatedAt',
+      this,
+    );
+    totpSecretEncrypted = _i1.ColumnString(
+      'totpSecretEncrypted',
+      this,
+    );
+    totpKeyVersion = _i1.ColumnInt(
+      'totpKeyVersion',
+      this,
+    );
+    totpEnabledAt = _i1.ColumnDateTime(
+      'totpEnabledAt',
+      this,
+    );
+    totpLastStep = _i1.ColumnInt(
+      'totpLastStep',
       this,
     );
   }
@@ -385,9 +511,25 @@ class UserCredentialTable extends _i1.Table<_i1.UuidValue?> {
   /// `null` = não bloqueado.
   late final _i1.ColumnDateTime lockedUntil;
 
+  /// Rodadas de bloqueio seguidas, sem um login válido no meio. Alimenta o
+  /// bloqueio progressivo (15 min x 2^lockStreak, teto 24 h). Zera no login válido.
+  late final _i1.ColumnInt lockStreak;
+
   late final _i1.ColumnDateTime createdAt;
 
   late final _i1.ColumnDateTime updatedAt;
+
+  /// MFA por TOTP (RFC 6238). `null` = sem segredo gravado. O segredo é cifrado
+  /// (AES-256-GCM, a mesma chave dos dados clínicos); **nunca** em claro.
+  late final _i1.ColumnString totpSecretEncrypted;
+
+  late final _i1.ColumnInt totpKeyVersion;
+
+  /// `null` = enrollment começou e não foi confirmado: a MFA ainda NÃO vale.
+  late final _i1.ColumnDateTime totpEnabledAt;
+
+  /// Último passo de 30 s aceito. O mesmo código não entra duas vezes (replay).
+  late final _i1.ColumnInt totpLastStep;
 
   @override
   List<_i1.Column> get columns => [
@@ -400,8 +542,13 @@ class UserCredentialTable extends _i1.Table<_i1.UuidValue?> {
     parallelism,
     failedAttempts,
     lockedUntil,
+    lockStreak,
     createdAt,
     updatedAt,
+    totpSecretEncrypted,
+    totpKeyVersion,
+    totpEnabledAt,
+    totpLastStep,
   ];
 }
 

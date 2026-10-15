@@ -1,0 +1,17 @@
+Linha de base da #45 (2026-10-13, branch feat/issue-45-trilha-auditoria-completa)
+
+Passo 1 - suites (nenhum codigo de producao alterado)
+  backend: cd backend/sinalacs_server && dart analyze -> 71 issues, todas info (0 error, 0 warning)
+  backend: dart test (unit + integration, postgres-test ja no ar) -> +988 All tests passed
+  apps/admin: flutter analyze -> No issues found
+  apps/admin: flutter test -> +260 All tests passed
+
+Passo 2 - H1 (audit_logs no banco de e2e)
+  ./scripts/qa/e2e_stack.sh up                      -> banco sinalacs_e2e recriado vazio
+  ./scripts/qa/e2e_stack.sh psql 'select count(*) from audit_logs' -> 0
+  ./scripts/qa/e2e_stack.sh seed                    -> fixtures: 5 pacientes, 2 ACS, 1 admin, 1 coordenador
+  ./scripts/qa/e2e_stack.sh psql 'select count(*) from audit_logs' -> 0 (o seed nao gera auditoria)
+  ./scripts/qa/e2e_stack.sh down
+  docker compose up -d executado ao final para restaurar a stack de dev (sinalacs-serverpod healthy)
+
+Passo 3 - decisoes D4/D5: ja confirmadas pelo dono (ver "Decisoes confirmadas" no plano); nada a perguntar.

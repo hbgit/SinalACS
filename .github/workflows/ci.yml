@@ -6,16 +6,25 @@ on:
     # de develop rodava CI — foi assim que 74d89c0 ficou sem um run sequer
     # (FINDING-2/FINDING-4 da avaliação de 2026-09-28).
     branches: [main, master, develop]
+  # Sem filtro nenhum (branches, branches-ignore, types, paths): uma PR fora
+  # do filtro nunca reporta os checks obrigatórios e espera para sempre.
+  # check_gatilhos em scripts/qa/ci_invariants.sh falha se aparecer um (issue #19).
   pull_request:
   # Para gerar o dado sem precisar abrir PR: `gh workflow run CI --ref <branch>`.
   workflow_dispatch:
 
 # Um run vivo por PR: push novo na mesma PR cancela o anterior, que já não
 # descreve a ponta dela — o android-e2e sozinho chega a 60 min (FINDING-7).
-# Push e dispatch são agrupados pelo SHA, então nenhum commit de main/develop
-# perde o próprio resultado para o commit seguinte.
+# Push e dispatch são agrupados pelo ref E pelo SHA: o SHA impede que um commit
+# de main/develop perca o resultado para o seguinte; o ref impede que main e
+# develop, no mesmo SHA (fast-forward de uma para a outra), se cancelem
+# (issue #23). github.ref, e não ref_name, para uma tag não colidir com uma
+# branch de mesmo nome num dispatch.
+# Este texto é comparado por igualdade com GRUPO_CONCORRENCIA em
+# scripts/qa/ci_invariants.sh (issue #24): mudou aqui, muda lá e em GRUPO_NOVO
+# de scripts/qa/ci_invariants_test.sh no mesmo commit.
 concurrency:
-  group: ci-${{ github.event_name }}-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.sha }}
+  group: ci-${{ github.event_name }}-${{ github.event_name == 'pull_request' && github.event.pull_request.number || format('{0}-{1}', github.ref, github.sha) }}
   cancel-in-progress: true
 
 # Todos os jobs fixam ubuntu-24.04 em vez de ubuntu-latest: o label migra
@@ -37,6 +46,16 @@ jobs:
         run: |
           python3 -c 'import yaml' 2>/dev/null || { sudo apt-get update && sudo apt-get install -y python3-yaml; }
           ./scripts/qa/ci_invariants.sh
+          ./scripts/qa/ci_invariants_test.sh
+      - name: Testes dos scripts de CI
+        run: |
+          ./scripts/ci/decode_secret_file_test.sh
+          ./scripts/qa/ci_push_e2e_test.sh
+          ./scripts/qa/ci_invariants_fcm_test.sh
+          ./scripts/qa/ci_concurrency_act_test.sh
+          ./scripts/dev/sync_dev_ca_test.sh
+          ./scripts/dev/bootstrap_env_test.sh
+          ./scripts/dev/run_acs_captura_test.sh
   serverpod-backend:
     runs-on: ubuntu-24.04
     defaults:
@@ -177,6 +196,10 @@ jobs:
         with:
           flutter-version: '3.44.8'
       - run: flutter pub get
+      # Mesmo motivo do job patient-app: assets/certs/ é gitignored e vem do
+      # scripts/dev/sync_dev_ca.sh, que precisa da stack de pé.
+      - name: Cria o diretório assets/certs/ que o pubspec declara
+        run: mkdir -p assets/certs
       - run: flutter analyze
       - run: flutter test
 
@@ -214,11 +237,6 @@ jobs:
       GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
     steps:
       - uses: actions/checkout@v7
-      # Sem isto o emulador roda por emulação de CPU em software: medido, o log
-      # dizia "ProbeKVM: This user doesn't have permissions to use KVM", o boot
-      # levava ~12 min e cada `adb install` de 45 a 95 s. O runner tem
-      # /dev/kvm, só não para o usuário do job — a regra do udev abre o
-      # dispositivo. É o passo documentado pelo android-emulator-runner.
       - name: Habilita KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
@@ -254,12 +272,15 @@ jobs:
           path: |
             ~/.android/avd/*
             ~/.android/adb*
-          key: avd-36-x86_64-pixel_7-ubuntu-24.04
+          # target no nome: o push e2e precisa de Play Services (a imagem padrão da action é
+          # AOSP, sem ele); trocar o target sem trocar a chave restauraria o AVD antigo.
+          key: avd-36-google_apis-x86_64-pixel_7-ubuntu-24.04
       - name: Gera o snapshot do AVD para o cache
         if: steps.avd-cache.outputs.cache-hit != 'true'
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 36
+          target: google_apis
           arch: x86_64
           profile: pixel_7
           force-avd-creation: false
@@ -278,10 +299,39 @@ jobs:
           (cd apps/patient && flutter pub get) & p2=$!
           (cd apps/acs && flutter pub get) & p3=$!
           wait $p1 && wait $p2 && wait $p3
+      # Credenciais do FCM para o push e2e (Gorush e FCM reais). Cada secret é um arquivo em
+      # base64 (`base64 -w0 arquivo`). A chave da conta de serviço vai para um arquivo
+      # temporário (0600) e GOOGLE_APPLICATION_CREDENTIALS aponta para ele; o
+      # google-services.json vai para onde o build do paciente o procura (sem ele o APK
+      # compila e degrada para "sem push"). Sem os secrets (PR de fork) os passos só avisam
+      # e o job roda como sempre. Cada secret entra por `env:` do PASSO: nunca em `run:`
+      # (injeção de script) e nunca no `env:` do job (toda ação de terceiros o veria) —
+      # ci_invariants.sh vigia as duas coisas. Ficam LOGO ANTES do E2E (e depois do
+      # setup de Java/Flutter/caches/AVD): as credenciais só existem em disco quando quem as usa roda,
+      # e nenhuma ação de terceiros que não precisa delas as lê — o guarda também exige isso.
+      - name: Decodifica a credencial do FCM
+        env:
+          FCM_CREDENTIALS_BASE64: ${{ secrets.FCM_CREDENTIALS_BASE64 }}
+        run: |
+          ./scripts/ci/decode_secret_file.sh --env FCM_CREDENTIALS_BASE64 \
+            --kind service_account --temp-export GOOGLE_APPLICATION_CREDENTIALS
+      - name: Decodifica o google-services.json
+        env:
+          GOOGLE_SERVICES_JSON_BASE64: ${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}
+        run: |
+          ./scripts/ci/decode_secret_file.sh --env GOOGLE_SERVICES_JSON_BASE64 \
+            --kind google_services --package br.com.prismrr.sinalacs.patient \
+            --to apps/patient/android/app/google-services.json
+      # Sem isto o emulador roda por emulação de CPU em software: medido, o log
+      # dizia "ProbeKVM: This user doesn't have permissions to use KVM", o boot
+      # levava ~12 min e cada `adb install` de 45 a 95 s. O runner tem
+      # /dev/kvm, só não para o usuário do job — a regra do udev abre o
+      # dispositivo. É o passo documentado pelo android-emulator-runner.
       - name: E2E no emulador Android
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 36
+          target: google_apis
           arch: x86_64
           profile: pixel_7
           force-avd-creation: false
@@ -296,6 +346,15 @@ jobs:
       # container. O pós-passo do flutter-action faz hashFiles('**/pubspec.lock')
       # sobre o workspace inteiro, não consegue ler pg_data/ e derruba o job
       # depois de o E2E ter passado — medido no run 36494654391.
+      # Apaga as credenciais mesmo se o E2E falhar. Num runner hospedado o disco é descartado
+      # ao fim do job, mas o passo mantém a regra verdadeira em qualquer runner (inclusive um
+      # autohospedado no futuro) e tira o google-services.json e a chave do Gorush do workspace.
+      - name: Remove as credenciais do FCM
+        if: always()
+        run: |
+          ./scripts/ci/decode_secret_file.sh --cleanup-temp GOOGLE_APPLICATION_CREDENTIALS
+          ./scripts/ci/decode_secret_file.sh --cleanup-file apps/patient/android/app/google-services.json
+          ./scripts/ci/decode_secret_file.sh --cleanup-file infra/docker/gorush/credentials/fcm-service-account.json
       - name: Remove pg_data/ do workspace
         if: always()
         run: sudo rm -rf pg_data
@@ -336,4 +395,7 @@ jobs:
           key: gradle-admin-${{ hashFiles('apps/admin/android/**/*.gradle.kts', 'apps/admin/android/gradle/wrapper/gradle-wrapper.properties') }}
           restore-keys: gradle-admin-
       - run: flutter pub get
+      # Sem a CA o APK sobe fail-closed (só raízes do sistema); aqui só interessa compilar.
+      - name: Cria o diretório assets/certs/ que o pubspec declara
+        run: mkdir -p assets/certs
       - run: flutter build apk --debug

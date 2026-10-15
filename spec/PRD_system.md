@@ -132,29 +132,30 @@ events:
 | ID | Requisito | Ator | Complexidade | Risco | Dependência |
 |----|-----------|------|--------------|-------|-------------|
 | **RF01** | Autenticação Passwordless (CPF + Data Nasc + OTP) | Paciente | M | Médio | SMS Gateway |
-| **RF02** | Onboarding via QR Code (ACS gera, paciente escaneia) | Paciente | M | Médio | Câmera, `qr_code_scanner` |
+| **RF02** | Onboarding via QR Code (ACS gera, paciente escaneia) | Paciente | M | Médio | Câmera, `mobile_scanner` (paciente) e `qr_flutter` (ACS) |
 | **RF03** | Botão de Alerta de Urgência (MQTT) | Paciente | M | **Crítico** | Mosquitto, GPS |
 | **RF04** | Formulário de Triagem Estruturada (árvore de decisão) | Paciente | S | Médio | Nenhuma (local) |
 | **RF05** | Painel de Status de Solicitação | Paciente | S | Baixo | API HTTP do backend |
 | **RF06** | Lembretes de Saúde (Local Notifications) | Paciente | S | Médio | `flutter_local_notifications` |
-| **RF07** | Login Institucional (Matrícula/Senha) | ACS | S | Médio | Auth própria no backend (`auth.loginInstitutional`); MFA/TOTP e refresh token pendentes |
+| **RF07** | Login Institucional (Matrícula/Senha) | ACS | S | Médio | Auth própria no backend (`auth.loginInstitutional`); MFA por TOTP (2026-10-02) e refresh token rotativo com desbloqueio biométrico no app (2026-10-03) entregues — ver `PROGRESS.md` |
 | **RF08** | Territorialização (Download de Microárea para cache) | ACS | M | Médio | `sqflite`, API |
 | **RF09** | Dashboard de Priorização Dinâmica (FSM de fila) | ACS | M | Alto | Motor de Triagem |
 | **RF10** | Mapa Interativo (Google Maps) | ACS | M | Médio | `google_maps_flutter` |
 | **RF11** | Registro Rápido de Visitas (Offline-first) | ACS | M | **Crítico** | `sqflite`, `connectivity_plus` |
 | **RF12** | Geofencing (Check-in Passivo) | ACS | M | Médio | GPS em segundo plano |
 | **RF13** | Escalonamento para SAMU/UBS (`url_launcher`) | ACS | S | Baixo | `url_launcher` |
-| **RF14** | Avisos Segmentados à Comunidade (Push) | ACS | M | Médio | FCM/APNs |
+| **RF14** | Avisos Segmentados à Comunidade (Push) | ACS | M | Médio | Gorush (relé para FCM/APNs) |
 | **RF15** | Sincronização Bidirecional (Local ↔ Central) | Sistema | **L** | **Crítico** | Driver `postgres` no backend (sem ORM); ainda não conectado ao cliente |
 | **RF16** | Motor de Triagem Determinístico (Manchester) | Sistema | **L** | **Crítico** | Nenhuma (local) |
-| **RF17** | Logs de Auditoria e Conformidade (LGPD) | Sistema | M | Alto | PostgreSQL |
+| **RF17** | Logs de Auditoria e Conformidade (LGPD) | Sistema | M | Alto | PostgreSQL  **Estado (#45, 2026-10-14):** `audit_logs` encadeado por HMAC; o backoffice consulta com filtros combináveis e paginação estável, verifica a integridade no servidor (selo por linha, verificação global com checkpoint de cauda) e o **admin** exporta CSV de nove colunas sem dado pessoal direto, com a exportação registrada na mesma transação. Limites: a cadeia detecta, não impede (sem trigger/`REVOKE` append-only); `audit_exports` fica fora da cadeia; rotação de `AUDIT_CHAIN_SECRET` invalida a história; o escopo do coordenador é a UBS dele e ele não exporta. Detalhe em `PROGRESS.md` (#45). |
 | **RF18** | Dark Mode Nativo (Modo Escuro) | UI | S | Baixo | Tema Flutter |
+| **RF19 (PRD)** *(proposto, issue #44; não confundir com LGPD-RF19)* | Escalonamento de Alerta Vermelho sem Confirmação, ação da coordenação no backoffice — distinto do RF13 (SAMU/UBS, ação do ACS): passado o prazo (`RED_ALERT_ESCALATION_SECONDS`, padrão 300 s, configurável de 30 a 3600 s) sem ACK, coordenador (da UBS) ou administrador pode escalonar. O alerta **nunca** é encerrado, ocultado ou silenciado (segue `pending` até o ACS confirmar, INV-03); o reforço é reentregue à microárea; a ação tem motivo de conjunto fechado, é auditada na mesma transação e é idempotente | Backoffice | M | **Crítico** | `admin.escalateAlert`, outbox MQTT, polling `admin.alertsPulse` |
 | **RNF01** | Latência MQTT < 500ms (p95) | Sistema | - | Alto | Mosquitto, Traefik |
 | **RNF02** | Sincronização Offline > 99.5% | Sistema | - | **Crítico** | `sqflite`, FSM |
 | **RNF03** | Criptografia AES-256 em repouso | Sistema | - | **Crítico** | SQLCipher |
 | **RNF04** | TLS 1.3 em todas as comunicações | Sistema | - | **Crítico** | Traefik, cert-manager |
 | **RNF05** | Acessibilidade WCAG 2.1 Nível AA | UI | - | Médio | `accessibility_test` |
-| **RNF06** | RBAC (Role-Based Access Control) | Sistema | - | Alto | Regra única de autorização implementada (`Authorization.require`); papéis institucionais ainda sem caminho de emissão |
+| **RNF06** | RBAC (Role-Based Access Control) | Sistema | - | Alto | Regra única de autorização implementada (`Authorization.require`); `coordinator`/`admin` agora têm caminho de emissão (`auth.loginStaff`, matrícula + senha Argon2id + TOTP obrigatório, tabela `staff_accounts`); o RBAC dos endpoints de dados do staff segue aberto (issue #40) |
 
 ### 2.2.1 Decisões de produto pós-validação (2026-09-16)
 
@@ -170,7 +171,7 @@ documento de decisão, não implementação:
 | RF10 (mapa) | Geocélula arredondada, não posição exata (§1) | Não |
 | RF02 + LGPD-RF02 (onboarding/consentimento) | Token de convite de uso único + consentimento por finalidade (§2) | Não |
 | RF06 (lembretes) | Local ao dispositivo, sem endpoint (§3.1) | Não |
-| RF14 (avisos push) | Contrato FCM definido (§3.2) | **Sim** — sem projeto Firebase provisionado |
+| RF14 (avisos push) | Contrato com Gorush definido (§3.2, revisado 2026-09-29); lado do paciente e envio prontos em código (`devices.registerPushToken`, `push_tokens`, `PushTokenSource`, `notices.sendSegmented`, tela de avisos do ACS); entrega provada no emulador Android (2026-09-30); iOS/APNs, aparelho físico e Gorush hospedado fora do Compose local pendentes | **Parcial** — Android provado em emulador; faltam iOS/APNs e hospedagem |
 | RF12 (geofencing) | Geofence atrelado a visita ativa, sem rastreamento contínuo (§4) | Parcial — submissão à loja pendente |
 | RF15 (sync central→dispositivo) | Pull incremental por cursor (§5) | Não |
 | RNF03 (criptografia Postgres) | AES-256-GCM em nível de aplicação (§6) | Não |
@@ -593,7 +594,7 @@ Cada registro possui um campo `version` (inteiro incremental). No momento da sin
 
 **Política ABAC (Atribute-Based Access Control):**
 
-Exemplo ilustrativo: não existe hoje uma camada de política ABAC genérica como esta. A checagem de papel — e a de que o token carrega uma microárea — passou a ser feita por uma regra única, `Authorization.require` (`backend/sinalacs_server/lib/src/application/auth/authorization.dart`), chamada pelos casos de uso; a comparação entre a microárea do paciente e a do ACS continua inline em cada caso de uso. Os papéis `admin` e `coordinator` ainda não têm caminho de emissão nem endpoint que os exercite, então o RBAC institucional completo segue pendente (ver RNF06 na seção 2.2). A API usada abaixo também é ilustrativa, não é a do ORM do Serverpod.
+Exemplo ilustrativo: não existe hoje uma camada de política ABAC genérica como esta. A checagem de papel — e a de que o token carrega uma microárea — passou a ser feita por uma regra única, `Authorization.require` (`backend/sinalacs_server/lib/src/application/auth/authorization.dart`), chamada pelos casos de uso; a comparação entre a microárea do paciente e a do ACS continua inline em cada caso de uso. Os papéis `admin` e `coordinator` têm hoje caminho de emissão (`auth.loginStaff`, `Authorization.staffRoles`), mas nenhum endpoint de dados os exercita ainda (issue #40), então o RBAC institucional completo segue pendente (ver RNF06 na seção 2.2). A API usada abaixo também é ilustrativa, não é a do ORM do Serverpod.
 
 ```dart
 // Exemplo ilustrativo — não há camada ABAC genérica no código real;

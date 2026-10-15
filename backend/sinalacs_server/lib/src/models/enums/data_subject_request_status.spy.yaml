@@ -1,0 +1,10 @@
+### Situação de um pedido do titular. `open` é escrito pelo titular; `inReview`,
+### `completed` e `rejected` pelo backoffice (coordenador/admin, #42).
+### `completed` e `rejected` são finais.
+enum: DataSubjectRequestStatus
+serialized: byName
+values:
+  - open
+  - inReview
+  - completed
+  - rejected

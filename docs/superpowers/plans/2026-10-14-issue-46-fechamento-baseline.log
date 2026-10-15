@@ -1,0 +1,15 @@
+Linha de base do fechamento da #46 - 2026-10-14 (branch fix/issue-46-fechamento)
+
+$ cd backend/sinalacs_server && dart analyze
+0 erros, 0 warnings (87 infos, nenhum erro/warning)
+$ cd backend/sinalacs_server && dart test -j 1
+01:15 +1307: All tests passed!
+
+$ cd apps/admin && flutter analyze
+No issues found! (ran in 2.5s)
+$ cd apps/admin && flutter test
+00:29 +456: All tests passed!
+
+$ ./scripts/qa/ci_invariants.sh
+ok: 9 grupos de invariantes do CI
+ci_invariants ok

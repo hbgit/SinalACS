@@ -10,6 +10,16 @@
          sem isso, os alarmes agendados via `flutter_local_notifications`
          somem em cada reboot (não sobrevivem sozinhos). -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- Usada por `scanQrWithCamera` (lib/app/qr_scanner.dart) para ler o QR
+         Code do convite do ACS no onboarding (RF02). A imagem não sai do
+         aparelho: só o texto do QR preenche o campo do convite. Câmera não é
+         obrigatória para instalar — sem ela, a pessoa digita o código. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <!-- Android 13+: sem esta permissão o token ainda é obtido e registrado, mas a
+         notificação do aviso comunitário não é exibida (RF14). Quem a pede em tempo
+         de execução é `main.dart`, por `requestNotificationsPermission()`. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <application
         android:label="sinalacs_patient"
         android:name="${applicationName}"
@@ -50,6 +60,11 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+        <!-- RF14 / LGPD: sem isto o FCM gera o token e fala com os servidores do Google em
+             TODA abertura do app (auto-init), antes do login e sem consentimento
+             `segmentedPush`. O token só é pedido quando o código pede
+             (`MainActivity`, canal `sinalacs/push_token`). -->
+        <meta-data android:name="firebase_messaging_auto_init_enabled" android:value="false" />
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data

@@ -1,0 +1,32 @@
+# Configuração do Gorush (RF14). Confira os nomes das chaves contra o README da
+# imagem que estiver fixada no docker-compose.yml antes de subir.
+core:
+  port: "8088"
+  sync: true
+  feedback_timeout: 10
+android:
+  enabled: true
+  credential: ""
+  key_path: /credentials/fcm-service-account.json
+# iOS fica desligado até existir app iOS e chave APNs: com `enabled: true` e sem o
+# arquivo `apns-key.p8` o Gorush encerra no boot com código 1 (medido na 1.22.0).
+ios:
+  enabled: false
+  key_path: /credentials/apns-key.p8
+  key_id: ""
+  team_id: ""
+  production: false
+# `stdout`/`stderr`, e não "-": com "-" o Gorush 1.22.0 não escreve log nenhum e o
+# motivo de uma falha de boot fica invisível (medido).
+log:
+  # O texto do aviso não deve ir para `docker logs`: o backend já não o grava
+  # na auditoria, e o relé não pode ser o ponto onde ele vaza.
+  hide_messages: true
+  # `false` de propósito: com o padrão (`true`) o Gorush devolve o token MASCARADO
+  # (`***…xx`) na resposta e a poda de tokens inválidos nunca casa com
+  # `push_tokens.token` (medido contra o FCM real). Custo: o token de aparelho
+  # aparece no log do Gorush; ele não liga a nenhuma pessoa sem o banco.
+  hide_token: false
+  format: json
+  access_log: stdout
+  error_log: stderr

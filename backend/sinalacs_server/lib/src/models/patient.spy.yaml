@@ -10,7 +10,16 @@ class: Patient
 table: patients
 fields:
   id: UuidValue?, defaultPersist=random
-  emergencyContact: String
+  ### Contato de emergência do paciente (PII de terceiro: nome/telefone),
+  ### cifrado em AES-256-GCM (RNF03, INV-04) — mesmo padrão de
+  ### chronicConditions. Antes era `emergencyContact` em texto claro; agora o
+  ### par `emergencyContactEncrypted`/`emergencyContactKeyVersion` guarda o
+  ### ciphertext, cifrado e decifrado na borda do repositório ORM
+  ### (OrmPatientDirectoryStore), nunca em application/.
+  emergencyContactEncrypted: String, default=''
+  ### Versão da chave que cifrou o campo acima, para permitir rotação futura
+  ### sem reescrever todas as linhas de uma vez.
+  emergencyContactKeyVersion: int, default=1
   isChronic: bool
   ### JSON de List<String>, cifrado em AES-256-GCM (RNF03, INV-04). Decifrado
   ### e cifrado na borda do repositório (OrmPatientDirectoryStore), nunca em

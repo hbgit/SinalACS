@@ -67,15 +67,29 @@ locais quando o consentimento espelhado no aparelho
 (`core/consent/consent_preferences.dart`) é `true`, com padrão de recusa
 (`false`) quando não há registro local.
 
-**Aviso — `ConsentPurpose.segmentedPush` continua sem leitor.** RF14 (avisos
-segmentados por push) não tem nenhum código de envio no repositório ainda —
-está bloqueado externamente na provisão de um projeto Firebase (§3.2 do
-mesmo documento de decisões), não apenas pendente de implementação. Não há
-o que "respeitar" hoje porque nada envia. Quando `notices.sendSegmented` for
-implementado, ele **deve** consultar o consentimento de `segmentedPush`
-antes de enviar, com o mesmo padrão de recusa por omissão adotado aqui para
-`localReminders` — tratar isso como parte da implementação de RF14, não
-como um item separado a lembrar depois.
+**`ConsentPurpose.segmentedPush` tem leitor, no servidor e no aparelho.** RF14
+(avisos segmentados por push) respeita o consentimento no **servidor**:
+`notices.sendSegmented` usa a linha de consentimento **mais recente** de cada
+titular (não a existência do token) antes de montar a lista, e
+`devices.registerPushToken` só guarda o token com o consentimento vigente. O envio
+foi provado de ponta a ponta num emulador Android em 2026-09-30 (ver PROGRESS.md,
+"RF14: Gorush e FCM provados no emulador").
+
+**Aparelho (2026-09-30):** o app só pede o token ao FCM depois de
+`patients.hasGrantedConsent(segmentedPush)` devolver `true` (um `bool`, teto de 3 s;
+falha, estouro ou "nunca decidiu" = não pergunta; resposta tardia é descartada).
+A consulta **não** lê o painel "Meus dados" e não grava auditoria de leitura: a
+primeira versão usava `myData`, que decifra e devolve o dossiê clínico e grava uma
+linha "titular abriu o painel" a cada login — trocada na revisão independente. Quem
+acabou de gravar a concessão (onboarding ou interruptor em "Meus dados") registra
+sem perguntar. O auto-init do FCM, que falaria com o Google em toda abertura, está
+desligado no manifesto.
+
+**Limite conhecido:** se o consentimento for revogado (neste ou em outro aparelho)
+entre a resposta do servidor e o pedido do token, o aparelho pode falar com o
+Google uma vez depois da revogação. O servidor continua certo: `registerPushToken`
+relê o consentimento sob lock e não guarda token sem base legal. O texto do aviso
+também passa pelo FCM (Google): decisão de produto da §3.2, não tratada aqui.
 
 ### LGPD-RF03 - Gerenciamento de Preferências de Privacidade
 
@@ -132,6 +146,10 @@ como um item separado a lembrar depois.
 | **Artigos LGPD** | 15, I e II; 16, I e II; 17 |
 | **Critério de Aceite** | ✓ Política de retenção documentada e aprovada<br>✓ Mecanismo automático de expurgo após prazo legal<br>✓ Dados de pacientes que revogam consentimento são excluídos em até 15 dias<br>✓ Logs de exclusão registrados |
 
+**Exceção do expurgo para alerta vermelho pendente (issue #44, INV-03).** O expurgo por retenção **não apaga** alerta vermelho ainda `pending`, mesmo vencido o prazo: a linha é retida, contada (`skippedPendingRed`) e registrada em log **sem identidade** (só a contagem). Apagá-lo seria descartar em silêncio um alerta que ninguém confirmou. O "encerramento forçado administrativo" desses alertas órfãos (para que o expurgo possa enfim alcançá-los) é **pendência**: não existe hoje (`PROGRESS.md`).
+
+**Auditoria de monitoramento (issue #44).** O painel do backoffice se atualiza por pulso a cada 30 s e **não** grava uma linha `read` por pulso. A leitura contínua é auditada como **sessão**: `monitoring_session_start` (antes de qualquer dado, fail-closed) e `monitoring_session_end` (best-effort), por usuário, com janela de inatividade de 90 s. O pulso carrega só contagens e instantes, sem identidade de titular. Escalonar grava `write`/`admin_alert` (`escalated:<motivo>`) na mesma transação do ato.
+
 ### LGPD-RF08 - Direitos do Titular dos Dados
 
 | Propriedade | Descrição |
@@ -164,6 +182,8 @@ como um item separado a lembrar depois.
 | **Base Legal** | Art. 6º, VI; Art. 9º |
 | **Artigos LGPD** | 6º, VI; 9º |
 | **Critério de Aceite** | ✓ Política de Privacidade com linguagem clara e acessível<br>✓ Resumo visual do fluxo de dados no app<br>✓ Notificações sobre mudanças nas políticas<br>✓ Canal de dúvidas sobre tratamento de dados |
+
+> **Estado (2026-09-29):** implementado no app paciente — ver PROGRESS.md "QR Code do onboarding e documentos legais". Pendentes: revisão jurídica do texto e canal digital de dúvidas. O aviso com 15 dias de antecedência existe (`TermsChangeSchedule`, `patients.termsChangeNotice` e um cartão dispensável na home), mas a agenda está vazia e o canal é só dentro do app.
 
 ### LGPD-RF11 - Controle de Acesso e RBAC
 
@@ -244,6 +264,18 @@ como um item separado a lembrar depois.
 
 ---
 
+### Dados sintéticos em teste e2e (CPF gerado)
+
+A stack de e2e (`docker-compose.e2e.yml`, `bin/seed_e2e_fixtures.dart`) gera CPFs
+aleatórios **com dígito verificador válido**, porque o login exige essa validade. Não
+existe faixa de CPF reconhecidamente fictícia: um valor gerado pode, por acaso,
+coincidir com o CPF de uma pessoa real. O risco é aceito porque o valor nunca aparece
+sozinho: vem com nome, nascimento e contato inventados, vive só num banco efêmero
+(apagado ao final), só é gravado como HMAC (`users.cpfHash`), o manifesto que o guarda
+é `0600` e apagado ao final, e nenhum log, mensagem de erro ou `toString` o imprime.
+Se a coincidência virar preocupação, a saída é trocar a geração por uma lista fixa de
+CPFs de documentação (como faz `seed_cpf_hashes.dart` para a stack de desenvolvimento).
+
 ## 2. Requisitos para Termo de Uso e Política de Privacidade
 
 ### LGPD-RF18 - Termo de Uso
@@ -256,6 +288,8 @@ como um item separado a lembrar depois.
 | **Conteúdo Mínimo** | Regras de uso, responsabilidades, proibições, propriedade intelectual, limitação de responsabilidade, jurisdição, alterações no termo. |
 | **Critério de Aceite** | ✓ Texto em linguagem simples (acessibilidade para idosos e baixo letramento)<br>✓ Disponibilizado no app e no site<br>✓ Aceite explícito no cadastro<br>✓ Controle de versões disponível para consulta |
 
+> **Estado (2026-09-29):** implementado no app paciente — ver PROGRESS.md "QR Code do onboarding e documentos legais". Pacientes que entram por OTP sem onboarding são convidados a aceitar no primeiro login (`patients.acceptTermsOfUse`), e de novo quando a versão mudar; o convite não é obrigatório para acessar o alerta de emergência. Pendentes: revisão jurídica do texto. O aviso com 15 dias de antecedência existe (`TermsChangeSchedule`, `patients.termsChangeNotice`, cartão dispensável na home, fora da aba de urgência; agenda vazia. Quando o app já embarca o texto da versão anunciada, o cartão também oferece lê-lo antes de valer).
+
 ### LGPD-RF19 - Política de Privacidade
 
 | Propriedade | Descrição |
@@ -265,6 +299,8 @@ como um item separado a lembrar depois.
 | **Objetivo** | Garantir transparência total sobre o tratamento de dados, cumprindo o Art. 9º da LGPD. |
 | **Conteúdo Mínimo** | Identificação do controlador, dados coletados (por funcionalidade), finalidades específicas, bases legais, compartilhamento, transferências, retenção, direitos, medidas de segurança, DPO/encarregado. |
 | **Critério de Aceite** | ✓ Linguagem acessível para leigos (recomendado: Nível de leitura 8º ano)<br>✓ Tópicos claros e organizados<br>✓ Versão resumida (sumário visual) e versão completa<br>✓ Atualização comunicada com no mínimo 15 dias de antecedência |
+
+> **Estado (2026-09-29):** implementado no app paciente — ver PROGRESS.md "QR Code do onboarding e documentos legais". Pendentes: revisão jurídica do texto. O aviso com 15 dias de antecedência existe (`TermsChangeSchedule`, `patients.termsChangeNotice`, cartão dispensável na home, fora da aba de urgência; agenda vazia. Quando o app já embarca o texto da versão anunciada, o cartão também oferece lê-lo antes de valer) e o reaceite a cada nova versão também (`hasAcceptedCurrentTerms`).
 
 ### LGPD-RF20 - Aviso de Consentimento (Banner/Modal)
 
@@ -487,6 +523,20 @@ como um item separado a lembrar depois.
 | **Limite conhecido** | Num aparelho comprometido (root) com o usuário autenticado, a chave é alcançável. Proteger contra isso exigiria o fator de posse do PIN. |
 | **Verificação** | `apps/acs/integration_test/encrypted_storage_test.dart` lê o arquivo do banco e afirma que ele não contém o conteúdo em texto plano. Roda em dispositivo — no CI (Linux) o caminho é o FFI, que não criptografa, e por isso a abertura fora de Android/iOS lança por padrão. |
 
+#### Decisão de custódia do refresh token do ACS (2026-10-05)
+
+| Propriedade | Descrição |
+|-------------|-----------|
+| **Decisão** | O refresh token do ACS fica num **envelope**: uma chave AES-256-GCM descartável, gerada a cada gravação, cifra o token; essa chave AES é cifrada com a pública de um par **RSA-2048/OAEP** (SHA-256, MGF1 com SHA-1, que é o que o provedor do Keystore usa) do Android Keystore, gerado com `setUserAuthenticationRequired(true)` e autenticação **a cada uso** (validade 0). Só o blob cifrado (`IV.chaveAES_RSA.token`, Base64) fica num SharedPreferences privado. Cifrar usa só a pública e não pede prompt (a rotação de 15 min segue silenciosa); **decifrar** exige o `BiometricPrompt` com `CryptoObject` sobre a privada — uma vez por partida a frio. Na API 30+ o prompt aceita biometria forte **ou** o PIN/padrão do aparelho; antes da API 30, só biometria forte. Código: `KeystoreVault.kt` (canal `br.com.prismrr.sinalacs.acs/keystore_vault`) e `AuthBoundSessionTokenStore`. |
+| **Motivo** | Antes o token ficava no `flutter_secure_storage` e a biometria era só portão de interface: num aparelho com root, ou lendo o armazenamento do app, o token saía sem autenticação nenhuma. Agora a decifra é cobrada pelo TEE: sem a digital ou o PIN do aparelho, o blob em repouso não vale nada. RSA (e não AES direto no Keystore) porque a pública cifra sem prompt; o envelope porque o RSA-2048/OAEP só cifra ~190 bytes. |
+| **Invalidação** | Remover o bloqueio de tela faz o Android apagar/invalidar a chave: a partida seguinte apaga o blob e cai no login completo com "Sua sessão expirou. Entre novamente." (provado no emulador). A chave é gerada com `setInvalidatedByBiometricEnrollment(true)`, mas **na API 30+, com o PIN aceito no prompt, uma digital nova não invalida a chave**: a chave carrega o SID do bloqueio de tela, e o token de autenticação da digital também o carrega. Provado no emulador API 36 (2026-10-05): depois de cadastrar a segunda digital, o prompt abre e a digital antiga entra. O ganho que a invalidação daria é pequeno com o PIN aceito, porque quem cadastra uma digital já precisa saber o PIN, e o PIN sozinho já abre o cofre. Antes da API 30 (só biometria) a invalidação por digital nova deveria valer, mas não foi provada. |
+| **Fora do vínculo (por desenho)** | A chave do SQLCipher (decisão acima) e o token de envio diferido (`acs_upload_token|<userId>`) seguem no `flutter_secure_storage`, **sem** vínculo à autenticação: a fila offline e o envio diferido de outro dono precisam funcionar sem o dono presente. Depois do desbloqueio, o token fica em RAM durante o processo; o `AppLockGate` (30 s em segundo plano) continua portão de interface sobre ele. |
+| **Degradação** | Aparelho sem bloqueio de tela, ou API 24–29 sem biometria forte: o token fica só em RAM e morre com o processo, então cada partida a frio exige login completo (matrícula + senha e, com MFA, o código). Uma falha ao selar degrada do mesmo jeito. |
+| **Limite conhecido** | Com root e o app já aberto e desbloqueado, o token em RAM é alcançável. O ganho é contra a leitura **em repouso** e contra a partida a frio. |
+| **Verificação** | `scripts/qa/acs_keystore_bound_e2e.sh` no emulador (prompt na partida a frio, digital certa/errada, cancelar, segundo plano com o prompt aberto, nova digital, remoção do bloqueio). Testes de unidade: `auth_bound_session_token_store_test.dart`, `keystore_vault_channel_test.dart`, `session_resume_test.dart`. API 24–29 e aparelho físico não foram provados. |
+
+**Captura de tela (2026-10-02).** A janela do app do ACS é `FLAG_SECURE`: o sistema não permite captura de tela, gravação nem miniatura nos apps recentes. Decisão: a janela inteira, porque a lista da microárea (nome e condições crônicas) aparece em mais de uma tela. Consequência aceita: `adb screencap` do ACS sai preto. Provado por `scripts/qa/acs_secure_window.sh`. **Exceção de desenvolvimento (2026-10-05):** a captura só é liberada em build de **debug**, por uma constante de compilação (`BuildConfig.ALLOW_SCREEN_CAPTURE`, `false` por padrão, ligada só com `-Psinalacs.allowScreenCapture=true`); o Gradle recusa a propriedade em release e nada em execução (menu, intent, preferência) a altera. Serve a QA e à gravação de demonstração com dados sintéticos; a build que vai ao ACS em campo, com paciente real, é release e permanece `FLAG_SECURE`.
+
 ### 5.2 Controle de Acesso por Perfil (RBAC)
 
 | Propriedade | Descrição |
@@ -531,7 +581,12 @@ como um item separado a lembrar depois.
 
 | Propriedade | Descrição |
 |-------------|-----------|
-| **Decisão** | O banco local guarda **apenas** visitas ainda não sincronizadas. `SqlCipherVisitStore.save()` reescreve a tabela inteira a partir da lista de pendentes, então a visita confirmada pelo servidor deixa o dispositivo na gravação seguinte. |
+| **Decisão** | O banco local guarda **apenas** visitas ainda não sincronizadas. `SqlCipherVisitStore.save()` reescreve **as linhas do dono** (`WHERE owner = ?`) a partir da lista de pendentes dele, então a visita confirmada pelo servidor deixa o dispositivo na gravação seguinte. |
+| **Por dono** | Cada linha de `offline_visits` tem `owner` = `userId` do ACS que a registrou (schema v7). Um ACS não carrega, conta, envia, descarta nem apaga visita de outro (RNF06); o `save()` de um dono nunca toca nas linhas de outro. O dono não vira dado novo: é o mesmo UUID pseudonimizado que o servidor grava como `acsId`. |
+| **Legado em quarentena** | Linhas gravadas antes do schema v7 não têm dono (`owner IS NULL`) e **nenhum ACS as adota**: adotá-las atribuiria dado clínico a quem não o registrou. Ficam invisíveis até subirem por `visits.syncLegacy`, que as grava com `authorship = legacyUnclaimed` e `acsId` nulo (autoria desconhecida, registrada como "migração v7"); o ACS que apenas transportou o lote fica só em `audit_logs`. |
+| **Envio diferido, com a autoria certa** | Quem sai do aparelho com visita pendente deixa no Keystore um **token de envio** (`acs_upload_tokens` no servidor: só hash, 7 dias, escopo único `visits.syncDeferred`/`visits.revokeUploadToken`, por usuário + aparelho). Ele sobe as visitas do dono sem sessão e sem poder de leitura, sob a autoria dele e no território dele relido do banco. O envio é disparado com o painel aberto, na retomada, quando a conexão volta e no "Sair"; a visita só sai do disco quando o servidor responde `synced`, e o token é revogado e apagado quando a fila do dono zera. |
+| **Limpar este aparelho** | O ACS pode apagar `offline_visits`, o cursor e o cache da microárea (§5.11), **só se não houver nenhuma linha** — de qualquer dono, do legado, recusada ou em revisão — nem fila só em memória; do contrário a ação é recusada sem apagar nada. O arquivo cifrado e a chave ficam. |
+| **O que NÃO fecha** | Não há envio em segundo plano do SO (só em primeiro plano). Token de envio vencido (7 dias) ou recusado deixa a fila do dono presa até ele entrar de novo e bloqueia o wipe; não há wipe forçado por supervisor (não existe login de supervisor). **Dono que nunca volta**: suas visitas permanecem cifradas no aparelho, sem prazo de expurgo, até haver envio ou desinstalação — a retenção local dele depende do envio e é um risco aberto (`PROGRESS.md`, seção Fila de visitas por dono e corrida do login). **Token que sobrevive ao "Sair" sem rede:** se o "Sair" não alcança o servidor, o token de envio do dono continua válido (no aparelho e no servidor) por até 7 dias, mesmo sem visita pendente, até um envio diferido rodar com rede e revogá-lo; desativar a conta o corta. |
 | **Estado** | Passou a valer de fato quando o `BackendVisitSynchronizer` foi ligado em produção. Antes, o app montava a fila sem sincronizador: `sync()` devolvia erro, nada era confirmado e nada era apagado — a retenção estava implementada e testada, mas nunca disparava. |
 | **O que é gravado** | `patient_id` (UUID), risco, status, desfecho, data e versão. **Não** é gravado nome, rótulo legível nem endereço. As observações de campo digitadas na tela ainda não são persistidas nem enviadas. |
 | **Por que o identificador, e não o rótulo** | A tela antes gravava `'Paciente ' + 8 dos 32 dígitos hex` e descartava o UUID. Era pior nos dois sentidos: texto legível sobre a pessoa no disco, e um identificador irrecuperável — `visits.sync` só aceita UUID, então a visita nunca poderia sair do aparelho e a retenção nunca a alcançaria. Guardar o identificador e montar o rótulo na tela é o desenho de minimização correto (LGPD-RF01). |
@@ -570,6 +625,20 @@ como um item separado a lembrar depois.
 | **Implementação** | Análise estática de código (SAST) no CI/CD; testes de penetração anuais; scanner de vulnerabilidades em dependências; processo de disclosure responsável; atualização regular de bibliotecas e frameworks. |
 | **Riscos Mitigados** | Exploração de vulnerabilidades conhecidas, zero-days, falhas de segurança introduzidas por dependências. |
 
+### 5.11 Cache local da microárea (RF08)
+
+| | |
+|---|---|
+| **Decisão** | O ACS guarda no aparelho a última lista da microárea (`patients.listMicroArea`) para registrar visita **sem rede**. |
+| **O que guarda** | Só o que a tela de visita já mostra: `patientId`, nome, `isChronic` e condições crônicas — o mesmo conjunto da retenção no aparelho (§5.6). Nada de contato de emergência, endereço, histórico ou triagem. |
+| **Onde** | Tabelas `micro_area_cache` e `micro_area_cache_meta` na **mesma base SQLCipher** das visitas offline (INV-04; chave no Keystore, §5.1). |
+| **Dono** | A lista pertence a `userId\|microAreaId` da sessão que a baixou. Outro usuário ou outra microárea **apaga** o cache e não o serve (RNF06). |
+| **Validade** | 72 horas desde o último download bem-sucedido. Vencida, **não é usada e é apagada**. |
+| **Quando entra** | Só no lugar de uma falha **recuperável** de rede. Uma recusa do servidor (sessão inválida, território negado, `isRecoverable: false`) nunca cai no cache. |
+| **Transparência** | A tela diz que a lista é do cache e de quando. |
+| **Retenção** | Some pela validade, pela troca de dono, pelo "Limpar este aparelho" (§5.6) e com a desinstalação; nunca é enviada a lugar nenhum. |
+| **Se for revisto** | Reduzir `microAreaCacheMaxAge` ou apagar a tabela v6 é migração aditiva reversível. |
+
 ---
 
 ## 6. Direitos dos Titulares dos Dados
@@ -595,6 +664,8 @@ como um item separado a lembrar depois.
 | **Acesso e Confirmação** | 1. Usuário acessa painel "Meus Dados"<br>2. Sistema exibe dados completos<br>3. Opção de exportação | Imediato | Sistema (automatizado) |
 | **Correção** | 1. Usuário edita dados no painel<br>2. Sistema valida e atualiza<br>3. Registro de alteração é criado<br>4. Notificação de confirmação | Imediato (simples)<br>15 dias (complexo) | Sistema (automatizado) / Suporte |
 | **Exclusão/Anonimização** | 1. Usuário solicita exclusão<br>2. Sistema verifica obrigações legais<br>3. Processa exclusão ou anonimização<br>4. Notifica usuário do resultado<br>5. Registra operação | 15 dias | Suporte (com automação) |
+
+> **Execução da exclusão (implementada na issue #42; a validar com o encarregado).** Atender o pedido anonimiza em uma transação: `users.name`, `users.cpfHash` (`removed:<uuid>` aleatório, nunca derivado do CPF), contato de emergência, data de nascimento (sentinela), condições crônicas e respostas de triagem; apaga `push_tokens`, `otp_challenges` e `user_credentials`; registra uma recusa de `segmentedPush`. **Ficam**, pseudonimizados: `alerts`, `visits` (inclusive `notesEncrypted`), `audit_logs`, `consent_logs`, o histórico de classificação de risco e hashes de localização/aparelho, por obrigação de auditoria e prova de consentimento. Isto é anonimização, não `DELETE`.
 | **Portabilidade** | 1. Usuário solicita exportação<br>2. Sistema gera arquivo (JSON/CSV)<br>3. Notifica para download seguro<br>4. Usuário baixa ou indica terceiro | 15 dias | Sistema (automatizado) |
 | **Revogação de Consentimento** | 1. Usuário acessa preferências<br>2. Revoga finalidade específica<br>3. Sistema interrompe tratamento<br>4. Registra revogação<br>5. Notifica efetivação | Imediato (tratamento) / 15 dias (eliminação) | Sistema (automatizado) |
 | **Informação sobre Compartilhamento** | 1. Usuário acessa histórico<br>2. Visualiza lista de compartilhamentos | Imediato | Sistema (automatizado) |
@@ -618,7 +689,7 @@ como um item separado a lembrar depois.
 | Propriedade | Descrição |
 |-------------|-----------|
 | **Descrição** | Todas as APIs devem exigir autenticação (JWT) e implementar controle de acesso (RBAC) para garantir que apenas usuários autorizados acessem dados específicos. |
-| **Implementação** | Middleware de autenticação na camada de aplicação do backend; validação de permissões por endpoint; tokens JWT com expiração curta; refresh token seguro. Ainda não implementado no código atual — hoje só existe um endpoint de login de desenvolvimento sem autenticação institucional real (ver `CLAUDE.md`). **Atualização (2026-09-18):** o login institucional existe (`auth.loginInstitutional`, RF07) — matrícula + senha verificadas com Argon2id contra `user_credentials`, com bloqueio por tentativas e auditoria em `audit_logs` — e a verificação de token dos endpoints sensíveis está centralizada (`Authorization.require`; os endpoints estendem `AuthenticatedEndpoint`). O que segue pendente desta linha: o token expira em 15 minutos, **não há refresh token** (LGPD-RT06) e os papéis `coordinator`/`admin` continuam sem caminho de emissão. **Atualização (2026-09-19):** o TTL deixou de ser um só. A sessão emitida pelo **login do paciente** (passwordless, RF01) vale **1 hora**, aplicando LGPD-RT06 — o código OTP é de uso único e não se reapresenta, então não existe renovação silenciosa desse lado; a do **ACS** continua em **15 minutos**, renovada em silêncio pela credencial que vive em memória (RF07). A assimetria é deliberada, e é a diferença entre as duas que precisa ser lida como decisão e não como inconsistência. Dentro do lado do paciente há uma exceção conhecida: o *onboarding* (`onboarding.completeEnrollment`, RF02) ainda emite o padrão de 15 minutos, porque o caminho dele não passa por esta decisão — lacuna com dono no `PROGRESS.md`. O que segue pendente: **não há refresh token** (LGPD-RT06) — é ele que permitiria devolver o TTL do paciente aos 15 minutos sem quebrar a experiência —, e os papéis `coordinator`/`admin` continuam sem caminho de emissão. |
+| **Implementação** | Middleware de autenticação na camada de aplicação do backend; validação de permissões por endpoint; tokens JWT com expiração curta; refresh token seguro. Ainda não implementado no código atual — hoje só existe um endpoint de login de desenvolvimento sem autenticação institucional real (ver `CLAUDE.md`). **Atualização (2026-09-18):** o login institucional existe (`auth.loginInstitutional`, RF07) — matrícula + senha verificadas com Argon2id contra `user_credentials`, com bloqueio por tentativas e auditoria em `audit_logs` — e a verificação de token dos endpoints sensíveis está centralizada (`Authorization.require`; os endpoints estendem `AuthenticatedEndpoint`). O que segue pendente desta linha: o token expira em 15 minutos, **não há refresh token** (LGPD-RT06) e os papéis `coordinator`/`admin` continuam sem caminho de emissão. **Atualização (2026-09-19):** o TTL deixou de ser um só. A sessão emitida pelo **login do paciente** (passwordless, RF01) vale **1 hora**, aplicando LGPD-RT06 — o código OTP é de uso único e não se reapresenta, então não existe renovação silenciosa desse lado; a do **ACS** continua em **15 minutos** (JWT), renovada em silêncio pelo refresh token (ver **Atualização (2026-10-03)** abaixo; a credencial em memória deixou de existir). A assimetria é deliberada, e é a diferença entre as duas que precisa ser lida como decisão e não como inconsistência. Dentro do lado do paciente há uma exceção conhecida: o *onboarding* (`onboarding.completeEnrollment`, RF02) ainda emite o padrão de 15 minutos, porque o caminho dele não passa por esta decisão — lacuna com dono no `PROGRESS.md`. O que segue pendente: **o paciente não tem refresh token** (LGPD-RT06) — é ele que permitiria devolver o TTL do paciente aos 15 minutos sem quebrar a experiência —, e os papéis `coordinator`/`admin` continuam sem caminho de emissão. **Atualização (2026-10-03):** o refresh token do **ACS** está implementado (`auth.refreshSession`/`auth.logout`, tabela `acs_refresh_tokens`): rotativo, guardado só como hash SHA-256, amarrado ao aparelho (o `deviceId` é o identificador da instalação — UUID aleatório —, não uma atestação de hardware: protege contra token vazado sem ele, não contra comprometimento do aparelho), com janela ociosa de 2 h e teto absoluto de 8 h contado do login por senha + TOTP; reuso fora da tolerância de 30 s, aparelho diferente ou conta inativa revogam a família, e a recusa é sempre a mesma mensagem. O app não retém mais a senha; o token fica no Keystore. O desbloqueio por biometria/bloqueio de tela do aparelho (partida a frio e após 30 s em segundo plano) também existe, mas é **portão de interface**: não liga a chave do SQLCipher nem o refresh token ao `BiometricPrompt` (a chave segue aleatória no Keystore, §5.1). **Atualização (2026-10-05):** o refresh token passou a ser decifrado só depois do `BiometricPrompt` com `CryptoObject` (envelope AES-256-GCM + RSA-OAEP do Keystore, ver §5.1, "Decisão de custódia do refresh token do ACS"); a chave do SQLCipher segue sem esse vínculo. |
 | **Critério de Aceite** | ✓ Todas as APIs autenticadas<br>✓ Testes de acesso não autorizado<br>✓ RBAC implementado e testado |
 
 ### LGPD-RT02 - Criptografia de Dados Sensíveis no Banco
@@ -635,7 +706,9 @@ como um item separado a lembrar depois.
 |-------------|-----------|
 | **Descrição** | Todos os acessos e operações devem ser registrados em logs estruturados (JSON), imutáveis, e auditáveis. |
 | **Implementação** | Tabela `audit_logs` no PostgreSQL; assinatura criptográfica dos logs (hash chain); armazenamento em tabela imutável (append-only). A tabela existia desde a migração-base sem escritor nenhum; os dois primeiros — `patients.listMicroArea` e a recusa por território em `visits.sync` (`AuditTrail`, `backend/sinalacs_server/lib/src/application/audit/`) — foram ligados, sempre com `ipHash` (nunca IP em claro) e best-effort (uma falha na trilha não derruba a operação clínica). **A assinatura em hash chain está implementada** (`AuditChain`, no mesmo diretório): cada linha carrega `sequence`, `previousHash` e `entryHash` — um HMAC-SHA256 sobre o conteúdo da linha, com um segredo próprio (`AUDIT_CHAIN_SECRET`) que nunca deriva do `JWT_SECRET`, para que rotacionar um não afete o outro. A escrita é serializada por `pg_advisory_xact_lock` dentro da mesma transação do apêndice, e um índice único em `sequence` é o segundo cinto contra bifurcação por concorrência. `AuditChainVerifier` (mesmo pacote) e `bin/audit_chain_check.dart` verificam a cadeia inteira sob demanda, detectando edição, remoção ou reordenação de qualquer linha — inclusive por quem tem acesso de escrita direto ao Postgres, já que o segredo fica fora do banco. **O que ainda falta**: o append-only em si não é imposto pelo banco (nenhum trigger/`REVOKE` bloqueia `UPDATE`/`DELETE` em `audit_logs` — a cadeia só *detecta* a violação, não a impede), e os demais endpoints que tocam dado sensível (alertas, ack, triagem) ainda não escrevem na trilha. |
-| **Critério de Aceite** | ✓ Todos os endpoints geram logs (parcial: só `patients.listMicroArea` e a recusa territorial de `visits.sync`)<br>✓ Logs têm assinatura em hash chain verificável (`AuditChainVerifier`)<br>✗ Logs são imutáveis por construção do banco (append-only ainda é só convenção, sem trigger/`REVOKE`)<br>✓ Logs incluem data, usuário, ação, IP (anonimizado) |
+| **Critério de Aceite** | ✓ Todos os endpoints geram logs (parcial: só `patients.listMicroArea` e a recusa territorial de `visits.sync`)<br>✓ Logs têm assinatura em hash chain verificável (`AuditChainVerifier`)<br>✗ Logs são imutáveis por construção do banco (append-only ainda é só convenção, sem trigger/`REVOKE`; desde a #45 a adulteração é **detectada** na tela do backoffice, não impedida)<br>✓ Logs incluem data, usuário, ação, IP (anonimizado) |
+
+**Consulta, verificação e exportação da trilha (#45).** O backoffice lê `audit_logs` por filtros fechados (matrícula, papel, ação, tipo de recurso, resultado, período e uma busca que só casa matrícula, tipo de recurso e resultado); o paciente não é filtrável por identificador e não há filtro por `resourceId` (pendente de validação com o encarregado de dados). A **exportação** é exclusiva do `admin` (a coordenação consulta, não exporta), exige período e é limitada a 5000 linhas. **Minimização:** o CSV tem uma lista fechada de nove colunas (`sequence, timestamp_utc, autor, papel_autor, acao, recurso, rotulo_recurso, resultado, selo`); o autor é a matrícula (dado funcional) ou `Paciente #A18F`, o recurso é um rótulo curto, e saem `userId`, `resourceId`, `ipHash`, hashes e qualquer segredo. **Base e finalidade:** a exportação serve à fiscalização e à responsabilização (LGPD art. 37 e 46; base e finalidade a confirmar com o encarregado). **Rastro:** cada exportação grava, na mesma transação, o evento `export` em `audit_logs` e uma linha em `audit_exports` (quem, quando, filtros, quantidade, intervalo de `sequence`, SHA-256 do conteúdo e estado da cadeia) — nunca as linhas exportadas. **Retenção de `audit_exports`:** sem política própria nem expurgo; a decisão (alinhar aos logs de acesso, 1 ano, §5.6, ou à vida da cadeia) está **aberta com o encarregado**, e a tabela fica fora da cadeia. **Entrega** por área de transferência do aparelho do admin, que é compartilhada com outros apps; o CSV não é gravado em disco nem em log. Não há dado de paciente identificável no CSV, mas matrícula de staff/ACS é dado pessoal funcional e os filtros digitados (`filtersJson`) podem conter uma.
 
 ### LGPD-RT04 - Consentimento Versionado
 
@@ -658,8 +731,8 @@ como um item separado a lembrar depois.
 | Propriedade | Descrição |
 |-------------|-----------|
 | **Descrição** | Sessões devem ter tempo de vida limitado, com autenticação forte para ACS (MFA) e mecanismos de segurança (biometria para pacientes). |
-| **Implementação** | JWT com expiração em 1h (pacientes) e 8h (ACS); refresh token rotativo; MFA com TOTP para ACS; autenticação biométrica nativa do dispositivo. |
-| **Critério de Aceite** | ✓ Sessões expiram<br>✓ MFA para ACS implementada<br>✓ Biometria disponível para pacientes<br>✓ Logout automático documentado |
+| **Implementação** | Pacientes: JWT de 1h, sem refresh token (o OTP é de uso único). ACS: o JWT segue em **15 min**; as **8h** são o teto absoluto do refresh token rotativo (janela ociosa de 2h), contado do login por senha + TOTP — implementado em 2026-10-03. MFA com TOTP para ACS. Autenticação biométrica nativa do dispositivo no app do **ACS** (`local_auth`), como portão de interface: não amarra a chave do SQLCipher nem o refresh token ao `BiometricPrompt`. No app do paciente não há biometria. Provado no emulador (API 36), não em aparelho físico. |
+| **Critério de Aceite** | ✓ Sessões expiram<br>✓ MFA para ACS implementada<br>✓ Biometria de desbloqueio no app do ACS (portão de interface; paciente: não implementada)<br>✓ Logout automático documentado |
 
 ### LGPD-RT07 - Backup Criptografado e Testado
 

@@ -2,6 +2,7 @@ import 'package:serverpod/serverpod.dart';
 import 'package:sinalacs_server/src/application/onboarding/consent_signature.dart';
 import 'package:sinalacs_server/src/application/onboarding/onboarding_service.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
+import 'package:sinalacs_server/src/infrastructure/database/signed_consent_log.dart';
 
 /// Implementação de [OnboardingStore] sobre o ORM do Serverpod.
 ///
@@ -93,29 +94,9 @@ class OrmOnboardingStore implements OnboardingStore {
 
   @override
   Future<void> recordConsent(ConsentLogEntry entry) async {
-    final signature = _signature.compute(
-      userId: entry.userId,
-      purpose: entry.purpose.name,
-      action: entry.action,
-      version: entry.version,
-      timestamp: entry.timestamp,
-    );
     await ConsentLog.db.insertRow(
       _session(),
-      ConsentLog(
-        userId: UuidValue.fromString(entry.userId),
-        purpose: entry.purpose.name,
-        action: entry.action,
-        version: entry.version,
-        timestamp: entry.timestamp,
-        // IP e user agent não se aplicam a este evento de domínio — o
-        // request HTTP em si já é auditado em audit_logs por outros
-        // caminhos; aqui os campos exigidos pelo schema ficam com um
-        // marcador explícito de ausência, não um valor fabricado.
-        ipHash: 'nao-aplicavel-onboarding',
-        userAgent: 'nao-aplicavel-onboarding',
-        signature: signature,
-      ),
+      signedConsentLog(entry, signature: _signature, origin: 'onboarding'),
       transaction: _transaction,
     );
   }

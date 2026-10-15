@@ -5,15 +5,17 @@ import 'package:sinalacs_admin/app/app.dart';
 import 'package:sinalacs_admin/core/data/mock_admin_data_source.dart';
 
 import '../test/support/failing_admin_data_source.dart';
+import '../test/support/fake_admin_auth.dart';
+import '../test/support/layout_harness.dart' show entrarComCredenciais;
 
 /// Validação do backoffice num dispositivo Android real (ou emulador).
 ///
 /// ATENÇÃO — este arquivo é **hermético**, ao contrário dos `integration_test/`
-/// do app ACS e do app do paciente. O backoffice ainda roda sobre
-/// `MockAdminDataSource`, então aqui **não** é preciso `docker compose up`,
+/// do app ACS e do app do paciente. Aqui o painel roda sobre o
+/// `MockAdminDataSource` (o fluxo com backend real é `scripts/qa/admin_login_e2e.sh`), então aqui **não** é preciso `docker compose up`,
 /// nem seed, nem `--dart-define`. Basta:
 ///
-///     flutter test integration_test -d emulator-5554
+///     flutter test integration_test/admin_mobile_smoke_test.dart -d emulator-5554
 ///
 /// O que isto cobre e `flutter test` não consegue cobrir: o runtime real do
 /// Android — densidade de tela, insets do sistema, rotação de verdade e a
@@ -23,24 +25,23 @@ void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
   Future<void> entrar(WidgetTester tester, {dynamic dataSource}) async {
-    await tester.pumpWidget(SinalAdminApp(dataSource: dataSource, devLoginEnabled: true));
+    await tester.pumpWidget(SinalAdminApp(dataSource: dataSource, auth: FakeAdminAuth()));
     await tester.pumpAndSettle();
-    final entrar = find.byKey(const Key('login_button'));
-    await tester.ensureVisible(entrar);
-    await tester.pumpAndSettle();
-    await tester.tap(entrar);
-    await tester.pumpAndSettle();
+    await entrarComCredenciais(tester);
   }
 
   Future<void> irPara(WidgetTester tester, String destino) async {
-    final alvo = find.text(destino).last;
+    // Em celular a barra inferior usa rótulos curtos ('Áreas', 'Trilha'); o
+    // nome completo fica no tooltip.
+    final porTexto = find.text(destino);
+    final alvo = porTexto.evaluate().isNotEmpty ? porTexto.last : find.byTooltip(destino).last;
     await tester.ensureVisible(alvo);
     await tester.pumpAndSettle();
     await tester.tap(alvo);
     await tester.pumpAndSettle();
   }
 
-  testWidgets('abre o backoffice no dispositivo e navega pelos quatro destinos', (tester) async {
+  testWidgets('abre o backoffice no dispositivo e navega pelos destinos', (tester) async {
     await entrar(tester);
 
     expect(find.text('Painel de Indicadores'), findsOneWidget);
@@ -50,6 +51,8 @@ void main() {
     expect(find.text('Alertas da UBS'), findsOneWidget);
     await irPara(tester, 'Auditoria');
     expect(find.text('Logs de auditoria'), findsOneWidget);
+    await irPara(tester, 'Avisos');
+    expect(find.text('Avisos às comunidades'), findsOneWidget);
   });
 
   testWidgets('escolhe a navegação conforme a largura real do aparelho', (tester) async {

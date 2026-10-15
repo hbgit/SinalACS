@@ -8,6 +8,7 @@
 #   ./scripts/dev/run_acs.sh --build            # flutter build apk --debug
 #   ./scripts/dev/run_acs.sh --host https://192.168.0.10/ --mqtt-host 192.168.0.10
 #   ./scripts/dev/run_acs.sh --skip-ca          # não recopia as CAs para o asset
+#   ./scripts/dev/run_acs.sh --build --captura  # debug com captura de tela liberada (QA e demonstração)
 #
 # Por que existe:
 #   · SINALACS_MQTT_PASSWORD é resolvido em tempo de COMPILAÇÃO e não tem
@@ -46,6 +47,7 @@ host='https://10.0.2.2/'
 mqtt_host='10.0.2.2'
 action='run'
 skip_ca=0
+captura=0
 flutter_args=()
 
 while [[ $# -gt 0 ]]; do
@@ -54,6 +56,7 @@ while [[ $# -gt 0 ]]; do
     --mqtt-host) mqtt_host="${2:?--mqtt-host exige um valor}"; shift 2 ;;
     --build)     action='build'; shift ;;
     --skip-ca)   skip_ca=1; shift ;;
+    --captura)   captura=1; shift ;;
     # Intervalo sem número fixo: imprime da linha 3 até a primeira que não é
     # comentário. A faixa à mão (era '3,26p') cortava a última frase do texto
     # depois de qualquer edição no cabeçalho — e ninguém percebia, porque a
@@ -170,6 +173,13 @@ JSON
 
 echo "ACS → $host   broker → $mqtt_host:8883 (usuário $mqtt_user)"
 echo 'senha do broker .... lida do .env, não exibida'
+
+if [[ "$captura" -eq 1 ]]; then
+  # Só o build de DEBUG aceita: o Gradle recusa a propriedade em release. O aviso
+  # existe porque o APK sai sem FLAG_SECURE e mostra nome e condições de pacientes.
+  flutter_args+=(-Psinalacs.allowScreenCapture=true)
+  echo 'AVISO: build de DEBUG com captura de tela liberada (FLAG_SECURE desligada). Só para QA e demonstração, com dados sintéticos; nunca instale em aparelho com paciente real.' >&2
+fi
 
 cd "$app_dir"
 if [[ "$action" == 'build' ]]; then
