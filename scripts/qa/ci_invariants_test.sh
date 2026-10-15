@@ -6,6 +6,8 @@
 # job fora de CHECKS_OBRIGATORIOS) e a do concurrency.group (issues #23, #63 e
 # #24: o grupo tem de ser exatamente GRUPO_CONCORRENCIA; cada regressão que a
 # busca por substring pegava, e as que ela deixava passar, são casos aqui).
+# E a dos filtros de pull_request (issue #19): branches, branches-ignore ou
+# types fazem PRs fora do filtro nunca reportarem os checks obrigatórios.
 #
 # Por que existe: sem fixture sintética, as três checagens só seriam
 # exercitadas contra o .github/workflows/ci.yml real do momento — que, por
@@ -77,11 +79,15 @@ GRUPO_ANTIGO='ci-${{ github.event_name }}-${{ github.event_name == '"'"'pull_req
 workflow_base() {
   local extra_admin_app="${1:-}"
   local grupo="${GRUPO_CONCORRENCIA:-$GRUPO_NOVO}"
+  # PULL_REQUEST_CFG vazio cai no `{}` de sempre — para testar `null` de
+  # verdade, passe a string 'null' (issue #19).
+  local pr_cfg="${PULL_REQUEST_CFG:-}"
+  [[ -n "$pr_cfg" ]] || pr_cfg='{}'
   cat <<YAML
 on:
   push:
     branches: [main, develop]
-  pull_request: {}
+  pull_request: ${pr_cfg}
   workflow_dispatch: {}
 concurrency:
   group: ${grupo}
@@ -149,6 +155,16 @@ escreve_grupo() {
   local grupo="$2"
   local caminho="$tmp_dir/$nome.yml"
   GRUPO_CONCORRENCIA="$grupo" workflow_base '' > "$caminho"
+  printf '%s' "$caminho"
+}
+
+# $2 é o valor de `pull_request:` em YAML de uma linha só (flow style), ex.:
+# '{ branches: [main] }'.
+escreve_pr() {
+  local nome="$1"
+  local cfg="$2"
+  local caminho="$tmp_dir/$nome.yml"
+  PULL_REQUEST_CFG="$cfg" workflow_base '' > "$caminho"
   printf '%s' "$caminho"
 }
 
@@ -262,9 +278,57 @@ espera_ok 'negativo (forma canônica entre aspas duplas no YAML)' \
 espera_ok 'negativo (forma canônica com comentário YAML no fim)' \
   "$(escreve_grupo grupo_comentario "$GRUPO_NOVO # mesmo grupo")" 'FINDING-7'
 
+echo '== pull_request sem filtro nenhum: um filtro faz PRs nunca reportarem os checks (issue #19) =='
+MSG_PR='restringe quais PRs disparam o CI'
+
+# O cenário da issue: PRs contra develop param de disparar o CI.
+espera_falha 'positivo (branches só com main)' \
+  "$(escreve_pr branches_so_main '{ branches: [main] }')" \
+  "pull_request.branches $MSG_PR"
+espera_falha 'positivo (branches-ignore com develop)' \
+  "$(escreve_pr branches_ignore '{ branches-ignore: [develop] }')" \
+  "pull_request.branches-ignore $MSG_PR"
+# Sem synchronize, um push novo na PR não roda o CI e a ponta fica sem check.
+espera_falha 'positivo (types só com opened)' \
+  "$(escreve_pr types_so_opened '{ types: [opened] }')" \
+  "pull_request.types $MSG_PR"
+espera_falha 'positivo (pull_request como lista, não dict)' \
+  "$(escreve_pr pr_lista '[main]')" \
+  'pull_request: tem tipo inesperado (list)'
+
+# Filtros que hoje não excluem nada: recusados de propósito. A regra é "sem
+# filtro nenhum" — mais simples de ler e impossível de envelhecer quando uma
+# branch protegida nova aparecer.
+espera_falha 'recusa por forma (branches com main e develop)' \
+  "$(escreve_pr branches_main_develop '{ branches: [main, develop] }')" \
+  "pull_request.branches $MSG_PR"
+espera_falha 'recusa por forma (types com o padrão escrito à mão)' \
+  "$(escreve_pr types_padrao '{ types: [opened, synchronize, reopened] }')" \
+  "pull_request.types $MSG_PR"
+
+# paths é de check_sem_filtro_de_paths: uma mensagem por defeito, não duas.
+espera_falha 'paths continua acusado pela checagem de paths' \
+  "$(escreve_pr pr_paths '{ paths: [docs/**] }')" \
+  'pull_request.paths faria checks obrigatórios nunca reportarem'
+espera_ok 'paths não é acusado de novo pela checagem de filtros' \
+  "$(escreve_pr pr_paths_2 '{ paths: [docs/**] }')" \
+  "$MSG_PR"
+
+# Negativos: as formas sem filtro.
+espera_ok 'negativo (pull_request: {})' \
+  "$(escreve_pr pr_vazio '{}')" 'pull_request'
+espera_ok 'negativo (pull_request: nulo)' \
+  "$(escreve_pr pr_nulo 'null')" 'pull_request'
+# `on:` em lista não carrega filtro; FINDING-2 (push sem develop) acende aqui,
+# mas nada sobre pull_request nem traceback.
+on_lista="$tmp_dir/on_lista.yml"
+{ echo 'on: [push, pull_request, workflow_dispatch]'; workflow_base '' | tail -n +6; } > "$on_lista"
+espera_ok 'negativo (on: em lista)' "$on_lista" 'pull_request'
+espera_ok 'negativo (on: em lista, sem traceback)' "$on_lista" 'Traceback'
+
 echo
 if [[ "$falhas" -eq 0 ]]; then
-  echo 'OK — as checagens de "verde sem rodar" (issue #20) e do grupo de concorrência (issues #23, #63 e #24) conferem.'
+  echo 'OK — as checagens de "verde sem rodar" (issue #20), do grupo de concorrência (issues #23, #63 e #24) e dos filtros de pull_request (issue #19) conferem.'
 else
   echo "FALHOU — $falhas asserção(ões) não conferem." >&2
 fi
