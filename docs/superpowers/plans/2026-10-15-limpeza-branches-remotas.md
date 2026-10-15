@@ -558,3 +558,25 @@ Cada ponta removida está em três lugares: no relatório (`$R/relatorio.tsv`, c
 5. **Pelo reflog**, só na máquina que fez o fetch antes da remoção: o `fetch --prune` apaga o reflog da ref remota, então use `git reflog --all | grep <sha-curto>` como último recurso. Os itens 1 a 3 não dependem do reflog.
 
 A `analysis-cybersec` não tem PR, então o item 4 não serve para ela. Restaure pelos itens 1 a 3. Para só ler o conteúdo, há `$R/analysis-cybersec.patch` (`git am` o reaplica sobre outra base).
+
+---
+
+## Execução (2026-10-15)
+
+Executado no mesmo dia, de forma inline, com aprovação do mantenedor antes da Fase B. O registro de progresso, o relatório, os lotes, o log e o bundle estão em `~/limpeza-branches-sinalacs/2026-10-15/`, fora do repositório.
+
+**Diferenças em relação à previsão**
+- **Três branches já tinham saído antes da execução:** `ci/correcoes-avaliacao-2026-09-28`, `ci/revisao-final-2026-09-28` e `ci/ensaio-ubuntu-26.04` não estavam mais no remoto. A previsão usou refs locais desatualizadas, e o `git fetch --prune` da Tarefa 2 mostrou a diferença. Por isso o remoto tinha 40 branches, não 43, e a classificação real deu `MANTER: 2`, `REMOVER: 35` e `REVISAR: 3`.
+- **Lote 1 menor:** saiu com 27 branches, não 29, porque as duas `ci/*` mergeadas já não existiam.
+- **`ci/ensaio-ubuntu-26.04`:** já tinha sido removida, então não sobrou nada a manter. O commit `15a9a3d` não está no bundle.
+- **Ensaio da Tarefa 1:** 26 checagens `ok` (não 27, como dizia uma mensagem anterior), `ENSAIO VERDE`.
+
+**Resultado**
+- **Backup:** 36 refs em `refs/backup/limpeza-2026-10-15/`, bundle verificado e `analysis-cybersec.patch` com os 3 commits.
+- **Simulação e remoção:** os lotes 1 (27), 2 (8) e 3 (1, `analysis-cybersec`) passaram na simulação e foram removidos sem nenhuma recusa.
+- **Remoto final:** `main`, `develop`, `feat/issue-44-alertas-escalonar-tempo-real` e `fix/issue-56-mqtt-queda-processo`. A reclassificação depois da remoção deu `MANTER: 2` e `REVISAR: 2`, sem nenhum REMOVER.
+
+**Pendências**
+- **Correção da #56:** levada para a develop pelo PR #71 (`fix/issue-56-integra-develop`). Depois do merge, as duas branches que restaram ficam contidas na develop e podem ser removidas pelo mesmo procedimento.
+- **Tarefa 8, Passo 1 (auto-delete após o merge):** não executada, porque é uma ação externa que aguarda a confirmação do mantenedor.
+- **Branches locais:** 22 branches locais ficaram com o upstream `[gone]`. Todas foram conferidas: estão contidas na develop, não têm commit sem equivalente e a ponta é igual à do backup. Nenhuma foi apagada; isso é decisão do mantenedor, com `git branch -d`.
