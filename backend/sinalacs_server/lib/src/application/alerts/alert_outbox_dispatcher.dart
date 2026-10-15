@@ -57,7 +57,9 @@ class AlertOutboxDispatcher {
 
   Future<bool> _publishOne(PendingDelivery entry) async {
     try {
-      _publisher.publish(entry.delivery);
+      // Só depois da confirmação do broker (H5, #56): marcar antes deixava um
+      // alerta perdido numa conexão morta dado como entregue para sempre.
+      await _publisher.publish(entry.delivery);
       await _outbox.markPublished(entry.entryId);
       return true;
     } catch (error) {

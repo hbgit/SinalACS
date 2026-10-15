@@ -31,11 +31,11 @@ AlertDelivery _delivery() => AlertDelivery(
 
 void main() {
   group('MqttAlertDispatcher', () {
-    test('falha ao publicar quando o broker não está conectado', () {
+    test('falha ao publicar quando o broker não está conectado', () async {
       final dispatcher = MqttAlertDispatcher(config: _config());
 
-      expect(
-        () => dispatcher.publish(_delivery()),
+      await expectLater(
+        dispatcher.publish(_delivery()),
         throwsA(isA<MqttUnavailableException>()),
       );
     });
