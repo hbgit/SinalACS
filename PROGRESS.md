@@ -1652,7 +1652,7 @@ Plano: `docs/superpowers/plans/2026-10-14-issue-46-avisos-e-termos.md`; achados 
 
 Relatório item a item de `spec/PRD_system.md` contra o código, com evidência medida a partir de `develop` em `92106d1`:
 [docs/auditoria-prd/2026-10-15-lacunas-prd.md](docs/auditoria-prd/2026-10-15-lacunas-prd.md).
-Contagem dos 64 IDs do PRD: 24 entregue, 27 parcial, 4 ausente, 9 externo (mais 57 linhas sem ID próprio, para SLOs, STRIDE, criptografia, acessibilidade, telemetria, métricas do §1.3 e módulos dos apps).
+Contagem dos 64 IDs do PRD: 26 entregue, 25 parcial, 4 ausente, 9 externo (mais 57 linhas sem ID próprio, para SLOs, STRIDE, criptografia, acessibilidade, telemetria, métricas do §1.3 e módulos dos apps).
 Os três P0 do backlog: colunas de risco em texto plano (INV-04), o estado "Atendido" que o paciente nunca vê (RF05) e o SMS real do OTP (RF01).
 Backlog priorizado na seção final do relatório; conferência por `python3 scripts/qa/cobertura_prd.py --final`.
 
@@ -1662,3 +1662,9 @@ Backlog priorizado na seção final do relatório; conferência por `python3 scr
 - Decisão: `alerts.riskLevel` permanece legível (só `red` é gravado; chave dos filtros SQL da INV-03). Registrada no PRD (INV-04) e em `spec/lgpd_data_audit.md` §2.3; amarrada pelo teste `INV-04 (#75)` de `test/unit/red_alert_discard_paths_test.dart`.
 - Provas: `test/unit/encrypted_risk_level_test.dart`; testes `#75` em `test/integration/health_data_encryption_test.dart` (linha bruta por `row_to_json` sem risco legível, ida e volta, `After` nulo e conclusão, linha antiga fora do `pull` e `rejected` só para ela no `sync`) e em `test/integration/patient_data_overview_endpoint_test.dart`.
 - Aberto: migrações sem backfill (volume antigo precisa ser recriado); rotação de chave continua inexistente (`keyVersion` só marcador), como nas demais colunas cifradas.
+
+## Estado "Atendido" do alerta (#76) — 2026-10-16
+
+- Entregue: `alerts.resolve` (só ACS do território, só de `acknowledged`, idempotente, auditado na mesma transação: `resolved`, `already_resolved`, `denied_not_acknowledged`); coluna `alerts.resolvedAt` (migração aditiva); o ACK trava a linha e não rebaixa `resolved`; `alerts.statusFor` devolve `resolvedAt`; o pulso do backoffice anda com a conclusão. ACS: botão "Concluir atendimento" no cartão confirmado, com diálogo. Paciente: "Atendido pela equipe de saúde" e a hora da conclusão.
+- Provas: `test/unit/red_alert_service_test.dart` (grupo `resolve (#76)`), `test/integration/red_alert_cycle_test.dart` (grupo `concluir o atendimento (#76)`), `test/integration/admin_monitoring_store_test.dart`, `apps/acs/test/alert_resolve_test.dart`, `apps/patient/test/patient_app_mvp_test.dart`.
+- Aberto: sem prova no emulador (o e2e do paciente não tem ACS concluindo); o contador "reconhecidos" do backoffice (`acknowledgedRedAlerts`) conta só `acknowledged`, então um alerta concluído sai dele (o TMRAV não muda); a conclusão vive só na fila em memória do ACS, como o ACK.
