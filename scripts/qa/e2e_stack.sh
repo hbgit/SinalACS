@@ -41,6 +41,14 @@ case "${1:-}" in
     for f in infra/docker/traefik/runtime/certs/ca.crt; do
       [[ -f "$f" ]] || falhou "falta $f: suba a stack normal uma vez (docker compose up -d) para gerar os certificados"
     done
+    # A folha TLS da 8080 interna do backend (#78) vem do traefik-init, que o
+    # `--no-deps` abaixo não roda: num runtime/ anterior à #78 o Docker criaria
+    # runtime/backend/ vazio e o backend entraria em laço de restart. A CA já foi
+    # conferida acima, então o init só reaproveita a CA e regera as folhas.
+    dc up traefik-init >"$log" 2>&1 || falhou 'o traefik-init não gerou as folhas do RPC'
+    for f in infra/docker/traefik/runtime/backend/backend.crt infra/docker/traefik/runtime/backend/backend.key; do
+      [[ -f "$f" ]] || falhou "falta $f depois do traefik-init"
+    done
     dc up -d --build --force-recreate --no-deps serverpod gorush traefik mosquitto >"$log" 2>&1 \
       || falhou 'a subida do backend falhou'
     for _ in $(seq 1 90); do
