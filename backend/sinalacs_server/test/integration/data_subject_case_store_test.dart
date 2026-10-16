@@ -252,14 +252,15 @@ Future<void> _prontuarioA(Session s) async {
   final respostas = await testHealthDataCipher().encryptJson([
     TriageAnswer(question: 'fever', answer: 'sim').toJson(),
   ]);
+  final riscoTriagem = await encryptedRiskLevel(RiskLevel.yellow);
   await TriageSession.db.insertRow(
     s,
     TriageSession(
       patientId: a,
       answersEncrypted: respostas.ciphertextBase64,
       answersKeyVersion: respostas.keyVersion,
-      resultRisk: RiskLevel.yellow,
-      resultDisplay: 'Amarelo',
+      resultRiskEncrypted: riscoTriagem.ciphertextBase64,
+      resultRiskKeyVersion: riscoTriagem.keyVersion,
       createdAt: _t,
       deviceId: 'device-sintetico',
     ),
@@ -490,7 +491,7 @@ void main() {
         final triagens = await TriageSession.db.find(session, where: (t) => t.patientId.equals(a));
         expect(triagens, hasLength(1), reason: 'a sessão fica para estatística');
         expect(await decryptedTriageAnswers(triagens.single), isEmpty);
-        expect(triagens.single.resultRisk, RiskLevel.yellow);
+        expect(await decryptedTriageRisk(triagens.single), RiskLevel.yellow);
 
         expect(await Alert.db.count(session, where: (t) => t.patientId.equals(a)), 1);
         expect(await Visit.db.count(session, where: (t) => t.patientId.equals(a)), 1);

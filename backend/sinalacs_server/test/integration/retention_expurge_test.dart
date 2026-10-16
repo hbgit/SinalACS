@@ -181,8 +181,6 @@ Future<void> _seed(Session session) async {
     session,
     TriageSession(
       patientId: UuidValue.fromString(_patientId),
-      resultRisk: RiskLevel.green,
-      resultDisplay: 'Verde',
       createdAt: _cutoffTriage.subtract(const Duration(days: 1)),
       deviceId: 'device-retencao',
     ),
@@ -191,8 +189,6 @@ Future<void> _seed(Session session) async {
     session,
     TriageSession(
       patientId: UuidValue.fromString(_patientId),
-      resultRisk: RiskLevel.yellow,
-      resultDisplay: 'Amarelo',
       createdAt: _now,
       deviceId: 'device-retencao',
     ),

@@ -34,7 +34,6 @@ class TriageSessionRecord {
     required this.patientId,
     required this.answers,
     required this.resultRisk,
-    required this.resultDisplay,
     required this.createdAt,
     required this.deviceId,
   });
@@ -42,7 +41,6 @@ class TriageSessionRecord {
   final UuidValue patientId;
   final List<TriageAnswer> answers;
   final RiskLevel resultRisk;
-  final String resultDisplay;
   final DateTime createdAt;
   final String deviceId;
 }
@@ -154,7 +152,6 @@ class TriageSessionService {
             ),
         ],
         resultRisk: risk,
-        resultDisplay: _displayFor(risk),
         createdAt: _clock(),
         deviceId: user.deviceId,
       ));
@@ -179,10 +176,4 @@ class TriageSessionService {
 
     return risk;
   }
-
-  static String _displayFor(RiskLevel risk) => switch (risk) {
-        RiskLevel.red => 'Vermelho',
-        RiskLevel.yellow => 'Amarelo',
-        RiskLevel.green => 'Verde',
-      };
 }

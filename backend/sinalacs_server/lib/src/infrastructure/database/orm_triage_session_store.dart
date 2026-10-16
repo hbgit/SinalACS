@@ -2,6 +2,7 @@ import 'package:serverpod/serverpod.dart';
 import 'package:sinalacs_server/src/application/triage/triage_session_service.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
 import 'package:sinalacs_server/src/infrastructure/crypto/encrypted_json.dart';
+import 'package:sinalacs_server/src/infrastructure/crypto/encrypted_risk_level.dart';
 import 'package:sinalacs_server/src/infrastructure/crypto/health_data_cipher.dart';
 import 'package:sinalacs_server/src/infrastructure/database/removed_account.dart';
 import 'package:sinalacs_server/src/infrastructure/database/subject_lock.dart';
@@ -12,9 +13,10 @@ import 'package:sinalacs_server/src/infrastructure/database/subject_lock.dart';
 /// gravação falha se o paciente do token não existir no banco — é o que
 /// garante que uma triagem nunca fique órfã de prontuário.
 ///
-/// É aqui que as respostas da triagem viram ciphertext: o serviço entrega um
-/// [TriageSessionRecord] em claro e este store serializa para JSON, cifra e
-/// monta a linha persistida (RNF03, INV-04). `application/` não constrói mais
+/// É aqui que as respostas e a classificação de risco da triagem viram
+/// ciphertext: o serviço entrega um [TriageSessionRecord] em claro e este
+/// store serializa para JSON, cifra e monta a linha persistida (RNF03,
+/// INV-04, #75). `application/` não constrói mais
 /// o `TriageSession` gerado justamente para não precisar conhecer o par
 /// `answersEncrypted`/`answersKeyVersion`.
 class OrmTriageSessionStore implements TriageSessionStore {
@@ -42,10 +44,11 @@ class OrmTriageSessionStore implements TriageSessionStore {
     final encrypted = await _cipher.encryptJson(
       [for (final answer in session.answers) answer.toJson()],
     );
+    final risk = await _cipher.encryptRiskLevel(session.resultRisk);
     final db = _session();
     final external = _transaction;
-    if (external != null) return _insert(db, external, session, encrypted);
-    return db.db.transaction((transaction) => _insert(db, transaction, session, encrypted));
+    if (external != null) return _insert(db, external, session, encrypted, risk);
+    return db.db.transaction((transaction) => _insert(db, transaction, session, encrypted, risk));
   }
 
   Future<UuidValue?> _insert(
@@ -53,6 +56,7 @@ class OrmTriageSessionStore implements TriageSessionStore {
     Transaction transaction,
     TriageSessionRecord session,
     EncryptedValue encrypted,
+    EncryptedValue risk,
   ) async {
     await lockPerSubject(db, transaction,
         namespace: lockNamespaceDeletion, key: session.patientId.uuid);
@@ -65,8 +69,8 @@ class OrmTriageSessionStore implements TriageSessionStore {
         patientId: session.patientId,
         answersEncrypted: encrypted.ciphertextBase64,
         answersKeyVersion: encrypted.keyVersion,
-        resultRisk: session.resultRisk,
-        resultDisplay: session.resultDisplay,
+        resultRiskEncrypted: risk.ciphertextBase64,
+        resultRiskKeyVersion: risk.keyVersion,
         createdAt: session.createdAt,
         deviceId: session.deviceId,
       ),

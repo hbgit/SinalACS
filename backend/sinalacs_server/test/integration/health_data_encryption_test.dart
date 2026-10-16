@@ -139,6 +139,28 @@ Future<String> _colunaBruta(
   return rows.single.first.toString();
 }
 
+/// A linha inteira como mapa coluna → valor, lida por SQL cru (#75). Mostra
+/// TODAS as colunas, inclusive as que alguém acrescentar depois.
+Future<Map<String, dynamic>> _linhaBruta(Session session, {required String table}) async {
+  final rows = await session.db.unsafeQuery('SELECT row_to_json(t)::text FROM "$table" t;');
+  expect(rows, hasLength(1), reason: 'o seed deve ter gravado exatamente 1 linha');
+  return jsonDecode(rows.single.first as String) as Map<String, dynamic>;
+}
+
+/// Nenhuma coluna pode guardar a classificação legível — nem o nome do enum
+/// nem o rótulo de tela. Igualdade, não substring: um base64 pode conter
+/// "red" por acaso.
+void _expectSemRiscoLegivel(Map<String, dynamic> linha) {
+  const legiveis = {'red', 'yellow', 'green', 'Vermelho', 'Amarelo', 'Verde'};
+  for (final entry in linha.entries) {
+    expect(
+      legiveis.contains('${entry.value}'.trim()),
+      isFalse,
+      reason: 'a coluna ${entry.key} guarda o risco em claro (INV-04, #75)',
+    );
+  }
+}
+
 /// Falha se QUALQUER palavra do texto claro aparecer na coluna bruta.
 ///
 /// Comparar a string inteira seria fraco demais: um JSON parcialmente cifrado,
@@ -264,6 +286,40 @@ void main() {
         {for (final r in respostas) r.question: r.answer}['chestPain'],
         'sim',
       );
+    });
+
+    test('#75: nenhuma coluna de triage_sessions guarda a classificação de '
+        'risco em claro', () async {
+      final session = sessionBuilder.build();
+      await _seed(session);
+
+      final service = TriageSessionService(
+        store: OrmTriageSessionStore(
+          session: () => session,
+          cipher: testHealthDataCipher(),
+        ),
+        audit: _SilentAuditTrail(),
+      );
+      final risco = await service.evaluateAndRecord(
+        user: _paciente,
+        chestPain: true,
+        difficultyBreathing: false,
+        fever: false,
+        persistentVomiting: false,
+        bleeding: false,
+        severeWeakness: false,
+      );
+      expect(risco, RiskLevel.red);
+
+      final linha = await _linhaBruta(session, table: 'triage_sessions');
+      _expectSemRiscoLegivel(linha);
+      expect(
+        linha.containsKey('resultDisplay'),
+        isFalse,
+        reason: 'o rótulo derivado do risco não é mais persistido',
+      );
+      final gravada = await TriageSession.db.findFirstRow(session);
+      expect(await decryptedTriageRisk(gravada!), RiskLevel.red);
     });
 
     test('visits.notesEncrypted não guarda as notas em claro, e o pull do ACS '

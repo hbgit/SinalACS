@@ -116,7 +116,6 @@ void main() {
 
     expect(risco, RiskLevel.red);
     expect(store.saved.single.resultRisk, RiskLevel.red);
-    expect(store.saved.single.resultDisplay, 'Vermelho');
   });
 
   test('grava as seis respostas com chave estável, não com texto de UI', () async {

@@ -2419,16 +2419,18 @@ class Protocol extends _i1.SerializationManagerServer {
           columnDefault: '1',
         ),
         _i2.ColumnDefinition(
-          name: 'resultRisk',
-          columnType: _i2.ColumnType.text,
-          isNullable: false,
-          dartType: 'protocol:RiskLevel',
-        ),
-        _i2.ColumnDefinition(
-          name: 'resultDisplay',
+          name: 'resultRiskEncrypted',
           columnType: _i2.ColumnType.text,
           isNullable: false,
           dartType: 'String',
+          columnDefault: '\'\'::text',
+        ),
+        _i2.ColumnDefinition(
+          name: 'resultRiskKeyVersion',
+          columnType: _i2.ColumnType.bigint,
+          isNullable: false,
+          dartType: 'int',
+          columnDefault: '1',
         ),
         _i2.ColumnDefinition(
           name: 'createdAt',
