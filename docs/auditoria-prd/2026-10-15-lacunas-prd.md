@@ -60,69 +60,69 @@ próprio; o conferidor exige apenas os IDs do PRD.
 
 | ID | Requisito | Status | Evidência | O que falta |
 |----|-----------|--------|-----------|-------------|
-| INV-01 | ACS só vê pacientes da própria microárea | **a-verificar** | | |
-| INV-02 | Classificação de risco não alterável por humano | **a-verificar** | | |
-| INV-03 | Alerta vermelho nunca perdido | **a-verificar** | | |
-| INV-04 | Dado de saúde nunca em texto plano | **a-verificar** | | |
-| INV-05 | Paciente nunca acessa dado de outro paciente | **a-verificar** | | |
+| INV-01 | ACS só vê pacientes da própria microárea | **entregue** | Recusa de outra microárea testada por endpoint: `patients.listMicroArea` e `visits.pull` (`patient_directory_and_territory_test.dart`), `visits.sync` (`visit_sync_service_test.dart`, rejeição de território), `onboarding.generateEnrollmentToken` (`onboarding_service_test.dart:75`), `alerts.acknowledge` (`red_alert_discard_paths_test.dart`), `notices.sendSegmented` (`notices_endpoint_test.dart`), staff por UBS (`admin_scope_test.dart`); todos passam (2026-10-15). |  |
+| INV-02 | Classificação de risco não alterável por humano | **entregue** | Nenhum endpoint recebe risco do cliente: `createRedAlert` aceita só `idempotencyKey`, `locationHash` e `locationCell` (`alerts_endpoint.dart`); `triage.evaluate` recebe os sinais e o servidor classifica; o app do paciente não calcula risco (`apps/patient/lib/app/app.dart:1424-1428`). |  |
+| INV-03 | Alerta vermelho nunca perdido | **entregue** | Outbox MQTT com ACK, retry e reforço; publicação confirmada por PUBACK (`mqtt_alert_dispatcher_resilience_test.dart`, #56), caminhos de descarte cobertos (`red_alert_discard_paths_test.dart`), `red_alert_cycle_test.dart`; e2e `scripts/qa/mqtt_resiliencia_e2e.sh`; 10/10 alertas entregues na medição de latência. | O ACS só recebe alerta por MQTT: não há reserva por HTTP se o broker ficar inalcançável (ver R2). |
+| INV-04 | Dado de saúde nunca em texto plano | **parcial** | Colunas clínicas cifradas em AES-256-GCM na aplicação (`*Encrypted`/`*KeyVersion` para condições crônicas, respostas de triagem e notas de visita); SQLCipher no ACS (`apps/acs/lib/core/database/encrypted_database.dart`). | `triage_sessions.resultRisk` e `resultDisplay` seguem em texto plano (`definition.sql` da migração `20261014155304871`) e `spec/lgpd_data_audit.md:50-51` os classifica como dado sensível de saúde; `alerts.riskLevel` idem. Cifrar ou registrar a decisão de deixá-los legíveis para a fila. |
+| INV-05 | Paciente nunca acessa dado de outro paciente | **entregue** | Token do paciente carrega o `patientId` e os endpoints de paciente leem só dele: `myData`, consentimentos e pedidos (`patient_data_overview_endpoint_test.dart`, `data_subject_rights_endpoint_test.dart`), `statusFor` (`authorization_test.dart`, `red_alert_cycle_test.dart`), token de push por dono (`push_token_endpoint_test.dart`); passam (2026-10-15). |  |
 
 ### STRIDE (§4.2.1)
 
 | ID | Requisito | Status | Evidência | O que falta |
 |----|-----------|--------|-----------|-------------|
-| STRIDE-S | Spoofing: mensagens falsas no MQTT | **a-verificar** | | |
-| STRIDE-T | Tampering: triagem alterada no dispositivo | **a-verificar** | | |
-| STRIDE-R | Repudiation: logs append-only assinados | **a-verificar** | | |
-| STRIDE-I | Information disclosure: PII no dispositivo | **a-verificar** | | |
-| STRIDE-D | Denial of service: inundação MQTT | **a-verificar** | | |
-| STRIDE-E | Elevation of privilege: outra microárea | **a-verificar** | | |
+| STRIDE-S | Spoofing: mensagens falsas no MQTT | **parcial** | Broker com senha + ACL por tópico + certificado de cliente obrigatório (`infra/docker/mosquitto/mosquitto.conf:10`); `scripts/qa/mtls_invariants.sh` OK (2026-10-15). | Certificado de cliente por aparelho em produção (hoje um certificado de dev compartilhado, `acs-area-12.crt`). |
+| STRIDE-T | Tampering: triagem alterada no dispositivo | **parcial** | O risco é recalculado no servidor (INV-02), então adulterar a triagem no aparelho não muda a classificação. | Não há a assinatura digital dos dados de triagem no dispositivo que o PRD descreve; decidir se a reclassificação no servidor substitui a assinatura e registrar. |
+| STRIDE-R | Repudiation: logs append-only assinados | **parcial** | Cadeia HMAC em `audit_logs` detecta remoção e alteração (`audit_chain_check`). | Append-only no banco (trigger/`REVOKE`) não existe: ver RF17. |
+| STRIDE-I | Information disclosure: PII no dispositivo | **entregue** | SQLCipher no ACS com chave no Keystore (`apps/acs/lib/core/security/database_key_store.dart`), `FLAG_SECURE` na janela do ACS (`secure_window_test`); o app do paciente não persiste dado clínico. |  |
+| STRIDE-D | Denial of service: inundação MQTT | **ausente** | `infra/docker/mosquitto/mosquitto.conf` sem nenhum limite (`max_connections`, `max_inflight_messages`, `message_size_limit`); nenhum middleware de rate limit no Traefik. | Limites no Mosquitto e rate limit no Traefik. |
+| STRIDE-E | Elevation of privilege: outra microárea | **entregue** | Ver INV-01 e RNF06 (`Authorization.require`, recusa auditada). |  |
 
 ### Criptografia (§4.2.3)
 
 | ID | Requisito | Status | Evidência | O que falta |
 |----|-----------|--------|-----------|-------------|
-| CRIPTO-APP-LOCAL | SQLCipher com chave derivada de PIN/biometria | **a-verificar** | | |
-| CRIPTO-APP-CACHE | SQLCipher com chave rotativa | **a-verificar** | | |
-| CRIPTO-APP-TRAEFIK | TLS 1.3 app ↔ Traefik | **a-verificar** | | |
-| CRIPTO-TRAEFIK-BACKEND | mTLS Traefik ↔ backend | **a-verificar** | | |
-| CRIPTO-POSTGRES | Criptografia no PostgreSQL | **a-verificar** | | |
-| CRIPTO-AUDITORIA | Cadeia HMAC-SHA256 da auditoria | **a-verificar** | | |
+| CRIPTO-APP-LOCAL | SQLCipher com chave derivada de PIN/biometria | **parcial** | SQLCipher com chave aleatória de 32 bytes guardada no Keystore (`apps/acs/lib/core/security/database_key_store.dart:31`); o arquivo documenta por que não usa PBKDF2 de PIN (`:8`). | Divergência do PRD (§4.2.3 pede chave derivada de PIN/biometria por PBKDF2): atualizar o PRD com a decisão ou amarrar a chave à biometria. |
+| CRIPTO-APP-CACHE | SQLCipher com chave rotativa | **ausente** | A mesma chave do SQLCipher é usada por toda a vida da instalação; nenhuma rotação. | Rotação da chave do cache (mudança de dispositivo) ou decisão registrada de não rotacionar. |
+| CRIPTO-APP-TRAEFIK | TLS 1.3 app ↔ Traefik | **entregue** | Traefik com `minVersion: VersionTLS13` (`infra/docker/traefik/dynamic/tls.yaml:22`); `scripts/qa/tls_invariants.sh` OK e `openssl s_client -tls1_2` na 443 recusado (2026-10-15). | Certificado Let's Encrypt em produção (hoje CA de dev). |
+| CRIPTO-TRAEFIK-BACKEND | mTLS Traefik ↔ backend | **ausente** | Traefik fala com o backend em HTTP puro na 8080 (`docker-compose.yml:194`, `loadbalancer.server.port=8080`), sem `serversTransport` nem mTLS. | mTLS entre Traefik e backend, ou decisão registrada de rede interna confiável. |
+| CRIPTO-POSTGRES | Criptografia no PostgreSQL | **entregue** | AES-256-GCM na aplicação com `HEALTH_DATA_ENCRYPTION_KEY` (decisão §2.2.1 §6, que substituiu pgcrypto); ver INV-04. | Chave em gerenciador de segredos (Vault) em produção; hoje variável de ambiente. |
+| CRIPTO-AUDITORIA | Cadeia HMAC-SHA256 da auditoria | **entregue** | HMAC-SHA256 com `AUDIT_CHAIN_SECRET` fora do Postgres; `audit_chain_test.dart` passa. | Rotação do segredo invalida a história (limite conhecido, #45). |
 
 ## Não funcionais
 
 | ID | Requisito | Status | Evidência | O que falta |
 |----|-----------|--------|-----------|-------------|
-| RNF01 | Latência MQTT < 500 ms (p95) | **a-verificar** | | |
-| RNF02 | Sincronização offline > 99,5 % | **a-verificar** | | |
-| RNF03 | Criptografia AES-256 em repouso | **a-verificar** | | |
-| RNF04 | TLS 1.3 em todas as comunicações | **a-verificar** | | |
-| RNF05 | Acessibilidade WCAG 2.1 AA | **a-verificar** | | |
+| RNF01 | Latência MQTT < 500 ms (p95) | **entregue** | Entrega de alerta p95 212 ms, 10/10 amostras (meta < 500 ms); `measure_latency.dart --samples 10 --visit-count 100` contra a stack local (2026-10-16 01:27 UTC). | Medido em stack local com 10 amostras; repetir em produção com carga (ver M3.3). |
+| RNF02 | Sincronização offline > 99,5 % | **parcial** | Sync 10/10 lotes de 100 visitas sem perda (`measure_latency.dart --samples 10 --visit-count 100` contra a stack local (2026-10-16 01:27 UTC)); `offline_burst_test.dart` prova que nenhuma de 100 se perde em reinício. | A taxa > 99,5 % em campo não é medida: nenhum evento `sync_attempt`/`sync_result` é emitido (ver EVT-*). |
+| RNF03 | Criptografia AES-256 em repouso | **parcial** | Ver INV-04 e CRIPTO-*. | Ver INV-04 (colunas de risco em texto plano) e CRIPTO-APP-CACHE. |
+| RNF04 | TLS 1.3 em todas as comunicações | **parcial** | RPC em TLS 1.3 obrigatório (`tls_invariants.sh` OK); broker MQTT só em TLS na 8883 com mTLS (`mtls_invariants.sh` OK). | O broker aceita TLS 1.2: `openssl s_client -tls1_2 -connect localhost:8883` com certificado de cliente negociou TLSv1.2 (2026-10-15). Falta `tls_version tlsv1.3` no `mosquitto.conf` e o caso no `tls_invariants.sh`; Traefik-backend em texto claro (CRIPTO-TRAEFIK-BACKEND). |
+| RNF05 | Acessibilidade WCAG 2.1 AA | **parcial** | Matriz de contraste e `meetsGuideline` nos três apps (`apps/*/test/contrast_tokens_test.dart`, `touch_targets_test.dart` no admin), avaliação em `spec/ux_accessibility_assessment.md` (WCAG 2.2 AA, superconjunto do 2.1); linha de base verde. | Foco visível no admin (A11Y-2.4.7) e métricas de interface (A11Y-LCP/FID/CLS) não medidas. |
 
 ### SLOs (§4.1)
 
 | ID | Requisito | Status | Evidência | O que falta |
 |----|-----------|--------|-----------|-------------|
-| SLO-LOGIN | Login < 1 s | **a-verificar** | | |
-| SLO-ALERTA | Alerta publish → ACK < 500 ms | **a-verificar** | | |
-| SLO-DASHBOARD | Dashboard ACS < 1,5 s, paginação de 20 | **a-verificar** | | |
-| SLO-VISITA | Registro offline < 200 ms | **a-verificar** | | |
-| SLO-SYNC | Sync de 50 itens < 5 s | **a-verificar** | | |
-| SLO-MAPA | Mapa < 2 s, clusterização 50+ | **a-verificar** | | |
-| SLO-TRIAGEM | Cálculo da triagem < 50 ms | **a-verificar** | | |
+| SLO-LOGIN | Login < 1 s | **parcial** | Não medido. | Medir p95 do login do ACS e do paciente (o Argon2id domina o custo). |
+| SLO-ALERTA | Alerta publish → ACK < 500 ms | **entregue** | p95 212 ms (meta < 500 ms) por `measure_latency.dart`, stack local, 10 amostras (2026-10-16 UTC). | Repetir em produção. |
+| SLO-DASHBOARD | Dashboard ACS < 1,5 s, paginação de 20 | **parcial** | Carga do dashboard não medida; a fila não pagina (lista inteira em `AlertQueue`). | Paginação de 20 itens e medição < 1,5 s. |
+| SLO-VISITA | Registro offline < 200 ms | **parcial** | Inserção local sem rede (`offline_visit_queue.dart`), tempo não medido. | Medir a gravação local (< 200 ms). |
+| SLO-SYNC | Sync de 50 itens < 5 s | **entregue** | Lote de 100 visitas com p95 112 ms (meta: 50 itens < 5 s), stack local, 10 amostras (2026-10-16 UTC). | Repetir em rede móvel real. |
+| SLO-MAPA | Mapa < 2 s, clusterização 50+ | **parcial** | Renderização não medida; sem clusterização (ver RF10). | Clusterização para 50+ pinos e medição < 2 s. |
+| SLO-TRIAGEM | Cálculo da triagem < 50 ms | **parcial** | Função pura com seis booleanos (`triage_engine.dart`), sem IO; tempo não medido. | Um teste de tempo basta para fechar. |
 
 ### Acessibilidade (§4.3)
 
 | ID | Requisito | Status | Evidência | O que falta |
 |----|-----------|--------|-----------|-------------|
-| A11Y-1.4.3 | Contraste de texto ≥ 4,5:1 | **a-verificar** | | |
-| A11Y-1.4.11 | Contraste não textual ≥ 3:1 | **a-verificar** | | |
-| A11Y-2.5.1 | Alvos de toque ≥ 48 dp | **a-verificar** | | |
-| A11Y-2.5.6 | Botão de pânico ≥ 60 dp | **a-verificar** | | |
-| A11Y-2.4.7 | Foco visível | **a-verificar** | | |
-| A11Y-3.3.2 | Rótulos e Semantics | **a-verificar** | | |
-| A11Y-LCP | LCP < 1,5 s | **a-verificar** | | |
-| A11Y-FID | FID < 100 ms | **a-verificar** | | |
-| A11Y-CLS | CLS < 0,1 | **a-verificar** | | |
+| A11Y-1.4.3 | Contraste de texto ≥ 4,5:1 | **entregue** | Matriz determinística de contraste nos três apps (`apps/acs/test/contrast_tokens_test.dart`, `apps/patient/test/contrast_tokens_test.dart`, `apps/admin/test/contrast_tokens_test.dart`) mais os de tema claro; linha de base verde. |  |
+| A11Y-1.4.11 | Contraste não textual ≥ 3:1 | **parcial** | Tokens de preenchimento conferidos na matriz de contraste. | Não há golden tests (o PRD pede validação visual por golden). |
+| A11Y-2.5.1 | Alvos de toque ≥ 48 dp | **entregue** | `androidTapTargetGuideline` no ACS e no paciente, alvos >= 48 dp no admin (`apps/admin/test/notices_a11y_test.dart:22`); botões de 48x52 dp no paciente. |  |
+| A11Y-2.5.6 | Botão de pânico ≥ 60 dp | **entregue** | Botão de pânico 208x208 dp (`apps/patient/lib/app/app.dart:1380`) e SAMU 60x60 dp no ACS. |  |
+| A11Y-2.4.7 | Foco visível | **parcial** | Nenhum `FocusNode`, `focusColor` ou estilo de foco no `apps/admin/lib` (0 ocorrências); apps móveis usam o padrão do Material. | Indicador de foco visível no backoffice (uso com teclado no desktop/web) e teste. |
+| A11Y-3.3.2 | Rótulos e Semantics | **entregue** | `Semantics`/`liveRegion` em status dinâmicos e `labeledTapTargetGuideline` (`apps/acs/test/login_flow_test.dart`, `apps/patient/test/patient_app_mvp_test.dart`). |  |
+| A11Y-LCP | LCP < 1,5 s | **parcial** | Não medido. | Medir primeiro quadro do dashboard (< 1,5 s), por exemplo com `integration_test` + timeline. |
+| A11Y-FID | FID < 100 ms | **parcial** | Não medido. | Medir a resposta ao toque no botão de pânico (< 100 ms). |
+| A11Y-CLS | CLS < 0,1 | **parcial** | Não medido. | Medir estabilidade do layout no carregamento (< 0,1). |
 
 ## LGPD e dados
 
