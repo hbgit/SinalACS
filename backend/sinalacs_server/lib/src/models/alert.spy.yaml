@@ -14,6 +14,9 @@ fields:
   receivedAt: DateTime?
   respondedAt: DateTime?
   acknowledgedAt: DateTime?
+  ### Atendimento concluído pelo ACS (#76): carimbado uma única vez, na
+  ### transição acknowledged → resolved. Nulo enquanto não foi atendido.
+  resolvedAt: DateTime?
   riskLevel: RiskLevel
   locationHash: String
   ### Célula geográfica de baixa resolução para o mapa do ACS (~1,1 km).

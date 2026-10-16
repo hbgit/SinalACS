@@ -1,4 +1,5 @@
 import 'package:serverpod/serverpod.dart';
+import 'package:sinalacs_server/src/application/alerts/red_alert_service.dart';
 import 'package:sinalacs_server/src/endpoints/authenticated_endpoint.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
 import 'package:sinalacs_server/src/runtime/alert_runtime.dart';
@@ -88,6 +89,35 @@ class AlertsEndpoint extends AuthenticatedEndpoint {
     }
   }
 
+  /// Conclui o atendimento de um alerta já confirmado (#76, RF05): é o que
+  /// faz o paciente ver "Atendido". Alerta inexistente ou de outra microárea
+  /// devolve `resolved: false`, como o ACK; alerta ainda não confirmado é
+  /// [AlertValidationException] com o texto de
+  /// `RedAlertService.notAcknowledgedMessage`.
+  Future<AlertResolveResult> resolve(
+    Session session, {
+    required String accessToken,
+    required String alertId,
+  }) async {
+    final user = authenticate(accessToken);
+    final service = AlertRuntime.instance.serviceFor(session);
+
+    try {
+      final attempt = await service.resolve(user: user, alertId: alertId);
+      final found = attempt.outcome != AlertResolveOutcome.notFound;
+      return AlertResolveResult(
+        alertId: alertId,
+        resolved: found,
+        status: found ? AlertStatus.resolved : null,
+        resolvedAt: attempt.resolvedAt,
+      );
+    } on ArgumentError catch (error) {
+      throw AlertValidationException(message: '${error.message}');
+    } on StateError catch (error) {
+      throw AlertPermissionException(message: error.message);
+    }
+  }
+
   /// Status do alerta mais recente do PRÓPRIO paciente (RF05, decisão §5).
   /// `patientId` nunca é parâmetro — vem do token (INV-05).
   Future<AlertStatusResult> statusFor(
@@ -108,6 +138,7 @@ class AlertsEndpoint extends AuthenticatedEndpoint {
         status: snapshot.status,
         triggeredAt: snapshot.triggeredAt,
         acknowledgedAt: snapshot.acknowledgedAt,
+        resolvedAt: snapshot.resolvedAt,
       );
     } on StateError catch (error) {
       throw AlertPermissionException(message: error.message);

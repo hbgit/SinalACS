@@ -32,6 +32,7 @@ abstract class Alert
     this.receivedAt,
     this.respondedAt,
     this.acknowledgedAt,
+    this.resolvedAt,
     required this.riskLevel,
     required this.locationHash,
     this.locationCell,
@@ -54,6 +55,7 @@ abstract class Alert
     DateTime? receivedAt,
     DateTime? respondedAt,
     DateTime? acknowledgedAt,
+    DateTime? resolvedAt,
     required _i2.RiskLevel riskLevel,
     required String locationHash,
     String? locationCell,
@@ -99,6 +101,9 @@ abstract class Alert
           : _i1.DateTimeJsonExtension.fromJson(
               jsonSerialization['acknowledgedAt'],
             ),
+      resolvedAt: jsonSerialization['resolvedAt'] == null
+          ? null
+          : _i1.DateTimeJsonExtension.fromJson(jsonSerialization['resolvedAt']),
       riskLevel: _i2.RiskLevel.fromJson(
         (jsonSerialization['riskLevel'] as String),
       ),
@@ -148,6 +153,10 @@ abstract class Alert
 
   DateTime? acknowledgedAt;
 
+  /// Atendimento concluído pelo ACS (#76): carimbado uma única vez, na
+  /// transição acknowledged → resolved. Nulo enquanto não foi atendido.
+  DateTime? resolvedAt;
+
   _i2.RiskLevel riskLevel;
 
   String locationHash;
@@ -188,6 +197,7 @@ abstract class Alert
     DateTime? receivedAt,
     DateTime? respondedAt,
     DateTime? acknowledgedAt,
+    DateTime? resolvedAt,
     _i2.RiskLevel? riskLevel,
     String? locationHash,
     String? locationCell,
@@ -212,6 +222,7 @@ abstract class Alert
       if (receivedAt != null) 'receivedAt': receivedAt?.toJson(),
       if (respondedAt != null) 'respondedAt': respondedAt?.toJson(),
       if (acknowledgedAt != null) 'acknowledgedAt': acknowledgedAt?.toJson(),
+      if (resolvedAt != null) 'resolvedAt': resolvedAt?.toJson(),
       'riskLevel': riskLevel.toJson(),
       'locationHash': locationHash,
       if (locationCell != null) 'locationCell': locationCell,
@@ -239,6 +250,7 @@ abstract class Alert
       if (receivedAt != null) 'receivedAt': receivedAt?.toJson(),
       if (respondedAt != null) 'respondedAt': respondedAt?.toJson(),
       if (acknowledgedAt != null) 'acknowledgedAt': acknowledgedAt?.toJson(),
+      if (resolvedAt != null) 'resolvedAt': resolvedAt?.toJson(),
       'riskLevel': riskLevel.toJson(),
       'locationHash': locationHash,
       if (locationCell != null) 'locationCell': locationCell,
@@ -296,6 +308,7 @@ class _AlertImpl extends Alert {
     DateTime? receivedAt,
     DateTime? respondedAt,
     DateTime? acknowledgedAt,
+    DateTime? resolvedAt,
     required _i2.RiskLevel riskLevel,
     required String locationHash,
     String? locationCell,
@@ -316,6 +329,7 @@ class _AlertImpl extends Alert {
          receivedAt: receivedAt,
          respondedAt: respondedAt,
          acknowledgedAt: acknowledgedAt,
+         resolvedAt: resolvedAt,
          riskLevel: riskLevel,
          locationHash: locationHash,
          locationCell: locationCell,
@@ -342,6 +356,7 @@ class _AlertImpl extends Alert {
     Object? receivedAt = _Undefined,
     Object? respondedAt = _Undefined,
     Object? acknowledgedAt = _Undefined,
+    Object? resolvedAt = _Undefined,
     _i2.RiskLevel? riskLevel,
     String? locationHash,
     Object? locationCell = _Undefined,
@@ -367,6 +382,7 @@ class _AlertImpl extends Alert {
       acknowledgedAt: acknowledgedAt is DateTime?
           ? acknowledgedAt
           : this.acknowledgedAt,
+      resolvedAt: resolvedAt is DateTime? ? resolvedAt : this.resolvedAt,
       riskLevel: riskLevel ?? this.riskLevel,
       locationHash: locationHash ?? this.locationHash,
       locationCell: locationCell is String? ? locationCell : this.locationCell,
@@ -430,6 +446,12 @@ class AlertUpdateTable extends _i1.UpdateTable<AlertTable> {
   _i1.ColumnValue<DateTime, DateTime> acknowledgedAt(DateTime? value) =>
       _i1.ColumnValue(
         table.acknowledgedAt,
+        value,
+      );
+
+  _i1.ColumnValue<DateTime, DateTime> resolvedAt(DateTime? value) =>
+      _i1.ColumnValue(
+        table.resolvedAt,
         value,
       );
 
@@ -530,6 +552,10 @@ class AlertTable extends _i1.Table<_i1.UuidValue?> {
       'acknowledgedAt',
       this,
     );
+    resolvedAt = _i1.ColumnDateTime(
+      'resolvedAt',
+      this,
+    );
     riskLevel = _i1.ColumnEnum(
       'riskLevel',
       this,
@@ -595,6 +621,10 @@ class AlertTable extends _i1.Table<_i1.UuidValue?> {
 
   late final _i1.ColumnDateTime acknowledgedAt;
 
+  /// Atendimento concluído pelo ACS (#76): carimbado uma única vez, na
+  /// transição acknowledged → resolved. Nulo enquanto não foi atendido.
+  late final _i1.ColumnDateTime resolvedAt;
+
   late final _i1.ColumnEnum<_i2.RiskLevel> riskLevel;
 
   late final _i1.ColumnString locationHash;
@@ -630,6 +660,7 @@ class AlertTable extends _i1.Table<_i1.UuidValue?> {
     receivedAt,
     respondedAt,
     acknowledgedAt,
+    resolvedAt,
     riskLevel,
     locationHash,
     locationCell,

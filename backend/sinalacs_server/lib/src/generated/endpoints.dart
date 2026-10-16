@@ -977,6 +977,30 @@ class Endpoints extends _i1.EndpointDispatch {
                     alertId: params['alertId'],
                   ),
         ),
+        'resolve': _i1.MethodConnector(
+          name: 'resolve',
+          params: {
+            'accessToken': _i1.ParameterDescription(
+              name: 'accessToken',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'alertId': _i1.ParameterDescription(
+              name: 'alertId',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async => (endpoints['alerts'] as _i3.AlertsEndpoint).resolve(
+                session,
+                accessToken: params['accessToken'],
+                alertId: params['alertId'],
+              ),
+        ),
         'statusFor': _i1.MethodConnector(
           name: 'statusFor',
           params: {

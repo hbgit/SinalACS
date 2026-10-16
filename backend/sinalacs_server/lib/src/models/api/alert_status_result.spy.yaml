@@ -11,3 +11,4 @@ fields:
   status: AlertStatus?
   triggeredAt: DateTime?
   acknowledgedAt: DateTime?
+  resolvedAt: DateTime?
