@@ -97,6 +97,11 @@ Configurar como variáveis de ambiente secretas (nunca commitadas):
 > O piloto, portanto, **depende de um proxy com TLS na frente**; publicar a porta
 > da API direto, sem essa borda, reabriria o caminho em texto claro.
 >
+> Deixe `API_TLS_CERT_PATH` e `API_TLS_KEY_PATH` **sem definir** aqui: elas ligam
+> o TLS 1.3 do próprio processo, que é o trecho Traefik → backend da stack local
+> (issue #78), e o proxy do Render fala HTTP com o container. Só uma das duas
+> definida impede o boot.
+>
 > O certificado de desenvolvimento deste repositório
 > (`infra/docker/traefik/runtime/certs/` — a folha é emitida pela CA de dev
 > `SinalACS Dev RPC CA` e regerada a cada subida; **auto-assinada é a CA**, que é
