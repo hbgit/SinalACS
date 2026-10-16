@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:serverpod/serverpod.dart';
 import 'package:sinalacs_server/src/application/visits/visit_sync_service.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
@@ -106,7 +108,13 @@ class OrmVisitStore implements VisitStore {
     // Laço, e não list literal: decifrar é assíncrono.
     final records = <VisitRecord>[];
     for (final visit in visits) {
-      records.add(await _toRecord(visit));
+      try {
+        records.add(await _toRecord(visit));
+      } on UnreadableVisitException catch (error) {
+        // Uma linha anterior à #75 não pode derrubar o pull do território
+        // inteiro: fica de fora, e o log leva só o id (VAZ-01).
+        stderr.writeln('$error Omitida do pull.');
+      }
     }
     return records;
   }
@@ -157,11 +165,9 @@ class OrmVisitStore implements VisitStore {
           row.riskLevelBeforeKeyVersion,
         );
     // Ciphertext vazio = linha anterior à migração da #75 ou gravada fora
-    // deste store. Falha alto: a fila do ACS não pode receber um risco
-    // inventado (INV-02). Só o id sintético vai na mensagem (VAZ-01).
-    if (before == null) {
-      throw StateError('Visita ${row.id} sem riskLevelBefore cifrado (#75).');
-    }
+    // deste store. A fila do ACS não pode receber um risco inventado
+    // (INV-02): quem chama decide o que fazer com a visita ilegível.
+    if (before == null) throw UnreadableVisitException(row.id);
     final after = plain != null
         ? plain.riskLevelAfter
         : await _cipher.decryptRiskLevel(

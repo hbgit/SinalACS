@@ -72,7 +72,7 @@ existing content with no warning. Either `docker compose down && rm -rf
 pg_data/` before starting on the new schema, or accept the loss of synthetic
 dev data in those three fields.
 
-Issue #75 repeats it: migrations `20261016135918697` and `20261016140159775` `DROP COLUMN` `triage_sessions.resultRisk`/`resultDisplay` and `visits.riskLevelBefore`/`riskLevelAfter` with no backfill. On an old volume, old triages drop out of the patient's "Meus Dados" risk history and the ACS `visits.pull` fails with `StateError` on any pre-migration visit until `docker compose down && rm -rf pg_data/`.
+Issue #75 repeats it: migrations `20261016135918697` and `20261016140159775` `DROP COLUMN` `triage_sessions.resultRisk`/`resultDisplay` and `visits.riskLevelBefore`/`riskLevelAfter` with no backfill. On an old volume, old triages drop out of the patient's "Meus Dados" risk history and a pre-migration visit is left out of the ACS `visits.pull` and answered `SyncStatus.rejected` (`visita anterior à cifra do risco (#75)`, only that visit; the rest of the batch uploads) by `visits.sync`/`syncLegacy`/`syncDeferred`, until `docker compose down && rm -rf pg_data/`.
 
 Rotating the MQTT passwords is enough on its own: `infra/docker/mosquitto/init.sh`
 rewrites the broker's `passwordfile` on every boot. It used to only create it

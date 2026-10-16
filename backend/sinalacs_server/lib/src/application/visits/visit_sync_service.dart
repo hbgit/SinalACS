@@ -112,12 +112,26 @@ class VisitRecord {
 /// Serverpod gera para os seus próprios modelos.
 const Object _keep = Object();
 
+/// A visita existe no banco, mas sem o risco cifrado: foi gravada antes da
+/// migração da #75, que descartou as colunas em claro sem backfill. Não há
+/// risco legível para devolver, e inventar um violaria a INV-02; quem chama
+/// recusa só esta visita. Leva só o id sintético (VAZ-01).
+class UnreadableVisitException implements Exception {
+  const UnreadableVisitException(this.visitId);
+
+  final UuidValue? visitId;
+
+  @override
+  String toString() => 'Visita $visitId sem riskLevelBefore cifrado (#75).';
+}
+
 /// Persistência das visitas sincronizadas.
 ///
 /// Interface no mesmo padrão de `AlertStore`: mantém o serviço testável sem
 /// Postgres real.
 abstract interface class VisitStore {
-  /// Visita já gravada com este `localId`, se houver.
+  /// Visita já gravada com este `localId`, se houver. Lança
+  /// [UnreadableVisitException] se ela existe mas não tem o risco cifrado.
   Future<VisitRecord?> findByLocalId(String localId);
 
   /// Grava uma visita nova, já com `version` inicial.
@@ -386,7 +400,18 @@ class VisitSyncService {
     }
 
     final acsId = UuidValue.fromString(user.id);
-    final existing = await _store.findByLocalId(entry.localId);
+    final VisitRecord? existing;
+    try {
+      existing = await _store.findByLocalId(entry.localId);
+    } on UnreadableVisitException {
+      // Terminal e só desta visita: o resto do lote segue, e o aparelho a
+      // mantém na fila para revisão em vez de achar que a sessão caiu.
+      return VisitSyncResult(
+        localId: entry.localId,
+        syncStatus: SyncStatus.rejected,
+        message: 'visita anterior à cifra do risco (#75)',
+      );
+    }
 
     if (existing == null) {
       final inserted = await _store.insert(VisitRecord(
