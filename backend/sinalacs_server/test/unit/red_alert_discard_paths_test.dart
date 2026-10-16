@@ -230,6 +230,30 @@ void main() {
       );
       expect(adminWriters, isEmpty);
     });
+
+    test('INV-04 (#75): todo alerta gravado é vermelho — é o que justifica '
+        'alerts.riskLevel em claro (spec/lgpd_data_audit.md §2.3)', () {
+      // `(?<!\w)Alert\(` pega o construtor do modelo de tabela e deixa de fora
+      // AdminAlert/AlertStatusSnapshot; `copyWith` pega uma reclassificação.
+      final pattern = RegExp(
+        r'(?:(?<!\w)Alert\(|\.copyWith\()[^;]*?riskLevel:\s*([\w.]+)',
+        dotAll: true,
+      );
+      final valores = <String>{};
+      for (final entry in _grepSources(pattern).entries) {
+        for (final hit in entry.value) {
+          valores.add(pattern.firstMatch(hit)!.group(1)!);
+        }
+      }
+      expect(valores, isNotEmpty, reason: 'a varredura precisa achar o save() do OrmAlertStore');
+      expect(
+        valores,
+        {'RiskLevel.red'},
+        reason: 'Se um alerta amarelo/verde passou a ser gravado, alerts.riskLevel '
+            'deixou de ser igual à existência da linha: cifre a coluna ou '
+            'revise a decisão da #75 antes de mudar este teste.',
+      );
+    });
   });
 
   group('alerts.createRedAlert repetido (idempotência)', () {
