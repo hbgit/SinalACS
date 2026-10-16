@@ -220,6 +220,27 @@ void main() {
       expect(depois.overdueRed, 0);
     });
 
+    test('maxChangedAt anda com a conclusão do atendimento (#76)', () async {
+      final a = await _alerta(
+        session,
+        em: _t.subtract(const Duration(hours: 1)),
+      );
+      final ack = _t.subtract(const Duration(minutes: 10));
+      final concluido = _t.subtract(const Duration(minutes: 2));
+      await Alert.db.updateRow(
+        session,
+        a.copyWith(
+          status: AlertStatus.resolved,
+          acknowledgedAt: ack,
+          resolvedAt: concluido,
+        ),
+      );
+
+      final r = await pulso(const AdminScope.ubs(_ubsA));
+      expect(r.maxChangedAt, concluido);
+      expect(r.overdueRed, 0);
+    });
+
     test(
       'maxChangedAt anda com o escalonamento, e escalonar tira o alerta de overdueRed',
       () async {
