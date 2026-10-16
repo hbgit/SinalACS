@@ -1625,7 +1625,9 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
     }
   }
 
-  /// Trava o toque duplo do "Concluir atendimento".
+  /// Alertas com a conclusão em voo. O diálogo modal já impede dois toques;
+  /// este conjunto impede uma segunda conclusão do mesmo alerta enquanto a
+  /// chamada ao servidor não volta (o servidor também é idempotente).
   final Set<String> _concluindo = <String>{};
 
   /// "Concluir atendimento" (#76): confirma com o ACS, porque o paciente passa

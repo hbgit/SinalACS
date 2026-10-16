@@ -145,9 +145,9 @@ class OrmAlertStore implements AlertStore {
               ? AlertStatus.resolved
               : AlertStatus.acknowledged,
         ),
-        // Só as colunas do ACK: a linha foi lida sem lock, e um escalonamento
-        // (#44) gravado entre a leitura e esta escrita seria apagado por um
-        // UPDATE da linha inteira com os valores velhos.
+        // A linha agora é lida sob FOR UPDATE (acima). Restringir às colunas
+        // do ACK fica como defesa extra: um UPDATE da linha inteira não pode
+        // apagar o escalonamento (#44) nem a conclusão (#76).
         columns: (t) => [t.acsId, t.receivedAt, t.acknowledgedAt, t.status],
         transaction: transaction,
       );
