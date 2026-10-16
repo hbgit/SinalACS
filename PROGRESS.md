@@ -1647,3 +1647,11 @@ Plano: `docs/superpowers/plans/2026-10-14-issue-46-avisos-e-termos.md`; achados 
 - Os rótulos curtos da barra inferior do admin mudaram ('Áreas', 'Trilha'): decisão de produto a confirmar.
 - `upcomingTermsChange` morta mantida; varredura de `sending` só na partida e para instância única. (issue a abrir)
 - Guarda "texto novo embarcado no app" perdida (issue a abrir): `upcoming_legal_documents_test.dart` compara com `upcomingTermsChange`, constante morta desde que a agenda passou a `terms_versions`; o admin pode publicar uma versão cujo texto o app não embarca (o cartão aparece sem "Ler o texto novo").
+
+## Auditoria de lacunas do PRD (2026-10-15)
+
+Relatório item a item de `spec/PRD_system.md` contra o código, com evidência medida a partir de `develop` em `92106d1`:
+[docs/auditoria-prd/2026-10-15-lacunas-prd.md](docs/auditoria-prd/2026-10-15-lacunas-prd.md).
+Contagem dos 64 IDs do PRD: 26 entregue, 23 parcial, 6 ausente, 9 externo (mais 52 linhas sem ID próprio, para SLOs, STRIDE, criptografia, acessibilidade, telemetria e módulos do backoffice).
+Os três P0 do backlog: colunas de risco em texto plano (INV-04), o estado "Atendido" que o paciente nunca vê (RF05) e o SMS real do OTP (RF01).
+Backlog priorizado na seção final do relatório; conferência por `python3 scripts/qa/cobertura_prd.py --final`.

@@ -5,6 +5,8 @@ Fonte: `spec/PRD_system.md` no commit `73bcb0f` (branch `docs/auditoria-lacunas-
 
 **Linha de base dos testes:** backend 1355/1355 (`dart test`, com `postgres-test`), ACS 544/544, paciente 259/259, admin 459/459 (`flutter test`), scripts/qa 42 testes Python OK. Nenhuma falha.
 
+**Amostragem:** 3 de 3 linhas `entregue` reproduzidas do zero (RF02, RF08, M1.2; 2026-10-15).
+
 **Legenda de status:** `entregue` (código + prova do critério do PRD) · `parcial` (código sem o critério provado)
 · `ausente` · `fora-do-mvp` (ausente e listado em v1.5+ no §6.1) · `externo` (falta só ação de terceiro).
 
@@ -209,4 +211,33 @@ próprio; o conferidor exige apenas os IDs do PRD.
 
 ## Backlog priorizado
 
-(preenchido ao final da auditoria)
+Critério: **P0** toca invariante ou o núcleo do MVP (§6.1) sem critério atingido; **P1** requisito de risco Crítico (§2.2) ou risco de impacto 5 (§6.3); **P2** demais RF/RNF e Fase 3; **P3** fora do MVP e correções do PRD; **—** externo, com dono e sem prioridade de engenharia.
+
+| # | Prioridade | Lacuna | IDs | Tipo | Justificativa |
+|---|---|---|---|---|---|
+| 1 | P0 | Colunas de risco da triagem e do alerta em texto plano (`resultRisk`, `resultDisplay`, `alerts.riskLevel`) | INV-04, RNF03, LGPD-RF09 | código | Viola uma invariante; ou cifrar, ou registrar no PRD por que o risco precisa ficar legível para a fila. |
+| 2 | P0 | Paciente nunca vê Atendido: nenhum caminho leva o alerta a `resolved` | RF05, MVP-STATUS, M2.1 | código | Critério do núcleo do MVP (§6.1) não atingido; precisa da ação do ACS de encerrar o atendimento. |
+| 3 | P0 | Envio de OTP por SMS real (provedor + telefone do paciente) | RF01, MVP-LOGIN-60S, M2.1, R6 | código + externo | Sem isso nenhum paciente fora do ambiente de dev consegue entrar; a escolha de provedor/contrato é de produto. |
+| 4 | P1 | Broker MQTT aceita TLS 1.2; Traefik → backend em HTTP | RNF04, M2.3, CRIPTO-TRAEFIK-BACKEND | infra | Risco Crítico; `tls_version tlsv1.3` no `mosquitto.conf` e o caso no `tls_invariants.sh` é pequeno; mTLS interno exige decisão. |
+| 5 | P1 | Resolução de conflito de visita no ACS (comparar e escolher versão) | R1, DADOS-VERSION-OTIMISTA | código | Risco de impacto 5; hoje a visita em conflito fica parada na fila para sempre. |
+| 6 | P1 | Reserva por HTTP para o ACS receber alertas quando o MQTT cai | R2, INV-03 | código | Risco de impacto 5 em rede 3G; o ACS não tem como listar alertas pendentes por HTTP. |
+| 7 | P1 | Remote wipe e certificado de cliente por aparelho | R3, STRIDE-S, CRIPTO-APP-CACHE | código + infra | Risco de impacto 5; depende de login de supervisor e de PKI de produção. |
+| 8 | P1 | Auditoria append-only no banco (trigger/`REVOKE`) | RF17, STRIDE-R | código | A cadeia só detecta; o PRD pede logs imutáveis. |
+| 9 | P1 | Telemetria estruturada dos eventos do §1.3 | EVT-*, RNF02, H1, H2, H4, MOD-RELATORIOS | código | Sem os eventos, a North Star e três hipóteses não são mensuráveis no piloto. |
+| 10 | P2 | Rate limiting no Mosquitto e no Traefik | STRIDE-D | infra | DoS listado no STRIDE sem mitigação. |
+| 11 | P2 | Deploy de produção (Pulumi/VPS), observabilidade e failover do Traefik | M3.1, M3.2, R8 | infra | Fase 3 inteira; pré-requisito do piloto M3.5. |
+| 12 | P2 | Teste de carga (100 ACS, 500 alertas/h) e medições de SLO pendentes | M3.3, MVP-MQTT-100, R5, SLO-LOGIN, SLO-DASHBOARD, SLO-VISITA, SLO-TRIAGEM, MVP-TERRITORIO-30S, A11Y-LCP, A11Y-FID, A11Y-CLS | prova | Código existe; falta medir. Paginação de 20 no dashboard junto. |
+| 13 | P2 | Testes de caos com Toxiproxy na rede real | M2.5 | prova | O simulador em processo não exercita a rede entre app, Traefik e broker. |
+| 14 | P2 | Check-in passivo por geofence nativa | RF12 | código + externo | Bloqueado por revisão de produto/jurídico do texto de divulgação e da localização em segundo plano. |
+| 15 | P2 | Clusterização do mapa e chave de Maps de produção | RF10, SLO-MAPA | código | Pedido do §4.1 para 50+ pacientes. |
+| 16 | P2 | Push em iOS/APNs, aparelho físico e Gorush hospedado | RF14 | código + infra | Android provado só em emulador. |
+| 17 | P2 | Matriz RBAC §4.2.2: paciente lendo os próprios logs; justificativa do coordenador | RNF06, LGPD-RF11 | código |  |
+| 18 | P2 | Backoffice: cadastro de UBS (com telefone), coordenador pela interface, configurações do sistema | MOD-UBS, MOD-CONFIG, MOD-ACS | código |  |
+| 19 | P2 | Tema claro no backoffice e foco visível | RF18, A11Y-2.4.7, A11Y-1.4.11 | código | Golden tests para contraste não textual junto. |
+| 20 | P2 | Expurgo no aparelho do dono que nunca volta; prazos de OTP/convites/tokens na política | LGPD-RF07 | código |  |
+| 21 | P2 | `alert_outbox` no inventário LGPD | LGPD-RF01 | documentação | Uma tabela; vale prender a contagem num conferidor. |
+| 22 | P2 | Logs estruturados no backend | MVP-MIGRACOES-LOGS | código | Hoje `session.log`/`stdout` em texto livre. |
+| 23 | P3 | Corrigir o PRD onde o código decidiu outra coisa | RF04 (3→6 perguntas), RF15 (dependência), RF19 (proposto), RNF06 (#40), CRIPTO-APP-LOCAL (PBKDF2), DADOS-TIMESCALE, DADOS-SYNC-TOKEN, DADOS-MIGRACAO-ROLLBACK, STRIDE-T | correção do PRD | Texto velho gera auditoria falsa da próxima vez. |
+| 24 | P3 | Integração automática com o SAMU | RF13 | fora-do-mvp | v1.5+ no §6.1. |
+| 25 | — | Beta em campo, piloto, NPS | M2.6, M3.5, H1, H2, H3, H4, R4 | externo | Dono: produto + UBS. |
+| 26 | — | Revisão jurídica dos termos e do DPO (anonimização, exportação da auditoria) | M3.4, LGPD-RF08, R7, RF17 | externo | Dono: jurídico + DPO. |
