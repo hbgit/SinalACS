@@ -65,6 +65,15 @@ class LinhasDoRelatorioTest(unittest.TestCase):
         with self.assertRaises(Malformado):
             linhas_do_relatorio("| RF01 | Login | **entregue** | a |\n")
 
+    def test_celula_de_id_fora_do_formato_e_erro(self):
+        for linha in (
+            "| RF01  | Login | **ausente** | | x |\n",
+            "|RF01| Login | **ausente** | | x |\n",
+            "| **RF01** | Login | **ausente** | | x |\n",
+        ):
+            with self.subTest(linha=linha), self.assertRaises(Malformado):
+                linhas_do_relatorio(RELATORIO_OK + linha)
+
     def test_linha_duplicada_no_relatorio_e_erro(self):
         with self.assertRaises(Malformado):
             linhas_do_relatorio(RELATORIO_OK + "| RF01 | Login | **entregue** | x | |\n")

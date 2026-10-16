@@ -1652,6 +1652,6 @@ Plano: `docs/superpowers/plans/2026-10-14-issue-46-avisos-e-termos.md`; achados 
 
 Relatório item a item de `spec/PRD_system.md` contra o código, com evidência medida a partir de `develop` em `92106d1`:
 [docs/auditoria-prd/2026-10-15-lacunas-prd.md](docs/auditoria-prd/2026-10-15-lacunas-prd.md).
-Contagem dos 64 IDs do PRD: 26 entregue, 23 parcial, 6 ausente, 9 externo (mais 52 linhas sem ID próprio, para SLOs, STRIDE, criptografia, acessibilidade, telemetria e módulos do backoffice).
+Contagem dos 64 IDs do PRD: 24 entregue, 27 parcial, 4 ausente, 9 externo (mais 57 linhas sem ID próprio, para SLOs, STRIDE, criptografia, acessibilidade, telemetria, métricas do §1.3 e módulos dos apps).
 Os três P0 do backlog: colunas de risco em texto plano (INV-04), o estado "Atendido" que o paciente nunca vê (RF05) e o SMS real do OTP (RF01).
 Backlog priorizado na seção final do relatório; conferência por `python3 scripts/qa/cobertura_prd.py --final`.

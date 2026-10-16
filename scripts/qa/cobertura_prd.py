@@ -20,6 +20,7 @@ STATUS = ["entregue", "parcial", "ausente", "fora-do-mvp", "externo", "a-verific
 ID = r"(?:RF\d{2}|RNF\d{2}|INV-\d{2}|LGPD-RF\d{2}|M\d\.\d|H\d|R\d)"
 ID_NO_PRD = re.compile(rf"^\| \*{{0,2}}({ID})\b", re.M)
 LINHA_RELATORIO = re.compile(rf"^\| ({ID}) \|(.*)$", re.M)
+CELULA_DE_ID = re.compile(rf"^\|\s*\**\s*({ID})\s*\**\s*\|", re.M)
 STATUS_NEGRITO = re.compile(r"\*\*([^*]+)\*\*")
 
 
@@ -32,6 +33,12 @@ def ids_do_prd(texto):
 
 
 def linhas_do_relatorio(texto):
+    # Célula de ID fora do formato `| ID |` (espaço a mais, negrito, sem
+    # espaço) escaparia de LINHA_RELATORIO e sumiria da conta — inclusive como
+    # duplicata de uma linha válida.
+    for m in CELULA_DE_ID.finditer(texto):
+        if not LINHA_RELATORIO.match(texto, m.start()):
+            raise Malformado(f"{m.group(1)}: célula de ID fora do formato '| ID |'")
     linhas = {}
     for m in LINHA_RELATORIO.finditer(texto):
         ident = m.group(1)

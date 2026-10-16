@@ -58,6 +58,13 @@ próprio; o conferidor exige apenas os IDs do PRD.
 | MOD-AUDITORIA | Auditoria | **parcial** | Tela `apps/admin/lib/app/audit_log_screen.dart` com filtros, selo e verificação global (#45). | Ver RF17. |
 | MOD-CONFIG | Configurações de sistema | **ausente** | Nenhum endpoint nem tela de configurações do sistema; prazos (`RED_ALERT_ESCALATION_SECONDS`, `RETENTION_*_DAYS`) só por variável de ambiente. | Decidir se o admin edita configurações pela interface (§4.2.2 diz R/W); se sim, endpoint auditado + tela. |
 
+### Módulos do app paciente (§2.1)
+
+| ID | Requisito | Status | Evidência | O que falta |
+|----|-----------|--------|-----------|-------------|
+| MOD-MENSAGERIA | Mensageria assíncrona (tickets) | **fora-do-mvp** | Nenhum código de tickets ou mensagens entre paciente e equipe. | v1.5+ no §6.1. |
+| MOD-PERFIL-CLINICO | Perfil clínico | **entregue** | `patients.myChronicConditions`/`updateChronicConditions` (`backend/sinalacs_server/lib/src/endpoints/patients_endpoint.dart:33,50`), cifrados em repouso; tela Perfil clínico (`apps/patient/lib/app/app.dart:1138,1714`); `patient_chronic_conditions_endpoint_test.dart` passa. | |
+
 ## Invariantes e segurança
 
 | ID | Requisito | Status | Evidência | O que falta |
@@ -65,7 +72,7 @@ próprio; o conferidor exige apenas os IDs do PRD.
 | INV-01 | ACS só vê pacientes da própria microárea | **entregue** | Recusa de outra microárea testada por endpoint: `patients.listMicroArea` e `visits.pull` (`patient_directory_and_territory_test.dart`), `visits.sync` (`visit_sync_service_test.dart`, rejeição de território), `onboarding.generateEnrollmentToken` (`onboarding_service_test.dart:75`), `alerts.acknowledge` (`red_alert_discard_paths_test.dart`), `notices.sendSegmented` (`notices_endpoint_test.dart`), staff por UBS (`admin_scope_test.dart`); todos passam (2026-10-15). |  |
 | INV-02 | Classificação de risco não alterável por humano | **entregue** | Nenhum endpoint recebe risco do cliente: `createRedAlert` aceita só `idempotencyKey`, `locationHash` e `locationCell` (`alerts_endpoint.dart`); `triage.evaluate` recebe os sinais e o servidor classifica; o app do paciente não calcula risco (`apps/patient/lib/app/app.dart:1424-1428`). |  |
 | INV-03 | Alerta vermelho nunca perdido | **entregue** | Outbox MQTT com ACK, retry e reforço; publicação confirmada por PUBACK (`mqtt_alert_dispatcher_resilience_test.dart`, #56), caminhos de descarte cobertos (`red_alert_discard_paths_test.dart`), `red_alert_cycle_test.dart`; e2e `scripts/qa/mqtt_resiliencia_e2e.sh`; 10/10 alertas entregues na medição de latência. | O ACS só recebe alerta por MQTT: não há reserva por HTTP se o broker ficar inalcançável (ver R2). |
-| INV-04 | Dado de saúde nunca em texto plano | **parcial** | Colunas clínicas cifradas em AES-256-GCM na aplicação (`*Encrypted`/`*KeyVersion` para condições crônicas, respostas de triagem e notas de visita); SQLCipher no ACS (`apps/acs/lib/core/database/encrypted_database.dart`). | `triage_sessions.resultRisk` e `resultDisplay` seguem em texto plano (`definition.sql` da migração `20261014155304871`) e `spec/lgpd_data_audit.md:50-51` os classifica como dado sensível de saúde; `alerts.riskLevel` idem. Cifrar ou registrar a decisão de deixá-los legíveis para a fila. |
+| INV-04 | Dado de saúde nunca em texto plano | **parcial** | Colunas clínicas cifradas em AES-256-GCM na aplicação (`*Encrypted`/`*KeyVersion` para condições crônicas, respostas de triagem e notas de visita); SQLCipher no ACS (`apps/acs/lib/core/database/encrypted_database.dart`). | Seguem em texto plano, e `spec/lgpd_data_audit.md` os classifica como dado sensível de saúde: `triage_sessions.resultRisk` e `resultDisplay` (`:50-51`), `visits.riskLevelBefore` e `riskLevelAfter` (`:64-65`) e `alerts.riskLevel` (`definition.sql` da migração `20261014155304871`). Cifrar ou registrar a decisão de deixá-los legíveis para a fila. |
 | INV-05 | Paciente nunca acessa dado de outro paciente | **entregue** | Token do paciente carrega o `patientId` e os endpoints de paciente leem só dele: `myData`, consentimentos e pedidos (`patient_data_overview_endpoint_test.dart`, `data_subject_rights_endpoint_test.dart`), `statusFor` (`authorization_test.dart`, `red_alert_cycle_test.dart`), token de push por dono (`push_token_endpoint_test.dart`); passam (2026-10-15). |  |
 
 ### STRIDE (§4.2.1)
@@ -75,7 +82,7 @@ próprio; o conferidor exige apenas os IDs do PRD.
 | STRIDE-S | Spoofing: mensagens falsas no MQTT | **parcial** | Broker com senha + ACL por tópico + certificado de cliente obrigatório (`infra/docker/mosquitto/mosquitto.conf:10`); `scripts/qa/mtls_invariants.sh` OK (2026-10-15). | Certificado de cliente por aparelho em produção (hoje um certificado de dev compartilhado, `acs-area-12.crt`). |
 | STRIDE-T | Tampering: triagem alterada no dispositivo | **parcial** | O risco é recalculado no servidor (INV-02), então adulterar a triagem no aparelho não muda a classificação. | Não há a assinatura digital dos dados de triagem no dispositivo que o PRD descreve; decidir se a reclassificação no servidor substitui a assinatura e registrar. |
 | STRIDE-R | Repudiation: logs append-only assinados | **parcial** | Cadeia HMAC em `audit_logs` detecta remoção e alteração (`audit_chain_check`). | Append-only no banco (trigger/`REVOKE`) não existe: ver RF17. |
-| STRIDE-I | Information disclosure: PII no dispositivo | **entregue** | SQLCipher no ACS com chave no Keystore (`apps/acs/lib/core/security/database_key_store.dart`), `FLAG_SECURE` na janela do ACS (`secure_window_test`); o app do paciente não persiste dado clínico. |  |
+| STRIDE-I | Information disclosure: PII no dispositivo | **entregue** | SQLCipher no ACS com chave no Keystore (`apps/acs/lib/core/security/database_key_store.dart`), `FLAG_SECURE` na janela do ACS (`secure_window_test`). | O app do paciente guarda lembretes de saúde em texto livre (medicamento, pesagem: `apps/patient/lib/core/reminders/reminder.dart:1`) em `sqflite` sem cifra, por decisão; reavaliar se o campo passar a aceitar diagnóstico. |
 | STRIDE-D | Denial of service: inundação MQTT | **ausente** | `infra/docker/mosquitto/mosquitto.conf` sem nenhum limite (`max_connections`, `max_inflight_messages`, `message_size_limit`); nenhum middleware de rate limit no Traefik. | Limites no Mosquitto e rate limit no Traefik. |
 | STRIDE-E | Elevation of privilege: outra microárea | **entregue** | Ver INV-01 e RNF06 (`Authorization.require`, recusa auditada). |  |
 
@@ -94,9 +101,9 @@ próprio; o conferidor exige apenas os IDs do PRD.
 
 | ID | Requisito | Status | Evidência | O que falta |
 |----|-----------|--------|-----------|-------------|
-| RNF01 | Latência MQTT < 500 ms (p95) | **entregue** | Entrega de alerta p95 212 ms, 10/10 amostras (meta < 500 ms); `measure_latency.dart --samples 10 --visit-count 100` contra a stack local (2026-10-16 01:27 UTC). | Medido em stack local com 10 amostras; repetir em produção com carga (ver M3.3). |
+| RNF01 | Latência MQTT < 500 ms (p95) | **parcial** | Entrega de alerta p95 212 ms, 10/10 amostras (meta < 500 ms); `measure_latency.dart --samples 10 --visit-count 100` contra a stack local (2026-10-16 01:27 UTC). | Só stack local, 1 cliente sequencial, 10 amostras (p95 de 10 amostras é quase o máximo): repetir em produção, com carga e mais amostras. |
 | RNF02 | Sincronização offline > 99,5 % | **parcial** | Sync 10/10 lotes de 100 visitas sem perda (`measure_latency.dart --samples 10 --visit-count 100` contra a stack local (2026-10-16 01:27 UTC)); `offline_burst_test.dart` prova que nenhuma de 100 se perde em reinício. | A taxa > 99,5 % em campo não é medida: nenhum evento `sync_attempt`/`sync_result` é emitido (ver EVT-*). |
-| RNF03 | Criptografia AES-256 em repouso | **parcial** | Ver INV-04 e CRIPTO-*. | Ver INV-04 (colunas de risco em texto plano) e CRIPTO-APP-CACHE. |
+| RNF03 | Criptografia AES-256 em repouso | **parcial** | Ver INV-04 e CRIPTO-*. | Ver INV-04 (cinco colunas de risco em texto plano) e CRIPTO-APP-CACHE. |
 | RNF04 | TLS 1.3 em todas as comunicações | **parcial** | RPC em TLS 1.3 obrigatório (`tls_invariants.sh` OK); broker MQTT só em TLS na 8883 com mTLS (`mtls_invariants.sh` OK). | O broker aceita TLS 1.2: `openssl s_client -tls1_2 -connect localhost:8883` com certificado de cliente negociou TLSv1.2 (2026-10-15). Falta `tls_version tlsv1.3` no `mosquitto.conf` e o caso no `tls_invariants.sh`; Traefik-backend em texto claro (CRIPTO-TRAEFIK-BACKEND). |
 | RNF05 | Acessibilidade WCAG 2.1 AA | **parcial** | Matriz de contraste e `meetsGuideline` nos três apps (`apps/*/test/contrast_tokens_test.dart`, `touch_targets_test.dart` no admin), avaliação em `spec/ux_accessibility_assessment.md` (WCAG 2.2 AA, superconjunto do 2.1); linha de base verde. | Foco visível no admin (A11Y-2.4.7) e métricas de interface (A11Y-LCP/FID/CLS) não medidas. |
 
@@ -105,10 +112,10 @@ próprio; o conferidor exige apenas os IDs do PRD.
 | ID | Requisito | Status | Evidência | O que falta |
 |----|-----------|--------|-----------|-------------|
 | SLO-LOGIN | Login < 1 s | **parcial** | Não medido. | Medir p95 do login do ACS e do paciente (o Argon2id domina o custo). |
-| SLO-ALERTA | Alerta publish → ACK < 500 ms | **entregue** | p95 212 ms (meta < 500 ms) por `measure_latency.dart`, stack local, 10 amostras (2026-10-16 UTC). | Repetir em produção. |
+| SLO-ALERTA | Alerta publish → ACK < 500 ms | **parcial** | p95 212 ms (meta < 500 ms) por `measure_latency.dart`, stack local, 10 amostras (2026-10-16 UTC). | Só stack local, 1 cliente sequencial, 10 amostras (p95 de 10 amostras é quase o máximo): repetir em produção, com carga e mais amostras. |
 | SLO-DASHBOARD | Dashboard ACS < 1,5 s, paginação de 20 | **parcial** | Carga do dashboard não medida; a fila não pagina (lista inteira em `AlertQueue`). | Paginação de 20 itens e medição < 1,5 s. |
 | SLO-VISITA | Registro offline < 200 ms | **parcial** | Inserção local sem rede (`offline_visit_queue.dart`), tempo não medido. | Medir a gravação local (< 200 ms). |
-| SLO-SYNC | Sync de 50 itens < 5 s | **entregue** | Lote de 100 visitas com p95 112 ms (meta: 50 itens < 5 s), stack local, 10 amostras (2026-10-16 UTC). | Repetir em rede móvel real. |
+| SLO-SYNC | Sync de 50 itens < 5 s | **parcial** | Lote de 100 visitas com p95 112 ms (meta: 50 itens < 5 s), stack local, 10 amostras (2026-10-16 UTC). | Só stack local, 1 cliente sequencial, 10 amostras (p95 de 10 amostras é quase o máximo): repetir em produção, com carga e mais amostras. |
 | SLO-MAPA | Mapa < 2 s, clusterização 50+ | **parcial** | Renderização não medida; sem clusterização (ver RF10). | Clusterização para 50+ pinos e medição < 2 s. |
 | SLO-TRIAGEM | Cálculo da triagem < 50 ms | **parcial** | Função pura com seis booleanos (`triage_engine.dart`), sem IO; tempo não medido. | Um teste de tempo basta para fechar. |
 
@@ -130,11 +137,11 @@ próprio; o conferidor exige apenas os IDs do PRD.
 
 | ID | Requisito | Status | Evidência | O que falta |
 |----|-----------|--------|-----------|-------------|
-| LGPD-RF01 | Coleta mínima | **parcial** | `spec/lgpd_data_audit.md` classifica campo a campo 24 das 25 tabelas de domínio da migração `20261014155304871`. | `alert_outbox` não está no inventário: incluir a tabela e conferir a contagem a cada migração. |
+| LGPD-RF01 | Coleta mínima | **parcial** | `spec/lgpd_data_audit.md` classifica campo a campo as 25 tabelas de domínio da migração `20261014155304871`. | `alert_outbox` aparece com o nome do modelo (`alert_outbox_entry`, `spec/lgpd_data_audit.md:94`) e sem os campos `topic`, `lastError` e `attempts`: corrigir nome e campos e conferir a contagem a cada migração. |
 | LGPD-RF02 | Consentimento granular | **entregue** | Consentimento por finalidade com histórico (`consent_logs`, `patients.updateConsent`, `hasGrantedConsent`); token de push só com consentimento; testes de endpoint passam na linha de base. | Validação jurídica do texto dos termos (ver M3.4). |
 | LGPD-RF07 | Retenção e exclusão (job de expurgo) | **parcial** | Expurgo diário no servidor por `ExpurgeFutureCall` (`backend/sinalacs_server/lib/src/application/retention/expurge_future_call.dart`, agendado em `server.dart:158`): alertas 2 anos, visitas e triagens 5 anos (`RETENTION_*_DAYS`); `expurge_service_test.dart` e `retention_expurge_test.dart` passam (12 testes, 2026-10-15). | Expurgo no aparelho da fila de um dono que nunca volta (ACS); prazos de OTP, convites e tokens não entram na política. |
 | LGPD-RF08 | Direitos do titular (Meus Dados + exportação JSON) | **entregue** | Painel Meus Dados (`patients.myData`, `PatientDataOverview`) e exportação em JSON copiada para a área de transferência (`apps/patient/lib/app/app.dart:2040-2084`, botão `Copiar meus dados (JSON)`); pedidos de exclusão/correção atendidos no backoffice (#42). | Validar as regras de anonimização com o encarregado (DPO); exportação como arquivo, não só área de transferência. |
-| LGPD-RF09 | Proteção de dados sensíveis | **parcial** | Ver INV-04, CRIPTO-* e RNF06. | Colunas de risco em texto plano (INV-04). |
+| LGPD-RF09 | Proteção de dados sensíveis | **parcial** | Ver INV-04, CRIPTO-* e RNF06. | Colunas de risco em texto plano em `triage_sessions`, `visits` e `alerts` (INV-04). |
 | LGPD-RF11 | Controle de acesso RBAC | **parcial** | Ver RNF06. | Matriz §4.2.2: paciente lendo os próprios logs e justificativa do coordenador. |
 
 ### Modelo de dados e telemetria (§1.3, §3)
@@ -145,6 +152,9 @@ próprio; o conferidor exige apenas os IDs do PRD.
 | DADOS-VERSION-OTIMISTA | Versionamento otimista com 409 | **entregue** | `visits.version`; versão divergente devolve `conflict` com a versão do servidor sem sobrescrever, mesma versão é idempotente (`backend/sinalacs_server/lib/src/application/visits/visit_sync_service.dart:490-500`); `visit_sync_service_test.dart` passa. | Resolução do conflito pelo ACS não existe (ver R1). |
 | DADOS-SYNC-TOKEN | sync_token sequencial | **ausente** | Nenhum `sync_token` sequencial; a idempotência é por `localId` + `version` por registro e a descida usa cursor (`visits.pull`). | Decidir se o `sync_token` ainda é necessário ou corrigir o §3.4 do PRD. |
 | DADOS-MIGRACAO-ROLLBACK | Migrações com rollback | **ausente** | Migrações do Serverpod só para frente (`backend/sinalacs_server/migrations/*/migration.sql`); nenhum script de rollback. | Rollback por versão ou decisão registrada de restauração por backup. |
+| DADOS-CACHE-PACIENTE | Cache local do paciente em `sqflite` com triagens e alertas pendentes (§3.2) | **ausente** | O app do paciente não guarda triagens nem alertas pendentes no aparelho; só lembretes e preferências de consentimento (ver M1.5). | Corrigir o §3.2 do PRD ou decidir guardar o alerta pendente quando não há rede. |
+| METRICA-TMRAV | North Star: TMRAV < 90 s | **parcial** | Calculado em `AdminIndicators.tmravSeconds` a partir de `triggeredAt`/`acknowledgedAt`. | Nenhuma medição contra a meta de 90 s (só existe em piloto). |
+| METRICA-PRODUTO | Sincronização > 99,5 %, aderência > 90 %, ≥ 8 visitas/ACS/dia, retenção > 70 % (§1.3) | **ausente** | Nenhuma das quatro é calculada ou exibida; sem os eventos do §1.3 (EVT-*). | Telemetria e indicadores no backoffice. |
 | EVT-alert_triggered | Evento alert_triggered | **ausente** | Nenhuma emissão do evento em `backend/` ou `apps/*/lib` (busca de 2026-10-15). Os carimbos `triggeredAt`/`acknowledgedAt` em `alerts` permitem o TMRAV (`AdminIndicators.tmravSeconds`). | Telemetria estruturada dos eventos do §1.3. |
 | EVT-alert_received_acs | Evento alert_received_acs | **ausente** | Nenhuma emissão do evento. | Emitir com `latency_ms` no ACK. |
 | EVT-sync_attempt | Evento sync_attempt | **ausente** | Nenhuma emissão do evento. | Emitir no início de cada lote de sync. |
@@ -159,11 +169,11 @@ próprio; o conferidor exige apenas os IDs do PRD.
 | M1.2 | CI básica | **entregue** | `.github/workflows/ci.yml` com 9 jobs (`flutter test`, `dart analyze`, build Docker, e2e Android), guardados por `scripts/qa/ci_invariants.sh`. |  |
 | M1.3 | Motor de triagem (MCDC, 50 cenários) | **entregue** | Ver RF16: 64 combinações (tabela-verdade completa) + 8 cenários nomeados. | Sem relatório MCDC por ferramenta; a tabela-verdade completa o torna redundante para seis booleanos. |
 | M1.4 | FSM de sincronização | **entregue** | `backend/sinalacs_server/lib/src/application/sync/sync_fsm.dart` e a FSM do aparelho em `offline_visit_queue.dart`; testes de transição, conflito e erro passam na linha de base. |  |
-| M1.5 | SQLCipher local | **entregue** | SQLCipher no ACS (`apps/acs/lib/core/database/encrypted_database.dart`, `integration_test/encrypted_storage_test.dart`); o paciente não persiste dado clínico, de propósito. |  |
+| M1.5 | SQLCipher local | **entregue** | SQLCipher no ACS (`apps/acs/lib/core/database/encrypted_database.dart`, `integration_test/encrypted_storage_test.dart`). O paciente usa `sqflite` sem cifra, de propósito, para lembretes e preferências de consentimento. | Lembretes de saúde do paciente em texto livre sem cifra (ver STRIDE-I). |
 | M2.1 | App Paciente MVP | **parcial** | Login, alerta, triagem e status no app do paciente (RF01, RF03, RF04, RF05). | SMS real (RF01) e o estado Atendido do status (RF05). |
 | M2.2 | App ACS MVP | **entregue** | Login, territorialização, dashboard e registro no ACS (RF07, RF08, RF09, RF11). |  |
 | M2.3 | MQTT com TLS (WSS) | **parcial** | MQTT sobre TLS com mTLS na 8883 (`mtls_invariants.sh` OK). | O critério fala em WSS, e WebSockets (9001) não é publicado por decisão; o broker aceita TLS 1.2 (ver RNF04). |
-| M2.4 | 100 registros sincronizam em < 5 s | **entregue** | 100 visitas por lote em p95 112 ms, 10/10 (meta < 5 s), `measure_latency.dart` contra a stack local (2026-10-16 UTC); `offline_burst_test.dart`. | Repetir em rede móvel real. |
+| M2.4 | 100 registros sincronizam em < 5 s | **parcial** | 100 visitas por lote em p95 112 ms, 10/10 (meta < 5 s), `measure_latency.dart` contra a stack local (2026-10-16 UTC); `offline_burst_test.dart`. | Só stack local, 1 cliente sequencial, 10 amostras (p95 de 10 amostras é quase o máximo): repetir em produção, com carga e mais amostras. |
 | M2.5 | Testes de caos (Toxiproxy) | **parcial** | Simulador em processo `apps/acs/lib/core/services/network_chaos_simulator.dart` + `network_chaos_test.dart`; resiliência real do broker em `scripts/qa/mqtt_resiliencia_e2e.sh`. | Toxiproxy (0 ocorrências): latência, jitter e partição na rede de verdade entre app, Traefik e broker. |
 | M2.6 | Testes de usabilidade em campo | **externo** | Avaliação de acessibilidade e e2e no emulador (`spec/ux_accessibility_assessment.md`). | Beta fechado com 5 ACS e 10 pacientes em campo (dono: produto + UBS). |
 | M3.1 | Deploy em produção (Pulumi) | **ausente** | Nenhuma ocorrência de Pulumi; `backend/DEPLOY.md` é só um caminho de demo free-tier, não executado. | IaC (Pulumi) e VPS de produção. |
@@ -177,7 +187,7 @@ próprio; o conferidor exige apenas os IDs do PRD.
 | ID | Requisito | Status | Evidência | O que falta |
 |----|-----------|--------|-----------|-------------|
 | MVP-LOGIN-60S | 10 pacientes logam em < 60 s | **parcial** | Fluxo OTP funciona (RF01). | SMS real e medição com 10 pacientes. |
-| MVP-ALERTA-2S | Alerta chega ao ACS em < 2 s | **entregue** | p95 212 ms na stack local (RNF01). |  |
+| MVP-ALERTA-2S | Alerta chega ao ACS em < 2 s | **parcial** | p95 212 ms na stack local (RNF01). | Só stack local, 1 cliente sequencial, 10 amostras (p95 de 10 amostras é quase o máximo): repetir em produção, com carga e mais amostras. |
 | MVP-TRIAGEM-3P | Triagem de 3 perguntas | **entregue** | Seis perguntas, classificação determinística (RF04). | Corrigir 3 para 6 no texto do PRD. |
 | MVP-STATUS | Enviado → Visualizado → Atendido | **parcial** | Enviado e Recebido aparecem (RF05). | Atendido nunca aparece (RF05). |
 | MVP-LOGIN-ACS | ACS loga com matrícula e senha | **entregue** | Ver RF07. |  |
@@ -200,12 +210,12 @@ próprio; o conferidor exige apenas os IDs do PRD.
 
 | ID | Requisito | Status | Evidência | O que falta |
 |----|-----------|--------|-----------|-------------|
-| R1 | Colisão de sincronização | **ausente** | Conflito fica na fila com contador (`apps/acs/lib/app/app.dart:3143-3147`, `conflict_visits_count`); não existe tela para comparar e escolher versão. | UI de resolução lado a lado (plano de contingência do R1). |
+| R1 | Colisão de sincronização | **parcial** | Conflito detectado sem sobrescrever (`backend/sinalacs_server/lib/src/application/visits/visit_sync_service.dart:490-500`), mantido em fila própria (`apps/acs/lib/core/services/offline_visit_queue.dart`) e contado na tela (`apps/acs/lib/app/app.dart:3143-3147`, `conflict_visits_count`). | Não existe tela para comparar e escolher versão (UI de resolução lado a lado do plano de contingência): a visita em conflito fica parada na fila. |
 | R2 | Falha do MQTT em rede 3G | **parcial** | Reconexão com backoff e sessão persistente no MQTT; outbox no servidor reentrega (`mqtt_resiliencia_e2e.sh`); visitas já vão por HTTP. | Sem reserva por HTTP para o ACS receber alertas quando o MQTT cai (o `backend_client.dart` do ACS não lista alertas pendentes). |
 | R3 | Vazamento de PII no dispositivo | **parcial** | Limpeza do aparelho pelo próprio ACS (`apps/acs/lib/app/app.dart:174`, `device_wipe_test.dart`); chave do SQLCipher no Keystore. | Remote wipe pela API (não existe login de supervisor para dispará-lo); rotação de chave. |
 | R4 | Rejeição do ACS | **externo** | Nada no código. | NPS semanal e treinamento (produto + UBS). |
 | R5 | Performance do PostgreSQL | **parcial** | 46 índices na migração `20261014155304871`, incluindo `alerts_micro_area_status_idx` e `users_micro_area_idx`. | Particionamento por microárea não existe; sem teste de carga que mostre necessidade (M3.3). |
-| R6 | Dependência de SMS gateway | **ausente** | Sem provedor de SMS (RF01); o QR do onboarding não substitui o login. | Fallback de login sem SMS e múltiplos provedores. |
+| R6 | Dependência de SMS gateway | **parcial** | O ACS pode gerar quantas vezes quiser um convite QR de uso único para paciente da microárea dele (`backend/sinalacs_server/lib/src/endpoints/onboarding_endpoint.dart:21`), e `completeEnrollment` emite uma sessão do paciente (`onboarding_endpoint.dart:37,70`): é metade do fallback por QR. Nenhum provedor de SMS (RF01). | Entrada sem o ACS presente quando o SMS falha; biometria; múltiplos provedores de SMS. |
 | R7 | Mudanças regulatórias (LGPD) | **externo** | Nada no código. | Comitê de compliance e DPO. |
 | R8 | SPOF no Traefik | **ausente** | Uma instância de Traefik no Compose. | Segunda instância e failover (infra de produção, M3.1). |
 
@@ -215,9 +225,9 @@ Critério: **P0** toca invariante ou o núcleo do MVP (§6.1) sem critério atin
 
 | # | Prioridade | Lacuna | IDs | Tipo | Justificativa |
 |---|---|---|---|---|---|
-| 1 | P0 | Colunas de risco da triagem e do alerta em texto plano (`resultRisk`, `resultDisplay`, `alerts.riskLevel`) | INV-04, RNF03, LGPD-RF09 | código | Viola uma invariante; ou cifrar, ou registrar no PRD por que o risco precisa ficar legível para a fila. |
+| 1 | P0 | Colunas de risco da triagem e do alerta em texto plano (`triage_sessions.resultRisk`/`resultDisplay`, `visits.riskLevelBefore`/`riskLevelAfter`, `alerts.riskLevel`) | INV-04, RNF03, LGPD-RF09 | código | Viola uma invariante; ou cifrar, ou registrar no PRD por que o risco precisa ficar legível para a fila. |
 | 2 | P0 | Paciente nunca vê Atendido: nenhum caminho leva o alerta a `resolved` | RF05, MVP-STATUS, M2.1 | código | Critério do núcleo do MVP (§6.1) não atingido; precisa da ação do ACS de encerrar o atendimento. |
-| 3 | P0 | Envio de OTP por SMS real (provedor + telefone do paciente) | RF01, MVP-LOGIN-60S, M2.1, R6 | código + externo | Sem isso nenhum paciente fora do ambiente de dev consegue entrar; a escolha de provedor/contrato é de produto. |
+| 3 | P0 | Envio de OTP por SMS real (provedor + telefone do paciente) | RF01, MVP-LOGIN-60S, M2.1, R6 | código + externo | Sem SMS o paciente só entra com o ACS presente gerando um QR (R6): não há login por conta própria fora do ambiente de dev; a escolha de provedor/contrato é de produto. |
 | 4 | P1 | Broker MQTT aceita TLS 1.2; Traefik → backend em HTTP | RNF04, M2.3, CRIPTO-TRAEFIK-BACKEND | infra | Risco Crítico; `tls_version tlsv1.3` no `mosquitto.conf` e o caso no `tls_invariants.sh` é pequeno; mTLS interno exige decisão. |
 | 5 | P1 | Resolução de conflito de visita no ACS (comparar e escolher versão) | R1, DADOS-VERSION-OTIMISTA | código | Risco de impacto 5; hoje a visita em conflito fica parada na fila para sempre. |
 | 6 | P1 | Reserva por HTTP para o ACS receber alertas quando o MQTT cai | R2, INV-03 | código | Risco de impacto 5 em rede 3G; o ACS não tem como listar alertas pendentes por HTTP. |
@@ -235,9 +245,9 @@ Critério: **P0** toca invariante ou o núcleo do MVP (§6.1) sem critério atin
 | 18 | P2 | Backoffice: cadastro de UBS (com telefone), coordenador pela interface, configurações do sistema | MOD-UBS, MOD-CONFIG, MOD-ACS | código |  |
 | 19 | P2 | Tema claro no backoffice e foco visível | RF18, A11Y-2.4.7, A11Y-1.4.11 | código | Golden tests para contraste não textual junto. |
 | 20 | P2 | Expurgo no aparelho do dono que nunca volta; prazos de OTP/convites/tokens na política | LGPD-RF07 | código |  |
-| 21 | P2 | `alert_outbox` no inventário LGPD | LGPD-RF01 | documentação | Uma tabela; vale prender a contagem num conferidor. |
+| 21 | P2 | `alert_outbox` no inventário LGPD com nome e campos certos | LGPD-RF01 | documentação | Uma tabela; vale prender a contagem num conferidor. |
 | 22 | P2 | Logs estruturados no backend | MVP-MIGRACOES-LOGS | código | Hoje `session.log`/`stdout` em texto livre. |
-| 23 | P3 | Corrigir o PRD onde o código decidiu outra coisa | RF04 (3→6 perguntas), RF15 (dependência), RF19 (proposto), RNF06 (#40), CRIPTO-APP-LOCAL (PBKDF2), DADOS-TIMESCALE, DADOS-SYNC-TOKEN, DADOS-MIGRACAO-ROLLBACK, STRIDE-T | correção do PRD | Texto velho gera auditoria falsa da próxima vez. |
+| 23 | P3 | Corrigir o PRD onde o código decidiu outra coisa | RF04 (3→6 perguntas), RF15 (dependência), RF19 (proposto), RNF06 (#40), CRIPTO-APP-LOCAL (PBKDF2), DADOS-TIMESCALE, DADOS-SYNC-TOKEN, DADOS-MIGRACAO-ROLLBACK, STRIDE-T, DADOS-CACHE-PACIENTE | correção do PRD | Texto velho gera auditoria falsa da próxima vez. |
 | 24 | P3 | Integração automática com o SAMU | RF13 | fora-do-mvp | v1.5+ no §6.1. |
 | 25 | — | Beta em campo, piloto, NPS | M2.6, M3.5, H1, H2, H3, H4, R4 | externo | Dono: produto + UBS. |
 | 26 | — | Revisão jurídica dos termos e do DPO (anonimização, exportação da auditoria) | M3.4, LGPD-RF08, R7, RF17 | externo | Dono: jurídico + DPO. |
