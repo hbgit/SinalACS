@@ -27,15 +27,15 @@ próprio; o conferidor exige apenas os IDs do PRD.
 
 | ID | Requisito | Status | Evidência | O que falta |
 |----|-----------|--------|-----------|-------------|
-| RF07 | Login institucional (matrícula + senha) | **a-verificar** | | |
-| RF08 | Territorialização (cache da microárea) | **a-verificar** | | |
-| RF09 | Dashboard de priorização dinâmica | **a-verificar** | | |
-| RF10 | Mapa interativo | **a-verificar** | | |
-| RF11 | Registro rápido de visitas offline-first | **a-verificar** | | |
-| RF12 | Geofencing (check-in passivo) | **a-verificar** | | |
-| RF13 | Escalonamento para SAMU/UBS | **a-verificar** | | |
-| RF14 | Avisos segmentados à comunidade (push) | **a-verificar** | | |
-| RF15 | Sincronização bidirecional | **a-verificar** | | |
+| RF07 | Login institucional (matrícula + senha) | **entregue** | `auth.loginInstitutional` (matrícula + senha Argon2id + TOTP), refresh token rotativo preso ao Keystore; `mfa_login_test.dart` passa (2026-10-15); prova no emulador API 36 em `scripts/qa/acs_keystore_bound_e2e.sh`. | Fora do critério do PRD, mas aberto: invalidar a chave com digital nova em API 30+, provar o Keystore em API 24-29, troca de senha pelo próprio ACS. |
+| RF08 | Territorialização (cache da microárea) | **entregue** | Cache da microárea por dono com validade de 72 h (`apps/acs/lib/core/services/micro_area_directory.dart:9`, `apps/acs/lib/core/database/micro_area_cache_store.dart`), sobre SQLCipher; `micro_area_cache_store_test.dart` passa. | Tempo de carga (< 30 s do MVP) não medido: ver `MVP-TERRITORIO-30S`. |
+| RF09 | Dashboard de priorização dinâmica | **entregue** | `AlertQueue._sort` ordena por risco e, no mesmo risco, pelo mais antigo (`apps/acs/lib/core/services/alert_queue.dart:150`); teste `deve ordenar por risco e, no mesmo risco, pelo mais antigo` (`apps/acs/test/login_flow_test.dart:422`) passa na linha de base. | Paginação de 20 itens do SLO não existe (ver `SLO-DASHBOARD`). |
+| RF10 | Mapa interativo | **parcial** | Tela de mapa com `GoogleMap` (`apps/acs/lib/app/app.dart:2501`), geocélula e círculo de incerteza; `map_screen_test.dart` (4 testes) passa; `integration_test/map_flow_test.dart`. Chave por `GOOGLE_MAPS_API_KEY` (`apps/acs/android/app/build.gradle.kts:72`). | Sem clusterização de pinos (PRD §4.1 pede para 50+ pacientes); renderização < 2 s não medida; sem chave de Maps de produção provisionada. |
+| RF11 | Registro rápido de visitas offline-first | **entregue** | Fila offline por dono (`apps/acs/lib/core/services/offline_visit_queue.dart`, schema v7) com lote, retry e conflito; `offline_burst_test.dart` (100 visitas, reinício, nenhuma perdida) passa; envio disparado por volta da rede (`connectivityChanges`, `apps/acs/lib/app/app.dart:72`); sync de 100 visitas p95 112 ms (`measure_latency.dart`, 2026-10-16 UTC). | Upload em segundo plano pelo SO (WorkManager fora de `spec/stack.md`); desbloquear fila com token de 7 dias expirado. |
+| RF12 | Geofencing (check-in passivo) | **parcial** | `GeofencingScreen` (`apps/acs/lib/app/app.dart:3303`) calcula distância até a geocélula com GPS em primeiro plano; `scripts/qa/acs_gps_e2e.sh` e `integration_test/geofence_gps_e2e.dart`. | Check-in passivo não existe: nenhuma geofence nativa, sem localização em segundo plano, e toda visita sai com `arrivalMethod: manual` (`apps/acs/lib/core/services/backend_visit_synchronizer.dart:67-72`); escolha de plugin e texto de divulgação aguardam revisão de produto/jurídico. |
+| RF13 | Escalonamento para SAMU/UBS | **entregue** | Discador do SAMU 192 e da UBS por `url_launcher` sem ligar sozinho (`apps/acs/lib/core/services/emergency_dialer.dart:4-8`); `escalation_dialer_test.dart` e `escalation_ubs_test.dart` passam. | Integração automática com o SAMU é v1.5+ (§6.1). |
+| RF14 | Avisos segmentados à comunidade (push) | **parcial** | `notices.sendSegmented` (`backend/sinalacs_server/lib/src/endpoints/notices_endpoint.dart`), registro de token só com consentimento, Gorush; entrega no tray Android via FCM provada no emulador (`scripts/qa/push_e2e.sh`, 2026-09-30) e no CI quando há segredos (`scripts/qa/ci_push_e2e.sh`); `notices_screen_test.dart` passa. | iOS/APNs, prova em aparelho físico e Gorush hospedado fora do Compose local. |
+| RF15 | Sincronização bidirecional | **entregue** | Subida `visits.sync` e descida `visits.pull` por cursor (`backend/sinalacs_server/lib/src/endpoints/visits_endpoint.dart`), FSM em `backend/sinalacs_server/lib/src/application/sync/sync_fsm.dart`, consumo no ACS (`visit_pull_service.dart`, `sync_cursor_store.dart`); `visit_pull_service_test.dart` passa. | A coluna Dependência do RF15 no PRD ainda diz ainda não conectado ao cliente: corrigir o PRD. |
 
 ## Núcleo, auditoria e backoffice
 
