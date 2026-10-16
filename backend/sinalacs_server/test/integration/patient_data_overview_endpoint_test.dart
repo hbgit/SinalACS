@@ -105,12 +105,13 @@ Future<void> _seed(Session session) async {
       signature: 'assinatura-de-teste',
     ),
   );
+  final riscoTriagem = await encryptedRiskLevel(RiskLevel.yellow);
   await TriageSession.db.insertRow(
     session,
     TriageSession(
       patientId: UuidValue.fromString(_patientId),
-      resultRisk: RiskLevel.yellow,
-      resultDisplay: 'Risco: Amarelo',
+      resultRiskEncrypted: riscoTriagem.ciphertextBase64,
+      resultRiskKeyVersion: riscoTriagem.keyVersion,
       createdAt: DateTime.utc(2026, 2, 1),
       deviceId: 'device-de-teste',
     ),
@@ -164,6 +165,34 @@ void main() {
       expect(result.riskHistory[0].riskLevel, RiskLevel.red);
       expect(result.riskHistory[1].source, 'triage');
       expect(result.riskHistory[1].riskLevel, RiskLevel.yellow);
+    });
+
+    test('#75: triagem gravada antes da cifra do risco fica fora do histórico '
+        'e o painel abre mesmo assim', () async {
+      final session = sessionBuilder.build();
+      await _seed(session);
+      // Linha "antiga": o default '' da coluna, como a migração deixa as
+      // linhas que já existiam.
+      await TriageSession.db.insertRow(
+        session,
+        TriageSession(
+          patientId: UuidValue.fromString(_patientId),
+          createdAt: DateTime.utc(2026, 4, 1),
+          deviceId: 'device-de-teste',
+        ),
+      );
+      final login = await endpoints.auth.developmentLogin(sessionBuilder, role: 'patient');
+
+      final result = await endpoints.patients.myData(
+        sessionBuilder,
+        accessToken: login.accessToken,
+      );
+
+      expect(result.riskHistory, hasLength(2), reason: 'só as duas linhas do seed');
+      expect(
+        result.riskHistory.every((e) => e.recordedAt != DateTime.utc(2026, 4, 1)),
+        isTrue,
+      );
     });
 
     test('um ACS não pode consultar o painel "Meus Dados" de um paciente', () async {

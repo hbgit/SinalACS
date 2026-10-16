@@ -156,7 +156,6 @@ Future<void> _seed(Session session) async {
       patientId: UuidValue.fromString(_patientId),
       scheduledAt: _cutoffVisits.subtract(const Duration(days: 10)),
       status: 'agendada',
-      riskLevelBefore: RiskLevel.green,
       syncStatus: SyncStatus.synced,
       localId: UuidValue.fromString('00000000-0000-4000-8000-0000000000d1'),
       version: 1,
@@ -169,7 +168,6 @@ Future<void> _seed(Session session) async {
       scheduledAt: _now,
       completedAt: _now,
       status: 'realizada',
-      riskLevelBefore: RiskLevel.green,
       syncStatus: SyncStatus.synced,
       localId: UuidValue.fromString('00000000-0000-4000-8000-0000000000d2'),
       version: 1,
@@ -181,8 +179,6 @@ Future<void> _seed(Session session) async {
     session,
     TriageSession(
       patientId: UuidValue.fromString(_patientId),
-      resultRisk: RiskLevel.green,
-      resultDisplay: 'Verde',
       createdAt: _cutoffTriage.subtract(const Duration(days: 1)),
       deviceId: 'device-retencao',
     ),
@@ -191,8 +187,6 @@ Future<void> _seed(Session session) async {
     session,
     TriageSession(
       patientId: UuidValue.fromString(_patientId),
-      resultRisk: RiskLevel.yellow,
-      resultDisplay: 'Amarelo',
       createdAt: _now,
       deviceId: 'device-retencao',
     ),

@@ -1655,3 +1655,10 @@ Relatório item a item de `spec/PRD_system.md` contra o código, com evidência 
 Contagem dos 64 IDs do PRD: 24 entregue, 27 parcial, 4 ausente, 9 externo (mais 57 linhas sem ID próprio, para SLOs, STRIDE, criptografia, acessibilidade, telemetria, métricas do §1.3 e módulos dos apps).
 Os três P0 do backlog: colunas de risco em texto plano (INV-04), o estado "Atendido" que o paciente nunca vê (RF05) e o SMS real do OTP (RF01).
 Backlog priorizado na seção final do relatório; conferência por `python3 scripts/qa/cobertura_prd.py --final`.
+
+## Colunas de risco cifradas (#75) — 2026-10-16
+
+- Entregue: `triage_sessions.resultRisk` e `visits.riskLevelBefore`/`riskLevelAfter` cifrados em AES-256-GCM na borda ORM, com codec de largura fixa (o tamanho do ciphertext não revela a classe); `triage_sessions.resultDisplay` removida (derivada). Migrações `20261016135918697` (triagem) e `20261016140159775` (visitas).
+- Decisão: `alerts.riskLevel` permanece legível (só `red` é gravado; chave dos filtros SQL da INV-03). Registrada no PRD (INV-04) e em `spec/lgpd_data_audit.md` §2.3; amarrada pelo teste `INV-04 (#75)` de `test/unit/red_alert_discard_paths_test.dart`.
+- Provas: `test/unit/encrypted_risk_level_test.dart`; testes `#75` em `test/integration/health_data_encryption_test.dart` (linha bruta por `row_to_json` sem risco legível, ida e volta, `After` nulo e conclusão, linha antiga fora do `pull` e `rejected` só para ela no `sync`) e em `test/integration/patient_data_overview_endpoint_test.dart`.
+- Aberto: migrações sem backfill (volume antigo precisa ser recriado); rotação de chave continua inexistente (`keyVersion` só marcador), como nas demais colunas cifradas.

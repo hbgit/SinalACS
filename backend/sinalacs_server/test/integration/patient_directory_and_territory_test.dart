@@ -362,6 +362,7 @@ void main() {
       // `notesEncrypted`/`notesKeyVersion` com a mesma chave de
       // desenvolvimento que o `AlertRuntime` usa aqui.
       final notasVazias = await encryptedVisitNotes(const {});
+      final riscoVerde = await encryptedRiskLevel(RiskLevel.green);
 
       Visit visita({
         required String localId,
@@ -374,8 +375,10 @@ void main() {
             scheduledAt: DateTime.utc(2026, 9, 12, 9),
             completedAt: DateTime.utc(2026, 9, 12, 10),
             status: 'realizada',
-            riskLevelBefore: RiskLevel.green,
-            riskLevelAfter: RiskLevel.green,
+            riskLevelBeforeEncrypted: riscoVerde.ciphertextBase64,
+            riskLevelBeforeKeyVersion: riscoVerde.keyVersion,
+            riskLevelAfterEncrypted: riscoVerde.ciphertextBase64,
+            riskLevelAfterKeyVersion: riscoVerde.keyVersion,
             notesEncrypted: notasVazias.ciphertextBase64,
             notesKeyVersion: notasVazias.keyVersion,
             syncStatus: SyncStatus.synced,

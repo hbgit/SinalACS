@@ -2,6 +2,7 @@ import 'package:serverpod/serverpod.dart' show UuidValue;
 import 'package:sinalacs_server/src/config/app_config.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
 import 'package:sinalacs_server/src/infrastructure/crypto/encrypted_json.dart';
+import 'package:sinalacs_server/src/infrastructure/crypto/encrypted_risk_level.dart';
 import 'package:sinalacs_server/src/infrastructure/crypto/health_data_cipher.dart';
 
 /// Ajudantes para os testes que precisam SEMEAR linhas cifradas.
@@ -62,3 +63,14 @@ Future<List<TriageAnswer>> decryptedTriageAnswers(TriageSession session) async {
       TriageAnswer.fromJson(json as Map<String, dynamic>),
   ];
 }
+
+/// Cifra uma classificação de risco do jeito que os stores gravam (#75).
+Future<EncryptedValue> encryptedRiskLevel(RiskLevel? risk) =>
+    testHealthDataCipher().encryptRiskLevel(risk);
+
+/// Decifra o risco de uma sessão de triagem lida pelo ORM (#75).
+Future<RiskLevel?> decryptedTriageRisk(TriageSession session) =>
+    testHealthDataCipher().decryptRiskLevel(
+      session.resultRiskEncrypted,
+      session.resultRiskKeyVersion,
+    );

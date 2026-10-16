@@ -1,4 +1,4 @@
-### Sessão de triagem estruturada. resultRisk é produzido pelo TriageEngine
+### Sessão de triagem estruturada. O risco é produzido pelo TriageEngine
 ### de forma determinística e não é editável (INV-02).
 class: TriageSession
 table: triage_sessions
@@ -8,7 +8,10 @@ fields:
   ### JSON de List<TriageAnswer>, cifrado. Ver patient.spy.yaml para o padrão.
   answersEncrypted: String, default=''
   answersKeyVersion: int, default=1
-  resultRisk: RiskLevel
-  resultDisplay: String
+  ### Classificação do TriageEngine, cifrada (INV-04, #75): nome do RiskLevel
+  ### com largura fixa, ver `encrypted_risk_level.dart`. O rótulo de tela
+  ### (`resultDisplay`) deixou de ser persistido: era derivado do risco.
+  resultRiskEncrypted: String, default=''
+  resultRiskKeyVersion: int, default=1
   createdAt: DateTime
   deviceId: String
