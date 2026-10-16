@@ -144,6 +144,7 @@ void main() {
 
     expect(results.single.syncStatus, SyncStatus.synced);
     expect(results.single.serverVersion, 1);
+    expect(results.single.serverVisit, isNull);
     expect(store.rows[_localId]?.status, 'realizada');
   });
 
@@ -197,6 +198,41 @@ void main() {
     expect(store.rows[_localId]?.status, 'realizada');
   });
 
+  test('conflito devolve a visita do servidor ao autor', () async {
+    await service.sync(user: _acs, entries: [entry()]);
+
+    final conflicted = await service.sync(
+      user: _acs,
+      entries: [entry(version: 7, status: 'recusou atendimento')],
+    );
+
+    expect(conflicted.single.syncStatus, SyncStatus.conflict);
+    expect(conflicted.single.serverVersion, 1);
+    final copia = conflicted.single.serverVisit!;
+    expect(copia.status, 'realizada');
+    expect(copia.version, 1);
+    expect(copia.localId, _localId);
+    expect(copia.notes, store.rows[_localId]!.notes);
+  });
+
+  test('conflito grava read/visit_conflict sem conteúdo', () async {
+    await service.sync(user: _acs, entries: [entry()]);
+    audit.events.clear();
+
+    await service.sync(
+      user: _acs,
+      entries: [entry(version: 7, status: 'recusou atendimento')],
+    );
+
+    final event = audit.events.single;
+    expect(event.actionType, 'read');
+    expect(event.resourceType, 'visit_conflict');
+    expect(event.resourceId, store.rows[_localId]!.id!.uuid);
+    expect(event.userId, _acsId);
+    expect(event.result, isNot(contains('sem intercorrências')));
+    expect(event.resourceId, isNot(contains('sem intercorrências')));
+  });
+
   test('recusa sincronizar visita registrada por outro agente', () async {
     await service.sync(user: _acs, entries: [entry()]);
 
@@ -210,6 +246,7 @@ void main() {
 
     // Terminal: o dono do registro não muda com uma próxima tentativa.
     expect(results.single.syncStatus, SyncStatus.rejected);
+    expect(results.single.serverVisit, isNull);
     expect(store.rows[_localId]?.acsId, UuidValue.fromString(_acsId));
   });
 
@@ -309,6 +346,7 @@ void main() {
       );
 
       expect(results.single.syncStatus, SyncStatus.error);
+      expect(results.single.serverVisit, isNull);
       // Não é necessariamente espionagem territorial — pode ser um localId
       // órfão de um seed antigo. Só a recusa POR TERRITÓRIO é auditada.
       expect(audit.events, isEmpty);
@@ -551,6 +589,8 @@ void main() {
       expect(conflicted.single.syncStatus, SyncStatus.conflict);
       expect(conflicted.single.serverVersion, 1);
       expect(store.rows[_localId]!.status, 'realizada');
+      // Legado não tem autor: a cópia do servidor não é devolvida.
+      expect(conflicted.single.serverVisit, isNull);
     });
 
     test('visita legada de OUTRO aparelho com o mesmo localId: rejected', () async {

@@ -227,26 +227,26 @@ class VisitSyncService {
       result: 'granted',
     ));
 
-    return [
-      for (final visit in visits)
-        VisitSyncEntry(
-          localId: visit.localId.uuid,
-          patientId: visit.patientId.uuid,
-          scheduledAt: visit.scheduledAt,
-          completedAt: visit.completedAt,
-          status: visit.status,
-          riskLevelBefore: visit.riskLevelBefore,
-          riskLevelAfter: visit.riskLevelAfter,
-          notes: visit.notes,
-          version: visit.version,
-          arrivalMethod: visit.arrivalMethod,
-          // Relógio do SERVIDOR (gravado em `_syncOne` via `_clock()`), nunca
-          // o do dispositivo. É o que o cursor do app usa para avançar sem
-          // depender do relógio do aparelho — ver `VisitPullService` no ACS.
-          syncAt: visit.syncAt,
-        ),
-    ];
+    return [for (final visit in visits) _entryFor(visit)];
   }
+
+  /// A visita como o ACS a recebe (`pull` e cópia do servidor no conflito).
+  VisitSyncEntry _entryFor(VisitRecord visit) => VisitSyncEntry(
+        localId: visit.localId.uuid,
+        patientId: visit.patientId.uuid,
+        scheduledAt: visit.scheduledAt,
+        completedAt: visit.completedAt,
+        status: visit.status,
+        riskLevelBefore: visit.riskLevelBefore,
+        riskLevelAfter: visit.riskLevelAfter,
+        notes: visit.notes,
+        version: visit.version,
+        arrivalMethod: visit.arrivalMethod,
+        // Relógio do SERVIDOR (gravado em `_syncOne` via `_clock()`), nunca
+        // o do dispositivo. É o que o cursor do app usa para avançar sem
+        // depender do relógio do aparelho — ver `VisitPullService` no ACS.
+        syncAt: visit.syncAt,
+      );
 
   Future<List<VisitSyncResult>> sync({
     required AuthenticatedUser user,
@@ -524,10 +524,22 @@ class VisitSyncService {
     // a visita no meio. Devolve conflito com a versão do servidor, sem
     // sobrescrever nada.
     if (entry.version != existing.version - 1) {
+      // Só o autor recebe a cópia (aqui `legacy` já exclui o transportador).
+      // Audita o EVENTO, sem conteúdo clínico, como o `visit_pull`.
+      if (!legacy) {
+        await _audit.recordSafely(AuditEvent(
+          userId: user.id,
+          actionType: 'read',
+          resourceType: 'visit_conflict',
+          resourceId: existing.id?.uuid,
+          result: 'granted',
+        ));
+      }
       return VisitSyncResult(
         localId: entry.localId,
         syncStatus: SyncStatus.conflict,
         serverVersion: existing.version,
+        serverVisit: legacy ? null : _entryFor(existing),
       );
     }
 
