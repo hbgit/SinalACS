@@ -1,0 +1,102 @@
+{
+  "__className__": "serverpod.DatabaseMigration",
+  "actions": [
+    {
+      "__className__": "serverpod.DatabaseMigrationAction",
+      "type": "alterTable",
+      "alterTable": {
+        "__className__": "serverpod.TableMigration",
+        "name": "visits",
+        "schema": "public",
+        "addColumns": [
+          {
+            "__className__": "serverpod.ColumnDefinition",
+            "name": "riskLevelBeforeEncrypted",
+            "columnType": 0,
+            "isNullable": false,
+            "columnDefault": "''::text",
+            "dartType": "String"
+          },
+          {
+            "__className__": "serverpod.ColumnDefinition",
+            "name": "riskLevelBeforeKeyVersion",
+            "columnType": 6,
+            "isNullable": false,
+            "columnDefault": "1",
+            "dartType": "int"
+          },
+          {
+            "__className__": "serverpod.ColumnDefinition",
+            "name": "riskLevelAfterEncrypted",
+            "columnType": 0,
+            "isNullable": false,
+            "columnDefault": "''::text",
+            "dartType": "String"
+          },
+          {
+            "__className__": "serverpod.ColumnDefinition",
+            "name": "riskLevelAfterKeyVersion",
+            "columnType": 6,
+            "isNullable": false,
+            "columnDefault": "1",
+            "dartType": "int"
+          }
+        ],
+        "deleteColumns": [
+          "riskLevelBefore",
+          "riskLevelAfter"
+        ],
+        "modifyColumns": [],
+        "addIndexes": [],
+        "deleteIndexes": [],
+        "addForeignKeys": [],
+        "deleteForeignKeys": [],
+        "warnings": [
+          {
+            "__className__": "serverpod.DatabaseMigrationWarning",
+            "type": "columnDropped",
+            "message": "Column \"riskLevelBefore\" of table \"visits\" will be dropped.",
+            "table": "visits",
+            "columns": [
+              "riskLevelBefore"
+            ],
+            "destrucive": true
+          },
+          {
+            "__className__": "serverpod.DatabaseMigrationWarning",
+            "type": "columnDropped",
+            "message": "Column \"riskLevelAfter\" of table \"visits\" will be dropped.",
+            "table": "visits",
+            "columns": [
+              "riskLevelAfter"
+            ],
+            "destrucive": true
+          }
+        ]
+      }
+    }
+  ],
+  "warnings": [
+    {
+      "__className__": "serverpod.DatabaseMigrationWarning",
+      "type": "columnDropped",
+      "message": "Column \"riskLevelBefore\" of table \"visits\" will be dropped.",
+      "table": "visits",
+      "columns": [
+        "riskLevelBefore"
+      ],
+      "destrucive": true
+    },
+    {
+      "__className__": "serverpod.DatabaseMigrationWarning",
+      "type": "columnDropped",
+      "message": "Column \"riskLevelAfter\" of table \"visits\" will be dropped.",
+      "table": "visits",
+      "columns": [
+        "riskLevelAfter"
+      ],
+      "destrucive": true
+    }
+  ],
+  "migrationApiVersion": 1
+}

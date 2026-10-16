@@ -287,7 +287,6 @@ Future<void> _prontuarioA(Session s) async {
       acsId: UuidValue.fromString(_acsId),
       scheduledAt: _t,
       status: 'realizada',
-      riskLevelBefore: RiskLevel.green,
       syncStatus: SyncStatus.synced,
       localId: UuidValue.fromString('00000000-0000-4000-8000-000000004231'),
       version: 1,

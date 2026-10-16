@@ -380,5 +380,128 @@ void main() {
       expect(puxadas, hasLength(1));
       expect(puxadas.single.notes, const {_notaChave: _notaValor});
     });
+
+    test('#75: nenhuma coluna de visits guarda a classificação de risco em '
+        'claro', () async {
+      final session = sessionBuilder.build();
+      await _seed(session);
+      final relogio = DateTime.utc(2026, 9, 17, 12);
+      final service = VisitSyncService(
+        store: OrmVisitStore(session: () => session, cipher: testHealthDataCipher()),
+        audit: _SilentAuditTrail(),
+        clock: () => relogio,
+      );
+
+      await service.sync(
+        user: _acs,
+        entries: [
+          VisitSyncEntry(
+            localId: _localId,
+            patientId: _patientId,
+            scheduledAt: DateTime.utc(2026, 9, 17, 9),
+            completedAt: DateTime.utc(2026, 9, 17, 10),
+            status: 'realizada',
+            riskLevelBefore: RiskLevel.yellow,
+            riskLevelAfter: RiskLevel.green,
+            notes: const {},
+            version: 1,
+            arrivalMethod: ArrivalMethod.manual,
+          ),
+        ],
+      );
+
+      final linha = await _linhaBruta(session, table: 'visits');
+      _expectSemRiscoLegivel(linha);
+
+      final puxadas = await service.pull(
+        user: _acs,
+        since: relogio.subtract(const Duration(days: 1)),
+      );
+      expect(puxadas.single.riskLevelBefore, RiskLevel.yellow);
+      expect(puxadas.single.riskLevelAfter, RiskLevel.green);
+    });
+
+    test('#75: riskLevelAfter nulo volta nulo e, na conclusão (servidor vai à '
+        'versão 2), o risco novo é regravado cifrado', () async {
+      final session = sessionBuilder.build();
+      await _seed(session);
+      var relogio = DateTime.utc(2026, 9, 17, 12);
+      final service = VisitSyncService(
+        store: OrmVisitStore(session: () => session, cipher: testHealthDataCipher()),
+        audit: _SilentAuditTrail(),
+        clock: () => relogio,
+      );
+      VisitSyncEntry entrada({required int version, RiskLevel? depois, DateTime? fim}) =>
+          VisitSyncEntry(
+            localId: _localId,
+            patientId: _patientId,
+            scheduledAt: DateTime.utc(2026, 9, 17, 9),
+            completedAt: fim,
+            status: fim == null ? 'agendada' : 'realizada',
+            riskLevelBefore: RiskLevel.red,
+            riskLevelAfter: depois,
+            notes: const {},
+            version: version,
+            arrivalMethod: ArrivalMethod.manual,
+          );
+
+      // O aparelho envia a versão-base: 0 na criação e de novo 0 na conclusão,
+      // que o servidor (já na 1) aceita como `existing.version - 1`.
+      await service.sync(user: _acs, entries: [entrada(version: 0)]);
+      var puxadas = await service.pull(
+        user: _acs,
+        since: relogio.subtract(const Duration(days: 1)),
+      );
+      expect(puxadas.single.riskLevelAfter, isNull);
+
+      relogio = relogio.add(const Duration(hours: 1));
+      final resultado = await service.sync(
+        user: _acs,
+        entries: [
+          entrada(version: 0, depois: RiskLevel.yellow, fim: DateTime.utc(2026, 9, 17, 10)),
+        ],
+      );
+      expect(resultado.single.syncStatus, SyncStatus.synced);
+      expect(resultado.single.serverVersion, 2);
+      _expectSemRiscoLegivel(await _linhaBruta(session, table: 'visits'));
+      puxadas = await service.pull(
+        user: _acs,
+        since: relogio.subtract(const Duration(days: 1)),
+      );
+      expect(puxadas.single.riskLevelBefore, RiskLevel.red);
+      expect(puxadas.single.riskLevelAfter, RiskLevel.yellow);
+    });
+
+    test('#75: visita sem risco cifrado (anterior à migração) faz o pull '
+        'falhar alto, sem inventar risco', () async {
+      final session = sessionBuilder.build();
+      await _seed(session);
+      final notas = await encryptedVisitNotes(const {});
+      await Visit.db.insertRow(
+        session,
+        Visit(
+          patientId: UuidValue.fromString(_patientId),
+          acsId: UuidValue.fromString(_acsId),
+          scheduledAt: DateTime.utc(2026, 9, 17, 9),
+          status: 'realizada',
+          notesEncrypted: notas.ciphertextBase64,
+          notesKeyVersion: notas.keyVersion,
+          syncStatus: SyncStatus.synced,
+          localId: UuidValue.fromString(_localId),
+          syncAt: DateTime.utc(2026, 9, 17, 11),
+          version: 1,
+        ),
+      );
+      final service = VisitSyncService(
+        store: OrmVisitStore(session: () => session, cipher: testHealthDataCipher()),
+        audit: _SilentAuditTrail(),
+        clock: () => DateTime.utc(2026, 9, 17, 12),
+      );
+
+      expect(
+        () => service.pull(user: _acs, since: DateTime.utc(2026, 9, 16)),
+        throwsA(isA<StateError>()),
+      );
+    });
   });
 }

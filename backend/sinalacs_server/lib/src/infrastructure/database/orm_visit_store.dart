@@ -2,6 +2,7 @@ import 'package:serverpod/serverpod.dart';
 import 'package:sinalacs_server/src/application/visits/visit_sync_service.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
 import 'package:sinalacs_server/src/infrastructure/crypto/encrypted_json.dart';
+import 'package:sinalacs_server/src/infrastructure/crypto/encrypted_risk_level.dart';
 import 'package:sinalacs_server/src/infrastructure/crypto/health_data_cipher.dart';
 
 /// Implementação de [VisitStore] sobre o ORM do Serverpod.
@@ -10,8 +11,8 @@ import 'package:sinalacs_server/src/infrastructure/crypto/health_data_cipher.dar
 /// não guardada no construtor, porque o Serverpod amarra o ciclo de vida da
 /// conexão à `Session` da requisição.
 ///
-/// É também a única fronteira que conhece a cifragem de `visits.notes`
-/// (RNF03, INV-04): [VisitSyncService] trafega [VisitRecord] com `notes` em
+/// É também a única fronteira que conhece a cifragem de `visits.notes` e dos
+/// riscos `riskLevelBefore`/`riskLevelAfter` (RNF03, INV-04, #75): [VisitSyncService] trafega [VisitRecord] com `notes` em
 /// claro nos dois sentidos — inclusive no `pull`, porque o ACS do território é
 /// justamente quem tem legitimidade para lê-las — e este store converte de e
 /// para o par `notesEncrypted`/`notesKeyVersion`.
@@ -48,9 +49,9 @@ class OrmVisitStore implements VisitStore {
       await _toRow(visit),
       transaction: _transaction,
     );
-    // Reaproveita as notas em claro que o chamador já tem: decifrar de volta o
-    // que acabamos de cifrar seria trabalho puro de ida e volta.
-    return _toRecord(row, notes: visit.notes);
+    // Reaproveita o texto claro que o chamador já tem (notas e riscos):
+    // decifrar de volta o que acabamos de cifrar seria ida e volta à toa.
+    return _toRecord(row, plain: visit);
   }
 
   @override
@@ -60,7 +61,7 @@ class OrmVisitStore implements VisitStore {
       await _toRow(visit),
       transaction: _transaction,
     );
-    return _toRecord(row, notes: visit.notes);
+    return _toRecord(row, plain: visit);
   }
 
   @override
@@ -118,6 +119,8 @@ class OrmVisitStore implements VisitStore {
 
   Future<Visit> _toRow(VisitRecord record) async {
     final encrypted = await _cipher.encryptJson(record.notes);
+    final before = await _cipher.encryptRiskLevel(record.riskLevelBefore);
+    final after = await _cipher.encryptRiskLevel(record.riskLevelAfter);
     return Visit(
       id: record.id,
       patientId: record.patientId,
@@ -128,8 +131,10 @@ class OrmVisitStore implements VisitStore {
       startedAt: record.startedAt,
       completedAt: record.completedAt,
       status: record.status,
-      riskLevelBefore: record.riskLevelBefore,
-      riskLevelAfter: record.riskLevelAfter,
+      riskLevelBeforeEncrypted: before.ciphertextBase64,
+      riskLevelBeforeKeyVersion: before.keyVersion,
+      riskLevelAfterEncrypted: after.ciphertextBase64,
+      riskLevelAfterKeyVersion: after.keyVersion,
       notesEncrypted: encrypted.ciphertextBase64,
       notesKeyVersion: encrypted.keyVersion,
       syncStatus: record.syncStatus,
@@ -140,11 +145,29 @@ class OrmVisitStore implements VisitStore {
     );
   }
 
-  Future<VisitRecord> _toRecord(Visit row, {Map<String, String>? notes}) async {
-    final decoded = notes ??
+  Future<VisitRecord> _toRecord(Visit row, {VisitRecord? plain}) async {
+    final notes = plain?.notes ??
         ((await _cipher.decryptJson(row.notesEncrypted, row.notesKeyVersion))
                 as Map<String, dynamic>?)
-            ?.cast<String, String>();
+            ?.cast<String, String>() ??
+        const <String, String>{};
+    final before = plain?.riskLevelBefore ??
+        await _cipher.decryptRiskLevel(
+          row.riskLevelBeforeEncrypted,
+          row.riskLevelBeforeKeyVersion,
+        );
+    // Ciphertext vazio = linha anterior à migração da #75 ou gravada fora
+    // deste store. Falha alto: a fila do ACS não pode receber um risco
+    // inventado (INV-02). Só o id sintético vai na mensagem (VAZ-01).
+    if (before == null) {
+      throw StateError('Visita ${row.id} sem riskLevelBefore cifrado (#75).');
+    }
+    final after = plain != null
+        ? plain.riskLevelAfter
+        : await _cipher.decryptRiskLevel(
+            row.riskLevelAfterEncrypted,
+            row.riskLevelAfterKeyVersion,
+          );
     return VisitRecord(
       id: row.id,
       patientId: row.patientId,
@@ -155,9 +178,9 @@ class OrmVisitStore implements VisitStore {
       startedAt: row.startedAt,
       completedAt: row.completedAt,
       status: row.status,
-      riskLevelBefore: row.riskLevelBefore,
-      riskLevelAfter: row.riskLevelAfter,
-      notes: decoded ?? const {},
+      riskLevelBefore: before,
+      riskLevelAfter: after,
+      notes: notes,
       syncStatus: row.syncStatus,
       arrivalMethod: row.arrivalMethod,
       localId: row.localId,
