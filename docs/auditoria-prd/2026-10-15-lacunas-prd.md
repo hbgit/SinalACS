@@ -15,13 +15,13 @@ próprio; o conferidor exige apenas os IDs do PRD.
 
 | ID | Requisito | Status | Evidência | O que falta |
 |----|-----------|--------|-----------|-------------|
-| RF01 | Autenticação passwordless (CPF + nascimento + OTP) | **a-verificar** | | |
-| RF02 | Onboarding via QR Code | **a-verificar** | | |
-| RF03 | Botão de alerta de urgência (MQTT, GPS) | **a-verificar** | | |
-| RF04 | Triagem estruturada (árvore de decisão) | **a-verificar** | | |
-| RF05 | Painel de status da solicitação | **a-verificar** | | |
-| RF06 | Lembretes de saúde (notificação local) | **a-verificar** | | |
-| RF18 | Modo escuro nativo | **a-verificar** | | |
+| RF01 | Autenticação passwordless (CPF + nascimento + OTP) | **parcial** | Fluxo CPF + nascimento + OTP em `auth.requestOtp`/`verifyOtp`; `passwordless_auth_service_test.dart` passa; e2e real em `scripts/qa/patient_full_e2e.sh` (2026-09-30). Único gateway é `LoggingSmsGateway` (`backend/sinalacs_server/lib/src/application/auth/sms_gateway.dart:36`), que só escreve o código no log em `APP_ENV=development`. | Escolher e integrar provedor de SMS (implementar `SmsGateway`); criar coluna de telefone do paciente (hoje o destino é o CPF, `sms_gateway.dart:12`). |
+| RF02 | Onboarding via QR Code | **entregue** | Convite de uso único em `onboarding_endpoint.dart:21` (`generateEnrollmentToken`) e `:38` (`completeEnrollment`); `qr_flutter` no ACS, `mobile_scanner` no paciente (`apps/patient/lib/app/qr_scanner.dart`); `onboarding_service_test.dart` recusa outra microárea; `qr_scanner_test`, `onboarding_flow_test`, `enrollment_qr_test` passam (36 testes, 2026-10-15). |  |
+| RF03 | Botão de alerta de urgência (MQTT, GPS) | **entregue** | Botão `panic_button` 208x208 dp (`apps/patient/lib/app/app.dart:1380`); localização por `GeolocatorLocationReader` vira geocélula arredondada + hash antes do envio (`app.dart:1300-1320`); `alerts.createRedAlert` publica via outbox MQTT; ciclo provado em `red_alert_cycle_test.dart` (integração) e entrega p95 212 ms medida por `scripts/qa/measure_latency.dart` (2026-10-16 UTC). |  |
+| RF04 | Triagem estruturada (árvore de decisão) | **entregue** | Seis perguntas sim/não em `TriageSymptom` (`apps/patient/lib/app/app.dart:1429`) mapeadas 1:1 para `TriageEngine.evaluate` (`backend/sinalacs_server/lib/src/application/triage/triage_engine.dart`); risco calculado só no servidor. | O §6.1 fala em 3 perguntas e o código usa 6: atualizar o texto do PRD (correção do PRD, não do código). |
+| RF05 | Painel de status da solicitação | **parcial** | `alerts.statusFor` + tela de status (`apps/patient/lib/app/app.dart:2518`) mostram Enviado (pending) e Recebido pela equipe (acknowledged); sincronização periódica testada em `patient_app_mvp_test.dart`. | Nenhum código leva o alerta a `resolved` (só existe no enum `alert_status.spy.yaml:8`), então o paciente nunca vê Atendido: falta a ação do ACS de encerrar o atendimento e a transição no backend. |
+| RF06 | Lembretes de saúde (notificação local) | **entregue** | `flutter_local_notifications` + `apps/patient/lib/core/reminders/` (agendador e store `sqflite`); testes em `apps/patient/test/reminders/` passam. Sem endpoint por decisão §2.2.1 (§3.1). |  |
+| RF18 | Modo escuro nativo | **parcial** | Paciente e ACS seguem o tema do sistema (`ThemeController` com `ThemeMode.system`, `darkTheme:` em `apps/patient/lib/app/app.dart:164` e `apps/acs/lib/app/app.dart:554`), com testes de contraste nos dois temas (`contrast_tokens_test.dart`, `contrast_tokens_light_test.dart`). | O backoffice (`apps/admin/lib/app/admin_theme.dart:48`) só tem tema escuro fixo (`Brightness.dark`), sem tema claro nem `themeMode`. |
 
 ## ACS
 
