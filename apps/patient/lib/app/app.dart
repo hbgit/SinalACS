@@ -2518,12 +2518,13 @@ class _StatusCard extends StatelessWidget {
     final statusLabel = switch (status.status) {
       AlertStatus.pending => 'Enviado — aguardando confirmação da equipe',
       AlertStatus.acknowledged => 'Recebido pela equipe de saúde',
-      AlertStatus.resolved => 'Atendimento concluído',
+      AlertStatus.resolved => 'Atendido pela equipe de saúde',
       AlertStatus.escalated => 'Encaminhado para o SAMU',
       null => 'Sem status',
     };
     final triggeredAt = status.triggeredAt;
     final acknowledgedAt = status.acknowledgedAt;
+    final resolvedAt = status.resolvedAt;
 
     return Card(
       child: Padding(
@@ -2549,6 +2550,13 @@ class _StatusCard extends StatelessWidget {
             if (acknowledgedAt != null) ...[
               const SizedBox(height: 4),
               Text('Confirmado pela equipe às ${_formatTime(acknowledgedAt)}'),
+            ],
+            if (resolvedAt != null) ...[
+              const SizedBox(height: 4),
+              Text(
+                key: const Key('status_resolved_at'),
+                'Atendimento concluído às ${_formatTime(resolvedAt)}',
+              ),
             ],
           ],
         ),

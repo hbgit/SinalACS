@@ -1564,6 +1564,30 @@ void main() {
       expect(find.text('Recebido pela equipe de saúde'), findsOneWidget);
     });
 
+    testWidgets('alerta concluído pela equipe aparece como "Atendido" (#76)', (tester) async {
+      final backend = FakePatientBackend()
+        ..statusResult = AlertStatusResult(
+          found: true,
+          alertId: 'alerta-1',
+          riskLevel: RiskLevel.red,
+          status: AlertStatus.resolved,
+          triggeredAt: DateTime.utc(2026, 9, 18, 9),
+          acknowledgedAt: DateTime.utc(2026, 9, 18, 9, 5),
+          resolvedAt: DateTime.utc(2026, 9, 18, 10, 40),
+        );
+      await tester.pumpWidget(SinalAcsApp(backend: backend));
+      await login(tester);
+
+      await tester.tap(find.text('Status'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Atendido pela equipe de saúde'), findsOneWidget);
+      expect(find.byKey(const Key('status_resolved_at')), findsOneWidget);
+      expect(find.textContaining('Atendimento concluído às'), findsOneWidget);
+      // A confirmação continua visível: é a etapa "Visualizado" do PRD §6.1.
+      expect(find.textContaining('Confirmado pela equipe às'), findsOneWidget);
+    });
+
     testWidgets('uma falha ao consultar mostra o aviso, sem travar o botão de tentar de novo', (tester) async {
       final backend = FakePatientBackend()
         ..statusFailure = const BackendFailure('Sem conexão com o servidor.');
