@@ -153,59 +153,59 @@ próprio; o conferidor exige apenas os IDs do PRD.
 
 | ID | Requisito | Status | Evidência | O que falta |
 |----|-----------|--------|-----------|-------------|
-| M1.1 | Docker Compose local | **a-verificar** | | |
-| M1.2 | CI básica | **a-verificar** | | |
-| M1.3 | Motor de triagem (MCDC, 50 cenários) | **a-verificar** | | |
-| M1.4 | FSM de sincronização | **a-verificar** | | |
-| M1.5 | SQLCipher local | **a-verificar** | | |
-| M2.1 | App Paciente MVP | **a-verificar** | | |
-| M2.2 | App ACS MVP | **a-verificar** | | |
-| M2.3 | MQTT com TLS (WSS) | **a-verificar** | | |
-| M2.4 | 100 registros sincronizam em < 5 s | **a-verificar** | | |
-| M2.5 | Testes de caos (Toxiproxy) | **a-verificar** | | |
-| M2.6 | Testes de usabilidade em campo | **a-verificar** | | |
-| M3.1 | Deploy em produção (Pulumi) | **a-verificar** | | |
-| M3.2 | Monitoramento (OpenTelemetry) | **a-verificar** | | |
-| M3.3 | Testes de carga | **a-verificar** | | |
-| M3.4 | LGPD compliance | **a-verificar** | | |
-| M3.5 | Lançamento v1.0 em UBS piloto | **a-verificar** | | |
+| M1.1 | Docker Compose local | **entregue** | `docker-compose.yml` sobe Postgres, Mosquitto, backend, Traefik e Gorush; todos em execução e usados pela medição de latência e pelos scripts TLS/mTLS (2026-10-15). |  |
+| M1.2 | CI básica | **entregue** | `.github/workflows/ci.yml` com 9 jobs (`flutter test`, `dart analyze`, build Docker, e2e Android), guardados por `scripts/qa/ci_invariants.sh`. |  |
+| M1.3 | Motor de triagem (MCDC, 50 cenários) | **entregue** | Ver RF16: 64 combinações (tabela-verdade completa) + 8 cenários nomeados. | Sem relatório MCDC por ferramenta; a tabela-verdade completa o torna redundante para seis booleanos. |
+| M1.4 | FSM de sincronização | **entregue** | `backend/sinalacs_server/lib/src/application/sync/sync_fsm.dart` e a FSM do aparelho em `offline_visit_queue.dart`; testes de transição, conflito e erro passam na linha de base. |  |
+| M1.5 | SQLCipher local | **entregue** | SQLCipher no ACS (`apps/acs/lib/core/database/encrypted_database.dart`, `integration_test/encrypted_storage_test.dart`); o paciente não persiste dado clínico, de propósito. |  |
+| M2.1 | App Paciente MVP | **parcial** | Login, alerta, triagem e status no app do paciente (RF01, RF03, RF04, RF05). | SMS real (RF01) e o estado Atendido do status (RF05). |
+| M2.2 | App ACS MVP | **entregue** | Login, territorialização, dashboard e registro no ACS (RF07, RF08, RF09, RF11). |  |
+| M2.3 | MQTT com TLS (WSS) | **parcial** | MQTT sobre TLS com mTLS na 8883 (`mtls_invariants.sh` OK). | O critério fala em WSS, e WebSockets (9001) não é publicado por decisão; o broker aceita TLS 1.2 (ver RNF04). |
+| M2.4 | 100 registros sincronizam em < 5 s | **entregue** | 100 visitas por lote em p95 112 ms, 10/10 (meta < 5 s), `measure_latency.dart` contra a stack local (2026-10-16 UTC); `offline_burst_test.dart`. | Repetir em rede móvel real. |
+| M2.5 | Testes de caos (Toxiproxy) | **parcial** | Simulador em processo `apps/acs/lib/core/services/network_chaos_simulator.dart` + `network_chaos_test.dart`; resiliência real do broker em `scripts/qa/mqtt_resiliencia_e2e.sh`. | Toxiproxy (0 ocorrências): latência, jitter e partição na rede de verdade entre app, Traefik e broker. |
+| M2.6 | Testes de usabilidade em campo | **externo** | Avaliação de acessibilidade e e2e no emulador (`spec/ux_accessibility_assessment.md`). | Beta fechado com 5 ACS e 10 pacientes em campo (dono: produto + UBS). |
+| M3.1 | Deploy em produção (Pulumi) | **ausente** | Nenhuma ocorrência de Pulumi; `backend/DEPLOY.md` é só um caminho de demo free-tier, não executado. | IaC (Pulumi) e VPS de produção. |
+| M3.2 | Monitoramento (OpenTelemetry) | **ausente** | Nenhuma ocorrência de OpenTelemetry, Prometheus ou Grafana. | Traces e métricas em produção. |
+| M3.3 | Testes de carga | **ausente** | Nenhum script de carga (100 ACS simultâneos, 500 alertas/hora); `measure_latency.dart` é sequencial, 1 cliente. | Teste de carga. |
+| M3.4 | LGPD compliance | **externo** | Documentos de privacidade, painel de consentimento e direitos do titular entregues (LGPD-RF02, LGPD-RF08). | Revisão jurídica do texto real dos termos e validação do DPO (anonimização, exportação da auditoria). |
+| M3.5 | Lançamento v1.0 em UBS piloto | **externo** | Nada no código. | Piloto em 1 UBS (2 microáreas, 50 pacientes), depois de M3.1-M3.4. |
 
 ### MVP (§6.1)
 
 | ID | Requisito | Status | Evidência | O que falta |
 |----|-----------|--------|-----------|-------------|
-| MVP-LOGIN-60S | 10 pacientes logam em < 60 s | **a-verificar** | | |
-| MVP-ALERTA-2S | Alerta chega ao ACS em < 2 s | **a-verificar** | | |
-| MVP-TRIAGEM-3P | Triagem de 3 perguntas | **a-verificar** | | |
-| MVP-STATUS | Enviado → Visualizado → Atendido | **a-verificar** | | |
-| MVP-LOGIN-ACS | ACS loga com matrícula e senha | **a-verificar** | | |
-| MVP-TERRITORIO-30S | Microárea carrega em < 30 s | **a-verificar** | | |
-| MVP-FILA-ORDEM | Lista Vermelho → Amarelo → Verde | **a-verificar** | | |
-| MVP-VISITA-OFFLINE | Visita salva local e sincronizada em background | **a-verificar** | | |
-| MVP-MQTT-100 | 100 dispositivos, latência < 500 ms | **a-verificar** | | |
-| MVP-MIGRACOES-LOGS | Migrações versionadas e logs estruturados | **a-verificar** | | |
+| MVP-LOGIN-60S | 10 pacientes logam em < 60 s | **parcial** | Fluxo OTP funciona (RF01). | SMS real e medição com 10 pacientes. |
+| MVP-ALERTA-2S | Alerta chega ao ACS em < 2 s | **entregue** | p95 212 ms na stack local (RNF01). |  |
+| MVP-TRIAGEM-3P | Triagem de 3 perguntas | **entregue** | Seis perguntas, classificação determinística (RF04). | Corrigir 3 para 6 no texto do PRD. |
+| MVP-STATUS | Enviado → Visualizado → Atendido | **parcial** | Enviado e Recebido aparecem (RF05). | Atendido nunca aparece (RF05). |
+| MVP-LOGIN-ACS | ACS loga com matrícula e senha | **entregue** | Ver RF07. |  |
+| MVP-TERRITORIO-30S | Microárea carrega em < 30 s | **parcial** | Cache da microárea entregue (RF08). | Medir o download (< 30 s). |
+| MVP-FILA-ORDEM | Lista Vermelho → Amarelo → Verde | **entregue** | Ver RF09. |  |
+| MVP-VISITA-OFFLINE | Visita salva local e sincronizada em background | **parcial** | Gravação local e envio quando a rede volta ou o app abre (RF11). | Envio em segundo plano com o app fechado (WorkManager fora da stack). |
+| MVP-MQTT-100 | 100 dispositivos, latência < 500 ms | **parcial** | Latência < 500 ms medida com 1 cliente (RNF01). | 100 dispositivos simultâneos não testados (ver M3.3). |
+| MVP-MIGRACOES-LOGS | Migrações versionadas e logs estruturados | **parcial** | Migrações versionadas do Serverpod aplicadas no boot e na CI. | Logs estruturados: o backend usa `session.log` e `stdout.writeln` em texto livre (7 pontos em `lib/src`), sem formato estruturado. |
 
 ### Hipóteses (§1.2)
 
 | ID | Requisito | Status | Evidência | O que falta |
 |----|-----------|--------|-----------|-------------|
-| H1 | ACS priorizam mais rápido (−40 %) | **a-verificar** | | |
-| H2 | ≥ 80 % completam onboarding sem ajuda | **a-verificar** | | |
-| H3 | ≥ 90 % de concordância com avaliação médica | **a-verificar** | | |
-| H4 | ≥ 99,5 % dos registros offline sincronizam | **a-verificar** | | |
+| H1 | ACS priorizam mais rápido (−40 %) | **externo** | TMRAV calculado em `AdminIndicators.tmravSeconds`. | Piloto; o início da visita não é ligado ao alerta, então a redução de 40 % só é medível com o evento `visit_registered` (ver EVT-*). |
+| H2 | ≥ 80 % completam onboarding sem ajuda | **externo** | Nada instrumentado. | Piloto; registrar conclusão do onboarding sem assistência (evento ausente). |
+| H3 | ≥ 90 % de concordância com avaliação médica | **externo** | Nada no código: não existe classificação médica posterior para comparar. | Piloto com avaliação médica e campo para registrá-la (`risk_level_after` existe em `visits`). |
+| H4 | ≥ 99,5 % dos registros offline sincronizam | **externo** | Sync medido só em laboratório (RNF02). | Piloto + eventos `sync_attempt`/`sync_result` (ausentes). |
 
 ### Riscos (§6.3)
 
 | ID | Requisito | Status | Evidência | O que falta |
 |----|-----------|--------|-----------|-------------|
-| R1 | Colisão de sincronização | **a-verificar** | | |
-| R2 | Falha do MQTT em rede 3G | **a-verificar** | | |
-| R3 | Vazamento de PII no dispositivo | **a-verificar** | | |
-| R4 | Rejeição do ACS | **a-verificar** | | |
-| R5 | Performance do PostgreSQL | **a-verificar** | | |
-| R6 | Dependência de SMS gateway | **a-verificar** | | |
-| R7 | Mudanças regulatórias (LGPD) | **a-verificar** | | |
-| R8 | SPOF no Traefik | **a-verificar** | | |
+| R1 | Colisão de sincronização | **ausente** | Conflito fica na fila com contador (`apps/acs/lib/app/app.dart:3143-3147`, `conflict_visits_count`); não existe tela para comparar e escolher versão. | UI de resolução lado a lado (plano de contingência do R1). |
+| R2 | Falha do MQTT em rede 3G | **parcial** | Reconexão com backoff e sessão persistente no MQTT; outbox no servidor reentrega (`mqtt_resiliencia_e2e.sh`); visitas já vão por HTTP. | Sem reserva por HTTP para o ACS receber alertas quando o MQTT cai (o `backend_client.dart` do ACS não lista alertas pendentes). |
+| R3 | Vazamento de PII no dispositivo | **parcial** | Limpeza do aparelho pelo próprio ACS (`apps/acs/lib/app/app.dart:174`, `device_wipe_test.dart`); chave do SQLCipher no Keystore. | Remote wipe pela API (não existe login de supervisor para dispará-lo); rotação de chave. |
+| R4 | Rejeição do ACS | **externo** | Nada no código. | NPS semanal e treinamento (produto + UBS). |
+| R5 | Performance do PostgreSQL | **parcial** | 46 índices na migração `20261014155304871`, incluindo `alerts_micro_area_status_idx` e `users_micro_area_idx`. | Particionamento por microárea não existe; sem teste de carga que mostre necessidade (M3.3). |
+| R6 | Dependência de SMS gateway | **ausente** | Sem provedor de SMS (RF01); o QR do onboarding não substitui o login. | Fallback de login sem SMS e múltiplos provedores. |
+| R7 | Mudanças regulatórias (LGPD) | **externo** | Nada no código. | Comitê de compliance e DPO. |
+| R8 | SPOF no Traefik | **ausente** | Uma instância de Traefik no Compose. | Segunda instância e failover (infra de produção, M3.1). |
 
 ## Backlog priorizado
 
