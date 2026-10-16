@@ -50,7 +50,8 @@ final _mutationPattern = RegExp(
 const _allowedWriters = <String, String>{
   'infrastructure/database/orm_alert_store.dart':
       'save() insere o alerta como pending; acknowledge() leva a acknowledged '
-      '(única transição de status hoje)',
+      '(e preserva resolved); resolve() leva acknowledged → resolved, sob '
+      'trava e auditado na mesma transação (#76)',
   'infrastructure/database/orm_retention_store.dart':
       'expurgo LGPD: DELETE FROM alerts por triggeredAt — hoje SEM guarda de '
       'status/risco (buraco, corrigido na Task 4)',
@@ -118,6 +119,21 @@ class _MemoryStore implements AlertStore {
 
   @override
   Future<AlertStatusSnapshot?> latestForPatient(String patientId) async => null;
+
+  @override
+  Future<AlertResolveAttempt> resolve({
+    required String alertId,
+    required String microAreaId,
+    required DateTime now,
+    required AuditEvent Function(AlertResolveOutcome outcome) auditFor,
+  }) async {
+    if (status[alertId] != 'acknowledged') {
+      return const AlertResolveAttempt(AlertResolveOutcome.notAcknowledged);
+    }
+    audits.add(auditFor(AlertResolveOutcome.resolved));
+    status[alertId] = 'resolved';
+    return AlertResolveAttempt(AlertResolveOutcome.resolved, resolvedAt: now);
+  }
 }
 
 class _MemoryOutbox implements AlertOutbox {

@@ -30,6 +30,17 @@ abstract interface class AlertStore {
     required AuditEvent audit,
   });
 
+  /// Conclui o atendimento (#76): leva o alerta de `acknowledged` a
+  /// `resolved` no território do ACS. O desfecho é decidido sob trava da
+  /// linha, e `auditFor(desfecho)` é gravado na MESMA transação (fail-closed)
+  /// — exceto [AlertResolveOutcome.notFound], que não grava nada, como o ACK.
+  Future<AlertResolveAttempt> resolve({
+    required String alertId,
+    required String microAreaId,
+    required DateTime now,
+    required AuditEvent Function(AlertResolveOutcome outcome) auditFor,
+  });
+
   /// Recupera o alerta já criado para esta chave de idempotência, se houver.
   ///
   /// A deduplicação vive no armazenamento, e não em memória, para sobreviver a
@@ -83,6 +94,32 @@ class RedAlertRecord {
   final String idempotencyKey;
 }
 
+/// Desfecho de [AlertStore.resolve] (#76).
+enum AlertResolveOutcome {
+  /// Inexistente ou de outra microárea: a mesma resposta, nada gravado.
+  notFound,
+
+  /// Ainda `pending`: o recebimento precisa ser confirmado antes (INV-03 —
+  /// concluir sem ACK apagaria do painel um vermelho que ninguém confirmou).
+  notAcknowledged,
+
+  /// `acknowledged` → `resolved` agora.
+  resolved,
+
+  /// Já estava `resolved`: nada muda e o `resolvedAt` original volta.
+  alreadyResolved,
+}
+
+class AlertResolveAttempt {
+  const AlertResolveAttempt(this.outcome, {this.resolvedAt});
+
+  final AlertResolveOutcome outcome;
+
+  /// Quando o atendimento foi concluído; nulo em [AlertResolveOutcome.notFound]
+  /// e [AlertResolveOutcome.notAcknowledged].
+  final DateTime? resolvedAt;
+}
+
 /// Status do alerta mais recente de um paciente, para RF05.
 ///
 /// Espelha os campos que `Alert` guarda além de [AlertDelivery] — `status` e
@@ -94,6 +131,7 @@ class AlertStatusSnapshot {
     required this.status,
     required this.triggeredAt,
     this.acknowledgedAt,
+    this.resolvedAt,
   });
 
   final String alertId;
@@ -101,6 +139,9 @@ class AlertStatusSnapshot {
   final AlertStatus status;
   final DateTime triggeredAt;
   final DateTime? acknowledgedAt;
+
+  /// Conclusão do atendimento pelo ACS (#76); nulo até lá.
+  final DateTime? resolvedAt;
 }
 
 /// Formato produzido por `locationCellFrom()` (apps/patient/lib/core/privacy/location_cell.dart):
@@ -220,6 +261,52 @@ class RedAlertService {
         result: porMqtt ? 'acknowledged_mqtt' : 'acknowledged',
       ),
     );
+  }
+
+  /// Texto da recusa de concluir um alerta que ninguém confirmou (#76).
+  static const notAcknowledgedMessage =
+      'Confirme o recebimento antes de concluir o atendimento.';
+
+  /// Conclui o atendimento (#76, RF05): é a transição que faz o paciente ver
+  /// "Atendido". Só o ACS do território do alerta, e só depois do ACK.
+  /// Cada ato que encontra o alerta é auditado, inclusive a repetição e a
+  /// recusa por falta de ACK; a recusa vira [ArgumentError] DEPOIS de a
+  /// trilha gravar.
+  Future<AlertResolveAttempt> resolve({
+    required AuthenticatedUser user,
+    required String alertId,
+  }) async {
+    Authorization.require(
+      user,
+      roles: {UserRole.acs},
+      onDenied: () =>
+          StateError('Somente ACS territorializados podem concluir atendimentos.'),
+    );
+    if (alertId.trim().isEmpty) {
+      throw ArgumentError('O identificador do alerta é obrigatório.');
+    }
+    final attempt = await _store.resolve(
+      alertId: alertId,
+      microAreaId: user.microAreaId!,
+      now: _clock().toUtc(),
+      auditFor: (outcome) => AuditEvent(
+        userId: user.id,
+        actionType: 'write',
+        resourceType: 'alert',
+        resourceId: alertId,
+        result: switch (outcome) {
+          AlertResolveOutcome.resolved => 'resolved',
+          AlertResolveOutcome.alreadyResolved => 'already_resolved',
+          AlertResolveOutcome.notAcknowledged => 'denied_not_acknowledged',
+          // O store não grava este; o texto existe só para o switch ser total.
+          AlertResolveOutcome.notFound => 'denied_not_found',
+        },
+      ),
+    );
+    if (attempt.outcome == AlertResolveOutcome.notAcknowledged) {
+      throw ArgumentError(notAcknowledgedMessage);
+    }
+    return attempt;
   }
 
   /// Status do alerta mais recente do próprio paciente autenticado (RF05,

@@ -95,7 +95,8 @@ class OrmAdminReadStore implements AdminReadStore, AuditChainScopeStore {
         count(*) FILTER (WHERE $alertOverdueSql),
         max(GREATEST(a."triggeredAt",
                      COALESCE(a."acknowledgedAt", a."triggeredAt"),
-                     COALESCE(a."escalatedAt", a."triggeredAt")))
+                     COALESCE(a."escalatedAt", a."triggeredAt"),
+                     COALESCE(a."resolvedAt", a."triggeredAt")))
       FROM alerts a
       LEFT JOIN micro_areas m ON m.id = a."microAreaId"
       WHERE $_escopo

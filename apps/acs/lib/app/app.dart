@@ -1625,6 +1625,58 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
     }
   }
 
+  /// Alertas com a conclusão em voo. O diálogo modal já impede dois toques;
+  /// este conjunto impede uma segunda conclusão do mesmo alerta enquanto a
+  /// chamada ao servidor não volta (o servidor também é idempotente).
+  final Set<String> _concluindo = <String>{};
+
+  /// "Concluir atendimento" (#76): confirma com o ACS, porque o paciente passa
+  /// a ver "Atendido" e o servidor não volta atrás.
+  Future<void> _resolve(PrioritizedAlert alert) async {
+    if (_concluindo.contains(alert.alertId)) return;
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    void aviso(String texto) => messenger
+      ?..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(texto)));
+    final confirmou = await showDialog<bool>(
+      context: context,
+      builder: (dialog) => AlertDialog(
+        title: const Text('Concluir o atendimento?'),
+        content: const Text(
+          'O paciente verá "Atendido" no aplicativo. Conclua só depois de atender o paciente.',
+        ),
+        actions: [
+          TextButton(
+            key: const Key('cancelar_conclusao'),
+            onPressed: () => Navigator.of(dialog).pop(false),
+            style: TextButton.styleFrom(minimumSize: const Size(48, 52)),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            key: const Key('confirmar_conclusao'),
+            onPressed: () => Navigator.of(dialog).pop(true),
+            style: FilledButton.styleFrom(minimumSize: const Size(48, 52)),
+            child: const Text('Concluir'),
+          ),
+        ],
+      ),
+    );
+    if (confirmou != true || !mounted) return;
+    _concluindo.add(alert.alertId);
+    try {
+      final result = await BackendScope.of(context).resolveAlert(alertId: alert.alertId);
+      if (result.resolved && mounted) _queue.markResolved(alert.alertId);
+      aviso(result.resolved
+          ? 'Atendimento concluído. O paciente já vê "Atendido".'
+          : 'A central não reconheceu este alerta.');
+    } on BackendFailure catch (failure) {
+      // Nunca engolir: o alerta segue confirmado e por concluir.
+      aviso(failure.message);
+    } finally {
+      _concluindo.remove(alert.alertId);
+    }
+  }
+
   bool _saindo = false;
   bool _limpando = false;
 
@@ -1964,6 +2016,7 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
           onRetryFeed: _feedErrorIsTransient ? _retryFeedNow : null,
           storageError: _storageNotice,
           onAcknowledge: _acknowledge,
+          onResolve: _resolve,
           onEscalate: (alert) => setState(() { _selected = alert; destination = AcsDestination.escalation; }),
           onVisit: (alert) => setState(() { _selected = alert; destination = AcsDestination.visit; }),
         ),
@@ -2169,6 +2222,7 @@ class DashboardScreen extends StatelessWidget {
     this.onRetryFeed,
     this.storageError,
     this.onAcknowledge,
+    this.onResolve,
     this.onEscalate,
     this.onVisit,
   });
@@ -2189,6 +2243,7 @@ class DashboardScreen extends StatelessWidget {
   /// descobre sozinho — que as visitas do dia não estão sendo salvas.
   final InfraNotice? storageError;
   final void Function(PrioritizedAlert alert)? onAcknowledge;
+  final void Function(PrioritizedAlert alert)? onResolve;
   final void Function(PrioritizedAlert alert)? onEscalate;
   final void Function(PrioritizedAlert alert)? onVisit;
 
@@ -2229,6 +2284,7 @@ class DashboardScreen extends StatelessWidget {
               child: _AlertCard(
                 alert: alert,
                 onAcknowledge: onAcknowledge,
+                onResolve: onResolve,
                 onEscalate: onEscalate,
                 onVisit: onVisit,
               ),
@@ -2282,10 +2338,11 @@ class _InfraBanner extends StatelessWidget {
 }
 
 class _AlertCard extends StatelessWidget {
-  const _AlertCard({required this.alert, this.onAcknowledge, this.onEscalate, this.onVisit});
+  const _AlertCard({required this.alert, this.onAcknowledge, this.onEscalate, this.onVisit, this.onResolve});
 
   final PrioritizedAlert alert;
   final void Function(PrioritizedAlert alert)? onAcknowledge;
+  final void Function(PrioritizedAlert alert)? onResolve;
   final void Function(PrioritizedAlert alert)? onEscalate;
   final void Function(PrioritizedAlert alert)? onVisit;
 
@@ -2326,7 +2383,8 @@ class _AlertCard extends StatelessWidget {
             container: true,
             label: 'Paciente ${alert.patientId.substring(0, 8)}, $label'
                 '${alert.escalated ? ', reforço da coordenação' : ''}'
-                '${alert.acknowledged ? ', recebimento confirmado' : ''}, '
+                '${alert.acknowledged ? ', recebimento confirmado' : ''}'
+                '${alert.resolved ? ', atendimento concluído' : ''}, '
                 'recebido às ${_time(alert.triggeredAt)}',
             excludeSemantics: true,
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -2349,7 +2407,16 @@ class _AlertCard extends StatelessWidget {
               ),
               const SizedBox(height: 6),
               Text('Recebido às ${_time(alert.triggeredAt)} • local ${alert.locationHash}'),
-              if (alert.acknowledged) Padding(
+              if (alert.resolved) Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Row(children: [
+                  Icon(Icons.task_alt, size: 16, color: context.acsRisk.greenOnSurface),
+                  const SizedBox(width: 6),
+                  Text('Atendimento concluído',
+                      key: Key('resolved_${alert.alertId}'),
+                      style: TextStyle(color: context.acsRisk.greenOnSurface)),
+                ]),
+              ) else if (alert.acknowledged) Padding(
                 padding: const EdgeInsets.only(top: 8),
                 child: Row(children: [
                   Icon(Icons.check_circle, size: 16, color: context.acsRisk.greenOnSurface),
@@ -2369,17 +2436,29 @@ class _AlertCard extends StatelessWidget {
               child: const Text('Confirmar recebimento'),
             ),
           ),
-          const SizedBox(height: 8),
-          SizedBox(
+          if (alert.acknowledged && !alert.resolved) SizedBox(
             width: double.infinity,
-            child: OutlinedButton(
-              onPressed: isRed
-                  ? (onEscalate == null ? null : () => onEscalate!(alert))
-                  : (onVisit == null ? null : () => onVisit!(alert)),
-              style: OutlinedButton.styleFrom(minimumSize: const Size(48, 52)),
-              child: Text(isRed ? 'Acionar SAMU / Atender' : 'Iniciar rota de visita'),
+            child: FilledButton.icon(
+              key: Key('resolve_${alert.alertId}'),
+              onPressed: onResolve == null ? null : () => onResolve!(alert),
+              style: FilledButton.styleFrom(minimumSize: const Size(48, 52)),
+              icon: const Icon(Icons.task_alt),
+              label: const Text('Concluir atendimento'),
             ),
           ),
+          if (!alert.resolved) ...[
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton(
+                onPressed: isRed
+                    ? (onEscalate == null ? null : () => onEscalate!(alert))
+                    : (onVisit == null ? null : () => onVisit!(alert)),
+                style: OutlinedButton.styleFrom(minimumSize: const Size(48, 52)),
+                child: Text(isRed ? 'Acionar SAMU / Atender' : 'Iniciar rota de visita'),
+              ),
+            ),
+          ],
         ]),
       ),
     );

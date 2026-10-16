@@ -364,6 +364,187 @@ void main() {
       expect(statusDepoisDoAck.acknowledgedAt, isNotNull);
     });
 
+    group('concluir o atendimento (#76)', () {
+      Future<({String alertId, String acs})> alertaConfirmado() async {
+        await _seed(sessionBuilder.build());
+        final paciente =
+            await endpoints.auth.developmentLogin(sessionBuilder, role: 'patient');
+        final criado = await endpoints.alerts.createRedAlert(
+          sessionBuilder,
+          accessToken: paciente.accessToken,
+          idempotencyKey: 'resolve-${DateTime.now().microsecondsSinceEpoch}',
+          locationHash: 'hash-sintetico',
+        );
+        final acs = await endpoints.auth.developmentLogin(sessionBuilder, role: 'acs');
+        await endpoints.alerts.acknowledge(
+          sessionBuilder,
+          accessToken: acs.accessToken,
+          alertId: criado.alertId,
+        );
+        return (alertId: criado.alertId, acs: acs.accessToken);
+      }
+
+      Future<List<String>> resultadosDaTrilha(String alertId) async {
+        final linhas = await AuditLog.db.find(
+          sessionBuilder.build(),
+          where: (t) =>
+              t.resourceType.equals('alert') &
+              t.resourceId.equals(UuidValue.fromString(alertId)),
+          orderBy: (t) => t.sequence,
+        );
+        return linhas.map((l) => l.result).toList();
+      }
+
+      test('leva a resolved, o paciente vê e repetir preserva o resolvedAt', () async {
+        final (:alertId, :acs) = await alertaConfirmado();
+
+        final r = await endpoints.alerts.resolve(
+          sessionBuilder,
+          accessToken: acs,
+          alertId: alertId,
+        );
+        expect(r.resolved, isTrue);
+        expect(r.status, AlertStatus.resolved);
+        expect(r.resolvedAt, isNotNull);
+
+        final paciente =
+            await endpoints.auth.developmentLogin(sessionBuilder, role: 'patient');
+        final status = await endpoints.alerts.statusFor(
+          sessionBuilder,
+          accessToken: paciente.accessToken,
+        );
+        expect(status.status, AlertStatus.resolved);
+        expect(status.resolvedAt, r.resolvedAt);
+        expect(status.acknowledgedAt, isNotNull);
+
+        final deNovo = await endpoints.alerts.resolve(
+          sessionBuilder,
+          accessToken: acs,
+          alertId: alertId,
+        );
+        expect(deNovo.resolved, isTrue);
+        expect(deNovo.resolvedAt, r.resolvedAt);
+
+        expect(await resultadosDaTrilha(alertId),
+            ['acknowledged', 'resolved', 'already_resolved']);
+      });
+
+      test('alerta ainda pending é recusado e segue pending', () async {
+        await _seed(sessionBuilder.build());
+        final paciente =
+            await endpoints.auth.developmentLogin(sessionBuilder, role: 'patient');
+        final criado = await endpoints.alerts.createRedAlert(
+          sessionBuilder,
+          accessToken: paciente.accessToken,
+          idempotencyKey: 'resolve-pending',
+          locationHash: 'hash-sintetico',
+        );
+        final acs = await endpoints.auth.developmentLogin(sessionBuilder, role: 'acs');
+
+        await expectLater(
+          endpoints.alerts.resolve(
+            sessionBuilder,
+            accessToken: acs.accessToken,
+            alertId: criado.alertId,
+          ),
+          throwsA(isA<AlertValidationException>().having(
+            (e) => e.message,
+            'message',
+            RedAlertService.notAcknowledgedMessage,
+          )),
+        );
+
+        final linha = await Alert.db.findById(
+          sessionBuilder.build(),
+          UuidValue.fromString(criado.alertId),
+        );
+        expect(linha!.status, AlertStatus.pending);
+        expect(linha.resolvedAt, isNull);
+        expect(await resultadosDaTrilha(criado.alertId), ['denied_not_acknowledged']);
+      });
+
+      test('confirmar de novo depois de concluído não volta a acknowledged', () async {
+        final (:alertId, :acs) = await alertaConfirmado();
+        await endpoints.alerts.resolve(sessionBuilder, accessToken: acs, alertId: alertId);
+
+        final ack = await endpoints.alerts.acknowledge(
+          sessionBuilder,
+          accessToken: acs,
+          alertId: alertId,
+        );
+        expect(ack.acknowledged, isTrue);
+
+        final linha = await Alert.db.findById(
+          sessionBuilder.build(),
+          UuidValue.fromString(alertId),
+        );
+        expect(linha!.status, AlertStatus.resolved);
+        expect(linha.resolvedAt, isNotNull);
+      });
+
+      test('alerta de outra microárea: resolved false, nada muda nem é auditado', () async {
+        await _seed(sessionBuilder.build());
+        final session = sessionBuilder.build();
+        final outro = await Alert.db.insertRow(
+          session,
+          Alert(
+            patientId: UuidValue.fromString(_patientId),
+            microAreaId: UuidValue.fromString('00000000-0000-4000-8000-0000000076aa'),
+            triggeredAt: DateTime.now().toUtc(),
+            acknowledgedAt: DateTime.now().toUtc(),
+            riskLevel: RiskLevel.red,
+            locationHash: 'hash-sintetico',
+            status: AlertStatus.acknowledged,
+            mqttTopic: 'sinalacs/v1/microareas/outra/alerts',
+            deviceId: 'device-sintetico',
+            retryCount: 0,
+            version: 1,
+          ),
+        );
+        final acs = await endpoints.auth.developmentLogin(sessionBuilder, role: 'acs');
+
+        final r = await endpoints.alerts.resolve(
+          sessionBuilder,
+          accessToken: acs.accessToken,
+          alertId: outro.id!.uuid,
+        );
+
+        expect(r.resolved, isFalse);
+        expect(r.status, isNull);
+        expect((await Alert.db.findById(session, outro.id!))!.status,
+            AlertStatus.acknowledged);
+        expect(await resultadosDaTrilha(outro.id!.uuid), isEmpty);
+      });
+
+      test('identificador que não é UUID devolve resolved false', () async {
+        await _seed(sessionBuilder.build());
+        final acs = await endpoints.auth.developmentLogin(sessionBuilder, role: 'acs');
+
+        final r = await endpoints.alerts.resolve(
+          sessionBuilder,
+          accessToken: acs.accessToken,
+          alertId: 'nao-e-uuid',
+        );
+
+        expect(r.resolved, isFalse);
+      });
+
+      test('paciente não conclui atendimento', () async {
+        final (:alertId, acs: _) = await alertaConfirmado();
+        final paciente =
+            await endpoints.auth.developmentLogin(sessionBuilder, role: 'patient');
+
+        await expectLater(
+          endpoints.alerts.resolve(
+            sessionBuilder,
+            accessToken: paciente.accessToken,
+            alertId: alertId,
+          ),
+          throwsA(isA<AlertPermissionException>()),
+        );
+      });
+    });
+
     test('um ACS não pode consultar alerts.statusFor', () async {
       await _seed(sessionBuilder.build());
       final tokenAcs =

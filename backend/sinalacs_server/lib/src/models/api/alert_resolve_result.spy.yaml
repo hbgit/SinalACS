@@ -1,0 +1,11 @@
+### Resultado de alerts.resolve (#76).
+###
+### Mesmo desenho de AlertAckResult: resolved: false significa que não havia
+### alerta com esse id na microárea do ACS. Concluir duas vezes devolve
+### resolved: true com o resolvedAt da primeira conclusão.
+class: AlertResolveResult
+fields:
+  alertId: String
+  resolved: bool
+  status: AlertStatus?
+  resolvedAt: DateTime?
