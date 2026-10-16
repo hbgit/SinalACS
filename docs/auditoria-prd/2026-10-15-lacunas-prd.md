@@ -41,20 +41,20 @@ próprio; o conferidor exige apenas os IDs do PRD.
 
 | ID | Requisito | Status | Evidência | O que falta |
 |----|-----------|--------|-----------|-------------|
-| RF16 | Motor de triagem determinístico (Manchester) | **a-verificar** | | |
-| RF17 | Logs de auditoria e conformidade | **a-verificar** | | |
-| RF19 | Escalonamento de alerta vermelho sem confirmação | **a-verificar** | | |
-| RNF06 | RBAC | **a-verificar** | | |
+| RF16 | Motor de triagem determinístico (Manchester) | **entregue** | `TriageEngine.evaluate` puro, sem IO (`backend/sinalacs_server/lib/src/application/triage/triage_engine.dart`); `triage_engine_test.dart` cobre as 64 combinações dos seis sinais (tabela-verdade completa, o que implica MCDC) mais 8 cenários nomeados; passa (2026-10-15). | O critério de 50 cenários do M1.3 está superado pelas 64 combinações; nenhum relatório de cobertura MCDC por ferramenta (ver M1.3). |
+| RF17 | Logs de auditoria e conformidade | **parcial** | `audit_logs` encadeado por HMAC-SHA256; filtros, paginação, selo por linha e verificação global no servidor; exportação CSV só pelo admin, registrada na mesma transação; `audit_chain_test.dart`, `admin_endpoint_audit_chain_test.dart` e `admin_endpoint_audit_export_test.dart` passam; e2e `scripts/qa/admin_auditoria_e2e.sh` (2026-10-13/14). | Cadeia só detecta adulteração: falta trigger/`REVOKE` append-only no banco (nenhum nas migrações); `audit_exports` fora da cadeia; o CSV vai pela área de transferência (`apps/admin/lib/app/audit_log_screen.dart:389`), sem download; revisão do DPO sobre a exportação. |
+| RF19 | Escalonamento de alerta vermelho sem confirmação | **entregue** | `admin.escalateAlert` com motivo de conjunto fechado, idempotente (`alreadyEscalated`) e auditado na mesma transação (`backend/sinalacs_server/lib/src/application/admin/alert_escalation_service.dart:134`); prazo `RED_ALERT_ESCALATION_SECONDS` validado de 30 a 3600 s (`app_config.dart:120`, `app_config_test.dart`); `alert_escalation_service_test.dart` (14 testes) e `admin_endpoint_escalation_test.dart` passam; e2e no emulador 2026-10-12. | O PRD ainda marca RF19 como proposto: atualizar a linha. |
+| RNF06 | RBAC | **parcial** | `Authorization.require` e `AdminScope` (UBS do coordenador) com recusa auditada; `authorization_test.dart` e `admin_scope_test.dart` passam; endpoints de dados do staff existem desde a #40 (`admin_endpoint.dart`). | Matriz §4.2.2 não cumprida em duas células: o paciente não lê os próprios logs de auditoria (`PatientDataOverview` não traz acessos) e o acesso do coordenador a outra microárea não pede justificativa. O texto do RNF06 no PRD (issue #40 aberta) está velho. |
 
 ### Módulos do backoffice (§2.1)
 
 | ID | Requisito | Status | Evidência | O que falta |
 |----|-----------|--------|-----------|-------------|
-| MOD-UBS | Gestão de UBS | **a-verificar** | | |
-| MOD-ACS | Gestão de ACS | **a-verificar** | | |
-| MOD-RELATORIOS | Relatórios | **a-verificar** | | |
-| MOD-AUDITORIA | Auditoria | **a-verificar** | | |
-| MOD-CONFIG | Configurações de sistema | **a-verificar** | | |
+| MOD-UBS | Gestão de UBS | **ausente** | Nenhum endpoint cria ou edita UBS: `ubs_endpoint.dart` só tem `myContact`; nenhuma tela no `apps/admin/lib/app/`. | Cadastro/edição de UBS no backoffice, incluindo o telefone da UBS usado pelo botão do ACS (hoje só em seed/SQL). |
+| MOD-ACS | Gestão de ACS | **entregue** | `admin.createAcs`/`setAcsMicroArea`/`setAcsActive`/`resetAcsPassword`/`resetAcsMfa`/`resetStaffMfa` + `apps/admin/lib/app/admin_accounts.dart`; `admin_endpoint_accounts_test.dart` passa; e2e `scripts/qa/admin_acs_gestao_e2e.sh` (#43). | Criar coordenador e definir o `ubsId` dele pela interface (hoje só seed/SQL). |
+| MOD-RELATORIOS | Relatórios | **parcial** | `admin.indicators` devolve contagem por risco, alertas vermelhos e TMRAV (`AdminIndicators.tmravSeconds`), com polling de 30 s; `admin_read_service_test.dart` passa. | Sem recorte por período, sem exportação de relatório e sem as métricas de produto do §1.3 além do TMRAV (sincronização, aderência, visitas por ACS/dia, retenção). |
+| MOD-AUDITORIA | Auditoria | **parcial** | Tela `apps/admin/lib/app/audit_log_screen.dart` com filtros, selo e verificação global (#45). | Ver RF17. |
+| MOD-CONFIG | Configurações de sistema | **ausente** | Nenhum endpoint nem tela de configurações do sistema; prazos (`RED_ALERT_ESCALATION_SECONDS`, `RETENTION_*_DAYS`) só por variável de ambiente. | Decidir se o admin edita configurações pela interface (§4.2.2 diz R/W); se sim, endpoint auditado + tela. |
 
 ## Invariantes e segurança
 
