@@ -144,6 +144,54 @@ else
   falha "o measure_latency não recusou o host em texto claro como o esperado: exit $rc, stdout com ${#ml_out} byte(s), stderr: $ml_err"
 fi
 
+echo '== Grupo F: o broker MQTT fala TLS 1.3, e só ele =='
+# O broker exige certificado de cliente (`require_certificate true`), então as
+# sondas apresentam o do backend: sem ele o handshake cai em QUALQUER versão, e a
+# recusa do 1.2 seria verdade por acidente. Mesmo desenho do Grupo B: o 1.3
+# completando é o controle positivo do 1.2 recusado.
+mqtt_certs='infra/docker/mosquitto/runtime/certs'
+mqtt_ok=1
+for f in ca.crt backend.crt backend.key; do
+  if [[ ! -f "$mqtt_certs/$f" ]]; then
+    falha "$mqtt_certs/$f não existe — o mosquitto-init não gerou os certificados do broker"
+    mqtt_ok=0
+  fi
+done
+if [[ "$mqtt_ok" -eq 1 ]]; then
+  mqtt_tls=(-connect localhost:8883 -CAfile "$mqtt_certs/ca.crt" -cert "$mqtt_certs/backend.crt" -key "$mqtt_certs/backend.key")
+  m13="$(openssl s_client -brief -tls1_3 "${mqtt_tls[@]}" </dev/null 2>&1)"
+  if printf '%s' "$m13" | grep -q 'Protocol version: TLSv1.3' \
+     && ! printf '%s' "$m13" | grep -q 'verify error'; then
+    ok 'TLS 1.3 completa o handshake na 8883 com certificado de cliente e a cadeia verifica'
+  else
+    falha "o handshake TLS 1.3 na 8883 não completou ou não verificou: $(printf '%s' "$m13" | head -3 | tr '\n' ' ')"
+  fi
+
+  m12="$(openssl s_client -brief -tls1_2 "${mqtt_tls[@]}" </dev/null 2>&1)"
+  rc=$?
+  if [[ "$rc" -eq 0 ]] || printf '%s' "$m12" | grep -q 'CONNECTION ESTABLISHED'; then
+    falha 'o handshake TLS 1.2 completou na 8883 — o `tls_version tlsv1.3` do infra/docker/mosquitto/mosquitto.conf deixou de valer'
+  else
+    ok "TLS 1.2 é recusado na 8883 ($(printf '%s' "$m12" | grep -o 'SSL alert number [0-9]*' | head -1))"
+  fi
+fi
+
+# E o cliente MQTT do próprio backend continua conectado: um broker só-1.3 que o
+# backend não alcança deixaria o RPC verde e os alertas vermelhos sem entrega.
+# Espera até 60 s porque, logo depois de um restart do broker, a reconexão do
+# despachante ainda está no backoff.
+mqtt_corpo=''
+for _ in $(seq 1 20); do
+  mqtt_corpo="$(curl -sS --max-time 5 --cacert "$rpc_ca" https://localhost/health/check 2>&1)"
+  printf '%s' "$mqtt_corpo" | grep -q '"mqttConnected":true' && break
+  sleep 3
+done
+if printf '%s' "$mqtt_corpo" | grep -q '"mqttConnected":true'; then
+  ok 'o backend está conectado ao broker (mqttConnected: true)'
+else
+  falha "o backend não está conectado ao broker depois de 60 s: $mqtt_corpo"
+fi
+
 echo
 if [[ "$falhas" -eq 0 ]]; then
   echo 'OK — as propriedades do RNF04 conferem.'
