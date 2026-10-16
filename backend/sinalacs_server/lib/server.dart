@@ -8,6 +8,7 @@ import 'src/application/auth/development_auth_service.dart';
 import 'src/application/notices/notice_scheduling_service.dart';
 import 'src/application/retention/expurge_future_call.dart';
 import 'src/application/retention/expurge_service.dart';
+import 'src/config/api_tls_config.dart';
 import 'src/generated/endpoints.dart';
 import 'src/generated/protocol.dart';
 import 'src/runtime/alert_runtime.dart';
@@ -17,8 +18,21 @@ import 'src/web/routes/root.dart';
 
 /// The starting point of the Serverpod server.
 void run(List<String> args) async {
+  // TLS 1.3 no apiServer quando API_TLS_* está definido (RNF04, #78): é o
+  // trecho Traefik → backend da stack local. Sem as variáveis segue em HTTP,
+  // que é o caminho do Render (TLS na borda). Insights e webServer ficam em
+  // HTTP: nenhum dos dois é publicado nem roteado.
+  final apiTls = ApiTlsConfig.fromMap(Platform.environment);
+
   // Initialize Serverpod and connect it with your generated code.
-  final pod = Serverpod(args, Protocol(), Endpoints());
+  final pod = Serverpod(
+    args,
+    Protocol(),
+    Endpoints(),
+    securityContextConfig: apiTls == null
+        ? null
+        : SecurityContextConfig(apiServer: apiTls.toSecurityContext()),
+  );
 
   // O módulo serverpod_auth_idp não é inicializado: o acesso hoje é o token
   // HMAC de DevelopmentAuthService, e o módulo trazia ~70 tabelas de identidade
