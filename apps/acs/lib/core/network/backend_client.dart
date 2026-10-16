@@ -127,6 +127,10 @@ abstract class AcsBackend {
 
   Future<AlertAckResult> acknowledge({required String alertId});
 
+  /// Conclui o atendimento de um alerta já confirmado (#76): o paciente passa
+  /// a ver "Atendido".
+  Future<AlertResolveResult> resolveAlert({required String alertId});
+
   /// [expectedUserId], quando presente, é o dono do lote: se a sessão que vai
   /// assinar a chamada — conferida DEPOIS de o token ser resolvido (talvez por
   /// renovação) e imediatamente antes da rede — não é dele, lança
@@ -249,6 +253,8 @@ class MisconfiguredBackend implements AcsBackend {
 
   @override
   Future<AlertAckResult> acknowledge({required String alertId}) async => _recusar();
+  @override
+  Future<AlertResolveResult> resolveAlert({required String alertId}) async => _recusar();
 
   @override
   Future<List<VisitSyncResult>> syncVisits(List<VisitSyncEntry> visits, {String? expectedUserId}) async =>
@@ -719,6 +725,17 @@ class BackendClient implements AcsBackend {
     final token = await _requireToken();
     return _guard(
       () => _client.alerts.acknowledge(accessToken: token, alertId: alertId),
+    );
+  }
+
+  /// Conclui o atendimento (#76). Alerta inexistente ou de outra microárea
+  /// volta `resolved: false`; alerta ainda não confirmado é recusado pelo
+  /// servidor com texto pronto, que o `_guard` repassa.
+  @override
+  Future<AlertResolveResult> resolveAlert({required String alertId}) async {
+    final token = await _requireToken();
+    return _guard(
+      () => _client.alerts.resolve(accessToken: token, alertId: alertId),
     );
   }
 

@@ -14,6 +14,7 @@ class PrioritizedAlert {
     required this.triggeredAt,
     this.acknowledged = false,
     this.escalated = false,
+    this.resolved = false,
   });
 
   factory PrioritizedAlert.fromMqtt(ReceivedMqttAlert alert) {
@@ -49,7 +50,10 @@ class PrioritizedAlert {
   /// gravado no aparelho nem carrega quem escalonou.
   final bool escalated;
 
-  PrioritizedAlert copyWith({bool? acknowledged, bool? escalated}) => PrioritizedAlert(
+  /// O ACS concluiu o atendimento (#76). Implica [acknowledged].
+  final bool resolved;
+
+  PrioritizedAlert copyWith({bool? acknowledged, bool? escalated, bool? resolved}) => PrioritizedAlert(
         alertId: alertId,
         patientId: patientId,
         microAreaId: microAreaId,
@@ -59,6 +63,7 @@ class PrioritizedAlert {
         triggeredAt: triggeredAt,
         acknowledged: acknowledged ?? this.acknowledged,
         escalated: escalated ?? this.escalated,
+        resolved: resolved ?? this.resolved,
       );
 
   /// Peso da ordenação. Menor vem primeiro.
@@ -147,10 +152,24 @@ class AlertQueue extends ChangeNotifier {
     return true;
   }
 
+  /// Marca o atendimento como concluído (e, por consequência, confirmado).
+  /// Devolve `false` se o alerta não está na fila.
+  bool markResolved(String alertId) {
+    final index = _alerts.indexWhere((item) => item.alertId == alertId);
+    if (index < 0) return false;
+
+    _alerts[index] = _alerts[index].copyWith(acknowledged: true, resolved: true);
+    _sort();
+    notifyListeners();
+    return true;
+  }
+
   void _sort() {
     _alerts.sort((a, b) {
       // Confirmados descem, para não competir com quem ainda espera.
       if (a.acknowledged != b.acknowledged) return a.acknowledged ? 1 : -1;
+      // Concluídos descem abaixo dos confirmados: já não pedem ação.
+      if (a.resolved != b.resolved) return a.resolved ? 1 : -1;
       final byRisk = a._riskRank.compareTo(b._riskRank);
       if (byRisk != 0) return byRisk;
       // Reforço da coordenação vem à frente dos demais do mesmo risco.

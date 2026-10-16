@@ -41,6 +41,13 @@ class FakeAcsBackend implements AcsBackend {
   int listPatientsCount = 0;
 
   final List<String> acknowledgedAlertIds = <String>[];
+  final List<String> resolvedAlertIds = <String>[];
+
+  /// `false` simula alerta que a central não encontra na microárea.
+  bool resolved = true;
+
+  /// Quando presente, `resolveAlert` lança esta falha (ex.: alerta pending).
+  BackendFailure? resolveFailure;
   int loginCount = 0;
 
   AuthSession? _session;
@@ -208,6 +215,19 @@ class FakeAcsBackend implements AcsBackend {
       alertId: alertId,
       acknowledged: acknowledged,
       status: acknowledged ? AlertStatus.acknowledged : null,
+    );
+  }
+
+  @override
+  Future<AlertResolveResult> resolveAlert({required String alertId}) async {
+    final falha = resolveFailure;
+    if (falha != null) throw falha;
+    resolvedAlertIds.add(alertId);
+    return AlertResolveResult(
+      alertId: alertId,
+      resolved: resolved,
+      status: resolved ? AlertStatus.resolved : null,
+      resolvedAt: resolved ? DateTime.utc(2026, 10, 16, 14) : null,
     );
   }
 
