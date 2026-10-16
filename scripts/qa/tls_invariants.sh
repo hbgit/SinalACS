@@ -144,6 +144,53 @@ else
   falha "o measure_latency não recusou o host em texto claro como o esperado: exit $rc, stdout com ${#ml_out} byte(s), stderr: $ml_err"
 fi
 
+echo '== Grupo E: o Traefik fala com o backend por TLS 1.3, e só por ele =='
+# O trecho que o Grupo C não vê: a 8080 INTERNA, na rede do Compose. Ela não é
+# publicada, então as sondas rodam dentro do próprio container do backend, com o
+# `curl` que a imagem já traz para o HEALTHCHECK. Mesmo desenho dos grupos B e F:
+# o 1.3 completando (E2) é o controle positivo do texto claro (E1) e do 1.2 (E3)
+# recusados — sem ele, um container parado faria os dois passarem.
+backend_ca='/app/rpc-certs/ca.crt'
+if ! docker exec "$backend_container" true >/dev/null 2>&1; then
+  falha "não deu para entrar no container $backend_container — suba a stack antes de ler o Grupo E"
+else
+  e_claro="$(docker exec "$backend_container" curl -sS --max-time 5 -X POST -H 'Content-Type: application/json' -d '{}' \
+    http://localhost:8080/health/check 2>&1)"
+  if printf '%s' "$e_claro" | grep -q '"status"'; then
+    falha 'a 8080 interna atende em texto claro — o `API_TLS_*` do serviço serverpod deixou de valer'
+  else
+    ok 'a 8080 interna não entrega o backend a um pedido em texto claro'
+  fi
+
+  e13="$(docker exec "$backend_container" curl -sS -v --max-time 5 --tlsv1.3 --cacert "$backend_ca" \
+    -X POST -H 'Content-Type: application/json' -d '{}' https://localhost:8080/health/check 2>&1)"
+  if printf '%s' "$e13" | grep -q '"status"' && printf '%s' "$e13" | grep -q 'TLSv1.3'; then
+    ok 'a 8080 interna responde por TLS 1.3 com a cadeia verificada pela CA do RPC'
+  else
+    falha "a 8080 interna não respondeu por TLS 1.3 verificado: $(printf '%s' "$e13" | grep -E '^\* |status' | tail -3 | tr '\n' ' ')"
+  fi
+
+  if docker exec "$backend_container" curl -sS -o /dev/null --max-time 5 --tlsv1.2 --tls-max 1.2 --cacert "$backend_ca" \
+       -X POST -H 'Content-Type: application/json' -d '{}' https://localhost:8080/health/check >/dev/null 2>&1; then
+    falha 'a 8080 interna aceitou TLS 1.2 — o `minimumTlsProtocolVersion` do ApiTlsConfig deixou de valer'
+  else
+    ok 'a 8080 interna recusa TLS 1.2'
+  fi
+fi
+
+# Estática, não precisa da stack: o Traefik só autentica o backend se verificar a
+# cadeia. Um `insecureSkipVerify` deixaria todas as sondas acima verdes — o
+# trecho continua cifrado — com o backend sem autenticação nenhuma.
+# Só linhas de configuração: o comentário do dynamic/tls.yaml cita a palavra.
+if grep -rniE '^[^#]*insecureSkipVerify' infra/docker/traefik/dynamic docker-compose.yml >/dev/null 2>&1; then
+  falha 'há `insecureSkipVerify` na configuração do Traefik — o trecho até o backend deixou de verificar a cadeia'
+elif grep -q 'loadbalancer.server.scheme=https' docker-compose.yml \
+     && grep -q 'loadbalancer.serverstransport=backend-tls@file' docker-compose.yml; then
+  ok 'o Traefik disca o backend por https pelo transporte backend-tls (rootCAs), sem insecureSkipVerify'
+else
+  falha 'o router sinalacs não usa `server.scheme=https` com `serverstransport=backend-tls@file` no docker-compose.yml'
+fi
+
 echo '== Grupo F: o broker MQTT fala TLS 1.3, e só ele =='
 # O broker exige certificado de cliente (`require_certificate true`), então as
 # sondas apresentam o do backend: sem ele o handshake cai em QUALQUER versão, e a

@@ -1,7 +1,8 @@
 #!/bin/sh
 #
-# Gera a CA de desenvolvimento do RPC e o certificado do servidor que o
-# Traefik apresenta em :443 (RNF04).
+# Gera a CA de desenvolvimento do RPC e as duas folhas assinadas por ela
+# (RNF04): a que o Traefik apresenta em :443 e, desde a issue #78, a que o
+# backend apresenta ao Traefik na 8080 interna (runtime/backend/).
 #
 # CA PRÓPRIA, separada da do Mosquitto: aquela é consumida pelo broker, pelo
 # asset do app ACS e pela conexão de saída do backend — três coisas que hoje
@@ -123,44 +124,67 @@ fi
 # `2>/dev/null` que engolia o erro e o `set -e` abortando depois. O par
 # `ca.crt`/`ca.key` de CAs diferentes cai no mesmo caminho (a chave é legível, a
 # assinatura é que não casa), e também tem de sair com diagnóstico.
-server_key_tmp="$certs_dir/server.key.tmp"
-server_crt_tmp="$certs_dir/server.crt.tmp"
-server_csr="$certs_dir/server.csr"
+#
+# São DUAS folhas desde a issue #78, as duas assinadas por esta CA: a que o
+# Traefik apresenta aos apps em :443 (`server`) e a que o backend apresenta ao
+# Traefik na 8080 interna (`backend`, RNF04 no trecho Traefik → backend).
+#
+# emitir_folha <dir> <nome> <cn> <san>
+emitir_folha() {
+  dir="$1"; nome="$2"; cn="$3"; folha_san="$4"
+  key_tmp="$dir/$nome.key.tmp"
+  crt_tmp="$dir/$nome.crt.tmp"
+  csr="$dir/$nome.csr"
 
-openssl genrsa -out "$server_key_tmp" 2048 2>/dev/null
-openssl req -new -key "$server_key_tmp" \
-  -subj "/C=BR/O=SinalACS Dev/CN=sinalacs-rpc" \
-  -out "$server_csr"
+  openssl genrsa -out "$key_tmp" 2048 2>/dev/null
+  openssl req -new -key "$key_tmp" \
+    -subj "/C=BR/O=SinalACS Dev/CN=$cn" \
+    -out "$csr"
 
-# As duas extensões de restrição são as que o init.sh do broker declara. Sem
-# elas a folha não afirma nada sobre o que ela é: sem `basicConstraints`, a
-# ausência só significa "não é CA" por omissão, e sem `keyUsage` não há restrição
-# nenhuma — era a única diferença entre esta folha e a do broker, que o app já
-# valida (`dart:io`/BoringSSL).
-ext_file="$certs_dir/server.ext"
-cat > "$ext_file" <<EXT
+  # As duas extensões de restrição são as que o init.sh do broker declara. Sem
+  # elas a folha não afirma nada sobre o que ela é: sem `basicConstraints`, a
+  # ausência só significa "não é CA" por omissão, e sem `keyUsage` não há
+  # restrição nenhuma — era a única diferença entre esta folha e a do broker,
+  # que o app já valida (`dart:io`/BoringSSL).
+  ext_file="$dir/$nome.ext"
+  cat > "$ext_file" <<EXT
 basicConstraints=CA:FALSE
 keyUsage=digitalSignature,keyEncipherment
 extendedKeyUsage=serverAuth
-subjectAltName=$san
+subjectAltName=$folha_san
 EXT
 
-# Aqui NÃO tem `2>/dev/null`: o erro do OpenSSL é o diagnóstico, e engoli-lo foi
-# o que transformou uma falha de configuração num arquivo vazio.
-if ! openssl x509 -req -in "$server_csr" \
-  -CA "$certs_dir/ca.crt" -CAkey "$certs_dir/ca.key" -CAcreateserial \
-  -out "$server_crt_tmp" -days "$server_days" -sha256 \
-  -extfile "$ext_file"; then
-  echo "erro: falha ao assinar o certificado do servidor com a CA em $certs_dir/ca.key." >&2
-  echo "erro: chave ilegível ou par ca.crt/ca.key de CAs diferentes. Nada foi substituído:" >&2
-  echo "erro: o certificado anterior, se existia, continua no lugar e intacto." >&2
-  rm -f "$server_crt_tmp" "$server_key_tmp" "$server_csr" "$ext_file"
-  exit 1
-fi
+  # Aqui NÃO tem `2>/dev/null`: o erro do OpenSSL é o diagnóstico, e engoli-lo
+  # foi o que transformou uma falha de configuração num arquivo vazio.
+  if ! openssl x509 -req -in "$csr" \
+    -CA "$certs_dir/ca.crt" -CAkey "$certs_dir/ca.key" -CAcreateserial \
+    -out "$crt_tmp" -days "$server_days" -sha256 \
+    -extfile "$ext_file"; then
+    echo "erro: falha ao assinar o certificado $nome com a CA em $certs_dir/ca.key." >&2
+    echo "erro: chave ilegível ou par ca.crt/ca.key de CAs diferentes. Nada foi substituído:" >&2
+    echo "erro: o certificado anterior, se existia, continua no lugar e intacto." >&2
+    rm -f "$crt_tmp" "$key_tmp" "$csr" "$ext_file"
+    exit 1
+  fi
 
-mv "$server_crt_tmp" "$certs_dir/server.crt"
-mv "$server_key_tmp" "$certs_dir/server.key"
-rm -f "$server_csr" "$ext_file"
+  mv "$crt_tmp" "$dir/$nome.crt"
+  mv "$key_tmp" "$dir/$nome.key"
+  rm -f "$csr" "$ext_file"
+}
+
+emitir_folha "$certs_dir" server sinalacs-rpc "$san"
+
+# A folha do backend fica num diretório PRÓPRIO, que é o único montado no
+# container do backend: ele recebe a folha, a chave dela e a CA pública, e nunca
+# enxerga `ca.key`. O SAN cobre o nome que o Traefik verifica (`serverName` do
+# `dynamic/tls.yaml`), o nome do serviço no Compose e o `localhost` do
+# healthcheck, que roda dentro do próprio container. Não recebe o
+# RPC_CERT_SAN_EXTRA: aparelho nenhum fala com o backend direto.
+backend_dir="$runtime_dir/backend"
+mkdir -p "$backend_dir"
+emitir_folha "$backend_dir" backend sinalacs-serverpod \
+  "DNS:sinalacs-serverpod,DNS:serverpod,DNS:localhost,IP:127.0.0.1"
+cp "$certs_dir/ca.crt" "$backend_dir/ca.crt"
 
 # 644 nos certificados e nas chaves, como o init.sh do broker faz com os dele. O
 # `openssl` cria chave privada em 600 por conta própria, e 600 divergiria do
@@ -168,12 +192,16 @@ rm -f "$server_csr" "$ext_file"
 # .gitignore cobre, e o Traefik monta a pasta e lê como root hoje — o modo do
 # arquivo não é o que protege este par. O 644 é o que evita a falha no dia em que
 # alguém puser `user:` no serviço `traefik`, porque quem passar a ler como outro
-# usuário precisa do bit de leitura. Num certificado de produção isto muda.
-chmod 755 "$runtime_dir" "$certs_dir"
+# usuário precisa do bit de leitura. Num certificado de produção isto muda. A
+# `backend.key` precisa dele já hoje: o backend roda como uid 1000.
+chmod 755 "$runtime_dir" "$certs_dir" "$backend_dir"
 chmod 644 "$certs_dir/ca.crt" "$certs_dir/server.crt" "$certs_dir/server.key"
+chmod 644 "$backend_dir/ca.crt" "$backend_dir/backend.crt" "$backend_dir/backend.key"
 # A chave da CA só assina folhas e quem a lê é este init.sh, como root: ninguém
 # mais precisa do bit de leitura (server.key segue em 644 pelo motivo acima).
 chmod 600 "$certs_dir/ca.key"
 
 echo "CA do RPC e certificado do servidor prontos em $certs_dir (SAN: $san)."
 openssl x509 -in "$certs_dir/server.crt" -noout -subject -dates -ext subjectAltName
+echo "Certificado do backend (Traefik → backend) pronto em $backend_dir."
+openssl x509 -in "$backend_dir/backend.crt" -noout -subject -dates -ext subjectAltName

@@ -20,3 +20,17 @@ tls:
       # verificável (`openssl s_client -tls1_2` precisa FALHAR), em vez de
       # "tem alguma criptografia".
       minVersion: VersionTLS13
+
+http:
+  serversTransports:
+    # Traefik → backend (RNF04, issue #78): TLS verificado contra a mesma CA do
+    # RPC que assina a folha do backend (runtime/backend/, gerada pelo
+    # traefik-init). O Traefik disca pelo IP do container, então o nome
+    # verificado é fixado aqui e tem de estar no SAN daquela folha. Sem
+    # `insecureSkipVerify` em lugar nenhum: o Grupo E do tls_invariants.sh cobra.
+    # O mínimo 1.3 deste trecho é imposto pelo próprio backend
+    # (ApiTlsConfig.toSecurityContext).
+    backend-tls:
+      serverName: sinalacs-serverpod
+      rootCAs:
+        - /certs/ca.crt

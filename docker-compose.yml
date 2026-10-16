@@ -118,6 +118,9 @@ services:
         condition: service_healthy
       mosquitto:
         condition: service_started
+      # A folha TLS da 8080 interna (API_TLS_* abaixo) vem do traefik-init.
+      traefik-init:
+        condition: service_completed_successfully
     environment:
       # O Serverpod aplica as próprias migrações no boot, o que substitui o
       # serviço one-shot database-init: o guard anterior era tudo-ou-nada sobre
@@ -173,6 +176,20 @@ services:
       # Prazo (s) para reconhecer um alerta vermelho antes do escalonamento
       # (issue #44). Faixa válida 30..3600; fora dela o servidor não sobe.
       RED_ALERT_ESCALATION_SECONDS: "${RED_ALERT_ESCALATION_SECONDS:-300}"
+      # TLS 1.3 na 8080 interna (RNF04, issue #78): o Traefik fala com o backend
+      # por TLS verificado, não mais em texto claro. A folha é assinada pela CA
+      # do RPC e gerada pelo traefik-init em runtime/backend/. Fora da stack
+      # local (Render) as duas ficam vazias e o servidor segue em HTTP atrás do
+      # TLS da borda; só uma delas definida é erro de boot.
+      API_TLS_CERT_PATH: /app/rpc-certs/backend.crt
+      API_TLS_KEY_PATH: /app/rpc-certs/backend.key
+    # O HEALTHCHECK do Dockerfile fala http (é o do Render); aqui a 8080 é TLS,
+    # então a stack local o sobrepõe com os mesmos tempos.
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS -X POST -H 'Content-Type: application/json' -d '{}' --cacert /app/rpc-certs/ca.crt https://localhost:8080/health/check || exit 1"]
+      interval: 30s
+      timeout: 3s
+      start_period: 20s
     # O RPC só é alcançável por HTTPS em :443. A publicação de 8080 foi
     # REMOVIDA de propósito: enquanto ela existisse, o TLS seria decorativo —
     # RNF04 pede TLS em todas as comunicações, e um caminho em texto claro ao
@@ -188,12 +205,17 @@ services:
       - traefik.http.routers.sinalacs.rule=Host(`10.0.2.2`) || Host(`localhost`) || Host(`sinalacs.localhost`)
       - traefik.http.routers.sinalacs.entrypoints=websecure
       - traefik.http.routers.sinalacs.tls=true
-      # A porta INTERNA do container, que continua sendo 8080 — o que mudou foi
-      # não haver mais publicação no host. O processo segue escutando em texto
-      # claro aqui dentro; quem termina TLS é o Traefik.
+      # A porta INTERNA do container, que continua sendo 8080 — sem publicação
+      # no host. Desde a issue #78 o processo escuta TLS 1.3 ali (API_TLS_*), e
+      # o Traefik disca por https verificando a folha pelo transporte
+      # `backend-tls` do dynamic/tls.yaml.
       - traefik.http.services.sinalacs.loadbalancer.server.port=8080
+      - traefik.http.services.sinalacs.loadbalancer.server.scheme=https
+      - traefik.http.services.sinalacs.loadbalancer.serverstransport=backend-tls@file
     volumes:
       - ./infra/docker/mosquitto/runtime/certs:/app/certs:ro
+      # Só a folha do backend e a CA pública; a ca.key fica em runtime/certs/.
+      - ./infra/docker/traefik/runtime/backend:/app/rpc-certs:ro
 
   # Dados sintéticos de desenvolvimento. Roda depois que o servidor sobe, porque
   # é ele quem aplica as migrações. O seed não é opcional: o dev-login referencia
