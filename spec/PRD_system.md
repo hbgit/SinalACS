@@ -51,7 +51,7 @@ O SinalACS transforma dados clínicos estruturados em ação imediata através d
 | **INV-01** | Um ACS **nunca** pode visualizar dados de pacientes fora de sua microárea | Verificação em todas as queries: `WHERE micro_area_id = user.micro_area_id` |
 | **INV-02** | A classificação de risco **nunca** pode ser alterada por um humano no momento da triagem | O cálculo é determinístico e imutável no frontend |
 | **INV-03** | Um alerta vermelho **nunca** pode ser perdido ou silenciosamente descartado | Confirmação de entrega (ACK) no MQTT com retry até confirmação |
-| **INV-04** | Dados de saúde sensíveis **nunca** podem ser persistidos em texto plano | Criptografia AES-256 em `sqflite` e PostgreSQL |
+| **INV-04** | Dados de saúde sensíveis **nunca** podem ser persistidos em texto plano | Criptografia AES-256 em `sqflite` e PostgreSQL. **Exceção registrada (#75, 2026-10-16):** `alerts.riskLevel` fica legível — todo alerta gravado é vermelho (a coluna não diz nada além da existência da linha) e ela sustenta os predicados SQL da INV-03; ver `spec/lgpd_data_audit.md` §2.3 |
 | **INV-05** | O paciente **nunca** pode acessar dados de outro paciente | Autenticação com segregação por `patient_id` |
 
 ### 1.3 Métricas de Sucesso (North Star)

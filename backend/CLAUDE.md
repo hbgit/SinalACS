@@ -82,7 +82,7 @@ The seed runs in **four** steps. `development.sql` is plain SQL over `psql`, so 
 
 Each encrypted column stores a `keyVersion` next to the ciphertext, but **nothing reads it back**: `HealthDataCipher.decrypt` always uses the one key the process was configured with. The column is a marker for a future rewrite routine; until that routine exists, changing `HEALTH_DATA_ENCRYPTION_KEY` makes every previously encrypted row unreadable (GCM authentication failure). Real key rotation is a future production improvement, not an MVP requirement.
 
-The three clinical columns are encrypted at the ORM boundary only: `OrmPatientDirectoryStore`, `OrmTriageSessionStore` and `OrmVisitStore` take a `HealthDataCipher` and translate to/from the plaintext types (`PatientDirectoryEntry`, `TriageSessionRecord`, `VisitRecord`) that `application/` works with. Keep it that way — a service that decides whether to encrypt is the failure mode this design exists to prevent.
+The clinical columns are encrypted at the ORM boundary only (since #75 also the risk classifications `triage_sessions.resultRiskEncrypted` and `visits.riskLevelBefore/AfterEncrypted`, through the fixed-width codec `infrastructure/crypto/encrypted_risk_level.dart`; `alerts.riskLevel` stays plaintext by a recorded decision — see `spec/lgpd_data_audit.md` §2.3): `OrmPatientDirectoryStore`, `OrmTriageSessionStore` and `OrmVisitStore` take a `HealthDataCipher` and translate to/from the plaintext types (`PatientDirectoryEntry`, `TriageSessionRecord`, `VisitRecord`) that `application/` works with. Keep it that way — a service that decides whether to encrypt is the failure mode this design exists to prevent.
 
 
 ### Backend (`backend/`) — Serverpod workspace
