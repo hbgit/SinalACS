@@ -128,26 +128,26 @@ próprio; o conferidor exige apenas os IDs do PRD.
 
 | ID | Requisito | Status | Evidência | O que falta |
 |----|-----------|--------|-----------|-------------|
-| LGPD-RF01 | Coleta mínima | **a-verificar** | | |
-| LGPD-RF02 | Consentimento granular | **a-verificar** | | |
-| LGPD-RF07 | Retenção e exclusão (job de expurgo) | **a-verificar** | | |
-| LGPD-RF08 | Direitos do titular (Meus Dados + exportação JSON) | **a-verificar** | | |
-| LGPD-RF09 | Proteção de dados sensíveis | **a-verificar** | | |
-| LGPD-RF11 | Controle de acesso RBAC | **a-verificar** | | |
+| LGPD-RF01 | Coleta mínima | **parcial** | `spec/lgpd_data_audit.md` classifica campo a campo 24 das 25 tabelas de domínio da migração `20261014155304871`. | `alert_outbox` não está no inventário: incluir a tabela e conferir a contagem a cada migração. |
+| LGPD-RF02 | Consentimento granular | **entregue** | Consentimento por finalidade com histórico (`consent_logs`, `patients.updateConsent`, `hasGrantedConsent`); token de push só com consentimento; testes de endpoint passam na linha de base. | Validação jurídica do texto dos termos (ver M3.4). |
+| LGPD-RF07 | Retenção e exclusão (job de expurgo) | **parcial** | Expurgo diário no servidor por `ExpurgeFutureCall` (`backend/sinalacs_server/lib/src/application/retention/expurge_future_call.dart`, agendado em `server.dart:158`): alertas 2 anos, visitas e triagens 5 anos (`RETENTION_*_DAYS`); `expurge_service_test.dart` e `retention_expurge_test.dart` passam (12 testes, 2026-10-15). | Expurgo no aparelho da fila de um dono que nunca volta (ACS); prazos de OTP, convites e tokens não entram na política. |
+| LGPD-RF08 | Direitos do titular (Meus Dados + exportação JSON) | **entregue** | Painel Meus Dados (`patients.myData`, `PatientDataOverview`) e exportação em JSON copiada para a área de transferência (`apps/patient/lib/app/app.dart:2040-2084`, botão `Copiar meus dados (JSON)`); pedidos de exclusão/correção atendidos no backoffice (#42). | Validar as regras de anonimização com o encarregado (DPO); exportação como arquivo, não só área de transferência. |
+| LGPD-RF09 | Proteção de dados sensíveis | **parcial** | Ver INV-04, CRIPTO-* e RNF06. | Colunas de risco em texto plano (INV-04). |
+| LGPD-RF11 | Controle de acesso RBAC | **parcial** | Ver RNF06. | Matriz §4.2.2: paciente lendo os próprios logs e justificativa do coordenador. |
 
 ### Modelo de dados e telemetria (§1.3, §3)
 
 | ID | Requisito | Status | Evidência | O que falta |
 |----|-----------|--------|-----------|-------------|
-| DADOS-TIMESCALE | Logs e telemetria em TimescaleDB | **a-verificar** | | |
-| DADOS-VERSION-OTIMISTA | Versionamento otimista com 409 | **a-verificar** | | |
-| DADOS-SYNC-TOKEN | sync_token sequencial | **a-verificar** | | |
-| DADOS-MIGRACAO-ROLLBACK | Migrações com rollback | **a-verificar** | | |
-| EVT-alert_triggered | Evento alert_triggered | **a-verificar** | | |
-| EVT-alert_received_acs | Evento alert_received_acs | **a-verificar** | | |
-| EVT-sync_attempt | Evento sync_attempt | **a-verificar** | | |
-| EVT-sync_result | Evento sync_result | **a-verificar** | | |
-| EVT-visit_registered | Evento visit_registered | **a-verificar** | | |
+| DADOS-TIMESCALE | Logs e telemetria em TimescaleDB | **ausente** | Nenhuma ocorrência de TimescaleDB no repositório; logs e auditoria em tabelas comuns do Postgres. | Decidir se TimescaleDB entra (não está em `spec/stack.md`) ou corrigir o §3.2 do PRD. |
+| DADOS-VERSION-OTIMISTA | Versionamento otimista com 409 | **entregue** | `visits.version`; versão divergente devolve `conflict` com a versão do servidor sem sobrescrever, mesma versão é idempotente (`backend/sinalacs_server/lib/src/application/visits/visit_sync_service.dart:490-500`); `visit_sync_service_test.dart` passa. | Resolução do conflito pelo ACS não existe (ver R1). |
+| DADOS-SYNC-TOKEN | sync_token sequencial | **ausente** | Nenhum `sync_token` sequencial; a idempotência é por `localId` + `version` por registro e a descida usa cursor (`visits.pull`). | Decidir se o `sync_token` ainda é necessário ou corrigir o §3.4 do PRD. |
+| DADOS-MIGRACAO-ROLLBACK | Migrações com rollback | **ausente** | Migrações do Serverpod só para frente (`backend/sinalacs_server/migrations/*/migration.sql`); nenhum script de rollback. | Rollback por versão ou decisão registrada de restauração por backup. |
+| EVT-alert_triggered | Evento alert_triggered | **ausente** | Nenhuma emissão do evento em `backend/` ou `apps/*/lib` (busca de 2026-10-15). Os carimbos `triggeredAt`/`acknowledgedAt` em `alerts` permitem o TMRAV (`AdminIndicators.tmravSeconds`). | Telemetria estruturada dos eventos do §1.3. |
+| EVT-alert_received_acs | Evento alert_received_acs | **ausente** | Nenhuma emissão do evento. | Emitir com `latency_ms` no ACK. |
+| EVT-sync_attempt | Evento sync_attempt | **ausente** | Nenhuma emissão do evento. | Emitir no início de cada lote de sync. |
+| EVT-sync_result | Evento sync_result | **ausente** | Nenhuma emissão do evento (a única ocorrência é o tipo `VisitSyncResult`). | Emitir contagens de sucesso/falha/conflito. Sem os eventos do §1.3 a Taxa de Sincronização Offline, o Engajamento do ACS e a Retenção de Pacientes não são mensuráveis em campo. |
+| EVT-visit_registered | Evento visit_registered | **ausente** | Nenhuma emissão do evento. | Emitir com `offline_flag` e `sync_status`. |
 
 ## Roadmap, hipóteses e riscos
 
