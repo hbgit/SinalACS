@@ -43,6 +43,29 @@ class FakeAlertStore implements AlertStore {
   @override
   Future<AlertStatusSnapshot?> latestForPatient(String patientId) async =>
       statusByPatient[patientId];
+
+  /// Desfecho que o "banco" decide para o próximo `resolve` (#76).
+  AlertResolveOutcome resolveOutcome = AlertResolveOutcome.resolved;
+  final List<({String alertId, String microAreaId, DateTime now})> resolveCalls = [];
+
+  @override
+  Future<AlertResolveAttempt> resolve({
+    required String alertId,
+    required String microAreaId,
+    required DateTime now,
+    required AuditEvent Function(AlertResolveOutcome outcome) auditFor,
+  }) async {
+    resolveCalls.add((alertId: alertId, microAreaId: microAreaId, now: now));
+    // Mesma regra do store real: inexistente/fora do território não grava.
+    if (resolveOutcome != AlertResolveOutcome.notFound) {
+      audits.add(auditFor(resolveOutcome));
+    }
+    final carimbo = switch (resolveOutcome) {
+      AlertResolveOutcome.resolved || AlertResolveOutcome.alreadyResolved => now,
+      _ => null,
+    };
+    return AlertResolveAttempt(resolveOutcome, resolvedAt: carimbo);
+  }
 }
 
 
@@ -202,6 +225,114 @@ void main() {
       () async => service.acknowledge(user: acs, alertId: ''),
       throwsA(isA<ArgumentError>()),
     );
+  });
+
+  group('resolve (#76)', () {
+    const acs = AuthenticatedUser(
+      id: 'acs-001',
+      role: UserRole.acs,
+      microAreaId: 'area-12',
+      deviceId: 'device-001',
+    );
+    final agora = DateTime.utc(2026, 10, 16, 14);
+
+    RedAlertService servico(FakeAlertStore store) => RedAlertService(
+          store: store,
+          outbox: FakeAlertOutbox(),
+          clock: () => agora,
+        );
+
+    test('conclui no território do token e audita resolved', () async {
+      final store = FakeAlertStore();
+
+      final r = await servico(store).resolve(user: acs, alertId: 'alerta-1');
+
+      expect(r.outcome, AlertResolveOutcome.resolved);
+      expect(r.resolvedAt, agora);
+      expect(store.resolveCalls.single.microAreaId, 'area-12');
+      expect(store.resolveCalls.single.now, agora);
+      final audit = store.audits.single;
+      expect(audit.userId, 'acs-001');
+      expect(audit.actionType, 'write');
+      expect(audit.resourceType, 'alert');
+      expect(audit.resourceId, 'alerta-1');
+      expect(audit.result, 'resolved');
+    });
+
+    test('repetir a conclusão é idempotente e audita already_resolved', () async {
+      final store = FakeAlertStore()..resolveOutcome = AlertResolveOutcome.alreadyResolved;
+
+      final r = await servico(store).resolve(user: acs, alertId: 'alerta-1');
+
+      expect(r.outcome, AlertResolveOutcome.alreadyResolved);
+      expect(store.audits.single.result, 'already_resolved');
+    });
+
+    test('alerta ainda pending é recusado com a mensagem e a recusa é auditada', () async {
+      final store = FakeAlertStore()..resolveOutcome = AlertResolveOutcome.notAcknowledged;
+
+      await expectLater(
+        servico(store).resolve(user: acs, alertId: 'alerta-1'),
+        throwsA(isA<ArgumentError>().having(
+          (e) => e.message,
+          'message',
+          RedAlertService.notAcknowledgedMessage,
+        )),
+      );
+      expect(store.audits.single.result, 'denied_not_acknowledged');
+    });
+
+    test('alerta inexistente ou de outra microárea devolve notFound sem auditar', () async {
+      final store = FakeAlertStore()..resolveOutcome = AlertResolveOutcome.notFound;
+
+      final r = await servico(store).resolve(user: acs, alertId: 'alerta-1');
+
+      expect(r.outcome, AlertResolveOutcome.notFound);
+      expect(r.resolvedAt, isNull);
+      expect(store.audits, isEmpty);
+    });
+
+    test('paciente não conclui atendimento', () async {
+      final store = FakeAlertStore();
+      const paciente = AuthenticatedUser(
+        id: 'paciente-1',
+        role: UserRole.patient,
+        microAreaId: 'area-12',
+        deviceId: 'device-1',
+      );
+
+      await expectLater(
+        servico(store).resolve(user: paciente, alertId: 'alerta-1'),
+        throwsA(isA<StateError>()),
+      );
+      expect(store.resolveCalls, isEmpty);
+    });
+
+    test('ACS sem microárea não conclui atendimento', () async {
+      final store = FakeAlertStore();
+      const semArea = AuthenticatedUser(
+        id: 'acs-002',
+        role: UserRole.acs,
+        microAreaId: null,
+        deviceId: 'device-2',
+      );
+
+      await expectLater(
+        servico(store).resolve(user: semArea, alertId: 'alerta-1'),
+        throwsA(isA<StateError>()),
+      );
+      expect(store.resolveCalls, isEmpty);
+    });
+
+    test('identificador vazio é recusado antes do store', () async {
+      final store = FakeAlertStore();
+
+      await expectLater(
+        servico(store).resolve(user: acs, alertId: '  '),
+        throwsA(isA<ArgumentError>()),
+      );
+      expect(store.resolveCalls, isEmpty);
+    });
   });
 
   group('statusFor (RF05)', () {

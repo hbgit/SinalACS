@@ -118,6 +118,21 @@ class _MemoryStore implements AlertStore {
 
   @override
   Future<AlertStatusSnapshot?> latestForPatient(String patientId) async => null;
+
+  @override
+  Future<AlertResolveAttempt> resolve({
+    required String alertId,
+    required String microAreaId,
+    required DateTime now,
+    required AuditEvent Function(AlertResolveOutcome outcome) auditFor,
+  }) async {
+    if (status[alertId] != 'acknowledged') {
+      return const AlertResolveAttempt(AlertResolveOutcome.notAcknowledged);
+    }
+    audits.add(auditFor(AlertResolveOutcome.resolved));
+    status[alertId] = 'resolved';
+    return AlertResolveAttempt(AlertResolveOutcome.resolved, resolvedAt: now);
+  }
 }
 
 class _MemoryOutbox implements AlertOutbox {

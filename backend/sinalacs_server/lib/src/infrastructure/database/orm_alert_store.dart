@@ -172,6 +172,15 @@ class OrmAlertStore implements AlertStore {
   }
 
   @override
+  Future<AlertResolveAttempt> resolve({
+    required String alertId,
+    required String microAreaId,
+    required DateTime now,
+    required AuditEvent Function(AlertResolveOutcome outcome) auditFor,
+  }) =>
+      throw UnimplementedError('Task 2 (#76)');
+
+  @override
   Future<AlertStatusSnapshot?> latestForPatient(String patientId) async {
     final row = await Alert.db.findFirstRow(
       _session(),

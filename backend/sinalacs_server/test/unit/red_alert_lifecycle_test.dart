@@ -43,6 +43,16 @@ class RecordingStore implements AlertStore {
   Future<AlertStatusSnapshot?> latestForPatient(String patientId) async {
     throw UnimplementedError('não usado nos testes deste arquivo');
   }
+
+  @override
+  Future<AlertResolveAttempt> resolve({
+    required String alertId,
+    required String microAreaId,
+    required DateTime now,
+    required AuditEvent Function(AlertResolveOutcome outcome) auditFor,
+  }) async {
+    throw UnimplementedError('não usado nos testes deste arquivo');
+  }
 }
 
 
