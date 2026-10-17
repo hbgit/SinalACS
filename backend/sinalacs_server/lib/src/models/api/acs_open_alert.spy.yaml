@@ -1,0 +1,18 @@
+### Alerta ainda não concluído da microárea do ACS, lido por HTTP (#80, R2):
+### a reserva para quando o MQTT do aparelho não está conectado.
+###
+### Os campos espelham o envelope MQTT (`AlertDelivery.toJson`) mais o estado
+### persistido (`status`, `acknowledgedAt`) e o marcador de reforço. Nada de
+### `escalatedBy`, `escalationReason` ou `deviceId`: nenhuma identidade a mais.
+class: AcsOpenAlert
+fields:
+  alertId: String
+  patientId: String
+  microAreaId: String
+  riskLevel: RiskLevel
+  locationHash: String
+  locationCell: String?
+  triggeredAt: DateTime
+  status: AlertStatus
+  acknowledgedAt: DateTime?
+  escalated: bool

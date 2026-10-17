@@ -273,4 +273,9 @@ class OrmAlertStore implements AlertStore {
       resolvedAt: row.resolvedAt,
     );
   }
+
+  @override
+  Future<List<OpenAlertSnapshot>> openInMicroArea(String microAreaId, {required int limit}) {
+    throw UnimplementedError('preenchido na Task 2 da #80');
+  }
 }

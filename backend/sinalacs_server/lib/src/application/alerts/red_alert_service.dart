@@ -53,6 +53,11 @@ abstract interface class AlertStore {
   /// Alerta mais recente do paciente, para RF05 (`alerts.statusFor`). `null`
   /// quando o paciente nunca disparou um alerta.
   Future<AlertStatusSnapshot?> latestForPatient(String patientId);
+
+  /// Alertas não concluídos da microárea (#80, R2): primeiro os não
+  /// confirmados (`pending` e o `escalated` legado), depois os confirmados,
+  /// cada grupo do mais antigo ao mais novo, cortado em [limit].
+  Future<List<OpenAlertSnapshot>> openInMicroArea(String microAreaId, {required int limit});
 }
 
 /// Fila durável de entregas pendentes.
@@ -142,6 +147,38 @@ class AlertStatusSnapshot {
 
   /// Conclusão do atendimento pelo ACS (#76); nulo até lá.
   final DateTime? resolvedAt;
+}
+
+/// Alerta aberto da microárea, para a reserva por HTTP do ACS (#80).
+///
+/// Mesmos campos de `AcsOpenAlert`: o envelope MQTT mais o estado persistido.
+class OpenAlertSnapshot {
+  const OpenAlertSnapshot({
+    required this.alertId,
+    required this.patientId,
+    required this.microAreaId,
+    required this.riskLevel,
+    required this.locationHash,
+    this.locationCell,
+    required this.triggeredAt,
+    required this.status,
+    this.acknowledgedAt,
+    required this.escalated,
+  });
+
+  final String alertId;
+  final String patientId;
+  final String microAreaId;
+  final RiskLevel riskLevel;
+  final String locationHash;
+  final String? locationCell;
+  final DateTime triggeredAt;
+  final AlertStatus status;
+  final DateTime? acknowledgedAt;
+
+  /// Reforçado pelo backoffice (#44): `escalatedAt` preenchido ou a linha
+  /// legada com `status: escalated`.
+  final bool escalated;
 }
 
 /// Formato produzido por `locationCellFrom()` (apps/patient/lib/core/privacy/location_cell.dart):
@@ -307,6 +344,23 @@ class RedAlertService {
       throw ArgumentError(notAcknowledgedMessage);
     }
     return attempt;
+  }
+
+  /// Teto de [openForAcs]: muito acima do que uma microárea tem aberto ao
+  /// mesmo tempo, e os não confirmados vêm antes, então o corte nunca troca um
+  /// pendente por um confirmado.
+  static const int openAlertsLimit = 200;
+
+  /// Alertas abertos da microárea do ACS autenticado (#80, R2): a reserva por
+  /// HTTP quando o MQTT do aparelho não está conectado. A microárea vem do
+  /// token (INV-01), nunca de parâmetro.
+  Future<List<OpenAlertSnapshot>> openForAcs({required AuthenticatedUser user}) async {
+    Authorization.require(
+      user,
+      roles: {UserRole.acs},
+      onDenied: () => StateError('Somente ACS territorializados podem listar alertas.'),
+    );
+    return _store.openInMicroArea(user.microAreaId!, limit: openAlertsLimit);
   }
 
   /// Status do alerta mais recente do próprio paciente autenticado (RF05,
