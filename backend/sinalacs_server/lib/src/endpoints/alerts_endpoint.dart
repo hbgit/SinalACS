@@ -118,6 +118,40 @@ class AlertsEndpoint extends AuthenticatedEndpoint {
     }
   }
 
+  /// Alertas não concluídos da microárea do ACS (#80, R2): a reserva por HTTP
+  /// para quando o MQTT do aparelho não está conectado. A microárea vem do
+  /// token (INV-01). Não grava linha de auditoria de leitura: o app repete a
+  /// consulta a cada 30 s com o broker fora, e o mesmo conteúdo chega pelo
+  /// MQTT sem auditoria; ACK e conclusão seguem auditados.
+  Future<List<AcsOpenAlert>> openForMicroArea(
+    Session session, {
+    required String accessToken,
+  }) async {
+    final user = authenticate(accessToken);
+    final service = AlertRuntime.instance.serviceFor(session);
+
+    try {
+      final abertos = await service.openForAcs(user: user);
+      return [
+        for (final a in abertos)
+          AcsOpenAlert(
+            alertId: a.alertId,
+            patientId: a.patientId,
+            microAreaId: a.microAreaId,
+            riskLevel: a.riskLevel,
+            locationHash: a.locationHash,
+            locationCell: a.locationCell,
+            triggeredAt: a.triggeredAt,
+            status: a.status,
+            acknowledgedAt: a.acknowledgedAt,
+            escalated: a.escalated,
+          ),
+      ];
+    } on StateError catch (error) {
+      throw AlertPermissionException(message: error.message);
+    }
+  }
+
   /// Status do alerta mais recente do PRÓPRIO paciente (RF05, decisão §5).
   /// `patientId` nunca é parâmetro — vem do token (INV-05).
   Future<AlertStatusResult> statusFor(

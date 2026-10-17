@@ -40,6 +40,16 @@ class FakeAlertStore implements AlertStore {
 
   final Map<String, AlertStatusSnapshot> statusByPatient = {};
 
+  /// Última consulta de alertas abertos (#80): microárea e teto pedidos.
+  (String, int)? lastOpenQuery;
+  List<OpenAlertSnapshot> openAlerts = [];
+
+  @override
+  Future<List<OpenAlertSnapshot>> openInMicroArea(String microAreaId, {required int limit}) async {
+    lastOpenQuery = (microAreaId, limit);
+    return openAlerts;
+  }
+
   @override
   Future<AlertStatusSnapshot?> latestForPatient(String patientId) async =>
       statusByPatient[patientId];
@@ -437,5 +447,48 @@ void main() {
         );
       },
     );
+  });
+
+  group('openForAcs (#80)', () {
+    const acs = AuthenticatedUser(id: 'acs-001', role: UserRole.acs, microAreaId: 'area-12', deviceId: 'device-001');
+
+    test('lista pela microárea do token e com o teto de 200', () async {
+      final store = FakeAlertStore();
+      final aberto = OpenAlertSnapshot(
+        alertId: 'alerta-1',
+        patientId: 'patient-001',
+        microAreaId: 'area-12',
+        riskLevel: RiskLevel.red,
+        locationHash: '6gyf4bf',
+        triggeredAt: DateTime.utc(2026, 10, 17, 12),
+        status: AlertStatus.pending,
+        escalated: false,
+      );
+      store.openAlerts = [aberto];
+      final service = RedAlertService(store: store, outbox: FakeAlertOutbox());
+
+      final lista = await service.openForAcs(user: acs);
+
+      expect(store.lastOpenQuery, ('area-12', 200));
+      expect(RedAlertService.openAlertsLimit, 200);
+      expect(lista, [aberto]);
+    });
+
+    test('paciente não lista alertas da microárea', () async {
+      final store = FakeAlertStore();
+      final service = RedAlertService(store: store, outbox: FakeAlertOutbox());
+
+      expect(() => service.openForAcs(user: patient), throwsA(isA<StateError>()));
+      expect(store.lastOpenQuery, isNull);
+    });
+
+    test('ACS sem microárea é recusado', () async {
+      final store = FakeAlertStore();
+      final service = RedAlertService(store: store, outbox: FakeAlertOutbox());
+      const semArea = AuthenticatedUser(id: 'acs-002', role: UserRole.acs, microAreaId: null, deviceId: 'device-002');
+
+      expect(() => service.openForAcs(user: semArea), throwsA(isA<StateError>()));
+      expect(store.lastOpenQuery, isNull);
+    });
   });
 }

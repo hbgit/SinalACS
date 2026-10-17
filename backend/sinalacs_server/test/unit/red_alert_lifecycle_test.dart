@@ -45,6 +45,11 @@ class RecordingStore implements AlertStore {
   }
 
   @override
+  Future<List<OpenAlertSnapshot>> openInMicroArea(String microAreaId, {required int limit}) async {
+    throw UnimplementedError('não usado nos testes deste arquivo');
+  }
+
+  @override
   Future<AlertResolveAttempt> resolve({
     required String alertId,
     required String microAreaId,

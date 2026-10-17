@@ -121,6 +121,9 @@ class _MemoryStore implements AlertStore {
   Future<AlertStatusSnapshot?> latestForPatient(String patientId) async => null;
 
   @override
+  Future<List<OpenAlertSnapshot>> openInMicroArea(String microAreaId, {required int limit}) async => [];
+
+  @override
   Future<AlertResolveAttempt> resolve({
     required String alertId,
     required String microAreaId,

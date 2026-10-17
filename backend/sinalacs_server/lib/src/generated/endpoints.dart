@@ -1001,6 +1001,25 @@ class Endpoints extends _i1.EndpointDispatch {
                 alertId: params['alertId'],
               ),
         ),
+        'openForMicroArea': _i1.MethodConnector(
+          name: 'openForMicroArea',
+          params: {
+            'accessToken': _i1.ParameterDescription(
+              name: 'accessToken',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async =>
+                  (endpoints['alerts'] as _i3.AlertsEndpoint).openForMicroArea(
+                    session,
+                    accessToken: params['accessToken'],
+                  ),
+        ),
         'statusFor': _i1.MethodConnector(
           name: 'statusFor',
           params: {

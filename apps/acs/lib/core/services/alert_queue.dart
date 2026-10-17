@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:sinalacs_acs/core/services/mqtt_secure_client.dart';
+import 'package:sinalacs_client/sinalacs_client.dart' show AcsOpenAlert, AlertStatus;
 
 /// Um alerta na fila de priorização do ACS.
 @immutable
@@ -26,6 +27,21 @@ class PrioritizedAlert {
       locationHash: alert.locationHash,
       locationCell: alert.locationCell,
       triggeredAt: alert.triggeredAt,
+      escalated: alert.escalated,
+    );
+  }
+
+  /// Alerta aberto lido por HTTP, a reserva para quando o MQTT cai (#80).
+  factory PrioritizedAlert.fromServer(AcsOpenAlert alert) {
+    return PrioritizedAlert(
+      alertId: alert.alertId,
+      patientId: alert.patientId,
+      microAreaId: alert.microAreaId,
+      riskLevel: alert.riskLevel.name,
+      locationHash: alert.locationHash,
+      locationCell: alert.locationCell,
+      triggeredAt: alert.triggeredAt,
+      acknowledged: alert.status == AlertStatus.acknowledged,
       escalated: alert.escalated,
     );
   }
@@ -139,6 +155,46 @@ class AlertQueue extends ChangeNotifier {
     _sort();
     notifyListeners();
     return true;
+  }
+
+  /// Funde a lista de alertas abertos lida por HTTP (#80, R2).
+  ///
+  /// Devolve quantos cartões foram criados ou mudaram e notifica uma vez só,
+  /// e só se algo mudou: a mesma resposta a cada 30 s não pode virar "alerta
+  /// novo". As regras são as de [upsert], vistas do lado do servidor:
+  ///
+  /// - outra microárea é ignorada;
+  /// - nada é removido — um cartão ausente da resposta fica (INV-03);
+  /// - confirmação e reforço só são ganhos, nunca perdidos: o servidor pode
+  ///   promover um cartão local a confirmado (ACK de outro aparelho ou pelo
+  ///   MQTT), mas um "pendente" do servidor nunca desfaz o ACK local;
+  /// - um cartão já concluído aqui não muda.
+  int mergeFromServer(Iterable<PrioritizedAlert> alerts) {
+    var changed = 0;
+    for (final alert in alerts) {
+      if (alert.microAreaId != microAreaId) continue;
+
+      final index = _alerts.indexWhere((item) => item.alertId == alert.alertId);
+      if (index < 0) {
+        _alerts.add(alert);
+        changed++;
+        continue;
+      }
+
+      final existing = _alerts[index];
+      if (existing.resolved) continue;
+      final acknowledged = existing.acknowledged || alert.acknowledged;
+      final escalated = existing.escalated || alert.escalated;
+      if (acknowledged == existing.acknowledged && escalated == existing.escalated) continue;
+      _alerts[index] = existing.copyWith(acknowledged: acknowledged, escalated: escalated);
+      changed++;
+    }
+
+    if (changed > 0) {
+      _sort();
+      notifyListeners();
+    }
+    return changed;
   }
 
   /// Marca o alerta como confirmado. Devolve `false` se ele não está na fila.
