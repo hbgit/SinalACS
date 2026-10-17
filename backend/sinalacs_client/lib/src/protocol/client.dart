@@ -1220,6 +1220,25 @@ class EndpointVisits extends EndpointAuthenticated {
     },
   );
 
+  /// Resolução explícita de um conflito pelo autor (#79): compare-and-set
+  /// sobre [expectedServerVersion], a versão do servidor que o aparelho viu no
+  /// conflito. `visit.version` é ignorado. Ver
+  /// `VisitSyncService.resolveConflict`. Mesma transação e mesma tradução de
+  /// erros de [sync].
+  _i2.Future<_i42.VisitSyncResult> resolveConflict({
+    required String accessToken,
+    required _i43.VisitSyncEntry visit,
+    required int expectedServerVersion,
+  }) => caller.callServerEndpoint<_i42.VisitSyncResult>(
+    'visits',
+    'resolveConflict',
+    {
+      'accessToken': accessToken,
+      'visit': visit,
+      'expectedServerVersion': expectedServerVersion,
+    },
+  );
+
   /// Envio das visitas LEGADAS do aparelho (autoria desconhecida, D4 do plano
   /// 2026-10-03): gravadas antes de existir dono por visita no banco local.
   ///

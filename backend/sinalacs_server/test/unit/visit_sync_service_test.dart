@@ -941,4 +941,217 @@ void main() {
       expect(results.single.message, 'paciente fora da sua microárea');
     });
   });
+
+  group('resolveConflict', () {
+    const outroAcs = AuthenticatedUser(
+      id: _otherAcsId,
+      role: UserRole.acs,
+      microAreaId: _microAreaId,
+      deviceId: 'acs-device-002',
+    );
+
+    setUp(() {
+      store = FakeVisitStore(microAreaByPatient: {
+        _patientId: _microAreaId,
+        _outroTerritorioPatientId: _otherMicroAreaId,
+      });
+      audit = FakeAuditTrail();
+      service = VisitSyncService(
+        store: store,
+        audit: audit,
+        clock: () => DateTime.utc(2026, 10, 16, 12),
+      );
+    });
+
+    /// Leva a visita a v3 no servidor pela regra atual do `sync`
+    /// (`entry.version == servidor - 1` atualiza).
+    Future<void> servidorEmV3() async {
+      await service.sync(user: _acs, entries: [entry()]);
+      await service.sync(user: _acs, entries: [entry(version: 0)]);
+      await service.sync(user: _acs, entries: [entry(version: 1)]);
+      expect(store.rows[_localId]!.version, 3);
+    }
+
+    test('grava o conteúdo do aparelho quando a versão esperada é a corrente', () async {
+      await servidorEmV3();
+      audit.events.clear();
+
+      final result = await service.resolveConflict(
+        user: _acs,
+        entry: entry(status: 'recusou atendimento'),
+        expectedServerVersion: 3,
+      );
+
+      expect(result.syncStatus, SyncStatus.synced);
+      expect(result.serverVersion, 4);
+      expect(result.serverVisit, isNull);
+      final row = store.rows[_localId]!;
+      expect(row.status, 'recusou atendimento');
+      expect(row.version, 4);
+      expect(row.acsId, UuidValue.fromString(_acsId));
+      final resolvidos =
+          audit.events.where((e) => e.result == 'conflict_resolved_local').toList();
+      expect(resolvidos, hasLength(1));
+      expect(resolvidos.single.actionType, 'write');
+      expect(resolvidos.single.resourceType, 'visit');
+      expect(resolvidos.single.resourceId, row.id!.uuid);
+      expect(resolvidos.single.userId, _acsId);
+    });
+
+    test('ignora entry.version: a referência é só a versão esperada', () async {
+      await servidorEmV3();
+
+      final result = await service.resolveConflict(
+        user: _acs,
+        entry: entry(version: 99, status: 'recusou atendimento'),
+        expectedServerVersion: 3,
+      );
+
+      expect(result.syncStatus, SyncStatus.synced);
+      expect(result.serverVersion, 4);
+      expect(store.rows[_localId]!.version, 4);
+    });
+
+    test('versão vencida devolve conflito novo sem gravar', () async {
+      await servidorEmV3();
+      final antes = store.rows[_localId]!;
+      audit.events.clear();
+
+      final result = await service.resolveConflict(
+        user: _acs,
+        entry: entry(status: 'recusou atendimento'),
+        expectedServerVersion: 2,
+      );
+
+      expect(result.syncStatus, SyncStatus.conflict);
+      expect(result.serverVersion, 3);
+      expect(result.serverVisit!.version, 3);
+      expect(result.serverVisit!.status, 'realizada');
+      expect(identical(store.rows[_localId], antes), isTrue);
+      expect(store.rows[_localId]!.status, 'realizada');
+      expect(audit.events.where((e) => e.result == 'conflict_resolved_local'), isEmpty);
+      // A cópia devolvida é uma leitura, auditada como no conflito do `sync`.
+      final leitura = audit.events.single;
+      expect(leitura.actionType, 'read');
+      expect(leitura.resourceType, 'visit_conflict');
+      expect(leitura.resourceId, antes.id!.uuid);
+    });
+
+    test('visita inexistente é criada', () async {
+      final result = await service.resolveConflict(
+        user: _acs,
+        entry: entry(status: 'recusou atendimento'),
+        expectedServerVersion: 3,
+      );
+
+      expect(result.syncStatus, SyncStatus.synced);
+      expect(result.serverVersion, 1);
+      final row = store.rows[_localId]!;
+      expect(row.status, 'recusou atendimento');
+      expect(row.acsId, UuidValue.fromString(_acsId));
+      expect(row.authorship, VisitAuthorship.acs);
+    });
+
+    group('recusas iguais às do sync', () {
+      /// Compara a recusa do `resolveConflict` com a do `sync` para a mesma
+      /// entrada e o mesmo usuário, e prova que nada foi gravado.
+      Future<VisitSyncResult> confere(
+        AuthenticatedUser user,
+        VisitSyncEntry e, {
+        required SyncStatus status,
+        required String message,
+      }) async {
+        final antes = Map.of(store.rows);
+        final resolvido = await service.resolveConflict(
+          user: user,
+          entry: e,
+          expectedServerVersion: 1,
+        );
+        final sincronizado = (await service.sync(user: user, entries: [e])).single;
+
+        expect(resolvido.syncStatus, status);
+        expect(resolvido.message, message);
+        expect(resolvido.syncStatus, sincronizado.syncStatus);
+        expect(resolvido.message, sincronizado.message);
+        expect(resolvido.serverVisit, isNull);
+        expect(resolvido.serverVersion, isNull);
+        expect(store.rows, antes);
+        expect(audit.events.where((ev) => ev.result == 'conflict_resolved_local'), isEmpty);
+        return resolvido;
+      }
+
+      test('ACS de outro território', () async {
+        const acsDeOutraArea = AuthenticatedUser(
+          id: _otherAcsId,
+          role: UserRole.acs,
+          microAreaId: _otherMicroAreaId,
+          deviceId: 'acs-device-y',
+        );
+        await service.sync(user: _acs, entries: [entry()]);
+        audit.events.clear();
+
+        await confere(acsDeOutraArea, entry(version: 1),
+            status: SyncStatus.rejected, message: 'paciente fora da sua microárea');
+
+        // Uma recusa auditada por chamada (resolveConflict + sync).
+        expect(audit.events.map((ev) => ev.result), ['denied_territory', 'denied_territory']);
+        expect(audit.events.first.resourceType, 'visit');
+        expect(audit.events.first.resourceId, UuidValue.fromString(_patientId).uuid);
+        expect(audit.events.first.userId, _otherAcsId);
+      });
+
+      test('outro agente', () async {
+        await service.sync(user: _acs, entries: [entry()]);
+
+        await confere(outroAcs, entry(version: 1),
+            status: SyncStatus.rejected, message: 'visita registrada por outro agente');
+        expect(store.rows[_localId]!.acsId, UuidValue.fromString(_acsId));
+      });
+
+      test('visita sem autor', () async {
+        await service.syncLegacy(
+            transporter: _acs, deviceId: 'aparelho-legado-01', entries: [entry()]);
+
+        await confere(_acs, entry(version: 1),
+            status: SyncStatus.rejected, message: 'visita sem autor registrado');
+        expect(store.rows[_localId]!.acsId, isNull);
+      });
+
+      test('localId malformado', () async {
+        await confere(_acs, entry().copyWith(localId: 'nao-e-uuid'),
+            status: SyncStatus.rejected, message: 'identificadores devem ser UUID');
+      });
+
+      test('patientId malformado', () async {
+        await confere(_acs, entry(patientId: 'nao-e-uuid'),
+            status: SyncStatus.rejected, message: 'identificadores devem ser UUID');
+      });
+
+      test('paciente inexistente', () async {
+        await confere(_acs, entry(patientId: '00000000-0000-4000-8000-00000000dead'),
+            status: SyncStatus.error, message: 'paciente não encontrado');
+        expect(audit.events, isEmpty);
+      });
+    });
+
+    test('expectedServerVersion menor que 1 é ArgumentError', () async {
+      await service.sync(user: _acs, entries: [entry()]);
+
+      for (final versao in [0, -1]) {
+        await expectLater(
+          service.resolveConflict(user: _acs, entry: entry(), expectedServerVersion: versao),
+          throwsA(isA<ArgumentError>()),
+        );
+      }
+      expect(store.rows[_localId]!.version, 1);
+    });
+
+    test('papel patient é StateError', () async {
+      await expectLater(
+        service.resolveConflict(user: _patient, entry: entry(), expectedServerVersion: 1),
+        throwsA(isA<StateError>()),
+      );
+      expect(store.rows, isEmpty);
+    });
+  });
 }

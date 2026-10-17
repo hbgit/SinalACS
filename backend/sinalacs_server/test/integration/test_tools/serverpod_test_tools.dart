@@ -2609,6 +2609,43 @@ class _VisitsEndpoint {
     });
   }
 
+  _i3.Future<_i43.VisitSyncResult> resolveConflict(
+    _i1.TestSessionBuilder sessionBuilder, {
+    required String accessToken,
+    required _i44.VisitSyncEntry visit,
+    required int expectedServerVersion,
+  }) async {
+    return _i1.callAwaitableFunctionAndHandleExceptions(() async {
+      var _localUniqueSession =
+          (sessionBuilder as _i1.InternalTestSessionBuilder).internalBuild(
+            endpoint: 'visits',
+            method: 'resolveConflict',
+          );
+      try {
+        var _localCallContext = await _endpointDispatch.getMethodCallContext(
+          createSessionCallback: (_) => _localUniqueSession,
+          endpointPath: 'visits',
+          methodName: 'resolveConflict',
+          parameters: _i1.testObjectToJson({
+            'accessToken': accessToken,
+            'visit': visit,
+            'expectedServerVersion': expectedServerVersion,
+          }),
+          serializationManager: _serializationManager,
+        );
+        var _localReturnValue =
+            await (_localCallContext.method.call(
+                  _localUniqueSession,
+                  _localCallContext.arguments,
+                )
+                as _i3.Future<_i43.VisitSyncResult>);
+        return _localReturnValue;
+      } finally {
+        await _localUniqueSession.close();
+      }
+    });
+  }
+
   _i3.Future<List<_i43.VisitSyncResult>> syncLegacy(
     _i1.TestSessionBuilder sessionBuilder, {
     required String accessToken,
