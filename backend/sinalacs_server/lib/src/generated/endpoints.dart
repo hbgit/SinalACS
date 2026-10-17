@@ -1450,6 +1450,50 @@ class Endpoints extends _i1.EndpointDispatch {
                     platform: params['platform'],
                   ),
         ),
+        'pendingWipe': _i1.MethodConnector(
+          name: 'pendingWipe',
+          params: {
+            'deviceId': _i1.ParameterDescription(
+              name: 'deviceId',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async =>
+                  (endpoints['devices'] as _i5.DevicesEndpoint).pendingWipe(
+                    session,
+                    params['deviceId'],
+                  ),
+        ),
+        'confirmWipe': _i1.MethodConnector(
+          name: 'confirmWipe',
+          params: {
+            'deviceId': _i1.ParameterDescription(
+              name: 'deviceId',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'orderId': _i1.ParameterDescription(
+              name: 'orderId',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async =>
+                  (endpoints['devices'] as _i5.DevicesEndpoint).confirmWipe(
+                    session,
+                    params['deviceId'],
+                    params['orderId'],
+                  ),
+        ),
       },
     );
     connectors['health'] = _i1.EndpointConnector(

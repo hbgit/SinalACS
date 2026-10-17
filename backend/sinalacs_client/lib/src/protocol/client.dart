@@ -933,6 +933,30 @@ class EndpointDevices extends EndpointAuthenticated {
       'platform': platform,
     },
   );
+
+  /// O `orderId` do pedido de limpeza remota do aparelho, ou `null` (#81).
+  /// Público: o aparelho cujo token foi revogado precisa perguntar. Não devolve
+  /// identidade; só o id do pedido, que é um UUID aleatório.
+  _i2.Future<String?> pendingWipe(String deviceId) =>
+      caller.callServerEndpoint<String?>(
+        'devices',
+        'pendingWipe',
+        {'deviceId': deviceId},
+      );
+
+  /// O aparelho confirma que apagou tudo (#81). Sem token e sem retorno: um par
+  /// errado ou repetido se comporta igual (no-op), então não vira oráculo.
+  _i2.Future<void> confirmWipe(
+    String deviceId,
+    String orderId,
+  ) => caller.callServerEndpoint<void>(
+    'devices',
+    'confirmWipe',
+    {
+      'deviceId': deviceId,
+      'orderId': orderId,
+    },
+  );
 }
 
 /// Sonda de saúde.

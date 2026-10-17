@@ -66,6 +66,14 @@ const _publicMethodsByDesign = <String, String>{
       'JWT — o token de envio opaco, amarrado ao aparelho, de 7 dias e escopo '
       'único É a credencial; o usuário vem de UploadTokenService.resolve (dono '
       'do token, microárea relida do banco), nunca de parâmetro',
+  'DevicesEndpoint.pendingWipe':
+      'limpeza remota (#81): o aparelho cujos tokens o pedido revogou não tem '
+      'sessão para apresentar; devolve só o orderId do pedido do próprio '
+      'deviceId, sem identidade',
+  'DevicesEndpoint.confirmWipe':
+      'limpeza remota (#81): confirmação do aparelho sem sessão; o par '
+      '(deviceId, orderId) é a prova, e um par errado ou repetido é um no-op '
+      'silencioso, sem retorno que sirva de oráculo',
   'VisitsEndpoint.revokeUploadToken':
       'revoga pela posse do token de envio diferido, como AuthEndpoint.logout; '
       'idempotente e sem efeito sobre token desconhecido',

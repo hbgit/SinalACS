@@ -98,7 +98,9 @@ class _Aparelhos implements DeviceWipeStore {
     final nova = DeviceWipeOrder(
       id: UuidValue.fromString('00000000-0000-4000-8000-00000000c001'),
       deviceId: deviceId,
-      targetUserId: UuidValue.fromString('00000000-0000-4000-8000-00000000c002'),
+      targetUserId: UuidValue.fromString(
+        '00000000-0000-4000-8000-00000000c002',
+      ),
       requestedBy: UuidValue.fromString('00000000-0000-4000-8000-00000000c003'),
       reason: reason,
       requestedAt: at,
@@ -107,17 +109,45 @@ class _Aparelhos implements DeviceWipeStore {
     return (order: nova, created: true);
   }
 
-  @override
-  Future<DeviceWipeOrder?> orderFor(String deviceId) =>
-      throw UnimplementedError();
+  DeviceWipeOrder? pedido;
+  bool entregue = false;
+  bool confirmado = false;
+  int deliveredCalls = 0;
+  int confirmedCalls = 0;
 
   @override
-  Future<bool> markDelivered(String orderId, DateTime at) =>
-      throw UnimplementedError();
+  Future<DeviceWipeOrder?> orderFor(String deviceId) async {
+    final p = pedido;
+    if (p == null || p.deviceId != deviceId) return null;
+    return p.copyWith(
+      deliveredAt: entregue ? DateTime.utc(2026, 10, 17, 13) : null,
+      confirmedAt: confirmado ? DateTime.utc(2026, 10, 17, 14) : null,
+    );
+  }
 
   @override
-  Future<bool> markConfirmed(String deviceId, String orderId, DateTime at) =>
-      throw UnimplementedError();
+  Future<bool> markDelivered(String orderId, DateTime at) async {
+    deliveredCalls++;
+    if (entregue) return false;
+    entregue = true;
+    return true;
+  }
+
+  @override
+  Future<bool> markConfirmed(
+    String deviceId,
+    String orderId,
+    DateTime at,
+  ) async {
+    confirmedCalls++;
+    final p = pedido;
+    if (p == null || p.deviceId != deviceId || p.id.toString() != orderId) {
+      return false;
+    }
+    if (confirmado) return false;
+    confirmado = true;
+    return true;
+  }
 }
 
 class _Audit extends AuditTrail {
@@ -125,7 +155,9 @@ class _Audit extends AuditTrail {
 
   @override
   Future<void> record(AuditEvent event) async {
-    _ordem.add('audit:${event.actionType}:${event.resourceType}:${event.result}');
+    _ordem.add(
+      'audit:${event.actionType}:${event.resourceType}:${event.result}',
+    );
     events.add(event);
   }
 }
@@ -281,5 +313,102 @@ void main() {
     );
     expect(audit.events.single.result, 'denied');
     expect(_ordem, isNot(contains('store:devicesOf')));
+  });
+
+  group('lado do aparelho', () {
+    const idPedido = '00000000-0000-4000-8000-00000000c001';
+    const aparelho = 'aaaaaaaa-1111';
+
+    void haPedido() {
+      aparelhos.pedido = DeviceWipeOrder(
+        id: UuidValue.fromString(idPedido),
+        deviceId: aparelho,
+        targetUserId: UuidValue.fromString(
+          '00000000-0000-4000-8000-00000000c002',
+        ),
+        requestedBy: UuidValue.fromString(
+          '00000000-0000-4000-8000-00000000c003',
+        ),
+        reason: DeviceWipeReason.lost,
+        requestedAt: DateTime.utc(2026, 10, 17, 12),
+      );
+    }
+
+    test('pendingOrderId marca entrega e audita só na primeira vez', () async {
+      haPedido();
+      expect(await servico.pendingOrderId(aparelho), idPedido);
+      expect(await servico.pendingOrderId(aparelho), idPedido);
+      expect(audit.events, hasLength(1));
+      final e = audit.events.single;
+      expect(e.userId, '00000000-0000-4000-8000-00000000c002');
+      expect(e.actionType, 'write');
+      expect(e.resourceType, 'acs_device');
+      expect(e.resourceId, idPedido);
+      expect(e.result, 'wipe_delivered');
+    });
+
+    test(
+      'pendingOrderId de aparelho sem pedido, ou já confirmado, devolve null sem auditar',
+      () async {
+        expect(await servico.pendingOrderId(aparelho), isNull);
+        haPedido();
+        aparelhos.confirmado = true;
+        expect(await servico.pendingOrderId(aparelho), isNull);
+        expect(audit.events, isEmpty);
+        expect(aparelhos.deliveredCalls, 0);
+      },
+    );
+
+    test(
+      'confirm com par errado não grava nem audita; com par certo grava uma vez',
+      () async {
+        haPedido();
+        await servico.confirm(aparelho, '00000000-0000-4000-8000-0000000000ff');
+        await servico.confirm('outro-aparelho', idPedido);
+        expect(aparelhos.confirmado, isFalse);
+        expect(audit.events, isEmpty);
+
+        await servico.confirm(aparelho, idPedido);
+        await servico.confirm(aparelho, idPedido);
+        expect(aparelhos.confirmado, isTrue);
+        final e = audit.events.single;
+        expect(e.result, 'wipe_confirmed');
+        expect(e.resourceType, 'acs_device');
+        expect(e.actionType, 'write');
+        expect(e.resourceId, idPedido);
+        expect(e.userId, '00000000-0000-4000-8000-00000000c002');
+      },
+    );
+
+    test(
+      'ensureDeviceNotMarked lança com o orderId; sentinela e vazio passam',
+      () async {
+        await servico.ensureDeviceNotMarked(aparelho);
+        haPedido();
+        await expectLater(
+          servico.ensureDeviceNotMarked(aparelho),
+          throwsA(
+            isA<DeviceWipeRequiredException>()
+                .having((e) => e.orderId, 'orderId', idPedido)
+                .having(
+                  (e) => e.message,
+                  'message',
+                  'Este aparelho precisa ser limpo a pedido da coordenação.',
+                ),
+          ),
+        );
+        // Confirmado também continua marcado: o id antigo nunca volta (D1).
+        aparelhos.confirmado = true;
+        await expectLater(
+          servico.ensureDeviceNotMarked(aparelho),
+          throwsA(isA<DeviceWipeRequiredException>()),
+        );
+        await servico.ensureDeviceNotMarked(null);
+        await servico.ensureDeviceNotMarked('');
+        await servico.ensureDeviceNotMarked(
+          InstitutionalAuthService.deviceIdAbsent,
+        );
+      },
+    );
   });
 }

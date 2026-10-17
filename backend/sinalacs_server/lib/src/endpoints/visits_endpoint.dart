@@ -122,6 +122,11 @@ class VisitsEndpoint extends AuthenticatedEndpoint {
     required List<VisitSyncEntry> visits,
   }) async {
     final runtime = AlertRuntime.instance;
+    // Aparelho marcado para limpeza (#81): um login ou renovação em corrida com
+    // o pedido pode ter emitido token vivo depois da revogação.
+    await runtime
+        .deviceWipeServiceFor(session)
+        .ensureDeviceNotMarked(deviceId);
     try {
       // Teto do lote ANTES de resolver o token e de abrir a transação.
       VisitSyncService.checkLegacyBatchSize(visits.length);

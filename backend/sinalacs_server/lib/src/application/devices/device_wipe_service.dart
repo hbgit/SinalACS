@@ -148,6 +148,65 @@ class DeviceWipeService {
     );
   }
 
+  // --- Lado do aparelho (sem token): entrega, confirmação e recusa ---------
+
+  /// O `orderId` do pedido ainda não confirmado do aparelho [deviceId], ou
+  /// `null`. Carimba a entrega e audita `wipe_delivered` só na primeira vez.
+  Future<String?> pendingOrderId(String deviceId) async {
+    final pedido = await _pedidoDe(deviceId);
+    if (pedido == null || pedido.confirmedAt != null) return null;
+    final orderId = pedido.id.toString();
+    if (await store.markDelivered(orderId, _clock().toUtc())) {
+      await _auditarAparelho(pedido, 'wipe_delivered');
+    }
+    return orderId;
+  }
+
+  /// Confirma a limpeza. Só a primeira confirmação do par certo grava e audita;
+  /// par errado ou repetição são um no-op silencioso (não vira oráculo).
+  Future<void> confirm(String deviceId, String orderId) async {
+    if (deviceId.trim().isEmpty) return;
+    final pedido = await store.orderFor(deviceId);
+    if (pedido == null || pedido.id.toString() != orderId) return;
+    if (await store.markConfirmed(deviceId, orderId, _clock().toUtc())) {
+      await _auditarAparelho(pedido, 'wipe_confirmed');
+    }
+  }
+
+  /// Lança [DeviceWipeRequiredException] quando existe **qualquer** pedido para
+  /// [deviceId], confirmado ou não: o aparelho limpo troca de id (D1), então um
+  /// id antigo que reaparece é aparelho a limpar. `null`, vazio e a sentinela
+  /// não são checados.
+  Future<void> ensureDeviceNotMarked(String? deviceId) async {
+    final pedido = await _pedidoDe(deviceId);
+    if (pedido == null) return;
+    throw DeviceWipeRequiredException(
+      orderId: pedido.id.toString(),
+      message: 'Este aparelho precisa ser limpo a pedido da coordenação.',
+    );
+  }
+
+  Future<DeviceWipeOrder?> _pedidoDe(String? deviceId) async {
+    if (deviceId == null ||
+        deviceId.trim().isEmpty ||
+        deviceId == InstitutionalAuthService.deviceIdAbsent) {
+      return null;
+    }
+    return store.orderFor(deviceId);
+  }
+
+  /// O aparelho age em nome da conta do pedido (`targetUserId`).
+  Future<void> _auditarAparelho(DeviceWipeOrder pedido, String result) =>
+      audit.record(
+        AuditEvent(
+          userId: pedido.targetUserId.toString(),
+          actionType: 'write',
+          resourceType: 'acs_device',
+          resourceId: pedido.id.toString(),
+          result: result,
+        ),
+      );
+
   /// Recusa com linha `denied` ANTES de lançar; a mesma mensagem para "não
   /// existe" e "não é seu".
   Future<Never> _negar(
