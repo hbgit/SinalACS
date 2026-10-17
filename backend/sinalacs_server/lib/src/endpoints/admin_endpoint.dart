@@ -286,6 +286,37 @@ class AdminEndpoint extends AuthenticatedEndpoint {
       .adminAccountServiceFor(session)
       .resetStaffMfa(authenticate(accessToken), staffId: staffId);
 
+  /// Aparelhos do ACS [acsId] (#81): rótulo, último uso e estado do pedido de
+  /// limpeza. Só `coordinator`/`admin`; o coordenador só na própria UBS. ACS
+  /// fora do escopo e inexistente recebem a mesma recusa; a leitura é auditada.
+  Future<List<AdminAcsDevice>> acsDevices(
+    Session session, {
+    required String accessToken,
+    required String acsId,
+  }) => AlertRuntime.instance
+      .deviceWipeServiceFor(session)
+      .devicesOf(authenticate(accessToken), acsId: acsId);
+
+  /// Pede a limpeza remota do aparelho [deviceId] do ACS [acsId] (#81) e revoga
+  /// na hora os tokens dele, numa transação só. O aparelho precisa ser do ACS e
+  /// do escopo de quem pede; qualquer outro caso recebe a mesma recusa. Repetir
+  /// é idempotente (`alreadyOrdered`, carimbo original). Audita
+  /// `admin_device`/`wipe_ordered` com o id do pedido.
+  Future<AdminDeviceWipeResult> orderDeviceWipe(
+    Session session, {
+    required String accessToken,
+    required String acsId,
+    required String deviceId,
+    required DeviceWipeReason reason,
+  }) => AlertRuntime.instance
+      .deviceWipeServiceFor(session)
+      .orderWipe(
+        authenticate(accessToken),
+        acsId: acsId,
+        deviceId: deviceId,
+        reason: reason,
+      );
+
   /// Escalona um alerta vermelho pendente cujo prazo sem confirmação venceu
   /// (#44). Grava data, autor e motivo fechado, reenfileira **uma** entrega de
   /// reforço para o tópico da microárea e audita — numa transação só; o alerta

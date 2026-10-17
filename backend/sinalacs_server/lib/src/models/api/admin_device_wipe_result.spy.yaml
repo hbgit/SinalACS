@@ -1,0 +1,7 @@
+### Resposta do pedido de limpeza remota (#81). Repetir o pedido é idempotente:
+### `alreadyOrdered` e o `requestedAt` original.
+class: AdminDeviceWipeResult
+fields:
+  orderId: String
+  requestedAt: DateTime
+  alreadyOrdered: bool

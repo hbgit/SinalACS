@@ -1,0 +1,13 @@
+### Aparelho de um ACS na listagem do backoffice (#81). O rótulo é derivado do
+### `deviceId` (`Aparelho ` + 8 primeiros caracteres): o app não envia modelo
+### nem nome do aparelho, e o id completo não precisa chegar à tela.
+class: AdminAcsDevice
+fields:
+  deviceId: String
+  label: String
+  ### Maior `issuedAt` entre os tokens do aparelho.
+  lastSeenAt: DateTime
+  ### `null` = sem pedido de limpeza.
+  wipeState: DeviceWipeState?
+  wipeRequestedAt: DateTime?
+  wipeConfirmedAt: DateTime?

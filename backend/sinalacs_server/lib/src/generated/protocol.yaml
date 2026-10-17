@@ -20,6 +20,8 @@ admin:
   - resetAcsPassword:
   - resetAcsMfa:
   - resetStaffMfa:
+  - acsDevices:
+  - orderDeviceWipe:
   - escalateAlert:
   - scheduleNotice:
   - cancelScheduledNotice:

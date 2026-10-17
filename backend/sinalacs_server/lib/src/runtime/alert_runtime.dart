@@ -1,5 +1,6 @@
 import 'package:sinalacs_server/src/application/audit/audit_chain.dart';
 import 'package:sinalacs_server/src/application/admin/admin_account_service.dart';
+import 'package:sinalacs_server/src/application/devices/device_wipe_service.dart';
 import 'package:sinalacs_server/src/application/admin/admin_monitoring_service.dart';
 import 'package:sinalacs_server/src/application/admin/admin_read_service.dart';
 import 'package:sinalacs_server/src/application/admin/alert_escalation_service.dart';
@@ -8,6 +9,7 @@ import 'package:sinalacs_server/src/application/admin/audit_export_service.dart'
 import 'package:sinalacs_server/src/application/admin/data_subject_case_service.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_data_subject_case_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_admin_account_store.dart';
+import 'package:sinalacs_server/src/infrastructure/database/orm_device_wipe_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_admin_read_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_audit_checkpoint_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_audit_export_store.dart';
@@ -372,6 +374,15 @@ class AlertRuntime {
       audit: auditTrailFor(session),
     );
   }
+
+  /// Limpeza remota e aparelhos do ACS pelo backoffice (#81), para uma
+  /// requisição. O escopo e a existência do ACS vêm do mesmo store de contas da
+  /// #43; a trilha é a da requisição.
+  DeviceWipeService deviceWipeServiceFor(Session session) => DeviceWipeService(
+    store: OrmDeviceWipeStore(session: () => session),
+    accounts: OrmAdminAccountStore(session: () => session),
+    audit: auditTrailFor(session),
+  );
 
   /// Escalonamento de alerta vermelho pelo backoffice (#44), para uma
   /// requisição. O escalonamento gravado é auditado DENTRO da transação do

@@ -1,0 +1,24 @@
+### Pedido de limpeza remota do aparelho de um ACS (#81). Um por aparelho
+### (índice único em `deviceId`): pedir de novo devolve o pedido original.
+###
+### O pedido não carrega dado pessoal: só ids, o motivo (conjunto fechado) e os
+### carimbos. `deliveredAt` marca a primeira vez que o aparelho foi mandado
+### limpar; `confirmedAt`, a confirmação do próprio aparelho de que limpou.
+class: DeviceWipeOrder
+table: device_wipe_orders
+fields:
+  id: UuidValue?, defaultPersist=random
+  ### Instalação alvo (`acs_refresh_tokens.deviceId`).
+  deviceId: String
+  ### O ACS dono do aparelho no momento do pedido.
+  targetUserId: UuidValue, relation(parent=users)
+  ### Quem pediu (coordenador ou administrador).
+  requestedBy: UuidValue, relation(parent=users)
+  reason: DeviceWipeReason
+  requestedAt: DateTime
+  deliveredAt: DateTime?
+  confirmedAt: DateTime?
+indexes:
+  device_wipe_orders_device_key:
+    fields: deviceId
+    unique: true
