@@ -25,6 +25,11 @@ void main() {
     expect(fonte, contains('connectivityChanges: Connectivity()'));
   });
 
+  test('o main.dart liga o diário da limpeza remota ao shared_preferences (#81)', () {
+    final fonte = File('lib/main.dart').readAsStringSync();
+    expect(fonte, contains('wipeJournal: SharedPreferencesWipeJournal()'));
+  });
+
   test('o caminho importado pelo backend_client não puxa o Flutter', () {
     for (final arquivo in [
       'lib/core/security/session_token_store.dart',

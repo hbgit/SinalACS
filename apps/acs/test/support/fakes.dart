@@ -144,6 +144,13 @@ class FakeAcsBackend implements AcsBackend {
   /// Quantas chamadas a [beginTotpEnrollment] ainda falham antes de funcionar.
   int enrollmentFailuresLeft = 0;
 
+  /// Id da instalação que o [login] lê, como o `BackendClient` real (#81).
+  /// `null`: o login não registra id nenhum.
+  DeviceIdStore? deviceIds;
+
+  /// `deviceId` lido a cada [login], na ordem.
+  final List<String> loginDeviceIds = <String>[];
+
   @override
   Future<AuthSession> login({
     required String matricula,
@@ -151,6 +158,8 @@ class FakeAcsBackend implements AcsBackend {
     String? totpCode,
   }) async {
     loginCount++;
+    final ids = deviceIds;
+    if (ids != null) loginDeviceIds.add(await ids.readOrCreate());
     lastCredentials = (matricula: matricula, senha: senha);
     lastTotpCode = totpCode;
     if (sessionExpired && expectedTotpCode != null && totpCode == null) throw const MfaCodeRequired();
