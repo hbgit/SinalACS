@@ -159,6 +159,17 @@ class _EnvioDeVisitasForaDoAr implements AcsBackend {
   Future<List<api.VisitSyncResult>> syncVisits(List<api.VisitSyncEntry> visits, {String? expectedUserId}) =>
       _rede(() => _inner.syncVisits(visits, expectedUserId: expectedUserId));
   @override
+  Future<api.VisitSyncResult> resolveVisitConflict(
+    api.VisitSyncEntry visit, {
+    required int expectedServerVersion,
+    String? expectedUserId,
+  }) =>
+      _rede(() => _inner.resolveVisitConflict(
+            visit,
+            expectedServerVersion: expectedServerVersion,
+            expectedUserId: expectedUserId,
+          ));
+  @override
   Future<List<api.VisitSyncResult>> syncLegacyVisits(List<api.VisitSyncEntry> visits, {required String deviceId}) =>
       _rede(() => _inner.syncLegacyVisits(visits, deviceId: deviceId));
   @override

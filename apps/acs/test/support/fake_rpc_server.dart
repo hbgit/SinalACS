@@ -237,6 +237,12 @@ class FakeRpcServer {
           for (final visit in (decoded['visits'] as List).cast<Map<String, dynamic>>())
             {'localId': visit['localId'], 'syncStatus': 'synced', 'serverVersion': visit['version']},
         ],
+      // `visits.resolveConflict` (#79): sempre aceita, versão vista + 1.
+      'resolveConflict' => <String, Object?>{
+          'localId': (decoded['visit'] as Map<String, dynamic>)['localId'],
+          'syncStatus': 'synced',
+          'serverVersion': (decoded['expectedServerVersion'] as int) + 1,
+        },
       'refreshSession' => <String, Object?>{
           'accessToken': garbageAccessToken ? 'lixo' : _token(),
           'tokenType': 'Bearer',

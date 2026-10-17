@@ -545,6 +545,38 @@ CREATE TABLE offline_visits (
     expect((await storage.countsByOwner())['acs-a'], 2);
   });
 
+  test('cópia do servidor corrompida não derruba o load: o conflito e a versão ficam', () async {
+    final loja = storage.forOwner('acs-a');
+    await loja.save([
+      OfflineVisitRecord(
+        patientId: seedPatientId,
+        risk: 'red',
+        status: 'PENDENTE',
+        localId: 'local-conflito',
+        conflictServerVersion: 5,
+        conflictServer: const VisitConflictSnapshot(version: 5, status: 'Realizada', notes: ''),
+      ),
+      _visita('local-normal'),
+    ]);
+    final db = await storage.database.open();
+    for (final lixo in ['{não é json', '[1, 2]', '{"version": "cinco"}']) {
+      await db.update(
+        'offline_visits',
+        {'conflict_server_snapshot': lixo},
+        where: 'local_id = ?',
+        whereArgs: ['local-conflito'],
+      );
+
+      final lidas = {for (final v in await loja.load()) v.localId: v};
+
+      expect(lidas.keys, containsAll(['local-conflito', 'local-normal']), reason: lixo);
+      final c = lidas['local-conflito']!;
+      expect(c.inConflict, isTrue, reason: lixo);
+      expect(c.conflictServerVersion, 5, reason: lixo);
+      expect(c.conflictServer, isNull, reason: lixo);
+    }
+  });
+
   test('wipeAllData com só a linha em conflito lança WipeBlocked(1)', () async {
     await storage.forOwner('acs-a').save([
       OfflineVisitRecord(

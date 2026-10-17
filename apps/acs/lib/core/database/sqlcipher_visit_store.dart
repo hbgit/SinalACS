@@ -187,11 +187,19 @@ OfflineVisitRecord _recordFrom(Map<String, Object?> row) => OfflineVisitRecord(
       conflictServer: _snapshotFrom(row['conflict_server_snapshot'] as String?),
     );
 
+/// Cópia do servidor ilegível vira `null`, nunca exceção: um `load()` que
+/// lançasse jogaria a fila inteira do dono só para a RAM por causa de uma
+/// coluna auxiliar. O conflito continua valendo pela `conflict_server_version`
+/// (a tela só não tem o que comparar).
 VisitConflictSnapshot? _snapshotFrom(String? raw) {
   if (raw == null) return null;
-  return VisitConflictSnapshot.fromJson(
-    Map<String, Object?>.from(jsonDecode(raw) as Map),
-  );
+  try {
+    return VisitConflictSnapshot.fromJson(
+      Map<String, Object?>.from(jsonDecode(raw) as Map),
+    );
+  } catch (_) {
+    return null;
+  }
 }
 
 /// Armazenamento por dono sobre UM [VisitDatabase].

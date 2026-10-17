@@ -195,10 +195,14 @@ class _DeviceCareScope extends InheritedWidget {
 /// outro dono sem chave de envio neste aparelho (dependem de ele entrar).
 typedef UnsentOnDevice = ({int own, int elsewhere, int unsent, int review, int noToken});
 
+/// Visitas que a fila ainda guarda no aparelho: pendentes, em conflito (#79,
+/// fora da retentativa até o ACS decidir) e recusadas.
+int _visitsOnDevice(OfflineVisitQueue queue) =>
+    queue.pendingCount + queue.conflictCount + queue.rejectedCount;
+
 /// Fila que não conseguiu gravar e ainda tem visita: essas visitas existem só
 /// em RAM, e descartá-la as perderia.
-bool _onlyInMemory(OfflineVisitQueue queue) =>
-    queue.persistenceFailed && (queue.pendingCount > 0 || queue.rejectedCount > 0);
+bool _onlyInMemory(OfflineVisitQueue queue) => queue.persistenceFailed && _visitsOnDevice(queue) > 0;
 
 /// Fila que não pode sair da memória: só em RAM, ou com um envio em voo
 /// (`isSyncing`). A segunda, descartada, faria o próximo login do dono montar
@@ -392,7 +396,7 @@ class _SinalAcsAppState extends State<SinalAcsApp> with WidgetsBindingObserver i
   Future<void> wipe(String currentOwner, OfflineVisitQueue current) async {
     // A memória primeiro: o disco não enxerga a fila que não conseguiu gravar.
     final inMemory = {..._queues.values, current}
-        .fold<int>(0, (total, queue) => total + queue.pendingCount + queue.rejectedCount);
+        .fold<int>(0, (total, queue) => total + _visitsOnDevice(queue));
     if (inMemory > 0) throw WipeBlocked(inMemory);
 
     // Reconta e apaga numa transação; recusa sem apagar nada se sobrou visita.
@@ -1727,7 +1731,7 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
     setState(() => _enviandoAntesDeSair = false);
     final fila = widget.visitQueue;
     final recusadas = fila.rejectedCount;
-    final proprias = fila.pendingCount + recusadas;
+    final proprias = _visitsOnDevice(fila);
     final outras = await _care?.pendingElsewhere(widget.acsId) ?? 0;
     if (!mounted) return;
     setState(() => _saindo = false);

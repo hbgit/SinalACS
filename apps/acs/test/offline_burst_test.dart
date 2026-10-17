@@ -61,11 +61,11 @@ void main() {
     expect(fila.rejectedVisits.single.localId, 'burst-40');
     expect(fila.rejectedVisits.single.rejectionReason, 'paciente de outra microárea');
     expect(fila.conflictCount, 1, reason: 'o conflito fica registrado');
-    // Conflito VOLTA para a fila (`_applyOutcomes`: "precisa de resolução, não de
-    // descarte"); a recusada, não — ela sai da retentativa e fica só visível.
-    expect(fila.pendingCount, 1);
-    expect(fila.pendingVisits.single.localId, 'burst-70');
-    expect(fila.pendingVisits.single.status, 'CONFLITO');
+    // Conflito sai da retentativa e espera a decisão do ACS (#79, D3); a
+    // recusada também sai e fica só visível. Nenhuma das duas se perde.
+    expect(fila.pendingCount, 0);
+    expect(fila.conflictVisits.single.localId, 'burst-70');
+    expect(fila.conflictVisits.single.inConflict, isTrue);
   });
 
   test('sem rede, as 100 continuam pendentes e a próxima tentativa as leva', () async {

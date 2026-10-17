@@ -17,7 +17,10 @@ import 'package:sinalacs_client/sinalacs_client.dart';
 /// recusa é recuperável — a fila converte a exceção em
 /// `SyncOutcomeKind.error` e o lote continua pendente, esperando o dono
 /// entrar de novo.
-class BackendVisitSynchronizer implements VisitSynchronizer {
+///
+/// Também é o [VisitConflictResolver] da fila do painel (#79): "Manter a
+/// minha" vai por `visits.resolveConflict` com a mesma checagem de dono.
+class BackendVisitSynchronizer implements VisitSynchronizer, VisitConflictResolver {
   BackendVisitSynchronizer({required this.backend, required String ownerId})
       : ownerId = requireOwnerId(ownerId);
 
@@ -37,17 +40,48 @@ class BackendVisitSynchronizer implements VisitSynchronizer {
       expectedUserId: ownerId,
     );
 
-    return [
-      for (final result in results)
-        VisitSyncOutcome(
-          localId: result.localId,
-          status: result.syncStatus.name,
-          serverVersion: result.serverVersion,
-          message: result.message,
-        ),
-    ];
+    return [for (final result in results) visitSyncOutcomeFor(result)];
+  }
+
+  @override
+  Future<VisitSyncOutcome> resolve(OfflineVisitRecord visit, {required int expectedServerVersion}) async {
+    // Mesma dupla checagem de [push]: cedo, e de novo depois do token resolvido.
+    if (backend.session?.userId != ownerId) throw sessionOwnerMismatch;
+    final result = await backend.resolveVisitConflict(
+      visitSyncEntryFor(visit),
+      expectedServerVersion: expectedServerVersion,
+      expectedUserId: ownerId,
+    );
+    return visitSyncOutcomeFor(result);
   }
 }
+
+/// Resposta do servidor → resultado que a fila entende. A cópia do servidor
+/// só é aproveitada no `conflict` (é só lá que o contrato a preenche).
+VisitSyncOutcome visitSyncOutcomeFor(VisitSyncResult result) {
+  final serverVisit = result.serverVisit;
+  return VisitSyncOutcome(
+    localId: result.localId,
+    status: result.syncStatus.name,
+    serverVersion: result.serverVersion,
+    message: result.message,
+    serverSnapshot: result.syncStatus == SyncStatus.conflict && serverVisit != null
+        ? conflictSnapshotFor(serverVisit)
+        : null,
+  );
+}
+
+/// Visita do servidor → cópia guardada junto ao conflito, para o ACS comparar.
+///
+/// As observações são o `'campo'` do mapa (o que este app grava, ver
+/// [visitSyncEntryFor]); sem ele — visita gravada por outro cliente —, os
+/// valores do mapa unidos por quebra de linha, para nada sumir da comparação.
+VisitConflictSnapshot conflictSnapshotFor(VisitSyncEntry entry) => VisitConflictSnapshot(
+      version: entry.version,
+      status: entry.status,
+      notes: entry.notes['campo'] ?? entry.notes.values.join('\n'),
+      completedAt: entry.completedAt?.toUtc(),
+    );
 
 /// Visita da fila → contrato de `visits.sync`/`syncLegacy`/`syncDeferred`. Um
 /// só mapeamento para os três caminhos: o servidor deduplica pelo `localId` e

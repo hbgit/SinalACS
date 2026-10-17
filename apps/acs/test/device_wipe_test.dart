@@ -428,6 +428,39 @@ void main() {
       expect(fila.pendingCount, 1);
     });
 
+    testWidgets('conflito só na MEMÓRIA também bloqueia a limpeza (#79)', (tester) async {
+      await io(tester, () => gravarCursorECache(storage));
+      // O conflito saiu da retentativa (D3): não conta mais como pendente, e
+      // ainda assim é trabalho de campo que não subiu.
+      final fila = OfflineVisitQueue(
+        store: FailingVisitStore(failOnLoad: false),
+        synchronizer: FakeVisitSynchronizer(statusFor: (_) => 'conflict'),
+      );
+      await tester.pumpWidget(SinalAcsApp(
+        backend: backend,
+        visitStorage: storage,
+        visitQueue: fila,
+        uploadTokens: tokens,
+        deviceIds: MemoryDeviceIdStore('aparelho-sintetico'),
+        feedBuilder: (q) => FakeAlertFeed(q),
+      ));
+      await assentar(tester);
+      await entrarComo(tester, acsA);
+      final antes = await io(tester, () => contarTabelas(storage));
+      await ateAConfirmacao(tester);
+
+      await fila.add(pendente('conflito-na-ram'));
+      await tester.runAsync(fila.sync);
+      expect(fila.pendingCount, 0);
+      expect(fila.conflictCount, 1);
+      expect(fila.persistenceFailed, isTrue);
+      await tester.tap(find.byKey(const Key('wipe_confirm')));
+      await assentar(tester);
+
+      await esperarBloqueio(tester, visitas: 1, antes: antes);
+      expect(fila.conflictCount, 1);
+    });
+
     testWidgets('visita que chega ao DISCO depois da confirmação aberta: a transação recusa e nada é apagado', (tester) async {
       await io(tester, () => gravarCursorECache(storage));
       await abrirApp(tester);

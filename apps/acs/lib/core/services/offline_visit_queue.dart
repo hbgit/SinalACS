@@ -173,6 +173,7 @@ class VisitSyncOutcome {
     required this.status,
     this.serverVersion,
     this.message,
+    this.serverSnapshot,
   });
 
   final String localId;
@@ -188,6 +189,11 @@ class VisitSyncOutcome {
   /// Ele já vinha no contrato (`VisitSyncResult.message`) e era descartado no
   /// caminho até aqui, o que deixava um `patientId` inválido parecendo silêncio.
   final String? message;
+
+  /// Cópia da visita no servidor quando [status] é `conflict` (#79). Pode
+  /// faltar (caminho sem autor, servidor antigo): o conflito vale assim mesmo,
+  /// a tela só não tem o que comparar.
+  final VisitConflictSnapshot? serverSnapshot;
 }
 
 /// Quem leva as visitas pendentes ao servidor.
@@ -197,6 +203,24 @@ class VisitSyncOutcome {
 abstract class VisitSynchronizer {
   Future<List<VisitSyncOutcome>> push(List<OfflineVisitRecord> visits);
 }
+
+/// Quem leva ao servidor a decisão "manter a minha versão" de uma visita em
+/// conflito (#79, `visits.resolveConflict`).
+///
+/// Separado de [VisitSynchronizer] de propósito: o envio diferido não resolve
+/// conflito (não há dono presente para decidir, D6), então não implementa isto.
+abstract interface class VisitConflictResolver {
+  /// Envia [visit] (já com a edição do ACS) com compare-and-set sobre
+  /// [expectedServerVersion], a versão do servidor que o ACS viu.
+  Future<VisitSyncOutcome> resolve(OfflineVisitRecord visit, {required int expectedServerVersion});
+}
+
+/// D7: o servidor disse `conflict` sem dizer a versão. Sem versão de
+/// referência não há como resolver depois, então é erro retentável.
+const conflictWithoutVersionMessage = 'O servidor indicou conflito sem informar a versão.';
+
+/// `resolveKeepLocal` numa fila sem [VisitConflictResolver].
+const conflictResolverMissingMessage = 'A resolução de conflitos não está configurada neste aplicativo.';
 
 /// Onde as visitas ficam enquanto não sincronizam.
 ///
@@ -384,18 +408,24 @@ class _InMemoryLegacyVisitStore implements LegacyVisitStore {
 ///
 /// Preserva a semântica da `SyncFsm` do backend
 /// (`idle → localWrite → queued → syncing → {synced|conflict|error|rejected}`):
-/// uma visita em conflito **volta para a fila** em vez de ser descartada, uma
-/// falha de rede não perde o lote, e uma recusa definitiva (`rejected`) SAI da
-/// fila de retentativa mas fica visível no aparelho até o ACS descartá-la —
-/// diferente de `error`, que continua pendente e retenta.
+/// uma falha de rede não perde o lote; uma visita em conflito (#79, D3) SAI da
+/// retentativa — reenviá-la só devolveria o mesmo conflito — e fica no
+/// aparelho, gravada com a cópia do servidor, até o ACS decidir
+/// ([resolveKeepLocal]/[resolveKeepServer]); uma recusa definitiva
+/// (`rejected`) também sai da retentativa e fica visível até o ACS
+/// descartá-la — diferente de `error`, que continua pendente e retenta.
+/// Nenhum dos dois some do disco sozinho.
 class OfflineVisitQueue {
-  OfflineVisitQueue({VisitStore? store, this.synchronizer})
+  OfflineVisitQueue({VisitStore? store, this.synchronizer, this.conflictResolver})
       : _store = store ?? InMemoryVisitStore();
 
   final VisitStore _store;
 
   /// `null` mantém o comportamento local: a fila enfileira, mas não envia.
   final VisitSynchronizer? synchronizer;
+
+  /// `null`: os conflitos ficam guardados, mas "Manter a minha" devolve erro.
+  final VisitConflictResolver? conflictResolver;
 
   final List<OfflineVisitRecord> _pending = <OfflineVisitRecord>[];
   final List<OfflineVisitRecord> _synced = <OfflineVisitRecord>[];
@@ -426,8 +456,9 @@ class OfflineVisitQueue {
   /// Recarrega o que ficou gravado de execuções anteriores.
   ///
   /// Sem isso, fechar o app perde a fila — o oposto de offline-first. O que
-  /// veio do disco é separado entre pendente e recusado pelo próprio
-  /// [OfflineVisitRecord.rejectionReason] — não há uma segunda tabela.
+  /// veio do disco é separado entre pendente, em conflito e recusado pelos
+  /// próprios campos do registro ([OfflineVisitRecord.inConflict] primeiro,
+  /// depois [OfflineVisitRecord.rejectionReason]) — não há uma segunda tabela.
   Future<void> restore() async {
     if (_restored) return;
     _restored = true;
@@ -435,9 +466,16 @@ class OfflineVisitQueue {
     try {
       final stored = await _store.load();
       _pending.clear();
+      _conflicts.clear();
       _rejected.clear();
       for (final visit in stored) {
-        (visit.rejectionReason == null ? _pending : _rejected).add(visit);
+        if (visit.inConflict) {
+          _conflicts.add(visit);
+        } else if (visit.rejectionReason != null) {
+          _rejected.add(visit);
+        } else {
+          _pending.add(visit);
+        }
       }
       _persistenceFailed = false;
     } catch (_) {
@@ -464,14 +502,152 @@ class OfflineVisitQueue {
     await _persist();
   }
 
+  /// "Manter a do servidor" (#79, D4): apaga a cópia deste aparelho da visita
+  /// em conflito. Só local — o servidor não é chamado, nada muda lá. A tela
+  /// pede confirmação antes. `localId` desconhecido não faz nada.
+  Future<void> resolveKeepServer(String localId) async {
+    final before = _conflicts.length;
+    _conflicts.removeWhere((visit) => visit.localId == localId);
+    if (_conflicts.length == before) return;
+    await _persist();
+  }
+
+  Future<SyncOutcome>? _resolving;
+
+  /// "Manter a minha versão" / "Editar e enviar" (#79, D5): aplica [outcome] e
+  /// [notes] editados (nulos = mantém os do aparelho) e envia a visita por
+  /// `visits.resolveConflict`, com a versão do servidor que o ACS viu.
+  ///
+  /// `synced` → sai do aparelho; `conflict` → fica, com a cópia nova do
+  /// servidor e a edição preservada; `rejected` → vai para as recusadas; erro
+  /// de rede → fica em conflito como estava, mas com a edição gravada.
+  ///
+  /// Espera um [sync] em voo antes de ler o registro, e as resoluções correm
+  /// uma de cada vez.
+  Future<SyncOutcome> resolveKeepLocal(String localId, {String? outcome, String? notes}) {
+    final previous = _resolving;
+    late final Future<SyncOutcome> run;
+    run = () async {
+      if (previous != null) await previous.then((_) {}, onError: (_) {});
+      final syncing = _syncing;
+      if (syncing != null) await syncing.then((_) {}, onError: (_) {});
+      return _resolveKeepLocalNow(localId, outcome: outcome, notes: notes);
+    }()
+        .whenComplete(() {
+      if (identical(_resolving, run)) _resolving = null;
+    });
+    return _resolving = run;
+  }
+
+  Future<SyncOutcome> _resolveKeepLocalNow(String localId, {String? outcome, String? notes}) async {
+    final index = _conflicts.indexWhere((visit) => visit.localId == localId);
+    if (index < 0) {
+      return const SyncOutcome(
+        kind: SyncOutcomeKind.error,
+        processed: 0,
+        message: 'Esta visita não está mais em conflito neste aparelho.',
+      );
+    }
+    final edited = _conflicts[index].copyWith(outcome: outcome, notes: notes);
+    // A edição é gravada ANTES da rede: se a chamada falhar, o que o ACS
+    // digitou continua no aparelho.
+    _conflicts[index] = edited;
+    await _persist();
+
+    final resolver = conflictResolver;
+    if (resolver == null) {
+      return const SyncOutcome(
+        kind: SyncOutcomeKind.error,
+        processed: 1,
+        message: conflictResolverMissingMessage,
+      );
+    }
+
+    final VisitSyncOutcome result;
+    try {
+      result = await resolver.resolve(edited, expectedServerVersion: edited.conflictServerVersion!);
+    } catch (error) {
+      // Mesmo contrato do `sync`: em produção é uma `BackendFailure`, cujo
+      // `toString()` já é a frase em português.
+      return SyncOutcome(kind: SyncOutcomeKind.error, processed: 1, message: '$error');
+    }
+
+    // O registro pode ter saído durante a chamada (ex.: "Manter a do
+    // servidor" em outra tela): nada a recolocar.
+    final current = _conflicts.indexWhere((visit) => visit.localId == localId);
+    switch (result.status) {
+      case 'synced':
+        if (current >= 0) _conflicts.removeAt(current);
+        _synced.add(edited.copyWith(
+          status: 'SINCRONIZADO',
+          version: result.serverVersion ?? edited.version,
+        ));
+        await _persist();
+        return const SyncOutcome(kind: SyncOutcomeKind.synced, processed: 1);
+      case 'conflict':
+        final serverVersion = result.serverVersion;
+        if (serverVersion == null) {
+          return const SyncOutcome(
+            kind: SyncOutcomeKind.error,
+            processed: 1,
+            message: conflictWithoutVersionMessage,
+          );
+        }
+        // copyWith não zera, mas sobrescreve: versão e cópia novas, conteúdo
+        // editado preservado. Sem cópia nova, a anterior não vale mais.
+        final replaced = OfflineVisitRecord(
+          patientId: edited.patientId,
+          risk: edited.risk,
+          status: edited.status,
+          outcome: edited.outcome,
+          notes: edited.notes,
+          rejectionReason: edited.rejectionReason,
+          localId: edited.localId,
+          createdAt: edited.createdAt,
+          version: edited.version,
+          conflictServerVersion: serverVersion,
+          conflictServer: result.serverSnapshot,
+        );
+        if (current >= 0) {
+          _conflicts[current] = replaced;
+          await _persist();
+        }
+        return const SyncOutcome(kind: SyncOutcomeKind.conflict, processed: 1);
+      case 'rejected':
+        final reason = result.message ?? 'O servidor recusou esta visita em definitivo.';
+        if (current >= 0) _conflicts.removeAt(current);
+        // Sai do conflito para as recusadas: o registro novo não carrega a
+        // versão de conflito, senão `restore` o poria de volta em conflito.
+        _rejected.add(OfflineVisitRecord(
+          patientId: edited.patientId,
+          risk: edited.risk,
+          status: edited.status,
+          outcome: edited.outcome,
+          notes: edited.notes,
+          rejectionReason: reason,
+          localId: edited.localId,
+          createdAt: edited.createdAt,
+          version: edited.version,
+        ));
+        await _persist();
+        return SyncOutcome(kind: SyncOutcomeKind.rejected, processed: 1, message: reason);
+      default:
+        return SyncOutcome(
+          kind: SyncOutcomeKind.error,
+          processed: 1,
+          message: result.message ?? 'O servidor não confirmou a visita.',
+        );
+    }
+  }
+
   /// Grava o estado corrente, sem deixar a falha derrubar quem chamou.
   ///
-  /// Persiste pendentes E recusadas: uma recusada que saísse do disco junto
-  /// com a fila desapareceria do aparelho no instante em que fosse recusada,
-  /// silenciosamente — antes mesmo de o ACS decidir descartá-la.
+  /// Persiste pendentes, em conflito E recusadas: as duas últimas já saíram
+  /// da retentativa, e sair do disco junto as faria desaparecer do aparelho,
+  /// silenciosamente — antes mesmo de o ACS decidir o que fazer com elas.
   Future<void> _persist() async {
     try {
-      await _store.save([..._pending, ..._rejected]);
+      await _store.save([..._pending, ..._conflicts, ..._rejected]);
       _persistenceFailed = false;
     } catch (_) {
       _persistenceFailed = true;
@@ -480,41 +656,33 @@ class OfflineVisitQueue {
 
   Future<SyncOutcome>? _syncing;
 
-  /// `true` enquanto um [sync] está em voo (o lote pode estar no servidor).
-  /// Quem descarta filas (o app, ao trocar de dono) não pode descartar esta:
-  /// uma segunda fila sobre o mesmo dono seria regravada às cegas por esta
-  /// quando o envio terminasse.
-  bool get isSyncing => _syncing != null;
+  /// `true` enquanto um [sync] ou um [resolveKeepLocal] está em voo (a
+  /// visita pode estar no servidor). Quem descarta filas (o app, ao trocar de
+  /// dono) não pode descartar esta: uma segunda fila sobre o mesmo dono seria
+  /// regravada às cegas por esta quando o envio terminasse.
+  bool get isSyncing => _syncing != null || _resolving != null;
 
   /// Envia o que está pendente. **Single-flight**: chamar de novo com um envio
   /// em voo devolve o resultado DESSE envio (o lote nunca sai duas vezes, nem
   /// é contado duas vezes); o que foi registrado depois da captura do lote
-  /// fica para o próximo `sync()`.
-  Future<SyncOutcome> sync({bool forceConflict = false}) {
+  /// fica para o próximo `sync()`. Visitas em conflito não fazem parte do
+  /// lote (D3): reenviá-las só devolveria o mesmo conflito.
+  Future<SyncOutcome> sync() {
     final inFlight = _syncing;
     if (inFlight != null) return inFlight;
     late final Future<SyncOutcome> run;
-    run = _syncOnce(forceConflict: forceConflict).whenComplete(() {
+    run = _syncOnce().whenComplete(() {
       if (identical(_syncing, run)) _syncing = null;
     });
     return _syncing = run;
   }
 
-  Future<SyncOutcome> _syncOnce({required bool forceConflict}) async {
+  Future<SyncOutcome> _syncOnce() async {
     if (_pending.isEmpty) {
       return const SyncOutcome(kind: SyncOutcomeKind.empty, processed: 0);
     }
 
     final batch = List<OfflineVisitRecord>.from(_pending);
-
-    // Gancho de teste preservado do comportamento anterior.
-    if (forceConflict) {
-      return _applyOutcomes(batch, [
-        VisitSyncOutcome(localId: batch.first.localId, status: 'conflict'),
-        for (final visit in batch.skip(1))
-          VisitSyncOutcome(localId: visit.localId, status: 'synced'),
-      ]);
-    }
 
     final sender = synchronizer;
     if (sender == null) {
@@ -573,10 +741,24 @@ class OfflineVisitQueue {
           ));
           synced++;
         case 'conflict':
-          final conflicted = visit.copyWith(status: 'CONFLITO');
-          _conflicts.add(conflicted);
-          // Volta para a fila: conflito precisa de resolução, não de descarte.
-          stillPending.add(conflicted);
+          final serverVersion = outcome?.serverVersion;
+          if (serverVersion == null) {
+            // D7: sem a versão do servidor não há referência para resolver
+            // depois. Fica pendente e retenta, como um `error`.
+            stillPending.add(visit);
+            errors++;
+            firstError ??= conflictWithoutVersionMessage;
+            break;
+          }
+          // D3: sai da retentativa e espera a decisão do ACS, gravada com a
+          // cópia do servidor. Substitui um conflito anterior da mesma visita
+          // em vez de duplicar.
+          _conflicts
+            ..removeWhere((c) => c.localId == visit.localId)
+            ..add(visit.copyWith(
+              conflictServerVersion: serverVersion,
+              conflictServer: outcome?.serverSnapshot,
+            ));
           conflicts++;
         case 'rejected':
           // Terminal: SAI da retentativa, mas fica visível até o ACS

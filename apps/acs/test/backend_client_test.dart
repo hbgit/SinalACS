@@ -2,6 +2,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:sinalacs_acs/core/network/backend_client.dart';
 import 'package:sinalacs_acs/core/network/backend_config.dart';
 import 'package:sinalacs_acs/core/security/session_token_store.dart';
+import 'package:sinalacs_acs/core/services/backend_visit_synchronizer.dart';
+import 'package:sinalacs_client/sinalacs_client.dart';
 
 import 'support/fake_rpc_server.dart';
 
@@ -136,6 +138,61 @@ void main() {
             .having((f) => f.isRecoverable, 'isRecoverable', isFalse),
       ),
     );
+  });
+
+  group('resolução de conflito de visita (#79)', () {
+    VisitSyncEntry entrada({Map<String, String> notes = const {'campo': 'obs editada'}}) => VisitSyncEntry(
+          localId: '00000000-0000-4000-8000-0000000000c1',
+          patientId: '00000000-0000-4000-8000-000000000001',
+          scheduledAt: DateTime.utc(2026, 10, 16, 9),
+          completedAt: DateTime.utc(2026, 10, 16, 9, 30),
+          status: 'Paciente ausente',
+          riskLevelBefore: RiskLevel.red,
+          notes: notes,
+          version: 1,
+          arrivalMethod: ArrivalMethod.manual,
+        );
+
+    test('resolveVisitConflict recusa sessão de outro dono', () async {
+      await backend.login(matricula: 'ACS-001', senha: 'senha-sintetica');
+
+      await expectLater(
+        backend.resolveVisitConflict(entrada(), expectedServerVersion: 3, expectedUserId: 'outro-acs'),
+        throwsA(same(sessionOwnerMismatch)),
+      );
+      expect(server.requests.where((r) => r.method == 'resolveConflict'), isEmpty,
+          reason: 'a decisão de um ACS nunca sai com o token de outro');
+    });
+
+    test('resolveVisitConflict envia a versão vista com a sessão do próprio dono', () async {
+      final sessao = await backend.login(matricula: 'ACS-001', senha: 'senha-sintetica');
+
+      final resultado = await backend.resolveVisitConflict(
+        entrada(),
+        expectedServerVersion: 3,
+        expectedUserId: sessao.userId,
+      );
+
+      expect(resultado.syncStatus, SyncStatus.synced);
+      expect(resultado.serverVersion, 4);
+      final pedido = server.requests.singleWhere((r) => r.method == 'resolveConflict');
+      expect(pedido.endpoint, 'visits');
+      expect(pedido.args['expectedServerVersion'], 3);
+      expect(pedido.args['accessToken'], isNotEmpty);
+    });
+
+    test('conflictSnapshotFor usa o campo das observações, ou une os valores sem ele', () {
+      final comCampo = conflictSnapshotFor(entrada(notes: {'campo': 'obs do servidor', 'outro': 'x'}));
+      expect(comCampo.notes, 'obs do servidor');
+      expect(comCampo.version, 1);
+      expect(comCampo.status, 'Paciente ausente');
+      expect(comCampo.completedAt, DateTime.utc(2026, 10, 16, 9, 30));
+
+      final semCampo = conflictSnapshotFor(entrada(notes: {'a': 'primeira', 'b': 'segunda'}));
+      expect(semCampo.notes, 'primeira\nsegunda');
+
+      expect(conflictSnapshotFor(entrada(notes: const {})).notes, '');
+    });
   });
 
   group('host do RPC', () {

@@ -485,25 +485,30 @@ void main() {
       expect(sender.batches.single, hasLength(1));
     });
 
-    test('deve reencolar registros em conflito e reprocessar no retry', () async {
-      var firstPass = true;
-      final sender = FakeVisitSynchronizer(
-        statusFor: (_) => firstPass ? 'conflict' : 'synced',
-      );
-      final queue = OfflineVisitQueue(synchronizer: sender);
+    test('conflito sai da retentativa e é resolvido pela decisão do ACS', () async {
+      final sender = FakeVisitSynchronizer(statusFor: (_) => 'conflict');
+      final resolver = _ResolvedorQueSincroniza();
+      final queue = OfflineVisitQueue(synchronizer: sender, conflictResolver: resolver);
 
-      await queue.add(visit(syntheticPatientId(2)));
+      final registrada = visit(syntheticPatientId(2));
+      await queue.add(registrada);
 
       final conflict = await queue.sync();
       expect(conflict.kind, SyncOutcomeKind.conflict);
-      // Conflito volta para a fila: precisa de resolução, não de descarte.
-      expect(queue.pendingCount, 1);
-      expect(queue.conflictCount, 1);
-
-      firstPass = false;
-      final retried = await queue.sync();
-      expect(retried.kind, SyncOutcomeKind.synced);
+      // #79, D3: o conflito sai da retentativa e espera a decisão do ACS —
+      // não é descartado, e reenviar só devolveria o mesmo conflito.
       expect(queue.pendingCount, 0);
+      expect(queue.conflictCount, 1);
+      expect(queue.conflictVisits.single.conflictServerVersion, registrada.version + 1);
+
+      expect((await queue.sync()).kind, SyncOutcomeKind.empty, reason: 'não reenvia o conflito');
+      expect(sender.batches, hasLength(1));
+
+      final resolved = await queue.resolveKeepLocal(registrada.localId);
+      expect(resolved.kind, SyncOutcomeKind.synced);
+      expect(resolver.versoesVistas, [registrada.version + 1]);
+      expect(queue.pendingCount, 0);
+      expect(queue.conflictCount, 0);
       expect(queue.syncedCount, 1);
     });
 
@@ -587,8 +592,11 @@ void main() {
       final result = await queue.sync();
 
       expect(result.kind, SyncOutcomeKind.conflict);
-      // Nada saiu: as duas continuam no aparelho.
-      expect(queue.pendingCount, 2);
+      // Nada saiu do aparelho: a do erro continua pendente e retenta; a do
+      // conflito espera a decisão do ACS fora da retentativa (#79, D3).
+      expect(queue.pendingCount, 1);
+      expect(queue.conflictCount, 1);
+      expect(queue.pendingCount + queue.conflictCount, 2);
     });
 
     test('visita recusada em definitivo sai da fila e não é reenviada', () async {
@@ -630,8 +638,9 @@ void main() {
 
       expect(result.kind, SyncOutcomeKind.rejected);
       expect(queue.rejectedCount, 1);
-      // O conflito continua pendente para resolução — só a recusada saiu.
-      expect(queue.pendingCount, 1);
+      // As duas saem da retentativa (#79, D3): a recusada para as recusadas,
+      // o conflito para a decisão do ACS. Nenhuma some.
+      expect(queue.pendingCount, 0);
       expect(queue.conflictCount, 1);
     });
 
@@ -1727,4 +1736,15 @@ void main() {
       expect(backend.listPatientsCount, 3);
     });
   });
+}
+
+/// Resolvedor de conflito que o servidor sempre aceita (#79).
+class _ResolvedorQueSincroniza implements VisitConflictResolver {
+  final List<int> versoesVistas = <int>[];
+
+  @override
+  Future<VisitSyncOutcome> resolve(OfflineVisitRecord visit, {required int expectedServerVersion}) async {
+    versoesVistas.add(expectedServerVersion);
+    return VisitSyncOutcome(localId: visit.localId, status: 'synced', serverVersion: expectedServerVersion + 1);
+  }
 }
