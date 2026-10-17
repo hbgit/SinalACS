@@ -1050,6 +1050,68 @@ void main() {
       expect(row.status, 'recusou atendimento');
       expect(row.acsId, UuidValue.fromString(_acsId));
       expect(row.authorship, VisitAuthorship.acs);
+      final resolvidos =
+          audit.events.where((e) => e.result == 'conflict_resolved_local').toList();
+      expect(resolvidos, hasLength(1));
+      expect(resolvidos.single.resourceType, 'visit');
+      expect(resolvidos.single.resourceId, row.id!.uuid);
+    });
+
+    group('localId de outro paciente (ACS movido de microárea)', () {
+      /// O mesmo ACS, depois de `admin.setAcsMicroArea` levá-lo para a área do
+      /// `_outroTerritorioPatientId`.
+      const acsMovido = AuthenticatedUser(
+        id: _acsId,
+        role: UserRole.acs,
+        microAreaId: _otherMicroAreaId,
+        deviceId: 'acs-device-001',
+      );
+
+      /// Visita própria antiga, na área de origem, levada a v3.
+      Future<VisitRecord> visitaAntigaNaAreaDeOrigem() async {
+        await servidorEmV3();
+        audit.events.clear();
+        return store.rows[_localId]!;
+      }
+
+      void confereRecusa(VisitSyncResult result, VisitRecord antes) {
+        expect(result.syncStatus, SyncStatus.rejected);
+        expect(result.message, 'paciente fora da sua microárea');
+        expect(result.serverVisit, isNull);
+        expect(result.serverVersion, isNull);
+        expect(identical(store.rows[_localId], antes), isTrue);
+        expect(audit.events, hasLength(1));
+        final evento = audit.events.single;
+        expect(evento.result, 'denied_patient_mismatch');
+        expect(evento.actionType, 'write');
+        expect(evento.resourceType, 'visit');
+        expect(evento.resourceId, UuidValue.fromString(_outroTerritorioPatientId).uuid);
+        expect(evento.userId, _acsId);
+      }
+
+      test('sync com versão velha não devolve a cópia da área de origem', () async {
+        final antes = await visitaAntigaNaAreaDeOrigem();
+
+        final results = await service.sync(
+          user: acsMovido,
+          entries: [entry(version: 0, patientId: _outroTerritorioPatientId)],
+        );
+
+        confereRecusa(results.single, antes);
+      });
+
+      test('resolveConflict não sobrescreve a visita da área de origem', () async {
+        final antes = await visitaAntigaNaAreaDeOrigem();
+
+        final result = await service.resolveConflict(
+          user: acsMovido,
+          entry: entry(status: 'recusou atendimento', patientId: _outroTerritorioPatientId),
+          expectedServerVersion: 3,
+        );
+
+        confereRecusa(result, antes);
+        expect(store.rows[_localId]!.status, 'realizada');
+      });
     });
 
     group('recusas iguais às do sync', () {

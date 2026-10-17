@@ -601,6 +601,23 @@ class VisitSyncService {
     }
 
     if (!legacy && existing != null) {
+      // O território acima foi conferido contra o paciente DECLARADO. Sem
+      // isto, um ACS movido de microárea (`admin.setAcsMicroArea`) mandaria o
+      // `localId` de uma visita sua antiga com um paciente da área nova e
+      // receberia a cópia da área de origem no `conflict` (ou a sobrescreveria
+      // pelo `resolveConflict`). Antes da autoria, para nenhuma resposta
+      // revelar que o `localId` existe; a resposta é a mesma da recusa
+      // territorial, como no ramo legado.
+      if (existing.patientId != patientId) {
+        await _audit.recordSafely(AuditEvent(
+          userId: user.id,
+          actionType: 'write',
+          resourceType: 'visit',
+          resourceId: patientId.uuid,
+          result: 'denied_patient_mismatch',
+        ));
+        return _Refused(_outsideTerritory(entry));
+      }
       final acsId = UuidValue.fromString(user.id);
       if (existing.acsId == null) {
         // Visita sem autor (legado, D4): o `sync` comum NÃO a reivindica — se
