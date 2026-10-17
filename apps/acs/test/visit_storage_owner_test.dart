@@ -508,6 +508,84 @@ CREATE TABLE offline_visits (
       expect((await b.load()).length, 2);
     });
   });
+
+  test('ida e volta de visita em conflito', () async {
+    final loja = storage.forOwner('acs-a');
+    final concluida = DateTime.utc(2026, 10, 16, 12, 30);
+    final emConflito = OfflineVisitRecord(
+      patientId: seedPatientId,
+      risk: 'red',
+      status: 'PENDENTE',
+      outcome: 'realizada',
+      localId: 'local-conflito',
+      conflictServerVersion: 3,
+      conflictServer: VisitConflictSnapshot(
+        version: 3,
+        status: 'Paciente ausente',
+        notes: 'Sem resposta',
+        completedAt: concluida,
+      ),
+    );
+    await loja.save([emConflito, _visita('local-normal')]);
+
+    final lidas = {for (final v in await loja.load()) v.localId: v};
+    final c = lidas['local-conflito']!;
+    expect(c.inConflict, isTrue);
+    expect(c.conflictServerVersion, 3);
+    expect(c.conflictServer!.version, 3);
+    expect(c.conflictServer!.status, 'Paciente ausente');
+    expect(c.conflictServer!.notes, 'Sem resposta');
+    expect(c.conflictServer!.completedAt, concluida);
+
+    final n = lidas['local-normal']!;
+    expect(n.inConflict, isFalse);
+    expect(n.conflictServerVersion, isNull);
+    expect(n.conflictServer, isNull);
+
+    expect((await storage.countsByOwner())['acs-a'], 2);
+  });
+
+  test('wipeAllData com só a linha em conflito lança WipeBlocked(1)', () async {
+    await storage.forOwner('acs-a').save([
+      OfflineVisitRecord(
+        patientId: seedPatientId,
+        risk: 'red',
+        status: 'PENDENTE',
+        localId: 'local-conflito',
+        conflictServerVersion: 2,
+        conflictServer: const VisitConflictSnapshot(
+          version: 2,
+          status: 'Realizada',
+          notes: '',
+        ),
+      ),
+    ]);
+    await expectLater(
+      storage.wipeAllData(),
+      throwsA(isA<WipeBlocked>().having((e) => e.unsent, 'unsent', 1)),
+    );
+  });
+
+  test('VisitConflictSnapshot: toJson/fromJson ida e volta', () {
+    final snapshot = VisitConflictSnapshot(
+      version: 4,
+      status: 'Paciente ausente',
+      notes: 'a\nb',
+      completedAt: DateTime.utc(2026, 10, 16, 8),
+    );
+    final json = snapshot.toJson();
+    expect(json['completedAt'], '2026-10-16T08:00:00.000Z');
+    final volta = VisitConflictSnapshot.fromJson(json);
+    expect(volta.version, 4);
+    expect(volta.status, 'Paciente ausente');
+    expect(volta.notes, 'a\nb');
+    expect(volta.completedAt, DateTime.utc(2026, 10, 16, 8));
+
+    final semData = VisitConflictSnapshot.fromJson(
+      const VisitConflictSnapshot(version: 1, status: 's', notes: '').toJson(),
+    );
+    expect(semData.completedAt, isNull);
+  });
 }
 
 /// Erro do sqflite como o plugin entrega (mensagem do SQLite/plugin).

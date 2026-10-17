@@ -29,6 +29,40 @@ class SyncOutcome {
   final String? message;
 }
 
+/// Cópia da visita no servidor, guardada junto à visita local em conflito (#79).
+///
+/// Sem identificação do paciente: só o que o ACS precisa para comparar.
+class VisitConflictSnapshot {
+  const VisitConflictSnapshot({
+    required this.version,
+    required this.status,
+    required this.notes,
+    this.completedAt,
+  });
+
+  final int version;
+  final String status;
+  final String notes;
+  final DateTime? completedAt;
+
+  Map<String, Object?> toJson() => {
+        'version': version,
+        'status': status,
+        'notes': notes,
+        'completedAt': completedAt?.toUtc().toIso8601String(),
+      };
+
+  factory VisitConflictSnapshot.fromJson(Map<String, Object?> json) {
+    final completedAt = json['completedAt'] as String?;
+    return VisitConflictSnapshot(
+      version: json['version']! as int,
+      status: json['status']! as String,
+      notes: json['notes']! as String,
+      completedAt: completedAt == null ? null : DateTime.parse(completedAt),
+    );
+  }
+}
+
 class OfflineVisitRecord {
   OfflineVisitRecord({
     required this.patientId,
@@ -40,6 +74,8 @@ class OfflineVisitRecord {
     String? localId,
     DateTime? createdAt,
     this.version = 1,
+    this.conflictServerVersion,
+    this.conflictServer,
   })  : localId = localId ?? _newLocalId(),
         createdAt = createdAt ?? DateTime.now();
 
@@ -82,6 +118,15 @@ class OfflineVisitRecord {
   /// `copyWith`.
   final String? rejectionReason;
 
+  /// Versão que o servidor tinha quando respondeu `conflict` (#79). Não-nulo =
+  /// a visita está em conflito e fica no aparelho até o ACS decidir.
+  final int? conflictServerVersion;
+
+  /// Cópia da visita no servidor, vista no conflito, para o ACS comparar.
+  final VisitConflictSnapshot? conflictServer;
+
+  bool get inConflict => conflictServerVersion != null;
+
   OfflineVisitRecord copyWith({
     String? patientId,
     String? risk,
@@ -92,6 +137,8 @@ class OfflineVisitRecord {
     String? localId,
     DateTime? createdAt,
     int? version,
+    int? conflictServerVersion,
+    VisitConflictSnapshot? conflictServer,
   }) {
     return OfflineVisitRecord(
       patientId: patientId ?? this.patientId,
@@ -103,6 +150,8 @@ class OfflineVisitRecord {
       localId: localId ?? this.localId,
       createdAt: createdAt ?? this.createdAt,
       version: version ?? this.version,
+      conflictServerVersion: conflictServerVersion ?? this.conflictServerVersion,
+      conflictServer: conflictServer ?? this.conflictServer,
     );
   }
 

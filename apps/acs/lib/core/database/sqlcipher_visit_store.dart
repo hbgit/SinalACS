@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:sinalacs_acs/core/database/encrypted_database.dart';
 import 'package:sinalacs_acs/core/security/database_key_store.dart';
@@ -181,7 +183,16 @@ OfflineVisitRecord _recordFrom(Map<String, Object?> row) => OfflineVisitRecord(
       localId: row['local_id']! as String,
       createdAt: DateTime.parse(row['created_at']! as String),
       version: row['version']! as int,
+      conflictServerVersion: row['conflict_server_version'] as int?,
+      conflictServer: _snapshotFrom(row['conflict_server_snapshot'] as String?),
     );
+
+VisitConflictSnapshot? _snapshotFrom(String? raw) {
+  if (raw == null) return null;
+  return VisitConflictSnapshot.fromJson(
+    Map<String, Object?>.from(jsonDecode(raw) as Map),
+  );
+}
 
 /// Armazenamento por dono sobre UM [VisitDatabase].
 class SqlCipherVisitStorage implements VisitStorage {
@@ -338,6 +349,10 @@ class SqlCipherVisitStore implements VisitStore {
           'version': visit.version,
           'rejection_reason': visit.rejectionReason,
           'owner': owner,
+          'conflict_server_version': visit.conflictServerVersion,
+          'conflict_server_snapshot': visit.conflictServer == null
+              ? null
+              : jsonEncode(visit.conflictServer!.toJson()),
         });
       }
     });
