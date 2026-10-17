@@ -1,0 +1,9 @@
+### Motivo da limpeza remota de um aparelho (#81). Conjunto fechado, sem texto
+### livre: o motivo vai para a trilha de auditoria e texto livre ali seria um
+### canal para dado pessoal.
+enum: DeviceWipeReason
+serialized: byName
+values:
+  - lost
+  - stolen
+  - replaced

@@ -151,6 +151,44 @@ class BackendAdminDataSource implements AdminDataSource {
   );
 
   @override
+  Future<List<AcsDevice>> fetchAcsDevices(String acsId) => _guard(() async {
+    final lista = await _admin.acsDevices(accessToken: _accessToken, acsId: acsId);
+    return [
+      for (final d in lista)
+        AcsDevice(
+          deviceId: d.deviceId,
+          label: d.label,
+          lastSeenAt: d.lastSeenAt,
+          // Por nome, nunca por índice: a ordem do enum não é contrato.
+          wipeState: d.wipeState == null ? null : DeviceWipeState.values.byName(d.wipeState!.name),
+          wipeRequestedAt: d.wipeRequestedAt,
+          wipeConfirmedAt: d.wipeConfirmedAt,
+        ),
+    ];
+  }, invalido: 'Aparelho não encontrado.');
+
+  @override
+  Future<DeviceWipeOrderResult> orderDeviceWipe({
+    required String acsId,
+    required String deviceId,
+    required DeviceWipeReason reason,
+  }) => _guard(() async {
+    final r = await _admin.orderDeviceWipe(
+      accessToken: _accessToken,
+      acsId: acsId,
+      deviceId: deviceId,
+      reason: api.DeviceWipeReason.values.byName(reason.name),
+    );
+    return DeviceWipeOrderResult(
+      orderId: r.orderId,
+      requestedAt: r.requestedAt,
+      alreadyOrdered: r.alreadyOrdered,
+    );
+    // Texto fixo: a recusa do servidor ('Aparelho não encontrado.') é a mesma
+    // para fora do escopo e para aparelho alheio, e não vira texto de tela.
+  }, invalido: 'Aparelho não encontrado.');
+
+  @override
   Future<NewStaffActivation> resetStaffMfa({required String staffId}) =>
       _guardEscrita(() async {
         final r = await _admin.resetStaffMfa(

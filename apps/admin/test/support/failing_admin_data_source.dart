@@ -143,6 +143,16 @@ class FailingAdminDataSource implements AdminDataSource {
   Future<String> resetAcsPassword({required String acsId}) => inner.resetAcsPassword(acsId: acsId);
 
   @override
+  Future<List<AcsDevice>> fetchAcsDevices(String acsId) => inner.fetchAcsDevices(acsId);
+
+  @override
+  Future<DeviceWipeOrderResult> orderDeviceWipe({
+    required String acsId,
+    required String deviceId,
+    required DeviceWipeReason reason,
+  }) => inner.orderDeviceWipe(acsId: acsId, deviceId: deviceId, reason: reason);
+
+  @override
   Future<void> resetAcsMfa({required String acsId}) => inner.resetAcsMfa(acsId: acsId);
 
   @override

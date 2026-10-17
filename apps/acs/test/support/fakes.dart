@@ -144,6 +144,13 @@ class FakeAcsBackend implements AcsBackend {
   /// Quantas chamadas a [beginTotpEnrollment] ainda falham antes de funcionar.
   int enrollmentFailuresLeft = 0;
 
+  /// Id da instalação que o [login] lê, como o `BackendClient` real (#81).
+  /// `null`: o login não registra id nenhum.
+  DeviceIdStore? deviceIds;
+
+  /// `deviceId` lido a cada [login], na ordem.
+  final List<String> loginDeviceIds = <String>[];
+
   @override
   Future<AuthSession> login({
     required String matricula,
@@ -151,6 +158,8 @@ class FakeAcsBackend implements AcsBackend {
     String? totpCode,
   }) async {
     loginCount++;
+    final ids = deviceIds;
+    if (ids != null) loginDeviceIds.add(await ids.readOrCreate());
     lastCredentials = (matricula: matricula, senha: senha);
     lastTotpCode = totpCode;
     if (sessionExpired && expectedTotpCode != null && totpCode == null) throw const MfaCodeRequired();
@@ -478,6 +487,61 @@ class FakeAcsBackend implements AcsBackend {
     final failure = noticeFailure;
     if (failure != null) throw failure;
     return noticeResult;
+  }
+
+  @override
+  void Function(String orderId)? onDeviceWipeRequired;
+
+  /// O que `pendingDeviceWipe` devolve (`null`: nenhum pedido de limpeza).
+  String? pendingWipeOrderId;
+
+  /// Falha de `pendingDeviceWipe`, como a queda de rede.
+  BackendFailure? pendingWipeFailure;
+
+  /// Se definido, `pendingDeviceWipe` espera por ele (consulta em voo).
+  Completer<void>? pendingWipeGate;
+
+  /// `deviceId` de cada consulta, na ordem.
+  final List<String> pendingWipeQueries = <String>[];
+
+  @override
+  Future<String?> pendingDeviceWipe(String deviceId) async {
+    pendingWipeQueries.add(deviceId);
+    await pendingWipeGate?.future;
+    final failure = pendingWipeFailure;
+    if (failure != null) throw failure;
+    return pendingWipeOrderId;
+  }
+
+  /// Falha de `confirmDeviceWipe` (sem rede).
+  BackendFailure? confirmWipeFailure;
+
+  /// Chamado a cada `confirmDeviceWipe`, antes da falha configurada.
+  void Function()? onConfirmDeviceWipe;
+
+  /// Confirmações que chegaram ao "servidor" (só as que não falharam).
+  final List<({String deviceId, String orderId})> confirmedWipes = <({String deviceId, String orderId})>[];
+
+  /// Se definido, `confirmDeviceWipe` espera por ele (servidor que aceita a
+  /// conexão e não responde).
+  Completer<void>? confirmWipeGate;
+
+  @override
+  Future<void> confirmDeviceWipe(String deviceId, String orderId) async {
+    onConfirmDeviceWipe?.call();
+    await confirmWipeGate?.future;
+    final failure = confirmWipeFailure;
+    if (failure != null) throw failure;
+    confirmedWipes.add((deviceId: deviceId, orderId: orderId));
+  }
+
+  int forgetLocalSessionCount = 0;
+
+  @override
+  Future<void> forgetLocalSession() async {
+    forgetLocalSessionCount++;
+    storedRefreshToken = null;
+    _session = null;
   }
 
   /// Entradas que `pullVisits` devolve. Vazio por padrão.

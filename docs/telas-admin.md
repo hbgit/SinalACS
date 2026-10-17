@@ -54,6 +54,12 @@ A segunda seção lista as contas de coordenação e administração (matrícula
 
 **Capturas pendentes:** as imagens da gestão (seção de ACS com os cartões e as quatro ações, formulário de Novo ACS, diálogo de vínculo, confirmação destrutiva, credencial mostrada uma única vez e a seção Equipe) **não foram capturadas** — as capturas 03 a 08 acima são anteriores à #43. Elas exigem uma sessão real no emulador contra o banco de teste; até lá, o texto descreve o que a tela faz e nenhuma imagem foi inventada.
 
+### Aparelhos do ACS e limpeza remota (issue #81)
+
+Cada cartão de ACS tem o botão **Aparelhos**, que abre um diálogo com os aparelhos em que aquela conta entrou (rótulo curto, "Último acesso em DD/MM às HH:MM" e o estado: sem pedido, "Limpeza pedida", "Pedido entregue ao aparelho" ou "Aparelho limpo", com a hora quando existe). Sem aparelhos, o diálogo diz isso em texto. Cada aparelho sem pedido tem o botão **Limpar remotamente**: primeiro o motivo (**Perdido**, **Roubado** ou **Substituído**), depois uma confirmação destrutiva "Limpar aparelho" (vermelho `redOnSurface`) que avisa que o aparelho perde o acesso na hora e apaga os dados, inclusive **visitas ainda não enviadas**. Pedir de novo devolve o pedido original; fora da UBS (coordenador) ou aparelho que o ACS nunca usou dão a mesma recusa em texto fixo. Depois do pedido a lista é relida do servidor. "Aparelho limpo" é a confirmação enviada pelo próprio aparelho, não uma prova de que ele apagou (ver `PROGRESS.md`, seção #81).
+
+**Capturas pendentes:** a lista de aparelhos, a etapa do motivo e a confirmação destrutiva **não foram capturadas**; nenhuma imagem foi inventada.
+
 ## Alertas da UBS
 
 ![Consulta de alertas filtrável](screenshots/admin/04-alertas.png)

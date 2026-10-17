@@ -28,12 +28,14 @@ import 'package:sinalacs_server/src/generated/api/admin_audit_filter.dart'
     as _i14;
 import 'package:sinalacs_server/src/generated/enums/data_subject_request_status.dart'
     as _i15;
-import 'package:sinalacs_server/src/generated/enums/escalation_reason.dart'
+import 'package:sinalacs_server/src/generated/enums/device_wipe_reason.dart'
     as _i16;
-import 'package:sinalacs_server/src/generated/enums/consent_purpose.dart'
+import 'package:sinalacs_server/src/generated/enums/escalation_reason.dart'
     as _i17;
-import 'package:sinalacs_server/src/generated/api/visit_sync_entry.dart'
+import 'package:sinalacs_server/src/generated/enums/consent_purpose.dart'
     as _i18;
+import 'package:sinalacs_server/src/generated/api/visit_sync_entry.dart'
+    as _i19;
 
 class Endpoints extends _i1.EndpointDispatch {
   @override
@@ -661,6 +663,67 @@ class Endpoints extends _i1.EndpointDispatch {
                     staffId: params['staffId'],
                   ),
         ),
+        'acsDevices': _i1.MethodConnector(
+          name: 'acsDevices',
+          params: {
+            'accessToken': _i1.ParameterDescription(
+              name: 'accessToken',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'acsId': _i1.ParameterDescription(
+              name: 'acsId',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async => (endpoints['admin'] as _i2.AdminEndpoint).acsDevices(
+                session,
+                accessToken: params['accessToken'],
+                acsId: params['acsId'],
+              ),
+        ),
+        'orderDeviceWipe': _i1.MethodConnector(
+          name: 'orderDeviceWipe',
+          params: {
+            'accessToken': _i1.ParameterDescription(
+              name: 'accessToken',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'acsId': _i1.ParameterDescription(
+              name: 'acsId',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'deviceId': _i1.ParameterDescription(
+              name: 'deviceId',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'reason': _i1.ParameterDescription(
+              name: 'reason',
+              type: _i1.getType<_i16.DeviceWipeReason>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async =>
+                  (endpoints['admin'] as _i2.AdminEndpoint).orderDeviceWipe(
+                    session,
+                    accessToken: params['accessToken'],
+                    acsId: params['acsId'],
+                    deviceId: params['deviceId'],
+                    reason: params['reason'],
+                  ),
+        ),
         'escalateAlert': _i1.MethodConnector(
           name: 'escalateAlert',
           params: {
@@ -676,7 +739,7 @@ class Endpoints extends _i1.EndpointDispatch {
             ),
             'reason': _i1.ParameterDescription(
               name: 'reason',
-              type: _i1.getType<_i16.EscalationReason>(),
+              type: _i1.getType<_i17.EscalationReason>(),
               nullable: false,
             ),
           },
@@ -1387,6 +1450,50 @@ class Endpoints extends _i1.EndpointDispatch {
                     platform: params['platform'],
                   ),
         ),
+        'pendingWipe': _i1.MethodConnector(
+          name: 'pendingWipe',
+          params: {
+            'deviceId': _i1.ParameterDescription(
+              name: 'deviceId',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async =>
+                  (endpoints['devices'] as _i5.DevicesEndpoint).pendingWipe(
+                    session,
+                    params['deviceId'],
+                  ),
+        ),
+        'confirmWipe': _i1.MethodConnector(
+          name: 'confirmWipe',
+          params: {
+            'deviceId': _i1.ParameterDescription(
+              name: 'deviceId',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'orderId': _i1.ParameterDescription(
+              name: 'orderId',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async =>
+                  (endpoints['devices'] as _i5.DevicesEndpoint).confirmWipe(
+                    session,
+                    params['deviceId'],
+                    params['orderId'],
+                  ),
+        ),
       },
     );
     connectors['health'] = _i1.EndpointConnector(
@@ -1617,7 +1724,7 @@ class Endpoints extends _i1.EndpointDispatch {
             ),
             'purpose': _i1.ParameterDescription(
               name: 'purpose',
-              type: _i1.getType<_i17.ConsentPurpose>(),
+              type: _i1.getType<_i18.ConsentPurpose>(),
               nullable: false,
             ),
             'granted': _i1.ParameterDescription(
@@ -1686,7 +1793,7 @@ class Endpoints extends _i1.EndpointDispatch {
             ),
             'purpose': _i1.ParameterDescription(
               name: 'purpose',
-              type: _i1.getType<_i17.ConsentPurpose>(),
+              type: _i1.getType<_i18.ConsentPurpose>(),
               nullable: false,
             ),
           },
@@ -1864,7 +1971,7 @@ class Endpoints extends _i1.EndpointDispatch {
             ),
             'visits': _i1.ParameterDescription(
               name: 'visits',
-              type: _i1.getType<List<_i18.VisitSyncEntry>>(),
+              type: _i1.getType<List<_i19.VisitSyncEntry>>(),
               nullable: false,
             ),
           },
@@ -1888,7 +1995,7 @@ class Endpoints extends _i1.EndpointDispatch {
             ),
             'visit': _i1.ParameterDescription(
               name: 'visit',
-              type: _i1.getType<_i18.VisitSyncEntry>(),
+              type: _i1.getType<_i19.VisitSyncEntry>(),
               nullable: false,
             ),
             'expectedServerVersion': _i1.ParameterDescription(
@@ -1924,7 +2031,7 @@ class Endpoints extends _i1.EndpointDispatch {
             ),
             'visits': _i1.ParameterDescription(
               name: 'visits',
-              type: _i1.getType<List<_i18.VisitSyncEntry>>(),
+              type: _i1.getType<List<_i19.VisitSyncEntry>>(),
               nullable: false,
             ),
           },
@@ -1955,7 +2062,7 @@ class Endpoints extends _i1.EndpointDispatch {
             ),
             'visits': _i1.ParameterDescription(
               name: 'visits',
-              type: _i1.getType<List<_i18.VisitSyncEntry>>(),
+              type: _i1.getType<List<_i19.VisitSyncEntry>>(),
               nullable: false,
             ),
           },

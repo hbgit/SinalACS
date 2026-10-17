@@ -56,6 +56,10 @@ class MemorySessionTokenStore implements SessionTokenStore {
 /// refresh token a ele e recusa a troca por outro aparelho.
 abstract interface class DeviceIdStore {
   Future<String> readOrCreate();
+
+  /// Apaga o id desta instalação (limpeza remota, #81, D1): o próximo
+  /// [readOrCreate] gera outro, e o id antigo nunca volta.
+  Future<void> delete();
 }
 
 /// UUID v4 aleatório (sem dependência extra).
@@ -76,4 +80,7 @@ class MemoryDeviceIdStore implements DeviceIdStore {
 
   @override
   Future<String> readOrCreate() async => _id ??= generateDeviceId();
+
+  @override
+  Future<void> delete() async => _id = null;
 }

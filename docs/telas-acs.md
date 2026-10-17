@@ -54,6 +54,12 @@ Exibe uma proximidade sintética e atalho para o formulário de visita. Rastream
 
 Permite preparar público-alvo e mensagem comunitária. O envio depende da futura integração FCM/APNs e das regras de segmentação por microárea.
 
+## Aparelho limpo pela coordenação (issue #81)
+
+Quando a coordenação ordena a limpeza do aparelho, o app a aplica sozinho na partida, ao voltar do segundo plano, quando a rede volta ou na renovação da sessão. Se o ACS estava com o painel ou um formulário aberto, tudo some sem aviso prévio: a fila em memória é descartada sem gravar, o banco cifrado, a chave e os tokens de envio são apagados e aparece a tela **Aparelho limpo pela coordenação** (`device_wiped`), que explica que os dados foram apagados a pedido da coordenação da UBS, inclusive as visitas não enviadas, e que os alertas continuam com a equipe da UBS. Se a confirmação ao servidor ainda não saiu (sem rede), a tela mostra uma linha avisando que a confirmação está pendente. O botão **Entrar de novo** leva ao login, que funciona normalmente com uma identidade de aparelho nova. Na partida, o login espera até 5 s pela consulta quando o servidor não responde.
+
+**Capturas pendentes:** a tela `device_wiped` não foi capturada (a janela do ACS é `FLAG_SECURE`; ver "Captura de tela" abaixo).
+
 ## Referências
 
 - [Implementação Flutter](../apps/acs/lib/app/app.dart)

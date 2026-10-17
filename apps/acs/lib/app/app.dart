@@ -7,6 +7,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:sinalacs_acs/app/acs_theme.dart';
 import 'package:sinalacs_acs/app/app_lock_gate.dart';
+import 'package:sinalacs_acs/app/device_wiped_screen.dart';
 import 'package:sinalacs_acs/app/pending_alerts_banner.dart';
 import 'package:sinalacs_acs/app/invite_screen.dart';
 import 'package:sinalacs_acs/app/mfa_enrollment_screen.dart';
@@ -29,6 +30,7 @@ import 'package:sinalacs_acs/core/services/micro_area_directory.dart';
 import 'package:sinalacs_acs/core/services/offline_visit_queue.dart';
 import 'package:sinalacs_client/sinalacs_client.dart' show MicroAreaPatient;
 import 'package:sinalacs_acs/core/services/reconnect_schedule.dart';
+import 'package:sinalacs_acs/core/services/remote_wipe.dart';
 import 'package:sinalacs_acs/core/services/route_service.dart';
 import 'package:sinalacs_acs/core/services/theme_controller.dart';
 import 'package:sinalacs_acs/core/services/visit_pull_service.dart';
@@ -56,6 +58,7 @@ class SinalAcsApp extends StatefulWidget {
     this.uploadTokens,
     this.deviceIds,
     this.connectivityChanges,
+    this.wipeJournal,
   });
 
   /// Envio diferido (D4/D7) já montado — gancho de teste. `null` monta um
@@ -75,6 +78,11 @@ class SinalAcsApp extends StatefulWidget {
   /// `connectivity_plus`). Passar a ter rede dispara o envio diferido. `null`:
   /// sem esse gatilho (o canal de plataforma não existe no `flutter test`).
   final Stream<bool>? connectivityChanges;
+
+  /// Diário da limpeza remota (#81, D7). Em produção, o `main.dart` passa o
+  /// `SharedPreferencesWipeJournal`; `null` usa um diário só em memória. A
+  /// limpeza remota só existe com [deviceIds] (o id que o servidor conhece).
+  final WipeJournal? wipeJournal;
 
   /// Desbloqueio local (digital/rosto ou bloqueio de tela). `null` usa
   /// [LocalAuthBiometricGate]; testes injetam um duplo.
@@ -145,6 +153,18 @@ const sessionEndSendTimeout = Duration(seconds: 20);
 /// Teto de cada revogação de token de envio no "Limpar este aparelho"
 /// (best-effort: o token apagado do aparelho já não serve a ninguém aqui).
 const wipeRevokeTimeout = Duration(seconds: 5);
+
+/// Teto da consulta de limpeza remota na partida (#81, D3): o login espera por
+/// ela para não abrir a sessão de um aparelho já mandado limpar, mas sem rede
+/// que responda ele segue — a consulta continua e, se trouxer pedido, a
+/// limpeza acontece por cima do login.
+const startupWipeCheckTimeout = Duration(seconds: 5);
+
+/// Teto de cada espera de quadro na desmontagem do painel antes da limpeza
+/// remota. Em segundo plano o Flutter não desenha quadros: sem teto, a
+/// limpeza ficaria parada até o app voltar. Com a fila já selada, apagar antes
+/// de o painel sair é seguro; ele sai no próximo quadro.
+const remoteWipeFrameWait = Duration(milliseconds: 500);
 
 /// O que o painel pede ao app ao encerrar o turno ou limpar o aparelho: o app
 /// é dono do armazenamento, das filas memoizadas e do envio diferido.
@@ -432,6 +452,10 @@ class _SinalAcsAppState extends State<SinalAcsApp> with WidgetsBindingObserver i
     // Reconta e apaga numa transação; recusa sem apagar nada se sobrou visita.
     await _storage.wipeAllData();
 
+    // Só depois da recusa acima: sem visita nenhuma, o arquivo e a chave saem e
+    // o próximo uso abre um banco novo com chave nova (CRIPTO-APP-CACHE).
+    await _storage.destroyAll();
+
     final tokens = widget.uploadTokens;
     if (tokens != null) {
       Set<String> owners;
@@ -490,14 +514,274 @@ class _SinalAcsAppState extends State<SinalAcsApp> with WidgetsBindingObserver i
   /// nada (nem conteúdo clínico, nem erro) — `flushAll` não lança, é
   /// single-flight, e o que não subir fica para o próximo gatilho.
   void _triggerFlush() {
+    // Antes do diário da partida ou durante a limpeza remota, nada sai: o
+    // banco pode estar sendo apagado (#81).
+    if (!_wipeReady || _wiping) return;
     final flush = _flush;
     if (flush != null) unawaited(flush.flushAll());
   }
+
+  // ---------------------------------------------------------------------------
+  // Limpeza remota pedida pela coordenação (#81).
+  //
+  // Ordem na partida: `resumePending()` (diário em `erasing` ou `erased`) ANTES
+  // de qualquer uso do banco e de ligar os outros gatilhos — o single-flight do
+  // coordenador ignora o `orderId`, e uma retomada correndo com um `apply`
+  // poderia perder um pedido. Depois, `check()` com teto, e só então o login.
+  // Retomada e volta da rede repetem `resumePending()` (reenvia a confirmação
+  // que ficou no diário, D7) e `check()`. INV-03: nada aqui reconhece nem
+  // conclui alerta; eles seguem `pending` no servidor.
+  // ---------------------------------------------------------------------------
+
+  late final WipeJournal _wipeJournal = widget.wipeJournal ?? MemoryWipeJournal();
+
+  /// Sem [SinalAcsApp.deviceIds] não há id da instalação para perguntar ao
+  /// servidor: sem limpeza remota (o padrão dos testes de widget).
+  late final RemoteWipeCoordinator? _remoteWipe = widget.deviceIds == null
+      ? null
+      : RemoteWipeCoordinator(
+          backend: widget.backend,
+          deviceIds: widget.deviceIds!,
+          journal: _wipeJournal,
+          erase: _eraseDevice,
+          onWiped: _onDeviceWiped,
+        );
+
+  /// `false` até o diário e a consulta da partida terminarem: até lá a raiz
+  /// é uma espera neutra, e nem o login nem o envio diferido tocam no banco.
+  final ValueNotifier<bool> _wipeReadyNotifier = ValueNotifier<bool>(false);
+  bool get _wipeReady => _wipeReadyNotifier.value;
+
+  /// `true` do começo do apagador até `onWiped` (ou até a falha dele).
+  bool _wiping = false;
+
+  /// `true` com a tela `device_wiped` à vista: o [AppLockGate] sai de cima
+  /// dela (não há o que proteger, e não há sessão para desbloquear).
+  bool _showingWiped = false;
+
+  /// Diário em `erased`: o aparelho está limpo, mas a confirmação não chegou.
+  final ValueNotifier<bool> _wipePendingConfirm = ValueNotifier<bool>(false);
+
+  Future<void> _startRemoteWipe() async {
+    final wipe = _remoteWipe!;
+    try {
+      // A limpeza pendente termina aqui, sem teto, antes de qualquer uso do
+      // banco; só a confirmação tem teto (servidor mudo não segura o login).
+      await wipe.resumePending(confirmTimeout: startupWipeCheckTimeout);
+    } catch (_) {
+      // O apagador falhou: o diário segue em `erasing` e a próxima retomada,
+      // volta da rede ou partida tenta de novo. Nada do erro vai ao log.
+      developer.log('Limpeza remota pendente não terminou.', name: 'sinalacs.acs.remote_wipe');
+    }
+    if (!mounted) return;
+    widget.backend.onDeviceWipeRequired = _onDeviceWipeRequired;
+    await wipe.check().timeout(startupWipeCheckTimeout, onTimeout: () => false);
+    await _refreshWipePendingConfirm();
+    if (!mounted) return;
+    _wipeReadyNotifier.value = true;
+  }
+
+  /// Login, renovação ou envio diferido recusados com pedido de limpeza.
+  void _onDeviceWipeRequired(String orderId) {
+    final wipe = _remoteWipe;
+    if (wipe == null || !mounted) return;
+    unawaited(() async {
+      try {
+        await wipe.apply(orderId);
+      } catch (_) {
+        developer.log('Limpeza remota não terminou.', name: 'sinalacs.acs.remote_wipe');
+      }
+      await _refreshWipePendingConfirm();
+    }());
+  }
+
+  /// Retomada e volta da rede: reenvia a confirmação pendente e pergunta se
+  /// há pedido. `true` quando o aparelho foi limpo agora.
+  Future<bool> _checkRemoteWipe() async {
+    final wipe = _remoteWipe;
+    if (wipe == null || !_wipeReady) return false;
+    try {
+      await wipe.resumePending();
+    } catch (_) {
+      developer.log('Limpeza remota pendente não terminou.', name: 'sinalacs.acs.remote_wipe');
+    }
+    final wiped = await wipe.check();
+    await _refreshWipePendingConfirm();
+    return wiped;
+  }
+
+  /// Gatilho da retomada e da volta da rede: primeiro a limpeza, e o envio
+  /// diferido só se o aparelho não foi limpo.
+  void _onForegroundOrOnline() {
+    if (_remoteWipe == null) {
+      _triggerFlush();
+      return;
+    }
+    unawaited(() async {
+      final wiped = await _checkRemoteWipe();
+      if (!wiped && mounted) _triggerFlush();
+    }());
+  }
+
+  Future<void> _refreshWipePendingConfirm() async {
+    WipeJournalEntry? entry;
+    try {
+      entry = await _wipeJournal.read();
+    } catch (_) {
+      entry = null;
+    }
+    if (!mounted) return;
+    _wipePendingConfirm.value = entry?.phase == WipePhase.erased;
+  }
+
+  /// O apagador ([DeviceEraser]) do coordenador. Idempotente. Primeiro SELA
+  /// toda fila em memória ([OfflineVisitQueue.seal]): um envio em voo que
+  /// termine depois da destruição gravaria de novo, num banco recriado com
+  /// chave nova, as visitas que a coordenação mandou apagar. Depois desmonta o
+  /// painel (feed MQTT, reserva por HTTP, timers e formulários saem com ele;
+  /// em segundo plano, no próximo quadro), descarta as filas SEM gravar e
+  /// apaga, nesta ordem: a sessão local, o banco e a chave do SQLCipher, os
+  /// tokens de envio (sem revogar: o servidor já os revogou no pedido) e o id
+  /// da instalação. D2: ao contrário do "Limpar este aparelho", nada aqui
+  /// recusa por visita não enviada.
+  ///
+  /// Junto com as filas, SELA o pull de cada escopo e o cache da microárea
+  /// ([MicroAreaDirectory.seal]): a lista ou o pull que o painel pediu antes e
+  /// que só volte da rede depois da destruição reabriria o banco, criaria uma
+  /// chave nova e gravaria nomes e condições crônicas num aparelho que o
+  /// servidor registra como limpo. O selo do cache só abre no próximo login
+  /// ([_scopeForShell]).
+  Future<void> _eraseDevice() async {
+    _wiping = true;
+    try {
+      for (final queue in {..._queues.values, for (final scope in _scopes.values) scope.queue}) {
+        queue.seal();
+      }
+      for (final pull in {for (final scope in _scopes.values) scope.pullService, ?widget.visitPullService}) {
+        pull.seal();
+      }
+      final cacheSealed = widget.microAreaDirectory?.seal();
+      await _tearDownForWipe();
+      await cacheSealed;
+      final owners = <String>{..._queues.keys};
+      _queues.clear();
+      _scopes.clear();
+      await widget.backend.forgetLocalSession();
+      await _storage.destroyAll();
+      final tokens = widget.uploadTokens;
+      if (tokens != null) {
+        try {
+          owners.addAll(await tokens.owners());
+        } catch (_) {}
+        try {
+          await tokens.clearAll(alsoOwners: owners);
+        } catch (_) {
+          // Keystore falhou: sem banco, um token que sobrar não acha visita
+          // nenhuma, e o servidor já o revogou.
+        }
+      }
+      await widget.deviceIds!.delete();
+    } catch (_) {
+      // As filas já estão seladas: nenhuma serve ao próximo login, que relê o
+      // disco (o diário segue em `erasing` e a limpeza é refeita depois).
+      _queues.clear();
+      _scopes.clear();
+      _wiping = false;
+      if (mounted) _openFreshLogin();
+      rethrow;
+    }
+  }
+
+  /// Tira o painel (e tudo o mais) da pilha e espera, com teto, os quadros em
+  /// que os `State`s saem. Sem quadros (segundo plano), não espera: a fila já
+  /// está selada, e o painel sai no primeiro quadro da volta.
+  Future<void> _tearDownForWipe() async {
+    var nav = _navigatorKey.currentState;
+    if (nav == null) {
+      await _frame();
+      nav = _navigatorKey.currentState;
+    }
+    if (nav == null || !mounted) return;
+    nav.pushAndRemoveUntil(
+      PageRouteBuilder<void>(
+        transitionDuration: Duration.zero,
+        reverseTransitionDuration: Duration.zero,
+        pageBuilder: (_, __, ___) => const _WipeHold(),
+      ),
+      (_) => false,
+    );
+    await _frame();
+    await _frame();
+  }
+
+  Future<void> _frame() async {
+    final binding = WidgetsBinding.instance;
+    if (!binding.framesEnabled) return;
+    await binding.endOfFrame.timeout(remoteWipeFrameWait, onTimeout: () {});
+  }
+
+  /// `onWiped`: a pilha inteira vira a tela `device_wiped`, fora do bloqueio.
+  void _onDeviceWiped() {
+    _wiping = false;
+    if (!mounted) return;
+    setState(() => _showingWiped = true);
+    void show() => _navigatorKey.currentState?.pushAndRemoveUntil(
+          PageRouteBuilder<void>(
+            transitionDuration: Duration.zero,
+            reverseTransitionDuration: Duration.zero,
+            pageBuilder: (_, __, ___) => DeviceWipedScreen(
+              pendingConfirm: _wipePendingConfirm,
+              onLoginAgain: _loginAgainAfterWipe,
+            ),
+          ),
+          (_) => false,
+        );
+    if (_navigatorKey.currentState != null) {
+      show();
+    } else {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) show();
+      });
+    }
+  }
+
+  /// "Entrar de novo": login novo, com o bloqueio de volta. O id da instalação
+  /// já foi trocado pelo apagador; o próximo login gera e envia o novo.
+  void _loginAgainAfterWipe() {
+    if (!mounted) return;
+    setState(() => _showingWiped = false);
+    _openFreshLogin();
+  }
+
+  void _openFreshLogin() {
+    _navigatorKey.currentState?.pushAndRemoveUntil(
+      MaterialPageRoute<void>(builder: (_) => _loginScreen()),
+      (_) => false,
+    );
+  }
+
+  LoginScreen _loginScreen() => LoginScreen(
+        feedBuilder: widget.feedBuilder,
+        visitScopeFor: _scopeForShell,
+        directory: widget.microAreaDirectory,
+        initialAlert: widget.initialAlert,
+        initialPosition: widget.currentPosition,
+        themeController: _themeController,
+        syncInterval: widget.syncInterval,
+        alertFallbackInterval: widget.alertFallbackInterval,
+        biometricGate: _gate,
+      );
 
   /// Resolve o escopo do painel que vai abrir e dispara o envio diferido
   /// (gatilho "depois de abrir o painel"). Só `_openShell` chama o resolvedor.
   OwnerVisitScope _scopeForShell(AuthSession session) {
     final scope = _scopeFor(session);
+    // Login novo depois de uma limpeza remota: o cache e o pull voltam a
+    // gravar (o selo de [_eraseDevice] vale até aqui). Nunca no meio dela.
+    if (!_wiping) {
+      widget.microAreaDirectory?.unseal();
+      scope.pullService.unseal();
+    }
     _triggerFlush();
     return scope;
   }
@@ -510,19 +794,29 @@ class _SinalAcsAppState extends State<SinalAcsApp> with WidgetsBindingObserver i
     _connectivity = widget.connectivityChanges?.listen((online) {
       final was = _online;
       _online = online;
-      if (online && was != true) _triggerFlush();
+      if (online && was != true) _onForegroundOrOnline();
     });
+    if (_remoteWipe == null) {
+      _wipeReadyNotifier.value = true;
+    } else {
+      unawaited(_startRemoteWipe());
+    }
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) _triggerFlush();
+    if (state == AppLifecycleState.resumed) _onForegroundOrOnline();
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _connectivity?.cancel();
+    if (widget.backend.onDeviceWipeRequired == _onDeviceWipeRequired) {
+      widget.backend.onDeviceWipeRequired = null;
+    }
+    _wipeReadyNotifier.dispose();
+    _wipePendingConfirm.dispose();
     if (widget.themeController == null) _themeController.dispose();
     super.dispose();
   }
@@ -589,29 +883,41 @@ class _SinalAcsAppState extends State<SinalAcsApp> with WidgetsBindingObserver i
               themeMode: mode,
               // No `builder`, ACIMA do Navigator: cobre também as rotas
               // empilhadas (formulário de visita, reautenticação).
-              builder: (context, child) => AppLockGate(
-                key: ValueKey<int>(_gateGeneration),
-                gate: _gate,
-                navigatorKey: _navigatorKey,
-                lockAfter: widget.lockAfter ?? const Duration(seconds: 30),
-                onUsePassword: _usePassword,
-                child: child!,
-              ),
-              home: LoginScreen(
-                feedBuilder: widget.feedBuilder,
-                visitScopeFor: _scopeForShell,
-                directory: widget.microAreaDirectory,
-                initialAlert: widget.initialAlert,
-                initialPosition: widget.currentPosition,
-                themeController: _themeController,
-                syncInterval: widget.syncInterval,
-                alertFallbackInterval: widget.alertFallbackInterval,
-                biometricGate: _gate,
+              // Com a tela `device_wiped` à vista, o gate sai (#81): o
+              // Navigator sobrevive à troca de pai pela `GlobalKey`, como na
+              // recriação do gate por "Entrar com senha".
+              builder: (context, child) => _showingWiped
+                  ? child!
+                  : AppLockGate(
+                      key: ValueKey<int>(_gateGeneration),
+                      gate: _gate,
+                      navigatorKey: _navigatorKey,
+                      lockAfter: widget.lockAfter ?? const Duration(seconds: 30),
+                      onUsePassword: _usePassword,
+                      child: child!,
+                    ),
+              // Até o diário da limpeza remota e a consulta da partida
+              // terminarem, uma espera neutra: o login (e a retomada da
+              // sessão) nunca abre antes de o aparelho saber se foi limpo.
+              home: ValueListenableBuilder<bool>(
+                valueListenable: _wipeReadyNotifier,
+                builder: (context, ready, _) => ready ? _loginScreen() : const _WipeHold(),
               ),
             ),
           ),
          ),
         ),
+      );
+}
+
+/// Espera neutra, sem texto nem dado: a partida antes do diário da limpeza
+/// remota e o intervalo em que o aparelho está sendo apagado (#81).
+class _WipeHold extends StatelessWidget {
+  const _WipeHold();
+
+  @override
+  Widget build(BuildContext context) => const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
       );
 }
 

@@ -23,4 +23,22 @@ class DevicesEndpoint extends AuthenticatedEndpoint {
       throw AlertPermissionException(message: error.message);
     }
   }
+
+  /// O `orderId` do pedido de limpeza remota do aparelho, ou `null` (#81).
+  /// Público: o aparelho cujo token foi revogado precisa perguntar. Não devolve
+  /// identidade; só o id do pedido, que é um UUID aleatório.
+  Future<String?> pendingWipe(Session session, String deviceId) => AlertRuntime
+      .instance
+      .deviceWipeServiceFor(session)
+      .pendingOrderId(deviceId);
+
+  /// O aparelho confirma que apagou tudo (#81). Sem token e sem retorno: um par
+  /// errado ou repetido se comporta igual (no-op), então não vira oráculo.
+  Future<void> confirmWipe(
+    Session session,
+    String deviceId,
+    String orderId,
+  ) => AlertRuntime.instance
+      .deviceWipeServiceFor(session)
+      .confirm(deviceId, orderId);
 }

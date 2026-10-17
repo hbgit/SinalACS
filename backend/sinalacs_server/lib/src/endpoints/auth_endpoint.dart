@@ -84,6 +84,12 @@ class AuthEndpoint extends Endpoint {
   }) async {
     final runtime = AlertRuntime.instance;
 
+    // Aparelho marcado para limpeza (#81): a resposta é a limpeza, antes de
+    // olhar a senha, para o app não confundi-la com credencial recusada.
+    await runtime
+        .deviceWipeServiceFor(session)
+        .ensureDeviceNotMarked(deviceId);
+
     final user = await runtime.institutionalAuthServiceFor(session).login(
           matricula: matricula,
           password: password,
@@ -187,6 +193,11 @@ class AuthEndpoint extends Endpoint {
     required String deviceId,
   }) async {
     final runtime = AlertRuntime.instance;
+    // O pedido de limpeza já revogou os tokens do aparelho (#81); checar antes
+    // faz a resposta ser a limpeza, não a `SessionExpiredException` genérica.
+    await runtime
+        .deviceWipeServiceFor(session)
+        .ensureDeviceNotMarked(deviceId);
     final renewed = await runtime
         .refreshTokenServiceFor(session)
         .refresh(refreshToken: refreshToken, deviceId: deviceId);

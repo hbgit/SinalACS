@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sinalacs_acs/core/database/encrypted_database.dart';
 import 'package:sinalacs_acs/core/database/sqlcipher_visit_store.dart';
@@ -223,4 +225,40 @@ void main() {
       expect(service.lastPulled.map((e) => e.localId), ['local-a1']);
     });
   });
+
+  test('selo da limpeza remota (#81): pull que volta da rede depois do selo não grava cursor nem lê a fila', () async {
+    backend.pullEntries = [entry(localId: 'remota-1', syncAt: DateTime.utc(2021, 1, 2))];
+    backend.pullGate = Completer<void>();
+    final local = _LoadCounter();
+    final service = VisitPullService(backend: backend, cursorStore: cursorStore, localVisits: local);
+
+    final pull = service.pullAndMerge();
+    await pumpEventQueue();
+    service.seal();
+    backend.pullGate!.complete();
+    await pull;
+
+    expect(local.loads, 0);
+    expect(await cursorStore.read(), isNull);
+
+    // Selado, um pull novo nem sai.
+    final antes = backend.pullSinceCalls.length;
+    await service.pullAndMerge();
+    expect(backend.pullSinceCalls.length, antes);
+
+    backend.pullGate = null;
+    service.unseal();
+    await service.pullAndMerge();
+    expect(await cursorStore.read(), DateTime.utc(2021, 1, 2));
+  });
+}
+
+class _LoadCounter extends InMemoryVisitStore {
+  int loads = 0;
+
+  @override
+  Future<List<OfflineVisitRecord>> load() {
+    loads++;
+    return super.load();
+  }
 }

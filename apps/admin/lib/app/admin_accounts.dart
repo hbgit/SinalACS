@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'package:sinalacs_admin/app/acs_devices_dialog.dart';
 import 'package:sinalacs_admin/app/admin_theme.dart';
 import 'package:sinalacs_admin/core/data/admin_data_source.dart';
 
@@ -241,6 +242,13 @@ class _AcsManagementSectionState extends State<AcsManagementSection> with _Escri
     await escrever(() => widget.dataSource.resetAcsMfa(acsId: acs.id));
   }
 
+  Future<void> _aparelhos(AcsSummary acs) => mostrarAparelhosDoAcs(
+        context,
+        dataSource: widget.dataSource,
+        acs: acs,
+        aoVencerSessao: widget.aoVencerSessao,
+      );
+
   Future<void> _mostrarCredencial({
     required String titulo,
     required String explicacao,
@@ -294,6 +302,7 @@ class _AcsManagementSectionState extends State<AcsManagementSection> with _Escri
                   aoAlternarAcesso: () => _alternarAcesso(acs),
                   aoRedefinirSenha: () => _redefinirSenha(acs),
                   aoRedefinirMfa: () => _redefinirMfa(acs),
+                  aoVerAparelhos: () => _aparelhos(acs),
                 ),
               ),
         ],
@@ -389,6 +398,7 @@ class _CartaoAcs extends StatelessWidget {
     required this.aoAlternarAcesso,
     required this.aoRedefinirSenha,
     required this.aoRedefinirMfa,
+    required this.aoVerAparelhos,
   });
 
   final AcsSummary acs;
@@ -397,6 +407,7 @@ class _CartaoAcs extends StatelessWidget {
   final VoidCallback aoAlternarAcesso;
   final VoidCallback aoRedefinirSenha;
   final VoidCallback aoRedefinirMfa;
+  final VoidCallback aoVerAparelhos;
 
   @override
   Widget build(BuildContext context) => Padding(
@@ -454,6 +465,14 @@ class _CartaoAcs extends StatelessWidget {
                   onPressed: ocupado ? null : aoRedefinirMfa,
                   icon: const Icon(Icons.phonelink_lock_outlined),
                   label: const Text('Redefinir MFA'),
+                ),
+                OutlinedButton.icon(
+                  key: Key('acs_devices_${acs.id}'),
+                  style: OutlinedButton.styleFrom(minimumSize: const Size(48, 52)),
+                  // Só leitura: segue habilitado durante outra escrita.
+                  onPressed: aoVerAparelhos,
+                  icon: const Icon(Icons.smartphone_outlined),
+                  label: const Text('Aparelhos'),
                 ),
                 OutlinedButton.icon(
                   key: Key('${acs.active ? 'desativar' : 'ativar'}_acs_${acs.id}'),

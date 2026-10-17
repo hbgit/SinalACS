@@ -52,6 +52,7 @@ class VisitDatabase {
 
   Database? _database;
   Future<Database>? _opening;
+  Future<void>? _destroying;
 
   /// Abre preguiçosamente, na primeira leitura ou escrita.
   ///
@@ -62,6 +63,12 @@ class VisitDatabase {
   /// conexões ao mesmo arquivo, ou duas recuperações apagando o arquivo, são
   /// o que isto evita). Se a abertura falha, o próximo `open()` tenta de novo.
   Future<Database> open() {
+    // Durante um [destroy] nenhuma abertura começa: ela esperaria pelo fim e
+    // abriria com a chave NOVA. Sem isso, uma abertura no meio usaria a chave
+    // velha (ainda guardada) sobre um arquivo apagado ou recém-criado.
+    final destroying = _destroying;
+    if (destroying != null) return destroying.then((_) => open());
+
     final existing = _database;
     if (existing != null && existing.isOpen) return Future.value(existing);
 
@@ -153,6 +160,49 @@ class VisitDatabase {
     // também sai.
     await EncryptedLocalDatabase.deleteRecoveryCopy(databaseName);
   }
+
+  /// Destrói o banco e a chave (CRIPTO-APP-CACHE, D6): fecha a conexão, apaga o
+  /// arquivo com WAL/SHM/journal, apaga a cópia `<nome>.recuperado` e apaga a
+  /// chave do Keystore. O próximo [open] cria uma chave NOVA e um banco vazio
+  /// no schema atual: é assim que a chave é trocada, por evento (limpeza do
+  /// aparelho, limpeza remota), sem `PRAGMA rekey` sobre um arquivo com visitas
+  /// pendentes.
+  ///
+  /// Incondicional: NÃO confere visitas, isso é de quem chama
+  /// ([wipeAllData] recusa antes). Espera uma abertura em voo terminar para não
+  /// deixar uma conexão viva sobre o arquivo apagado. O objeto continua
+  /// reutilizável. A chave nunca é lida nem registrada aqui.
+  Future<void> destroy() {
+    // Exclusivo contra [open] e contra outro destroy: serializa na fila.
+    final previous = _destroying;
+    final run = Future<void>(() async {
+      if (previous != null) {
+        try {
+          await previous;
+        } catch (_) {}
+      }
+      await _destroyOnce();
+    });
+    _destroying = run;
+    return run.whenComplete(() {
+      if (identical(_destroying, run)) _destroying = null;
+    });
+  }
+
+  Future<void> _destroyOnce() async {
+    final inFlight = _opening;
+    if (inFlight != null) {
+      try {
+        await inFlight;
+      } catch (_) {
+        // Abertura que falhou não deixa conexão: o que importa é apagar.
+      }
+    }
+    await close();
+    await EncryptedLocalDatabase.deleteDatabaseFile(databaseName);
+    await EncryptedLocalDatabase.deleteRecoveryCopy(databaseName);
+    await _keyStore.delete();
+  }
 }
 
 /// O erro que o SQLCipher dá quando a chave não abre o arquivo.
@@ -235,6 +285,9 @@ class SqlCipherVisitStorage implements VisitStorage {
 
   @override
   Future<void> wipeAllData() => database.wipeAllData();
+
+  @override
+  Future<void> destroyAll() => database.destroy();
 
   Future<void> close() => database.close();
 }

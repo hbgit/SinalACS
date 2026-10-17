@@ -268,6 +268,12 @@ abstract interface class VisitStorage {
   /// apagar nada, se houver QUALQUER visita no aparelho, de qualquer dono ou
   /// da quarentena: tudo o que está em `offline_visits` ainda não subiu.
   Future<void> wipeAllData();
+
+  /// Troca de chave por evento (CRIPTO-APP-CACHE): apaga o banco inteiro e a
+  /// chave que o cifrava; a próxima abertura recomeça com chave nova. É
+  /// **incondicional** (não confere visitas): quem chama recusa antes, como
+  /// [wipeAllData] faz com [WipeBlocked].
+  Future<void> destroyAll();
 }
 
 /// "Limpar este aparelho" recusado: ainda há [unsent] visitas não enviadas.
@@ -359,6 +365,13 @@ class InMemoryVisitStorage implements VisitStorage {
     if (unsent > 0) throw WipeBlocked(unsent);
     _byOwner.clear();
   }
+
+  /// Sem arquivo nem chave: esvazia a memória.
+  @override
+  Future<void> destroyAll() async {
+    _byOwner.clear();
+    _legacy._visits.clear();
+  }
 }
 
 class _InMemoryOwnerVisitStore implements VisitStore {
@@ -434,6 +447,16 @@ class OfflineVisitQueue {
 
   bool _restored = false;
   bool _persistenceFailed = false;
+  bool _sealed = false;
+
+  /// Limpeza remota (#81): a partir daqui a fila nunca mais grava no disco —
+  /// nem pelo fim de um envio que já estava em voo, que recriaria o banco
+  /// apagado (com chave nova) com as visitas que a coordenação mandou apagar.
+  /// Registrar lança; enviar e resolver não fazem nada. Irreversível: o app
+  /// descarta a fila selada e monta outra depois do próximo login.
+  void seal() => _sealed = true;
+
+  bool get isSealed => _sealed;
 
   /// `true` quando o armazenamento do dispositivo não está aceitando gravação.
   ///
@@ -486,6 +509,7 @@ class OfflineVisitQueue {
   }
 
   Future<void> add(OfflineVisitRecord record) async {
+    if (_sealed) throw StateError('Fila de visitas encerrada pela limpeza do aparelho.');
     _pending.add(record);
     await _persist();
   }
@@ -497,7 +521,7 @@ class OfflineVisitQueue {
   /// confirmação apagaria evidência de uma visita feita que nunca chegou ao
   /// servidor.
   Future<void> discardRejected() async {
-    if (_rejected.isEmpty) return;
+    if (_sealed || _rejected.isEmpty) return;
     _rejected.clear();
     await _persist();
   }
@@ -506,6 +530,7 @@ class OfflineVisitQueue {
   /// em conflito. Só local — o servidor não é chamado, nada muda lá. A tela
   /// pede confirmação antes. `localId` desconhecido não faz nada.
   Future<void> resolveKeepServer(String localId) async {
+    if (_sealed) return;
     final before = _conflicts.length;
     _conflicts.removeWhere((visit) => visit.localId == localId);
     if (_conflicts.length == before) return;
@@ -525,12 +550,14 @@ class OfflineVisitQueue {
   /// Espera um [sync] em voo antes de ler o registro, e as resoluções correm
   /// uma de cada vez.
   Future<SyncOutcome> resolveKeepLocal(String localId, {String? outcome, String? notes}) {
+    if (_sealed) return Future.value(_sealedOutcome);
     final previous = _resolving;
     late final Future<SyncOutcome> run;
     run = () async {
       if (previous != null) await previous.then((_) {}, onError: (_) {});
       final syncing = _syncing;
       if (syncing != null) await syncing.then((_) {}, onError: (_) {});
+      if (_sealed) return _sealedOutcome;
       return _resolveKeepLocalNow(localId, outcome: outcome, notes: notes);
     }()
         .whenComplete(() {
@@ -657,7 +684,14 @@ class OfflineVisitQueue {
   /// Persiste pendentes, em conflito E recusadas: as duas últimas já saíram
   /// da retentativa, e sair do disco junto as faria desaparecer do aparelho,
   /// silenciosamente — antes mesmo de o ACS decidir o que fazer com elas.
+  static const _sealedOutcome = SyncOutcome(
+    kind: SyncOutcomeKind.error,
+    processed: 0,
+    message: 'Fila de visitas encerrada pela limpeza do aparelho.',
+  );
+
   Future<void> _persist() async {
+    if (_sealed) return;
     try {
       await _store.save([..._pending, ..._conflicts, ..._rejected]);
       _persistenceFailed = false;
@@ -682,6 +716,7 @@ class OfflineVisitQueue {
   Future<SyncOutcome> sync() {
     final inFlight = _syncing;
     if (inFlight != null) return inFlight;
+    if (_sealed) return Future.value(_sealedOutcome);
     late final Future<SyncOutcome> run;
     run = _syncOnce().whenComplete(() {
       if (identical(_syncing, run)) _syncing = null;

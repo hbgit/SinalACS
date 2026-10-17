@@ -12,6 +12,7 @@ import 'package:sinalacs_acs/core/security/keystore_vault.dart';
 import 'package:sinalacs_acs/core/security/secure_session_token_store.dart';
 import 'package:sinalacs_acs/core/security/secure_upload_token_store.dart';
 import 'package:sinalacs_acs/core/services/micro_area_directory_factory.dart';
+import 'package:sinalacs_acs/core/services/remote_wipe.dart';
 
 /// Sobe o app do ACS.
 ///
@@ -82,6 +83,9 @@ Future<void> main({String? defaultHost}) async {
     connectivityChanges: Connectivity()
         .onConnectivityChanged
         .map((results) => results.any((r) => r != ConnectivityResult.none)),
+    // Diário da limpeza remota (#81, D7) em `shared_preferences`: fora do
+    // banco e do Keystore, que são justamente o que a limpeza apaga.
+    wipeJournal: SharedPreferencesWipeJournal(),
   ));
 }
 

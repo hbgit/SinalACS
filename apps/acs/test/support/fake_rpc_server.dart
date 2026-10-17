@@ -125,6 +125,14 @@ class FakeRpcServer {
   /// Faz `refreshSession` devolver um refresh token vazio.
   bool emptyRefreshToken = false;
 
+  /// Pedido de limpeza remota (#81): definido, `loginInstitutional`,
+  /// `refreshSession` e `syncDeferred` recusam com
+  /// `DeviceWipeRequiredException` carregando este `orderId`.
+  String? wipeOrderId;
+
+  /// O que `devices.pendingWipe` devolve (`null`: nenhum pedido).
+  String? pendingWipeOrderId;
+
   /// Tokens que `logout` recebeu.
   final List<String> loggedOut = <String>[];
 
@@ -161,6 +169,15 @@ class FakeRpcServer {
       method: method,
       args: decoded,
     ));
+
+    if (wipeOrderId != null &&
+        (method == 'loginInstitutional' || method == 'refreshSession' || method == 'syncDeferred')) {
+      await _respond(request, HttpStatus.badRequest, {
+        'className': 'DeviceWipeRequiredException',
+        'data': {'orderId': wipeOrderId, 'message': 'Este aparelho precisa ser limpo.'},
+      });
+      return;
+    }
 
     if (method == 'loginInstitutional' && rejectWith != null) {
       await _respond(request, HttpStatus.badRequest, {
@@ -208,6 +225,20 @@ class FakeRpcServer {
         'className': 'SessionExpiredException',
         'data': {'message': 'Envio não autorizado. Entre novamente.'},
       });
+      return;
+    }
+
+    if (method == 'pendingWipe') {
+      request.response
+        ..statusCode = HttpStatus.ok
+        ..headers.contentType = ContentType.json
+        ..write(jsonEncode(pendingWipeOrderId));
+      await request.response.close();
+      return;
+    }
+
+    if (method == 'confirmWipe') {
+      await _respond(request, HttpStatus.ok, null);
       return;
     }
 

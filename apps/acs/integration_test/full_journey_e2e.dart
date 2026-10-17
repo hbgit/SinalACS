@@ -68,6 +68,7 @@ import 'package:sinalacs_acs/core/services/visit_queue_factory.dart';
 import 'package:sinalacs_client/sinalacs_client.dart' as api;
 
 import 'support/e2e_acs.dart';
+import 'support/envio_fora_do_ar.dart';
 import 'support/legacy_v6.dart';
 import 'support/totp.dart';
 
@@ -119,102 +120,6 @@ Uint8List? _mfaSegredo;
 int? _mfaUltimoPasso;
 
 int _passo(DateTime t) => t.toUtc().millisecondsSinceEpoch ~/ 1000 ~/ 30;
-
-/// Backend do app com o ENVIO de visitas (sync, legado, diferido, revogação do
-/// token de envio) "fora do ar" enquanto [offline]: falha recuperável, como a
-/// queda de rede. Login, lista da microárea e logout seguem o servidor real —
-/// é o que permite a A registrar e sair com a visita pendente, e a B entrar.
-/// Não é a rede do aparelho caindo: só os caminhos de envio de visita.
-class _EnvioDeVisitasForaDoAr implements AcsBackend {
-  _EnvioDeVisitasForaDoAr(this._inner);
-
-  final AcsBackend _inner;
-  bool offline = true;
-  int recusas = 0;
-
-  Future<T> _rede<T>(Future<T> Function() call) {
-    if (offline) {
-      recusas++;
-      return Future.error(const BackendFailure('Sem conexão (simulada no e2e).'));
-    }
-    return call();
-  }
-
-  @override
-  AuthSession? get session => _inner.session;
-  @override
-  bool get isAuthenticated => _inner.isAuthenticated;
-  @override
-  void Function()? get onSessionExpired => _inner.onSessionExpired;
-  @override
-  set onSessionExpired(void Function()? value) => _inner.onSessionExpired = value;
-  @override
-  Future<bool> get hasStoredSession => _inner.hasStoredSession;
-  @override
-  Future<SessionUnlock> unlockStoredSession({required String reason}) => _inner.unlockStoredSession(reason: reason);
-  @override
-  Future<AuthSession?> resumeSession() => _inner.resumeSession();
-  @override
-  Future<void> logout() => _inner.logout();
-  @override
-  Future<AuthSession> login({required String matricula, required String senha, String? totpCode}) =>
-      _inner.login(matricula: matricula, senha: senha, totpCode: totpCode);
-  @override
-  Future<api.TotpEnrollmentStart> beginTotpEnrollment({required String matricula, required String senha}) =>
-      _inner.beginTotpEnrollment(matricula: matricula, senha: senha);
-  @override
-  Future<void> confirmTotpEnrollment({required String matricula, required String senha, required String code}) =>
-      _inner.confirmTotpEnrollment(matricula: matricula, senha: senha, code: code);
-  @override
-  Future<AuthSession> developmentLogin({required String role}) => _inner.developmentLogin(role: role);
-  @override
-  Future<api.AlertAckResult> acknowledge({required String alertId}) => _inner.acknowledge(alertId: alertId);
-  @override
-  Future<List<api.AcsOpenAlert>> openAlerts() => _inner.openAlerts();
-  @override
-  Future<api.AlertResolveResult> resolveAlert({required String alertId}) =>
-      _inner.resolveAlert(alertId: alertId);
-  @override
-  Future<List<api.VisitSyncResult>> syncVisits(List<api.VisitSyncEntry> visits, {String? expectedUserId}) =>
-      _rede(() => _inner.syncVisits(visits, expectedUserId: expectedUserId));
-  @override
-  Future<api.VisitSyncResult> resolveVisitConflict(
-    api.VisitSyncEntry visit, {
-    required int expectedServerVersion,
-    String? expectedUserId,
-  }) =>
-      _rede(() => _inner.resolveVisitConflict(
-            visit,
-            expectedServerVersion: expectedServerVersion,
-            expectedUserId: expectedUserId,
-          ));
-  @override
-  Future<List<api.VisitSyncResult>> syncLegacyVisits(List<api.VisitSyncEntry> visits, {required String deviceId}) =>
-      _rede(() => _inner.syncLegacyVisits(visits, deviceId: deviceId));
-  @override
-  Future<List<api.VisitSyncResult>> syncDeferredVisits({
-    required String uploadToken,
-    required String deviceId,
-    required List<api.VisitSyncEntry> visits,
-  }) =>
-      _rede(() => _inner.syncDeferredVisits(uploadToken: uploadToken, deviceId: deviceId, visits: visits));
-  @override
-  Future<void> revokeUploadToken(String uploadToken) => _rede(() => _inner.revokeUploadToken(uploadToken));
-  @override
-  Future<List<api.VisitSyncEntry>> pullVisits({required DateTime since}) => _inner.pullVisits(since: since);
-  @override
-  Future<List<api.MicroAreaPatient>> listPatients() => _inner.listPatients();
-  @override
-  Future<api.UbsContact> ubsContact() => _inner.ubsContact();
-  @override
-  Future<api.EnrollmentTokenResult> generateInvite({required String patientId}) =>
-      _inner.generateInvite(patientId: patientId);
-  @override
-  Future<api.NoticeSendResult> sendNotice({required String title, required String message, required bool chronicOnly}) =>
-      _inner.sendNotice(title: title, message: message, chronicOnly: chronicOnly);
-  @override
-  void close() => _inner.close();
-}
 
 /// Espera o JWT vencer de verdade (15 min) em vez de forçar a renovação.
 const _esperarJwt = bool.fromEnvironment('E2E_ESPERAR_JWT');
@@ -392,7 +297,7 @@ void main() {
     final ca = (await rootBundle.load(BackendConfig.rpcCaAsset)).buffer.asUint8List();
     final real = _clienteComKeystore(ca);
     addTearDown(real.close);
-    final backend = _EnvioDeVisitasForaDoAr(real);
+    final backend = EnvioDeVisitasForaDoAr(real);
     final cred = await acsCredentialFromRelay();
     final main = e2ePatient('main');
 
@@ -664,7 +569,7 @@ void main() {
       uploadTokens: uploadTokens,
     );
     addTearDown(real.close);
-    final backend = _EnvioDeVisitasForaDoAr(real);
+    final backend = EnvioDeVisitasForaDoAr(real);
 
     // 1) Banco v6 de uma versão anterior do app, com uma visita SEM dono, no
     //    arquivo e com a chave que o app usa (sinalacs_acs.db + Keystore).
@@ -805,13 +710,21 @@ void main() {
     print('E2E_FILA_POR_DONO visita_a=$visitaA legado=$legadoId acs_a=$idA acs_b=$idB');
 
     // 7) Tudo enviado: o wipe pede confirmação e apaga as quatro tabelas.
+    //    Desde a #81 (CRIPTO-APP-CACHE, D6) ele também fecha e apaga o arquivo
+    //    e troca a chave: a conexão `db` acima fica fechada, e a contagem é
+    //    feita num banco reaberto, que tem de nascer vazio com chave nova.
+    final chaveAntes = await chaves.readOrCreate();
     await _tocarNoMeio(tester, find.byKey(const Key('wipe_button')));
     await _pumpUntil(tester, () => find.byKey(const Key('wipe_confirm')).evaluate().isNotEmpty);
     await tester.tap(find.byKey(const Key('wipe_confirm')));
     await _pumpUntil(tester, () => find.byKey(const Key('login_button')).evaluate().isNotEmpty);
     expect(find.text('Os dados deste aparelho foram apagados.'), findsOneWidget);
+    expect(db.isOpen, isFalse, reason: 'o wipe fecha a conexão antes de apagar o arquivo');
+    expect(await chaves.readOrCreate() == chaveAntes, isFalse, reason: 'o wipe troca a chave'); // sem imprimir a chave
+    final reaberto = await storage.database.open();
     for (final tabela in ['offline_visits', 'sync_cursor', 'micro_area_cache', 'micro_area_cache_meta']) {
-      expect(await linhas(tabela), 0, reason: '$tabela depois do wipe');
+      final n = (await reaberto.rawQuery('SELECT COUNT(*) AS n FROM $tabela')).single['n']! as int;
+      expect(n, 0, reason: '$tabela depois do wipe');
     }
     expect(await uploadTokens.owners(), isEmpty);
     expect(await uploadTokens.read(idB), isNull, reason: 'o wipe apaga o token de envio de B');

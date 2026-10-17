@@ -57,6 +57,23 @@ class SecureStorageDeviceIdStore implements DeviceIdStore {
 
   Future<String>? _pending;
 
+  /// Apaga `acs_device_id` (limpeza remota, #81). Espera a leitura em voo
+  /// terminar, para ela não regravar o id antigo depois da exclusão, e zera a
+  /// memória DEPOIS de apagar: uma leitura que tenha começado no meio pode ter
+  /// visto o id antigo, e não fica memorizada.
+  @override
+  Future<void> delete() async {
+    final inFlight = _pending;
+    if (inFlight != null) {
+      try {
+        await inFlight;
+      } catch (_) {}
+    }
+    _pending = null;
+    await _storage.delete(key: _key);
+    _pending = null;
+  }
+
   Future<String> _load() async {
     final existing = await _storage.read(key: _key);
     if (existing != null && existing.isNotEmpty) return existing;

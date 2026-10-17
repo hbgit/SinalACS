@@ -484,6 +484,56 @@ class StaffSummary {
   final bool mfaActive;
 }
 
+/// Espelha `DeviceWipeState` (#81). Traduzido **por nome**, nunca por índice.
+enum DeviceWipeState { pending, delivered, confirmed }
+
+/// Espelha `DeviceWipeReason` (#81): conjunto fechado, nunca texto livre.
+enum DeviceWipeReason {
+  lost('Perdido'),
+  stolen('Roubado'),
+  replaced('Substituído');
+
+  const DeviceWipeReason(this.label);
+
+  /// Texto da tela, em português.
+  final String label;
+}
+
+/// Espelha `AdminAcsDevice` (`admin_acs_device.spy.yaml`): um aparelho do ACS.
+/// [label] é derivado do `deviceId` pelo servidor; sem pedido de limpeza,
+/// [wipeState] é nulo.
+class AcsDevice {
+  const AcsDevice({
+    required this.deviceId,
+    required this.label,
+    required this.lastSeenAt,
+    this.wipeState,
+    this.wipeRequestedAt,
+    this.wipeConfirmedAt,
+  });
+
+  final String deviceId;
+  final String label;
+  final DateTime lastSeenAt;
+  final DeviceWipeState? wipeState;
+  final DateTime? wipeRequestedAt;
+  final DateTime? wipeConfirmedAt;
+}
+
+/// Espelha `AdminDeviceWipeResult`. Com [alreadyOrdered], [requestedAt] é o
+/// instante do pedido original.
+class DeviceWipeOrderResult {
+  const DeviceWipeOrderResult({
+    required this.orderId,
+    required this.requestedAt,
+    required this.alreadyOrdered,
+  });
+
+  final String orderId;
+  final DateTime requestedAt;
+  final bool alreadyOrdered;
+}
+
 /// Cadastro de ACS: a linha criada e a senha inicial, que **só** existe nesta
 /// resposta — o servidor guarda apenas o hash.
 class NewAcsCredential {
@@ -656,6 +706,18 @@ abstract interface class AdminDataSource {
 
   /// Apaga o segredo TOTP do ACS, para ele ativar de novo na próxima entrada.
   Future<void> resetAcsMfa({required String acsId});
+
+  /// Aparelhos com acesso registrado do ACS e o estado do pedido de limpeza
+  /// (#81). Recusa fora do escopo como o servidor: texto fixo.
+  Future<List<AcsDevice>> fetchAcsDevices(String acsId);
+
+  /// Pede a limpeza remota do aparelho (#81). Irreversível; repetir é
+  /// idempotente ([DeviceWipeOrderResult.alreadyOrdered]).
+  Future<DeviceWipeOrderResult> orderDeviceWipe({
+    required String acsId,
+    required String deviceId,
+    required DeviceWipeReason reason,
+  });
 
   /// Redefine a MFA de uma conta de equipe (só o administrador, nunca a própria
   /// conta) e devolve o código de ativação novo.
