@@ -125,10 +125,19 @@ class _Aparelhos implements DeviceWipeStore {
     );
   }
 
+  /// Como o store ORM: carimbo e auditoria atômicos. Se a trilha lança, o
+  /// carimbo não fica.
+  AuditTrail? trilha;
+
   @override
-  Future<bool> markDelivered(String orderId, DateTime at) async {
+  Future<bool> markDelivered(
+    String orderId,
+    DateTime at, {
+    required AuditEvent audit,
+  }) async {
     deliveredCalls++;
     if (entregue) return false;
+    await trilha?.record(audit);
     entregue = true;
     return true;
   }
@@ -137,14 +146,16 @@ class _Aparelhos implements DeviceWipeStore {
   Future<bool> markConfirmed(
     String deviceId,
     String orderId,
-    DateTime at,
-  ) async {
+    DateTime at, {
+    required AuditEvent audit,
+  }) async {
     confirmedCalls++;
     final p = pedido;
     if (p == null || p.deviceId != deviceId || p.id.toString() != orderId) {
       return false;
     }
     if (confirmado) return false;
+    await trilha?.record(audit);
     confirmado = true;
     return true;
   }
@@ -152,9 +163,11 @@ class _Aparelhos implements DeviceWipeStore {
 
 class _Audit extends AuditTrail {
   final events = <AuditEvent>[];
+  bool falhar = false;
 
   @override
   Future<void> record(AuditEvent event) async {
+    if (falhar) throw StateError('trilha fora do ar');
     _ordem.add(
       'audit:${event.actionType}:${event.resourceType}:${event.result}',
     );
@@ -180,6 +193,7 @@ void main() {
     contas = _Contas();
     aparelhos = _Aparelhos();
     audit = _Audit();
+    aparelhos.trilha = audit;
     servico = DeviceWipeService(
       store: aparelhos,
       accounts: contas,
@@ -377,6 +391,35 @@ void main() {
         expect(e.actionType, 'write');
         expect(e.resourceId, idPedido);
         expect(e.userId, '00000000-0000-4000-8000-00000000c002');
+      },
+    );
+
+    test(
+      'trilha que falha na 1a entrega ou confirmação não perde a linha na repetição',
+      () async {
+        haPedido();
+        audit.falhar = true;
+        await expectLater(
+          servico.pendingOrderId(aparelho),
+          throwsA(isA<StateError>()),
+        );
+        expect(aparelhos.entregue, isFalse);
+        audit.falhar = false;
+        expect(await servico.pendingOrderId(aparelho), idPedido);
+        expect(audit.events.map((e) => e.result), ['wipe_delivered']);
+
+        audit.falhar = true;
+        await expectLater(
+          servico.confirm(aparelho, idPedido),
+          throwsA(isA<StateError>()),
+        );
+        expect(aparelhos.confirmado, isFalse);
+        audit.falhar = false;
+        await servico.confirm(aparelho, idPedido);
+        expect(audit.events.map((e) => e.result), [
+          'wipe_delivered',
+          'wipe_confirmed',
+        ]);
       },
     );
 

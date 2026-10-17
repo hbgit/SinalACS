@@ -34,12 +34,25 @@ abstract interface class DeviceWipeStore {
   /// O pedido de limpeza do aparelho, ou `null`.
   Future<DeviceWipeOrder?> orderFor(String deviceId);
 
-  /// Carimba `deliveredAt`. `true` só na primeira vez.
-  Future<bool> markDelivered(String orderId, DateTime at);
+  /// Carimba `deliveredAt`. `true` só na primeira vez. O carimbo e a linha de
+  /// [audit] vivem numa **única transação**: se a trilha falhar, o carimbo é
+  /// desfeito e a repetição do aparelho ainda é a "primeira vez". Em `false`
+  /// nada é auditado.
+  Future<bool> markDelivered(
+    String orderId,
+    DateTime at, {
+    required AuditEvent audit,
+  });
 
   /// Carimba `confirmedAt`. `true` só na primeira vez e só se o par
-  /// ([deviceId], [orderId]) for o do pedido.
-  Future<bool> markConfirmed(String deviceId, String orderId, DateTime at);
+  /// ([deviceId], [orderId]) for o do pedido. Carimbo e [audit] na mesma
+  /// transação, como em [markDelivered]; em `false` nada é auditado.
+  Future<bool> markConfirmed(
+    String deviceId,
+    String orderId,
+    DateTime at, {
+    required AuditEvent audit,
+  });
 }
 
 /// Limpeza remota do aparelho de um ACS pelo backoffice (issue #81).
@@ -156,9 +169,13 @@ class DeviceWipeService {
     final pedido = await _pedidoDe(deviceId);
     if (pedido == null || pedido.confirmedAt != null) return null;
     final orderId = pedido.id.toString();
-    if (await store.markDelivered(orderId, _clock().toUtc())) {
-      await _auditarAparelho(pedido, 'wipe_delivered');
-    }
+    // Carimbo e auditoria na mesma transação do store: uma falha da trilha não
+    // pode deixar a entrega carimbada sem a linha `wipe_delivered`.
+    await store.markDelivered(
+      orderId,
+      _clock().toUtc(),
+      audit: _eventoDoAparelho(pedido, 'wipe_delivered'),
+    );
     return orderId;
   }
 
@@ -168,9 +185,12 @@ class DeviceWipeService {
     if (deviceId.trim().isEmpty) return;
     final pedido = await store.orderFor(deviceId);
     if (pedido == null || pedido.id.toString() != orderId) return;
-    if (await store.markConfirmed(deviceId, orderId, _clock().toUtc())) {
-      await _auditarAparelho(pedido, 'wipe_confirmed');
-    }
+    await store.markConfirmed(
+      deviceId,
+      orderId,
+      _clock().toUtc(),
+      audit: _eventoDoAparelho(pedido, 'wipe_confirmed'),
+    );
   }
 
   /// Lança [DeviceWipeRequiredException] quando existe **qualquer** pedido para
@@ -196,15 +216,13 @@ class DeviceWipeService {
   }
 
   /// O aparelho age em nome da conta do pedido (`targetUserId`).
-  Future<void> _auditarAparelho(DeviceWipeOrder pedido, String result) =>
-      audit.record(
-        AuditEvent(
-          userId: pedido.targetUserId.toString(),
-          actionType: 'write',
-          resourceType: 'acs_device',
-          resourceId: pedido.id.toString(),
-          result: result,
-        ),
+  AuditEvent _eventoDoAparelho(DeviceWipeOrder pedido, String result) =>
+      AuditEvent(
+        userId: pedido.targetUserId.toString(),
+        actionType: 'write',
+        resourceType: 'acs_device',
+        resourceId: pedido.id.toString(),
+        result: result,
       );
 
   /// Recusa com linha `denied` ANTES de lançar; a mesma mensagem para "não

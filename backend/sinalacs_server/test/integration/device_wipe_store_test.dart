@@ -1,4 +1,5 @@
 import 'package:serverpod/serverpod.dart';
+import 'package:sinalacs_server/src/application/audit/audit_trail.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_device_wipe_store.dart';
 import 'package:test/test.dart';
@@ -17,6 +18,13 @@ const _aparelhoD = 'dddddddd-aparelho-d';
 const _aparelhoE = 'eeeeeeee-aparelho-e';
 
 final _t = DateTime.utc(2026, 10, 17, 9);
+
+final _ev = AuditEvent(
+  userId: _u1,
+  actionType: 'write',
+  resourceType: 'acs_device',
+  result: 'teste',
+);
 
 var _seq = 0;
 UuidValue _id() => UuidValue.fromString(
@@ -85,9 +93,19 @@ void main() {
   ) {
     late Session session;
     late OrmDeviceWipeStore store;
+    late List<AuditEvent> auditados;
+    var falhaNaTrilha = false;
     setUp(() async {
       session = sessionBuilder.build();
-      store = OrmDeviceWipeStore(session: () => session);
+      auditados = [];
+      falhaNaTrilha = false;
+      store = OrmDeviceWipeStore(
+        session: () => session,
+        appendAudit: (s, transaction, event) async {
+          if (falhaNaTrilha) throw StateError('trilha fora do ar');
+          auditados.add(event);
+        },
+      );
       await _usuario(session, _u1, UserRole.acs);
       await _usuario(session, _u2, UserRole.acs);
       await _usuario(session, _u3, UserRole.acs);
@@ -162,19 +180,67 @@ void main() {
         expect(lista.single.wipeState, DeviceWipeState.pending);
         expect(lista.single.wipeRequestedAt, pedido.order.requestedAt);
 
-        expect(await store.markDelivered(id, _t.add(const Duration(days: 2))), isTrue);
-        expect(await store.markDelivered(id, _t.add(const Duration(days: 3))), isFalse);
+        expect(await store.markDelivered(id, _t.add(const Duration(days: 2)), audit: _ev), isTrue);
+        expect(await store.markDelivered(id, _t.add(const Duration(days: 3)), audit: _ev), isFalse);
         lista = await store.devicesOf(_u1);
         expect(lista.single.wipeState, DeviceWipeState.delivered);
 
-        expect(await store.markConfirmed(_aparelhoE, id, _t), isFalse);
-        expect(await store.markConfirmed(_aparelhoD, id, _t.add(const Duration(days: 4))), isTrue);
-        expect(await store.markConfirmed(_aparelhoD, id, _t.add(const Duration(days: 5))), isFalse);
+        expect(await store.markConfirmed(_aparelhoE, id, _t, audit: _ev), isFalse);
+        expect(await store.markConfirmed(_aparelhoD, id, _t.add(const Duration(days: 4)), audit: _ev), isTrue);
+        expect(await store.markConfirmed(_aparelhoD, id, _t.add(const Duration(days: 5)), audit: _ev), isFalse);
         lista = await store.devicesOf(_u1);
         expect(lista.single.wipeState, DeviceWipeState.confirmed);
         expect(lista.single.wipeConfirmedAt, _t.add(const Duration(days: 4)));
         expect((await store.orderFor(_aparelhoD))!.id.toString(), id);
         expect(await store.orderFor(_aparelhoE), isNull);
+        // Só as duas primeiras gravações auditam; repetição e par errado não.
+        expect(auditados, hasLength(2));
+      },
+    );
+
+    test(
+      'se a trilha falha, o carimbo é desfeito e a repetição ainda audita',
+      () async {
+        final id = (await pedir()).order.id.toString();
+
+        falhaNaTrilha = true;
+        await expectLater(
+          store.markDelivered(id, _t.add(const Duration(days: 2)), audit: _ev),
+          throwsA(isA<StateError>()),
+        );
+        expect((await store.orderFor(_aparelhoD))!.deliveredAt, isNull);
+        falhaNaTrilha = false;
+        expect(
+          await store.markDelivered(
+            id,
+            _t.add(const Duration(days: 2)),
+            audit: _ev,
+          ),
+          isTrue,
+        );
+
+        falhaNaTrilha = true;
+        await expectLater(
+          store.markConfirmed(
+            _aparelhoD,
+            id,
+            _t.add(const Duration(days: 3)),
+            audit: _ev,
+          ),
+          throwsA(isA<StateError>()),
+        );
+        expect((await store.orderFor(_aparelhoD))!.confirmedAt, isNull);
+        falhaNaTrilha = false;
+        expect(
+          await store.markConfirmed(
+            _aparelhoD,
+            id,
+            _t.add(const Duration(days: 3)),
+            audit: _ev,
+          ),
+          isTrue,
+        );
+        expect(auditados, hasLength(2));
       },
     );
 

@@ -379,7 +379,13 @@ class AlertRuntime {
   /// requisição. O escopo e a existência do ACS vêm do mesmo store de contas da
   /// #43; a trilha é a da requisição.
   DeviceWipeService deviceWipeServiceFor(Session session) => DeviceWipeService(
-    store: OrmDeviceWipeStore(session: () => session),
+    store: OrmDeviceWipeStore(
+      session: () => session,
+      appendAudit: OrmAuditTrail(
+        session: () => session,
+        chainSecret: config.auditChainSecret,
+      ).recordInTransaction,
+    ),
     accounts: OrmAdminAccountStore(session: () => session),
     audit: auditTrailFor(session),
   );

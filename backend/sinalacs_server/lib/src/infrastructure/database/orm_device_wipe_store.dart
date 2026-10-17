@@ -1,6 +1,9 @@
 import 'package:serverpod/serverpod.dart';
 import 'package:sinalacs_server/src/application/devices/device_wipe_service.dart';
+import 'package:sinalacs_server/src/application/audit/audit_trail.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
+import 'package:sinalacs_server/src/infrastructure/database/orm_data_subject_case_store.dart'
+    show AuditAppender;
 
 /// Pedidos de limpeza remota e aparelhos do ACS sobre Postgres (issue #81).
 ///
@@ -8,9 +11,17 @@ import 'package:sinalacs_server/src/generated/protocol.dart';
 /// junta duas tabelas de token e o pedido. Nada aqui concatena valor no texto
 /// da consulta.
 class OrmDeviceWipeStore implements DeviceWipeStore {
-  OrmDeviceWipeStore({required Session Function() session}) : _session = session;
+  OrmDeviceWipeStore({
+    required Session Function() session,
+    required AuditAppender appendAudit,
+  }) : _session = session,
+       _appendAudit = appendAudit;
 
   final Session Function() _session;
+
+  /// Onde a linha do aparelho é auditada, dentro da transação do carimbo. Em
+  /// produção é `OrmAuditTrail.recordInTransaction`; o teste injeta uma falha.
+  final AuditAppender _appendAudit;
 
   @override
   Future<List<AdminAcsDevice>> devicesOf(String acsId) async {
@@ -124,33 +135,50 @@ class OrmDeviceWipeStore implements DeviceWipeStore {
       );
 
   @override
-  Future<bool> markDelivered(String orderId, DateTime at) async {
+  Future<bool> markDelivered(
+    String orderId,
+    DateTime at, {
+    required AuditEvent audit,
+  }) async {
     if (!_uuidValido(orderId)) return false;
-    final linhas = await _session().db.unsafeExecute(
-      'UPDATE device_wipe_orders SET "deliveredAt" = @at '
-      'WHERE id = @id::uuid AND "deliveredAt" IS NULL',
-      parameters: QueryParameters.named({'at': at.toUtc(), 'id': orderId}),
-    );
-    return linhas == 1;
+    final sessao = _session();
+    return sessao.db.transaction((transaction) async {
+      final linhas = await sessao.db.unsafeExecute(
+        'UPDATE device_wipe_orders SET "deliveredAt" = @at '
+        'WHERE id = @id::uuid AND "deliveredAt" IS NULL',
+        parameters: QueryParameters.named({'at': at.toUtc(), 'id': orderId}),
+        transaction: transaction,
+      );
+      if (linhas != 1) return false;
+      await _appendAudit(sessao, transaction, audit);
+      return true;
+    });
   }
 
   @override
   Future<bool> markConfirmed(
     String deviceId,
     String orderId,
-    DateTime at,
-  ) async {
+    DateTime at, {
+    required AuditEvent audit,
+  }) async {
     if (!_uuidValido(orderId)) return false;
-    final linhas = await _session().db.unsafeExecute(
-      'UPDATE device_wipe_orders SET "confirmedAt" = @at '
-      'WHERE id = @id::uuid AND "deviceId" = @d AND "confirmedAt" IS NULL',
-      parameters: QueryParameters.named({
-        'at': at.toUtc(),
-        'id': orderId,
-        'd': deviceId,
-      }),
-    );
-    return linhas == 1;
+    final sessao = _session();
+    return sessao.db.transaction((transaction) async {
+      final linhas = await sessao.db.unsafeExecute(
+        'UPDATE device_wipe_orders SET "confirmedAt" = @at '
+        'WHERE id = @id::uuid AND "deviceId" = @d AND "confirmedAt" IS NULL',
+        parameters: QueryParameters.named({
+          'at': at.toUtc(),
+          'id': orderId,
+          'd': deviceId,
+        }),
+        transaction: transaction,
+      );
+      if (linhas != 1) return false;
+      await _appendAudit(sessao, transaction, audit);
+      return true;
+    });
   }
 
   static bool _uuidValido(String id) {
