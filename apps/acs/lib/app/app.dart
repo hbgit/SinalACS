@@ -21,6 +21,7 @@ import 'package:sinalacs_acs/core/security/database_key_store.dart';
 import 'package:sinalacs_acs/core/security/session_token_store.dart';
 import 'package:sinalacs_acs/core/security/upload_token_store.dart';
 import 'package:sinalacs_acs/core/services/alert_feed.dart';
+import 'package:sinalacs_acs/core/services/alert_http_fallback.dart';
 import 'package:sinalacs_acs/core/services/alert_queue.dart';
 import 'package:sinalacs_acs/core/services/deferred_flush_service.dart';
 import 'package:sinalacs_acs/core/services/emergency_dialer.dart';
@@ -47,6 +48,7 @@ class SinalAcsApp extends StatefulWidget {
     this.currentPosition,
     this.themeController,
     this.syncInterval,
+    this.alertFallbackInterval,
     this.biometricGate,
     this.navigatorKey,
     this.lockAfter,
@@ -126,6 +128,10 @@ class SinalAcsApp extends StatefulWidget {
   /// pacientes da microárea). `null` usa `AcsHomeShell.defaultSyncInterval`
   /// — testes passam um valor curto para não esperar 5 minutos reais.
   final Duration? syncInterval;
+
+  /// Intervalo da consulta de alertas por HTTP enquanto o MQTT está fora
+  /// (#80). `null` usa `AcsHomeShell.defaultAlertFallbackInterval`.
+  final Duration? alertFallbackInterval;
 
   @override
   State<SinalAcsApp> createState() => _SinalAcsAppState();
@@ -599,6 +605,7 @@ class _SinalAcsAppState extends State<SinalAcsApp> with WidgetsBindingObserver i
                 initialPosition: widget.currentPosition,
                 themeController: _themeController,
                 syncInterval: widget.syncInterval,
+                alertFallbackInterval: widget.alertFallbackInterval,
                 biometricGate: _gate,
               ),
             ),
@@ -643,6 +650,7 @@ class LoginScreen extends StatefulWidget {
     this.initialAlert,
     this.initialPosition,
     this.syncInterval,
+    this.alertFallbackInterval,
     this.aviso,
     this.reauthUserId,
     this.biometricGate,
@@ -672,6 +680,7 @@ class LoginScreen extends StatefulWidget {
   final LatLng? initialPosition;
   final ThemeController themeController;
   final Duration? syncInterval;
+  final Duration? alertFallbackInterval;
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
@@ -916,6 +925,7 @@ class _LoginScreenState extends State<LoginScreen> {
         initialPosition: widget.initialPosition,
         themeController: widget.themeController,
         syncInterval: widget.syncInterval,
+        alertFallbackInterval: widget.alertFallbackInterval,
       ),
     );
     if (widget.reauthUserId != null) {
@@ -1052,6 +1062,7 @@ class AcsHomeShell extends StatefulWidget {
     this.initialAlert,
     this.initialPosition,
     this.syncInterval,
+    this.alertFallbackInterval,
   });
 
   final String microAreaId;
@@ -1070,6 +1081,15 @@ class AcsHomeShell extends StatefulWidget {
   /// botão, uma visita registrada por outro colega — sem virar polling
   /// agressivo que gasta bateria/dados em campo.
   static const defaultSyncInterval = Duration(minutes: 5);
+
+  /// Consulta de alertas por HTTP (#80, R2) enquanto o broker está fora.
+  /// `null` usa [defaultAlertFallbackInterval].
+  final Duration? alertFallbackInterval;
+
+  /// 30 s: com a consulta no meio do intervalo, um alerta chega em ~15 s e,
+  /// no pior caso, em 30 s — dentro dos 90 s do TMRAV, sem virar polling que
+  /// gasta bateria e dados em 3G.
+  static const defaultAlertFallbackInterval = Duration(seconds: 30);
 
   /// Obrigatória: a tela de visita usava `widget.visitQueue ?? OfflineVisitQueue()`,
   /// e um dia em que o shell fosse construído sem fila voltaria a descartar a
@@ -1114,6 +1134,27 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
   /// `null` quando nenhum ciclo periódico está agendado (app em segundo
   /// plano, ou ainda não iniciado).
   Timer? _periodicSyncTimer;
+
+  /// Reserva por HTTP dos alertas (#80, R2). Criada com o backend, em
+  /// [didChangeDependencies].
+  AlertHttpFallback? _alertFallback;
+
+  /// Armado só enquanto o broker está fora e o app em primeiro plano; `null`
+  /// é "reserva desligada", e é isso que a linha de status do painel segue.
+  Timer? _alertFallbackTimer;
+
+  /// Uma consulta por vez: um tique que chega com outra em voo é descartado.
+  bool _pollingAlerts = false;
+
+  /// Hora da última resposta da reserva (sucesso ou falha); `null` antes da
+  /// primeira.
+  DateTime? _alertFallbackAt;
+  bool _alertFallbackFailed = false;
+
+  bool _inBackground = false;
+
+  Duration get _alertFallbackInterval =>
+      widget.alertFallbackInterval ?? AcsHomeShell.defaultAlertFallbackInterval;
 
   Duration get _syncInterval => widget.syncInterval ?? AcsHomeShell.defaultSyncInterval;
 
@@ -1199,6 +1240,11 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
       _backend!.onSessionExpired = _sessionExpired;
       _lockHooks = _AppLockScope.maybeOf(context)?..openPasswordReauth = _reauthForLock;
       _loadMicroAreaPatients();
+      // Sempre uma vez ao abrir, com ou sem MQTT: a fila em memória começa
+      // vazia, e o "Sair" anterior pode ter levado embora alertas que seguem
+      // pendentes no servidor (#80).
+      _alertFallback = AlertHttpFallback(backend: _backend!, queue: _queue);
+      _pollAlerts();
     }
   }
 
@@ -1255,6 +1301,7 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
                 initialAlert: widget.initialAlert,
                 initialPosition: widget.initialPosition,
                 syncInterval: widget.syncInterval,
+                alertFallbackInterval: widget.alertFallbackInterval,
                 aviso: aviso,
                 reauthUserId: widget.acsId,
               ),
@@ -1537,6 +1584,7 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
         _feedError = null;
         _feedErrorIsTransient = false;
       });
+      _syncAlertFallbackTimer();
     } on AlertFeedFailure catch (failure, stackTrace) {
       developer.log(
         'não foi possível assinar o tópico de alertas',
@@ -1555,6 +1603,7 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
               : failure.detail,
         );
       });
+      _syncAlertFallbackTimer();
       if (failure.transient) _scheduleReconnect();
     } catch (error, stackTrace) {
       // Defesa: hoje só um AlertFeed de teste chega aqui. Logar em vez de
@@ -1577,6 +1626,7 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
               'Tentando reconectar automaticamente.',
         );
       });
+      _syncAlertFallbackTimer();
       _scheduleReconnect();
     }
   }
@@ -1608,6 +1658,47 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
   void _onBrokerConnectionChanged(bool connected) {
     if (!mounted) return;
     setState(() => _brokerConnected = connected);
+    _syncAlertFallbackTimer();
+  }
+
+  /// Liga a consulta periódica de alertas por HTTP enquanto o broker está
+  /// fora e o app em primeiro plano; desliga em qualquer outro caso (#80).
+  /// Intervalo fixo, sem backoff: 30 s já é o piso de custo, e uma falha só
+  /// aparece na linha de status.
+  void _syncAlertFallbackTimer() {
+    final wanted = mounted && !_brokerConnected && !_inBackground;
+    if (wanted == (_alertFallbackTimer != null)) return;
+    if (wanted) {
+      _alertFallbackTimer = Timer.periodic(_alertFallbackInterval, (_) => _pollAlerts());
+    } else {
+      _alertFallbackTimer?.cancel();
+      _alertFallbackTimer = null;
+    }
+    if (mounted) setState(() {});
+  }
+
+  /// Uma consulta à reserva. A sessão vencida segue o caminho de sempre
+  /// (`onSessionExpired` do backend abre a reautenticação); aqui só se marca
+  /// a falha para a linha de status.
+  Future<void> _pollAlerts() async {
+    final fallback = _alertFallback;
+    if (fallback == null || _pollingAlerts) return;
+    _pollingAlerts = true;
+    var failed = false;
+    try {
+      await fallback.poll();
+    } on BackendFailure catch (failure) {
+      // Só o texto já traduzido pelo `_guard`: nada do paciente vai ao log.
+      failed = true;
+      developer.log(failure.message, name: 'sinalacs.acs.alert_fallback');
+    } finally {
+      _pollingAlerts = false;
+    }
+    if (!mounted) return;
+    setState(() {
+      _alertFallbackAt = DateTime.now();
+      _alertFallbackFailed = failed;
+    });
   }
 
   @override
@@ -1619,7 +1710,12 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
       _reconnectTimer = null;
       _periodicSyncTimer?.cancel();
       _periodicSyncTimer = null;
+      _inBackground = true;
+      _syncAlertFallbackTimer();
     } else if (state == AppLifecycleState.resumed) {
+      _inBackground = false;
+      _pollAlerts();
+      _syncAlertFallbackTimer();
       if (_feedErrorIsTransient) {
         // O gatilho que mais importa na prática: o sinal costuma voltar com
         // a tela apagada, e o ACS tira o aparelho do bolso já esperando o
@@ -1854,6 +1950,7 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
         initialAlert: widget.initialAlert,
         initialPosition: widget.initialPosition,
         syncInterval: widget.syncInterval,
+        alertFallbackInterval: widget.alertFallbackInterval,
         aviso: aviso,
       )),
       (_) => false,
@@ -2023,6 +2120,8 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
     if (_lockHooks?.openPasswordReauth == _reauthForLock) _lockHooks!.openPasswordReauth = null;
     _reconnectTimer?.cancel();
     _periodicSyncTimer?.cancel();
+    _alertFallbackTimer?.cancel();
+    _alertFallback?.close();
     WidgetsBinding.instance.removeObserver(this);
     // Solta o callback ANTES de parar: `stop()` desconecta o MQTT, que avisa
     // `onConnectionChanged(false)`, e `mounted` ainda é `true` durante o
@@ -2053,6 +2152,9 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
           queue: _queue,
           feedError: _feedError,
           onRetryFeed: _feedErrorIsTransient ? _retryFeedNow : null,
+          alertFallback: _alertFallbackTimer == null
+              ? null
+              : (at: _alertFallbackAt, failed: _alertFallbackFailed, every: _alertFallbackInterval),
           storageError: _storageNotice,
           onAcknowledge: _acknowledge,
           onResolve: _resolve,
@@ -2259,6 +2361,7 @@ class DashboardScreen extends StatelessWidget {
     super.key,
     this.feedError,
     this.onRetryFeed,
+    this.alertFallback,
     this.storageError,
     this.onAcknowledge,
     this.onResolve,
@@ -2268,6 +2371,11 @@ class DashboardScreen extends StatelessWidget {
 
   final AlertQueue queue;
   final InfraNotice? feedError;
+
+  /// Reserva por HTTP ativa (#80): o broker está fora e o painel consulta o
+  /// servidor a cada [every]. `at` é a última resposta (nula antes da
+  /// primeira) e `failed` diz se ela falhou.
+  final ({DateTime? at, bool failed, Duration every})? alertFallback;
 
   /// Presente só quando [feedError] é uma falha transitória — dá ao ACS que já
   /// vê o sinal voltar a chance de não esperar o backoff automático. `null`
@@ -2301,6 +2409,10 @@ class DashboardScreen extends StatelessWidget {
               icon: Icons.cloud_off_outlined,
               notice: feedError!,
               onRetry: onRetryFeed,
+            ),
+            if (alertFallback != null) _AlertFallbackStatus(
+              key: const Key('alert_fallback_status'),
+              status: alertFallback!,
             ),
             if (storageError != null) _InfraBanner(
               key: const Key('storage_error'),
@@ -2341,6 +2453,41 @@ class DashboardScreen extends StatelessWidget {
 ///
 /// A `Key` vem de fora e é o único identificador do aviso — pô-la também no
 /// `ListTile` faria `find.byKey` achar dois widgets.
+/// Linha da reserva por HTTP (#80): diz ao ACS que os alertas seguem
+/// chegando, pelo servidor e com atraso, enquanto o tempo real está fora.
+class _AlertFallbackStatus extends StatelessWidget {
+  const _AlertFallbackStatus({required this.status, super.key});
+
+  final ({DateTime? at, bool failed, Duration every}) status;
+
+  static String _hhmm(DateTime t) =>
+      '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
+
+  @override
+  Widget build(BuildContext context) {
+    final at = status.at;
+    final segundos = status.every.inSeconds;
+    final texto = at == null
+        ? 'Consultando alertas pelo servidor…'
+        : status.failed
+            ? 'A consulta de alertas pelo servidor também falhou às ${_hhmm(at)}. '
+                'Nova tentativa em $segundos s.'
+            : 'Recebendo alertas pelo servidor a cada $segundos s. '
+                'Última consulta às ${_hhmm(at)}.';
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Semantics(
+        liveRegion: true,
+        child: Row(children: [
+          Icon(status.failed ? Icons.sync_problem_outlined : Icons.sync_outlined, size: 18),
+          const SizedBox(width: 8),
+          Expanded(child: Text(texto)),
+        ]),
+      ),
+    );
+  }
+}
+
 class _InfraBanner extends StatelessWidget {
   const _InfraBanner({required this.icon, required this.notice, super.key, this.onRetry});
 
