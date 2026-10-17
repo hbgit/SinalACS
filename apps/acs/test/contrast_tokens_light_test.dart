@@ -54,4 +54,12 @@ void main() {
   test('green (fill, desenhado para o escuro) usado como texto sobre card claro fica abaixo de 4.5:1', () {
     expect(contrastOn(AcsColors.green, AcsLightColors.surfaceRaised), lessThan(normalText));
   });
+
+  // "Descartar a minha" (#79) pinta `redOnSurface` sobre o fundo do
+  // `AlertDialog`, que no Material 3 é `surfaceContainerHigh` do esquema
+  // (derivado da semente), não `surfaceRaised`.
+  test('redOnSurface sobre diálogo (confirmação destrutiva do conflito)', () {
+    final dialogo = buildAcsLightTheme().colorScheme.surfaceContainerHigh;
+    expect(contrastOn(risk.redOnSurface, dialogo), greaterThanOrEqualTo(normalText));
+  });
 }

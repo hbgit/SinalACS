@@ -615,7 +615,13 @@ class OfflineVisitQueue {
         return const SyncOutcome(kind: SyncOutcomeKind.conflict, processed: 1);
       case 'rejected':
         final reason = result.message ?? 'O servidor recusou esta visita em definitivo.';
-        if (current >= 0) _conflicts.removeAt(current);
+        // Descartada durante a chamada ("Manter a do servidor"): o ACS já
+        // decidiu apagar a cópia do aparelho; recolocá-la nas recusadas a
+        // ressuscitaria.
+        if (current < 0) {
+          return SyncOutcome(kind: SyncOutcomeKind.rejected, processed: 1, message: reason);
+        }
+        _conflicts.removeAt(current);
         // Sai do conflito para as recusadas: o registro novo não carrega a
         // versão de conflito, senão `restore` o poria de volta em conflito.
         _rejected.add(OfflineVisitRecord(

@@ -607,6 +607,28 @@ class FakeVisitSynchronizer implements VisitSynchronizer {
   }
 }
 
+/// Resolvedor de conflito (#79) programado pelo teste: registra cada chamada
+/// e devolve [resposta]. Com [portao], espera por ele (chamada em voo).
+class FakeVisitConflictResolver implements VisitConflictResolver {
+  FakeVisitConflictResolver({this.resposta});
+
+  /// Resposta por chamada; ausente = `synced` com a versão vista + 1.
+  Future<VisitSyncOutcome> Function(OfflineVisitRecord visit, int expectedServerVersion)? resposta;
+
+  Completer<void>? portao;
+
+  final List<({OfflineVisitRecord visit, int expectedServerVersion})> chamadas = [];
+
+  @override
+  Future<VisitSyncOutcome> resolve(OfflineVisitRecord visit, {required int expectedServerVersion}) async {
+    chamadas.add((visit: visit, expectedServerVersion: expectedServerVersion));
+    await portao?.future;
+    final custom = resposta;
+    if (custom != null) return custom(visit, expectedServerVersion);
+    return VisitSyncOutcome(localId: visit.localId, status: 'synced', serverVersion: expectedServerVersion + 1);
+  }
+}
+
 PrioritizedAlert testAlert({
   required String alertId,
   String riskLevel = 'red',
