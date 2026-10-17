@@ -274,8 +274,43 @@ class OrmAlertStore implements AlertStore {
     );
   }
 
+  /// Duas consultas em vez de uma ordenação por status: os não confirmados
+  /// enchem o teto primeiro, e só o que sobra vai para os confirmados.
   @override
-  Future<List<OpenAlertSnapshot>> openInMicroArea(String microAreaId, {required int limit}) {
-    throw UnimplementedError('preenchido na Task 2 da #80');
+  Future<List<OpenAlertSnapshot>> openInMicroArea(String microAreaId, {required int limit}) async {
+    final area = UuidValue.fromString(microAreaId);
+    final naoConfirmados = await Alert.db.find(
+      _session(),
+      where: (t) => t.microAreaId.equals(area) & t.status.inSet({AlertStatus.pending, AlertStatus.escalated}),
+      orderBy: (t) => t.triggeredAt,
+      limit: limit,
+      transaction: _transaction,
+    );
+    final restante = limit - naoConfirmados.length;
+    final confirmados = restante <= 0
+        ? const <Alert>[]
+        : await Alert.db.find(
+            _session(),
+            where: (t) => t.microAreaId.equals(area) & t.status.equals(AlertStatus.acknowledged),
+            orderBy: (t) => t.triggeredAt,
+            limit: restante,
+            transaction: _transaction,
+          );
+
+    return [
+      for (final row in [...naoConfirmados, ...confirmados])
+        OpenAlertSnapshot(
+          alertId: row.id!.uuid,
+          patientId: row.patientId.uuid,
+          microAreaId: microAreaId,
+          riskLevel: row.riskLevel,
+          locationHash: row.locationHash,
+          locationCell: row.locationCell,
+          triggeredAt: row.triggeredAt,
+          status: row.status,
+          acknowledgedAt: row.acknowledgedAt,
+          escalated: row.escalatedAt != null || row.status == AlertStatus.escalated,
+        ),
+    ];
   }
 }

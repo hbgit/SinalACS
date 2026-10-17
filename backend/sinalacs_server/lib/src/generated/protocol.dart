@@ -115,12 +115,13 @@ import 'package:sinalacs_server/src/generated/api/admin_acs.dart' as _i100;
 import 'package:sinalacs_server/src/generated/api/admin_staff.dart' as _i101;
 import 'package:sinalacs_server/src/generated/api/terms_version_entry.dart'
     as _i102;
+import 'package:sinalacs_server/src/generated/api/acs_open_alert.dart' as _i103;
 import 'package:sinalacs_server/src/generated/api/micro_area_patient.dart'
-    as _i103;
-import 'package:sinalacs_server/src/generated/api/visit_sync_result.dart'
     as _i104;
-import 'package:sinalacs_server/src/generated/api/visit_sync_entry.dart'
+import 'package:sinalacs_server/src/generated/api/visit_sync_result.dart'
     as _i105;
+import 'package:sinalacs_server/src/generated/api/visit_sync_entry.dart'
+    as _i106;
 export 'acs.dart';
 export 'acs_refresh_token.dart';
 export 'acs_upload_token.dart';
@@ -3721,24 +3722,30 @@ class Protocol extends _i1.SerializationManagerServer {
               .toList()
           as T;
     }
-    if (t == List<_i103.MicroAreaPatient>) {
+    if (t == List<_i103.AcsOpenAlert>) {
       return (data as List)
-              .map((e) => deserialize<_i103.MicroAreaPatient>(e))
+              .map((e) => deserialize<_i103.AcsOpenAlert>(e))
+              .toList()
+          as T;
+    }
+    if (t == List<_i104.MicroAreaPatient>) {
+      return (data as List)
+              .map((e) => deserialize<_i104.MicroAreaPatient>(e))
               .toList()
           as T;
     }
     if (t == List<String>) {
       return (data as List).map((e) => deserialize<String>(e)).toList() as T;
     }
-    if (t == List<_i104.VisitSyncResult>) {
+    if (t == List<_i105.VisitSyncResult>) {
       return (data as List)
-              .map((e) => deserialize<_i104.VisitSyncResult>(e))
+              .map((e) => deserialize<_i105.VisitSyncResult>(e))
               .toList()
           as T;
     }
-    if (t == List<_i105.VisitSyncEntry>) {
+    if (t == List<_i106.VisitSyncEntry>) {
       return (data as List)
-              .map((e) => deserialize<_i105.VisitSyncEntry>(e))
+              .map((e) => deserialize<_i106.VisitSyncEntry>(e))
               .toList()
           as T;
     }
