@@ -644,6 +644,67 @@ void main() {
       expect(formulario(), findsOneWidget);
     });
 
+    OfflineVisitRecord emConflito(String localId) => OfflineVisitRecord(
+          localId: localId,
+          patientId: seedPatientId,
+          risk: 'red',
+          status: 'PENDENTE',
+          conflictServerVersion: 3,
+          conflictServer: const VisitConflictSnapshot(version: 3, status: 'Paciente ausente', notes: 'Sem resposta'),
+        );
+
+    testWidgets('"Sair" com visitas em conflito: linha própria, e "sobem sozinhas" não as conta', (tester) async {
+      backend = FakeAcsBackend()..syncFailure = const BackendFailure('Sem conexão com o servidor.');
+      final store = InMemoryVisitStore();
+      await store.save([
+        OfflineVisitRecord(localId: 'local-1', patientId: seedPatientId, risk: 'red', status: 'PENDENTE'),
+        emConflito('local-c1'),
+        emConflito('local-c2'),
+      ]);
+      fila = OfflineVisitQueue(store: store, synchronizer: BackendVisitSynchronizer(backend: backend, ownerId: seedAcsId));
+      await fila.restore();
+      expect(fila.conflictCount, 2);
+      await abrirApp(tester, backend);
+      await entrarComSenha(tester);
+      await abrirSair(tester);
+
+      expect(
+        find.text('3 visitas ainda não enviadas continuam neste aparelho. 1 delas segue protegida e sobe sozinha quando o aplicativo estiver aberto com conexão (em até 7 dias).'),
+        findsOneWidget,
+      );
+      expect(find.byKey(const Key('logout_conflict_visits')), findsOneWidget);
+      expect(find.text('2 delas estão em conflito com o servidor e aguardam a sua decisão nesta conta.'), findsOneWidget);
+      expect(find.byKey(const Key('logout_rejected_visits')), findsNothing);
+    });
+
+    testWidgets('"Sair" só com 1 visita em conflito: nada "sobe sozinha"', (tester) async {
+      backend = FakeAcsBackend()..syncFailure = const BackendFailure('Sem conexão com o servidor.');
+      final store = InMemoryVisitStore();
+      await store.save([emConflito('local-c1')]);
+      fila = OfflineVisitQueue(store: store, synchronizer: BackendVisitSynchronizer(backend: backend, ownerId: seedAcsId));
+      await fila.restore();
+      await abrirApp(tester, backend);
+      await entrarComSenha(tester);
+      await abrirSair(tester);
+
+      expect(find.text('1 visita ainda não enviada continua neste aparelho.'), findsOneWidget);
+      expect(find.textContaining('sozinha'), findsNothing);
+      expect(find.text('1 delas está em conflito com o servidor e aguarda a sua decisão nesta conta.'), findsOneWidget);
+      expect(find.byKey(const Key('logout_conflict_visits')), findsOneWidget);
+    });
+
+    testWidgets('"Sair" sem conflito não mostra a linha de conflito', (tester) async {
+      backend = FakeAcsBackend()..syncFailure = const BackendFailure('Sem conexão com o servidor.');
+      fila = OfflineVisitQueue(synchronizer: BackendVisitSynchronizer(backend: backend, ownerId: seedAcsId));
+      await fila.add(OfflineVisitRecord(localId: 'local-1', patientId: seedPatientId, risk: 'red', status: 'PENDENTE'));
+      await abrirApp(tester, backend);
+      await entrarComSenha(tester);
+      await abrirSair(tester);
+
+      expect(find.byKey(const Key('logout_pending_visits')), findsOneWidget);
+      expect(find.byKey(const Key('logout_conflict_visits')), findsNothing);
+    });
+
     testWidgets('"Sair" com 1 alerta não confirmado usa o singular', (tester) async {
       await abrirPainel(tester);
       await abrirSair(tester);

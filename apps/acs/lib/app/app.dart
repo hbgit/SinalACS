@@ -199,6 +199,25 @@ typedef UnsentOnDevice = ({int own, int elsewhere, int unsent, int review, int n
 
 /// Visitas que a fila ainda guarda no aparelho: pendentes, em conflito (#79,
 /// fora da retentativa até o ACS decidir) e recusadas.
+/// Frase do "Sair" sobre as [ficam] visitas não enviadas. As [emConflito]
+/// contam no total, mas não no "sobem sozinhas": o envio diferido não as
+/// envia (#79, D6) — a linha `logout_conflict_visits` diz o que esperam.
+String _pendingVisitsOnLogout({required int ficam, required int emConflito}) {
+  if (emConflito == 0) {
+    return ficam == 1
+        ? '1 visita ainda não enviada continua neste aparelho. Ela segue protegida e sobe sozinha quando o aplicativo estiver aberto com conexão (em até 7 dias).'
+        : '$ficam visitas ainda não enviadas continuam neste aparelho. Elas seguem protegidas e sobem sozinhas quando o aplicativo estiver aberto com conexão (em até 7 dias).';
+  }
+  final total = ficam == 1
+      ? '1 visita ainda não enviada continua neste aparelho.'
+      : '$ficam visitas ainda não enviadas continuam neste aparelho.';
+  final sozinhas = ficam - emConflito;
+  if (sozinhas <= 0) return total;
+  return sozinhas == 1
+      ? '$total 1 delas segue protegida e sobe sozinha quando o aplicativo estiver aberto com conexão (em até 7 dias).'
+      : '$total $sozinhas delas seguem protegidas e sobem sozinhas quando o aplicativo estiver aberto com conexão (em até 7 dias).';
+}
+
 int _visitsOnDevice(OfflineVisitQueue queue) =>
     queue.pendingCount + queue.conflictCount + queue.rejectedCount;
 
@@ -1736,6 +1755,10 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
     setState(() => _enviandoAntesDeSair = false);
     final fila = widget.visitQueue;
     final recusadas = fila.rejectedCount;
+    // Em conflito também ficam no aparelho, mas o envio diferido as pula (D6):
+    // só sobem depois da decisão do dono, nesta conta. Não entram no "sobem
+    // sozinhas".
+    final emConflito = fila.conflictCount;
     final proprias = _visitsOnDevice(fila);
     final outras = await _care?.pendingElsewhere(widget.acsId) ?? 0;
     if (!mounted) return;
@@ -1763,9 +1786,7 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
               const Text('Tudo foi enviado. Nenhuma visita fica pendente neste aparelho.', key: Key('logout_all_sent'))
             else ...[
               Text(
-                ficam == 1
-                    ? '1 visita ainda não enviada continua neste aparelho. Ela segue protegida e sobe sozinha quando o aplicativo estiver aberto com conexão (em até 7 dias).'
-                    : '$ficam visitas ainda não enviadas continuam neste aparelho. Elas seguem protegidas e sobem sozinhas quando o aplicativo estiver aberto com conexão (em até 7 dias).',
+                _pendingVisitsOnLogout(ficam: ficam, emConflito: emConflito),
                 key: const Key('logout_pending_visits'),
               ),
               if (outras > 0 && proprias > 0) ...[
@@ -1782,6 +1803,15 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
                       ? '1 delas foi recusada pela central e aguarda revisão nesta conta.'
                       : '$recusadas delas foram recusadas pela central e aguardam revisão nesta conta.',
                   key: const Key('logout_rejected_visits'),
+                ),
+              ],
+              if (emConflito > 0) ...[
+                const SizedBox(height: 8),
+                Text(
+                  emConflito == 1
+                      ? '1 delas está em conflito com o servidor e aguarda a sua decisão nesta conta.'
+                      : '$emConflito delas estão em conflito com o servidor e aguardam a sua decisão nesta conta.',
+                  key: const Key('logout_conflict_visits'),
                 ),
               ],
             ],

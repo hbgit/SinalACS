@@ -204,6 +204,26 @@ void main() {
     expect(await store.load(), isEmpty);
   });
 
+  test('resolveKeepLocal sincronizado não conta visita descartada durante a chamada', () async {
+    final store = InMemoryVisitStore();
+    await store.save([emConflito('c-1')]);
+    late final OfflineVisitQueue fila;
+    final resolvedor = _Resolvedor((v, _) async {
+      // "Manter a do servidor" correu enquanto a chamada estava em voo.
+      await fila.resolveKeepServer('c-1');
+      return VisitSyncOutcome(localId: v.localId, status: 'synced', serverVersion: 4);
+    });
+    fila = OfflineVisitQueue(store: store, conflictResolver: resolvedor);
+    await fila.restore();
+
+    final resultado = await fila.resolveKeepLocal('c-1');
+
+    expect(resultado.kind, SyncOutcomeKind.synced);
+    expect(fila.conflictCount, 0);
+    expect(fila.syncedCount, 0, reason: 'o ACS já descartou a cópia do aparelho');
+    expect(await store.load(), isEmpty);
+  });
+
   test('resolveKeepLocal sem rede mantém o conflito', () async {
     final store = InMemoryVisitStore();
     await store.save([emConflito('c-1')]);

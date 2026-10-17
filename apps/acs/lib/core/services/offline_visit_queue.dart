@@ -577,7 +577,13 @@ class OfflineVisitQueue {
     final current = _conflicts.indexWhere((visit) => visit.localId == localId);
     switch (result.status) {
       case 'synced':
-        if (current >= 0) _conflicts.removeAt(current);
+        // Descartada durante a chamada: o servidor gravou, mas o ACS já tirou
+        // a cópia do aparelho — contá-la como enviada daqui a ressuscitaria,
+        // como no ramo `rejected`.
+        if (current < 0) {
+          return const SyncOutcome(kind: SyncOutcomeKind.synced, processed: 1);
+        }
+        _conflicts.removeAt(current);
         _synced.add(edited.copyWith(
           status: 'SINCRONIZADO',
           version: result.serverVersion ?? edited.version,
