@@ -52,6 +52,7 @@ class VisitDatabase {
 
   Database? _database;
   Future<Database>? _opening;
+  Future<void>? _destroying;
 
   /// Abre preguiçosamente, na primeira leitura ou escrita.
   ///
@@ -62,6 +63,12 @@ class VisitDatabase {
   /// conexões ao mesmo arquivo, ou duas recuperações apagando o arquivo, são
   /// o que isto evita). Se a abertura falha, o próximo `open()` tenta de novo.
   Future<Database> open() {
+    // Durante um [destroy] nenhuma abertura começa: ela esperaria pelo fim e
+    // abriria com a chave NOVA. Sem isso, uma abertura no meio usaria a chave
+    // velha (ainda guardada) sobre um arquivo apagado ou recém-criado.
+    final destroying = _destroying;
+    if (destroying != null) return destroying.then((_) => open());
+
     final existing = _database;
     if (existing != null && existing.isOpen) return Future.value(existing);
 
@@ -165,7 +172,24 @@ class VisitDatabase {
   /// ([wipeAllData] recusa antes). Espera uma abertura em voo terminar para não
   /// deixar uma conexão viva sobre o arquivo apagado. O objeto continua
   /// reutilizável. A chave nunca é lida nem registrada aqui.
-  Future<void> destroy() async {
+  Future<void> destroy() {
+    // Exclusivo contra [open] e contra outro destroy: serializa na fila.
+    final previous = _destroying;
+    final run = Future<void>(() async {
+      if (previous != null) {
+        try {
+          await previous;
+        } catch (_) {}
+      }
+      await _destroyOnce();
+    });
+    _destroying = run;
+    return run.whenComplete(() {
+      if (identical(_destroying, run)) _destroying = null;
+    });
+  }
+
+  Future<void> _destroyOnce() async {
     final inFlight = _opening;
     if (inFlight != null) {
       try {

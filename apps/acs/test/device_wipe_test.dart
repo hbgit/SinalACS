@@ -87,6 +87,9 @@ void main() {
       await gravarCursorECache(storage);
       final caminho = await EncryptedLocalDatabase.pathFor(dbName);
       final copia = File('$caminho${EncryptedLocalDatabase.recoverySuffix}')..writeAsStringSync('cifrado');
+      for (final sufixo in ['-wal', '-shm', '-journal']) {
+        File('$caminho$sufixo').writeAsStringSync('resto');
+      }
       expect(File(caminho).existsSync(), isTrue);
 
       await storage.destroyAll();
@@ -125,6 +128,44 @@ void main() {
       expect(File(caminho).existsSync(), isFalse, reason: 'a abertura em voo não sobrevive ao destroy');
       expect(await contarTabelas(storage), {for (final t in tabelas) t: 0});
       expect(await keyStore.readOrCreate(), isNot('a' * 64));
+    });
+
+    test('open durante destroy espera o fim e abre com a chave NOVA', () async {
+      final chaveAntiga = 'a' * 64;
+      final portao = Completer<void>();
+      final keyStore = _ChaveComPortao(chaveAntiga, portao.future);
+      final usadas = <String>[];
+      final banco = VisitDatabase(
+        keyStore: keyStore,
+        databaseName: dbName,
+        allowUnencryptedForTesting: true,
+        opener: (nome, chave, claro) {
+          usadas.add(chave);
+          return EncryptedLocalDatabase.open(
+              databaseName: nome, passphrase: chave, allowUnencryptedForTesting: claro);
+        },
+      );
+      addTearDown(banco.close);
+      await banco.open();
+      usadas.clear();
+
+      final destruindo = banco.destroy();
+      var abriu = false;
+      final abrindo = banco.open().then((db) {
+        abriu = true;
+        return db;
+      });
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      expect(abriu, isFalse, reason: 'a abertura não pode furar o destroy');
+      expect(usadas, isEmpty);
+
+      portao.complete();
+      await destruindo;
+      await abrindo;
+
+      expect(usadas, hasLength(1));
+      expect(usadas.single, isNot(chaveAntiga));
+      expect(usadas.single, await keyStore.readOrCreate());
     });
 
     test('recusa com visita de um dono e não apaga nada', () async {
@@ -795,4 +836,18 @@ class _GravacaoDeAFalha implements VisitStorage {
   @override
   VisitStore forOwner(String ownerId) =>
       ownerId == 'acs-a' ? FailingVisitStore(failOnLoad: false) : _inner.forOwner(ownerId);
+}
+
+/// Chave cuja exclusão espera um portão: abre a janela em que um `open()`
+/// concorrente ao `destroy()` leria a chave velha.
+class _ChaveComPortao extends InMemoryDatabaseKeyStore {
+  _ChaveComPortao(String chave, this._portao) : super(initialKey: chave);
+
+  final Future<void> _portao;
+
+  @override
+  Future<void> delete() async {
+    await _portao;
+    await super.delete();
+  }
 }
