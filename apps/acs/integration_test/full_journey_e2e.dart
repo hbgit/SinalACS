@@ -149,6 +149,16 @@ class _EnvioDeVisitasForaDoAr implements AcsBackend {
   @override
   set onSessionExpired(void Function()? value) => _inner.onSessionExpired = value;
   @override
+  void Function(String orderId)? get onDeviceWipeRequired => _inner.onDeviceWipeRequired;
+  @override
+  set onDeviceWipeRequired(void Function(String orderId)? value) => _inner.onDeviceWipeRequired = value;
+  @override
+  Future<String?> pendingDeviceWipe(String deviceId) => _inner.pendingDeviceWipe(deviceId);
+  @override
+  Future<void> confirmDeviceWipe(String deviceId, String orderId) => _inner.confirmDeviceWipe(deviceId, orderId);
+  @override
+  Future<void> forgetLocalSession() => _inner.forgetLocalSession();
+  @override
   Future<bool> get hasStoredSession => _inner.hasStoredSession;
   @override
   Future<SessionUnlock> unlockStoredSession({required String reason}) => _inner.unlockStoredSession(reason: reason);

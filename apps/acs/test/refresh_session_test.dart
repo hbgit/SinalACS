@@ -518,6 +518,9 @@ class ThrowingStore implements SessionTokenStore {
 class ThrowingDevices implements DeviceIdStore {
   @override
   Future<String> readOrCreate() async => throw PlatformException(code: 'x');
+
+  @override
+  Future<void> delete() async => throw PlatformException(code: 'x');
 }
 
 class SlowStorage implements FlutterSecureStorage {

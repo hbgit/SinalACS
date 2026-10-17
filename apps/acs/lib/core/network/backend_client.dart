@@ -38,6 +38,19 @@ class UploadTokenRefused extends BackendFailure {
   const UploadTokenRefused() : super('Envio não autorizado. Entre novamente.', isRecoverable: false);
 }
 
+/// O servidor pediu a limpeza remota deste aparelho (#81) e recusou o login,
+/// a renovação ou o envio diferido com `DeviceWipeRequiredException`. Não
+/// recuperável: nada volta a funcionar com o id antigo da instalação. Quem
+/// apaga é o `RemoteWipeCoordinator`, avisado por
+/// [AcsBackend.onDeviceWipeRequired] — nunca por `onSessionExpired`.
+class DeviceWipeRequiredFailure extends BackendFailure {
+  const DeviceWipeRequiredFailure(this.orderId)
+      : super('Este aparelho precisa ser limpo a pedido da coordenação.', isRecoverable: false);
+
+  /// Identificador do pedido, a devolver em `devices.confirmWipe`.
+  final String orderId;
+}
+
 /// O ACS tem MFA ativa e a senha conferiu: falta o código do autenticador.
 class MfaCodeRequired extends BackendFailure {
   const MfaCodeRequired() : super('Informe o código do aplicativo autenticador.');
@@ -86,6 +99,26 @@ abstract class AcsBackend {
   /// refresh token foi recusado ou não existe mais). A UI leva a pessoa de
   /// volta ao login.
   void Function()? onSessionExpired;
+
+  /// Chamado quando o servidor pede a limpeza remota deste aparelho (#81):
+  /// `login`, a renovação e o envio diferido recusam com
+  /// [DeviceWipeRequiredFailure] e passam o `orderId` aqui. É o gatilho do
+  /// `RemoteWipeCoordinator`; [onSessionExpired] não é chamado nesse caso.
+  void Function(String orderId)? onDeviceWipeRequired;
+
+  /// `devices.pendingWipe`: o `orderId` da limpeza pedida para [deviceId], ou
+  /// `null`. Sem token. Falha de rede: [BackendFailure] recuperável.
+  Future<String?> pendingDeviceWipe(String deviceId);
+
+  /// `devices.confirmWipe`: o aparelho avisa que apagou tudo. Sem token e sem
+  /// retorno; um par errado se comporta igual no servidor.
+  Future<void> confirmDeviceWipe(String deviceId, String orderId);
+
+  /// Esquece a sessão SÓ neste aparelho, sem rede: torna obsoleta a renovação
+  /// em voo, descarta a sessão em memória e apaga o refresh token. É o passo
+  /// de sessão da limpeza remota — o servidor já revogou a família no pedido,
+  /// então não há `logout` a chamar.
+  Future<void> forgetLocalSession();
 
   /// `true` se há um refresh token guardado no aparelho (a UI pode tentar
   /// [resumeSession] na partida).
@@ -230,6 +263,12 @@ class MisconfiguredBackend implements AcsBackend {
   set onSessionExpired(void Function()? _) {}
 
   @override
+  void Function(String orderId)? get onDeviceWipeRequired => null;
+
+  @override
+  set onDeviceWipeRequired(void Function(String orderId)? _) {}
+
+  @override
   AuthSession? get session => null;
 
   @override
@@ -246,6 +285,10 @@ class MisconfiguredBackend implements AcsBackend {
 
   @override
   Future<void> logout() async {}
+
+  /// Não há sessão nem token: nada a esquecer.
+  @override
+  Future<void> forgetLocalSession() async {}
 
   /// Recusa uma chamada. `Never` avisa o analisador de que nada abaixo disto
   /// executa, então cada método abaixo é uma linha só.
@@ -300,6 +343,12 @@ class MisconfiguredBackend implements AcsBackend {
 
   @override
   Future<void> revokeUploadToken(String uploadToken) async => _recusar();
+
+  @override
+  Future<String?> pendingDeviceWipe(String deviceId) async => _recusar();
+
+  @override
+  Future<void> confirmDeviceWipe(String deviceId, String orderId) async => _recusar();
 
   @override
   Future<List<VisitSyncEntry>> pullVisits({required DateTime since}) async => _recusar();
@@ -392,6 +441,17 @@ class BackendClient implements AcsBackend {
   void Function()? onSessionExpired;
 
   @override
+  void Function(String orderId)? onDeviceWipeRequired;
+
+  /// Traduz o pedido de limpeza do servidor e avisa quem apaga. Chamado só
+  /// FORA de [_exclusive]: o aviso dispara a limpeza, que chama
+  /// [forgetLocalSession] — outra seção crítica.
+  DeviceWipeRequiredFailure _wipeRequired(DeviceWipeRequiredException error) {
+    onDeviceWipeRequired?.call(error.orderId);
+    return DeviceWipeRequiredFailure(error.orderId);
+  }
+
+  @override
   bool get isAuthenticated {
     final current = _session;
     return current != null && !current.isExpired();
@@ -428,15 +488,19 @@ class BackendClient implements AcsBackend {
     String? totpCode,
   }) async {
     final deviceId = await _storage(_deviceIds.readOrCreate);
-    final result = await _guard(
-      () => _client.auth.loginInstitutional(
-        matricula: matricula,
-        password: senha,
-        totpCode: totpCode,
-        // O servidor só emite refresh token a quem informa o aparelho.
-        deviceId: deviceId,
-      ),
-    );
+    final result = await _guard(() async {
+      try {
+        return await _client.auth.loginInstitutional(
+          matricula: matricula,
+          password: senha,
+          totpCode: totpCode,
+          // O servidor só emite refresh token a quem informa o aparelho.
+          deviceId: deviceId,
+        );
+      } on DeviceWipeRequiredException catch (error) {
+        throw _wipeRequired(error);
+      }
+    });
 
     final session = AuthSession.tryParse(result.accessToken, result.tokenType);
     if (session == null) {
@@ -581,6 +645,11 @@ class BackendClient implements AcsBackend {
         return await _client.auth.refreshSession(refreshToken: refreshToken, deviceId: deviceId);
       } on SessionExpiredException {
         return null;
+      } on DeviceWipeRequiredException catch (error) {
+        // Fora da seção crítica, como a rede. Não é sessão vencida: nada de
+        // `onSessionExpired` nem de apagar o token aqui — quem apaga tudo é a
+        // limpeza (que chama `forgetLocalSession`).
+        throw _wipeRequired(error);
       }
     });
     // Confirmação dentro da seção: a checagem de obsolescência é definitiva
@@ -712,6 +781,16 @@ class BackendClient implements AcsBackend {
     });
   }
 
+  /// Como a segunda seção do [logout], sem a chamada de rede: o servidor já
+  /// revogou a família no pedido de limpeza (#81). Só E/S local dentro da
+  /// seção crítica.
+  @override
+  Future<void> forgetLocalSession() => _exclusive(() async {
+        _invalidateRenewal();
+        _session = null;
+        await _storage(_tokenStore.clear);
+      });
+
   /// Login de desenvolvimento, para `tool/` e `integration_test/`.
   ///
   /// É a versão antiga de [login], preservada porque as ferramentas rodam
@@ -839,12 +918,23 @@ class BackendClient implements AcsBackend {
         } on SessionExpiredException {
           // A recusa única do servidor para o token de envio.
           throw const UploadTokenRefused();
+        } on DeviceWipeRequiredException catch (error) {
+          // O aparelho inteiro vai ser limpo: não é recusa do token deste
+          // dono, então NÃO vira [UploadTokenRefused] (que apagaria o token).
+          throw _wipeRequired(error);
         }
       });
 
   @override
   Future<void> revokeUploadToken(String uploadToken) =>
       _guard(() => _client.visits.revokeUploadToken(uploadToken: uploadToken));
+
+  @override
+  Future<String?> pendingDeviceWipe(String deviceId) => _guard(() => _client.devices.pendingWipe(deviceId));
+
+  @override
+  Future<void> confirmDeviceWipe(String deviceId, String orderId) =>
+      _guard(() => _client.devices.confirmWipe(deviceId, orderId));
 
   /// Reconciliação central→dispositivo: visitas da microárea alteradas desde
   /// `since` (RF15, decisão §5). Espelha [syncVisits] na tradução de falhas.
