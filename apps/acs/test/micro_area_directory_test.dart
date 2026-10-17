@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sinalacs_acs/core/network/auth_session.dart';
 import 'package:sinalacs_acs/core/network/backend_client.dart';
@@ -126,5 +128,54 @@ void main() {
     busca = () async => <MicroAreaPatient>[];
     await diretorio().load();
     expect(store.patients, isEmpty);
+  });
+
+  group('selo da limpeza remota (#81)', () {
+    test('lista que responde depois do selo não grava; o próximo login volta a gravar', () async {
+      final rede = Completer<List<MicroAreaPatient>>();
+      busca = () => rede.future;
+      final dir = diretorio();
+
+      final carga = dir.load();
+      await dir.seal();
+      rede.complete([_p(1)]);
+      final r = await carga;
+
+      expect(r.patients, hasLength(1), reason: 'a lista fresca ainda chega a quem pediu');
+      expect(store.owner, isNull, reason: 'mas nada é gravado no aparelho limpo');
+
+      dir.unseal();
+      busca = () async => [_p(2)];
+      await dir.load();
+      expect(store.owner, 'u1|m1');
+    });
+
+    test('carga que começa selada não grava nem depois de unseal', () async {
+      final rede = Completer<List<MicroAreaPatient>>();
+      busca = () => rede.future;
+      final dir = diretorio();
+      await dir.seal();
+
+      final carga = dir.load();
+      dir.unseal();
+      rede.complete([_p(1)]);
+      await carga;
+
+      expect(store.owner, isNull);
+    });
+
+    test('falha recuperável depois do selo não lê nem apaga o cache', () async {
+      final dir = diretorio();
+      await dir.load();
+      final rede = Completer<List<MicroAreaPatient>>();
+      busca = () => rede.future;
+
+      final carga = dir.load();
+      await dir.seal();
+      rede.completeError(const BackendFailure('Sem conexão.'));
+
+      await expectLater(carga, throwsA(isA<BackendFailure>()));
+      expect(store.clears, 0);
+    });
   });
 }

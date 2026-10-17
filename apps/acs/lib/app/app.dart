@@ -642,13 +642,25 @@ class _SinalAcsAppState extends State<SinalAcsApp> with WidgetsBindingObserver i
   /// tokens de envio (sem revogar: o servidor já os revogou no pedido) e o id
   /// da instalação. D2: ao contrário do "Limpar este aparelho", nada aqui
   /// recusa por visita não enviada.
+  ///
+  /// Junto com as filas, SELA o pull de cada escopo e o cache da microárea
+  /// ([MicroAreaDirectory.seal]): a lista ou o pull que o painel pediu antes e
+  /// que só volte da rede depois da destruição reabriria o banco, criaria uma
+  /// chave nova e gravaria nomes e condições crônicas num aparelho que o
+  /// servidor registra como limpo. O selo do cache só abre no próximo login
+  /// ([_scopeForShell]).
   Future<void> _eraseDevice() async {
     _wiping = true;
     try {
       for (final queue in {..._queues.values, for (final scope in _scopes.values) scope.queue}) {
         queue.seal();
       }
+      for (final pull in {for (final scope in _scopes.values) scope.pullService, ?widget.visitPullService}) {
+        pull.seal();
+      }
+      final cacheSealed = widget.microAreaDirectory?.seal();
       await _tearDownForWipe();
+      await cacheSealed;
       final owners = <String>{..._queues.keys};
       _queues.clear();
       _scopes.clear();
@@ -762,6 +774,12 @@ class _SinalAcsAppState extends State<SinalAcsApp> with WidgetsBindingObserver i
   /// (gatilho "depois de abrir o painel"). Só `_openShell` chama o resolvedor.
   OwnerVisitScope _scopeForShell(AuthSession session) {
     final scope = _scopeFor(session);
+    // Login novo depois de uma limpeza remota: o cache e o pull voltam a
+    // gravar (o selo de [_eraseDevice] vale até aqui). Nunca no meio dela.
+    if (!_wiping) {
+      widget.microAreaDirectory?.unseal();
+      scope.pullService.unseal();
+    }
     _triggerFlush();
     return scope;
   }
