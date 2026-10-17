@@ -1706,10 +1706,11 @@ Backlog priorizado na seção final do relatório; conferência por `python3 scr
   - O JWT vivo vale até 15 min depois do pedido; a limpeza só chega na renovação seguinte ou numa consulta do app.
   - A checagem da partida do ACS espera até 5 s pela consulta `pendingWipe` quando o servidor está mudo, antes de mostrar o login.
   - Certificado de cliente MQTT por aparelho (D8, STRIDE-S): issue de continuação (a abrir); rascunho em `.superpowers/sdd/2026-10-17-issue-81-wipe-remoto-e-rotacao-de-chave/followup-issue.md`.
+  - R3 do PRD segue **parcial** (`docs/auditoria-prd`): faltam também a chave derivada de biometria que o PRD pede (a do SQLCipher fica no Keystore sem amarração, §5.1).
   - Prova só na API 36 do emulador; API 24–29 e aparelho físico sem prova.
   - `pendingWipe`/`confirmWipe` são públicos: quem tem o `deviceId` pode carimbar entregue/confirmado sem apagar nada (o acesso segue bloqueado, porque o id antigo fica marcado para sempre). "Aparelho limpo" no admin é a afirmação do aparelho, não prova.
   - O diário é de uma vaga só: um pedido mais novo sobrescreve a confirmação pendente de um mais antigo (o `wipe_confirmed` do antigo se perde). Se a gravação de `erased` e a confirmação falharem juntas, a partida seguinte vê `erasing` e apaga de novo (raro; pode atingir visitas de um login novo).
   - Escritas tardias do cache da microárea ou do cursor de `pull` depois da limpeza remota não estão provadas impossíveis: a desmontagem não congela a área. No e2e o arquivo não foi recriado, numa execução só.
-  - Teste de dispositivo que já falha em `develop`: "banco v6 ... migra para v7" em `apps/acs/integration_test/encrypted_storage_test.dart` espera `user_version` 7 e o schema é 8.
+  - Teste de dispositivo que já falhava antes desta branch (medido na base dela): "banco v6 ... migra para v7" em `apps/acs/integration_test/encrypted_storage_test.dart` espera `user_version` 7 e o schema é 8.
   - O motivo escolhido não aparece no histórico do app admin (só no servidor); se a recarga da lista falha depois de um pedido bem-sucedido, a tela mostra a falha genérica.
-  - Conferidor `scripts/qa/cobertura_prd.py --final` falha em `develop` por uma linha do RNF04 sem negrito no status (anterior a esta issue).
+  - Conferidor `scripts/qa/cobertura_prd.py --final` falha por uma linha do RNF04 sem negrito no status; falhava igual com as mudanças desta issue guardadas (medido na base da branch).
