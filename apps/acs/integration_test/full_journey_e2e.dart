@@ -170,6 +170,8 @@ class _EnvioDeVisitasForaDoAr implements AcsBackend {
   @override
   Future<api.AlertAckResult> acknowledge({required String alertId}) => _inner.acknowledge(alertId: alertId);
   @override
+  Future<List<api.AcsOpenAlert>> openAlerts() => _inner.openAlerts();
+  @override
   Future<api.AlertResolveResult> resolveAlert({required String alertId}) =>
       _inner.resolveAlert(alertId: alertId);
   @override

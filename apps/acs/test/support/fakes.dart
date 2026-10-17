@@ -201,6 +201,33 @@ class FakeAcsBackend implements AcsBackend {
     onSessionExpired?.call();
   }
 
+  /// O que `openAlerts()` devolve (#80).
+  List<AcsOpenAlert> openAlertsResult = const [];
+
+  /// Quando presente, `openAlerts()` lança esta falha.
+  Object? openAlertsFailure;
+
+  int openAlertsCalls = 0;
+
+  /// Se definido, `openAlerts()` espera por ele (consulta lenta).
+  Completer<void>? openAlertsGate;
+
+  @override
+  Future<List<AcsOpenAlert>> openAlerts() async {
+    openAlertsCalls++;
+    await openAlertsGate?.future;
+    if (sessionExpired) {
+      onSessionExpired?.call();
+      throw const BackendFailure(
+        'Sua sessão expirou. Entre novamente com o código do autenticador.',
+        isRecoverable: false,
+      );
+    }
+    final falha = openAlertsFailure;
+    if (falha != null) throw falha;
+    return openAlertsResult;
+  }
+
   @override
   Future<AlertAckResult> acknowledge({required String alertId}) async {
     if (sessionExpired) {

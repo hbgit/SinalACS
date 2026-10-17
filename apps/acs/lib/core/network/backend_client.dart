@@ -127,6 +127,10 @@ abstract class AcsBackend {
 
   Future<AlertAckResult> acknowledge({required String alertId});
 
+  /// `alerts.openForMicroArea` (#80, R2): alertas não concluídos da microárea
+  /// da sessão, a reserva por HTTP para quando o MQTT não está conectado.
+  Future<List<AcsOpenAlert>> openAlerts();
+
   /// Conclui o atendimento de um alerta já confirmado (#76): o paciente passa
   /// a ver "Atendido".
   Future<AlertResolveResult> resolveAlert({required String alertId});
@@ -264,6 +268,9 @@ class MisconfiguredBackend implements AcsBackend {
 
   @override
   Future<AlertAckResult> acknowledge({required String alertId}) async => _recusar();
+
+  @override
+  Future<List<AcsOpenAlert>> openAlerts() async => _recusar();
   @override
   Future<AlertResolveResult> resolveAlert({required String alertId}) async => _recusar();
 
@@ -744,6 +751,15 @@ class BackendClient implements AcsBackend {
     final token = await _requireToken();
     return _guard(
       () => _client.alerts.acknowledge(accessToken: token, alertId: alertId),
+    );
+  }
+
+  /// Alertas abertos da microárea pelo RPC (#80): a microárea vem do token.
+  @override
+  Future<List<AcsOpenAlert>> openAlerts() async {
+    final token = await _requireToken();
+    return _guard(
+      () => _client.alerts.openForMicroArea(accessToken: token),
     );
   }
 
