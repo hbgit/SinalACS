@@ -10,7 +10,7 @@ import 'package:sinalacs_acs/core/security/upload_token_store.dart';
 import 'package:sinalacs_acs/core/services/alert_queue.dart';
 import 'package:sinalacs_acs/core/services/offline_visit_queue.dart';
 import 'package:sinalacs_acs/core/services/remote_wipe.dart';
-import 'package:sinalacs_client/sinalacs_client.dart' show MicroAreaPatient;
+import 'package:sinalacs_client/sinalacs_client.dart' show MicroAreaPatient, SyncStatus, VisitSyncResult;
 
 import 'support/fakes.dart';
 import 'support/layout_harness.dart';
@@ -147,6 +147,10 @@ void main() {
     backend.patients = [
       MicroAreaPatient(patientId: syntheticPatientId(5), name: 'Paciente Sintético', isChronic: false, chronicConditions: const []),
     ];
+    // Uma visita pendente do ACS, que o painel carrega para a RAM ao abrir.
+    await storage.inner.forOwner(seedAcsId).save([
+      OfflineVisitRecord(localId: 'v-ram', patientId: seedPatientId, risk: 'green', status: 'PENDENTE'),
+    ]);
     await abrirApp(tester);
     await entrar(tester);
     await irParaDaBarra(tester, 'Visita');
@@ -156,6 +160,19 @@ void main() {
     await tester.pump();
     final feed = feeds.single;
     expect(feed.stopped, isFalse);
+
+    // Envio da fila em voo (rede lenta), que só responde DEPOIS da limpeza —
+    // e responde "recusada", o que faria a fila regravar a visita no disco.
+    final rede = Completer<void>();
+    backend.syncGate = rede;
+    backend.syncResultFor = (e) =>
+        VisitSyncResult(localId: e.localId, syncStatus: SyncStatus.rejected, message: 'recusa sintética');
+    final sincronizar = find.byKey(const Key('sync_visits'));
+    await tester.ensureVisible(sincronizar);
+    await tester.pump();
+    await tester.tap(sincronizar);
+    await tester.pump();
+    expect(backend.syncedVisitBatches, hasLength(1), reason: 'o envio saiu e está em voo');
 
     backend.pendingWipeOrderId = ordem;
     // A sequência completa (o campo de texto aberto escuta o ciclo e recusa
@@ -181,11 +198,46 @@ void main() {
     expect(backend.acknowledgedAlertIds, isEmpty);
     expect(backend.resolvedAlertIds, isEmpty);
 
+    // O envio em voo responde agora, depois do `destroyAll`: a fila selada
+    // não grava, e o banco recriado continua vazio.
+    rede.complete();
+    await assentar(tester);
+    expect(await storage.inner.forOwner(seedAcsId).load(), isEmpty, reason: 'o fim do envio não traz a visita de volta');
+    expect(await storage.inner.countsByOwner(), isEmpty);
+
     // O painel não volta a rodar nada depois de desmontado.
     final consultas = backend.openAlertsCalls;
     await tester.pump(const Duration(minutes: 10));
     await assentar(tester);
     expect(backend.openAlertsCalls, consultas);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('pedido com o app em segundo plano apaga sem esperar quadro', (tester) async {
+    await abrirApp(tester);
+    await entrar(tester);
+    for (final estado in [AppLifecycleState.inactive, AppLifecycleState.hidden, AppLifecycleState.paused]) {
+      tester.binding.handleAppLifecycleStateChanged(estado);
+    }
+    expect(tester.binding.framesEnabled, isFalse);
+
+    // Renovação recusada em segundo plano (reserva de alertas, reconexão).
+    backend.onDeviceWipeRequired!(ordem);
+    // Sem nenhum `pump`: nenhum quadro é desenhado, só as microtarefas correm.
+    for (var i = 0; i < 100 && backend.confirmedWipes.isEmpty; i++) {
+      await Future<void>.value();
+    }
+
+    expect(storage.destroyCalls, 1, reason: 'o banco é apagado sem esperar a volta do app');
+    expect(backend.forgetLocalSessionCount, 1);
+    expect(await deviceIds.readOrCreate(), isNot(idAntigo));
+    expect(backend.confirmedWipes, [(deviceId: idAntigo, orderId: ordem)]);
+
+    for (final estado in [AppLifecycleState.hidden, AppLifecycleState.inactive, AppLifecycleState.resumed]) {
+      tester.binding.handleAppLifecycleStateChanged(estado);
+    }
+    await assentar(tester);
+    esperarTelaDeLimpeza();
     expect(tester.takeException(), isNull);
   });
 

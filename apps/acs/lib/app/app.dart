@@ -160,10 +160,11 @@ const wipeRevokeTimeout = Duration(seconds: 5);
 /// limpeza acontece por cima do login.
 const startupWipeCheckTimeout = Duration(seconds: 5);
 
-/// Teto da espera por um envio da fila do painel já em voo antes da limpeza
-/// remota: o fim dele grava no disco, e gravar DEPOIS da destruição recriaria
-/// o banco com as visitas que a coordenação mandou apagar.
-const remoteWipeSyncWaitTimeout = Duration(seconds: 5);
+/// Teto de cada espera de quadro na desmontagem do painel antes da limpeza
+/// remota. Em segundo plano o Flutter não desenha quadros: sem teto, a
+/// limpeza ficaria parada até o app voltar. Com a fila já selada, apagar antes
+/// de o painel sair é seguro; ele sai no próximo quadro.
+const remoteWipeFrameWait = Duration(milliseconds: 500);
 
 /// O que o painel pede ao app ao encerrar o turno ou limpar o aparelho: o app
 /// é dono do armazenamento, das filas memoizadas e do envio diferido.
@@ -631,22 +632,23 @@ class _SinalAcsAppState extends State<SinalAcsApp> with WidgetsBindingObserver i
     _wipePendingConfirm.value = entry?.phase == WipePhase.erased;
   }
 
-  /// O apagador ([DeviceEraser]) do coordenador. Idempotente. Antes de apagar,
-  /// desmonta o painel (feed MQTT, reserva por HTTP, timers e formulários saem
-  /// com ele) e espera o envio da fila que já estava em voo, com teto; depois
-  /// descarta as filas em memória SEM gravar e apaga, nesta ordem: a sessão
-  /// local, o banco e a chave do SQLCipher, os tokens de envio (sem revogar: o
-  /// servidor já os revogou no pedido) e o id da instalação. D2: ao contrário
-  /// do "Limpar este aparelho", nada aqui recusa por visita não enviada.
+  /// O apagador ([DeviceEraser]) do coordenador. Idempotente. Primeiro SELA
+  /// toda fila em memória ([OfflineVisitQueue.seal]): um envio em voo que
+  /// termine depois da destruição gravaria de novo, num banco recriado com
+  /// chave nova, as visitas que a coordenação mandou apagar. Depois desmonta o
+  /// painel (feed MQTT, reserva por HTTP, timers e formulários saem com ele;
+  /// em segundo plano, no próximo quadro), descarta as filas SEM gravar e
+  /// apaga, nesta ordem: a sessão local, o banco e a chave do SQLCipher, os
+  /// tokens de envio (sem revogar: o servidor já os revogou no pedido) e o id
+  /// da instalação. D2: ao contrário do "Limpar este aparelho", nada aqui
+  /// recusa por visita não enviada.
   Future<void> _eraseDevice() async {
     _wiping = true;
     try {
-      await _tearDownForWipe();
-      final emVoo = {..._queues.values, for (final scope in _scopes.values) scope.queue};
-      final limite = DateTime.now().add(remoteWipeSyncWaitTimeout);
-      while (emVoo.any((queue) => queue.isSyncing) && DateTime.now().isBefore(limite)) {
-        await Future<void>.delayed(const Duration(milliseconds: 50));
+      for (final queue in {..._queues.values, for (final scope in _scopes.values) scope.queue}) {
+        queue.seal();
       }
+      await _tearDownForWipe();
       final owners = <String>{..._queues.keys};
       _queues.clear();
       _scopes.clear();
@@ -666,18 +668,23 @@ class _SinalAcsAppState extends State<SinalAcsApp> with WidgetsBindingObserver i
       }
       await widget.deviceIds!.delete();
     } catch (_) {
+      // As filas já estão seladas: nenhuma serve ao próximo login, que relê o
+      // disco (o diário segue em `erasing` e a limpeza é refeita depois).
+      _queues.clear();
+      _scopes.clear();
       _wiping = false;
       if (mounted) _openFreshLogin();
       rethrow;
     }
   }
 
-  /// Tira o painel (e tudo o mais) da pilha e espera os quadros em que os
-  /// `State`s saem: nenhum `setState` do painel roda depois disto.
+  /// Tira o painel (e tudo o mais) da pilha e espera, com teto, os quadros em
+  /// que os `State`s saem. Sem quadros (segundo plano), não espera: a fila já
+  /// está selada, e o painel sai no primeiro quadro da volta.
   Future<void> _tearDownForWipe() async {
     var nav = _navigatorKey.currentState;
     if (nav == null) {
-      await WidgetsBinding.instance.endOfFrame;
+      await _frame();
       nav = _navigatorKey.currentState;
     }
     if (nav == null || !mounted) return;
@@ -689,8 +696,14 @@ class _SinalAcsAppState extends State<SinalAcsApp> with WidgetsBindingObserver i
       ),
       (_) => false,
     );
-    await WidgetsBinding.instance.endOfFrame;
-    await WidgetsBinding.instance.endOfFrame;
+    await _frame();
+    await _frame();
+  }
+
+  Future<void> _frame() async {
+    final binding = WidgetsBinding.instance;
+    if (!binding.framesEnabled) return;
+    await binding.endOfFrame.timeout(remoteWipeFrameWait, onTimeout: () {});
   }
 
   /// `onWiped`: a pilha inteira vira a tela `device_wiped`, fora do bloqueio.
