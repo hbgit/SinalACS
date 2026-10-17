@@ -72,6 +72,7 @@ ubs:
   - myContact:
 visits:
   - sync:
+  - resolveConflict:
   - syncLegacy:
   - syncDeferred:
   - revokeUploadToken:

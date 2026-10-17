@@ -26,8 +26,10 @@ class EncryptedLocalDatabase {
   /// `micro_area_cache` e `micro_area_cache_meta`, o cache da microárea (RF08,
   /// `spec/lgpd_design.md` §5.11). v7 acrescenta `offline_visits.owner`, o dono
   /// da visita (id do ACS); nulo = visita legada em QUARENTENA, que nenhum dono
-  /// enxerga e que só sai pelo envio legado (`visits.syncLegacy`).
-  static const schemaVersion = 7;
+  /// enxerga e que só sai pelo envio legado (`visits.syncLegacy`). v8 acrescenta
+  /// `conflict_server_version`/`conflict_server_snapshot`: a visita em conflito
+  /// e a cópia do servidor ficam no aparelho até o ACS decidir (#79).
+  static const schemaVersion = 8;
 
   /// Visitas registradas offline, aguardando sincronização.
   ///
@@ -47,7 +49,9 @@ CREATE TABLE IF NOT EXISTS offline_visits (
   created_at TEXT NOT NULL,
   version INTEGER NOT NULL,
   rejection_reason TEXT,
-  owner TEXT
+  owner TEXT,
+  conflict_server_version INTEGER,
+  conflict_server_snapshot TEXT
 )''';
 
   /// Índice por dono: toda leitura/escrita de visitas filtra por `owner`.
@@ -79,7 +83,7 @@ CREATE TABLE IF NOT EXISTS micro_area_cache_meta (
   value TEXT NOT NULL
 )''';
 
-  /// Migração v1 → v2, v2 → v3, v3 → v4, v4 → v5, v5 → v6 e v6 → v7.
+  /// Migração v1 → v2, v2 → v3, v3 → v4, v4 → v5, v5 → v6, v6 → v7 e v7 → v8.
   ///
   /// Nenhuma das duas formas de v1 guarda o UUID do paciente: `patient_name`
   /// era `'Paciente ' + 8 dos 32 dígitos hex`, irreversível. Sem UUID,
@@ -149,6 +153,24 @@ CREATE TABLE IF NOT EXISTS micro_area_cache_meta (
         await db.execute('ALTER TABLE offline_visits ADD COLUMN owner TEXT;');
       }
       await db.execute(createOfflineVisitsOwnerIndex);
+    }
+
+    if (from < 8) {
+      // Aditiva: linhas existentes ficam com as duas colunas nulas = sem conflito.
+      final columns = await db.rawQuery(
+        "PRAGMA table_info('offline_visits')",
+      );
+      final nomes = {for (final column in columns) column['name']};
+      if (!nomes.contains('conflict_server_version')) {
+        await db.execute(
+          'ALTER TABLE offline_visits ADD COLUMN conflict_server_version INTEGER;',
+        );
+      }
+      if (!nomes.contains('conflict_server_snapshot')) {
+        await db.execute(
+          'ALTER TABLE offline_visits ADD COLUMN conflict_server_snapshot TEXT;',
+        );
+      }
     }
   }
 

@@ -138,6 +138,17 @@ abstract class AcsBackend {
   /// do token: o lote de A nunca pode sair com o token de B.
   Future<List<VisitSyncResult>> syncVisits(List<VisitSyncEntry> visits, {String? expectedUserId});
 
+  /// "Manter a minha versão" de uma visita em conflito (#79) por
+  /// `visits.resolveConflict`: compare-and-set sobre [expectedServerVersion],
+  /// a versão do servidor que o ACS viu. [expectedUserId] como em
+  /// [syncVisits]: sessão de outro dono lança [sessionOwnerMismatch] sem
+  /// enviar nada.
+  Future<VisitSyncResult> resolveVisitConflict(
+    VisitSyncEntry visit, {
+    required int expectedServerVersion,
+    String? expectedUserId,
+  });
+
   /// Envia visitas LEGADAS (sem dono, D4) por `visits.syncLegacy`. A sessão
   /// atual é só o transporte: o servidor grava autoria desconhecida e confere
   /// o território do paciente contra o de quem transporta. No máximo 200 por
@@ -258,6 +269,14 @@ class MisconfiguredBackend implements AcsBackend {
 
   @override
   Future<List<VisitSyncResult>> syncVisits(List<VisitSyncEntry> visits, {String? expectedUserId}) async =>
+      _recusar();
+
+  @override
+  Future<VisitSyncResult> resolveVisitConflict(
+    VisitSyncEntry visit, {
+    required int expectedServerVersion,
+    String? expectedUserId,
+  }) async =>
       _recusar();
 
   @override
@@ -757,6 +776,28 @@ class BackendClient implements AcsBackend {
       // microárea" aqui manda o ACS procurar um problema que não existe.
       permissionMessage:
           'Sua sessão não autoriza sincronizar visitas. Entre novamente.',
+    );
+  }
+
+  /// Mesma renovação, checagem de dono e tradução de falhas de [syncVisits].
+  @override
+  Future<VisitSyncResult> resolveVisitConflict(
+    VisitSyncEntry visit, {
+    required int expectedServerVersion,
+    String? expectedUserId,
+  }) async {
+    final current = await _requireSession();
+    // Depois da resolução do token e imediatamente antes da rede, como em
+    // `syncVisits`: a decisão de A nunca sai com o token de B.
+    if (expectedUserId != null && current.userId != expectedUserId) throw sessionOwnerMismatch;
+    final token = current.accessToken;
+    return _guard(
+      () => _client.visits.resolveConflict(
+        accessToken: token,
+        visit: visit,
+        expectedServerVersion: expectedServerVersion,
+      ),
+      permissionMessage: 'Sua sessão não autoriza sincronizar visitas. Entre novamente.',
     );
   }
 

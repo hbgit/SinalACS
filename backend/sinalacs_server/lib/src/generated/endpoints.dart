@@ -1859,6 +1859,37 @@ class Endpoints extends _i1.EndpointDispatch {
                 visits: params['visits'],
               ),
         ),
+        'resolveConflict': _i1.MethodConnector(
+          name: 'resolveConflict',
+          params: {
+            'accessToken': _i1.ParameterDescription(
+              name: 'accessToken',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'visit': _i1.ParameterDescription(
+              name: 'visit',
+              type: _i1.getType<_i18.VisitSyncEntry>(),
+              nullable: false,
+            ),
+            'expectedServerVersion': _i1.ParameterDescription(
+              name: 'expectedServerVersion',
+              type: _i1.getType<int>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async =>
+                  (endpoints['visits'] as _i12.VisitsEndpoint).resolveConflict(
+                    session,
+                    accessToken: params['accessToken'],
+                    visit: params['visit'],
+                    expectedServerVersion: params['expectedServerVersion'],
+                  ),
+        ),
         'syncLegacy': _i1.MethodConnector(
           name: 'syncLegacy',
           params: {

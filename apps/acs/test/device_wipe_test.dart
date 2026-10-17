@@ -428,6 +428,149 @@ void main() {
       expect(fila.pendingCount, 1);
     });
 
+    testWidgets('conflito só na MEMÓRIA também bloqueia a limpeza (#79)', (tester) async {
+      await io(tester, () => gravarCursorECache(storage));
+      // O conflito saiu da retentativa (D3): não conta mais como pendente, e
+      // ainda assim é trabalho de campo que não subiu.
+      final fila = OfflineVisitQueue(
+        store: FailingVisitStore(failOnLoad: false),
+        synchronizer: FakeVisitSynchronizer(statusFor: (_) => 'conflict'),
+      );
+      await tester.pumpWidget(SinalAcsApp(
+        backend: backend,
+        visitStorage: storage,
+        visitQueue: fila,
+        uploadTokens: tokens,
+        deviceIds: MemoryDeviceIdStore('aparelho-sintetico'),
+        feedBuilder: (q) => FakeAlertFeed(q),
+      ));
+      await assentar(tester);
+      await entrarComo(tester, acsA);
+      final antes = await io(tester, () => contarTabelas(storage));
+      await ateAConfirmacao(tester);
+
+      await fila.add(pendente('conflito-na-ram'));
+      await tester.runAsync(fila.sync);
+      expect(fila.pendingCount, 0);
+      expect(fila.conflictCount, 1);
+      expect(fila.persistenceFailed, isTrue);
+      await tester.tap(find.byKey(const Key('wipe_confirm')));
+      await assentar(tester);
+
+      await esperarBloqueio(tester, visitas: 1, antes: antes);
+      expect(fila.conflictCount, 1);
+    });
+
+    testWidgets('conflito no DISCO do próprio ACS bloqueia pedindo revisão, não rede (#79)', (tester) async {
+      // O conflito depende da decisão do ACS dono, não de conexão: dizer
+      // "conecte e tente de novo" mandaria o ACS esperar algo que não vem.
+      await io(tester, () async {
+        await storage.forOwner(acsA).save([
+          pendente('a-conflito').copyWith(
+            conflictServerVersion: 3,
+            conflictServer: const VisitConflictSnapshot(version: 3, status: 'Paciente ausente', notes: ''),
+          ),
+        ]);
+        await gravarCursorECache(storage);
+      });
+      final antes = await io(tester, () => contarTabelas(storage));
+      await abrirApp(tester);
+      await entrarComo(tester, acsA);
+
+      await tocarEmLimpar(tester);
+
+      await esperarBloqueio(tester, visitas: 1, antes: antes, motivo: 'revisao');
+      expect((await io(tester, () => storage.forOwner(acsA).load())).single.inConflict, isTrue);
+    });
+
+    testWidgets('conflito só na MEMÓRIA entra na contagem antes da confirmação (#79)', (tester) async {
+      await io(tester, () => gravarCursorECache(storage));
+      final fila = OfflineVisitQueue(
+        store: FailingVisitStore(failOnLoad: false),
+        synchronizer: FakeVisitSynchronizer(statusFor: (_) => 'conflict'),
+      );
+      await tester.pumpWidget(SinalAcsApp(
+        backend: backend,
+        visitStorage: storage,
+        visitQueue: fila,
+        uploadTokens: tokens,
+        deviceIds: MemoryDeviceIdStore('aparelho-sintetico'),
+        feedBuilder: (q) => FakeAlertFeed(q),
+      ));
+      await assentar(tester);
+      await entrarComo(tester, acsA);
+      // Depois do login: o `restore` da fila do painel relê o disco (vazio).
+      await fila.add(pendente('conflito-na-ram'));
+      await tester.runAsync(fila.sync);
+      expect(fila.conflictCount, 1);
+      expect(fila.persistenceFailed, isTrue);
+      final antes = await io(tester, () => contarTabelas(storage));
+
+      await tocarEmLimpar(tester);
+
+      // Direto no bloqueio: a confirmação não chega a abrir.
+      await esperarBloqueio(tester, visitas: 1, antes: antes, motivo: 'revisao');
+      expect(fila.conflictCount, 1);
+    });
+
+    testWidgets('conflito só na MEMÓRIA de outro ACS aparece no "Sair" de quem entrou depois (#79)', (tester) async {
+      backend.syncResultFor = (entry) => VisitSyncResult(
+            localId: entry.localId,
+            syncStatus: SyncStatus.conflict,
+            serverVersion: 3,
+          );
+      backend.deferredFailure = semRede;
+      late FakeAlertFeed feed;
+      await tester.pumpWidget(SinalAcsApp(
+        backend: backend,
+        visitStorage: _GravacaoDeAFalha(storage),
+        uploadTokens: tokens,
+        deviceIds: MemoryDeviceIdStore('aparelho-sintetico'),
+        feedBuilder: (q) => feed = FakeAlertFeed(q),
+      ));
+      await assentar(tester);
+      await entrarComo(tester, acsA);
+
+      // A registra uma visita; a gravação falha e ela fica só na RAM. No
+      // "Sair", o envio devolve conflito: segue só na RAM, agora em conflito.
+      feed.deliver(testAlert(alertId: 'alerta-ram', riskLevel: 'yellow'));
+      await assentar(tester);
+      await tester.tap(find.text('Iniciar rota de visita'));
+      await assentar(tester);
+      await tester.tap(find.byKey(const Key('arrival_confirmation')));
+      await assentar(tester);
+      final salvar = find.byKey(const Key('save_visit'));
+      await tester.ensureVisible(salvar);
+      await tester.pump();
+      await tester.tap(salvar);
+      await assentar(tester);
+      await tester.pump(const Duration(seconds: 10));
+      await assentar(tester);
+
+      await irParaDoMais(tester, 'Preferências');
+      final sair = find.byKey(const Key('logout_button'));
+      await tester.ensureVisible(sair);
+      await tester.pump();
+      await tester.tap(sair);
+      await assentar(tester);
+      await tester.tap(find.byKey(const Key('logout_confirm')));
+      await assentar(tester);
+      await entrarComo(tester, acsB);
+
+      await irParaDoMais(tester, 'Preferências');
+      await tester.ensureVisible(sair);
+      await tester.pump();
+      await tester.tap(sair);
+      await assentar(tester);
+
+      expect(find.byKey(const Key('logout_all_sent')), findsNothing,
+          reason: 'o conflito de A só na RAM não pode sumir da contagem');
+      expect(find.byKey(const Key('logout_pending_visits')), findsOneWidget);
+      expect(find.textContaining('1 visita ainda não enviada'), findsOneWidget);
+      await tester.tap(find.text('Cancelar'));
+      await assentar(tester);
+    });
+
     testWidgets('visita que chega ao DISCO depois da confirmação aberta: a transação recusa e nada é apagado', (tester) async {
       await io(tester, () => gravarCursorECache(storage));
       await abrirApp(tester);

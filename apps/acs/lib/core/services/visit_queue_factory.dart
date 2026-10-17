@@ -36,11 +36,11 @@ OfflineVisitQueue buildVisitQueue({
   required AcsBackend backend,
   required VisitStore store,
   required String ownerId,
-}) =>
-    OfflineVisitQueue(
-      store: store,
-      synchronizer: BackendVisitSynchronizer(backend: backend, ownerId: ownerId),
-    );
+}) {
+  // O mesmo objeto envia e resolve conflitos (#79): uma só checagem de dono.
+  final sender = BackendVisitSynchronizer(backend: backend, ownerId: ownerId);
+  return OfflineVisitQueue(store: store, synchronizer: sender, conflictResolver: sender);
+}
 
 /// Fila e pull do dono de [session] sobre UM [storage].
 ///

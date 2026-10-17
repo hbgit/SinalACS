@@ -265,6 +265,35 @@ class FakeAcsBackend implements AcsBackend {
     ];
   }
 
+  /// Chamadas de `resolveVisitConflict` (#79), na ordem.
+  final List<({VisitSyncEntry visit, int expectedServerVersion})> resolveConflictCalls = [];
+
+  /// Falha da chamada de resolução, como uma queda de rede.
+  BackendFailure? resolveConflictFailure;
+
+  /// Resultado da resolução; ausente significa `synced` com a versão vista + 1.
+  VisitSyncResult Function(VisitSyncEntry entry, int expectedServerVersion)? resolveConflictResultFor;
+
+  @override
+  Future<VisitSyncResult> resolveVisitConflict(
+    VisitSyncEntry visit, {
+    required int expectedServerVersion,
+    String? expectedUserId,
+  }) async {
+    // Como o BackendClient: a conferência do dono vem antes de qualquer envio.
+    if (expectedUserId != null && _session?.userId != expectedUserId) throw sessionOwnerMismatch;
+    callLog.add('resolveConflict');
+    resolveConflictCalls.add((visit: visit, expectedServerVersion: expectedServerVersion));
+    final failure = resolveConflictFailure;
+    if (failure != null) throw failure;
+    return resolveConflictResultFor?.call(visit, expectedServerVersion) ??
+        VisitSyncResult(
+          localId: visit.localId,
+          syncStatus: SyncStatus.synced,
+          serverVersion: expectedServerVersion + 1,
+        );
+  }
+
   /// Lotes de `syncLegacyVisits`, com o `userId` da sessão que transportou.
   final List<({String? transportUserId, String deviceId, List<VisitSyncEntry> visits})> legacyBatches = [];
 
@@ -575,6 +604,28 @@ class FakeVisitSynchronizer implements VisitSynchronizer {
           message: messageFor?.call(visit),
         ),
     ];
+  }
+}
+
+/// Resolvedor de conflito (#79) programado pelo teste: registra cada chamada
+/// e devolve [resposta]. Com [portao], espera por ele (chamada em voo).
+class FakeVisitConflictResolver implements VisitConflictResolver {
+  FakeVisitConflictResolver({this.resposta});
+
+  /// Resposta por chamada; ausente = `synced` com a versão vista + 1.
+  Future<VisitSyncOutcome> Function(OfflineVisitRecord visit, int expectedServerVersion)? resposta;
+
+  Completer<void>? portao;
+
+  final List<({OfflineVisitRecord visit, int expectedServerVersion})> chamadas = [];
+
+  @override
+  Future<VisitSyncOutcome> resolve(OfflineVisitRecord visit, {required int expectedServerVersion}) async {
+    chamadas.add((visit: visit, expectedServerVersion: expectedServerVersion));
+    await portao?.future;
+    final custom = resposta;
+    if (custom != null) return custom(visit, expectedServerVersion);
+    return VisitSyncOutcome(localId: visit.localId, status: 'synced', serverVersion: expectedServerVersion + 1);
   }
 }
 

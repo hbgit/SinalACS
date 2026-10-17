@@ -10,6 +10,7 @@ import 'package:sinalacs_acs/app/app_lock_gate.dart';
 import 'package:sinalacs_acs/app/pending_alerts_banner.dart';
 import 'package:sinalacs_acs/app/invite_screen.dart';
 import 'package:sinalacs_acs/app/mfa_enrollment_screen.dart';
+import 'package:sinalacs_acs/app/visit_conflict_screen.dart';
 import 'package:sinalacs_acs/core/database/sqlcipher_visit_store.dart';
 import 'package:sinalacs_acs/core/geo/location_cell.dart';
 import 'package:sinalacs_acs/core/network/auth_session.dart';
@@ -191,14 +192,38 @@ class _DeviceCareScope extends InheritedWidget {
 /// O que impede o "Limpar este aparelho", só em contagens. [own] + [elsewhere]
 /// é o total (desta conta / de outras contas e sem autor); [unsent] +
 /// [review] + [noToken] é o mesmo total, por motivo: ainda não enviadas
-/// (dependem de rede), recusadas ou em revisão (dependem do ACS dono), e de
+/// (dependem de rede), recusadas, em conflito (#79) ou em revisão (dependem
+/// do ACS dono), e de
 /// outro dono sem chave de envio neste aparelho (dependem de ele entrar).
 typedef UnsentOnDevice = ({int own, int elsewhere, int unsent, int review, int noToken});
 
+/// Visitas que a fila ainda guarda no aparelho: pendentes, em conflito (#79,
+/// fora da retentativa até o ACS decidir) e recusadas.
+/// Frase do "Sair" sobre as [ficam] visitas não enviadas. As [emConflito]
+/// contam no total, mas não no "sobem sozinhas": o envio diferido não as
+/// envia (#79, D6) — a linha `logout_conflict_visits` diz o que esperam.
+String _pendingVisitsOnLogout({required int ficam, required int emConflito}) {
+  if (emConflito == 0) {
+    return ficam == 1
+        ? '1 visita ainda não enviada continua neste aparelho. Ela segue protegida e sobe sozinha quando o aplicativo estiver aberto com conexão (em até 7 dias).'
+        : '$ficam visitas ainda não enviadas continuam neste aparelho. Elas seguem protegidas e sobem sozinhas quando o aplicativo estiver aberto com conexão (em até 7 dias).';
+  }
+  final total = ficam == 1
+      ? '1 visita ainda não enviada continua neste aparelho.'
+      : '$ficam visitas ainda não enviadas continuam neste aparelho.';
+  final sozinhas = ficam - emConflito;
+  if (sozinhas <= 0) return total;
+  return sozinhas == 1
+      ? '$total 1 delas segue protegida e sobe sozinha quando o aplicativo estiver aberto com conexão (em até 7 dias).'
+      : '$total $sozinhas delas seguem protegidas e sobem sozinhas quando o aplicativo estiver aberto com conexão (em até 7 dias).';
+}
+
+int _visitsOnDevice(OfflineVisitQueue queue) =>
+    queue.pendingCount + queue.conflictCount + queue.rejectedCount;
+
 /// Fila que não conseguiu gravar e ainda tem visita: essas visitas existem só
 /// em RAM, e descartá-la as perderia.
-bool _onlyInMemory(OfflineVisitQueue queue) =>
-    queue.persistenceFailed && (queue.pendingCount > 0 || queue.rejectedCount > 0);
+bool _onlyInMemory(OfflineVisitQueue queue) => queue.persistenceFailed && _visitsOnDevice(queue) > 0;
 
 /// Fila que não pode sair da memória: só em RAM, ou com um envio em voo
 /// (`isSyncing`). A segunda, descartada, faria o próximo login do dono montar
@@ -307,9 +332,10 @@ class _SinalAcsAppState extends State<SinalAcsApp> with WidgetsBindingObserver i
     return total;
   }
 
-  /// Visitas de [queue] que não estão no disco de [owner].
+  /// Visitas de [queue] que não estão no disco de [owner]: pendentes, em
+  /// conflito (#79) e recusadas.
   Future<int> _onlyInRam(String owner, OfflineVisitQueue queue) async {
-    final inQueue = [...queue.pendingVisits, ...queue.rejectedVisits];
+    final inQueue = [...queue.pendingVisits, ...queue.conflictVisits, ...queue.rejectedVisits];
     if (inQueue.isEmpty) return 0;
     final onDisk = {for (final row in await _storage.forOwner(owner).load()) row.localId};
     return inQueue.where((visit) => !onDisk.contains(visit.localId)).length;
@@ -330,7 +356,9 @@ class _SinalAcsAppState extends State<SinalAcsApp> with WidgetsBindingObserver i
         } else {
           elsewhere++;
         }
-        if (visit.rejectionReason != null) {
+        // Recusada ou em conflito (#79): as duas dependem de uma decisão do
+        // ACS dono, não de conexão.
+        if (visit.rejectionReason != null || visit.inConflict) {
           review++;
         } else if (owner != null && owner != currentOwner && ownersWithoutToken.contains(owner)) {
           noToken++;
@@ -363,7 +391,7 @@ class _SinalAcsAppState extends State<SinalAcsApp> with WidgetsBindingObserver i
       // Memória: visitas de filas que não estão no disco do dono delas.
       final filas = <String, OfflineVisitQueue>{..._queues, currentOwner: current};
       for (final MapEntry(key: owner, value: queue) in filas.entries) {
-        final naFila = [...queue.pendingVisits, ...queue.rejectedVisits];
+        final naFila = [...queue.pendingVisits, ...queue.conflictVisits, ...queue.rejectedVisits];
         if (naFila.isEmpty) continue;
         final noDisco = disco[owner] ?? {for (final row in await _storage.forOwner(owner).load()) row.localId};
         for (final visit in naFila) {
@@ -392,7 +420,7 @@ class _SinalAcsAppState extends State<SinalAcsApp> with WidgetsBindingObserver i
   Future<void> wipe(String currentOwner, OfflineVisitQueue current) async {
     // A memória primeiro: o disco não enxerga a fila que não conseguiu gravar.
     final inMemory = {..._queues.values, current}
-        .fold<int>(0, (total, queue) => total + queue.pendingCount + queue.rejectedCount);
+        .fold<int>(0, (total, queue) => total + _visitsOnDevice(queue));
     if (inMemory > 0) throw WipeBlocked(inMemory);
 
     // Reconta e apaga numa transação; recusa sem apagar nada se sobrou visita.
@@ -1727,7 +1755,11 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
     setState(() => _enviandoAntesDeSair = false);
     final fila = widget.visitQueue;
     final recusadas = fila.rejectedCount;
-    final proprias = fila.pendingCount + recusadas;
+    // Em conflito também ficam no aparelho, mas o envio diferido as pula (D6):
+    // só sobem depois da decisão do dono, nesta conta. Não entram no "sobem
+    // sozinhas".
+    final emConflito = fila.conflictCount;
+    final proprias = _visitsOnDevice(fila);
     final outras = await _care?.pendingElsewhere(widget.acsId) ?? 0;
     if (!mounted) return;
     setState(() => _saindo = false);
@@ -1754,9 +1786,7 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
               const Text('Tudo foi enviado. Nenhuma visita fica pendente neste aparelho.', key: Key('logout_all_sent'))
             else ...[
               Text(
-                ficam == 1
-                    ? '1 visita ainda não enviada continua neste aparelho. Ela segue protegida e sobe sozinha quando o aplicativo estiver aberto com conexão (em até 7 dias).'
-                    : '$ficam visitas ainda não enviadas continuam neste aparelho. Elas seguem protegidas e sobem sozinhas quando o aplicativo estiver aberto com conexão (em até 7 dias).',
+                _pendingVisitsOnLogout(ficam: ficam, emConflito: emConflito),
                 key: const Key('logout_pending_visits'),
               ),
               if (outras > 0 && proprias > 0) ...[
@@ -1773,6 +1803,15 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
                       ? '1 delas foi recusada pela central e aguarda revisão nesta conta.'
                       : '$recusadas delas foram recusadas pela central e aguardam revisão nesta conta.',
                   key: const Key('logout_rejected_visits'),
+                ),
+              ],
+              if (emConflito > 0) ...[
+                const SizedBox(height: 8),
+                Text(
+                  emConflito == 1
+                      ? '1 delas está em conflito com o servidor e aguarda a sua decisão nesta conta.'
+                      : '$emConflito delas estão em conflito com o servidor e aguardam a sua decisão nesta conta.',
+                  key: const Key('logout_conflict_visits'),
                 ),
               ],
             ],
@@ -3015,7 +3054,8 @@ class _VisitRegistrationScreenState extends State<VisitRegistrationScreen> {
 
     _message(context, switch (result.kind) {
       SyncOutcomeKind.synced => '${result.processed} visita(s) enviada(s) ao servidor.',
-      SyncOutcomeKind.conflict => '${result.processed} visita(s) em conflito. Continuam na fila para resolução.',
+      SyncOutcomeKind.conflict => '${result.processed} visita(s) em conflito com o servidor. '
+          'Toque em "Resolver conflito(s)" para comparar e escolher.',
       SyncOutcomeKind.empty => 'Não há visitas pendentes.',
       SyncOutcomeKind.error => result.message ??
           (widget.queue.persistenceFailed
@@ -3027,6 +3067,15 @@ class _VisitRegistrationScreenState extends State<VisitRegistrationScreen> {
           'servidor e não serão reenviadas. '
           '${result.message ?? 'Veja o motivo na lista abaixo.'}',
     });
+  }
+
+  /// Abre a lista de visitas em conflito (#79) e atualiza os contadores na volta.
+  Future<void> _openConflicts() async {
+    await Navigator.of(context).push<void>(MaterialPageRoute(
+      builder: (_) => VisitConflictListScreen(queue: widget.queue),
+    ));
+    if (!mounted) return;
+    setState(() {});
   }
 
   /// Descarta as visitas recusadas, com confirmação — o registro sai do
@@ -3187,7 +3236,7 @@ class _VisitRegistrationScreenState extends State<VisitRegistrationScreen> {
         contentPadding: EdgeInsets.zero,
       ),
       const SizedBox(height: 8),
-      DropdownButtonFormField<String>(isExpanded: true, initialValue: outcome, decoration: const InputDecoration(labelText: 'Status do atendimento'), items: const ['Realizada com sucesso', 'Paciente ausente', 'Recusou atendimento'].map((v) => DropdownMenuItem(value: v, child: Text(v))).toList(), onChanged: !hasPatient || !_arrivalConfirmed ? null : (v) => setState(() => outcome = v!)),
+      DropdownButtonFormField<String>(isExpanded: true, initialValue: outcome, decoration: const InputDecoration(labelText: 'Status do atendimento'), items: visitOutcomeOptions.map((v) => DropdownMenuItem(value: v, child: Text(v))).toList(), onChanged: !hasPatient || !_arrivalConfirmed ? null : (v) => setState(() => outcome = v!)),
       const SizedBox(height: 16),
       TextField(
         controller: notes,
@@ -3219,15 +3268,25 @@ class _VisitRegistrationScreenState extends State<VisitRegistrationScreen> {
         'Pendentes de sincronização: ${queue.pendingCount}'
         '${queue.persistenceFailed ? ' (em memória)' : ''}',
       ),
-      if (queue.conflictCount > 0) Padding(
-        padding: const EdgeInsets.only(top: 4),
-        child: Text(
-          key: const Key('conflict_visits_count'),
-          'Em conflito: ${queue.conflictCount}',
-          // Conflito de sincronização é operacional, não gravidade clínica.
-          style: TextStyle(color: context.acsRisk.accentOnSurface, fontWeight: FontWeight.bold),
+      if (queue.conflictCount > 0) ...[
+        Padding(
+          padding: const EdgeInsets.only(top: 4),
+          child: Text(
+            key: const Key('conflict_visits_count'),
+            'Em conflito: ${queue.conflictCount}',
+            // Conflito de sincronização é operacional, não gravidade clínica.
+            style: TextStyle(color: context.acsRisk.accentOnSurface, fontWeight: FontWeight.bold),
+          ),
         ),
-      ),
+        const SizedBox(height: 8),
+        OutlinedButton.icon(
+          key: const Key('resolve_conflicts'),
+          onPressed: _openConflicts,
+          style: OutlinedButton.styleFrom(minimumSize: const Size(48, 52)),
+          icon: const Icon(Icons.compare_arrows),
+          label: const Text('Resolver conflito(s)'),
+        ),
+      ],
       if (queue.rejectedCount > 0) ...[
         Padding(
           padding: const EdgeInsets.only(top: 4),

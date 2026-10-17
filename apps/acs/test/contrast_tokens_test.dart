@@ -69,4 +69,12 @@ void main() {
     final ratio = contrastOn(const Color(0xFFEF4444), AcsDarkColors.surfaceRaised);
     expect(ratio, lessThan(normalText));
   });
+
+  // "Descartar a minha" (#79) pinta `redOnSurface` sobre o fundo do
+  // `AlertDialog`, que no Material 3 é `surfaceContainerHigh` do esquema
+  // (derivado da semente), não `surfaceRaised`.
+  test('redOnSurface sobre diálogo (confirmação destrutiva do conflito)', () {
+    final dialogo = buildAcsDarkTheme().colorScheme.surfaceContainerHigh;
+    expect(contrastOn(risk.redOnSurface, dialogo), greaterThanOrEqualTo(normalText));
+  });
 }

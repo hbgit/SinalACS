@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:sinalacs_acs/core/database/encrypted_database.dart';
 import 'package:sinalacs_acs/core/security/database_key_store.dart';
@@ -181,7 +183,24 @@ OfflineVisitRecord _recordFrom(Map<String, Object?> row) => OfflineVisitRecord(
       localId: row['local_id']! as String,
       createdAt: DateTime.parse(row['created_at']! as String),
       version: row['version']! as int,
+      conflictServerVersion: row['conflict_server_version'] as int?,
+      conflictServer: _snapshotFrom(row['conflict_server_snapshot'] as String?),
     );
+
+/// Cópia do servidor ilegível vira `null`, nunca exceção: um `load()` que
+/// lançasse jogaria a fila inteira do dono só para a RAM por causa de uma
+/// coluna auxiliar. O conflito continua valendo pela `conflict_server_version`
+/// (a tela só não tem o que comparar).
+VisitConflictSnapshot? _snapshotFrom(String? raw) {
+  if (raw == null) return null;
+  try {
+    return VisitConflictSnapshot.fromJson(
+      Map<String, Object?>.from(jsonDecode(raw) as Map),
+    );
+  } catch (_) {
+    return null;
+  }
+}
 
 /// Armazenamento por dono sobre UM [VisitDatabase].
 class SqlCipherVisitStorage implements VisitStorage {
@@ -338,6 +357,10 @@ class SqlCipherVisitStore implements VisitStore {
           'version': visit.version,
           'rejection_reason': visit.rejectionReason,
           'owner': owner,
+          'conflict_server_version': visit.conflictServerVersion,
+          'conflict_server_snapshot': visit.conflictServer == null
+              ? null
+              : jsonEncode(visit.conflictServer!.toJson()),
         });
       }
     });

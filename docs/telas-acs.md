@@ -36,6 +36,12 @@ Mostra pinos sintéticos conforme o risco e uma ação de rota. Não usa Google 
 
 Permite escolher o desfecho, registrar observações e enfileirar a visita localmente. O registro usa a fila offline existente; sincronização central permanece pendente.
 
+### Visita em conflito (#79)
+
+Quando o servidor já tem outra versão da mesma visita, o contador "Em conflito" aparece na tela de visita e o botão `resolve_conflicts` abre a lista de conflitos. Cada item mostra, lado a lado, a versão do aparelho (`conflict_local`) e a do servidor (`conflict_server`), com o marcador "Diferente" (ícone + texto, não só cor) nos campos que divergem. Três saídas: "Manter a minha" (`conflict_keep_local`, envia por `visits.resolveConflict`), "Editar e enviar" (`conflict_edit` → `conflict_send_edited`) e "Manter a do servidor" (`conflict_keep_server`, com confirmação destrutiva; só apaga a cópia do aparelho). Se o servidor mudou de novo, a cópia exibida é trocada e a tela avisa; sem rede, a visita continua em conflito.
+
+Screenshots: **pendentes**. Não foram capturadas; devem sair de `./scripts/dev/run_acs.sh --build --captura` (a prova atual é o e2e no emulador, `docs/superpowers/plans/2026-10-16-issue-79-e2e.log`).
+
 ## Acionamento e escalonamento
 
 Resume paciente, risco e endereço para ações de SAMU ou UBS. Os botões comunicam explicitamente que discagem e encaminhamento reais ainda não foram integrados.

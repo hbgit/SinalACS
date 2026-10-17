@@ -1,0 +1,41 @@
+# ./scripts/qa/acs_full_e2e.sh — emulator-5554, banco sinalacs_e2e, 2026-10-17T01:27:08Z, branch feat/issue-79-conflito-visita
+# Saída filtrada: sem o 'pub get' nem o Gradle; só fixtures sintéticas (UUIDs aleatórios por execução).
+== stack de e2e (banco de teste)
+00:00 +0: login real, seletor por microárea, visita e sincronização
+00:04 +1: 100 visitas offline sobem em menos de 5 s (M2.4)
+rajada: 100 visitas em 85 ms
+00:05 +2: RF08: a microárea fica no aparelho, sobrevive à queda de rede e está cifrada
+00:05 +3: conflito de visita: compara lado a lado, mantém a minha numa e a do servidor noutra (#79)
+E2E_CONFLITO manter_minha=ff7f7858-a699-4e2d-befc-5c77a5103162 manter_servidor=4a5823fb-f5b4-4031-b41c-00b3b3e8a2de acs=65a0fa3b-3f62-4e0d-aff1-68e8f99cad62
+00:13 +4: MFA: com a verificação ativa, o login pela tela pede e aceita o código; o refresh token renova sem reautenticação e retoma a sessão na partida
+jwt: renovado sem reautenticação (exp anterior 2026-10-17T01:41:01.000Z, novo 2026-10-17T01:41:01.000Z)
+00:26 +5: fila por dono: A sai com visita pendente, B não a vê, o envio diferido sobe a de A com a autoria de A e a legada sem autor; o wipe recusa com pendência e apaga com tudo enviado
+E2E_FILA_POR_DONO visita_a=9b71953c-84c3-4683-8f84-6375015236a1 legado=505a5cd6-2590-40f0-9e52-86817d4dfc47 acs_a=65a0fa3b-3f62-4e0d-aff1-68e8f99cad62 acs_b=a16fa79e-0ea1-4226-9eb7-3e5fed43fc8d
+01:02 +6: (tearDownAll)
+01:02 +6: All tests passed!
+== refresh token no banco de teste
+  tokens emitidos com deviceId: 8
+  tokens rotacionados: 2
+  tokens revogados pelo Sair: 5
+  audit_logs refresh_granted: 2
+  audit_logs session_refresh negados: 0
+== fila por dono, envio diferido e legado no banco de teste
+  visita de A: acsId|authorship: 65a0fa3b-3f62-4e0d-aff1-68e8f99cad62|acs
+  visita legada: acsId nulo|authorship|originDeviceId preenchido: nulo|legacyUnclaimed|true
+  audit_logs visit_deferred_sync de A: 1
+  audit_logs visit_legacy_sync (B transportou): 1
+  audit_logs visit_legacy_sync_item da visita legada: 1
+  token de envio de A revogado (fila zerou): 6
+  token de envio de B revogado (wipe): 1
+  tokens de envio de A ou B ainda ativos: 0
+== conflito de visita no banco de teste
+  manter a minha: version|status|acsId: 4|Realizada com sucesso|65a0fa3b-3f62-4e0d-aff1-68e8f99cad62
+  manter a do servidor: version|status: 3|Paciente ausente
+  audit_logs conflict_resolved_local da 1ª visita: 1
+  audit_logs conflict_resolved_local no total: 1
+  audit_logs read/visit_conflict (cópia do servidor entregue): 2
+== cadeia de auditoria no banco de teste
+  OK — 53 linha(s) verificada(s), cadeia íntegra.
+OK — jornada completa do ACS contra o banco de teste
+A stack de desenvolvimento foi substituída pela de e2e: rode `docker compose up -d` para voltá-la.
+exit=0

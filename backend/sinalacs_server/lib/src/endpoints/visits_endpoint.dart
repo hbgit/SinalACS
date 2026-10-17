@@ -37,6 +37,36 @@ class VisitsEndpoint extends AuthenticatedEndpoint {
     }
   }
 
+  /// Resolução explícita de um conflito pelo autor (#79): compare-and-set
+  /// sobre [expectedServerVersion], a versão do servidor que o aparelho viu no
+  /// conflito. `visit.version` é ignorado. Ver
+  /// `VisitSyncService.resolveConflict`. Mesma transação e mesma tradução de
+  /// erros de [sync].
+  Future<VisitSyncResult> resolveConflict(
+    Session session, {
+    required String accessToken,
+    required VisitSyncEntry visit,
+    required int expectedServerVersion,
+  }) async {
+    final user = authenticate(accessToken);
+
+    try {
+      return await session.db.transaction((transaction) async {
+        final service =
+            AlertRuntime.instance.visitSyncServiceFor(session, transaction: transaction);
+        return service.resolveConflict(
+          user: user,
+          entry: visit,
+          expectedServerVersion: expectedServerVersion,
+        );
+      });
+    } on ArgumentError catch (error) {
+      throw AlertValidationException(message: '${error.message}');
+    } on StateError catch (error) {
+      throw AlertPermissionException(message: error.message);
+    }
+  }
+
   /// Envio das visitas LEGADAS do aparelho (autoria desconhecida, D4 do plano
   /// 2026-10-03): gravadas antes de existir dono por visita no banco local.
   ///

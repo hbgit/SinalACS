@@ -13,6 +13,8 @@
 
 import 'package:serverpod_client/serverpod_client.dart' as _i1;
 import '../enums/sync_status.dart' as _i2;
+import '../api/visit_sync_entry.dart' as _i3;
+import 'package:sinalacs_client/src/protocol/protocol.dart' as _i4;
 
 /// Resultado da sincronização de UMA visita.
 ///
@@ -25,6 +27,7 @@ abstract class VisitSyncResult implements _i1.SerializableModel {
     required this.syncStatus,
     this.serverVersion,
     this.message,
+    this.serverVisit,
   });
 
   factory VisitSyncResult({
@@ -32,6 +35,7 @@ abstract class VisitSyncResult implements _i1.SerializableModel {
     required _i2.SyncStatus syncStatus,
     int? serverVersion,
     String? message,
+    _i3.VisitSyncEntry? serverVisit,
   }) = _VisitSyncResultImpl;
 
   factory VisitSyncResult.fromJson(Map<String, dynamic> jsonSerialization) {
@@ -42,6 +46,11 @@ abstract class VisitSyncResult implements _i1.SerializableModel {
       ),
       serverVersion: jsonSerialization['serverVersion'] as int?,
       message: jsonSerialization['message'] as String?,
+      serverVisit: jsonSerialization['serverVisit'] == null
+          ? null
+          : _i4.Protocol().deserialize<_i3.VisitSyncEntry>(
+              jsonSerialization['serverVisit'],
+            ),
     );
   }
 
@@ -56,6 +65,10 @@ abstract class VisitSyncResult implements _i1.SerializableModel {
   /// Preenchido apenas quando syncStatus é error.
   String? message;
 
+  /// Preenchido apenas em `conflict` do caminho com autor: a visita como está
+  /// no servidor, para o ACS comparar.
+  _i3.VisitSyncEntry? serverVisit;
+
   /// Returns a shallow copy of this [VisitSyncResult]
   /// with some or all fields replaced by the given arguments.
   @_i1.useResult
@@ -64,6 +77,7 @@ abstract class VisitSyncResult implements _i1.SerializableModel {
     _i2.SyncStatus? syncStatus,
     int? serverVersion,
     String? message,
+    _i3.VisitSyncEntry? serverVisit,
   });
   @override
   Map<String, dynamic> toJson() {
@@ -73,6 +87,7 @@ abstract class VisitSyncResult implements _i1.SerializableModel {
       'syncStatus': syncStatus.toJson(),
       if (serverVersion != null) 'serverVersion': serverVersion,
       if (message != null) 'message': message,
+      if (serverVisit != null) 'serverVisit': serverVisit?.toJson(),
     };
   }
 
@@ -90,11 +105,13 @@ class _VisitSyncResultImpl extends VisitSyncResult {
     required _i2.SyncStatus syncStatus,
     int? serverVersion,
     String? message,
+    _i3.VisitSyncEntry? serverVisit,
   }) : super._(
          localId: localId,
          syncStatus: syncStatus,
          serverVersion: serverVersion,
          message: message,
+         serverVisit: serverVisit,
        );
 
   /// Returns a shallow copy of this [VisitSyncResult]
@@ -106,12 +123,16 @@ class _VisitSyncResultImpl extends VisitSyncResult {
     _i2.SyncStatus? syncStatus,
     Object? serverVersion = _Undefined,
     Object? message = _Undefined,
+    Object? serverVisit = _Undefined,
   }) {
     return VisitSyncResult(
       localId: localId ?? this.localId,
       syncStatus: syncStatus ?? this.syncStatus,
       serverVersion: serverVersion is int? ? serverVersion : this.serverVersion,
       message: message is String? ? message : this.message,
+      serverVisit: serverVisit is _i3.VisitSyncEntry?
+          ? serverVisit
+          : this.serverVisit?.copyWith(),
     );
   }
 }

@@ -72,7 +72,7 @@ class DeferredVisitSynchronizer implements VisitSynchronizer {
           deviceId: deviceId,
           visits: [for (final visit in chunk) visitSyncEntryFor(visit)],
         );
-        outcomes.addAll(results.map(_outcome));
+        outcomes.addAll(results.map(visitSyncOutcomeFor));
       } on UploadTokenRefused {
         tokenRefused = true;
         if (outcomes.isEmpty) rethrow;
@@ -85,13 +85,6 @@ class DeferredVisitSynchronizer implements VisitSynchronizer {
     return outcomes;
   }
 }
-
-VisitSyncOutcome _outcome(VisitSyncResult result) => VisitSyncOutcome(
-      localId: result.localId,
-      status: result.syncStatus.name,
-      serverVersion: result.serverVersion,
-      message: result.message,
-    );
 
 /// Sobe o que está preso no aparelho e não pertence à sessão atual (D4/D7).
 ///
@@ -183,6 +176,10 @@ class DeferredFlushService {
 
         if (deviceId != null) {
           final synchronizer = DeferredVisitSynchronizer(backend: _backend, uploadToken: token, deviceId: deviceId);
+          // Sem `conflictResolver`, de propósito (#79, D6): a fila temporária
+          // separa as visitas em conflito no `restore` e não as envia — só o
+          // dono, presente, decide entre a versão dele e a do servidor. Elas
+          // voltam ao disco intactas e mantêm o token dele vivo (passo 3).
           final queue = OfflineVisitQueue(store: _MergingOwnerStore(_storage.forOwner(owner)), synchronizer: synchronizer);
           await queue.restore();
           await queue.sync(); // nunca lança: falha vira SyncOutcome.error
