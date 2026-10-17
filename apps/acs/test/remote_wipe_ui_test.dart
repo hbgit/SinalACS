@@ -40,6 +40,20 @@ class _CountingStorage implements VisitStorage {
   }
 }
 
+/// Diário cuja PRIMEIRA gravação de `erased` falha (disco cheio, por exemplo).
+class _DiarioQueFalhaEmErased extends MemoryWipeJournal {
+  bool _falhou = false;
+
+  @override
+  Future<void> write(String orderId, String deviceId, WipePhase phase) async {
+    if (phase == WipePhase.erased && !_falhou) {
+      _falhou = true;
+      throw StateError('diário não gravado');
+    }
+    await super.write(orderId, deviceId, phase);
+  }
+}
+
 /// Limpeza remota no app (#81, Task 5): partida, retomada, volta da rede e
 /// renovação levam à mesma tela `device_wiped`, fora do bloqueio. Ids
 /// sintéticos.
@@ -318,6 +332,76 @@ void main() {
     expect(await journal.read(), isNull);
     expect(find.byKey(const Key('device_wiped_pending_confirm')), findsNothing);
     expect(storage.destroyCalls, 1, reason: 'reenviar a confirmação não apaga de novo');
+  });
+
+  testWidgets('servidor mudo na confirmação da partida não segura o login além do teto (M1)', (tester) async {
+    // Aparelho já limpo numa execução anterior; falta só a confirmação, e o
+    // servidor aceita a conexão mas nunca responde.
+    await journal.write(ordem, idAntigo, WipePhase.erased);
+    backend.confirmWipeGate = Completer<void>();
+
+    await tester.pumpWidget(SinalAcsApp(
+      backend: backend,
+      visitStorage: storage,
+      uploadTokens: tokens,
+      deviceIds: deviceIds,
+      wipeJournal: journal,
+      connectivityChanges: rede.stream,
+      biometricGate: FakeBiometricGate(),
+      feedBuilder: (AlertQueue q) => FakeAlertFeed(q),
+    ));
+    await tester.pump();
+    expect(find.byType(LoginScreen), findsNothing, reason: 'a espera neutra vem antes do diário');
+
+    // Teto da confirmação + teto da consulta, com folga; bem abaixo dos ~20 s
+    // do tempo de conexão do cliente real.
+    await tester.pump(startupWipeCheckTimeout);
+    await tester.pump(startupWipeCheckTimeout);
+    await tester.pump(const Duration(seconds: 1));
+
+    expect(find.byType(LoginScreen), findsOneWidget, reason: 'o login sai da espera mesmo sem resposta');
+    expect((await journal.read())?.phase, WipePhase.erased, reason: 'a confirmação segue no diário');
+    expect(storage.destroyCalls, 0, reason: 'erased não apaga de novo');
+    backend.confirmWipeGate!.complete();
+    await assentar(tester);
+  });
+
+  testWidgets('diário preso em erasing depois de Entrar de novo: a retomada não apaga a visita nova (I2)',
+      (tester) async {
+    journal = _DiarioQueFalhaEmErased();
+    backend.pendingWipeOrderId = ordem;
+    backend.confirmWipeFailure = const BackendFailure('Sem conexão com o servidor.');
+    await abrirApp(tester);
+    esperarTelaDeLimpeza();
+    expect((await journal.read())?.phase, WipePhase.erasing, reason: 'gravar erased falhou; a confirmação também');
+
+    backend.pendingWipeOrderId = null; // o id novo não tem pedido
+    final botao = find.byKey(const Key('device_wiped_login'));
+    await tester.ensureVisible(botao);
+    await tester.tap(botao);
+    await assentar(tester);
+    await entrar(tester);
+    // Uma visita registrada sem rede pelo login novo.
+    await storage.inner.forOwner(seedAcsId).save([
+      OfflineVisitRecord(localId: 'v-depois', patientId: seedPatientId, risk: 'green', status: 'PENDENTE'),
+    ]);
+
+    for (final estado in [AppLifecycleState.inactive, AppLifecycleState.hidden, AppLifecycleState.paused]) {
+      tester.binding.handleAppLifecycleStateChanged(estado);
+    }
+    for (final estado in [AppLifecycleState.hidden, AppLifecycleState.inactive, AppLifecycleState.resumed]) {
+      tester.binding.handleAppLifecycleStateChanged(estado);
+    }
+    await assentar(tester);
+    rede.add(false);
+    rede.add(true);
+    await assentar(tester);
+
+    expect(storage.destroyCalls, 1, reason: 'a retomada não refaz a limpeza');
+    expect(await storage.inner.forOwner(seedAcsId).load(), hasLength(1), reason: 'a visita nova continua no aparelho');
+    expect(find.byKey(const Key('device_wiped')), findsNothing);
+    expect(find.text('Painel operacional'), findsOneWidget);
+    expect((await journal.read())?.phase, WipePhase.erased);
   });
 
   testWidgets('fonte 200% em 320x640 sem estouro na device_wiped', (tester) async {

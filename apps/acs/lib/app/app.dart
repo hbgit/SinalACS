@@ -565,7 +565,9 @@ class _SinalAcsAppState extends State<SinalAcsApp> with WidgetsBindingObserver i
   Future<void> _startRemoteWipe() async {
     final wipe = _remoteWipe!;
     try {
-      await wipe.resumePending();
+      // A limpeza pendente termina aqui, sem teto, antes de qualquer uso do
+      // banco; só a confirmação tem teto (servidor mudo não segura o login).
+      await wipe.resumePending(confirmTimeout: startupWipeCheckTimeout);
     } catch (_) {
       // O apagador falhou: o diário segue em `erasing` e a próxima retomada,
       // volta da rede ou partida tenta de novo. Nada do erro vai ao log.

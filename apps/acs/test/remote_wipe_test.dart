@@ -17,7 +17,7 @@ void main() {
   const idAntigo = '00000000-0000-4000-8000-0000000000d1';
 
   late FakeAcsBackend backend;
-  late MemoryDeviceIdStore deviceIds;
+  late DeviceIdStore deviceIds;
   late MemoryWipeJournal journal;
   late List<String> eventos;
   late int eraseCalls;
@@ -158,15 +158,83 @@ void main() {
   });
 
   test('diário em erasing termina a limpeza na partida antes de abrir o banco', () async {
-    // O processo morreu no meio da limpeza: o id da instalação já pode ser
-    // outro, mas a confirmação vai com o do diário.
+    // O processo morreu no meio da limpeza, antes de trocar o id da
+    // instalação (o último passo do apagador).
     await journal.write(orderId, idAntigo, WipePhase.erasing);
-    deviceIds = MemoryDeviceIdStore('00000000-0000-4000-8000-0000000000d2');
 
     await novo().resumePending();
 
     expect(eventos, ['erase', 'onWiped', 'confirm']);
     expect(backend.confirmedWipes, [(deviceId: idAntigo, orderId: orderId)]);
+    expect(await journal.read(), isNull);
+  });
+
+  test('diário preso em erasing com o id já trocado: a limpeza terminou, só confirma (I2)', () async {
+    // Outra execução: o apagador foi até o fim (o id é outro), mas o diário
+    // não chegou a `erased`. Apagar de novo levaria as visitas do login novo.
+    await journal.write(orderId, idAntigo, WipePhase.erasing);
+    deviceIds = MemoryDeviceIdStore('00000000-0000-4000-8000-0000000000d2');
+
+    await novo().resumePending();
+
+    expect(eraseCalls, 0);
+    expect(wipedCalls, 0, reason: 'a tela de limpeza já foi mostrada naquela execução');
+    expect(backend.confirmedWipes, [(deviceId: idAntigo, orderId: orderId)]);
+    expect(await journal.read(), isNull);
+  });
+
+  test('diário preso em erasing na MESMA execução: resumePending não apaga de novo (I2)', () async {
+    final diario = _DiarioQueFalhaEmErased();
+    journal = diario;
+    backend.confirmWipeFailure = const BackendFailure('Sem conexão com o servidor.');
+    final coordinator = novo();
+
+    await coordinator.apply(orderId);
+    expect(eraseCalls, 1);
+    expect((await journal.read())?.phase, WipePhase.erasing, reason: 'gravar erased falhou e a confirmação também');
+
+    // Retomadas e voltas da rede depois de "Entrar de novo".
+    await coordinator.resumePending();
+    await coordinator.resumePending();
+
+    expect(eraseCalls, 1);
+    expect(wipedCalls, 1);
+    expect(eventos.where((e) => e == 'confirm'), hasLength(3), reason: 'só a confirmação é reenviada');
+    expect((await journal.read())?.phase, WipePhase.erased, reason: 'o diário passa a dizer o que aconteceu');
+  });
+
+  test('diário preso em erasing com o id ilegível: refaz a limpeza (lado seguro)', () async {
+    await journal.write(orderId, idAntigo, WipePhase.erasing);
+    deviceIds = _IdQueFalha();
+
+    await novo().resumePending();
+
+    expect(eraseCalls, 1);
+  });
+
+  test('confirmTimeout limita só a confirmação: servidor mudo não prende a retomada (M1)', () async {
+    await journal.write(orderId, idAntigo, WipePhase.erased);
+    backend.confirmWipeGate = Completer<void>();
+
+    await novo().resumePending(confirmTimeout: const Duration(milliseconds: 50));
+
+    expect(eraseCalls, 0);
+    expect(await journal.read(), (orderId: orderId, deviceId: idAntigo, phase: WipePhase.erased),
+        reason: 'a confirmação sem resposta segue no diário');
+    backend.confirmWipeGate!.complete();
+  });
+
+  test('confirmTimeout não corta a limpeza em si (M1)', () async {
+    await journal.write(orderId, idAntigo, WipePhase.erasing);
+    eraseGate = Completer<void>();
+    var terminou = false;
+    final retomada = novo().resumePending(confirmTimeout: const Duration(milliseconds: 10)).then((_) => terminou = true);
+
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+    expect(terminou, isFalse, reason: 'a retomada espera o apagador, sem teto');
+    eraseGate!.complete();
+    await retomada;
+    expect(eraseCalls, 1);
     expect(await journal.read(), isNull);
   });
 
@@ -259,6 +327,28 @@ void main() {
     await ids.delete();
     expect(await ids.readOrCreate(), isNot(idAntigo));
   });
+}
+
+/// Diário cuja PRIMEIRA gravação de `erased` falha (disco cheio, por exemplo).
+class _DiarioQueFalhaEmErased extends MemoryWipeJournal {
+  bool _falhou = false;
+
+  @override
+  Future<void> write(String orderId, String deviceId, WipePhase phase) async {
+    if (phase == WipePhase.erased && !_falhou) {
+      _falhou = true;
+      throw StateError('diário não gravado');
+    }
+    await super.write(orderId, deviceId, phase);
+  }
+}
+
+class _IdQueFalha implements DeviceIdStore {
+  @override
+  Future<String> readOrCreate() async => throw StateError('Keystore indisponível');
+
+  @override
+  Future<void> delete() async {}
 }
 
 class _MapStorage implements FlutterSecureStorage {

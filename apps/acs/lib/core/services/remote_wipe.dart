@@ -135,10 +135,15 @@ class RemoteWipeCoordinator {
   /// confirma; `erased` só reenvia a confirmação. Sem diário, não faz nada.
   /// Uma falha do apagador sobe (o diário continua em `erasing`, e a próxima
   /// partida tenta de novo); a da confirmação, não.
-  Future<void> resumePending() => _single(() async {
+  ///
+  /// [confirmTimeout] limita SÓ a espera pela confirmação (a partida usa: um
+  /// servidor que aceita a conexão e não responde não segura o login atrás da
+  /// espera neutra). A limpeza em si nunca tem teto: termina antes de qualquer
+  /// uso do banco. A confirmação que estoura o teto segue no diário.
+  Future<void> resumePending({Duration? confirmTimeout}) => _single(() async {
         final entry = await _readJournal();
         if (entry == null) return;
-        await _run(entry.orderId, entry.deviceId, entry.phase);
+        await _run(entry.orderId, entry.deviceId, entry.phase, confirmTimeout: confirmTimeout);
       });
 
   /// Pergunta ao servidor se há limpeza pedida para este aparelho e, se há,
@@ -188,7 +193,16 @@ class RemoteWipeCoordinator {
     return _inFlight = flight;
   }
 
-  Future<void> _run(String orderId, String deviceId, WipePhase phase) async {
+  Future<void> _run(String orderId, String deviceId, WipePhase phase, {Duration? confirmTimeout}) async {
+    if (phase == WipePhase.erasing && await _alreadyErased(orderId, deviceId)) {
+      // O diário ficou em `erasing` só porque gravar `erased` falhou: o
+      // aparelho já está limpo. Apagar de novo levaria o que o login novo
+      // registrou depois ("Entrar de novo" e visitas sem rede).
+      phase = WipePhase.erased;
+      try {
+        await _journal.write(orderId, deviceId, WipePhase.erased);
+      } catch (_) {}
+    }
     if (phase == WipePhase.erasing) {
       // D7: o diário vem ANTES de qualquer exclusão. Se ele não grava, nada
       // é apagado e o erro sobe: o próximo gatilho tenta de novo.
@@ -205,14 +219,30 @@ class RemoteWipeCoordinator {
     } else {
       _erasedOrders.add(orderId);
     }
-    await _confirm(orderId, deviceId);
+    await _confirm(orderId, deviceId, timeout: confirmTimeout);
   }
 
-  /// Confirmação no servidor. Sem rede, o diário fica em `erased` para o
-  /// próximo gatilho; só a resposta do servidor apaga o diário.
-  Future<void> _confirm(String orderId, String deviceId) async {
+  /// `true` quando a limpeza de [orderId] já foi até o fim, ainda que o diário
+  /// diga `erasing`: nesta execução ([_erasedOrders]), ou numa anterior — o
+  /// apagador troca o id da instalação no ÚLTIMO passo, então um id diferente
+  /// do [deviceId] do diário prova que todos os outros passos terminaram. Sem
+  /// conseguir ler o id, refaz a limpeza (idempotente): o lado seguro.
+  Future<bool> _alreadyErased(String orderId, String deviceId) async {
+    if (_erasedOrders.contains(orderId)) return true;
     try {
-      await _backend.confirmDeviceWipe(deviceId, orderId);
+      return await _deviceIds.readOrCreate() != deviceId;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Confirmação no servidor. Sem rede (ou além de [timeout]), o diário fica
+  /// em `erased` para o próximo gatilho; só a resposta do servidor apaga o
+  /// diário.
+  Future<void> _confirm(String orderId, String deviceId, {Duration? timeout}) async {
+    try {
+      final sent = _backend.confirmDeviceWipe(deviceId, orderId);
+      await (timeout == null ? sent : sent.timeout(timeout));
     } catch (_) {
       return;
     }

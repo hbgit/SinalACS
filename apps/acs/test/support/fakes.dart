@@ -522,9 +522,14 @@ class FakeAcsBackend implements AcsBackend {
   /// Confirmações que chegaram ao "servidor" (só as que não falharam).
   final List<({String deviceId, String orderId})> confirmedWipes = <({String deviceId, String orderId})>[];
 
+  /// Se definido, `confirmDeviceWipe` espera por ele (servidor que aceita a
+  /// conexão e não responde).
+  Completer<void>? confirmWipeGate;
+
   @override
   Future<void> confirmDeviceWipe(String deviceId, String orderId) async {
     onConfirmDeviceWipe?.call();
+    await confirmWipeGate?.future;
     final failure = confirmWipeFailure;
     if (failure != null) throw failure;
     confirmedWipes.add((deviceId: deviceId, orderId: orderId));
