@@ -1682,3 +1682,4 @@ Backlog priorizado na seção final do relatório; conferência por `python3 scr
   - `resolveConflict` faz leitura e depois update, sem trava de linha nem `WHERE version = esperada`: duas resoluções simultâneas da mesma visita pelo mesmo ACS (dois aparelhos) podem gravar `version + 1` as duas, a segunda vencendo em silêncio e deixando duas linhas `conflict_resolved_local`; o `visits.sync` tem a mesma lacuna.
   - Quando "Limpar este aparelho" é bloqueado por um conflito, a mensagem usa a frase genérica "precisa de revisão pelo ACS dono", sem dizer "conflito".
   - Screenshots da tela de conflito.
+  - O conflito só aparece na tela de registro de visita (sem selo no painel), como as recusadas.
