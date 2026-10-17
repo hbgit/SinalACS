@@ -268,6 +268,12 @@ abstract interface class VisitStorage {
   /// apagar nada, se houver QUALQUER visita no aparelho, de qualquer dono ou
   /// da quarentena: tudo o que está em `offline_visits` ainda não subiu.
   Future<void> wipeAllData();
+
+  /// Troca de chave por evento (CRIPTO-APP-CACHE): apaga o banco inteiro e a
+  /// chave que o cifrava; a próxima abertura recomeça com chave nova. É
+  /// **incondicional** (não confere visitas): quem chama recusa antes, como
+  /// [wipeAllData] faz com [WipeBlocked].
+  Future<void> destroyAll();
 }
 
 /// "Limpar este aparelho" recusado: ainda há [unsent] visitas não enviadas.
@@ -358,6 +364,13 @@ class InMemoryVisitStorage implements VisitStorage {
         _legacy._visits.length;
     if (unsent > 0) throw WipeBlocked(unsent);
     _byOwner.clear();
+  }
+
+  /// Sem arquivo nem chave: esvazia a memória.
+  @override
+  Future<void> destroyAll() async {
+    _byOwner.clear();
+    _legacy._visits.clear();
   }
 }
 

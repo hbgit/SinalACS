@@ -79,6 +79,54 @@ void main() {
     setUp(() => EncryptedLocalDatabase.deleteDatabaseFile(dbName));
     tearDown(() => EncryptedLocalDatabase.deleteDatabaseFile(dbName));
 
+    test('destroy apaga o arquivo, a cópia recuperada e troca a chave', () async {
+      final chaveAntiga = 'a' * 64;
+      final keyStore = InMemoryDatabaseKeyStore(initialKey: chaveAntiga);
+      final storage = SqlCipherVisitStorage(keyStore: keyStore, databaseName: dbName, allowUnencryptedForTesting: true);
+      addTearDown(storage.close);
+      await gravarCursorECache(storage);
+      final caminho = await EncryptedLocalDatabase.pathFor(dbName);
+      final copia = File('$caminho${EncryptedLocalDatabase.recoverySuffix}')..writeAsStringSync('cifrado');
+      expect(File(caminho).existsSync(), isTrue);
+
+      await storage.destroyAll();
+
+      expect(File(caminho).existsSync(), isFalse);
+      for (final sufixo in ['-wal', '-shm', '-journal']) {
+        expect(File('$caminho$sufixo').existsSync(), isFalse);
+      }
+      expect(copia.existsSync(), isFalse);
+      expect(await keyStore.readOrCreate(), isNot(chaveAntiga));
+    });
+
+    test('open depois de destroy devolve banco vazio no schema atual', () async {
+      final keyStore = InMemoryDatabaseKeyStore(initialKey: 'a' * 64);
+      final storage = SqlCipherVisitStorage(keyStore: keyStore, databaseName: dbName, allowUnencryptedForTesting: true);
+      addTearDown(storage.close);
+      await gravarCursorECache(storage);
+
+      await storage.database.destroy();
+      final db = await storage.database.open();
+
+      expect((await db.rawQuery('PRAGMA user_version')).single['user_version'], EncryptedLocalDatabase.schemaVersion);
+      expect(await contarTabelas(storage), {for (final t in tabelas) t: 0});
+    });
+
+    test('destroy espera uma abertura em voo e deixa o objeto reutilizável', () async {
+      final keyStore = InMemoryDatabaseKeyStore(initialKey: 'a' * 64);
+      final storage = SqlCipherVisitStorage(keyStore: keyStore, databaseName: dbName, allowUnencryptedForTesting: true);
+      addTearDown(storage.close);
+
+      final abrindo = storage.database.open();
+      await storage.database.destroy();
+      await abrindo;
+
+      final caminho = await EncryptedLocalDatabase.pathFor(dbName);
+      expect(File(caminho).existsSync(), isFalse, reason: 'a abertura em voo não sobrevive ao destroy');
+      expect(await contarTabelas(storage), {for (final t in tabelas) t: 0});
+      expect(await keyStore.readOrCreate(), isNot('a' * 64));
+    });
+
     test('recusa com visita de um dono e não apaga nada', () async {
       final storage = abrirBanco(dbName);
       addTearDown(storage.close);
@@ -648,6 +696,42 @@ void main() {
           reason: 'nada do território é regravado depois de "dados apagados"');
     });
 
+    testWidgets('Limpar este aparelho sem visitas troca a chave', (tester) async {
+      final chaveAntiga = 'a' * 64;
+      final keyStore = InMemoryDatabaseKeyStore(initialKey: chaveAntiga);
+      final comChave = SqlCipherVisitStorage(keyStore: keyStore, databaseName: dbName, allowUnencryptedForTesting: true);
+      addTearDown(comChave.close);
+      await io(tester, () => gravarCursorECache(comChave));
+      await abrirApp(tester, visitStorage: comChave);
+      await entrarComo(tester, acsA);
+
+      await tocarEmLimpar(tester);
+      await tester.tap(find.byKey(const Key('wipe_confirm')));
+      await assentar(tester);
+      await assentar(tester);
+
+      expect(find.text('Os dados deste aparelho foram apagados.'), findsOneWidget);
+      expect(await io(tester, keyStore.readOrCreate), isNot(chaveAntiga));
+    });
+
+    testWidgets('Limpar este aparelho com visita recusa e mantém arquivo e chave', (tester) async {
+      final chaveAntiga = 'a' * 64;
+      final keyStore = InMemoryDatabaseKeyStore(initialKey: chaveAntiga);
+      final comChave = SqlCipherVisitStorage(keyStore: keyStore, databaseName: dbName, allowUnencryptedForTesting: true);
+      addTearDown(comChave.close);
+      await io(tester, () => comChave.forOwner(acsA).save([pendente('a-1')]));
+      final caminho = await io(tester, () => EncryptedLocalDatabase.pathFor(dbName));
+      backend.syncFailure = semRede;
+      await abrirApp(tester, visitStorage: comChave);
+      await entrarComo(tester, acsA);
+
+      await tocarEmLimpar(tester);
+
+      expect(find.byKey(const Key('wipe_blocked')), findsOneWidget);
+      expect(File(caminho).existsSync(), isTrue);
+      expect(await io(tester, keyStore.readOrCreate), chaveAntiga);
+    });
+
     testWidgets('com TUDO enviado: confirma, esvazia as tabelas e as chaves de envio, sai e volta ao login', (tester) async {
       await io(tester, () async {
         await storage.forOwner(acsA).save([pendente('a-1')]);
@@ -704,6 +788,9 @@ class _GravacaoDeAFalha implements VisitStorage {
 
   @override
   Future<void> wipeAllData() => _inner.wipeAllData();
+
+  @override
+  Future<void> destroyAll() => _inner.destroyAll();
 
   @override
   VisitStore forOwner(String ownerId) =>

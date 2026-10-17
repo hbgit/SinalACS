@@ -391,4 +391,35 @@ void main() {
     await storage.close();
     await EncryptedLocalDatabase.deleteDatabaseFile(databaseName);
   });
+  test('destroy troca a chave no aparelho', () async {
+    final chaveAntiga = generateDatabaseKey();
+    final keyStore = InMemoryDatabaseKeyStore(initialKey: chaveAntiga);
+    final storage = SqlCipherVisitStorage(keyStore: keyStore, databaseName: databaseName);
+    await storage.forOwner('acs-teste').save([
+      OfflineVisitRecord(patientId: seedPatientId, risk: 'red', status: 'PENDENTE', outcome: marcador),
+    ]);
+
+    await storage.destroyAll();
+    expect(await keyStore.readOrCreate(), isNot(chaveAntiga), reason: 'a chave não foi trocada');
+
+    // Reabre com a chave nova: banco vazio.
+    expect(await storage.forOwner('acs-teste').load(), isEmpty);
+    await storage.forOwner('acs-teste').save([
+      OfflineVisitRecord(patientId: seedPatientId, risk: 'green', status: 'PENDENTE'),
+    ]);
+    await storage.close();
+
+    final bytes = await File(await EncryptedLocalDatabase.pathFor(databaseName)).readAsBytes();
+    final conteudo = String.fromCharCodes(bytes);
+    expect(conteudo.contains(marcador), isFalse, reason: 'a visita antiga sobrou no arquivo');
+    expect(String.fromCharCodes(bytes.take(15)), isNot('SQLite format 3'));
+
+    // A chave antiga não abre o arquivo novo.
+    expect(
+      () => EncryptedLocalDatabase.open(databaseName: databaseName, passphrase: chaveAntiga),
+      throwsA(anything),
+    );
+
+    await EncryptedLocalDatabase.deleteDatabaseFile(databaseName);
+  });
 }

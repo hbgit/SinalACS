@@ -432,6 +432,10 @@ class _SinalAcsAppState extends State<SinalAcsApp> with WidgetsBindingObserver i
     // Reconta e apaga numa transação; recusa sem apagar nada se sobrou visita.
     await _storage.wipeAllData();
 
+    // Só depois da recusa acima: sem visita nenhuma, o arquivo e a chave saem e
+    // o próximo uso abre um banco novo com chave nova (CRIPTO-APP-CACHE).
+    await _storage.destroyAll();
+
     final tokens = widget.uploadTokens;
     if (tokens != null) {
       Set<String> owners;

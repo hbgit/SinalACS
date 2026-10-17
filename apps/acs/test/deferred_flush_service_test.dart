@@ -493,6 +493,9 @@ class _RemocaoLegadaFalhaUmaVez implements VisitStorage {
 
   @override
   Future<void> wipeAllData() => _inner.wipeAllData();
+
+  @override
+  Future<void> destroyAll() => _inner.destroyAll();
 }
 
 class _LegadoFalha implements LegacyVisitStore {
@@ -533,6 +536,9 @@ class _GravacaoDoDonoFalhaUmaVez implements VisitStorage {
 
   @override
   Future<void> wipeAllData() => _inner.wipeAllData();
+
+  @override
+  Future<void> destroyAll() => _inner.destroyAll();
 }
 
 class _DonoFalha implements VisitStore {
