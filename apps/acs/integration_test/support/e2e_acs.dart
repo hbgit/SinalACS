@@ -86,3 +86,21 @@ Future<({String matricula, String senha})> _buscarCredencialDoSegundoAcs() async
   final json = jsonDecode(await _get('/acs-b')) as Map;
   return (matricula: json['matricula'] as String, senha: json['senha'] as String);
 }
+
+/// Matrícula, senha e código de ativação da MFA do COORDENADOR da fixture
+/// (bloco `coordinator`, mesma UBS do ACS), servidos pelo relé em
+/// `/coordenador`, também uma única vez. O código de ativação é de uso único:
+/// o login do coordenador ativa a MFA com ele (#48).
+Future<({String matricula, String senha, String activationCode})> coordinatorCredentialFromRelay() =>
+    _coordinatorCredential ??= _buscarCredencialDoCoordenador();
+
+Future<({String matricula, String senha, String activationCode})>? _coordinatorCredential;
+
+Future<({String matricula, String senha, String activationCode})> _buscarCredencialDoCoordenador() async {
+  final json = jsonDecode(await _get('/coordenador')) as Map;
+  return (
+    matricula: json['matricula'] as String,
+    senha: json['senha'] as String,
+    activationCode: json['activationCode'] as String,
+  );
+}
