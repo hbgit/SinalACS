@@ -75,6 +75,24 @@ class MockAdminDataSource implements AdminDataSource {
   final List<String> senhasRedefinidas = [];
   final List<String> mfasRedefinidas = [];
 
+  /// Pedidos de limpeza remota recebidos (#81): `acsId/deviceId` e o motivo.
+  final List<({String acsId, String deviceId, DeviceWipeReason reason})> limpezasPedidas = [];
+
+  /// Aparelhos sintéticos por ACS. `acs-1` tem um sem pedido e um já limpo.
+  final Map<String, List<AcsDevice>> _aparelhos = {
+    'acs-1': [
+      AcsDevice(deviceId: 'dev-aaaa1111', label: 'Aparelho dev-aaaa', lastSeenAt: DateTime.utc(2026, 10, 16, 14, 5)),
+      AcsDevice(
+        deviceId: 'dev-bbbb2222',
+        label: 'Aparelho dev-bbbb',
+        lastSeenAt: DateTime.utc(2026, 10, 10, 9, 30),
+        wipeState: DeviceWipeState.confirmed,
+        wipeRequestedAt: DateTime.utc(2026, 10, 10, 10, 0),
+        wipeConfirmedAt: DateTime.utc(2026, 10, 10, 10, 20),
+      ),
+    ],
+  };
+
   /// Credenciais determinísticas: o teste de tela procura por este texto.
   static const _senhaDeTeste = 'SENHA-INICIAL-DE-TESTE';
   static const _codigoDeAtivacao = 'ABCD-EFGH-JKLM-NPQR-STUV';
@@ -697,6 +715,41 @@ class MockAdminDataSource implements AdminDataSource {
     final i = _indiceAcs(acsId);
     _acs[i] = _comAcs(_acs[i], mfaActive: false);
     mfasRedefinidas.add(acsId);
+  }
+
+  @override
+  Future<List<AcsDevice>> fetchAcsDevices(String acsId) async {
+    _indiceAcs(acsId);
+    return List.of(_aparelhos[acsId] ?? const []);
+  }
+
+  @override
+  Future<DeviceWipeOrderResult> orderDeviceWipe({
+    required String acsId,
+    required String deviceId,
+    required DeviceWipeReason reason,
+  }) async {
+    final lista = _aparelhos[acsId] ?? const <AcsDevice>[];
+    final i = lista.indexWhere((d) => d.deviceId == deviceId);
+    if (i < 0) throw const AdminDataFailure('Aparelho não encontrado.');
+    final d = lista[i];
+    if (d.wipeState != null) {
+      return DeviceWipeOrderResult(
+        orderId: 'ord-$deviceId',
+        requestedAt: d.wipeRequestedAt!,
+        alreadyOrdered: true,
+      );
+    }
+    limpezasPedidas.add((acsId: acsId, deviceId: deviceId, reason: reason));
+    final agora = DateTime.now().toUtc();
+    lista[i] = AcsDevice(
+      deviceId: d.deviceId,
+      label: d.label,
+      lastSeenAt: d.lastSeenAt,
+      wipeState: DeviceWipeState.pending,
+      wipeRequestedAt: agora,
+    );
+    return DeviceWipeOrderResult(orderId: 'ord-$deviceId', requestedAt: agora, alreadyOrdered: false);
   }
 
   @override
