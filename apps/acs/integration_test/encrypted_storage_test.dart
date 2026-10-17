@@ -264,7 +264,7 @@ void main() {
     await EncryptedLocalDatabase.deleteDatabaseFile(databaseName);
   });
 
-  test('banco v6 criado no aparelho migra para v7: as linhas vão para a QUARENTENA, cache e cursor ficam', () async {
+  test('banco v6 criado no aparelho migra para a versão atual: as linhas vão para a QUARENTENA, cache e cursor ficam', () async {
     final key = generateDatabaseKey();
     await createV6Database(
       databaseName: databaseName,
@@ -310,10 +310,10 @@ void main() {
     expect(await storage.legacy.load(), hasLength(2), reason: 'o save de um dono não apaga a quarentena');
     expect(await storage.countsByOwner(), isEmpty);
 
-    // O schema ficou na v7, com `owner` nulo nas linhas antigas; o resto da v6 intacto.
+    // O schema ficou na versão atual (v8, #79), com `owner` nulo nas linhas antigas; o resto da v6 intacto.
     final db = await storage.database.open();
     expect(await db.getVersion(), EncryptedLocalDatabase.schemaVersion);
-    expect(EncryptedLocalDatabase.schemaVersion, 7);
+    expect(EncryptedLocalDatabase.schemaVersion, 8);
     final semDono = await db.rawQuery('SELECT COUNT(*) AS n FROM offline_visits WHERE owner IS NULL');
     expect(semDono.single['n'], 2);
     expect((await db.query('micro_area_cache')).single['patient_id'], seedPatientId);
