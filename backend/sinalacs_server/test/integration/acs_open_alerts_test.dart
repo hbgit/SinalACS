@@ -249,7 +249,7 @@ void main() {
       expect(await AuditLog.db.count(session), antes);
     });
 
-    test('corta em 200', () async {
+    test('corta em 200 sem nunca deixar de fora o pendente mais novo', () async {
       final session = sessionBuilder.build();
       await _seed(session);
       final t0 = DateTime.utc(2026, 10, 17, 10);
@@ -261,7 +261,13 @@ void main() {
       final abertos = await endpoints.alerts.openForMicroArea(sessionBuilder, accessToken: await tokenDoAcs());
 
       expect(abertos, hasLength(200));
-      expect(abertos.map((a) => a.alertId), isNot(contains(ids.last)));
+      // O corte cai nos mais ANTIGOS: um vermelho novo numa microárea com
+      // pendentes acumulados é justamente o que a reserva existe para entregar.
+      expect(abertos.map((a) => a.alertId), contains(ids.last));
+      expect(abertos.map((a) => a.alertId), isNot(contains(ids.first)));
+      // E a resposta segue do mais antigo ao mais novo.
+      expect(abertos.first.alertId, ids[1]);
+      expect(abertos.last.alertId, ids.last);
     });
   });
 }

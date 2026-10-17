@@ -1670,6 +1670,12 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
     if (wanted == (_alertFallbackTimer != null)) return;
     if (wanted) {
       _alertFallbackTimer = Timer.periodic(_alertFallbackInterval, (_) => _pollAlerts());
+      // Consulta já, sem esperar um intervalo inteiro, e esquece a resposta
+      // anterior: ela é de quando o tempo real funcionava (ou de outra queda),
+      // e a linha de status diria uma hora velha como se fosse desta reserva.
+      _alertFallbackAt = null;
+      _alertFallbackFailed = false;
+      _pollAlerts();
     } else {
       _alertFallbackTimer?.cancel();
       _alertFallbackTimer = null;

@@ -301,6 +301,14 @@ class MqttSecureClient {
       ..autoReconnect = true
       ..resubscribeOnAutoReconnect = true
       ..onDisconnected = (() => onConnectionChanged?.call(false))
+      // Com `autoReconnect`, a queda DEPOIS da primeira conexão não chama
+      // `onDisconnected` (o mqtt_client 10.5.1 entra direto no laço de
+      // reconexão e só chama `onAutoReconnect`). Sem isto o painel seguia
+      // "em linha" e nunca ligava a reserva por HTTP dos alertas (#80).
+      ..onAutoReconnect = (() => onConnectionChanged?.call(false))
+      // Conexão meio aberta (comum em 3G): sem resposta ao PINGREQ por este
+      // tempo, o cliente a dá por caída. O padrão 0 nunca desconecta.
+      ..disconnectOnNoResponsePeriod = 10
       ..onAutoReconnected = (() => onConnectionChanged?.call(true))
       ..onConnected = (() => onConnectionChanged?.call(true))
       ..connectionMessage = MqttConnectMessage()

@@ -91,6 +91,26 @@ void main() {
     expect(find.byKey(const Key('alert_fallback_status')), findsOneWidget);
   });
 
+  testWidgets('ao armar, consulta na hora e não mostra a consulta de quando o MQTT estava em linha',
+      (tester) async {
+    final gate = Completer<void>();
+    await abrir(tester);
+    expect(backend.openAlertsCalls, 1, reason: 'a consulta da abertura, com o broker em linha');
+
+    // A próxima consulta fica em voo: a linha tem de dizer "Consultando…",
+    // não a hora da consulta de quando o tempo real ainda funcionava.
+    backend.openAlertsGate = gate;
+    feed.onConnectionChanged!(false);
+    await tester.pump();
+
+    expect(backend.openAlertsCalls, 2, reason: 'sem esperar um intervalo inteiro');
+    expect(find.text('Consultando alertas pelo servidor…'), findsOneWidget);
+    gate.complete();
+    await tester.pump();
+    await tester.pump();
+    expect(find.textContaining('Recebendo alertas pelo servidor'), findsOneWidget);
+  });
+
   testWidgets('broker volta: o tique para', (tester) async {
     await abrir(tester);
     feed.onConnectionChanged!(false);

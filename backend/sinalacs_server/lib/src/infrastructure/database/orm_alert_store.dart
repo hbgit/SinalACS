@@ -275,7 +275,10 @@ class OrmAlertStore implements AlertStore {
   }
 
   /// Duas consultas em vez de uma ordenação por status: os não confirmados
-  /// enchem o teto primeiro, e só o que sobra vai para os confirmados.
+  /// enchem o teto primeiro, e só o que sobra vai para os confirmados. Cada
+  /// grupo é lido do MAIS NOVO para trás e devolvido do mais antigo para a
+  /// frente: o corte cai sempre nos antigos, nunca num vermelho recém-chegado
+  /// a uma microárea com pendentes acumulados (INV-03).
   @override
   Future<List<OpenAlertSnapshot>> openInMicroArea(String microAreaId, {required int limit}) async {
     final area = UuidValue.fromString(microAreaId);
@@ -283,6 +286,7 @@ class OrmAlertStore implements AlertStore {
       _session(),
       where: (t) => t.microAreaId.equals(area) & t.status.inSet({AlertStatus.pending, AlertStatus.escalated}),
       orderBy: (t) => t.triggeredAt,
+      orderDescending: true,
       limit: limit,
       transaction: _transaction,
     );
@@ -293,12 +297,13 @@ class OrmAlertStore implements AlertStore {
             _session(),
             where: (t) => t.microAreaId.equals(area) & t.status.equals(AlertStatus.acknowledged),
             orderBy: (t) => t.triggeredAt,
+            orderDescending: true,
             limit: restante,
             transaction: _transaction,
           );
 
     return [
-      for (final row in [...naoConfirmados, ...confirmados])
+      for (final row in [...naoConfirmados.reversed, ...confirmados.reversed])
         OpenAlertSnapshot(
           alertId: row.id!.uuid,
           patientId: row.patientId.uuid,

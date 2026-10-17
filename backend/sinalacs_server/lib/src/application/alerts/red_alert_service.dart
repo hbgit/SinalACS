@@ -56,7 +56,8 @@ abstract interface class AlertStore {
 
   /// Alertas não concluídos da microárea (#80, R2): primeiro os não
   /// confirmados (`pending` e o `escalated` legado), depois os confirmados,
-  /// cada grupo do mais antigo ao mais novo, cortado em [limit].
+  /// cada grupo do mais antigo ao mais novo, cortado em [limit] — o corte
+  /// descarta os mais ANTIGOS de cada grupo, nunca o mais novo.
   Future<List<OpenAlertSnapshot>> openInMicroArea(String microAreaId, {required int limit});
 }
 

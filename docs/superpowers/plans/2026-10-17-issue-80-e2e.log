@@ -79,24 +79,23 @@ WARNING: java.lang.System::load has been called by net.rubygrapefruit.platform.i
 WARNING: Use --enable-native-access=ALL-UNNAMED to avoid a warning for callers in this module
 WARNING: Restricted methods will be blocked in a future release unless native access is enabled
 
-Warning: SDK processing. This version only understands SDK XML versions up to 3 but an SDK XML file of version 4 was encountered. This can happen if you use versions of Android Studio and the command-line tools that were released at different times.
-Running Gradle task 'assembleDebug'...                             24.2s
+Running Gradle task 'assembleDebug'...                             13.1s
 ✓ Built build/app/outputs/flutter-apk/app-debug.apk
-Installing build/app/outputs/flutter-apk/app-debug.apk...          626ms
+Installing build/app/outputs/flutter-apk/app-debug.apk...          581ms
 00:00 +0: com o MQTT fora, o alerta chega pela reserva HTTP e o ACK não é desfeito
-E2E_DISPARAR_ALERTA id=8b821238-1b68-47fc-88e1-765727cdb81a
-  [script] alerta 8b821238-1b68-47fc-88e1-765727cdb81a inserido (09:26:46)
-E2E_ALERTA_VIA_HTTP atraso_ms=29929
+E2E_DISPARAR_ALERTA id=7298ae4a-9c51-440b-bd43-3433b1806889
+  [script] alerta 7298ae4a-9c51-440b-bd43-3433b1806889 inserido (09:53:30)
+E2E_ALERTA_VIA_HTTP atraso_ms=29633
 E2E_ACK_OK
 E2E_RESERVA_OK
-01:08 +1: (tearDownAll)
-01:08 +1: All tests passed!
-  atraso até o cartão: 29929 ms
-== reserva no banco de teste (alerta 8b821238-1b68-47fc-88e1-765727cdb81a)
+01:07 +1: (tearDownAll)
+01:07 +1: All tests passed!
+  atraso até o cartão: 29633 ms
+== reserva no banco de teste (alerta 7298ae4a-9c51-440b-bd43-3433b1806889)
   alerta confirmado, com acknowledgedAt: true
   uma linha acknowledged na trilha: 1
   nenhuma leitura de alerta auditada (D2): 0
   nada no alert_outbox: não veio pelo broker: 0
-OK: alerta recebido só pela reserva HTTP em 29929 ms e confirmado pela tela.
+OK: alerta recebido só pela reserva HTTP em 29633 ms e confirmado pela tela.
 A stack de desenvolvimento foi substituída pela de e2e: rode `docker compose up -d` para voltá-la.
 exit=0
