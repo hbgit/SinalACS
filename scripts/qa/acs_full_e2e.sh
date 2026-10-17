@@ -140,4 +140,34 @@ exigir 'token de envio de B revogado (wipe)' 1 \
   "select count(*) from acs_upload_tokens where \"userId\"='$acs_b_id' and \"revokedAt\" is not null"
 igual 'tokens de envio de A ou B ainda ativos' 0 \
   "select count(*) from acs_upload_tokens where \"userId\" in ('$acs_id','$acs_b_id') and \"revokedAt\" is null and \"expiresAt\" > now()"
+
+# Conflito de visita (#79): o "outro aparelho" levou as duas visitas à v3; o ACS
+# manteve a dele na 1ª (resolveConflict grava a v4 com o conteúdo do aparelho) e
+# a do servidor na 2ª (só local: o servidor segue na v3, sem chamada nem trilha).
+echo "== conflito de visita no banco de teste"
+conflito="$(grep -o 'E2E_CONFLITO .*' "$saida_teste" | tail -1)"
+[[ -n "$conflito" ]] || { echo 'erro: o teste do conflito não informou os ids' >&2; exit 1; }
+campo_conflito() { sed -n "s/.* $1=\([0-9a-fA-F-]*\).*/\1/p" <<<"$conflito"; }
+manter_minha="$(campo_conflito manter_minha)"; manter_servidor="$(campo_conflito manter_servidor)"
+[[ -n "$manter_minha" && -n "$manter_servidor" ]] || { echo 'erro: marcador E2E_CONFLITO incompleto' >&2; exit 1; }
+[[ "$(campo_conflito acs)" == "$acs_id" ]] || { echo 'erro: o ACS do conflito não é o da fixture' >&2; exit 1; }
+igual 'manter a minha: version|status|acsId' "4|Realizada com sucesso|$acs_id" \
+  "select version || '|' || status || '|' || \"acsId\" from visits where \"localId\"='$manter_minha'"
+igual 'manter a do servidor: version|status' '3|Paciente ausente' \
+  "select version || '|' || status from visits where \"localId\"='$manter_servidor'"
+id_minha="$(sql "select id from visits where \"localId\"='$manter_minha'")"
+igual 'audit_logs conflict_resolved_local da 1ª visita' 1 \
+  "select count(*) from audit_logs where \"userId\"='$acs_id' and \"resourceType\"='visit' and result='conflict_resolved_local' and \"resourceId\"='$id_minha'"
+igual 'audit_logs conflict_resolved_local no total' 1 \
+  "select count(*) from audit_logs where \"resourceType\"='visit' and result='conflict_resolved_local'"
+exigir 'audit_logs read/visit_conflict (cópia do servidor entregue)' 1 \
+  "select count(*) from audit_logs where \"userId\"='$acs_id' and \"actionType\"='read' and \"resourceType\"='visit_conflict' and result='granted'"
+
+# Cadeia de hash da trilha (LGPD-RT03) íntegra depois de tudo o que a jornada gravou.
+echo "== cadeia de auditoria no banco de teste"
+( cd backend/sinalacs_server && \
+  SERVERPOD_DATABASE_HOST=localhost SERVERPOD_DATABASE_PORT=9090 SERVERPOD_DATABASE_NAME=sinalacs_e2e \
+  SERVERPOD_DATABASE_USER=postgres SERVERPOD_DATABASE_PASSWORD="$TEST_DATABASE_PASSWORD" \
+  dart run bin/audit_chain_check.dart 2>&1 | grep -E 'OK|FALHA|quebra|cadeia' | sed 's/^/  /'; exit "${PIPESTATUS[0]}" ) \
+  || { echo 'erro: a cadeia de auditoria do banco de teste não está íntegra' >&2; exit 1; }
 echo 'OK — jornada completa do ACS contra o banco de teste'
