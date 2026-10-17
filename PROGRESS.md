@@ -125,7 +125,7 @@ dados.
 | M2.1 | App Paciente - MVP | Implementado | [apps/patient/lib/app/app.dart](apps/patient/lib/app/app.dart) com login, triagem e status do paciente |
 | M2.2 | App ACS - MVP | Implementado | [apps/acs/lib/app/app.dart](apps/acs/lib/app/app.dart) com login, dashboard, territorialização e registro de visita |
 | M2.3 | MQTT com TLS | Parcialmente implementado | [apps/acs/lib/core/services/mqtt_secure_client.dart](apps/acs/lib/core/services/mqtt_secure_client.dart) adiciona configuração segura e payload de alerta com TLS/WSS e teste em [apps/acs/test/mqtt_secure_client_test.dart](apps/acs/test/mqtt_secure_client_test.dart) |
-| M2.4 | Sincronização Offline-First | Implementado | [apps/acs/lib/core/services/offline_visit_queue.dart](apps/acs/lib/core/services/offline_visit_queue.dart) com lote, retry e conflito, validado em [apps/acs/test/login_flow_test.dart](apps/acs/test/login_flow_test.dart) |
+| M2.4 | Sincronização Offline-First | Implementado | [apps/acs/lib/core/services/offline_visit_queue.dart](apps/acs/lib/core/services/offline_visit_queue.dart) com lote, retry e conflito (resolvido pelo ACS desde a #79), validado em [apps/acs/test/login_flow_test.dart](apps/acs/test/login_flow_test.dart) |
 | M2.5 | Testes de Caos (Toxiproxy) | Implementado | [apps/acs/lib/core/services/network_chaos_simulator.dart](apps/acs/lib/core/services/network_chaos_simulator.dart) e [apps/acs/test/network_chaos_test.dart](apps/acs/test/network_chaos_test.dart) simulam latência, jitter e retry em cenários de falha |
 | M2.6 | Testes de Usabilidade e Acessibilidade | Implementado | [spec/ux_accessibility_assessment.md](spec/ux_accessibility_assessment.md) — matriz de contraste WCAG 1.4.3 determinística (`contrast_tokens_test.dart`), `meetsGuideline` de contraste/alvo de toque e `liveRegion` (SC 4.1.3) em [apps/acs/test/login_flow_test.dart](apps/acs/test/login_flow_test.dart) e [apps/patient/test/patient_app_mvp_test.dart](apps/patient/test/patient_app_mvp_test.dart), validado ponta a ponta no emulador contra o backend e o broker reais |
 
@@ -175,10 +175,10 @@ A fila local de visitas foi evoluída em [apps/acs/lib/core/services/offline_vis
 - registro de visita em estado pendente
 - lote de sincronização com resposta explícita
 - retry de reprocessamento em fila
-- detecção de conflito em payloads divergentes
+- detecção de conflito em payloads divergentes (desde a #79 o conflito sai da retentativa e é decidido pelo ACS)
 - contagem de pendentes, sincronizados e conflitos
 
-A validação foi incluída em [apps/acs/test/login_flow_test.dart](apps/acs/test/login_flow_test.dart), cobrindo o fluxo de sucesso e o caso de conflito com reprocessamento.
+A validação foi incluída em [apps/acs/test/login_flow_test.dart](apps/acs/test/login_flow_test.dart), cobrindo o fluxo de sucesso e o caso de conflito (na semântica original o conflito voltava à fila e uma 2ª sincronização o "resolvia"; desde a #79 ele fica em `_conflicts` até o ACS decidir, e esse teste foi reescrito para isso).
 
 #### A fila passou a sair do aparelho
 
@@ -1669,3 +1669,16 @@ Backlog priorizado na seção final do relatório; conferência por `python3 scr
 - Entregue: `alerts.resolve` (só ACS do território, só de `acknowledged`, idempotente, auditado na mesma transação: `resolved`, `already_resolved`, `denied_not_acknowledged`); coluna `alerts.resolvedAt` (migração aditiva); o ACK trava a linha e não rebaixa `resolved`; `alerts.statusFor` devolve `resolvedAt`; o pulso do backoffice anda com a conclusão. ACS: botão "Concluir atendimento" no cartão confirmado, com diálogo. Paciente: "Atendido pela equipe de saúde" e a hora da conclusão.
 - Provas: `test/unit/red_alert_service_test.dart` (grupo `resolve (#76)`), `test/integration/red_alert_cycle_test.dart` (grupo `concluir o atendimento (#76)`), `test/integration/admin_monitoring_store_test.dart`, `apps/acs/test/alert_resolve_test.dart`, `apps/patient/test/patient_app_mvp_test.dart`.
 - Aberto: sem prova no emulador (o e2e do paciente não tem ACS concluindo); o contador "reconhecidos" do backoffice (`acknowledgedRedAlerts`) conta só `acknowledged`, então um alerta concluído sai dele (o TMRAV não muda); a conclusão vive só na fila em memória do ACS, como o ACK.
+
+## Resolução de conflito de visita (#79) — 2026-10-16
+
+- Entregue: o ACS compara a versão do aparelho com a do servidor e decide. Backend: `VisitSyncResult.serverVisit` (cópia do servidor só no `conflict` de `sync`/`syncDeferred`, trilha `read`/`visit_conflict`) e `visits.resolveConflict` (compare-and-set sobre `expectedServerVersion`, trilha `write`/`visit`/`conflict_resolved_local`). App ACS: schema local v8 (`conflict_server_version`, `conflict_server_snapshot`, só `ADD COLUMN`), `OfflineVisitQueue` com `resolveKeepLocal` (com `outcome`/`notes` para "Editar e enviar")/`resolveKeepServer`, tela `resolve_conflicts` (chaves `conflict_*`). Sem migração de banco do servidor.
+- Decisões: D1 cópia do servidor no conflito, só para o autor; D2 `resolveConflict` explícito, com as mesmas recusas do `sync`; D3 o conflito sai da retentativa e vive persistido até a decisão (continua bloqueando "Limpar este aparelho" e contando em `countsByOwner`; a antiga semântica "volta para a fila" caiu); D4 "Manter a do servidor" é só local, com confirmação destrutiva; D5 "Editar e enviar" sem merge campo a campo; D6 o envio diferido não envia nem apaga linhas em conflito; D7 conflito sem `serverVersion` vira `error` retentável.
+- Prova: `./scripts/qa/acs_full_e2e.sh` no emulador contra o banco de teste, 6/6 testWidgets, 2026-10-16 (marcador `E2E_CONFLITO`, versões 4 e 3 no banco, 1 linha `conflict_resolved_local`, `audit_chain_check` verde); log em `docs/superpowers/plans/2026-10-16-issue-79-e2e.log`. Testes: `visit_conflict_resolution_test.dart`, `visit_sync_service_test.dart`, `offline_visit_queue_conflict_test.dart`, `visit_conflict_screen_test.dart`, `encrypted_database_test.dart`, `device_wipe_test.dart`. Screenshots da tela ainda não capturadas (`docs/telas-acs.md`).
+- Aberto:
+  - "Manter a do servidor" não deixa trilha no servidor (nada é lido nem escrito lá).
+  - Conflito de visita legada (`syncLegacy`) segue sem tela: fica na quarentena como antes.
+  - O envio diferido não resolve conflito; a linha espera o dono voltar.
+  - `resolveConflict` faz leitura e depois update, sem trava de linha nem `WHERE version = esperada`: duas resoluções simultâneas da mesma visita pelo mesmo ACS (dois aparelhos) podem gravar `version + 1` as duas, a segunda vencendo em silêncio e deixando duas linhas `conflict_resolved_local`; o `visits.sync` tem a mesma lacuna.
+  - Quando "Limpar este aparelho" é bloqueado por um conflito, a mensagem usa a frase genérica "precisa de revisão pelo ACS dono", sem dizer "conflito".
+  - Screenshots da tela de conflito.
