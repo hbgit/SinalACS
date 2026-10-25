@@ -9,9 +9,11 @@ class RetentionPolicy {
     required this.alertsDays,
     required this.visitsDays,
     required this.triageSessionsDays,
+    required this.telemetryDays,
   })  : assert(alertsDays > 0),
         assert(visitsDays > 0),
-        assert(triageSessionsDays > 0);
+        assert(triageSessionsDays > 0),
+        assert(telemetryDays > 0);
 
   /// Retenção de `alerts`, em dias.
   final int alertsDays;
@@ -22,6 +24,9 @@ class RetentionPolicy {
   /// Retenção de `triage_sessions`, em dias.
   final int triageSessionsDays;
 
+  /// Retenção de `telemetry_events` (#83), em dias contados de `receivedAt`.
+  final int telemetryDays;
+
   /// Os instantes-limite por tabela: linhas anteriores a estes cortes estão
   /// vencidas e são candidatas ao expurgo.
   RetentionCutoffs cutoffsAt(DateTime nowUtc) {
@@ -30,6 +35,7 @@ class RetentionPolicy {
       alerts: now.subtract(Duration(days: alertsDays)),
       visits: now.subtract(Duration(days: visitsDays)),
       triageSessions: now.subtract(Duration(days: triageSessionsDays)),
+      telemetry: now.subtract(Duration(days: telemetryDays)),
     );
   }
 }
@@ -40,11 +46,13 @@ class RetentionCutoffs {
     required this.alerts,
     required this.visits,
     required this.triageSessions,
+    required this.telemetry,
   });
 
   final DateTime alerts;
   final DateTime visits;
   final DateTime triageSessions;
+  final DateTime telemetry;
 }
 
 /// Contagens do expurgo, apuradas ANTES dos DELETEs (decisão B3): são o único
@@ -59,6 +67,7 @@ class ExpurgeCounts {
     required this.visits,
     required this.triageSessions,
     required this.alertsByRisk,
+    required this.telemetryEvents,
     this.skippedPendingRed = 0,
   });
 
@@ -68,6 +77,9 @@ class ExpurgeCounts {
   final int alertOutbox;
   final int visits;
   final int triageSessions;
+
+  /// Eventos de telemetria (#83) vencidos por `receivedAt`.
+  final int telemetryEvents;
 
   /// `alerts` desdobrados por `riskLevel` — a parte "série epidemiológica" que
   /// a contagem preserva antes do DELETE físico.
@@ -110,10 +122,12 @@ class ExpurgeResult {
         'idempotencia=${counts.alertIdempotencyKeys}, '
         'outbox=${counts.alertOutbox}, '
         'visitas=${counts.visits}, '
-        'triagens=${counts.triageSessions}; '
+        'triagens=${counts.triageSessions}, '
+        'telemetria=${counts.telemetryEvents}; '
         'cortes: alertas<${cutoffs.alerts.toIso8601String()}, '
         'visitas<${cutoffs.visits.toIso8601String()}, '
-        'triagens<${cutoffs.triageSessions.toIso8601String()}';
+        'triagens<${cutoffs.triageSessions.toIso8601String()}, '
+        'telemetria<${cutoffs.telemetry.toIso8601String()}';
   }
 
   /// Aviso operacional dos vermelhos pendentes retidos; `null` quando não há

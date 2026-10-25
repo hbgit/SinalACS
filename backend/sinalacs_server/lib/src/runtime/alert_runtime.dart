@@ -364,6 +364,7 @@ class AlertRuntime {
           session,
           healthDataCipher,
           chainSecret: config.auditChainSecret,
+          pseudonymizer: TelemetryPseudonymizer(config.telemetryPseudonymKey),
           appendAudit: OrmAuditTrail(
             session: () => session,
             chainSecret: config.auditChainSecret,

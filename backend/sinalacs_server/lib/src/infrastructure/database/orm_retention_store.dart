@@ -70,6 +70,11 @@ class OrmRetentionStore implements RetentionStore {
           cutoffs.triageSessions,
           transaction,
         ),
+        telemetryEvents: await _count(
+          'SELECT COUNT(*) FROM telemetry_events WHERE "receivedAt" < @cutoff',
+          cutoffs.telemetry,
+          transaction,
+        ),
         alertsByRisk: await _alertsByRisk(cutoffs.alerts, transaction),
         skippedPendingRed: await _count(
           'SELECT COUNT(*) FROM alerts WHERE "triggeredAt" < @cutoff '
@@ -115,6 +120,13 @@ class OrmRetentionStore implements RetentionStore {
       await _delete(
         'DELETE FROM triage_sessions WHERE "createdAt" < @cutoff',
         cutoffs.triageSessions,
+        transaction,
+      );
+
+      // Telemetria (#83) não tem FK com as demais: o corte é só o dela.
+      await _delete(
+        'DELETE FROM telemetry_events WHERE "receivedAt" < @cutoff',
+        cutoffs.telemetry,
         transaction,
       );
 

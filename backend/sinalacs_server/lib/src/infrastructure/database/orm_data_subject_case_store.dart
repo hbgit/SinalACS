@@ -4,6 +4,7 @@ import 'package:sinalacs_server/src/application/admin/admin_read_service.dart';
 import 'package:sinalacs_server/src/application/admin/data_subject_case_service.dart';
 import 'package:sinalacs_server/src/application/audit/audit_trail.dart';
 import 'package:sinalacs_server/src/application/onboarding/consent_signature.dart';
+import 'package:sinalacs_server/src/application/telemetry/telemetry_pseudonymizer.dart';
 import 'package:sinalacs_server/src/application/onboarding/onboarding_service.dart'
     show ConsentLogEntry, consentPolicyVersion;
 import 'package:sinalacs_server/src/generated/protocol.dart';
@@ -37,8 +38,10 @@ class OrmDataSubjectCaseStore implements DataSubjectCaseStore {
     this._session,
     this._cipher, {
     required String chainSecret,
+    required TelemetryPseudonymizer pseudonymizer,
     required this.appendAudit,
-  }) : _signature = ConsentSignature(secret: chainSecret);
+  }) : _signature = ConsentSignature(secret: chainSecret),
+       _pseudonymizer = pseudonymizer;
 
   final Session _session;
   final HealthDataCipher _cipher;
@@ -46,6 +49,10 @@ class OrmDataSubjectCaseStore implements DataSubjectCaseStore {
   /// Assina o `denied` de push da anonimização com o MESMO `AUDIT_CHAIN_SECRET`
   /// do painel do titular (`OrmDataSubjectRightsStore`).
   final ConsentSignature _signature;
+
+  /// Liga o titular aos eventos de telemetria (#83), que só guardam o pseudônimo.
+  final TelemetryPseudonymizer _pseudonymizer;
+
   /// Onde a decisão é auditada, dentro da transação dela.
   final AuditAppender appendAudit;
 
@@ -351,6 +358,13 @@ class OrmDataSubjectCaseStore implements DataSubjectCaseStore {
       WHERE "patientId" = @id::uuid
       ''',
       parameters: QueryParameters.named({'id': titular.uuid}),
+      transaction: transaction,
+    );
+    // Telemetria (#83): os eventos só carregam o pseudônimo do titular, então
+    // o apagamento é por ele. O pseudônimo não vai para log.
+    await session.db.unsafeExecute(
+      'DELETE FROM telemetry_events WHERE "patientPseudonym" = @p',
+      parameters: QueryParameters.named({'p': _pseudonymizer.patient(titular.uuid)}),
       transaction: transaction,
     );
     // Push: a sessão do titular pode seguir viva até o JWT vencer, e

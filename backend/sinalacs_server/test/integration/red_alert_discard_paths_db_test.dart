@@ -6,6 +6,7 @@ import 'package:sinalacs_server/src/application/audit/audit_chain_verifier.dart'
 import 'package:sinalacs_server/src/application/audit/audit_trail.dart';
 import 'package:sinalacs_server/src/application/auth/development_auth_service.dart';
 import 'package:sinalacs_server/src/application/retention/expurge_service.dart';
+import 'package:sinalacs_server/src/application/telemetry/telemetry_pseudonymizer.dart';
 import 'package:sinalacs_server/src/config/app_config.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_alert_outbox.dart';
@@ -300,6 +301,7 @@ void main() {
           alerts: _agora.subtract(const Duration(days: 730)),
           visits: _agora.subtract(const Duration(days: 1825)),
           triageSessions: _agora.subtract(const Duration(days: 1825)),
+          telemetry: _agora.subtract(const Duration(days: 365)),
         );
 
         await OrmRetentionStore(session: () => session).purgeDue(cortes);
@@ -335,6 +337,7 @@ void main() {
           session,
           testHealthDataCipher(),
           chainSecret: 'segredo-sintetico',
+          pseudonymizer: TelemetryPseudonymizer('chave-sintetica-telemetria'),
           appendAudit: (s, t, e) async {},
         );
 

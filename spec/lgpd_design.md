@@ -574,7 +574,7 @@ CPFs de documentação (como faz `seed_cpf_hashes.dart` para a stack de desenvol
 | Propriedade | Descrição |
 |-------------|-----------|
 | **Objetivo** | Garantir que dados sejam mantidos apenas pelo tempo necessário e eliminados de forma segura. |
-| **Implementação** | Tabela com política de retenção por categoria de dado: alertas (2 anos), visitas (5 anos conforme legislação), logs de acesso (1 ano), dados de consentimento (indeterminado). Processo automatizado de expurgo com anonimização. |
+| **Implementação** | Tabela com política de retenção por categoria de dado: alertas (2 anos), visitas (5 anos conforme legislação), logs de acesso (1 ano), telemetria (1 ano, de `receivedAt`), dados de consentimento (indeterminado). Processo automatizado de expurgo com anonimização. |
 | **Riscos Mitigados** | Acumulação excessiva de dados, violação do princípio da necessidade, armazenamento desnecessário de dados sensíveis. |
 
 #### Retenção no aparelho do ACS (implementada)
