@@ -1,8 +1,12 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sinalacs_acs/core/network/backend_client.dart';
 import 'package:sinalacs_acs/core/network/backend_config.dart';
 import 'package:sinalacs_acs/core/security/session_token_store.dart';
 import 'package:sinalacs_acs/core/services/backend_visit_synchronizer.dart';
+import 'package:sinalacs_acs/core/telemetry/app_version.dart';
+import 'package:sinalacs_acs/core/telemetry/telemetry_event.dart';
 import 'package:sinalacs_client/sinalacs_client.dart';
 
 import 'support/fake_rpc_server.dart';
@@ -192,6 +196,52 @@ void main() {
       expect(semCampo.notes, 'primeira\nsegunda');
 
       expect(conflictSnapshotFor(entrada(notes: const {})).notes, '');
+    });
+  });
+
+  group('telemetria (#83)', () {
+    TelemetryEventRecord evento(String dono) => TelemetryEventRecord(
+          eventId: '0000000a-0000-4000-8000-0000000000e1',
+          owner: dono,
+          name: 'sync_attempt',
+          occurredAt: DateTime.utc(2026, 10, 25, 12),
+          payload: const {'records_count': 3, 'network_type': 'wifi', 'channel': 'sync'},
+        );
+
+    test('uploader recusa sessão de outro dono', () async {
+      await backend.login(matricula: 'ACS-001', senha: 'senha-sintetica');
+
+      await expectLater(
+        backend.ingestTelemetry([evento('outro-acs')], expectedUserId: 'outro-acs'),
+        throwsA(isA<BackendFailure>()),
+      );
+      expect(server.requests.where((r) => r.method == 'ingest'), isEmpty,
+          reason: 'eventos de A nunca sobem com o token de B');
+    });
+
+    test('ingestTelemetry envia o lote com deviceId, sentAt e versão do app', () async {
+      final sessao = await backend.login(matricula: 'ACS-001', senha: 'senha-sintetica');
+      final deviceIdDoLogin = server.requests.single.args['deviceId'];
+      final antes = DateTime.now().toUtc();
+
+      final ack = await backend.ingestTelemetry([evento(sessao.userId)], expectedUserId: sessao.userId);
+
+      expect(ack.accepted, {'0000000a-0000-4000-8000-0000000000e1'});
+      expect(ack.rejected, isEmpty);
+      final pedido = server.requests.singleWhere((r) => r.method == 'ingest');
+      expect(pedido.endpoint, 'telemetry');
+      expect(pedido.args['accessToken'], isNotEmpty);
+      expect(pedido.args['deviceId'], deviceIdDoLogin, reason: 'o mesmo DeviceIdStore do login');
+      final sentAt = DateTime.parse(pedido.args['sentAt'] as String);
+      expect(sentAt.isUtc, isTrue);
+      expect(sentAt.isBefore(antes.subtract(const Duration(seconds: 1))), isFalse);
+      final enviado = (pedido.args['events'] as List).single as Map<String, dynamic>;
+      expect(enviado['eventId'], '0000000a-0000-4000-8000-0000000000e1');
+      expect(enviado['eventName'], 'sync_attempt');
+      expect(enviado['appVersion'], acsAppVersion);
+      expect(jsonDecode(enviado['payloadJson'] as String),
+          {'records_count': 3, 'network_type': 'wifi', 'channel': 'sync'});
+      expect(enviado.containsKey('owner'), isFalse, reason: 'o autor vem do token');
     });
   });
 

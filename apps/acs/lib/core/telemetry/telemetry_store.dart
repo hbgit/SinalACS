@@ -1,4 +1,4 @@
-import 'package:sinalacs_acs/core/services/offline_visit_queue.dart' show requireOwnerId;
+import 'package:sinalacs_acs/core/services/owner_id.dart';
 import 'package:sinalacs_acs/core/telemetry/telemetry_event.dart';
 
 /// Teto da fila local, por dono: acima disso o `append` apaga os mais antigos

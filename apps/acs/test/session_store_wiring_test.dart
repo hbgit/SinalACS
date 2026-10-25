@@ -35,9 +35,21 @@ void main() {
       'lib/core/security/session_token_store.dart',
       'lib/core/security/upload_token_store.dart',
       'lib/core/network/backend_client.dart',
+      // O envio da telemetria (#83) e o que ele importa.
+      'lib/core/telemetry/telemetry_uploader.dart',
+      'lib/core/telemetry/telemetry_store.dart',
+      'lib/core/telemetry/telemetry_event.dart',
+      'lib/core/telemetry/app_version.dart',
+      'lib/core/services/owner_id.dart',
     ]) {
       final imports = File(arquivo).readAsLinesSync().where((l) => l.startsWith('import ')).join('\n');
       expect(imports, isNot(contains('package:flutter')), reason: arquivo);
+      // A fila de visitas importa o gravador, e o gravador o connectivity_plus
+      // (Flutter): nenhum dos dois pode entrar por este caminho.
+      expect(imports, isNot(contains('offline_visit_queue.dart')), reason: arquivo);
+      expect(imports, isNot(contains('telemetry_recorder.dart')), reason: arquivo);
+      expect(imports, isNot(contains('network_probe.dart')), reason: arquivo);
+      expect(imports, isNot(contains('connectivity_plus')), reason: arquivo);
       expect(imports, isNot(contains('secure_session_token_store.dart')), reason: arquivo);
       expect(imports, isNot(contains('secure_upload_token_store.dart')), reason: arquivo);
     }

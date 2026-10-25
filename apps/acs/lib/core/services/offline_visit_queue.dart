@@ -2,6 +2,10 @@ import 'dart:math';
 
 import 'package:sinalacs_acs/core/telemetry/telemetry_recorder.dart';
 
+import 'package:sinalacs_acs/core/services/owner_id.dart';
+
+export 'package:sinalacs_acs/core/services/owner_id.dart' show requireOwnerId;
+
 enum SyncOutcomeKind {
   synced,
   conflict,
@@ -315,15 +319,6 @@ class VisitLocalIdConflict implements Exception {
   String toString() => repeatedInList
       ? 'VisitLocalIdConflict: localId $localId repetido na mesma gravação'
       : 'VisitLocalIdConflict: localId $localId já pertence a outro dono';
-}
-
-/// Valida o id de dono: vazio ou só espaços é erro de programação (sem dono, a
-/// visita cairia na quarentena ou numa visão compartilhada).
-String requireOwnerId(String ownerId) {
-  if (ownerId.trim().isEmpty) {
-    throw ArgumentError.value(ownerId, 'ownerId', 'não pode ser vazio');
-  }
-  return ownerId;
 }
 
 /// Falha com [VisitLocalIdConflict] se [visits] repete algum `localId`.

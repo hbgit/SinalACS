@@ -274,6 +274,15 @@ class FakeRpcServer {
           'syncStatus': 'synced',
           'serverVersion': (decoded['expectedServerVersion'] as int) + 1,
         },
+      // `telemetry.ingest` (#83): aceita todos, ids em minúsculas como o
+      // servidor real devolve.
+      'ingest' => <String, Object?>{
+          'acceptedEventIds': [
+            for (final e in (decoded['events'] as List).cast<Map<String, dynamic>>())
+              (e['eventId'] as String).toLowerCase(),
+          ],
+          'rejectedEventIds': const <String>[],
+        },
       'refreshSession' => <String, Object?>{
           'accessToken': garbageAccessToken ? 'lixo' : _token(),
           'tokenType': 'Bearer',
