@@ -32,6 +32,7 @@ AppConfig _config() => AppConfig(
   auditChainSecret: _segredo,
   healthDataEncryptionKey: AppConfig.developmentHealthDataEncryptionKey,
   cpfHashPepper: AppConfig.developmentCpfHashPepper,
+  telemetryPseudonymKey: AppConfig.developmentTelemetryPseudonymKey,
   smsGateway: 'log',
   mqttUsername: null,
   mqttPassword: null,

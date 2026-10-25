@@ -21,6 +21,7 @@ AppConfig _config(int port) => AppConfig(
       auditChainSecret: 'test-audit-chain-secret',
       healthDataEncryptionKey: AppConfig.developmentHealthDataEncryptionKey,
       cpfHashPepper: AppConfig.developmentCpfHashPepper,
+      telemetryPseudonymKey: AppConfig.developmentTelemetryPseudonymKey,
       smsGateway: 'log',
       mqttUsername: null,
       mqttPassword: null,

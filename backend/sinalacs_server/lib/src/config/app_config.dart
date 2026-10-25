@@ -12,7 +12,7 @@ class AppConfig {
     required this.auditChainSecret,
     required this.healthDataEncryptionKey,
     required this.cpfHashPepper,
-    this.telemetryPseudonymKey = developmentTelemetryPseudonymKey,
+    required this.telemetryPseudonymKey,
     required this.smsGateway,
     required this.mqttUsername,
     required this.mqttPassword,
@@ -83,8 +83,9 @@ class AppConfig {
   /// Chave do HMAC-SHA-256 que pseudonimiza paciente e aparelho na telemetria
   /// (`TELEMETRY_PSEUDONYM_KEY`, issue #83). Independente dos outros segredos
   /// de propósito: rotacioná-la só quebra a ligação entre períodos da
-  /// telemetria, nunca a cadeia de auditoria nem o login. O default do
-  /// construtor serve só às configurações montadas à mão nos testes.
+  /// telemetria, nunca a cadeia de auditoria nem o login. Obrigatório no
+  /// construtor, como os outros segredos: nenhum default público escapa do
+  /// fail-fast de [_resolveSecret].
   final String telemetryPseudonymKey;
 
   /// Gateway de SMS do login passwordless (RF01).
