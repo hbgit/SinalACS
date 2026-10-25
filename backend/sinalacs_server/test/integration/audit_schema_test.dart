@@ -44,6 +44,34 @@ void main() {
     });
   });
 
+  group('Dado o append-only da trilha (#82)', () {
+    final bloco = File('database/audit_append_only.sql').readAsStringSync();
+    // O cabeçalho do registry começa com `###`.
+    final versoes = File('migrations/migration_registry.txt')
+        .readAsLinesSync()
+        .map((l) => l.trim())
+        .where((l) => l.isNotEmpty && !l.startsWith('#'))
+        .toList();
+
+    test('o definition.sql mais recente instala o append-only', () {
+      expect(
+        _definitionDoUltimoEsquema(),
+        contains(bloco),
+        reason: 'a última migração perdeu o bloco: rode '
+            'scripts/dev/append_audit_append_only.sh (ver backend/CLAUDE.md)',
+      );
+    });
+
+    test('a migração de origem aplica o append-only num banco existente', () {
+      final origem = versoes.where(
+        (v) => File('migrations/$v/migration.sql')
+            .readAsStringSync()
+            .contains(bloco),
+      );
+      expect(origem, isNotEmpty);
+    });
+  });
+
   withServerpod('Dado o esquema de auditoria em Postgres real',
       (sessionBuilder, endpoints) {
     test('audit_chain_checkpoints rejeita duas linhas com a mesma sequence',
@@ -93,6 +121,19 @@ void main() {
       expect(lida!.firstSequence, isNull);
       expect(lida.lastSequence, isNull);
       expect(lida.rowCount, 0);
+    });
+
+    test('os três triggers append-only existem e estão ativos (#82)', () async {
+      final session = sessionBuilder.build();
+      final r = await session.db.unsafeQuery(
+        "SELECT tgname FROM pg_trigger WHERE tgname LIKE '%_append_only' "
+        "AND tgenabled = 'O' ORDER BY tgname",
+      );
+      expect(r.map((row) => row.first), [
+        'audit_chain_checkpoints_append_only',
+        'audit_exports_append_only',
+        'audit_logs_append_only',
+      ]);
     });
   });
 }
