@@ -12,6 +12,7 @@ class AppConfig {
     required this.auditChainSecret,
     required this.healthDataEncryptionKey,
     required this.cpfHashPepper,
+    this.telemetryPseudonymKey = developmentTelemetryPseudonymKey,
     required this.smsGateway,
     required this.mqttUsername,
     required this.mqttPassword,
@@ -26,6 +27,7 @@ class AppConfig {
     this.retentionAlertDays = defaultRetentionAlertDays,
     this.retentionVisitDays = defaultRetentionVisitDays,
     this.retentionTriageDays = defaultRetentionTriageDays,
+    this.retentionTelemetryDays = defaultRetentionTelemetryDays,
     this.redAlertEscalationSeconds = defaultRedAlertEscalationSeconds,
   });
 
@@ -78,6 +80,13 @@ class AppConfig {
   /// simplesmente o invalida — que é o efeito desejado. Ver `HmacCpfHasher`.
   final String cpfHashPepper;
 
+  /// Chave do HMAC-SHA-256 que pseudonimiza paciente e aparelho na telemetria
+  /// (`TELEMETRY_PSEUDONYM_KEY`, issue #83). Independente dos outros segredos
+  /// de propósito: rotacioná-la só quebra a ligação entre períodos da
+  /// telemetria, nunca a cadeia de auditoria nem o login. O default do
+  /// construtor serve só às configurações montadas à mão nos testes.
+  final String telemetryPseudonymKey;
+
   /// Gateway de SMS do login passwordless (RF01).
   ///
   /// `log` só é aceito em `development`: ele **não envia SMS**, escreve o
@@ -114,6 +123,10 @@ class AppConfig {
   final int retentionAlertDays;
   final int retentionVisitDays;
   final int retentionTriageDays;
+
+  /// `RETENTION_TELEMETRY_DAYS` (issue #83): prazo de `telemetry_events`,
+  /// contado de `receivedAt`. Padrão 365 (o dos logs de acesso, §5.6).
+  final int retentionTelemetryDays;
 
   /// `RED_ALERT_ESCALATION_SECONDS`: prazo, em segundos, para o alerta vermelho
   /// ser reconhecido antes de ficar elegível a escalonamento (issue #44).
@@ -154,10 +167,16 @@ class AppConfig {
   /// restrito a `development` por [_resolveSecret].
   static const developmentCpfHashPepper = 'development-cpf-hash-pepper';
 
+  /// Chave de pseudônimos da telemetria de desenvolvimento. Pública, como os
+  /// outros fallbacks — e por isso restrita a `development` por [_resolveSecret].
+  static const developmentTelemetryPseudonymKey =
+      'development-telemetry-pseudonym-key';
+
   /// Defaults da política de retenção (spec/lgpd_design.md §5.6).
   static const defaultRetentionAlertDays = 730; // 2 anos
   static const defaultRetentionVisitDays = 1825; // 5 anos
   static const defaultRetentionTriageDays = 1825; // 5 anos
+  static const defaultRetentionTelemetryDays = 365; // 1 ano
 
   /// Prazo padrão e faixa válida do escalonamento do alerta vermelho (#44).
   static const defaultRedAlertEscalationSeconds = 300;
@@ -252,6 +271,12 @@ class AppConfig {
         envVarName: 'CPF_HASH_PEPPER',
         developmentFallback: developmentCpfHashPepper,
       ),
+      telemetryPseudonymKey: _resolveSecret(
+        value: environment['TELEMETRY_PSEUDONYM_KEY'],
+        appEnv: appEnv,
+        envVarName: 'TELEMETRY_PSEUDONYM_KEY',
+        developmentFallback: developmentTelemetryPseudonymKey,
+      ),
       smsGateway: _resolveSmsGateway(
         value: environment['SMS_GATEWAY'],
         appEnv: appEnv,
@@ -283,6 +308,11 @@ class AppConfig {
         environment['RETENTION_TRIAGE_DAYS'],
         fallback: defaultRetentionTriageDays,
         envVarName: 'RETENTION_TRIAGE_DAYS',
+      ),
+      retentionTelemetryDays: _resolveRetentionDays(
+        environment['RETENTION_TELEMETRY_DAYS'],
+        fallback: defaultRetentionTelemetryDays,
+        envVarName: 'RETENTION_TELEMETRY_DAYS',
       ),
       redAlertEscalationSeconds: _resolveEscalationSeconds(
         environment['RED_ALERT_ESCALATION_SECONDS'],

@@ -168,6 +168,9 @@ services:
       # `docker compose` numa máquina cujo `.env` é anterior à variável. O
       # guarda não se perde: fora de development o `AppConfig` recusa subir.
       CPF_HASH_PEPPER: ${CPF_HASH_PEPPER:-}
+      # Pseudônimos da telemetria (#83). `:-` pelo mesmo motivo do pepper acima.
+      TELEMETRY_PSEUDONYM_KEY: ${TELEMETRY_PSEUDONYM_KEY:-}
+      RETENTION_TELEMETRY_DAYS: ${RETENTION_TELEMETRY_DAYS:-}
       APP_ENV: ${APP_ENV:-development}
       ENABLE_DEV_LOGIN: "${ENABLE_DEV_LOGIN:-true}"
       # MFA (TOTP) obrigatória no login institucional do ACS. Em produção o
