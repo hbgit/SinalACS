@@ -1,5 +1,7 @@
 import 'dart:math';
 
+import 'package:sinalacs_acs/core/telemetry/telemetry_recorder.dart';
+
 enum SyncOutcomeKind {
   synced,
   conflict,
@@ -431,7 +433,7 @@ class _InMemoryLegacyVisitStore implements LegacyVisitStore {
 /// descartá-la — diferente de `error`, que continua pendente e retenta.
 /// Nenhum dos dois some do disco sozinho.
 class OfflineVisitQueue {
-  OfflineVisitQueue({VisitStore? store, this.synchronizer, this.conflictResolver})
+  OfflineVisitQueue({VisitStore? store, this.synchronizer, this.conflictResolver, this.telemetry})
       : _store = store ?? InMemoryVisitStore();
 
   final VisitStore _store;
@@ -441,6 +443,11 @@ class OfflineVisitQueue {
 
   /// `null`: os conflitos ficam guardados, mas "Manter a minha" devolve erro.
   final VisitConflictResolver? conflictResolver;
+
+  /// Eventos do PRD §1.3 (#83): `visit_registered` no [add], `sync_attempt`
+  /// e `sync_result` em volta do envio. `null` desliga, sem mudar mais nada.
+  /// O gravador nunca lança; resolver conflito não emite (fora do §1.3).
+  final TelemetryRecorder? telemetry;
 
   final List<OfflineVisitRecord> _pending = <OfflineVisitRecord>[];
   final List<OfflineVisitRecord> _synced = <OfflineVisitRecord>[];
@@ -510,10 +517,15 @@ class OfflineVisitQueue {
     }
   }
 
-  Future<void> add(OfflineVisitRecord record) async {
+  /// [alertId]: a visita nasceu de um alerta; só vai para a telemetria.
+  Future<void> add(OfflineVisitRecord record, {String? alertId}) async {
     if (_sealed) throw StateError('Fila de visitas encerrada pela limpeza do aparelho.');
     _pending.add(record);
     await _persist();
+    // Depois da gravação: o evento nunca chega antes da visita estar no disco.
+    // Sem gravador, nem o `await`: o fluxo fica idêntico ao de antes.
+    final recorder = telemetry;
+    if (recorder != null) await recorder.visitRegistered(visit: record, alertId: alertId);
   }
 
   /// Descarta as visitas recusadas em definitivo.
@@ -745,10 +757,29 @@ class OfflineVisitQueue {
       );
     }
 
+    // Com `await`: o `sync_attempt` fica no disco antes do envio, e um app
+    // morto no meio deixa a tentativa órfã (contada como interrompida).
+    final recorder = telemetry;
+    final attemptId =
+        recorder == null ? null : await recorder.syncAttempt(recordsCount: batch.length);
+    final stopwatch = Stopwatch()..start();
+
     final List<VisitSyncOutcome> outcomes;
     try {
       outcomes = await sender.push(batch);
     } catch (error) {
+      if (recorder != null) {
+        await recorder.syncResult(
+          attemptEventId: attemptId,
+          successCount: 0,
+          failureCount: batch.length,
+          conflictCount: 0,
+          rejectedCount: 0,
+          outcome: SyncOutcomeKind.error.name,
+          transportError: true,
+          duration: stopwatch.elapsed,
+        );
+      }
       // O lote continua pendente: perder a visita por falha de rede seria
       // exatamente o que a fila existe para evitar.
       //
@@ -763,13 +794,32 @@ class OfflineVisitQueue {
       );
     }
 
-    return _applyOutcomes(batch, outcomes);
+    if (recorder == null) return _applyOutcomes(batch, outcomes);
+
+    late final ({int synced, int errors, int conflicts, int rejected}) counts;
+    final result = await _applyOutcomes(batch, outcomes, onCounts: (c) => counts = c);
+    // Com a fila selada no meio do voo isto ainda grava: é telemetria, não
+    // visita, e `_persist` já não tocou no disco das visitas.
+    await recorder.syncResult(
+      attemptEventId: attemptId,
+      successCount: counts.synced,
+      failureCount: counts.errors,
+      conflictCount: counts.conflicts,
+      rejectedCount: counts.rejected,
+      outcome: result.kind.name,
+      transportError: false,
+      duration: stopwatch.elapsed,
+    );
+    return result;
   }
 
+  /// [onCounts] recebe as contagens apuradas do lote (telemetria, #83), antes
+  /// da precedência reduzi-las a um só [SyncOutcome].
   Future<SyncOutcome> _applyOutcomes(
     List<OfflineVisitRecord> batch,
-    List<VisitSyncOutcome> outcomes,
-  ) async {
+    List<VisitSyncOutcome> outcomes, {
+    void Function(({int synced, int errors, int conflicts, int rejected}) counts)? onCounts,
+  }) async {
     final byLocalId = {for (final outcome in outcomes) outcome.localId: outcome};
 
     var conflicts = 0;
@@ -843,6 +893,7 @@ class OfflineVisitQueue {
       ..addAll(stillPending)
       ..addAll(arrived);
     await _persist();
+    onCounts?.call((synced: synced, errors: errors, conflicts: conflicts, rejected: rejected));
 
     // Precedência: recusado > conflito > erro > sincronizado. Recusado é
     // trabalho de campo que NUNCA vai ao servidor — o que mais precisa
