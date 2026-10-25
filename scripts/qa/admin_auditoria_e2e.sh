@@ -24,6 +24,10 @@
 #      - o teste no aparelho; o script atende a linha marcadora dele:
 #          E2E_ADULTERAR sequence=<n> -> guarda o `result` original da linha <n>
 #                                        e faz `update audit_logs set result='x'`
+#                                        como superusuário (`set local
+#                                        session_replication_role = replica`:
+#                                        o trigger append-only da #82 recusa o
+#                                        UPDATE comum)
 #                                        NO BANCO DE E2E (nunca no de dev);
 #        o teste espera o servidor ver a linha `invalid` e segue;
 #      - conferências no banco de teste (abaixo) e o verificador CLI: FALHA
@@ -136,7 +140,7 @@ adulterar() {
   [[ "$n" == "$alvo" ]] || { echo "erro: o teste pediu a sequence '$n', o manifesto diz '$alvo'" >&2; exit 1; }
   original="$(sql "select result from audit_logs where sequence = $n")"
   [[ -n "$original" ]] || { echo "erro: a linha $n não existe" >&2; exit 1; }
-  sql "update audit_logs set result = 'x' where sequence = $n" >/dev/null
+  sql "begin; set local session_replication_role = replica; update audit_logs set result = 'x' where sequence = $n; commit;" >/dev/null
   echo "  [script] linha $n adulterada no sinalacs_e2e (result '$original' -> 'x') ($(date +%T))" >&2
 }
 
@@ -199,11 +203,20 @@ assert len(sys.argv[1]) < 512, "filtersJson grande demais para ser só filtro"
 print("  filtersJson só com chaves de filtro:", sorted(f))
 ' "$filtros" || { echo 'erro: audit_exports.filtersJson não é só o filtro' >&2; exit 1; }
 
+echo "== append-only no banco de e2e (#82)"
+# O sinalacs_e2e é recriado a cada rodada, então o trigger aqui veio do
+# definition.sql da última migração — o caminho de um banco novo.
+if recusa="$(sql "update audit_logs set result = result where sequence = $alvo" 2>&1)"; then
+  echo 'erro: o UPDATE comum deveria ser recusado pelo trigger append-only' >&2; exit 1
+fi
+[[ "$recusa" == *append-only* ]] || { echo "erro: a recusa não veio do trigger append-only: $recusa" >&2; exit 1; }
+echo "  UPDATE comum recusado: ${recusa##*ERROR:  }"
+
 echo "== cadeia de auditoria (verificador CLI)"
 codigo="$(cadeia_cli)"
 echo "  com a linha $alvo adulterada: exit=$codigo"
 [[ "$codigo" == 1 ]] || { echo "erro: o verificador CLI deveria FALHAR (exit 1) com a cadeia adulterada; saiu $codigo" >&2; exit 1; }
-sql "update audit_logs set result = '$original' where sequence = $alvo" >/dev/null
+sql "begin; set local session_replication_role = replica; update audit_logs set result = '$original' where sequence = $alvo; commit;" >/dev/null
 echo "  [script] linha $alvo restaurada (result 'x' -> '$original')"
 codigo="$(cadeia_cli)"
 echo "  depois de restaurada: exit=$codigo"

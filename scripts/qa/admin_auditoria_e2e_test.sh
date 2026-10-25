@@ -60,9 +60,14 @@ conferir 'o sql do script passa pelo e2e_stack.sh' "grep -qF 'sql() { ./scripts/
 conferir 'nenhum docker compose/exec no postgres de dev' "! grep -q 'docker compose.*sinalacs-postgres[^-]' $s && ! grep -q 'docker exec.*sinalacs-postgres[^-]' $s && ! grep -q 'sinalacs-postgres\\b[^-]' $s"
 conferir 'o e2e_stack.sh fala com o sinalacs_e2e no postgres-test' \
   "grep -qF 'db=sinalacs_e2e' scripts/qa/e2e_stack.sh && grep -qF 'docker exec -e PGPASSWORD sinalacs-postgres-test psql' scripts/qa/e2e_stack.sh"
-p_adulterar='update audit_logs set result = '"'"'x'"'"' where sequence = $n'
+p_adulterar='begin; set local session_replication_role = replica; update audit_logs set result = '"'"'x'"'"' where sequence = $n; commit;'
 conferir 'a adulteração é um UPDATE da linha pedida' 'grep -qF "$p_adulterar" $s'
 conferir 'a adulteração confere a sequence pedida contra o manifesto' "grep -qF '[[ \"\$n\" == \"\$alvo\" ]]' $s"
+# #82: o trigger append-only recusa UPDATE comum; a adulteração acima só passa
+# como superusuário (replica), e o script prova a recusa no banco recém-criado.
+p_recusa='if recusa="$(sql "update audit_logs set result = result where sequence = $alvo" 2>&1)"; then'
+conferir 'o banco de e2e recusa UPDATE comum na trilha (#82)' \
+  'grep -qF "$p_recusa" $s && grep -qF "erro: o UPDATE comum deveria ser recusado pelo trigger append-only" $s && grep -qF "[[ \"\$recusa\" == *append-only* ]]" $s'
 
 # Os asserts finais: o que o teste no aparelho não alcança.
 conferir 'assert da linha export/success ligada a audit_exports' \
@@ -70,7 +75,7 @@ conferir 'assert da linha export/success ligada a audit_exports' \
 conferir 'assert da recusa export/denied do coordenador' "grep -qF \"'admin_audit_export' and result = 'denied'\" $s"
 conferir 'assert do filtersJson só com chaves de filtro' "grep -qF 'filtersJson só com chaves de filtro' $s"
 conferir 'CLI deve falhar (exit 1) com a cadeia adulterada' "grep -qF '[[ \"\$codigo\" == 1 ]]' $s"
-p_restaurar='update audit_logs set result = '"'"'$original'"'"' where sequence = $alvo'
+p_restaurar='begin; set local session_replication_role = replica; update audit_logs set result = '"'"'$original'"'"' where sequence = $alvo; commit;'
 p_passa='[[ "$codigo" == 0 ]]'
 conferir 'CLI deve passar (exit 0) depois de restaurar' \
   'grep -qF "$p_restaurar" $s && [[ $(grep -cF "$p_passa" $s) -ge 2 ]]'
