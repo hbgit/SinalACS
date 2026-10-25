@@ -140,7 +140,8 @@ class VisitDatabase {
   /// houver alguma, lança [WipeBlocked] sem apagar nada (toda linha de
   /// `offline_visits` é visita ainda não enviada: a confirmada pelo servidor
   /// sai do disco). Sem visita, apaga as linhas de `offline_visits`,
-  /// `sync_cursor`, `micro_area_cache` e `micro_area_cache_meta`.
+  /// `sync_cursor`, `micro_area_cache`, `micro_area_cache_meta` e
+  /// `telemetry_events` (esta última nunca bloqueia a limpeza).
   ///
   /// O arquivo e a chave do Keystore ficam: é limpeza de dados, não troca de
   /// chave. A cópia `<nome>.recuperado` de uma recuperação por chave errada,
@@ -155,6 +156,8 @@ class VisitDatabase {
       await transaction.delete('sync_cursor');
       await transaction.delete('micro_area_cache');
       await transaction.delete('micro_area_cache_meta');
+      // Telemetria nunca bloqueia a limpeza (só `offline_visits` conta acima).
+      await transaction.delete('telemetry_events');
     });
     // Fim da custódia: a cópia de uma recuperação antiga (ilegível ao app)
     // também sai.

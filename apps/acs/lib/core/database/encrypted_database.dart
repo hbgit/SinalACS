@@ -28,8 +28,9 @@ class EncryptedLocalDatabase {
   /// da visita (id do ACS); nulo = visita legada em QUARENTENA, que nenhum dono
   /// enxerga e que só sai pelo envio legado (`visits.syncLegacy`). v8 acrescenta
   /// `conflict_server_version`/`conflict_server_snapshot`: a visita em conflito
-  /// e a cópia do servidor ficam no aparelho até o ACS decidir (#79).
-  static const schemaVersion = 8;
+  /// e a cópia do servidor ficam no aparelho até o ACS decidir (#79). v9
+  /// acrescenta `telemetry_events`, a fila local de telemetria por dono (#83).
+  static const schemaVersion = 9;
 
   /// Visitas registradas offline, aguardando sincronização.
   ///
@@ -83,7 +84,22 @@ CREATE TABLE IF NOT EXISTS micro_area_cache_meta (
   value TEXT NOT NULL
 )''';
 
-  /// Migração v1 → v2, v2 → v3, v3 → v4, v4 → v5, v5 → v6, v6 → v7 e v7 → v8.
+  /// Fila local de telemetria (#83, PRD §1.3), separada por dono (`owner`).
+  /// Sem PII: `payload` é JSON com contagens, durações e ids opacos. Não conta
+  /// como visita não enviada na limpeza do aparelho.
+  static const createTelemetryEvents = '''
+CREATE TABLE IF NOT EXISTS telemetry_events (
+  event_id TEXT PRIMARY KEY,
+  owner TEXT NOT NULL,
+  name TEXT NOT NULL,
+  occurred_at TEXT NOT NULL,
+  payload TEXT NOT NULL
+)''';
+
+  static const createTelemetryEventsOwnerIndex =
+      'CREATE INDEX IF NOT EXISTS telemetry_events_owner_idx ON telemetry_events(owner, occurred_at)';
+
+  /// Migração v1 → v2, v2 → v3, v3 → v4, v4 → v5, v5 → v6, v6 → v7, v7 → v8 e v8 → v9.
   ///
   /// Nenhuma das duas formas de v1 guarda o UUID do paciente: `patient_name`
   /// era `'Paciente ' + 8 dos 32 dígitos hex`, irreversível. Sem UUID,
@@ -172,6 +188,12 @@ CREATE TABLE IF NOT EXISTS micro_area_cache_meta (
         );
       }
     }
+
+    if (from < 9) {
+      // Aditiva: tabela nova, `offline_visits` não é tocada.
+      await db.execute(createTelemetryEvents);
+      await db.execute(createTelemetryEventsOwnerIndex);
+    }
   }
 
   /// Caminho do arquivo do banco neste dispositivo.
@@ -227,6 +249,8 @@ CREATE TABLE IF NOT EXISTS micro_area_cache_meta (
           await db.execute(createSyncCursor);
           await db.execute(createMicroAreaCache);
           await db.execute(createMicroAreaCacheMeta);
+          await db.execute(createTelemetryEvents);
+          await db.execute(createTelemetryEventsOwnerIndex);
         },
         onUpgrade: _upgrade,
         // Um rollback de APK abriria um arquivo v2 pedindo v1 e lançaria,
@@ -247,6 +271,8 @@ CREATE TABLE IF NOT EXISTS micro_area_cache_meta (
           await db.execute(createSyncCursor);
           await db.execute(createMicroAreaCache);
           await db.execute(createMicroAreaCacheMeta);
+          await db.execute(createTelemetryEvents);
+          await db.execute(createTelemetryEventsOwnerIndex);
         },
         onUpgrade: _upgrade,
         onDowngrade: onDatabaseDowngradeDelete,
