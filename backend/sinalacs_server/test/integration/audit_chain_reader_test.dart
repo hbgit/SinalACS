@@ -13,6 +13,7 @@ import 'package:sinalacs_server/src/infrastructure/database/orm_audit_chain_read
 import 'package:sinalacs_server/src/infrastructure/database/orm_audit_trail.dart';
 import 'package:test/test.dart';
 
+import 'support/privileged_tamper.dart';
 import 'test_tools/serverpod_test_tools.dart';
 
 /// Leitura em lotes da cadeia e selo por linha (#45, Task 5) contra Postgres
@@ -133,7 +134,8 @@ void main() {
         expect(integra.ok, isTrue);
         expect(integra.checked, base + 5);
 
-        await session.db.unsafeExecute(
+        await adulterarComoSuperusuario(
+          session,
           'UPDATE audit_logs SET result = \'x\' WHERE sequence = @s',
           parameters: QueryParameters.named({'s': base + 4}),
         );
@@ -173,7 +175,8 @@ void main() {
           reason: 'o vizinho vem do banco, não da linha ao lado na página',
         );
 
-        await session.db.unsafeExecute(
+        await adulterarComoSuperusuario(
+          session,
           'UPDATE audit_logs SET result = \'x\' WHERE sequence = @s',
           parameters: QueryParameters.named({'s': s5}),
         );
@@ -205,7 +208,8 @@ void main() {
       'vizinho apagado ⇒ a linha seguinte fica unverifiable, nunca verified',
       () async {
         final base = await _seisLinhas(session);
-        await session.db.unsafeExecute(
+        await adulterarComoSuperusuario(
+          session,
           'DELETE FROM audit_logs WHERE sequence = @s',
           parameters: QueryParameters.named({'s': base + 3}),
         );
