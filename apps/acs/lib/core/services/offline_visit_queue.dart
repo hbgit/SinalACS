@@ -521,8 +521,9 @@ class OfflineVisitQueue {
     // Sem gravador, nem o `await`: o fluxo fica idêntico ao de antes.
     final recorder = telemetry;
     // A visita já está no disco: um erro aqui não pode subir, ou o ACS a
-    // registraria de novo.
-    if (recorder != null) {
+    // registraria de novo. Selada durante a gravação (#81): o banco pode já
+    // ter sido destruído, e o evento leva o UUID do paciente — nada é gravado.
+    if (recorder != null && !_sealed) {
       try {
         await recorder.visitRegistered(visit: record, alertId: alertId);
       } catch (_) {}
@@ -775,7 +776,9 @@ class OfflineVisitQueue {
       stopwatch.stop();
     } catch (error) {
       stopwatch.stop();
-      if (recorder != null) {
+      // Selada no meio do voo (#81): nada mais grava, nem a telemetria. A
+      // tentativa fica órfã (interrompida).
+      if (recorder != null && !_sealed) {
         await recorder.syncResult(
           attemptEventId: attemptId,
           successCount: 0,
@@ -805,8 +808,9 @@ class OfflineVisitQueue {
 
     late final ({int synced, int errors, int conflicts, int rejected}) counts;
     final result = await _applyOutcomes(batch, outcomes, onCounts: (c) => counts = c);
-    // Com a fila selada no meio do voo isto ainda grava: é telemetria, não
-    // visita, e `_persist` já não tocou no disco das visitas.
+    // Selada no meio do voo (#81): o banco pode já ter sido destruído, e um
+    // `sync_result` aqui o reabriria. A tentativa fica órfã (interrompida).
+    if (_sealed) return result;
     await recorder.syncResult(
       attemptEventId: attemptId,
       successCount: counts.synced,

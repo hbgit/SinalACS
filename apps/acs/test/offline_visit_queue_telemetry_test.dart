@@ -69,6 +69,30 @@ class _GravadorQueLanca extends TelemetryRecorder {
       throw StateError('telemetria quebrada');
 }
 
+/// Envio que espera o portão e falha na rede.
+class _EnvioQueFalha implements VisitSynchronizer {
+  _EnvioQueFalha(this.portao);
+
+  final Completer<void> portao;
+
+  @override
+  Future<List<VisitSyncOutcome>> push(List<OfflineVisitRecord> visits) async {
+    await portao.future;
+    throw StateError('sem rede');
+  }
+}
+
+/// Disco de visitas cujo `save` espera [portao].
+class _DiscoTravado extends InMemoryVisitStore {
+  final Completer<void> portao = Completer<void>();
+
+  @override
+  Future<void> save(List<OfflineVisitRecord> visits) async {
+    await portao.future;
+    await super.save(visits);
+  }
+}
+
 OfflineVisitRecord _visita(int n) => OfflineVisitRecord(
       patientId: syntheticPatientId(n),
       risk: 'yellow',
@@ -267,7 +291,41 @@ void main() {
 
     expect((await disco.load()).map((v) => v.localId), gravadoAntes.map((v) => v.localId),
         reason: 'a fila selada não grava o fim do envio');
-    expect(await _eventos(telemetria, 'sync_result'), hasLength(1));
+    // Decisão do controlador (Task 14): selada, a fila não grava mais nem a
+    // telemetria — o banco pode já ter sido destruído (#81). A tentativa fica
+    // órfã, contada como interrompida.
+    expect(await _eventos(telemetria, 'sync_result'), isEmpty);
+  });
+
+  test('selo no meio de um envio que falha na rede: não há result', () async {
+    final telemetria = InMemoryTelemetryStore();
+    final portao = Completer<void>();
+    final envio = _EnvioQueFalha(portao);
+    final fila = OfflineVisitQueue(synchronizer: envio, telemetry: _recorder(telemetria));
+    await fila.add(_visita(1));
+
+    final envioEmVoo = fila.sync();
+    await pumpEventQueue();
+    fila.seal();
+    portao.complete();
+    await envioEmVoo;
+
+    expect(await _eventos(telemetria, 'sync_attempt'), hasLength(1));
+    expect(await _eventos(telemetria, 'sync_result'), isEmpty);
+  });
+
+  test('selo durante a gravação da visita: não emite visit_registered', () async {
+    final telemetria = InMemoryTelemetryStore();
+    final disco = _DiscoTravado();
+    final fila = OfflineVisitQueue(store: disco, telemetry: _recorder(telemetria));
+
+    final registro = fila.add(_visita(1));
+    await pumpEventQueue();
+    fila.seal();
+    disco.portao.complete();
+    await registro;
+
+    expect(await _eventos(telemetria, 'visit_registered'), isEmpty);
   });
 
   test('selo durante a gravação do attempt: o lote não sai e não há result', () async {

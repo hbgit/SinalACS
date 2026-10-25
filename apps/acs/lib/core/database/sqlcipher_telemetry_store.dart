@@ -1,26 +1,51 @@
 import 'dart:convert';
 
 import 'package:sinalacs_acs/core/database/sqlcipher_visit_store.dart';
+import 'package:sinalacs_acs/core/services/local_write_seal.dart';
 import 'package:sinalacs_acs/core/services/offline_visit_queue.dart' show requireOwnerId;
 import 'package:sinalacs_acs/core/telemetry/telemetry_event.dart';
 import 'package:sinalacs_acs/core/telemetry/telemetry_store.dart';
-import 'package:sqflite_common_ffi/sqflite_ffi.dart' show ConflictAlgorithm;
+import 'package:sqflite_common_ffi/sqflite_ffi.dart' show ConflictAlgorithm, Database;
 
 const _table = 'telemetry_events';
 
 /// Fila de telemetria na base SQLCipher das visitas (schema v9). Uma linha de
 /// telemetria nunca conta para a recusa de "Limpar este aparelho"
 /// (`WipeBlocked` olha só `offline_visits`); o wipe a apaga.
+///
+/// Limpeza remota (#81): `VisitDatabase.open()` reabre depois do `destroy`,
+/// com chave e arquivo novos. Por isso o apagador [seal]a este store ANTES do
+/// `destroy`, junto com as filas e o cache da microárea: selado, nada aqui
+/// chama `open()` — gravar e apagar não fazem nada, ler devolve vazio ou 0.
+/// Um `sync_result` que volta da rede depois, ou um flush em voo, não recria o
+/// banco que a coordenação mandou apagar. [unseal] no próximo login.
 class SqlCipherTelemetryStore implements TelemetryStore {
   SqlCipherTelemetryStore(this._database, {this.maxPerOwner = maxTelemetryEventsPerOwner});
 
   final VisitDatabase _database;
   final int maxPerOwner;
+  final LocalWriteSeal _seal = LocalWriteSeal();
+
+  void seal() => _seal.seal();
+
+  void unseal() => _seal.unseal();
+
+  bool get isSealed => _seal.isSealed;
+
+  /// O banco, ou `null` com o selo fechado — antes ou depois da abertura (uma
+  /// abertura em voo quando o selo fechou não grava).
+  Future<Database?> _openAdmitted() async {
+    final ticket = _seal.begin();
+    if (ticket == null) return null;
+    final db = await _database.open();
+    return _seal.admits(ticket) ? db : null;
+  }
 
   @override
   Future<void> append(TelemetryEventRecord e) async {
     requireOwnerId(e.owner);
-    final db = await _database.open();
+    final db = await _openAdmitted();
+    if (db == null) return;
     await db.transaction((txn) async {
       await txn.insert(
         _table,
@@ -45,7 +70,8 @@ class SqlCipherTelemetryStore implements TelemetryStore {
   @override
   Future<List<TelemetryEventRecord>> oldestForOwner(String owner, {required int limit}) async {
     requireOwnerId(owner);
-    final db = await _database.open();
+    final db = await _openAdmitted();
+    if (db == null) return const [];
     final rows = await db.query(
       _table,
       where: 'owner = ?',
@@ -69,7 +95,8 @@ class SqlCipherTelemetryStore implements TelemetryStore {
   Future<void> deleteByIds(Iterable<String> ids) async {
     final lista = ids.toList();
     if (lista.isEmpty) return;
-    final db = await _database.open();
+    final db = await _openAdmitted();
+    if (db == null) return;
     await db.transaction((txn) async {
       // Lotes abaixo do limite de variáveis do SQLite.
       for (var i = 0; i < lista.length; i += 500) {
@@ -82,7 +109,8 @@ class SqlCipherTelemetryStore implements TelemetryStore {
   @override
   Future<int> countForOwner(String owner) async {
     requireOwnerId(owner);
-    final db = await _database.open();
+    final db = await _openAdmitted();
+    if (db == null) return 0;
     final rows = await db.rawQuery('SELECT COUNT(*) AS total FROM $_table WHERE owner = ?', [owner]);
     return rows.single['total']! as int;
   }

@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sinalacs_acs/core/database/encrypted_database.dart';
 import 'package:sinalacs_acs/core/database/sqlcipher_telemetry_store.dart';
@@ -144,4 +146,97 @@ void main() {
       expect(await store.countForOwner('acs-a'), 1);
     });
   });
+
+  // Limpeza remota (#81): `VisitDatabase.open()` reabre depois do `destroy`,
+  // com chave e arquivo novos. O selo do store impede que um evento tardio
+  // (um `sync_result` que volta da rede depois, um flush em voo) recrie o
+  // banco que a coordenação mandou apagar.
+  group('SqlCipherTelemetryStore selado (#81)', () {
+    const seladoNome = 'telemetry_store_seal_test.db';
+    late _ChaveContada chave;
+    late VisitDatabase contado;
+    var aberturas = 0;
+
+    setUp(() async {
+      await EncryptedLocalDatabase.deleteDatabaseFile(seladoNome);
+      aberturas = 0;
+      chave = _ChaveContada();
+      contado = VisitDatabase(
+        keyStore: chave,
+        databaseName: seladoNome,
+        allowUnencryptedForTesting: true,
+        opener: (nome, senha, semCifra) {
+          aberturas++;
+          return EncryptedLocalDatabase.open(
+            databaseName: nome,
+            passphrase: senha,
+            allowUnencryptedForTesting: semCifra,
+          );
+        },
+      );
+    });
+    tearDown(() async {
+      await contado.close();
+      await EncryptedLocalDatabase.deleteDatabaseFile(seladoNome);
+    });
+
+    test('com o selo fechado, nenhuma operação abre o banco', () async {
+      final store = SqlCipherTelemetryStore(contado)..seal();
+
+      await store.append(_evento('a1', 'acs-a', DateTime.utc(2026)));
+      expect(await store.oldestForOwner('acs-a', limit: 10), isEmpty);
+      await store.deleteByIds(['a1']);
+      expect(await store.countForOwner('acs-a'), 0);
+
+      expect(aberturas, 0);
+    });
+
+    test('append tardio depois do destroy não recria arquivo nem chave', () async {
+      final store = SqlCipherTelemetryStore(contado);
+      await store.append(_evento('a1', 'acs-a', DateTime.utc(2026)));
+      expect(aberturas, 1);
+
+      store.seal();
+      await contado.destroy();
+      await store.append(_evento('tarde', 'acs-a', DateTime.utc(2026)));
+      await store.oldestForOwner('acs-a', limit: 10);
+
+      expect(aberturas, 1);
+      expect(chave.criadas, 0);
+      expect(await File(await EncryptedLocalDatabase.pathFor(seladoNome)).exists(), isFalse);
+    });
+
+    test('reaberto o selo, volta a gravar', () async {
+      final store = SqlCipherTelemetryStore(contado)..seal();
+      await store.append(_evento('perdido', 'acs-a', DateTime.utc(2026)));
+
+      store.unseal();
+      await store.append(_evento('a1', 'acs-a', DateTime.utc(2026)));
+
+      expect((await store.oldestForOwner('acs-a', limit: 10)).map((e) => e.eventId), ['a1']);
+      expect(await store.countForOwner('acs-a'), 1);
+      await store.deleteByIds(['a1']);
+      expect(await store.countForOwner('acs-a'), 0);
+    });
+  });
+}
+
+/// Conta as chaves NOVAS criadas depois de um `delete` (o `destroy` apaga a
+/// chave; uma reabertura tardia criaria outra).
+class _ChaveContada extends InMemoryDatabaseKeyStore {
+  bool temChave = true;
+  int criadas = 0;
+
+  @override
+  Future<String> readOrCreate() async {
+    if (!temChave) criadas++;
+    temChave = true;
+    return super.readOrCreate();
+  }
+
+  @override
+  Future<void> delete() async {
+    temChave = false;
+    await super.delete();
+  }
 }
