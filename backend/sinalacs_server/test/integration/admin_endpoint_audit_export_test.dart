@@ -18,6 +18,7 @@ import 'package:sinalacs_server/src/infrastructure/database/orm_audit_trail.dart
 import 'package:sinalacs_server/src/runtime/alert_runtime.dart';
 import 'package:test/test.dart';
 
+import 'support/privileged_tamper.dart';
 import 'test_tools/serverpod_test_tools.dart';
 
 /// `admin.exportAuditLogs` (#45, Task 10) pelo endpoint, com tokens reais e
@@ -461,7 +462,8 @@ void main() {
         await linha(_acsA, 'triage_session');
         await linha(_acsA, 'patient_directory');
         await verificarECachear();
-        await session.db.unsafeExecute(
+        await adulterarComoSuperusuario(
+          session,
           "UPDATE audit_logs SET result = 'x' WHERE sequence = 2",
         );
 
@@ -486,7 +488,8 @@ void main() {
           orderBy: (t) => t.sequence,
           orderDescending: true,
         ))!.sequence;
-        await session.db.unsafeExecute(
+        await adulterarComoSuperusuario(
+          session,
           'DELETE FROM audit_logs WHERE sequence >= @s',
           parameters: QueryParameters.named({'s': cabeca - 1}),
         );

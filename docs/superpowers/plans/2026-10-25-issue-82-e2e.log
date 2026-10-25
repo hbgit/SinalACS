@@ -1,0 +1,82 @@
+== stack de e2e (banco de teste)
+aviso: o backend em execução (sinalacs-serverpod) será substituído pelo de e2e; ao final, rode `docker compose up -d` para voltar à stack de desenvolvimento.
+NOTICE:  database "sinalacs_e2e" does not exist, skipping
+Fixtures de e2e gravadas (5 pacientes, 2 ACS, 1 admin, 1 coordenador) em ../../.e2e/fixtures.json.
+  linhas semeadas na trilha: 60
+    OK — 60 linha(s) verificada(s), cadeia íntegra.
+  verificador CLI antes do teste: exit=0
+== trilha de auditoria no emulador
+Resolving dependencies...
+Downloading packages...
+  clock 1.1.2 (1.1.3 available)
+  flutter_lints 3.0.2 (6.0.0 available)
+  intl 0.20.2 (0.20.3 available)
+  lints 3.0.0 (6.1.0 available)
+  matcher 0.12.19 (0.12.20 available)
+  material_color_utilities 0.13.0 (0.13.1 available)
+  meta 1.18.0 (1.19.0 available)
+  qr 3.0.2 (4.0.0 available)
+  serverpod_auth_core_client 3.4.13 (4.0.4 available)
+  serverpod_auth_idp_client 3.4.13 (4.0.4 available)
+  serverpod_client 3.4.13 (4.0.4 available)
+  serverpod_serialization 3.4.13 (4.0.4 available)
+  stack_trace 1.12.1 (1.12.2 available)
+  test_api 0.7.11 (0.7.15 available)
+  vector_math 2.2.0 (2.4.3 available)
+  vm_service 15.3.0 (15.4.0 available)
+  web 1.1.1 (1.1.2 available)
+Got dependencies!
+17 packages have newer versions incompatible with dependency constraints.
+Try `flutter pub outdated` for more information.
+00:00 +0: loading /home/rock/Documents/Dev/APPs/SinalACS/apps/admin/integration_test/admin_auditoria_e2e.dart
+Running Gradle task 'assembleDebug'...                          
+WARNING: A restricted method in java.lang.System has been called
+WARNING: java.lang.System::load has been called by net.rubygrapefruit.platform.internal.NativeLibraryLoader in an unnamed module (file:/home/rock/.gradle/wrapper/dists/gradle-9.1.0-all/7wzd0jkjit61aq2p43wpjgij9/gradle-9.1.0/lib/native-platform-0.22-milestone-28.jar)
+WARNING: Use --enable-native-access=ALL-UNNAMED to avoid a warning for callers in this module
+WARNING: Restricted methods will be blocked in a future release unless native access is enabled
+
+Warning: SDK processing. This version only understands SDK XML versions up to 3 but an SDK XML file of version 4 was encountered. This can happen if you use versions of Android Studio and the command-line tools that were released at different times.
+Running Gradle task 'assembleDebug'...                             20.8s
+✓ Built build/app/outputs/flutter-apk/app-debug.apk
+Installing build/app/outputs/flutter-apk/app-debug.apk...          505ms
+00:00 +0: admin consulta, filtra e pagina a trilha, vê a adulteração e exporta o CSV
+E2E_CADEIA_INTEGRA
+E2E_FILTROS_OK paginas=2 linhas=76
+E2E_ADULTERAR sequence=50
+  [script] linha 50 adulterada no sinalacs_e2e (result 'success' -> 'x') (16:30:24)
+E2E_ADULTERACAO_DETECTADA sequence=50 linhas=83
+E2E_CLIPBOARD caminho=clipboard
+E2E_EXPORT_FEITO linhas=45 primeira=16 ultima=60
+01:53 +1: coordenador vê só a UBS dele, não tem "Exportar" e a exportação por RPC é recusada
+E2E_COORDENADOR_OK linhas=20
+E2E_FIM
+02:22 +2: (tearDownAll)
+02:22 +2: All tests passed!
+  E2E_CLIPBOARD caminho=clipboard
+== exportação e recusa no banco de teste
+  uma linha export/success gravada no teste: 1
+  ela é do administrador, sobre admin_audit_logs, ligada a audit_exports: true
+  uma recusa export/denied do coordenador: 1
+  nenhuma exportação do coordenador concluída: 0
+  uma única linha em audit_exports: 1
+  audit_exports com o recorte do período e a cadeia quebrada no momento: 45|16|60|broken|csv
+  filtersJson só com chaves de filtro: ['from', 'to']
+== append-only no banco de e2e (#82)
+  UPDATE comum recusado: tabela de auditoria audit_logs é append-only: UPDATE recusado
+CONTEXT:  PL/pgSQL function sinalacs_audit_append_only() line 3 at RAISE
+== cadeia de auditoria (verificador CLI)
+    FALHA [hashMismatch] na sequence 50: hash não confere com o conteúdo da linha (possível adulteração) (49 linha(s) íntegra(s) antes da quebra)
+  com a linha 50 adulterada: exit=1
+  [script] linha 50 restaurada (result 'x' -> 'success')
+    OK — 99 linha(s) verificada(s), cadeia íntegra.
+  depois de restaurada: exit=0
+OK — trilha de auditoria do backoffice contra o banco de teste
+A stack de desenvolvimento foi substituída pela de e2e: rode `docker compose up -d` para voltá-la.
+exit=0
+
+== 2026-10-25: atualização de um pg_data/ de desenvolvimento existente (migration.sql)
+$ docker compose up -d --build   # backend healthy
+serverpod_migrations (sinalacs): 20261025201950984
+triggers: audit_chain_checkpoints_append_only, audit_exports_append_only, audit_logs_append_only
+$ psql -c "delete from audit_logs where false"
+ERROR:  tabela de auditoria audit_logs é append-only: DELETE recusado

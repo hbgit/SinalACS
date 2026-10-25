@@ -9,6 +9,7 @@ import 'package:sinalacs_server/src/infrastructure/database/orm_audit_trail.dart
 import 'package:sinalacs_server/src/runtime/alert_runtime.dart';
 import 'package:test/test.dart';
 
+import 'support/privileged_tamper.dart';
 import 'test_tools/serverpod_test_tools.dart';
 
 /// `admin.verifyAuditChain` (#45, Task 6) pelo endpoint, com tokens reais e
@@ -226,7 +227,8 @@ void main() {
         await linha(_acsA, 'cadeia_0');
         final alvo = await linha(_acsA, 'cadeia_1');
         await linha(_acsA, 'cadeia_2');
-        await session.db.unsafeExecute(
+        await adulterarComoSuperusuario(
+          session,
           'UPDATE audit_logs SET result = \'x\' WHERE sequence = @s',
           parameters: QueryParameters.named({'s': alvo}),
         );
@@ -245,7 +247,8 @@ void main() {
       await linha(_acsA, 'cadeia_0');
       final meio = await linha(_acsA, 'cadeia_1');
       await linha(_acsA, 'cadeia_2');
-      await session.db.unsafeExecute(
+      await adulterarComoSuperusuario(
+        session,
         'DELETE FROM audit_logs WHERE sequence = @s',
         parameters: QueryParameters.named({'s': meio}),
       );
@@ -262,7 +265,8 @@ void main() {
       () async {
         final daB = await linha(_acsB, 'cadeia_b');
         await linha(_acsA, 'cadeia_a');
-        await session.db.unsafeExecute(
+        await adulterarComoSuperusuario(
+          session,
           'UPDATE audit_logs SET result = \'x\' WHERE sequence = @s',
           parameters: QueryParameters.named({'s': daB}),
         );
@@ -279,12 +283,14 @@ void main() {
         expect(texto, isNot(contains(_segredo)));
 
         // A mesma quebra, agora numa linha de autor da UBS A.
-        await session.db.unsafeExecute(
+        await adulterarComoSuperusuario(
+          session,
           'UPDATE audit_logs SET result = \'success\' WHERE sequence = @s',
           parameters: QueryParameters.named({'s': daB}),
         );
         final daA = await linha(_acsA, 'cadeia_a2');
-        await session.db.unsafeExecute(
+        await adulterarComoSuperusuario(
+          session,
           'UPDATE audit_logs SET result = \'x\' WHERE sequence = @s',
           parameters: QueryParameters.named({'s': daA}),
         );

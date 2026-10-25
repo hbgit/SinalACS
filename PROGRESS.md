@@ -399,7 +399,7 @@ inteira e detecta edição, remoção ou reordenação de qualquer linha — ver
 ao vivo: adulterar uma linha por `UPDATE` direto no Postgres faz o verificador
 falhar exatamente na `sequence` afetada. Fora de escopo, registrado na spec: o
 append-only em si não é imposto pelo banco (sem trigger/`REVOKE`) — a cadeia
-*detecta* a violação, não a impede.
+*detecta* a violação, não a impede. *(Estado na época; o trigger veio na #82.)*
 
 **Recusa definitiva presa na fila para sempre.** `VisitSyncService._syncOne`
 colapsava seis motivos de falha distintos no mesmo `SyncStatus.error`, e
@@ -1598,7 +1598,7 @@ Plano: `docs/superpowers/plans/2026-10-13-issue-45-trilha-de-auditoria-completa.
 - **Download real de arquivo (P5)** fora: o CSV sai pela área de transferência (compartilhada com outros apps); pacote de arquivo exigiria aprovação em `spec/stack.md`. Resposta perdida depois do commit deixa evento sem entrega.
 - **Filtro por `resourceId` exato** fora (D10); validar com o encarregado de dados, junto com D5 e com a base/retenção de `audit_exports` (sem política de retenção; fora da cadeia, então edição direta não é detectada).
 - **Exceção própria do teto** não existe: o servidor reutiliza `AdminInvalidRequestException` para teto e filtro inválido; falha de geração é `AuditExportFailedException` genérica (o cliente não distingue rede de geração).
-- **Sem trigger/`REVOKE` append-only:** a cadeia detecta, não impede; quem escreve no Postgres **e** tem `AUDIT_CHAIN_SECRET` reescreve tudo.
+- ~~**Sem trigger/`REVOKE` append-only**~~ — resolvido na #82 (2026-10-25), ver a seção dela: o banco recusa `UPDATE`/`DELETE`/`TRUNCATE`; o superusuário ainda contorna (#96).
 - **Backup restaurado inteiro** (cadeia + checkpoints) passa como íntegro. **Truncamento de cauda** só é pego com checkpoint; quem apaga cauda e checkpoints não é detectado. **A CLI `audit_chain_check` não usa checkpoints.** Sem **re-baseline** auditado: restauração parcial de `audit_logs` dá `broken` permanente. Só os 100 checkpoints mais recentes são conferidos; a tabela não tem poda.
 - **Rotação de `AUDIT_CHAIN_SECRET` invalida toda a história** (parece adulteração em massa; a tela diz "falha", não "ataque"); exigiria `keyVersion` por linha (migração futura).
 - Verificação global é O(n): ~22 µs/linha medidos, 10 s cobrem ~440 mil linhas; acima disso, verificação incremental por checkpoint. O selo por linha olha só para trás (a linha seguinte à adulterada segue "Íntegro"). `chainState` da exportação atesta o instante da verificação, não do commit; N exportações simultâneas = N verificações (só admin).
@@ -1715,3 +1715,16 @@ Backlog priorizado na seção final do relatório; conferência por `python3 scr
   - Escritas tardias do cache da microárea e do cursor de `pull`: o apagador sela `MicroAreaDirectory` e o `VisitPullService` de cada escopo (`LocalWriteSeal`) antes de destruir o banco, e espera (até 5 s) a gravação do cache que já tinha começado; a resposta que volta da rede depois não lê, não grava e não reabre o arquivo, e o selo do cache só abre no próximo login (`remote_wipe_late_writes_test.dart`, banco real FFI: nenhuma chave nova, arquivo ausente, e o cache volta a gravar depois de "Entrar de novo"). Fica aberto: `MicroAreaCacheStore` tem a própria instância de `SecureStorageDatabaseKeyStore`, e no primeiro uso depois de uma destruição (ou da instalação) o `readOrCreate` dele pode correr com o do `VisitDatabase` e gerar duas chaves; na prática a lista vem da rede antes de gravar, mas nada garante a ordem.
   - O motivo escolhido não aparece no histórico do app admin (só no servidor); se a recarga da lista falha depois de um pedido bem-sucedido, a tela mostra a falha genérica.
   - Duas falhas anteriores a esta branch foram corrigidas depois do merge (2026-10-17): o teste de aparelho "banco v6 … migra" em `encrypted_storage_test.dart` esperava o schema 7 e agora acompanha a v8 (8/8 no `emulator-5554`); e `scripts/qa/cobertura_prd.py --final` recusava as linhas RNF04, CRIPTO-TRAEFIK-BACKEND e R2 da auditoria do PRD, que tinham texto depois do status em negrito (o texto foi para a coluna de evidência; 64 IDs, ok).
+
+## Auditoria append-only no banco (#82) — 2026-10-25
+
+**Entregue.** Um trigger por comando (`sinalacs_audit_append_only`, `BEFORE UPDATE OR DELETE OR TRUNCATE … FOR EACH STATEMENT`) em `audit_logs`, `audit_exports` e `audit_chain_checkpoints` recusa a operação com `SQLSTATE 42501` (`tabela de auditoria <t> é append-only: <OP> recusado`), inclusive quando nenhuma linha casa (`WHERE false`). `REVOKE UPDATE, DELETE, TRUNCATE … FROM PUBLIC`. Fonte canônica em `backend/sinalacs_server/database/audit_append_only.sql`, colada no `migration.sql` e no `definition.sql` da migração `20261025201950984` (montada à mão: o Serverpod 3.4.13 não cria migração vazia nem modela trigger). Nenhum escritor de produção precisou mudar: os três stores só inserem (o checkpoint usa `ON CONFLICT DO NOTHING`).
+
+**Provas.** `test/integration/audit_append_only_test.dart` (recusa por tabela × operação, sem linha alvo, a trilha continua gravando depois da recusa, `advanceTo` e exportação seguem funcionando, o superusuário ainda contorna e o atalho não vaza, `PUBLIC` sem os privilégios); `audit_schema_test.dart` (o `definition.sql` mais recente contém o bloco, uma migração o aplica, os três triggers ativos no banco); suíte do backend 1455/1455. e2e `scripts/qa/admin_auditoria_e2e.sh` no `emulator-5554` em 2026-10-25, `exit=0`: adulteração (como superusuário) detectada na tela e pelo CLI, `UPDATE` comum recusado no `sinalacs_e2e` recém-criado (caminho do `definition.sql`); `pg_data/` de desenvolvimento existente migrado para `20261025201950984` com os três triggers e `DELETE` recusado (caminho do `migration.sql`). Log: `docs/superpowers/plans/2026-10-25-issue-82-e2e.log`.
+
+**Limites e pendências.**
+- O backend conecta como `POSTGRES_USER`, superusuário e dono das tabelas: ignora `REVOKE` e contorna o trigger (`session_replication_role = replica`, `ALTER TABLE … DISABLE TRIGGER`). Separar o papel de runtime é a **#96**; até lá RF17 e STRIDE-R seguem **parciais** e, contra esse adversário, a cadeia só detecta.
+- Os testes e o e2e que adulteram de propósito passaram a fazê-lo como esse adversário (`test/integration/support/privileged_tamper.dart`; `begin; set local session_replication_role = replica; …; commit;` no script).
+- Passo manual: depois de todo `serverpod create-migration`, rodar `./scripts/dev/append_audit_append_only.sh` (o `audit_schema_test.dart` falha se esquecer; `backend/CLAUDE.md`). Mudar o bloco exige migração nova com `--tambem-migration-sql`.
+- `consent_logs` segue sem trigger (avaliado na #96).
+- Herdados da #45, fora desta issue: `audit_exports` fora da cadeia (agora o trigger recusa editá-la, mas a edição pelo superusuário não é detectada), CSV pela área de transferência sem download, revisão do DPO sobre a exportação.
