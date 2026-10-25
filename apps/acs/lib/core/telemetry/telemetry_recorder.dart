@@ -75,13 +75,18 @@ class TelemetryRecorder {
     required Duration duration,
   }) async {
     if (attemptEventId == null) return;
+    // O servidor recusa o evento inteiro com contagem fora de 0..10000 ou
+    // `outcome` fora do domínio; isso deixaria a tentativa órfã (contada como
+    // interrompida). Normalizar aqui mantém o par attempt/result ligado.
+    int c(int v) => v.clamp(0, 10000);
+    const outcomes = {'synced', 'conflict', 'error', 'rejected'};
     await _append('sync_result', {
       'attempt_event_id': attemptEventId,
-      'success_count': successCount,
-      'failure_count': failureCount,
-      'conflict_count': conflictCount,
-      'rejected_count': rejectedCount,
-      'outcome': outcome,
+      'success_count': c(successCount),
+      'failure_count': c(failureCount),
+      'conflict_count': c(conflictCount),
+      'rejected_count': c(rejectedCount),
+      'outcome': outcomes.contains(outcome) ? outcome : 'error',
       'transport_error': transportError,
       'duration_ms': duration.inMilliseconds < 0 ? 0 : duration.inMilliseconds,
     });

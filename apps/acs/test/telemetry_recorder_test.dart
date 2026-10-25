@@ -23,6 +23,13 @@ class _ThrowingStore implements TelemetryStore {
   Future<int> countForOwner(String owner) async => 0;
 }
 
+class _BrokenConnectivity implements Connectivity {
+  @override
+  Future<List<ConnectivityResult>> checkConnectivity() async => throw StateError('sem plugin');
+  @override
+  dynamic noSuchMethod(Invocation i) => super.noSuchMethod(i);
+}
+
 TelemetryRecorder _rec(TelemetryStore s, NetworkKind k) => TelemetryRecorder(
       store: s,
       owner: _owner,
@@ -150,6 +157,62 @@ void main() {
     final j = jsonEncode(e.payload);
     expect(j.contains('SEGREDO-CLINICO'), isFalse);
     expect(j.contains('DESFECHO-X'), isFalse);
+  });
+
+  Future<Map<String, Object?>> recordResult(TelemetryRecorder r, InMemoryTelemetryStore s,
+      {int n = 1, String outcome = 'synced'}) async {
+    await r.syncResult(
+      attemptEventId: _alert,
+      successCount: n,
+      failureCount: n,
+      conflictCount: n,
+      rejectedCount: n,
+      outcome: outcome,
+      transportError: false,
+      duration: const Duration(milliseconds: -5),
+    );
+    return (await _all(s)).last.payload;
+  }
+
+  test('contagens são limitadas a 0..10000 e duração negativa vira 0', () async {
+    final s = InMemoryTelemetryStore();
+    final r = _rec(s, NetworkKind.wifi);
+    var p = await recordResult(r, s, n: 10001);
+    expect([p['success_count'], p['failure_count'], p['conflict_count'], p['rejected_count']],
+        everyElement(10000));
+    expect(p['duration_ms'], 0);
+    p = await recordResult(r, s, n: -1);
+    expect([p['success_count'], p['failure_count'], p['conflict_count'], p['rejected_count']],
+        everyElement(0));
+  });
+
+  test('records_count 10001 é gravado como 10000', () async {
+    final s = InMemoryTelemetryStore();
+    await _rec(s, NetworkKind.wifi).syncAttempt(recordsCount: 10001);
+    expect((await _all(s)).single.payload['records_count'], 10000);
+  });
+
+  test('outcome desconhecido vira error', () async {
+    final s = InMemoryTelemetryStore();
+    final p = await recordResult(_rec(s, NetworkKind.wifi), s, outcome: 'empty');
+    expect(p['outcome'], 'error');
+  });
+
+  test('store lançando em syncResult não propaga', () async {
+    await _rec(_ThrowingStore(), NetworkKind.wifi).syncResult(
+      attemptEventId: _alert,
+      successCount: 1,
+      failureCount: 0,
+      conflictCount: 0,
+      rejectedCount: 0,
+      outcome: 'synced',
+      transportError: false,
+      duration: Duration.zero,
+    );
+  });
+
+  test('connectivityProbe com fonte lançando devolve unknown', () async {
+    expect(await connectivityProbe(_BrokenConnectivity())(), NetworkKind.unknown);
   });
 
   group('networkKindOf', () {
