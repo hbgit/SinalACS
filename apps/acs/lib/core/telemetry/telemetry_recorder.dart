@@ -17,9 +17,13 @@ class TelemetryRecorder {
     Duration? stepTimeout,
   })  : _store = store,
         _owner = owner,
-        _probe = probe ?? connectivityProbe(),
+        _probe = probe ?? _unknownProbe,
         _clock = clock ?? DateTime.now,
         _stepTimeout = stepTimeout ?? telemetryStepTimeout;
+
+  /// Sem sonda, a rede é `unknown`. A real (`connectivityProbe`, Flutter) só a
+  /// fábrica de produção passa: este arquivo roda também na VM.
+  static Future<NetworkKind> _unknownProbe() async => NetworkKind.unknown;
 
   /// Teto de cada passo (sonda de rede, gravação). Um canal de plataforma ou
   /// um SQLCipher travado não pode prender a fila de visitas que espera aqui.

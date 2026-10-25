@@ -1,4 +1,8 @@
-import 'package:connectivity_plus/connectivity_plus.dart';
+// Dart puro de propósito: `offline_visit_queue.dart` importa o gravador, que
+// importa este arquivo, e a fila roda também na VM (`tool/live_check.dart`,
+// instrumento do RNF02). A sonda real, sobre `connectivity_plus` (Flutter),
+// mora em `connectivity_network_probe.dart` e só o app a liga —
+// `test/session_store_wiring_test.dart` guarda o caminho.
 
 /// Tipo de rede no momento do evento (domínio de `network_type`, PRD §1.3).
 enum NetworkKind {
@@ -15,41 +19,3 @@ enum NetworkKind {
 }
 
 typedef NetworkProbe = Future<NetworkKind> Function();
-
-/// Sonda real, sobre `connectivity_plus`. Nunca lança: erro vira `unknown`.
-NetworkProbe connectivityProbe([Connectivity? connectivity]) {
-  return () async {
-    try {
-      final results = await (connectivity ?? Connectivity()).checkConnectivity();
-      return networkKindOf(results);
-    } catch (_) {
-      return NetworkKind.unknown;
-    }
-  };
-}
-
-/// Prioridade com várias redes: wifi > ethernet > mobile > vpn > other.
-/// Lista vazia ou só `none` é `none`.
-NetworkKind networkKindOf(List<ConnectivityResult> results) {
-  final kinds = {
-    for (final r in results)
-      switch (r) {
-        ConnectivityResult.wifi => NetworkKind.wifi,
-        ConnectivityResult.ethernet => NetworkKind.ethernet,
-        ConnectivityResult.mobile => NetworkKind.mobile,
-        ConnectivityResult.vpn => NetworkKind.vpn,
-        ConnectivityResult.none => NetworkKind.none,
-        _ => NetworkKind.other,
-      },
-  };
-  for (final k in const [
-    NetworkKind.wifi,
-    NetworkKind.ethernet,
-    NetworkKind.mobile,
-    NetworkKind.vpn,
-    NetworkKind.other,
-  ]) {
-    if (kinds.contains(k)) return k;
-  }
-  return NetworkKind.none;
-}

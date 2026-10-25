@@ -54,4 +54,48 @@ void main() {
       expect(imports, isNot(contains('secure_upload_token_store.dart')), reason: arquivo);
     }
   });
+
+  // A fila de visitas importa o gravador da telemetria, e o `live_check` (VM,
+  // instrumento do RNF02) importa a fila. A sonda real (`connectivity_plus`)
+  // mora em `connectivity_network_probe.dart`, que só o app liga. A guarda
+  // segue os imports locais de forma transitiva: um import novo três arquivos
+  // abaixo já quebraria a compilação na VM.
+  test('a fila, o gravador e o live_check não alcançam o Flutter, nem de forma transitiva', () {
+    for (final raiz in [
+      'lib/core/services/offline_visit_queue.dart',
+      'lib/core/telemetry/telemetry_recorder.dart',
+      'tool/live_check.dart',
+    ]) {
+      final proibidos = _importsProibidosAlcancaveis(raiz);
+      expect(proibidos, isEmpty, reason: raiz);
+    }
+  });
+}
+
+final _diretiva = RegExp(r'''^\s*(?:import|export)\s+['"]([^'"]+)['"]''', multiLine: true);
+
+/// Percorre os imports/exports locais a partir de [raiz] e devolve, como
+/// `arquivo -> uri`, os que apontam para `package:flutter`, `dart:ui` ou
+/// `connectivity_plus`.
+List<String> _importsProibidosAlcancaveis(String raiz) {
+  final vistos = <String>{};
+  final pendentes = [File(raiz).absolute.path];
+  final achados = <String>[];
+  final lib = Directory('lib').absolute.path;
+  while (pendentes.isNotEmpty) {
+    final caminho = pendentes.removeLast();
+    if (!vistos.add(caminho)) continue;
+    final fonte = File(caminho).readAsStringSync();
+    for (final m in _diretiva.allMatches(fonte)) {
+      final uri = m.group(1)!;
+      if (uri.startsWith('package:flutter') || uri == 'dart:ui' || uri.startsWith('package:connectivity_plus')) {
+        achados.add('$caminho -> $uri');
+      } else if (uri.startsWith('package:sinalacs_acs/')) {
+        pendentes.add('$lib/${uri.substring('package:sinalacs_acs/'.length)}');
+      } else if (!uri.contains(':')) {
+        pendentes.add(File(caminho).parent.uri.resolve(uri).toFilePath());
+      }
+    }
+  }
+  return achados;
 }
