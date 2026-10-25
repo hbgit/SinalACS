@@ -3,6 +3,7 @@ import 'package:uuid/uuid.dart';
 import 'package:sinalacs_server/src/application/audit/audit_trail.dart';
 import 'package:sinalacs_server/src/application/auth/authorization.dart';
 import 'package:sinalacs_server/src/application/auth/development_auth_service.dart';
+import 'package:sinalacs_server/src/application/telemetry/telemetry_service.dart';
 import 'package:sinalacs_server/src/domain/entities/alert_delivery.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
 
@@ -22,8 +23,9 @@ abstract interface class AlertStore {
   /// Confirma o alerta no território do ACS. Quando o alerta existe na
   /// microárea, grava [audit] na MESMA transação da mudança de status (#44):
   /// se a trilha falhar, o ACK é desfeito — nenhum alerta vermelho muda de
-  /// estado sem registro. Sem alerta na microárea, nada é gravado.
-  Future<bool> acknowledge({
+  /// estado sem registro. Sem alerta na microárea, nada é gravado e volta
+  /// `null`; senão volta o [AlertAckRecord] lido sob a trava da linha.
+  Future<AlertAckRecord?> acknowledge({
     required String alertId,
     required String acsId,
     required String microAreaId,
@@ -126,6 +128,24 @@ class AlertResolveAttempt {
   final DateTime? resolvedAt;
 }
 
+/// O que [AlertStore.acknowledge] leu e gravou sob a trava da linha (#83).
+class AlertAckRecord {
+  const AlertAckRecord({
+    required this.triggeredAt,
+    required this.acknowledgedAt,
+    required this.firstAcknowledgement,
+  });
+
+  final DateTime triggeredAt;
+
+  /// O `acknowledgedAt` gravado: o do primeiro ACK, que a repetição preserva.
+  final DateTime acknowledgedAt;
+
+  /// Verdadeiro só quando a linha ainda não tinha `acknowledgedAt` antes deste
+  /// ACK; é o que faz `alert_received_acs` sair uma vez por alerta.
+  final bool firstAcknowledgement;
+}
+
 /// Status do alerta mais recente de um paciente, para RF05.
 ///
 /// Espelha os campos que `Alert` guarda além de [AlertDelivery] — `status` e
@@ -198,13 +218,18 @@ class RedAlertService {
     required AlertStore store,
     required AlertOutbox outbox,
     DateTime Function()? clock,
+    TelemetryService? telemetry,
   })  : _store = store,
         _outbox = outbox,
-        _clock = clock ?? DateTime.now;
+        _clock = clock ?? DateTime.now,
+        _telemetry = telemetry;
 
   final AlertStore _store;
   final AlertOutbox _outbox;
   final DateTime Function() _clock;
+
+  /// Telemetria do PRD §1.3 (#83); nula não emite nada.
+  final TelemetryService? _telemetry;
 
   Future<RedAlertRecord> create({
     required AuthenticatedUser user,
@@ -271,7 +296,7 @@ class RedAlertService {
   // vermelho nunca pode ser descartado por colisão de identificador (INV-03).
   String _newAlertId() => _uuid.v4();
 
-  Future<bool> acknowledge({required AuthenticatedUser user, required String alertId}) {
+  Future<bool> acknowledge({required AuthenticatedUser user, required String alertId}) async {
     Authorization.require(
       user,
       roles: {UserRole.acs},
@@ -287,7 +312,7 @@ class RedAlertService {
     // MQTT não é autenticado (a identidade vem do payload), então a trilha o
     // marca `acknowledged_mqtt` em vez de atribuí-lo como um ACK do RPC.
     final porMqtt = user.deviceId == mqttAckDeviceId;
-    return _store.acknowledge(
+    final ack = await _store.acknowledge(
       alertId: alertId,
       acsId: user.id,
       microAreaId: user.microAreaId!,
@@ -299,6 +324,22 @@ class RedAlertService {
         result: porMqtt ? 'acknowledged_mqtt' : 'acknowledged',
       ),
     );
+    if (ack == null) return false;
+    // Depois do commit da transação própria do store: nenhum caminho de
+    // produção chama `acknowledge` com transação externa (o único
+    // `serviceFor(session, transaction: …)` é o `createRedAlert`). Best-effort:
+    // `alertReceived` nunca lança, então o ACK não depende dela (INV-03).
+    final telemetry = _telemetry;
+    if (ack.firstAcknowledgement && telemetry != null) {
+      await telemetry.alertReceived(
+        alertId: alertId,
+        acsId: user.id,
+        triggeredAt: ack.triggeredAt,
+        acknowledgedAt: ack.acknowledgedAt,
+        channel: porMqtt ? 'mqtt' : 'rpc',
+      );
+    }
+    return true;
   }
 
   /// Texto da recusa de concluir um alerta que ninguém confirmou (#76).

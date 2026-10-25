@@ -138,6 +138,46 @@ class TelemetryService {
     }
   }
 
+  /// Registra o `alert_received_acs` (PRD §1.3) no primeiro ACK do alerta,
+  /// pelo RPC ou pelo MQTT ([channel] `rpc`|`mqtt`). `latency_ms` é
+  /// `acknowledgedAt − triggeredAt`, com piso 0. Nunca lança (INV-03), como
+  /// [alertTriggered].
+  Future<void> alertReceived({
+    required String alertId,
+    required String acsId,
+    required DateTime triggeredAt,
+    required DateTime acknowledgedAt,
+    required String channel,
+  }) async {
+    try {
+      final latency = acknowledgedAt.difference(triggeredAt).inMilliseconds;
+      await _store.insertIgnoringDuplicates([
+        TelemetryRecord(
+          eventId: const Uuid().v5(
+            telemetryNamespace,
+            '${TelemetryEventNames.alertReceivedAcs}:$alertId',
+          ),
+          eventName: TelemetryEventNames.alertReceivedAcs,
+          source: TelemetrySource.backend,
+          occurredAt: acknowledgedAt,
+          receivedAt: _clock(),
+          appVersion: backendVersion,
+          actorId: acsId,
+          alertId: alertId,
+          payload: {
+            'latency_ms': latency < 0 ? 0 : latency,
+            'channel': channel,
+          },
+        ),
+      ]);
+    } catch (error) {
+      stderr.writeln(
+        'Falha ao gravar telemetria (alert_received_acs, '
+        'erro ${error.runtimeType}).',
+      );
+    }
+  }
+
   /// Valida e grava um lote de eventos do aparelho.
   ///
   /// Recusa o **lote** (sem tocar o store): papel diferente de `acs` ou token

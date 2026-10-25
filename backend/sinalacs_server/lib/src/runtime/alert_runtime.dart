@@ -222,6 +222,7 @@ class AlertRuntime {
           ).recordInTransaction,
         ),
         outbox: OrmAlertOutbox(session: () => session, transaction: transaction),
+        telemetry: telemetryServiceFor(session),
       );
 
   TelemetryStore? _telemetryStoreOverride;

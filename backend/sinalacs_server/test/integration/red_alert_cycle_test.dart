@@ -414,6 +414,58 @@ void main() {
       });
     });
 
+    group('telemetria alert_received_acs (#83)', () {
+      test(
+          'ACK pelo RPC grava um evento com actorId do ACS e latency_ms = '
+          'acknowledgedAt − triggeredAt', () async {
+        final session = sessionBuilder.build();
+        await _seed(session);
+        final token = await endpoints.auth
+            .developmentLogin(sessionBuilder, role: 'patient');
+        final criado = await endpoints.alerts.createRedAlert(
+          sessionBuilder,
+          accessToken: token.accessToken,
+          idempotencyKey: 'tele-ack-1',
+          locationHash: 'hash-sintetico',
+        );
+        final tokenAcs =
+            await endpoints.auth.developmentLogin(sessionBuilder, role: 'acs');
+
+        // Dois ACKs: só o primeiro emite.
+        for (var i = 0; i < 2; i++) {
+          final ack = await endpoints.alerts.acknowledge(
+            sessionBuilder,
+            accessToken: tokenAcs.accessToken,
+            alertId: criado.alertId,
+          );
+          expect(ack.acknowledged, isTrue);
+        }
+
+        final alerta = (await Alert.db.find(session)).single;
+        final r = await session.db.unsafeQuery(
+          'SELECT "actorId"::text AS "actorId", "alertId"::text AS "alertId", '
+          '"occurredAt", source, payload FROM telemetry_events '
+          "WHERE \"eventName\" = 'alert_received_acs'",
+        );
+        expect(r, hasLength(1));
+        final e = r.single.toColumnMap();
+        expect(e['actorId'], _acsId);
+        expect(e['alertId'], criado.alertId);
+        expect(e['source'], 'backend');
+        expect(
+          (e['occurredAt'] as DateTime).toUtc(),
+          alerta.acknowledgedAt!.toUtc(),
+        );
+        final payload = jsonDecode(e['payload'] as String);
+        expect(payload, {
+          'latency_ms': alerta.acknowledgedAt!
+              .difference(alerta.triggeredAt)
+              .inMilliseconds,
+          'channel': 'rpc',
+        });
+      });
+    });
+
     test('confirmar um alerta inexistente devolve acknowledged false, sem erro',
         () async {
       await _seed(sessionBuilder.build());

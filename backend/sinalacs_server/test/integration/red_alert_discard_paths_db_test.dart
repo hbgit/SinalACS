@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:serverpod/serverpod.dart';
 import 'package:sinalacs_server/src/application/admin/admin_scope.dart';
 import 'package:sinalacs_server/src/application/audit/audit_chain_verifier.dart';
@@ -222,6 +224,16 @@ void main() {
         expect(
           (await Alert.db.findById(session, alerta.id!))!.status,
           AlertStatus.acknowledged,
+        );
+        // #83: o ACK por MQTT emite alert_received_acs sem mudar server.dart.
+        final tele = await session.db.unsafeQuery(
+          "SELECT payload FROM telemetry_events "
+          "WHERE \"eventName\" = 'alert_received_acs'",
+        );
+        expect(tele, hasLength(1));
+        expect(
+          jsonDecode(tele.single.toColumnMap()['payload'] as String)['channel'],
+          'mqtt',
         );
         expect(
           await _auditoriaDoAlerta(session, alerta.id!),
