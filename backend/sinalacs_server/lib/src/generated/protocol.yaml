@@ -71,6 +71,8 @@ patients:
   - termsChangeNotice:
   - requestDataDeletion:
   - requestDataCorrection:
+telemetry:
+  - ingest:
 triage:
   - evaluate:
 ubs:

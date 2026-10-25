@@ -83,12 +83,16 @@ import 'package:sinalacs_client/src/protocol/api/terms_change_notice.dart'
     as _i42;
 import 'package:sinalacs_client/src/protocol/api/patient_data_subject_request_record.dart'
     as _i43;
-import 'package:sinalacs_client/src/protocol/api/triage_result.dart' as _i44;
-import 'package:sinalacs_client/src/protocol/api/ubs_contact.dart' as _i45;
+import 'package:sinalacs_client/src/protocol/api/telemetry_ingest_result.dart'
+    as _i44;
+import 'package:sinalacs_client/src/protocol/api/telemetry_event_input.dart'
+    as _i45;
+import 'package:sinalacs_client/src/protocol/api/triage_result.dart' as _i46;
+import 'package:sinalacs_client/src/protocol/api/ubs_contact.dart' as _i47;
 import 'package:sinalacs_client/src/protocol/api/visit_sync_result.dart'
-    as _i46;
-import 'package:sinalacs_client/src/protocol/api/visit_sync_entry.dart' as _i47;
-import 'protocol.dart' as _i48;
+    as _i48;
+import 'package:sinalacs_client/src/protocol/api/visit_sync_entry.dart' as _i49;
+import 'protocol.dart' as _i50;
 
 /// Backoffice, só para `coordinator` e `admin`: leitura (issue #40), gestão de
 /// contas (issue #43), atendimento de pedidos do titular (issue #42) e
@@ -1215,6 +1219,40 @@ class EndpointPatients extends EndpointAuthenticated {
   );
 }
 
+/// Porta de entrada da telemetria que o app do ACS gerou offline (#83, PRD
+/// §1.3).
+/// {@category Endpoint}
+class EndpointTelemetry extends EndpointAuthenticated {
+  EndpointTelemetry(_i1.EndpointCaller caller) : super(caller);
+
+  @override
+  String get name => 'telemetry';
+
+  /// Grava um lote de eventos do aparelho. Idempotente por `eventId`: o reenvio
+  /// do mesmo lote (resposta perdida) devolve os mesmos aceitos sem duplicar
+  /// linha. Só o ACS; o autor vem do token. Regras de recusa em
+  /// `TelemetryService.ingestFromDevice`.
+  ///
+  /// Não grava linha de auditoria: é métrica operacional, não acesso a dado de
+  /// titular, e o app chama a cada sincronização — o mesmo critério de
+  /// `alerts.openForMicroArea`. O paciente só chega à tabela pseudonimizado.
+  _i2.Future<_i44.TelemetryIngestResult> ingest({
+    required String accessToken,
+    required String deviceId,
+    required DateTime sentAt,
+    required List<_i45.TelemetryEventInput> events,
+  }) => caller.callServerEndpoint<_i44.TelemetryIngestResult>(
+    'telemetry',
+    'ingest',
+    {
+      'accessToken': accessToken,
+      'deviceId': deviceId,
+      'sentAt': sentAt,
+      'events': events,
+    },
+  );
+}
+
 /// Motor de triagem determinístico, inspirado no Protocolo de Manchester.
 ///
 /// A mesma entrada produz sempre a mesma saída, sem modelo probabilístico e sem
@@ -1232,7 +1270,7 @@ class EndpointTriage extends EndpointAuthenticated {
   @override
   String get name => 'triage';
 
-  _i2.Future<_i44.TriageResult> evaluate({
+  _i2.Future<_i46.TriageResult> evaluate({
     required String accessToken,
     required bool chestPain,
     required bool difficultyBreathing,
@@ -1240,7 +1278,7 @@ class EndpointTriage extends EndpointAuthenticated {
     required bool persistentVomiting,
     required bool bleeding,
     required bool severeWeakness,
-  }) => caller.callServerEndpoint<_i44.TriageResult>(
+  }) => caller.callServerEndpoint<_i46.TriageResult>(
     'triage',
     'evaluate',
     {
@@ -1263,8 +1301,8 @@ class EndpointUbs extends EndpointAuthenticated {
   @override
   String get name => 'ubs';
 
-  _i2.Future<_i45.UbsContact> myContact({required String accessToken}) =>
-      caller.callServerEndpoint<_i45.UbsContact>(
+  _i2.Future<_i47.UbsContact> myContact({required String accessToken}) =>
+      caller.callServerEndpoint<_i47.UbsContact>(
         'ubs',
         'myContact',
         {'accessToken': accessToken},
@@ -1287,10 +1325,10 @@ class EndpointVisits extends EndpointAuthenticated {
   @override
   String get name => 'visits';
 
-  _i2.Future<List<_i46.VisitSyncResult>> sync({
+  _i2.Future<List<_i48.VisitSyncResult>> sync({
     required String accessToken,
-    required List<_i47.VisitSyncEntry> visits,
-  }) => caller.callServerEndpoint<List<_i46.VisitSyncResult>>(
+    required List<_i49.VisitSyncEntry> visits,
+  }) => caller.callServerEndpoint<List<_i48.VisitSyncResult>>(
     'visits',
     'sync',
     {
@@ -1304,11 +1342,11 @@ class EndpointVisits extends EndpointAuthenticated {
   /// conflito. `visit.version` é ignorado. Ver
   /// `VisitSyncService.resolveConflict`. Mesma transação e mesma tradução de
   /// erros de [sync].
-  _i2.Future<_i46.VisitSyncResult> resolveConflict({
+  _i2.Future<_i48.VisitSyncResult> resolveConflict({
     required String accessToken,
-    required _i47.VisitSyncEntry visit,
+    required _i49.VisitSyncEntry visit,
     required int expectedServerVersion,
-  }) => caller.callServerEndpoint<_i46.VisitSyncResult>(
+  }) => caller.callServerEndpoint<_i48.VisitSyncResult>(
     'visits',
     'resolveConflict',
     {
@@ -1323,11 +1361,11 @@ class EndpointVisits extends EndpointAuthenticated {
   ///
   /// A sessão do ACS é só o transporte — ver `VisitSyncService.syncLegacy`.
   /// Mesma transação por lote e mesma tradução de erros de [sync].
-  _i2.Future<List<_i46.VisitSyncResult>> syncLegacy({
+  _i2.Future<List<_i48.VisitSyncResult>> syncLegacy({
     required String accessToken,
     required String deviceId,
-    required List<_i47.VisitSyncEntry> visits,
-  }) => caller.callServerEndpoint<List<_i46.VisitSyncResult>>(
+    required List<_i49.VisitSyncEntry> visits,
+  }) => caller.callServerEndpoint<List<_i48.VisitSyncResult>>(
     'visits',
     'syncLegacy',
     {
@@ -1351,11 +1389,11 @@ class EndpointVisits extends EndpointAuthenticated {
   /// No máximo `VisitSyncService.maxLegacyBatch` visitas por chamada, checado
   /// antes de qualquer acesso ao banco. Um evento `visit_deferred_sync` por
   /// lote gravado vai para `audit_logs`, com o dono e nada clínico.
-  _i2.Future<List<_i46.VisitSyncResult>> syncDeferred({
+  _i2.Future<List<_i48.VisitSyncResult>> syncDeferred({
     required String uploadToken,
     required String deviceId,
-    required List<_i47.VisitSyncEntry> visits,
-  }) => caller.callServerEndpoint<List<_i46.VisitSyncResult>>(
+    required List<_i49.VisitSyncEntry> visits,
+  }) => caller.callServerEndpoint<List<_i48.VisitSyncResult>>(
     'visits',
     'syncDeferred',
     {
@@ -1378,10 +1416,10 @@ class EndpointVisits extends EndpointAuthenticated {
   /// Sincronização central→dispositivo: visitas da microárea do ACS
   /// autenticado alteradas após `since`, para reconciliar um device que
   /// ficou offline ou foi reinstalado.
-  _i2.Future<List<_i47.VisitSyncEntry>> pull({
+  _i2.Future<List<_i49.VisitSyncEntry>> pull({
     required String accessToken,
     required DateTime since,
-  }) => caller.callServerEndpoint<List<_i47.VisitSyncEntry>>(
+  }) => caller.callServerEndpoint<List<_i49.VisitSyncEntry>>(
     'visits',
     'pull',
     {
@@ -1411,7 +1449,7 @@ class Client extends _i1.ServerpodClientShared {
     bool? disconnectStreamsOnLostInternetConnection,
   }) : super(
          host,
-         _i48.Protocol(),
+         _i50.Protocol(),
          securityContext: securityContext,
          streamingConnectionTimeout: streamingConnectionTimeout,
          connectionTimeout: connectionTimeout,
@@ -1428,6 +1466,7 @@ class Client extends _i1.ServerpodClientShared {
     notices = EndpointNotices(this);
     onboarding = EndpointOnboarding(this);
     patients = EndpointPatients(this);
+    telemetry = EndpointTelemetry(this);
     triage = EndpointTriage(this);
     ubs = EndpointUbs(this);
     visits = EndpointVisits(this);
@@ -1449,6 +1488,8 @@ class Client extends _i1.ServerpodClientShared {
 
   late final EndpointPatients patients;
 
+  late final EndpointTelemetry telemetry;
+
   late final EndpointTriage triage;
 
   late final EndpointUbs ubs;
@@ -1465,6 +1506,7 @@ class Client extends _i1.ServerpodClientShared {
     'notices': notices,
     'onboarding': onboarding,
     'patients': patients,
+    'telemetry': telemetry,
     'triage': triage,
     'ubs': ubs,
     'visits': visits,

@@ -129,10 +129,12 @@ import 'package:sinalacs_client/src/protocol/api/terms_version_entry.dart'
 import 'package:sinalacs_client/src/protocol/api/acs_open_alert.dart' as _i113;
 import 'package:sinalacs_client/src/protocol/api/micro_area_patient.dart'
     as _i114;
-import 'package:sinalacs_client/src/protocol/api/visit_sync_result.dart'
+import 'package:sinalacs_client/src/protocol/api/telemetry_event_input.dart'
     as _i115;
-import 'package:sinalacs_client/src/protocol/api/visit_sync_entry.dart'
+import 'package:sinalacs_client/src/protocol/api/visit_sync_result.dart'
     as _i116;
+import 'package:sinalacs_client/src/protocol/api/visit_sync_entry.dart'
+    as _i117;
 export 'acs.dart';
 export 'acs_refresh_token.dart';
 export 'acs_upload_token.dart';
@@ -1072,15 +1074,21 @@ class Protocol extends _i1.SerializationManager {
     if (t == List<String>) {
       return (data as List).map((e) => deserialize<String>(e)).toList() as T;
     }
-    if (t == List<_i115.VisitSyncResult>) {
+    if (t == List<_i115.TelemetryEventInput>) {
       return (data as List)
-              .map((e) => deserialize<_i115.VisitSyncResult>(e))
+              .map((e) => deserialize<_i115.TelemetryEventInput>(e))
               .toList()
           as T;
     }
-    if (t == List<_i116.VisitSyncEntry>) {
+    if (t == List<_i116.VisitSyncResult>) {
       return (data as List)
-              .map((e) => deserialize<_i116.VisitSyncEntry>(e))
+              .map((e) => deserialize<_i116.VisitSyncResult>(e))
+              .toList()
+          as T;
+    }
+    if (t == List<_i117.VisitSyncEntry>) {
+      return (data as List)
+              .map((e) => deserialize<_i117.VisitSyncEntry>(e))
               .toList()
           as T;
     }
