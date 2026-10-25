@@ -1,6 +1,10 @@
+import 'dart:convert';
+
 import 'package:serverpod/serverpod.dart';
 import 'package:sinalacs_server/src/application/alerts/alert_outbox_dispatcher.dart';
 import 'package:sinalacs_server/src/application/alerts/red_alert_service.dart';
+import 'package:sinalacs_server/src/application/telemetry/telemetry_pseudonymizer.dart';
+import 'package:sinalacs_server/src/application/telemetry/telemetry_service.dart';
 import 'package:sinalacs_server/src/config/app_config.dart';
 import 'package:sinalacs_server/src/domain/entities/alert_delivery.dart';
 import 'package:sinalacs_server/src/endpoints/health_endpoint.dart';
@@ -20,6 +24,14 @@ import 'test_tools/serverpod_test_tools.dart';
 /// O harness do Serverpod sobe o servidor em processo e expõe os endpoints
 /// tipados, o que elimina a porta fixa, a espera por `/health` e o risco de
 /// reusar por engano um servidor já em execução.
+/// Store de telemetria que sempre falha, para provar a INV-03.
+class _ThrowingTelemetryStore implements TelemetryStore {
+  @override
+  Future<Set<String>> insertIgnoringDuplicates(
+    List<TelemetryRecord> records,
+  ) async => throw StateError('telemetria fora do ar');
+}
+
 class _RecordingPublisher implements AlertPublisher {
   final List<AlertDelivery> published = [];
 
@@ -188,6 +200,7 @@ void main() {
     tearDown(() {
       AlertRuntime.instance
         ..overridePublisher(null)
+        ..overrideTelemetryStore(null)
         ..overrideConfig(null);
     });
 
@@ -309,6 +322,96 @@ void main() {
       expect(confirmado.acknowledged, isTrue);
       expect(confirmado.status, AlertStatus.acknowledged);
       expect(await AlertDeliveryRecord.db.find(session), hasLength(1));
+    });
+
+    group('telemetria alert_triggered (#83)', () {
+      Future<List<Map<String, dynamic>>> eventos(Session session) async {
+        final r = await session.db.unsafeQuery(
+          'SELECT "eventName", "source", "actorId", "patientPseudonym", '
+          '"alertId"::text AS "alertId", payload '
+          'FROM telemetry_events',
+        );
+        return [for (final row in r) row.toColumnMap()];
+      }
+
+      test(
+          'createRedAlert grava um alert_triggered com patientPseudonym e sem '
+          'UUID do paciente', () async {
+        final session = sessionBuilder.build();
+        await _seed(session);
+        final token = await endpoints.auth
+            .developmentLogin(sessionBuilder, role: 'patient');
+
+        final criado = await endpoints.alerts.createRedAlert(
+          sessionBuilder,
+          accessToken: token.accessToken,
+          idempotencyKey: 'tele-1',
+          locationHash: 'hash-sintetico',
+        );
+
+        final linhas = await eventos(session);
+        expect(linhas, hasLength(1));
+        final e = linhas.single;
+        expect(e['eventName'], 'alert_triggered');
+        expect(e['source'], 'backend');
+        expect(e['actorId'], isNull);
+        expect(e['alertId'], criado.alertId);
+        expect(
+          e['patientPseudonym'],
+          TelemetryPseudonymizer(
+            AppConfig.developmentTelemetryPseudonymKey,
+          ).patient(_patientId),
+        );
+        expect(e['payload'].toString(), isNot(contains(_patientId)));
+        expect(e['payload'].toString(), isNot(contains('hash-sintetico')));
+        expect(jsonDecode(e['payload'] as String), {
+          'risk_level': 'red',
+          'mqtt_topic': 'sinalacs/v1/microareas/$_microAreaId/alerts',
+          'location_known': true,
+          'published': true,
+        });
+      });
+
+      test('replay com a mesma idempotencyKey não duplica o evento', () async {
+        final session = sessionBuilder.build();
+        await _seed(session);
+        final token = await endpoints.auth
+            .developmentLogin(sessionBuilder, role: 'patient');
+
+        for (var i = 0; i < 2; i++) {
+          await endpoints.alerts.createRedAlert(
+            sessionBuilder,
+            accessToken: token.accessToken,
+            idempotencyKey: 'tele-2',
+            locationHash: 'hash-sintetico',
+          );
+        }
+
+        expect(await eventos(session), hasLength(1));
+      });
+
+      test('alert_triggered nunca bloqueia o alerta', () async {
+        final session = sessionBuilder.build();
+        await _seed(session);
+        AlertRuntime.instance.overrideTelemetryStore(_ThrowingTelemetryStore());
+        final token = await endpoints.auth
+            .developmentLogin(sessionBuilder, role: 'patient');
+
+        final criado = await endpoints.alerts.createRedAlert(
+          sessionBuilder,
+          accessToken: token.accessToken,
+          idempotencyKey: 'tele-3',
+          locationHash: 'hash-sintetico',
+        );
+
+        expect(criado.status, AlertStatus.pending);
+        expect(criado.published, isTrue);
+        expect(publisher.published, hasLength(1));
+        final alertas = await Alert.db.find(session);
+        expect(alertas, hasLength(1));
+        expect(alertas.single.id.toString(), criado.alertId);
+        expect(await eventos(session), isEmpty);
+      });
     });
 
     test('confirmar um alerta inexistente devolve acknowledged false, sem erro',

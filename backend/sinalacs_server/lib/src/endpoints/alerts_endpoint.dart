@@ -54,6 +54,12 @@ class AlertsEndpoint extends AuthenticatedEndpoint {
           .dispatcherFor(session)
           .publishNow(record.delivery.alertId);
 
+      // Telemetria fora da transação e depois da publicação: best-effort, não
+      // lança e nunca atrasa nem desfaz o alerta (INV-03). Replay idempotente.
+      await AlertRuntime.instance
+          .telemetryServiceFor(session)
+          .alertTriggered(alert: record.delivery, published: published);
+
       return RedAlertResult(
         alertId: record.delivery.alertId,
         status: AlertStatus.pending,

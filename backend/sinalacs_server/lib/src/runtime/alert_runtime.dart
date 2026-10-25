@@ -224,10 +224,19 @@ class AlertRuntime {
         outbox: OrmAlertOutbox(session: () => session, transaction: transaction),
       );
 
+  TelemetryStore? _telemetryStoreOverride;
+
+  /// Substitui o store da telemetria (#83) por um duplo de teste, p. ex. um que
+  /// lança, para provar que a telemetria não bloqueia o alerta. `null` restaura
+  /// o store ORM.
+  @visibleForTesting
+  void overrideTelemetryStore(TelemetryStore? store) =>
+      _telemetryStoreOverride = store;
+
   /// Ingestão da telemetria do aparelho (#83), para uma requisição. O
   /// pseudônimo usa `TELEMETRY_PSEUDONYM_KEY`, independente dos outros segredos.
   TelemetryService telemetryServiceFor(Session session) => TelemetryService(
-        store: OrmTelemetryStore(session),
+        store: _telemetryStoreOverride ?? OrmTelemetryStore(session),
         pseudonymizer: TelemetryPseudonymizer(config.telemetryPseudonymKey),
       );
 

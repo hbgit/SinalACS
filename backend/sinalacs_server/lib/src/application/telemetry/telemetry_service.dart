@@ -1,11 +1,14 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:sinalacs_server/src/application/auth/authorization.dart';
 import 'package:sinalacs_server/src/application/auth/development_auth_service.dart';
 import 'package:sinalacs_server/src/application/common/uuid_format.dart';
 import 'package:sinalacs_server/src/application/telemetry/telemetry_pseudonymizer.dart';
 import 'package:sinalacs_server/src/application/telemetry/telemetry_schema.dart';
+import 'package:sinalacs_server/src/domain/entities/alert_delivery.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
+import 'package:uuid/uuid.dart';
 
 /// Um evento de telemetria já validado, pronto para gravar (#83).
 ///
@@ -67,6 +70,18 @@ class TelemetryService {
   final TelemetryPseudonymizer _pseudonymizer;
   final DateTime Function() _clock;
 
+  /// Namespace do UUID v5 dos eventos que nascem no backend: o mesmo alerta
+  /// gera sempre o mesmo `eventId`, e o replay cai no `ON CONFLICT`.
+  static const telemetryNamespace = '6f1d3c2a-9b4e-5d7f-8a1b-2c3d4e5f6a7b';
+
+  /// Versão do servidor, gravada em `appVersion` dos eventos do backend.
+  /// Espelha o `version` do `pubspec.yaml` (um teste compara os dois).
+  static const backendVersion = '1.0.0';
+
+  /// Espelho de `unknownLocationHash` em
+  /// `apps/patient/lib/core/privacy/location_hash.dart`: o paciente sem GPS.
+  static const unknownLocationHash = 'sem-local-00';
+
   /// Teto de eventos por chamada, checado antes de tocar o banco.
   static const maxIngestBatch = 200;
 
@@ -84,6 +99,44 @@ class TelemetryService {
 
   /// Chaves do payload que guardam UUID e saem normalizadas em minúsculas.
   static const _uuidPayloadKeys = ['local_id', 'alert_id', 'attempt_event_id'];
+
+  /// Registra o `alert_triggered` (PRD §1.3) depois do commit do alerta e da
+  /// tentativa imediata de publicação. Nunca lança (INV-03): a falha do store
+  /// vai para o log só com o tipo do erro. A posição não é gravada, só se o
+  /// aparelho informou uma (`location_known`, decisão A1).
+  Future<void> alertTriggered({
+    required AlertDelivery alert,
+    required bool published,
+  }) async {
+    try {
+      await _store.insertIgnoringDuplicates([
+        TelemetryRecord(
+          eventId: const Uuid().v5(
+            telemetryNamespace,
+            '${TelemetryEventNames.alertTriggered}:${alert.alertId}',
+          ),
+          eventName: TelemetryEventNames.alertTriggered,
+          source: TelemetrySource.backend,
+          occurredAt: alert.triggeredAt,
+          receivedAt: _clock(),
+          appVersion: backendVersion,
+          patientPseudonym: _pseudonymizer.patient(alert.patientId),
+          alertId: alert.alertId,
+          payload: {
+            'risk_level': alert.riskLevel,
+            'mqtt_topic': alert.topic,
+            'location_known': alert.locationHash != unknownLocationHash,
+            'published': published,
+          },
+        ),
+      ]);
+    } catch (error) {
+      stderr.writeln(
+        'Falha ao gravar telemetria (alert_triggered, '
+        'erro ${error.runtimeType}).',
+      );
+    }
+  }
 
   /// Valida e grava um lote de eventos do aparelho.
   ///

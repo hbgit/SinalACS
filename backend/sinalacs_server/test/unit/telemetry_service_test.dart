@@ -1,10 +1,13 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:sinalacs_server/src/application/auth/development_auth_service.dart';
 import 'package:sinalacs_server/src/application/telemetry/telemetry_pseudonymizer.dart';
 import 'package:sinalacs_server/src/application/telemetry/telemetry_service.dart';
+import 'package:sinalacs_server/src/domain/entities/alert_delivery.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
 import 'package:test/test.dart';
+import 'package:uuid/uuid.dart';
 
 /// Ingestão dos eventos do aparelho (#83) com um store falso. Dados sintéticos.
 const _acsId = '00000000-0000-4000-8000-0000000000a1';
@@ -17,6 +20,13 @@ String _id(int n) => '00000000-0000-4000-8000-${n.toString().padLeft(12, '0')}';
 
 final _sentAt = DateTime.utc(2026, 10, 25, 12);
 final _receivedAt = DateTime.utc(2026, 10, 25, 12, 0, 3);
+
+class _ThrowingStore implements TelemetryStore {
+  @override
+  Future<Set<String>> insertIgnoringDuplicates(
+    List<TelemetryRecord> records,
+  ) async => throw StateError('segredo-do-banco $_paciente');
+}
 
 class _FakeStore implements TelemetryStore {
   final calls = <List<TelemetryRecord>>[];
@@ -291,5 +301,98 @@ void main() {
     final r = await ingest([_attempt('ruim')]);
     expect(r.acceptedEventIds, isEmpty);
     expect(store.calls, isEmpty);
+  });
+
+  group('alert_triggered (#83)', () {
+    final alert = AlertDelivery(
+      alertId: '00000000-0000-4000-8000-0000000000b1',
+      patientId: _paciente,
+      microAreaId: _ma,
+      riskLevel: 'red',
+      locationHash: 'hash-sintetico-de-teste',
+      triggeredAt: DateTime.utc(2026, 10, 25, 11, 59),
+    );
+
+    test('tem id determinístico e não carrega locationHash', () async {
+      await service.alertTriggered(alert: alert, published: true);
+      await service.alertTriggered(alert: alert, published: true);
+
+      expect(store.all, hasLength(2));
+      final r = store.all.first;
+      expect(r.eventId, store.all.last.eventId);
+      expect(
+        r.eventId,
+        const Uuid().v5(
+          TelemetryService.telemetryNamespace,
+          'alert_triggered:${alert.alertId}',
+        ),
+      );
+      expect(r.eventName, 'alert_triggered');
+      expect(r.source, TelemetrySource.backend);
+      expect(r.occurredAt, alert.triggeredAt);
+      expect(r.receivedAt, _receivedAt);
+      expect(r.alertId, alert.alertId);
+      expect(r.actorId, isNull);
+      expect(r.appVersion, TelemetryService.backendVersion);
+      expect(r.patientPseudonym, pseudonymizer.patient(_paciente));
+      expect(r.payload, {
+        'risk_level': 'red',
+        'mqtt_topic': alert.topic,
+        'location_known': true,
+        'published': true,
+      });
+      expect(jsonEncode(r.payload), isNot(contains(alert.locationHash)));
+      expect(jsonEncode(r.payload), isNot(contains(_paciente)));
+    });
+
+    test('local desconhecido vira location_known false', () async {
+      await service.alertTriggered(
+        alert: AlertDelivery(
+          alertId: alert.alertId,
+          patientId: _paciente,
+          microAreaId: _ma,
+          riskLevel: 'red',
+          locationHash: TelemetryService.unknownLocationHash,
+          triggeredAt: alert.triggeredAt,
+        ),
+        published: false,
+      );
+
+      expect(store.all.single.payload['location_known'], isFalse);
+      expect(store.all.single.payload['published'], isFalse);
+    });
+
+    test('store lançando não propaga', () async {
+      final quebrado = TelemetryService(
+        store: _ThrowingStore(),
+        pseudonymizer: pseudonymizer,
+        clock: () => _receivedAt,
+      );
+
+      await quebrado.alertTriggered(alert: alert, published: true);
+    });
+
+    test('unknownLocationHash espelha o app do paciente', () {
+      final fonte = File(
+        '../../apps/patient/lib/core/privacy/location_hash.dart',
+      ).readAsStringSync();
+      final m = RegExp(
+        r"const String unknownLocationHash = '([^']+)';",
+      ).firstMatch(fonte);
+
+      expect(m, isNotNull);
+      expect(TelemetryService.unknownLocationHash, m!.group(1));
+    });
+
+    test('backendVersion espelha a versão do pubspec', () {
+      final pubspec = File('pubspec.yaml').readAsStringSync();
+      final m = RegExp(
+        r'^#?\s*version:\s*(\S+)',
+        multiLine: true,
+      ).firstMatch(pubspec);
+
+      expect(m, isNotNull);
+      expect(TelemetryService.backendVersion, m!.group(1));
+    });
   });
 }
