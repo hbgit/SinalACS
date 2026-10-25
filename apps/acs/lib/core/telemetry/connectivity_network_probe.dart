@@ -2,8 +2,9 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:sinalacs_acs/core/telemetry/network_probe.dart';
 
 // Puxa o Flutter (`connectivity_plus`): fora do caminho da fila de visitas e do
-// gravador, que rodam também na VM. Quem liga esta sonda é a fábrica de
-// produção (`visit_queue_factory.dart`).
+// gravador, que rodam também na VM. Quem liga esta sonda é o `main.dart`
+// (`networkProbe: connectivityProbe()`), guardado por
+// `test/session_store_wiring_test.dart`.
 
 /// Sonda real, sobre `connectivity_plus`. Nunca lança: erro vira `unknown`.
 NetworkProbe connectivityProbe([Connectivity? connectivity]) {
