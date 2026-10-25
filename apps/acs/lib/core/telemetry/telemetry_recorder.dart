@@ -14,15 +14,22 @@ class TelemetryRecorder {
     required String owner,
     NetworkProbe? probe,
     DateTime Function()? clock,
+    Duration? stepTimeout,
   })  : _store = store,
         _owner = owner,
         _probe = probe ?? connectivityProbe(),
-        _clock = clock ?? DateTime.now;
+        _clock = clock ?? DateTime.now,
+        _stepTimeout = stepTimeout ?? telemetryStepTimeout;
+
+  /// Teto de cada passo (sonda de rede, gravação). Um canal de plataforma ou
+  /// um SQLCipher travado não pode prender a fila de visitas que espera aqui.
+  static const telemetryStepTimeout = Duration(seconds: 2);
 
   final TelemetryStore _store;
   final String _owner;
   final NetworkProbe _probe;
   final DateTime Function() _clock;
+  final Duration _stepTimeout;
 
   /// Milissegundos em UTC: a ordenação ISO-8601 não inverte com micros.
   DateTime _now() =>
@@ -30,7 +37,7 @@ class TelemetryRecorder {
 
   Future<NetworkKind> _network() async {
     try {
-      return await _probe();
+      return await _probe().timeout(_stepTimeout);
     } catch (_) {
       return NetworkKind.unknown;
     }
@@ -39,13 +46,15 @@ class TelemetryRecorder {
   Future<String?> _append(String name, Map<String, Object?> payload) async {
     try {
       final id = newRandomUuid();
-      await _store.append(TelemetryEventRecord(
-        eventId: id,
-        owner: _owner,
-        name: name,
-        occurredAt: _now(),
-        payload: payload,
-      ));
+      await _store
+          .append(TelemetryEventRecord(
+            eventId: id,
+            owner: _owner,
+            name: name,
+            occurredAt: _now(),
+            payload: payload,
+          ))
+          .timeout(_stepTimeout);
       return id;
     } catch (_) {
       return null;

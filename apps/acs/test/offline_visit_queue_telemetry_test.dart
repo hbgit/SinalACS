@@ -36,6 +36,39 @@ class _EspiaoDeTelemetria implements VisitSynchronizer {
   }
 }
 
+/// Store de telemetria cujo `append` espera [portao] (ou nunca completa, se
+/// [portao] nunca for completado). [falha] faz o `append` lançar.
+class _StoreTravado implements TelemetryStore {
+  final Completer<void> portao = Completer<void>();
+  final InMemoryTelemetryStore _interno = InMemoryTelemetryStore();
+  int appends = 0;
+
+  @override
+  Future<void> append(TelemetryEventRecord e) async {
+    appends++;
+    await portao.future;
+    await _interno.append(e);
+  }
+
+  @override
+  Future<List<TelemetryEventRecord>> oldestForOwner(String owner, {required int limit}) =>
+      _interno.oldestForOwner(owner, limit: limit);
+  @override
+  Future<void> deleteByIds(Iterable<String> ids) => _interno.deleteByIds(ids);
+  @override
+  Future<int> countForOwner(String owner) => _interno.countForOwner(owner);
+}
+
+/// Gravador que lança em `visitRegistered` — o contrato diz que não lança,
+/// mas a fila não pode depender disso para não pedir o registro de novo.
+class _GravadorQueLanca extends TelemetryRecorder {
+  _GravadorQueLanca() : super(store: InMemoryTelemetryStore(), owner: _owner, probe: () async => NetworkKind.wifi);
+
+  @override
+  Future<void> visitRegistered({required OfflineVisitRecord visit, String? alertId}) async =>
+      throw StateError('telemetria quebrada');
+}
+
 OfflineVisitRecord _visita(int n) => OfflineVisitRecord(
       patientId: syntheticPatientId(n),
       risk: 'yellow',
@@ -235,5 +268,83 @@ void main() {
     expect((await disco.load()).map((v) => v.localId), gravadoAntes.map((v) => v.localId),
         reason: 'a fila selada não grava o fim do envio');
     expect(await _eventos(telemetria, 'sync_result'), hasLength(1));
+  });
+
+  test('selo durante a gravação do attempt: o lote não sai e não há result', () async {
+    final telemetria = _StoreTravado();
+    final envio = FakeVisitSynchronizer();
+    final fila = OfflineVisitQueue(synchronizer: envio, telemetry: _recorder(telemetria));
+    fila.add(_visita(1)).ignore(); // `visit_registered` também espera o portão
+    await pumpEventQueue();
+
+    final envioEmVoo = fila.sync();
+    await pumpEventQueue();
+    fila.seal();
+    telemetria.portao.complete();
+    final resultado = await envioEmVoo;
+
+    expect(envio.batches, isEmpty, reason: 'fila selada não envia (#81)');
+    expect(resultado.kind, SyncOutcomeKind.error);
+    expect(await _eventos(telemetria, 'sync_attempt'), hasLength(1));
+    expect(await _eventos(telemetria, 'sync_result'), isEmpty);
+  });
+
+  test('sonda de rede que nunca responde não prende add nem sync', () async {
+    final telemetria = InMemoryTelemetryStore();
+    final envio = FakeVisitSynchronizer();
+    final fila = OfflineVisitQueue(
+      synchronizer: envio,
+      telemetry: TelemetryRecorder(
+        store: telemetria,
+        owner: _owner,
+        probe: () => Completer<NetworkKind>().future,
+        stepTimeout: const Duration(milliseconds: 20),
+      ),
+    );
+
+    await fila.add(_visita(1));
+    final resultado = await fila.sync();
+
+    expect(resultado.kind, SyncOutcomeKind.synced);
+    expect(fila.syncedCount, 1);
+    final eventos = await _eventos(telemetria);
+    expect(eventos.map((e) => e.name), ['visit_registered', 'sync_attempt', 'sync_result']);
+    expect(eventos.first.payload['network_type'], 'unknown');
+  });
+
+  test('gravação de telemetria que nunca completa não prende add nem sync', () async {
+    final telemetria = _StoreTravado(); // portão nunca liberado
+    final disco = InMemoryVisitStore();
+    final envio = FakeVisitSynchronizer();
+    final fila = OfflineVisitQueue(
+      store: disco,
+      synchronizer: envio,
+      telemetry: TelemetryRecorder(
+        store: telemetria,
+        owner: _owner,
+        probe: () async => NetworkKind.wifi,
+        stepTimeout: const Duration(milliseconds: 20),
+      ),
+    );
+
+    await fila.add(_visita(1));
+    final resultado = await fila.sync();
+
+    expect(resultado.kind, SyncOutcomeKind.synced);
+    expect(envio.batches, hasLength(1), reason: 'o lote segue o fluxo normal');
+    expect(fila.pendingCount, 0);
+    expect(await disco.load(), isEmpty);
+    expect(fila.isSyncing, isFalse);
+    expect(telemetria.appends, 2, reason: 'visit_registered e sync_attempt; sem id, nenhum result');
+  });
+
+  test('erro da telemetria no add não sobe: a visita já está gravada', () async {
+    final disco = InMemoryVisitStore();
+    final fila = OfflineVisitQueue(store: disco, telemetry: _GravadorQueLanca());
+
+    await fila.add(_visita(1));
+
+    expect(fila.pendingCount, 1);
+    expect(await disco.load(), hasLength(1));
   });
 }

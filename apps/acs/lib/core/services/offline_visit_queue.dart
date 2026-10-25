@@ -525,7 +525,13 @@ class OfflineVisitQueue {
     // Depois da gravação: o evento nunca chega antes da visita estar no disco.
     // Sem gravador, nem o `await`: o fluxo fica idêntico ao de antes.
     final recorder = telemetry;
-    if (recorder != null) await recorder.visitRegistered(visit: record, alertId: alertId);
+    // A visita já está no disco: um erro aqui não pode subir, ou o ACS a
+    // registraria de novo.
+    if (recorder != null) {
+      try {
+        await recorder.visitRegistered(visit: record, alertId: alertId);
+      } catch (_) {}
+    }
   }
 
   /// Descarta as visitas recusadas em definitivo.
@@ -762,12 +768,18 @@ class OfflineVisitQueue {
     final recorder = telemetry;
     final attemptId =
         recorder == null ? null : await recorder.syncAttempt(recordsCount: batch.length);
+    // Limpeza remota (#81) durante a gravação do attempt: o lote não sai. A
+    // tentativa fica órfã (interrompida), sem `sync_result`.
+    if (recorder != null && _sealed) return _sealedOutcome;
+    // `duration_ms` é a latência do envio: só o `push`.
     final stopwatch = Stopwatch()..start();
 
     final List<VisitSyncOutcome> outcomes;
     try {
       outcomes = await sender.push(batch);
+      stopwatch.stop();
     } catch (error) {
+      stopwatch.stop();
       if (recorder != null) {
         await recorder.syncResult(
           attemptEventId: attemptId,
