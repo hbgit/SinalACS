@@ -58,78 +58,82 @@ import 'api/patient_data_subject_request_record.dart' as _i44;
 import 'api/patient_risk_event.dart' as _i45;
 import 'api/red_alert_result.dart' as _i46;
 import 'api/service_health.dart' as _i47;
-import 'api/terms_change_notice.dart' as _i48;
-import 'api/terms_version_entry.dart' as _i49;
-import 'api/totp_enrollment_start.dart' as _i50;
-import 'api/triage_result.dart' as _i51;
-import 'api/ubs_contact.dart' as _i52;
-import 'api/visit_sync_entry.dart' as _i53;
-import 'api/visit_sync_result.dart' as _i54;
-import 'audit_chain_checkpoint.dart' as _i55;
-import 'audit_export.dart' as _i56;
-import 'audit_log.dart' as _i57;
-import 'consent_log.dart' as _i58;
-import 'data_subject_request.dart' as _i59;
-import 'device_wipe_order.dart' as _i60;
-import 'enrollment_token.dart' as _i61;
-import 'enums/alert_status.dart' as _i62;
-import 'enums/arrival_method.dart' as _i63;
-import 'enums/audit_chain_reason.dart' as _i64;
-import 'enums/audit_integrity_state.dart' as _i65;
-import 'enums/audit_row_seal.dart' as _i66;
-import 'enums/consent_purpose.dart' as _i67;
-import 'enums/data_subject_request_status.dart' as _i68;
-import 'enums/data_subject_request_type.dart' as _i69;
-import 'enums/device_wipe_reason.dart' as _i70;
-import 'enums/device_wipe_state.dart' as _i71;
-import 'enums/escalation_reason.dart' as _i72;
-import 'enums/risk_level.dart' as _i73;
-import 'enums/scheduled_notice_status.dart' as _i74;
-import 'enums/sync_status.dart' as _i75;
-import 'enums/user_role.dart' as _i76;
-import 'enums/visit_authorship.dart' as _i77;
-import 'exceptions/admin_invalid_request_exception.dart' as _i78;
-import 'exceptions/alert_dispatch_unavailable_exception.dart' as _i79;
-import 'exceptions/alert_permission_exception.dart' as _i80;
-import 'exceptions/alert_validation_exception.dart' as _i81;
-import 'exceptions/authentication_failed_exception.dart' as _i82;
-import 'exceptions/data_rights_exception.dart' as _i83;
-import 'exceptions/device_wipe_required_exception.dart' as _i84;
-import 'exceptions/endpoint_disabled_exception.dart' as _i85;
-import 'exceptions/enrollment_exception.dart' as _i86;
-import 'exceptions/mfa_enrollment_required_exception.dart' as _i87;
-import 'exceptions/mfa_required_exception.dart' as _i88;
-import 'exceptions/notice_delivery_exception.dart' as _i89;
-import 'exceptions/otp_request_exception.dart' as _i90;
-import 'exceptions/session_expired_exception.dart' as _i91;
-import 'micro_area.dart' as _i92;
-import 'otp_challenge.dart' as _i93;
-import 'patient.dart' as _i94;
-import 'push_token.dart' as _i95;
-import 'scheduled_notice.dart' as _i96;
-import 'staff_account.dart' as _i97;
-import 'terms_version.dart' as _i98;
-import 'triage_answer.dart' as _i99;
-import 'triage_session.dart' as _i100;
-import 'ubs.dart' as _i101;
-import 'user.dart' as _i102;
-import 'user_credential.dart' as _i103;
-import 'visit.dart' as _i104;
+import 'api/telemetry_event_input.dart' as _i48;
+import 'api/telemetry_ingest_result.dart' as _i49;
+import 'api/terms_change_notice.dart' as _i50;
+import 'api/terms_version_entry.dart' as _i51;
+import 'api/totp_enrollment_start.dart' as _i52;
+import 'api/triage_result.dart' as _i53;
+import 'api/ubs_contact.dart' as _i54;
+import 'api/visit_sync_entry.dart' as _i55;
+import 'api/visit_sync_result.dart' as _i56;
+import 'audit_chain_checkpoint.dart' as _i57;
+import 'audit_export.dart' as _i58;
+import 'audit_log.dart' as _i59;
+import 'consent_log.dart' as _i60;
+import 'data_subject_request.dart' as _i61;
+import 'device_wipe_order.dart' as _i62;
+import 'enrollment_token.dart' as _i63;
+import 'enums/alert_status.dart' as _i64;
+import 'enums/arrival_method.dart' as _i65;
+import 'enums/audit_chain_reason.dart' as _i66;
+import 'enums/audit_integrity_state.dart' as _i67;
+import 'enums/audit_row_seal.dart' as _i68;
+import 'enums/consent_purpose.dart' as _i69;
+import 'enums/data_subject_request_status.dart' as _i70;
+import 'enums/data_subject_request_type.dart' as _i71;
+import 'enums/device_wipe_reason.dart' as _i72;
+import 'enums/device_wipe_state.dart' as _i73;
+import 'enums/escalation_reason.dart' as _i74;
+import 'enums/risk_level.dart' as _i75;
+import 'enums/scheduled_notice_status.dart' as _i76;
+import 'enums/sync_status.dart' as _i77;
+import 'enums/telemetry_source.dart' as _i78;
+import 'enums/user_role.dart' as _i79;
+import 'enums/visit_authorship.dart' as _i80;
+import 'exceptions/admin_invalid_request_exception.dart' as _i81;
+import 'exceptions/alert_dispatch_unavailable_exception.dart' as _i82;
+import 'exceptions/alert_permission_exception.dart' as _i83;
+import 'exceptions/alert_validation_exception.dart' as _i84;
+import 'exceptions/authentication_failed_exception.dart' as _i85;
+import 'exceptions/data_rights_exception.dart' as _i86;
+import 'exceptions/device_wipe_required_exception.dart' as _i87;
+import 'exceptions/endpoint_disabled_exception.dart' as _i88;
+import 'exceptions/enrollment_exception.dart' as _i89;
+import 'exceptions/mfa_enrollment_required_exception.dart' as _i90;
+import 'exceptions/mfa_required_exception.dart' as _i91;
+import 'exceptions/notice_delivery_exception.dart' as _i92;
+import 'exceptions/otp_request_exception.dart' as _i93;
+import 'exceptions/session_expired_exception.dart' as _i94;
+import 'micro_area.dart' as _i95;
+import 'otp_challenge.dart' as _i96;
+import 'patient.dart' as _i97;
+import 'push_token.dart' as _i98;
+import 'scheduled_notice.dart' as _i99;
+import 'staff_account.dart' as _i100;
+import 'telemetry_event.dart' as _i101;
+import 'terms_version.dart' as _i102;
+import 'triage_answer.dart' as _i103;
+import 'triage_session.dart' as _i104;
+import 'ubs.dart' as _i105;
+import 'user.dart' as _i106;
+import 'user_credential.dart' as _i107;
+import 'visit.dart' as _i108;
 import 'package:sinalacs_server/src/generated/api/admin_micro_area.dart'
-    as _i105;
-import 'package:sinalacs_server/src/generated/api/admin_acs.dart' as _i106;
-import 'package:sinalacs_server/src/generated/api/admin_staff.dart' as _i107;
-import 'package:sinalacs_server/src/generated/api/admin_acs_device.dart'
-    as _i108;
-import 'package:sinalacs_server/src/generated/api/terms_version_entry.dart'
     as _i109;
-import 'package:sinalacs_server/src/generated/api/acs_open_alert.dart' as _i110;
-import 'package:sinalacs_server/src/generated/api/micro_area_patient.dart'
-    as _i111;
-import 'package:sinalacs_server/src/generated/api/visit_sync_result.dart'
+import 'package:sinalacs_server/src/generated/api/admin_acs.dart' as _i110;
+import 'package:sinalacs_server/src/generated/api/admin_staff.dart' as _i111;
+import 'package:sinalacs_server/src/generated/api/admin_acs_device.dart'
     as _i112;
-import 'package:sinalacs_server/src/generated/api/visit_sync_entry.dart'
+import 'package:sinalacs_server/src/generated/api/terms_version_entry.dart'
     as _i113;
+import 'package:sinalacs_server/src/generated/api/acs_open_alert.dart' as _i114;
+import 'package:sinalacs_server/src/generated/api/micro_area_patient.dart'
+    as _i115;
+import 'package:sinalacs_server/src/generated/api/visit_sync_result.dart'
+    as _i116;
+import 'package:sinalacs_server/src/generated/api/visit_sync_entry.dart'
+    as _i117;
 export 'acs.dart';
 export 'acs_refresh_token.dart';
 export 'acs_upload_token.dart';
@@ -175,6 +179,8 @@ export 'api/patient_data_subject_request_record.dart';
 export 'api/patient_risk_event.dart';
 export 'api/red_alert_result.dart';
 export 'api/service_health.dart';
+export 'api/telemetry_event_input.dart';
+export 'api/telemetry_ingest_result.dart';
 export 'api/terms_change_notice.dart';
 export 'api/terms_version_entry.dart';
 export 'api/totp_enrollment_start.dart';
@@ -203,6 +209,7 @@ export 'enums/escalation_reason.dart';
 export 'enums/risk_level.dart';
 export 'enums/scheduled_notice_status.dart';
 export 'enums/sync_status.dart';
+export 'enums/telemetry_source.dart';
 export 'enums/user_role.dart';
 export 'enums/visit_authorship.dart';
 export 'exceptions/admin_invalid_request_exception.dart';
@@ -225,6 +232,7 @@ export 'patient.dart';
 export 'push_token.dart';
 export 'scheduled_notice.dart';
 export 'staff_account.dart';
+export 'telemetry_event.dart';
 export 'terms_version.dart';
 export 'triage_answer.dart';
 export 'triage_session.dart';
@@ -2389,6 +2397,186 @@ class Protocol extends _i1.SerializationManagerServer {
       managed: true,
     ),
     _i2.TableDefinition(
+      name: 'telemetry_events',
+      dartName: 'TelemetryEvent',
+      schema: 'public',
+      module: 'sinalacs',
+      columns: [
+        _i2.ColumnDefinition(
+          name: 'id',
+          columnType: _i2.ColumnType.bigint,
+          isNullable: false,
+          dartType: 'int?',
+          columnDefault: 'nextval(\'telemetry_events_id_seq\'::regclass)',
+        ),
+        _i2.ColumnDefinition(
+          name: 'eventId',
+          columnType: _i2.ColumnType.uuid,
+          isNullable: false,
+          dartType: 'UuidValue',
+        ),
+        _i2.ColumnDefinition(
+          name: 'eventName',
+          columnType: _i2.ColumnType.text,
+          isNullable: false,
+          dartType: 'String',
+        ),
+        _i2.ColumnDefinition(
+          name: 'schemaVersion',
+          columnType: _i2.ColumnType.bigint,
+          isNullable: false,
+          dartType: 'int',
+          columnDefault: '1',
+        ),
+        _i2.ColumnDefinition(
+          name: 'source',
+          columnType: _i2.ColumnType.text,
+          isNullable: false,
+          dartType: 'protocol:TelemetrySource',
+        ),
+        _i2.ColumnDefinition(
+          name: 'occurredAt',
+          columnType: _i2.ColumnType.timestampWithoutTimeZone,
+          isNullable: false,
+          dartType: 'DateTime',
+        ),
+        _i2.ColumnDefinition(
+          name: 'receivedAt',
+          columnType: _i2.ColumnType.timestampWithoutTimeZone,
+          isNullable: false,
+          dartType: 'DateTime',
+        ),
+        _i2.ColumnDefinition(
+          name: 'clockSkewMs',
+          columnType: _i2.ColumnType.bigint,
+          isNullable: true,
+          dartType: 'int?',
+        ),
+        _i2.ColumnDefinition(
+          name: 'actorId',
+          columnType: _i2.ColumnType.uuid,
+          isNullable: true,
+          dartType: 'UuidValue?',
+        ),
+        _i2.ColumnDefinition(
+          name: 'devicePseudonym',
+          columnType: _i2.ColumnType.text,
+          isNullable: true,
+          dartType: 'String?',
+        ),
+        _i2.ColumnDefinition(
+          name: 'patientPseudonym',
+          columnType: _i2.ColumnType.text,
+          isNullable: true,
+          dartType: 'String?',
+        ),
+        _i2.ColumnDefinition(
+          name: 'alertId',
+          columnType: _i2.ColumnType.uuid,
+          isNullable: true,
+          dartType: 'UuidValue?',
+        ),
+        _i2.ColumnDefinition(
+          name: 'appVersion',
+          columnType: _i2.ColumnType.text,
+          isNullable: false,
+          dartType: 'String',
+        ),
+        _i2.ColumnDefinition(
+          name: 'payload',
+          columnType: _i2.ColumnType.text,
+          isNullable: false,
+          dartType: 'String',
+        ),
+      ],
+      foreignKeys: [],
+      indexes: [
+        _i2.IndexDefinition(
+          indexName: 'telemetry_events_pkey',
+          tableSpace: null,
+          elements: [
+            _i2.IndexElementDefinition(
+              type: _i2.IndexElementDefinitionType.column,
+              definition: 'id',
+            ),
+          ],
+          type: 'btree',
+          isUnique: true,
+          isPrimary: true,
+        ),
+        _i2.IndexDefinition(
+          indexName: 'telemetry_events_event_id_key',
+          tableSpace: null,
+          elements: [
+            _i2.IndexElementDefinition(
+              type: _i2.IndexElementDefinitionType.column,
+              definition: 'eventId',
+            ),
+          ],
+          type: 'btree',
+          isUnique: true,
+          isPrimary: false,
+        ),
+        _i2.IndexDefinition(
+          indexName: 'telemetry_events_name_occurred_idx',
+          tableSpace: null,
+          elements: [
+            _i2.IndexElementDefinition(
+              type: _i2.IndexElementDefinitionType.column,
+              definition: 'eventName',
+            ),
+            _i2.IndexElementDefinition(
+              type: _i2.IndexElementDefinitionType.column,
+              definition: 'occurredAt',
+            ),
+          ],
+          type: 'btree',
+          isUnique: false,
+          isPrimary: false,
+        ),
+        _i2.IndexDefinition(
+          indexName: 'telemetry_events_alert_idx',
+          tableSpace: null,
+          elements: [
+            _i2.IndexElementDefinition(
+              type: _i2.IndexElementDefinitionType.column,
+              definition: 'alertId',
+            ),
+          ],
+          type: 'btree',
+          isUnique: false,
+          isPrimary: false,
+        ),
+        _i2.IndexDefinition(
+          indexName: 'telemetry_events_patient_idx',
+          tableSpace: null,
+          elements: [
+            _i2.IndexElementDefinition(
+              type: _i2.IndexElementDefinitionType.column,
+              definition: 'patientPseudonym',
+            ),
+          ],
+          type: 'btree',
+          isUnique: false,
+          isPrimary: false,
+        ),
+        _i2.IndexDefinition(
+          indexName: 'telemetry_events_received_idx',
+          tableSpace: null,
+          elements: [
+            _i2.IndexElementDefinition(
+              type: _i2.IndexElementDefinitionType.column,
+              definition: 'receivedAt',
+            ),
+          ],
+          type: 'btree',
+          isUnique: false,
+          isPrimary: false,
+        ),
+      ],
+      managed: true,
+    ),
+    _i2.TableDefinition(
       name: 'terms_versions',
       dartName: 'TermsVersion',
       schema: 'public',
@@ -3269,176 +3457,188 @@ class Protocol extends _i1.SerializationManagerServer {
     if (t == _i47.ServiceHealth) {
       return _i47.ServiceHealth.fromJson(data) as T;
     }
-    if (t == _i48.TermsChangeNotice) {
-      return _i48.TermsChangeNotice.fromJson(data) as T;
+    if (t == _i48.TelemetryEventInput) {
+      return _i48.TelemetryEventInput.fromJson(data) as T;
     }
-    if (t == _i49.TermsVersionEntry) {
-      return _i49.TermsVersionEntry.fromJson(data) as T;
+    if (t == _i49.TelemetryIngestResult) {
+      return _i49.TelemetryIngestResult.fromJson(data) as T;
     }
-    if (t == _i50.TotpEnrollmentStart) {
-      return _i50.TotpEnrollmentStart.fromJson(data) as T;
+    if (t == _i50.TermsChangeNotice) {
+      return _i50.TermsChangeNotice.fromJson(data) as T;
     }
-    if (t == _i51.TriageResult) {
-      return _i51.TriageResult.fromJson(data) as T;
+    if (t == _i51.TermsVersionEntry) {
+      return _i51.TermsVersionEntry.fromJson(data) as T;
     }
-    if (t == _i52.UbsContact) {
-      return _i52.UbsContact.fromJson(data) as T;
+    if (t == _i52.TotpEnrollmentStart) {
+      return _i52.TotpEnrollmentStart.fromJson(data) as T;
     }
-    if (t == _i53.VisitSyncEntry) {
-      return _i53.VisitSyncEntry.fromJson(data) as T;
+    if (t == _i53.TriageResult) {
+      return _i53.TriageResult.fromJson(data) as T;
     }
-    if (t == _i54.VisitSyncResult) {
-      return _i54.VisitSyncResult.fromJson(data) as T;
+    if (t == _i54.UbsContact) {
+      return _i54.UbsContact.fromJson(data) as T;
     }
-    if (t == _i55.AuditChainCheckpoint) {
-      return _i55.AuditChainCheckpoint.fromJson(data) as T;
+    if (t == _i55.VisitSyncEntry) {
+      return _i55.VisitSyncEntry.fromJson(data) as T;
     }
-    if (t == _i56.AuditExport) {
-      return _i56.AuditExport.fromJson(data) as T;
+    if (t == _i56.VisitSyncResult) {
+      return _i56.VisitSyncResult.fromJson(data) as T;
     }
-    if (t == _i57.AuditLog) {
-      return _i57.AuditLog.fromJson(data) as T;
+    if (t == _i57.AuditChainCheckpoint) {
+      return _i57.AuditChainCheckpoint.fromJson(data) as T;
     }
-    if (t == _i58.ConsentLog) {
-      return _i58.ConsentLog.fromJson(data) as T;
+    if (t == _i58.AuditExport) {
+      return _i58.AuditExport.fromJson(data) as T;
     }
-    if (t == _i59.DataSubjectRequest) {
-      return _i59.DataSubjectRequest.fromJson(data) as T;
+    if (t == _i59.AuditLog) {
+      return _i59.AuditLog.fromJson(data) as T;
     }
-    if (t == _i60.DeviceWipeOrder) {
-      return _i60.DeviceWipeOrder.fromJson(data) as T;
+    if (t == _i60.ConsentLog) {
+      return _i60.ConsentLog.fromJson(data) as T;
     }
-    if (t == _i61.EnrollmentToken) {
-      return _i61.EnrollmentToken.fromJson(data) as T;
+    if (t == _i61.DataSubjectRequest) {
+      return _i61.DataSubjectRequest.fromJson(data) as T;
     }
-    if (t == _i62.AlertStatus) {
-      return _i62.AlertStatus.fromJson(data) as T;
+    if (t == _i62.DeviceWipeOrder) {
+      return _i62.DeviceWipeOrder.fromJson(data) as T;
     }
-    if (t == _i63.ArrivalMethod) {
-      return _i63.ArrivalMethod.fromJson(data) as T;
+    if (t == _i63.EnrollmentToken) {
+      return _i63.EnrollmentToken.fromJson(data) as T;
     }
-    if (t == _i64.AuditChainReason) {
-      return _i64.AuditChainReason.fromJson(data) as T;
+    if (t == _i64.AlertStatus) {
+      return _i64.AlertStatus.fromJson(data) as T;
     }
-    if (t == _i65.AuditIntegrityState) {
-      return _i65.AuditIntegrityState.fromJson(data) as T;
+    if (t == _i65.ArrivalMethod) {
+      return _i65.ArrivalMethod.fromJson(data) as T;
     }
-    if (t == _i66.AuditRowSeal) {
-      return _i66.AuditRowSeal.fromJson(data) as T;
+    if (t == _i66.AuditChainReason) {
+      return _i66.AuditChainReason.fromJson(data) as T;
     }
-    if (t == _i67.ConsentPurpose) {
-      return _i67.ConsentPurpose.fromJson(data) as T;
+    if (t == _i67.AuditIntegrityState) {
+      return _i67.AuditIntegrityState.fromJson(data) as T;
     }
-    if (t == _i68.DataSubjectRequestStatus) {
-      return _i68.DataSubjectRequestStatus.fromJson(data) as T;
+    if (t == _i68.AuditRowSeal) {
+      return _i68.AuditRowSeal.fromJson(data) as T;
     }
-    if (t == _i69.DataSubjectRequestType) {
-      return _i69.DataSubjectRequestType.fromJson(data) as T;
+    if (t == _i69.ConsentPurpose) {
+      return _i69.ConsentPurpose.fromJson(data) as T;
     }
-    if (t == _i70.DeviceWipeReason) {
-      return _i70.DeviceWipeReason.fromJson(data) as T;
+    if (t == _i70.DataSubjectRequestStatus) {
+      return _i70.DataSubjectRequestStatus.fromJson(data) as T;
     }
-    if (t == _i71.DeviceWipeState) {
-      return _i71.DeviceWipeState.fromJson(data) as T;
+    if (t == _i71.DataSubjectRequestType) {
+      return _i71.DataSubjectRequestType.fromJson(data) as T;
     }
-    if (t == _i72.EscalationReason) {
-      return _i72.EscalationReason.fromJson(data) as T;
+    if (t == _i72.DeviceWipeReason) {
+      return _i72.DeviceWipeReason.fromJson(data) as T;
     }
-    if (t == _i73.RiskLevel) {
-      return _i73.RiskLevel.fromJson(data) as T;
+    if (t == _i73.DeviceWipeState) {
+      return _i73.DeviceWipeState.fromJson(data) as T;
     }
-    if (t == _i74.ScheduledNoticeStatus) {
-      return _i74.ScheduledNoticeStatus.fromJson(data) as T;
+    if (t == _i74.EscalationReason) {
+      return _i74.EscalationReason.fromJson(data) as T;
     }
-    if (t == _i75.SyncStatus) {
-      return _i75.SyncStatus.fromJson(data) as T;
+    if (t == _i75.RiskLevel) {
+      return _i75.RiskLevel.fromJson(data) as T;
     }
-    if (t == _i76.UserRole) {
-      return _i76.UserRole.fromJson(data) as T;
+    if (t == _i76.ScheduledNoticeStatus) {
+      return _i76.ScheduledNoticeStatus.fromJson(data) as T;
     }
-    if (t == _i77.VisitAuthorship) {
-      return _i77.VisitAuthorship.fromJson(data) as T;
+    if (t == _i77.SyncStatus) {
+      return _i77.SyncStatus.fromJson(data) as T;
     }
-    if (t == _i78.AdminInvalidRequestException) {
-      return _i78.AdminInvalidRequestException.fromJson(data) as T;
+    if (t == _i78.TelemetrySource) {
+      return _i78.TelemetrySource.fromJson(data) as T;
     }
-    if (t == _i79.AlertDispatchUnavailableException) {
-      return _i79.AlertDispatchUnavailableException.fromJson(data) as T;
+    if (t == _i79.UserRole) {
+      return _i79.UserRole.fromJson(data) as T;
     }
-    if (t == _i80.AlertPermissionException) {
-      return _i80.AlertPermissionException.fromJson(data) as T;
+    if (t == _i80.VisitAuthorship) {
+      return _i80.VisitAuthorship.fromJson(data) as T;
     }
-    if (t == _i81.AlertValidationException) {
-      return _i81.AlertValidationException.fromJson(data) as T;
+    if (t == _i81.AdminInvalidRequestException) {
+      return _i81.AdminInvalidRequestException.fromJson(data) as T;
     }
-    if (t == _i82.AuthenticationFailedException) {
-      return _i82.AuthenticationFailedException.fromJson(data) as T;
+    if (t == _i82.AlertDispatchUnavailableException) {
+      return _i82.AlertDispatchUnavailableException.fromJson(data) as T;
     }
-    if (t == _i83.DataRightsException) {
-      return _i83.DataRightsException.fromJson(data) as T;
+    if (t == _i83.AlertPermissionException) {
+      return _i83.AlertPermissionException.fromJson(data) as T;
     }
-    if (t == _i84.DeviceWipeRequiredException) {
-      return _i84.DeviceWipeRequiredException.fromJson(data) as T;
+    if (t == _i84.AlertValidationException) {
+      return _i84.AlertValidationException.fromJson(data) as T;
     }
-    if (t == _i85.EndpointDisabledException) {
-      return _i85.EndpointDisabledException.fromJson(data) as T;
+    if (t == _i85.AuthenticationFailedException) {
+      return _i85.AuthenticationFailedException.fromJson(data) as T;
     }
-    if (t == _i86.EnrollmentException) {
-      return _i86.EnrollmentException.fromJson(data) as T;
+    if (t == _i86.DataRightsException) {
+      return _i86.DataRightsException.fromJson(data) as T;
     }
-    if (t == _i87.MfaEnrollmentRequiredException) {
-      return _i87.MfaEnrollmentRequiredException.fromJson(data) as T;
+    if (t == _i87.DeviceWipeRequiredException) {
+      return _i87.DeviceWipeRequiredException.fromJson(data) as T;
     }
-    if (t == _i88.MfaRequiredException) {
-      return _i88.MfaRequiredException.fromJson(data) as T;
+    if (t == _i88.EndpointDisabledException) {
+      return _i88.EndpointDisabledException.fromJson(data) as T;
     }
-    if (t == _i89.NoticeDeliveryException) {
-      return _i89.NoticeDeliveryException.fromJson(data) as T;
+    if (t == _i89.EnrollmentException) {
+      return _i89.EnrollmentException.fromJson(data) as T;
     }
-    if (t == _i90.OtpRequestException) {
-      return _i90.OtpRequestException.fromJson(data) as T;
+    if (t == _i90.MfaEnrollmentRequiredException) {
+      return _i90.MfaEnrollmentRequiredException.fromJson(data) as T;
     }
-    if (t == _i91.SessionExpiredException) {
-      return _i91.SessionExpiredException.fromJson(data) as T;
+    if (t == _i91.MfaRequiredException) {
+      return _i91.MfaRequiredException.fromJson(data) as T;
     }
-    if (t == _i92.MicroArea) {
-      return _i92.MicroArea.fromJson(data) as T;
+    if (t == _i92.NoticeDeliveryException) {
+      return _i92.NoticeDeliveryException.fromJson(data) as T;
     }
-    if (t == _i93.OtpChallenge) {
-      return _i93.OtpChallenge.fromJson(data) as T;
+    if (t == _i93.OtpRequestException) {
+      return _i93.OtpRequestException.fromJson(data) as T;
     }
-    if (t == _i94.Patient) {
-      return _i94.Patient.fromJson(data) as T;
+    if (t == _i94.SessionExpiredException) {
+      return _i94.SessionExpiredException.fromJson(data) as T;
     }
-    if (t == _i95.PushToken) {
-      return _i95.PushToken.fromJson(data) as T;
+    if (t == _i95.MicroArea) {
+      return _i95.MicroArea.fromJson(data) as T;
     }
-    if (t == _i96.ScheduledNotice) {
-      return _i96.ScheduledNotice.fromJson(data) as T;
+    if (t == _i96.OtpChallenge) {
+      return _i96.OtpChallenge.fromJson(data) as T;
     }
-    if (t == _i97.StaffAccount) {
-      return _i97.StaffAccount.fromJson(data) as T;
+    if (t == _i97.Patient) {
+      return _i97.Patient.fromJson(data) as T;
     }
-    if (t == _i98.TermsVersion) {
-      return _i98.TermsVersion.fromJson(data) as T;
+    if (t == _i98.PushToken) {
+      return _i98.PushToken.fromJson(data) as T;
     }
-    if (t == _i99.TriageAnswer) {
-      return _i99.TriageAnswer.fromJson(data) as T;
+    if (t == _i99.ScheduledNotice) {
+      return _i99.ScheduledNotice.fromJson(data) as T;
     }
-    if (t == _i100.TriageSession) {
-      return _i100.TriageSession.fromJson(data) as T;
+    if (t == _i100.StaffAccount) {
+      return _i100.StaffAccount.fromJson(data) as T;
     }
-    if (t == _i101.Ubs) {
-      return _i101.Ubs.fromJson(data) as T;
+    if (t == _i101.TelemetryEvent) {
+      return _i101.TelemetryEvent.fromJson(data) as T;
     }
-    if (t == _i102.User) {
-      return _i102.User.fromJson(data) as T;
+    if (t == _i102.TermsVersion) {
+      return _i102.TermsVersion.fromJson(data) as T;
     }
-    if (t == _i103.UserCredential) {
-      return _i103.UserCredential.fromJson(data) as T;
+    if (t == _i103.TriageAnswer) {
+      return _i103.TriageAnswer.fromJson(data) as T;
     }
-    if (t == _i104.Visit) {
-      return _i104.Visit.fromJson(data) as T;
+    if (t == _i104.TriageSession) {
+      return _i104.TriageSession.fromJson(data) as T;
+    }
+    if (t == _i105.Ubs) {
+      return _i105.Ubs.fromJson(data) as T;
+    }
+    if (t == _i106.User) {
+      return _i106.User.fromJson(data) as T;
+    }
+    if (t == _i107.UserCredential) {
+      return _i107.UserCredential.fromJson(data) as T;
+    }
+    if (t == _i108.Visit) {
+      return _i108.Visit.fromJson(data) as T;
     }
     if (t == _i1.getType<_i3.Acs?>()) {
       return (data != null ? _i3.Acs.fromJson(data) : null) as T;
@@ -3603,215 +3803,229 @@ class Protocol extends _i1.SerializationManagerServer {
     if (t == _i1.getType<_i47.ServiceHealth?>()) {
       return (data != null ? _i47.ServiceHealth.fromJson(data) : null) as T;
     }
-    if (t == _i1.getType<_i48.TermsChangeNotice?>()) {
-      return (data != null ? _i48.TermsChangeNotice.fromJson(data) : null) as T;
-    }
-    if (t == _i1.getType<_i49.TermsVersionEntry?>()) {
-      return (data != null ? _i49.TermsVersionEntry.fromJson(data) : null) as T;
-    }
-    if (t == _i1.getType<_i50.TotpEnrollmentStart?>()) {
-      return (data != null ? _i50.TotpEnrollmentStart.fromJson(data) : null)
+    if (t == _i1.getType<_i48.TelemetryEventInput?>()) {
+      return (data != null ? _i48.TelemetryEventInput.fromJson(data) : null)
           as T;
     }
-    if (t == _i1.getType<_i51.TriageResult?>()) {
-      return (data != null ? _i51.TriageResult.fromJson(data) : null) as T;
-    }
-    if (t == _i1.getType<_i52.UbsContact?>()) {
-      return (data != null ? _i52.UbsContact.fromJson(data) : null) as T;
-    }
-    if (t == _i1.getType<_i53.VisitSyncEntry?>()) {
-      return (data != null ? _i53.VisitSyncEntry.fromJson(data) : null) as T;
-    }
-    if (t == _i1.getType<_i54.VisitSyncResult?>()) {
-      return (data != null ? _i54.VisitSyncResult.fromJson(data) : null) as T;
-    }
-    if (t == _i1.getType<_i55.AuditChainCheckpoint?>()) {
-      return (data != null ? _i55.AuditChainCheckpoint.fromJson(data) : null)
+    if (t == _i1.getType<_i49.TelemetryIngestResult?>()) {
+      return (data != null ? _i49.TelemetryIngestResult.fromJson(data) : null)
           as T;
     }
-    if (t == _i1.getType<_i56.AuditExport?>()) {
-      return (data != null ? _i56.AuditExport.fromJson(data) : null) as T;
+    if (t == _i1.getType<_i50.TermsChangeNotice?>()) {
+      return (data != null ? _i50.TermsChangeNotice.fromJson(data) : null) as T;
     }
-    if (t == _i1.getType<_i57.AuditLog?>()) {
-      return (data != null ? _i57.AuditLog.fromJson(data) : null) as T;
+    if (t == _i1.getType<_i51.TermsVersionEntry?>()) {
+      return (data != null ? _i51.TermsVersionEntry.fromJson(data) : null) as T;
     }
-    if (t == _i1.getType<_i58.ConsentLog?>()) {
-      return (data != null ? _i58.ConsentLog.fromJson(data) : null) as T;
-    }
-    if (t == _i1.getType<_i59.DataSubjectRequest?>()) {
-      return (data != null ? _i59.DataSubjectRequest.fromJson(data) : null)
+    if (t == _i1.getType<_i52.TotpEnrollmentStart?>()) {
+      return (data != null ? _i52.TotpEnrollmentStart.fromJson(data) : null)
           as T;
     }
-    if (t == _i1.getType<_i60.DeviceWipeOrder?>()) {
-      return (data != null ? _i60.DeviceWipeOrder.fromJson(data) : null) as T;
+    if (t == _i1.getType<_i53.TriageResult?>()) {
+      return (data != null ? _i53.TriageResult.fromJson(data) : null) as T;
     }
-    if (t == _i1.getType<_i61.EnrollmentToken?>()) {
-      return (data != null ? _i61.EnrollmentToken.fromJson(data) : null) as T;
+    if (t == _i1.getType<_i54.UbsContact?>()) {
+      return (data != null ? _i54.UbsContact.fromJson(data) : null) as T;
     }
-    if (t == _i1.getType<_i62.AlertStatus?>()) {
-      return (data != null ? _i62.AlertStatus.fromJson(data) : null) as T;
+    if (t == _i1.getType<_i55.VisitSyncEntry?>()) {
+      return (data != null ? _i55.VisitSyncEntry.fromJson(data) : null) as T;
     }
-    if (t == _i1.getType<_i63.ArrivalMethod?>()) {
-      return (data != null ? _i63.ArrivalMethod.fromJson(data) : null) as T;
+    if (t == _i1.getType<_i56.VisitSyncResult?>()) {
+      return (data != null ? _i56.VisitSyncResult.fromJson(data) : null) as T;
     }
-    if (t == _i1.getType<_i64.AuditChainReason?>()) {
-      return (data != null ? _i64.AuditChainReason.fromJson(data) : null) as T;
-    }
-    if (t == _i1.getType<_i65.AuditIntegrityState?>()) {
-      return (data != null ? _i65.AuditIntegrityState.fromJson(data) : null)
+    if (t == _i1.getType<_i57.AuditChainCheckpoint?>()) {
+      return (data != null ? _i57.AuditChainCheckpoint.fromJson(data) : null)
           as T;
     }
-    if (t == _i1.getType<_i66.AuditRowSeal?>()) {
-      return (data != null ? _i66.AuditRowSeal.fromJson(data) : null) as T;
+    if (t == _i1.getType<_i58.AuditExport?>()) {
+      return (data != null ? _i58.AuditExport.fromJson(data) : null) as T;
     }
-    if (t == _i1.getType<_i67.ConsentPurpose?>()) {
-      return (data != null ? _i67.ConsentPurpose.fromJson(data) : null) as T;
+    if (t == _i1.getType<_i59.AuditLog?>()) {
+      return (data != null ? _i59.AuditLog.fromJson(data) : null) as T;
     }
-    if (t == _i1.getType<_i68.DataSubjectRequestStatus?>()) {
+    if (t == _i1.getType<_i60.ConsentLog?>()) {
+      return (data != null ? _i60.ConsentLog.fromJson(data) : null) as T;
+    }
+    if (t == _i1.getType<_i61.DataSubjectRequest?>()) {
+      return (data != null ? _i61.DataSubjectRequest.fromJson(data) : null)
+          as T;
+    }
+    if (t == _i1.getType<_i62.DeviceWipeOrder?>()) {
+      return (data != null ? _i62.DeviceWipeOrder.fromJson(data) : null) as T;
+    }
+    if (t == _i1.getType<_i63.EnrollmentToken?>()) {
+      return (data != null ? _i63.EnrollmentToken.fromJson(data) : null) as T;
+    }
+    if (t == _i1.getType<_i64.AlertStatus?>()) {
+      return (data != null ? _i64.AlertStatus.fromJson(data) : null) as T;
+    }
+    if (t == _i1.getType<_i65.ArrivalMethod?>()) {
+      return (data != null ? _i65.ArrivalMethod.fromJson(data) : null) as T;
+    }
+    if (t == _i1.getType<_i66.AuditChainReason?>()) {
+      return (data != null ? _i66.AuditChainReason.fromJson(data) : null) as T;
+    }
+    if (t == _i1.getType<_i67.AuditIntegrityState?>()) {
+      return (data != null ? _i67.AuditIntegrityState.fromJson(data) : null)
+          as T;
+    }
+    if (t == _i1.getType<_i68.AuditRowSeal?>()) {
+      return (data != null ? _i68.AuditRowSeal.fromJson(data) : null) as T;
+    }
+    if (t == _i1.getType<_i69.ConsentPurpose?>()) {
+      return (data != null ? _i69.ConsentPurpose.fromJson(data) : null) as T;
+    }
+    if (t == _i1.getType<_i70.DataSubjectRequestStatus?>()) {
       return (data != null
-              ? _i68.DataSubjectRequestStatus.fromJson(data)
+              ? _i70.DataSubjectRequestStatus.fromJson(data)
               : null)
           as T;
     }
-    if (t == _i1.getType<_i69.DataSubjectRequestType?>()) {
-      return (data != null ? _i69.DataSubjectRequestType.fromJson(data) : null)
+    if (t == _i1.getType<_i71.DataSubjectRequestType?>()) {
+      return (data != null ? _i71.DataSubjectRequestType.fromJson(data) : null)
           as T;
     }
-    if (t == _i1.getType<_i70.DeviceWipeReason?>()) {
-      return (data != null ? _i70.DeviceWipeReason.fromJson(data) : null) as T;
+    if (t == _i1.getType<_i72.DeviceWipeReason?>()) {
+      return (data != null ? _i72.DeviceWipeReason.fromJson(data) : null) as T;
     }
-    if (t == _i1.getType<_i71.DeviceWipeState?>()) {
-      return (data != null ? _i71.DeviceWipeState.fromJson(data) : null) as T;
+    if (t == _i1.getType<_i73.DeviceWipeState?>()) {
+      return (data != null ? _i73.DeviceWipeState.fromJson(data) : null) as T;
     }
-    if (t == _i1.getType<_i72.EscalationReason?>()) {
-      return (data != null ? _i72.EscalationReason.fromJson(data) : null) as T;
+    if (t == _i1.getType<_i74.EscalationReason?>()) {
+      return (data != null ? _i74.EscalationReason.fromJson(data) : null) as T;
     }
-    if (t == _i1.getType<_i73.RiskLevel?>()) {
-      return (data != null ? _i73.RiskLevel.fromJson(data) : null) as T;
+    if (t == _i1.getType<_i75.RiskLevel?>()) {
+      return (data != null ? _i75.RiskLevel.fromJson(data) : null) as T;
     }
-    if (t == _i1.getType<_i74.ScheduledNoticeStatus?>()) {
-      return (data != null ? _i74.ScheduledNoticeStatus.fromJson(data) : null)
+    if (t == _i1.getType<_i76.ScheduledNoticeStatus?>()) {
+      return (data != null ? _i76.ScheduledNoticeStatus.fromJson(data) : null)
           as T;
     }
-    if (t == _i1.getType<_i75.SyncStatus?>()) {
-      return (data != null ? _i75.SyncStatus.fromJson(data) : null) as T;
+    if (t == _i1.getType<_i77.SyncStatus?>()) {
+      return (data != null ? _i77.SyncStatus.fromJson(data) : null) as T;
     }
-    if (t == _i1.getType<_i76.UserRole?>()) {
-      return (data != null ? _i76.UserRole.fromJson(data) : null) as T;
+    if (t == _i1.getType<_i78.TelemetrySource?>()) {
+      return (data != null ? _i78.TelemetrySource.fromJson(data) : null) as T;
     }
-    if (t == _i1.getType<_i77.VisitAuthorship?>()) {
-      return (data != null ? _i77.VisitAuthorship.fromJson(data) : null) as T;
+    if (t == _i1.getType<_i79.UserRole?>()) {
+      return (data != null ? _i79.UserRole.fromJson(data) : null) as T;
     }
-    if (t == _i1.getType<_i78.AdminInvalidRequestException?>()) {
+    if (t == _i1.getType<_i80.VisitAuthorship?>()) {
+      return (data != null ? _i80.VisitAuthorship.fromJson(data) : null) as T;
+    }
+    if (t == _i1.getType<_i81.AdminInvalidRequestException?>()) {
       return (data != null
-              ? _i78.AdminInvalidRequestException.fromJson(data)
+              ? _i81.AdminInvalidRequestException.fromJson(data)
               : null)
           as T;
     }
-    if (t == _i1.getType<_i79.AlertDispatchUnavailableException?>()) {
+    if (t == _i1.getType<_i82.AlertDispatchUnavailableException?>()) {
       return (data != null
-              ? _i79.AlertDispatchUnavailableException.fromJson(data)
+              ? _i82.AlertDispatchUnavailableException.fromJson(data)
               : null)
           as T;
     }
-    if (t == _i1.getType<_i80.AlertPermissionException?>()) {
+    if (t == _i1.getType<_i83.AlertPermissionException?>()) {
       return (data != null
-              ? _i80.AlertPermissionException.fromJson(data)
+              ? _i83.AlertPermissionException.fromJson(data)
               : null)
           as T;
     }
-    if (t == _i1.getType<_i81.AlertValidationException?>()) {
+    if (t == _i1.getType<_i84.AlertValidationException?>()) {
       return (data != null
-              ? _i81.AlertValidationException.fromJson(data)
+              ? _i84.AlertValidationException.fromJson(data)
               : null)
           as T;
     }
-    if (t == _i1.getType<_i82.AuthenticationFailedException?>()) {
+    if (t == _i1.getType<_i85.AuthenticationFailedException?>()) {
       return (data != null
-              ? _i82.AuthenticationFailedException.fromJson(data)
+              ? _i85.AuthenticationFailedException.fromJson(data)
               : null)
           as T;
     }
-    if (t == _i1.getType<_i83.DataRightsException?>()) {
-      return (data != null ? _i83.DataRightsException.fromJson(data) : null)
+    if (t == _i1.getType<_i86.DataRightsException?>()) {
+      return (data != null ? _i86.DataRightsException.fromJson(data) : null)
           as T;
     }
-    if (t == _i1.getType<_i84.DeviceWipeRequiredException?>()) {
+    if (t == _i1.getType<_i87.DeviceWipeRequiredException?>()) {
       return (data != null
-              ? _i84.DeviceWipeRequiredException.fromJson(data)
+              ? _i87.DeviceWipeRequiredException.fromJson(data)
               : null)
           as T;
     }
-    if (t == _i1.getType<_i85.EndpointDisabledException?>()) {
+    if (t == _i1.getType<_i88.EndpointDisabledException?>()) {
       return (data != null
-              ? _i85.EndpointDisabledException.fromJson(data)
+              ? _i88.EndpointDisabledException.fromJson(data)
               : null)
           as T;
     }
-    if (t == _i1.getType<_i86.EnrollmentException?>()) {
-      return (data != null ? _i86.EnrollmentException.fromJson(data) : null)
+    if (t == _i1.getType<_i89.EnrollmentException?>()) {
+      return (data != null ? _i89.EnrollmentException.fromJson(data) : null)
           as T;
     }
-    if (t == _i1.getType<_i87.MfaEnrollmentRequiredException?>()) {
+    if (t == _i1.getType<_i90.MfaEnrollmentRequiredException?>()) {
       return (data != null
-              ? _i87.MfaEnrollmentRequiredException.fromJson(data)
+              ? _i90.MfaEnrollmentRequiredException.fromJson(data)
               : null)
           as T;
     }
-    if (t == _i1.getType<_i88.MfaRequiredException?>()) {
-      return (data != null ? _i88.MfaRequiredException.fromJson(data) : null)
+    if (t == _i1.getType<_i91.MfaRequiredException?>()) {
+      return (data != null ? _i91.MfaRequiredException.fromJson(data) : null)
           as T;
     }
-    if (t == _i1.getType<_i89.NoticeDeliveryException?>()) {
-      return (data != null ? _i89.NoticeDeliveryException.fromJson(data) : null)
+    if (t == _i1.getType<_i92.NoticeDeliveryException?>()) {
+      return (data != null ? _i92.NoticeDeliveryException.fromJson(data) : null)
           as T;
     }
-    if (t == _i1.getType<_i90.OtpRequestException?>()) {
-      return (data != null ? _i90.OtpRequestException.fromJson(data) : null)
+    if (t == _i1.getType<_i93.OtpRequestException?>()) {
+      return (data != null ? _i93.OtpRequestException.fromJson(data) : null)
           as T;
     }
-    if (t == _i1.getType<_i91.SessionExpiredException?>()) {
-      return (data != null ? _i91.SessionExpiredException.fromJson(data) : null)
+    if (t == _i1.getType<_i94.SessionExpiredException?>()) {
+      return (data != null ? _i94.SessionExpiredException.fromJson(data) : null)
           as T;
     }
-    if (t == _i1.getType<_i92.MicroArea?>()) {
-      return (data != null ? _i92.MicroArea.fromJson(data) : null) as T;
+    if (t == _i1.getType<_i95.MicroArea?>()) {
+      return (data != null ? _i95.MicroArea.fromJson(data) : null) as T;
     }
-    if (t == _i1.getType<_i93.OtpChallenge?>()) {
-      return (data != null ? _i93.OtpChallenge.fromJson(data) : null) as T;
+    if (t == _i1.getType<_i96.OtpChallenge?>()) {
+      return (data != null ? _i96.OtpChallenge.fromJson(data) : null) as T;
     }
-    if (t == _i1.getType<_i94.Patient?>()) {
-      return (data != null ? _i94.Patient.fromJson(data) : null) as T;
+    if (t == _i1.getType<_i97.Patient?>()) {
+      return (data != null ? _i97.Patient.fromJson(data) : null) as T;
     }
-    if (t == _i1.getType<_i95.PushToken?>()) {
-      return (data != null ? _i95.PushToken.fromJson(data) : null) as T;
+    if (t == _i1.getType<_i98.PushToken?>()) {
+      return (data != null ? _i98.PushToken.fromJson(data) : null) as T;
     }
-    if (t == _i1.getType<_i96.ScheduledNotice?>()) {
-      return (data != null ? _i96.ScheduledNotice.fromJson(data) : null) as T;
+    if (t == _i1.getType<_i99.ScheduledNotice?>()) {
+      return (data != null ? _i99.ScheduledNotice.fromJson(data) : null) as T;
     }
-    if (t == _i1.getType<_i97.StaffAccount?>()) {
-      return (data != null ? _i97.StaffAccount.fromJson(data) : null) as T;
+    if (t == _i1.getType<_i100.StaffAccount?>()) {
+      return (data != null ? _i100.StaffAccount.fromJson(data) : null) as T;
     }
-    if (t == _i1.getType<_i98.TermsVersion?>()) {
-      return (data != null ? _i98.TermsVersion.fromJson(data) : null) as T;
+    if (t == _i1.getType<_i101.TelemetryEvent?>()) {
+      return (data != null ? _i101.TelemetryEvent.fromJson(data) : null) as T;
     }
-    if (t == _i1.getType<_i99.TriageAnswer?>()) {
-      return (data != null ? _i99.TriageAnswer.fromJson(data) : null) as T;
+    if (t == _i1.getType<_i102.TermsVersion?>()) {
+      return (data != null ? _i102.TermsVersion.fromJson(data) : null) as T;
     }
-    if (t == _i1.getType<_i100.TriageSession?>()) {
-      return (data != null ? _i100.TriageSession.fromJson(data) : null) as T;
+    if (t == _i1.getType<_i103.TriageAnswer?>()) {
+      return (data != null ? _i103.TriageAnswer.fromJson(data) : null) as T;
     }
-    if (t == _i1.getType<_i101.Ubs?>()) {
-      return (data != null ? _i101.Ubs.fromJson(data) : null) as T;
+    if (t == _i1.getType<_i104.TriageSession?>()) {
+      return (data != null ? _i104.TriageSession.fromJson(data) : null) as T;
     }
-    if (t == _i1.getType<_i102.User?>()) {
-      return (data != null ? _i102.User.fromJson(data) : null) as T;
+    if (t == _i1.getType<_i105.Ubs?>()) {
+      return (data != null ? _i105.Ubs.fromJson(data) : null) as T;
     }
-    if (t == _i1.getType<_i103.UserCredential?>()) {
-      return (data != null ? _i103.UserCredential.fromJson(data) : null) as T;
+    if (t == _i1.getType<_i106.User?>()) {
+      return (data != null ? _i106.User.fromJson(data) : null) as T;
     }
-    if (t == _i1.getType<_i104.Visit?>()) {
-      return (data != null ? _i104.Visit.fromJson(data) : null) as T;
+    if (t == _i1.getType<_i107.UserCredential?>()) {
+      return (data != null ? _i107.UserCredential.fromJson(data) : null) as T;
+    }
+    if (t == _i1.getType<_i108.Visit?>()) {
+      return (data != null ? _i108.Visit.fromJson(data) : null) as T;
     }
     if (t == List<_i14.AdminAlert>) {
       return (data as List).map((e) => deserialize<_i14.AdminAlert>(e)).toList()
@@ -3862,58 +4076,58 @@ class Protocol extends _i1.SerializationManagerServer {
           )
           as T;
     }
-    if (t == List<_i105.AdminMicroArea>) {
+    if (t == List<_i109.AdminMicroArea>) {
       return (data as List)
-              .map((e) => deserialize<_i105.AdminMicroArea>(e))
+              .map((e) => deserialize<_i109.AdminMicroArea>(e))
               .toList()
           as T;
     }
-    if (t == List<_i106.AdminAcs>) {
-      return (data as List).map((e) => deserialize<_i106.AdminAcs>(e)).toList()
+    if (t == List<_i110.AdminAcs>) {
+      return (data as List).map((e) => deserialize<_i110.AdminAcs>(e)).toList()
           as T;
     }
-    if (t == List<_i107.AdminStaff>) {
+    if (t == List<_i111.AdminStaff>) {
       return (data as List)
-              .map((e) => deserialize<_i107.AdminStaff>(e))
+              .map((e) => deserialize<_i111.AdminStaff>(e))
               .toList()
           as T;
     }
-    if (t == List<_i108.AdminAcsDevice>) {
+    if (t == List<_i112.AdminAcsDevice>) {
       return (data as List)
-              .map((e) => deserialize<_i108.AdminAcsDevice>(e))
+              .map((e) => deserialize<_i112.AdminAcsDevice>(e))
               .toList()
           as T;
     }
-    if (t == List<_i109.TermsVersionEntry>) {
+    if (t == List<_i113.TermsVersionEntry>) {
       return (data as List)
-              .map((e) => deserialize<_i109.TermsVersionEntry>(e))
+              .map((e) => deserialize<_i113.TermsVersionEntry>(e))
               .toList()
           as T;
     }
-    if (t == List<_i110.AcsOpenAlert>) {
+    if (t == List<_i114.AcsOpenAlert>) {
       return (data as List)
-              .map((e) => deserialize<_i110.AcsOpenAlert>(e))
+              .map((e) => deserialize<_i114.AcsOpenAlert>(e))
               .toList()
           as T;
     }
-    if (t == List<_i111.MicroAreaPatient>) {
+    if (t == List<_i115.MicroAreaPatient>) {
       return (data as List)
-              .map((e) => deserialize<_i111.MicroAreaPatient>(e))
+              .map((e) => deserialize<_i115.MicroAreaPatient>(e))
               .toList()
           as T;
     }
     if (t == List<String>) {
       return (data as List).map((e) => deserialize<String>(e)).toList() as T;
     }
-    if (t == List<_i112.VisitSyncResult>) {
+    if (t == List<_i116.VisitSyncResult>) {
       return (data as List)
-              .map((e) => deserialize<_i112.VisitSyncResult>(e))
+              .map((e) => deserialize<_i116.VisitSyncResult>(e))
               .toList()
           as T;
     }
-    if (t == List<_i113.VisitSyncEntry>) {
+    if (t == List<_i117.VisitSyncEntry>) {
       return (data as List)
-              .map((e) => deserialize<_i113.VisitSyncEntry>(e))
+              .map((e) => deserialize<_i117.VisitSyncEntry>(e))
               .toList()
           as T;
     }
@@ -3970,64 +4184,68 @@ class Protocol extends _i1.SerializationManagerServer {
       _i45.PatientRiskEvent => 'PatientRiskEvent',
       _i46.RedAlertResult => 'RedAlertResult',
       _i47.ServiceHealth => 'ServiceHealth',
-      _i48.TermsChangeNotice => 'TermsChangeNotice',
-      _i49.TermsVersionEntry => 'TermsVersionEntry',
-      _i50.TotpEnrollmentStart => 'TotpEnrollmentStart',
-      _i51.TriageResult => 'TriageResult',
-      _i52.UbsContact => 'UbsContact',
-      _i53.VisitSyncEntry => 'VisitSyncEntry',
-      _i54.VisitSyncResult => 'VisitSyncResult',
-      _i55.AuditChainCheckpoint => 'AuditChainCheckpoint',
-      _i56.AuditExport => 'AuditExport',
-      _i57.AuditLog => 'AuditLog',
-      _i58.ConsentLog => 'ConsentLog',
-      _i59.DataSubjectRequest => 'DataSubjectRequest',
-      _i60.DeviceWipeOrder => 'DeviceWipeOrder',
-      _i61.EnrollmentToken => 'EnrollmentToken',
-      _i62.AlertStatus => 'AlertStatus',
-      _i63.ArrivalMethod => 'ArrivalMethod',
-      _i64.AuditChainReason => 'AuditChainReason',
-      _i65.AuditIntegrityState => 'AuditIntegrityState',
-      _i66.AuditRowSeal => 'AuditRowSeal',
-      _i67.ConsentPurpose => 'ConsentPurpose',
-      _i68.DataSubjectRequestStatus => 'DataSubjectRequestStatus',
-      _i69.DataSubjectRequestType => 'DataSubjectRequestType',
-      _i70.DeviceWipeReason => 'DeviceWipeReason',
-      _i71.DeviceWipeState => 'DeviceWipeState',
-      _i72.EscalationReason => 'EscalationReason',
-      _i73.RiskLevel => 'RiskLevel',
-      _i74.ScheduledNoticeStatus => 'ScheduledNoticeStatus',
-      _i75.SyncStatus => 'SyncStatus',
-      _i76.UserRole => 'UserRole',
-      _i77.VisitAuthorship => 'VisitAuthorship',
-      _i78.AdminInvalidRequestException => 'AdminInvalidRequestException',
-      _i79.AlertDispatchUnavailableException =>
+      _i48.TelemetryEventInput => 'TelemetryEventInput',
+      _i49.TelemetryIngestResult => 'TelemetryIngestResult',
+      _i50.TermsChangeNotice => 'TermsChangeNotice',
+      _i51.TermsVersionEntry => 'TermsVersionEntry',
+      _i52.TotpEnrollmentStart => 'TotpEnrollmentStart',
+      _i53.TriageResult => 'TriageResult',
+      _i54.UbsContact => 'UbsContact',
+      _i55.VisitSyncEntry => 'VisitSyncEntry',
+      _i56.VisitSyncResult => 'VisitSyncResult',
+      _i57.AuditChainCheckpoint => 'AuditChainCheckpoint',
+      _i58.AuditExport => 'AuditExport',
+      _i59.AuditLog => 'AuditLog',
+      _i60.ConsentLog => 'ConsentLog',
+      _i61.DataSubjectRequest => 'DataSubjectRequest',
+      _i62.DeviceWipeOrder => 'DeviceWipeOrder',
+      _i63.EnrollmentToken => 'EnrollmentToken',
+      _i64.AlertStatus => 'AlertStatus',
+      _i65.ArrivalMethod => 'ArrivalMethod',
+      _i66.AuditChainReason => 'AuditChainReason',
+      _i67.AuditIntegrityState => 'AuditIntegrityState',
+      _i68.AuditRowSeal => 'AuditRowSeal',
+      _i69.ConsentPurpose => 'ConsentPurpose',
+      _i70.DataSubjectRequestStatus => 'DataSubjectRequestStatus',
+      _i71.DataSubjectRequestType => 'DataSubjectRequestType',
+      _i72.DeviceWipeReason => 'DeviceWipeReason',
+      _i73.DeviceWipeState => 'DeviceWipeState',
+      _i74.EscalationReason => 'EscalationReason',
+      _i75.RiskLevel => 'RiskLevel',
+      _i76.ScheduledNoticeStatus => 'ScheduledNoticeStatus',
+      _i77.SyncStatus => 'SyncStatus',
+      _i78.TelemetrySource => 'TelemetrySource',
+      _i79.UserRole => 'UserRole',
+      _i80.VisitAuthorship => 'VisitAuthorship',
+      _i81.AdminInvalidRequestException => 'AdminInvalidRequestException',
+      _i82.AlertDispatchUnavailableException =>
         'AlertDispatchUnavailableException',
-      _i80.AlertPermissionException => 'AlertPermissionException',
-      _i81.AlertValidationException => 'AlertValidationException',
-      _i82.AuthenticationFailedException => 'AuthenticationFailedException',
-      _i83.DataRightsException => 'DataRightsException',
-      _i84.DeviceWipeRequiredException => 'DeviceWipeRequiredException',
-      _i85.EndpointDisabledException => 'EndpointDisabledException',
-      _i86.EnrollmentException => 'EnrollmentException',
-      _i87.MfaEnrollmentRequiredException => 'MfaEnrollmentRequiredException',
-      _i88.MfaRequiredException => 'MfaRequiredException',
-      _i89.NoticeDeliveryException => 'NoticeDeliveryException',
-      _i90.OtpRequestException => 'OtpRequestException',
-      _i91.SessionExpiredException => 'SessionExpiredException',
-      _i92.MicroArea => 'MicroArea',
-      _i93.OtpChallenge => 'OtpChallenge',
-      _i94.Patient => 'Patient',
-      _i95.PushToken => 'PushToken',
-      _i96.ScheduledNotice => 'ScheduledNotice',
-      _i97.StaffAccount => 'StaffAccount',
-      _i98.TermsVersion => 'TermsVersion',
-      _i99.TriageAnswer => 'TriageAnswer',
-      _i100.TriageSession => 'TriageSession',
-      _i101.Ubs => 'Ubs',
-      _i102.User => 'User',
-      _i103.UserCredential => 'UserCredential',
-      _i104.Visit => 'Visit',
+      _i83.AlertPermissionException => 'AlertPermissionException',
+      _i84.AlertValidationException => 'AlertValidationException',
+      _i85.AuthenticationFailedException => 'AuthenticationFailedException',
+      _i86.DataRightsException => 'DataRightsException',
+      _i87.DeviceWipeRequiredException => 'DeviceWipeRequiredException',
+      _i88.EndpointDisabledException => 'EndpointDisabledException',
+      _i89.EnrollmentException => 'EnrollmentException',
+      _i90.MfaEnrollmentRequiredException => 'MfaEnrollmentRequiredException',
+      _i91.MfaRequiredException => 'MfaRequiredException',
+      _i92.NoticeDeliveryException => 'NoticeDeliveryException',
+      _i93.OtpRequestException => 'OtpRequestException',
+      _i94.SessionExpiredException => 'SessionExpiredException',
+      _i95.MicroArea => 'MicroArea',
+      _i96.OtpChallenge => 'OtpChallenge',
+      _i97.Patient => 'Patient',
+      _i98.PushToken => 'PushToken',
+      _i99.ScheduledNotice => 'ScheduledNotice',
+      _i100.StaffAccount => 'StaffAccount',
+      _i101.TelemetryEvent => 'TelemetryEvent',
+      _i102.TermsVersion => 'TermsVersion',
+      _i103.TriageAnswer => 'TriageAnswer',
+      _i104.TriageSession => 'TriageSession',
+      _i105.Ubs => 'Ubs',
+      _i106.User => 'User',
+      _i107.UserCredential => 'UserCredential',
+      _i108.Visit => 'Visit',
       _ => null,
     };
   }
@@ -4132,119 +4350,127 @@ class Protocol extends _i1.SerializationManagerServer {
         return 'RedAlertResult';
       case _i47.ServiceHealth():
         return 'ServiceHealth';
-      case _i48.TermsChangeNotice():
+      case _i48.TelemetryEventInput():
+        return 'TelemetryEventInput';
+      case _i49.TelemetryIngestResult():
+        return 'TelemetryIngestResult';
+      case _i50.TermsChangeNotice():
         return 'TermsChangeNotice';
-      case _i49.TermsVersionEntry():
+      case _i51.TermsVersionEntry():
         return 'TermsVersionEntry';
-      case _i50.TotpEnrollmentStart():
+      case _i52.TotpEnrollmentStart():
         return 'TotpEnrollmentStart';
-      case _i51.TriageResult():
+      case _i53.TriageResult():
         return 'TriageResult';
-      case _i52.UbsContact():
+      case _i54.UbsContact():
         return 'UbsContact';
-      case _i53.VisitSyncEntry():
+      case _i55.VisitSyncEntry():
         return 'VisitSyncEntry';
-      case _i54.VisitSyncResult():
+      case _i56.VisitSyncResult():
         return 'VisitSyncResult';
-      case _i55.AuditChainCheckpoint():
+      case _i57.AuditChainCheckpoint():
         return 'AuditChainCheckpoint';
-      case _i56.AuditExport():
+      case _i58.AuditExport():
         return 'AuditExport';
-      case _i57.AuditLog():
+      case _i59.AuditLog():
         return 'AuditLog';
-      case _i58.ConsentLog():
+      case _i60.ConsentLog():
         return 'ConsentLog';
-      case _i59.DataSubjectRequest():
+      case _i61.DataSubjectRequest():
         return 'DataSubjectRequest';
-      case _i60.DeviceWipeOrder():
+      case _i62.DeviceWipeOrder():
         return 'DeviceWipeOrder';
-      case _i61.EnrollmentToken():
+      case _i63.EnrollmentToken():
         return 'EnrollmentToken';
-      case _i62.AlertStatus():
+      case _i64.AlertStatus():
         return 'AlertStatus';
-      case _i63.ArrivalMethod():
+      case _i65.ArrivalMethod():
         return 'ArrivalMethod';
-      case _i64.AuditChainReason():
+      case _i66.AuditChainReason():
         return 'AuditChainReason';
-      case _i65.AuditIntegrityState():
+      case _i67.AuditIntegrityState():
         return 'AuditIntegrityState';
-      case _i66.AuditRowSeal():
+      case _i68.AuditRowSeal():
         return 'AuditRowSeal';
-      case _i67.ConsentPurpose():
+      case _i69.ConsentPurpose():
         return 'ConsentPurpose';
-      case _i68.DataSubjectRequestStatus():
+      case _i70.DataSubjectRequestStatus():
         return 'DataSubjectRequestStatus';
-      case _i69.DataSubjectRequestType():
+      case _i71.DataSubjectRequestType():
         return 'DataSubjectRequestType';
-      case _i70.DeviceWipeReason():
+      case _i72.DeviceWipeReason():
         return 'DeviceWipeReason';
-      case _i71.DeviceWipeState():
+      case _i73.DeviceWipeState():
         return 'DeviceWipeState';
-      case _i72.EscalationReason():
+      case _i74.EscalationReason():
         return 'EscalationReason';
-      case _i73.RiskLevel():
+      case _i75.RiskLevel():
         return 'RiskLevel';
-      case _i74.ScheduledNoticeStatus():
+      case _i76.ScheduledNoticeStatus():
         return 'ScheduledNoticeStatus';
-      case _i75.SyncStatus():
+      case _i77.SyncStatus():
         return 'SyncStatus';
-      case _i76.UserRole():
+      case _i78.TelemetrySource():
+        return 'TelemetrySource';
+      case _i79.UserRole():
         return 'UserRole';
-      case _i77.VisitAuthorship():
+      case _i80.VisitAuthorship():
         return 'VisitAuthorship';
-      case _i78.AdminInvalidRequestException():
+      case _i81.AdminInvalidRequestException():
         return 'AdminInvalidRequestException';
-      case _i79.AlertDispatchUnavailableException():
+      case _i82.AlertDispatchUnavailableException():
         return 'AlertDispatchUnavailableException';
-      case _i80.AlertPermissionException():
+      case _i83.AlertPermissionException():
         return 'AlertPermissionException';
-      case _i81.AlertValidationException():
+      case _i84.AlertValidationException():
         return 'AlertValidationException';
-      case _i82.AuthenticationFailedException():
+      case _i85.AuthenticationFailedException():
         return 'AuthenticationFailedException';
-      case _i83.DataRightsException():
+      case _i86.DataRightsException():
         return 'DataRightsException';
-      case _i84.DeviceWipeRequiredException():
+      case _i87.DeviceWipeRequiredException():
         return 'DeviceWipeRequiredException';
-      case _i85.EndpointDisabledException():
+      case _i88.EndpointDisabledException():
         return 'EndpointDisabledException';
-      case _i86.EnrollmentException():
+      case _i89.EnrollmentException():
         return 'EnrollmentException';
-      case _i87.MfaEnrollmentRequiredException():
+      case _i90.MfaEnrollmentRequiredException():
         return 'MfaEnrollmentRequiredException';
-      case _i88.MfaRequiredException():
+      case _i91.MfaRequiredException():
         return 'MfaRequiredException';
-      case _i89.NoticeDeliveryException():
+      case _i92.NoticeDeliveryException():
         return 'NoticeDeliveryException';
-      case _i90.OtpRequestException():
+      case _i93.OtpRequestException():
         return 'OtpRequestException';
-      case _i91.SessionExpiredException():
+      case _i94.SessionExpiredException():
         return 'SessionExpiredException';
-      case _i92.MicroArea():
+      case _i95.MicroArea():
         return 'MicroArea';
-      case _i93.OtpChallenge():
+      case _i96.OtpChallenge():
         return 'OtpChallenge';
-      case _i94.Patient():
+      case _i97.Patient():
         return 'Patient';
-      case _i95.PushToken():
+      case _i98.PushToken():
         return 'PushToken';
-      case _i96.ScheduledNotice():
+      case _i99.ScheduledNotice():
         return 'ScheduledNotice';
-      case _i97.StaffAccount():
+      case _i100.StaffAccount():
         return 'StaffAccount';
-      case _i98.TermsVersion():
+      case _i101.TelemetryEvent():
+        return 'TelemetryEvent';
+      case _i102.TermsVersion():
         return 'TermsVersion';
-      case _i99.TriageAnswer():
+      case _i103.TriageAnswer():
         return 'TriageAnswer';
-      case _i100.TriageSession():
+      case _i104.TriageSession():
         return 'TriageSession';
-      case _i101.Ubs():
+      case _i105.Ubs():
         return 'Ubs';
-      case _i102.User():
+      case _i106.User():
         return 'User';
-      case _i103.UserCredential():
+      case _i107.UserCredential():
         return 'UserCredential';
-      case _i104.Visit():
+      case _i108.Visit():
         return 'Visit';
     }
     className = _i2.Protocol().getClassNameForObject(data);
@@ -4395,176 +4621,188 @@ class Protocol extends _i1.SerializationManagerServer {
     if (dataClassName == 'ServiceHealth') {
       return deserialize<_i47.ServiceHealth>(data['data']);
     }
+    if (dataClassName == 'TelemetryEventInput') {
+      return deserialize<_i48.TelemetryEventInput>(data['data']);
+    }
+    if (dataClassName == 'TelemetryIngestResult') {
+      return deserialize<_i49.TelemetryIngestResult>(data['data']);
+    }
     if (dataClassName == 'TermsChangeNotice') {
-      return deserialize<_i48.TermsChangeNotice>(data['data']);
+      return deserialize<_i50.TermsChangeNotice>(data['data']);
     }
     if (dataClassName == 'TermsVersionEntry') {
-      return deserialize<_i49.TermsVersionEntry>(data['data']);
+      return deserialize<_i51.TermsVersionEntry>(data['data']);
     }
     if (dataClassName == 'TotpEnrollmentStart') {
-      return deserialize<_i50.TotpEnrollmentStart>(data['data']);
+      return deserialize<_i52.TotpEnrollmentStart>(data['data']);
     }
     if (dataClassName == 'TriageResult') {
-      return deserialize<_i51.TriageResult>(data['data']);
+      return deserialize<_i53.TriageResult>(data['data']);
     }
     if (dataClassName == 'UbsContact') {
-      return deserialize<_i52.UbsContact>(data['data']);
+      return deserialize<_i54.UbsContact>(data['data']);
     }
     if (dataClassName == 'VisitSyncEntry') {
-      return deserialize<_i53.VisitSyncEntry>(data['data']);
+      return deserialize<_i55.VisitSyncEntry>(data['data']);
     }
     if (dataClassName == 'VisitSyncResult') {
-      return deserialize<_i54.VisitSyncResult>(data['data']);
+      return deserialize<_i56.VisitSyncResult>(data['data']);
     }
     if (dataClassName == 'AuditChainCheckpoint') {
-      return deserialize<_i55.AuditChainCheckpoint>(data['data']);
+      return deserialize<_i57.AuditChainCheckpoint>(data['data']);
     }
     if (dataClassName == 'AuditExport') {
-      return deserialize<_i56.AuditExport>(data['data']);
+      return deserialize<_i58.AuditExport>(data['data']);
     }
     if (dataClassName == 'AuditLog') {
-      return deserialize<_i57.AuditLog>(data['data']);
+      return deserialize<_i59.AuditLog>(data['data']);
     }
     if (dataClassName == 'ConsentLog') {
-      return deserialize<_i58.ConsentLog>(data['data']);
+      return deserialize<_i60.ConsentLog>(data['data']);
     }
     if (dataClassName == 'DataSubjectRequest') {
-      return deserialize<_i59.DataSubjectRequest>(data['data']);
+      return deserialize<_i61.DataSubjectRequest>(data['data']);
     }
     if (dataClassName == 'DeviceWipeOrder') {
-      return deserialize<_i60.DeviceWipeOrder>(data['data']);
+      return deserialize<_i62.DeviceWipeOrder>(data['data']);
     }
     if (dataClassName == 'EnrollmentToken') {
-      return deserialize<_i61.EnrollmentToken>(data['data']);
+      return deserialize<_i63.EnrollmentToken>(data['data']);
     }
     if (dataClassName == 'AlertStatus') {
-      return deserialize<_i62.AlertStatus>(data['data']);
+      return deserialize<_i64.AlertStatus>(data['data']);
     }
     if (dataClassName == 'ArrivalMethod') {
-      return deserialize<_i63.ArrivalMethod>(data['data']);
+      return deserialize<_i65.ArrivalMethod>(data['data']);
     }
     if (dataClassName == 'AuditChainReason') {
-      return deserialize<_i64.AuditChainReason>(data['data']);
+      return deserialize<_i66.AuditChainReason>(data['data']);
     }
     if (dataClassName == 'AuditIntegrityState') {
-      return deserialize<_i65.AuditIntegrityState>(data['data']);
+      return deserialize<_i67.AuditIntegrityState>(data['data']);
     }
     if (dataClassName == 'AuditRowSeal') {
-      return deserialize<_i66.AuditRowSeal>(data['data']);
+      return deserialize<_i68.AuditRowSeal>(data['data']);
     }
     if (dataClassName == 'ConsentPurpose') {
-      return deserialize<_i67.ConsentPurpose>(data['data']);
+      return deserialize<_i69.ConsentPurpose>(data['data']);
     }
     if (dataClassName == 'DataSubjectRequestStatus') {
-      return deserialize<_i68.DataSubjectRequestStatus>(data['data']);
+      return deserialize<_i70.DataSubjectRequestStatus>(data['data']);
     }
     if (dataClassName == 'DataSubjectRequestType') {
-      return deserialize<_i69.DataSubjectRequestType>(data['data']);
+      return deserialize<_i71.DataSubjectRequestType>(data['data']);
     }
     if (dataClassName == 'DeviceWipeReason') {
-      return deserialize<_i70.DeviceWipeReason>(data['data']);
+      return deserialize<_i72.DeviceWipeReason>(data['data']);
     }
     if (dataClassName == 'DeviceWipeState') {
-      return deserialize<_i71.DeviceWipeState>(data['data']);
+      return deserialize<_i73.DeviceWipeState>(data['data']);
     }
     if (dataClassName == 'EscalationReason') {
-      return deserialize<_i72.EscalationReason>(data['data']);
+      return deserialize<_i74.EscalationReason>(data['data']);
     }
     if (dataClassName == 'RiskLevel') {
-      return deserialize<_i73.RiskLevel>(data['data']);
+      return deserialize<_i75.RiskLevel>(data['data']);
     }
     if (dataClassName == 'ScheduledNoticeStatus') {
-      return deserialize<_i74.ScheduledNoticeStatus>(data['data']);
+      return deserialize<_i76.ScheduledNoticeStatus>(data['data']);
     }
     if (dataClassName == 'SyncStatus') {
-      return deserialize<_i75.SyncStatus>(data['data']);
+      return deserialize<_i77.SyncStatus>(data['data']);
+    }
+    if (dataClassName == 'TelemetrySource') {
+      return deserialize<_i78.TelemetrySource>(data['data']);
     }
     if (dataClassName == 'UserRole') {
-      return deserialize<_i76.UserRole>(data['data']);
+      return deserialize<_i79.UserRole>(data['data']);
     }
     if (dataClassName == 'VisitAuthorship') {
-      return deserialize<_i77.VisitAuthorship>(data['data']);
+      return deserialize<_i80.VisitAuthorship>(data['data']);
     }
     if (dataClassName == 'AdminInvalidRequestException') {
-      return deserialize<_i78.AdminInvalidRequestException>(data['data']);
+      return deserialize<_i81.AdminInvalidRequestException>(data['data']);
     }
     if (dataClassName == 'AlertDispatchUnavailableException') {
-      return deserialize<_i79.AlertDispatchUnavailableException>(data['data']);
+      return deserialize<_i82.AlertDispatchUnavailableException>(data['data']);
     }
     if (dataClassName == 'AlertPermissionException') {
-      return deserialize<_i80.AlertPermissionException>(data['data']);
+      return deserialize<_i83.AlertPermissionException>(data['data']);
     }
     if (dataClassName == 'AlertValidationException') {
-      return deserialize<_i81.AlertValidationException>(data['data']);
+      return deserialize<_i84.AlertValidationException>(data['data']);
     }
     if (dataClassName == 'AuthenticationFailedException') {
-      return deserialize<_i82.AuthenticationFailedException>(data['data']);
+      return deserialize<_i85.AuthenticationFailedException>(data['data']);
     }
     if (dataClassName == 'DataRightsException') {
-      return deserialize<_i83.DataRightsException>(data['data']);
+      return deserialize<_i86.DataRightsException>(data['data']);
     }
     if (dataClassName == 'DeviceWipeRequiredException') {
-      return deserialize<_i84.DeviceWipeRequiredException>(data['data']);
+      return deserialize<_i87.DeviceWipeRequiredException>(data['data']);
     }
     if (dataClassName == 'EndpointDisabledException') {
-      return deserialize<_i85.EndpointDisabledException>(data['data']);
+      return deserialize<_i88.EndpointDisabledException>(data['data']);
     }
     if (dataClassName == 'EnrollmentException') {
-      return deserialize<_i86.EnrollmentException>(data['data']);
+      return deserialize<_i89.EnrollmentException>(data['data']);
     }
     if (dataClassName == 'MfaEnrollmentRequiredException') {
-      return deserialize<_i87.MfaEnrollmentRequiredException>(data['data']);
+      return deserialize<_i90.MfaEnrollmentRequiredException>(data['data']);
     }
     if (dataClassName == 'MfaRequiredException') {
-      return deserialize<_i88.MfaRequiredException>(data['data']);
+      return deserialize<_i91.MfaRequiredException>(data['data']);
     }
     if (dataClassName == 'NoticeDeliveryException') {
-      return deserialize<_i89.NoticeDeliveryException>(data['data']);
+      return deserialize<_i92.NoticeDeliveryException>(data['data']);
     }
     if (dataClassName == 'OtpRequestException') {
-      return deserialize<_i90.OtpRequestException>(data['data']);
+      return deserialize<_i93.OtpRequestException>(data['data']);
     }
     if (dataClassName == 'SessionExpiredException') {
-      return deserialize<_i91.SessionExpiredException>(data['data']);
+      return deserialize<_i94.SessionExpiredException>(data['data']);
     }
     if (dataClassName == 'MicroArea') {
-      return deserialize<_i92.MicroArea>(data['data']);
+      return deserialize<_i95.MicroArea>(data['data']);
     }
     if (dataClassName == 'OtpChallenge') {
-      return deserialize<_i93.OtpChallenge>(data['data']);
+      return deserialize<_i96.OtpChallenge>(data['data']);
     }
     if (dataClassName == 'Patient') {
-      return deserialize<_i94.Patient>(data['data']);
+      return deserialize<_i97.Patient>(data['data']);
     }
     if (dataClassName == 'PushToken') {
-      return deserialize<_i95.PushToken>(data['data']);
+      return deserialize<_i98.PushToken>(data['data']);
     }
     if (dataClassName == 'ScheduledNotice') {
-      return deserialize<_i96.ScheduledNotice>(data['data']);
+      return deserialize<_i99.ScheduledNotice>(data['data']);
     }
     if (dataClassName == 'StaffAccount') {
-      return deserialize<_i97.StaffAccount>(data['data']);
+      return deserialize<_i100.StaffAccount>(data['data']);
+    }
+    if (dataClassName == 'TelemetryEvent') {
+      return deserialize<_i101.TelemetryEvent>(data['data']);
     }
     if (dataClassName == 'TermsVersion') {
-      return deserialize<_i98.TermsVersion>(data['data']);
+      return deserialize<_i102.TermsVersion>(data['data']);
     }
     if (dataClassName == 'TriageAnswer') {
-      return deserialize<_i99.TriageAnswer>(data['data']);
+      return deserialize<_i103.TriageAnswer>(data['data']);
     }
     if (dataClassName == 'TriageSession') {
-      return deserialize<_i100.TriageSession>(data['data']);
+      return deserialize<_i104.TriageSession>(data['data']);
     }
     if (dataClassName == 'Ubs') {
-      return deserialize<_i101.Ubs>(data['data']);
+      return deserialize<_i105.Ubs>(data['data']);
     }
     if (dataClassName == 'User') {
-      return deserialize<_i102.User>(data['data']);
+      return deserialize<_i106.User>(data['data']);
     }
     if (dataClassName == 'UserCredential') {
-      return deserialize<_i103.UserCredential>(data['data']);
+      return deserialize<_i107.UserCredential>(data['data']);
     }
     if (dataClassName == 'Visit') {
-      return deserialize<_i104.Visit>(data['data']);
+      return deserialize<_i108.Visit>(data['data']);
     }
     if (dataClassName.startsWith('serverpod.')) {
       data['className'] = dataClassName.substring(10);
@@ -4596,44 +4834,46 @@ class Protocol extends _i1.SerializationManagerServer {
         return _i8.AlertIdempotencyKey.t;
       case _i9.AlertOutboxEntry:
         return _i9.AlertOutboxEntry.t;
-      case _i55.AuditChainCheckpoint:
-        return _i55.AuditChainCheckpoint.t;
-      case _i56.AuditExport:
-        return _i56.AuditExport.t;
-      case _i57.AuditLog:
-        return _i57.AuditLog.t;
-      case _i58.ConsentLog:
-        return _i58.ConsentLog.t;
-      case _i59.DataSubjectRequest:
-        return _i59.DataSubjectRequest.t;
-      case _i60.DeviceWipeOrder:
-        return _i60.DeviceWipeOrder.t;
-      case _i61.EnrollmentToken:
-        return _i61.EnrollmentToken.t;
-      case _i92.MicroArea:
-        return _i92.MicroArea.t;
-      case _i93.OtpChallenge:
-        return _i93.OtpChallenge.t;
-      case _i94.Patient:
-        return _i94.Patient.t;
-      case _i95.PushToken:
-        return _i95.PushToken.t;
-      case _i96.ScheduledNotice:
-        return _i96.ScheduledNotice.t;
-      case _i97.StaffAccount:
-        return _i97.StaffAccount.t;
-      case _i98.TermsVersion:
-        return _i98.TermsVersion.t;
-      case _i100.TriageSession:
-        return _i100.TriageSession.t;
-      case _i101.Ubs:
-        return _i101.Ubs.t;
-      case _i102.User:
-        return _i102.User.t;
-      case _i103.UserCredential:
-        return _i103.UserCredential.t;
-      case _i104.Visit:
-        return _i104.Visit.t;
+      case _i57.AuditChainCheckpoint:
+        return _i57.AuditChainCheckpoint.t;
+      case _i58.AuditExport:
+        return _i58.AuditExport.t;
+      case _i59.AuditLog:
+        return _i59.AuditLog.t;
+      case _i60.ConsentLog:
+        return _i60.ConsentLog.t;
+      case _i61.DataSubjectRequest:
+        return _i61.DataSubjectRequest.t;
+      case _i62.DeviceWipeOrder:
+        return _i62.DeviceWipeOrder.t;
+      case _i63.EnrollmentToken:
+        return _i63.EnrollmentToken.t;
+      case _i95.MicroArea:
+        return _i95.MicroArea.t;
+      case _i96.OtpChallenge:
+        return _i96.OtpChallenge.t;
+      case _i97.Patient:
+        return _i97.Patient.t;
+      case _i98.PushToken:
+        return _i98.PushToken.t;
+      case _i99.ScheduledNotice:
+        return _i99.ScheduledNotice.t;
+      case _i100.StaffAccount:
+        return _i100.StaffAccount.t;
+      case _i101.TelemetryEvent:
+        return _i101.TelemetryEvent.t;
+      case _i102.TermsVersion:
+        return _i102.TermsVersion.t;
+      case _i104.TriageSession:
+        return _i104.TriageSession.t;
+      case _i105.Ubs:
+        return _i105.Ubs.t;
+      case _i106.User:
+        return _i106.User.t;
+      case _i107.UserCredential:
+        return _i107.UserCredential.t;
+      case _i108.Visit:
+        return _i108.Visit.t;
     }
     return null;
   }
