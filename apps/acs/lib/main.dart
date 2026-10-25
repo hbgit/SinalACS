@@ -13,6 +13,7 @@ import 'package:sinalacs_acs/core/security/secure_session_token_store.dart';
 import 'package:sinalacs_acs/core/security/secure_upload_token_store.dart';
 import 'package:sinalacs_acs/core/services/micro_area_directory_factory.dart';
 import 'package:sinalacs_acs/core/services/remote_wipe.dart';
+import 'package:sinalacs_acs/core/telemetry/connectivity_network_probe.dart';
 
 /// Sobe o app do ACS.
 ///
@@ -86,6 +87,10 @@ Future<void> main({String? defaultHost}) async {
     // Diário da limpeza remota (#81, D7) em `shared_preferences`: fora do
     // banco e do Keystore, que são justamente o que a limpeza apaga.
     wipeJournal: SharedPreferencesWipeJournal(),
+    // Telemetria (#83): store (SQLCipher das visitas) e transporte (o próprio
+    // `BackendClient`) são os padrões do app. Só a sonda de rede vem daqui:
+    // ela puxa o Flutter (`connectivity_plus`) e o gravador roda também na VM.
+    networkProbe: connectivityProbe(),
   ));
 }
 

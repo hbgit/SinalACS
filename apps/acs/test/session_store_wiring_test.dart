@@ -25,6 +25,18 @@ void main() {
     expect(fonte, contains('connectivityChanges: Connectivity()'));
   });
 
+  test('o main.dart liga a sonda de rede real da telemetria (#83)', () {
+    final fonte = File('lib/main.dart').readAsStringSync();
+    expect(fonte, contains('networkProbe: connectivityProbe()'));
+  });
+
+  test('o app liga a telemetria ao SQLCipher das visitas e ao BackendClient por padrão (#83)', () {
+    final fonte = File('lib/app/app.dart').readAsStringSync();
+    expect(fonte, contains('final SqlCipherVisitStorage sqlcipher => SqlCipherTelemetryStore(sqlcipher.database)'));
+    expect(fonte, contains('final TelemetryTransport transport => transport'));
+    expect(fonte, contains('if (telemetryStore is SqlCipherTelemetryStore) telemetryStore.seal();'));
+  });
+
   test('o main.dart liga o diário da limpeza remota ao shared_preferences (#81)', () {
     final fonte = File('lib/main.dart').readAsStringSync();
     expect(fonte, contains('wipeJournal: SharedPreferencesWipeJournal()'));
