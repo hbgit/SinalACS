@@ -1,0 +1,115 @@
+== stack de e2e (banco de teste)
+aviso: o backend em execução (sinalacs-serverpod) será substituído pelo de e2e; ao final, rode `docker compose up -d` para voltar à stack de desenvolvimento.
+NOTICE:  database "sinalacs_e2e" does not exist, skipping
+Fixtures de e2e gravadas (6 pacientes, 2 ACS, 1 admin, 1 coordenador) em ../../.e2e/fixtures.json.
+== telemetria no emulador
+Resolving dependencies...
+Downloading packages...
+  async 2.11.0 (2.13.1 available)
+  boolean_selector 2.1.1 (2.1.2 available)
+  clock 1.1.2 (1.1.3 available)
+  connectivity_plus 7.3.1 (7.3.2 available)
+  dbus 0.7.12 (0.8.0 available)
+  ffi 2.1.3 (2.2.0 available)
+  flutter_lints 3.0.2 (6.0.0 available)
+  flutter_secure_storage 9.2.4 (11.2.0 available)
+  flutter_secure_storage_linux 1.2.3 (3.0.3 available)
+  flutter_secure_storage_macos 3.1.3 (4.0.0 available)
+  flutter_secure_storage_platform_interface 1.1.2 (2.1.1 available)
+  flutter_secure_storage_web 1.2.1 (2.1.1 available)
+  flutter_secure_storage_windows 3.1.2 (4.2.2 available)
+  geolocator 12.0.0 (14.1.2 available)
+  geolocator_android 4.6.2 (5.2.1 available)
+  geolocator_apple 2.3.14 (2.4.3 available)
+  geolocator_platform_interface 4.3.0 (4.4.1 available)
+  google_maps_flutter 2.18.0 (2.19.0 available)
+  google_maps_flutter_android 2.19.13 (2.21.0 available)
+  google_maps_flutter_ios 2.18.6 (2.18.7 available)
+  google_maps_flutter_platform_interface 2.16.1 (2.17.0 available)
+  google_maps_flutter_web 0.6.3+1 (0.6.5 available)
+  html 0.15.6 (0.15.7 available)
+  jni 1.0.3 (1.1.0 available)
+  jni_flutter 1.0.3 (1.0.4+1 available)
+  js 0.6.7 (0.7.2 available)
+  lints 3.0.0 (6.1.0 available)
+  local_auth_android 2.2.0 (2.3.0 available)
+  local_auth_darwin 2.0.4 (2.0.5 available)
+  matcher 0.12.19 (0.12.20 available)
+  material_color_utilities 0.13.0 (0.13.1 available)
+  meta 1.18.0 (1.19.0 available)
+  mqtt_client 10.5.1 (10.13.0 available)
+  nm 0.5.0 (0.6.0 available)
+  path_provider_foundation 2.5.1 (2.6.0 available)
+  petitparser 6.0.2 (7.1.0 available)
+  platform 3.1.6 (3.2.0 available)
+  qr 3.0.2 (4.0.0 available)
+  serverpod_auth_core_client 3.4.13 (4.0.4 available)
+  serverpod_auth_idp_client 3.4.13 (4.0.4 available)
+  serverpod_client 3.4.13 (4.0.4 available)
+  serverpod_serialization 3.4.13 (4.0.4 available)
+  shared_preferences 2.5.5 (2.5.6 available)
+  shared_preferences_android 2.4.28 (2.5.3 available)
+  shared_preferences_foundation 2.5.7 (2.6.0 available)
+  source_span 1.10.0 (1.10.2 available)
+  sqflite 2.4.1 (2.4.5 available)
+  sqflite_android 2.4.0 (2.4.5 available)
+  sqflite_common 2.5.4+6 (2.5.14 available)
+  sqflite_common_ffi 2.3.4+4 (2.4.5 available)
+  sqflite_darwin 2.4.1+1 (2.4.4+1 available)
+  sqflite_platform_interface 2.4.0 (2.4.3 available)
+  sqflite_sqlcipher 3.2.0 (3.4.1 available)
+  sqlite3 2.9.4 (3.8.0 available)
+  stack_trace 1.12.1 (1.12.2 available)
+  string_scanner 1.2.0 (1.4.1 available)
+  synchronized 3.3.0+3 (3.5.0 available)
+  term_glyph 1.2.1 (1.2.2 available)
+  test_api 0.7.11 (0.7.15 available)
+  universal_html 2.2.4 (2.3.0 available)
+  universal_io 2.2.2 (2.3.1 available)
+  url_launcher 6.3.2 (6.3.3 available)
+  vector_math 2.2.0 (2.4.3 available)
+  vm_service 14.2.5 (15.4.0 available)
+  web 1.1.1 (1.1.2 available)
+  win32 5.13.0 (6.4.0 available)
+  xml 6.5.0 (7.1.0 available)
+Got dependencies!
+67 packages have newer versions incompatible with dependency constraints.
+Try `flutter pub outdated` for more information.
+00:00 +0: loading /home/rock/Documents/Dev/APPs/SinalACS/apps/acs/integration_test/telemetry_e2e.dart
+Running Gradle task 'assembleDebug'...                          
+WARNING: A restricted method in java.lang.System has been called
+WARNING: java.lang.System::load has been called by net.rubygrapefruit.platform.internal.NativeLibraryLoader in an unnamed module (file:/home/rock/.gradle/wrapper/dists/gradle-9.1.0-all/7wzd0jkjit61aq2p43wpjgij9/gradle-9.1.0/lib/native-platform-0.22-milestone-28.jar)
+WARNING: Use --enable-native-access=ALL-UNNAMED to avoid a warning for callers in this module
+WARNING: Restricted methods will be blocked in a future release unless native access is enabled
+
+Warning: SDK processing. This version only understands SDK XML versions up to 3 but an SDK XML file of version 4 was encountered. This can happen if you use versions of Android Studio and the command-line tools that were released at different times.
+Running Gradle task 'assembleDebug'...                             48.5s
+✓ Built build/app/outputs/flutter-apk/app-debug.apk
+Installing build/app/outputs/flutter-apk/app-debug.apk...          607ms
+00:00 +0: telemetria: alerta, ACK, visitas offline, reinício e reenvio idempotente
+E2E_ALERTA id=691e8242-3240-4412-ad54-522483548fa8
+E2E_CORTAR_BACKEND
+  [script] Traefik pausado (20:00:19); o backend segue no ar
+E2E_RESTAURAR_BACKEND
+  [script] Traefik de volta (20:00:52)
+E2E_TELEMETRIA_OK eventos=7
+00:50 +1: (tearDownAll)
+00:50 +1: All tests passed!
+== telemetria no banco de teste (alerta 691e8242-3240-4412-ad54-522483548fa8)
+  eventos por nome: alert_received_acs|1 alert_triggered|1 sync_attempt|2 sync_result|2 visit_registered|3 
+    OK
+  nenhum eventId duplicado depois do reenvio: t 
+    OK
+  UUID do paciente nunca cru: 0 
+    OK
+  uma visita ligada ao alerta: 1 
+    OK
+== relatório (telemetry_report.dart, 2026-10-25T23:59:15Z → 2026-10-26T00:02:02Z)
+  {"attempts":2,"attemptsWithResult":2,"interruptedAttempts":0,"recordsAttempted":6,"recordsSucceeded":3,"perAttemptSuccessRate":0.5,"registeredVisits":3,"registeredVisitsSynced":3,"eventualSyncRate":1.0,"alertLinkedVisits":1,"medianAlertToVisitSeconds":17,"medianAckLatencyMs":4905}
+  eventualSyncRate: 1.0 (esperado 1.0) OK
+  interruptedAttempts: 0 (esperado 0) OK
+  alertLinkedVisits: 1 (esperado 1) OK
+  perAttemptSuccessRate: 0.5 (esperado 0.5 (3 de 6)) OK
+  medianAckLatencyMs: 4905 (esperado não nulo) OK
+OK: telemetria do alerta ao reenvio, sem duplicar nem expor o paciente.
+A stack de desenvolvimento foi substituída pela de e2e: rode `docker compose up -d` para voltá-la.
