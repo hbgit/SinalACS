@@ -1,0 +1,3 @@
+--------- beginning of main
+10-26 15:25:19.149  6012  6083 D FirebaseMessaging: Invoking onNewToken for app: [DEFAULT]
+10-26 15:25:19.182  6012  6012 D FirebaseMessaging: service received new intent via bind strategy
