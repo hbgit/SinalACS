@@ -329,6 +329,10 @@ jobs:
       # dispositivo. É o passo documentado pelo android-emulator-runner.
       - name: E2E no emulador Android
         uses: reactivecircus/android-emulator-runner@v2
+        # Só identificação do AVD para o diagnóstico do push (#103); nenhum secret aqui.
+        env:
+          AVD_CACHE_KEY: avd-36-google_apis-x86_64-pixel_7-ubuntu-24.04
+          AVD_CACHE_HIT: ${{ steps.avd-cache.outputs.cache-hit }}
         with:
           api-level: 36
           target: google_apis
@@ -363,6 +367,16 @@ jobs:
         with:
           name: android-e2e-metrics
           path: build/qa/latency
+      # Diagnóstico do push (#103): só existe quando a espera da bandeja falhou. O artefato é
+      # público; a coleta (scripts/qa/lib_push_diag.sh) redige token, project_id/number e
+      # api_key e apaga o arquivo que ainda contiver algum deles. Sem logs do Gorush.
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: android-e2e-push-diag
+          path: build/qa/push-diag
+          retention-days: 7
+          if-no-files-found: ignore
 
   # Único job do repositório que executa o Gradle. `flutter analyze` e
   # `flutter test` não enxergam namespace inconsistente, AGP/Kotlin
