@@ -28,7 +28,7 @@ import 'package:sinalacs_acs/core/services/deferred_flush_service.dart';
 import 'package:sinalacs_acs/core/services/emergency_dialer.dart';
 import 'package:sinalacs_acs/core/services/micro_area_directory.dart';
 import 'package:sinalacs_acs/core/services/offline_visit_queue.dart';
-import 'package:sinalacs_client/sinalacs_client.dart' show MicroAreaPatient;
+import 'package:sinalacs_client/sinalacs_client.dart' show AlertStatus, MicroAreaPatient;
 import 'package:sinalacs_acs/core/services/reconnect_schedule.dart';
 import 'package:sinalacs_acs/core/services/remote_wipe.dart';
 import 'package:sinalacs_acs/core/services/route_service.dart';
@@ -2141,6 +2141,13 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
       ..showSnackBar(SnackBar(content: Text(texto)));
     try {
       final result = await BackendScope.of(context).acknowledge(alertId: alert.alertId);
+      // Outro aparelho (ou uma reentrega) já concluiu o atendimento (#86):
+      // o cartão vai a concluído, sem oferecer "Concluir atendimento".
+      if (result.status == AlertStatus.resolved) {
+        if (mounted) _queue.markResolved(alert.alertId);
+        aviso('Este atendimento já foi concluído.');
+        return;
+      }
       if (result.acknowledged && mounted) _queue.markAcknowledged(alert.alertId);
       aviso(result.acknowledged
           ? 'Recebimento confirmado à central.'

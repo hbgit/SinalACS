@@ -5,6 +5,8 @@ import 'package:sinalacs_acs/app/app.dart';
 import 'package:sinalacs_acs/core/network/backend_client.dart';
 import 'package:sinalacs_acs/core/services/alert_queue.dart';
 
+import 'package:sinalacs_client/sinalacs_client.dart' show AlertStatus;
+
 import 'support/fakes.dart';
 
 /// Mesmo caminho de `entrar` em `login_flow_test.dart` (não importável entre
@@ -165,6 +167,42 @@ void main() {
 
       expect(find.text('A central não reconheceu este alerta.'), findsOneWidget);
       expect(find.byKey(const Key('resolved_alerta-1')), findsNothing);
+    });
+    testWidgets('ACK de alerta já concluído em outro aparelho marca concluído e não oferece "Concluir atendimento" (#86)', (tester) async {
+      final backend = FakeAcsBackend()..ackStatus = AlertStatus.resolved;
+      late FakeAlertFeed feed;
+      await tester.pumpWidget(SinalAcsApp(
+        backend: backend,
+        feedBuilder: (queue) => feed = FakeAlertFeed(queue),
+      ));
+      await entrar(tester);
+      await tester.pumpAndSettle();
+      feed.deliver(testAlert(alertId: 'alerta-1'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('ack_alerta-1')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('resolved_alerta-1')), findsOneWidget);
+      expect(find.byKey(const Key('resolve_alerta-1')), findsNothing);
+      expect(find.byKey(const Key('ack_alerta-1')), findsNothing);
+      expect(find.text('Este atendimento já foi concluído.'), findsOneWidget);
+      expect(backend.resolvedAlertIds, isEmpty);
+
+      // Reentrega do MQTT: o cartão segue concluído.
+      feed.deliver(testAlert(alertId: 'alerta-1'));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('resolve_alerta-1')), findsNothing);
+      expect(find.byKey(const Key('resolved_alerta-1')), findsOneWidget);
+    });
+
+    testWidgets('servidor sem status no ACK continua marcando confirmado', (tester) async {
+      final backend = FakeAcsBackend();
+      await abrirComAlertaConfirmado(tester, backend);
+
+      expect(find.byKey(const Key('resolve_alerta-1')), findsOneWidget);
+      expect(find.byKey(const Key('resolved_alerta-1')), findsNothing);
+      expect(find.text('Recebimento confirmado à central.'), findsOneWidget);
     });
   });
 }
