@@ -25,6 +25,7 @@
 # Nunca imprime a chave nem o token FCM.
 set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib_rele.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/lib_push_diag.sh"
 # Controle de jobs: cada processo em segundo plano vira um grupo próprio, e `parar_arvore` mata o
 # grupo inteiro (o `flutter test` é NETO do subshell que o lança; matar só o subshell o deixava vivo).
 set -m
@@ -132,7 +133,12 @@ done
 adb -s "$dev" reverse tcp:8443 tcp:443 >/dev/null
 adb -s "$dev" reverse tcp:8765 tcp:8765 >/dev/null
 hold_pid=""
+# Diagnóstico da #103: só vira arquivo quando uma espera da bandeja falha (diag_falhar); a CI
+# publica este diretório como artefato. Uma sobra de rodada anterior não pode ser publicada.
+export PUSH_DIAG_DIR="${PUSH_DIAG_DIR:-build/qa/push-diag}"
+rm -rf "$PUSH_DIAG_DIR"
 cleanup() {
+  diag_encerrar
   parar_arvore "$hold_pid"
   [[ -n "$relay_pid" ]] && kill "$relay_pid" 2>/dev/null || true
   docker compose --profile push start gorush >/dev/null 2>&1 || true
@@ -151,6 +157,8 @@ send() { ( cd apps/acs && dart run tool/send_notice.dart --title "SinalACS e2e" 
 # `flutter test` desinstala o app ao terminar e o token FCM morre junto: o teste segura
 # o app por PUSH_HOLD_SECONDS depois de registrar, e o envio acontece nesse intervalo.
 echo "== registro do token FCM real (segura o app por 240 s)"
+diag_iniciar
+diag_iniciar_logcat
 psql_q 'delete from push_tokens' >/dev/null
 ( cd apps/patient && flutter test integration_test/push_register_test.dart -d "$dev" \
     --dart-define=SINALACS_HOST=https://localhost:8443/ --dart-define=PUSH_HOLD_SECONDS=240 --dart-define=PUSH_E2E=1 \
@@ -164,6 +172,18 @@ done
 [[ "$(psql_q 'select count(*) from push_tokens' | head -1)" -ge 1 ]] \
   || { echo 'erro: o token não foi registrado (veja /tmp/push_e2e_hold.txt)'; exit 1; }
 echo "tokens no banco: $(psql_q 'select count(*) from push_tokens' | head -1)"
+diag_marca registro_ok
+# O que a redação da coleta apaga dos artefatos públicos. Nunca impresso.
+PUSH_DIAG_SEGREDOS="$(psql_q 'select token from push_tokens'
+python3 - <<'PYSEGREDOS'
+import json
+g = json.load(open('apps/patient/android/app/google-services.json'))
+print(g['project_info']['project_id']); print(g['project_info']['project_number'])
+for c in g.get('client', []):
+    print(c['client_info']['mobilesdk_app_id'])
+    for k in c.get('api_key', []): print(k['current_key'])
+PYSEGREDOS
+)"
 # O servidor impõe 60 s entre dois pedidos de OTP do MESMO paciente: o registro acabou de
 # pedir um, e as chamadas de consentimento abaixo precisam esperar a janela passar.
 otp_last="$(date +%s)"
@@ -179,27 +199,16 @@ adb -s "$dev" shell cmd notification cancel_all >/dev/null 2>&1 || true
 # FCM não mostra mensagem de notificação na bandeja com o app em primeiro plano.
 adb -s "$dev" shell input keyevent KEYCODE_HOME
 sleep 3
+diag_estado_pre_envio
 
 # -- caminho feliz --------------------------------------------------------------
 echo "== envio do ACS"
+diag_marca envio
 saida="$(send 'Teste do Gorush')"
 echo "$saida"
 grep -q 'recipients=1 accepted=1' <<<"$saida" || { echo 'FALHOU: esperado recipients=1 accepted=1'; exit 1; }
-# A entrega pelo FCM leva de 1 a dezenas de segundos: espera o texto aparecer em vez de
-# dormir um tempo fixo (um `sleep` curto é uma corrida com a rede do emulador).
-na_bandeja() { # $1 = texto que deve estar na bandeja do app; $2 = espera máxima em s (padrão 45)
-  local _ dump
-  for _ in $(seq 1 "${2:-45}"); do
-    # Captura antes de filtrar: `grep -q` fecha o pipe no 1º achado, e sob `pipefail` o
-    # SIGPIPE do `grep -A` viraria um "não achou" falso.
-    dump="$(adb -s "$dev" shell dumpsys notification --noredact 2>/dev/null || true)"
-    grep -A30 "pkg=$app" <<<"$dump" | grep -q "$1" && return 0
-    sleep 1
-  done
-  return 1
-}
-na_bandeja 'SinalACS e2e' || { echo 'FALHOU: título não está na bandeja'; exit 1; }
-na_bandeja 'Teste do Gorush' || { echo 'FALHOU: texto não está na bandeja'; exit 1; }
+na_bandeja 'SinalACS e2e' || diag_falhar 'SinalACS e2e' 'título não está na bandeja'
+na_bandeja 'Teste do Gorush' || diag_falhar 'Teste do Gorush' 'texto não está na bandeja'
 [[ "$(psql_q "select result from audit_logs where \"resourceType\"='community_notice' order by timestamp desc limit 1" | head -1)" == granted ]] \
   || { echo 'FALHOU: auditoria não é granted'; exit 1; }
 echo 'caminho feliz: OK'
@@ -213,13 +222,14 @@ if [[ "$e2e_db" -eq 1 ]]; then
   echo "== aviso agendado (disparado pelo laço do servidor)"
   adb -s "$dev" shell cmd notification cancel_all >/dev/null 2>&1 || true
   adb -s "$dev" shell input keyevent KEYCODE_HOME
+  diag_marca envio
   saida="$(./scripts/qa/e2e_stack.sh schedule-notice)"
   echo "$saida"
   agendado_id="$(sed -n 's/.*id=\([0-9a-f-]\{36\}\)).*/\1/p' <<<"$saida" | head -1)"
   [[ -n "$agendado_id" ]] || { echo 'FALHOU: o aviso agendado não foi criado'; exit 1; }
   # 70 s até o vencimento + até 30 s do ciclo do laço + a entrega pelo FCM.
-  na_bandeja 'SinalACS agendado e2e' 150 || { echo 'FALHOU: título do aviso agendado não está na bandeja'; exit 1; }
-  na_bandeja 'Aviso agendado do Gorush' 10 || { echo 'FALHOU: texto do aviso agendado não está na bandeja'; exit 1; }
+  na_bandeja 'SinalACS agendado e2e' 150 || diag_falhar 'SinalACS agendado e2e' 'título do aviso agendado não está na bandeja'
+  na_bandeja 'Aviso agendado do Gorush' 10 || diag_falhar 'Aviso agendado do Gorush' 'texto do aviso agendado não está na bandeja'
   linha="$(psql_q "select status, coalesce(recipients,0), coalesce(accepted,0) from scheduled_notices where id='$agendado_id'" | head -1)"
   [[ "$linha" =~ ^sent\|([0-9]+)\|([0-9]+)$ ]] && (( BASH_REMATCH[1] >= 1 && BASH_REMATCH[2] >= 1 )) \
     || { echo "FALHOU: esperado status=sent com recipients>=1 e accepted>=1; obtido: ${linha:-nenhuma linha}"; exit 1; }
@@ -238,10 +248,10 @@ if [[ "$negativos" -eq 1 ]]; then
   for spec in "repeat('x',150)|android" "repeat('i',64)|ios"; do
     psql_q "insert into push_tokens (\"userId\",\"microAreaId\",token,platform,\"createdAt\",\"updatedAt\") select \"userId\",\"microAreaId\",${spec%%|*},'${spec##*|}',now(),now() from push_tokens limit 1" >/dev/null
   done
-  saida="$(send 'Mistura real falso ios')"; echo "$saida"; sleep 8
+  diag_marca envio; saida="$(send 'Mistura real falso ios')"; echo "$saida"; sleep 8
   [[ "$(psql_q "select count(*) from push_tokens where token=repeat('x',150)" | head -1)" == 0 ]] || { echo 'FALHOU: o token falso não foi podado'; exit 1; }
   [[ "$(psql_q "select count(*) from push_tokens where platform='ios'" | head -1)" == 1 ]] || { echo 'FALHOU: a linha ios foi apagada'; exit 1; }
-  na_bandeja 'Mistura real falso ios' || { echo 'FALHOU: o token real não recebeu'; exit 1; }
+  na_bandeja 'Mistura real falso ios' || diag_falhar 'Mistura real falso ios' 'o token real não recebeu'
   echo 'token falso podado, ios mantido, token real recebeu: OK'
 
   echo "== Gorush parado, com tokens no banco"

@@ -126,5 +126,74 @@ afirma "#103 classificar: dump sem o app + logcat com a marca = chegou_nao_exibi
 afirma "#103 classificar: dump sem o app + logcat vazio = nao_chegou" '[[ "$(classe dump_dois_pacotes.txt logcat_vazio.txt "Aviso inexistente")" == nao_chegou ]]'
 afirma "#103 classificar: título só em outro pacote não conta como exibida" '[[ "$(classe dump_dois_pacotes.txt logcat_vazio.txt "SinalACS e2e")" == nao_chegou ]]'
 
+# ---- #103: coleta na falha (adb stub) -------------------------------------------------------------
+# O stub responde de fixtures. STUB_ADB_MODO: ok | falha (sai 1) | pendura (dorme 300 s).
+# STUB_ADB_TARDIA=N: a partir da N-ésima chamada de `dumpsys notification` o título aparece.
+sb="$raiz/stub_adb"; mkdir -p "$sb"
+cat >"$sb/adb" <<STUB
+#!/usr/bin/env bash
+case "\${STUB_ADB_MODO:-ok}" in falha) exit 1 ;; pendura) exec sleep 300 ;; esac
+args="\$*"
+case "\$args" in
+  *"dumpsys notification"*)
+    n=\$(( \$(cat "$sb/n_dump" 2>/dev/null || echo 0) + 1 )); echo \$n >"$sb/n_dump"
+    if [[ -n "\${STUB_ADB_TARDIA:-}" && \$n -ge \$STUB_ADB_TARDIA ]]; then cat "$fx/dump_um_app.txt"
+    else cat "$fx/dump_dois_pacotes.txt"; fi
+    echo "  token vazado no dump: $token_falso proj-falso-987" ;;
+  *"logcat -v"*)
+    echo "10-26 15:00:00.000 1 1 D FirebaseMessaging: Logging to scion event=_nr (de uma rodada anterior)"
+    while [[ ! -e "$sb/enviado" ]]; do sleep 0.1; done
+    [[ "\${STUB_LOGCAT:-}" == antigo ]] || cat "$fx/logcat_recebida.txt"
+    echo "10-26 D FirebaseMessaging: token $token_falso" ;;
+  *GcmService*) printf '    connectTime=09:59/00:00\n    Heartbeat: alarm(00:31 initial: 600s)\n    Is client connected: true\n'
+    for i in \$(seq 1 30); do echo "    17:45.\$i net=1: Received $app_pkg 0:\$i"; done ;;
+  *) echo "stub: \$args proj-falso-987" ;;
+esac
+STUB
+chmod +x "$sb/adb"
+roda_falha() { # $1 = diretório de saída; demais variáveis vêm do ambiente
+  rm -f "$sb/n_dump" "$sb/enviado"
+  PATH="$sb:$PATH" PUSH_DIAG_DIR="$1" PUSH_DIAG_TARDIA_S="${TARDIA:-3}" timeout 120 bash -c "
+    set -euo pipefail
+    source '$repo/scripts/qa/lib_push_diag.sh'
+    dev=emulator-5554; app=$app_pkg
+    PUSH_DIAG_SEGREDOS=\$'$token_falso\nproj-falso-987'
+    diag_iniciar
+    diag_iniciar_logcat
+    diag_estado_pre_envio
+    diag_marca envio; touch '$sb/enviado'; sleep 0.5
+    { [[ -z \"\${PRIMEIRA:-}\" ]] && na_bandeja 'SinalACS e2e' 1; } || diag_falhar 'SinalACS e2e' 'título não está na bandeja'
+    echo 'não devia chegar aqui'
+  " 2>&1
+}
+
+d1="$raiz/diag1"; out="$(STUB_ADB_TARDIA=3 roda_falha "$d1")"; rc=$?
+afirma "#103 diag_falhar sai com 1 mesmo quando a observação tardia acha o texto" '[[ $rc -eq 1 ]] && grep -q "FALHOU: título não está na bandeja" <<<"$out" && ! grep -q "não devia" <<<"$out"'
+afirma "#103 a observação tardia registra a chegada em segundos após o envio" 'grep -qE "^chegada_tardia=[0-9]+$" "$d1/chegada_tardia.txt"'
+afirma "#103 a coleta separa o estado na falha do estado após a observação" '[[ "$(cat "$d1/na_falha/classificacao.txt")" == chegou_nao_exibida && "$(cat "$d1/apos_observacao/classificacao.txt")" == exibida_encontrada ]]'
+afirma "#103 a coleta grava dumpsys, logcat filtrado, estado pré-envio, conexão FCM e linha do tempo" '[[ -s "$d1/na_falha/dumpsys_notification.txt" && -s "$d1/na_falha/logcat_filtrado.txt" && -s "$d1/estado_pre_envio.txt" && -s "$d1/na_falha/conexao_fcm.txt" && -s "$d1/linha_do_tempo.txt" ]]'
+afirma "#103 o estado da conexão FCM traz o status E o fim do histórico" 'grep -q "^uptime_s=" "$d1/estado_pre_envio.txt" && grep -q "Is client connected: true" "$d1/estado_pre_envio.txt" && grep -q "Heartbeat: alarm" "$d1/na_falha/conexao_fcm.txt" && grep -q "Received $app_pkg 0:30" "$d1/na_falha/conexao_fcm.txt"'
+afirma "#103 nenhum arquivo de PUSH_DIAG_DIR contém o token do stub, APA91 nem o project_id" '! grep -rqE "APA91|proj-falso-987" "$d1"'
+
+d2="$raiz/diag2"; out="$(STUB_ADB_MODO=falha roda_falha "$d2")"; rc=$?
+afirma "#103 coleta com adb que falha (exit 1) preserva o exit 1 e não pendura" '[[ $rc -eq 1 ]] && grep -q "FALHOU: título" <<<"$out" && grep -q "^chegada_tardia=nunca$" "$d2/chegada_tardia.txt"'
+
+# PRIMEIRA=1 pula o na_bandeja: o adb dele não tem timeout (anterior à #103); o que se testa é a coleta.
+d3="$raiz/diag3"; inicio=$SECONDS
+out="$(STUB_ADB_MODO=pendura DIAG_TIMEOUT_ADB=1 TARDIA=2 PRIMEIRA=1 roda_falha "$d3")"; rc=$?
+afirma "#103 coleta com adb que pendura respeita o timeout por chamada" '[[ $rc -eq 1 ]] && (( SECONDS - inicio < 60 ))'
+
+d5="$raiz/diag5"; out="$(STUB_LOGCAT=antigo roda_falha "$d5")"
+afirma "#103 marca _nr ANTERIOR ao envio (buffer restaurado do snapshot) não conta como recebida" '[[ "$(cat "$d5/na_falha/classificacao.txt")" == nao_chegou ]]'
+
+d4="$raiz/diag4"; rm -f "$sb/n_dump"; touch "$sb/enviado"
+PATH="$sb:$PATH" PUSH_DIAG_DIR="$d4" STUB_ADB_TARDIA=1 bash -c "
+  set -euo pipefail; source '$repo/scripts/qa/lib_push_diag.sh'; dev=emulator-5554; app=$app_pkg
+  diag_iniciar; diag_iniciar_logcat; diag_estado_pre_envio; diag_marca envio
+  na_bandeja 'SinalACS e2e' 2 || diag_falhar 'SinalACS e2e' x; diag_encerrar" >/dev/null 2>&1; rc=$?
+afirma "#103 caminho feliz não chama diag_coletar nem cria PUSH_DIAG_DIR" '[[ $rc -eq 0 && ! -e "$d4" ]] && ! grep -qE "^[^#]*diag_coletar" "$repo/scripts/qa/push_e2e.sh"'
+afirma "#103 push_e2e.sh não imprime PUSH_DIAG_SEGREDOS" '! grep -nE "(echo|printf)[^#]*PUSH_DIAG_SEGREDOS" "$repo/scripts/qa/push_e2e.sh"'
+afirma "#103 push_e2e.sh usa diag_falhar nas esperas da bandeja (nenhum na_bandeja termina em echo FALHOU)" '! grep -E "^na_bandeja .*\|\| \{ echo .FALHOU" "$repo/scripts/qa/push_e2e.sh" && grep -qE "^na_bandeja .*diag_falhar" "$repo/scripts/qa/push_e2e.sh"'
+
 n="$(wc -l <"$marcador")"
 echo; [[ "$n" -eq 0 ]] && echo "OK — ci_push_e2e.sh" || { echo "$n asserção(ões) falharam"; exit 1; }
