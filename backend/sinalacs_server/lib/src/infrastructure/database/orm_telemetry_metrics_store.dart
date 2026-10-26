@@ -38,6 +38,14 @@ class OrmTelemetryMetricsStore implements TelemetryMetricsStore {
   /// Tentativas da janela, cada uma com no máximo um resultado (o mais
   /// recente, se o app reenviou) — um resultado repetido não infla a soma.
   static const _attemptsSql = '''
+WITH resultados AS (
+  SELECT DISTINCT ON (payload::jsonb->>'attempt_event_id')
+         payload::jsonb->>'attempt_event_id' AS attempt_id,
+         (payload::jsonb->>'success_count')::bigint AS success
+  FROM telemetry_events
+  WHERE "eventName" = 'sync_result'
+  ORDER BY payload::jsonb->>'attempt_event_id', "occurredAt" DESC, id DESC
+)
 SELECT count(*)::bigint AS attempts,
        count(r.success)::bigint AS with_result,
        COALESCE(sum(a.records) FILTER (WHERE r.success IS NOT NULL), 0)::bigint AS records_attempted,
@@ -48,14 +56,7 @@ FROM (
   WHERE "eventName" = 'sync_attempt'
     AND "occurredAt" >= @from::timestamp AND "occurredAt" < @to::timestamp
 ) a
-LEFT JOIN LATERAL (
-  SELECT (t.payload::jsonb->>'success_count')::bigint AS success
-  FROM telemetry_events t
-  WHERE t."eventName" = 'sync_result'
-    AND (t.payload::jsonb->>'attempt_event_id')::uuid = a."eventId"
-  ORDER BY t."occurredAt" DESC, t.id DESC
-  LIMIT 1
-) r ON true''';
+LEFT JOIN resultados r ON r.attempt_id = a."eventId"::text''';
 
   static const _visitsSql = '''
 SELECT count(*)::bigint AS registered,

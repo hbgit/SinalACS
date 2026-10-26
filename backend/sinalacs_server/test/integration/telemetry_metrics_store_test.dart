@@ -169,37 +169,63 @@ void main() {
       expect(r.perAttemptSuccessRate, closeTo(0.85, 1e-9));
     });
 
-    test('resultado fora da janela conta para a tentativa dentro dela', () async {
-      await gravar([
-        _attempt(1, 4, at: DateTime.utc(2026, 10, 31, 23, 59)),
-        _result(2, 1, 4, at: DateTime.utc(2026, 11, 1, 0, 1)),
-      ]);
+    test(
+      'resultado fora da janela conta para a tentativa dentro dela',
+      () async {
+        await gravar([
+          _attempt(1, 4, at: DateTime.utc(2026, 10, 31, 23, 59)),
+          _result(2, 1, 4, at: DateTime.utc(2026, 11, 1, 0, 1)),
+        ]);
 
-      final r = await metrics.report(from: _from, to: _to);
+        final r = await metrics.report(from: _from, to: _to);
 
-      expect(r.attemptsWithResult, 1);
-      expect(r.recordsSucceeded, 4);
-      expect(r.perAttemptSuccessRate, 1.0);
-    });
+        expect(r.attemptsWithResult, 1);
+        expect(r.recordsSucceeded, 4);
+        expect(r.perAttemptSuccessRate, 1.0);
+      },
+    );
 
-    test('tentativa sem resultado conta como interrompida, não como sucesso', () async {
-      await gravar([
-        _attempt(1, 10),
-        _result(2, 1, 5),
-        // App morto entre o sync_attempt e o sync_result.
-        _attempt(3, 30),
-      ]);
+    test(
+      'dois sync_result da mesma tentativa não inflam recordsSucceeded',
+      () async {
+        await gravar([
+          _attempt(1, 10),
+          _result(2, 1, 4, at: DateTime.utc(2026, 10, 10, 12, 0, 1)),
+          // Reenvio do app: vale o mais recente, e só ele.
+          _result(3, 1, 7, at: DateTime.utc(2026, 10, 10, 12, 0, 2)),
+        ]);
 
-      final r = await metrics.report(from: _from, to: _to);
+        final r = await metrics.report(from: _from, to: _to);
 
-      expect(r.attempts, 2);
-      expect(r.attemptsWithResult, 1);
-      expect(r.interruptedAttempts, 1);
-      // A órfã fica fora do denominador e do numerador.
-      expect(r.recordsAttempted, 10);
-      expect(r.recordsSucceeded, 5);
-      expect(r.perAttemptSuccessRate, closeTo(0.5, 1e-9));
-    });
+        expect(r.attempts, 1);
+        expect(r.attemptsWithResult, 1);
+        expect(r.recordsAttempted, 10);
+        expect(r.recordsSucceeded, 7);
+        expect(r.perAttemptSuccessRate, closeTo(0.7, 1e-9));
+      },
+    );
+
+    test(
+      'tentativa sem resultado conta como interrompida, não como sucesso',
+      () async {
+        await gravar([
+          _attempt(1, 10),
+          _result(2, 1, 5),
+          // App morto entre o sync_attempt e o sync_result.
+          _attempt(3, 30),
+        ]);
+
+        final r = await metrics.report(from: _from, to: _to);
+
+        expect(r.attempts, 2);
+        expect(r.attemptsWithResult, 1);
+        expect(r.interruptedAttempts, 1);
+        // A órfã fica fora do denominador e do numerador.
+        expect(r.recordsAttempted, 10);
+        expect(r.recordsSucceeded, 5);
+        expect(r.perAttemptSuccessRate, closeTo(0.5, 1e-9));
+      },
+    );
 
     test('só tentativas interrompidas dão taxa nula, não zero', () async {
       await gravar([_attempt(1, 10)]);
@@ -236,14 +262,28 @@ void main() {
       final a3 = await _seedAlert(session, disparo);
       await gravar([
         // Relógio do aparelho 5 min atrasado: 10 min no aparelho + 5 min = 15.
-        _visit(1, _id(901), alertId: a1,
-            at: disparo.add(const Duration(minutes: 10)), skewMs: 300000),
+        _visit(
+          1,
+          _id(901),
+          alertId: a1,
+          at: disparo.add(const Duration(minutes: 10)),
+          skewMs: 300000,
+        ),
         // Sem desvio conhecido: 20 min.
-        _visit(2, _id(902), alertId: a2,
-            at: disparo.add(const Duration(minutes: 20))),
+        _visit(
+          2,
+          _id(902),
+          alertId: a2,
+          at: disparo.add(const Duration(minutes: 20)),
+        ),
         // Relógio 2 min adiantado: 32 min no aparelho − 2 = 30.
-        _visit(3, _id(903), alertId: a3,
-            at: disparo.add(const Duration(minutes: 32)), skewMs: -120000),
+        _visit(
+          3,
+          _id(903),
+          alertId: a3,
+          at: disparo.add(const Duration(minutes: 32)),
+          skewMs: -120000,
+        ),
         // Visita de rotina: fora da amostra.
         _visit(4, _id(904)),
       ]);
