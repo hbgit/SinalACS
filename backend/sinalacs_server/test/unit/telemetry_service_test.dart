@@ -297,6 +297,20 @@ void main() {
     expect(store.all.single.clockSkewMs, 3000);
   });
 
+  test(
+    'eventId do aparelho precisa ser UUID v4: um v5 é recusado (M1)',
+    () async {
+      final v5 = const Uuid().v5(
+        TelemetryService.telemetryNamespace,
+        'alert_received_acs:00000000-0000-4000-8000-0000000000b1',
+      );
+      final r = await ingest([_attempt(v5), _attempt(_id(1))]);
+      expect(r.rejectedEventIds, [v5]);
+      expect(r.acceptedEventIds, [_id(1)]);
+      expect(store.all.map((e) => e.eventId), [_id(1)]);
+    },
+  );
+
   test('lote só de recusados não chama o store', () async {
     final r = await ingest([_attempt('ruim')]);
     expect(r.acceptedEventIds, isEmpty);

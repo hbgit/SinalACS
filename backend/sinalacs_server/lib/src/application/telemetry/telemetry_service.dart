@@ -229,7 +229,10 @@ class TelemetryService {
     final rejected = <String>[];
     final records = <TelemetryRecord>[];
     for (final event in events) {
-      final valid = isUuidFormat(event.eventId);
+      // Só UUID v4 (o que o app gera): um v5 determinístico, como o de
+      // `alert_received_acs:<alertId>`, deixaria um ACS pré-ocupar o id do
+      // evento do backend e o ON CONFLICT descartaria o evento real.
+      final valid = isUuidFormat(event.eventId) && _isUuidV4(event.eventId);
       final id = valid ? event.eventId.toLowerCase() : event.eventId;
       if (!seen.add(id)) continue;
 
@@ -325,3 +328,9 @@ class TelemetryService {
     );
   }
 }
+
+final RegExp _uuidV4 = RegExp(
+  r'^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$',
+);
+
+bool _isUuidV4(String value) => _uuidV4.hasMatch(value.toLowerCase());
