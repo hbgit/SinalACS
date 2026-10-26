@@ -156,12 +156,13 @@ send() { ( cd apps/acs && dart run tool/send_notice.dart --title "SinalACS e2e" 
 # -- registro real, segurando o app instalado ----------------------------------
 # `flutter test` desinstala o app ao terminar e o token FCM morre junto: o teste segura
 # o app por PUSH_HOLD_SECONDS depois de registrar, e o envio acontece nesse intervalo.
-echo "== registro do token FCM real (segura o app por 240 s)"
+hold_s=240
+echo "== registro do token FCM real (segura o app por $hold_s s)"
 diag_iniciar
 diag_iniciar_logcat
 psql_q 'delete from push_tokens' >/dev/null
 ( cd apps/patient && flutter test integration_test/push_register_test.dart -d "$dev" \
-    --dart-define=SINALACS_HOST=https://localhost:8443/ --dart-define=PUSH_HOLD_SECONDS=240 --dart-define=PUSH_E2E=1 \
+    --dart-define=SINALACS_HOST=https://localhost:8443/ --dart-define=PUSH_HOLD_SECONDS=$hold_s --dart-define=PUSH_E2E=1 \
     ${e2e_fixtures:+--dart-define=E2E_FIXTURES="$e2e_fixtures"} \
     > /tmp/push_e2e_hold.txt 2>&1 ) &
 hold_pid=$!
@@ -173,6 +174,8 @@ done
   || { echo 'erro: o token não foi registrado (veja /tmp/push_e2e_hold.txt)'; exit 1; }
 echo "tokens no banco: $(psql_q 'select count(*) from push_tokens' | head -1)"
 diag_marca registro_ok
+# O hold começou no registro (até 2 s antes deste ponto; a margem de 5 s em cada exigir_hold cobre).
+push_hold_fim=$(( $(date +%s) + hold_s ))
 # O que a redação da coleta apaga dos artefatos públicos. Nunca impresso.
 PUSH_DIAG_SEGREDOS="$(psql_q 'select token from push_tokens'
 python3 - <<'PYSEGREDOS'
@@ -201,6 +204,7 @@ adb -s "$dev" shell input keyevent KEYCODE_HOME
 sleep 3
 # A conexão FCM do emulador morre ociosa sem o GMS perceber (#103): religa a rede antes de cada envio.
 garantir_conexao_fcm
+exigir_hold 95   # título 45 s + texto 45 s + margem
 diag_estado_pre_envio
 
 # -- caminho feliz --------------------------------------------------------------
@@ -225,6 +229,7 @@ if [[ "$e2e_db" -eq 1 ]]; then
   adb -s "$dev" shell cmd notification cancel_all >/dev/null 2>&1 || true
   adb -s "$dev" shell input keyevent KEYCODE_HOME
   garantir_conexao_fcm
+  exigir_hold 165  # título 150 s + texto 10 s + margem
   diag_marca envio
   saida="$(./scripts/qa/e2e_stack.sh schedule-notice)"
   echo "$saida"
@@ -252,6 +257,7 @@ if [[ "$negativos" -eq 1 ]]; then
     psql_q "insert into push_tokens (\"userId\",\"microAreaId\",token,platform,\"createdAt\",\"updatedAt\") select \"userId\",\"microAreaId\",${spec%%|*},'${spec##*|}',now(),now() from push_tokens limit 1" >/dev/null
   done
   garantir_conexao_fcm
+  exigir_hold 58   # poda 8 s + bandeja 45 s + margem
   diag_marca envio; saida="$(send 'Mistura real falso ios')"; echo "$saida"; sleep 8
   [[ "$(psql_q "select count(*) from push_tokens where token=repeat('x',150)" | head -1)" == 0 ]] || { echo 'FALHOU: o token falso não foi podado'; exit 1; }
   [[ "$(psql_q "select count(*) from push_tokens where platform='ios'" | head -1)" == 1 ]] || { echo 'FALHOU: a linha ios foi apagada'; exit 1; }

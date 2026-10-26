@@ -225,6 +225,16 @@ garantir_conexao_fcm() { # $1 = espera máxima em s (padrão 120)
   exit 1
 }
 
+# O app só fica instalado até o fim do hold (push_hold_fim, epoch): depois o `flutter test`
+# o desinstala e uma espera da bandeja falharia como "não chegou" sem ser falha de entrega.
+exigir_hold() { # $1 = segundos que o envio seguinte ainda precisa do app instalado
+  local resta=$(( ${push_hold_fim:?} - $(date +%s) ))
+  (( resta >= $1 )) && return 0
+  echo "FALHOU: o hold do app acaba em ${resta} s, antes da espera de $1 s da bandeja (aumente PUSH_HOLD_SECONDS; o teste tem timeout de 6 min)"
+  diag_encerrar
+  exit 1
+}
+
 # A entrega pelo FCM leva de 1 a dezenas de segundos: espera o texto aparecer em vez de
 # dormir um tempo fixo (um `sleep` curto é uma corrida com a rede do emulador).
 na_bandeja() { # $1 = texto que deve estar na bandeja do app; $2 = espera máxima em s (padrão 45)

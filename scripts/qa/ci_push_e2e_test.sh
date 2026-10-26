@@ -217,5 +217,15 @@ afirma "#103 conexão que não se renova falha com mensagem própria antes do en
 afirma "#103 a falha de conexão deixa o estado do GMS no diagnóstico, sem segredos" 'grep -q "connectTime=09:59" "$d7/sem_conexao_fcm.txt" && ! grep -rqE "APA91|proj-falso-987" "$d7"'
 afirma "#103 push_e2e.sh garante a conexão FCM nova antes de cada envio" 'awk "/^[[:space:]]*garantir_conexao_fcm/ {g=1} /diag_marca envio/ { if (!g) bad=1; g=0; n++ } END { exit !(n >= 3 && !bad) }" "$repo/scripts/qa/push_e2e.sh"'
 
+# ---- #103: o app precisa seguir instalado (hold) até o fim da espera da bandeja ------------------
+hold() { PATH="$sb:$PATH" PUSH_DIAG_DIR="$raiz/diag_hold" bash -c "
+  set -euo pipefail; source '$repo/scripts/qa/lib_push_diag.sh'; dev=emulator-5554; app=$app_pkg
+  diag_iniciar; push_hold_fim=\$(( \$(date +%s) + $1 )); exigir_hold $2; echo enviado" 2>&1; }
+out="$(hold 100 60)"; rc=$?
+afirma "#103 hold com folga para a espera deixa enviar" '[[ $rc -eq 0 ]] && grep -q "^enviado$" <<<"$out"'
+out="$(hold 30 60)"; rc=$?
+afirma "#103 hold que acaba antes da espera falha com mensagem própria, antes do envio" '[[ $rc -eq 1 ]] && grep -q "FALHOU: o hold do app acaba" <<<"$out" && ! grep -q "^enviado$" <<<"$out"'
+afirma "#103 push_e2e.sh confere o hold antes de cada envio" 'awk "/^[[:space:]]*exigir_hold/ {h=1} /diag_marca envio/ { if (!h) bad=1; h=0; n++ } END { exit !(n >= 3 && !bad) }" "$repo/scripts/qa/push_e2e.sh"'
+
 n="$(wc -l <"$marcador")"
 echo; [[ "$n" -eq 0 ]] && echo "OK — ci_push_e2e.sh" || { echo "$n asserção(ões) falharam"; exit 1; }
