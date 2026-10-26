@@ -1,0 +1,25 @@
+# Issue #86 — reprodução no emulador-5554 antes da correção (2026-10-25)
+# Base: fix/issue-86-ack-status @ a1fb80f (código de alertas ainda igual ao de feat/issue-83-telemetria)
+# Comando: ./scripts/qa/acs_ack_concluido_e2e.sh
+
+== stack de e2e (banco de teste)
+== aparelho B confirma um alerta já concluído no A (reserva HTTP: 30 s)
+E2E_DISPARAR_ALERTA id=3c1289d9-a775-45f6-9922-688ae09d890c
+  [script] alerta 3c1289d9-a775-45f6-9922-688ae09d890c inserido (21:31:36)
+E2E_CONCLUIR_NO_APARELHO_A id=3c1289d9-a775-45f6-9922-688ae09d890c
+  [script] alerta 3c1289d9-a775-45f6-9922-688ae09d890c concluído no aparelho A (21:32:05)
+#86: "Concluir atendimento" reapareceu depois do ACK de um alerta já concluído
+  Test failed. See exception logs above.
+00:38 +0 -1: Some tests failed.
+erro: o teste no emulador falhou (código 1)
+exit=1
+
+# O lado do servidor (trilha 'acknowledged' para um alerta 'resolved', status devolvido 'acknowledged') foi
+# registrado pelo teste de backend da Task 3, rodado antes da correção (abaixo).
+
+# Backend, antes da correção: dart test -j 1 test/integration/red_alert_cycle_test.dart --name 'depois de concluído'
+  Expected: AlertStatus:<resolved>
+    Actual: AlertStatus:<acknowledged>
+  Expected: ['acknowledged', 'resolved', 'ack_already_resolved']
+    Actual: ['acknowledged', 'resolved', 'acknowledged']
+     Which: at location [2] is 'acknowledged' instead of 'ack_already_resolved'
