@@ -21,10 +21,11 @@ class RecordingStore implements AlertStore {
   Future<void> save(AlertDelivery alert, {required String deviceId}) async => saved.add(alert);
 
   @override
-  Future<AlertAckRecord?> acknowledge({required String alertId, required String acsId, required String microAreaId, required AuditEvent audit}) async {
+  Future<AlertAckRecord?> acknowledge({required String alertId, required String acsId, required String microAreaId, required AuditEvent Function(AlertAckOutcome outcome) auditFor}) async {
     if (alertId.trim().isEmpty) return null;
     final now = DateTime.utc(2026, 9, 1, 12);
     return AlertAckRecord(
+      outcome: AlertAckOutcome.acknowledged,
       triggeredAt: now,
       acknowledgedAt: now,
       firstAcknowledgement: acknowledgedAlertIds.add(alertId),

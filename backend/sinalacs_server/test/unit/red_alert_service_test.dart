@@ -27,13 +27,21 @@ class FakeAlertStore implements AlertStore {
   DateTime ackAcknowledgedAt = DateTime.utc(2026, 10, 25, 12, 0, 4, 500);
   final Set<String> acknowledged = {};
 
+  /// Desfecho imposto ao ACK (ex.: `alreadyResolved`, #86); nulo, o primeiro
+  /// ACK de cada alerta é `acknowledged` e os seguintes `alreadyAcknowledged`.
+  AlertAckOutcome? forcedOutcome;
+
   @override
-  Future<AlertAckRecord?> acknowledge({required String alertId, required String acsId, required String microAreaId, required AuditEvent audit}) async {
-    audits.add(audit);
+  Future<AlertAckRecord?> acknowledge({required String alertId, required String acsId, required String microAreaId, required AuditEvent Function(AlertAckOutcome outcome) auditFor}) async {
+    final primeiro = acknowledged.add(alertId);
+    final outcome = forcedOutcome ??
+        (primeiro ? AlertAckOutcome.acknowledged : AlertAckOutcome.alreadyAcknowledged);
+    audits.add(auditFor(outcome));
     return AlertAckRecord(
+      outcome: outcome,
       triggeredAt: ackTriggeredAt,
       acknowledgedAt: ackAcknowledgedAt,
-      firstAcknowledgement: acknowledged.add(alertId),
+      firstAcknowledgement: primeiro,
     );
   }
 
@@ -625,6 +633,6 @@ void main() {
 
 class _NotFoundAckStore extends FakeAlertStore {
   @override
-  Future<AlertAckRecord?> acknowledge({required String alertId, required String acsId, required String microAreaId, required AuditEvent audit}) async =>
+  Future<AlertAckRecord?> acknowledge({required String alertId, required String acsId, required String microAreaId, required AuditEvent Function(AlertAckOutcome outcome) auditFor}) async =>
       null;
 }

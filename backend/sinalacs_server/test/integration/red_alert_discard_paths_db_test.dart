@@ -184,7 +184,7 @@ void main() {
           alertId: alerta.id!.uuid,
           acsId: _acs,
           microAreaId: _ma,
-          audit: const AuditEvent(
+          auditFor: (_) => const AuditEvent(
             userId: _acs,
             actionType: 'write',
             resourceType: 'alert',
