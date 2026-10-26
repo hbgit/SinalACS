@@ -1728,3 +1728,32 @@ Backlog priorizado na seção final do relatório; conferência por `python3 scr
 - Passo manual: depois de todo `serverpod create-migration`, rodar `./scripts/dev/append_audit_append_only.sh` (o `audit_schema_test.dart` falha se esquecer; `backend/CLAUDE.md`). Mudar o bloco exige migração nova com `--tambem-migration-sql`.
 - `consent_logs` segue sem trigger (avaliado na #96).
 - Herdados da #45, fora desta issue: `audit_exports` fora da cadeia (agora o trigger recusa editá-la, mas a edição pelo superusuário não é detectada), CSV pela área de transferência sem download, revisão do DPO sobre a exportação.
+
+## Telemetria dos eventos do §1.3 (#83) — 2026-10-25
+
+**Entregue.** Os cinco eventos do PRD §1.3 (`alert_triggered`, `alert_received_acs`, `sync_attempt`, `sync_result`, `visit_registered`) passam a ser gravados em `telemetry_events` (tabela só de anexo, `eventId` único). O backend emite `alert_triggered` e `alert_received_acs` com id UUID v5 determinístico, logo depois do commit do alerta/ACK. O app do ACS grava os demais na fila SQLCipher (schema v9) por `TelemetryRecorder` (o `sync_attempt` é a única escrita aguardada antes do `push`, com teto de 2 s) e os envia por `TelemetryUploader` a `telemetry.ingest` (só ACS com microárea, lote de até 200, esquema fechado por evento, sem linha em `audit_logs`), via `SessionBoundTelemetryTransport` preso à sessão do dono. Paciente só como pseudônimo HMAC-SHA-256 (`TELEMETRY_PSEUDONYM_KEY`, domínio `patient`), aparelho idem; desvio A1: `location_hash` virou `location_known`. Retenção de 365 dias (`RETENTION_TELEMETRY_DAYS`), exclusão no atendimento do pedido do titular. CLI `dart run bin/telemetry_report.dart --from <dia> --to <dia>` (`eventualSyncRate`, `perAttemptSuccessRate`, `interruptedAttempts`, `alertLinkedVisits`, `medianAckLatencyMs`, `medianAlertToVisitSeconds`).
+
+**Provas.**
+- Verificação inicial (`docs/superpowers/plans/2026-10-25-issue-83-verificacao.log`): `develop` em `00ad04d`, nenhuma emissão em `lib/` antes da issue.
+- Suítes: ACS `flutter test` 758 passando; backend `dart test -j 1` 1527 passando (Task 9).
+- RNF02 com telemetria ativa, `dart run scripts/qa/measure_latency.dart --samples 10 --visit-count 100` contra a stack local (2026-10-25), `live_check` emitindo `telemetry_flush sent=102` por amostra; `apps/acs/test/offline_burst_test.dart` passa. Linha de base sem telemetria: p95 de sync 112 ms; teto aceito +10 % (123,2 ms).
+
+| Rodada | Lotes sem perda | p95 de sync |
+|---|---|---|
+| 1 | 10/10 | 123 ms |
+| 2 | 10/10 | 102 ms |
+| 3 | 10/10 | 104 ms |
+
+- E2E no emulador, `./scripts/qa/acs_telemetria_e2e.sh` (log `docs/superpowers/plans/2026-10-25-issue-83-e2e.log`, commit d617df7): `alert_triggered` 1, `alert_received_acs` 1, `sync_attempt` 2, `sync_result` 2, `visit_registered` 3; sem `eventId` duplicado após reenvio forçado de 7 eventos; nenhum UUID cru de paciente; 1 visita ligada ao alerta. Relatório: `eventualSyncRate` 1.0, `perAttemptSuccessRate` 0.5, `interruptedAttempts` 0, `alertLinkedVisits` 1, `medianAckLatencyMs` 4905. Regressão `./scripts/qa/acs_full_e2e.sh` verde.
+
+**Cortes (issues a abrir, números ainda não atribuídos).** Evento de onboarding sem assistência (H2); tela de relatórios/indicadores no backoffice sobre `telemetry_events` (MOD-RELATORIOS, aderência, visitas/ACS/dia, retenção); sinal de eventos descartados pelo teto; reemissão do `alert_*` perdido (R6).
+
+**Riscos residuais.**
+- R1 (desempenho): dentro do teto na medição acima; fora do laboratório, só o piloto diz.
+- R2 (fila): teto local de 5000 eventos por dono, apagando os mais antigos **sem aviso**; enviesa a taxa de sincronização em aparelhos muito tempo sem rede.
+- R3 (versões): app novo com servidor antigo recebe método inexistente e guarda os eventos até o teto; eventos de app antigo não existem, então o relatório precisa de janela posterior ao rollout.
+- R4 (privacidade): o pseudônimo ainda é dado pessoal (LGPD art. 13 §4); a ligação alerta→visita reidentifica com acesso a `alerts`. **Revisão do DPO pendente.**
+- R5 (relógio): `occurredAt` vem do relógio do aparelho; `clockSkewMs` por lote, mas um relógio que muda entre o evento e o envio ainda distorce.
+- R6 (servidor): um crash entre o commit do alerta/ACK e a emissão perde o `alert_*`; o TMRAV segue calculável por `alerts`.
+- Um `append` que estoura os 2 s pode gravar tarde e deixar a tentativa órfã (sem `sync_result`).
+- Na limpeza remota (#81) a telemetria é selada: uma tentativa interrompida não aparece e o que não subiu se perde com o banco.
