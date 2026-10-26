@@ -1766,3 +1766,33 @@ Backlog priorizado na seção final do relatório; conferência por `python3 scr
 - `offline_flag` = sem interface de rede (`kind == none`), não "servidor inalcançável": Wi-Fi sem rota até o servidor dá `false`.
 - Um `append` que estoura os 2 s pode gravar tarde e deixar a tentativa órfã (sem `sync_result`).
 - Na limpeza remota (#81) a telemetria é selada: uma tentativa interrompida não aparece e o que não subiu se perde com o banco.
+
+## Push do `android-e2e` que não chegava à bandeja (#103) — 2026-10-26
+
+**Causa.** No emulador da CI, a conexão MCS do GMS com o FCM (`mtalk.google.com:5228`) morre ociosa sem o GMS perceber: ele segue informando `Is client connected: true` até o heartbeat seguinte (540 a 600 s) ficar sem resposta. Um envio nesse intervalo é aceito pelo FCM (`recipients=1 accepted=1`) e só chega depois do reset da conexão. O desfecho dependia de onde o envio caía no ciclo do heartbeat, o que explica a intermitência e o resultado bimodal: ou o aviso aparecia no 1º poll, ou nada aparecia em 46 s.
+
+**Evidência.**
+- Reprodução local com o AVD igual ao da CI (`docs/superpowers/plans/2026-10-26-issue-103-assinaturas.md`, exp. E): depois de restaurar o snapshot, a entrega ocorreu no segundo exato do `GCM_HB_ALARM`.
+- Na CI, a execução 40361611807 deu `nao_chegou` na falha. O GMS mostrou `Sent Client HB` sem resposta, depois `Heartbeat timeout, GCM connection reset` e, 1 s após o reset, `Received` e `posted`, com `chegada_tardia=51` (fora dos 45 s do `na_bandeja`).
+- Permissão, foco, Doze, `stopped` e o GMS estavam normais nessa falha.
+
+**Correção.**
+- `scripts/qa/lib_push_diag.sh`, `garantir_conexao_fcm`: antes de cada envio, religa a rede do emulador e exige uma conexão aberta depois disso, em até 120 s. Sem ela, o script falha com "GMS sem conexão nova com o FCM (falha de ambiente, não de entrega)".
+- `exigir_hold`: confere se o app continua instalado até o fim da espera da bandeja.
+- `na_bandeja` segue com 45 s e não há reenvio. É uma precondição medida, não uma espera maior.
+- Na falha, a coleta de diagnóstico publica o artefato `android-e2e-push-diag` (só com `if: failure()`), com redação fail-closed de token e credenciais.
+- Testes: `scripts/qa/ci_push_e2e_test.sh`.
+
+**Aceite.**
+- 6/6 verdes na branch: 40377111137, 40380611438, 40384191626, 40387706218, 40391257940 e 40394715879.
+- PR #106 verde (40403414518).
+- `develop` verde em `0e41934` (40406206712).
+- Os 3 PRs seguintes com o passo de push ficam anotados na #103.
+- `android-e2e` segue informativo.
+
+**Riscos residuais.**
+- O modo `--e2e-db --negativos` (aviso agendado e casos negativos) não rodou num emulador com a correção, porque a CI só exercita o caminho feliz. Se o hold estourar, a falha agora sai com mensagem própria.
+- `fcm_idade_conexao` lê um `connectTime` não numérico como conexão nova, e não há fixture real do `GcmService`.
+- A observação tardia de 180 s pode passar do fim do hold, caso em que `chegada_tardia=nunca` engana.
+- A redação não cobre JWT do Firebase Installations nas linhas do pid do app. Não há evidência de que ele seja logado.
+- Fora da #103: uma execução caiu no `smoke_test` com "Failed to start Dart Development Service", depois de um restore corrompido do cache do AVD (40369657710).
