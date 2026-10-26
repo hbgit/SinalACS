@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:serverpod/serverpod.dart';
 import 'package:sinalacs_server/src/application/admin/alert_escalation_service.dart';
+import 'package:sinalacs_server/src/application/alerts/red_alert_service.dart';
 import 'package:sinalacs_server/src/application/audit/audit_trail.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_alert_escalation_store.dart';
@@ -537,7 +538,7 @@ void main() {
               alertId: a.id!.uuid,
               acsId: _acs,
               microAreaId: _maA,
-              audit: const AuditEvent(
+              auditFor: (_) => const AuditEvent(
                 userId: _acs,
                 actionType: 'write',
                 resourceType: 'alert',
@@ -545,7 +546,7 @@ void main() {
                 result: 'acknowledged',
               ),
             );
-        expect(ok, isNotNull);
+        expect(ok!.outcome, AlertAckOutcome.acknowledged);
         final lido = (await Alert.db.findById(session, a.id!))!;
         expect(lido.status, AlertStatus.acknowledged);
         expect(lido.escalatedAt, _t);
@@ -563,6 +564,88 @@ void main() {
     );
   });
 
+  // ACK sob a trava (#86): o status devolvido é o da linha travada, e o
+  // ACK que não muda o status não pede a auditoria de uma mudança.
+  withServerpod('Dado o ACK do store ORM (#86)', (sessionBuilder, endpoints) {
+    late Session session;
+    late _AuditoriaGravada trilha;
+    late OrmAlertStore store;
+
+    setUp(() async {
+      session = sessionBuilder.build();
+      await _semear(session);
+      trilha = _AuditoriaGravada();
+      store = OrmAlertStore(session: () => session, appendAudit: trilha.call);
+    });
+
+    Future<AlertAckRecord?> confirmar(String alertId, {String ma = _maA}) =>
+        store.acknowledge(
+          alertId: alertId,
+          acsId: _acs,
+          microAreaId: ma,
+          auditFor: (o) => AuditEvent(
+            userId: _acs,
+            actionType: 'write',
+            resourceType: 'alert',
+            resourceId: alertId,
+            result: o.name,
+          ),
+        );
+
+    Future<Alert> alertaCom(AlertStatus status) async {
+      final a = await _alerta(session);
+      return Alert.db.updateRow(
+        session,
+        a.copyWith(
+          status: status,
+          acknowledgedAt:
+              status == AlertStatus.acknowledged || status == AlertStatus.resolved
+                  ? _t
+                  : null,
+          resolvedAt: status == AlertStatus.resolved ? _t : null,
+        ),
+      );
+    }
+
+    test('matriz: status lido → desfecho, status gravado e uma linha de auditoria', () async {
+      const matriz = <(AlertStatus, AlertAckOutcome, AlertStatus)>[
+        (AlertStatus.pending, AlertAckOutcome.acknowledged, AlertStatus.acknowledged),
+        (AlertStatus.escalated, AlertAckOutcome.acknowledged, AlertStatus.acknowledged),
+        (AlertStatus.acknowledged, AlertAckOutcome.alreadyAcknowledged, AlertStatus.acknowledged),
+        (AlertStatus.resolved, AlertAckOutcome.alreadyResolved, AlertStatus.resolved),
+      ];
+      for (final (lido, desfecho, gravado) in matriz) {
+        trilha.eventos.clear();
+        final a = await alertaCom(lido);
+
+        final r = await confirmar(a.id!.uuid);
+
+        expect(r!.outcome, desfecho, reason: '$lido');
+        expect(r.status, gravado, reason: '$lido');
+        final depois = (await Alert.db.findById(session, a.id!))!;
+        expect(depois.status, gravado, reason: '$lido');
+        expect(trilha.eventos.single.result, desfecho.name, reason: '$lido');
+      }
+    });
+
+    test('ACK sobre resolved não muda o status gravado nem o resolvedAt', () async {
+      final a = await alertaCom(AlertStatus.resolved);
+
+      await confirmar(a.id!.uuid);
+
+      final depois = (await Alert.db.findById(session, a.id!))!;
+      expect(depois.status, AlertStatus.resolved);
+      expect(depois.resolvedAt, _t);
+    });
+
+    test('alerta de outra microárea: null e nenhuma linha de auditoria', () async {
+      final a = await _alerta(session, ma: _maB);
+
+      expect(await confirmar(a.id!.uuid), isNull);
+      expect(trilha.eventos, isEmpty);
+    });
+  });
+
   // Corrida: rollback desligado (com ele, sessões concorrentes colidem no
   // savepoint compartilhado do harness). Trilha em memória, para não commitar
   // linhas em `audit_logs` que as suítes paralelas conferem sem filtro; a
@@ -578,6 +661,10 @@ void main() {
           where: (t) => t.patientId.equals(UuidValue.fromString(_paciente)),
         );
         for (final a in alertas) {
+          await AlertDeliveryRecord.db.deleteWhere(
+            s,
+            where: (t) => t.alertId.equals(a.id!),
+          );
           await AlertOutboxEntry.db.deleteWhere(
             s,
             where: (t) => t.alertId.equals(a.id!),
@@ -673,6 +760,69 @@ void main() {
                 ],
                 reason: 'rodada $i',
               );
+            }
+          } finally {
+            await limpar(s);
+          }
+        },
+      );
+
+      test(
+        'ACK e conclusão simultâneos: o status devolvido é o da linha travada (#86)',
+        () async {
+          final s = sessionBuilder.build();
+          await limpar(s);
+          try {
+            await _semear(s);
+            for (var i = 0; i < rodadas; i++) {
+              final criado = await _alerta(s);
+              final a = await Alert.db.updateRow(
+                s,
+                criado.copyWith(status: AlertStatus.acknowledged, acknowledgedAt: _t),
+              );
+              // Uma trilha só: ela é gravada dentro de cada transação, sob a
+              // trava da linha, então a ordem dos eventos é a ordem da trava.
+              final trilha = _AuditoriaGravada();
+              OrmAlertStore novo() => OrmAlertStore(
+                    session: sessionBuilder.build,
+                    appendAudit: trilha.call,
+                  );
+              AuditEvent evento(String result) => AuditEvent(
+                    userId: _acs,
+                    actionType: 'write',
+                    resourceType: 'alert',
+                    resourceId: a.id!.uuid,
+                    result: result,
+                  );
+
+              final r = await Future.wait<Object?>([
+                novo().acknowledge(
+                  alertId: a.id!.uuid,
+                  acsId: _acs,
+                  microAreaId: _maA,
+                  auditFor: (o) => evento('ack:${o.name}'),
+                ),
+                novo().resolve(
+                  alertId: a.id!.uuid,
+                  microAreaId: _maA,
+                  now: _t,
+                  auditFor: (o) => evento('resolve:${o.name}'),
+                ),
+              ]);
+              final ack = r[0]! as AlertAckRecord;
+              final resolvido = r[1]! as AlertResolveAttempt;
+
+              expect(resolvido.outcome, AlertResolveOutcome.resolved, reason: 'rodada $i');
+              final lido = (await Alert.db.findById(s, a.id!))!;
+              expect(lido.status, AlertStatus.resolved, reason: 'rodada $i');
+              final ordem = trilha.eventos.map((e) => e.result).toList();
+              if (ordem.first == 'resolve:resolved') {
+                expect(ack.outcome, AlertAckOutcome.alreadyResolved, reason: 'rodada $i: $ordem');
+                expect(ack.status, AlertStatus.resolved, reason: 'rodada $i: $ordem');
+              } else {
+                expect(ack.outcome, AlertAckOutcome.alreadyAcknowledged, reason: 'rodada $i: $ordem');
+                expect(ack.status, AlertStatus.acknowledged, reason: 'rodada $i: $ordem');
+              }
             }
           } finally {
             await limpar(s);

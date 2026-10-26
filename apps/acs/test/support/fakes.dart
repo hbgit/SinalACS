@@ -41,6 +41,14 @@ class FakeAcsBackend implements AcsBackend {
   int listPatientsCount = 0;
 
   final List<String> acknowledgedAlertIds = <String>[];
+
+  /// `status` imposto à resposta do ACK (ex.: `resolved`, #86); nulo, a
+  /// resposta é a de sempre (`acknowledged` quando aceito).
+  AlertStatus? ackStatus;
+
+  /// Responde ao ACK como um servidor anterior à #86: `acknowledged: true`
+  /// sem `status`.
+  bool ackWithoutStatus = false;
   final List<String> resolvedAlertIds = <String>[];
 
   /// `false` simula alerta que a central não encontra na microárea.
@@ -250,7 +258,7 @@ class FakeAcsBackend implements AcsBackend {
     return AlertAckResult(
       alertId: alertId,
       acknowledged: acknowledged,
-      status: acknowledged ? AlertStatus.acknowledged : null,
+      status: ackWithoutStatus ? null : ackStatus ?? (acknowledged ? AlertStatus.acknowledged : null),
     );
   }
 

@@ -1,0 +1,39 @@
+# Issue #86 — validação depois da correção (2026-10-25), emulador-5554, banco de teste sinalacs_e2e
+# Branch fix/issue-86-ack-status @ c959911
+
+## ./scripts/qa/acs_ack_concluido_e2e.sh
+== stack de e2e (banco de teste)
+== aparelho B confirma um alerta já concluído no A (reserva HTTP: 30 s)
+E2E_DISPARAR_ALERTA id=4abe8a77-da02-40fe-94dd-57a14c2b6703
+  [script] alerta 4abe8a77-da02-40fe-94dd-57a14c2b6703 inserido (21:48:56)
+E2E_CONCLUIR_NO_APARELHO_A id=4abe8a77-da02-40fe-94dd-57a14c2b6703
+  [script] alerta 4abe8a77-da02-40fe-94dd-57a14c2b6703 concluído no aparelho A (21:49:26)
+E2E_ACK_CONCLUIDO_OK
+E2E_SEGUE_CONCLUIDO_OK
+01:14 +1: All tests passed!
+== banco de teste (alerta 4abe8a77-da02-40fe-94dd-57a14c2b6703)
+  alerta segue concluído: resolved
+  uma linha ack_already_resolved na trilha: 1
+  nenhuma linha acknowledged na trilha: 0
+  nada no alert_outbox: não veio pelo broker: 0
+OK: o ACK de um alerta já concluído voltou resolved e a tela não ofereceu "Concluir atendimento".
+exit=0
+
+## Regressão #80: ./scripts/qa/acs_alert_fallback_e2e.sh
+E2E_DISPARAR_ALERTA id=4f9e022d-2260-47de-8487-077d4953f353
+E2E_ALERTA_VIA_HTTP atraso_ms=29647
+E2E_ACK_OK
+E2E_RESERVA_OK
+01:07 +1: All tests passed!
+  atraso até o cartão: 29647 ms
+  alerta confirmado, com acknowledgedAt: true
+  uma linha acknowledged na trilha: 1
+  nenhuma leitura de alerta auditada (D2): 0
+  nada no alert_outbox: não veio pelo broker: 0
+OK: alerta recebido só pela reserva HTTP em 29647 ms e confirmado pela tela.
+exit=0
+
+## Suítes
+backend: dart test -j 1 → 02:24 +1538: All tests passed!
+apps/acs: flutter test → 08:14 +760: All tests passed!; flutter analyze → No issues found
+scripts/qa/acs_ack_concluido_e2e_test.sh → OK; scripts/qa/acs_alert_fallback_e2e_test.sh → OK

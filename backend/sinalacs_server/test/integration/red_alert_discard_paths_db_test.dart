@@ -184,7 +184,7 @@ void main() {
           alertId: alerta.id!.uuid,
           acsId: _acs,
           microAreaId: _ma,
-          audit: const AuditEvent(
+          auditFor: (_) => const AuditEvent(
             userId: _acs,
             actionType: 'write',
             resourceType: 'alert',
@@ -221,7 +221,7 @@ void main() {
               ),
               alertId: alerta.id!.uuid,
             );
-        expect(ok, isTrue);
+        expect(ok, AlertStatus.acknowledged);
         expect(
           (await Alert.db.findById(session, alerta.id!))!.status,
           AlertStatus.acknowledged,

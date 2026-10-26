@@ -107,7 +107,7 @@ class OrmAlertStore implements AlertStore {
     required String alertId,
     required String acsId,
     required String microAreaId,
-    required AuditEvent audit,
+    required AuditEvent Function(AlertAckOutcome outcome) auditFor,
   }) async {
     final session = _session();
     final alertUuid = UuidValue.fromString(alertId);
@@ -133,8 +133,15 @@ class OrmAlertStore implements AlertStore {
           (await Alert.db.findById(session, alertUuid, transaction: transaction))!;
 
       final now = DateTime.now().toUtc();
-      // Lido sob a trava, antes do UPDATE: só o primeiro ACK emite a
-      // telemetria `alert_received_acs` (#83).
+      // Lido sob a trava, antes do UPDATE: o desfecho é o que a linha era, não
+      // o que o chamador supõe (#86).
+      final outcome = switch (alert.status) {
+        AlertStatus.resolved => AlertAckOutcome.alreadyResolved,
+        AlertStatus.acknowledged => AlertAckOutcome.alreadyAcknowledged,
+        AlertStatus.pending || AlertStatus.escalated => AlertAckOutcome.acknowledged,
+      };
+      // Também lido sob a trava: só o primeiro ACK emite a telemetria
+      // `alert_received_acs` (#83).
       final acknowledgedAt = alert.acknowledgedAt ?? now;
       await Alert.db.updateRow(
         session,
@@ -176,9 +183,10 @@ class OrmAlertStore implements AlertStore {
 
       // Fail-closed: se a trilha falhar, a transação inteira (status incluso)
       // é desfeita. Roda por último, pois o lock da cadeia nunca precede outro.
-      await _appendAudit(session, transaction, audit);
+      await _appendAudit(session, transaction, auditFor(outcome));
 
       return AlertAckRecord(
+        outcome: outcome,
         triggeredAt: alert.triggeredAt,
         acknowledgedAt: acknowledgedAt,
         firstAcknowledgement: alert.acknowledgedAt == null,

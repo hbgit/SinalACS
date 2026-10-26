@@ -21,15 +21,17 @@ abstract interface class AlertStore {
   Future<void> save(AlertDelivery alert, {required String deviceId});
 
   /// Confirma o alerta no território do ACS. Quando o alerta existe na
-  /// microárea, grava [audit] na MESMA transação da mudança de status (#44):
-  /// se a trilha falhar, o ACK é desfeito — nenhum alerta vermelho muda de
-  /// estado sem registro. Sem alerta na microárea, nada é gravado e volta
-  /// `null`; senão volta o [AlertAckRecord] lido sob a trava da linha.
+  /// microárea, grava `auditFor(desfecho)` na MESMA transação da mudança de
+  /// status (#44): se a trilha falhar, o ACK é desfeito — nenhum alerta
+  /// vermelho muda de estado sem registro. O desfecho é decidido sob a trava
+  /// da linha (#86), para a trilha e a resposta não dizerem que mudou o que
+  /// não mudou. Sem alerta na microárea, nada é gravado e volta `null`; senão
+  /// volta o [AlertAckRecord] lido sob a trava.
   Future<AlertAckRecord?> acknowledge({
     required String alertId,
     required String acsId,
     required String microAreaId,
-    required AuditEvent audit,
+    required AuditEvent Function(AlertAckOutcome outcome) auditFor,
   });
 
   /// Conclui o atendimento (#76): leva o alerta de `acknowledged` a
@@ -128,13 +130,34 @@ class AlertResolveAttempt {
   final DateTime? resolvedAt;
 }
 
+/// Desfecho de [AlertStore.acknowledge] quando o alerta existe (#86).
+enum AlertAckOutcome {
+  /// `pending` (ou o `escalated` legado) → `acknowledged` agora.
+  acknowledged,
+
+  /// Já estava `acknowledged`: ACK repetido, nada muda.
+  alreadyAcknowledged,
+
+  /// Já estava `resolved` (outro aparelho concluiu, reentrega do MQTT): o
+  /// ACK não rebaixa a conclusão (#76) e a resposta diz `resolved`.
+  alreadyResolved,
+}
+
 /// O que [AlertStore.acknowledge] leu e gravou sob a trava da linha (#83).
 class AlertAckRecord {
   const AlertAckRecord({
+    required this.outcome,
     required this.triggeredAt,
     required this.acknowledgedAt,
     required this.firstAcknowledgement,
   });
+
+  final AlertAckOutcome outcome;
+
+  /// O status da linha depois do ACK, que é o que o RPC devolve (#86).
+  AlertStatus get status => outcome == AlertAckOutcome.alreadyResolved
+      ? AlertStatus.resolved
+      : AlertStatus.acknowledged;
 
   final DateTime triggeredAt;
 
@@ -296,7 +319,10 @@ class RedAlertService {
   // vermelho nunca pode ser descartado por colisão de identificador (INV-03).
   String _newAlertId() => _uuid.v4();
 
-  Future<bool> acknowledge({required AuthenticatedUser user, required String alertId}) async {
+  /// Status do alerta depois do ACK, lido sob a trava da linha: `resolved`
+  /// quando o atendimento já foi concluído (#86), `acknowledged` nos demais
+  /// casos; `null` quando o alerta não existe na microárea do ACS.
+  Future<AlertStatus?> acknowledge({required AuthenticatedUser user, required String alertId}) async {
     Authorization.require(
       user,
       roles: {UserRole.acs},
@@ -307,24 +333,32 @@ class RedAlertService {
       throw ArgumentError('O identificador do alerta é obrigatório.');
     }
     // Toda confirmação que encontra o alerta é auditada, inclusive a repetida
-    // do mesmo ACS: o log é append-only e registra cada ato (decisão #44).
-    // Sem identidade de paciente: só quem confirmou e qual alerta. O ACK por
-    // MQTT não é autenticado (a identidade vem do payload), então a trilha o
-    // marca `acknowledged_mqtt` em vez de atribuí-lo como um ACK do RPC.
+    // e a que chega depois da conclusão: o log é append-only e registra cada
+    // ato (decisão #44), mas só a que muda o status grava `acknowledged`
+    // (#86). Sem identidade de paciente: só quem confirmou e qual alerta. O
+    // ACK por MQTT não é autenticado (a identidade vem do payload), então a
+    // trilha o marca com `_mqtt` em vez de atribuí-lo como um ACK do RPC.
     final porMqtt = user.deviceId == mqttAckDeviceId;
     final ack = await _store.acknowledge(
       alertId: alertId,
       acsId: user.id,
       microAreaId: user.microAreaId!,
-      audit: AuditEvent(
-        userId: user.id,
-        actionType: 'write',
-        resourceType: 'alert',
-        resourceId: alertId,
-        result: porMqtt ? 'acknowledged_mqtt' : 'acknowledged',
-      ),
+      auditFor: (outcome) {
+        final result = switch (outcome) {
+          AlertAckOutcome.acknowledged => 'acknowledged',
+          AlertAckOutcome.alreadyAcknowledged => 'ack_already_acknowledged',
+          AlertAckOutcome.alreadyResolved => 'ack_already_resolved',
+        };
+        return AuditEvent(
+          userId: user.id,
+          actionType: 'write',
+          resourceType: 'alert',
+          resourceId: alertId,
+          result: porMqtt ? '${result}_mqtt' : result,
+        );
+      },
     );
-    if (ack == null) return false;
+    if (ack == null) return null;
     // Depois do commit da transação própria do store: nenhum caminho de
     // produção chama `acknowledge` com transação externa (o único
     // `serviceFor(session, transaction: …)` é o `createRedAlert`). Best-effort:
@@ -339,7 +373,7 @@ class RedAlertService {
         channel: porMqtt ? 'mqtt' : 'rpc',
       );
     }
-    return true;
+    return ack.status;
   }
 
   /// Texto da recusa de concluir um alerta que ninguém confirmou (#76).

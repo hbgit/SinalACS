@@ -103,13 +103,21 @@ class _MemoryStore implements AlertStore {
     required String alertId,
     required String acsId,
     required String microAreaId,
-    required AuditEvent audit,
+    required AuditEvent Function(AlertAckOutcome outcome) auditFor,
   }) async {
-    audits.add(audit);
     final primeiro = status[alertId] == 'pending';
-    status[alertId] = 'acknowledged';
+    // Como o ORM sob a trava (#86): o desfecho sai do status lido, e o ACK
+    // nunca rebaixa `resolved`.
+    final outcome = switch (status[alertId]) {
+      'resolved' => AlertAckOutcome.alreadyResolved,
+      'acknowledged' => AlertAckOutcome.alreadyAcknowledged,
+      _ => AlertAckOutcome.acknowledged,
+    };
+    audits.add(auditFor(outcome));
+    if (outcome == AlertAckOutcome.acknowledged) status[alertId] = 'acknowledged';
     final em = DateTime.utc(2026, 10, 25, 12);
     return AlertAckRecord(
+      outcome: outcome,
       triggeredAt: alerts[alertId]?.triggeredAt ?? em,
       acknowledgedAt: em,
       firstAcknowledgement: primeiro,
@@ -346,7 +354,7 @@ void main() {
         alertId: 'alerta-1',
       );
 
-      expect(ok, isTrue);
+      expect(ok, AlertStatus.acknowledged);
       expect(store.status['alerta-1'], 'acknowledged');
       final e = store.audits.single;
       expect(e.actionType, 'write');

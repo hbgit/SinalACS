@@ -630,6 +630,12 @@ void main() {
           alertId: alertId,
         );
         expect(ack.acknowledged, isTrue);
+        // #86: a resposta diz o status da linha travada, não um palpite.
+        expect(ack.status, AlertStatus.resolved);
+        expect(
+          await resultadosDaTrilha(alertId),
+          ['acknowledged', 'resolved', 'ack_already_resolved'],
+        );
 
         final linha = await Alert.db.findById(
           sessionBuilder.build(),
@@ -637,6 +643,22 @@ void main() {
         );
         expect(linha!.status, AlertStatus.resolved);
         expect(linha.resolvedAt, isNotNull);
+      });
+
+      test('ACK repetido de um alerta confirmado devolve acknowledged e audita ack_already_acknowledged', () async {
+        final (:alertId, :acs) = await alertaConfirmado();
+
+        final ack = await endpoints.alerts.acknowledge(
+          sessionBuilder,
+          accessToken: acs,
+          alertId: alertId,
+        );
+
+        expect(ack.acknowledged, isTrue);
+        expect(ack.status, AlertStatus.acknowledged);
+        expect(await resultadosDaTrilha(alertId), ['acknowledged', 'ack_already_acknowledged']);
+        final linha = await Alert.db.findById(sessionBuilder.build(), UuidValue.fromString(alertId));
+        expect(linha!.status, AlertStatus.acknowledged);
       });
 
       test('alerta de outra microárea: resolved false, nada muda nem é auditado', () async {

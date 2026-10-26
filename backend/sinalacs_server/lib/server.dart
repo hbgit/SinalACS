@@ -205,7 +205,7 @@ Future<void> _connectAlertDispatcher(Serverpod pod) async {
     onAcknowledgement: (ack) async {
       final session = await pod.createSession(enableLogging: false);
       try {
-        final acknowledged = await runtime.serviceFor(session).acknowledge(
+        final status = await runtime.serviceFor(session).acknowledge(
               user: AuthenticatedUser(
                 id: ack.acsId,
                 role: UserRole.acs,
@@ -216,7 +216,7 @@ Future<void> _connectAlertDispatcher(Serverpod pod) async {
             );
         session.log(
           'ACK do alerta ${ack.alertId} pelo ACS ${ack.acsId}: '
-          '${acknowledged ? 'registrado' : 'sem correspondência na microárea'}',
+          '${status != null ? 'registrado (${status.name})' : 'sem correspondência na microárea'}',
         );
       } finally {
         await session.close();

@@ -72,6 +72,10 @@ class AlertsEndpoint extends AuthenticatedEndpoint {
     }
   }
 
+  /// Confirma o recebimento. `status` é o da linha travada: um alerta já
+  /// concluído (outro aparelho, reentrega do MQTT) volta `resolved`, não
+  /// `acknowledged` (#86). Alerta inexistente ou de outra microárea devolve
+  /// `acknowledged: false` e `status` nulo.
   Future<AlertAckResult> acknowledge(
     Session session, {
     required String accessToken,
@@ -81,12 +85,11 @@ class AlertsEndpoint extends AuthenticatedEndpoint {
     final service = AlertRuntime.instance.serviceFor(session);
 
     try {
-      final acknowledged =
-          await service.acknowledge(user: user, alertId: alertId);
+      final status = await service.acknowledge(user: user, alertId: alertId);
       return AlertAckResult(
         alertId: alertId,
-        acknowledged: acknowledged,
-        status: acknowledged ? AlertStatus.acknowledged : null,
+        acknowledged: status != null,
+        status: status,
       );
     } on ArgumentError catch (error) {
       throw AlertValidationException(message: '${error.message}');
