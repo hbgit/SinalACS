@@ -1,6 +1,7 @@
 /// Telemetria dos eventos do PRD §1.3 (#83) no emulador, contra o BANCO DE
-/// TESTE: alerta → ACK → visitas offline → reinício → online → reenvio
-/// idempotente.
+/// TESTE: alerta → ACK → visitas offline → reinício simulado → online → reenvio
+/// idempotente. O reinício é simulado (um `SinalAcsApp` novo no mesmo processo);
+/// "app morto entre attempt e result" só tem prova unitária.
 ///
 /// Só roda por `scripts/qa/acs_telemetria_e2e.sh` (sufixo `_e2e`: a descoberta
 /// do `flutter test integration_test` não o encontra). Conversa com o script

@@ -1744,16 +1744,19 @@ Backlog priorizado na seção final do relatório; conferência por `python3 scr
 | 2 | 10/10 | 102 ms |
 | 3 | 10/10 | 104 ms |
 
-- E2E no emulador, `./scripts/qa/acs_telemetria_e2e.sh` (log `docs/superpowers/plans/2026-10-25-issue-83-e2e.log`, commit d617df7): `alert_triggered` 1, `alert_received_acs` 1, `sync_attempt` 2, `sync_result` 2, `visit_registered` 3; sem `eventId` duplicado após reenvio forçado de 7 eventos; nenhum UUID cru de paciente; 1 visita ligada ao alerta. Relatório: `eventualSyncRate` 1.0, `perAttemptSuccessRate` 0.5, `interruptedAttempts` 0, `alertLinkedVisits` 1, `medianAckLatencyMs` 4905. Regressão `./scripts/qa/acs_full_e2e.sh` verde.
+- E2E no emulador (o "reinício" é simulado: um `SinalAcsApp` novo no mesmo processo; "app morto entre attempt e result" só tem prova unitária), `./scripts/qa/acs_telemetria_e2e.sh` (log `docs/superpowers/plans/2026-10-25-issue-83-e2e.log`, commit d617df7): `alert_triggered` 1, `alert_received_acs` 1, `sync_attempt` 2, `sync_result` 2, `visit_registered` 3; sem `eventId` duplicado após reenvio forçado de 7 eventos; nenhum UUID cru de paciente; 1 visita ligada ao alerta. Relatório: `eventualSyncRate` 1.0, `perAttemptSuccessRate` 0.5, `interruptedAttempts` 0, `alertLinkedVisits` 1, `medianAckLatencyMs` 4905. Regressão `./scripts/qa/acs_full_e2e.sh` verde.
 
 **Cortes (issues a abrir, números ainda não atribuídos).** Evento de onboarding sem assistência (H2); tela de relatórios/indicadores no backoffice sobre `telemetry_events` (MOD-RELATORIOS, aderência, visitas/ACS/dia, retenção); sinal de eventos descartados pelo teto; reemissão do `alert_*` perdido (R6).
 
 **Riscos residuais.**
-- R1 (desempenho): dentro do teto na medição acima; fora do laboratório, só o piloto diz.
+- R1 (desempenho): a medição acima usa `InMemoryTelemetryStore` e a sonda `unknown` (`live_check` e `offline_burst`): o custo do SQLCipher e do `connectivity_plus` **não foi medido**. Dentro do teto só para a parte de rede e backend; o resto, e o laboratório em geral, só o piloto diz.
 - R2 (fila): teto local de 5000 eventos por dono, apagando os mais antigos **sem aviso**; enviesa a taxa de sincronização em aparelhos muito tempo sem rede.
 - R3 (versões): app novo com servidor antigo recebe método inexistente e guarda os eventos até o teto; eventos de app antigo não existem, então o relatório precisa de janela posterior ao rollout.
 - R4 (privacidade): o pseudônimo ainda é dado pessoal (LGPD art. 13 §4); a ligação alerta→visita reidentifica com acesso a `alerts`. **Revisão do DPO pendente.**
 - R5 (relógio): `occurredAt` vem do relógio do aparelho; `clockSkewMs` por lote, mas um relógio que muda entre o evento e o envio ainda distorce.
 - R6 (servidor): um crash entre o commit do alerta/ACK e a emissão perde o `alert_*`; o TMRAV segue calculável por `alerts`.
+- Rotação de `TELEMETRY_PSEUDONYM_KEY` (I1): a exclusão do titular apaga pelo pseudônimo da chave vigente; após rotacionar, eventos antigos do paciente (até 365 dias) ficam até `DELETE FROM telemetry_events` ou o fim da retenção. Sem `keyVersion` nesta issue.
+- Um `visit_registered` de visita presa no aparelho pode chegar depois do atendimento do pedido do titular e recriar uma linha com o pseudônimo dele, que fica até a retenção (365 dias).
+- `offline_flag` = sem interface de rede (`kind == none`), não "servidor inalcançável": Wi-Fi sem rota até o servidor dá `false`.
 - Um `append` que estoura os 2 s pode gravar tarde e deixar a tentativa órfã (sem `sync_result`).
 - Na limpeza remota (#81) a telemetria é selada: uma tentativa interrompida não aparece e o que não subiu se perde com o banco.

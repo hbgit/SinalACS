@@ -112,6 +112,8 @@ class TelemetryRecorder {
       'patient_id': visit.patientId,
       'visit_type': alertId == null ? 'routine' : 'alert',
       if (alertId != null) 'alert_id': alertId,
+      // Só "sem interface de rede" (kind == none); servidor inalcançável com
+      // Wi-Fi ligado dá false.
       'offline_flag': kind == NetworkKind.none,
       'network_type': kind.wireName,
       'sync_status': 'queued',

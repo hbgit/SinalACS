@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 #
 # Telemetria dos eventos do PRD §1.3 (#83) no emulador-5554, contra o BANCO DE
-# TESTE: alerta → ACK → visitas offline → reinício → online → reenvio
-# idempotente.
+# TESTE: alerta → ACK → visitas offline → reinício simulado → online → reenvio
+# idempotente. O reinício é simulado (um SinalAcsApp novo no mesmo processo);
+# "app morto entre attempt e result" só tem prova unitária.
 #
 #   ./scripts/qa/acs_telemetria_e2e.sh
 #   DEVICE=0087014315 ./scripts/qa/acs_telemetria_e2e.sh   # aparelho físico
