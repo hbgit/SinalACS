@@ -186,6 +186,55 @@ diag_falhar() { # $1 = texto esperado; $2 = mensagem. Coleta, observa, coleta de
   exit 1
 }
 
+# ---- precondição do envio: conexão FCM NOVA (#103, ramo A-MCS) -----------------------------------
+# A conexão MCS do GMS com o FCM morre em silêncio no emulador da CI, e o GMS continua dizendo
+# "Is client connected: true" até o heartbeat seguinte (540–600 s) falhar. Um envio nesse intervalo
+# é aceito pelo FCM e só chega depois do reset (medido: 51 s, execução 40361611807). Por isso
+# "conectado" não basta: religa a rede e exige uma conexão aberta DEPOIS disso. É uma precondição
+# medida, não uma espera maior na bandeja.
+
+# stdin = saída de DIAG_CMD_CONEXAO_FCM. Imprime a idade da conexão em s, ou nada se desconectado.
+fcm_idade_conexao() {
+  awk '/Is client connected: true/ { c = 1 }
+       /connectTime=/ { v = $0; sub(/.*connectTime=/, "", v); sub(/\/.*/, "", v)
+                        n = split(v, p, ":"); t = 0; for (i = 1; i <= n; i++) t = t * 60 + p[i] }
+       END { if (c && t != "") print t }'
+}
+
+garantir_conexao_fcm() { # $1 = espera máxima em s (padrão 120)
+  local max="${1:-120}" inicio=$SECONDS inicio_rede idade
+  _diag_adb shell svc wifi disable >/dev/null || true
+  _diag_adb shell svc data disable >/dev/null || true
+  sleep 2
+  _diag_adb shell svc wifi enable >/dev/null || true
+  _diag_adb shell svc data enable >/dev/null || true
+  inicio_rede=$SECONDS
+  while (( SECONDS - inicio < max )); do
+    idade="$(_diag_adb shell "$DIAG_CMD_CONEXAO_FCM" | fcm_idade_conexao || true)"
+    if [[ -n "$idade" ]] && (( idade <= SECONDS - inicio_rede )); then
+      echo "(conexão FCM nova em $(( SECONDS - inicio )) s)"
+      diag_marca conexao_fcm_nova
+      return 0
+    fi
+    sleep 1
+  done
+  mkdir -p "$PUSH_DIAG_DIR"
+  _diag_conexao_fcm | _diag_publicar "$PUSH_DIAG_DIR/sem_conexao_fcm.txt"
+  echo "FALHOU: GMS sem conexão nova com o FCM em $max s (falha de ambiente, não de entrega)"
+  diag_encerrar
+  exit 1
+}
+
+# O app só fica instalado até o fim do hold (push_hold_fim, epoch): depois o `flutter test`
+# o desinstala e uma espera da bandeja falharia como "não chegou" sem ser falha de entrega.
+exigir_hold() { # $1 = segundos que o envio seguinte ainda precisa do app instalado
+  local resta=$(( ${push_hold_fim:?} - $(date +%s) ))
+  (( resta >= $1 )) && return 0
+  echo "FALHOU: o hold do app acaba em ${resta} s, antes da espera de $1 s da bandeja (aumente PUSH_HOLD_SECONDS; o teste tem timeout de 6 min)"
+  diag_encerrar
+  exit 1
+}
+
 # A entrega pelo FCM leva de 1 a dezenas de segundos: espera o texto aparecer em vez de
 # dormir um tempo fixo (um `sleep` curto é uma corrida com a rede do emulador).
 na_bandeja() { # $1 = texto que deve estar na bandeja do app; $2 = espera máxima em s (padrão 45)
