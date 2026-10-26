@@ -1746,7 +1746,7 @@ Backlog priorizado na seção final do relatório; conferência por `python3 scr
 
 - E2E no emulador (o "reinício" é simulado: um `SinalAcsApp` novo no mesmo processo; "app morto entre attempt e result" só tem prova unitária), `./scripts/qa/acs_telemetria_e2e.sh` (log `docs/superpowers/plans/2026-10-25-issue-83-e2e.log`, commit d617df7): `alert_triggered` 1, `alert_received_acs` 1, `sync_attempt` 2, `sync_result` 2, `visit_registered` 3; sem `eventId` duplicado após reenvio forçado de 7 eventos; nenhum UUID cru de paciente; 1 visita ligada ao alerta. Relatório: `eventualSyncRate` 1.0, `perAttemptSuccessRate` 0.5, `interruptedAttempts` 0, `alertLinkedVisits` 1, `medianAckLatencyMs` 4905. Regressão `./scripts/qa/acs_full_e2e.sh` verde.
 
-**Cortes (issues a abrir, números ainda não atribuídos).** Evento de onboarding sem assistência (H2); tela de relatórios/indicadores no backoffice sobre `telemetry_events` (MOD-RELATORIOS, aderência, visitas/ACS/dia, retenção); sinal de eventos descartados pelo teto; reemissão do `alert_*` perdido (R6).
+**Cortes (issues abertas em 2026-10-25).** Evento de onboarding sem assistência (H2): #99; tela de relatórios/indicadores no backoffice sobre `telemetry_events` (MOD-RELATORIOS, aderência, visitas/ACS/dia, retenção): #102; sinal de eventos descartados pelo teto: #100; reemissão do `alert_*` perdido (R6): #101.
 
 **Riscos residuais.**
 - R1 (desempenho): a medição acima usa `InMemoryTelemetryStore` e a sonda `unknown` (`live_check` e `offline_burst`): o custo do SQLCipher e do `connectivity_plus` **não foi medido**. Dentro do teto só para a parte de rede e backend; o resto, e o laboratório em geral, só o piloto diz.
