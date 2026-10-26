@@ -85,6 +85,8 @@ events:
     fields: [acs_id, patient_id, visit_type, offline_flag, sync_status]
 ```
 
+> **Implementação (#83):** os eventos ficam em `telemetry_events` (`backend/`, ingestão `telemetry.ingest`). Desvio A1: `location_hash` do `alert_triggered` virou `location_known` (booleano), para não gravar localização derivada. O paciente aparece só como pseudônimo HMAC-SHA-256 (`TELEMETRY_PSEUDONYM_KEY`), nunca o UUID cru; os ids dos eventos emitidos pelo backend são determinísticos (UUID v5), o que torna a reemissão idempotente.
+
 ---
 
 ## 2. Escopo Funcional e Comportamental

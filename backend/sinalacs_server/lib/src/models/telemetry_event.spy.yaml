@@ -1,0 +1,42 @@
+### Evento de telemetria do PRD §1.3 (#83). Só anexa: nunca se atualiza.
+### Sem `relation` para `alerts` nem `users`: o expurgo de um não depende do outro.
+class: TelemetryEvent
+table: telemetry_events
+fields:
+  ### Identificador do evento, gerado por quem emite. Único: o reenvio do mesmo
+  ### lote não duplica linha. Os eventos do backend usam UUID v5 determinístico.
+  eventId: UuidValue
+  ### Um de `alert_triggered`, `alert_received_acs`, `sync_attempt`,
+  ### `sync_result` ou `visit_registered`.
+  eventName: String
+  ### Versão do esquema do `payload`. Hoje 1.
+  schemaVersion: int, default=1
+  source: TelemetrySource
+  ### Relógio de quem emitiu (UTC). No app pode estar errado: ver `clockSkewMs`.
+  occurredAt: DateTime
+  ### Relógio do servidor ao gravar. Base da retenção.
+  receivedAt: DateTime
+  ### `receivedAt` menos o instante de envio do app. Nulo nos eventos do backend.
+  clockSkewMs: int?
+  ### ACS autor, vindo do token e nunca do cliente. Dado de profissional.
+  actorId: UuidValue?
+  ### HMAC-SHA-256 do id da instalação, domínio `device`. Nunca o id cru.
+  devicePseudonym: String?
+  ### HMAC-SHA-256 do UUID do paciente, domínio `patient`, calculado no servidor.
+  patientPseudonym: String?
+  alertId: UuidValue?
+  appVersion: String
+  ### JSON em texto, esquema fechado por evento, sem PII (sem UUID do paciente).
+  payload: String
+indexes:
+  telemetry_events_event_id_key:
+    fields: eventId
+    unique: true
+  telemetry_events_name_occurred_idx:
+    fields: eventName, occurredAt
+  telemetry_events_alert_idx:
+    fields: alertId
+  telemetry_events_patient_idx:
+    fields: patientPseudonym
+  telemetry_events_received_idx:
+    fields: receivedAt

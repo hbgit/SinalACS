@@ -24,6 +24,7 @@ Future<void> main() async {
     auditChainSecret: 'test-audit-chain-secret',
     healthDataEncryptionKey: AppConfig.developmentHealthDataEncryptionKey,
     cpfHashPepper: AppConfig.developmentCpfHashPepper,
+    telemetryPseudonymKey: AppConfig.developmentTelemetryPseudonymKey,
     smsGateway: 'log',
     mqttUsername: env['MQTT_USERNAME'],
     mqttPassword: env['MQTT_PASSWORD'],

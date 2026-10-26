@@ -18,6 +18,7 @@ class _FakeRetentionStore implements RetentionStore {
           visits: 0,
           triageSessions: 0,
           alertsByRisk: {},
+          telemetryEvents: 0,
         );
   }
 }
@@ -30,6 +31,7 @@ const _counts = ExpurgeCounts(
   visits: 4,
   triageSessions: 5,
   alertsByRisk: {'red': 2, 'yellow': 1},
+  telemetryEvents: 6,
 );
 
 void main() {
@@ -39,6 +41,7 @@ void main() {
         alertsDays: 730,
         visitsDays: 1825,
         triageSessionsDays: 1825,
+        telemetryDays: 365,
       );
       final now = DateTime.utc(2026, 10, 7, 12);
 
@@ -48,6 +51,7 @@ void main() {
       // 1825 dias atrás cruzam o 29/02/2024 (ano bissexto): +1 dia civil.
       expect(cutoffs.visits, DateTime.utc(2021, 10, 8, 12));
       expect(cutoffs.triageSessions, DateTime.utc(2021, 10, 8, 12));
+      expect(cutoffs.telemetry, DateTime.utc(2025, 10, 7, 12));
     });
 
     test('normaliza "agora" para UTC antes de calcular', () {
@@ -55,6 +59,7 @@ void main() {
         alertsDays: 1,
         visitsDays: 2,
         triageSessionsDays: 3,
+        telemetryDays: 365,
       );
 
       final cutoffs = policy.cutoffsAt(DateTime.utc(2026, 10, 7, 12));
@@ -104,6 +109,7 @@ void main() {
           alertsDays: 730,
           visitsDays: 1825,
           triageSessionsDays: 1825,
+          telemetryDays: 365,
         ),
         clock: () => DateTime.utc(2026, 10, 7, 12),
       );
@@ -122,6 +128,7 @@ void main() {
         alertsDays: 730,
         visitsDays: 1825,
         triageSessionsDays: 1825,
+        telemetryDays: 365,
       );
       final result = ExpurgeResult(
         ranAtUtc: DateTime.utc(2026, 10, 7, 3),
@@ -138,6 +145,7 @@ void main() {
       expect(line, contains('outbox=2'));
       expect(line, contains('visitas=4'));
       expect(line, contains('triagens=5'));
+      expect(line, contains('telemetria=6'));
       expect(line, contains('cortes:'));
     });
 
@@ -146,6 +154,7 @@ void main() {
         alertsDays: 730,
         visitsDays: 1825,
         triageSessionsDays: 1825,
+        telemetryDays: 365,
       ).cutoffsAt(DateTime.utc(2026, 10, 7, 3));
       ExpurgeResult com(int n) => ExpurgeResult(
             ranAtUtc: DateTime.utc(2026, 10, 7, 3),
@@ -158,6 +167,7 @@ void main() {
               visits: 0,
               triageSessions: 0,
               alertsByRisk: const {},
+              telemetryEvents: 0,
               skippedPendingRed: n,
             ),
           );

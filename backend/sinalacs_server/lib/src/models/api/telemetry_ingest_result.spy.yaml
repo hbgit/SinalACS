@@ -1,0 +1,6 @@
+### Resposta de `telemetry.ingest` (#83): o app apaga os aceitos e descarta
+### ou mantém os recusados. Um evento recusado nunca derruba o lote.
+class: TelemetryIngestResult
+fields:
+  acceptedEventIds: List<String>
+  rejectedEventIds: List<String>

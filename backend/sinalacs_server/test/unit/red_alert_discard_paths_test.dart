@@ -99,15 +99,21 @@ class _MemoryStore implements AlertStore {
   }
 
   @override
-  Future<bool> acknowledge({
+  Future<AlertAckRecord?> acknowledge({
     required String alertId,
     required String acsId,
     required String microAreaId,
     required AuditEvent audit,
   }) async {
     audits.add(audit);
+    final primeiro = status[alertId] == 'pending';
     status[alertId] = 'acknowledged';
-    return true;
+    final em = DateTime.utc(2026, 10, 25, 12);
+    return AlertAckRecord(
+      triggeredAt: alerts[alertId]?.triggeredAt ?? em,
+      acknowledgedAt: em,
+      firstAcknowledgement: primeiro,
+    );
   }
 
   @override

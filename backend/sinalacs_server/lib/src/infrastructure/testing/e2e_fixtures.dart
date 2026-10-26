@@ -19,7 +19,8 @@ class E2ePatient {
   final String id;
 
   /// `main` e `chronic` (jornada pela tela), `api` (testes sem tela), `push`
-  /// (testes de push) ou `outsider` (outra microárea).
+  /// (testes de push), `telemetry` (e2e da telemetria, #83) ou `outsider`
+  /// (outra microárea).
   final String role;
   final String name;
 
@@ -321,6 +322,9 @@ E2eFixtures generateE2eFixtures(Random random) {
       // paciente, então testes que rodam em sequência não podem dividir um.
       patient('api', 'Paciente E2E API', chronic: false, microAreaId: microAreaId),
       patient('push', 'Paciente E2E Push', chronic: false, microAreaId: microAreaId),
+      // Dispara o alerta do e2e da telemetria (#83); o script confere que o
+      // UUID dele nunca chega cru a `telemetry_events`.
+      patient('telemetry', 'Paciente E2E Telemetria', chronic: false, microAreaId: microAreaId),
       patient('outsider', 'Paciente E2E Outra Área', chronic: false, microAreaId: otherMicroAreaId),
     ],
   );

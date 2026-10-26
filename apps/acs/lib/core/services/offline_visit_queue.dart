@@ -1,5 +1,11 @@
 import 'dart:math';
 
+import 'package:sinalacs_acs/core/telemetry/telemetry_recorder.dart';
+
+import 'package:sinalacs_acs/core/services/owner_id.dart';
+
+export 'package:sinalacs_acs/core/services/owner_id.dart' show requireOwnerId;
+
 enum SyncOutcomeKind {
   synced,
   conflict,
@@ -63,6 +69,18 @@ class VisitConflictSnapshot {
   }
 }
 
+/// UUID v4 com `Random.secure`: ids de visita (`localId`) e de eventos de
+/// telemetria saem do mesmo gerador.
+String newRandomUuid() {
+  final random = Random.secure();
+  final bytes = List<int>.generate(16, (_) => random.nextInt(256));
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  final hex = bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+  return '${hex.substring(0, 8)}-${hex.substring(8, 12)}-'
+      '${hex.substring(12, 16)}-${hex.substring(16, 20)}-${hex.substring(20)}';
+}
+
 class OfflineVisitRecord {
   OfflineVisitRecord({
     required this.patientId,
@@ -76,7 +94,7 @@ class OfflineVisitRecord {
     this.version = 1,
     this.conflictServerVersion,
     this.conflictServer,
-  })  : localId = localId ?? _newLocalId(),
+  })  : localId = localId ?? newRandomUuid(),
         createdAt = createdAt ?? DateTime.now();
 
   /// UUID do paciente, exatamente como veio no alerta.
@@ -153,16 +171,6 @@ class OfflineVisitRecord {
       conflictServerVersion: conflictServerVersion ?? this.conflictServerVersion,
       conflictServer: conflictServer ?? this.conflictServer,
     );
-  }
-
-  static String _newLocalId() {
-    final random = Random.secure();
-    final bytes = List<int>.generate(16, (_) => random.nextInt(256));
-    bytes[6] = (bytes[6] & 0x0f) | 0x40;
-    bytes[8] = (bytes[8] & 0x3f) | 0x80;
-    final hex = bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
-    return '${hex.substring(0, 8)}-${hex.substring(8, 12)}-'
-        '${hex.substring(12, 16)}-${hex.substring(16, 20)}-${hex.substring(20)}';
   }
 }
 
@@ -313,15 +321,6 @@ class VisitLocalIdConflict implements Exception {
       : 'VisitLocalIdConflict: localId $localId já pertence a outro dono';
 }
 
-/// Valida o id de dono: vazio ou só espaços é erro de programação (sem dono, a
-/// visita cairia na quarentena ou numa visão compartilhada).
-String requireOwnerId(String ownerId) {
-  if (ownerId.trim().isEmpty) {
-    throw ArgumentError.value(ownerId, 'ownerId', 'não pode ser vazio');
-  }
-  return ownerId;
-}
-
 /// Falha com [VisitLocalIdConflict] se [visits] repete algum `localId`.
 void ensureNoRepeatedLocalIds(List<OfflineVisitRecord> visits) {
   final seen = <String>{};
@@ -429,7 +428,7 @@ class _InMemoryLegacyVisitStore implements LegacyVisitStore {
 /// descartá-la — diferente de `error`, que continua pendente e retenta.
 /// Nenhum dos dois some do disco sozinho.
 class OfflineVisitQueue {
-  OfflineVisitQueue({VisitStore? store, this.synchronizer, this.conflictResolver})
+  OfflineVisitQueue({VisitStore? store, this.synchronizer, this.conflictResolver, this.telemetry})
       : _store = store ?? InMemoryVisitStore();
 
   final VisitStore _store;
@@ -439,6 +438,11 @@ class OfflineVisitQueue {
 
   /// `null`: os conflitos ficam guardados, mas "Manter a minha" devolve erro.
   final VisitConflictResolver? conflictResolver;
+
+  /// Eventos do PRD §1.3 (#83): `visit_registered` no [add], `sync_attempt`
+  /// e `sync_result` em volta do envio. `null` desliga, sem mudar mais nada.
+  /// O gravador nunca lança; resolver conflito não emite (fora do §1.3).
+  final TelemetryRecorder? telemetry;
 
   final List<OfflineVisitRecord> _pending = <OfflineVisitRecord>[];
   final List<OfflineVisitRecord> _synced = <OfflineVisitRecord>[];
@@ -508,10 +512,22 @@ class OfflineVisitQueue {
     }
   }
 
-  Future<void> add(OfflineVisitRecord record) async {
+  /// [alertId]: a visita nasceu de um alerta; só vai para a telemetria.
+  Future<void> add(OfflineVisitRecord record, {String? alertId}) async {
     if (_sealed) throw StateError('Fila de visitas encerrada pela limpeza do aparelho.');
     _pending.add(record);
     await _persist();
+    // Depois da gravação: o evento nunca chega antes da visita estar no disco.
+    // Sem gravador, nem o `await`: o fluxo fica idêntico ao de antes.
+    final recorder = telemetry;
+    // A visita já está no disco: um erro aqui não pode subir, ou o ACS a
+    // registraria de novo. Selada durante a gravação (#81): o banco pode já
+    // ter sido destruído, e o evento leva o UUID do paciente — nada é gravado.
+    if (recorder != null && !_sealed) {
+      try {
+        await recorder.visitRegistered(visit: record, alertId: alertId);
+      } catch (_) {}
+    }
   }
 
   /// Descarta as visitas recusadas em definitivo.
@@ -743,10 +759,37 @@ class OfflineVisitQueue {
       );
     }
 
+    // Com `await`: o `sync_attempt` fica no disco antes do envio, e um app
+    // morto no meio deixa a tentativa órfã (contada como interrompida).
+    final recorder = telemetry;
+    final attemptId =
+        recorder == null ? null : await recorder.syncAttempt(recordsCount: batch.length);
+    // Limpeza remota (#81) durante a gravação do attempt: o lote não sai. A
+    // tentativa fica órfã (interrompida), sem `sync_result`.
+    if (recorder != null && _sealed) return _sealedOutcome;
+    // `duration_ms` é a latência do envio: só o `push`.
+    final stopwatch = Stopwatch()..start();
+
     final List<VisitSyncOutcome> outcomes;
     try {
       outcomes = await sender.push(batch);
+      stopwatch.stop();
     } catch (error) {
+      stopwatch.stop();
+      // Selada no meio do voo (#81): nada mais grava, nem a telemetria. A
+      // tentativa fica órfã (interrompida).
+      if (recorder != null && !_sealed) {
+        await recorder.syncResult(
+          attemptEventId: attemptId,
+          successCount: 0,
+          failureCount: batch.length,
+          conflictCount: 0,
+          rejectedCount: 0,
+          outcome: SyncOutcomeKind.error.name,
+          transportError: true,
+          duration: stopwatch.elapsed,
+        );
+      }
       // O lote continua pendente: perder a visita por falha de rede seria
       // exatamente o que a fila existe para evitar.
       //
@@ -761,13 +804,33 @@ class OfflineVisitQueue {
       );
     }
 
-    return _applyOutcomes(batch, outcomes);
+    if (recorder == null) return _applyOutcomes(batch, outcomes);
+
+    late final ({int synced, int errors, int conflicts, int rejected}) counts;
+    final result = await _applyOutcomes(batch, outcomes, onCounts: (c) => counts = c);
+    // Selada no meio do voo (#81): o banco pode já ter sido destruído, e um
+    // `sync_result` aqui o reabriria. A tentativa fica órfã (interrompida).
+    if (_sealed) return result;
+    await recorder.syncResult(
+      attemptEventId: attemptId,
+      successCount: counts.synced,
+      failureCount: counts.errors,
+      conflictCount: counts.conflicts,
+      rejectedCount: counts.rejected,
+      outcome: result.kind.name,
+      transportError: false,
+      duration: stopwatch.elapsed,
+    );
+    return result;
   }
 
+  /// [onCounts] recebe as contagens apuradas do lote (telemetria, #83), antes
+  /// da precedência reduzi-las a um só [SyncOutcome].
   Future<SyncOutcome> _applyOutcomes(
     List<OfflineVisitRecord> batch,
-    List<VisitSyncOutcome> outcomes,
-  ) async {
+    List<VisitSyncOutcome> outcomes, {
+    void Function(({int synced, int errors, int conflicts, int rejected}) counts)? onCounts,
+  }) async {
     final byLocalId = {for (final outcome in outcomes) outcome.localId: outcome};
 
     var conflicts = 0;
@@ -841,6 +904,7 @@ class OfflineVisitQueue {
       ..addAll(stillPending)
       ..addAll(arrived);
     await _persist();
+    onCounts?.call((synced: synced, errors: errors, conflicts: conflicts, rejected: rejected));
 
     // Precedência: recusado > conflito > erro > sincronizado. Recusado é
     // trabalho de campo que NUNCA vai ao servidor — o que mais precisa

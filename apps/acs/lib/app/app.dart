@@ -35,6 +35,10 @@ import 'package:sinalacs_acs/core/services/route_service.dart';
 import 'package:sinalacs_acs/core/services/theme_controller.dart';
 import 'package:sinalacs_acs/core/services/visit_pull_service.dart';
 import 'package:sinalacs_acs/core/services/visit_queue_factory.dart';
+import 'package:sinalacs_acs/core/database/sqlcipher_telemetry_store.dart';
+import 'package:sinalacs_acs/core/telemetry/network_probe.dart';
+import 'package:sinalacs_acs/core/telemetry/telemetry_store.dart';
+import 'package:sinalacs_acs/core/telemetry/telemetry_uploader.dart';
 
 class SinalAcsApp extends StatefulWidget {
   const SinalAcsApp({
@@ -59,7 +63,24 @@ class SinalAcsApp extends StatefulWidget {
     this.deviceIds,
     this.connectivityChanges,
     this.wipeJournal,
+    this.telemetryStore,
+    this.telemetryTransport,
+    this.networkProbe,
   });
+
+  /// Fila local da telemetria (#83). `null` usa o `SqlCipherTelemetryStore`
+  /// sobre o banco das visitas quando [visitStorage] é o SQLCipher do
+  /// aparelho; com outro armazenamento (os testes de widget), sem telemetria.
+  final TelemetryStore? telemetryStore;
+
+  /// Quem leva a telemetria ao servidor. `null` usa o [backend] quando ele é
+  /// um [TelemetryTransport] (o `BackendClient`); o `FakeAcsBackend` não é,
+  /// e os testes que não injetam um ficam sem telemetria.
+  final TelemetryTransport? telemetryTransport;
+
+  /// Sonda de rede dos eventos. O `main.dart` passa a do `connectivity_plus`;
+  /// `null` grava `network_type: unknown` (o canal não existe no `flutter test`).
+  final NetworkProbe? networkProbe;
 
   /// Envio diferido (D4/D7) já montado — gancho de teste. `null` monta um
   /// sobre o armazenamento de visitas do app quando [uploadTokens] e
@@ -279,6 +300,42 @@ class _SinalAcsAppState extends State<SinalAcsApp> with WidgetsBindingObserver i
   /// volta, ou que se reautentica, reencontra o seu; outro ACS ganha o dele.
   final Map<String, OwnerVisitScope> _scopes = {};
 
+  /// Fila local da telemetria (#83): a injetada, ou a do banco SQLCipher das
+  /// visitas. Com outro armazenamento, sem telemetria. A limpeza remota a sela
+  /// ([_eraseDevice]) e o próximo login a reabre ([_scopeForShell]).
+  late final TelemetryStore? _telemetryStore = widget.telemetryStore ??
+      switch (_storage) {
+        final SqlCipherVisitStorage sqlcipher => SqlCipherTelemetryStore(sqlcipher.database),
+        _ => null,
+      };
+
+  late final TelemetryTransport? _telemetryTransport = widget.telemetryTransport ??
+      switch (widget.backend) {
+        final TelemetryTransport transport => transport,
+        _ => null,
+      };
+
+  /// Gravador e envio da telemetria por `userId`, criados junto com a fila do
+  /// dono e descartados com ela (RNF06): nunca um uploader novo por gatilho.
+  final Map<String, OwnerTelemetry> _telemetry = {};
+
+  /// A telemetria do dono, montada uma vez. `null` sem store ou transporte.
+  OwnerTelemetry? _telemetryFor(String owner) {
+    final store = _telemetryStore;
+    final transport = _telemetryTransport;
+    if (store == null || transport == null) return null;
+    return _telemetry.putIfAbsent(
+      owner,
+      () => buildOwnerTelemetry(
+        store: store,
+        transport: transport,
+        ownerId: owner,
+        backend: widget.backend,
+        probe: widget.networkProbe,
+      ),
+    );
+  }
+
   /// Fila e pull do dono de [session].
   ///
   /// Ordem: o resolvedor injetado; senão a fila/o pull injetados (gancho de
@@ -303,7 +360,12 @@ class _SinalAcsAppState extends State<SinalAcsApp> with WidgetsBindingObserver i
     // próximo login do dono precisa reencontrá-las.
     _queues.removeWhere((owner, queue) => owner != session.userId && !_mustKeep(queue));
     _scopes.removeWhere((key, scope) => !key.startsWith('${session.userId}|') && !_mustKeep(scope.queue));
+    // A telemetria acompanha a fila do dono: sai com ela (o gravador está
+    // dentro da fila mantida; o envio de quem saiu não dispara mais).
+    _telemetry.removeWhere((owner, _) => owner != session.userId && !_queues.containsKey(owner));
     return _scopes.putIfAbsent(visitCursorOwner(session), () {
+      // Fila injetada (gancho de teste): sem telemetria.
+      final telemetry = injectedQueue == null ? _telemetryFor(session.userId) : null;
       final built = buildOwnerVisitScope(
         backend: widget.backend,
         storage: _storage,
@@ -315,12 +377,15 @@ class _SinalAcsAppState extends State<SinalAcsApp> with WidgetsBindingObserver i
                 backend: widget.backend,
                 store: _storage.forOwner(session.userId),
                 ownerId: session.userId,
+                telemetry: telemetry?.recorder,
               ),
             ),
+        telemetryUploader: telemetry?.uploader,
       );
       return OwnerVisitScope(
         queue: built.queue,
         pullService: injectedPull ?? built.pullService,
+        telemetryUploader: built.telemetryUploader,
       );
     });
   }
@@ -519,6 +584,16 @@ class _SinalAcsAppState extends State<SinalAcsApp> with WidgetsBindingObserver i
     if (!_wipeReady || _wiping) return;
     final flush = _flush;
     if (flush != null) unawaited(flush.flushAll());
+    _flushTelemetry();
+  }
+
+  /// Envio da telemetria do dono da sessão aberta (#83), sem esperar: o
+  /// `flush` é single-flight por dono e nunca lança. Sem sessão, nada.
+  void _flushTelemetry() {
+    if (!_wipeReady || _wiping) return;
+    final owner = widget.backend.session?.userId;
+    final uploader = owner == null ? null : _telemetry[owner]?.uploader;
+    if (uploader != null) unawaited(uploader.flush());
   }
 
   // ---------------------------------------------------------------------------
@@ -660,12 +735,17 @@ class _SinalAcsAppState extends State<SinalAcsApp> with WidgetsBindingObserver i
       for (final pull in {for (final scope in _scopes.values) scope.pullService, ?widget.visitPullService}) {
         pull.seal();
       }
+      // Telemetria (#83): um `append` ou um flush que chegue depois abriria de
+      // novo o banco destruído, com chave nova.
+      final telemetryStore = _telemetryStore;
+      if (telemetryStore is SqlCipherTelemetryStore) telemetryStore.seal();
       final cacheSealed = widget.microAreaDirectory?.seal();
       await _tearDownForWipe();
       await cacheSealed;
       final owners = <String>{..._queues.keys};
       _queues.clear();
       _scopes.clear();
+      _telemetry.clear();
       await widget.backend.forgetLocalSession();
       await _storage.destroyAll();
       final tokens = widget.uploadTokens;
@@ -686,6 +766,7 @@ class _SinalAcsAppState extends State<SinalAcsApp> with WidgetsBindingObserver i
       // disco (o diário segue em `erasing` e a limpeza é refeita depois).
       _queues.clear();
       _scopes.clear();
+      _telemetry.clear();
       _wiping = false;
       if (mounted) _openFreshLogin();
       rethrow;
@@ -781,6 +862,8 @@ class _SinalAcsAppState extends State<SinalAcsApp> with WidgetsBindingObserver i
     if (!_wiping) {
       widget.microAreaDirectory?.unseal();
       scope.pullService.unseal();
+      final telemetryStore = _telemetryStore;
+      if (telemetryStore is SqlCipherTelemetryStore) telemetryStore.unseal();
     }
     _triggerFlush();
     return scope;
@@ -1225,6 +1308,7 @@ class _LoginScreenState extends State<LoginScreen> {
         feedBuilder: widget.feedBuilder,
         visitQueue: scope.queue,
         visitPullService: scope.pullService,
+        telemetryUploader: scope.telemetryUploader,
         visitScopeFor: widget.visitScopeFor,
         directory: widget.directory,
         initialAlert: widget.initialAlert,
@@ -1369,10 +1453,16 @@ class AcsHomeShell extends StatefulWidget {
     this.initialPosition,
     this.syncInterval,
     this.alertFallbackInterval,
+    this.telemetryUploader,
   });
 
   final String microAreaId;
   final String acsId;
+
+  /// Envio da telemetria do dono deste painel (#83), o MESMO do escopo dele.
+  /// Disparado sem esperar depois de todo `visitQueue.sync()`. `null`: sem
+  /// telemetria (os testes que injetam a fila).
+  final TelemetryUploader? telemetryUploader;
   final AlertFeed Function(AlertQueue queue)? feedBuilder;
   final PrioritizedAlert? initialAlert;
   final LatLng? initialPosition;
@@ -2122,6 +2212,18 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
 
   _DeviceCare? get _care => _DeviceCareScope.maybeOf(context);
 
+  /// Todo `sync` da fila do painel passa por aqui: concluído, dispara o envio
+  /// da telemetria do dono sem esperar (#83). Os eventos do próprio sync
+  /// (`sync_attempt`/`sync_result`) já estão na fila local nesse ponto.
+  Future<SyncOutcome> _syncVisits() async {
+    try {
+      return await widget.visitQueue.sync();
+    } finally {
+      final uploader = widget.telemetryUploader;
+      if (uploader != null) unawaited(uploader.flush());
+    }
+  }
+
   /// Antes de sair ou limpar: (1) a fila do painel (o envio diferido pula o
   /// dono da sessão atual de propósito, para não haver dois `sync` sobre a
   /// mesma fila); (2) o envio diferido do legado e dos outros donos. Cada
@@ -2131,7 +2233,7 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
   Future<({bool settled, FlushReport? report})> _sendBeforeLeaving() async {
     var settled = true;
     try {
-      await widget.visitQueue.sync().timeout(sessionEndSendTimeout);
+      await _syncVisits().timeout(sessionEndSendTimeout);
     } on TimeoutException {
       settled = false;
     } catch (_) {
@@ -2486,6 +2588,7 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
           directory: widget.directory,
           alert: _selected,
           queue: widget.visitQueue,
+          sync: _syncVisits,
           currentPosition: _currentPosition,
         ),
       AcsDestination.escalation => EscalationScreen(
@@ -3355,7 +3458,18 @@ Widget _cacheNotice(BuildContext context, Key key, DateTime fetchedAt) => Paddin
     );
 
 class VisitRegistrationScreen extends StatefulWidget {
-  const VisitRegistrationScreen({required this.queue, super.key, this.alert, this.currentPosition, this.directory});
+  const VisitRegistrationScreen({
+    required this.queue,
+    super.key,
+    this.alert,
+    this.currentPosition,
+    this.directory,
+    this.sync,
+  });
+
+  /// "Sincronizar agora". `null` chama `queue.sync()` direto; o painel passa
+  /// o dele, que dispara o envio da telemetria depois (#83).
+  final Future<SyncOutcome> Function()? sync;
 
   /// A fila é recebida pronta, não construída aqui: uma instância por gravação
   /// descartava a visita assim que o callback retornava.
@@ -3492,7 +3606,7 @@ class _VisitRegistrationScreenState extends State<VisitRegistrationScreen> {
       status: 'PENDENTE',
       outcome: outcome,
       notes: notes.text.trim(),
-    ));
+    ), alertId: widget.alert?.alertId);
     if (!mounted) return;
     setState(() {});
     _message(context, 'Visita salva e enfileirada localmente para sincronização.');
@@ -3503,7 +3617,7 @@ class _VisitRegistrationScreenState extends State<VisitRegistrationScreen> {
 
     final SyncOutcome result;
     try {
-      result = await widget.queue.sync();
+      result = await (widget.sync ?? widget.queue.sync)();
     } finally {
       // A fila já captura falha de rede, mas um erro inesperado aqui deixaria
       // o botão desabilitado para o resto da sessão.

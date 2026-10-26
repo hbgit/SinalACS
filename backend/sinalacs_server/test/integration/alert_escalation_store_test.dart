@@ -545,7 +545,7 @@ void main() {
                 result: 'acknowledged',
               ),
             );
-        expect(ok, isTrue);
+        expect(ok, isNotNull);
         final lido = (await Alert.db.findById(session, a.id!))!;
         expect(lido.status, AlertStatus.acknowledged);
         expect(lido.escalatedAt, _t);

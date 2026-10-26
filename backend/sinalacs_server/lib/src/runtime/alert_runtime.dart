@@ -38,6 +38,9 @@ import 'package:sinalacs_server/src/application/patients/patient_directory_servi
 import 'package:sinalacs_server/src/application/triage/triage_session_service.dart';
 import 'package:sinalacs_server/src/application/ubs/ubs_contact_service.dart';
 import 'package:sinalacs_server/src/application/visits/visit_sync_service.dart';
+import 'package:sinalacs_server/src/application/telemetry/telemetry_pseudonymizer.dart';
+import 'package:sinalacs_server/src/application/telemetry/telemetry_service.dart';
+import 'package:sinalacs_server/src/infrastructure/database/orm_telemetry_store.dart';
 import 'package:sinalacs_server/src/config/app_config.dart';
 import 'package:sinalacs_server/src/infrastructure/crypto/argon2_password_hasher.dart';
 import 'package:sinalacs_server/src/infrastructure/crypto/health_cipher_totp_vault.dart';
@@ -219,6 +222,23 @@ class AlertRuntime {
           ).recordInTransaction,
         ),
         outbox: OrmAlertOutbox(session: () => session, transaction: transaction),
+        telemetry: telemetryServiceFor(session),
+      );
+
+  TelemetryStore? _telemetryStoreOverride;
+
+  /// Substitui o store da telemetria (#83) por um duplo de teste, p. ex. um que
+  /// lança, para provar que a telemetria não bloqueia o alerta. `null` restaura
+  /// o store ORM.
+  @visibleForTesting
+  void overrideTelemetryStore(TelemetryStore? store) =>
+      _telemetryStoreOverride = store;
+
+  /// Ingestão da telemetria do aparelho (#83), para uma requisição. O
+  /// pseudônimo usa `TELEMETRY_PSEUDONYM_KEY`, independente dos outros segredos.
+  TelemetryService telemetryServiceFor(Session session) => TelemetryService(
+        store: _telemetryStoreOverride ?? OrmTelemetryStore(session),
+        pseudonymizer: TelemetryPseudonymizer(config.telemetryPseudonymKey),
       );
 
   /// Constrói o serviço de sincronização de visitas para uma requisição.
@@ -344,6 +364,7 @@ class AlertRuntime {
           session,
           healthDataCipher,
           chainSecret: config.auditChainSecret,
+          pseudonymizer: TelemetryPseudonymizer(config.telemetryPseudonymKey),
           appendAudit: OrmAuditTrail(
             session: () => session,
             chainSecret: config.auditChainSecret,

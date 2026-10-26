@@ -1,10 +1,14 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:sinalacs_acs/core/network/auth_session.dart';
 import 'package:sinalacs_acs/core/network/backend_config.dart';
 import 'package:sinalacs_acs/core/security/session_token_store.dart';
 import 'package:sinalacs_acs/core/security/upload_token_store.dart';
+import 'package:sinalacs_acs/core/telemetry/app_version.dart';
+import 'package:sinalacs_acs/core/telemetry/telemetry_event.dart';
+import 'package:sinalacs_acs/core/telemetry/telemetry_uploader.dart';
 import 'package:sinalacs_client/sinalacs_client.dart';
 
 /// Falha já traduzida para a pessoa que está usando o app.
@@ -377,7 +381,7 @@ class MisconfiguredBackend implements AcsBackend {
 }
 
 /// Fachada do backend para o app do ACS.
-class BackendClient implements AcsBackend {
+class BackendClient implements AcsBackend, TelemetryTransport {
   /// [trustedCaBytes] é a CA de desenvolvimento do RPC (RNF04). `null` faz o
   /// cliente usar o armazenamento de confiança do sistema — que **não** conhece
   /// a CA local, e por isso a conexão falha de forma explícita em vez de ser
@@ -935,6 +939,45 @@ class BackendClient implements AcsBackend {
   @override
   Future<void> confirmDeviceWipe(String deviceId, String orderId) =>
       _guard(() => _client.devices.confirmWipe(deviceId, orderId));
+
+  /// Envia um lote da fila de telemetria (#83) por `telemetry.ingest`.
+  ///
+  /// Mesma checagem de dono de [syncVisits], depois de resolvido o token e
+  /// antes da rede: eventos de A nunca sobem com a sessão de B. O autor vem do
+  /// token no servidor; o `owner` local não sai do aparelho. O `deviceId` é o
+  /// mesmo do login (o servidor só guarda o pseudônimo dele).
+  @override
+  Future<TelemetryIngestAck> ingestTelemetry(
+    List<TelemetryEventRecord> events, {
+    required String expectedUserId,
+  }) async {
+    final current = await _requireSession();
+    if (current.userId != expectedUserId) throw sessionOwnerMismatch;
+    final token = current.accessToken;
+    final deviceId = await _storage(_deviceIds.readOrCreate);
+    final result = await _guard(
+      () => _client.telemetry.ingest(
+        accessToken: token,
+        deviceId: deviceId,
+        sentAt: DateTime.now().toUtc(),
+        events: [
+          for (final e in events)
+            TelemetryEventInput(
+              eventId: e.eventId,
+              eventName: e.name,
+              occurredAt: e.occurredAt.toUtc(),
+              appVersion: acsAppVersion,
+              payloadJson: jsonEncode(e.payload),
+            ),
+        ],
+      ),
+      permissionMessage: 'Sua sessão não autoriza enviar telemetria. Entre novamente.',
+    );
+    return TelemetryIngestAck(
+      accepted: result.acceptedEventIds.toSet(),
+      rejected: result.rejectedEventIds.toSet(),
+    );
+  }
 
   /// Reconciliação central→dispositivo: visitas da microárea alteradas desde
   /// `since` (RF15, decisão §5). Espelha [syncVisits] na tradução de falhas.

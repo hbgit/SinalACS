@@ -39,9 +39,11 @@ void main() {
     }
   });
 
-  test('há um paciente por consumidor: jornada, api, push e forasteiro', () {
+  test('há um paciente por consumidor: jornada, api, push, telemetria e forasteiro', () {
     final f = generateE2eFixtures(Random(5));
-    expect(f.patients.map((p) => p.role).toSet(), {'main', 'chronic', 'api', 'push', 'outsider'});
+    expect(f.patients.map((p) => p.role).toSet(), {'main', 'chronic', 'api', 'push', 'telemetry', 'outsider'});
+    expect(f.patients.singleWhere((p) => p.role == 'telemetry').microAreaId, f.microAreaId,
+        reason: 'o alerta do paciente telemetry tem de chegar ao ACS da fixture (#83)');
     expect(f.patients.singleWhere((p) => p.role == 'chronic').chronic, isTrue);
   });
 

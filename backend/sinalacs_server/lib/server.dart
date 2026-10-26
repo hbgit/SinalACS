@@ -174,6 +174,7 @@ void _registerRetentionExpurge(Serverpod pod) {
         alertsDays: retentionConfig.retentionAlertDays,
         visitsDays: retentionConfig.retentionVisitDays,
         triageSessionsDays: retentionConfig.retentionTriageDays,
+        telemetryDays: retentionConfig.retentionTelemetryDays,
       ),
     ),
     retentionExpurgeFutureCallName,

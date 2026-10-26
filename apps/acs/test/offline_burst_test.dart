@@ -1,5 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sinalacs_acs/core/services/offline_visit_queue.dart';
+import 'package:sinalacs_acs/core/telemetry/network_probe.dart';
+import 'package:sinalacs_acs/core/telemetry/telemetry_recorder.dart';
+import 'package:sinalacs_acs/core/telemetry/telemetry_store.dart';
 
 import 'support/fakes.dart';
 
@@ -83,5 +86,41 @@ void main() {
     await fila.sync();
     expect(fila.pendingCount, 0);
     expect(fila.syncedCount, 100);
+  });
+
+  test('100 visitas com telemetria ligada: nenhuma se perde e 100 visit_registered + 1 attempt + 1 result',
+      () async {
+    // A fila de telemetria também é "disco": sobrevive ao reinício, como a
+    // das visitas.
+    final telemetria = InMemoryTelemetryStore();
+    TelemetryRecorder gravador() => TelemetryRecorder(
+          store: telemetria,
+          owner: 'acs-burst',
+          probe: () async => NetworkKind.none,
+        );
+    final disco = InMemoryVisitStore();
+    final antes = OfflineVisitQueue(store: disco, telemetry: gravador());
+    for (var n = 0; n < 100; n++) {
+      await antes.add(visita(n));
+    }
+
+    final envio = FakeVisitSynchronizer();
+    final depois = OfflineVisitQueue(store: disco, synchronizer: envio, telemetry: gravador());
+    await depois.restore();
+    final resultado = await depois.sync();
+
+    expect(resultado.kind, SyncOutcomeKind.synced);
+    expect(depois.pendingCount, 0);
+    expect(depois.syncedCount, 100);
+    expect(envio.batches.single.map((v) => v.localId).toSet(), hasLength(100));
+
+    final eventos = await telemetria.oldestForOwner('acs-burst', limit: 1000);
+    int contar(String nome) => eventos.where((e) => e.name == nome).length;
+    expect(contar('visit_registered'), 100);
+    expect(contar('sync_attempt'), 1);
+    expect(contar('sync_result'), 1);
+    final result = eventos.singleWhere((e) => e.name == 'sync_result');
+    expect(result.payload['success_count'], 100);
+    expect(result.payload['failure_count'], 0);
   });
 }

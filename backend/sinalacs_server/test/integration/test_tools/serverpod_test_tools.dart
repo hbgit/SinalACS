@@ -87,12 +87,16 @@ import 'package:sinalacs_server/src/generated/api/terms_change_notice.dart'
     as _i43;
 import 'package:sinalacs_server/src/generated/api/patient_data_subject_request_record.dart'
     as _i44;
-import 'package:sinalacs_server/src/generated/api/triage_result.dart' as _i45;
-import 'package:sinalacs_server/src/generated/api/ubs_contact.dart' as _i46;
+import 'package:sinalacs_server/src/generated/api/telemetry_ingest_result.dart'
+    as _i45;
+import 'package:sinalacs_server/src/generated/api/telemetry_event_input.dart'
+    as _i46;
+import 'package:sinalacs_server/src/generated/api/triage_result.dart' as _i47;
+import 'package:sinalacs_server/src/generated/api/ubs_contact.dart' as _i48;
 import 'package:sinalacs_server/src/generated/api/visit_sync_result.dart'
-    as _i47;
+    as _i49;
 import 'package:sinalacs_server/src/generated/api/visit_sync_entry.dart'
-    as _i48;
+    as _i50;
 import 'package:sinalacs_server/src/generated/protocol.dart';
 import 'package:sinalacs_server/src/generated/endpoints.dart';
 export 'package:serverpod_test/serverpod_test_public_exports.dart';
@@ -223,6 +227,8 @@ class TestEndpoints {
 
   late final _PatientsEndpoint patients;
 
+  late final _TelemetryEndpoint telemetry;
+
   late final _TriageEndpoint triage;
 
   late final _UbsEndpoint ubs;
@@ -266,6 +272,10 @@ class _InternalTestEndpoints extends TestEndpoints
       serializationManager,
     );
     patients = _PatientsEndpoint(
+      endpoints,
+      serializationManager,
+    );
+    telemetry = _TelemetryEndpoint(
       endpoints,
       serializationManager,
     );
@@ -2644,6 +2654,56 @@ class _PatientsEndpoint {
   }
 }
 
+class _TelemetryEndpoint {
+  _TelemetryEndpoint(
+    this._endpointDispatch,
+    this._serializationManager,
+  );
+
+  final _i2.EndpointDispatch _endpointDispatch;
+
+  final _i2.SerializationManager _serializationManager;
+
+  _i3.Future<_i45.TelemetryIngestResult> ingest(
+    _i1.TestSessionBuilder sessionBuilder, {
+    required String accessToken,
+    required String deviceId,
+    required DateTime sentAt,
+    required List<_i46.TelemetryEventInput> events,
+  }) async {
+    return _i1.callAwaitableFunctionAndHandleExceptions(() async {
+      var _localUniqueSession =
+          (sessionBuilder as _i1.InternalTestSessionBuilder).internalBuild(
+            endpoint: 'telemetry',
+            method: 'ingest',
+          );
+      try {
+        var _localCallContext = await _endpointDispatch.getMethodCallContext(
+          createSessionCallback: (_) => _localUniqueSession,
+          endpointPath: 'telemetry',
+          methodName: 'ingest',
+          parameters: _i1.testObjectToJson({
+            'accessToken': accessToken,
+            'deviceId': deviceId,
+            'sentAt': sentAt,
+            'events': events,
+          }),
+          serializationManager: _serializationManager,
+        );
+        var _localReturnValue =
+            await (_localCallContext.method.call(
+                  _localUniqueSession,
+                  _localCallContext.arguments,
+                )
+                as _i3.Future<_i45.TelemetryIngestResult>);
+        return _localReturnValue;
+      } finally {
+        await _localUniqueSession.close();
+      }
+    });
+  }
+}
+
 class _TriageEndpoint {
   _TriageEndpoint(
     this._endpointDispatch,
@@ -2654,7 +2714,7 @@ class _TriageEndpoint {
 
   final _i2.SerializationManager _serializationManager;
 
-  _i3.Future<_i45.TriageResult> evaluate(
+  _i3.Future<_i47.TriageResult> evaluate(
     _i1.TestSessionBuilder sessionBuilder, {
     required String accessToken,
     required bool chestPain,
@@ -2691,7 +2751,7 @@ class _TriageEndpoint {
                   _localUniqueSession,
                   _localCallContext.arguments,
                 )
-                as _i3.Future<_i45.TriageResult>);
+                as _i3.Future<_i47.TriageResult>);
         return _localReturnValue;
       } finally {
         await _localUniqueSession.close();
@@ -2710,7 +2770,7 @@ class _UbsEndpoint {
 
   final _i2.SerializationManager _serializationManager;
 
-  _i3.Future<_i46.UbsContact> myContact(
+  _i3.Future<_i48.UbsContact> myContact(
     _i1.TestSessionBuilder sessionBuilder, {
     required String accessToken,
   }) async {
@@ -2733,7 +2793,7 @@ class _UbsEndpoint {
                   _localUniqueSession,
                   _localCallContext.arguments,
                 )
-                as _i3.Future<_i46.UbsContact>);
+                as _i3.Future<_i48.UbsContact>);
         return _localReturnValue;
       } finally {
         await _localUniqueSession.close();
@@ -2752,10 +2812,10 @@ class _VisitsEndpoint {
 
   final _i2.SerializationManager _serializationManager;
 
-  _i3.Future<List<_i47.VisitSyncResult>> sync(
+  _i3.Future<List<_i49.VisitSyncResult>> sync(
     _i1.TestSessionBuilder sessionBuilder, {
     required String accessToken,
-    required List<_i48.VisitSyncEntry> visits,
+    required List<_i50.VisitSyncEntry> visits,
   }) async {
     return _i1.callAwaitableFunctionAndHandleExceptions(() async {
       var _localUniqueSession =
@@ -2779,7 +2839,7 @@ class _VisitsEndpoint {
                   _localUniqueSession,
                   _localCallContext.arguments,
                 )
-                as _i3.Future<List<_i47.VisitSyncResult>>);
+                as _i3.Future<List<_i49.VisitSyncResult>>);
         return _localReturnValue;
       } finally {
         await _localUniqueSession.close();
@@ -2787,10 +2847,10 @@ class _VisitsEndpoint {
     });
   }
 
-  _i3.Future<_i47.VisitSyncResult> resolveConflict(
+  _i3.Future<_i49.VisitSyncResult> resolveConflict(
     _i1.TestSessionBuilder sessionBuilder, {
     required String accessToken,
-    required _i48.VisitSyncEntry visit,
+    required _i50.VisitSyncEntry visit,
     required int expectedServerVersion,
   }) async {
     return _i1.callAwaitableFunctionAndHandleExceptions(() async {
@@ -2816,7 +2876,7 @@ class _VisitsEndpoint {
                   _localUniqueSession,
                   _localCallContext.arguments,
                 )
-                as _i3.Future<_i47.VisitSyncResult>);
+                as _i3.Future<_i49.VisitSyncResult>);
         return _localReturnValue;
       } finally {
         await _localUniqueSession.close();
@@ -2824,11 +2884,11 @@ class _VisitsEndpoint {
     });
   }
 
-  _i3.Future<List<_i47.VisitSyncResult>> syncLegacy(
+  _i3.Future<List<_i49.VisitSyncResult>> syncLegacy(
     _i1.TestSessionBuilder sessionBuilder, {
     required String accessToken,
     required String deviceId,
-    required List<_i48.VisitSyncEntry> visits,
+    required List<_i50.VisitSyncEntry> visits,
   }) async {
     return _i1.callAwaitableFunctionAndHandleExceptions(() async {
       var _localUniqueSession =
@@ -2853,7 +2913,7 @@ class _VisitsEndpoint {
                   _localUniqueSession,
                   _localCallContext.arguments,
                 )
-                as _i3.Future<List<_i47.VisitSyncResult>>);
+                as _i3.Future<List<_i49.VisitSyncResult>>);
         return _localReturnValue;
       } finally {
         await _localUniqueSession.close();
@@ -2861,11 +2921,11 @@ class _VisitsEndpoint {
     });
   }
 
-  _i3.Future<List<_i47.VisitSyncResult>> syncDeferred(
+  _i3.Future<List<_i49.VisitSyncResult>> syncDeferred(
     _i1.TestSessionBuilder sessionBuilder, {
     required String uploadToken,
     required String deviceId,
-    required List<_i48.VisitSyncEntry> visits,
+    required List<_i50.VisitSyncEntry> visits,
   }) async {
     return _i1.callAwaitableFunctionAndHandleExceptions(() async {
       var _localUniqueSession =
@@ -2890,7 +2950,7 @@ class _VisitsEndpoint {
                   _localUniqueSession,
                   _localCallContext.arguments,
                 )
-                as _i3.Future<List<_i47.VisitSyncResult>>);
+                as _i3.Future<List<_i49.VisitSyncResult>>);
         return _localReturnValue;
       } finally {
         await _localUniqueSession.close();
@@ -2929,7 +2989,7 @@ class _VisitsEndpoint {
     });
   }
 
-  _i3.Future<List<_i48.VisitSyncEntry>> pull(
+  _i3.Future<List<_i50.VisitSyncEntry>> pull(
     _i1.TestSessionBuilder sessionBuilder, {
     required String accessToken,
     required DateTime since,
@@ -2956,7 +3016,7 @@ class _VisitsEndpoint {
                   _localUniqueSession,
                   _localCallContext.arguments,
                 )
-                as _i3.Future<List<_i48.VisitSyncEntry>>);
+                as _i3.Future<List<_i50.VisitSyncEntry>>);
         return _localReturnValue;
       } finally {
         await _localUniqueSession.close();

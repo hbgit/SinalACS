@@ -1,9 +1,12 @@
 import 'package:sinalacs_server/src/application/alerts/red_alert_service.dart';
 import 'package:sinalacs_server/src/application/audit/audit_trail.dart';
 import 'package:sinalacs_server/src/application/auth/development_auth_service.dart';
+import 'package:sinalacs_server/src/application/telemetry/telemetry_pseudonymizer.dart';
+import 'package:sinalacs_server/src/application/telemetry/telemetry_service.dart';
 import 'package:sinalacs_server/src/domain/entities/alert_delivery.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
 import 'package:test/test.dart';
+import 'package:uuid/uuid.dart';
 
 class FakeAlertPublisher implements AlertPublisher {
   final List<AlertDelivery> published = [];
@@ -18,10 +21,20 @@ class FakeAlertStore implements AlertStore {
   @override
   Future<void> save(AlertDelivery alert, {required String deviceId}) async => saved.add(alert);
 
+  /// Instantes que o fake devolve no ACK; o primeiro ACK de cada alerta vem
+  /// com `firstAcknowledgement`, os seguintes não (como o ORM sob a trava).
+  DateTime ackTriggeredAt = DateTime.utc(2026, 10, 25, 12);
+  DateTime ackAcknowledgedAt = DateTime.utc(2026, 10, 25, 12, 0, 4, 500);
+  final Set<String> acknowledged = {};
+
   @override
-  Future<bool> acknowledge({required String alertId, required String acsId, required String microAreaId, required AuditEvent audit}) async {
+  Future<AlertAckRecord?> acknowledge({required String alertId, required String acsId, required String microAreaId, required AuditEvent audit}) async {
     audits.add(audit);
-    return true;
+    return AlertAckRecord(
+      triggeredAt: ackTriggeredAt,
+      acknowledgedAt: ackAcknowledgedAt,
+      firstAcknowledgement: acknowledged.add(alertId),
+    );
   }
 
   final List<AuditEvent> audits = [];
@@ -119,6 +132,25 @@ class FakeAlertOutbox implements AlertOutbox {
     DateTime nextAttemptAt,
   ) async =>
       failures[entryId] = error;
+}
+
+class _RecordingTelemetryStore implements TelemetryStore {
+  final List<TelemetryRecord> records = [];
+
+  @override
+  Future<Set<String>> insertIgnoringDuplicates(
+    List<TelemetryRecord> batch,
+  ) async {
+    records.addAll(batch);
+    return {for (final r in batch) r.eventId};
+  }
+}
+
+class _ThrowingTelemetryStore implements TelemetryStore {
+  @override
+  Future<Set<String>> insertIgnoringDuplicates(
+    List<TelemetryRecord> batch,
+  ) async => throw StateError('telemetria fora do ar');
 }
 
 void main() {
@@ -491,4 +523,108 @@ void main() {
       expect(store.lastOpenQuery, isNull);
     });
   });
+  group('telemetria alert_received_acs (#83)', () {
+    const alertId = '00000000-0000-4000-8000-0000000000c1';
+    const acsId = '00000000-0000-4000-8000-0000000000c2';
+    final pseudonymizer = TelemetryPseudonymizer('chave-de-teste-do-pseudonimo');
+
+    AuthenticatedUser acsPor(String deviceId) => AuthenticatedUser(
+          id: acsId,
+          role: UserRole.acs,
+          microAreaId: 'area-1',
+          deviceId: deviceId,
+        );
+
+    late FakeAlertStore store;
+    late _RecordingTelemetryStore telemetria;
+    late RedAlertService service;
+
+    setUp(() {
+      store = FakeAlertStore();
+      telemetria = _RecordingTelemetryStore();
+      service = RedAlertService(
+        store: store,
+        outbox: FakeAlertOutbox(),
+        telemetry: TelemetryService(store: telemetria, pseudonymizer: pseudonymizer),
+      );
+    });
+
+    test('primeiro ACK emite alert_received_acs com latency_ms', () async {
+      final ok = await service.acknowledge(user: acsPor('device-1'), alertId: alertId);
+
+      expect(ok, isTrue);
+      final r = telemetria.records.single;
+      expect(r.eventName, 'alert_received_acs');
+      expect(
+        r.eventId,
+        const Uuid().v5(TelemetryService.telemetryNamespace, 'alert_received_acs:$alertId'),
+      );
+      expect(r.source, TelemetrySource.backend);
+      expect(r.occurredAt, store.ackAcknowledgedAt);
+      expect(r.actorId, acsId);
+      expect(r.alertId, alertId);
+      expect(r.patientPseudonym, isNull);
+      expect(r.appVersion, TelemetryService.backendVersion);
+      expect(r.payload, {'latency_ms': 4500, 'channel': 'rpc'});
+    });
+
+    test('ACK repetido não emite', () async {
+      await service.acknowledge(user: acsPor('device-1'), alertId: alertId);
+      await service.acknowledge(user: acsPor('device-1'), alertId: alertId);
+
+      expect(store.audits, hasLength(2));
+      expect(telemetria.records, hasLength(1));
+    });
+
+    test('ACK por MQTT marca channel mqtt', () async {
+      await service.acknowledge(
+        user: acsPor(RedAlertService.mqttAckDeviceId),
+        alertId: alertId,
+      );
+
+      expect(telemetria.records.single.payload['channel'], 'mqtt');
+    });
+
+    test('latency_ms tem piso 0 com relógio adiantado no disparo', () async {
+      store.ackTriggeredAt = store.ackAcknowledgedAt.add(const Duration(seconds: 2));
+
+      await service.acknowledge(user: acsPor('device-1'), alertId: alertId);
+
+      expect(telemetria.records.single.payload['latency_ms'], 0);
+    });
+
+    test('ACK conclui com a telemetria fora', () async {
+      final quebrado = RedAlertService(
+        store: store,
+        outbox: FakeAlertOutbox(),
+        telemetry: TelemetryService(
+          store: _ThrowingTelemetryStore(),
+          pseudonymizer: pseudonymizer,
+        ),
+      );
+
+      expect(
+        await quebrado.acknowledge(user: acsPor('device-1'), alertId: alertId),
+        isTrue,
+      );
+    });
+
+    test('alerta não encontrado não emite', () async {
+      final vazio = _NotFoundAckStore();
+      final s = RedAlertService(
+        store: vazio,
+        outbox: FakeAlertOutbox(),
+        telemetry: TelemetryService(store: telemetria, pseudonymizer: pseudonymizer),
+      );
+
+      expect(await s.acknowledge(user: acsPor('device-1'), alertId: alertId), isFalse);
+      expect(telemetria.records, isEmpty);
+    });
+  });
+}
+
+class _NotFoundAckStore extends FakeAlertStore {
+  @override
+  Future<AlertAckRecord?> acknowledge({required String alertId, required String acsId, required String microAreaId, required AuditEvent audit}) async =>
+      null;
 }

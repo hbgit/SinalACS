@@ -37,6 +37,9 @@ import 'package:sinalacs_acs/core/network/backend_config.dart';
 import 'package:sinalacs_acs/core/services/backend_visit_synchronizer.dart';
 import 'package:sinalacs_acs/core/services/mqtt_secure_client.dart';
 import 'package:sinalacs_acs/core/services/offline_visit_queue.dart';
+import 'package:sinalacs_acs/core/telemetry/telemetry_recorder.dart';
+import 'package:sinalacs_acs/core/telemetry/telemetry_store.dart';
+import 'package:sinalacs_acs/core/telemetry/telemetry_uploader.dart';
 import 'package:sinalacs_client/sinalacs_client.dart' as api;
 
 String _arg(List<String> args, String name, String fallback) {
@@ -256,9 +259,17 @@ Future<void> main(List<String> args) async {
     // montado à mão: é isto que pega uma fila sem sincronizador ligado, um
     // patientId errado ou um localId malformado — tudo o que o app faz sozinho.
     // O único pedaço fora do caminho real é o store: SQLCipher não abre na VM.
+    //
+    // A telemetria fica LIGADA (#83), como no app: o RNF02 é medido com o
+    // custo dela dentro do `sync` (1 `visit_registered` por visita, mais
+    // `sync_attempt` e `sync_result`). O store é em memória pelo mesmo motivo
+    // do store de visitas.
+    final ownerId = backend.session!.userId;
+    final telemetryStore = InMemoryTelemetryStore();
     final queue = OfflineVisitQueue(
       store: InMemoryVisitStore(),
-      synchronizer: BackendVisitSynchronizer(backend: backend, ownerId: backend.session!.userId),
+      synchronizer: BackendVisitSynchronizer(backend: backend, ownerId: ownerId),
+      telemetry: TelemetryRecorder(store: telemetryStore, owner: ownerId),
     );
     for (var index = 0; index < visitCount; index++) {
       await queue.add(OfflineVisitRecord(
@@ -290,6 +301,31 @@ Future<void> main(List<String> args) async {
         'processadas=${synced.processed} pendentes=${queue.pendingCount}');
     if (synced.kind != SyncOutcomeKind.synced || queue.pendingCount != 0) {
       stderr.writeln('  ERRO: a visita não sincronizou (${synced.message}).');
+      exitCode = 1;
+    }
+
+    // Depois do sync, e fora da janela medida: o envio da telemetria contra o
+    // `telemetry.ingest` real. Todo evento gravado tem de subir aceito.
+    final flushed = await TelemetryUploader(
+      store: telemetryStore,
+      transport: backend,
+      owner: ownerId,
+    ).flush();
+    _emitMetric(
+      emitMetrics,
+      'telemetry_flush',
+      extra: <String, Object?>{
+        'visit_count': visitCount,
+        'sent': flushed.sent,
+        'rejected': flushed.rejected,
+        'stopped_by_failure': flushed.stoppedByFailure,
+      },
+    );
+    stdout.writeln('  telemetria enviada . sent=${flushed.sent} rejected=${flushed.rejected} '
+        'parou=${flushed.stoppedByFailure}');
+    if (flushed.sent != visitCount + 2) {
+      stderr.writeln('  ERRO: a telemetria enviou ${flushed.sent} evento(s); '
+          'esperado ${visitCount + 2} ($visitCount visita(s) + tentativa + resultado).');
       exitCode = 1;
     }
 

@@ -103,7 +103,7 @@ class OrmAlertStore implements AlertStore {
   }
 
   @override
-  Future<bool> acknowledge({
+  Future<AlertAckRecord?> acknowledge({
     required String alertId,
     required String acsId,
     required String microAreaId,
@@ -113,7 +113,7 @@ class OrmAlertStore implements AlertStore {
     final alertUuid = UuidValue.fromString(alertId);
     final acsUuid = UuidValue.fromString(acsId);
 
-    Future<bool> run(Transaction transaction) async {
+    Future<AlertAckRecord?> run(Transaction transaction) async {
       // O predicado de microárea é a barreira de territorialização: um ACS
       // nunca confirma alerta fora do seu território (INV-01).
       // Trava antes de ler (#76): um `resolve` concorrente que já gravou
@@ -128,17 +128,20 @@ class OrmAlertStore implements AlertStore {
         parameters: QueryParameters.named({'id': alertId, 'ma': microAreaId}),
         transaction: transaction,
       );
-      if (travado.isEmpty) return false;
+      if (travado.isEmpty) return null;
       final alert =
           (await Alert.db.findById(session, alertUuid, transaction: transaction))!;
 
       final now = DateTime.now().toUtc();
+      // Lido sob a trava, antes do UPDATE: só o primeiro ACK emite a
+      // telemetria `alert_received_acs` (#83).
+      final acknowledgedAt = alert.acknowledgedAt ?? now;
       await Alert.db.updateRow(
         session,
         alert.copyWith(
           acsId: acsUuid,
           receivedAt: alert.receivedAt ?? now,
-          acknowledgedAt: alert.acknowledgedAt ?? now,
+          acknowledgedAt: acknowledgedAt,
           // ACK depois da conclusão (reentrega, outro aparelho) não rebaixa
           // o atendimento já concluído (#76).
           status: alert.status == AlertStatus.resolved
@@ -175,7 +178,11 @@ class OrmAlertStore implements AlertStore {
       // é desfeita. Roda por último, pois o lock da cadeia nunca precede outro.
       await _appendAudit(session, transaction, audit);
 
-      return true;
+      return AlertAckRecord(
+        triggeredAt: alert.triggeredAt,
+        acknowledgedAt: acknowledgedAt,
+        firstAcknowledgement: alert.acknowledgedAt == null,
+      );
     }
 
     final existing = _transaction;

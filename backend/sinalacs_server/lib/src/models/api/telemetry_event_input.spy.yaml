@@ -1,0 +1,9 @@
+### Um evento enviado pelo app do ACS a `telemetry.ingest` (#83).
+### O servidor valida o `payloadJson` contra o esquema fechado do evento.
+class: TelemetryEventInput
+fields:
+  eventId: String
+  eventName: String
+  occurredAt: DateTime
+  appVersion: String
+  payloadJson: String
