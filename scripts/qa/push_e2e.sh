@@ -199,6 +199,8 @@ adb -s "$dev" shell cmd notification cancel_all >/dev/null 2>&1 || true
 # FCM não mostra mensagem de notificação na bandeja com o app em primeiro plano.
 adb -s "$dev" shell input keyevent KEYCODE_HOME
 sleep 3
+# A conexão FCM do emulador morre ociosa sem o GMS perceber (#103): religa a rede antes de cada envio.
+garantir_conexao_fcm
 diag_estado_pre_envio
 
 # -- caminho feliz --------------------------------------------------------------
@@ -222,6 +224,7 @@ if [[ "$e2e_db" -eq 1 ]]; then
   echo "== aviso agendado (disparado pelo laço do servidor)"
   adb -s "$dev" shell cmd notification cancel_all >/dev/null 2>&1 || true
   adb -s "$dev" shell input keyevent KEYCODE_HOME
+  garantir_conexao_fcm
   diag_marca envio
   saida="$(./scripts/qa/e2e_stack.sh schedule-notice)"
   echo "$saida"
@@ -248,6 +251,7 @@ if [[ "$negativos" -eq 1 ]]; then
   for spec in "repeat('x',150)|android" "repeat('i',64)|ios"; do
     psql_q "insert into push_tokens (\"userId\",\"microAreaId\",token,platform,\"createdAt\",\"updatedAt\") select \"userId\",\"microAreaId\",${spec%%|*},'${spec##*|}',now(),now() from push_tokens limit 1" >/dev/null
   done
+  garantir_conexao_fcm
   diag_marca envio; saida="$(send 'Mistura real falso ios')"; echo "$saida"; sleep 8
   [[ "$(psql_q "select count(*) from push_tokens where token=repeat('x',150)" | head -1)" == 0 ]] || { echo 'FALHOU: o token falso não foi podado'; exit 1; }
   [[ "$(psql_q "select count(*) from push_tokens where platform='ios'" | head -1)" == 1 ]] || { echo 'FALHOU: a linha ios foi apagada'; exit 1; }

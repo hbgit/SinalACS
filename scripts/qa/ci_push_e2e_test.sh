@@ -145,7 +145,13 @@ case "\$args" in
     while [[ ! -e "$sb/enviado" ]]; do sleep 0.1; done
     [[ "\${STUB_LOGCAT:-}" == antigo ]] || cat "$fx/logcat_recebida.txt"
     echo "10-26 D FirebaseMessaging: token $token_falso" ;;
-  *GcmService*) printf '    connectTime=09:59/00:00\n    Heartbeat: alarm(00:31 initial: 600s)\n    Is client connected: true\n'
+  *"svc wifi enable"*) touch "$sb/religada" ;;
+  *"svc "*) echo "\$args" >>"$sb/svc" ;;
+  *GcmService*)
+    # STUB_FCM=nova: depois de religar a rede, a conexão é refeita (connectTime 00:01).
+    # Sem isso a conexão é a zumbi da falha real: "connected" com 09:59 de idade.
+    if [[ "\${STUB_FCM:-}" == nova && -e "$sb/religada" ]]; then idade=00:01; else idade=09:59; fi
+    printf '    connectTime=%s/00:00\n    Heartbeat: alarm(00:31 initial: 600s)\n    Is client connected: true\n' "\$idade"
     for i in \$(seq 1 30); do echo "    17:45.\$i net=1: Received $app_pkg 0:\$i"; done ;;
   *) echo "stub: \$args proj-falso-987" ;;
 esac
@@ -194,6 +200,22 @@ PATH="$sb:$PATH" PUSH_DIAG_DIR="$d4" STUB_ADB_TARDIA=1 bash -c "
 afirma "#103 caminho feliz não chama diag_coletar nem cria PUSH_DIAG_DIR" '[[ $rc -eq 0 && ! -e "$d4" ]] && ! grep -qE "^[^#]*diag_coletar" "$repo/scripts/qa/push_e2e.sh"'
 afirma "#103 push_e2e.sh não imprime PUSH_DIAG_SEGREDOS" '! grep -nE "(echo|printf)[^#]*PUSH_DIAG_SEGREDOS" "$repo/scripts/qa/push_e2e.sh"'
 afirma "#103 push_e2e.sh usa diag_falhar nas esperas da bandeja (nenhum na_bandeja termina em echo FALHOU)" '! grep -E "^na_bandeja .*\|\| \{ echo .FALHOU" "$repo/scripts/qa/push_e2e.sh" && grep -qE "^na_bandeja .*diag_falhar" "$repo/scripts/qa/push_e2e.sh"'
+
+# ---- #103 A-MCS: conexão FCM nova antes do envio ---------------------------------------------------
+conexao() { # $1 = espera máxima; imprime a saída e deixa o rc em $sb/rc
+  rm -f "$sb/religada" "$sb/svc"
+  PATH="$sb:$PATH" PUSH_DIAG_DIR="$2" timeout 60 bash -c "
+    set -euo pipefail; source '$repo/scripts/qa/lib_push_diag.sh'; dev=emulator-5554; app=$app_pkg
+    PUSH_DIAG_SEGREDOS=\$'$token_falso\nproj-falso-987'
+    diag_iniciar; garantir_conexao_fcm $1; diag_marca envio; echo 'enviado'
+    cat \"\$diag_tmp/linha_do_tempo.txt\"" 2>&1
+}
+d6="$raiz/diag6"; out="$(STUB_FCM=nova conexao 10 "$d6")"; rc=$?
+afirma "#103 envio espera a conexão FCM nova (rede religada e connectTime menor que o tempo desde a religação)" '[[ $rc -eq 0 ]] && grep -q "^enviado$" <<<"$out" && grep -q "svc wifi disable" "$sb/svc" && grep -qE "conexao_fcm_nova$" <<<"$out"'
+d7="$raiz/diag7"; inicio=$SECONDS; out="$(conexao 3 "$d7")"; rc=$?
+afirma "#103 conexão que não se renova falha com mensagem própria antes do envio" '[[ $rc -eq 1 ]] && grep -q "FALHOU: GMS sem conexão nova com o FCM" <<<"$out" && ! grep -q "^enviado$" <<<"$out" && (( SECONDS - inicio < 30 ))'
+afirma "#103 a falha de conexão deixa o estado do GMS no diagnóstico, sem segredos" 'grep -q "connectTime=09:59" "$d7/sem_conexao_fcm.txt" && ! grep -rqE "APA91|proj-falso-987" "$d7"'
+afirma "#103 push_e2e.sh garante a conexão FCM nova antes de cada envio" 'awk "/^[[:space:]]*garantir_conexao_fcm/ {g=1} /diag_marca envio/ { if (!g) bad=1; g=0; n++ } END { exit !(n >= 3 && !bad) }" "$repo/scripts/qa/push_e2e.sh"'
 
 n="$(wc -l <"$marcador")"
 echo; [[ "$n" -eq 0 ]] && echo "OK — ci_push_e2e.sh" || { echo "$n asserção(ões) falharam"; exit 1; }
