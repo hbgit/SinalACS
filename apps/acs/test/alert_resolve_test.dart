@@ -197,7 +197,7 @@ void main() {
     });
 
     testWidgets('servidor sem status no ACK continua marcando confirmado', (tester) async {
-      final backend = FakeAcsBackend();
+      final backend = FakeAcsBackend()..ackWithoutStatus = true;
       await abrirComAlertaConfirmado(tester, backend);
 
       expect(find.byKey(const Key('resolve_alerta-1')), findsOneWidget);
