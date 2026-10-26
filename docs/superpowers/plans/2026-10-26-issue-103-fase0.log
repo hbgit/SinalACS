@@ -47,3 +47,31 @@ Execuções: 40231780331 (verde, PR #97), 40237097203 (vermelha, develop), 40251
 == Restam: H2a (permissão), H2b (canal), H3 (janela do grep), H4 (primeiro plano), H5 (prioridade),
    H6 (app parado/standby), H7 (hold), H8 (conexão FCM no mesmo job). A bimodalidade favorece causas
    binárias (H2a, H3, H4, H6, H7, H8-nunca) sobre H5.
+
+ISSUE #103 — Fase 0 (Task 2): payload efetivo do Gorush (H5) e caminho da exibição (H4)
+
+== Payload (appleboy/gorush v1.22.0, notify/notification_fcm.go)
+- setupFCMNotification: com title/message preenchidos cria `messaging.Notification{Title, Body}`.
+- buildFCMMessage: Message{Notification, Android, Data (se não vazio)}.
+- setupFCMPriority: só cria AndroidConfig{Priority} quando req.Priority != "". O GorushClient
+  (backend/.../push/gorush_client.dart:105-115) manda tokens/platform/title/message/data, SEM priority
+  e sem sound ⇒ Android = nil ⇒ mensagem v1 com bloco `notification` (+ `data` se houver), sem
+  `android.priority`.
+- FCM ("Set and manage Android message priority",
+  https://firebase.google.com/docs/cloud-messaging/android-message-priority): normal priority
+  "is the default priority for data and notification messages"; "Normal priority messages are
+  delivered immediately when the device is not sleeping"; em Doze "delivery may be delayed".
+⇒ H5 VIVA mas FRACA: prioridade efetiva NORMAL; só atrasa com o aparelho em Doze. O emulador da CI
+  está "na tomada" e recém-bootado, e o desfecho é bimodal (0,2 s vs nada em 46 s). A coleta registra
+  `dumpsys deviceidle` para fechá-la.
+
+== H4 (primeiro plano), por leitura
+- apps/patient/android/app/src/main/: nenhum FirebaseMessagingService próprio e nenhum
+  `com.google.firebase.messaging.default_notification_channel_id`; pubspec.yaml sem firebase_messaging
+  (o token vem do canal nativo `sinalacs/push_token`, MainActivity.kt, firebase-messaging:25.1.3).
+- Fato: com o app em segundo plano, o SDK exibe a mensagem `notification` sozinho no canal
+  `fcm_fallback_notification_channel` (criado pelo SDK). Com o app em primeiro plano, o SDK entrega a
+  `FirebaseMessagingService.onMessageReceived` padrão, que não faz nada ⇒ nada na bandeja.
+- push_e2e.sh manda KEYCODE_HOME + sleep 3 sem verificar o foco. O app em teste é um integration_test
+  (`flutter test`) ainda em execução (hold de 240 s): se a atividade voltar ao topo, a notificação some.
+⇒ H4 VIVA e compatível com a bimodalidade. Assinatura a medir na Task 3.
