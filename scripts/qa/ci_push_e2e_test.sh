@@ -99,5 +99,32 @@ neto="$(cat "$marca" 2>/dev/null || echo 0)"
 afirma "M10 o neto (flutter test) morre junto" '[[ "$neto" != 0 ]] && ! kill -0 "$neto" 2>/dev/null'
 kill "$neto" 2>/dev/null || true
 
+# ---- #103: diagnóstico do push (redação, recorte do bloco do app e classificação) ---------------
+fx="$repo/scripts/qa/fixtures/push_diag"
+app_pkg=br.com.prismrr.sinalacs.patient
+diag() { bash -c "source '$repo/scripts/qa/lib_push_diag.sh'; $1" 2>&1; }
+token_falso="abcDEF12345:APA91$(printf 'b%.0s' $(seq 1 140))"
+
+out="$(printf 'antes %s depois\n' "$token_falso" | diag diag_redigir)"
+afirma "#103 redação: token fictício no formato FCM vira <token-fcm>" '! grep -q APA91 <<<"$out" && grep -q "antes <token-fcm> depois" <<<"$out"'
+out="$(printf 'projeto proj-secreto-123 aqui\n' | PUSH_DIAG_SEGREDOS=$'outro.segredo\nproj-secreto-123' diag diag_redigir)"
+afirma "#103 redação: literal de PUSH_DIAG_SEGREDOS (project_id) vira <redigido>" '! grep -q proj-secreto-123 <<<"$out" && grep -q "projeto <redigido> aqui" <<<"$out"'
+sujo="$raiz/sujo.txt"; printf 'linha %s\n' "$token_falso" >"$sujo"
+diag "diag_verificar_limpo '$sujo'" >/dev/null; rc=$?
+afirma "#103 verificação fail-closed: arquivo com APA91 é apagado e deixa .REMOVIDO sem o token" '[[ $rc -ne 0 && ! -e "$sujo" && -s "$sujo.REMOVIDO" ]] && ! grep -q APA91 "$sujo.REMOVIDO"'
+limpo="$raiz/limpo.txt"; echo 'nada aqui' >"$limpo"
+diag "diag_verificar_limpo '$limpo'" >/dev/null; rc=$?
+afirma "#103 verificação: arquivo limpo fica e retorna 0" '[[ $rc -eq 0 && -s "$limpo" && ! -e "$limpo.REMOVIDO" ]]'
+
+out="$(diag "diag_bloco_do_app '$fx/dump_dois_pacotes.txt' $app_pkg")"
+afirma "#103 bloco: dump de dois pacotes devolve só o bloco do app" 'grep -q "Outro aviso" <<<"$out" && ! grep -q "SinalACS e2e" <<<"$out" && ! grep -q "com.exemplo.outro" <<<"$out"'
+
+classe() { diag "diag_classificar '$fx/$1' '$fx/$2' $app_pkg '$3'"; }
+afirma "#103 classificar: título a 25 linhas = exibida_encontrada" '[[ "$(classe dump_um_app.txt logcat_recebida.txt "SinalACS e2e")" == exibida_encontrada ]]'
+afirma "#103 classificar: título a 45 linhas = exibida_nao_encontrada" '[[ "$(classe dump_titulo_longe.txt logcat_recebida.txt "SinalACS e2e")" == exibida_nao_encontrada ]]'
+afirma "#103 classificar: dump sem o app + logcat com a marca = chegou_nao_exibida" '[[ "$(classe dump_dois_pacotes.txt logcat_recebida.txt "Aviso inexistente")" == chegou_nao_exibida ]]'
+afirma "#103 classificar: dump sem o app + logcat vazio = nao_chegou" '[[ "$(classe dump_dois_pacotes.txt logcat_vazio.txt "Aviso inexistente")" == nao_chegou ]]'
+afirma "#103 classificar: título só em outro pacote não conta como exibida" '[[ "$(classe dump_dois_pacotes.txt logcat_vazio.txt "SinalACS e2e")" == nao_chegou ]]'
+
 n="$(wc -l <"$marcador")"
 echo; [[ "$n" -eq 0 ]] && echo "OK — ci_push_e2e.sh" || { echo "$n asserção(ões) falharam"; exit 1; }
