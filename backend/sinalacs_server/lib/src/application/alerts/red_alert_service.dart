@@ -319,7 +319,10 @@ class RedAlertService {
   // vermelho nunca pode ser descartado por colisão de identificador (INV-03).
   String _newAlertId() => _uuid.v4();
 
-  Future<bool> acknowledge({required AuthenticatedUser user, required String alertId}) async {
+  /// Status do alerta depois do ACK, lido sob a trava da linha: `resolved`
+  /// quando o atendimento já foi concluído (#86), `acknowledged` nos demais
+  /// casos; `null` quando o alerta não existe na microárea do ACS.
+  Future<AlertStatus?> acknowledge({required AuthenticatedUser user, required String alertId}) async {
     Authorization.require(
       user,
       roles: {UserRole.acs},
@@ -355,7 +358,7 @@ class RedAlertService {
         );
       },
     );
-    if (ack == null) return false;
+    if (ack == null) return null;
     // Depois do commit da transação própria do store: nenhum caminho de
     // produção chama `acknowledge` com transação externa (o único
     // `serviceFor(session, transaction: …)` é o `createRedAlert`). Best-effort:
@@ -370,7 +373,7 @@ class RedAlertService {
         channel: porMqtt ? 'mqtt' : 'rpc',
       );
     }
-    return true;
+    return ack.status;
   }
 
   /// Texto da recusa de concluir um alerta que ninguém confirmou (#76).

@@ -454,7 +454,7 @@ void main() {
         alertId: 'alerta-1',
       );
 
-      expect(ok, isTrue);
+      expect(ok, AlertStatus.acknowledged);
       final e = store.audits.single;
       expect(
         [e.userId, e.actionType, e.resourceType, e.resourceId, e.result],
@@ -479,7 +479,7 @@ void main() {
           alertId: 'alerta-1',
         );
 
-        expect(ok, isTrue);
+        expect(ok, AlertStatus.acknowledged);
         final e = store.audits.single;
         expect(
           [e.userId, e.actionType, e.resourceType, e.resourceId, e.result],
@@ -487,6 +487,54 @@ void main() {
         );
       },
     );
+
+    test('ACK sobre alerta concluído devolve resolved e audita ack_already_resolved (#86)', () async {
+      final store = FakeAlertStore()..forcedOutcome = AlertAckOutcome.alreadyResolved;
+      final service = RedAlertService(store: store, outbox: FakeAlertOutbox());
+
+      final status = await service.acknowledge(
+        user: const AuthenticatedUser(
+          id: 'acs-1',
+          role: UserRole.acs,
+          microAreaId: 'area-1',
+          deviceId: 'device-1',
+        ),
+        alertId: 'alerta-1',
+      );
+
+      expect(status, AlertStatus.resolved);
+      expect(store.audits.single.result, 'ack_already_resolved');
+    });
+
+    test('ACK por MQTT de alerta concluído audita ack_already_resolved_mqtt (#86)', () async {
+      final store = FakeAlertStore()..forcedOutcome = AlertAckOutcome.alreadyResolved;
+      final service = RedAlertService(store: store, outbox: FakeAlertOutbox());
+
+      final status = await service.acknowledge(
+        user: const AuthenticatedUser(
+          id: 'acs-1',
+          role: UserRole.acs,
+          microAreaId: 'area-1',
+          deviceId: RedAlertService.mqttAckDeviceId,
+        ),
+        alertId: 'alerta-1',
+      );
+
+      expect(status, AlertStatus.resolved);
+      expect(store.audits.single.result, 'ack_already_resolved_mqtt');
+    });
+
+    test('ACK repetido devolve acknowledged e audita ack_already_acknowledged (#86)', () async {
+      final store = FakeAlertStore();
+      final service = RedAlertService(store: store, outbox: FakeAlertOutbox());
+      const acs = AuthenticatedUser(id: 'acs-1', role: UserRole.acs, microAreaId: 'area-1', deviceId: 'device-1');
+
+      await service.acknowledge(user: acs, alertId: 'alerta-1');
+      final status = await service.acknowledge(user: acs, alertId: 'alerta-1');
+
+      expect(status, AlertStatus.acknowledged);
+      expect(store.audits.map((e) => e.result), ['acknowledged', 'ack_already_acknowledged']);
+    });
   });
 
   group('openForAcs (#80)', () {
@@ -560,7 +608,7 @@ void main() {
     test('primeiro ACK emite alert_received_acs com latency_ms', () async {
       final ok = await service.acknowledge(user: acsPor('device-1'), alertId: alertId);
 
-      expect(ok, isTrue);
+      expect(ok, AlertStatus.acknowledged);
       final r = telemetria.records.single;
       expect(r.eventName, 'alert_received_acs');
       expect(
@@ -581,6 +629,16 @@ void main() {
       await service.acknowledge(user: acsPor('device-1'), alertId: alertId);
 
       expect(store.audits, hasLength(2));
+      expect(telemetria.records, hasLength(1));
+    });
+
+    test('ACK sobre concluído não emite alert_received_acs (#86)', () async {
+      await service.acknowledge(user: acsPor('device-1'), alertId: alertId);
+      store.forcedOutcome = AlertAckOutcome.alreadyResolved;
+
+      final status = await service.acknowledge(user: acsPor('device-1'), alertId: alertId);
+
+      expect(status, AlertStatus.resolved);
       expect(telemetria.records, hasLength(1));
     });
 
@@ -613,7 +671,7 @@ void main() {
 
       expect(
         await quebrado.acknowledge(user: acsPor('device-1'), alertId: alertId),
-        isTrue,
+        AlertStatus.acknowledged,
       );
     });
 
@@ -625,7 +683,7 @@ void main() {
         telemetry: TelemetryService(store: telemetria, pseudonymizer: pseudonymizer),
       );
 
-      expect(await s.acknowledge(user: acsPor('device-1'), alertId: alertId), isFalse);
+      expect(await s.acknowledge(user: acsPor('device-1'), alertId: alertId), isNull);
       expect(telemetria.records, isEmpty);
     });
   });

@@ -221,7 +221,7 @@ void main() {
               ),
               alertId: alerta.id!.uuid,
             );
-        expect(ok, isTrue);
+        expect(ok, AlertStatus.acknowledged);
         expect(
           (await Alert.db.findById(session, alerta.id!))!.status,
           AlertStatus.acknowledged,

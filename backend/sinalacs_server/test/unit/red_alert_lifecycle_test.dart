@@ -155,7 +155,7 @@ void main() {
       expect(publisher.published, hasLength(1));
 
       final acknowledged = await service.acknowledge(user: acs, alertId: created.delivery.alertId);
-      expect(acknowledged, isTrue);
+      expect(acknowledged, AlertStatus.acknowledged);
       expect(store.acknowledgedAlertIds, contains(created.delivery.alertId));
     });
   });

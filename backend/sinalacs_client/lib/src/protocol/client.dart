@@ -629,6 +629,10 @@ class EndpointAlerts extends EndpointAuthenticated {
     },
   );
 
+  /// Confirma o recebimento. `status` é o da linha travada: um alerta já
+  /// concluído (outro aparelho, reentrega do MQTT) volta `resolved`, não
+  /// `acknowledged` (#86). Alerta inexistente ou de outra microárea devolve
+  /// `acknowledged: false` e `status` nulo.
   _i2.Future<_i28.AlertAckResult> acknowledge({
     required String accessToken,
     required String alertId,

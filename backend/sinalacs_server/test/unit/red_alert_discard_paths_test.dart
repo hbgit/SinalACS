@@ -354,7 +354,7 @@ void main() {
         alertId: 'alerta-1',
       );
 
-      expect(ok, isTrue);
+      expect(ok, AlertStatus.acknowledged);
       expect(store.status['alerta-1'], 'acknowledged');
       final e = store.audits.single;
       expect(e.actionType, 'write');
