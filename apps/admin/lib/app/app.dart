@@ -369,8 +369,13 @@ class _IndicatorsScreenState extends State<IndicatorsScreen> with MonitoredScree
             const SizedBox(height: 12),
             const Text('Alertas vermelhos', style: TextStyle(fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
+            // Partição fechada dos vermelhos (#87, INV-03): pendente (e o legado
+            // escalonado) em Abertos, reconhecido em Reconhecidos, concluído em
+            // Concluídos. A soma das três linhas é o cartão Vermelho: um alerta
+            // concluído sai de Reconhecidos e entra em Concluídos, nunca some.
             _InfoRow('Abertos (pendentes)', '${data.openRedAlerts}'),
-            _InfoRow('Reconhecidos', '${data.acknowledgedRedAlerts}'),
+            _InfoRow('Reconhecidos (em atendimento)', '${data.acknowledgedRedAlerts}'),
+            _InfoRow('Concluídos', '${data.resolvedRedAlerts}'),
             _InfoRow('TMRAV (tempo médio de resposta)', data.tmravSeconds == null ? '—' : '${data.tmravSeconds}s'),
           ]);
         },
