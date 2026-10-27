@@ -24,7 +24,17 @@ void run(List<String> args) async {
   // certificado de cliente assinado pela CA de API_TLS_CLIENT_CA_PATH. Sem as
   // variáveis segue em HTTP, que é o caminho do Render (TLS na borda). Insights
   // e webServer ficam em HTTP: nenhum dos dois é publicado nem roteado.
-  final apiTls = ApiTlsConfig.fromMap(Platform.environment);
+  //
+  // `carregar` e não `fromMap`: `run` é `async void` dentro do `runZonedGuarded`
+  // da #56, e uma exceção que escapasse daqui viraria "erro sem dono" no log,
+  // sem a mensagem que nomeia as três variáveis — ou, para TlsException, um
+  // "processo mantido" que sai com código 0. Em falha de configuração o
+  // processo escreve o diagnóstico no stderr e sai com 78 (EX_CONFIG).
+  final apiTls = ApiTlsConfig.carregar(
+    Platform.environment,
+    log: stderr.writeln,
+    exitFn: exit,
+  );
 
   // Initialize Serverpod and connect it with your generated code.
   //
@@ -39,10 +49,10 @@ void run(List<String> args) async {
     args,
     Protocol(),
     Endpoints(),
-    securityContextConfig: apiTls == null
+    securityContextConfig: apiTls.context == null
         ? null
-        : SecurityContextConfig(apiServer: apiTls.toSecurityContext()),
-    apiServerAdapterFactory: apiTls == null ? null : mtlsApiServerAdapter,
+        : SecurityContextConfig(apiServer: apiTls.context),
+    apiServerAdapterFactory: apiTls.context == null ? null : mtlsApiServerAdapter,
   );
 
   // O módulo serverpod_auth_idp não é inicializado: o acesso hoje é o token

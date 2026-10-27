@@ -66,12 +66,69 @@ class ApiTlsConfig {
   /// 1.2. `withTrustedRoots: false` + `setTrustedCertificates(clientCa)`: só a
   /// CA do RPC assina clientes aceitos — um certificado válido de qualquer
   /// outra raiz é recusado. `setClientAuthorities` é o que o servidor anuncia
-  /// no pedido de certificado. Arquivo ausente ou ilegível lança aqui, no boot
-  /// — falha fechada.
-  SecurityContext toSecurityContext() => SecurityContext(withTrustedRoots: false)
-    ..useCertificateChain(certificatePath)
-    ..usePrivateKey(keyPath)
-    ..setTrustedCertificates(clientCaPath)
-    ..setClientAuthorities(clientCaPath)
-    ..minimumTlsProtocolVersion = TlsProtocolVersion.tls1_3;
+  /// no pedido de certificado.
+  ///
+  /// Arquivo ausente, ilegível ou do tipo errado (uma chave no lugar da CA)
+  /// vira `StateError` que NOMEIA a variável e o tipo do erro do SDK — nunca
+  /// o conteúdo do arquivo. É `StateError`, e não a `TlsException`/
+  /// `FileSystemException` original, de propósito: o `runZonedGuarded` da #56
+  /// classifica `TlsException` como E/S transitória e deixaria o processo
+  /// "mantido" até o event loop esvaziar e sair com código 0, sem listener e
+  /// sem diagnóstico. Quem chama no boot é [carregar].
+  SecurityContext toSecurityContext() {
+    final ctx = SecurityContext(withTrustedRoots: false);
+    _etapa('API_TLS_CERT_PATH', certificatePath,
+        () => ctx.useCertificateChain(certificatePath));
+    _etapa('API_TLS_KEY_PATH', keyPath, () => ctx.usePrivateKey(keyPath));
+    _etapa('API_TLS_CLIENT_CA_PATH', clientCaPath, () {
+      ctx
+        ..setTrustedCertificates(clientCaPath)
+        ..setClientAuthorities(clientCaPath);
+    });
+    ctx.minimumTlsProtocolVersion = TlsProtocolVersion.tls1_3;
+    return ctx;
+  }
+
+  static void _etapa(String variavel, String caminho, void Function() acao) {
+    try {
+      acao();
+    } catch (e) {
+      throw StateError(
+        '$variavel aponta para um arquivo ausente, ilegível ou do tipo errado '
+        '($caminho): ${e.runtimeType}.',
+      );
+    }
+  }
+
+  /// O que `lib/server.dart` chama no boot: lê o ambiente, monta o contexto e,
+  /// em qualquer falha de configuração, escreve o diagnóstico em [log] e chama
+  /// [exitFn] com 78 (`EX_CONFIG`). Existe porque `run()` é `async void` dentro
+  /// do `runZonedGuarded` da #56: uma exceção que escapasse dali viraria "erro
+  /// sem dono (StateError)" no log — a mensagem que nomeia as três variáveis
+  /// nunca apareceria (achado 2 da revisão do checkpoint da #90). Sem as três
+  /// variáveis devolve `(null, null)` em silêncio: é o caminho HTTP do Render.
+  static ApiTlsBoot carregar(
+    Map<String, String> environment, {
+    required void Function(String) log,
+    required Never Function(int) exitFn,
+  }) {
+    try {
+      final config = fromMap(environment);
+      if (config == null) return const ApiTlsBoot(config: null, context: null);
+      return ApiTlsBoot(config: config, context: config.toSecurityContext());
+    } on StateError catch (e) {
+      log('[tls] configuração do apiServer inválida — o servidor não sobe: '
+          '${e.message}');
+      exitFn(78);
+    }
+  }
+}
+
+/// Resultado de [ApiTlsConfig.carregar]: os dois nulos (HTTP) ou os dois
+/// preenchidos (mTLS). Nunca um só.
+class ApiTlsBoot {
+  const ApiTlsBoot({required this.config, required this.context});
+
+  final ApiTlsConfig? config;
+  final SecurityContext? context;
 }

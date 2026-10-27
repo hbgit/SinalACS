@@ -176,6 +176,20 @@ void main() {
       );
     });
 
+    test('close do adapter libera a porta (fecha o SecureServerSocket, não só o HttpServer)', () async {
+      final adapter = await mtlsApiServerAdapter(
+        InternetAddress.loopbackIPv4, 0, config.toSecurityContext(),
+      );
+      final porta = adapter.port;
+      await adapter.close(force: true);
+      // `HttpServer.listenOn` cria o servidor com `_closeServer = false`: o
+      // close dele NÃO fecha o socket de baixo. Se a porta continuar ocupada, o
+      // shutdown gracioso do Serverpod deixaria a 8080 aceitando handshakes de
+      // um servidor morto (revisão do checkpoint, achado 1).
+      final livre = await ServerSocket.bind(InternetAddress.loopbackIPv4, porta);
+      await livre.close();
+    });
+
     test('devolve um Adapter na porta ligada, que exige o certificado', () async {
       final adapter = await mtlsApiServerAdapter(
         InternetAddress.loopbackIPv4, 0, config.toSecurityContext(),

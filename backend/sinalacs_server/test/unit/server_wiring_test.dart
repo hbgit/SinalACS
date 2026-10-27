@@ -4,7 +4,8 @@ import 'package:test/test.dart';
 
 /// O TLS do apiServer e a exigência do certificado de cliente são ligados
 /// JUNTOS em `lib/server.dart` (#90): o `SecurityContextConfig` e o
-/// `apiServerAdapterFactory` saem do mesmo `apiTls`. Separá-los é o defeito que
+/// `apiServerAdapterFactory` saem do mesmo `apiTls.context`, que
+/// `ApiTlsConfig.carregar` montou (ou encerrou o processo com 78). Separá-los é o defeito que
 /// este teste acusa — um `SecurityContextConfig` sem a fábrica subiria em TLS
 /// sem exigir o certificado do Traefik, com todas as sondas de "está cifrado"
 /// verdes. Lê o texto-fonte, como `endpoint_auth_posture_test.dart`.
@@ -16,11 +17,11 @@ void main() {
     final bloco = construtor!.group(0)!.replaceAll(RegExp(r'\s+'), ' ');
     expect(
       bloco,
-      contains('SecurityContextConfig(apiServer: apiTls.toSecurityContext())'),
+      contains('SecurityContextConfig(apiServer: apiTls.context)'),
     );
     expect(
       bloco,
-      contains('apiServerAdapterFactory: apiTls == null ? null : mtlsApiServerAdapter'),
+      contains('apiServerAdapterFactory: apiTls.context == null ? null : mtlsApiServerAdapter'),
     );
   });
 }

@@ -86,6 +86,49 @@ void main() {
     });
   });
 
+  group('ApiTlsConfig.carregar (boot)', () {
+    Never sair(int codigo) => throw _Saiu(codigo);
+
+    test('sem variável nenhuma: HTTP, sem log, sem sair', () {
+      final log = <String>[];
+      final boot = ApiTlsConfig.carregar({}, log: log.add, exitFn: sair);
+      expect(boot.config, isNull);
+      expect(boot.context, isNull);
+      expect(log, isEmpty);
+    });
+
+    test('só duas das três: escreve a mensagem com as três variáveis e sai 78', () {
+      final log = <String>[];
+      expect(
+        () => ApiTlsConfig.carregar(
+          {'API_TLS_CERT_PATH': '/x.crt', 'API_TLS_KEY_PATH': '/x.key'},
+          log: log.add, exitFn: sair,
+        ),
+        throwsA(isA<_Saiu>().having((e) => e.codigo, 'codigo', 78)),
+      );
+      expect(log.join('\n'), allOf(
+        contains('API_TLS_CERT_PATH'), contains('API_TLS_KEY_PATH'),
+        contains('API_TLS_CLIENT_CA_PATH'), contains('devem vir juntas'),
+      ));
+    });
+
+    test('arquivo inexistente: nomeia a variável e sai 78 (não cai em HTTP)', () {
+      final log = <String>[];
+      expect(
+        () => ApiTlsConfig.carregar(
+          {
+            'API_TLS_CERT_PATH': '/nao/existe.crt',
+            'API_TLS_KEY_PATH': '/nao/existe.key',
+            'API_TLS_CLIENT_CA_PATH': '/nao/existe-ca.crt',
+          },
+          log: log.add, exitFn: sair,
+        ),
+        throwsA(isA<_Saiu>().having((e) => e.codigo, 'codigo', 78)),
+      );
+      expect(log.join('\n'), contains('API_TLS_CERT_PATH'));
+    });
+  });
+
   group('ApiTlsConfig.toSecurityContext', () {
     late Directory dir;
     late String caPath;
@@ -133,6 +176,24 @@ void main() {
       );
     });
 
+    test('arquivo ilegível nomeia a variável e não vaza o conteúdo', () {
+      // Uma chave privada no lugar da CA: o SDK lança TlsException, que o
+      // runZonedGuarded da #56 classificaria como transitório e deixaria o
+      // processo sair com código 0 (revisão do checkpoint, achado 2).
+      expect(
+        () => ApiTlsConfig(
+          certificatePath: '${dir.path}/leaf.crt',
+          keyPath: '${dir.path}/leaf.key',
+          clientCaPath: '${dir.path}/leaf.key',
+        ).toSecurityContext(),
+        throwsA(isA<StateError>().having(
+          (e) => e.message, 'message',
+          allOf(contains('API_TLS_CLIENT_CA_PATH'), contains('TlsException'),
+              isNot(contains('PRIVATE KEY'))),
+        )),
+      );
+    });
+
     test('servidor com o contexto aceita TLS 1.3 e recusa TLS 1.2', () async {
       final server = await HttpServer.bindSecure(
         InternetAddress.loopbackIPv4,
@@ -164,4 +225,9 @@ void main() {
       expect(rc12, isNot(0));
     });
   });
+}
+
+class _Saiu implements Exception {
+  _Saiu(this.codigo);
+  final int codigo;
 }

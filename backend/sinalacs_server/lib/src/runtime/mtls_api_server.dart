@@ -115,6 +115,27 @@ Future<HttpServer> bindRequiringClientCertificate(
       await bindRequiringClientCertificateSocket(address, port, context, log: log),
     );
 
+/// `IOAdapter` cujo `close` fecha também o socket seguro.
+///
+/// `HttpServer.listenOn` cria o servidor com `_closeServer = false` (SDK
+/// 3.12.2, `_http/http_impl.dart`): `HttpServer.close` NÃO fecha o
+/// `ServerSocket` que recebeu. Sem isto, o shutdown do Serverpod
+/// (`RelicServer.close` → `HttpServer.close`) deixaria a 8080 aceitando
+/// handshakes de um servidor morto e a porta ocupada (achado 1 da revisão do
+/// checkpoint da #90; `close do adapter libera a porta` em
+/// `test/unit/mtls_api_server_test.dart`).
+class _MtlsIOAdapter extends IOAdapter {
+  _MtlsIOAdapter(super.server, this._socket);
+
+  final SecureServerSocketAsServerSocket _socket;
+
+  @override
+  Future<void> close({bool force = false}) async {
+    await super.close(force: force);
+    await _socket.close();
+  }
+}
+
 /// A `ApiServerAdapterFactory` passada ao `Serverpod(…)` em `lib/server.dart`
 /// quando `API_TLS_*` está definido. Sem contexto não há o que exigir: falha
 /// fechada em vez de cair em HTTP por este caminho.
@@ -129,7 +150,8 @@ Future<Adapter> mtlsApiServerAdapter(
       'sobe em HTTP pelo caminho padrão do Serverpod, não por esta fábrica.',
     );
   }
-  return IOAdapter(
-    await bindRequiringClientCertificate(address, port, securityContext),
+  final socket = await bindRequiringClientCertificateSocket(
+    address, port, securityContext,
   );
+  return _MtlsIOAdapter(HttpServer.listenOn(socket), socket);
 }
