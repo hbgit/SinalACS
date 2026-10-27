@@ -114,53 +114,75 @@ class OrmAlertStore implements AlertStore {
     final acsUuid = UuidValue.fromString(acsId);
 
     Future<AlertAckRecord?> run(Transaction transaction) async {
-      // O predicado de microárea é a barreira de territorialização: um ACS
-      // nunca confirma alerta fora do seu território (INV-01).
-      // Trava antes de ler (#76): um `resolve` concorrente que já gravou
-      // `resolved` é visto aqui, em vez de ser sobrescrito por um ACK que leu
-      // a linha antes dele.
-      final travado = await session.db.unsafeQuery(
-        '''
-        SELECT id FROM alerts
-        WHERE id = @id::uuid AND "microAreaId" = @ma::uuid
-        FOR UPDATE
-        ''',
-        parameters: QueryParameters.named({'id': alertId, 'ma': microAreaId}),
-        transaction: transaction,
-      );
-      if (travado.isEmpty) return null;
-      final alert =
-          (await Alert.db.findById(session, alertUuid, transaction: transaction))!;
-
       final now = DateTime.now().toUtc();
-      // Lido sob a trava, antes do UPDATE: o desfecho é o que a linha era, não
-      // o que o chamador supõe (#86).
-      final outcome = switch (alert.status) {
-        AlertStatus.resolved => AlertAckOutcome.alreadyResolved,
-        AlertStatus.acknowledged => AlertAckOutcome.alreadyAcknowledged,
-        AlertStatus.pending || AlertStatus.escalated => AlertAckOutcome.acknowledged,
-      };
-      // Também lido sob a trava: só o primeiro ACK emite a telemetria
-      // `alert_received_acs` (#83).
-      final acknowledgedAt = alert.acknowledgedAt ?? now;
-      await Alert.db.updateRow(
-        session,
-        alert.copyWith(
-          acsId: acsUuid,
-          receivedAt: alert.receivedAt ?? now,
-          acknowledgedAt: acknowledgedAt,
-          // ACK depois da conclusão (reentrega, outro aparelho) não rebaixa
-          // o atendimento já concluído (#76).
-          status: alert.status == AlertStatus.resolved
-              ? AlertStatus.resolved
-              : AlertStatus.acknowledged,
-        ),
-        // A linha agora é lida sob FOR UPDATE (acima). Restringir às colunas
-        // do ACK fica como defesa extra: um UPDATE da linha inteira não pode
-        // apagar o escalonamento (#44) nem a conclusão (#76).
-        columns: (t) => [t.acsId, t.receivedAt, t.acknowledgedAt, t.status],
+      // O desfecho é o resultado do UPDATE condicional, não de uma leitura
+      // anterior (#88): só pending/escalated viram acknowledged, e só esse
+      // primeiro ACK grava acsId/receivedAt/acknowledgedAt. Os desfechos
+      // repetidos nunca escrevem em alerts, então acsId é de quem confirmou
+      // primeiro. O predicado de microárea é a barreira de territorialização:
+      // um ACS nunca confirma alerta fora do seu território (INV-01).
+      final confirmado = await session.db.unsafeQuery(
+        '''
+        UPDATE alerts
+        SET status = @ack,
+            "acsId" = @acs::uuid,
+            "receivedAt" = COALESCE("receivedAt", @now::timestamp),
+            "acknowledgedAt" = COALESCE("acknowledgedAt", @now::timestamp)
+        WHERE id = @id::uuid AND "microAreaId" = @ma::uuid
+          AND status IN (@pending, @escalated)
+        RETURNING "triggeredAt", "acknowledgedAt"
+        ''',
+        parameters: QueryParameters.named({
+          'id': alertId,
+          'ma': microAreaId,
+          'acs': acsId,
+          'now': now,
+          'ack': AlertStatus.acknowledged.name,
+          'pending': AlertStatus.pending.name,
+          'escalated': AlertStatus.escalated.name,
+        }),
         transaction: transaction,
       );
+
+      final AlertAckOutcome outcome;
+      final DateTime triggeredAt;
+      final DateTime acknowledgedAt;
+      if (confirmado.isNotEmpty) {
+        outcome = AlertAckOutcome.acknowledged;
+        triggeredAt = (confirmado.single[0] as DateTime).toUtc();
+        acknowledgedAt = (confirmado.single[1] as DateTime).toUtc();
+      } else {
+        // Sem efeito: ou o alerta não é deste território, ou já saiu de
+        // pending/escalated. O SELECT … FOR UPDATE serializa com `resolve` e
+        // com o escalonamento, que travam a mesma linha: um `resolve`
+        // concorrente que já gravou `resolved` é visto aqui (#76), e a ordem
+        // da trilha segue a ordem da trava (#86).
+        final linhas = await session.db.unsafeQuery(
+          '''
+          SELECT status, "triggeredAt", "acknowledgedAt" FROM alerts
+          WHERE id = @id::uuid AND "microAreaId" = @ma::uuid
+          FOR UPDATE
+          ''',
+          parameters: QueryParameters.named({'id': alertId, 'ma': microAreaId}),
+          transaction: transaction,
+        );
+        if (linhas.isEmpty) return null;
+        final status = linhas.single[0] as String;
+        if (status == AlertStatus.resolved.name) {
+          outcome = AlertAckOutcome.alreadyResolved;
+        } else if (status == AlertStatus.acknowledged.name) {
+          outcome = AlertAckOutcome.alreadyAcknowledged;
+        } else {
+          // Em READ COMMITTED o UPDATE acima teria visto a linha pendente.
+          throw StateError(
+            'alerta ainda pendente depois do UPDATE condicional sem efeito (#88)',
+          );
+        }
+        triggeredAt = (linhas.single[1] as DateTime).toUtc();
+        // Um alerta acknowledged/resolved sempre tem acknowledgedAt (é o
+        // primeiro ACK que o grava); `now` é só defesa para dados anteriores.
+        acknowledgedAt = (linhas.single[2] as DateTime?)?.toUtc() ?? now;
+      }
 
       // Reconfirmação pelo mesmo ACS não duplica a linha de entrega — o par
       // (alertId, acsId) tem índice UNIQUE.
@@ -187,9 +209,10 @@ class OrmAlertStore implements AlertStore {
 
       return AlertAckRecord(
         outcome: outcome,
-        triggeredAt: alert.triggeredAt,
+        triggeredAt: triggeredAt,
         acknowledgedAt: acknowledgedAt,
-        firstAcknowledgement: alert.acknowledgedAt == null,
+        // Só o primeiro ACK emite a telemetria `alert_received_acs` (#83).
+        firstAcknowledgement: outcome == AlertAckOutcome.acknowledged,
       );
     }
 
