@@ -745,6 +745,49 @@ void main() {
       expect(await confirmar(a.id!.uuid), isNull);
       expect(trilha.eventos, isEmpty);
     });
+
+    test('o índice único de alert_deliveries é sobre o par (alertId, acsId) (#88)', () async {
+      final linhas = await session.db.unsafeQuery(
+        "SELECT indexdef FROM pg_indexes WHERE tablename = 'alert_deliveries' "
+        "AND indexname = 'alert_deliveries_alert_acs_key'",
+      );
+      final def = linhas.single[0] as String;
+      expect(def, contains('UNIQUE INDEX'));
+      expect(def, contains('("alertId", "acsId")'));
+    });
+
+    test('a reentrega não duplica e o segundo ACS entra: um par por ACS', () async {
+      final a = await alertaCom(AlertStatus.acknowledged);
+      await confirmar(a.id!.uuid); // A, reentrega
+      await confirmar(a.id!.uuid, acs: _acsB); // B
+      await confirmar(a.id!.uuid, acs: _acsB); // B, reentrega
+      final entregas = await AlertDeliveryRecord.db.find(
+        session,
+        where: (t) => t.alertId.equals(a.id!),
+      );
+      expect(entregas.map((e) => e.acsId.uuid).toSet(), {_acs, _acsB});
+      expect(entregas, hasLength(2));
+    });
+
+    test('entrega já registrada para alerta ainda pending: o ACK não falha e não duplica', () async {
+      final a = await _alerta(session);
+      await AlertDeliveryRecord.db.insertRow(
+        session,
+        AlertDeliveryRecord(
+          alertId: a.id!,
+          acsId: UuidValue.fromString(_acs),
+          acknowledgedAt: _t,
+        ),
+      );
+      final r = await confirmar(a.id!.uuid);
+      expect(r!.outcome, AlertAckOutcome.acknowledged);
+      final entregas = await AlertDeliveryRecord.db.find(
+        session,
+        where: (t) => t.alertId.equals(a.id!),
+      );
+      expect(entregas, hasLength(1));
+      expect(entregas.single.acknowledgedAt, _t, reason: 'a primeira entrega não é reescrita');
+    });
   });
 
   // Corrida: rollback desligado (com ele, sessões concorrentes colidem no

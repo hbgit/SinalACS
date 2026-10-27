@@ -110,8 +110,6 @@ class OrmAlertStore implements AlertStore {
     required AuditEvent Function(AlertAckOutcome outcome) auditFor,
   }) async {
     final session = _session();
-    final alertUuid = UuidValue.fromString(alertId);
-    final acsUuid = UuidValue.fromString(acsId);
 
     Future<AlertAckRecord?> run(Transaction transaction) async {
       final now = DateTime.now().toUtc();
@@ -184,24 +182,22 @@ class OrmAlertStore implements AlertStore {
         acknowledgedAt = (linhas.single[2] as DateTime?)?.toUtc() ?? now;
       }
 
-      // Reconfirmação pelo mesmo ACS não duplica a linha de entrega — o par
-      // (alertId, acsId) tem índice UNIQUE.
-      final already = await AlertDeliveryRecord.db.findFirstRow(
-        session,
-        where: (t) => t.alertId.equals(alertUuid) & t.acsId.equals(acsUuid),
+      // Reentrega é caso esperado: o índice único do par (alertId, acsId)
+      // decide, não uma leitura prévia (#88). A primeira entrega de cada ACS
+      // fica como está; `id` vem do DEFAULT da tabela.
+      await session.db.unsafeExecute(
+        '''
+        INSERT INTO alert_deliveries ("alertId", "acsId", "acknowledgedAt")
+        VALUES (@alert::uuid, @acs::uuid, @now::timestamp)
+        ON CONFLICT ("alertId", "acsId") DO NOTHING
+        ''',
+        parameters: QueryParameters.named({
+          'alert': alertId,
+          'acs': acsId,
+          'now': now,
+        }),
         transaction: transaction,
       );
-      if (already == null) {
-        await AlertDeliveryRecord.db.insertRow(
-          session,
-          AlertDeliveryRecord(
-            alertId: alertUuid,
-            acsId: acsUuid,
-            acknowledgedAt: now,
-          ),
-          transaction: transaction,
-        );
-      }
 
       // Fail-closed: se a trilha falhar, a transação inteira (status incluso)
       // é desfeita. Roda por último, pois o lock da cadeia nunca precede outro.
