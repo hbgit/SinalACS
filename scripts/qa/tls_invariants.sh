@@ -218,9 +218,18 @@ else
   openssl x509 -req -days 2 -in "$e_tmp/fora.csr" -CA "$e_tmp/fora-ca.crt" -CAkey "$e_tmp/fora-ca.key" \
     -CAcreateserial -extfile "$e_tmp/fora.ext" -out "$e_tmp/fora.crt" >/dev/null 2>&1
   chmod 755 "$e_tmp"; chmod 644 "$e_tmp"/*
+  # A geração do certificado "de fora" tem de ser conferida: se ela falhar (ou o
+  # bind-mount de $e_tmp chegar vazio, daemon remoto/rootless), o curl sai com 58
+  # ("could not load client certificate"), a saída tem `HTTP 000` e E6 passaria
+  # SEM ter apresentado certificado nenhum — falso verde na asserção que diz "o
+  # contexto confia só na CA do RPC" (revisão final da #90).
+  fora_ok=1
+  [[ -s "$e_tmp/fora.crt" && -s "$e_tmp/fora.key" ]] || fora_ok=0
 
   if [[ "$e2_ok" -eq 0 ]]; then
     falha 'E5/E6 — sem o controle positivo E2, a recusa seria verdade por acidente (stack no chão recusa tudo)'
+  elif [[ "$fora_ok" -eq 0 ]]; then
+    falha "E6 — não deu para gerar o certificado de outra CA em $e_tmp (openssl falhou); sem ele a sonda não prova nada"
   else
     e5="$(sonda_8080 --tlsv1.3 --cacert /c/ca.crt "$url_8080")"
     if recusado "$e5"; then
@@ -230,7 +239,9 @@ else
     fi
 
     e6="$(sonda_8080 --tlsv1.3 --cacert /c/ca.crt --cert /f/fora.crt --key /f/fora.key "$url_8080")"
-    if recusado "$e6"; then
+    if printf '%s' "$e6" | grep -q 'curl: (58)'; then
+      falha "E6 — o curl não conseguiu carregar o certificado de outra CA (curl: (58)); a sonda não apresentou certificado e não prova nada: $(printf '%s' "$e6" | grep 'curl: (58)' | head -1)"
+    elif recusado "$e6"; then
       ok 'E6 — certificado de OUTRA CA (mesmo CN do Traefik) é recusado no handshake'
     else
       falha "E6 — a 8080 interna aceitou certificado de outra CA — o contexto confia em mais do que a CA do RPC: $(printf '%s' "$e6" | grep -E 'status|HTTP ' | tail -2 | tr '\n' ' ')"
