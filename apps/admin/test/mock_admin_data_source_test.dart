@@ -13,6 +13,25 @@ void main() {
     expect(indicators.countsByRisk[RiskLevel.green], 2);
     expect(indicators.openRedAlerts, 1);
     expect(indicators.acknowledgedRedAlerts, 1);
+    expect(indicators.resolvedRedAlerts, 0, reason: 'nenhum vermelho concluído no seed do mock');
+    // INV-03 (#87): a partição fecha com o total de vermelhos.
+    expect(
+      indicators.countsByRisk[RiskLevel.red],
+      indicators.openRedAlerts + indicators.acknowledgedRedAlerts + indicators.resolvedRedAlerts,
+    );
+  });
+
+  test('alertas concluídos do mock trazem resolvedAt e movem o pulso (#87)', () async {
+    final dataSource = MockAdminDataSource();
+
+    final concluidos = await dataSource.fetchAlerts(status: AlertStatus.resolved);
+    expect(concluidos.map((a) => a.id), ['alert-4', 'alert-6']);
+    expect(concluidos.every((a) => a.resolvedAt != null), isTrue);
+    final maiorConclusao = concluidos.map((a) => a.resolvedAt!).reduce((a, b) => a.isAfter(b) ? a : b);
+
+    final pulso = await dataSource.alertsPulse();
+    expect(pulso.maxChangedAt, isNotNull);
+    expect(pulso.maxChangedAt!.isBefore(maiorConclusao), isFalse, reason: 'a conclusão move maxChangedAt, como no servidor');
   });
 
   test('deve filtrar alertas por microárea e status combinados', () async {

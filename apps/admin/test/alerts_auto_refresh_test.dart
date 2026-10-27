@@ -97,10 +97,27 @@ void main() {
       countsByRisk: {...base.countsByRisk, RiskLevel.green: 0},
       openRedAlerts: base.openRedAlerts,
       acknowledgedRedAlerts: base.acknowledgedRedAlerts,
+      resolvedRedAlerts: base.resolvedRedAlerts,
       tmravSeconds: base.tmravSeconds,
     );
     await ciclo(tester);
     expect(fonte.buscasDeAlertas, 3);
+  });
+
+  testWidgets('lista recarrega quando só o contador de concluídos muda (#87)', (tester) async {
+    await montarAlertas(tester, controlador());
+    expect(fonte.buscasDeAlertas, 1);
+
+    final base = await fonte.fetchDashboardIndicators();
+    fonte.indicadores = DashboardIndicators(
+      countsByRisk: base.countsByRisk,
+      openRedAlerts: base.openRedAlerts,
+      acknowledgedRedAlerts: base.acknowledgedRedAlerts,
+      resolvedRedAlerts: base.resolvedRedAlerts + 1,
+      tmravSeconds: base.tmravSeconds,
+    );
+    await ciclo(tester);
+    expect(fonte.buscasDeAlertas, 2, reason: 'o pulso não pode ser cego ao contador de concluídos');
   });
 
   testWidgets('pulso sem mudança não recarrega a lista', (tester) async {

@@ -49,6 +49,7 @@ class BackendAdminDataSource implements AdminDataSource {
       },
       openRedAlerts: r.openRedAlerts,
       acknowledgedRedAlerts: r.acknowledgedRedAlerts,
+      resolvedRedAlerts: r.resolvedRedAlerts,
       tmravSeconds: r.tmravSeconds,
     );
   });
@@ -227,6 +228,7 @@ class BackendAdminDataSource implements AdminDataSource {
           status: AlertStatus.values.byName(a.status.name),
           triggeredAt: a.triggeredAt,
           escalatedAt: a.escalatedAt,
+          resolvedAt: a.resolvedAt,
           overdue: a.overdue,
         ),
     ];
@@ -362,6 +364,7 @@ class BackendAdminDataSource implements AdminDataSource {
         },
         openRedAlerts: i.openRedAlerts,
         acknowledgedRedAlerts: i.acknowledgedRedAlerts,
+        resolvedRedAlerts: i.resolvedRedAlerts,
         tmravSeconds: i.tmravSeconds,
       ),
       overdueRed: p.overdueRed,

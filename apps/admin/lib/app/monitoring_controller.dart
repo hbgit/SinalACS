@@ -248,6 +248,7 @@ class MonitoringController extends ChangeNotifier with WidgetsBindingObserver {
     final ib = b.indicators;
     if (ia.openRedAlerts != ib.openRedAlerts ||
         ia.acknowledgedRedAlerts != ib.acknowledgedRedAlerts ||
+        ia.resolvedRedAlerts != ib.resolvedRedAlerts ||
         ia.tmravSeconds != ib.tmravSeconds) {
       return true;
     }

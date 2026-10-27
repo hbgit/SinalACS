@@ -26,6 +26,7 @@ void main() {
           green: 3,
           openRedAlerts: 1,
           acknowledgedRedAlerts: 1,
+          resolvedRedAlerts: 4,
           tmravSeconds: null,
         ),
       );
@@ -37,6 +38,7 @@ void main() {
       });
       expect(r.openRedAlerts, 1);
       expect(r.acknowledgedRedAlerts, 1);
+      expect(r.resolvedRedAlerts, 4, reason: 'concluídos (#87) passam como vieram');
       expect(r.tmravSeconds, isNull);
       expect(caller.lastArgs, {'accessToken': 'token-de-teste'});
     },
@@ -50,6 +52,7 @@ void main() {
         green: 0,
         openRedAlerts: 0,
         acknowledgedRedAlerts: 0,
+        resolvedRedAlerts: 0,
         tmravSeconds: 60,
       ),
     );
@@ -89,6 +92,7 @@ void main() {
               status: api.AlertStatus.acknowledged,
               triggeredAt: em,
               escalatedAt: DateTime.utc(2026, 10, 7, 12, 20),
+              resolvedAt: DateTime.utc(2026, 10, 7, 12, 40),
               overdue: true,
             ),
           ],
@@ -108,6 +112,7 @@ void main() {
         'offset': 40,
       });
       expect(r.single.patientLabel, 'Paciente #A18F', reason: 'a tela mostra o rótulo cru; o servidor manda só o #A18F');
+      expect(r.single.resolvedAt, DateTime.utc(2026, 10, 7, 12, 40), reason: 'a hora da conclusão (#87) passa como veio');
       expect(r.single.riskLevel, RiskLevel.red);
       expect(r.single.status, AlertStatus.acknowledged);
       expect(r.single.triggeredAt, em);
@@ -226,6 +231,7 @@ void main() {
             green: 0,
             openRedAlerts: 2,
             acknowledgedRedAlerts: 0,
+            resolvedRedAlerts: 1,
             tmravSeconds: null,
           ),
           overdueRed: 1,
@@ -237,6 +243,7 @@ void main() {
       expect(caller.lastArgs, {'accessToken': 'token-de-teste'});
       expect(r.indicators.countsByRisk[RiskLevel.red], 2);
       expect(r.indicators.openRedAlerts, 2);
+      expect(r.indicators.resolvedRedAlerts, 1, reason: 'o pulso carrega o contador novo (#87)');
       expect(r.indicators.tmravSeconds, isNull);
       expect(r.overdueRed, 1);
       expect(r.maxChangedAt, marca);
@@ -252,6 +259,7 @@ void main() {
             green: 0,
             openRedAlerts: 0,
             acknowledgedRedAlerts: 0,
+            resolvedRedAlerts: 0,
           ),
           overdueRed: 0,
           serverNow: DateTime.utc(2026, 10, 7),

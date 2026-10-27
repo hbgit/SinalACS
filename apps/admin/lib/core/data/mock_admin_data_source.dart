@@ -160,6 +160,7 @@ class MockAdminDataSource implements AdminDataSource {
       riskLevel: RiskLevel.green,
       status: AlertStatus.resolved,
       triggeredAt: DateTime(2026, 9, 10, 19, 5),
+      resolvedAt: DateTime(2026, 9, 10, 19, 40),
     ),
     AlertSummary(
       id: 'alert-5',
@@ -176,6 +177,7 @@ class MockAdminDataSource implements AdminDataSource {
       riskLevel: RiskLevel.green,
       status: AlertStatus.resolved,
       triggeredAt: DateTime(2026, 9, 9, 11, 2),
+      resolvedAt: DateTime(2026, 9, 9, 11, 30),
     ),
   ];
 
@@ -269,10 +271,15 @@ class MockAdminDataSource implements AdminDataSource {
     final acknowledgedRed = _alerts
         .where((alert) => alert.riskLevel == RiskLevel.red && alert.status == AlertStatus.acknowledged)
         .length;
+    // Concluídos (#87): a mesma partição do servidor (`RedAlertBucket`).
+    final resolvedRed = _alerts
+        .where((alert) => alert.riskLevel == RiskLevel.red && alert.status == AlertStatus.resolved)
+        .length;
     return DashboardIndicators(
       countsByRisk: counts,
       openRedAlerts: openRed,
       acknowledgedRedAlerts: acknowledgedRed,
+      resolvedRedAlerts: resolvedRed,
       tmravSeconds: 78,
     );
   }
@@ -310,6 +317,7 @@ class MockAdminDataSource implements AdminDataSource {
       status: a.status,
       triggeredAt: a.triggeredAt,
       escalatedAt: em,
+      resolvedAt: a.resolvedAt,
       overdue: em == null && a.riskLevel == RiskLevel.red && a.status == AlertStatus.pending && _venceu(a),
     );
   }
@@ -475,7 +483,8 @@ class MockAdminDataSource implements AdminDataSource {
     final lista = _alerts.map(_comEscalonamento).toList();
     DateTime? maior;
     for (final a in lista) {
-      for (final t in [a.triggeredAt, a.escalatedAt]) {
+      // A conclusão também move a marca, como no servidor (#76, `fa549b2`).
+      for (final t in [a.triggeredAt, a.escalatedAt, a.resolvedAt]) {
         if (t != null && (maior == null || t.isAfter(maior))) maior = t;
       }
     }
