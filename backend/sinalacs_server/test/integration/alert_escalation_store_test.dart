@@ -933,6 +933,75 @@ void main() {
           }
         },
       );
+
+      test(
+        'dois ACS confirmam o mesmo pendente: o UPDATE que casa vira acsId, o outro é idempotente (#88)',
+        () async {
+          final s = sessionBuilder.build();
+          await limpar(s);
+          try {
+            await _semear(s);
+            for (var i = 0; i < rodadas; i++) {
+              final a = await _alerta(s);
+              // Trilha única, gravada sob a trava: ordem = ordem da trava.
+              final trilha = _AuditoriaGravada();
+              OrmAlertStore novo() => OrmAlertStore(
+                    session: sessionBuilder.build,
+                    appendAudit: trilha.call,
+                  );
+              AuditEvent evento(String userId, String result) => AuditEvent(
+                    userId: userId,
+                    actionType: 'write',
+                    resourceType: 'alert',
+                    resourceId: a.id!.uuid,
+                    result: result,
+                  );
+
+              final r = await Future.wait([
+                novo().acknowledge(
+                  alertId: a.id!.uuid,
+                  acsId: _acs,
+                  microAreaId: _maA,
+                  auditFor: (o) => evento(_acs, 'ack:${o.name}'),
+                ),
+                novo().acknowledge(
+                  alertId: a.id!.uuid,
+                  acsId: _acsB,
+                  microAreaId: _maA,
+                  auditFor: (o) => evento(_acsB, 'ack:${o.name}'),
+                ),
+              ]);
+              final desfechos = r.map((x) => x!.outcome).toList();
+              expect(
+                desfechos.where((o) => o == AlertAckOutcome.acknowledged),
+                hasLength(1),
+                reason: 'rodada $i: $desfechos',
+              );
+              expect(
+                desfechos.where((o) => o == AlertAckOutcome.alreadyAcknowledged),
+                hasLength(1),
+                reason: 'rodada $i: $desfechos',
+              );
+              final vencedor = trilha.eventos.first.userId;
+              expect(trilha.eventos.first.result, 'ack:acknowledged', reason: 'rodada $i');
+              expect(trilha.eventos.last.result, 'ack:alreadyAcknowledged', reason: 'rodada $i');
+              final lido = (await Alert.db.findById(s, a.id!))!;
+              expect(lido.acsId!.uuid, vencedor, reason: 'rodada $i');
+              expect(lido.status, AlertStatus.acknowledged, reason: 'rodada $i');
+              // Os dois devolvem o carimbo do vencedor.
+              expect(r[0]!.acknowledgedAt, r[1]!.acknowledgedAt, reason: 'rodada $i');
+              expect(r.where((x) => x!.firstAcknowledgement), hasLength(1), reason: 'rodada $i');
+              expect(
+                await AlertDeliveryRecord.db.count(s, where: (t) => t.alertId.equals(a.id!)),
+                2,
+                reason: 'rodada $i',
+              );
+            }
+          } finally {
+            await limpar(s);
+          }
+        },
+      );
     },
     rollbackDatabase: RollbackDatabase.disabled,
   );
