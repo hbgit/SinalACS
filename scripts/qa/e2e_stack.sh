@@ -46,7 +46,14 @@ case "${1:-}" in
     # runtime/backend/ vazio e o backend entraria em laço de restart. A CA já foi
     # conferida acima, então o init só reaproveita a CA e regera as folhas.
     dc up traefik-init >"$log" 2>&1 || falhou 'o traefik-init não gerou as folhas do RPC'
-    for f in infra/docker/traefik/runtime/backend/backend.crt infra/docker/traefik/runtime/backend/backend.key; do
+    # Desde a #90 o init emite também as duas folhas de CLIENTE do mTLS da 8080:
+    # a do Traefik (runtime/certs/) e a do healthcheck (runtime/backend/). Sem a
+    # primeira o Traefik é recusado pelo backend (5xx em tudo); sem a segunda o
+    # container nunca fica healthy — e o laço de espera abaixo estouraria sem
+    # dizer por quê.
+    for f in infra/docker/traefik/runtime/backend/backend.crt infra/docker/traefik/runtime/backend/backend.key \
+             infra/docker/traefik/runtime/backend/healthcheck.crt infra/docker/traefik/runtime/backend/healthcheck.key \
+             infra/docker/traefik/runtime/certs/traefik-client.crt infra/docker/traefik/runtime/certs/traefik-client.key; do
       [[ -f "$f" ]] || falhou "falta $f depois do traefik-init"
     done
     dc up -d --build --force-recreate --no-deps serverpod gorush traefik mosquitto >"$log" 2>&1 \

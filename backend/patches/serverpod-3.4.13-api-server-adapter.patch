@@ -1,0 +1,159 @@
+From 2a0b67e38532faff48f8f75b42b9f63e36a1cd82 Mon Sep 17 00:00:00 2001
+From: Herbert Rocha <herberthb12@gmail.com>
+Date: Tue, 27 Oct 2026 16:56:43 -0400
+Subject: [PATCH] feat(server): optional apiServerAdapterFactory to supply the
+ API server Adapter
+
+Serverpod binds the API server through RelicApp.serve, which only reaches the
+bind options that HttpServer.bindSecure exposes. A reverse proxy that must
+authenticate itself with a TLS client certificate needs
+SecureServerSocket.bind(requireClientCertificate: true), which is out of
+reach that way. The optional factory lets the application bind the socket
+itself and hand the relic Adapter to Serverpod; without it nothing changes.
+---
+ packages/serverpod/lib/serverpod.dart         |  1 +
+ .../server/api_server_adapter_factory.dart    | 23 +++++++++++++++++
+ packages/serverpod/lib/src/server/server.dart | 25 +++++++++++++++----
+ .../serverpod/lib/src/server/serverpod.dart   |  7 ++++++
+ 4 files changed, 51 insertions(+), 5 deletions(-)
+ create mode 100644 packages/serverpod/lib/src/server/api_server_adapter_factory.dart
+
+diff --git a/packages/serverpod/lib/serverpod.dart b/packages/serverpod/lib/serverpod.dart
+index f357b7d..1292db4 100644
+--- a/packages/serverpod/lib/serverpod.dart
++++ b/packages/serverpod/lib/serverpod.dart
+@@ -34,5 +34,6 @@ export 'package:serverpod/src/cloud_storage/database_cloud_storage.dart';
+ export 'package:serverpod/src/cache/cache_miss_handler.dart';
+ 
+ // Experimental features
++export 'src/server/api_server_adapter_factory.dart';
+ export 'src/server/experimental_features.dart';
+ export 'diagnostic_events.dart';
+diff --git a/packages/serverpod/lib/src/server/api_server_adapter_factory.dart b/packages/serverpod/lib/src/server/api_server_adapter_factory.dart
+new file mode 100644
+index 0000000..a8a0376
+--- /dev/null
++++ b/packages/serverpod/lib/src/server/api_server_adapter_factory.dart
+@@ -0,0 +1,23 @@
++import 'dart:async';
++import 'dart:io';
++
++import 'package:relic/relic.dart';
++
++/// Creates the relic [Adapter] the API server listens on.
++///
++/// By default Serverpod binds the API server through `RelicApp.serve`, which
++/// covers HTTP and one-way HTTPS. Some bind options of `dart:io` are not
++/// reachable that way — for instance `SecureServerSocket.bind(…,
++/// requireClientCertificate: true)` for mutual TLS, which `HttpServer.bindSecure`
++/// does not expose. Supplying a factory lets the application bind the socket
++/// itself and hand the resulting [Adapter] to Serverpod; the default behavior
++/// is unchanged when no factory is given.
++///
++/// [address] and [port] are the ones Serverpod would have bound to, and
++/// [securityContext] is `SecurityContextConfig.apiServer` (null for HTTP).
++typedef ApiServerAdapterFactory =
++    FutureOr<Adapter> Function(
++      InternetAddress address,
++      int port,
++      SecurityContext? securityContext,
++    );
+diff --git a/packages/serverpod/lib/src/server/server.dart b/packages/serverpod/lib/src/server/server.dart
+index 9538cfb..124ea1f 100644
+--- a/packages/serverpod/lib/src/server/server.dart
++++ b/packages/serverpod/lib/src/server/server.dart
+@@ -76,6 +76,10 @@ class Server implements RouterInjectable {
+   /// Security context if the server is running over https.
+   final io.SecurityContext? _securityContext;
+ 
++  /// Optional factory for the relic [Adapter] the server listens on. When
++  /// null, the server binds through `RelicApp.serve`.
++  final ApiServerAdapterFactory? _apiServerAdapterFactory;
++
+   /// Responsible for dispatching calls to the correct [Endpoint] methods.
+   final EndpointDispatch endpoints;
+ 
+@@ -115,6 +119,7 @@ class Server implements RouterInjectable {
+     String? name,
+     required this.caches,
+     io.SecurityContext? securityContext,
++    ApiServerAdapterFactory? apiServerAdapterFactory,
+     this.whitelistedExternalCalls,
+     required this.endpoints,
+     required this.httpResponseHeaders,
+@@ -122,6 +127,7 @@ class Server implements RouterInjectable {
+   }) : name = name ?? 'Server $serverId',
+        _databasePoolManager = databasePoolManager,
+        _securityContext = securityContext,
++       _apiServerAdapterFactory = apiServerAdapterFactory,
+        _port = port;
+ 
+   late final _app = RelicApp()..inject(this);
+@@ -166,11 +172,20 @@ class Server implements RouterInjectable {
+   }) async {
+     _authenticationHandler = authenticationHandler;
+     try {
+-      final server = await _app.serve(
+-        address: io.InternetAddress.anyIPv6,
+-        port: _port,
+-        securityContext: _securityContext,
+-      );
++      final adapterFactory = _apiServerAdapterFactory;
++      final server = adapterFactory == null
++          ? await _app.serve(
++              address: io.InternetAddress.anyIPv6,
++              port: _port,
++              securityContext: _securityContext,
++            )
++          : await _app.run(
++              () => adapterFactory(
++                io.InternetAddress.anyIPv6,
++                _port,
++                _securityContext,
++              ),
++            );
+       _actualPort = server.port;
+       _relicServer = server;
+     } catch (e, stackTrace) {
+diff --git a/packages/serverpod/lib/src/server/serverpod.dart b/packages/serverpod/lib/src/server/serverpod.dart
+index c4ed927..927d7a0 100644
+--- a/packages/serverpod/lib/src/server/serverpod.dart
++++ b/packages/serverpod/lib/src/server/serverpod.dart
+@@ -385,6 +385,10 @@ class Serverpod {
+   /// Security context if the insights server is running over https.
+   final SecurityContextConfig? _securityContextConfig;
+ 
++  /// Optional factory for the relic adapter of the API server; see
++  /// [ApiServerAdapterFactory]. Null keeps the default bind.
++  final ApiServerAdapterFactory? _apiServerAdapterFactory;
++
+   /// Runtime parameters builder to apply to all sessions of the connection pool.
+   ///
+   /// Use the callback function to discover runtime parameters:
+@@ -414,6 +418,7 @@ class Serverpod {
+     Headers? httpResponseHeaders,
+     Headers? httpOptionsResponseHeaders,
+     SecurityContextConfig? securityContextConfig,
++    ApiServerAdapterFactory? apiServerAdapterFactory,
+     ExperimentalFeatures? experimentalFeatures,
+     this.runtimeParametersBuilder,
+   }) : httpResponseHeaders = httpResponseHeaders ?? _defaultHttpResponseHeaders,
+@@ -421,6 +426,7 @@ class Serverpod {
+            httpOptionsResponseHeaders ?? _defaultHttpOptionsResponseHeaders,
+        _configOverride = configOverride,
+        _securityContextConfig = securityContextConfig,
++       _apiServerAdapterFactory = apiServerAdapterFactory,
+        _healthConfig = healthConfig ?? const HealthConfig(),
+        _experimental = ExperimentalApi._(
+          config: config,
+@@ -598,6 +604,7 @@ class Serverpod {
+       httpResponseHeaders: httpResponseHeaders,
+       httpOptionsResponseHeaders: httpOptionsResponseHeaders,
+       securityContext: _securityContextConfig?.apiServer,
++      apiServerAdapterFactory: _apiServerAdapterFactory,
+     );
+ 
+     endpoints.initializeEndpoints(server);
+-- 
+2.56.0
+
