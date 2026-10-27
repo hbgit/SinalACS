@@ -23,8 +23,8 @@ O que **continua defeituoso** (confirmado em `orm_alert_store.dart:146-162`): o 
 
 Ordem de execução: **não há junção a fazer**; a #88 parte de `develop` e a #86 pode ser fechada no merge `develop → main`.
 
-- [ ] `git switch develop && git pull && git switch -c fix/issue-88-ack-acsid`
-- [ ] `gh pr list --state open --search "acknowledge"` → nenhum PR aberto toca `orm_alert_store.dart` (se houver, rebase sobre ele antes da Task 3).
+- [x] `git switch develop && git pull && git switch -c fix/issue-88-ack-acsid`
+- [x] `gh pr list --state open --search "acknowledge"` → nenhum PR aberto toca `orm_alert_store.dart` (se houver, rebase sobre ele antes da Task 3).
 
 ## Restrições globais
 
@@ -108,9 +108,9 @@ Decisão: **sem correção retroativa** (registrada na #88 em 2026-10-27). O pro
 **Interfaces:**
 - Produces: constante `_acsB = '00000000-0000-4000-8000-0000000044e7'` (segundo ACS, `users.microAreaId = _maA`, `acs.ubsId = _ubsA`, `active = true`) semeada por `_semear` e removida por `limpar`; helper `confirmar(alertId, {ma = _maA, acs = _acs})` no grupo `#86` (parâmetro novo `acs`, que vira `acsId` e `userId` do evento).
 
-- [ ] **Step 1: Semear o segundo ACS.** Em `_semear`, inserir `User` + `Acs` para `_acsB` ao lado do `_acs` existente (mesmos campos, `enrollmentId` distinto, ex.: `'ACS-B'`). Em `limpar` do grupo "sem rollback", incluir `_acsB` nos `deleteWhere` de `Acs` e `User`.
+- [x] **Step 1: Semear o segundo ACS.** Em `_semear`, inserir `User` + `Acs` para `_acsB` ao lado do `_acs` existente (mesmos campos, `enrollmentId` distinto, ex.: `'ACS-B'`). Em `limpar` do grupo "sem rollback", incluir `_acsB` nos `deleteWhere` de `Acs` e `User`.
 
-- [ ] **Step 2: Escrever o teste que falha**, no grupo `Dado o ACK do store ORM (#86)`:
+- [x] **Step 2: Escrever o teste que falha**, no grupo `Dado o ACK do store ORM (#86)`:
 
 ```dart
 test('ACK de outro ACS sobre alerta já confirmado não troca acsId (#88)', () async {
@@ -128,11 +128,11 @@ test('ACK de outro ACS sobre alerta já confirmado não troca acsId (#88)', () a
 });
 ```
 
-- [ ] **Step 3: Rodar e ver falhar.**
+- [x] **Step 3: Rodar e ver falhar.**
 Run: `cd backend/sinalacs_server && dart test -j 1 test/integration/alert_escalation_store_test.dart -N "não troca acsId"`
 Expected: FAIL em `acsId é de quem confirmou primeiro` (valor `_acsB`).
 
-- [ ] **Step 4: Commit da reprodução.**
+- [x] **Step 4: Commit da reprodução.**
 ```bash
 git add backend/sinalacs_server/test/integration/alert_escalation_store_test.dart
 git commit -m "test(alertas): ACK de outro ACS troca o acsId do alerta (#88, reprodução)"
@@ -149,9 +149,9 @@ git commit -m "test(alertas): ACK de outro ACS troca o acsId do alerta (#88, rep
 - Consumes: `secondAcsCredentialFromRelay()` de `integration_test/support/e2e_acs.dart` (relé `/acs-b`, bloco `acsB` do manifesto, mesma microárea); `fx "d['acs']['id']"` (ACS A) e `fx "d['acsB']['id']"` (ACS B) no script.
 - Produces: marcadores `E2E_DISPARAR_ALERTA id=<uuid>`, `E2E_CONFIRMAR_NO_APARELHO_A id=<uuid>`, `E2E_ACK_B_OK`; o script falha antes da correção na asserção `acsId segue o ACS A`.
 
-- [ ] **Step 1: Teste de integração.** O aparelho entra como **ACS B** (`secondAcsCredentialFromRelay()`), espera `alert_fallback_status` (broker fora do alcance, como na #86), imprime `E2E_DISPARAR_ALERTA`, espera o cartão `alert_$id`, imprime `E2E_CONFIRMAR_NO_APARELHO_A`, espera 6 s (menos que o tique de 30 s da reserva, para o cartão ainda oferecer o ACK), toca "Confirmar recebimento" e afirma (teto 20 s): texto `Recebimento confirmado à central.` presente, `Key('resolve_$id')` presente (opção 1: o cartão vai a confirmado e oferece concluir), `Key('resolved_$id')` ausente. Imprime `E2E_ACK_B_OK`. Falha com mensagem própria se aparecer `A central não reconheceu este alerta.`.
+- [x] **Step 1: Teste de integração.** O aparelho entra como **ACS B** (`secondAcsCredentialFromRelay()`), espera `alert_fallback_status` (broker fora do alcance, como na #86), imprime `E2E_DISPARAR_ALERTA`, espera o cartão `alert_$id`, imprime `E2E_CONFIRMAR_NO_APARELHO_A`, espera 6 s (menos que o tique de 30 s da reserva, para o cartão ainda oferecer o ACK), toca "Confirmar recebimento" e afirma (teto 20 s): texto `Recebimento confirmado à central.` presente, `Key('resolve_$id')` presente (opção 1: o cartão vai a confirmado e oferece concluir), `Key('resolved_$id')` ausente. Imprime `E2E_ACK_B_OK`. Falha com mensagem própria se aparecer `A central não reconheceu este alerta.`.
 
-- [ ] **Step 2: Script.** Igual ao da #86 até o `inserir_alerta`, com duas diferenças: o `INSERT` em `alerts` vai com `"acsId" = NULL`; e o marcador `E2E_CONFIRMAR_NO_APARELHO_A` executa, numa transação:
+- [x] **Step 2: Script.** Igual ao da #86 até o `inserir_alerta`, com duas diferenças: o `INSERT` em `alerts` vai com `"acsId" = NULL`; e o marcador `E2E_CONFIRMAR_NO_APARELHO_A` executa, numa transação:
 ```sql
 update alerts set status = 'acknowledged', "acsId" = '<acs_id A>', "receivedAt" = NOW(), "acknowledgedAt" = NOW() where id = '<id>' and status = 'pending';
 insert into alert_deliveries ("alertId", "acsId", "acknowledgedAt") values ('<id>', '<acs_id A>', NOW());
@@ -165,13 +165,13 @@ e guarda `acknowledgedAt` em variável para comparar depois. Asserções no banc
   - `nenhuma linha acknowledged`: 0.
   - `nada no alert_outbox`: 0.
 
-- [ ] **Step 3: Guarda de estrutura.** `acs_ack_segundo_acs_e2e_test.sh` confere, por `grep -qF`, os três marcadores, o `"acsId" = NULL` do insert, a asserção `result = 'ack_already_acknowledged'`, a contagem por `"acsId" = '$acs_b_id'` em `alert_deliveries` e o `d.pop('acsB',None)` do manifesto (senhas nunca no argv). Run: `bash scripts/qa/acs_ack_segundo_acs_e2e_test.sh` → `OK`.
+- [x] **Step 3: Guarda de estrutura.** `acs_ack_segundo_acs_e2e_test.sh` confere, por `grep -qF`, os três marcadores, o `"acsId" = NULL` do insert, a asserção `result = 'ack_already_acknowledged'`, a contagem por `"acsId" = '$acs_b_id'` em `alert_deliveries` e o `d.pop('acsB',None)` do manifesto (senhas nunca no argv). Run: `bash scripts/qa/acs_ack_segundo_acs_e2e_test.sh` → `OK`.
 
-- [ ] **Step 4: Rodar no emulador antes da correção** (AVD `sinalacs_ci36`; sobe **com janela**, `~/Android/Sdk/emulator/emulator -avd sinalacs_ci36`; `adb devices` mostra `emulator-5554`):
+- [x] **Step 4: Rodar no emulador antes da correção** (AVD `sinalacs_ci36`; sobe **com janela**, `~/Android/Sdk/emulator/emulator -avd sinalacs_ci36`; `adb devices` mostra `emulator-5554`):
 Run: `./scripts/qa/acs_ack_segundo_acs_e2e.sh 2>&1 | tee docs/superpowers/plans/2026-10-27-issue-88-reproducao.log`
 Expected: a tela passa (a resposta hoje já é `acknowledged`), e o banco falha em `erro: esperado '<acs A>' (acsId segue o ACS A)`, saída 1. Ao final o script derruba a stack de e2e; `docker compose up -d` devolve a de desenvolvimento.
 
-- [ ] **Step 5: Commit.**
+- [x] **Step 5: Commit.**
 ```bash
 git add scripts/qa/acs_ack_segundo_acs_e2e.sh scripts/qa/acs_ack_segundo_acs_e2e_test.sh apps/acs/integration_test/ack_by_second_acs_e2e.dart docs/superpowers/plans/2026-10-27-issue-88-reproducao.log
 git commit -m "test(e2e): ACK do ACS B sobre alerta confirmado pelo A (#88, reprodução)"
@@ -193,7 +193,7 @@ git commit -m "test(e2e): ACK do ACS B sobre alerta confirmado pelo A (#88, repr
   4. Entrega (hoje `findFirstRow` + `insertRow`; a Task 5 troca por `ON CONFLICT`), auditoria por último, `AlertAckRecord`.
   Os ids inválidos (não UUID) continuam chegando como hoje (o serviço não os filtra; `::uuid` falha como antes) — não mudar.
 
-- [ ] **Step 1: Testes que falham**, no grupo `#86`:
+- [x] **Step 1: Testes que falham**, no grupo `#86`:
 
 ```dart
 test('matriz #88: só pending/escalated escrevem alerts; acsId/receivedAt/acknowledgedAt preservados', () async {
@@ -240,17 +240,17 @@ test('entrega do segundo ACS é registrada e desfeita se a trilha falhar (fail-c
 });
 ```
 
-- [ ] **Step 2: Rodar e ver falhar.**
+- [x] **Step 2: Rodar e ver falhar.**
 Run: `dart test -j 1 test/integration/alert_escalation_store_test.dart -N "#88"`
 Expected: a matriz falha em `acknowledged`/`resolved` (`acsId` = `_acsB`); o fail-closed pode já passar (a transação desfaz tudo hoje) — se passar, fica como guarda.
 
-- [ ] **Step 3: Implementar** o fluxo da seção Interfaces em `orm_alert_store.dart`, removendo o `SELECT id … FOR UPDATE` inicial, o `findById`, o `switch` sobre `alert.status` e o `Alert.db.updateRow`. Comentário de cabeçalho: "o desfecho é o resultado do `UPDATE` condicional, não de uma leitura anterior (#88); o `SELECT … FOR UPDATE` do caminho vazio serializa com `resolve` e o escalonamento, que travam a mesma linha". Ajustar o texto de `_allowedWriters['infrastructure/database/orm_alert_store.dart']` em `red_alert_discard_paths_test.dart` para "acknowledge() leva pending/escalated a acknowledged por UPDATE condicional e nunca escreve alerts nos desfechos repetidos (#88)".
+- [x] **Step 3: Implementar** o fluxo da seção Interfaces em `orm_alert_store.dart`, removendo o `SELECT id … FOR UPDATE` inicial, o `findById`, o `switch` sobre `alert.status` e o `Alert.db.updateRow`. Comentário de cabeçalho: "o desfecho é o resultado do `UPDATE` condicional, não de uma leitura anterior (#88); o `SELECT … FOR UPDATE` do caminho vazio serializa com `resolve` e o escalonamento, que travam a mesma linha". Ajustar o texto de `_allowedWriters['infrastructure/database/orm_alert_store.dart']` em `red_alert_discard_paths_test.dart` para "acknowledge() leva pending/escalated a acknowledged por UPDATE condicional e nunca escreve alerts nos desfechos repetidos (#88)".
 
-- [ ] **Step 4: Rodar o arquivo inteiro e a suíte de unidade.**
+- [x] **Step 4: Rodar o arquivo inteiro e a suíte de unidade.**
 Run: `dart test -j 1 test/integration/alert_escalation_store_test.dart && dart test test/unit`
 Expected: PASS, inclusive `ACK depois do escalonamento preserva as colunas de escalonamento`, a matriz da #86, `ACK e conclusão simultâneos (#86)` (o `FOR UPDATE` do caminho vazio é o que mantém a ordem da trilha = ordem da trava) e `red_alert_discard_paths_test.dart`.
 
-- [ ] **Step 5: Commit.**
+- [x] **Step 5: Commit.**
 ```bash
 git add backend/sinalacs_server/lib/src/infrastructure/database/orm_alert_store.dart backend/sinalacs_server/test/integration/alert_escalation_store_test.dart backend/sinalacs_server/test/unit/red_alert_discard_paths_test.dart
 git commit -m "fix(alertas): ACK decide o desfecho pelo UPDATE condicional e não reescreve acsId (#88)"
@@ -261,7 +261,7 @@ git commit -m "fix(alertas): ACK decide o desfecho pelo UPDATE condicional e nã
 **Files:**
 - Test: `backend/sinalacs_server/test/integration/alert_escalation_store_test.dart`, grupo `Dado o store ORM do escalonamento (#44), sem rollback (corrida)` (ao lado de `ACK e conclusão simultâneos`)
 
-- [ ] **Step 1: Teste** (5 rodadas, como os vizinhos; `limpar` já remove `_acsB` desde a Task 1):
+- [x] **Step 1: Teste** (5 rodadas, como os vizinhos; `limpar` já remove `_acsB` desde a Task 1):
 
 ```dart
 test('dois ACS confirmam o mesmo pendente: o UPDATE que casa vira acsId, o outro é idempotente (#88)', () async {
@@ -286,11 +286,11 @@ test('dois ACS confirmam o mesmo pendente: o UPDATE que casa vira acsId, o outro
 ```
 (`evento` ganha o parâmetro `userId`; os eventos do teste vizinho passam `_acs`.)
 
-- [ ] **Step 2: Rodar.**
+- [x] **Step 2: Rodar.**
 Run: `dart test -j 1 test/integration/alert_escalation_store_test.dart -N "dois ACS confirmam"`
 Expected: PASS. Se `acknowledgedAt` divergir, o perdedor não está lendo sob `FOR UPDATE` depois do `UPDATE` vazio — rever o Step 3 da Task 3.
 
-- [ ] **Step 3: Commit.**
+- [x] **Step 3: Commit.**
 ```bash
 git add backend/sinalacs_server/test/integration/alert_escalation_store_test.dart
 git commit -m "test(alertas): corrida de dois ACS no mesmo alerta pendente (#88)"
@@ -305,7 +305,7 @@ git commit -m "test(alertas): corrida de dois ACS no mesmo alerta pendente (#88)
 **Interfaces:**
 - Produces: a inserção em `alert_deliveries` vira `session.db.unsafeExecute` com `INSERT INTO alert_deliveries ("alertId","acsId","acknowledgedAt") VALUES (@alert::uuid, @acs::uuid, @now::timestamp) ON CONFLICT ("alertId","acsId") DO NOTHING`, dentro da mesma `transaction`; o `findFirstRow` prévio some.
 
-- [ ] **Step 1: Testes** (ponto 1 do dono: a chave é o par, e o segundo ACS **entra**):
+- [x] **Step 1: Testes** (ponto 1 do dono: a chave é o par, e o segundo ACS **entra**):
 
 ```dart
 test('o índice único de alert_deliveries é sobre o par (alertId, acsId) (#88)', () async {
@@ -339,15 +339,15 @@ test('entrega já registrada para alerta ainda pending: o ACK não falha e não 
 ```
 (O helper `confirmar` do grupo `#86` precisa semear `alertaCom(AlertStatus.acknowledged)` com `acsId = _acs`, como na Task 1; se ainda não faz, ajustar `alertaCom` para gravar `acsId` quando o status não é `pending`.)
 
-- [ ] **Step 2: Rodar.** Run: `dart test -j 1 test/integration/alert_escalation_store_test.dart -N "alert_deliveries|um par por ACS|ainda pending"` → PASS já com o `findFirstRow` atual; os testes existem para a troca não regredir.
+- [x] **Step 2: Rodar.** Run: `dart test -j 1 test/integration/alert_escalation_store_test.dart -N "alert_deliveries|um par por ACS|ainda pending"` → PASS já com o `findFirstRow` atual; os testes existem para a troca não regredir.
 
-- [ ] **Step 3: Trocar** o par `findFirstRow` + `insertRow` pelo `unsafeExecute` acima (comentário: "reentrega é caso esperado: o índice único do par decide, não uma leitura prévia (#88)"). `id` fica com o `DEFAULT gen_random_uuid()` da tabela.
+- [x] **Step 3: Trocar** o par `findFirstRow` + `insertRow` pelo `unsafeExecute` acima (comentário: "reentrega é caso esperado: o índice único do par decide, não uma leitura prévia (#88)"). `id` fica com o `DEFAULT gen_random_uuid()` da tabela.
 
-- [ ] **Step 4: Rodar o arquivo e a suíte do backend.**
+- [x] **Step 4: Rodar o arquivo e a suíte do backend.**
 Run: `dart test -j 1`
 Expected: PASS (inclui `red_alert_cycle_test.dart`, `red_alert_discard_paths_db_test.dart` e os testes da #76/#86).
 
-- [ ] **Step 5: Commit.**
+- [x] **Step 5: Commit.**
 ```bash
 git add backend/sinalacs_server/lib/src/infrastructure/database/orm_alert_store.dart backend/sinalacs_server/test/integration/alert_escalation_store_test.dart
 git commit -m "fix(alertas): entrega do ACK idempotente por ON CONFLICT no par (alertId, acsId) (#88)"
@@ -358,8 +358,8 @@ git commit -m "fix(alertas): entrega do ACK idempotente por ON CONFLICT no par (
 **Files:**
 - Modify: `PROGRESS.md` (seção nova "ACK repetido e `acsId` (#88)", logo acima de "ACK de alerta já concluído (#86)"; e na seção da #86, remover do "Aberto" a frase "um ACK sobre alerta já confirmado ou concluído continua regravando `acsId` …")
 
-- [ ] **Step 1: Escrever a seção** com: o que mudou (`alerts.acsId` = primeiro ACS; desfecho pelo `UPDATE` condicional; `alerts` não é escrita no ACK repetido), a consulta de diagnóstico da seção "Dados históricos" deste plano, a decisão "sem correção retroativa" (já registrada na #88 em 2026-10-27) e o motivo, a limitação do ACK por MQTT sem autenticação, e a referência à issue de continuação (opção 2 e `resolvedBy`).
-- [ ] **Step 2: Commit.** `git commit -am "docs: #88, dados históricos sem correção retroativa e reconstrução por alert_deliveries"`
+- [x] **Step 1: Escrever a seção** com: o que mudou (`alerts.acsId` = primeiro ACS; desfecho pelo `UPDATE` condicional; `alerts` não é escrita no ACK repetido), a consulta de diagnóstico da seção "Dados históricos" deste plano, a decisão "sem correção retroativa" (já registrada na #88 em 2026-10-27) e o motivo, a limitação do ACK por MQTT sem autenticação, e a referência à issue de continuação (opção 2 e `resolvedBy`).
+- [x] **Step 2: Commit.** `git commit -am "docs: #88, dados históricos sem correção retroativa e reconstrução por alert_deliveries"`
 
 ---
 
@@ -379,7 +379,7 @@ Para as três opções descartadas/adiadas, a tabela comparativa fica no histór
 - Test: `backend/sinalacs_server/test/unit/red_alert_service_test.dart` (grupo do `acknowledge`)
 - Test: `backend/sinalacs_server/test/integration/alert_escalation_store_test.dart` (grupo `#86`)
 
-- [ ] **Step 1: Teste de unidade do serviço** (o `FakeAlertStore` já deduplica por `alertId`; só falta o par de usuários):
+- [x] **Step 1: Teste de unidade do serviço** (o `FakeAlertStore` já deduplica por `alertId`; só falta o par de usuários):
 
 ```dart
 test('ACK de outro ACS sobre alerta já confirmado é idempotente e audita com o userId dele (#88)', () async {
@@ -396,12 +396,12 @@ test('ACK de outro ACS sobre alerta já confirmado é idempotente e audita com o
 ```
 Run: `dart test test/unit/red_alert_service_test.dart -N "outro ACS"` → PASS (pina a decisão).
 
-- [ ] **Step 2: Testes do store** no grupo `#86`:
+- [x] **Step 2: Testes do store** no grupo `#86`:
   - `ACK de outro ACS sobre resolved: acsId e resolvedAt intactos, entrega registrada, alreadyResolved` (mesma forma da Task 1 com `alertaCom(AlertStatus.resolved)`; espera `entregas` com `_acsB`, `depois.acsId == _acs`, `depois.resolvedAt == _t`, `r.status == AlertStatus.resolved`).
   - **Ponto 5:** `resolve por outro ACS não toca acsId (#88, regressão)`: `alertaCom(AlertStatus.acknowledged)` com `acsId = _acs`; `store.resolve(alertId, microAreaId: _maA, now: _t, auditFor: (o) => AuditEvent(userId: _acsB, …, result: o.name))` → `outcome == resolved`; `depois.acsId.uuid == _acs`; `depois.resolvedAt == _t`; `trilha.eventos.single.userId == _acsB` (a trilha é o único registro de quem concluiu — não há `resolvedBy`).
 Run: `dart test -j 1 test/integration/alert_escalation_store_test.dart -N "sobre resolved|não toca acsId"` → PASS.
 
-- [ ] **Step 3: Commit.**
+- [x] **Step 3: Commit.**
 ```bash
 git add backend/sinalacs_server/test
 git commit -m "test(alertas): segundo ACS é registrado sem trocar o responsável; resolve não toca acsId (#88)"
@@ -412,11 +412,11 @@ git commit -m "test(alertas): segundo ACS é registrado sem trocar o responsáve
 **Files:**
 - Create: `docs/superpowers/plans/2026-10-27-issue-88-e2e.log`
 
-- [ ] **Step 1: Backend inteiro.** Run: `cd backend && dart analyze && cd sinalacs_server && dart test -j 1` → PASS, contagem anotada no log.
-- [ ] **Step 2: App do ACS.** Run: `cd apps/acs && flutter analyze && flutter test` → PASS (nada mudou no app; prova de não regressão, inclui o teste do ponto 4).
-- [ ] **Step 3: E2E da #88 depois da correção.** Run: `./scripts/qa/acs_ack_segundo_acs_e2e.sh 2>&1 | tee docs/superpowers/plans/2026-10-27-issue-88-e2e.log` → `OK: …`, saída 0, e as asserções do banco impressas.
-- [ ] **Step 4: E2E da #86 segue verde (ponto 4 no emulador).** Run: `./scripts/qa/acs_ack_concluido_e2e.sh` → `OK` ("a tela não ofereceu Concluir atendimento"). Opcional: `./scripts/qa/acs_alert_fallback_e2e.sh` (confere `result = 'acknowledged'` = 1 no primeiro ACK).
-- [ ] **Step 5: `docker compose up -d`** para devolver a stack de desenvolvimento; commit do log: `git add docs/superpowers/plans/2026-10-27-issue-88-e2e.log && git commit -m "docs: #88 validada no emulador com dois ACS"`
+- [x] **Step 1: Backend inteiro.** Run: `cd backend && dart analyze && cd sinalacs_server && dart test -j 1` → PASS, contagem anotada no log.
+- [x] **Step 2: App do ACS.** Run: `cd apps/acs && flutter analyze && flutter test` → PASS (nada mudou no app; prova de não regressão, inclui o teste do ponto 4).
+- [x] **Step 3: E2E da #88 depois da correção.** Run: `./scripts/qa/acs_ack_segundo_acs_e2e.sh 2>&1 | tee docs/superpowers/plans/2026-10-27-issue-88-e2e.log` → `OK: …`, saída 0, e as asserções do banco impressas.
+- [x] **Step 4: E2E da #86 segue verde (ponto 4 no emulador).** Run: `./scripts/qa/acs_ack_concluido_e2e.sh` → `OK` ("a tela não ofereceu Concluir atendimento"). Opcional: `./scripts/qa/acs_alert_fallback_e2e.sh` (confere `result = 'acknowledged'` = 1 no primeiro ACK).
+- [x] **Step 5: `docker compose up -d`** para devolver a stack de desenvolvimento; commit do log: `git add docs/superpowers/plans/2026-10-27-issue-88-e2e.log && git commit -m "docs: #88 validada no emulador com dois ACS"`
 
 ### Task 9: Documentação, grafo e PR
 
@@ -426,9 +426,9 @@ git commit -m "test(alertas): segundo ACS é registrado sem trocar o responsáve
 - Modify: `PROGRESS.md` (seção da Task 6: adicionar provas, a decisão (1) e a referência à issue de continuação)
 - Modify: `docs/superpowers/plans/2026-10-27-issue-88-ack-idempotente-acsid.md` (checkboxes)
 
-- [ ] **Step 1: Editar os três documentos.** Nada de contagem de testes inventada: copiar a do log da Task 8.
-- [ ] **Step 2: `graphify update .`** (regra do `CLAUDE.md`).
-- [ ] **Step 3: Commit e PR contra `develop`.**
+- [x] **Step 1: Editar os três documentos.** Nada de contagem de testes inventada: copiar a do log da Task 8.
+- [x] **Step 2: `graphify update .`** (regra do `CLAUDE.md`).
+- [x] **Step 3: Commit e PR contra `develop`.**
 ```bash
 git add -A && git commit -m "docs(alertas): ACK repetido não reescreve o responsável; consulta de distinção na trilha (#88)"
 git push -u origin fix/issue-88-ack-acsid
