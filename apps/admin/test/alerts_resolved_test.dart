@@ -29,6 +29,29 @@ class _ConcluidoSemHora extends MockAdminDataSource {
 
 Finder _noCartao(String id, Finder alvo) => find.descendant(of: find.byKey(Key('alert_$id')), matching: alvo);
 
+/// Fonte com um vermelho escalonado pelo backoffice e depois concluído pelo
+/// ACS: os dois selos aparecem, na ordem em que aconteceram.
+class _EscalonadoEConcluido extends MockAdminDataSource {
+  @override
+  Future<List<AlertSummary>> fetchAlerts({
+    String? microAreaId,
+    AlertStatus? status,
+    int limit = 50,
+    int offset = 0,
+  }) async => [
+        AlertSummary(
+          id: 'ambos',
+          patientLabel: 'Paciente #AMB0',
+          microAreaName: 'Microárea 12 — Zona Rural',
+          riskLevel: RiskLevel.red,
+          status: AlertStatus.resolved,
+          triggeredAt: DateTime(2026, 9, 11, 8, 12),
+          escalatedAt: DateTime(2026, 9, 11, 8, 20),
+          resolvedAt: DateTime(2026, 9, 11, 8, 50),
+        ),
+      ];
+}
+
 /// Estado "Concluído" e a hora da conclusão na lista de alertas (#87).
 void main() {
   Future<void> montar(WidgetTester tester, AdminDataSource fonte) async {
@@ -59,6 +82,17 @@ void main() {
     expect(tester.takeException(), isNull);
     expect(find.text('Status: Concluído'), findsOneWidget);
     expect(find.textContaining('Concluído às'), findsNothing);
+  });
+
+  testWidgets('escalonado e depois concluído mostra os dois selos em ordem cronológica', (tester) async {
+    await montar(tester, _EscalonadoEConcluido());
+
+    final escalonado = _noCartao('ambos', find.textContaining('Escalonado às'));
+    final concluido = _noCartao('ambos', find.textContaining('Concluído às'));
+    expect(escalonado, findsOneWidget);
+    expect(concluido, findsOneWidget);
+    expect(tester.getTopLeft(escalonado).dy, lessThan(tester.getTopLeft(concluido).dy),
+        reason: 'o escalonamento veio antes da conclusão');
   });
 
   testWidgets('o filtro de status oferece "Concluído" e filtra por ele', (tester) async {

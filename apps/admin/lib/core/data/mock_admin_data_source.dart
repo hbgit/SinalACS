@@ -9,9 +9,16 @@ class MockAdminDataSource implements AdminDataSource {
   /// [auditSeed] semeia a trilha (#45) com linhas sintéticas e selos
   /// escolhidos pelo teste; [chainStatus] fixa o estado da cadeia. O mock só
   /// devolve o que foi semeado: nunca calcula integridade.
-  MockAdminDataSource({DateTime Function()? now, List<AuditLogEntry>? auditSeed, this.chainStatus})
-      : _microAreas = List.unmodifiable(_seedMicroAreas),
-        _alerts = List.unmodifiable(_seedAlerts),
+  /// [alertSeed] substitui os alertas do mock (por padrão, [_seedAlerts]):
+  /// para um teste montar um estado que o seed não tem, como um vermelho
+  /// `escalated` legado ou um vermelho concluído.
+  MockAdminDataSource({
+    DateTime Function()? now,
+    List<AuditLogEntry>? auditSeed,
+    List<AlertSummary>? alertSeed,
+    this.chainStatus,
+  })  : _microAreas = List.unmodifiable(_seedMicroAreas),
+        _alerts = List.unmodifiable(alertSeed ?? _seedAlerts),
         _acs = [..._seedAcs],
         _staff = [..._seedStaff],
         _now = now ?? DateTime.now {
@@ -265,13 +272,16 @@ class MockAdminDataSource implements AdminDataSource {
       for (final level in RiskLevel.values)
         level: _alerts.where((alert) => alert.riskLevel == level).length,
     };
+    // A mesma partição do servidor (`RedAlertBucket`, #87): o `escalated`
+    // legado é um aberto sem confirmação.
     final openRed = _alerts
-        .where((alert) => alert.riskLevel == RiskLevel.red && alert.status == AlertStatus.pending)
+        .where((alert) =>
+            alert.riskLevel == RiskLevel.red &&
+            (alert.status == AlertStatus.pending || alert.status == AlertStatus.escalated))
         .length;
     final acknowledgedRed = _alerts
         .where((alert) => alert.riskLevel == RiskLevel.red && alert.status == AlertStatus.acknowledged)
         .length;
-    // Concluídos (#87): a mesma partição do servidor (`RedAlertBucket`).
     final resolvedRed = _alerts
         .where((alert) => alert.riskLevel == RiskLevel.red && alert.status == AlertStatus.resolved)
         .length;
