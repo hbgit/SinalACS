@@ -774,18 +774,19 @@ class _AlertsListState extends State<_AlertsList> {
                           const SizedBox(height: 6),
                           Text('Risco: ${riskLabel(alert.riskLevel)}', style: TextStyle(color: adminOnSurface(riskColor(alert.riskLevel)), fontWeight: FontWeight.bold)),
                           Text('Status: ${statusLabel(alert.status)}'),
-                          // Só com a hora (#87): uma linha concluída antes da
-                          // coluna `resolvedAt` mostra o estado e nada mais.
-                          if (alert.resolvedAt != null) ...[
-                            const SizedBox(height: 6),
-                            ResolvedBadge(alert.resolvedAt!),
-                          ],
                           if (alert.escalatedAt != null) ...[
                             const SizedBox(height: 6),
                             EscalatedBadge(alert.escalatedAt!),
                           ] else if (alert.overdue) ...[
                             const SizedBox(height: 8),
                             EscalateAlertButton(alert: alert, dataSource: widget.dataSource, onChanged: _aposEscalonar),
+                          ],
+                          // Depois do escalonamento, na ordem em que acontecem.
+                          // Só com a hora (#87): uma linha concluída antes da
+                          // coluna `resolvedAt` mostra o estado e nada mais.
+                          if (alert.resolvedAt != null) ...[
+                            const SizedBox(height: 6),
+                            ResolvedBadge(alert.resolvedAt!),
                           ],
                         ],
                       ),

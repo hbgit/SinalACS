@@ -46,7 +46,7 @@ fi
 
 echo "== stack de e2e (banco de teste)"
 ./scripts/qa/e2e_stack.sh up
-# Os 3 alertas do painel (#40) só existem neste e2e: o seed é compartilhado.
+# Os 4 alertas do painel (#40, #87) só existem neste e2e: o seed é compartilhado.
 E2E_SEED_ADMIN_ALERTS=1 ./scripts/qa/e2e_stack.sh seed
 ./scripts/dev/sync_dev_ca.sh >/dev/null 2>&1 || true
 [[ -f apps/admin/assets/certs/dev_rpc_ca.crt ]] \

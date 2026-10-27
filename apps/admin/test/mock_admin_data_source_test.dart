@@ -21,6 +21,32 @@ void main() {
     );
   });
 
+  test('o mock segue a partição do servidor: escalated legado conta em aberto e resolved em concluídos (#87)', () async {
+    AlertSummary vermelho(String id, AlertStatus status) => AlertSummary(
+          id: id,
+          patientLabel: 'Paciente #$id',
+          microAreaName: 'Microárea 12 — Zona Rural',
+          riskLevel: RiskLevel.red,
+          status: status,
+          triggeredAt: DateTime(2026, 9, 11, 8),
+          resolvedAt: status == AlertStatus.resolved ? DateTime(2026, 9, 11, 9) : null,
+        );
+    final dataSource = MockAdminDataSource(alertSeed: [
+      vermelho('p', AlertStatus.pending),
+      vermelho('e', AlertStatus.escalated),
+      vermelho('a', AlertStatus.acknowledged),
+      vermelho('r', AlertStatus.resolved),
+    ]);
+
+    final i = await dataSource.fetchDashboardIndicators();
+
+    expect(i.countsByRisk[RiskLevel.red], 4);
+    expect(i.openRedAlerts, 2, reason: 'pending e o escalated legado são abertos, como em RedAlertBucket');
+    expect(i.acknowledgedRedAlerts, 1);
+    expect(i.resolvedRedAlerts, 1);
+    expect(i.countsByRisk[RiskLevel.red], i.openRedAlerts + i.acknowledgedRedAlerts + i.resolvedRedAlerts);
+  });
+
   test('alertas concluídos do mock trazem resolvedAt e movem o pulso (#87)', () async {
     final dataSource = MockAdminDataSource();
 

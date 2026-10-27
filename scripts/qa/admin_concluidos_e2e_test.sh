@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Confere que admin_concluidos_e2e.sh escolhe o aparelho por DEVICE, usa o serial
-# em todo adb/flutter, semeia os 3 alertas do painel (opt-in), conversa com o
+# em todo adb/flutter, semeia os 4 alertas do painel (opt-in), conversa com o
 # teste pelas linhas marcadoras (reconhecer, concluir, concluir sem microárea),
 # derruba a stack de e2e ao sair e termina nos asserts que só o banco responde —
 # e que nem o `e2e.sh --full` nem a descoberta do `flutter test` alcançam esta
