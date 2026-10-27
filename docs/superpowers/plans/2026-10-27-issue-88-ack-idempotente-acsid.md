@@ -434,7 +434,7 @@ git add -A && git commit -m "docs(alertas): ACK repetido não reescreve o respon
 git push -u origin fix/issue-88-ack-acsid
 gh pr create --base develop --title "fix(alertas): ACK repetido não reescreve o ACS responsável (#88)" --body-file <corpo com: o que mudou, matriz, decisão (1), os cinco pontos e onde cada um é provado, logs; sem atribuição de IA>
 ```
-- [ ] **Step 4: Checks obrigatórios verdes** (`./scripts/qa/ci_invariants.sh --checks-obrigatorios` lista os 8); `android-e2e` informativo.
+- [x] **Step 4: Checks obrigatórios verdes** (`./scripts/qa/ci_invariants.sh --checks-obrigatorios` lista os 8); `android-e2e` informativo.
 
 ## Critérios de aceite (espelho da issue)
 
