@@ -27,7 +27,8 @@ fica em `sinalacs_server/lib/src/runtime/mtls_api_server.dart`.
   é o que `backend/pubspec.yaml` consome por `dependency_overrides`, **pelo
   SHA do commit, nunca pelo nome do branch**;
 - branch `upstream/api-server-adapter` — o mesmo patch sobre o `main`
-  (linha 4.x), base da proposta upstream (issue linkada no `PROGRESS.md`).
+  (linha 4.x), base da proposta upstream:
+  https://github.com/serverpod/serverpod/issues/5923.
 
 **Refazer o fork do zero.**
 
