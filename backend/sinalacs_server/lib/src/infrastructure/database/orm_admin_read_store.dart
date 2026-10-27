@@ -76,6 +76,7 @@ class OrmAdminReadStore implements AdminReadStore, AuditChainScopeStore {
       green: r[2] as int,
       openRedAlerts: r[3] as int,
       acknowledgedRedAlerts: r[4] as int,
+      resolvedRedAlerts: 0,
       tmravSeconds: r[5] as int?,
     );
   }

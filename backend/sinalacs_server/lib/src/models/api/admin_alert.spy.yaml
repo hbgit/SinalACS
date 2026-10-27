@@ -9,5 +9,8 @@ fields:
   status: AlertStatus
   triggeredAt: DateTime
   escalatedAt: DateTime?
+  ### Conclusão do atendimento (#76), se houve. Nulo também numa linha
+  ### `resolved` anterior à coluna: a tela mostra o estado sem a hora.
+  resolvedAt: DateTime?
   ### Sem reconhecimento além do prazo configurado; calculado na leitura.
   overdue: bool
