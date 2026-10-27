@@ -195,9 +195,11 @@ void main() {
   test(
     'admin lê com escopo de sistema e a leitura é auditada ANTES do dado',
     () async {
-      await servico.indicators(admin);
+      final r = await servico.indicators(admin);
       expect(store.ultimoEscopo!.ubsId, isNull);
       expect(_ordem, ['audit:admin_indicators:success', 'store:indicators']);
+      // O serviço devolve o que o store deu, sem recalcular (#87).
+      expect(r.resolvedRedAlerts, 0);
       expect(audit.events.single.actionType, 'read');
       expect(audit.events.single.userId, 'admin-1');
     },
