@@ -22,6 +22,9 @@ const _maA = '00000000-0000-4000-8000-0000000044e3';
 const _maB = '00000000-0000-4000-8000-0000000044e4';
 const _coord = '00000000-0000-4000-8000-0000000044e5';
 const _acs = '00000000-0000-4000-8000-0000000044e6';
+/// Segundo ACS da MESMA microárea (#88): o ACK dele sobre um alerta já
+/// confirmado não pode trocar o responsável.
+const _acsB = '00000000-0000-4000-8000-0000000044e7';
 const _inexistente = '00000000-0000-4000-8000-0000000044ff';
 const _segredo = 'segredo-sintetico-da-cadeia';
 final _t = DateTime.utc(2026, 10, 11, 12);
@@ -96,28 +99,31 @@ Future<void> _semear(Session s) async {
       ),
     );
   }
-  await User.db.insertRow(
-    s,
-    User(
-      id: UuidValue.fromString(_acs),
-      cpfHash: 'alert-escalation-acs',
-      name: 'ACS Sintético',
-      birthDate: DateTime.utc(1980),
-      role: UserRole.acs,
-      microAreaId: UuidValue.fromString(_maA),
-      createdAt: _t,
-      updatedAt: _t,
-    ),
-  );
-  await Acs.db.insertRow(
-    s,
-    Acs(
-      id: UuidValue.fromString(_acs),
-      enrollmentId: 'ACS-ESC-1',
-      ubsId: UuidValue.fromString(_ubsA),
-      active: true,
-    ),
-  );
+  // Dois ACS na mesma microárea (#88).
+  for (final (id, matricula) in [(_acs, 'ACS-ESC-1'), (_acsB, 'ACS-ESC-2')]) {
+    await User.db.insertRow(
+      s,
+      User(
+        id: UuidValue.fromString(id),
+        cpfHash: 'alert-escalation-$matricula',
+        name: 'ACS Sintético $matricula',
+        birthDate: DateTime.utc(1980),
+        role: UserRole.acs,
+        microAreaId: UuidValue.fromString(_maA),
+        createdAt: _t,
+        updatedAt: _t,
+      ),
+    );
+    await Acs.db.insertRow(
+      s,
+      Acs(
+        id: UuidValue.fromString(id),
+        enrollmentId: matricula,
+        ubsId: UuidValue.fromString(_ubsA),
+        active: true,
+      ),
+    );
+  }
   // Autor das linhas de auditoria (`audit_logs.userId` referencia `users`).
   await User.db.insertRow(
     s,
@@ -578,13 +584,13 @@ void main() {
       store = OrmAlertStore(session: () => session, appendAudit: trilha.call);
     });
 
-    Future<AlertAckRecord?> confirmar(String alertId, {String ma = _maA}) =>
+    Future<AlertAckRecord?> confirmar(String alertId, {String ma = _maA, String acs = _acs}) =>
         store.acknowledge(
           alertId: alertId,
-          acsId: _acs,
+          acsId: acs,
           microAreaId: ma,
           auditFor: (o) => AuditEvent(
-            userId: _acs,
+            userId: acs,
             actionType: 'write',
             resourceType: 'alert',
             resourceId: alertId,
@@ -638,11 +644,193 @@ void main() {
       expect(depois.resolvedAt, _t);
     });
 
+    test('ACK de outro ACS sobre alerta já confirmado não troca acsId (#88)', () async {
+      final a = await alertaCom(AlertStatus.acknowledged);
+      await Alert.db.updateRow(session, a.copyWith(acsId: UuidValue.fromString(_acs)));
+
+      final r = await confirmar(a.id!.uuid, acs: _acsB);
+
+      expect(r!.outcome, AlertAckOutcome.alreadyAcknowledged);
+      final depois = (await Alert.db.findById(session, a.id!))!;
+      expect(depois.acsId!.uuid, _acs, reason: 'acsId é de quem confirmou primeiro');
+      expect(depois.acknowledgedAt, _t);
+      expect(trilha.eventos.single.result, 'alreadyAcknowledged');
+      expect(trilha.eventos.single.userId, _acsB);
+    });
+
+    test('matriz #88: só pending/escalated escrevem alerts; acsId/receivedAt/acknowledgedAt preservados', () async {
+      const matriz = <(AlertStatus, String)>[
+        (AlertStatus.pending, _acsB),
+        (AlertStatus.escalated, _acsB),
+        (AlertStatus.acknowledged, _acs),
+        (AlertStatus.resolved, _acs),
+      ];
+      for (final (lido, esperado) in matriz) {
+        trilha.eventos.clear();
+        final a = await alertaCom(lido);
+        // acsId já preenchido mesmo em pending (os scripts de e2e inserem
+        // assim): pending é "ninguém confirmou", e o primeiro ACK o troca.
+        final semeado = await Alert.db.updateRow(
+          session,
+          a.copyWith(acsId: UuidValue.fromString(_acs), receivedAt: _t),
+        );
+
+        final r = await confirmar(a.id!.uuid, acs: _acsB);
+
+        final depois = (await Alert.db.findById(session, a.id!))!;
+        expect(depois.acsId!.uuid, esperado, reason: '$lido');
+        expect(depois.receivedAt, _t, reason: '$lido');
+        if (lido == AlertStatus.acknowledged || lido == AlertStatus.resolved) {
+          expect(depois.acknowledgedAt, semeado.acknowledgedAt, reason: '$lido');
+          expect(r!.acknowledgedAt, semeado.acknowledgedAt, reason: '$lido');
+          expect(r.firstAcknowledgement, isFalse, reason: '$lido');
+        } else {
+          expect(r!.firstAcknowledgement, isTrue, reason: '$lido');
+          expect(depois.acknowledgedAt, r.acknowledgedAt, reason: '$lido');
+        }
+        expect(trilha.eventos.single.userId, _acsB, reason: '$lido');
+      }
+    });
+
+    test('ACK repetido pelo mesmo ACS não escreve alerts nem duplica a entrega', () async {
+      final a = await alertaCom(AlertStatus.acknowledged);
+      await Alert.db.updateRow(session, a.copyWith(acsId: UuidValue.fromString(_acs)));
+
+      await confirmar(a.id!.uuid);
+
+      final entregas = await AlertDeliveryRecord.db.find(
+        session,
+        where: (t) => t.alertId.equals(a.id!),
+      );
+      expect(entregas, hasLength(1));
+      expect(entregas.single.acsId.uuid, _acs);
+    });
+
+    test('entrega do segundo ACS é registrada e desfeita se a trilha falhar (fail-closed)', () async {
+      final a = await alertaCom(AlertStatus.acknowledged);
+      await Alert.db.updateRow(session, a.copyWith(acsId: UuidValue.fromString(_acs)));
+      final falha = OrmAlertStore(
+        session: () => session,
+        appendAudit: (s, t, e) async => throw StateError('trilha fora'),
+      );
+
+      await expectLater(
+        falha.acknowledge(
+          alertId: a.id!.uuid,
+          acsId: _acsB,
+          microAreaId: _maA,
+          auditFor: (o) => AuditEvent(
+            userId: _acsB,
+            actionType: 'write',
+            resourceType: 'alert',
+            resourceId: a.id!.uuid,
+            result: o.name,
+          ),
+        ),
+        throwsStateError,
+      );
+
+      expect(
+        await AlertDeliveryRecord.db.count(
+          session,
+          where: (t) => t.alertId.equals(a.id!) & t.acsId.equals(UuidValue.fromString(_acsB)),
+        ),
+        0,
+      );
+    });
+
     test('alerta de outra microárea: null e nenhuma linha de auditoria', () async {
       final a = await _alerta(session, ma: _maB);
 
       expect(await confirmar(a.id!.uuid), isNull);
       expect(trilha.eventos, isEmpty);
+    });
+
+    test('o índice único de alert_deliveries é sobre o par (alertId, acsId) (#88)', () async {
+      final linhas = await session.db.unsafeQuery(
+        "SELECT indexdef FROM pg_indexes WHERE tablename = 'alert_deliveries' "
+        "AND indexname = 'alert_deliveries_alert_acs_key'",
+      );
+      final def = linhas.single[0] as String;
+      expect(def, contains('UNIQUE INDEX'));
+      expect(def, contains('("alertId", "acsId")'));
+    });
+
+    test('a reentrega não duplica e o segundo ACS entra: um par por ACS', () async {
+      final a = await alertaCom(AlertStatus.acknowledged);
+      await confirmar(a.id!.uuid); // A, reentrega
+      await confirmar(a.id!.uuid, acs: _acsB); // B
+      await confirmar(a.id!.uuid, acs: _acsB); // B, reentrega
+      final entregas = await AlertDeliveryRecord.db.find(
+        session,
+        where: (t) => t.alertId.equals(a.id!),
+      );
+      expect(entregas.map((e) => e.acsId.uuid).toSet(), {_acs, _acsB});
+      expect(entregas, hasLength(2));
+    });
+
+    test('entrega já registrada para alerta ainda pending: o ACK não falha e não duplica', () async {
+      final a = await _alerta(session);
+      await AlertDeliveryRecord.db.insertRow(
+        session,
+        AlertDeliveryRecord(
+          alertId: a.id!,
+          acsId: UuidValue.fromString(_acs),
+          acknowledgedAt: _t,
+        ),
+      );
+      final r = await confirmar(a.id!.uuid);
+      expect(r!.outcome, AlertAckOutcome.acknowledged);
+      final entregas = await AlertDeliveryRecord.db.find(
+        session,
+        where: (t) => t.alertId.equals(a.id!),
+      );
+      expect(entregas, hasLength(1));
+      expect(entregas.single.acknowledgedAt, _t, reason: 'a primeira entrega não é reescrita');
+    });
+
+    test('ACK de outro ACS sobre resolved: acsId e resolvedAt intactos, entrega registrada, alreadyResolved', () async {
+      final a = await alertaCom(AlertStatus.resolved);
+      await Alert.db.updateRow(session, a.copyWith(acsId: UuidValue.fromString(_acs)));
+
+      final r = await confirmar(a.id!.uuid, acs: _acsB);
+
+      expect(r!.outcome, AlertAckOutcome.alreadyResolved);
+      expect(r.status, AlertStatus.resolved);
+      final depois = (await Alert.db.findById(session, a.id!))!;
+      expect(depois.acsId!.uuid, _acs);
+      expect(depois.resolvedAt, _t);
+      final entregas = await AlertDeliveryRecord.db.find(
+        session,
+        where: (t) => t.alertId.equals(a.id!),
+      );
+      expect(entregas.map((e) => e.acsId.uuid), [_acsB]);
+      expect(trilha.eventos.single.userId, _acsB);
+    });
+
+    test('resolve por outro ACS não toca acsId (#88, regressão)', () async {
+      final a = await alertaCom(AlertStatus.acknowledged);
+      await Alert.db.updateRow(session, a.copyWith(acsId: UuidValue.fromString(_acs)));
+
+      final r = await store.resolve(
+        alertId: a.id!.uuid,
+        microAreaId: _maA,
+        now: _t,
+        auditFor: (o) => AuditEvent(
+          userId: _acsB,
+          actionType: 'write',
+          resourceType: 'alert',
+          resourceId: a.id!.uuid,
+          result: o.name,
+        ),
+      );
+
+      expect(r.outcome, AlertResolveOutcome.resolved);
+      final depois = (await Alert.db.findById(session, a.id!))!;
+      expect(depois.acsId!.uuid, _acs, reason: 'o responsável gravado segue quem confirmou');
+      expect(depois.resolvedAt, _t);
+      // A trilha é o único registro de quem concluiu: não há coluna resolvedBy (#111).
+      expect(trilha.eventos.single.userId, _acsB);
     });
   });
 
@@ -676,7 +864,9 @@ void main() {
         );
         await Acs.db.deleteWhere(
           s,
-          where: (t) => t.id.equals(UuidValue.fromString(_acs)),
+          where: (t) =>
+              t.id.equals(UuidValue.fromString(_acs)) |
+              t.id.equals(UuidValue.fromString(_acsB)),
         );
         await StaffAccount.db.deleteWhere(
           s,
@@ -691,6 +881,7 @@ void main() {
           where: (t) =>
               t.id.equals(UuidValue.fromString(_paciente)) |
               t.id.equals(UuidValue.fromString(_acs)) |
+              t.id.equals(UuidValue.fromString(_acsB)) |
               t.id.equals(UuidValue.fromString(_coord)),
         );
         await MicroArea.db.deleteWhere(
@@ -823,6 +1014,75 @@ void main() {
                 expect(ack.outcome, AlertAckOutcome.alreadyAcknowledged, reason: 'rodada $i: $ordem');
                 expect(ack.status, AlertStatus.acknowledged, reason: 'rodada $i: $ordem');
               }
+            }
+          } finally {
+            await limpar(s);
+          }
+        },
+      );
+
+      test(
+        'dois ACS confirmam o mesmo pendente: o UPDATE que casa vira acsId, o outro é idempotente (#88)',
+        () async {
+          final s = sessionBuilder.build();
+          await limpar(s);
+          try {
+            await _semear(s);
+            for (var i = 0; i < rodadas; i++) {
+              final a = await _alerta(s);
+              // Trilha única, gravada sob a trava: ordem = ordem da trava.
+              final trilha = _AuditoriaGravada();
+              OrmAlertStore novo() => OrmAlertStore(
+                    session: sessionBuilder.build,
+                    appendAudit: trilha.call,
+                  );
+              AuditEvent evento(String userId, String result) => AuditEvent(
+                    userId: userId,
+                    actionType: 'write',
+                    resourceType: 'alert',
+                    resourceId: a.id!.uuid,
+                    result: result,
+                  );
+
+              final r = await Future.wait([
+                novo().acknowledge(
+                  alertId: a.id!.uuid,
+                  acsId: _acs,
+                  microAreaId: _maA,
+                  auditFor: (o) => evento(_acs, 'ack:${o.name}'),
+                ),
+                novo().acknowledge(
+                  alertId: a.id!.uuid,
+                  acsId: _acsB,
+                  microAreaId: _maA,
+                  auditFor: (o) => evento(_acsB, 'ack:${o.name}'),
+                ),
+              ]);
+              final desfechos = r.map((x) => x!.outcome).toList();
+              expect(
+                desfechos.where((o) => o == AlertAckOutcome.acknowledged),
+                hasLength(1),
+                reason: 'rodada $i: $desfechos',
+              );
+              expect(
+                desfechos.where((o) => o == AlertAckOutcome.alreadyAcknowledged),
+                hasLength(1),
+                reason: 'rodada $i: $desfechos',
+              );
+              final vencedor = trilha.eventos.first.userId;
+              expect(trilha.eventos.first.result, 'ack:acknowledged', reason: 'rodada $i');
+              expect(trilha.eventos.last.result, 'ack:alreadyAcknowledged', reason: 'rodada $i');
+              final lido = (await Alert.db.findById(s, a.id!))!;
+              expect(lido.acsId!.uuid, vencedor, reason: 'rodada $i');
+              expect(lido.status, AlertStatus.acknowledged, reason: 'rodada $i');
+              // Os dois devolvem o carimbo do vencedor.
+              expect(r[0]!.acknowledgedAt, r[1]!.acknowledgedAt, reason: 'rodada $i');
+              expect(r.where((x) => x!.firstAcknowledgement), hasLength(1), reason: 'rodada $i');
+              expect(
+                await AlertDeliveryRecord.db.count(s, where: (t) => t.alertId.equals(a.id!)),
+                2,
+                reason: 'rodada $i',
+              );
             }
           } finally {
             await limpar(s);

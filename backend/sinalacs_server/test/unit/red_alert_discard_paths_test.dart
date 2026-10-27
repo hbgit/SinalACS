@@ -49,9 +49,10 @@ final _mutationPattern = RegExp(
 /// aqui (subconjunto).
 const _allowedWriters = <String, String>{
   'infrastructure/database/orm_alert_store.dart':
-      'save() insere o alerta como pending; acknowledge() leva a acknowledged '
-      '(e preserva resolved); resolve() leva acknowledged → resolved, sob '
-      'trava e auditado na mesma transação (#76)',
+      'save() insere o alerta como pending; acknowledge() leva '
+      'pending/escalated a acknowledged por UPDATE condicional e nunca '
+      'escreve alerts nos desfechos repetidos (#88); resolve() leva '
+      'acknowledged → resolved, sob trava e auditado na mesma transação (#76)',
   'infrastructure/database/orm_retention_store.dart':
       'expurgo LGPD: DELETE FROM alerts por triggeredAt — hoje SEM guarda de '
       'status/risco (buraco, corrigido na Task 4)',
