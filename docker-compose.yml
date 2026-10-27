@@ -179,17 +179,28 @@ services:
       # Prazo (s) para reconhecer um alerta vermelho antes do escalonamento
       # (issue #44). Faixa válida 30..3600; fora dela o servidor não sobe.
       RED_ALERT_ESCALATION_SECONDS: "${RED_ALERT_ESCALATION_SECONDS:-300}"
-      # TLS 1.3 na 8080 interna (RNF04, issue #78): o Traefik fala com o backend
-      # por TLS verificado, não mais em texto claro. A folha é assinada pela CA
-      # do RPC e gerada pelo traefik-init em runtime/backend/. Fora da stack
-      # local (Render) as duas ficam vazias e o servidor segue em HTTP atrás do
-      # TLS da borda; só uma delas definida é erro de boot.
+      # TLS 1.3 MÚTUO na 8080 interna (RNF04, issues #78 e #90): o Traefik fala
+      # com o backend por TLS verificado nos dois sentidos. A folha do backend é
+      # assinada pela CA do RPC e gerada pelo traefik-init em runtime/backend/;
+      # a CA (API_TLS_CLIENT_CA_PATH) é a que assina os certificados de CLIENTE
+      # aceitos — sem um deles o handshake é recusado, antes de qualquer byte
+      # HTTP (o Grupo E do scripts/qa/tls_invariants.sh prova). Fora da stack
+      # local (Render) as três ficam vazias e o servidor segue em HTTP atrás do
+      # TLS da borda; um subconjunto delas é erro de boot (sai com 78 e nomeia
+      # as três): TLS sem exigir o certificado não é mais uma configuração
+      # válida.
       API_TLS_CERT_PATH: /app/rpc-certs/backend.crt
       API_TLS_KEY_PATH: /app/rpc-certs/backend.key
-    # O HEALTHCHECK do Dockerfile fala http (é o do Render); aqui a 8080 é TLS,
-    # então a stack local o sobrepõe com os mesmos tempos.
+      API_TLS_CLIENT_CA_PATH: /app/rpc-certs/ca.crt
+    # O HEALTHCHECK do Dockerfile fala http (é o do Render); aqui a 8080 é TLS
+    # mútuo, então a stack local o sobrepõe com os mesmos tempos e com a folha
+    # de CLIENTE do healthcheck (#90): distinta da do Traefik, CN
+    # sinalacs-healthcheck, 90 dias, regerada pelo traefik-init em
+    # runtime/backend/. Sem ela o próprio backend recusa o curl e o container
+    # nunca fica healthy — e o Traefik tira um container unhealthy da rota
+    # (404 em tudo), sem mensagem que diga por quê.
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS -X POST -H 'Content-Type: application/json' -d '{}' --cacert /app/rpc-certs/ca.crt https://localhost:8080/health/check || exit 1"]
+      test: ["CMD-SHELL", "curl -fsS -X POST -H 'Content-Type: application/json' -d '{}' --cacert /app/rpc-certs/ca.crt --cert /app/rpc-certs/healthcheck.crt --key /app/rpc-certs/healthcheck.key https://localhost:8080/health/check || exit 1"]
       interval: 30s
       timeout: 3s
       start_period: 20s
@@ -211,7 +222,8 @@ services:
       # A porta INTERNA do container, que continua sendo 8080 — sem publicação
       # no host. Desde a issue #78 o processo escuta TLS 1.3 ali (API_TLS_*), e
       # o Traefik disca por https verificando a folha pelo transporte
-      # `backend-tls` do dynamic/tls.yaml.
+      # `backend-tls` do dynamic/tls.yaml; desde a #90 esse transporte também
+      # apresenta o certificado de cliente do Traefik, que o backend exige.
       - traefik.http.services.sinalacs.loadbalancer.server.port=8080
       - traefik.http.services.sinalacs.loadbalancer.server.scheme=https
       - traefik.http.services.sinalacs.loadbalancer.serverstransport=backend-tls@file

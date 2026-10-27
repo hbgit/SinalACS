@@ -23,14 +23,23 @@ tls:
 
 http:
   serversTransports:
-    # Traefik → backend (RNF04, issue #78): TLS verificado contra a mesma CA do
-    # RPC que assina a folha do backend (runtime/backend/, gerada pelo
-    # traefik-init). O Traefik disca pelo IP do container, então o nome
-    # verificado é fixado aqui e tem de estar no SAN daquela folha. Sem
-    # `insecureSkipVerify` em lugar nenhum: o Grupo E do tls_invariants.sh cobra.
+    # Traefik → backend (RNF04, issues #78 e #90): TLS MÚTUO. O Traefik verifica
+    # a folha do backend contra a CA do RPC (runtime/backend/, gerada pelo
+    # traefik-init) — disca pelo IP do container, então o nome verificado é
+    # fixado aqui e tem de estar no SAN daquela folha — e APRESENTA o seu
+    # próprio certificado de cliente (`certificates`), que o backend exige no
+    # handshake; sem ele a 8080 recusa antes de qualquer byte HTTP e o Traefik
+    # devolve 5xx para todos os apps. Sem `insecureSkipVerify` em lugar nenhum:
+    # o Grupo E do tls_invariants.sh cobra, e cobra também este `certificates`.
     # O mínimo 1.3 deste trecho é imposto pelo próprio backend
     # (ApiTlsConfig.toSecurityContext).
     backend-tls:
       serverName: sinalacs-serverpod
       rootCAs:
         - /certs/ca.crt
+      # #90: a folha de CLIENTE do Traefik, emitida pelo traefik-init com a CA
+      # do RPC (EKU clientAuth, CN sinalacs-traefik; chave 600, só o Traefik,
+      # que roda como root, a lê).
+      certificates:
+        - certFile: /certs/traefik-client.crt
+          keyFile: /certs/traefik-client.key
