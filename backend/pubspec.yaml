@@ -8,3 +8,16 @@ workspace:
   - sinalacs_client
   - sinalacs_server
 
+
+dependency_overrides:
+  # Fork pinado do Serverpod 3.4.13 com o gancho apiServerAdapterFactory (#90):
+  # o apiServer precisa exigir certificado de cliente (mTLS Traefik → backend) e
+  # o 3.4.13 do pub.dev liga o socket sem como pedir isso. Patch, motivo,
+  # critério de saída e como refazer: backend/patches/README.md. SHA, nunca
+  # branch. Só o sinalacs_server depende de `serverpod`; o sinalacs_client e os
+  # apps dependem de serverpod_client/serverpod_flutter do pub.dev.
+  serverpod:
+    git:
+      url: https://github.com/hbgit/serverpod.git
+      ref: 2a0b67e38532faff48f8f75b42b9f63e36a1cd82
+      path: packages/serverpod
