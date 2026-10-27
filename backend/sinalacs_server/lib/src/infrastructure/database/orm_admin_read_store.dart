@@ -1,6 +1,7 @@
 import 'package:serverpod/serverpod.dart';
 import 'package:sinalacs_server/src/application/admin/admin_labels.dart';
 import 'package:sinalacs_server/src/application/admin/admin_read_service.dart';
+import 'package:sinalacs_server/src/application/admin/red_alert_bucket.dart';
 import 'package:sinalacs_server/src/application/admin/audit_chain_status_service.dart';
 import 'package:sinalacs_server/src/application/audit/audit_chain.dart';
 import 'package:sinalacs_server/src/application/audit/audit_chain_verifier.dart';
@@ -43,6 +44,9 @@ class OrmAdminReadStore implements AdminReadStore, AuditChainScopeStore {
   /// `@ubs` nulo = sistema inteiro.
   static const _escopo = '(@ubs::uuid IS NULL OR m."ubsId" = @ubs::uuid)';
 
+  /// Os três contadores de vermelhos são a partição de [RedAlertBucket] (#87):
+  /// as listas dos `IN (…)` vêm dos nomes do enum, nunca de entrada do usuário,
+  /// e `red` é sempre a soma dos três no mesmo escopo (INV-03).
   @override
   Future<AdminIndicators> indicators(
     AdminScope scope, {
@@ -54,8 +58,9 @@ class OrmAdminReadStore implements AdminReadStore, AuditChainScopeStore {
         count(*) FILTER (WHERE a."riskLevel" = 'red'),
         count(*) FILTER (WHERE a."riskLevel" = 'yellow'),
         count(*) FILTER (WHERE a."riskLevel" = 'green'),
-        count(*) FILTER (WHERE a."riskLevel" = 'red' AND a."status" = 'pending'),
-        count(*) FILTER (WHERE a."riskLevel" = 'red' AND a."status" = 'acknowledged'),
+        count(*) FILTER (WHERE a."riskLevel" = 'red' AND a."status" IN (${RedAlertBucket.open.sqlList})),
+        count(*) FILTER (WHERE a."riskLevel" = 'red' AND a."status" IN (${RedAlertBucket.acknowledged.sqlList})),
+        count(*) FILTER (WHERE a."riskLevel" = 'red' AND a."status" IN (${RedAlertBucket.resolved.sqlList})),
         round(avg(extract(epoch FROM (a."acknowledgedAt" - a."triggeredAt")))
           FILTER (WHERE a."riskLevel" = 'red'
                     AND a."acknowledgedAt" IS NOT NULL
@@ -76,8 +81,8 @@ class OrmAdminReadStore implements AdminReadStore, AuditChainScopeStore {
       green: r[2] as int,
       openRedAlerts: r[3] as int,
       acknowledgedRedAlerts: r[4] as int,
-      resolvedRedAlerts: 0,
-      tmravSeconds: r[5] as int?,
+      resolvedRedAlerts: r[5] as int,
+      tmravSeconds: r[6] as int?,
     );
   }
 
@@ -160,7 +165,7 @@ class OrmAdminReadStore implements AdminReadStore, AuditChainScopeStore {
     final rows = await _session().db.unsafeQuery(
       '''
       SELECT a.id, a."patientId", m.name, a."riskLevel", a."status", a."triggeredAt",
-             a."escalatedAt",
+             a."escalatedAt", a."resolvedAt",
              -- Regra única de "vencido" (`alert_overdue_sql.dart`), a mesma de
              -- `OrmAlertEscalationStore` e de [pulse]; o acordo é pinado por
              -- test/integration/admin_read_store_test.dart ('acordo: overdue…').
@@ -201,7 +206,8 @@ class OrmAdminReadStore implements AdminReadStore, AuditChainScopeStore {
             status: AlertStatus.fromJson(r[4] as String),
             triggeredAt: (r[5] as DateTime).toUtc(),
             escalatedAt: (r[6] as DateTime?)?.toUtc(),
-            overdue: r[7] as bool,
+            resolvedAt: (r[7] as DateTime?)?.toUtc(),
+            overdue: r[8] as bool,
           ),
       ],
       nextOffset: haMais ? offset + limit : null,

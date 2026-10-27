@@ -16,8 +16,9 @@ import 'test_tools/serverpod_test_tools.dart';
 /// paginação e minimização de PII. Dados sintéticos; ids próprios.
 ///
 /// UBS A: microárea A (1 ACS, 5 alertas recentes + 1 vermelho fora da janela de
-/// 30 dias). UBS B: microárea B (1 vermelho pendente). Mais um alerta vermelho
-/// SEM microárea, que só o escopo de sistema enxerga.
+/// 30 dias + 1 vermelho concluído, #87). UBS B: microárea B (1 vermelho
+/// pendente + 1 vermelho concluído há 40 dias). Mais um alerta vermelho SEM
+/// microárea, que só o escopo de sistema enxerga.
 const _ubsA = '00000000-0000-4000-8000-0000000000e1';
 const _ubsB = '00000000-0000-4000-8000-0000000000e2';
 const _maA = '00000000-0000-4000-8000-0000000000e3';
@@ -66,6 +67,7 @@ Future<void> _alerta(
   required DateTime em,
   String? ma,
   Duration? reconhecidoApos,
+  Duration? concluidoApos,
   DateTime? escalonadoEm,
 }) => Alert.db
     .insertRow(
@@ -78,6 +80,7 @@ Future<void> _alerta(
         acknowledgedAt: reconhecidoApos == null
             ? null
             : em.add(reconhecidoApos),
+        resolvedAt: concluidoApos == null ? null : em.add(concluidoApos),
         riskLevel: risco,
         locationHash: 'hash-sintetico',
         status: status,
@@ -224,6 +227,24 @@ Future<void> _seed(Session s) async {
     ma: _maA,
     reconhecidoApos: const Duration(seconds: 1000),
   ); // o1: fora dos 30 dias
+  await _alerta(
+    s,
+    risco: RiskLevel.red,
+    status: AlertStatus.resolved,
+    em: _t.subtract(min * 90),
+    ma: _maA,
+    reconhecidoApos: const Duration(seconds: 90),
+    concluidoApos: const Duration(minutes: 10),
+  ); // a6: concluído (#87), dentro da janela do TMRAV (90 s)
+  await _alerta(
+    s,
+    risco: RiskLevel.red,
+    status: AlertStatus.resolved,
+    em: _t.subtract(const Duration(days: 40)),
+    ma: _maB,
+    reconhecidoApos: const Duration(seconds: 30),
+    concluidoApos: const Duration(minutes: 5),
+  ); // b2: concluído (#87), fora dos 30 dias (TMRAV da UBS B segue nulo)
 }
 
 void main() {
@@ -243,7 +264,7 @@ void main() {
       'indicadores do sistema contam por risco e calculam o TMRAV só na janela de 30 dias',
       () async {
         final r = await store.indicators(const AdminScope.system(), now: _t);
-        expect(r.red, 6); // a1 a2 a3 b1 n1 o1
+        expect(r.red, 8); // a1 a2 a3 b1 n1 o1 a6 b2
         expect(r.yellow, 1);
         expect(r.green, 1);
         expect(r.openRedAlerts, 3); // a1 b1 n1
@@ -251,7 +272,8 @@ void main() {
         expect(
           r.tmravSeconds,
           90,
-          reason: 'média de 60 s e 120 s; o1 (40 dias) fica de fora',
+          reason:
+              'média de 60 s, 120 s e 90 s (a6, concluído, conta); o1 e b2 (40 dias) ficam de fora',
         );
       },
     );
@@ -260,7 +282,7 @@ void main() {
       'indicadores da UBS A não enxergam a UBS B nem o alerta sem microárea',
       () async {
         final r = await store.indicators(const AdminScope.ubs(_ubsA), now: _t);
-        expect(r.red, 4); // a1 a2 a3 o1
+        expect(r.red, 5); // a1 a2 a3 o1 a6
         expect(r.openRedAlerts, 1);
         expect(r.acknowledgedRedAlerts, 3);
       },
@@ -270,11 +292,126 @@ void main() {
       'UBS B enxerga só o seu alerta e TMRAV nulo sem vermelho reconhecido',
       () async {
         final r = await store.indicators(const AdminScope.ubs(_ubsB), now: _t);
-        expect(r.red, 1);
+        expect(r.red, 2); // b1 b2
         expect(r.openRedAlerts, 1);
         expect(r.tmravSeconds, isNull);
       },
     );
+
+    test('concluídos (#87): sistema 2, UBS A 1, UBS B 1', () async {
+      expect(
+        (await store.indicators(
+          const AdminScope.system(),
+          now: _t,
+        )).resolvedRedAlerts,
+        2, // a6 b2
+      );
+      expect(
+        (await store.indicators(
+          const AdminScope.ubs(_ubsA),
+          now: _t,
+        )).resolvedRedAlerts,
+        1,
+      );
+      expect(
+        (await store.indicators(
+          const AdminScope.ubs(_ubsB),
+          now: _t,
+        )).resolvedRedAlerts,
+        1,
+      );
+    });
+
+    test(
+      'concluído sem microárea (#87): só o escopo de sistema o conta',
+      () async {
+        await _alerta(
+          session,
+          risco: RiskLevel.red,
+          status: AlertStatus.resolved,
+          em: _t.subtract(const Duration(minutes: 20)),
+          reconhecidoApos: const Duration(seconds: 60),
+          concluidoApos: const Duration(minutes: 5),
+        ); // sem `ma`
+        expect(
+          (await store.indicators(
+            const AdminScope.system(),
+            now: _t,
+          )).resolvedRedAlerts,
+          3,
+        );
+        expect(
+          (await store.indicators(
+            const AdminScope.ubs(_ubsA),
+            now: _t,
+          )).resolvedRedAlerts,
+          1,
+        );
+        expect(
+          (await store.indicators(
+            const AdminScope.ubs(_ubsB),
+            now: _t,
+          )).resolvedRedAlerts,
+          1,
+        );
+      },
+    );
+
+    test(
+      'INV-03 (#87): red é a soma dos três contadores em todo escopo, mesmo com escalated legado',
+      () async {
+        await _alerta(
+          session,
+          risco: RiskLevel.red,
+          status: AlertStatus.escalated,
+          em: _t.subtract(const Duration(minutes: 15)),
+          ma: _maA,
+        );
+        for (final escopo in [
+          const AdminScope.system(),
+          const AdminScope.ubs(_ubsA),
+          const AdminScope.ubs(_ubsB),
+        ]) {
+          final r = await store.indicators(escopo, now: _t);
+          expect(
+            r.red,
+            r.openRedAlerts + r.acknowledgedRedAlerts + r.resolvedRedAlerts,
+            reason: '$escopo',
+          );
+        }
+        expect(
+          (await store.indicators(
+            const AdminScope.ubs(_ubsA),
+            now: _t,
+          )).openRedAlerts,
+          2,
+          reason: 'o escalated legado conta como aberto',
+        );
+      },
+    );
+
+    test('alerts (#87): resolvedAt vem na linha e overdue não se desloca', () async {
+      final pagina = await store.alerts(
+        const AdminScope.ubs(_ubsB),
+        limit: 50,
+        offset: 0,
+        now: _t,
+      );
+      final concluido = pagina.items.singleWhere(
+        (a) => a.status == AlertStatus.resolved,
+      );
+      expect(
+        concluido.resolvedAt,
+        _t.subtract(const Duration(days: 40)).add(const Duration(minutes: 5)),
+      );
+      expect(concluido.overdue, isFalse);
+      expect(
+        pagina.items
+            .singleWhere((a) => a.status == AlertStatus.pending)
+            .resolvedAt,
+        isNull,
+      );
+    });
 
     test('microáreas trazem o ACS vinculado e respeitam a UBS', () async {
       final sistema = await store.microAreas(const AdminScope.system());
@@ -349,9 +486,13 @@ void main() {
           _t.subtract(const Duration(minutes: 5)),
         ]);
         expect(p1.items.map((a) => a.overdue).toList(), [true, true, false]);
+        // 10 alertas no sistema (#87 acrescentou a6 e b2): 3 + 3 + 3 + 1.
         final p3 = await store.alerts(sistema, limit: 3, offset: 6, now: _t);
-        expect(p3.items, hasLength(2));
-        expect(p3.nextOffset, isNull);
+        expect(p3.items, hasLength(3));
+        expect(p3.nextOffset, 9);
+        final p4 = await store.alerts(sistema, limit: 3, offset: 9, now: _t);
+        expect(p4.items, hasLength(1));
+        expect(p4.nextOffset, isNull);
         final alem = await store.alerts(sistema, limit: 3, offset: 30, now: _t);
         expect(alem.items, isEmpty);
         expect(alem.nextOffset, isNull);
@@ -424,13 +565,18 @@ void main() {
             offset: p1.nextOffset!,
             now: _t,
           );
-          expect(p2.items, hasLength(6));
+          expect(p2.items, hasLength(7));
           expect(p2.nextOffset, isNull);
           final ids = [...p1.items, ...p2.items].map((a) => a.id).toList();
-          expect(ids.toSet(), hasLength(56));
-          // O último da lista é b1, o mais antigo dos não vencidos.
+          expect(ids.toSet(), hasLength(57));
+          // O último da lista é b2 (concluído há 40 dias, #87), o mais antigo
+          // dos não vencidos; b1 vem logo antes dele.
           expect(
             p2.items.last.triggeredAt,
+            _t.subtract(const Duration(days: 40)),
+          );
+          expect(
+            p2.items[p2.items.length - 2].triggeredAt,
             _t.subtract(const Duration(minutes: 5)),
           );
         },
@@ -471,7 +617,7 @@ void main() {
             offset: 0,
             now: _t,
           );
-          expect(soA.items, hasLength(6));
+          expect(soA.items, hasLength(7));
           expect(soA.items.any((a) => a.triggeredAt == vencidoEm), isFalse);
           expect(
             soA.items.first.triggeredAt,
@@ -509,7 +655,7 @@ void main() {
           offset: 0,
           now: _t,
         );
-        expect(sistema.items, hasLength(8));
+        expect(sistema.items, hasLength(10));
         expect(
           sistema.items.where((a) => a.microAreaName == 'Sem microárea'),
           hasLength(1),
@@ -520,7 +666,7 @@ void main() {
           offset: 0,
           now: _t,
         );
-        expect(soA.items, hasLength(6));
+        expect(soA.items, hasLength(7));
         expect(
           soA.items.any((a) => a.microAreaName == 'Sem microárea'),
           isFalse,
@@ -536,7 +682,7 @@ void main() {
         offset: 0,
         now: _t,
       );
-      expect(b.items, hasLength(1));
+      expect(b.items, hasLength(2)); // b1 b2
       final reconhecidos = await store.alerts(
         const AdminScope.ubs(_ubsA),
         status: AlertStatus.acknowledged,
