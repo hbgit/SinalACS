@@ -22,6 +22,9 @@ const _maA = '00000000-0000-4000-8000-0000000044e3';
 const _maB = '00000000-0000-4000-8000-0000000044e4';
 const _coord = '00000000-0000-4000-8000-0000000044e5';
 const _acs = '00000000-0000-4000-8000-0000000044e6';
+/// Segundo ACS da MESMA microárea (#88): o ACK dele sobre um alerta já
+/// confirmado não pode trocar o responsável.
+const _acsB = '00000000-0000-4000-8000-0000000044e7';
 const _inexistente = '00000000-0000-4000-8000-0000000044ff';
 const _segredo = 'segredo-sintetico-da-cadeia';
 final _t = DateTime.utc(2026, 10, 11, 12);
@@ -96,28 +99,31 @@ Future<void> _semear(Session s) async {
       ),
     );
   }
-  await User.db.insertRow(
-    s,
-    User(
-      id: UuidValue.fromString(_acs),
-      cpfHash: 'alert-escalation-acs',
-      name: 'ACS Sintético',
-      birthDate: DateTime.utc(1980),
-      role: UserRole.acs,
-      microAreaId: UuidValue.fromString(_maA),
-      createdAt: _t,
-      updatedAt: _t,
-    ),
-  );
-  await Acs.db.insertRow(
-    s,
-    Acs(
-      id: UuidValue.fromString(_acs),
-      enrollmentId: 'ACS-ESC-1',
-      ubsId: UuidValue.fromString(_ubsA),
-      active: true,
-    ),
-  );
+  // Dois ACS na mesma microárea (#88).
+  for (final (id, matricula) in [(_acs, 'ACS-ESC-1'), (_acsB, 'ACS-ESC-2')]) {
+    await User.db.insertRow(
+      s,
+      User(
+        id: UuidValue.fromString(id),
+        cpfHash: 'alert-escalation-$matricula',
+        name: 'ACS Sintético $matricula',
+        birthDate: DateTime.utc(1980),
+        role: UserRole.acs,
+        microAreaId: UuidValue.fromString(_maA),
+        createdAt: _t,
+        updatedAt: _t,
+      ),
+    );
+    await Acs.db.insertRow(
+      s,
+      Acs(
+        id: UuidValue.fromString(id),
+        enrollmentId: matricula,
+        ubsId: UuidValue.fromString(_ubsA),
+        active: true,
+      ),
+    );
+  }
   // Autor das linhas de auditoria (`audit_logs.userId` referencia `users`).
   await User.db.insertRow(
     s,
@@ -578,13 +584,13 @@ void main() {
       store = OrmAlertStore(session: () => session, appendAudit: trilha.call);
     });
 
-    Future<AlertAckRecord?> confirmar(String alertId, {String ma = _maA}) =>
+    Future<AlertAckRecord?> confirmar(String alertId, {String ma = _maA, String acs = _acs}) =>
         store.acknowledge(
           alertId: alertId,
-          acsId: _acs,
+          acsId: acs,
           microAreaId: ma,
           auditFor: (o) => AuditEvent(
-            userId: _acs,
+            userId: acs,
             actionType: 'write',
             resourceType: 'alert',
             resourceId: alertId,
@@ -638,6 +644,20 @@ void main() {
       expect(depois.resolvedAt, _t);
     });
 
+    test('ACK de outro ACS sobre alerta já confirmado não troca acsId (#88)', () async {
+      final a = await alertaCom(AlertStatus.acknowledged);
+      await Alert.db.updateRow(session, a.copyWith(acsId: UuidValue.fromString(_acs)));
+
+      final r = await confirmar(a.id!.uuid, acs: _acsB);
+
+      expect(r!.outcome, AlertAckOutcome.alreadyAcknowledged);
+      final depois = (await Alert.db.findById(session, a.id!))!;
+      expect(depois.acsId!.uuid, _acs, reason: 'acsId é de quem confirmou primeiro');
+      expect(depois.acknowledgedAt, _t);
+      expect(trilha.eventos.single.result, 'alreadyAcknowledged');
+      expect(trilha.eventos.single.userId, _acsB);
+    });
+
     test('alerta de outra microárea: null e nenhuma linha de auditoria', () async {
       final a = await _alerta(session, ma: _maB);
 
@@ -676,7 +696,9 @@ void main() {
         );
         await Acs.db.deleteWhere(
           s,
-          where: (t) => t.id.equals(UuidValue.fromString(_acs)),
+          where: (t) =>
+              t.id.equals(UuidValue.fromString(_acs)) |
+              t.id.equals(UuidValue.fromString(_acsB)),
         );
         await StaffAccount.db.deleteWhere(
           s,
@@ -691,6 +713,7 @@ void main() {
           where: (t) =>
               t.id.equals(UuidValue.fromString(_paciente)) |
               t.id.equals(UuidValue.fromString(_acs)) |
+              t.id.equals(UuidValue.fromString(_acsB)) |
               t.id.equals(UuidValue.fromString(_coord)),
         );
         await MicroArea.db.deleteWhere(
