@@ -12,19 +12,29 @@ import 'src/config/api_tls_config.dart';
 import 'src/generated/endpoints.dart';
 import 'src/generated/protocol.dart';
 import 'src/runtime/alert_runtime.dart';
+import 'src/runtime/mtls_api_server.dart';
 import 'src/runtime/notice_dispatch_loop.dart';
 import 'src/web/routes/app_config_route.dart';
 import 'src/web/routes/root.dart';
 
 /// The starting point of the Serverpod server.
 void run(List<String> args) async {
-  // TLS 1.3 no apiServer quando API_TLS_* está definido (RNF04, #78): é o
-  // trecho Traefik → backend da stack local. Sem as variáveis segue em HTTP,
-  // que é o caminho do Render (TLS na borda). Insights e webServer ficam em
-  // HTTP: nenhum dos dois é publicado nem roteado.
+  // TLS 1.3 MÚTUO no apiServer quando API_TLS_* está definido (RNF04, #78 e
+  // #90): é o trecho Traefik → backend da stack local, e o backend exige o
+  // certificado de cliente assinado pela CA de API_TLS_CLIENT_CA_PATH. Sem as
+  // variáveis segue em HTTP, que é o caminho do Render (TLS na borda). Insights
+  // e webServer ficam em HTTP: nenhum dos dois é publicado nem roteado.
   final apiTls = ApiTlsConfig.fromMap(Platform.environment);
 
   // Initialize Serverpod and connect it with your generated code.
+  //
+  // O contexto TLS e a fábrica do adapter saem do MESMO `apiTls`, de propósito:
+  // o contexto sozinho subiria em TLS sem exigir o certificado (o estado que a
+  // #90 fechou), e a fábrica sozinha não tem com que ligar. `test/unit/
+  // server_wiring_test.dart` acusa se os dois forem separados. A fábrica
+  // (`mtls_api_server.dart`) liga o socket com `requireClientCertificate`, o
+  // que o Serverpod do pub.dev não permite — daí o fork pinado
+  // (`backend/patches/README.md`).
   final pod = Serverpod(
     args,
     Protocol(),
@@ -32,6 +42,7 @@ void run(List<String> args) async {
     securityContextConfig: apiTls == null
         ? null
         : SecurityContextConfig(apiServer: apiTls.toSecurityContext()),
+    apiServerAdapterFactory: apiTls == null ? null : mtlsApiServerAdapter,
   );
 
   // O módulo serverpod_auth_idp não é inicializado: o acesso hoje é o token
