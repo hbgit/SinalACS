@@ -506,6 +506,22 @@ void main() {
       expect(store.audits.single.result, 'ack_already_resolved');
     });
 
+    test('ACK de outro ACS sobre alerta já confirmado é idempotente e audita com o userId dele (#88)', () async {
+      final store = FakeAlertStore();
+      final service = RedAlertService(store: store, outbox: FakeAlertOutbox());
+      const a = AuthenticatedUser(id: 'acs-a', role: UserRole.acs, microAreaId: 'area-1', deviceId: 'd-a');
+      const b = AuthenticatedUser(id: 'acs-b', role: UserRole.acs, microAreaId: 'area-1', deviceId: 'd-b');
+
+      await service.acknowledge(user: a, alertId: 'alerta-1');
+      final status = await service.acknowledge(user: b, alertId: 'alerta-1');
+
+      expect(status, AlertStatus.acknowledged);
+      expect(
+        store.audits.map((e) => (e.userId, e.result)).toList(),
+        [('acs-a', 'acknowledged'), ('acs-b', 'ack_already_acknowledged')],
+      );
+    });
+
     test('ACK por MQTT de alerta concluído audita ack_already_resolved_mqtt (#86)', () async {
       final store = FakeAlertStore()..forcedOutcome = AlertAckOutcome.alreadyResolved;
       final service = RedAlertService(store: store, outbox: FakeAlertOutbox());

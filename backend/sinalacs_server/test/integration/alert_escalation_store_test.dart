@@ -788,6 +788,50 @@ void main() {
       expect(entregas, hasLength(1));
       expect(entregas.single.acknowledgedAt, _t, reason: 'a primeira entrega não é reescrita');
     });
+
+    test('ACK de outro ACS sobre resolved: acsId e resolvedAt intactos, entrega registrada, alreadyResolved', () async {
+      final a = await alertaCom(AlertStatus.resolved);
+      await Alert.db.updateRow(session, a.copyWith(acsId: UuidValue.fromString(_acs)));
+
+      final r = await confirmar(a.id!.uuid, acs: _acsB);
+
+      expect(r!.outcome, AlertAckOutcome.alreadyResolved);
+      expect(r.status, AlertStatus.resolved);
+      final depois = (await Alert.db.findById(session, a.id!))!;
+      expect(depois.acsId!.uuid, _acs);
+      expect(depois.resolvedAt, _t);
+      final entregas = await AlertDeliveryRecord.db.find(
+        session,
+        where: (t) => t.alertId.equals(a.id!),
+      );
+      expect(entregas.map((e) => e.acsId.uuid), [_acsB]);
+      expect(trilha.eventos.single.userId, _acsB);
+    });
+
+    test('resolve por outro ACS não toca acsId (#88, regressão)', () async {
+      final a = await alertaCom(AlertStatus.acknowledged);
+      await Alert.db.updateRow(session, a.copyWith(acsId: UuidValue.fromString(_acs)));
+
+      final r = await store.resolve(
+        alertId: a.id!.uuid,
+        microAreaId: _maA,
+        now: _t,
+        auditFor: (o) => AuditEvent(
+          userId: _acsB,
+          actionType: 'write',
+          resourceType: 'alert',
+          resourceId: a.id!.uuid,
+          result: o.name,
+        ),
+      );
+
+      expect(r.outcome, AlertResolveOutcome.resolved);
+      final depois = (await Alert.db.findById(session, a.id!))!;
+      expect(depois.acsId!.uuid, _acs, reason: 'o responsável gravado segue quem confirmou');
+      expect(depois.resolvedAt, _t);
+      // A trilha é o único registro de quem concluiu: não há coluna resolvedBy (#111).
+      expect(trilha.eventos.single.userId, _acsB);
+    });
   });
 
   // Corrida: rollback desligado (com ele, sessões concorrentes colidem no
