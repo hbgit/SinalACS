@@ -7,16 +7,17 @@
 /// nem troca de aba: só `tester.pump` e o tempo real passando), vê o Painel
 /// acompanhar um alerta que percorre todos os estados:
 ///
-/// 1. Painel com os 3 alertas de `E2E_SEED_ADMIN_ALERTS=1` (vermelho pendente,
-///    vermelho reconhecido, verde pendente): Abertos 1, Reconhecidos 1,
-///    Concluídos 0. **Antes da correção da #87 a linha "Concluídos" não
-///    existe: é aqui que a reprodução falha.**
+/// 1. Painel com os 4 alertas de `E2E_SEED_ADMIN_ALERTS=1` (vermelho pendente,
+///    vermelho reconhecido, verde pendente e, desde a #87, um vermelho já
+///    concluído): Abertos 1, Reconhecidos 1, Concluídos 1. **Antes da
+///    correção da #87 a linha "Concluídos" não existe: é aqui que a
+///    reprodução falha** (na reprodução o seed ainda tinha 3 alertas).
 /// 2. O script reconhece o pendente no banco (o papel do ACS): Abertos 0,
-///    Reconhecidos 2, Concluídos 0, no pulso seguinte (≤ 40 s).
-/// 3. O script conclui o reconhecido: Reconhecidos 1, Concluídos 1 (≤ 40 s).
-///    Em cada passo o cartão "Vermelho" segue 2: a soma fecha.
+///    Reconhecidos 2, Concluídos 1, no pulso seguinte (≤ 40 s).
+/// 3. O script conclui o reconhecido: Reconhecidos 1, Concluídos 2 (≤ 40 s).
+///    Em cada passo o cartão "Vermelho" segue 3: a soma fecha.
 /// 4. O script insere um vermelho concluído SEM microárea: só o administrador
-///    o conta; para o coordenador, Concluídos continua 1 (escopo da #40).
+///    o conta; para o coordenador, Concluídos continua 2 (escopo da #40).
 /// 5. Em Alertas, o cartão concluído mostra "Status: Concluído" e "Concluído
 ///    às HH:MM"; o filtro de status "Concluído" deixa só ele.
 ///
@@ -55,6 +56,9 @@ const _alertaPendente = String.fromEnvironment('E2E_ALERTA_PENDENTE');
 
 /// `adminAlertIds[1]` do manifesto: vermelho reconhecido semeado.
 const _alertaReconhecido = String.fromEnvironment('E2E_ALERTA_RECONHECIDO');
+
+/// `adminAlertIds[3]` do manifesto: vermelho já concluído no seed (#87).
+const _alertaConcluido = String.fromEnvironment('E2E_ALERTA_CONCLUIDO');
 
 /// Atraso máximo aceito para o Painel refletir uma transição feita no banco:
 /// um pulso (30 s) + o UPDATE (~1 s) + folga.
@@ -211,7 +215,7 @@ Future<Duration> _painelEm(
   final atraso = DateTime.now().difference(pedido);
   expect(atraso, lessThanOrEqualTo(_atrasoMaximoDoPainel), reason: 'o painel demorou ${atraso.inSeconds}s: $motivo');
   // A soma fecha com o cartão Vermelho (INV-03), que não muda nesta jornada.
-  expect(_vermelhoNoPainel('2'), isTrue, reason: 'o cartão Vermelho deveria seguir 2');
+  expect(_vermelhoNoPainel('3'), isTrue, reason: 'o cartão Vermelho deveria seguir 3');
   return atraso;
 }
 
@@ -222,6 +226,7 @@ void main() {
     expect(AdminBackendConfig.host, startsWith('https://'));
     expect(_alertaPendente, isNotEmpty, reason: 'falta --dart-define=E2E_ALERTA_PENDENTE (rode pelo script)');
     expect(_alertaReconhecido, isNotEmpty, reason: 'falta --dart-define=E2E_ALERTA_RECONHECIDO (rode pelo script)');
+    expect(_alertaConcluido, isNotEmpty, reason: 'falta --dart-define=E2E_ALERTA_CONCLUIDO (rode pelo script)');
 
     final ca = (await rootBundle.load(adminRpcCaAsset)).buffer.asUint8List();
     final fiacao = buildAdminWiring(caBytes: ca);
@@ -230,14 +235,14 @@ void main() {
     await _entrar(tester);
     expect(_painelAberto, isTrue);
 
-    // 1. Painel parado, com os 3 alertas semeados.
+    // 1. Painel parado, com os 4 alertas semeados.
     final rotuloAbertos = find.text('Abertos (pendentes)');
     await tester.scrollUntilVisible(rotuloAbertos, 200, scrollable: find.byType(Scrollable).last, maxScrolls: 30);
     await _pumpUntil(tester, () => _linhaDoPainel('Abertos (pendentes)', '1'), motivo: 'o painel com 1 vermelho aberto');
     expect(find.text('Concluídos'), findsOneWidget, reason: '#87: o Painel não tem a linha "Concluídos"');
     expect(_linhaDoPainel('Reconhecidos (em atendimento)', '1'), isTrue, reason: 'Reconhecidos (em atendimento) = 1');
-    expect(_linhaDoPainel('Concluídos', '0'), isTrue, reason: 'Concluídos = 0');
-    expect(_vermelhoNoPainel('2'), isTrue);
+    expect(_linhaDoPainel('Concluídos', '1'), isTrue, reason: 'Concluídos = 1 (o concluído semeado)');
+    expect(_vermelhoNoPainel('3'), isTrue);
 
     // 2. O ACS reconhece o pendente (UPDATE pelo script). Só o pulso traz o
     // novo estado: nada de aba, filtro ou toque.
@@ -245,7 +250,7 @@ void main() {
     // ignore: avoid_print
     print('E2E_RECONHECER id=$_alertaPendente');
     var atraso = await _painelEm(tester,
-        pedido: pedido, abertos: '0', reconhecidos: '2', concluidos: '0', motivo: 'o pendente virar reconhecido');
+        pedido: pedido, abertos: '0', reconhecidos: '2', concluidos: '1', motivo: 'o pendente virar reconhecido');
     // ignore: avoid_print
     print('E2E_PAINEL_RECONHECIDO atraso_ms=${atraso.inMilliseconds}');
 
@@ -255,7 +260,7 @@ void main() {
     // ignore: avoid_print
     print('E2E_CONCLUIR id=$_alertaReconhecido');
     atraso = await _painelEm(tester,
-        pedido: pedido, abertos: '0', reconhecidos: '1', concluidos: '1', motivo: 'o reconhecido virar concluído');
+        pedido: pedido, abertos: '0', reconhecidos: '1', concluidos: '2', motivo: 'o reconhecido virar concluído');
     // ignore: avoid_print
     print('E2E_PAINEL_CONCLUIDO atraso_ms=${atraso.inMilliseconds}');
 
@@ -265,8 +270,8 @@ void main() {
     print('E2E_CONCLUIR_SEM_MICROAREA');
     await tester.pump(_atrasoMaximoDoPainel);
     await tester.pump();
-    expect(_linhaDoPainel('Concluídos', '1'), isTrue, reason: 'o concluído sem microárea não é da UBS do coordenador');
-    expect(_vermelhoNoPainel('2'), isTrue);
+    expect(_linhaDoPainel('Concluídos', '2'), isTrue, reason: 'o concluído sem microárea não é da UBS do coordenador');
+    expect(_vermelhoNoPainel('3'), isTrue);
 
     // 5. Alertas (leitura nova): o cartão concluído com o estado e a hora.
     await _irPara(tester, const ['Alertas']);
@@ -284,7 +289,10 @@ void main() {
     await _tocar(tester, find.text('Concluído').last);
     await _pumpUntil(
       tester,
-      () => _cartao(_alertaReconhecido).evaluate().isNotEmpty && _cartao(_alertaPendente).evaluate().isEmpty,
+      () =>
+          _cartao(_alertaReconhecido).evaluate().isNotEmpty &&
+          _cartao(_alertaConcluido).evaluate().isNotEmpty &&
+          _cartao(_alertaPendente).evaluate().isEmpty,
       motivo: 'o filtro Concluído deixar só o concluído',
     );
     // ignore: avoid_print

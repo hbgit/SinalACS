@@ -313,7 +313,7 @@ E2eFixtures generateE2eFixtures(Random random) {
       password: _password(random),
       activationCode: StaffActivationCode.generate(random),
     ),
-    adminAlertIds: [for (var i = 0; i < 3; i++) generateUuidV4(random)],
+    adminAlertIds: [for (var i = 0; i < 4; i++) generateUuidV4(random)],
     escalationAlerts: E2eEscalationAlerts(overdueId: generateUuidV4(random), freshId: generateUuidV4(random)),
     patients: [
       patient('main', 'Paciente E2E Principal', chronic: false, microAreaId: microAreaId),

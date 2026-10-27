@@ -49,6 +49,32 @@ Future<void> _pumpUntil(WidgetTester tester, bool Function() done,
 
 bool _existe(String chave) => find.byKey(Key(chave)).evaluate().isNotEmpty;
 
+/// Chaves `alert_<id>` dos cartões construídos agora.
+Iterable<ValueKey<String>> _chavesDeCartao() => find
+    .byWidgetPredicate((w) => w.key is ValueKey<String> && (w.key! as ValueKey<String>).value.startsWith('alert_'))
+    .evaluate()
+    .map((e) => e.widget.key! as ValueKey<String>);
+
+/// Percorre a lista do topo ao fim e devolve, por cartão (`alert_<id>`), os
+/// textos vistos. A lista é preguiçosa: um cartão além da dobra não existe na
+/// árvore até ser rolado para dentro.
+Future<Map<String, Set<String>>> _cartoesAoRolar(WidgetTester tester) async {
+  final vistos = <String, Set<String>>{};
+  final rolavel = find.byType(Scrollable).last;
+  for (var passo = 0; passo < 12; passo++) {
+    for (final chave in _chavesDeCartao()) {
+      final textos = find
+          .descendant(of: find.byKey(chave), matching: find.byType(Text))
+          .evaluate()
+          .map((e) => (e.widget as Text).data ?? '');
+      vistos.putIfAbsent(chave.value, () => <String>{}).addAll(textos);
+    }
+    await tester.drag(rolavel, const Offset(0, -300));
+    await tester.pump(const Duration(milliseconds: 300));
+  }
+  return vistos;
+}
+
 /// Toca num botão que pode estar abaixo da dobra (teclado virtual aberto).
 Future<void> _tocar(WidgetTester tester, String chave) async {
   final alvo = find.byKey(Key(chave));
@@ -194,22 +220,35 @@ void main() {
         reason: _existe('login_error') ? (tester.widget<Text>(find.byKey(const Key('login_error'))).data ?? '') : '');
     expect(find.text('Painel de Indicadores'), findsOneWidget);
 
-    // Dados REAIS (#40): o seed semeia 3 alertas na microárea (vermelho pendente,
-    // vermelho reconhecido 60 s depois e verde pendente), então o painel deve
-    // mostrar Vermelho 2, Amarelo 0, Verde 1, 1 aberto, 1 reconhecido e TMRAV 60s.
+    // Dados REAIS (#40): o seed semeia 4 alertas na microárea (vermelho pendente,
+    // vermelho reconhecido 60 s depois, verde pendente e, desde a #87, um vermelho
+    // concluído, reconhecido aos 60 s), então o painel deve mostrar Vermelho 3,
+    // Amarelo 0, Verde 1, 1 aberto, 1 reconhecido, 1 concluído e TMRAV 60s.
     await _pumpUntil(tester, () => find.text('60s').evaluate().isNotEmpty);
-    expect(find.text('2'), findsOneWidget, reason: 'Vermelho = 2');
-    expect(find.text('0'), findsOneWidget, reason: 'Amarelo = 0');
+    expect(find.text('3'), findsOneWidget, reason: 'Vermelho = 3');
+    expect(find.text('0'), findsOneWidget, reason: 'Amarelo = 0 (nenhuma outra linha mostra 0)');
+    expect(find.text('Concluídos'), findsOneWidget, reason: 'a linha da #87 existe');
     expect(find.text('—'), findsNothing, reason: 'há amostra: o TMRAV não pode ser o traço');
 
-    // Alertas: 3 cartões, só com rótulo (`Paciente #XXXX`), nunca nome de paciente.
+    // Alertas: 4 cartões, só com rótulo (`Paciente #XXXX`), nunca nome de paciente.
+    // A lista é preguiçosa e, no celular, o 4º cartão fica além da dobra (a
+    // faixa de vencidos e o selo da #87 empurram): os cartões são reunidos
+    // rolando, pela chave `alert_<id>`, em vez de contados numa só tela.
     await tester.tap(find.text('Alertas').last);
     await tester.pump(const Duration(milliseconds: 300));
     final rotulo = RegExp(r'^Paciente #[0-9A-F]{4}$');
-    await _pumpUntil(tester, () => find.byWidgetPredicate((w) => w is Text && rotulo.hasMatch(w.data ?? '')).evaluate().length == 3);
-    expect(find.text('Risco: Vermelho'), findsNWidgets(2));
-    expect(find.text('Risco: Verde'), findsOneWidget);
-    expect(find.textContaining('Paciente E2E'), findsNothing, reason: 'nome de paciente nunca aparece');
+    await _pumpUntil(tester, () => _chavesDeCartao().isNotEmpty);
+    final cartoes = await _cartoesAoRolar(tester);
+    expect(cartoes, hasLength(4), reason: '4 alertas semeados: ${cartoes.keys}');
+    for (final textos in cartoes.values) {
+      expect(textos.where(rotulo.hasMatch), hasLength(1), reason: 'cada cartão tem um rótulo minimizado');
+      expect(textos.any((t) => t.contains('Paciente E2E')), isFalse, reason: 'nome de paciente nunca aparece');
+    }
+    expect(cartoes.values.where((t) => t.contains('Risco: Vermelho')), hasLength(3));
+    expect(cartoes.values.where((t) => t.contains('Risco: Verde')), hasLength(1));
+    final concluidos = cartoes.values.where((t) => t.contains('Status: Concluído')).toList();
+    expect(concluidos, hasLength(1), reason: 'o concluído mostra o estado (#87)');
+    expect(concluidos.single.any((t) => t.startsWith('Concluído às ')), isTrue, reason: 'e a hora da conclusão (#87)');
 
     // Auditoria: a leitura do próprio admin ficou registrada pelo servidor.
     final auditoriaPorTexto = find.text('Auditoria');

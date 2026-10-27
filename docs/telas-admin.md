@@ -27,9 +27,11 @@ O roteiro desse fluxo está escrito em `apps/admin/integration_test/admin_login_
 
 ![Painel de indicadores da UBS](screenshots/admin/02-indicadores.png)
 
-Contadores por `RiskLevel` (vermelho/amarelo/verde), alertas vermelhos abertos vs. reconhecidos e o TMRAV (Tempo Médio de Resposta a Alerta Vermelho, a métrica North Star do PRD). Desde a issue #40 os números vêm do backend (`admin.indicators`): contagens reais por risco e o TMRAV real, média de `acknowledgedAt − triggeredAt` dos alertas vermelhos dos últimos 30 dias. Sem alerta vermelho reconhecido na janela o TMRAV aparece como "—", nunca como "0s". Cor usada exclusivamente como sinal clínico.
+Contadores por `RiskLevel` (vermelho/amarelo/verde), alertas vermelhos abertos, reconhecidos e concluídos, e o TMRAV (Tempo Médio de Resposta a Alerta Vermelho, a métrica North Star do PRD). Desde a issue #40 os números vêm do backend (`admin.indicators`): contagens reais por risco e o TMRAV real, média de `acknowledgedAt − triggeredAt` dos alertas vermelhos dos últimos 30 dias. Sem alerta vermelho reconhecido na janela o TMRAV aparece como "—", nunca como "0s". Cor usada exclusivamente como sinal clínico.
 
 Desde a issue #44 o painel se atualiza sozinho, pelo pulso de 30 s (`admin.alertsPulse`, que já traz os indicadores); não há botão de recarregar. Se o último pulso bem-sucedido passa de 60 s, uma faixa com ícone e texto ("Dados de HH:MM:SS — sem atualização há N min") avisa que os números estão desatualizados, e some no próximo pulso que der certo. A permanência na tela é registrada na auditoria como uma sessão de monitoramento (início e fim), não uma linha por pulso. Ao lado do título, quando o último pulso conta algum, aparece "N vermelhos vencidos" (singular "1 vermelho vencido"; some com zero): ícone e texto em `redOnSurface`, anunciado ao leitor de tela, não é botão. É a mesma regra de vencido do servidor (`overdueRed` do pulso).
+
+Desde a issue #87 os vermelhos aparecem numa partição fechada por estado: "Abertos (pendentes)", "Reconhecidos (em atendimento)" e "Concluídos" (`resolvedRedAlerts`, mesmo escopo por papel e UBS). A soma das três linhas é sempre o cartão Vermelho (INV-03): um alerta que o ACS conclui sai de "Reconhecidos" e entra em "Concluídos", nunca some da coordenação. A linha nova se atualiza pelo mesmo pulso. A captura acima é anterior à #87 e ainda não mostra a linha "Concluídos" (captura pendente).
 
 ## Microáreas, vínculo ACS e gestão de contas
 
@@ -64,7 +66,7 @@ Cada cartão de ACS tem o botão **Aparelhos**, que abre um diálogo com os apar
 
 ![Consulta de alertas filtrável](screenshots/admin/04-alertas.png)
 
-Lista de alertas filtrável por microárea e status. Não há nenhum controle de reclassificação de risco — a classificação é determinística e não alterável por intervenção humana (INV-02 do PRD).
+Lista de alertas filtrável por microárea e status. Não há nenhum controle de reclassificação de risco — a classificação é determinística e não alterável por intervenção humana (INV-02 do PRD). Desde a issue #87 o alerta concluído pelo ACS aparece como "Status: Concluído" com o selo "Concluído às HH:MM" (ícone e texto, sem cor clínica; só quando o servidor mandou a hora) e o filtro de status oferece "Concluído".
 
 ## Logs de auditoria
 

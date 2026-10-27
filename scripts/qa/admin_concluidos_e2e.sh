@@ -16,8 +16,9 @@
 #   2. emulator -avd <avd> -no-snapshot &        # ou um aparelho físico com DEVICE=<serial>
 #      adb wait-for-device && adb devices
 #   3. ./scripts/qa/admin_concluidos_e2e.sh
-#      - e2e_stack.sh up e seed com E2E_SEED_ADMIN_ALERTS=1: 3 alertas na microárea
-#        do coordenador sintético (vermelho pendente, vermelho reconhecido, verde);
+#      - e2e_stack.sh up e seed com E2E_SEED_ADMIN_ALERTS=1: 4 alertas na microárea
+#        do coordenador sintético (vermelho pendente, vermelho reconhecido, verde e
+#        um vermelho já concluído);
 #      - relé (credencial do coordenador em /coordenador, uma vez) e adb reverse;
 #      - o teste no aparelho; o script atende as linhas marcadoras dele, fazendo
 #        o papel do ACS no banco (a mudança da #87 é de leitura; o que se prova é
@@ -95,7 +96,8 @@ acs_id="$(fx "d['acs']['id']")"
 main_id="$(fx "[p for p in d['patients'] if p['role']=='main'][0]['id']")"
 pendente_id="$(fx "d['adminAlertIds'][0]")"
 reconhecido_id="$(fx "d['adminAlertIds'][1]")"
-[[ -n "$coord_id" && -n "$acs_id" && -n "$main_id" && -n "$pendente_id" && -n "$reconhecido_id" ]] \
+concluido_id="$(fx "d['adminAlertIds'][3]")"
+[[ -n "$coord_id" && -n "$acs_id" && -n "$main_id" && -n "$pendente_id" && -n "$reconhecido_id" && -n "$concluido_id" ]] \
   || { echo 'erro: manifesto de fixtures incompleto (adminAlertIds?)' >&2; exit 1; }
 
 # Os ids vêm da saída do teste: só um UUID passa para o SQL.
@@ -129,7 +131,8 @@ echo "== alerta concluído no emulador"
 ( cd apps/admin && flutter pub get >/dev/null && flutter test integration_test/admin_concluidos_e2e.dart -d "$dev" \
     --dart-define=SINALACS_HOST=https://localhost:8443/ \
     --dart-define=E2E_ALERTA_PENDENTE="$pendente_id" \
-    --dart-define=E2E_ALERTA_RECONHECIDO="$reconhecido_id" ) >"$saida_teste" 2>&1 &
+    --dart-define=E2E_ALERTA_RECONHECIDO="$reconhecido_id" \
+    --dart-define=E2E_ALERTA_CONCLUIDO="$concluido_id" ) >"$saida_teste" 2>&1 &
 teste_pid=$!
 tail -n +1 -f --pid="$teste_pid" "$saida_teste" >&2 &
 eco_pid=$!
@@ -171,7 +174,7 @@ igual() { # <descrição> <esperado> <sql>
   echo "  $1: $v"
   [[ "$v" == "$2" ]] || { echo "erro: esperado '$2' ($1)" >&2; exit 1; }
 }
-igual 'dois vermelhos concluídos (o da UBS e o sem microárea)' 2 \
+igual 'três vermelhos concluídos (o semeado, o da jornada e o sem microárea)' 3 \
   "select count(*) from alerts where \"riskLevel\" = 'red' and status = 'resolved'"
 igual 'um deles sem microárea (invisível ao coordenador)' 1 \
   "select count(*) from alerts where \"riskLevel\" = 'red' and status = 'resolved' and \"microAreaId\" is null"
