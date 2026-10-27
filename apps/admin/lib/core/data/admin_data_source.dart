@@ -16,12 +16,20 @@ class DashboardIndicators {
     required this.countsByRisk,
     required this.openRedAlerts,
     required this.acknowledgedRedAlerts,
+    required this.resolvedRedAlerts,
     required this.tmravSeconds,
   });
 
   final Map<RiskLevel, int> countsByRisk;
+
+  /// Partição dos vermelhos por estado (#87, INV-03): `pending` (e o legado
+  /// `escalated`) em [openRedAlerts], `acknowledged` em
+  /// [acknowledgedRedAlerts], `resolved` em [resolvedRedAlerts]. A soma dos
+  /// três é sempre o vermelho total de [countsByRisk]; o concluído sai de
+  /// "reconhecidos" e entra em "concluídos", nunca some.
   final int openRedAlerts;
   final int acknowledgedRedAlerts;
+  final int resolvedRedAlerts;
 
   /// Tempo Médio de Resposta a Alerta Vermelho (métrica North Star do PRD §1.3).
   /// `null` = nenhum alerta vermelho reconhecido na janela: sem amostra não há
@@ -60,6 +68,7 @@ class AlertSummary {
     required this.status,
     required this.triggeredAt,
     this.escalatedAt,
+    this.resolvedAt,
     this.overdue = false,
   });
 
@@ -73,6 +82,11 @@ class AlertSummary {
   /// Instante do escalonamento pelo backoffice (#44), se houve. O alerta segue
   /// `pending` e listado: escalonar não o confirma nem o tira da lista.
   final DateTime? escalatedAt;
+
+  /// Conclusão do atendimento pelo ACS (#76/#87), se houve. Nulo também numa
+  /// linha `resolved` concluída antes da coluna existir: a tela mostra o
+  /// estado sem a hora.
+  final DateTime? resolvedAt;
 
   /// Vencido: vermelho pendente, não escalonado e além do prazo. Vem do
   /// **servidor** (relógio dele); a tela nunca recalcula com o relógio do aparelho.

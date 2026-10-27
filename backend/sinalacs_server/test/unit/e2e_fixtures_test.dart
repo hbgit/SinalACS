@@ -121,17 +121,17 @@ void main() {
     expect('$a'.contains(a.activationCode), isFalse);
   });
 
-  test('o painel do admin (#40) tem 3 alertas de fixture, com ids v4 distintos e que sobrevivem ao JSON', () {
+  test('o painel do admin (#40, #87) tem 4 alertas de fixture, com ids v4 distintos e que sobrevivem ao JSON', () {
     final f = generateE2eFixtures(Random(31));
-    expect(f.adminAlertIds, hasLength(3));
-    expect(f.adminAlertIds.toSet(), hasLength(3));
+    expect(f.adminAlertIds, hasLength(4)); // pendente, reconhecido, verde, concluído (#87)
+    expect(f.adminAlertIds.toSet(), hasLength(4));
     for (final id in f.adminAlertIds) {
       expect(id.startsWith('00000000-0000-4000-8000'), isFalse);
       expect(RegExp(r'^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$').hasMatch(id), isTrue);
     }
     expect(E2eFixtures.fromJson(f.toJson()).adminAlertIds, f.adminAlertIds);
     final ids = {f.staff.id, f.acs.id, f.secondAcs.id, ...f.patients.map((p) => p.id), ...f.adminAlertIds};
-    expect(ids, hasLength(3 + f.patients.length + 3), reason: 'nenhum id repetido entre as entidades');
+    expect(ids, hasLength(3 + f.patients.length + 4), reason: 'nenhum id repetido entre as entidades');
   });
 
   test('o escalonamento (#44) tem 2 alertas de fixture — vencido e novo —, distintos de todo o resto', () {
@@ -154,7 +154,7 @@ void main() {
       ...f.adminAlertIds,
       ...ids,
     };
-    expect(todos, hasLength(7 + f.patients.length + 3 + 2), reason: 'nenhum id repetido entre as entidades');
+    expect(todos, hasLength(7 + f.patients.length + 4 + 2), reason: 'nenhum id repetido entre as entidades');
     expect(f.toJson()['escalationAlerts'], {'overdueId': ids[0], 'freshId': ids[1]});
     final volta = E2eFixtures.fromJson(f.toJson()).escalationAlerts;
     expect((volta.overdueId, volta.freshId), (ids[0], ids[1]));

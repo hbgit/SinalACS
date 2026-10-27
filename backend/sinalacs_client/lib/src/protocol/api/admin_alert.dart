@@ -26,6 +26,7 @@ abstract class AdminAlert implements _i1.SerializableModel {
     required this.status,
     required this.triggeredAt,
     this.escalatedAt,
+    this.resolvedAt,
     required this.overdue,
   });
 
@@ -37,6 +38,7 @@ abstract class AdminAlert implements _i1.SerializableModel {
     required _i3.AlertStatus status,
     required DateTime triggeredAt,
     DateTime? escalatedAt,
+    DateTime? resolvedAt,
     required bool overdue,
   }) = _AdminAlertImpl;
 
@@ -57,6 +59,9 @@ abstract class AdminAlert implements _i1.SerializableModel {
           : _i1.DateTimeJsonExtension.fromJson(
               jsonSerialization['escalatedAt'],
             ),
+      resolvedAt: jsonSerialization['resolvedAt'] == null
+          ? null
+          : _i1.DateTimeJsonExtension.fromJson(jsonSerialization['resolvedAt']),
       overdue: _i1.BoolJsonExtension.fromJson(jsonSerialization['overdue']),
     );
   }
@@ -75,6 +80,10 @@ abstract class AdminAlert implements _i1.SerializableModel {
 
   DateTime? escalatedAt;
 
+  /// Conclusão do atendimento (#76), se houve. Nulo também numa linha
+  /// `resolved` anterior à coluna: a tela mostra o estado sem a hora.
+  DateTime? resolvedAt;
+
   /// Sem reconhecimento além do prazo configurado; calculado na leitura.
   bool overdue;
 
@@ -89,6 +98,7 @@ abstract class AdminAlert implements _i1.SerializableModel {
     _i3.AlertStatus? status,
     DateTime? triggeredAt,
     DateTime? escalatedAt,
+    DateTime? resolvedAt,
     bool? overdue,
   });
   @override
@@ -102,6 +112,7 @@ abstract class AdminAlert implements _i1.SerializableModel {
       'status': status.toJson(),
       'triggeredAt': triggeredAt.toJson(),
       if (escalatedAt != null) 'escalatedAt': escalatedAt?.toJson(),
+      if (resolvedAt != null) 'resolvedAt': resolvedAt?.toJson(),
       'overdue': overdue,
     };
   }
@@ -123,6 +134,7 @@ class _AdminAlertImpl extends AdminAlert {
     required _i3.AlertStatus status,
     required DateTime triggeredAt,
     DateTime? escalatedAt,
+    DateTime? resolvedAt,
     required bool overdue,
   }) : super._(
          id: id,
@@ -132,6 +144,7 @@ class _AdminAlertImpl extends AdminAlert {
          status: status,
          triggeredAt: triggeredAt,
          escalatedAt: escalatedAt,
+         resolvedAt: resolvedAt,
          overdue: overdue,
        );
 
@@ -147,6 +160,7 @@ class _AdminAlertImpl extends AdminAlert {
     _i3.AlertStatus? status,
     DateTime? triggeredAt,
     Object? escalatedAt = _Undefined,
+    Object? resolvedAt = _Undefined,
     bool? overdue,
   }) {
     return AdminAlert(
@@ -157,6 +171,7 @@ class _AdminAlertImpl extends AdminAlert {
       status: status ?? this.status,
       triggeredAt: triggeredAt ?? this.triggeredAt,
       escalatedAt: escalatedAt is DateTime? ? escalatedAt : this.escalatedAt,
+      resolvedAt: resolvedAt is DateTime? ? resolvedAt : this.resolvedAt,
       overdue: overdue ?? this.overdue,
     );
   }

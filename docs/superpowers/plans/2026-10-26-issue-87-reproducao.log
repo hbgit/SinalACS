@@ -1,0 +1,81 @@
+== stack de e2e (banco de teste)
+aviso: o backend em execução (sinalacs-serverpod) será substituído pelo de e2e; ao final, rode `docker compose up -d` para voltar à stack de desenvolvimento.
+NOTICE:  database "sinalacs_e2e" does not exist, skipping
+Fixtures de e2e gravadas (6 pacientes, 2 ACS, 1 admin, 1 coordenador) em ../../.e2e/fixtures.json.
+== alerta concluído no emulador
+Resolving dependencies...
+Downloading packages...
+  clock 1.1.2 (1.1.3 available)
+  crypto 3.0.7 (3.0.8 available)
+  flutter_lints 3.0.2 (6.0.0 available)
+  intl 0.20.2 (0.20.3 available)
+  lints 3.0.0 (6.1.0 available)
+  matcher 0.12.19 (0.12.20 available)
+  material_color_utilities 0.13.0 (0.13.1 available)
+  meta 1.18.0 (1.19.0 available)
+  qr 3.0.2 (4.0.0 available)
+  serverpod_auth_core_client 3.4.13 (4.0.4 available)
+  serverpod_auth_idp_client 3.4.13 (4.0.4 available)
+  serverpod_client 3.4.13 (4.0.4 available)
+  serverpod_serialization 3.4.13 (4.0.4 available)
+  stack_trace 1.12.1 (1.12.2 available)
+  test_api 0.7.11 (0.7.15 available)
+  vector_math 2.2.0 (2.4.3 available)
+  vm_service 15.3.0 (15.4.0 available)
+  web 1.1.1 (1.1.2 available)
+Got dependencies!
+18 packages have newer versions incompatible with dependency constraints.
+Try `flutter pub outdated` for more information.
+00:00 +0: loading /home/rock/Documents/Dev/APPs/SinalACS/apps/admin/integration_test/admin_concluidos_e2e.dart
+Running Gradle task 'assembleDebug'...                          
+WARNING: A restricted method in java.lang.System has been called
+WARNING: java.lang.System::load has been called by net.rubygrapefruit.platform.internal.NativeLibraryLoader in an unnamed module (file:/home/rock/.gradle/wrapper/dists/gradle-9.1.0-all/7wzd0jkjit61aq2p43wpjgij9/gradle-9.1.0/lib/native-platform-0.22-milestone-28.jar)
+WARNING: Use --enable-native-access=ALL-UNNAMED to avoid a warning for callers in this module
+WARNING: Restricted methods will be blocked in a future release unless native access is enabled
+
+Warning: SDK processing. This version only understands SDK XML versions up to 3 but an SDK XML file of version 4 was encountered. This can happen if you use versions of Android Studio and the command-line tools that were released at different times.
+Running Gradle task 'assembleDebug'...                             21.2s
+✓ Built build/app/outputs/flutter-apk/app-debug.apk
+Installing build/app/outputs/flutter-apk/app-debug.apk...          594ms
+00:00 +0: alerta vermelho concluído continua visível nos Indicadores e na lista (#87)
+══╡ EXCEPTION CAUGHT BY FLUTTER TEST FRAMEWORK ╞════════════════════════════════════════════════════
+The following TestFailure was thrown running a test:
+Expected: exactly one matching candidate
+  Actual: _TextWidgetFinder:<Found 0 widgets with text "Concluídos": []>
+   Which: means none were found but one was expected
+#87: o Painel não tem a linha "Concluídos"
+
+When the exception was thrown, this was the stack:
+#4      main.<anonymous closure> (file:///home/rock/Documents/Dev/APPs/SinalACS/apps/admin/integration_test/admin_concluidos_e2e.dart:237:5)
+<asynchronous suspension>
+#5      testWidgets.<anonymous closure>.<anonymous closure> (package:flutter_test/src/widget_tester.dart:192:15)
+<asynchronous suspension>
+#6      TestWidgetsFlutterBinding._runTestBody (package:flutter_test/src/binding.dart:1952:5)
+<asynchronous suspension>
+<asynchronous suspension>
+(elided one frame from package:stack_trace)
+
+This was caught by the test expectation on the following line:
+  file:///home/rock/Documents/Dev/APPs/SinalACS/apps/admin/integration_test/admin_concluidos_e2e.dart line 237
+The test description was:
+  alerta vermelho concluído continua visível nos Indicadores e na lista (#87)
+════════════════════════════════════════════════════════════════════════════════════════════════════
+00:14 +0 -1: alerta vermelho concluído continua visível nos Indicadores e na lista (#87) [E]
+  Test failed. See exception logs above.
+  The test description was: alerta vermelho concluído continua visível nos Indicadores e na lista (#87)
+  
+00:14 +0 -1: (tearDownAll)
+00:14 +0 -1: Some tests failed.
+
+Failing tests:
+  /home/rock/Documents/Dev/APPs/SinalACS/apps/admin/integration_test/admin_concluidos_e2e.dart: alerta vermelho concluído continua visível nos Indicadores e na lista (#87)
+erro: a jornada do alerta concluído no emulador falhou (código 1)
+A stack de desenvolvimento foi substituída pela de e2e: rode `docker compose up -d` para voltá-la.
+
+== nota da reprodução (2026-10-26, antes da correção)
+Falha no 1º passo, como esperado: o Painel do coordenador mostra "Abertos (pendentes)" e
+"Reconhecidos", mas não tem linha para o vermelho concluído. Como a tela Alertas o mostra hoje
+(pelo código em `apps/admin/lib/app/app.dart`, `statusLabel`): "Status: Resolvido", sem hora da
+conclusão, porque `AlertSummary` não recebe `resolvedAt` e `AdminAlert` não o devolve. A stack de
+e2e já tinha sido derrubada pelo cleanup, então essa segunda parte fica documentada pelo código
+e é provada pelo teste de widget da Task 7, não por captura de tela.

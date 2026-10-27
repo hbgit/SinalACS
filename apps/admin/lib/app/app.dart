@@ -10,6 +10,7 @@ import 'package:sinalacs_admin/app/admin_header.dart';
 import 'package:sinalacs_admin/app/audit_log_screen.dart';
 import 'package:sinalacs_admin/app/data_requests_screen.dart';
 import 'package:sinalacs_admin/app/escalate_alert_dialog.dart';
+import 'package:sinalacs_admin/app/resolved_badge.dart';
 import 'package:sinalacs_admin/app/admin_layout.dart';
 import 'package:sinalacs_admin/app/login_screen.dart';
 import 'package:sinalacs_admin/app/monitoring_controller.dart';
@@ -277,7 +278,9 @@ Color riskColor(RiskLevel level) => switch (level) {
 String statusLabel(AlertStatus status) => switch (status) {
       AlertStatus.pending => 'Pendente',
       AlertStatus.acknowledged => 'Reconhecido',
-      AlertStatus.resolved => 'Resolvido',
+      // O vocabulário do ACS ("Concluir atendimento") e da linha "Concluídos"
+      // do Painel (#87).
+      AlertStatus.resolved => 'Concluído',
       AlertStatus.escalated => 'Escalonado',
     };
 
@@ -369,8 +372,13 @@ class _IndicatorsScreenState extends State<IndicatorsScreen> with MonitoredScree
             const SizedBox(height: 12),
             const Text('Alertas vermelhos', style: TextStyle(fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
+            // Partição fechada dos vermelhos (#87, INV-03): pendente (e o legado
+            // escalonado) em Abertos, reconhecido em Reconhecidos, concluído em
+            // Concluídos. A soma das três linhas é o cartão Vermelho: um alerta
+            // concluído sai de Reconhecidos e entra em Concluídos, nunca some.
             _InfoRow('Abertos (pendentes)', '${data.openRedAlerts}'),
-            _InfoRow('Reconhecidos', '${data.acknowledgedRedAlerts}'),
+            _InfoRow('Reconhecidos (em atendimento)', '${data.acknowledgedRedAlerts}'),
+            _InfoRow('Concluídos', '${data.resolvedRedAlerts}'),
             _InfoRow('TMRAV (tempo médio de resposta)', data.tmravSeconds == null ? '—' : '${data.tmravSeconds}s'),
           ]);
         },
@@ -766,6 +774,12 @@ class _AlertsListState extends State<_AlertsList> {
                           const SizedBox(height: 6),
                           Text('Risco: ${riskLabel(alert.riskLevel)}', style: TextStyle(color: adminOnSurface(riskColor(alert.riskLevel)), fontWeight: FontWeight.bold)),
                           Text('Status: ${statusLabel(alert.status)}'),
+                          // Só com a hora (#87): uma linha concluída antes da
+                          // coluna `resolvedAt` mostra o estado e nada mais.
+                          if (alert.resolvedAt != null) ...[
+                            const SizedBox(height: 6),
+                            ResolvedBadge(alert.resolvedAt!),
+                          ],
                           if (alert.escalatedAt != null) ...[
                             const SizedBox(height: 6),
                             EscalatedBadge(alert.escalatedAt!),

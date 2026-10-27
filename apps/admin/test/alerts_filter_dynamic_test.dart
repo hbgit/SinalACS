@@ -69,6 +69,7 @@ class _CustomAreaDataSource implements AdminDataSource {
         countsByRisk: {},
         openRedAlerts: 0,
         acknowledgedRedAlerts: 0,
+        resolvedRedAlerts: 0,
         tmravSeconds: 0,
       );
 

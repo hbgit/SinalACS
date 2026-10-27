@@ -43,6 +43,7 @@ void main() {
       countsByRisk: {RiskLevel.red: 9, RiskLevel.yellow: 2, RiskLevel.green: 1},
       openRedAlerts: 4,
       acknowledgedRedAlerts: 5,
+      resolvedRedAlerts: 0,
       tmravSeconds: 42,
     );
     await ciclo(tester);

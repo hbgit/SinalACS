@@ -18,6 +18,7 @@ class _ComTmrav extends MockAdminDataSource {
       countsByRisk: base.countsByRisk,
       openRedAlerts: base.openRedAlerts,
       acknowledgedRedAlerts: base.acknowledgedRedAlerts,
+      resolvedRedAlerts: base.resolvedRedAlerts,
       tmravSeconds: tmrav,
     );
   }

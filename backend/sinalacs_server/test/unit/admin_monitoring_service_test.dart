@@ -38,6 +38,7 @@ class _Store implements AdminReadStore {
       green: 2,
       openRedAlerts: 2,
       acknowledgedRedAlerts: 1,
+      resolvedRedAlerts: 0,
       tmravSeconds: 42,
     );
   }
