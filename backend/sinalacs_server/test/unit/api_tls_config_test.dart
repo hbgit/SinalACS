@@ -3,36 +3,68 @@ import 'dart:io';
 import 'package:sinalacs_server/src/config/api_tls_config.dart';
 import 'package:test/test.dart';
 
-/// TLS 1.3 do apiServer (RNF04, issue #78): o trecho Traefik → backend.
+/// TLS 1.3 mútuo do apiServer (RNF04, issues #78 e #90): o trecho Traefik →
+/// backend.
 ///
 /// As regras de leitura das variáveis são testadas pelo mapa; a versão mínima
 /// é medida de verdade — um `HttpServer.bindSecure` com o contexto produzido e
 /// o `openssl s_client` do host negociando 1.3 e 1.2 contra ele. Só a primeira
-/// parte provaria que o código lê `API_TLS_*`, não que o 1.2 é recusado.
+/// parte provaria que o código lê `API_TLS_*`, não que o 1.2 é recusado. A
+/// exigência do certificado de cliente é medida em `mtls_api_server_test.dart`.
+///
+/// Desde a #90 são TRÊS variáveis, juntas ou nenhuma: duas delas presentes é o
+/// caso que mais importa recusar, porque é o que um `.env` anterior à #90 tem.
+/// Sem a recusa, o servidor subiria em TLS de mão única — exatamente o estado
+/// que a issue existe para fechar — sem ninguém notar.
+const _asTres = ['API_TLS_CERT_PATH', 'API_TLS_KEY_PATH', 'API_TLS_CLIENT_CA_PATH'];
+
+Matcher _erroQueNomeiaAsTres() => throwsA(
+  isA<StateError>().having(
+    (e) => e.message,
+    'message',
+    allOf(
+      contains('API_TLS_CERT_PATH'),
+      contains('API_TLS_KEY_PATH'),
+      contains('API_TLS_CLIENT_CA_PATH'),
+      contains('devem vir juntas'),
+      contains('#90'),
+    ),
+  ),
+);
+
 void main() {
   group('ApiTlsConfig.fromMap', () {
-    test('sem as duas variáveis devolve null (HTTP, caminho do Render)', () {
+    test('sem as três variáveis devolve null (HTTP, caminho do Render)', () {
       expect(ApiTlsConfig.fromMap({}), isNull);
     });
 
     test('string vazia ou só de espaços conta como ausente', () {
       expect(
-        ApiTlsConfig.fromMap({'API_TLS_CERT_PATH': '', 'API_TLS_KEY_PATH': '  '}),
+        ApiTlsConfig.fromMap({
+          'API_TLS_CERT_PATH': '',
+          'API_TLS_KEY_PATH': '  ',
+          'API_TLS_CLIENT_CA_PATH': '',
+        }),
         isNull,
       );
     });
 
-    test('só o certificado é erro de boot que nomeia as duas', () {
+    test('só o certificado é erro de boot que nomeia as três', () {
       expect(
         () => ApiTlsConfig.fromMap({'API_TLS_CERT_PATH': '/x.crt'}),
-        throwsA(
-          isA<StateError>().having(
-            (e) => e.message,
-            'message',
-            allOf(contains('API_TLS_CERT_PATH'), contains('API_TLS_KEY_PATH')),
-          ),
-        ),
+        _erroQueNomeiaAsTres(),
       );
+    });
+
+    test('só duas das três é erro de boot que nomeia as três (fail-fast, #90)', () {
+      for (final ausente in _asTres) {
+        final mapa = {for (final v in _asTres) if (v != ausente) v: '/x'};
+        expect(
+          () => ApiTlsConfig.fromMap(mapa),
+          _erroQueNomeiaAsTres(),
+          reason: 'sem $ausente o boot tem de falhar, não cair em mão única',
+        );
+      }
     });
 
     test('só a chave também é erro de boot', () {
@@ -42,13 +74,15 @@ void main() {
       );
     });
 
-    test('as duas juntas produzem os caminhos', () {
+    test('as três juntas produzem os caminhos', () {
       final config = ApiTlsConfig.fromMap({
         'API_TLS_CERT_PATH': '/a.crt',
         'API_TLS_KEY_PATH': '/a.key',
+        'API_TLS_CLIENT_CA_PATH': '/ca.crt',
       })!;
       expect(config.certificatePath, '/a.crt');
       expect(config.keyPath, '/a.key');
+      expect(config.clientCaPath, '/ca.crt');
     });
   });
 
@@ -82,6 +116,7 @@ void main() {
       config = ApiTlsConfig(
         certificatePath: '${dir.path}/leaf.crt',
         keyPath: '${dir.path}/leaf.key',
+        clientCaPath: caPath,
       );
     });
 
@@ -92,6 +127,7 @@ void main() {
         () => const ApiTlsConfig(
           certificatePath: '/nao/existe.crt',
           keyPath: '/nao/existe.key',
+          clientCaPath: '/nao/existe-ca.crt',
         ).toSecurityContext(),
         throwsA(anything),
       );
