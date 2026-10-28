@@ -28,7 +28,9 @@
 # próprio par). São nomes de formato, não chaves; um grep pela palavra reprovaria
 # todo APK. O que denuncia uma chave é o cabeçalho seguido do corpo em base64.
 #
-# Sai 1 nomeando cada entrada ofensora — nunca o conteúdo dela. Sai 2 em uso
+# Sai 1 nomeando cada entrada ofensora — nunca o conteúdo dela. Uma entrada
+# que não pôde ser varrida (unzip -p falhou ou o grep errou) também sai 1: a
+# conferência falha fechada, nunca diz OK sobre o que não leu. Sai 2 em uso
 # errado ou APK ausente.
 set -euo pipefail
 
@@ -100,9 +102,21 @@ while IFS= read -r e; do
   [[ -n "$e" && "$e" != */ ]] || continue
   # O unzip trata o nome como padrão: `[`, `*` e `?` viram classe literal.
   padrao="${e//\[/[[]}"; padrao="${padrao//\*/[*]}"; padrao="${padrao//\?/[?]}"
-  n="$(unzip -p "$apk" "$padrao" | grep -a -z -c -P -- "$pem_chave" || true)"
+  # Falha FECHADA: só o exit 1 do grep ("nenhuma ocorrência") é aceito como
+  # limpo. Um `|| true` aqui engolia também o exit 2 do grep (erro, p.ex. limite
+  # de backtracking/JIT do PCRE numa entrada grande) e a falha do `unzip -p`
+  # (entrada corrompida ou método não suportado): a contagem saía vazia, virava
+  # 0 e o script dizia OK sobre uma entrada que nunca leu. O PIPESTATUS é lido
+  # dentro da substituição (fora dela não existe) e vai na última linha.
+  resultado="$(unzip -p "$apk" "$padrao" | grep -a -z -c -P -- "$pem_chave"; echo "status ${PIPESTATUS[*]}")"
+  read -r _ st_unzip st_grep <<<"$(tail -n 1 <<<"$resultado")"
+  n="$(head -n 1 <<<"$resultado")"
+  if [[ "$st_unzip" != 0 || ! "$st_grep" =~ ^[01]$ ]]; then
+    reprova "não foi possível varrer $e (unzip -p saiu $st_unzip, grep saiu $st_grep)"
+    continue
+  fi
   varridas=$((varridas + 1))
-  [[ "${n:-0}" == 0 ]] || reprova "o APK leva uma chave privada PEM dentro de: $e"
+  [[ "$st_grep" == 1 ]] || reprova "o APK leva uma chave privada PEM dentro de: $e ($n ocorrência(s))"
 done <<<"$entradas"
 
 if [[ "$ruim" -ne 0 ]]; then

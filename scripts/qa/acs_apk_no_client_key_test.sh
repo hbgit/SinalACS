@@ -94,6 +94,32 @@ empacota "$tmp/p12" "$tmp/p12.apk"
 espera 1 "p12" --debug "$tmp/p12.apk"
 grep -q 'cliente.p12' "$tmp/saida" || falha "não nomeou o .p12: $(cat "$tmp/saida")"
 
+echo "== caso 9: entrada que não dá para varrer reprova (falha fechada), nunca OK"
+# Um grep que erra (exit 2: limite do PCRE, por exemplo) ou um unzip -p que não
+# consegue extrair a entrada não podem virar "0 ocorrências". Os shims só
+# falham na varredura de conteúdo (grep -P / unzip -p); o resto passa ao real.
+mkdir -p "$tmp/shim-grep" "$tmp/shim-unzip"
+grep_real="$(command -v grep)"; unzip_real="$(command -v unzip)"
+cat >"$tmp/shim-grep/grep" <<EOF
+#!/usr/bin/env bash
+for a in "\$@"; do [[ "\$a" == -P ]] && { cat >/dev/null; exit 2; }; done
+exec "$grep_real" "\$@"
+EOF
+cat >"$tmp/shim-unzip/unzip" <<EOF
+#!/usr/bin/env bash
+[[ "\$1" == -p ]] && exit 9
+exec "$unzip_real" "\$@"
+EOF
+chmod +x "$tmp/shim-grep/grep" "$tmp/shim-unzip/unzip"
+for shim in grep unzip; do
+  codigo=0
+  PATH="$tmp/shim-$shim:$PATH" "$script" --debug "$tmp/limpo.apk" >"$tmp/saida" 2>&1 || codigo=$?
+  [[ "$codigo" == 1 ]] || falha "$shim falhando: esperado exit 1, veio $codigo: $(cat "$tmp/saida")"
+  grep -q 'não foi possível varrer' "$tmp/saida" || falha "$shim falhando: não disse que não varreu: $(cat "$tmp/saida")"
+  grep -q 'kernel_blob.bin' "$tmp/saida" || falha "$shim falhando: não nomeou a entrada: $(cat "$tmp/saida")"
+  if grep -q '^OK' "$tmp/saida"; then falha "$shim falhando: imprimiu OK"; fi
+done
+
 echo "== caso 8: APK inexistente e argumento inválido saem 2"
 espera 2 "APK inexistente" --debug "$tmp/nao-existe.apk"
 espera 2 "argumento inválido" --qualquer "$tmp/limpo.apk"
