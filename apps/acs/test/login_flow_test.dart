@@ -1178,24 +1178,24 @@ void main() {
       expect(find.byKey(const Key('storage_error')), findsOneWidget);
     });
 
-    testWidgets('sem senha compilada o painel diz que falta a senha, não que falta conexão', (tester) async {
+    testWidgets('sem certificado do aparelho o painel diz isso, não que falta conexão (#94)', (tester) async {
       await abrirPainel(
         tester,
         visitQueue: OfflineVisitQueue(),
         feedBuilder: (queue) => FakeAlertFeed(
           queue,
           failure: const AlertFeedFailure(
-            AlertFeedFailureKind.missingPassword,
-            title: 'Este aplicativo foi compilado sem a senha do broker de alertas.',
-            detail: 'Nenhum alerta será recebido até o aplicativo ser recompilado.',
+            AlertFeedFailureKind.certificateUnavailable,
+            title: 'Sem certificado deste aparelho para a central',
+            detail: 'Será emitido quando houver rede.',
+            transient: true,
           ),
         ),
       );
 
-      expect(
-        find.text('Este aplicativo foi compilado sem a senha do broker de alertas.'),
-        findsOneWidget,
-      );
+      expect(find.text('Sem certificado deste aparelho para a central'), findsOneWidget);
+      expect(find.textContaining('Será emitido quando houver rede.'), findsOneWidget);
+      expect(find.byKey(const Key('retry_feed')), findsOneWidget, reason: 'transitória: oferece nova tentativa');
       expect(find.text('Sem conexão com a central de alertas.'), findsNothing);
     });
 
@@ -1305,7 +1305,7 @@ void main() {
       expect(find.text('Alertas em tempo real'), findsOneWidget);
     });
 
-    testWidgets('falta de senha não oferece nem agenda nova tentativa', (tester) async {
+    testWidgets('falta da CA da central não oferece nem agenda nova tentativa', (tester) async {
       late FakeAlertFeed feed;
 
       await abrirPainel(
@@ -1314,9 +1314,9 @@ void main() {
         feedBuilder: (queue) => feed = FakeAlertFeed(
           queue,
           failure: const AlertFeedFailure(
-            AlertFeedFailureKind.missingPassword,
-            title: 'Este aplicativo foi compilado sem a senha do broker de alertas.',
-            detail: 'Nenhum alerta será recebido até o aplicativo ser recompilado.',
+            AlertFeedFailureKind.missingCaAsset,
+            title: 'Falta o certificado da central neste aplicativo.',
+            detail: 'Sem ele a conexão segura não pode ser verificada.',
           ),
         ),
       );

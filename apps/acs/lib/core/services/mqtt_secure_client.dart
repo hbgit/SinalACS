@@ -17,6 +17,17 @@ const String alertTopicPrefix = 'sinalacs/v1/microareas';
 String alertTopicFor(String microAreaId) =>
     '$alertTopicPrefix/$microAreaId/alerts';
 
+/// Client id MQTT do aparelho (#94): estável por ACS **e** por instalação.
+///
+/// Tem de ser a MESMA string de `deviceMqttClientId` no servidor
+/// (`backend/sinalacs_server/lib/src/application/devices/device_certificate_service.dart`,
+/// usada por `MqttSessionKicker.clientIdFor` em
+/// `backend/sinalacs_server/lib/src/infrastructure/mqtt/mqtt_session_kicker.dart`):
+/// é por ela que o servidor derruba a sessão do aparelho cujo certificado
+/// revogou. O app não importa o servidor; `test/alert_feed_enrollment_test.dart`
+/// fixa a igualdade com a constante copiada.
+String deviceClientId({required String acsId, required String deviceId}) => 'sinalacs-acs-$acsId-$deviceId';
+
 /// Tópico onde o ACS confirma o recebimento de um alerta.
 String ackTopicFor(String alertId) => 'sinalacs/v1/alerts/$alertId/acks';
 

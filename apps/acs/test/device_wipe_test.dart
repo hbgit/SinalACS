@@ -9,6 +9,7 @@ import 'package:sinalacs_acs/core/database/micro_area_cache_store.dart';
 import 'package:sinalacs_acs/core/database/sqlcipher_visit_store.dart';
 import 'package:sinalacs_acs/core/network/backend_client.dart';
 import 'package:sinalacs_acs/core/security/database_key_store.dart';
+import 'package:sinalacs_acs/core/security/device_certificate_store.dart';
 import 'package:sinalacs_acs/core/security/session_token_store.dart';
 import 'package:sinalacs_acs/core/security/upload_token_store.dart';
 import 'package:sinalacs_acs/core/services/micro_area_directory.dart';
@@ -811,6 +812,48 @@ void main() {
       expect(find.byKey(const Key('login_button')), findsOneWidget);
       expect(find.text('Painel operacional'), findsNothing);
       expect(find.text('Os dados deste aparelho foram apagados.'), findsOneWidget);
+    });
+  });
+
+  group('limpeza remota e o certificado do aparelho (#94)', () {
+    testWidgets('a limpeza apaga o certificado do deviceId antigo', (tester) async {
+      const idAntigo = '00000000-0000-4000-8000-0000000000d1';
+      final deviceIds = MemoryDeviceIdStore(idAntigo);
+      final backend = FakeAcsBackend()
+        ..deviceIds = deviceIds
+        ..pendingWipeOrderId = 'ordem-1';
+      final certificados = InMemoryDeviceCertificateStore();
+      StoredDeviceCertificate cert(String acsId, String deviceId) => StoredDeviceCertificate(
+            acsId: acsId,
+            deviceId: deviceId,
+            microAreaId: seedMicroAreaId,
+            serial: 'serial-$acsId',
+            certificatePem: 'CERT-SINTETICO',
+            privateKeyPem: 'CHAVE-SINTETICA',
+            notAfter: DateTime.utc(2026, 11, 26),
+          );
+      await certificados.write(cert(acsA, idAntigo));
+      await certificados.write(cert(acsB, idAntigo));
+      await certificados.write(cert(acsA, 'outro-aparelho'));
+
+      await tester.pumpWidget(SinalAcsApp(
+        backend: backend,
+        visitStorage: InMemoryVisitStorage(),
+        uploadTokens: MemoryUploadTokenStore(),
+        deviceIds: deviceIds,
+        deviceCertificates: certificados,
+        biometricGate: FakeBiometricGate(),
+        feedBuilder: (q) => FakeAlertFeed(q),
+      ));
+      await assentar(tester);
+
+      expect(find.byKey(const Key('device_wiped')), findsOneWidget);
+      expect(await certificados.read(acsId: acsA, deviceId: idAntigo), isNull);
+      expect(await certificados.read(acsId: acsB, deviceId: idAntigo), isNull);
+      expect(await certificados.read(acsId: acsA, deviceId: 'outro-aparelho'), isNotNull,
+          reason: 'só o aparelho limpo perde o certificado');
+      expect(await deviceIds.readOrCreate(), isNot(idAntigo));
+      expect(backend.confirmedWipes, [(deviceId: idAntigo, orderId: 'ordem-1')]);
     });
   });
 }

@@ -245,6 +245,80 @@ void main() {
     });
   });
 
+  group('certificado do aparelho (#94)', () {
+    test('issueDeviceCertificate envia o CSR com o token e devolve a folha', () async {
+      await backend.login(matricula: 'ACS-001', senha: 'senha-sintetica');
+
+      final emitido = await backend.issueDeviceCertificate('CSR-SINTETICO');
+
+      final pedido = server.requests.lastWhere((r) => r.method == 'issueCertificate');
+      expect(pedido.endpoint, 'devices');
+      expect(pedido.args['csrPem'], 'CSR-SINTETICO');
+      expect(pedido.args['accessToken'], backend.session!.accessToken);
+      expect(emitido.certificatePem, 'CERT-SINTETICO');
+      expect(emitido.serial, '0a1b');
+      expect(emitido.notAfter, DateTime.utc(2026, 11, 26, 12));
+      expect(emitido.serverNow, DateTime.utc(2026, 10, 27, 12));
+    });
+
+    test('DeviceWipeRequiredException vira DeviceWipeRequiredFailure e avisa onDeviceWipeRequired', () async {
+      await backend.login(matricula: 'ACS-001', senha: 'senha-sintetica');
+      final pedidos = <String>[];
+      backend.onDeviceWipeRequired = pedidos.add;
+      server.issueCertificateRefusal = {
+        'className': 'DeviceWipeRequiredException',
+        'data': {'orderId': 'ordem-1', 'message': 'Este aparelho precisa ser limpo.'},
+      };
+
+      await expectLater(
+        backend.issueDeviceCertificate('CSR-SINTETICO'),
+        throwsA(isA<DeviceWipeRequiredFailure>().having((f) => f.orderId, 'orderId', 'ordem-1')),
+      );
+      expect(pedidos, ['ordem-1']);
+    });
+
+    test('AlertValidationException vira BackendFailure não recuperável com o texto do servidor', () async {
+      await backend.login(matricula: 'ACS-001', senha: 'senha-sintetica');
+      server.issueCertificateRefusal = {
+        'className': 'AlertValidationException',
+        'data': {'message': 'CSR inválido.'},
+      };
+
+      await expectLater(
+        backend.issueDeviceCertificate('CSR-SINTETICO'),
+        throwsA(isA<BackendFailure>()
+            .having((f) => f, 'tipo', isNot(isA<DeviceWipeRequiredFailure>()))
+            .having((f) => f.message, 'message', 'CSR inválido.')
+            .having((f) => f.isRecoverable, 'isRecoverable', isFalse)),
+      );
+    });
+
+    test('AlertPermissionException vira BackendFailure não recuperável sem falar de alerta', () async {
+      await backend.login(matricula: 'ACS-001', senha: 'senha-sintetica');
+      server.issueCertificateRefusal = {
+        'className': 'AlertPermissionException',
+        'data': {'message': 'Recusado.'},
+      };
+
+      await expectLater(
+        backend.issueDeviceCertificate('CSR-SINTETICO'),
+        throwsA(isA<BackendFailure>()
+            .having((f) => f.message, 'message', isNot(contains('alerta')))
+            .having((f) => f.isRecoverable, 'isRecoverable', isFalse)),
+      );
+    });
+
+    test('sem servidor a emissão é falha recuperável', () async {
+      await backend.login(matricula: 'ACS-001', senha: 'senha-sintetica');
+      await server.stop();
+
+      await expectLater(
+        backend.issueDeviceCertificate('CSR-SINTETICO'),
+        throwsA(isA<BackendFailure>().having((f) => f.isRecoverable, 'isRecoverable', isTrue)),
+      );
+    });
+  });
+
   group('host do RPC', () {
     test('recusa http — a porta em texto claro não existe mais', () {
       expect(

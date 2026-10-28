@@ -1,4 +1,6 @@
 import 'dart:async';
+
+import 'package:basic_utils/basic_utils.dart' show CryptoUtils, ECPrivateKey, X509Utils;
 import 'package:sinalacs_acs/core/network/auth_session.dart';
 import 'package:sinalacs_acs/core/network/backend_client.dart';
 import 'package:sinalacs_acs/core/security/biometric_gate.dart';
@@ -581,9 +583,63 @@ class FakeAcsBackend implements AcsBackend {
     return pullEntries;
   }
 
+  // ---------------------------------------------------------------------------
+  // Certificado MQTT do aparelho (#94).
+  // ---------------------------------------------------------------------------
+
+  /// Quantas vezes `issueDeviceCertificate` chegou ao "servidor" (inclusive as
+  /// que falharam).
+  int issueCertificateCount = 0;
+
+  /// CSRs recebidos, na ordem.
+  final List<String> issuedCsrs = <String>[];
+
+  /// Falha da emissão (ex.: sem rede, recuperável; ou pedido de limpeza).
+  BackendFailure? issueCertificateFailure;
+
+  /// Se definido, a emissão espera por ele (emissão em voo).
+  Completer<void>? issueCertificateGate;
+
+  /// Relógio do "servidor", devolvido como `serverNow`.
+  DateTime Function() serverClock = () => DateTime.now().toUtc();
+
+  /// Validade da folha emitida, a partir de [serverClock].
+  Duration certificateLifetime = const Duration(days: 30);
+
+  @override
+  Future<IssuedDeviceCertificate> issueDeviceCertificate(String csrPem) async {
+    issueCertificateCount++;
+    issuedCsrs.add(csrPem);
+    await issueCertificateGate?.future;
+    final failure = issueCertificateFailure;
+    if (failure != null) throw failure;
+    final now = serverClock();
+    final serial = 'serial-$issueCertificateCount';
+    return IssuedDeviceCertificate(
+      certificatePem: signDeviceCsrForTest(csrPem, serial: issueCertificateCount),
+      serial: serial,
+      notAfter: now.add(certificateLifetime),
+      serverNow: now,
+    );
+  }
+
   @override
   void close() {}
 }
+
+/// CA de teste (EC P-256), só em memória: assina o CSR do aparelho para que a
+/// folha devolvida tenha a chave PÚBLICA do aparelho de verdade — um
+/// `SecurityContext` montado com ela e a chave privada guardada só aceita o par
+/// se os dois casarem. Nada disto é a CA da stack.
+final _testCaKey = CryptoUtils.generateEcKeyPair(curve: 'prime256v1').privateKey as ECPrivateKey;
+
+String signDeviceCsrForTest(String csrPem, {int serial = 1}) => X509Utils.generateSelfSignedCertificate(
+      _testCaKey,
+      csrPem,
+      30,
+      serialNumber: '$serial',
+      issuer: {'CN': 'sinalacs-teste-ca'},
+    );
 
 /// Feed de alertas controlado pelo teste.
 ///

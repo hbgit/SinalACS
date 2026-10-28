@@ -18,6 +18,7 @@ import 'package:sinalacs_acs/core/network/auth_session.dart';
 import 'package:sinalacs_acs/core/network/backend_client.dart';
 import 'package:sinalacs_acs/core/network/backend_scope.dart';
 import 'package:sinalacs_acs/core/security/biometric_gate.dart';
+import 'package:sinalacs_acs/core/security/device_certificate_store.dart';
 import 'package:sinalacs_acs/core/security/database_key_store.dart';
 import 'package:sinalacs_acs/core/security/session_token_store.dart';
 import 'package:sinalacs_acs/core/security/upload_token_store.dart';
@@ -25,6 +26,7 @@ import 'package:sinalacs_acs/core/services/alert_feed.dart';
 import 'package:sinalacs_acs/core/services/alert_http_fallback.dart';
 import 'package:sinalacs_acs/core/services/alert_queue.dart';
 import 'package:sinalacs_acs/core/services/deferred_flush_service.dart';
+import 'package:sinalacs_acs/core/services/device_certificate_enroller.dart';
 import 'package:sinalacs_acs/core/services/emergency_dialer.dart';
 import 'package:sinalacs_acs/core/services/micro_area_directory.dart';
 import 'package:sinalacs_acs/core/services/offline_visit_queue.dart';
@@ -61,6 +63,7 @@ class SinalAcsApp extends StatefulWidget {
     this.deferredFlush,
     this.uploadTokens,
     this.deviceIds,
+    this.deviceCertificates,
     this.connectivityChanges,
     this.wipeJournal,
     this.telemetryStore,
@@ -94,6 +97,12 @@ class SinalAcsApp extends StatefulWidget {
 
   /// Id da instalação, a MESMA instância do `BackendClient`.
   final DeviceIdStore? deviceIds;
+
+  /// Certificado MQTT do aparelho (#94). Em produção, o `main.dart` passa o
+  /// `SecureStorageDeviceCertificateStore` (Keystore); `null` usa um só em
+  /// memória (reemitido a cada partida). Só vale com [deviceIds]: sem o id da
+  /// instalação não há para quem emitir, e o feed padrão falha na hora.
+  final DeviceCertificateStore? deviceCertificates;
 
   /// `true` quando há rede, `false` sem rede (o `main.dart` liga ao
   /// `connectivity_plus`). Passar a ter rede dispara o envio diferido. `null`:
@@ -610,6 +619,32 @@ class _SinalAcsAppState extends State<SinalAcsApp> with WidgetsBindingObserver i
 
   late final WipeJournal _wipeJournal = widget.wipeJournal ?? MemoryWipeJournal();
 
+  // ---------------------------------------------------------------------------
+  // Certificado MQTT por aparelho (#94).
+  // ---------------------------------------------------------------------------
+
+  late final DeviceCertificateStore _deviceCertificates =
+      widget.deviceCertificates ?? InMemoryDeviceCertificateStore();
+
+  /// Um por app: o single-flight por `deviceId` vale entre os painéis.
+  late final DeviceCertificateEnroller _enroller =
+      DeviceCertificateEnroller(store: _deviceCertificates, backend: widget.backend);
+
+  /// O feed do painel. O injetado pelo teste ganha; senão, o MQTT com o
+  /// certificado deste aparelho, e sem [SinalAcsApp.deviceIds] um feed que
+  /// falha na hora (não há id para pedir o certificado).
+  late final AlertFeed Function(AlertQueue queue) _feedBuilder = widget.feedBuilder ??
+      (widget.deviceIds == null
+          ? (_) => UnconfiguredAlertFeed()
+          : (queue) => MqttAlertFeed(
+                queue: queue,
+                enroller: _enroller,
+                deviceIds: widget.deviceIds!,
+                // A emissão recusada com pedido de limpeza vira o fluxo da
+                // #81: pergunta pelo pedido e apaga.
+                onDeviceWipeRequired: () => unawaited(_checkRemoteWipe()),
+              ));
+
   /// Sem [SinalAcsApp.deviceIds] não há id da instalação para perguntar ao
   /// servidor: sem limpeza remota (o padrão dos testes de widget).
   late final RemoteWipeCoordinator? _remoteWipe = widget.deviceIds == null
@@ -760,6 +795,12 @@ class _SinalAcsAppState extends State<SinalAcsApp> with WidgetsBindingObserver i
           // nenhuma, e o servidor já o revogou.
         }
       }
+      // O certificado MQTT emitido para o id antigo sai antes do id (#94): a
+      // chave privada dele não pode sobrar num aparelho limpo. O id antigo é
+      // o do diário (gravado antes de apagar), que vale também numa limpeza
+      // refeita depois de o id já ter sido trocado.
+      final oldDeviceId = (await _wipeJournal.read())?.deviceId ?? await widget.deviceIds!.readOrCreate();
+      await _deviceCertificates.delete(deviceId: oldDeviceId);
       await widget.deviceIds!.delete();
     } catch (_) {
       // As filas já estão seladas: nenhuma serve ao próximo login, que relê o
@@ -842,7 +883,7 @@ class _SinalAcsAppState extends State<SinalAcsApp> with WidgetsBindingObserver i
   }
 
   LoginScreen _loginScreen() => LoginScreen(
-        feedBuilder: widget.feedBuilder,
+        feedBuilder: _feedBuilder,
         visitScopeFor: _scopeForShell,
         directory: widget.microAreaDirectory,
         initialAlert: widget.initialAlert,
@@ -1513,7 +1554,7 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
 
   late final AlertQueue _queue = AlertQueue(microAreaId: widget.microAreaId);
   late final AlertFeed _feed =
-      (widget.feedBuilder ?? (queue) => MqttAlertFeed(queue: queue))(_queue);
+      (widget.feedBuilder ?? (_) => UnconfiguredAlertFeed())(_queue);
 
   bool _brokerConnected = false;
   InfraNotice? _feedError;
@@ -1965,8 +2006,8 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
   /// Antes rodava só uma vez, no `initState`: se falhasse, o app nunca mais
   /// tentava, e reabrir era o único jeito de recuperar um alerta que o broker
   /// já estava guardando com QoS 1. Falhas transitórias agora são retentadas
-  /// sozinhas por [_scheduleReconnect]; falhas permanentes (senha ausente, CA
-  /// ausente, credencial recusada) não são — insistir nelas não muda nada e só
+  /// sozinhas por [_scheduleReconnect]; falhas permanentes (CA ausente, emissão do
+  /// certificado recusada, credencial recusada) não são — insistir nelas não muda nada e só
   /// gastaria bateria.
   Future<void> _connectFeed() async {
     try {
@@ -2801,7 +2842,7 @@ class DashboardScreen extends StatelessWidget {
 
   /// Presente só quando [feedError] é uma falha transitória — dá ao ACS que já
   /// vê o sinal voltar a chance de não esperar o backoff automático. `null`
-  /// numa falha permanente (senha ausente, CA ausente) evita oferecer um botão
+  /// numa falha permanente (CA ausente, emissão do certificado recusada) evita oferecer um botão
   /// que nunca vai funcionar.
   final VoidCallback? onRetryFeed;
 

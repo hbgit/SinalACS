@@ -42,6 +42,8 @@ class EnvioDeVisitasForaDoAr implements AcsBackend {
   @override
   Future<void> forgetLocalSession() => _inner.forgetLocalSession();
   @override
+  Future<IssuedDeviceCertificate> issueDeviceCertificate(String csrPem) => _inner.issueDeviceCertificate(csrPem);
+  @override
   Future<bool> get hasStoredSession => _inner.hasStoredSession;
   @override
   Future<SessionUnlock> unlockStoredSession({required String reason}) => _inner.unlockStoredSession(reason: reason);

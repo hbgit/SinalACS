@@ -12,7 +12,7 @@
 ///   cd apps/acs
 ///   dart run tool/live_check.dart
 ///   dart run tool/live_check.dart --host https://10.0.2.2/ --broker 10.0.2.2
-///   dart run tool/live_check.dart --mqtt-password "$MQTT_ACS_PASSWORD"
+///   dart run tool/live_check.dart --client-cert <crt> --client-key <key>
 ///
 /// O default do RPC é `https://localhost/` — a 8080 em texto claro não é mais
 /// publicada e quem termina TLS é o Traefik (RNF04/L-08). O `--host` explícito
@@ -25,7 +25,9 @@
 /// a do **broker** (MQTT em 8883) e [_devRpcCaBytes] lê a do **RPC** (HTTPS em
 /// 443). Um `--host` em https com a CA do broker dá `HandshakeException`.
 ///
-/// `--mqtt-password` é obrigatório: a senha do broker não tem default.
+/// O broker não tem senha para o ACS (#94): a ferramenta se autentica pela
+/// folha `qa-tools` da CA de aparelhos (CN = microárea do seed), por padrão em
+/// `infra/docker/mosquitto/runtime/devices/qa-tools.{crt,key}`.
 library;
 
 import 'dart:async';
@@ -33,7 +35,6 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:sinalacs_acs/core/network/backend_client.dart';
-import 'package:sinalacs_acs/core/network/backend_config.dart';
 import 'package:sinalacs_acs/core/services/backend_visit_synchronizer.dart';
 import 'package:sinalacs_acs/core/services/mqtt_secure_client.dart';
 import 'package:sinalacs_acs/core/services/offline_visit_queue.dart';
@@ -112,22 +113,10 @@ Future<void> main(List<String> args) async {
   // CA do BROKER (MQTT). A do RPC é a de [_devRpcCaBytes], e continuam sendo
   // duas: apontar esta para a CA do Traefik derruba a leg do MQTT.
   final caPath = _arg(args, 'ca', '../../infra/docker/mosquitto/runtime/certs/ca.crt');
-  final clientCertPath = _arg(args, 'client-cert', '../../infra/docker/mosquitto/runtime/certs/acs-area-12.crt');
-  final clientKeyPath = _arg(args, 'client-key', '../../infra/docker/mosquitto/runtime/certs/acs-area-12.key');
+  final clientCertPath = _arg(args, 'client-cert', '../../infra/docker/mosquitto/runtime/devices/qa-tools.crt');
+  final clientKeyPath = _arg(args, 'client-key', '../../infra/docker/mosquitto/runtime/devices/qa-tools.key');
   final emitMetrics = args.contains('--emit-metrics');
   final visitCount = _intArg(args, 'visit-count', 1).clamp(1, 1000);
-
-  // A senha do broker não tem default no BackendConfig: é um segredo por
-  // máquina. Sem esta guarda, quem rodasse à mão ganharia um timeout mudo em
-  // vez de saber o que faltou.
-  final mqttPassword = _arg(args, 'mqtt-password', BackendConfig.mqttPassword);
-  if (mqttPassword.isEmpty) {
-    stderr.writeln('erro: a senha do broker não foi informada.');
-    stderr.writeln(r'Use: dart run tool/live_check.dart --mqtt-password "$MQTT_ACS_PASSWORD"');
-    stderr.writeln('O valor vem do .env; scripts/qa/e2e.sh já faz isso por você.');
-    exitCode = 2;
-    return;
-  }
 
   // A CA do RPC é lida ANTES de construir o cliente, e a ausência dela PARA a
   // execução com o motivo real. Se ela faltasse e o cliente fosse construído
@@ -200,13 +189,8 @@ Future<void> main(List<String> args) async {
         port: 8883,
         clientId: 'sinalacs-acs-livecheck-${session.userId}',
         topic: alertTopicFor(microAreaId),
-        // A senha do broker local é gerada por scripts/dev/bootstrap_env.sh e
-        // é diferente a cada máquina — por isso o --mqtt-password obrigatório,
-        // que scripts/qa/e2e.sh preenche a partir do .env.
-        username: _arg(args, 'mqtt-user', BackendConfig.mqttUsername),
-        password: mqttPassword,
         caCertificate: File(caPath).readAsBytesSync(),
-        // mTLS: o broker exige certificado de cliente (Task 7).
+        // mTLS: o broker autentica pelo CN do certificado de cliente (#94).
         clientCertificate: File(clientCertPath).readAsBytesSync(),
         clientPrivateKey: File(clientKeyPath).readAsBytesSync(),
       ),
