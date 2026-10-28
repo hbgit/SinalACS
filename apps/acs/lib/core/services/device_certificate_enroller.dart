@@ -69,6 +69,27 @@ class DeviceCertificateEnroller {
     });
   }
 
+  /// O broker recusou o certificado deste aparelho no handshake TLS (#94):
+  /// apaga o guardado para que o próximo [ensure] reemita. Se há emissão em
+  /// voo para o aparelho, espera-a terminar (com sucesso ou não) antes de
+  /// apagar, para que a gravação dela não sobreviva ao descarte.
+  ///
+  /// Apaga a folha de TODOS os ACS deste aparelho (`store.delete` é por
+  /// aparelho): a de outro ACS é só reemitida no login dele, e a recusa quase
+  /// sempre é do aparelho (revogação, limpeza remota). [acsId] identifica o
+  /// pedido para quem lê o chamador.
+  Future<void> discard({required String acsId, required String deviceId}) async {
+    final pending = _inFlight[deviceId];
+    if (pending != null) {
+      try {
+        await pending;
+      } catch (_) {
+        // O erro da emissão é de quem a pediu; aqui só importa que terminou.
+      }
+    }
+    await _store.delete(deviceId: deviceId);
+  }
+
   Future<StoredDeviceCertificate> _ensure({
     required String acsId,
     required String deviceId,

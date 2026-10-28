@@ -1647,6 +1647,7 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
     // sozinha, via autoReconnect do mqtt_client — é o que mantém o chip do
     // cabeçalho honesto sem o shell abrir um segundo laço de retentativa.
     _feed.onConnectionChanged = _onBrokerConnectionChanged;
+    _feed.onFailure = _onFeedFailure;
     _connectFeed();
     _restoreVisits();
     _pullVisits();
@@ -2023,25 +2024,7 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
       });
       _syncAlertFallbackTimer();
     } on AlertFeedFailure catch (failure, stackTrace) {
-      developer.log(
-        'não foi possível assinar o tópico de alertas',
-        name: 'sinalacs.acs.alert_feed',
-        error: failure.cause ?? failure,
-        stackTrace: stackTrace,
-      );
-      if (!mounted) return;
-      setState(() {
-        _brokerConnected = false;
-        _feedErrorIsTransient = failure.transient;
-        _feedError = (
-          title: failure.title,
-          detail: failure.transient
-              ? '${failure.detail} Tentando reconectar automaticamente.'
-              : failure.detail,
-        );
-      });
-      _syncAlertFallbackTimer();
-      if (failure.transient) _scheduleReconnect();
+      _onFeedFailure(failure, stackTrace);
     } catch (error, stackTrace) {
       // Defesa: hoje só um AlertFeed de teste chega aqui. Logar em vez de
       // descartar — antes o erro era engolido e a tela dizia sempre o mesmo.
@@ -2066,6 +2049,31 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
       _syncAlertFallbackTimer();
       _scheduleReconnect();
     }
+  }
+
+  /// Falha classificada do feed: a de `start()` e a que chega depois dele por
+  /// `AlertFeed.onFailure` (#94: certificado recusado na reconexão automática).
+  /// Transitória, entra na mesma retentativa com backoff.
+  void _onFeedFailure(AlertFeedFailure failure, [StackTrace? stackTrace]) {
+    developer.log(
+      'não foi possível assinar o tópico de alertas',
+      name: 'sinalacs.acs.alert_feed',
+      error: failure.cause ?? failure,
+      stackTrace: stackTrace,
+    );
+    if (!mounted) return;
+    setState(() {
+      _brokerConnected = false;
+      _feedErrorIsTransient = failure.transient;
+      _feedError = (
+        title: failure.title,
+        detail: failure.transient
+            ? '${failure.detail} Tentando reconectar automaticamente.'
+            : failure.detail,
+      );
+    });
+    _syncAlertFallbackTimer();
+    if (failure.transient) _scheduleReconnect();
   }
 
   /// Agenda a próxima tentativa, cancelando qualquer uma já pendente.
@@ -2589,6 +2597,7 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
     // `onConnectionChanged(false)`, e `mounted` ainda é `true` durante o
     // `dispose` — o `setState` caía num elemento já defunct (assertion).
     _feed.onConnectionChanged = null;
+    _feed.onFailure = null;
     _feed.stop();
     _queue.dispose();
     super.dispose();

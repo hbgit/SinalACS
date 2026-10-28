@@ -25,11 +25,15 @@ void main() {
   late MemoryDeviceIdStore deviceIds;
   late List<_ClienteFalso> clientes;
 
+  /// O próximo cliente criado recusa o handshake TLS no primeiro connect.
+  var recusarTls = false;
+
   setUp(() {
     backend = FakeAcsBackend();
     store = InMemoryDeviceCertificateStore();
     deviceIds = MemoryDeviceIdStore(deviceId);
     clientes = <_ClienteFalso>[];
+    recusarTls = false;
   });
 
   MqttAlertFeed feed({void Function()? onDeviceWipeRequired}) => MqttAlertFeed(
@@ -39,7 +43,7 @@ void main() {
         onDeviceWipeRequired: onDeviceWipeRequired,
         loadCaCertificate: () async => utf8.encode('CA-SINTETICA'),
         clientFactory: (config) {
-          final c = _ClienteFalso(config);
+          final c = _ClienteFalso(config, recusarTls: recusarTls);
           clientes.add(c);
           return c;
         },
@@ -130,16 +134,99 @@ void main() {
     expect(backend.confirmedWipes, [(deviceId: deviceId, orderId: 'ordem-1')]);
     expect(clientes, isEmpty);
   });
+
+  test('queda tlsRefused descarta o certificado, consulta o wipe e falha como certificateUnavailable transitório',
+      () async {
+    var consultouWipe = 0;
+    final falhas = <AlertFeedFailure>[];
+    final conexoes = <bool>[];
+    final f = feed(onDeviceWipeRequired: () => consultouWipe++)
+      ..onConnectionChanged = conexoes.add
+      ..onFailure = falhas.add;
+    await f.start(microAreaId: seedMicroAreaId, acsId: seedAcsId);
+    expect(await store.read(acsId: seedAcsId, deviceId: deviceId), isNotNull);
+
+    // O broker recusou o certificado na reconexão automática (revogado).
+    clientes.single.cair(MqttDropReason.tlsRefused);
+    await pumpEventQueue();
+
+    expect(await store.read(acsId: seedAcsId, deviceId: deviceId), isNull, reason: 'o certificado recusado é descartado');
+    expect(consultouWipe, 1, reason: 'a recusa pode ser a limpeza remota da #81');
+    expect(falhas, hasLength(1));
+    expect(falhas.single.kind, AlertFeedFailureKind.certificateUnavailable);
+    expect(falhas.single.transient, isTrue, reason: 'o painel reinicia o feed, que reemite');
+    expect(falhas.single.title, 'Sem certificado deste aparelho para a central');
+    expect(f.isConnected, isFalse);
+    expect(conexoes.last, isFalse);
+
+    // O ReconnectSchedule do painel reinicia o feed: o enroller reemite.
+    await f.start(microAreaId: seedMicroAreaId, acsId: seedAcsId);
+    expect(backend.issueCertificateCount, 2);
+    expect(utf8.decode(clientes.last.config.clientCertificate!),
+        (await store.read(acsId: seedAcsId, deviceId: deviceId))!.certificatePem);
+  });
+
+  test('recusa TLS no primeiro connect descarta o certificado, consulta o wipe e falha como certificateUnavailable transitório',
+      () async {
+    var consultouWipe = 0;
+    final falhas = <AlertFeedFailure>[];
+    final f = feed(onDeviceWipeRequired: () => consultouWipe++)..onFailure = falhas.add;
+    recusarTls = true;
+
+    await expectLater(
+      f.start(microAreaId: seedMicroAreaId, acsId: seedAcsId),
+      throwsA(isA<AlertFeedFailure>()
+          .having((e) => e.kind, 'kind', AlertFeedFailureKind.certificateUnavailable)
+          .having((e) => e.transient, 'transient', isTrue)
+          .having((e) => e.title, 'title', 'Sem certificado deste aparelho para a central')),
+    );
+
+    expect(await store.read(acsId: seedAcsId, deviceId: deviceId), isNull);
+    expect(consultouWipe, 1);
+    expect(falhas, isEmpty, reason: 'no primeiro connect a falha sobe pelo start(), não por onFailure');
+    expect(f.isConnected, isFalse);
+  });
+
+  test('queda por outro erro da reconexão vira falha transitória sem descartar o certificado', () async {
+    var consultouWipe = 0;
+    final falhas = <AlertFeedFailure>[];
+    final f = feed(onDeviceWipeRequired: () => consultouWipe++)..onFailure = falhas.add;
+    await f.start(microAreaId: seedMicroAreaId, acsId: seedAcsId);
+
+    clientes.single.cair(MqttDropReason.connectionError);
+    await pumpEventQueue();
+
+    expect(await store.read(acsId: seedAcsId, deviceId: deviceId), isNotNull);
+    expect(consultouWipe, 0);
+    expect(falhas.single.kind, AlertFeedFailureKind.unreachable);
+    expect(falhas.single.transient, isTrue);
+  });
+
+  test('queda de um cliente já parado não chega ao painel', () async {
+    final falhas = <AlertFeedFailure>[];
+    final f = feed()..onFailure = falhas.add;
+    await f.start(microAreaId: seedMicroAreaId, acsId: seedAcsId);
+    f.stop();
+
+    clientes.single.cair(MqttDropReason.tlsRefused);
+    await pumpEventQueue();
+
+    expect(falhas, isEmpty);
+    expect(await store.read(acsId: seedAcsId, deviceId: deviceId), isNotNull);
+  });
 }
 
 /// Cliente MQTT que não abre socket: registra a configuração e "conecta".
 class _ClienteFalso implements MqttSecureClient {
-  _ClienteFalso(this.config);
+  _ClienteFalso(this.config, {this.recusarTls = false});
 
   @override
   final SecureMqttConfig config;
+  final bool recusarTls;
 
   bool connected = false;
+  void Function(bool connected)? _onConnectionChanged;
+  void Function(MqttDropReason reason)? _onDrop;
 
   @override
   bool get isConnected => connected;
@@ -148,9 +235,21 @@ class _ClienteFalso implements MqttSecureClient {
   Future<void> connect({
     required void Function(ReceivedMqttAlert alert) onAlert,
     void Function(bool connected)? onConnectionChanged,
+    void Function(MqttDropReason reason)? onDrop,
   }) async {
+    if (recusarTls) throw const MqttTlsRefused(HandshakeException('CERTIFICATE_REVOKED'));
+    _onConnectionChanged = onConnectionChanged;
+    _onDrop = onDrop;
     connected = true;
     onConnectionChanged?.call(true);
+  }
+
+  /// O contrato de [MqttSecureClient.connect]: já desconectado, avisa
+  /// `onConnectionChanged(false)` e depois `onDrop`.
+  void cair(MqttDropReason reason) {
+    connected = false;
+    _onConnectionChanged?.call(false);
+    _onDrop?.call(reason);
   }
 
   @override

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/services.dart' show rootBundle;
@@ -28,6 +29,12 @@ abstract class AlertFeed {
   /// (os `feedBuilder` de teste) não precisa mudar para o dono do widget
   /// poder assinar depois.
   abstract void Function(bool connected)? onConnectionChanged;
+
+  /// O feed caiu DEPOIS de [start] ter retornado e não vai voltar sozinho
+  /// (#94: o broker recusou o certificado na reconexão automática). Já
+  /// classificada como as falhas de [start]; o painel trata igual — banner e,
+  /// se transitória, a mesma retentativa.
+  abstract void Function(AlertFeedFailure failure)? onFailure;
 }
 
 /// Por que o ACS não está recebendo alertas.
@@ -92,6 +99,9 @@ class UnconfiguredAlertFeed implements AlertFeed {
   void Function(bool connected)? onConnectionChanged;
 
   @override
+  void Function(AlertFeedFailure failure)? onFailure;
+
+  @override
   bool get isConnected => false;
 
   @override
@@ -139,8 +149,15 @@ class MqttAlertFeed implements AlertFeed {
   @override
   void Function(bool connected)? onConnectionChanged;
 
+  @override
+  void Function(AlertFeedFailure failure)? onFailure;
+
   MqttSecureClient? _client;
   bool _connected = false;
+
+  /// Muda a cada [start] e [stop]: a queda de um cliente antigo (já parado ou
+  /// substituído) não chega ao painel.
+  int _generation = 0;
 
   @override
   bool get isConnected => _connected;
@@ -154,6 +171,7 @@ class MqttAlertFeed implements AlertFeed {
     // segunda chamada a start() (a nova retentativa) sobrescreveria _client e
     // deixaria o cliente antigo órfão, fora do alcance de stop()/dispose().
     stop();
+    final generation = _generation;
 
     final List<int> caCertificate;
     try {
@@ -236,7 +254,11 @@ class MqttAlertFeed implements AlertFeed {
           _connected = connected;
           onConnectionChanged?.call(connected);
         },
+        onDrop: (reason) => unawaited(_dropped(generation, reason, acsId: acsId, deviceId: deviceId)),
       );
+    } on MqttTlsRefused catch (error) {
+      await _certificateRefused(acsId: acsId, deviceId: deviceId);
+      throw _certificateRefusedFailure(error);
     } on MqttConnectionRefused catch (error) {
       throw AlertFeedFailure(
         AlertFeedFailureKind.refused,
@@ -262,8 +284,63 @@ class MqttAlertFeed implements AlertFeed {
 
   @override
   void stop() {
+    _generation++;
     _client?.disconnect();
     _client = null;
     _connected = false;
   }
+
+  /// O cliente desistiu sozinho depois de conectar ([MqttSecureClient.connect]
+  /// já o desconectou e avisou `onConnectionChanged(false)`).
+  Future<void> _dropped(
+    int generation,
+    MqttDropReason reason, {
+    required String acsId,
+    required String deviceId,
+  }) async {
+    if (generation != _generation) return;
+    _client = null;
+    _connected = false;
+    final AlertFeedFailure failure;
+    if (reason == MqttDropReason.tlsRefused) {
+      // Descartar ANTES de avisar: a retentativa do painel chama `ensure`, que
+      // não pode devolver o certificado que o broker acabou de recusar.
+      await _certificateRefused(acsId: acsId, deviceId: deviceId);
+      failure = _certificateRefusedFailure(reason);
+    } else {
+      failure = AlertFeedFailure(
+        AlertFeedFailureKind.unreachable,
+        title: 'Sem conexão com a central de alertas.',
+        detail: 'Novos alertas podem não estar chegando.',
+        cause: reason,
+        transient: true,
+      );
+    }
+    if (generation != _generation) return;
+    onFailure?.call(failure);
+  }
+
+  /// O broker recusou o certificado deste aparelho (#94): revogado por troca
+  /// de microárea, desativação ou limpeza remota. Descarta o guardado (a
+  /// próxima tentativa reemite, e o servidor diz qual dos três foi) e já
+  /// dispara a consulta da limpeza remota da #81, sem esperar.
+  Future<void> _certificateRefused({required String acsId, required String deviceId}) async {
+    try {
+      await _enroller.discard(acsId: acsId, deviceId: deviceId);
+    } catch (_) {
+      // Keystore indisponível: a reemissão por microárea/validade segue valendo;
+      // o broker recusará de novo e o descarte será retentado.
+    }
+    _onDeviceWipeRequired?.call();
+  }
+
+  /// Transitória: o painel reinicia o feed e o enroller reemite. Se o
+  /// servidor recusar a emissão (desativado), aí sim a falha vira `refused`.
+  static AlertFeedFailure _certificateRefusedFailure(Object cause) => AlertFeedFailure(
+        AlertFeedFailureKind.certificateUnavailable,
+        title: 'Sem certificado deste aparelho para a central',
+        detail: 'Será emitido quando houver rede.',
+        cause: cause,
+        transient: true,
+      );
 }

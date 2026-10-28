@@ -678,6 +678,9 @@ class FakeAlertFeed implements AlertFeed {
   void Function(bool connected)? onConnectionChanged;
 
   @override
+  void Function(AlertFeedFailure failure)? onFailure;
+
+  @override
   Future<void> start({required String microAreaId, required String acsId}) async {
     startCount++;
     if (startCount <= failuresBeforeSuccess) {

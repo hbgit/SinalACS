@@ -168,6 +168,35 @@ void main() {
     expect((await store.read(acsId: acsId, deviceId: deviceId))?.serial, antes?.serial);
   });
 
+  test('discard apaga e a chamada seguinte reemite', () async {
+    await garantir();
+
+    await enroller.discard(acsId: acsId, deviceId: deviceId);
+
+    expect(await store.read(acsId: acsId, deviceId: deviceId), isNull);
+    final cert = await garantir();
+    expect(backend.issueCertificateCount, 2, reason: 'o certificado recusado pelo broker não volta a ser usado');
+    expect(cert.serial, 'serial-2');
+  });
+
+  test('discard durante emissão em voo espera e apaga', () async {
+    backend.issueCertificateGate = Completer<void>();
+    final emissao = garantir();
+    await Future<void>.delayed(Duration.zero);
+
+    var descartou = false;
+    final descarte = enroller.discard(acsId: acsId, deviceId: deviceId).then((_) => descartou = true);
+    await Future<void>.delayed(Duration.zero);
+    expect(descartou, isFalse, reason: 'espera a emissão em voo terminar');
+
+    backend.issueCertificateGate!.complete();
+    await emissao;
+    await descarte;
+
+    expect(await store.read(acsId: acsId, deviceId: deviceId), isNull,
+        reason: 'a gravação da emissão em voo não pode sobreviver ao descarte');
+  });
+
   test('recusa não recuperável do servidor sobe como veio', () async {
     backend.issueCertificateFailure = const BackendFailure('CSR recusado.', isRecoverable: false);
 
