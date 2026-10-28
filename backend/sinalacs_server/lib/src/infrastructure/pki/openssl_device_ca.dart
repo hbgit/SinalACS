@@ -44,11 +44,15 @@ class RevokedEntry {
 /// o código de saída e o `stderr` — que nunca traz o conteúdo da chave; a chave
 /// em si nunca é lida por este processo, só o caminho é passado ao `openssl`.
 ///
-/// `sign` usa `openssl x509 -req -not_before/-not_after`, que só existem a
-/// partir do OpenSSL 3.4 (medido 3.5.9 no `alpine:latest` e no host em
-/// 2026-10-27). `buildCrl` usa `openssl ca -gencrl` com um `index.txt`
-/// montado da lista recebida: a fonte de verdade das revogações é o banco, não
-/// um banco de dados do `openssl` em disco.
+/// `sign` e `buildCrl` usam `openssl ca` sobre um diretório de CA descartável
+/// (`ca.cnf`, `index.txt`, `serial`/`crlnumber`) montado a cada chamada: a
+/// fonte de verdade das emissões e revogações é o banco, não um banco de dados
+/// do `openssl` em disco. `sign` fixa a validade com `-startdate/-enddate` em
+/// GeneralizedTime, aceitos do OpenSSL 3.0 (runner `ubuntu-24.04`, 3.0.13) ao
+/// 3.5 (`alpine` e host); o `x509 -req -not_before/-not_after` usado antes só
+/// existe a partir do 3.4 e quebrava a CI. A serial sai do arquivo `serial`
+/// (o `ca` não tem `-set_serial`) e o sujeito do `-subj`, com a política
+/// `commonName = supplied`: a folha leva só `CN=`, nada do sujeito do CSR.
 class OpensslDeviceCa {
   OpensslDeviceCa(this._cfg, {String opensslBinary = 'openssl'})
       : _openssl = opensslBinary;
@@ -93,11 +97,18 @@ class OpensslDeviceCa {
         'req', '-in', csr.path, '-noout', '-verify', '-text',
         '-subject', '-nameopt', 'RFC2253',
       ]);
-      if (r.exitCode != 0) {
+      final out = r.stdout as String;
+      // O OpenSSL 3.0 (runner `ubuntu-24.04`) sai com 0 quando a assinatura do
+      // CSR NÃO confere e escreve o veredito no stderr; o 3.5 sai com 1 e
+      // escreve no stdout. Por isso, além do código de saída, exige-se o
+      // "verify OK" em qualquer um dos dois e a ausência de "verify failure".
+      final veredito = '$out\n${r.stderr as String}';
+      if (r.exitCode != 0 ||
+          !veredito.contains('self-signature verify OK') ||
+          veredito.contains('verify failure')) {
         throw const FormatException(
             'CSR inválido ou com assinatura que não confere.');
       }
-      final out = r.stdout as String;
       final alg = RegExp(r'Public Key Algorithm:\s*(\S+)').firstMatch(out);
       if (alg == null) {
         throw const FormatException('CSR sem algoritmo de chave reconhecível.');
@@ -171,16 +182,30 @@ class OpensslDeviceCa {
         'authorityKeyIdentifier=keyid\n'
         'subjectAltName=${sanUris.map((u) => 'URI:$u').join(',')}\n',
       );
+      // `openssl ca` lê a serial deste arquivo (hex com número par de dígitos).
+      await File('${dir.path}/serial').writeAsString('${_hexPar(serial)}\n');
+      final cnf = await _escreverConfiguracaoDeCa(
+        dir,
+        index: '',
+        devices: 'new_certs_dir = ${dir.path}\n'
+            'serial = ${dir.path}/serial\n'
+            'certificate = ${_cfg.caCertPath}\n'
+            'private_key = ${_cfg.caKeyPath}\n'
+            'policy = policy_any\n'
+            'email_in_dn = no\n'
+            'copy_extensions = none\n',
+        secoes: '[ policy_any ]\n'
+            'commonName = supplied\n',
+      );
       final out = '${dir.path}/leaf.crt';
-      await _checked('x509', [
-        'x509', '-req', '-in', csr.path,
-        '-CA', _cfg.caCertPath, '-CAkey', _cfg.caKeyPath,
-        '-set_serial', '0x${serial.toRadixString(16)}',
+      await _checked('ca', [
+        'ca', '-batch', '-notext', '-config', cnf.path,
+        '-in', csr.path, '-out', out,
         '-subj', '/CN=$commonName',
         '-extfile', ext.path,
-        '-not_before', _generalizedTime(notBefore),
-        '-not_after', _generalizedTime(notAfter),
-        '-sha256', '-out', out,
+        '-md', 'sha256',
+        '-startdate', _generalizedTime(notBefore),
+        '-enddate', _generalizedTime(notAfter),
       ]);
       return File(out).readAsString();
     } finally {
@@ -208,29 +233,19 @@ class OpensslDeviceCa {
     }
     final dir = await Directory.systemTemp.createTemp('sinalacs-crl-');
     try {
-      final index = File('${dir.path}/index.txt');
-      await index.writeAsString(revoked
-          .map((e) => 'R\t${_utcTime(e.notAfter)}\t${_utcTime(e.revokedAt)}\t'
-              '${_hexPar(e.serial)}\tunknown\t/CN=${e.commonName}\n')
-          .join());
-      await File('${dir.path}/index.txt.attr')
-          .writeAsString('unique_subject = no\n');
       await File('${dir.path}/crlnumber')
           .writeAsString('${_hexPar(crlNumber)}\n');
-      final cnf = File('${dir.path}/ca.cnf');
-      await cnf.writeAsString('''
-[ ca ]
-default_ca = devices
-
-[ devices ]
-database = ${index.path}
-crlnumber = ${dir.path}/crlnumber
-default_md = sha256
-crl_extensions = crl_ext
-
-[ crl_ext ]
-authorityKeyIdentifier = keyid:always
-''');
+      final cnf = await _escreverConfiguracaoDeCa(
+        dir,
+        index: revoked
+            .map((e) => 'R\t${_utcTime(e.notAfter)}\t${_utcTime(e.revokedAt)}\t'
+                '${_hexPar(e.serial)}\tunknown\t/CN=${e.commonName}\n')
+            .join(),
+        devices: 'crlnumber = ${dir.path}/crlnumber\n'
+            'crl_extensions = crl_ext\n',
+        secoes: '[ crl_ext ]\n'
+            'authorityKeyIdentifier = keyid:always\n',
+      );
       final out = '${dir.path}/crl.pem';
       await _checked('ca', [
         'ca', '-gencrl', '-batch', '-config', cnf.path,
@@ -243,6 +258,34 @@ authorityKeyIdentifier = keyid:always
     } finally {
       await dir.delete(recursive: true);
     }
+  }
+
+  /// Monta em [dir] o diretório de CA descartável do `openssl ca`: `index.txt`
+  /// com [index], `index.txt.attr` com `unique_subject = no` e `ca.cnf` com a
+  /// seção `devices` (banco, `default_md = sha256` e as linhas [devices]) mais
+  /// as [secoes] extras. Só entram caminhos do diretório temporário e da
+  /// configuração do servidor, e textos já validados por quem chama.
+  static Future<File> _escreverConfiguracaoDeCa(
+    Directory dir, {
+    required String index,
+    required String devices,
+    required String secoes,
+  }) async {
+    final indexTxt = File('${dir.path}/index.txt');
+    await indexTxt.writeAsString(index);
+    await File('${dir.path}/index.txt.attr')
+        .writeAsString('unique_subject = no\n');
+    final cnf = File('${dir.path}/ca.cnf');
+    await cnf.writeAsString('[ ca ]\n'
+        'default_ca = devices\n'
+        '\n'
+        '[ devices ]\n'
+        'database = ${indexTxt.path}\n'
+        'default_md = sha256\n'
+        '$devices'
+        '\n'
+        '$secoes');
+    return cnf;
   }
 
   Future<ProcessResult> _run(List<String> args) async {
@@ -268,7 +311,7 @@ authorityKeyIdentifier = keyid:always
       '${_dois(t.month)}${_dois(t.day)}${_dois(t.hour)}${_dois(t.minute)}'
       '${_dois(t.second)}Z';
 
-  /// `YYYYMMDDHHMMSSZ`, o formato de `-not_before`/`-crl_lastupdate`.
+  /// `YYYYMMDDHHMMSSZ`, o formato de `-startdate`/`-crl_lastupdate`.
   static String _generalizedTime(DateTime t) {
     final u = t.toUtc();
     return '${u.year.toString().padLeft(4, '0')}${_hms(u)}';

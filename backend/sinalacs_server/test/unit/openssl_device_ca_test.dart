@@ -122,6 +122,44 @@ void main() {
     expect((await verify(pem, caCert)).exitCode, 0);
   });
 
+  test(
+      'sign preserva a serial exata (128 bits com o bit alto, e hex ímpar) e '
+      'o sujeito só CN= mesmo com RDN extra no CSR', () async {
+    final nome = 'csr-rdn-${DateTime.now().microsecondsSinceEpoch}';
+    await ok([
+      'req', '-new', '-nodes', '-newkey', 'ec',
+      '-pkeyopt', 'ec_paramgen_curve:prime256v1',
+      '-keyout', '$nome.key', '-out', '$nome.csr',
+      '-subj', '/CN=$microArea/O=Outra Org/OU=Outra',
+    ]);
+    final csrComRdn = await File('${dir.path}/$nome.csr').readAsString();
+    for (final (serial, esperado) in [
+      (
+        BigInt.parse('f1e2d3c4b5a6478890a1b2c3d4e5f601', radix: 16),
+        'F1E2D3C4B5A6478890A1B2C3D4E5F601',
+      ),
+      (BigInt.from(0xabc), '0ABC'),
+    ]) {
+      final pem = await ca.sign(
+        csrPem: csrComRdn,
+        serial: serial,
+        commonName: microArea,
+        sanUris: ['urn:sinalacs:device:dev-1'],
+        notBefore: DateTime.utc(2026, 10, 27, 11),
+        notAfter: DateTime.utc(2026, 11, 26, 12),
+      );
+      final p = await tmp('leaf-rdn.pem', pem);
+      final r = await run([
+        'x509', '-in', p, '-noout', '-subject', '-serial',
+        '-nameopt', 'RFC2253',
+      ]);
+      expect(r.exitCode, 0, reason: '${r.stderr}');
+      expect(r.stdout as String, contains('subject=CN=$microArea\n'));
+      expect(r.stdout as String, contains('serial=$esperado\n'));
+      expect((await verify(pem, caCert)).exitCode, 0);
+    }
+  });
+
   test('sign recusa CSR com CN diferente do pedido', () async {
     final outro = await novoCsr(cn: 'outra-microarea');
     expect(
