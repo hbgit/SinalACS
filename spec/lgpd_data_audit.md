@@ -205,7 +205,7 @@ A tabela abaixo consolida o mapeamento exaustivo de dados persistidos pelo backe
 | | `userId` | `uuid` | Dado de profissional (Pseudonimizado) | UUID do ACS da sessão que pediu a emissão (FK `users`) | É o profissional, nunca um titular. Mesma classificação de `audit_logs.userId`. |
 | | `deviceId` | `text` | Identificador de aparelho | `deviceId` do token (UUID aleatório da instalação), nunca parâmetro | Mesma classificação do §2.4. |
 | | `microAreaId` | `uuid` | Metadado Técnico | Microárea do token na emissão; é o CN da folha | Território, não pessoa. |
-| | `serial` / `fingerprintSha256` | `text` | Metadado Técnico | Serial de 128 bits (bits de UUID v4, hex minúsculo, índice único) e SHA-256 do DER da folha | Sem dado pessoal; a serial vai para a CRL e para `audit_logs.resourceId` (`device_cert_*`). |
+| | `serial` / `fingerprintSha256` | `text` | Metadado Técnico | Serial de 128 bits com os bits de versão/variante de UUID v4 fixos (122 aleatórios), hex minúsculo, índice único e SHA-256 do DER da folha | Sem dado pessoal; a serial vai para a CRL e para `audit_logs.resourceId` (`device_cert_*`). |
 | | `notBefore` / `notAfter` / `issuedAt` / `revokedAt` | `timestamp without time zone` | Metadado Técnico | Validade (`DEVICE_CERT_DAYS`), emissão e revogação | **Retenção: até `notAfter` + 30 dias** (a CRL só lista as não vencidas). O expurgo não existe ainda (`PROGRESS.md`, #94). |
 | | `revocationReason` | `text` | Metadado Técnico | Enum `DeviceCertRevocationReason`: `wipe`, `deactivated`, `microAreaChanged`, `renewed` | Conjunto fechado; sem texto livre. |
 | **device_crl_counters** | `id` / `lastNumber` | `bigint` | Metadado Técnico | Uma linha (`id = 1`); último `CRL Number` publicado, começando em 1000 | Sem dado pessoal (#94). |
