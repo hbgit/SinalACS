@@ -12,6 +12,9 @@
 #   · `set -euo pipefail` e a saída 4 para falha de infraestrutura.
 # E, no mesmo espírito, que o sidecar valida a CRL (sintaxe e assinatura) antes
 # de sinalizar o broker, e que o mosquitto.conf não tem mais password_file.
+# Task 7a: o sidecar grava crl.loaded (tmp + mv) só depois do SIGHUP, com a
+# montagem rw; E espera o marcador, I prova que a recusa não o muda e F revoga
+# um A com reconexão automática e conta zero conexões dele depois do takeover.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 s=scripts/qa/mtls_invariants.sh
@@ -65,6 +68,16 @@ conferir 'D emite o certificado compartilhado antigo com a CA do servidor' \
 conferir 'E e I esperam o log do sidecar' "grep -qF \"'CRL recarregada'\" $s && grep -qF \"'CRL recusada pelo sidecar'\" $s"
 conferir 'E revoga por openssl ca -revoke e -gencrl' "grep -qF 'openssl ca -batch -config /f/aparelhos.cnf -revoke' $s && grep -qF 'openssl ca -batch -config /f/aparelhos.cnf -gencrl' $s"
 conferir 'F derruba a sessão conectando como backend com o client id de A' "grep -qF 'publicar /d/backend -i \"\$id_a\"' $s"
+# Task 7a: a derrubada só depois da recarga, provada pelo marcador do sidecar.
+conferir 'o script lê o marcador crl.loaded' "grep -qF 'crl.loaded' $s"
+conferir 'E espera crl.loaded == sha256 da CRL que revoga A' "grep -qE '^esperar aceito .*trocar_crl_marcada crl-revoga-a.pem ' $s && corpo trocar_crl_marcada | grep -qF 'esperar_marcador'"
+conferir 'I prova que a CRL recusada não muda o marcador' \
+  "[[ \$(awk '/^grupo I /{g=1} g && /^esperar aceito .*marcador_inalterado /{n++} END{print n+0}' $s) -ge 2 ]]"
+conferir 'F: A tem reconexão automática (laço while true)' "corpo assinar_reconectando | grep -qF 'while true'"
+conferir 'F conta as conexões de A no broker depois do takeover' \
+  "awk '/^grupo F /{g=1} /^grupo G /{g=0} g && /conexoes_de_a_desde/{f=1} END{exit !f}' $s"
+conferir 'F prova que o laço de A tentou reconectar' \
+  "awk '/^grupo F /{g=1} /^grupo G /{g=0} g && /tentou_reconectar/{f=1} END{exit !f}' $s"
 conferir 'I grava lixo e uma CRL válida de outra CA' "grep -qF 'trocar_crl lixo.pem' $s && grep -qF 'trocar_crl crl-fora.pem' $s"
 conferir 'H exige nextUpdate de pelo menos 7 dias' "grep -qF 'proxima_atualizacao_em_dias crl-original.pem 7' $s"
 
@@ -74,6 +87,14 @@ conferir 'o sidecar valida assinatura (-CAfile) e exige verify OK' \
   "grep -qF 'openssl crl -in \"\$crl\" -CAfile \"\$ca\" -noout' $r && grep -qF 'verify OK' $r"
 conferir 'o sidecar só sinaliza o broker no ramo validado' \
   "awk '/verify OK/{v=NR} /kill -HUP/{k=NR} END{exit !(v && k && v<k)}' $r"
+conferir 'o sidecar grava crl.loaded por temporário + mv' \
+  "grep -qF 'marcador=/mosquitto/devices/crl.loaded' $r && grep -qF 'mv -f \"\$marcador.tmp\" \"\$marcador\"' $r && grep -qF 'sha256sum' $r"
+conferir 'o sidecar só marca depois do kill -HUP, nunca no ramo da recusa' \
+  "awk '/kill -HUP/{if(!k)k=NR} /marcar \"\\\$sha\"/{m=NR} /CRL recusada pelo sidecar/{x=NR} END{exit !(k && m && x && k<m && m<x)}' $r"
+conferir 'compose: o sidecar monta runtime/devices em rw (grava o marcador)' \
+  "awk '/^  mosquitto-crl-reload:/{g=1;next} /^  [a-z]/{g=0} g && /runtime\/devices:\/mosquitto\/devices\$/{f=1} END{exit !f}' docker-compose.yml"
+conferir 'compose: o broker continua com runtime/devices ro' \
+  "awk '/^  mosquitto:/{g=1;next} /^  [a-z]/{g=0} g && /runtime\/devices:\/mosquitto\/devices:ro\$/{f=1} END{exit !f}' docker-compose.yml"
 conferir 'o sidecar loga recarga e recusa' "grep -qF 'CRL recarregada' $r && grep -qF 'CRL recusada pelo sidecar, não recarregada' $r"
 conferir 'mosquitto.conf sem password_file' "! grep -qE '^[[:space:]]*password_file' $c"
 for linha in 'use_identity_as_username true' 'require_certificate true' 'allow_anonymous false' \

@@ -93,6 +93,14 @@ if [[ -d "$ddir" ]]; then
   else
     echo "crl.pem ausente em $ddir (o mosquitto-init da #94 rodou?)" >&2; ruim=1
   fi
+  # O marcador do sidecar (Task 7a): o backend o lê como uid 1000 antes de
+  # derrubar a sessão do aparelho revogado; o sidecar (root) o grava em 644.
+  if [[ -f "$ddir/crl.loaded" ]]; then
+    m="$(stat -c %a "$ddir/crl.loaded")"
+    [[ "$m" == 644 ]] || { echo "crl.loaded em $m (esperado 644, o backend o lê): $ddir/crl.loaded" >&2; ruim=1; }
+  else
+    echo "crl.loaded ausente em $ddir (o sidecar mosquitto-crl-reload recarregou a CRL?)" >&2; ruim=1
+  fi
   for leaf in backend qa-tools; do
     if [[ -f "$ddir/$leaf.key" ]]; then
       m="$(stat -c %a "$ddir/$leaf.key")"
@@ -104,5 +112,5 @@ if [[ -d "$ddir" ]]; then
     fi
   done
 fi
-[[ "$ruim" -eq 0 ]] && echo "OK — ca.key em 600, folha do backend em 644 e sem ca.key ao lado; folhas de cliente (#90) com clientAuth, traefik-client.key 600 e healthcheck.key 644; CA de aparelhos (#94) com ca.key 600 do uid $app_uid e crl.pem legível"
+[[ "$ruim" -eq 0 ]] && echo "OK — ca.key em 600, folha do backend em 644 e sem ca.key ao lado; folhas de cliente (#90) com clientAuth, traefik-client.key 600 e healthcheck.key 644; CA de aparelhos (#94) com ca.key 600 do uid $app_uid, crl.pem legível e crl.loaded 644"
 exit "$ruim"

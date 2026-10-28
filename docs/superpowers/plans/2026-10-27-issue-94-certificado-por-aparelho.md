@@ -76,6 +76,7 @@ Broker descartável na porta 18883 com `require_certificate true`, `crlfile`, CA
 | Sessão longa de A depois do `SIGHUP` | **Viva**, e continua recebendo o que B publica. A CRL só vale no próximo handshake. |
 | Takeover: qualquer cliente conecta com o **mesmo client id** de A | A sessão de A é derrubada na hora (`mosquitto_sub` sai com 7; "Client acs-dev-A disconnected"). É semântica MQTT, não precisa de plugin. |
 | A tenta reconectar depois do takeover | Recusado pela CRL (rc 7). |
+| Takeover **antes** da recarga (Task 7, e2e no emulador) | O app reconecta com o cert revogado; medido no e2e: derrubado 32 ms depois de `revokedAt`, reconectou em porta nova, "CRL recarregada" 1,2 s depois — e ficou conectado. A derrubada só vale **depois** do `SIGHUP`: o sidecar grava `crl.loaded` (sha256 da `crl.pem` sinalizada) e o backend espera esse marcador (≤ 15 s, a cada 250 ms) antes do takeover (Task 7a). |
 | `crlfile` vazia/inválida + `SIGHUP` | `OpenSSL Error ... no crl found` e **"mosquitto version 2.1.2 terminating"**: o broker sai. |
 | Canais de recarga | `mosquitto_ctrl broker` só tem `listPlugins`/`listListeners`; `mosquitto_signal` é um invólucro de `kill`. **Só `SIGHUP`.** |
 | `use_identity_as_username true` + `password_file` | Senha errada aceita, `-u outro` ignorado: o username passa a ser o CN e a senha deixa de contar. |
@@ -141,6 +142,7 @@ Entradas que a issue implica mas nenhum critério de aceite exercita; cada linha
 6. **Dois aparelhos do mesmo ACS com o client id antigo (`sinalacs-acs-<acsId>`) se derrubam mutuamente.** Esperado: client id por aparelho. → Task 5 (`alert_feed_enrollment_test`: client id contém `deviceId`), Task 7 (dois aparelhos conectados ao mesmo tempo).
 7. **Revogação gravada no banco com a CRL não publicada (openssl/disco falham depois do commit).** Esperado: o publisher insiste sozinho com recuo até publicar; nunca espera o timer de 24 h. → Task 3 (`device_crl_publisher_test`: "falha no publish → republica sozinho depois").
 8. **CRL válida de outra CA chega ao arquivo.** Esperado: nem o publisher nem o sidecar a aceitam; o broker continua aceitando backend e aparelhos. → Task 3 (validação com `-CAfile`), Task 4 (mutação I-ii).
+9. **Takeover antes de o broker recarregar a CRL.** Esperado: o aparelho revogado com reconexão automática NÃO volta — o backend só derruba depois de `crl.loaded` bater com o sha256 da CRL publicada (ou de uma mais nova); prazo de 15 s esgotado → derruba assim mesmo e loga aviso sem serial; CRL em recuo → derruba na hora. → Task 7a (`device_revocation_effects_test`: marcador antes do kick, atrasado 3 s, nunca bate → 15 s com aviso, publish em recuo → imediato; `mtls_invariants.sh` Grupo F com laço `while true` e zero conexões de A em 10 s depois do takeover; Grupo I: CRL recusada não muda o marcador).
 
 ---
 

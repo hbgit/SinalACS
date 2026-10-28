@@ -79,6 +79,9 @@ services:
   # `docker compose restart mosquitto`). Reiniciar os DOIS no mesmo comando já o
   # deixou parado (exit 0) — `docker compose up -d` o traz de volta, e o
   # Grupo E de scripts/qa/mtls_invariants.sh falha se ele não recarregar.
+  # Depois do HUP grava `crl.loaded` (sha256 da crl.pem sinalizada) em
+  # runtime/devices — por isso a montagem aqui é rw (a do broker segue ro): o
+  # backend espera esse marcador antes de derrubar a sessão do aparelho revogado.
   mosquitto-crl-reload:
     image: eclipse-mosquitto:2
     container_name: sinalacs-mosquitto-crl-reload
@@ -88,7 +91,7 @@ services:
     depends_on:
       - mosquitto
     volumes:
-      - ./infra/docker/mosquitto/runtime/devices:/mosquitto/devices:ro
+      - ./infra/docker/mosquitto/runtime/devices:/mosquitto/devices
       - ./infra/docker/mosquitto/crl_reload.sh:/crl_reload.sh:ro
     entrypoint: ["/bin/sh", "-c", "apk add --no-cache openssl && sh /crl_reload.sh"]
 

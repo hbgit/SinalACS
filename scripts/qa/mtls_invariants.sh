@@ -14,20 +14,23 @@
 #   D) o certificado compartilhado antigo (CN acs-area-12, CA do servidor),
 #      emitido AQUI na hora com runtime/certs/ca.key            -> RECUSADO
 #   E) dois aparelhos A e B (CA de aparelhos, CN = microárea do seed, SAN URI
-#      por aparelho): ambos aceitos; A é revogado (CRL nova, temporário + mv),
-#      o sidecar recarrega em ≤ 10 s -> A RECUSADO, B ACEITO, e a assinatura
-#      longa de B aberta antes da recarga continua recebendo
-#   F) a sessão longa de A, aberta antes da revogação, sobrevive ao SIGHUP; o
-#      script conecta como `backend` com o client id de A -> a sessão de A cai
-#      em ≤ 2 s; A não reconecta
+#      por aparelho): ambos aceitos; A é revogado (CRL nova, temporário + mv) e
+#      o sidecar grava crl.loaded = sha256 dessa CRL em ≤ 10 s -> A RECUSADO,
+#      B ACEITO, e a assinatura longa de B aberta antes da recarga continua
+#      recebendo
+#   F) o caminho do backend (Task 7a): A tem sessão aberta com RECONEXÃO
+#      AUTOMÁTICA (laço `while true` de mosquitto_sub, como o mqtt_client do
+#      app); a sessão sobrevive ao SIGHUP; só depois do marcador o script
+#      conecta como `backend` com o client id de A (takeover) -> o laço de A
+#      tenta reconectar e NENHUMA conexão de A entra no broker em 10 s
 #   G) ACL: o aparelho da microárea X com `-u backend` NÃO publica no tópico de
 #      alertas (o username do CONNECT é ignorado) e não recebe nada de outra
 #      microárea, enquanto recebe o seu (controle positivo publicado pelo backend)
 #   H) estático: a crl.pem do backend verifica contra a CA de aparelhos (e não
 #      contra outra) e o nextUpdate está a ≥ 7 dias
 #   I) o sidecar não derruba o broker: (i) lixo na crl.pem; (ii) CRL VÁLIDA de
-#      outra CA — nos dois ele recusa, não sinaliza, o broker segue de pé e B e
-#      `backend` seguem aceitos
+#      outra CA — nos dois ele recusa, não sinaliza, não toca em crl.loaded, o
+#      broker segue de pé e B e `backend` seguem aceitos
 # Em todo grupo o primeiro caso é positivo: um "recusado" sem controle positivo
 # antes seria verdade por acidente (broker parado, arquivo ilegível).
 #
@@ -60,6 +63,7 @@ area_x='00000000-0000-4000-8000-000000000003'
 topico_x="sinalacs/v1/microareas/$area_x/alerts"
 topico_outra='sinalacs/v1/microareas/outra/alerts'
 sufixo="mtls-$$"
+marcador="$devices/crl.loaded"
 id_a="sinalacs-acs-qa-$sufixo-A"
 id_b="sinalacs-acs-qa-$sufixo-B"
 
@@ -107,6 +111,26 @@ esperar_log_sidecar() {
   done
   return 1
 }
+
+# O marcador do sidecar (Task 7a): sha256 da crl.pem que ele acabou de
+# sinalizar, gravado por temporário + mv depois do SIGHUP.
+marcador_atual() { tr -d '[:space:]' <"$marcador" 2>/dev/null || true; }
+sha_de() { sha256sum "$1" | cut -d' ' -f1; }
+
+# esperar_marcador <arquivo em $tmp> <segundos>: 0 quando crl.loaded tem o
+# sha256 do arquivo; 1 se não teve no prazo.
+esperar_marcador() {
+  local quer i
+  quer="$(sha_de "$tmp/$1")"
+  for ((i = 0; i < $2 * 4; i++)); do
+    [[ "$(marcador_atual)" == "$quer" ]] && return 0
+    sleep 0.25
+  done
+  return 1
+}
+
+# marcador_inalterado <valor anterior>: 0 se crl.loaded ainda tem o valor.
+marcador_inalterado() { [[ -n "$1" && "$(marcador_atual)" == "$1" ]]; }
 
 restaurar_crl() {
   local antes
@@ -256,6 +280,45 @@ assinar() {
   return 2
 }
 
+# assinar_reconectando <nome> <ident> <client id> <tópico>: como `assinar`, mas
+# com reconexão automática — um laço `while true` que reabre o mosquitto_sub
+# 0,2 s depois de cada saída e loga `saiu <código>`, como o mqtt_client do app
+# com autoReconnect. Só volta quando o broker logou a conexão (≤ 10 s); 2 se não.
+assinar_reconectando() {
+  local nome="$1" ident="$2" id="$3" topico="$4" i
+  assinantes+=("$nome")
+  docker run -d --name "$nome" --network host \
+    -v "$certs:/s:ro" -v "$devices:/d:ro" -v "$tmp:/f:ro" --entrypoint sh "$img_mqtt" -c \
+    "while true; do mosquitto_sub -h localhost -p 8883 --cafile /s/ca.crt --cert $ident.crt --key $ident.key -i $id -v -t $topico; echo \"saiu \$?\"; sleep 0.2; done" \
+    >/dev/null 2>&1 || return 2
+  for ((i = 0; i < 40; i++)); do
+    docker logs --since 2m "$broker" 2>&1 | grep -qF " as $id (" && return 0
+    sleep 0.25
+  done
+  return 2
+}
+
+# saidas <contêiner>: quantas vezes o mosquitto_sub do laço saiu.
+saidas() { { docker logs "$1" 2>&1 || true; } | grep -c '^saiu ' || true; }
+# sem_saidas <contêiner>: 0 se a sessão do laço nunca caiu.
+sem_saidas() { [[ "$(saidas "$1")" -eq 0 ]]; }
+# tentou_reconectar <contêiner> <mínimo> <segundos>: 0 quando o laço já saiu ao
+# menos <mínimo> vezes — a reconexão foi tentada (o zero do F não é vácuo).
+tentou_reconectar() {
+  local i
+  for ((i = 0; i < $3 * 4; i++)); do
+    [[ "$(saidas "$1")" -ge "$2" ]] && return 0
+    sleep 0.25
+  done
+  return 1
+}
+# conexoes_de_a_desde <instante RFC 3339>: 0 se o broker aceitou alguma conexão
+# do client id de A com o certificado de A (username = CN da microárea) desde o
+# instante; 1 se nenhuma. O takeover tem o mesmo client id, mas u'backend'.
+conexoes_de_a_desde() {
+  docker logs --since "$1" "$broker" 2>&1 | grep -F " as $id_a (" | grep -qF "u'$area_x'"
+}
+
 # recebeu <nome> <payload> [segundos]: 0 se o payload apareceu no assinante
 # dentro do prazo (padrão 5 s); 1 se não.
 recebeu() {
@@ -293,6 +356,13 @@ trocar_crl() {
   antes="$(log_sidecar_conta "$2")"
   gravar_crl "$1" || return 2
   esperar_log_sidecar "$2" "$antes" "$3"
+}
+
+# trocar_crl_marcada <arquivo> <segundos>: grava e espera o marcador do sidecar
+# com o sha256 do arquivo — o mesmo sinal que o backend espera antes do takeover.
+trocar_crl_marcada() {
+  gravar_crl "$1" || return 2
+  esperar_marcador "$1" "$2"
 }
 
 crl_verifica() { # <crl em $tmp> <ca>
@@ -336,21 +406,30 @@ esperar aceito   "D) controle: backend da CA de aparelhos" publicar /d/backend
 esperar recusado "D) CN acs-area-12 emitido agora pela CA do servidor" publicar /f/compartilhado
 
 grupo E 'revogação de um aparelho'
+esperar aceito   "E) o marcador do sidecar bate com a crl.pem atual" esperar_marcador crl-original.pem 10
 esperar aceito   "E) aparelho A conecta antes da revogação" publicar /f/ap-A -t sinalacs/v1/alerts/qa/acks -m x
 esperar aceito   "E) aparelho B conecta antes da revogação" publicar /f/ap-B -t sinalacs/v1/alerts/qa/acks -m x
-esperar aceito   "E) sessão longa de A aberta antes da revogação" assinar "$sufixo-sub-a" /f/ap-A "$id_a" -t "$topico_x"
+esperar aceito   "E) sessão longa de A, com reconexão automática, aberta antes da revogação" \
+  assinar_reconectando "$sufixo-sub-a" /f/ap-A "$id_a" "$topico_x"
 esperar aceito   "E) assinatura longa de B aberta antes da revogação" assinar "$sufixo-sub-b" /f/ap-B "$id_b" -t "$topico_x"
-esperar aceito   "E) o sidecar recarrega a CRL que revoga A em ≤ 10 s" trocar_crl crl-revoga-a.pem 'CRL recarregada' 10
-sleep 1   # o sidecar loga depois do kill; o broker trata o HUP no laço seguinte
+esperar aceito   "E) o sidecar grava crl.loaded = sha256 da CRL que revoga A em ≤ 10 s" trocar_crl_marcada crl-revoga-a.pem 10
 esperar aceito   "E) B continua aceito depois da recarga" publicar /f/ap-B -t sinalacs/v1/alerts/qa/acks -m x
 esperar recusado "E) A é recusado depois da recarga" publicar /f/ap-A -t sinalacs/v1/alerts/qa/acks -m x
 publicar /d/backend -t "$topico_x" -m "pos-recarga-$sufixo" || infra 'o backend não publicou o controle do Grupo E.'
 esperar aceito   "E) a assinatura longa de B continua recebendo" recebeu "$sufixo-sub-b" "pos-recarga-$sufixo"
 
-grupo F 'takeover da sessão revogada'
-esperar aceito   "F) a sessão longa de A sobrevive ao SIGHUP" sessao_viva "$sufixo-sub-a"
-esperar aceito   "F) backend conecta com o client id de A" publicar /d/backend -i "$id_a" -t sinalacs/v1/mtls/probe -m x
-esperar recusado "F) a sessão de A cai em ≤ 2 s" sessao_viva "$sufixo-sub-a" 2
+grupo F 'takeover depois do marcador, com reconexão automática'
+# A ordem do backend (DeviceRevocationEffects): CRL por temporário + mv,
+# marcador (Grupo E) e só então o takeover. Sem o marcador, o laço de A
+# reconectaria antes de o broker reler a CRL (medido no e2e da Task 7).
+esperar aceito   "F) a sessão de A sobreviveu ao SIGHUP sem cair" sem_saidas "$sufixo-sub-a"
+antes_takeover="$(date -u '+%Y-%m-%dT%H:%M:%S.%NZ')"
+antes_takeover_s="$(date +%s)"
+esperar aceito   "F) backend conecta com o client id de A (takeover)" publicar /d/backend -i "$id_a" -t sinalacs/v1/mtls/probe -m x
+esperar aceito   "F) o laço de A tenta reconectar (≥ 2 saídas em 10 s)" tentou_reconectar "$sufixo-sub-a" 2 10
+resta=$(( antes_takeover_s + 10 - $(date +%s) ))
+[[ "$resta" -gt 0 ]] && sleep "$resta"
+esperar recusado "F) alguma conexão de A no broker em 10 s depois do takeover" conexoes_de_a_desde "$antes_takeover"
 esperar recusado "F) A não reconecta" publicar /f/ap-A -i "$id_a" -t sinalacs/v1/alerts/qa/acks -m x
 
 grupo G 'ACL por microárea'
@@ -382,16 +461,19 @@ esperar aceito   "H) nextUpdate a pelo menos 7 dias" proxima_atualizacao_em_dias
 
 grupo I 'o sidecar não derruba o broker'
 esperar aceito   "I) controle: B aceito antes das mutações" publicar /f/ap-B -t sinalacs/v1/alerts/qa/acks -m x
+marcado="$(marcador_atual)"
 esperar aceito   "I-i) lixo na crl.pem: o sidecar recusa" trocar_crl lixo.pem 'CRL recusada pelo sidecar' 10
 sleep 5
 esperar aceito   "I-i) o broker continua de pé" broker_de_pe
+esperar aceito   "I-i) o marcador não muda" marcador_inalterado "$marcado"
 esperar aceito   "I-i) B continua aceito" publicar /f/ap-B -t sinalacs/v1/alerts/qa/acks -m x
 esperar aceito   "I-ii) CRL válida de outra CA: o sidecar recusa" trocar_crl crl-fora.pem 'CRL recusada pelo sidecar' 10
 sleep 5
 esperar aceito   "I-ii) o broker continua de pé" broker_de_pe
+esperar aceito   "I-ii) o marcador não muda" marcador_inalterado "$marcado"
 esperar aceito   "I-ii) B continua aceito" publicar /f/ap-B -t sinalacs/v1/alerts/qa/acks -m x
 esperar aceito   "I-ii) backend continua aceito" publicar /d/backend
 
 echo
-[[ "$falhas" -eq 0 ]] && echo "OK — o broker identifica pelo certificado da CA de aparelhos, recarrega a CRL pelo sidecar e aplica a ACL por microárea" \
+[[ "$falhas" -eq 0 ]] && echo "OK — o broker identifica pelo certificado da CA de aparelhos, recarrega a CRL pelo sidecar (com o marcador crl.loaded) e aplica a ACL por microárea" \
   || { echo "$falhas falha(s)"; exit 1; }

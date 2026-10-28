@@ -8,6 +8,7 @@ import 'package:sinalacs_server/src/config/device_ca_config.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_device_certificate_store.dart';
 import 'package:sinalacs_server/src/infrastructure/mqtt/mqtt_session_kicker.dart';
+import 'package:sinalacs_server/src/infrastructure/pki/crl_reload_watcher.dart';
 import 'package:sinalacs_server/src/infrastructure/pki/device_crl_publisher.dart';
 import 'package:sinalacs_server/src/infrastructure/pki/openssl_device_ca.dart';
 import 'package:sinalacs_server/src/application/admin/admin_monitoring_service.dart';
@@ -503,12 +504,21 @@ class AlertRuntime {
   /// O que vem depois do commit de uma revogação de certificado (#94): lê o
   /// que a transação revogou, audita (quando pedido), publica a CRL e derruba
   /// as sessões.
-  DeviceRevocationEffects deviceRevocationEffectsFor(Session session) =>
-      DeviceRevocationEffects(
-        store: OrmDeviceCertificateStore(session: () => session),
-        crl: deviceCrlPublication,
-        kicker: mqttSessionKicker,
-      );
+  ///
+  /// A derrubada espera o sidecar do broker confirmar a recarga da CRL
+  /// (`crl.loaded`, ao lado da `crl.pem`) — só com a publicação real: um duplo
+  /// de [overrideDeviceCrlPublication] não grava CRL nenhuma.
+  DeviceRevocationEffects deviceRevocationEffectsFor(Session session) {
+    final cfg = deviceCaConfig;
+    return DeviceRevocationEffects(
+      store: OrmDeviceCertificateStore(session: () => session),
+      crl: deviceCrlPublication,
+      kicker: mqttSessionKicker,
+      crlReload: _crlOverridden || cfg == null
+          ? null
+          : CrlReloadWatcher(crlPath: cfg.crlPath),
+    );
+  }
 
   /// Emissão do certificado do aparelho (#94), para uma requisição. A emissão
   /// e as linhas `device_cert_*` gravam na mesma transação

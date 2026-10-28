@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:crypto/crypto.dart';
 import 'package:fake_async/fake_async.dart';
 import 'package:serverpod/serverpod.dart' show UuidValue;
 import 'package:sinalacs_server/src/application/devices/device_certificate_service.dart';
@@ -85,9 +86,11 @@ void main() {
           ..add(_cert('0a1b', notAfter: _agora.add(const Duration(days: 10))))
           ..add(_cert('0c0d', notAfter: _agora.subtract(const Duration(days: 1))));
         final p = publicador();
-        await p.publish();
+        final sha = await p.publish();
         expect(p.pendingSince, isNull);
         expect(await ca.crlVerifies(ca.crlPath), isTrue);
+        // O sha256 dos bytes da crl.pem: o que o sidecar grava em crl.loaded.
+        expect(sha, sha256.convert(await File(ca.crlPath).readAsBytes()).toString());
         final primeira = await ca.crlText(ca.crlPath);
         expect(primeira, contains('0A1B'));
         expect(primeira, isNot(contains('0C0D')), reason: 'a vencida sai da CRL');
@@ -224,6 +227,29 @@ void main() {
           // Depois do sucesso, nada mais é agendado.
           async.elapse(const Duration(hours: 1));
           expect(tentativas, hasLength(3));
+          p.close();
+        });
+      },
+    );
+
+    test(
+      'publish() devolve o sha256 do conteúdo gravado; null enquanto falha',
+      () {
+        fakeAsync((async) {
+          final p = publicador(async, falhas: 1);
+          String? primeira = 'não chamou';
+          p.publish().then((v) => primeira = v);
+          async.flushMicrotasks();
+          expect(primeira, isNull, reason: 'falhou: a CRL está em recuo');
+
+          String? segunda;
+          p.publish().then((v) => segunda = v);
+          async.flushMicrotasks();
+          // sha256("PEM"), o mesmo que `sha256sum crl.pem` dá no sidecar.
+          expect(
+            segunda,
+            '384fb9a44fabe158be2757b9b8d8f67029f2280fcc1776ab2a53103e6f0c582d',
+          );
           p.close();
         });
       },

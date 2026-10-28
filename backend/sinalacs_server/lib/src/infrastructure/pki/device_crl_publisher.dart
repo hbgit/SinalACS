@@ -1,5 +1,8 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
+
+import 'package:crypto/crypto.dart';
 
 import 'package:sinalacs_server/src/application/devices/device_certificate_service.dart';
 import 'package:sinalacs_server/src/config/device_ca_config.dart';
@@ -31,7 +34,9 @@ typedef BuildCrl =
 ///   teto de tentativas, até uma publicação completa — aí [pendingSince] volta
 ///   a `null`. [publish] durante a espera tenta na hora e zera o recuo.
 /// - [publish] nunca lança: quem revoga já fez o commit e não pode receber
-///   erro por causa do arquivo.
+///   erro por causa do arquivo. Devolve o sha256 (hex) dos bytes gravados —
+///   o que o sidecar do broker grava em `crl.loaded` ao recarregá-la — ou
+///   `null` quando a tentativa falhou.
 ///
 /// O log traz só a contagem e o número da CRL, nunca serial ou CN.
 class DeviceCrlPublisher implements CrlPublication {
@@ -67,8 +72,8 @@ class DeviceCrlPublisher implements CrlPublication {
   Duration _backoff;
   Timer? _retry;
   DateTime? _pendingSince;
-  Future<void>? _emCurso;
-  Future<void>? _seguinte;
+  Future<String?>? _emCurso;
+  Future<String?>? _seguinte;
   bool _closed = false;
 
   /// Instante da primeira falha ainda não superada; `null` = a última
@@ -76,7 +81,7 @@ class DeviceCrlPublisher implements CrlPublication {
   DateTime? get pendingSince => _pendingSince;
 
   @override
-  Future<void> publish({DateTime? now}) {
+  Future<String?> publish({DateTime? now}) {
     if (_closed) return Future.value();
     _retry?.cancel();
     _retry = null;
@@ -91,7 +96,7 @@ class DeviceCrlPublisher implements CrlPublication {
     _retry = null;
   }
 
-  Future<void> _agendar(DateTime? now) {
+  Future<String?> _agendar(DateTime? now) {
     final emCurso = _emCurso;
     if (emCurso == null) return _emCurso = _rodar(now);
     return _seguinte ??= emCurso.then((_) {
@@ -100,16 +105,16 @@ class DeviceCrlPublisher implements CrlPublication {
     });
   }
 
-  Future<void> _rodar(DateTime? now) async {
+  Future<String?> _rodar(DateTime? now) async {
     try {
-      await _tentar(now);
+      return await _tentar(now);
     } finally {
       _emCurso = null;
     }
   }
 
-  Future<void> _tentar(DateTime? now) async {
-    if (_closed) return;
+  Future<String?> _tentar(DateTime? now) async {
+    if (_closed) return null;
     try {
       final t = (now ?? _clock()).toUtc();
       final revogadas = await _source.revokedUnexpired(t);
@@ -132,15 +137,16 @@ class DeviceCrlPublisher implements CrlPublication {
       _pendingSince = null;
       _backoff = _initialBackoff;
       _log('CRL dos aparelhos publicada: ${revogadas.length} revogada(s), número $numero.');
+      return sha256.convert(utf8.encode(pem)).toString();
     } catch (error) {
       _pendingSince ??= _clock().toUtc();
-      if (_closed) return;
+      if (_closed) return null;
       // Já há uma publicação enfileirada (um `publish()` chegou durante esta
       // tentativa): ela é a nova tentativa, e roda logo em seguida.
       if (_seguinte != null) {
         _log('Falha ao publicar a CRL dos aparelhos (${error.runtimeType}); '
             'a publicação enfileirada tenta de novo.');
-        return;
+        return null;
       }
       final espera = _backoff;
       _log(
@@ -157,6 +163,7 @@ class DeviceCrlPublisher implements CrlPublication {
         _retry = null;
         unawaited(_agendar(null));
       });
+      return null;
     }
   }
 

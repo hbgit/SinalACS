@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io' show stderr;
 import 'dart:math';
 
 import 'package:crypto/crypto.dart';
@@ -81,7 +82,21 @@ abstract interface class DeviceCertificateStore implements DeviceCrlSource {
 /// Publicação da CRL depois de uma revogação. Implementada por
 /// `DeviceCrlPublisher`; nunca lança (uma falha agenda nova tentativa).
 abstract interface class CrlPublication {
-  Future<void> publish({DateTime? now});
+  /// O sha256 (hex) dos bytes da CRL gravada, o mesmo que o sidecar do broker
+  /// grava em `crl.loaded` depois de recarregá-la; `null` quando a publicação
+  /// falhou e está em recuo.
+  Future<String?> publish({DateTime? now});
+}
+
+/// A confirmação de que o broker recarregou a CRL (#94, Task 7a). Implementada
+/// por `CrlReloadWatcher`, que lê o marcador `crl.loaded` do sidecar.
+abstract interface class CrlReloadAwait {
+  /// O prazo de [loaded].
+  Duration get timeout;
+
+  /// `true` quando o broker recarregou a CRL de conteúdo [sha256] (ou uma
+  /// mais nova, que também traz a serial); `false` esgotado o prazo.
+  Future<bool> loaded(String sha256);
 }
 
 /// Derrubada da sessão MQTT aberta de um client id. Implementada por
@@ -125,19 +140,32 @@ AuditEvent deviceCertAudit(
 /// A CRL é o corte duro, mas só vale no PRÓXIMO handshake (I2): a sessão já
 /// aberta seguiria recebendo — inclusive o território antigo, na troca de
 /// microárea — até cair sozinha. Daí a derrubada.
+///
+/// E a derrubada só vem **depois de o broker recarregar a CRL** ([crlReload]):
+/// derrubada antes, o `mqtt_client` do app reconecta em milissegundos e o
+/// broker, ainda com a CRL velha, aceita o certificado revogado (medido no e2e
+/// da Task 7). Recarga não confirmada no prazo → derruba assim mesmo e avisa;
+/// CRL em recuo (publicação falhou) → derruba na hora, sem esperar. Sem
+/// [crlReload] (ambiente sem o sidecar, testes com publicação falsa), derruba
+/// na hora.
 class DeviceRevocationEffects {
   DeviceRevocationEffects({
     required this.store,
     required this.crl,
     required this.kicker,
-  });
+    this.crlReload,
+    void Function(String line)? log,
+  }) : _log = log ?? stderr.writeln;
 
   final DeviceCertificateStore store;
   final CrlPublication? crl;
   final SessionKicker? kicker;
+  final CrlReloadAwait? crlReload;
+  final void Function(String line) _log;
 
-  /// Lê o que a chamada revogou ([reason] + [at]), publica a CRL, derruba as
-  /// sessões e então audita cada um com [audit], quando dado. Sem nada
+  /// Lê o que a chamada revogou ([reason] + [at]), publica a CRL, espera o
+  /// broker recarregá-la, derruba as sessões e então audita cada um com
+  /// [audit], quando dado. Sem nada
   /// revogado, não faz nada.
   Future<List<DeviceCertificate>> afterCommit({
     required DeviceCertRevocationReason reason,
@@ -156,7 +184,7 @@ class DeviceRevocationEffects {
     // CRL e derrubada antes da trilha: a revogação já foi confirmada, e uma
     // falha da auditoria (que sobe, fail-closed) não pode deixar o aparelho
     // revogado conectado nem a CRL sem a serial.
-    await crl?.publish();
+    await _publicarEEsperarRecarga();
     final ids = {
       for (final c in revogados)
         deviceMqttClientId(acsId: c.userId.toString(), deviceId: c.deviceId),
@@ -177,6 +205,30 @@ class DeviceRevocationEffects {
       }
     }
     return revogados;
+  }
+
+  /// Publica a CRL e espera o broker recarregá-la. O log traz só o tipo do
+  /// evento: nem serial, nem client id.
+  Future<void> _publicarEEsperarRecarga() async {
+    final c = crl;
+    if (c == null) return;
+    final sha = await c.publish();
+    final espera = crlReload;
+    if (espera == null) return;
+    if (sha == null) {
+      _log(
+        'Aviso: a CRL dos aparelhos está em recuo; a sessão do aparelho '
+        'revogado é derrubada sem esperar a recarga do broker.',
+      );
+      return;
+    }
+    if (!await espera.loaded(sha)) {
+      _log(
+        'Aviso: o broker não confirmou a recarga da CRL dos aparelhos em '
+        '${espera.timeout.inSeconds} s; a sessão do aparelho revogado '
+        'é derrubada mesmo assim.',
+      );
+    }
   }
 }
 

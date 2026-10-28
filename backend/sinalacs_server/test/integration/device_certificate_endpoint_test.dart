@@ -21,7 +21,10 @@ class _CrlContada implements CrlPublication {
   int chamadas = 0;
 
   @override
-  Future<void> publish({DateTime? now}) async => chamadas++;
+  Future<String?> publish({DateTime? now}) async {
+    chamadas++;
+    return 'f' * 64;
+  }
 }
 
 Future<void> _seed(Session s) async {
