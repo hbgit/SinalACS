@@ -192,6 +192,17 @@ services:
       API_TLS_CERT_PATH: /app/rpc-certs/backend.crt
       API_TLS_KEY_PATH: /app/rpc-certs/backend.key
       API_TLS_CLIENT_CA_PATH: /app/rpc-certs/ca.crt
+      # CA de aparelhos (#94): o backend assina o certificado de cliente MQTT de
+      # cada aparelho e regrava a CRL que o broker lê. Os três caminhos vêm
+      # juntos ou nenhum (sem eles, a emissão responde indisponível); um
+      # subconjunto é erro de boot. Gerada pelo mosquitto-init em
+      # runtime/devices/, montado abaixo em /app/devices (rw: a CRL é regravada
+      # por temporário + rename no mesmo diretório).
+      DEVICE_CA_CERT_PATH: /app/devices/ca.crt
+      DEVICE_CA_KEY_PATH: /app/devices/ca.key
+      DEVICE_CRL_PATH: /app/devices/crl.pem
+      DEVICE_CERT_DAYS: "30"
+      DEVICE_CRL_DAYS: "30"
     # O HEALTHCHECK do Dockerfile fala http (é o do Render); aqui a 8080 é TLS
     # mútuo, então a stack local o sobrepõe com os mesmos tempos e com a folha
     # de CLIENTE do healthcheck (#90): distinta da do Traefik, CN
@@ -231,6 +242,8 @@ services:
       - ./infra/docker/mosquitto/runtime/certs:/app/certs:ro
       # Só a folha do backend e a CA pública; a ca.key fica em runtime/certs/.
       - ./infra/docker/traefik/runtime/backend:/app/rpc-certs:ro
+      # CA de aparelhos (#94). Gravável: o backend publica crl.pem aqui.
+      - ./infra/docker/mosquitto/runtime/devices:/app/devices
 
   # Dados sintéticos de desenvolvimento. Roda depois que o servidor sobe, porque
   # é ele quem aplica as migrações. O seed não é opcional: o dev-login referencia
