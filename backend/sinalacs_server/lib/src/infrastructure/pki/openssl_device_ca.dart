@@ -59,8 +59,27 @@ class OpensslDeviceCa {
   // CN entra no `-subj` e no `index.txt`: só os caracteres que nenhum dos dois
   // interpreta (UUID de microárea, nomes simples).
   static final _cnSeguro = RegExp(r'^[A-Za-z0-9._:-]{1,64}$');
-  // URI entra numa linha `subjectAltName=URI:a,URI:b` do arquivo de extensões.
-  static final _uriSegura = RegExp(r'^[A-Za-z][A-Za-z0-9+.-]*:[^\s,]+$');
+  // URI entra numa linha `subjectAltName=URI:a,URI:b` do arquivo de extensões
+  // (`-extfile`), que o OpenSSL lê como CONFIGURAÇÃO: expande `$var` e
+  // `${ENV::NOME}` (vazaria o ambiente do processo, segredos inclusive, para
+  // dentro da folha assinada) e trata `#` como comentário. Por isso só `urn:`
+  // com um alfabeto fechado, sem `$`, `{`, `}`, `#`, espaço, vírgula ou quebra
+  // de linha (#94, achado C1 da revisão final).
+  static final _uriSegura = RegExp(r'^urn:[A-Za-z0-9:._-]+$');
+  // Defesa em profundidade, conferida antes da regex: qualquer um destes num
+  // texto que vai ao arquivo de configuração do OpenSSL é recusado com motivo
+  // explícito, mesmo que a regex um dia seja afrouxada.
+  static final _metacaracteresDoOpenssl = RegExp(r'[$\{\}#\n\r\\]');
+
+  static void _semMetacaracteres(String valor, String nome) {
+    if (_metacaracteresDoOpenssl.hasMatch(valor)) {
+      throw ArgumentError.value(
+        valor,
+        nome,
+        r'contém caractere que o OpenSSL interpreta na configuração ($, {, }, #, \, quebra de linha)',
+      );
+    }
+  }
 
   /// Lê o CSR e confere a assinatura dele. CSR malformado ou com assinatura que
   /// não confere → [FormatException]. A política (EC P-256, CN esperado) é de
@@ -116,6 +135,7 @@ class OpensslDeviceCa {
     required DateTime notBefore,
     required DateTime notAfter,
   }) async {
+    _semMetacaracteres(commonName, 'commonName');
     if (!_cnSeguro.hasMatch(commonName)) {
       throw ArgumentError.value(commonName, 'commonName', 'CN fora do padrão');
     }
@@ -123,6 +143,7 @@ class OpensslDeviceCa {
       throw ArgumentError.value(sanUris, 'sanUris', 'ao menos uma URI');
     }
     for (final u in sanUris) {
+      _semMetacaracteres(u, 'sanUris');
       if (!_uriSegura.hasMatch(u)) {
         throw ArgumentError.value(u, 'sanUris', 'URI fora do padrão');
       }

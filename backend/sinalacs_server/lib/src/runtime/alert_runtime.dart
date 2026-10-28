@@ -537,6 +537,9 @@ class AlertRuntime {
       ca: cfg == null ? null : OpensslDeviceCa(cfg),
       certDays: cfg?.certDays ?? 0,
       ensureDeviceNotMarked: deviceWipeServiceFor(session).ensureDeviceNotMarked,
+      // A mesma releitura de conta do refresh (#94, C2): ativa e microárea
+      // vêm do banco, não do JWT.
+      findAccount: OrmRefreshTokenStore(session: () => session).findAccount,
       crl: deviceCrlPublication,
     );
   }

@@ -14,13 +14,15 @@
 import 'package:serverpod/serverpod.dart' as _i1;
 import 'enums/device_cert_revocation_reason.dart' as _i2;
 
-/// Certificado de cliente MQTT emitido para um aparelho do ACS (#94). Um ativo
-/// por aparelho: a emissão nova revoga a anterior (`renewed`).
+/// Certificado de cliente MQTT emitido para um aparelho do ACS (#94). Em regra
+/// um ativo por aparelho: a emissão nova revoga a anterior (`renewed`); duas
+/// emissões concorrentes do mesmo aparelho podem coexistir, e a revogação por
+/// aparelho revoga todas.
 ///
 /// Só identificadores técnicos, sem dado pessoal além do `userId` do ACS (o
 /// profissional, não o titular): o `deviceId` é o UUID aleatório da
-/// instalação, a `serial` são 128 bits aleatórios em hex minúsculo com 32
-/// dígitos, e a impressão digital é o SHA-256 do DER da folha. O certificado
+/// instalação, a `serial` são 128 bits com versão/variante de UUID v4 fixos
+/// (122 aleatórios) em hex minúsculo com 32 dígitos, e a impressão digital é o SHA-256 do DER da folha. O certificado
 /// em si não é guardado: a revogação só precisa da serial.
 ///
 /// Retenção: até `notAfter` + 30 dias (a CRL só lista as não vencidas);
@@ -100,7 +102,8 @@ abstract class DeviceCertificate
   /// Instalação que recebeu o certificado (o `deviceId` do token).
   String deviceId;
 
-  /// A microárea do token na emissão; é o CN da folha.
+  /// A microárea da conta relida do banco na emissão (igual à do token, ou a
+  /// emissão é recusada); é o CN da folha.
   _i1.UuidValue microAreaId;
 
   String serial;
@@ -391,7 +394,8 @@ class DeviceCertificateTable extends _i1.Table<_i1.UuidValue?> {
   /// Instalação que recebeu o certificado (o `deviceId` do token).
   late final _i1.ColumnString deviceId;
 
-  /// A microárea do token na emissão; é o CN da folha.
+  /// A microárea da conta relida do banco na emissão (igual à do token, ou a
+  /// emissão é recusada); é o CN da folha.
   late final _i1.ColumnUuid microAreaId;
 
   late final _i1.ColumnString serial;

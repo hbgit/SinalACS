@@ -15,7 +15,9 @@ import 'test_tools/serverpod_test_tools.dart';
 const _ubs = '00000000-0000-4000-8000-00000000c401';
 const _ma = '00000000-0000-4000-8000-00000000c402';
 const _acs = '00000000-0000-4000-8000-00000000c403';
-const _aparelho = 'aparelho-cert-ep';
+const _admin = '00000000-0000-4000-8000-00000000c404';
+const _ma2 = '00000000-0000-4000-8000-00000000c405';
+const _aparelho = '00000000-0000-4000-8000-00000000c4d1';
 
 class _CrlContada implements CrlPublication {
   int chamadas = 0;
@@ -38,27 +40,40 @@ Future<void> _seed(Session s) async {
       state: 'SP',
     ),
   );
-  await MicroArea.db.insertRow(
-    s,
-    MicroArea(
-      id: UuidValue.fromString(_ma),
-      name: 'Microárea Cert EP',
-      ubsId: UuidValue.fromString(_ubs),
-      geoJsonBoundary: '{}',
-    ),
-  );
+  for (final ma in [_ma, _ma2]) {
+    await MicroArea.db.insertRow(
+      s,
+      MicroArea(
+        id: UuidValue.fromString(ma),
+        name: 'Microárea Cert EP $ma',
+        ubsId: UuidValue.fromString(_ubs),
+        geoJsonBoundary: '{}',
+      ),
+    );
+  }
   final now = DateTime.now().toUtc();
-  await User.db.insertRow(
+  for (final (id, role) in [(_acs, UserRole.acs), (_admin, UserRole.admin)]) {
+    await User.db.insertRow(
+      s,
+      User(
+        id: UuidValue.fromString(id),
+        cpfHash: 'cert-ep-$id',
+        name: 'Usuário sintético',
+        birthDate: DateTime.utc(1980),
+        role: role,
+        microAreaId: role == UserRole.acs ? UuidValue.fromString(_ma) : null,
+        createdAt: now,
+        updatedAt: now,
+      ),
+    );
+  }
+  await Acs.db.insertRow(
     s,
-    User(
+    Acs(
       id: UuidValue.fromString(_acs),
-      cpfHash: 'cert-ep-$_acs',
-      name: 'Usuário sintético',
-      birthDate: DateTime.utc(1980),
-      role: UserRole.acs,
-      microAreaId: UuidValue.fromString(_ma),
-      createdAt: now,
-      updatedAt: now,
+      enrollmentId: 'ACS-CERT-EP',
+      ubsId: UuidValue.fromString(_ubs),
+      active: true,
     ),
   );
 }
@@ -135,6 +150,106 @@ void main() {
         throwsA(isA<AlertValidationException>()),
       );
     });
+
+    test(
+      'aparelho com pedido de limpeza → DeviceWipeRequiredException tipada (I2)',
+      () async {
+        final session = sessionBuilder.build();
+        final pedido = await DeviceWipeOrder.db.insertRow(
+          session,
+          DeviceWipeOrder(
+            deviceId: _aparelho,
+            targetUserId: UuidValue.fromString(_acs),
+            requestedBy: UuidValue.fromString(_admin),
+            reason: DeviceWipeReason.lost,
+            requestedAt: DateTime.now().toUtc(),
+          ),
+        );
+        await expectLater(
+          endpoints.devices.issueCertificate(
+            sessionBuilder,
+            accessToken: _token(),
+            csrPem: await ca.csr(cn: _ma),
+          ),
+          throwsA(
+            isA<DeviceWipeRequiredException>().having(
+              (e) => e.orderId,
+              'orderId',
+              pedido.id.toString(),
+            ),
+          ),
+        );
+      },
+    );
+
+    test(
+      'limite de emissões → DeviceCertificateRetryLaterException, não validação (I1)',
+      () async {
+        for (var i = 0; i < DeviceCertificateService.maxIssuesPerHour; i++) {
+          await endpoints.devices.issueCertificate(
+            sessionBuilder,
+            accessToken: _token(),
+            csrPem: await ca.csr(cn: _ma),
+          );
+        }
+        await expectLater(
+          endpoints.devices.issueCertificate(
+            sessionBuilder,
+            accessToken: _token(),
+            csrPem: await ca.csr(cn: _ma),
+          ),
+          throwsA(isA<DeviceCertificateRetryLaterException>()),
+        );
+      },
+    );
+
+    test(
+      'conta desativada com o token anterior → AlertPermissionException (C2)',
+      () async {
+        final session = sessionBuilder.build();
+        final acs =
+            (await Acs.db.findById(session, UuidValue.fromString(_acs)))!;
+        await Acs.db.updateRow(session, acs.copyWith(active: false));
+        await expectLater(
+          endpoints.devices.issueCertificate(
+            sessionBuilder,
+            accessToken: _token(),
+            csrPem: await ca.csr(cn: _ma),
+          ),
+          throwsA(isA<AlertPermissionException>()),
+        );
+        expect(crl.chamadas, 0);
+      },
+    );
+
+    test(
+      'microárea trocada com o token anterior → DeviceCertificateRetryLaterException '
+      'pedindo renovação da sessão (C2)',
+      () async {
+        final session = sessionBuilder.build();
+        final u =
+            (await User.db.findById(session, UuidValue.fromString(_acs)))!;
+        await User.db.updateRow(
+          session,
+          u.copyWith(microAreaId: UuidValue.fromString(_ma2)),
+        );
+        await expectLater(
+          endpoints.devices.issueCertificate(
+            sessionBuilder,
+            accessToken: _token(),
+            csrPem: await ca.csr(cn: _ma),
+          ),
+          throwsA(
+            isA<DeviceCertificateRetryLaterException>().having(
+              (e) => e.message,
+              'message',
+              contains('renovada'),
+            ),
+          ),
+        );
+        expect(crl.chamadas, 0);
+      },
+    );
 
     test(
       'sem DeviceCaConfig → AlertPermissionException com a mensagem fixa',

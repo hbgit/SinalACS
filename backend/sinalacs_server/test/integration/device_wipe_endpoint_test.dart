@@ -18,8 +18,8 @@ const _adminId = '00000000-0000-4000-8000-00000000e004';
 
 const _matricula = 'ACS-WIPE-EP-001';
 const _senha = 'senha-sintetica-de-teste';
-const _aparelhoD = 'aparelho-wipe-d';
-const _aparelhoNovo = 'aparelho-wipe-novo';
+const _aparelhoD = '00000000-0000-4000-8000-0000000081dd';
+const _aparelhoNovo = '00000000-0000-4000-8000-0000000081de';
 
 Future<void> _seed(Session session) async {
   await Ubs.db.insertRow(

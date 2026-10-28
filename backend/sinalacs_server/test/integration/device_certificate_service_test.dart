@@ -5,6 +5,7 @@ import 'package:sinalacs_server/src/application/devices/device_certificate_servi
 import 'package:sinalacs_server/src/generated/protocol.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_audit_trail.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_device_certificate_store.dart';
+import 'package:sinalacs_server/src/infrastructure/database/orm_refresh_token_store.dart';
 import 'package:sinalacs_server/src/infrastructure/pki/device_crl_publisher.dart';
 import 'package:sinalacs_server/src/infrastructure/pki/openssl_device_ca.dart';
 import 'package:sinalacs_server/src/runtime/alert_runtime.dart';
@@ -20,7 +21,9 @@ const _ubs = '00000000-0000-4000-8000-00000000c301';
 const _ma = '00000000-0000-4000-8000-00000000c302';
 const _acs = '00000000-0000-4000-8000-00000000c303';
 const _admin = '00000000-0000-4000-8000-00000000c304';
-const _aparelho = 'aparelho-cert-c3';
+const _ma2 = '00000000-0000-4000-8000-00000000c305';
+// UUID minúsculo, como o app gera: a emissão recusa qualquer outro formato (C1).
+const _aparelho = '00000000-0000-4000-8000-00000000c3d1';
 
 Future<void> _seed(Session s) async {
   await Ubs.db.insertRow(
@@ -33,15 +36,17 @@ Future<void> _seed(Session s) async {
       state: 'SP',
     ),
   );
-  await MicroArea.db.insertRow(
-    s,
-    MicroArea(
-      id: UuidValue.fromString(_ma),
-      name: 'Microárea Cert',
-      ubsId: UuidValue.fromString(_ubs),
-      geoJsonBoundary: '{}',
-    ),
-  );
+  for (final ma in [_ma, _ma2]) {
+    await MicroArea.db.insertRow(
+      s,
+      MicroArea(
+        id: UuidValue.fromString(ma),
+        name: 'Microárea Cert $ma',
+        ubsId: UuidValue.fromString(_ubs),
+        geoJsonBoundary: '{}',
+      ),
+    );
+  }
   final now = DateTime.now().toUtc();
   for (final (id, role) in [(_acs, UserRole.acs), (_admin, UserRole.admin)]) {
     await User.db.insertRow(
@@ -58,6 +63,16 @@ Future<void> _seed(Session s) async {
       ),
     );
   }
+  // A emissão relê a conta (C2): sem linha em `acs`, ninguém é ACS.
+  await Acs.db.insertRow(
+    s,
+    Acs(
+      id: UuidValue.fromString(_acs),
+      enrollmentId: 'ACS-CERT-C3',
+      ubsId: UuidValue.fromString(_ubs),
+      active: true,
+    ),
+  );
 }
 
 AuthenticatedUser _acsUser({
@@ -113,6 +128,7 @@ void main() {
         ensureDeviceNotMarked: AlertRuntime.instance
             .deviceWipeServiceFor(session)
             .ensureDeviceNotMarked,
+        findAccount: OrmRefreshTokenStore(session: () => session).findAccount,
         crl: crl,
       );
     });
@@ -192,7 +208,7 @@ void main() {
       );
     });
 
-    test('recusa aparelho com pedido de wipe pendente', () async {
+    test('recusa aparelho com pedido de wipe pendente com a exceção tipada (I2)', () async {
       await DeviceWipeOrder.db.insertRow(
         session,
         DeviceWipeOrder(
@@ -205,7 +221,7 @@ void main() {
       );
       await expectLater(
         servico.issue(_acsUser(), await ca.csr(cn: _ma)),
-        throwsA(isA<StateError>()),
+        throwsA(isA<DeviceWipeRequiredException>()),
       );
       expect(await DeviceCertificate.db.count(session), 0);
     });
@@ -234,15 +250,130 @@ void main() {
       );
     });
 
-    test('sexta emissão na mesma hora é recusada', () async {
+    test('sexta emissão na mesma hora é recusada como limite, não como pedido inválido (I1)', () async {
       for (var i = 0; i < 5; i++) {
         await servico.issue(_acsUser(), await ca.csr(cn: _ma));
       }
       await expectLater(
         servico.issue(_acsUser(), await ca.csr(cn: _ma)),
-        throwsA(isA<ArgumentError>()),
+        throwsA(isA<DeviceCertificateRateLimited>()),
       );
       expect(await DeviceCertificate.db.count(session), 5);
+    });
+
+    group('C1: deviceId e id do ACS vão ao SAN, só no formato UUID', () {
+      for (final malicioso in [
+        r'${ENV::JWT_SECRET}',
+        r'$HOME',
+        'aparelho#x',
+        'aparelho-cert-c3',
+        '00000000-0000-4000-8000-00000000C3D1',
+      ]) {
+        test('deviceId "$malicioso" → ArgumentError, sem linha gravada', () async {
+          await expectLater(
+            servico.issue(_acsUser(deviceId: malicioso), await ca.csr(cn: _ma)),
+            throwsA(isA<ArgumentError>()),
+          );
+          expect(await DeviceCertificate.db.count(session), 0);
+        });
+      }
+
+      test('id do ACS fora do formato → ArgumentError', () async {
+        await expectLater(
+          servico.issue(
+            const AuthenticatedUser(
+              id: r'${ENV::JWT_SECRET}',
+              role: UserRole.acs,
+              microAreaId: _ma,
+              deviceId: _aparelho,
+            ),
+            await ca.csr(cn: _ma),
+          ),
+          throwsA(isA<ArgumentError>()),
+        );
+      });
+    });
+
+    group('C2: a emissão relê a conta no banco, não confia só no JWT', () {
+      test('desativar → emitir com o token anterior é recusado', () async {
+        final acs = (await Acs.db.findById(session, UuidValue.fromString(_acs)))!;
+        await Acs.db.updateRow(session, acs.copyWith(active: false));
+
+        await expectLater(
+          servico.issue(_acsUser(), await ca.csr(cn: _ma)),
+          throwsA(isA<StateError>()),
+        );
+        expect(await DeviceCertificate.db.count(session), 0);
+      });
+
+      test('trocar a microárea → emitir com o token anterior (CN antigo) é recusado '
+          'pedindo renovação da sessão', () async {
+        final u = (await User.db.findById(session, UuidValue.fromString(_acs)))!;
+        await User.db.updateRow(
+          session,
+          u.copyWith(microAreaId: UuidValue.fromString(_ma2)),
+        );
+
+        await expectLater(
+          servico.issue(_acsUser(), await ca.csr(cn: _ma)),
+          throwsA(
+            isA<DeviceCertificateSessionStale>()
+                .having((e) => e, 'é ArgumentError', isA<ArgumentError>())
+                .having((e) => '${e.message}', 'message', contains('renovada')),
+          ),
+        );
+        expect(await DeviceCertificate.db.count(session), 0);
+      });
+
+      test('token com a microárea nova e CSR com o CN novo → emite com o CN do banco',
+          () async {
+        final u = (await User.db.findById(session, UuidValue.fromString(_acs)))!;
+        await User.db.updateRow(
+          session,
+          u.copyWith(microAreaId: UuidValue.fromString(_ma2)),
+        );
+
+        final r = await servico.issue(
+          _acsUser(microAreaId: _ma2),
+          await ca.csr(cn: _ma2),
+        );
+        expect(await ca.x509Text(r.certificatePem), contains('CN = $_ma2'));
+        final linha = (await DeviceCertificate.db.find(session)).single;
+        expect(linha.microAreaId.toString(), _ma2);
+      });
+
+      test('token com a microárea nova mas CSR com o CN antigo → ArgumentError', () async {
+        final u = (await User.db.findById(session, UuidValue.fromString(_acs)))!;
+        await User.db.updateRow(
+          session,
+          u.copyWith(microAreaId: UuidValue.fromString(_ma2)),
+        );
+        await expectLater(
+          servico.issue(_acsUser(microAreaId: _ma2), await ca.csr(cn: _ma)),
+          throwsA(
+            isA<ArgumentError>().having(
+              (e) => e,
+              'não é a recusa de sessão',
+              isNot(isA<DeviceCertificateSessionStale>()),
+            ),
+          ),
+        );
+      });
+
+      test('usuário sem linha em acs (papel acs só no token) é recusado', () async {
+        await expectLater(
+          servico.issue(
+            const AuthenticatedUser(
+              id: _admin,
+              role: UserRole.acs,
+              microAreaId: _ma,
+              deviceId: _aparelho,
+            ),
+            await ca.csr(cn: _ma),
+          ),
+          throwsA(isA<StateError>()),
+        );
+      });
     });
 
     test('auditoria device_cert_issued com a serial', () async {

@@ -137,6 +137,96 @@ void main() {
     );
   });
 
+  group('C1 (revisão final): SAN e CN não injetam configuração no OpenSSL', () {
+    // O `-extfile` é configuração do OpenSSL: `${ENV::X}` e `$x` são expandidos
+    // e `#` corta a linha. Provado antes da correção: o SAN
+    // `urn:sinalacs:device:${ENV::JWT_SECRET}` saía na folha com o valor do
+    // segredo. O binário aqui não existe: se a validação deixasse passar, a
+    // chamada ao `openssl` viraria StateError, não ArgumentError.
+    final semBinario = OpensslDeviceCa(
+      DeviceCaConfig(
+        caCertPath: '/inexistente/ca.crt',
+        caKeyPath: '/inexistente/ca.key',
+        crlPath: '/inexistente/crl.pem',
+        certDays: 30,
+        crlDays: 30,
+      ),
+      opensslBinary: '/inexistente/openssl',
+    );
+
+    Future<String> assinar({
+      List<String> sanUris = const ['urn:sinalacs:device:dev-1'],
+      String commonName = microArea,
+    }) => semBinario.sign(
+      csrPem: 'irrelevante',
+      serial: BigInt.from(7),
+      commonName: commonName,
+      sanUris: sanUris,
+      notBefore: DateTime.utc(2026, 10, 27, 11),
+      notAfter: DateTime.utc(2026, 11, 26, 12),
+    );
+
+    for (final uri in [
+      r'urn:sinalacs:device:${ENV::JWT_SECRET}',
+      r'urn:sinalacs:device:$HOME',
+      r'urn:sinalacs:device:{x}',
+      'urn:sinalacs:device:a#comentario',
+      'urn:sinalacs:device:a\nsubjectAltName=URI:urn:x',
+      'urn:sinalacs:device:a\\b',
+    ]) {
+      test('recusa SAN com metacaractere do OpenSSL sem chamar o binário: $uri',
+          () async {
+        await expectLater(
+          assinar(sanUris: [uri]),
+          throwsA(isA<ArgumentError>().having(
+            (e) => '${e.message}',
+            'message',
+            contains('OpenSSL interpreta'),
+          )),
+        );
+      });
+    }
+
+    for (final uri in [
+      'https://exemplo/x',
+      'URN:sinalacs:device:dev-1',
+      'urn:sinalacs:device:a b',
+      'urn:sinalacs:device:a,URI:urn:b',
+      'urn:',
+    ]) {
+      test('recusa SAN fora de urn: com alfabeto fechado: $uri', () async {
+        await expectLater(
+          assinar(sanUris: [uri]),
+          throwsA(isA<ArgumentError>()),
+        );
+      });
+    }
+
+    test(r'recusa CN com ${ENV::...} sem chamar o binário', () async {
+      await expectLater(
+        assinar(commonName: r'${ENV::JWT_SECRET}'),
+        throwsA(isA<ArgumentError>()),
+      );
+    });
+
+    test('a folha real nunca contém a expansão de uma variável do ambiente',
+        () async {
+      // Com o binário real: o SAN malicioso é recusado antes do openssl, então
+      // nenhuma folha é emitida.
+      await expectLater(
+        ca.sign(
+          csrPem: csr,
+          serial: BigInt.from(8),
+          commonName: microArea,
+          sanUris: [r'urn:sinalacs:device:${ENV::PATH}'],
+          notBefore: DateTime.utc(2026, 10, 27, 11),
+          notAfter: DateTime.utc(2026, 11, 26, 12),
+        ),
+        throwsA(isA<ArgumentError>()),
+      );
+    });
+  });
+
   test('inspectCsr identifica EC prime256v1 e recusa RSA', () async {
     final info = await ca.inspectCsr(csr);
     expect(info.commonName, microArea);

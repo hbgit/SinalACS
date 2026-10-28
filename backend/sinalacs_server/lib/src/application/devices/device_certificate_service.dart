@@ -7,6 +7,8 @@ import 'package:serverpod/serverpod.dart' show Transaction, UuidValue;
 import 'package:sinalacs_server/src/application/audit/audit_trail.dart';
 import 'package:sinalacs_server/src/application/auth/development_auth_service.dart';
 import 'package:sinalacs_server/src/application/auth/institutional_auth_service.dart';
+import 'package:sinalacs_server/src/application/auth/refresh_token_service.dart';
+import 'package:sinalacs_server/src/application/devices/device_id_format.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
 import 'package:sinalacs_server/src/infrastructure/pki/openssl_device_ca.dart';
 
@@ -69,9 +71,15 @@ abstract interface class DeviceCertificateStore implements DeviceCrlSource {
   });
 
   /// Revoga os vigentes do aparelho como `renewed`, insere [certificate] e
-  /// grava as linhas de auditoria — tudo numa **única transação**: não existe
-  /// instante com dois certificados vigentes no aparelho, nem um certificado
-  /// sem a linha `device_cert_issued`.
+  /// grava as linhas de auditoria — tudo numa **única transação**: nenhum
+  /// certificado existe sem a linha `device_cert_issued`, e uma emissão revoga
+  /// as que a precederam no aparelho.
+  ///
+  /// Não é exclusão mútua: duas emissões concorrentes do mesmo `deviceId`
+  /// (transações que não veem a linha uma da outra) podem deixar dois
+  /// certificados vigentes no aparelho. É aceito porque [revoke] por
+  /// `deviceId` (limpeza remota) e [revokeForUser] revogam **todos** os
+  /// vigentes, e a emissão seguinte revoga os dois.
   Future<List<DeviceCertificate>> issueReplacing(
     DeviceCertificate certificate, {
     required AuditEvent issuedAudit,
@@ -232,24 +240,61 @@ class DeviceRevocationEffects {
   }
 }
 
+/// O aparelho passou de [DeviceCertificateService.maxIssuesPerHour] emissões
+/// na última hora (#94, achado I1). Transitória: o endpoint a traduz para
+/// `DeviceCertificateRetryLaterException`, e o app mantém o certificado
+/// guardado que ainda vale e tenta mais tarde.
+class DeviceCertificateRateLimited implements Exception {
+  const DeviceCertificateRateLimited();
+
+  String get message =>
+      'limite de emissões deste aparelho atingido; tente mais tarde';
+
+  @override
+  String toString() => message;
+}
+
+/// A microárea do token difere da gravada na conta (#94, achado C2): o token
+/// (15 min) foi emitido antes de uma troca de microárea. É um [ArgumentError]
+/// (pedido inválido como está), mas o endpoint a traduz para
+/// `DeviceCertificateRetryLaterException`: a próxima renovação do token traz a
+/// microárea nova e a emissão volta a ser possível.
+class DeviceCertificateSessionStale extends ArgumentError {
+  DeviceCertificateSessionStale()
+    : super(
+        'a microárea da sessão mudou; a sessão precisa ser renovada antes de '
+        'emitir o certificado deste aparelho',
+      );
+}
+
 /// Emissão do certificado de cliente MQTT do aparelho do ACS (#94).
 ///
 /// O aparelho manda um CSR com chave EC P-256 gerada nele (a chave nunca sai
 /// do aparelho); o backend confere a política e assina com a CA de aparelhos.
-/// O CN é a microárea do token (o ACL do broker deriva o tópico dela) e os SANs
-/// identificam o aparelho e o ACS.
+/// O CN é a microárea **da conta relida do banco** (o ACL do broker deriva o
+/// tópico dela) e os SANs identificam o aparelho e o ACS.
+///
+/// Papel e aparelho vêm do token, mas a conta é relida pelo mesmo contrato do
+/// refresh ([findAccount]): sem isso, o JWT de 15 min ainda vivo depois de
+/// `setAcsActive(false)` ou `setAcsMicroArea` emitia uma folha nova de 30
+/// dias, não revogada, desfazendo a revogação (achado C2 da revisão final).
 ///
 /// Recusas: [StateError] para quem não pode pedir (papel ≠ `acs`, sem
-/// microárea, token sem aparelho, aparelho com pedido de limpeza, CA não
-/// configurada) e [ArgumentError] para um pedido malformado (CSR inválido,
-/// chave fora de EC prime256v1, CN ≠ microárea do token, mais de
-/// [maxIssuesPerHour] emissões do aparelho na última hora).
+/// microárea, token sem aparelho, CA não configurada, conta inexistente ou
+/// inativa); `DeviceWipeRequiredException` sobe tipada para o aparelho com
+/// pedido de limpeza; [ArgumentError] para um pedido malformado (`deviceId`
+/// ou id do ACS fora do formato UUID, CSR inválido, chave fora de EC
+/// prime256v1, CN ≠ microárea da conta); [DeviceCertificateSessionStale]
+/// quando a microárea do token ficou para trás da conta; e
+/// [DeviceCertificateRateLimited] acima de [maxIssuesPerHour] emissões do
+/// aparelho na última hora.
 class DeviceCertificateService {
   DeviceCertificateService({
     required this.store,
     required this.ca,
     required this.certDays,
     required this.ensureDeviceNotMarked,
+    required this.findAccount,
     this.crl,
     DateTime Function()? clock,
     Random? random,
@@ -267,6 +312,10 @@ class DeviceCertificateService {
   /// `DeviceWipeRequiredException` para um aparelho com pedido de limpeza.
   final Future<void> Function(String? deviceId) ensureDeviceNotMarked;
 
+  /// `RefreshTokenStore.findAccount`: a conta do ACS relida do banco
+  /// (`active`, `microAreaId`), ou `null` para quem não é ACS.
+  final Future<RefreshAccount?> Function(String userId) findAccount;
+
   final CrlPublication? crl;
   final DateTime Function() _clock;
   final Random _random;
@@ -276,8 +325,9 @@ class DeviceCertificateService {
   static const maxIssuesPerHour = 5;
 
   /// A serial (32 dígitos hex) no formato de UUID, para `audit_logs.resourceId`
-  /// (coluna `uuid`): são os mesmos 128 bits, só com os hífens. Vale porque a
-  /// serial nasce com os bits de um UUID v4 (ver [_novaSerial]).
+  /// (coluna `uuid`): são os mesmos 128 bits — com versão/variante de UUID v4
+  /// fixos, 122 aleatórios —, só com os hífens. Vale porque a serial nasce com
+  /// os bits de um UUID v4 (ver [_novaSerial]).
   static String serialAsResourceId(String serial) {
     final h = serial.toLowerCase().padLeft(32, '0');
     return '${h.substring(0, 8)}-${h.substring(8, 12)}-${h.substring(12, 16)}-'
@@ -301,12 +351,31 @@ class DeviceCertificateService {
         deviceId == InstitutionalAuthService.deviceIdAbsent) {
       throw StateError('sessão sem aparelho identificado');
     }
+    // Os dois vão para o SAN, que o OpenSSL lê como configuração (C1): só o
+    // formato UUID passa, antes de qualquer I/O.
+    if (!isDeviceIdFormat(deviceId)) {
+      throw ArgumentError('identificador do aparelho fora do formato UUID');
+    }
+    if (!isDeviceIdFormat(user.id)) {
+      throw ArgumentError('identificador do ACS fora do formato UUID');
+    }
     final autoridade = ca;
     if (autoridade == null) throw StateError(unavailableMessage);
-    try {
-      await ensureDeviceNotMarked(deviceId);
-    } on DeviceWipeRequiredException {
-      throw StateError('aparelho com pedido de limpeza remota');
+    // Sobe tipada (I2): o app a reconhece e dispara a limpeza remota (#81).
+    await ensureDeviceNotMarked(deviceId);
+
+    // A conta relida do banco (C2): o token pode ser de antes de uma
+    // desativação ou troca de microárea.
+    final conta = await findAccount(user.id);
+    if (conta == null || !conta.active) {
+      throw StateError('conta de ACS inexistente ou inativa');
+    }
+    final microAreaConta = conta.microAreaId?.toLowerCase();
+    if (microAreaConta == null) {
+      throw StateError('ACS sem microárea vinculada');
+    }
+    if (microAreaConta != microArea.toLowerCase()) {
+      throw DeviceCertificateSessionStale();
     }
 
     // Truncado ao segundo: é a precisão do certificado, e a linha gravada
@@ -318,7 +387,7 @@ class DeviceCertificateService {
       agora.subtract(const Duration(hours: 1)),
     );
     if (emitidas >= maxIssuesPerHour) {
-      throw ArgumentError('limite de emissões deste aparelho atingido; tente mais tarde');
+      throw const DeviceCertificateRateLimited();
     }
 
     final CsrInfo info;
@@ -330,7 +399,7 @@ class DeviceCertificateService {
     if (info.keyAlgorithm != 'id-ecPublicKey' || info.curve != 'prime256v1') {
       throw ArgumentError('a chave do aparelho precisa ser EC prime256v1');
     }
-    if (info.commonName != microArea) {
+    if (info.commonName != microAreaConta) {
       throw ArgumentError('o CN do CSR difere da microárea da sessão');
     }
 
@@ -342,7 +411,7 @@ class DeviceCertificateService {
       pem = await autoridade.sign(
         csrPem: csrPem,
         serial: serial,
-        commonName: microArea,
+        commonName: microAreaConta,
         sanUris: [
           'urn:sinalacs:device:$deviceId',
           'urn:sinalacs:acs:${user.id}',
@@ -358,7 +427,7 @@ class DeviceCertificateService {
     final novo = DeviceCertificate(
       userId: UuidValue.fromString(user.id),
       deviceId: deviceId,
-      microAreaId: UuidValue.fromString(microArea),
+      microAreaId: UuidValue.fromString(microAreaConta),
       serial: serialHex,
       fingerprintSha256: _fingerprint(pem),
       notBefore: notBefore,

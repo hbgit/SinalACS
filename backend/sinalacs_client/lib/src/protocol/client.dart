@@ -722,6 +722,11 @@ class EndpointAuth extends _i1.EndpointRef {
   /// [totpCode] recebe `MfaRequiredException` (o app pede o código e repete a
   /// chamada); com `REQUIRE_ACS_MFA` ligado e a MFA não ativada, recebe
   /// `MfaEnrollmentRequiredException` (o app chama `beginTotpEnrollment`).
+  ///
+  /// [deviceId] ausente, em branco ou o sentinela público é "sem aparelho";
+  /// qualquer outro valor precisa ser um UUID minúsculo (o app gera um) ou a
+  /// chamada é recusada com `AlertValidationException` antes de qualquer I/O
+  /// (#94, C1): ele vai ao JWT e de lá ao SAN do certificado do aparelho.
   _i2.Future<_i32.DevelopmentLoginResult> loginInstitutional({
     required String matricula,
     required String password,
@@ -931,11 +936,15 @@ class EndpointDevices extends EndpointAuthenticated {
   String get name => 'devices';
 
   /// Assina o CSR do aparelho do ACS autenticado e devolve a folha de cliente
-  /// MQTT (#94). O aparelho é o `deviceId` do token, nunca um parâmetro; a
-  /// microárea do token é o CN. Regras de recusa em
-  /// `DeviceCertificateService.issue`: papel/território/aparelho/CA ausente →
-  /// [AlertPermissionException]; CSR inválido, chave fora de EC P-256, CN
-  /// divergente ou excesso de emissões → [AlertValidationException].
+  /// MQTT (#94). O aparelho é o `deviceId` do token, nunca um parâmetro; o CN
+  /// é a microárea da conta relida do banco. Regras de recusa em
+  /// `DeviceCertificateService.issue`: papel/território/aparelho/CA ausente ou
+  /// conta inativa → [AlertPermissionException]; aparelho com pedido de
+  /// limpeza → [DeviceWipeRequiredException] (tipada, como no login); excesso
+  /// de emissões ou microárea do token atrás da conta →
+  /// [DeviceCertificateRetryLaterException] (transitória no app); CSR
+  /// inválido, chave fora de EC P-256, CN divergente ou identificador fora do
+  /// formato → [AlertValidationException].
   _i2.Future<_i34.DeviceCertificateIssueResult> issueCertificate({
     required String accessToken,
     required String csrPem,

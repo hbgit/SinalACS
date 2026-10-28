@@ -35,8 +35,8 @@ const _pacienteFora = '00000000-0000-4000-8000-0000000000d7';
 const _matriculaA = 'ACS-UPLOAD-A';
 const _matriculaB = 'ACS-UPLOAD-B';
 const _senha = 'senha-sintetica-de-teste';
-const _aparelhoA = 'aparelho-upload-A';
-const _aparelhoB = 'aparelho-upload-B';
+const _aparelhoA = '00000000-0000-4000-8000-00000000a1d1';
+const _aparelhoB = '00000000-0000-4000-8000-00000000a1d2';
 
 AppConfig _config() => AppConfig(
       mqttBroker: 'localhost:1883',
@@ -323,10 +323,10 @@ void main() {
       final r = await enviar(segundo.uploadToken!, [_entry(_local(10))]);
       expect(r.single.syncStatus, SyncStatus.synced);
       // Outro aparelho do mesmo ACS não é afetado.
-      final outro = await entrar(deviceId: 'aparelho-upload-A2');
+      final outro = await entrar(deviceId: '00000000-0000-4000-8000-00000000a1d3');
       await entrar();
       final r2 = await enviar(outro.uploadToken!, [_entry(_local(11))],
-          deviceId: 'aparelho-upload-A2');
+          deviceId: '00000000-0000-4000-8000-00000000a1d3');
       expect(r2.single.syncStatus, SyncStatus.synced);
     });
 

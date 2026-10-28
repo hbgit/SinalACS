@@ -1,4 +1,5 @@
 import 'package:serverpod/serverpod.dart';
+import 'package:sinalacs_server/src/application/devices/device_certificate_service.dart';
 import 'package:sinalacs_server/src/endpoints/authenticated_endpoint.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
 import 'package:sinalacs_server/src/runtime/alert_runtime.dart';
@@ -8,11 +9,15 @@ import 'package:sinalacs_server/src/runtime/alert_runtime.dart';
 /// (#94).
 class DevicesEndpoint extends AuthenticatedEndpoint {
   /// Assina o CSR do aparelho do ACS autenticado e devolve a folha de cliente
-  /// MQTT (#94). O aparelho é o `deviceId` do token, nunca um parâmetro; a
-  /// microárea do token é o CN. Regras de recusa em
-  /// `DeviceCertificateService.issue`: papel/território/aparelho/CA ausente →
-  /// [AlertPermissionException]; CSR inválido, chave fora de EC P-256, CN
-  /// divergente ou excesso de emissões → [AlertValidationException].
+  /// MQTT (#94). O aparelho é o `deviceId` do token, nunca um parâmetro; o CN
+  /// é a microárea da conta relida do banco. Regras de recusa em
+  /// `DeviceCertificateService.issue`: papel/território/aparelho/CA ausente ou
+  /// conta inativa → [AlertPermissionException]; aparelho com pedido de
+  /// limpeza → [DeviceWipeRequiredException] (tipada, como no login); excesso
+  /// de emissões ou microárea do token atrás da conta →
+  /// [DeviceCertificateRetryLaterException] (transitória no app); CSR
+  /// inválido, chave fora de EC P-256, CN divergente ou identificador fora do
+  /// formato → [AlertValidationException].
   Future<DeviceCertificateIssueResult> issueCertificate(
     Session session, {
     required String accessToken,
@@ -23,6 +28,10 @@ class DevicesEndpoint extends AuthenticatedEndpoint {
       return await AlertRuntime.instance
           .deviceCertificateServiceFor(session)
           .issue(user, csrPem);
+    } on DeviceCertificateRateLimited catch (error) {
+      throw DeviceCertificateRetryLaterException(message: error.message);
+    } on DeviceCertificateSessionStale catch (error) {
+      throw DeviceCertificateRetryLaterException(message: '${error.message}');
     } on ArgumentError catch (error) {
       throw AlertValidationException(message: '${error.message}');
     } on StateError catch (error) {
