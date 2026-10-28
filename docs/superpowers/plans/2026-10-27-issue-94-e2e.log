@@ -1,0 +1,118 @@
+== stack de e2e (banco de teste)
+NOTICE:  database "sinalacs_e2e" does not exist, skipping
+Fixtures de e2e gravadas (6 pacientes, 2 ACS, 1 admin, 1 coordenador) em ../../.e2e/fixtures.json.
+== segundo aparelho: compilando a ferramenta
+== emulador: certificado por aparelho
+00:00 +0: loading /home/rock/Documents/Dev/APPs/SinalACS/apps/acs/integration_test/device_cert_e2e.dart
+Running Gradle task 'assembleDebug'...                          
+WARNING: A restricted method in java.lang.System has been called
+WARNING: java.lang.System::load has been called by net.rubygrapefruit.platform.internal.NativeLibraryLoader in an unnamed module (file:/home/rock/.gradle/wrapper/dists/gradle-9.1.0-all/7wzd0jkjit61aq2p43wpjgij9/gradle-9.1.0/lib/native-platform-0.22-milestone-28.jar)
+WARNING: Use --enable-native-access=ALL-UNNAMED to avoid a warning for callers in this module
+WARNING: Restricted methods will be blocked in a future release unless native access is enabled
+
+Running Gradle task 'assembleDebug'...                             13.2s
+✓ Built build/app/outputs/flutter-apk/app-debug.apk
+Installing build/app/outputs/flutter-apk/app-debug.apk...          618ms
+00:00 +0: certificado por aparelho: emissão, dois aparelhos, limpeza remota e reemissão
+E2E_CERT_PAINEL acs=a3e4a281-67b1-49be-b183-4a5b24963223 device=877d6a75-6697-4215-8922-564d9e45c03b serial=7f9b15e0725c4c55b92567b48fe49e32
+== 1) emulador: aparelho 877d6a75-6697-4215-8922-564d9e45c03b
+  uma linha de device_certificates do emulador: 1
+  emulador: serial|CN = microárea da fixture|revogado|motivo: 7f9b15e0725c4c55b92567b48fe49e32|6830e547-eb25-4c5d-9a27-77c7cb63ce87|false|-
+  broker: New client connected from 172.19.0.1:49968 as sinalacs-acs-a3e4a281-67b1-49be-b183-4a5b24963223-877d6a75-6697-4215-8922-564d9e45c03b (p3, c0, k30, u'6830e547-eb25-4c5d-9a27-77c7cb63ce87').
+== 2) segundo aparelho (VM)
+  [dev2] E2E_DEV2_CONECTADO device=031fccb4-29b6-4fee-a551-ed428ab0a858 serial=3c4adf2a86584573918a90d12d9bda6a
+  duas linhas de device_certificates do ACS: 2
+  segundo aparelho: serial|CN|revogado|motivo: 3c4adf2a86584573918a90d12d9bda6a|6830e547-eb25-4c5d-9a27-77c7cb63ce87|false|-
+  broker: New client connected from 172.19.0.1:49980 as sinalacs-acs-a3e4a281-67b1-49be-b183-4a5b24963223-031fccb4-29b6-4fee-a551-ed428ab0a858 (p3, c0, k30, u'6830e547-eb25-4c5d-9a27-77c7cb63ce87').
+== 3) alerta para os dois aparelhos
+E2E_DISPARAR_ALERTA id=53241a13-a2f1-4c82-a792-b8286d3243aa dev2=031fccb4-29b6-4fee-a551-ed428ab0a858
+  [script] alerta 53241a13-a2f1-4c82-a792-b8286d3243aa inserido e enfileirado no outbox (02:04:01)
+  [dev2] E2E_DEV2_ALERTA_RECEBIDO 53241a13-a2f1-4c82-a792-b8286d3243aa
+E2E_ALERTA_NA_TELA id=53241a13-a2f1-4c82-a792-b8286d3243aa
+  o alerta 53241a13-a2f1-4c82-a792-b8286d3243aa chegou ao emulador e ao segundo aparelho
+== 4) limpeza remota do segundo aparelho
+  [dev2] E2E_DEV2_DERRUBADO at_ms=1793167448205
+E2E_WIPE_DEV2_PEDIDO order=096edd5e-6d0a-46ba-b171-0171ca8910bd device=031fccb4-29b6-4fee-a551-ed428ab0a858
+  derrubado 2041 ms depois do revokedAt
+E2E_DISPARAR_ALERTA2 id=60b8b1dc-ad28-4260-95bc-73e4166283cf
+  [dev2] E2E_DEV2_RECONEXAO_RECUSADA erro=MqttTlsRefused
+  E2E_DEV2_RECONEXAO_RECUSADA erro=MqttTlsRefused
+  segundo aparelho revogado como wipe: 3c4adf2a86584573918a90d12d9bda6a|6830e547-eb25-4c5d-9a27-77c7cb63ce87|true|wipe
+  serial 3c4adf2a86584573918a90d12d9bda6a na CRL (openssl crl -text)
+  sidecar: CRL recarregada (2026-10-28T06:04:08Z), revogação às 2026-10-28T06:04:06Z
+== 5) o emulador segue recebendo
+  [script] alerta 60b8b1dc-ad28-4260-95bc-73e4166283cf inserido e enfileirado no outbox (02:04:35)
+E2E_ALERTA2_NA_TELA id=60b8b1dc-ad28-4260-95bc-73e4166283cf
+  o alerta 60b8b1dc-ad28-4260-95bc-73e4166283cf chegou ao emulador depois da revogação do outro aparelho
+  os dois alertas publicados pelo outbox: 2
+== 6) limpeza remota do emulador e reemissão
+E2E_WIPE_DEV1_PEDIDO order=7ac7510c-f5e7-4e57-a6c3-9cdd0773bcf6 device=877d6a75-6697-4215-8922-564d9e45c03b
+E2E_CERT_OK acs=a3e4a281-67b1-49be-b183-4a5b24963223 novo=dddb87c4-24b3-4b82-920c-0c2e43c24049 serial=df95f7b7c2b24f7a806ea6a2dd88e988
+00:53 +1: (tearDownAll)
+00:53 +1: All tests passed!
+  emulador revogado como wipe: 7f9b15e0725c4c55b92567b48fe49e32|6830e547-eb25-4c5d-9a27-77c7cb63ce87|true|wipe
+  serial 7f9b15e0725c4c55b92567b48fe49e32 na CRL (openssl crl -text)
+  três linhas de device_certificates do ACS: 3
+  id novo: serial|CN|revogado|motivo: df95f7b7c2b24f7a806ea6a2dd88e988|6830e547-eb25-4c5d-9a27-77c7cb63ce87|false|-
+  broker: New client connected from 172.19.0.1:41336 as sinalacs-acs-a3e4a281-67b1-49be-b183-4a5b24963223-dddb87c4-24b3-4b82-920c-0c2e43c24049 (p3, c0, k30, u'6830e547-eb25-4c5d-9a27-77c7cb63ce87').
+== 7) trilha de auditoria
+  trilha device_cert_issued (pelo ACS): 3
+  trilha device_cert_revoked:wipe (pelo coordenador): 2
+  nenhuma outra revogação na trilha: 2
+  OK — 25 linha(s) verificada(s), cadeia íntegra.
+E2E do certificado por aparelho: OK
+A stack de desenvolvimento foi substituída pela de e2e: rode `docker compose up -d` para voltá-la.
+
+################################################################
+# Anexo — regressões da #81 e bateria completa (2026-10-28)
+################################################################
+
+== ./scripts/qa/acs_remote_wipe_e2e.sh (regressão da #81 + asserções novas da #94)
+== stack de e2e (banco de teste)
+== limpeza remota no emulador
+== limpeza remota no banco de teste (pedido fc01e2f8-721f-4703-b413-99d64e77cad9)
+  certificado do id antigo revogado como wipe: true|wipe
+  serial 9f938919327c44768550a799077a2175 do id antigo na CRL (openssl crl -text)
+== cadeia de auditoria no banco de teste
+  OK — 21 linha(s) verificada(s), cadeia íntegra.
+E2E de limpeza remota: OK
+
+== ./scripts/qa/e2e.sh --emulator --keep (o que a CI roda: invariantes de TLS, live_check dos dois apps, smoke dos três apps)
+== subindo a stack ==
+== aguardando o backend ficar saudável ==
+== aplicando o seed de desenvolvimento ==
+== sincronizando as CAs (broker e RPC) para os dois apps ==
+== RNF04/L-08: as invariantes de TLS na stack que acabou de subir ==
+== Grupo A: a stack de pé e o RPC respondendo por HTTPS com a CA de desenvolvimento ==
+== Grupo B: o RPC fala TLS 1.3, e só ele ==
+== Grupo C: não existe caminho em texto claro até o RPC ==
+== Grupo D: a regra de https do host (não precisa da stack) ==
+== Grupo E: o Traefik fala com o backend por TLS 1.3 MÚTUO, e só por ele ==
+== Grupo F: o broker MQTT fala TLS 1.3, e só ele ==
+== paciente: RPC (saúde, login, triagem, alerta, idempotência) ==
+== ACS: ciclo completo (RPC + MQTT/TLS + sincronização de visita) ==
+== smoke de integração no dispositivo ==
+00:00 +1: All tests passed!
+00:01 +1: All tests passed!
+OK — os apps falam com o backend.
+
+== ./scripts/qa/e2e.sh --emulator --full — bateria completa
+# O emulador ci36 (API 36, emulator 37.2.12, host Mesa Intel ADL GT2) morre com
+# SIGSEGV em gfxstream (ColorBufferGl::create → TextureResize → strlen(NULL)) ao
+# desinstalar um app depois de alguns arquivos de teste: 3 execuções inteiras
+# caíram no mesmo ponto (depois de encrypted_storage_test.dart) e o crash se
+# reproduz fora do e2e.sh; coredumpctl registra 26 crashes do qemu neste host
+# desde agosto. Por isso a bateria foi concluída arquivo a arquivo, com a mesma
+# stack (--keep), os mesmos --dart-define do e2e.sh e o emulador religado
+# (-gpu angle_indirect) quando caiu. Nenhuma falha de teste do produto.
+# paciente (bateria inteira, dentro do e2e.sh --full, 2 execuções; ~4 = push_register_test pulado sem PUSH_E2E=1, como sempre):
+00:46 +8 ~4: All tests passed!
+# acs:
+integration_test/encrypted_storage_test.dart: 02:37 +8: All tests passed!
+integration_test/map_flow_test.dart: 00:02 +4: All tests passed!
+integration_test/red_alert_cycle_test.dart: 00:01 +7: All tests passed!
+integration_test/layout_fonte_200_test.dart: 02:15 +1: All tests passed!
+integration_test/smoke_test.dart: 00:01 +1: All tests passed! (dentro do e2e.sh --emulator)
+# admin:
+integration_test/admin_mobile_smoke_test.dart: 00:13 +4: All tests passed! (repetido isolado com veredito do harness; na primeira passagem o adb travou na desinstalação final, depois dos 4 testes)
+# deriva pré-existente corrigida de passagem: encrypted_storage_test esperava schema v8; develop está em v9 desde a #83.

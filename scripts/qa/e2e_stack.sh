@@ -56,7 +56,11 @@ case "${1:-}" in
              infra/docker/traefik/runtime/certs/traefik-client.crt infra/docker/traefik/runtime/certs/traefik-client.key; do
       [[ -f "$f" ]] || falhou "falta $f depois do traefik-init"
     done
-    dc up -d --build --force-recreate --no-deps serverpod gorush traefik mosquitto >"$log" 2>&1 \
+    # O sidecar da CRL (#94) entra junto: ele vive no namespace de PID do
+    # container do broker (`pid: service:mosquitto`), e recriar só o broker o
+    # deixa parado ("failed to join PID namespace", medido) — com ele parado,
+    # nenhuma revogação chega ao broker.
+    dc up -d --build --force-recreate --no-deps serverpod gorush traefik mosquitto mosquitto-crl-reload >"$log" 2>&1 \
       || falhou 'a subida do backend falhou'
     for _ in $(seq 1 90); do
       [[ "$(docker inspect -f '{{.State.Health.Status}}' sinalacs-serverpod 2>/dev/null)" == healthy ]] && exit 0

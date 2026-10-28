@@ -60,6 +60,8 @@ for evento in wipe_ordered wipe_delivered wipe_confirmed; do
 done
 conferir 'assert: wipe_ordered pelo coordenador' "grep -qF 'and \\\"userId\\\" = '\"'\"'\$coord_id'\"'\"'' $s"
 conferir 'assert: a visita não está em visits' "grep -qF 'from visits where \\\"localId\\\" = ' $s"
+conferir 'assert: certificado do id antigo revogado como wipe (#94)' "grep -qF 'from device_certificates where' $s && grep -qF \"'true|wipe'\" $s"
+conferir 'assert: serial do id antigo na CRL (#94)' "grep -qF 'openssl crl -in infra/docker/mosquitto/runtime/devices/crl.pem' $s"
 conferir 'assert: cadeia de auditoria' "grep -qF 'audit_chain_check' $s"
 conferir 'linha final de sucesso' "grep -qF \"echo 'E2E de limpeza remota: OK'\" $s"
 
