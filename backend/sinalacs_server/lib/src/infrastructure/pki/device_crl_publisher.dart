@@ -135,6 +135,13 @@ class DeviceCrlPublisher implements CrlPublication {
     } catch (error) {
       _pendingSince ??= _clock().toUtc();
       if (_closed) return;
+      // Já há uma publicação enfileirada (um `publish()` chegou durante esta
+      // tentativa): ela é a nova tentativa, e roda logo em seguida.
+      if (_seguinte != null) {
+        _log('Falha ao publicar a CRL dos aparelhos (${error.runtimeType}); '
+            'a publicação enfileirada tenta de novo.');
+        return;
+      }
       final espera = _backoff;
       _log(
         'Falha ao publicar a CRL dos aparelhos (${error.runtimeType}); '
@@ -142,6 +149,10 @@ class DeviceCrlPublisher implements CrlPublication {
       );
       final dobro = espera * 2;
       _backoff = dobro > _maxBackoff ? _maxBackoff : dobro;
+      // Um só timer vivo: a publicação enfileirada que falha logo depois de
+      // outra substituiria o timer sem cancelá-lo, e duas cadeias de recuo
+      // correriam em paralelo.
+      _retry?.cancel();
       _retry = Timer(espera, () {
         _retry = null;
         unawaited(_agendar(null));

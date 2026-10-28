@@ -275,6 +275,50 @@ void main() {
       });
     });
 
+    test('publish durante uma tentativa que falha deixa um único timer pendente', () {
+      fakeAsync((async) {
+        // openssl lento (1 s) e sempre falhando: o segundo publish() chega
+        // durante a primeira tentativa e fica enfileirado.
+        final p = DeviceCrlPublisher(
+          config: _semDisco,
+          source: fonte,
+          buildCrl: ({required revoked, required crlNumber, required now, required days}) async {
+            tentativas.add(async.elapsed);
+            await Future<void>.delayed(const Duration(seconds: 1));
+            throw StateError('openssl saiu com 1');
+          },
+          writeCrl: (path, pem) async => gravadas.add(pem),
+          log: logs.add,
+          clock: () => _agora.add(async.elapsed),
+        );
+        p.publish();
+        async.elapse(const Duration(milliseconds: 500));
+        p.publish();
+        // t = 1 s: a 1ª falha; a enfileirada roda e falha em t = 2 s.
+        async.elapse(const Duration(milliseconds: 1500));
+        expect(tentativas, [Duration.zero, const Duration(seconds: 1)]);
+        expect(async.pendingTimers, hasLength(1));
+
+        // Uma só cadeia de recuo: a próxima em 2 s (t = 4), depois 4 s.
+        async.elapse(const Duration(seconds: 3));
+        expect(tentativas.last, const Duration(seconds: 4));
+        expect(async.pendingTimers, hasLength(1));
+        async.elapse(const Duration(seconds: 1)); // falha em t = 5
+        async.elapse(const Duration(seconds: 4)); // próxima em t = 9
+        expect(tentativas, [
+          Duration.zero,
+          const Duration(seconds: 1),
+          const Duration(seconds: 4),
+          const Duration(seconds: 9),
+        ]);
+
+        p.close();
+        async.elapse(const Duration(seconds: 1)); // a tentativa em voo termina
+        expect(async.pendingTimers, isEmpty);
+        expect(gravadas, isEmpty);
+      });
+    });
+
     test('close() cancela a tentativa pendente', () {
       fakeAsync((async) {
         final p = publicador(async, falhas: 1);

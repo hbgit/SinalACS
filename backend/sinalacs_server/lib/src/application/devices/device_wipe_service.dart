@@ -157,6 +157,17 @@ class DeviceWipeService {
       at: at,
     );
     final orderId = r.order.id.toString();
+    if (r.created) {
+      // A revogação e a auditoria dela já foram na transação do pedido; aqui
+      // só a CRL e a derrubada da sessão. Antes da linha do pedido: a trilha
+      // é fail-closed, e uma falha dela depois do commit não pode deixar a CRL
+      // sem a serial nem o aparelho revogado conectado.
+      await deviceRevocations?.afterCommit(
+        reason: DeviceCertRevocationReason.wipe,
+        at: at,
+        deviceId: deviceId,
+      );
+    }
     await audit.record(
       AuditEvent(
         userId: user.id,
@@ -166,15 +177,6 @@ class DeviceWipeService {
         result: r.created ? 'wipe_ordered' : 'already_ordered',
       ),
     );
-    if (r.created) {
-      // A revogação e a auditoria dela já foram na transação do pedido; aqui
-      // só a CRL e a derrubada da sessão, que não se desfazem.
-      await deviceRevocations?.afterCommit(
-        reason: DeviceCertRevocationReason.wipe,
-        at: at,
-        deviceId: deviceId,
-      );
-    }
     return AdminDeviceWipeResult(
       orderId: orderId,
       requestedAt: r.order.requestedAt,

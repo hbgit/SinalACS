@@ -354,17 +354,19 @@ class AdminAccountService {
     // extremo de o ACS ter saído do escopo entre o commit e esta releitura —
     // aí a linha do `UPDATE` ainda descreve o vínculo que de fato aconteceu.
     final acs = await store.acsById(escopo, acsId) ?? movido;
-    await _auditar(
-      user,
-      recurso,
-      result: 'micro_area_changed',
-      resourceId: acs.id,
-    );
+    // CRL e derrubada antes das linhas da trilha (fail-closed): a revogação já
+    // foi confirmada e não pode esperar por uma auditoria que falhe.
     await _depoisDaRevogacao(
       user,
       acsId,
       DeviceCertRevocationReason.microAreaChanged,
       at,
+    );
+    await _auditar(
+      user,
+      recurso,
+      result: 'micro_area_changed',
+      resourceId: acs.id,
     );
     return acs;
   }
@@ -416,12 +418,8 @@ class AdminAccountService {
     // saído do escopo entre o commit e esta leitura — aí a linha da
     // pré-checagem, com a flag que a transação gravou, ainda descreve o estado.
     final acs = await store.acsById(escopo, acsId) ?? antes.copyWith(active: active);
-    await _auditar(
-      user,
-      recurso,
-      result: active ? 'activated' : 'deactivated',
-      resourceId: acs.id,
-    );
+    // CRL e derrubada antes das linhas da trilha (fail-closed): a revogação já
+    // foi confirmada e não pode esperar por uma auditoria que falhe.
     if (!active) {
       await _depoisDaRevogacao(
         user,
@@ -430,6 +428,12 @@ class AdminAccountService {
         at,
       );
     }
+    await _auditar(
+      user,
+      recurso,
+      result: active ? 'activated' : 'deactivated',
+      resourceId: acs.id,
+    );
     return acs;
   }
 
@@ -611,7 +615,8 @@ class AdminAccountService {
   /// Os certificados que a transação da conta revogou ([reason] + [at]):
   /// uma linha `device_cert_revoked:<motivo>` por certificado (ator = o
   /// operador), a CRL e a derrubada da sessão de cada aparelho (#94). Depois
-  /// do commit e da linha da operação, como toda escrita deste serviço.
+  /// do commit e ANTES da linha da operação: a CRL e a derrubada não podem
+  /// depender de a trilha gravar.
   Future<void> _depoisDaRevogacao(
     AuthenticatedUser user,
     String acsId,

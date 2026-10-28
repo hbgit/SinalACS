@@ -3,10 +3,18 @@ import 'dart:async';
 import 'package:mqtt_client/mqtt_client.dart';
 import 'package:mqtt_client/mqtt_server_client.dart';
 import 'package:serverpod/serverpod.dart';
+import 'package:sinalacs_server/src/application/admin/admin_account_service.dart';
+import 'package:sinalacs_server/src/application/audit/audit_trail.dart';
 import 'package:sinalacs_server/src/application/auth/development_auth_service.dart';
+import 'package:sinalacs_server/src/application/devices/device_wipe_service.dart';
 import 'package:sinalacs_server/src/application/devices/device_certificate_service.dart';
 import 'package:sinalacs_server/src/config/app_config.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
+import 'package:sinalacs_server/src/infrastructure/crypto/argon2_password_hasher.dart';
+import 'package:sinalacs_server/src/infrastructure/database/orm_acs_credential_store.dart';
+import 'package:sinalacs_server/src/infrastructure/database/orm_admin_account_store.dart';
+import 'package:sinalacs_server/src/infrastructure/database/orm_audit_trail.dart';
+import 'package:sinalacs_server/src/infrastructure/database/orm_device_wipe_store.dart';
 import 'package:sinalacs_server/src/infrastructure/mqtt/mqtt_session_kicker.dart';
 import 'package:sinalacs_server/src/runtime/alert_runtime.dart';
 import 'package:test/test.dart';
@@ -34,6 +42,13 @@ const _operador = AuthenticatedUser(
   microAreaId: null,
   deviceId: 'sem-aparelho',
 );
+
+/// Trilha fora do ar: toda gravação pós-commit do serviço falha (fail-closed).
+class _TrilhaQuebrada extends AuditTrail {
+  @override
+  Future<void> record(AuditEvent event) async =>
+      throw StateError('trilha fora do ar');
+}
 
 class _CrlContada implements CrlPublication {
   int chamadas = 0;
@@ -283,6 +298,108 @@ void main() {
         expect(await revogacoesAuditadas(), ['device_cert_revoked:wipe']);
       },
     );
+
+    group('trilha que falha depois da revogação confirmada', () {
+      DeviceRevocationEffects efeitos() =>
+          AlertRuntime.instance.deviceRevocationEffectsFor(session);
+
+      AdminAccountService contas() {
+        final credenciais = OrmAcsCredentialStore(session: () => session);
+        return AdminAccountService(
+          store: OrmAdminAccountStore(session: () => session),
+          credentials: credenciais,
+          totpStore: credenciais,
+          activationStore: OrmAcsCredentialStore(
+            session: () => session,
+            staff: true,
+          ),
+          hasher: const Argon2PasswordHasher(),
+          audit: _TrilhaQuebrada(),
+          deviceRevocations: efeitos(),
+        );
+      }
+
+      test(
+        'setAcsActive(false): a falha da trilha ainda publica a CRL e derruba',
+        () async {
+          await expectLater(
+            contas().setAcsActive(_operador, acsId: _acs, active: false),
+            throwsA(isA<StateError>()),
+          );
+          expect((await certificados()).every((c) => c.revokedAt != null), isTrue);
+          await Future.wait([
+            a1.caiu.future,
+            a2.caiu.future,
+          ]).timeout(const Duration(seconds: 2));
+          expect(crl.chamadas, 1);
+        },
+      );
+
+      test(
+        'setAcsMicroArea: a falha da trilha ainda publica a CRL e derruba',
+        () async {
+          await expectLater(
+            contas().setAcsMicroArea(_operador, acsId: _acs, microAreaId: _ma2),
+            throwsA(isA<StateError>()),
+          );
+          await Future.wait([
+            a1.caiu.future,
+            a2.caiu.future,
+          ]).timeout(const Duration(seconds: 2));
+          expect(crl.chamadas, 1);
+        },
+      );
+
+      test(
+        'orderWipe: a falha da trilha ainda publica a CRL e derruba',
+        () async {
+          final agora = DateTime.now().toUtc();
+          await AcsRefreshToken.db.insertRow(
+            session,
+            AcsRefreshToken(
+              userId: UuidValue.fromString(_acs),
+              familyId: UuidValue.fromString(
+                '00000000-0000-4000-8000-00000000c5fe',
+              ),
+              tokenHash: 'rev-wipe-trilha',
+              deviceId: _dev1,
+              issuedAt: agora,
+              idleExpiresAt: agora.add(const Duration(hours: 2)),
+              absoluteExpiresAt: agora.add(const Duration(hours: 8)),
+            ),
+          );
+          final servico = DeviceWipeService(
+            // A revogação e a linha dela vão na transação do pedido (trilha
+            // real); quem falha é a linha `wipe_ordered`, depois do commit.
+            store: OrmDeviceWipeStore(
+              session: () => session,
+              appendAudit: OrmAuditTrail(
+                session: () => session,
+                chainSecret: AlertRuntime.instance.config.auditChainSecret,
+              ).recordInTransaction,
+            ),
+            accounts: OrmAdminAccountStore(session: () => session),
+            audit: _TrilhaQuebrada(),
+            deviceRevocations: efeitos(),
+          );
+          await expectLater(
+            servico.orderWipe(
+              _operador,
+              acsId: _acs,
+              deviceId: _dev1,
+              reason: DeviceWipeReason.lost,
+            ),
+            throwsA(isA<StateError>()),
+          );
+          expect(
+            (await certificados()).first.revocationReason,
+            DeviceCertRevocationReason.wipe,
+          );
+          await a1.caiu.future.timeout(const Duration(seconds: 2));
+          expect(crl.chamadas, 1);
+        },
+      );
+    });
 
     test('setAcsMicroArea para a mesma microárea não revoga', () async {
       await AlertRuntime.instance
