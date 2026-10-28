@@ -633,7 +633,7 @@ void main() {
           enrollmentId: 'ACS-EP-VINC-1',
           microAreaId: _maA,
         );
-        const aparelho = 'aparelho-vinculo-1';
+        const aparelho = '00000000-0000-4000-8000-0000000091d1';
         final login = await InstitutionalAuthService(
           store: AlertRuntimeHarness.store(sessionBuilder.build()),
           hasher: AlertRuntimeHarness.hasher,
@@ -692,7 +692,7 @@ void main() {
     test(
       'desativar revoga refresh e envio diferido: refreshSession e syncDeferred são recusados depois',
       () async {
-        const aparelho = 'aparelho-desativacao-1';
+        const aparelho = '00000000-0000-4000-8000-0000000091d2';
         await _usuario(
           session,
           _acsDesat,

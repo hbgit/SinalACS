@@ -42,6 +42,18 @@ void main() {
     expect(fonte, contains('wipeJournal: SharedPreferencesWipeJournal()'));
   });
 
+  test('main.dart liga SecureStorageDeviceCertificateStore; o enroller não importa dart:ui (#94)', () {
+    final fonte = File('lib/main.dart').readAsStringSync();
+    expect(fonte, contains('deviceCertificates: SecureStorageDeviceCertificateStore()'));
+    // O enroller fica na árvore do `backend_client.dart` (VM): nada de Flutter,
+    // nem a loja do Keystore, nem de forma transitiva.
+    const enroller = 'lib/core/services/device_certificate_enroller.dart';
+    expect(_importsProibidosAlcancaveis(enroller), isEmpty);
+    final imports = File(enroller).readAsLinesSync().where((l) => l.startsWith('import ')).join('\n');
+    expect(imports, isNot(contains('secure_device_certificate_store.dart')));
+    expect(_importsProibidosAlcancaveis('lib/core/security/device_certificate_store.dart'), isEmpty);
+  });
+
   test('o caminho importado pelo backend_client não puxa o Flutter', () {
     for (final arquivo in [
       'lib/core/security/session_token_store.dart',

@@ -1428,6 +1428,31 @@ class Endpoints extends _i1.EndpointDispatch {
       name: 'devices',
       endpoint: endpoints['devices']!,
       methodConnectors: {
+        'issueCertificate': _i1.MethodConnector(
+          name: 'issueCertificate',
+          params: {
+            'accessToken': _i1.ParameterDescription(
+              name: 'accessToken',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'csrPem': _i1.ParameterDescription(
+              name: 'csrPem',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async => (endpoints['devices'] as _i5.DevicesEndpoint)
+                  .issueCertificate(
+                    session,
+                    accessToken: params['accessToken'],
+                    csrPem: params['csrPem'],
+                  ),
+        ),
         'registerPushToken': _i1.MethodConnector(
           name: 'registerPushToken',
           params: {

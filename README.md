@@ -87,8 +87,7 @@ As versões usadas pela CI estão em
 ```
 
 O script cria o `.env` com segredos aleatórios desta máquina —
-`POSTGRES_PASSWORD`, `TEST_DATABASE_PASSWORD`, `MQTT_BACKEND_PASSWORD`,
-`MQTT_ACS_PASSWORD`, `JWT_SECRET`, `AUDIT_CHAIN_SECRET`,
+`POSTGRES_PASSWORD`, `TEST_DATABASE_PASSWORD`, `JWT_SECRET`, `AUDIT_CHAIN_SECRET`,
 `HEALTH_DATA_ENCRYPTION_KEY`, `CPF_HASH_PEPPER`, `DEV_ACS_PASSWORD` e
 `DEV_ADMIN_PASSWORD` — e gera `backend/sinalacs_server/config/passwords.yaml`
 (gitignored; sem ele a suíte do Serverpod morre sem imprimir nada). Os dois
@@ -160,18 +159,16 @@ cd apps/acs && flutter pub get && cd -
 ./scripts/dev/run_acs.sh
 ```
 
-Use o script, não `flutter run` direto. A senha do broker é resolvida em tempo
-de compilação e não tem valor padrão: ela é gerada por máquina pelo
-`bootstrap_env.sh`. O script lê o `.env`, copia as duas CAs de desenvolvimento
-(a do broker e a do RPC) para os assets e passa os cinco `--dart-define` por um
-arquivo temporário (`--dart-define-from-file`,
-apagado ao sair), para a senha não trafegar na linha de comando do `flutter`. Os
-cinco são `SINALACS_HOST`, `SINALACS_MQTT_HOST`, `SINALACS_MQTT_USER`,
-`SINALACS_MQTT_PASSWORD` e `GOOGLE_MAPS_API_KEY`. Um
-`flutter build apk` sem o `SINALACS_MQTT_PASSWORD` — o único dos cinco sem
-valor padrão — **falha** (a guarda vive em
-`apps/acs/android/app/build.gradle.kts`) em vez de compilar em silêncio um APK
-que nunca recebe alerta.
+Use o script, não `flutter run` direto. Ele copia as duas CAs de
+desenvolvimento (a do broker e a do RPC) para os assets, confere as cópias e
+passa `SINALACS_HOST`, `SINALACS_MQTT_HOST` e, se houver,
+`GOOGLE_MAPS_API_KEY` por um arquivo temporário (`--dart-define-from-file`,
+apagado ao sair). Nenhuma credencial do broker vai no APK (#94): depois do
+login, cada aparelho gera o próprio par de chaves e recebe do backend o seu
+certificado de cliente MQTT, guardado no Keystore. A senha MQTT e o
+certificado compartilhado deixaram de existir, e
+`./scripts/qa/acs_apk_no_client_key.sh --debug` confere que o APK não leva
+chave privada.
 
 Para escolher o dispositivo, ou gerar o APK:
 
@@ -336,10 +333,11 @@ classificação de risco é determinística e não pode ser alterada manualmente
 alertas vermelhos não são descartados em silêncio e o acesso do ACS fica
 restrito à própria microárea.
 
-Autenticação, RBAC por microárea, TLS no RPC e no broker (com senha, ACL e
-certificado de cliente) estão implementados **na stack local**. Ainda faltam,
-entre outros: provisionamento de certificado de cliente por aparelho em
-produção, refresh token para o paciente, imposição de append-only da trilha de
+Autenticação, RBAC por microárea, TLS no RPC e no broker (com ACL e
+certificado de cliente por aparelho, revogável pela limpeza remota, sem senha)
+estão implementados **na stack local**. Ainda faltam, entre outros: a PKI de
+produção da CA de aparelhos ([#118](https://github.com/hbgit/SinalACS/issues/118)),
+refresh token para o paciente, imposição de append-only da trilha de
 auditoria no banco e o deploy de produção — ver [PROGRESS.md](PROGRESS.md) e a
 [política de segurança](.github/SECURITY.md).
 

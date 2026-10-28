@@ -14,8 +14,7 @@
 ///
 ///   flutter test integration_test \
 ///     --dart-define=SINALACS_HOST=https://10.0.2.2/ \
-///     --dart-define=SINALACS_MQTT_HOST=10.0.2.2 \
-///     --dart-define=SINALACS_MQTT_PASSWORD="$MQTT_ACS_PASSWORD"
+///     --dart-define=SINALACS_MQTT_HOST=10.0.2.2
 ///
 /// A CI usa `https://localhost:8443/` com `adb reverse tcp:8443 tcp:443` e
 /// `adb reverse tcp:8883 tcp:8883` em vez de 10.0.2.2: medido no runner da CI
@@ -26,7 +25,8 @@
 /// nome (`localhost`) importa para os dois. 8883 (MQTT) já não é privilegiada,
 /// então mantém a mesma porta dos dois lados.
 ///
-/// A senha é obrigatória: ela não tem default no `BackendConfig`.
+/// O broker não tem senha para o ACS (#94): o feed pede ao backend o
+/// certificado deste aparelho.
 ///
 /// PRIVACIDADE: só os UUIDs sintéticos do seed.
 ///
@@ -51,7 +51,10 @@ import 'package:sinalacs_acs/core/database/sqlcipher_visit_store.dart';
 import 'package:sinalacs_acs/core/network/backend_client.dart';
 import 'package:sinalacs_acs/core/network/backend_config.dart';
 import 'package:sinalacs_acs/core/security/database_key_store.dart';
+import 'package:sinalacs_acs/core/security/device_certificate_store.dart';
+import 'package:sinalacs_acs/core/security/session_token_store.dart';
 import 'package:sinalacs_acs/core/services/alert_feed.dart';
+import 'package:sinalacs_acs/core/services/device_certificate_enroller.dart';
 import 'package:sinalacs_acs/core/services/alert_queue.dart';
 import 'package:sinalacs_acs/core/services/backend_visit_synchronizer.dart';
 import 'package:sinalacs_acs/core/services/offline_visit_queue.dart';
@@ -80,18 +83,6 @@ Future<List<int>?> _devRpcCaBytes() async {
 
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
-
-  setUpAll(() {
-    // Sem a senha, a assinatura do tópico falha depois do timeout do broker e
-    // o motivo real — o comando de compilação — não aparece em lugar nenhum.
-    if (BackendConfig.mqttPasswordMissing) {
-      fail(
-        'Compile com --dart-define=SINALACS_MQTT_PASSWORD (o valor está em '
-        'MQTT_ACS_PASSWORD no .env). O caminho pronto é '
-        './scripts/qa/e2e.sh --emulator.',
-      );
-    }
-  });
 
   late BackendClient backend;
   late api.Client patientClient;
@@ -154,7 +145,12 @@ void main() {
     final microAreaId = session.microAreaId!;
 
     final queue = AlertQueue(microAreaId: microAreaId);
-    final feed = MqttAlertFeed(queue: queue);
+    final feed = MqttAlertFeed(
+      queue: queue,
+      // Certificado por aparelho (#94), emitido pelo backend para esta sessão.
+      enroller: DeviceCertificateEnroller(store: InMemoryDeviceCertificateStore(), backend: backend),
+      deviceIds: MemoryDeviceIdStore(),
+    );
 
     /// Espera o alerta ESPECÍFICO criado pelo teste.
     ///

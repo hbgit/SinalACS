@@ -1178,24 +1178,24 @@ void main() {
       expect(find.byKey(const Key('storage_error')), findsOneWidget);
     });
 
-    testWidgets('sem senha compilada o painel diz que falta a senha, não que falta conexão', (tester) async {
+    testWidgets('sem certificado do aparelho o painel diz isso, não que falta conexão (#94)', (tester) async {
       await abrirPainel(
         tester,
         visitQueue: OfflineVisitQueue(),
         feedBuilder: (queue) => FakeAlertFeed(
           queue,
           failure: const AlertFeedFailure(
-            AlertFeedFailureKind.missingPassword,
-            title: 'Este aplicativo foi compilado sem a senha do broker de alertas.',
-            detail: 'Nenhum alerta será recebido até o aplicativo ser recompilado.',
+            AlertFeedFailureKind.certificateUnavailable,
+            title: 'Sem certificado deste aparelho para a central',
+            detail: 'Será emitido quando houver rede.',
+            transient: true,
           ),
         ),
       );
 
-      expect(
-        find.text('Este aplicativo foi compilado sem a senha do broker de alertas.'),
-        findsOneWidget,
-      );
+      expect(find.text('Sem certificado deste aparelho para a central'), findsOneWidget);
+      expect(find.textContaining('Será emitido quando houver rede.'), findsOneWidget);
+      expect(find.byKey(const Key('retry_feed')), findsOneWidget, reason: 'transitória: oferece nova tentativa');
       expect(find.text('Sem conexão com a central de alertas.'), findsNothing);
     });
 
@@ -1267,6 +1267,38 @@ void main() {
       expect(find.text('Nenhum alerta na sua microárea agora.'), findsNothing);
     });
 
+    testWidgets('falha depois do start (onFailure, #94) mostra o banner e reinicia o feed pelo backoff', (tester) async {
+      late FakeAlertFeed feed;
+
+      await abrirPainel(
+        tester,
+        visitQueue: OfflineVisitQueue(),
+        feedBuilder: (queue) => feed = FakeAlertFeed(queue),
+      );
+      expect(feed.startCount, 1);
+      expect(find.byKey(const Key('feed_error')), findsNothing);
+
+      // O broker recusou o certificado na reconexão automática.
+      feed.started = false;
+      feed.onConnectionChanged?.call(false);
+      feed.onFailure?.call(const AlertFeedFailure(
+        AlertFeedFailureKind.certificateUnavailable,
+        title: 'Sem certificado deste aparelho para a central',
+        detail: 'Será emitido quando houver rede.',
+        transient: true,
+      ));
+      await tester.pump();
+
+      expect(find.byKey(const Key('feed_error')), findsOneWidget);
+      expect(find.text('Sem certificado deste aparelho para a central'), findsOneWidget);
+
+      await tester.pump(const Duration(seconds: 2));
+      await tester.pumpAndSettle();
+
+      expect(feed.startCount, 2, reason: 'o ReconnectSchedule reinicia o feed, que reemite o certificado');
+      expect(find.byKey(const Key('feed_error')), findsNothing);
+    });
+
     testWidgets('o atraso entre tentativas dobra a cada falha', (tester) async {
       late FakeAlertFeed feed;
 
@@ -1305,7 +1337,7 @@ void main() {
       expect(find.text('Alertas em tempo real'), findsOneWidget);
     });
 
-    testWidgets('falta de senha não oferece nem agenda nova tentativa', (tester) async {
+    testWidgets('falta da CA da central não oferece nem agenda nova tentativa', (tester) async {
       late FakeAlertFeed feed;
 
       await abrirPainel(
@@ -1314,9 +1346,9 @@ void main() {
         feedBuilder: (queue) => feed = FakeAlertFeed(
           queue,
           failure: const AlertFeedFailure(
-            AlertFeedFailureKind.missingPassword,
-            title: 'Este aplicativo foi compilado sem a senha do broker de alertas.',
-            detail: 'Nenhum alerta será recebido até o aplicativo ser recompilado.',
+            AlertFeedFailureKind.missingCaAsset,
+            title: 'Falta o certificado da central neste aplicativo.',
+            detail: 'Sem ele a conexão segura não pode ser verificada.',
           ),
         ),
       );

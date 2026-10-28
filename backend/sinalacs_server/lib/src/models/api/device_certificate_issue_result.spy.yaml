@@ -1,0 +1,9 @@
+### Resposta de `devices.issueCertificate` (#94): a folha assinada, a serial e
+### a validade. `serverNow` deixa o app medir o desvio do próprio relógio antes
+### de decidir quando renovar.
+class: DeviceCertificateIssueResult
+fields:
+  certificatePem: String
+  serial: String
+  notAfter: DateTime
+  serverNow: DateTime

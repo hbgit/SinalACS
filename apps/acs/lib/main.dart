@@ -9,6 +9,7 @@ import 'package:sinalacs_acs/core/network/backend_config.dart';
 import 'package:sinalacs_acs/core/security/auth_bound_session_token_store.dart';
 import 'package:sinalacs_acs/core/security/biometric_gate.dart';
 import 'package:sinalacs_acs/core/security/keystore_vault.dart';
+import 'package:sinalacs_acs/core/security/secure_device_certificate_store.dart';
 import 'package:sinalacs_acs/core/security/secure_session_token_store.dart';
 import 'package:sinalacs_acs/core/security/secure_upload_token_store.dart';
 import 'package:sinalacs_acs/core/services/micro_area_directory_factory.dart';
@@ -81,6 +82,9 @@ Future<void> main({String? defaultHost}) async {
     // retomada e quando a rede volta (D8).
     uploadTokens: uploadTokens,
     deviceIds: deviceIds,
+    // Certificado MQTT deste aparelho (#94) e a chave privada dele, no
+    // Keystore: emitido pelo backend, nunca embutido no binário.
+    deviceCertificates: SecureStorageDeviceCertificateStore(),
     connectivityChanges: Connectivity()
         .onConnectivityChanged
         .map((results) => results.any((r) => r != ConnectivityResult.none)),

@@ -55,6 +55,31 @@ class DeviceWipeRequiredFailure extends BackendFailure {
   final String orderId;
 }
 
+/// O servidor não emitiu o certificado do aparelho AGORA, mas pode emitir mais
+/// tarde sem intervenção (#94, I1/C2): limite de emissões por hora atingido,
+/// ou a microárea da sessão ficou para trás da conta (a próxima renovação do
+/// token a corrige). Recuperável: o feed tenta de novo e mostra "Tentar agora".
+class DeviceCertificateRetryLater extends BackendFailure {
+  const DeviceCertificateRetryLater(super.message);
+}
+
+/// Folha de cliente MQTT que o servidor assinou para este aparelho (#94).
+/// [serverNow] é o relógio do servidor no momento da emissão: a validade é
+/// comparada com ele, não só com o relógio do aparelho.
+class IssuedDeviceCertificate {
+  const IssuedDeviceCertificate({
+    required this.certificatePem,
+    required this.serial,
+    required this.notAfter,
+    required this.serverNow,
+  });
+
+  final String certificatePem;
+  final String serial;
+  final DateTime notAfter;
+  final DateTime serverNow;
+}
+
 /// O ACS tem MFA ativa e a senha conferiu: falta o código do autenticador.
 class MfaCodeRequired extends BackendFailure {
   const MfaCodeRequired() : super('Informe o código do aplicativo autenticador.');
@@ -117,6 +142,14 @@ abstract class AcsBackend {
   /// `devices.confirmWipe`: o aparelho avisa que apagou tudo. Sem token e sem
   /// retorno; um par errado se comporta igual no servidor.
   Future<void> confirmDeviceWipe(String deviceId, String orderId);
+
+  /// `devices.issueCertificate` (#94): o servidor assina o CSR do aparelho da
+  /// sessão (o `deviceId` vem do token) e devolve a folha de cliente MQTT.
+  /// Pedido de limpeza: [DeviceWipeRequiredFailure] (e [onDeviceWipeRequired]);
+  /// "tente mais tarde" do servidor: [DeviceCertificateRetryLater]
+  /// (recuperável); recusa: [BackendFailure] não recuperável; sem rede:
+  /// recuperável.
+  Future<IssuedDeviceCertificate> issueDeviceCertificate(String csrPem);
 
   /// Esquece a sessão SÓ neste aparelho, sem rede: torna obsoleta a renovação
   /// em voo, descarta a sessão em memória e apaga o refresh token. É o passo
@@ -353,6 +386,9 @@ class MisconfiguredBackend implements AcsBackend {
 
   @override
   Future<void> confirmDeviceWipe(String deviceId, String orderId) async => _recusar();
+
+  @override
+  Future<IssuedDeviceCertificate> issueDeviceCertificate(String csrPem) async => _recusar();
 
   @override
   Future<List<VisitSyncEntry>> pullVisits({required DateTime since}) async => _recusar();
@@ -939,6 +975,31 @@ class BackendClient implements AcsBackend, TelemetryTransport {
   @override
   Future<void> confirmDeviceWipe(String deviceId, String orderId) =>
       _guard(() => _client.devices.confirmWipe(deviceId, orderId));
+
+  @override
+  Future<IssuedDeviceCertificate> issueDeviceCertificate(String csrPem) async {
+    final token = await _requireToken();
+    final result = await _guard(
+      () async {
+        try {
+          return await _client.devices.issueCertificate(accessToken: token, csrPem: csrPem);
+        } on DeviceWipeRequiredException catch (error) {
+          throw _wipeRequired(error);
+        } on DeviceCertificateRetryLaterException catch (error) {
+          throw DeviceCertificateRetryLater(error.message);
+        }
+      },
+      // Papel, território, aparelho do token ou CA ausente no servidor: a
+      // mensagem padrão ("este alerta") não faria sentido aqui.
+      permissionMessage: 'O servidor recusou emitir o certificado deste aparelho. Procure a coordenação.',
+    );
+    return IssuedDeviceCertificate(
+      certificatePem: result.certificatePem,
+      serial: result.serial,
+      notAfter: result.notAfter.toUtc(),
+      serverNow: result.serverNow.toUtc(),
+    );
+  }
 
   /// Envia um lote da fila de telemetria (#83) por `telemetry.ingest`.
   ///

@@ -310,10 +310,10 @@ void main() {
     expect(await storage.legacy.load(), hasLength(2), reason: 'o save de um dono não apaga a quarentena');
     expect(await storage.countsByOwner(), isEmpty);
 
-    // O schema ficou na versão atual (v8, #79), com `owner` nulo nas linhas antigas; o resto da v6 intacto.
+    // O schema ficou na versão atual (v9, telemetria da #83), com `owner` nulo nas linhas antigas; o resto da v6 intacto.
     final db = await storage.database.open();
     expect(await db.getVersion(), EncryptedLocalDatabase.schemaVersion);
-    expect(EncryptedLocalDatabase.schemaVersion, 8);
+    expect(EncryptedLocalDatabase.schemaVersion, 9);
     final semDono = await db.rawQuery('SELECT COUNT(*) AS n FROM offline_visits WHERE owner IS NULL');
     expect(semDono.single['n'], 2);
     expect((await db.query('micro_area_cache')).single['patient_id'], seedPatientId);

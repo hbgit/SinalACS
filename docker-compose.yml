@@ -61,17 +61,45 @@ services:
     volumes:
       - ./infra/docker/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
       - ./infra/docker/mosquitto/aclfile:/mosquitto/config/aclfile:ro
-      - ./infra/docker/mosquitto/runtime/passwordfile:/mosquitto/config/passwordfile:ro
       - ./infra/docker/mosquitto/runtime/certs:/mosquitto/certs:ro
+      # CA de aparelhos e CRL (#94). O DIRETÓRIO, e não o arquivo: o backend
+      # regrava crl.pem por temporário + rename, e uma montagem do arquivo
+      # continuaria presa ao inode antigo.
+      - ./infra/docker/mosquitto/runtime/devices:/mosquitto/devices:ro
       - ./infra/docker/mosquitto/runtime/data:/mosquitto/data
+
+  # Recarga da CRL (#94). O Mosquitto só relê o `crlfile` no SIGHUP (o $CONTROL
+  # não tem reload; o mosquitto_signal é um `kill`), e uma CRL vazia/inválida +
+  # SIGHUP TERMINA o broker — medido no scripts/qa/spikes/mosquitto_crl_spike.sh.
+  # Este sidecar compartilha o namespace de PID do broker, vê a crl.pem mudar
+  # (inode/mtime) e só manda o HUP depois de validá-la contra a CA de aparelhos
+  # (sintaxe e assinatura). Ver infra/docker/mosquitto/crl_reload.sh.
+  # O namespace de PID é o do contêiner do broker: quando o broker reinicia, este
+  # sidecar cai junto e o `restart` o religa ao namespace novo (medido com
+  # `docker compose restart mosquitto`). Reiniciar os DOIS no mesmo comando já o
+  # deixou parado (exit 0) — `docker compose up -d` o traz de volta, e o
+  # Grupo E de scripts/qa/mtls_invariants.sh falha se ele não recarregar.
+  # Depois do HUP grava `crl.loaded` (sha256 da crl.pem sinalizada) em
+  # runtime/devices — por isso a montagem aqui é rw (a do broker segue ro): o
+  # backend espera esse marcador antes de derrubar a sessão do aparelho revogado.
+  mosquitto-crl-reload:
+    image: eclipse-mosquitto:2
+    container_name: sinalacs-mosquitto-crl-reload
+    pid: "service:mosquitto"
+    user: root
+    restart: unless-stopped
+    depends_on:
+      - mosquitto
+    volumes:
+      - ./infra/docker/mosquitto/runtime/devices:/mosquitto/devices
+      - ./infra/docker/mosquitto/crl_reload.sh:/crl_reload.sh:ro
+    entrypoint: ["/bin/sh", "-c", "apk add --no-cache openssl && sh /crl_reload.sh"]
 
   mosquitto-init:
     image: eclipse-mosquitto:2
     container_name: sinalacs-mosquitto-init
     user: root
     environment:
-      MQTT_BACKEND_PASSWORD: ${MQTT_BACKEND_PASSWORD:?defina em .env — rode ./scripts/dev/bootstrap_env.sh}
-      MQTT_ACS_PASSWORD: ${MQTT_ACS_PASSWORD:?defina em .env — rode ./scripts/dev/bootstrap_env.sh}
       # SANs adicionais no certificado do broker, para validar em aparelho
       # físico na LAN: MQTT_CERT_SAN_EXTRA='IP:192.168.0.10' docker compose up
       MQTT_CERT_SAN_EXTRA: ${MQTT_CERT_SAN_EXTRA:-}
@@ -137,13 +165,17 @@ services:
       # O Insights escuta 8081 por padrão, que aqui é o dashboard do Traefik.
       SERVERPOD_INSIGHTS_SERVER_PORT: "8083"
       MQTT_BROKER: mosquitto:8883
+      # Sem senha desde a #94: o broker toma o CN do certificado como usuário
+      # (use_identity_as_username) e ignora username/senha do CONNECT. O
+      # MQTT_USERNAME fica só como rótulo.
       MQTT_USERNAME: backend
-      MQTT_PASSWORD: ${MQTT_BACKEND_PASSWORD:?defina em .env — rode ./scripts/dev/bootstrap_env.sh}
       MQTT_USE_TLS: "true"
+      # CA que verifica o BROKER (a do servidor).
       MQTT_CA_CERT_PATH: /app/certs/ca.crt
-      # mTLS: o broker exige certificado de cliente (CN = usuário MQTT).
-      MQTT_CLIENT_CERT_PATH: /app/certs/backend.crt
-      MQTT_CLIENT_KEY_PATH: /app/certs/backend.key
+      # mTLS: folha `backend` da CA de aparelhos (CN = backend, ACL readwrite
+      # em sinalacs/v1/#), emitida pelo mosquitto-init em runtime/devices/.
+      MQTT_CLIENT_CERT_PATH: /app/devices/backend.crt
+      MQTT_CLIENT_KEY_PATH: /app/devices/backend.key
       # Sem esta variável o servidor caía num segredo de desenvolvimento fixo e
       # público, com o qual qualquer pessoa forjaria um token de ACS.
       JWT_SECRET: ${JWT_SECRET:?defina em .env — rode ./scripts/dev/bootstrap_env.sh}
@@ -192,6 +224,17 @@ services:
       API_TLS_CERT_PATH: /app/rpc-certs/backend.crt
       API_TLS_KEY_PATH: /app/rpc-certs/backend.key
       API_TLS_CLIENT_CA_PATH: /app/rpc-certs/ca.crt
+      # CA de aparelhos (#94): o backend assina o certificado de cliente MQTT de
+      # cada aparelho e regrava a CRL que o broker lê. Os três caminhos vêm
+      # juntos ou nenhum (sem eles, a emissão responde indisponível); um
+      # subconjunto é erro de boot. Gerada pelo mosquitto-init em
+      # runtime/devices/, montado abaixo em /app/devices (rw: a CRL é regravada
+      # por temporário + rename no mesmo diretório).
+      DEVICE_CA_CERT_PATH: /app/devices/ca.crt
+      DEVICE_CA_KEY_PATH: /app/devices/ca.key
+      DEVICE_CRL_PATH: /app/devices/crl.pem
+      DEVICE_CERT_DAYS: "30"
+      DEVICE_CRL_DAYS: "30"
     # O HEALTHCHECK do Dockerfile fala http (é o do Render); aqui a 8080 é TLS
     # mútuo, então a stack local o sobrepõe com os mesmos tempos e com a folha
     # de CLIENTE do healthcheck (#90): distinta da do Traefik, CN
@@ -228,9 +271,13 @@ services:
       - traefik.http.services.sinalacs.loadbalancer.server.scheme=https
       - traefik.http.services.sinalacs.loadbalancer.serverstransport=backend-tls@file
     volumes:
+      # Só a CA do servidor é usada daqui (verificar o broker); a ca.key em 600
+      # root não é legível pelo uid 1000.
       - ./infra/docker/mosquitto/runtime/certs:/app/certs:ro
       # Só a folha do backend e a CA pública; a ca.key fica em runtime/certs/.
       - ./infra/docker/traefik/runtime/backend:/app/rpc-certs:ro
+      # CA de aparelhos (#94). Gravável: o backend publica crl.pem aqui.
+      - ./infra/docker/mosquitto/runtime/devices:/app/devices
 
   # Dados sintéticos de desenvolvimento. Roda depois que o servidor sobe, porque
   # é ele quem aplica as migrações. O seed não é opcional: o dev-login referencia

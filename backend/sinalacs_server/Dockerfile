@@ -47,8 +47,11 @@ FROM alpine:latest
 WORKDIR /app
 
 # curl é necessário para o HEALTHCHECK, que hosts free-tier usam para acordar o
-# serviço; ca-certificates para o TLS do broker e do Postgres gerenciado.
-RUN apk add --no-cache curl ca-certificates \
+# serviço; ca-certificates para o TLS do broker e do Postgres gerenciado;
+# openssl para a CA de aparelhos (#94), que assina folhas e gera a CRL pelo
+# binário (lib/src/infrastructure/pki/openssl_device_ca.dart) por `openssl ca
+# -startdate/-enddate`, que funciona do OpenSSL 3.0 em diante.
+RUN apk add --no-cache curl ca-certificates openssl \
     && adduser -D -h /app app
 
 ENV runmode=production

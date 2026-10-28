@@ -34,7 +34,10 @@ import 'package:sinalacs_acs/core/database/sqlcipher_visit_store.dart';
 import 'package:sinalacs_acs/core/network/backend_client.dart';
 import 'package:sinalacs_acs/core/network/backend_config.dart';
 import 'package:sinalacs_acs/core/security/database_key_store.dart';
+import 'package:sinalacs_acs/core/security/device_certificate_store.dart';
+import 'package:sinalacs_acs/core/security/session_token_store.dart';
 import 'package:sinalacs_acs/core/services/alert_feed.dart';
+import 'package:sinalacs_acs/core/services/device_certificate_enroller.dart';
 import 'package:sinalacs_acs/core/services/alert_queue.dart';
 import 'package:sinalacs_acs/core/services/backend_visit_synchronizer.dart';
 import 'package:sinalacs_acs/core/services/offline_visit_queue.dart';
@@ -63,13 +66,6 @@ void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
   test('smoke: alerta pelo broker, visita cifrada no disco e sincronizada', () async {
-    if (BackendConfig.mqttPasswordMissing) {
-      fail(
-        'Compile com --dart-define=SINALACS_MQTT_PASSWORD (o valor está em '
-        'MQTT_ACS_PASSWORD no .env). O caminho pronto é '
-        './scripts/qa/e2e.sh --emulator.',
-      );
-    }
     final caBytes = await _devRpcCaBytes();
     if (caBytes == null) {
       fail(
@@ -95,7 +91,12 @@ void main() {
 
     // 2. Alerta vermelho pelo broker, com ACK.
     final alertQueue = AlertQueue(microAreaId: microAreaId);
-    final feed = MqttAlertFeed(queue: alertQueue);
+    final feed = MqttAlertFeed(
+      queue: alertQueue,
+      // Certificado por aparelho (#94), emitido pelo backend para esta sessão.
+      enroller: DeviceCertificateEnroller(store: InMemoryDeviceCertificateStore(), backend: backend),
+      deviceIds: MemoryDeviceIdStore(),
+    );
     await feed.start(microAreaId: microAreaId, acsId: session.userId);
     expect(feed.isConnected, isTrue, reason: 'o ACS não conectou ao broker');
 

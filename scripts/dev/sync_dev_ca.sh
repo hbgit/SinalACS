@@ -14,6 +14,15 @@
 # Nenhuma das duas é versionada: infra/docker/mosquitto/runtime/,
 # infra/docker/traefik/runtime/ e apps/*/assets/certs/ estão no .gitignore.
 #
+# Certificado de CLIENTE do broker: nenhum. Desde a #94 cada aparelho gera o
+# próprio par e recebe o certificado do backend, e o compartilhado
+# (acs_client.{crt,key}, CN acs-area-12) deixou de existir. Um checkout antigo
+# ainda o tem no asset do ACS, e ele iria para dentro do APK — a guarda do
+# Gradle barra o release, e scripts/qa/acs_apk_no_client_key.sh reprova
+# qualquer APK com ele. Por isso este script APAGA o legado na fase 3, junto
+# com a publicação das CAs (nunca num caminho de erro: "nada foi copiado"
+# continua querendo dizer que a árvore ficou como estava).
+#
 # ATENÇÃO à distinção, que o `init.sh` do RPC mediu e o do broker confirma: as
 # duas CAs são PRESERVADAS entre subidas — só as folhas são regeradas —, então
 # esta cópia continua válida enquanto a CA não expirar. A folha muda, mas o app
@@ -33,12 +42,11 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # Só o teste (sync_dev_ca_test.sh) sobrescreve: aponta para uma árvore temporária.
 repo_root="${SYNC_DEV_CA_ROOT:-$repo_root}"
 
-# Os seis temporários das fases 2 e 3. `mv` consome o seu; o que sobrar numa
+# Os cinco temporários das fases 2 e 3. `mv` consome o seu; o que sobrar numa
 # falha ou num Ctrl-C (o `trap EXIT` roda nos dois) é apagado aqui, para o asset
 # nunca ficar ao lado de um `.tmp` meio escrito.
 limpar_tmp() {
   rm -f "$repo_root"/apps/{acs,patient}/assets/certs/{dev_ca.crt,dev_rpc_ca.crt}.tmp \
-        "$repo_root"/apps/acs/assets/certs/acs_client.{crt,key}.tmp \
         "$repo_root"/apps/admin/assets/certs/dev_rpc_ca.crt.tmp
 }
 trap limpar_tmp EXIT
@@ -136,37 +144,6 @@ for par in "${pares[@]}"; do
     "$label"
 done
 
-# mTLS do broker: o ACS também apresenta um certificado de CLIENTE
-# (acs-area-12, emitido pelo init.sh do Mosquitto). Mesma prova da CA: a folha
-# tem de ser assinada pela CA do broker que está em runtime/, senão o handshake
-# falha no app sem nada vermelho em lugar nenhum. **Só desenvolvimento**: a
-# chave privada vira asset gitignorado (o guard do Gradle barra um release com
-# ela dentro).
-mqtt_certs="$repo_root/infra/docker/mosquitto/runtime/certs"
-acs_assets="$repo_root/apps/acs/assets/certs"
-for f in acs-area-12.crt acs-area-12.key; do
-  if [[ ! -f "$mqtt_certs/$f" ]]; then
-    echo "erro: $mqtt_certs/$f não existe — nada foi copiado." >&2
-    echo "Suba a stack primeiro (docker compose up) para que o certificado de cliente seja gerado." >&2
-    exit 1
-  fi
-done
-if ! verify_err="$(openssl verify -CAfile "$mqtt_certs/ca.crt" "$mqtt_certs/acs-area-12.crt" 2>&1)"; then
-  echo "erro: a CA do broker não assina o certificado de cliente $mqtt_certs/acs-area-12.crt — nada foi copiado." >&2
-  echo "$verify_err" >&2
-  exit 1
-fi
-# O certificado ser da CA não prova que a chave é o par dele: uma chave regerada
-# sem o certificado passaria no `verify` e o handshake mTLS falharia no app sem
-# nada vermelho em lugar nenhum. Compara a chave pública dos dois.
-pub_crt="$(openssl x509 -in "$mqtt_certs/acs-area-12.crt" -noout -pubkey)"
-pub_key="$(openssl pkey -in "$mqtt_certs/acs-area-12.key" -pubout 2>/dev/null || true)"
-if [[ -z "$pub_key" || "$pub_crt" != "$pub_key" ]]; then
-  echo "erro: $mqtt_certs/acs-area-12.key não é o par do certificado acs-area-12.crt — nada foi copiado." >&2
-  echo "Apague infra/docker/mosquitto/runtime e suba a stack de novo para regerar o par." >&2
-  exit 1
-fi
-
 # Fase 2 — preparar os quatro (nada visível ainda para quem lê o asset).
 for app in acs patient; do
   for par in "${pares[@]}"; do
@@ -179,18 +156,11 @@ for app in acs patient; do
 done
 
 # O backoffice (apps/admin) só fala RPC por HTTPS: recebe apenas a CA do RPC,
-# nunca a do broker nem o certificado de cliente do ACS.
+# nunca a do broker.
 stage_ca \
   "$repo_root/infra/docker/traefik/runtime/certs/ca.crt" \
   "$repo_root/apps/admin/assets/certs" \
   "$repo_root/apps/admin/assets/certs/dev_rpc_ca.crt"
-
-# Cliente do ACS: temporário + mv, igual às CAs. A chave nasce 600 (umask) e
-# o chmod é explícito para não depender dele.
-mkdir -p "$acs_assets"
-(umask 077; cp "$mqtt_certs/acs-area-12.key" "$acs_assets/acs_client.key.tmp")
-chmod 600 "$acs_assets/acs_client.key.tmp"
-cp "$mqtt_certs/acs-area-12.crt" "$acs_assets/acs_client.crt.tmp"
 
 # Fase 3 — publicar os quatro.
 for app in acs patient; do
@@ -204,7 +174,12 @@ done
 
 promote_ca "$repo_root/apps/admin/assets/certs/dev_rpc_ca.crt" "RPC (admin)"
 
-mv "$acs_assets/acs_client.crt.tmp" "$acs_assets/acs_client.crt"
-mv "$acs_assets/acs_client.key.tmp" "$acs_assets/acs_client.key"
-echo "Certificado de cliente do ACS (mTLS) copiado para $acs_assets/acs_client.{crt,key}"
-openssl x509 -in "$acs_assets/acs_client.crt" -noout -subject -dates
+# Legado de checkout anterior à #94 (ver o cabeçalho). Só aqui, depois de as
+# três fases terem passado.
+acs_assets="$repo_root/apps/acs/assets/certs"
+for legado in "$acs_assets"/acs_client.crt "$acs_assets"/acs_client.key; do
+  if [[ -e "$legado" ]]; then
+    rm -f "$legado"
+    echo "Removido $legado (certificado compartilhado anterior à #94; o aparelho emite o próprio)"
+  fi
+done

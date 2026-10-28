@@ -1,0 +1,7 @@
+### Contador da extensão `CRL Number` da CRL dos aparelhos (#94). Uma única
+### linha (`id = 1`), incrementada a cada publicação; começa em 1000, acima do
+### `01` da CRL inicial do `init.sh`, e sobrevive a reinícios. Sem dado pessoal.
+class: DeviceCrlCounter
+table: device_crl_counters
+fields:
+  lastNumber: int

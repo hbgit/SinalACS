@@ -82,7 +82,6 @@ echo "== limpeza remota no emulador"
 ( cd apps/acs && flutter pub get >/dev/null && flutter test integration_test/remote_wipe_e2e.dart -d "$dev" \
     --dart-define=SINALACS_HOST=https://localhost:8443/ \
     --dart-define=SINALACS_MQTT_HOST=localhost \
-    --dart-define=SINALACS_MQTT_PASSWORD="$MQTT_ACS_PASSWORD" \
     --dart-define=E2E_FIXTURES="$fixtures" ) 2>&1 | tee "$saida_teste"
 [[ "${PIPESTATUS[0]}" -eq 0 ]] || { echo 'erro: a limpeza remota no emulador falhou' >&2; exit 1; }
 for marca in E2E_WIPE_PEDIDO E2E_WIPE_APARELHO E2E_WIPE_OK; do
@@ -119,6 +118,16 @@ igual 'tokens de envio vivos do id antigo' 0 \
   "select count(*) from acs_upload_tokens where \"deviceId\" = '$aparelho' and \"revokedAt\" is null"
 igual 'o login de novo usou o id novo (refresh token vivo)' 'true' \
   "select (count(*) > 0)::text from acs_refresh_tokens where \"userId\" = '$acs_id' and \"deviceId\" = '$novo' and \"revokedAt\" is null"
+# #94: o pedido revoga o certificado MQTT do aparelho e a serial entra na CRL.
+igual 'certificado do id antigo revogado como wipe' 'true|wipe' \
+  "select (\"revokedAt\" is not null)::text || '|' || \"revocationReason\" from device_certificates where \"userId\" = '$acs_id' and \"deviceId\" = '$aparelho'"
+serial_antigo="$(sql "select serial from device_certificates where \"userId\" = '$acs_id' and \"deviceId\" = '$aparelho'")"
+[[ -n "$serial_antigo" ]] || { echo 'erro: o id antigo não tinha certificado' >&2; exit 1; }
+openssl crl -in infra/docker/mosquitto/runtime/devices/crl.pem -noout -text \
+  | sed -n 's/.*Serial Number: *//p' | tr 'A-F' 'a-f' | sed 's/^0*//' \
+  | grep -qx "$(tr 'A-F' 'a-f' <<<"$serial_antigo" | sed 's/^0*//')" \
+  || { echo "erro: a serial $serial_antigo do id antigo não está na CRL" >&2; exit 1; }
+echo "  serial $serial_antigo do id antigo na CRL (openssl crl -text)"
 igual 'trilha wipe_ordered (admin_device, pelo coordenador)' 1 \
   "select count(*) from audit_logs where \"resourceId\" = '$ordem' and \"resourceType\" = 'admin_device' and result = 'wipe_ordered' and \"userId\" = '$coord_id'"
 igual 'trilha wipe_delivered (acs_device)' 1 \

@@ -7,6 +7,7 @@ import 'package:sinalacs_server/src/application/auth/development_auth_service.da
 import 'package:sinalacs_server/src/application/auth/institutional_auth_service.dart';
 import 'package:sinalacs_server/src/application/auth/password_hasher.dart';
 import 'package:sinalacs_server/src/application/auth/staff_activation_code.dart';
+import 'package:sinalacs_server/src/application/devices/device_certificate_service.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
 
 // A `AdminScope`/`AdminScopeStore` vêm com o serviço: quem implementa o store
@@ -76,6 +77,11 @@ abstract interface class AdminAccountStore implements AdminScopeStore {
   /// — a checagem e a escrita não podem ser duas decisões sobre estados
   /// diferentes (TOCTOU). `null` significa exatamente isso: nada foi movido,
   /// seja porque o ACS não existe, seja porque não é do escopo.
+  ///
+  /// Quando a microárea de fato muda, revoga **na mesma transação** os
+  /// certificados vigentes dos aparelhos do ACS como `microAreaChanged`, com
+  /// [at] como carimbo (#94): o CN deles é a microárea antiga. Para a mesma
+  /// microárea, não revoga nada.
   Future<AdminAcs?> setAcsMicroArea({
     required String acsId,
     required String microAreaId,
@@ -91,9 +97,11 @@ abstract interface class AdminAccountStore implements AdminScopeStore {
   /// token e todos os tokens de envio diferido da conta, com [at] como carimbo
   /// da revogação: a flag e as revogações são um só estado, e não existe
   /// instante observável em que o ACS esteja inativo e ainda com sessão viva
-  /// (o `findAccount` do refresh só recusaria na próxima renovação). Reativar
-  /// não toca em token nenhum — revogado é revogado, e o acesso novo se obtém
-  /// com um login novo.
+  /// (o `findAccount` do refresh só recusaria na próxima renovação). Desde a
+  /// #94 a mesma transação revoga também os certificados MQTT vigentes dos
+  /// aparelhos do ACS (`deactivated`, carimbo [at]). Reativar não toca em
+  /// token nem certificado nenhum — revogado é revogado, e o acesso novo se
+  /// obtém com um login novo.
   ///
   /// Devolve `true` quando o ACS existe no escopo e a flag foi gravada — o
   /// valor anterior não importa (desativar um já inativo também grava). `false`
@@ -164,6 +172,7 @@ class AdminAccountService {
     required this.activationStore,
     required this.hasher,
     required this.audit,
+    this.deviceRevocations,
     Random? random,
     DateTime Function()? clock,
   }) : _random = random ?? Random.secure(),
@@ -182,6 +191,12 @@ class AdminAccountService {
 
   final PasswordHasher hasher;
   final AuditTrail audit;
+
+  /// Depois do commit de uma desativação ou troca de microárea: auditoria de
+  /// cada certificado revogado, CRL publicada e sessão MQTT de cada aparelho
+  /// derrubada (#94). `null` nos testes e ambientes sem certificado de
+  /// aparelho.
+  final DeviceRevocationEffects? deviceRevocations;
 
   /// Sorteio das credenciais entregues fora de banda (senha inicial, código de
   /// ativação).
@@ -324,12 +339,13 @@ class AdminAccountService {
       await _negar(user, recurso, message: 'ACS não encontrado.');
     }
 
+    final at = _clock().toUtc();
     final movido = await store.setAcsMicroArea(
       acsId: acsId,
       microAreaId: microAreaId,
       ubsId: ubsDaMicroarea,
       scope: escopo,
-      at: _clock().toUtc(),
+      at: at,
     );
     if (movido == null) {
       await _negar(user, recurso, message: 'ACS não encontrado.');
@@ -338,6 +354,14 @@ class AdminAccountService {
     // extremo de o ACS ter saído do escopo entre o commit e esta releitura —
     // aí a linha do `UPDATE` ainda descreve o vínculo que de fato aconteceu.
     final acs = await store.acsById(escopo, acsId) ?? movido;
+    // CRL e derrubada antes das linhas da trilha (fail-closed): a revogação já
+    // foi confirmada e não pode esperar por uma auditoria que falhe.
+    await _depoisDaRevogacao(
+      user,
+      acsId,
+      DeviceCertRevocationReason.microAreaChanged,
+      at,
+    );
     await _auditar(
       user,
       recurso,
@@ -379,11 +403,12 @@ class AdminAccountService {
       await _negar(user, recurso, message: 'ACS não encontrado.');
     }
 
+    final at = _clock().toUtc();
     final mudou = await store.setAcsActive(
       acsId: acsId,
       scope: escopo,
       active: active,
-      at: _clock().toUtc(),
+      at: at,
     );
     if (!mudou) {
       await _negar(user, recurso, message: 'ACS não encontrado.');
@@ -393,6 +418,16 @@ class AdminAccountService {
     // saído do escopo entre o commit e esta leitura — aí a linha da
     // pré-checagem, com a flag que a transação gravou, ainda descreve o estado.
     final acs = await store.acsById(escopo, acsId) ?? antes.copyWith(active: active);
+    // CRL e derrubada antes das linhas da trilha (fail-closed): a revogação já
+    // foi confirmada e não pode esperar por uma auditoria que falhe.
+    if (!active) {
+      await _depoisDaRevogacao(
+        user,
+        acsId,
+        DeviceCertRevocationReason.deactivated,
+        at,
+      );
+    }
     await _auditar(
       user,
       recurso,
@@ -576,6 +611,25 @@ class AdminAccountService {
           result: 'success',
         ),
       );
+
+  /// Os certificados que a transação da conta revogou ([reason] + [at]):
+  /// uma linha `device_cert_revoked:<motivo>` por certificado (ator = o
+  /// operador), a CRL e a derrubada da sessão de cada aparelho (#94). Depois
+  /// do commit e ANTES da linha da operação: a CRL e a derrubada não podem
+  /// depender de a trilha gravar.
+  Future<void> _depoisDaRevogacao(
+    AuthenticatedUser user,
+    String acsId,
+    DeviceCertRevocationReason reason,
+    DateTime at,
+  ) async {
+    await deviceRevocations?.afterCommit(
+      reason: reason,
+      at: at,
+      userId: acsId,
+      audit: (trail: audit, actorId: user.id),
+    );
+  }
 
   // Os dois helpers abaixo são a interface interna das operações de escrita da
   // #43.

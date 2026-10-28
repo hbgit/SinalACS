@@ -1,0 +1,9 @@
+### A emissão do certificado de cliente MQTT do aparelho (#94) não pode ser
+### feita AGORA, mas pode dar certo mais tarde sem intervenção da coordenação:
+### o aparelho passou do limite de emissões por hora, ou a microárea da sessão
+### ficou para trás da gravada na conta (a próxima renovação do token traz a
+### nova). O app a trata como transitória: mantém o certificado guardado que
+### ainda vale e tenta de novo. Mensagem pronta para o ACS ler.
+exception: DeviceCertificateRetryLaterException
+fields:
+  message: String

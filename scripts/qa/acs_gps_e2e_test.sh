@@ -43,7 +43,7 @@ caso() { # caso <nome> [VAR=valor ...] -- [args do script]
   nome=$1; shift
   envs=(); while [[ $# -gt 0 && $1 != -- ]]; do envs+=("$1"); shift; done; shift
   : >"$FAKE_LOG"; rm -rf "$tmp/t" "$FAKE_LOG.dumps"; mkdir "$tmp/t"
-  saida="$(env PATH="$tmp/bin:$PATH" TMPDIR="$tmp/t" GPS_E2E_INTERVALO=0.1 MQTT_ACS_PASSWORD=x "${envs[@]}" ./scripts/qa/acs_gps_e2e.sh "$@" 2>&1)"; codigo=$?
+  saida="$(env PATH="$tmp/bin:$PATH" TMPDIR="$tmp/t" GPS_E2E_INTERVALO=0.1 "${envs[@]}" ./scripts/qa/acs_gps_e2e.sh "$@" 2>&1)"; codigo=$?
 }
 verifica() { eval "$1" || { echo "FALHOU [$nome]: $1"; echo "$saida" | tail -4; falhas=$((falhas + 1)); }; }
 conta() { grep -c "$1" "$FAKE_LOG" || true; }
@@ -98,7 +98,7 @@ verifica 'grep -q "mais de 2 vezes" <<<"$saida"'
 verifica '[[ -z "$(ls -A "$tmp/t")" ]]'
 
 nome=interrompido; : >"$FAKE_LOG"; rm -rf "$tmp/t" "$FAKE_LOG.dumps"; mkdir "$tmp/t"
-env PATH="$tmp/bin:$PATH" TMPDIR="$tmp/t" GPS_E2E_INTERVALO=0.1 MQTT_ACS_PASSWORD=x \
+env PATH="$tmp/bin:$PATH" TMPDIR="$tmp/t" GPS_E2E_INTERVALO=0.1 \
   FAKE_DIALOGO_TOQUES=1 FAKE_DRIVE_DEMORA=5 ./scripts/qa/acs_gps_e2e.sh --sem-permissao >/dev/null 2>&1 &
 pid=$!; sleep 2; kill -TERM "$pid" 2>/dev/null; wait "$pid" 2>/dev/null; saida=""; codigo=$?
 verifica '[[ -z "$(ls -A "$tmp/t")" ]]'            # nem o arquivo de toques vaza

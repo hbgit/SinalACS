@@ -1,0 +1,13 @@
+### Por que um certificado de aparelho foi revogado (#94). Conjunto fechado: o
+### motivo vai para a trilha de auditoria.
+enum: DeviceCertRevocationReason
+serialized: byName
+values:
+  ### Limpeza remota do aparelho (#81).
+  - wipe
+  ### Conta do ACS desativada pela coordenação.
+  - deactivated
+  ### O ACS mudou de microárea: o CN da folha é a microárea antiga.
+  - microAreaChanged
+  ### Substituído por uma emissão nova no mesmo aparelho.
+  - renewed

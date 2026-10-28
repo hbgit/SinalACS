@@ -363,7 +363,7 @@ void main() {
 
 const _matricula = 'ACS-REFRESH-001';
 const _senha = 'senha-sintetica-de-teste';
-const _aparelho = 'aparelho-refresh-1';
+const _aparelho = '00000000-0000-4000-8000-0000000071d1';
 const _outraMicroArea = '00000000-0000-4000-8000-0000000000a6';
 
 Uint8List _deBase32(String texto) {

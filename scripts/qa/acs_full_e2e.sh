@@ -81,7 +81,6 @@ echo "== jornada do ACS no emulador"
 ( cd apps/acs && flutter pub get >/dev/null && flutter test integration_test/full_journey_e2e.dart -d "$dev" \
     --dart-define=SINALACS_HOST=https://localhost:8443/ \
     --dart-define=SINALACS_MQTT_HOST=localhost \
-    --dart-define=SINALACS_MQTT_PASSWORD="$MQTT_ACS_PASSWORD" \
     --dart-define=E2E_FIXTURES="$fixtures" \
     --dart-define=E2E_ESPERAR_JWT="$esperar_jwt" ) 2>&1 | tee "$saida_teste"
 [[ "${PIPESTATUS[0]}" -eq 0 ]] || { echo 'erro: a jornada no emulador falhou' >&2; exit 1; }

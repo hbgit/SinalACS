@@ -49,6 +49,7 @@ auth:
   - requestOtp:
   - verifyOtp:
 devices:
+  - issueCertificate:
   - registerPushToken:
   - pendingWipe:
   - confirmWipe:

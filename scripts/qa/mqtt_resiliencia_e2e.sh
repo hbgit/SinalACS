@@ -44,9 +44,9 @@
 #       `docker stop` do B (o arquivo sobrevive ao stop/start). Prova a
 #       entrega pelo broker, mais do que o carimbo do outbox (lacuna H5: o
 #       outbox marcava publicado sem PUBACK).
-#   O CARD NO APP DO ACS NÃO É VERIFICADO AQUI: o ACL do broker só libera ao
-#   usuário do ACS (`acs-area-12`) o tópico da microárea do seed de
-#   desenvolvimento, e as fixtures de e2e sorteiam a microárea a cada execução.
+#   O CARD NO APP DO ACS NÃO É VERIFICADO AQUI: as fixtures de e2e sorteiam a
+#   microárea a cada execução, e este script não provisiona o certificado de
+#   aparelho (CN = microárea, #94) que o app precisaria para lê-la.
 #   O ciclo broker -> app do ACS fica com `integration_test/red_alert_cycle_test.dart`
 #   (stack de desenvolvimento, `e2e.sh --emulator --full`).
 #
@@ -89,7 +89,6 @@ mkdir -p "$ART"
 # Intervalo mínimo entre dois logins OTP do MESMO paciente (o servidor impõe 60 s).
 INTERVALO_OTP=65
 SUB_ID="qa-resiliencia-$$"
-OPTS=/tmp/qa-resiliencia-$$.opts   # dentro do container do broker
 SUB_SH=/tmp/qa-resiliencia-$$.sh   # laço do assinante (idem)
 SUB_LOG=/tmp/qa-resiliencia-$$.log # `hora alert_id` de cada entrega (idem)
 RESTAURADO_EM=0                    # epoch da restauração do cenário corrente
@@ -107,7 +106,7 @@ cleanup() {
   if [[ -n "$rede" ]]; then
     parar_assinante
     mqtt_sub -i "$SUB_ID" -t 'sinalacs/v1/qa/fim' -E >/dev/null 2>&1
-    docker exec "$BROKER" rm -f "$OPTS" "$SUB_SH" "$SUB_LOG" >/dev/null 2>&1
+    docker exec "$BROKER" rm -f "$SUB_SH" "$SUB_LOG" >/dev/null 2>&1
   fi
   [[ -n "$relay_pid" ]] && kill "$relay_pid" 2>/dev/null
   rm -f .e2e/fixtures.json   # primeiro: tem as senhas sintéticas, mesmo se o down falhar
@@ -155,15 +154,13 @@ sanitiza() {
   sed -E 's/[0-9]{1,3}(\.[0-9]{1,3}){3}(:[0-9]+)?/<ip>/g; s/(address|host|port) = [^,)]+/\1 = <x>/g; s/(mosquitto|localhost)(:[0-9]+)?/<host>/g; s/sinalacs-backend-[0-9]+/sinalacs-backend-<id>/g; s/código de acesso: [0-9]{6}/código de acesso: <otp>/g'
 }
 
-# Assinante MQTT dentro do container do broker, com o usuário e o certificado
-# do backend (ACL `sinalacs/v1/#`). A senha vai num arquivo de opções 600 no
-# container, nunca no argv (`ps`). Reescrito a cada uso: o `docker stop` do
-# cenário B não o apaga, mas um container recriado sim.
+# Assinante MQTT dentro do container do broker, com a folha `backend` da CA de
+# aparelhos (#94; ACL `sinalacs/v1/#`), montada em /mosquitto/devices. Sem
+# senha: o broker toma o CN do certificado como usuário. Não é a folha qa-tools
+# porque as fixtures de e2e sorteiam a microárea, e a qa-tools só lê a do seed.
 mqtt_sub() {
-  printf -- '-u backend\n-P %s\n' "$MQTT_BACKEND_PASSWORD" \
-    | docker exec -i "$BROKER" sh -c "umask 077; cat > $OPTS"
-  docker exec "$BROKER" mosquitto_sub -o "$OPTS" -h localhost -p 8883 \
-    --cafile /mosquitto/certs/ca.crt --cert /mosquitto/certs/backend.crt --key /mosquitto/certs/backend.key \
+  docker exec "$BROKER" mosquitto_sub -h localhost -p 8883 \
+    --cafile /mosquitto/certs/ca.crt --cert /mosquitto/devices/backend.crt --key /mosquitto/devices/backend.key \
     "$@"
 }
 
@@ -175,11 +172,11 @@ parar_assinante() {
 }
 iniciar_assinante() {
   parar_assinante
-  mqtt_sub -c -i "$SUB_ID" -q 1 -t "$topico" -E >/dev/null   # cria a sessão e reescreve $OPTS
+  mqtt_sub -c -i "$SUB_ID" -q 1 -t "$topico" -E >/dev/null   # cria a sessão
   docker exec -i "$BROKER" sh -c "cat > $SUB_SH" <<EOF
 while :; do
-  mosquitto_sub -o $OPTS -h localhost -p 8883 \\
-    --cafile /mosquitto/certs/ca.crt --cert /mosquitto/certs/backend.crt --key /mosquitto/certs/backend.key \\
+  mosquitto_sub -h localhost -p 8883 \\
+    --cafile /mosquitto/certs/ca.crt --cert /mosquitto/devices/backend.crt --key /mosquitto/devices/backend.key \\
     -c -i $SUB_ID -q 1 -t $topico -F '%p' 2>/dev/null |
   while IFS= read -r l; do
     case "\$l" in *'"alert_id":"'*) r=\${l#*'"alert_id":"'}; echo "\$(date +%s) \${r%%\"*}" >> $SUB_LOG ;; esac

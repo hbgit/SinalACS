@@ -8,8 +8,7 @@
 ///
 ///   adb shell settings put system font_scale 2.0
 ///   adb shell wm size 320x640 && adb shell wm density 160   # 1 dp = 1 px
-///   flutter test integration_test/layout_fonte_200_test.dart -d emulator-5554 \
-///     --dart-define=SINALACS_MQTT_PASSWORD="$MQTT_ACS_PASSWORD"
+///   flutter test integration_test/layout_fonte_200_test.dart -d emulator-5554
 ///   adb shell wm size reset && adb shell wm density reset
 ///   adb shell settings put system font_scale 1.0
 ///

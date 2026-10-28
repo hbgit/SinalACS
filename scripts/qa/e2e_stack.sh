@@ -36,7 +36,7 @@ case "${1:-}" in
     pg "create database $db" postgres >/dev/null
     # Só o backend e o relé; os seeds de desenvolvimento NÃO sobem (as fixtures vêm do `seed`).
     # Sem `--no-deps` o Compose sobe também o postgres de desenvolvimento; COM ele, os
-    # certificados do Traefik e o passwordfile do Mosquitto precisam existir de uma subida
+    # certificados do Traefik e os do Mosquitto (CA de aparelhos) precisam existir de uma subida
     # anterior da stack normal — a falta aparece aqui em vez de sumir.
     for f in infra/docker/traefik/runtime/certs/ca.crt; do
       [[ -f "$f" ]] || falhou "falta $f: suba a stack normal uma vez (docker compose up -d) para gerar os certificados"
@@ -56,7 +56,11 @@ case "${1:-}" in
              infra/docker/traefik/runtime/certs/traefik-client.crt infra/docker/traefik/runtime/certs/traefik-client.key; do
       [[ -f "$f" ]] || falhou "falta $f depois do traefik-init"
     done
-    dc up -d --build --force-recreate --no-deps serverpod gorush traefik mosquitto >"$log" 2>&1 \
+    # O sidecar da CRL (#94) entra junto: ele vive no namespace de PID do
+    # container do broker (`pid: service:mosquitto`), e recriar só o broker o
+    # deixa parado ("failed to join PID namespace", medido) — com ele parado,
+    # nenhuma revogação chega ao broker.
+    dc up -d --build --force-recreate --no-deps serverpod gorush traefik mosquitto mosquitto-crl-reload >"$log" 2>&1 \
       || falhou 'a subida do backend falhou'
     for _ in $(seq 1 90); do
       [[ "$(docker inspect -f '{{.State.Health.Status}}' sinalacs-serverpod 2>/dev/null)" == healthy ]] && exit 0

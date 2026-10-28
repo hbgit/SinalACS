@@ -133,6 +133,10 @@ class FakeRpcServer {
   /// O que `devices.pendingWipe` devolve (`null`: nenhum pedido).
   String? pendingWipeOrderId;
 
+  /// Recusa de `devices.issueCertificate` (#94), no formato do backend:
+  /// `{'className': ..., 'data': {...}}`. `null`: emite.
+  Map<String, Object?>? issueCertificateRefusal;
+
   /// Tokens que `logout` recebeu.
   final List<String> loggedOut = <String>[];
 
@@ -237,6 +241,11 @@ class FakeRpcServer {
       return;
     }
 
+    if (method == 'issueCertificate' && issueCertificateRefusal != null) {
+      await _respond(request, HttpStatus.badRequest, issueCertificateRefusal);
+      return;
+    }
+
     if (method == 'confirmWipe') {
       await _respond(request, HttpStatus.ok, null);
       return;
@@ -295,6 +304,13 @@ class FakeRpcServer {
       // Corpo de `patients.listMicroArea`: uma lista vazia basta para o teste
       // de renovação — o que importa é que a chamada autenticada aconteceu.
       'listMicroArea' => const <Object?>[],
+      // `devices.issueCertificate` (#94): folha sintética, não é PEM real.
+      'issueCertificate' => <String, Object?>{
+          'certificatePem': 'CERT-SINTETICO',
+          'serial': '0a1b',
+          'notAfter': '2026-11-26T12:00:00.000Z',
+          'serverNow': '2026-10-27T12:00:00.000Z',
+        },
       // Corpo de `onboarding.generateEnrollmentToken`. Token sintético: o real
       // tem 43 caracteres base64url, mas o cliente não valida o formato.
       'generateEnrollmentToken' => <String, Object?>{

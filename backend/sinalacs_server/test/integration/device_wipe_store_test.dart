@@ -19,6 +19,11 @@ const _aparelhoE = 'eeeeeeee-aparelho-e';
 
 final _t = DateTime.utc(2026, 10, 17, 9);
 
+// Seriais de certificado (#94) com os bits de um UUID v4, como as emitidas.
+const _serialD = 'dddddddddddd4dddaddddddddddddddd';
+const _serialE = 'eeeeeeeeeeee4eeeaeeeeeeeeeeeeeee';
+const _serialF = 'ffffffffffff4fffafffffffffffffff';
+
 final _ev = AuditEvent(
   userId: _u1,
   actionType: 'write',
@@ -77,6 +82,25 @@ Future<void> _envio(Session s, String user, String device, DateTime issued) =>
           ),
         )
         .then((_) {});
+
+Future<DeviceCertificate> _certificado(
+  Session s,
+  String user,
+  String device,
+  String serial,
+) => DeviceCertificate.db.insertRow(
+  s,
+  DeviceCertificate(
+    userId: UuidValue.fromString(user),
+    deviceId: device,
+    microAreaId: UuidValue.fromString('00000000-0000-4000-8000-00000000d0aa'),
+    serial: serial,
+    fingerprintSha256: 'f' * 64,
+    notBefore: _t,
+    notAfter: _t.add(const Duration(days: 30)),
+    issuedAt: _t,
+  ),
+);
 
 Future<int> _vivos(Session s, String tabela, String device) async {
   final r = await s.db.unsafeQuery(
@@ -243,6 +267,65 @@ void main() {
         expect(auditados, hasLength(2));
       },
     );
+
+    test(
+      'orderWipe revoga o certificado ativo do aparelho como wipe na mesma transação',
+      () async {
+        await _certificado(session, _u1, _aparelhoD, _serialD);
+        await _certificado(session, _u3, _aparelhoE, _serialE);
+
+        // A trilha falha: o pedido, os tokens e o certificado voltam juntos.
+        falhaNaTrilha = true;
+        await expectLater(pedir(), throwsA(isA<StateError>()));
+        expect(await DeviceWipeOrder.db.count(session), 0);
+        expect(await _vivos(session, 'acs_refresh_tokens', _aparelhoD), 2);
+        var d = await DeviceCertificate.db.findFirstRow(
+          session,
+          where: (c) => c.serial.equals(_serialD),
+        );
+        expect(d!.revokedAt, isNull);
+
+        falhaNaTrilha = false;
+        final at = _t.add(const Duration(days: 1));
+        await pedir(at: at);
+        d = await DeviceCertificate.db.findFirstRow(
+          session,
+          where: (c) => c.serial.equals(_serialD),
+        );
+        expect(d!.revokedAt, at);
+        expect(d.revocationReason, DeviceCertRevocationReason.wipe);
+        final e = await DeviceCertificate.db.findFirstRow(
+          session,
+          where: (c) => c.serial.equals(_serialE),
+        );
+        expect(e!.revokedAt, isNull);
+
+        final revogados = auditados
+            .where((a) => a.result == 'device_cert_revoked:wipe')
+            .toList();
+        expect(revogados, hasLength(1));
+        expect(revogados.single.userId, _admin);
+        expect(revogados.single.resourceType, 'device_certificate');
+        expect(revogados.single.resourceId, 'dddddddd-dddd-4ddd-addd-dddddddddddd');
+      },
+    );
+
+    test('repetir o pedido não revoga de novo', () async {
+      await pedir();
+      // Certificado gravado depois do pedido: o segundo pedido não o toca.
+      await _certificado(session, _u1, _aparelhoD, _serialF);
+      final segundo = await pedir(at: _t.add(const Duration(days: 3)));
+      expect(segundo.created, isFalse);
+      final f = await DeviceCertificate.db.findFirstRow(
+        session,
+        where: (c) => c.serial.equals(_serialF),
+      );
+      expect(f!.revokedAt, isNull);
+      expect(
+        auditados.where((a) => a.result.startsWith('device_cert_revoked')),
+        isEmpty,
+      );
+    });
 
     test('deviceBelongsTo só para quem tem token no aparelho', () async {
       expect(await store.deviceBelongsTo(_u1, _aparelhoD), isTrue);
