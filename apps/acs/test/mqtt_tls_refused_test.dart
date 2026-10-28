@@ -44,20 +44,76 @@ void main() {
       await broker.segundaTentativa.future.timeout(const Duration(seconds: 10), onTimeout: () {
         fail('o cliente nunca tentou reconectar');
       });
-      await caiu.future.timeout(const Duration(seconds: 10), onTimeout: () {
+      // A primeira tentativa pode trazer só o erro do socket antigo (que uma
+      // queda comum também produz); a recusa se decide quando a SEGUNDA
+      // tentativa com erro de E/S falha — 2 ciclos de 3×5 s do mqtt_client.
+      await caiu.future.timeout(const Duration(seconds: 60), onTimeout: () {
         fail('a recusa TLS na reconexão nunca virou queda tlsRefused: $quedas');
       });
 
-      // Sem insistir: depois da queda, nenhuma tentativa nova chega ao broker.
+      // Sem insistir para sempre. A queda é decidida no `onAutoReconnect`,
+      // que o mqtt_client 10.5.1 chama ANTES do ciclo de tentativas que ele já
+      // ia fazer; esse ciclo (no máximo `maxConnectionAttempts` = 3, de 5 s
+      // cada) não tem como ser cortado de fora e ainda sai, falhando calado.
+      // Depois dele, nada: o barramento de eventos foi destruído e o laço
+      // morre — antes, seguia para sempre.
+      final naQueda = broker.tentativas;
+      await Future<void>.delayed(const Duration(seconds: 17));
       final depois = broker.tentativas;
-      await Future<void>.delayed(const Duration(seconds: 3));
+      expect(depois - naQueda, lessThanOrEqualTo(3), reason: 'no máximo o ciclo já em curso');
+      await Future<void>.delayed(const Duration(seconds: 6));
       expect(broker.tentativas, depois, reason: 'o cliente não pode seguir tentando com o certificado recusado');
       expect(client.isConnected, isFalse);
       expect(quedas.where((q) => q == MqttDropReason.tlsRefused), hasLength(1));
     },
     skip: temOpenssl ? false : 'openssl ausente',
-    timeout: const Timeout(Duration(seconds: 60)),
+    timeout: const Timeout(Duration(seconds: 120)),
   );
+
+  // A garantia da #80: uma queda comum com reconexão ACEITA nunca vira
+  // `onDrop` (nem descarte do certificado nem consulta de wipe). Repetida
+  // porque a corrida de escrita no socket derrubado depende de tempo.
+  for (var rodada = 1; rodada <= 5; rodada++) {
+    test(
+      'queda TLS comum com reconexão aceita não dispara onDrop e o autoReconnect volta (rodada $rodada)',
+      () async {
+        final broker = await _BrokerTls.start(aceitarAte: 1000);
+        final client = broker.client();
+        addTearDown(client.disconnect);
+
+        final quedas = <MqttDropReason>[];
+        final estados = <bool>[];
+        final caiu = Completer<void>();
+        final voltou = Completer<void>();
+        await client.connect(
+          onAlert: (_) {},
+          onDrop: quedas.add,
+          onConnectionChanged: (conectado) {
+            estados.add(conectado);
+            if (!conectado && !caiu.isCompleted) caiu.complete();
+            if (conectado && caiu.isCompleted && !voltou.isCompleted) voltou.complete();
+          },
+        );
+        expect(client.isConnected, isTrue);
+
+        broker.derrubarSessoes();
+        await caiu.future.timeout(const Duration(seconds: 10), onTimeout: () {
+          fail('a queda nunca virou onConnectionChanged(false): $estados');
+        });
+        await voltou.future.timeout(const Duration(seconds: 15), onTimeout: () {
+          fail('o autoReconnect não reconectou: $estados, quedas $quedas');
+        });
+        // Folga para um erro tardio do socket derrubado aparecer.
+        await Future<void>.delayed(const Duration(seconds: 1));
+
+        expect(quedas, isEmpty, reason: 'queda comum não é recusa do certificado');
+        expect(client.isConnected, isTrue);
+        expect(estados.last, isTrue);
+      },
+      skip: temOpenssl ? false : 'openssl ausente',
+      timeout: const Timeout(Duration(seconds: 60)),
+    );
+  }
 
   test(
     'recusa TLS no primeiro connect lança MqttTlsRefused, sem erro não tratado',

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:developer' as developer;
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -317,9 +318,10 @@ class MqttTlsRefused implements Exception {
 /// como recusa: é o que o broker produz ao recusar o certificado — o alerta TLS
 /// (`SSLV3_ALERT_CERTIFICATE_REVOKED`, no e2e) ou o socket que ele fecha no
 /// meio da escrita (`Broken pipe`, no broker falso de
-/// `test/mqtt_tls_refused_test.dart`). Uma queda comum de rede não chega aqui:
-/// a falha de abrir o socket o `mqtt_client` já trata, e a reconexão que dá
-/// certo não deixa erro escapar (medido no mesmo teste).
+/// `test/mqtt_tls_refused_test.dart`). Uma queda comum também deixa escapar
+/// um `Broken pipe` do socket antigo; por isso, depois de conectar, o erro é
+/// só suspeita até uma tentativa de reconexão posterior falhar com ele (ver
+/// [MqttSecureClient.connect]).
 MqttDropReason mqttDropReasonFor(Object error) =>
     error is TlsException || error is SocketException ? MqttDropReason.tlsRefused : MqttDropReason.connectionError;
 
@@ -366,20 +368,62 @@ class MqttSecureClient {
     final result = Completer<void>();
     MqttServerClient? owned;
 
+    // Uma queda COMUM também deixa escapar um `SocketException` (`Broken
+    // pipe` do socket que o broker derrubou, medido em
+    // `test/mqtt_tls_refused_test.dart`). Por isso erro de E/S na reconexão é
+    // só suspeita: vira recusa quando uma tentativa de reconexão que NÃO é a
+    // primeira desde a última conexão teve erro de E/S e falhou (o
+    // `mqtt_client` chama `onAutoReconnect` de novo). O erro do socket
+    // antigo cai sempre na primeira tentativa; um broker reiniciando recusa o
+    // TCP, o que o `mqtt_client` trata sem deixar escapar.
+    var reconnecting = false;
+    var attemptsSinceConnected = 0;
+    Object? attemptIoError;
+
+    void drop(MqttDropReason reason) {
+      dropped = true;
+      disconnect();
+      changedInCaller?.call(false);
+      dropInCaller?.call(reason);
+    }
+
+    void onReconnectAttempt() {
+      final client = owned;
+      if (dropped || client == null || !identical(_client, client)) return;
+      if (attemptIoError != null && attemptsSinceConnected >= 2) {
+        drop(MqttDropReason.tlsRefused);
+        return;
+      }
+      reconnecting = true;
+      attemptsSinceConnected++;
+      attemptIoError = null;
+    }
+
+    void onReconnected() {
+      reconnecting = false;
+      attemptsSinceConnected = 0;
+      attemptIoError = null;
+    }
+
     void onZoneError(Object error, StackTrace stack) {
       final client = owned;
       // Desligado por quem chamou (ou já caído): o resto da reconexão que o
       // mqtt_client ainda desenrola não interessa a ninguém.
       if (dropped || client == null || !identical(_client, client)) return;
+      // Só o tipo: a mensagem pode trazer endereço do broker.
+      developer.log('erro escapou do mqtt_client: ${error.runtimeType}', name: 'sinalacs.acs.mqtt');
       final reason = mqttDropReasonFor(error);
       if (connecting) {
         if (reason == MqttDropReason.tlsRefused) refusedWhileConnecting ??= error;
         return;
       }
-      dropped = true;
-      disconnect();
-      changedInCaller?.call(false);
-      dropInCaller?.call(reason);
+      if (reason == MqttDropReason.tlsRefused) {
+        // Fora de uma reconexão (conectado, ou atrasado depois de reconectar)
+        // é resto de um socket antigo: não decide nada.
+        if (reconnecting) attemptIoError ??= error;
+        return;
+      }
+      drop(reason);
     }
 
     runZonedGuarded(() {
@@ -387,6 +431,8 @@ class MqttSecureClient {
         onAlert: alertInCaller,
         onConnectionChanged: changedInCaller,
         onClient: (client) => owned = client,
+        onReconnectAttempt: onReconnectAttempt,
+        onReconnected: onReconnected,
       ).then((_) {
         connecting = false;
         result.complete();
@@ -407,6 +453,8 @@ class MqttSecureClient {
     required void Function(ReceivedMqttAlert alert) onAlert,
     required void Function(bool connected)? onConnectionChanged,
     required void Function(MqttServerClient client) onClient,
+    required void Function() onReconnectAttempt,
+    required void Function() onReconnected,
   }) async {
     final client = MqttServerClient.withPort(config.brokerHost, config.clientId, config.port)
       ..keepAlivePeriod = 30
@@ -420,11 +468,17 @@ class MqttSecureClient {
       // `onDisconnected` (o mqtt_client 10.5.1 entra direto no laço de
       // reconexão e só chama `onAutoReconnect`). Sem isto o painel seguia
       // "em linha" e nunca ligava a reserva por HTTP dos alertas (#80).
-      ..onAutoReconnect = (() => onConnectionChanged?.call(false))
+      ..onAutoReconnect = (() {
+        onConnectionChanged?.call(false);
+        onReconnectAttempt();
+      })
       // Conexão meio aberta (comum em 3G): sem resposta ao PINGREQ por este
       // tempo, o cliente a dá por caída. O padrão 0 nunca desconecta.
       ..disconnectOnNoResponsePeriod = 10
-      ..onAutoReconnected = (() => onConnectionChanged?.call(true))
+      ..onAutoReconnected = (() {
+        onReconnected();
+        onConnectionChanged?.call(true);
+      })
       ..onConnected = (() => onConnectionChanged?.call(true))
       ..connectionMessage = MqttConnectMessage()
           .withClientIdentifier(config.clientId)
