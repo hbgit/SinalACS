@@ -82,7 +82,6 @@ echo "== limpeza remota no emulador"
 ( cd apps/acs && flutter pub get >/dev/null && flutter test integration_test/remote_wipe_e2e.dart -d "$dev" \
     --dart-define=SINALACS_HOST=https://localhost:8443/ \
     --dart-define=SINALACS_MQTT_HOST=localhost \
-    --dart-define=SINALACS_MQTT_PASSWORD="$MQTT_ACS_PASSWORD" \
     --dart-define=E2E_FIXTURES="$fixtures" ) 2>&1 | tee "$saida_teste"
 [[ "${PIPESTATUS[0]}" -eq 0 ]] || { echo 'erro: a limpeza remota no emulador falhou' >&2; exit 1; }
 for marca in E2E_WIPE_PEDIDO E2E_WIPE_APARELHO E2E_WIPE_OK; do

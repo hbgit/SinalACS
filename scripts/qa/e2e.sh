@@ -55,8 +55,9 @@ if [[ ! -f "$repo_root/.env" ]]; then
   exit 1
 fi
 
-# As senhas do broker são geradas por máquina, então os apps não podem contar
-# com o default compilado: o live_check recebe a senha real por argumento.
+# O .env traz o que o compose e os scripts precisam. O broker não tem senha
+# para o ACS (#94): o live_check se autentica pela folha qa-tools da CA de
+# aparelhos, e o app no emulador emite o próprio certificado depois do login.
 existing_google_maps_api_key="${GOOGLE_MAPS_API_KEY:-}"
 set -a
 # shellcheck disable=SC1091
@@ -105,7 +106,7 @@ echo '== paciente: RPC (saúde, login, triagem, alerta, idempotência) =='
 echo
 echo '== ACS: ciclo completo (RPC + MQTT/TLS + sincronização de visita) =='
 (cd apps/acs && dart pub get >/dev/null && \
-  dart run tool/live_check.dart --mqtt-password "$MQTT_ACS_PASSWORD")
+  dart run tool/live_check.dart)
 
 # `adb install` falha de forma transiente e conhecida em emuladores sem
 # aceleração de hardware (medido no runner da CI antes de o job habilitar o
@@ -183,8 +184,7 @@ if [[ "$run_emulator" -eq 1 ]]; then
       --dart-define=SINALACS_HOST=https://localhost:8443/)
   acs_cmd=(flutter test "$alvo_integracao" -d emulator-5554
     --dart-define=SINALACS_HOST=https://localhost:8443/
-    --dart-define=SINALACS_MQTT_HOST=localhost
-    --dart-define=SINALACS_MQTT_PASSWORD="$MQTT_ACS_PASSWORD")
+    --dart-define=SINALACS_MQTT_HOST=localhost)
   if [[ -n "${GOOGLE_MAPS_API_KEY:-}" ]]; then
     acs_cmd+=(--dart-define=GOOGLE_MAPS_API_KEY="$GOOGLE_MAPS_API_KEY")
   fi

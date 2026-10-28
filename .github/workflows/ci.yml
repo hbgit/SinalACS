@@ -383,9 +383,10 @@ jobs:
   # incompatíveis, MainActivity em pacote errado nem merge de manifest
   # quebrado — erros que só apareceriam quando alguém tentasse compilar.
   #
-  # É o app admin e não o ACS porque `apps/acs/android/app/build.gradle.kts`
-  # tem a guarda que faz o build falhar sem SINALACS_MQTT_PASSWORD: cobri-lo
-  # aqui exigiria compilar um APK que a própria guarda declara inútil.
+  # É o app admin e não o ACS por histórico: o ACS tinha uma guarda no Gradle
+  # que fazia o build falhar sem a senha do broker, removida na #94 (o aparelho
+  # passou a se autenticar pelo próprio certificado). O build do ACS em release
+  # é provado localmente por scripts/qa/acs_release_signing.sh.
   admin-android-build:
     runs-on: ubuntu-24.04
     defaults:

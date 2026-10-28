@@ -22,30 +22,42 @@ monta() {
   local raiz="$1"; rm -rf "$raiz"
   gera_runtime "$raiz/infra/docker/mosquitto/runtime/certs"
   gera_runtime "$raiz/infra/docker/traefik/runtime/certs"
-  local m="$raiz/infra/docker/mosquitto/runtime/certs"
-  openssl req -newkey rsa:2048 -nodes -keyout "$m/acs-area-12.key" -out "$m/c.csr" -subj "/CN=acs-area-12" 2>/dev/null
-  openssl x509 -req -in "$m/c.csr" -CA "$m/ca.crt" -CAkey "$m/ca.key" -CAcreateserial -out "$m/acs-area-12.crt" -days 2 2>/dev/null
   mkdir -p "$raiz/apps/acs/assets/certs" "$raiz/apps/patient/assets/certs"
 }
 sem_tmp() { [[ -z "$(find "$1/apps" -name '*.tmp' 2>/dev/null)" ]]; }
 
-echo "== caso 1: tudo certo copia os assets"
+echo "== caso 1: tudo certo copia as CAs e não cria acs_client.*"
 monta "$tmp/ok"
 SYNC_DEV_CA_ROOT="$tmp/ok" "$script" >/dev/null || falha "o sync falhou numa árvore válida"
-[[ -f "$tmp/ok/apps/acs/assets/certs/acs_client.key" ]] || falha "a chave do cliente não foi copiada"
-[[ "$(stat -c %a "$tmp/ok/apps/acs/assets/certs/acs_client.key")" == 600 ]] || falha "a chave do cliente não está em 600"
+for app in acs patient; do
+  for ca in dev_ca.crt dev_rpc_ca.crt; do
+    [[ -f "$tmp/ok/apps/$app/assets/certs/$ca" ]] || falha "$ca não foi copiada para $app"
+  done
+done
+# Desde a #94 o certificado de cliente é por aparelho, emitido pelo backend: o
+# sync não cria acs_client.* em app nenhum.
+[[ -z "$(find "$tmp/ok/apps" -name 'acs_client.*')" ]] || falha "o sync criou acs_client.*: $(find "$tmp/ok/apps" -name 'acs_client.*')"
 sem_tmp "$tmp/ok" || falha "sobrou .tmp no caminho feliz"
 [[ -f "$tmp/ok/apps/admin/assets/certs/dev_rpc_ca.crt" ]] || falha "a CA do RPC não foi copiada para o admin"
-[[ ! -e "$tmp/ok/apps/admin/assets/certs/dev_ca.crt" && ! -e "$tmp/ok/apps/admin/assets/certs/acs_client.key" ]] || falha "o admin recebeu a CA do broker ou o certificado de cliente do ACS"
+[[ ! -e "$tmp/ok/apps/admin/assets/certs/dev_ca.crt" ]] || falha "o admin recebeu a CA do broker"
 
-echo "== caso 2: chave que não é o par do certificado é recusada antes de copiar"
-monta "$tmp/par"
-m="$tmp/par/infra/docker/mosquitto/runtime/certs"
-openssl genrsa -out "$m/acs-area-12.key" 2048 2>/dev/null   # outra chave, mesmo certificado
-if SYNC_DEV_CA_ROOT="$tmp/par" "$script" >"$tmp/saida" 2>&1; then falha "aceitou chave de outro par"; fi
-grep -q "não é o par" "$tmp/saida" || falha "a mensagem não explicou o motivo: $(cat "$tmp/saida")"
-grep -q "nada foi copiado" "$tmp/saida" || falha "a mensagem não diz que nada foi copiado"
-[[ -z "$(find "$tmp/par/apps" -type f 2>/dev/null)" ]] || falha "algum asset foi copiado apesar do erro"
+echo "== caso 2: remove acs_client.* legado de um checkout antigo"
+monta "$tmp/legado"
+legado="$tmp/legado/apps/acs/assets/certs"
+echo 'certificado compartilhado (sintético)' >"$legado/acs_client.crt"
+echo 'chave compartilhada (sintética)' >"$legado/acs_client.key"
+SYNC_DEV_CA_ROOT="$tmp/legado" "$script" >"$tmp/saida" 2>&1 || falha "o sync falhou com o legado: $(cat "$tmp/saida")"
+[[ ! -e "$legado/acs_client.crt" && ! -e "$legado/acs_client.key" ]] || falha "o acs_client.* legado continuou no asset"
+grep -q 'acs_client' "$tmp/saida" || falha "a remoção do legado não foi anunciada"
+
+echo "== caso 2b: com a CA do RPC errada nada muda — nem o legado é apagado"
+monta "$tmp/errada"
+cp "$tmp/errada/infra/docker/mosquitto/runtime/certs/ca.crt" "$tmp/errada/infra/docker/traefik/runtime/certs/ca.crt"
+echo 'chave compartilhada (sintética)' >"$tmp/errada/apps/acs/assets/certs/acs_client.key"
+if SYNC_DEV_CA_ROOT="$tmp/errada" "$script" >"$tmp/saida" 2>&1; then falha "aceitou a CA do broker no lugar da do RPC"; fi
+grep -q "nada foi copiado" "$tmp/saida" || falha "a mensagem não diz que nada foi copiado: $(cat "$tmp/saida")"
+[[ "$(find "$tmp/errada/apps" -type f)" == "$tmp/errada/apps/acs/assets/certs/acs_client.key" ]] \
+  || falha "a árvore mudou apesar do erro: $(find "$tmp/errada/apps" -type f)"
 
 echo "== caso 3: falha no meio da publicação não deixa .tmp"
 monta "$tmp/meio"
@@ -61,4 +73,4 @@ chmod +x "$tmp/shim/openssl"
 if PATH="$tmp/shim:$PATH" SYNC_DEV_CA_ROOT="$tmp/meio" "$script" >/dev/null 2>&1; then falha "o sync não falhou com o shim"; fi
 sem_tmp "$tmp/meio" || falha "sobrou .tmp depois da falha no meio: $(find "$tmp/meio/apps" -name '*.tmp')"
 
-echo "OK — sync_dev_ca.sh: par conferido, nada copiado no erro, sem .tmp"
+echo "OK — sync_dev_ca.sh: CAs conferidas, sem acs_client.* (o legado é removido), nada muda no erro, sem .tmp"

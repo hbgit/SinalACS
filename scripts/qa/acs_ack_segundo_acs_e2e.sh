@@ -113,7 +113,6 @@ echo "== aparelho B (segundo ACS) confirma um alerta já confirmado pelo A (rese
 ( cd apps/acs && flutter pub get >/dev/null && flutter test integration_test/ack_by_second_acs_e2e.dart -d "$dev" \
     --dart-define=SINALACS_HOST=https://localhost:8443/ \
     --dart-define=SINALACS_MQTT_HOST=localhost \
-    --dart-define=SINALACS_MQTT_PASSWORD="$MQTT_ACS_PASSWORD" \
     --dart-define=E2E_FIXTURES="$fixtures" ) >"$saida_teste" 2>&1 &
 teste_pid=$!
 tail -n +1 -f --pid="$teste_pid" "$saida_teste" >&2 &

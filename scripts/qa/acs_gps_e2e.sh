@@ -26,7 +26,6 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$repo_root"
 export PATH="$PATH:$HOME/Android/Sdk/platform-tools:$HOME/flutter/bin"
 if [[ -f .env ]]; then set -a; source .env; set +a; fi
-: "${MQTT_ACS_PASSWORD:?exporte MQTT_ACS_PASSWORD ou rode ./scripts/dev/bootstrap_env.sh}"
 cd apps/acs
 
 dev=emulator-5554
@@ -72,7 +71,6 @@ trap 'exit 143' TERM
 # O EXPECT_PERMISSION é fixado AQUI, no build: o `flutter drive` abaixo usa o APK pronto
 # (--use-application-binary) e não recompila, então um dart-define no drive não teria efeito.
 if ! flutter build apk --debug --target=integration_test/geofence_gps_e2e.dart \
-    --dart-define=SINALACS_MQTT_PASSWORD="$MQTT_ACS_PASSWORD" \
     --dart-define=EXPECT_PERMISSION="$expect" >"$log" 2>&1; then
   echo "erro: o build do APK falhou. Últimas linhas:" >&2
   tail -n 30 "$log" >&2
