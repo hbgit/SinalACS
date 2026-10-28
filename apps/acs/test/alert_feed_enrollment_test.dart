@@ -106,6 +106,45 @@ void main() {
     expect(clientes, isEmpty, reason: 'sem certificado, nenhum socket é aberto');
   });
 
+  test('servidor pede para tentar mais tarde: certificateUnavailable transitório com o motivo, sem falar de rede', () async {
+    backend.issueCertificateFailure = const DeviceCertificateRetryLater(
+        'a microárea da sessão mudou; a sessão precisa ser renovada antes de emitir o certificado deste aparelho');
+
+    await expectLater(
+      feed().start(microAreaId: seedMicroAreaId, acsId: seedAcsId),
+      throwsA(isA<AlertFeedFailure>()
+          .having((f) => f.kind, 'kind', AlertFeedFailureKind.certificateUnavailable)
+          // Transitória: o painel mostra "Tentar agora" e retenta sozinho.
+          .having((f) => f.transient, 'transient', isTrue)
+          .having((f) => f.detail, 'detail', contains('renovada'))
+          .having((f) => f.detail, 'detail', isNot(contains('rede')))),
+    );
+  });
+
+  test('Keystore que falha na leitura: transitória com texto próprio, não "quando houver rede" (T5)', () async {
+    final quebrado = _LeituraQuebrada();
+    final f = MqttAlertFeed(
+      queue: AlertQueue(microAreaId: seedMicroAreaId),
+      enroller: DeviceCertificateEnroller(store: quebrado, backend: backend),
+      deviceIds: deviceIds,
+      loadCaCertificate: () async => utf8.encode('CA-SINTETICA'),
+      clientFactory: (config) {
+        final c = _ClienteFalso(config, recusarTls: false);
+        clientes.add(c);
+        return c;
+      },
+    );
+
+    await expectLater(
+      f.start(microAreaId: seedMicroAreaId, acsId: seedAcsId),
+      throwsA(isA<AlertFeedFailure>()
+          .having((f) => f.kind, 'kind', AlertFeedFailureKind.certificateUnavailable)
+          .having((f) => f.transient, 'transient', isTrue)
+          .having((f) => f.detail, 'detail', contains('armazenamento seguro'))
+          .having((f) => f.detail, 'detail', isNot(contains('rede')))),
+    );
+  });
+
   test('DeviceWipeRequiredFailure vira o fluxo da #81 (RemoteWipeCoordinator.check)', () async {
     backend.issueCertificateFailure = const DeviceWipeRequiredFailure('ordem-1');
     backend.pendingWipeOrderId = 'ordem-1';
@@ -257,4 +296,11 @@ class _ClienteFalso implements MqttSecureClient {
 
   @override
   dynamic noSuchMethod(Invocation invocation) => throw UnimplementedError('${invocation.memberName}');
+}
+
+/// Keystore cuja leitura falha (T5).
+class _LeituraQuebrada extends InMemoryDeviceCertificateStore {
+  @override
+  Future<StoredDeviceCertificate?> read({required String acsId, required String deviceId}) async =>
+      throw StateError('Keystore indisponível');
 }

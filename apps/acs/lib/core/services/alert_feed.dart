@@ -197,10 +197,13 @@ class MqttAlertFeed implements AlertFeed {
       certificatePem = cert.certificatePem;
       privateKeyPem = cert.privateKeyPem;
     } on DeviceCertificateUnavailable catch (error) {
+      final motivo = error.retryLater;
       throw AlertFeedFailure(
         AlertFeedFailureKind.certificateUnavailable,
         title: 'Sem certificado deste aparelho para a central',
-        detail: 'Será emitido quando houver rede.',
+        detail: motivo == null
+            ? 'Será emitido quando houver rede.'
+            : 'A central pediu para tentar mais tarde ($motivo).',
         cause: error,
         transient: true,
       );
@@ -221,11 +224,12 @@ class MqttAlertFeed implements AlertFeed {
         cause: error,
       );
     } catch (error) {
-      // Keystore indisponível ou falha local inesperada: tenta de novo.
+      // Keystore indisponível ou falha local inesperada: tenta de novo. Não é
+      // falta de rede, e o texto não pode mandar procurar sinal (T5).
       throw AlertFeedFailure(
         AlertFeedFailureKind.certificateUnavailable,
         title: 'Sem certificado deste aparelho para a central',
-        detail: 'Será emitido quando houver rede.',
+        detail: 'O armazenamento seguro deste aparelho não respondeu.',
         cause: error,
         transient: true,
       );

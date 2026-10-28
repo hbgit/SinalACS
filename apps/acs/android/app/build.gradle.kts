@@ -165,9 +165,10 @@ gradle.taskGraph.whenReady {
             """
             |O release levaria a chave privada de desenvolvimento do broker (assets/certs/acs_client.key).
             |
-            |Remova o arquivo antes de gerar o release (em produção o certificado de cliente é
-            |provisionado por aparelho — ainda não implementado). Para um release de TESTE LOCAL,
-            |acrescente -Psinalacs.allowDevClientKey=true.
+            |Desde a #94 o app não usa chave de cliente embarcada: cada aparelho gera o próprio par
+            |e recebe do backend um certificado por aparelho (devices.issueCertificate). Esta é uma
+            |chave legada que sobrou no checkout; remova o arquivo antes de gerar o release. Para
+            |um release de TESTE LOCAL, acrescente -Psinalacs.allowDevClientKey=true.
             """.trimMargin()
         )
     }

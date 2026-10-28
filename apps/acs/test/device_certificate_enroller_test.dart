@@ -197,6 +197,76 @@ void main() {
         reason: 'a gravação da emissão em voo não pode sobreviver ao descarte');
   });
 
+  group('I1: falha na renovação com o guardado ainda válido devolve o guardado', () {
+    for (final (nome, falha) in [
+      ('limite de emissões', const DeviceCertificateRetryLater('limite de emissões deste aparelho atingido; tente mais tarde')),
+      ('recusa não recuperável', const BackendFailure('Recusado.', isRecoverable: false)),
+      ('sem rede', semRede),
+    ]) {
+      test(nome, () async {
+        await garantir();
+        relogio = relogio.add(const Duration(days: 21));
+        backend.issueCertificateFailure = falha;
+
+        final cert = await garantir();
+
+        expect(backend.issueCertificateCount, 2);
+        expect(cert.serial, 'serial-1');
+      });
+    }
+
+    test('DeviceWipeRequiredFailure sobe mesmo com o guardado ainda válido', () async {
+      await garantir();
+      relogio = relogio.add(const Duration(days: 21));
+      backend.issueCertificateFailure = const DeviceWipeRequiredFailure('ordem-2');
+
+      await expectLater(garantir(), throwsA(isA<DeviceWipeRequiredFailure>()));
+    });
+  });
+
+  test('vencido e servidor pede para tentar mais tarde → DeviceCertificateUnavailable com o motivo', () async {
+    await garantir();
+    relogio = relogio.add(const Duration(days: 31));
+    backend.issueCertificateFailure = const DeviceCertificateRetryLater('limite de emissões deste aparelho atingido; tente mais tarde');
+
+    await expectLater(
+      garantir(),
+      throwsA(isA<DeviceCertificateUnavailable>()
+          .having((e) => e.expired, 'expired', isTrue)
+          .having((e) => e.retryLater, 'retryLater', contains('limite'))),
+    );
+  });
+
+  group('T5: o Keystore que falha na gravação não descarta a folha emitida', () {
+    late _GravacaoQuebrada quebrado;
+
+    setUp(() {
+      quebrado = _GravacaoQuebrada();
+      enroller = DeviceCertificateEnroller(store: quebrado, backend: backend, now: () => relogio);
+    });
+
+    test('devolve a folha recém-emitida e a próxima chamada não reemite', () async {
+      final primeiro = await garantir();
+
+      expect(primeiro.serial, 'serial-1');
+      expect(await quebrado.read(acsId: acsId, deviceId: deviceId), isNull);
+      final segundo = await garantir();
+      expect(backend.issueCertificateCount, 1, reason: 'reemitir a cada reconexão queimaria o limite por hora');
+      expect(segundo.serial, 'serial-1');
+      expect(segundo.privateKeyPem, primeiro.privateKeyPem);
+    });
+
+    test('discard também esquece a folha da RAM', () async {
+      await garantir();
+
+      await enroller.discard(acsId: acsId, deviceId: deviceId);
+      final cert = await garantir();
+
+      expect(backend.issueCertificateCount, 2);
+      expect(cert.serial, 'serial-2');
+    });
+  });
+
   test('recusa não recuperável do servidor sobe como veio', () async {
     backend.issueCertificateFailure = const BackendFailure('CSR recusado.', isRecoverable: false);
 
@@ -206,4 +276,13 @@ void main() {
     );
     expect(store.writeCount, 0);
   });
+}
+
+/// Keystore que lê e apaga, mas cuja gravação falha (T5).
+class _GravacaoQuebrada extends InMemoryDeviceCertificateStore {
+  @override
+  Future<void> write(StoredDeviceCertificate c) async {
+    writeCount++;
+    throw StateError('Keystore indisponível');
+  }
 }

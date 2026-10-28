@@ -293,6 +293,21 @@ void main() {
       );
     });
 
+    test('DeviceCertificateRetryLaterException vira DeviceCertificateRetryLater recuperável (I1)', () async {
+      await backend.login(matricula: 'ACS-001', senha: 'senha-sintetica');
+      server.issueCertificateRefusal = {
+        'className': 'DeviceCertificateRetryLaterException',
+        'data': {'message': 'limite de emissões deste aparelho atingido; tente mais tarde'},
+      };
+
+      await expectLater(
+        backend.issueDeviceCertificate('CSR-SINTETICO'),
+        throwsA(isA<DeviceCertificateRetryLater>()
+            .having((f) => f.message, 'message', contains('limite'))
+            .having((f) => f.isRecoverable, 'isRecoverable', isTrue)),
+      );
+    });
+
     test('AlertPermissionException vira BackendFailure não recuperável sem falar de alerta', () async {
       await backend.login(matricula: 'ACS-001', senha: 'senha-sintetica');
       server.issueCertificateRefusal = {
