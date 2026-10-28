@@ -116,3 +116,25 @@ integration_test/smoke_test.dart: 00:01 +1: All tests passed! (dentro do e2e.sh 
 # admin:
 integration_test/admin_mobile_smoke_test.dart: 00:13 +4: All tests passed! (repetido isolado com veredito do harness; na primeira passagem o adb travou na desinstalação final, depois dos 4 testes)
 # deriva pré-existente corrigida de passagem: encrypted_storage_test esperava schema v8; develop está em v9 desde a #83.
+
+== Reexecução de ./scripts/qa/acs_device_cert_e2e.sh após a onda de correções da revisão final (e943e8a: emissão relê a conta no banco, deviceId só UUID, limite transitório)
+== stack de e2e (banco de teste)
+== segundo aparelho: compilando a ferramenta
+== emulador: certificado por aparelho
+== 1) emulador: aparelho ccd89982-a3bb-4330-8775-299f7e1311d4
+== 2) segundo aparelho (VM)
+== 3) alerta para os dois aparelhos
+== 4) limpeza remota do segundo aparelho
+  derrubado 1554 ms depois do revokedAt
+  [dev2] E2E_DEV2_RECONEXAO_RECUSADA erro=MqttTlsRefused
+  E2E_DEV2_RECONEXAO_RECUSADA erro=MqttTlsRefused
+  segundo aparelho revogado como wipe: 09540b75306945d3acc7376c7c161c74|a6f2692b-2b79-4b80-857d-999af0bd93fd|true|wipe
+== 5) o emulador segue recebendo
+== 6) limpeza remota do emulador e reemissão
+  emulador revogado como wipe: 3ada2c76c6c2449b84d0708fb90c1c23|a6f2692b-2b79-4b80-857d-999af0bd93fd|true|wipe
+  id novo: serial|CN|revogado|motivo: abdfc716ace04f5984b6f4a62f267377|a6f2692b-2b79-4b80-857d-999af0bd93fd|false|-
+== 7) trilha de auditoria
+  trilha device_cert_issued (pelo ACS): 3
+  trilha device_cert_revoked:wipe (pelo coordenador): 2
+  OK — 25 linha(s) verificada(s), cadeia íntegra.
+E2E do certificado por aparelho: OK

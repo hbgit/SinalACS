@@ -257,8 +257,10 @@ class DeviceCertificateRateLimited implements Exception {
 /// A microárea do token difere da gravada na conta (#94, achado C2): o token
 /// (15 min) foi emitido antes de uma troca de microárea. É um [ArgumentError]
 /// (pedido inválido como está), mas o endpoint a traduz para
-/// `DeviceCertificateRetryLaterException`: a próxima renovação do token traz a
-/// microárea nova e a emissão volta a ser possível.
+/// `DeviceCertificateRetryLaterException`. Hoje, porém, o painel do ACS fica
+/// preso à microárea do login e o CSR seguinte ainda traz o CN antigo: na
+/// prática só um novo login traz o território novo ao aparelho (limite
+/// registrado no PROGRESS, seção da #94).
 class DeviceCertificateSessionStale extends ArgumentError {
   DeviceCertificateSessionStale()
     : super(
