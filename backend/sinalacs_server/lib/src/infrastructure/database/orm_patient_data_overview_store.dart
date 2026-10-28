@@ -2,6 +2,7 @@ import 'package:serverpod/serverpod.dart';
 import 'package:sinalacs_server/src/application/patients/patient_data_overview_service.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
 import 'package:sinalacs_server/src/infrastructure/crypto/encrypted_json.dart';
+import 'package:sinalacs_server/src/infrastructure/crypto/encrypted_risk_level.dart';
 import 'package:sinalacs_server/src/infrastructure/crypto/health_data_cipher.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_data_subject_rights_store.dart';
 
@@ -76,12 +77,26 @@ class OrmPatientDataOverviewStore implements PatientDataOverviewStore {
       for (final row in requestRows) await dataSubjectRequestSnapshotOf(row, _cipher),
     ];
 
-    final riskHistory = <RiskEventSnapshot>[
-      for (final row in triageRows)
-        RiskEventSnapshot(source: 'triage', riskLevel: row.resultRisk, recordedAt: row.createdAt),
-      for (final row in alertRows)
+    final riskHistory = <RiskEventSnapshot>[];
+    for (final row in triageRows) {
+      // Ciphertext vazio = triagem gravada antes da migração da #75: sem risco
+      // legível, a linha fica fora do histórico — nunca um risco inventado
+      // (INV-02), e o painel do titular continua abrindo.
+      final risk = await _cipher.decryptRiskLevel(
+        row.resultRiskEncrypted,
+        row.resultRiskKeyVersion,
+      );
+      if (risk == null) continue;
+      riskHistory.add(
+        RiskEventSnapshot(source: 'triage', riskLevel: risk, recordedAt: row.createdAt),
+      );
+    }
+    for (final row in alertRows) {
+      riskHistory.add(
         RiskEventSnapshot(source: 'alert', riskLevel: row.riskLevel, recordedAt: row.triggeredAt),
-    ]..sort((a, b) => b.recordedAt.compareTo(a.recordedAt));
+      );
+    }
+    riskHistory.sort((a, b) => b.recordedAt.compareTo(a.recordedAt));
 
     return PatientDataSnapshot(
       // `patients.id` É `users.id` (mesma chave, ver `patient.spy.yaml`), então

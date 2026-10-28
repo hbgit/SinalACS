@@ -2,6 +2,7 @@ import 'package:serverpod/serverpod.dart';
 import 'package:sinalacs_server/src/application/auth/cpf.dart';
 import 'package:sinalacs_server/src/application/auth/development_auth_service.dart';
 import 'package:sinalacs_server/src/application/auth/institutional_auth_service.dart';
+import 'package:sinalacs_server/src/application/devices/device_id_format.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
 import 'package:sinalacs_server/src/runtime/alert_runtime.dart';
 
@@ -30,11 +31,17 @@ class AuthEndpoint extends Endpoint {
     deviceId: 'patient-device-001',
   );
 
+  /// O `deviceId` é um UUID fixo, sintético (#94, C1): a emissão do
+  /// certificado do aparelho só aceita `deviceId` no formato UUID, e era
+  /// `acs-device-001` antes. Todos os logins de desenvolvimento do ACS
+  /// compartilham este aparelho — uma emissão nova revoga a anterior.
+  static const devAcsDeviceId = '00000000-0000-4000-8000-0000000000d1';
+
   static const _acs = AuthenticatedUser(
     id: '00000000-0000-4000-8000-000000000002',
     role: UserRole.acs,
     microAreaId: '00000000-0000-4000-8000-000000000003',
-    deviceId: 'acs-device-001',
+    deviceId: devAcsDeviceId,
   );
 
   Future<DevelopmentLoginResult> developmentLogin(
@@ -75,6 +82,11 @@ class AuthEndpoint extends Endpoint {
   /// [totpCode] recebe `MfaRequiredException` (o app pede o código e repete a
   /// chamada); com `REQUIRE_ACS_MFA` ligado e a MFA não ativada, recebe
   /// `MfaEnrollmentRequiredException` (o app chama `beginTotpEnrollment`).
+  ///
+  /// [deviceId] ausente, em branco ou o sentinela público é "sem aparelho";
+  /// qualquer outro valor precisa ser um UUID minúsculo (o app gera um) ou a
+  /// chamada é recusada com `AlertValidationException` antes de qualquer I/O
+  /// (#94, C1): ele vai ao JWT e de lá ao SAN do certificado do aparelho.
   Future<DevelopmentLoginResult> loginInstitutional(
     Session session, {
     required String matricula,
@@ -83,6 +95,21 @@ class AuthEndpoint extends Endpoint {
     String? totpCode,
   }) async {
     final runtime = AlertRuntime.instance;
+
+    if (deviceId != null &&
+        deviceId.trim().isNotEmpty &&
+        deviceId != InstitutionalAuthService.deviceIdAbsent &&
+        !isDeviceIdFormat(deviceId)) {
+      throw AlertValidationException(
+        message: 'identificador do aparelho fora do formato UUID',
+      );
+    }
+
+    // Aparelho marcado para limpeza (#81): a resposta é a limpeza, antes de
+    // olhar a senha, para o app não confundi-la com credencial recusada.
+    await runtime
+        .deviceWipeServiceFor(session)
+        .ensureDeviceNotMarked(deviceId);
 
     final user = await runtime.institutionalAuthServiceFor(session).login(
           matricula: matricula,
@@ -187,6 +214,11 @@ class AuthEndpoint extends Endpoint {
     required String deviceId,
   }) async {
     final runtime = AlertRuntime.instance;
+    // O pedido de limpeza já revogou os tokens do aparelho (#81); checar antes
+    // faz a resposta ser a limpeza, não a `SessionExpiredException` genérica.
+    await runtime
+        .deviceWipeServiceFor(session)
+        .ensureDeviceNotMarked(deviceId);
     final renewed = await runtime
         .refreshTokenServiceFor(session)
         .refresh(refreshToken: refreshToken, deviceId: deviceId);

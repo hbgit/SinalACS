@@ -3,6 +3,7 @@ import 'package:uuid/uuid.dart';
 import 'package:sinalacs_server/src/application/audit/audit_trail.dart';
 import 'package:sinalacs_server/src/application/auth/authorization.dart';
 import 'package:sinalacs_server/src/application/auth/development_auth_service.dart';
+import 'package:sinalacs_server/src/application/telemetry/telemetry_service.dart';
 import 'package:sinalacs_server/src/domain/entities/alert_delivery.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
 
@@ -20,14 +21,28 @@ abstract interface class AlertStore {
   Future<void> save(AlertDelivery alert, {required String deviceId});
 
   /// Confirma o alerta no território do ACS. Quando o alerta existe na
-  /// microárea, grava [audit] na MESMA transação da mudança de status (#44):
-  /// se a trilha falhar, o ACK é desfeito — nenhum alerta vermelho muda de
-  /// estado sem registro. Sem alerta na microárea, nada é gravado.
-  Future<bool> acknowledge({
+  /// microárea, grava `auditFor(desfecho)` na MESMA transação da mudança de
+  /// status (#44): se a trilha falhar, o ACK é desfeito — nenhum alerta
+  /// vermelho muda de estado sem registro. O desfecho é decidido sob a trava
+  /// da linha (#86), para a trilha e a resposta não dizerem que mudou o que
+  /// não mudou. Sem alerta na microárea, nada é gravado e volta `null`; senão
+  /// volta o [AlertAckRecord] lido sob a trava.
+  Future<AlertAckRecord?> acknowledge({
     required String alertId,
     required String acsId,
     required String microAreaId,
-    required AuditEvent audit,
+    required AuditEvent Function(AlertAckOutcome outcome) auditFor,
+  });
+
+  /// Conclui o atendimento (#76): leva o alerta de `acknowledged` a
+  /// `resolved` no território do ACS. O desfecho é decidido sob trava da
+  /// linha, e `auditFor(desfecho)` é gravado na MESMA transação (fail-closed)
+  /// — exceto [AlertResolveOutcome.notFound], que não grava nada, como o ACK.
+  Future<AlertResolveAttempt> resolve({
+    required String alertId,
+    required String microAreaId,
+    required DateTime now,
+    required AuditEvent Function(AlertResolveOutcome outcome) auditFor,
   });
 
   /// Recupera o alerta já criado para esta chave de idempotência, se houver.
@@ -42,6 +57,12 @@ abstract interface class AlertStore {
   /// Alerta mais recente do paciente, para RF05 (`alerts.statusFor`). `null`
   /// quando o paciente nunca disparou um alerta.
   Future<AlertStatusSnapshot?> latestForPatient(String patientId);
+
+  /// Alertas não concluídos da microárea (#80, R2): primeiro os não
+  /// confirmados (`pending` e o `escalated` legado), depois os confirmados,
+  /// cada grupo do mais antigo ao mais novo, cortado em [limit] — o corte
+  /// descarta os mais ANTIGOS de cada grupo, nunca o mais novo.
+  Future<List<OpenAlertSnapshot>> openInMicroArea(String microAreaId, {required int limit});
 }
 
 /// Fila durável de entregas pendentes.
@@ -83,6 +104,71 @@ class RedAlertRecord {
   final String idempotencyKey;
 }
 
+/// Desfecho de [AlertStore.resolve] (#76).
+enum AlertResolveOutcome {
+  /// Inexistente ou de outra microárea: a mesma resposta, nada gravado.
+  notFound,
+
+  /// Ainda `pending`: o recebimento precisa ser confirmado antes (INV-03 —
+  /// concluir sem ACK apagaria do painel um vermelho que ninguém confirmou).
+  notAcknowledged,
+
+  /// `acknowledged` → `resolved` agora.
+  resolved,
+
+  /// Já estava `resolved`: nada muda e o `resolvedAt` original volta.
+  alreadyResolved,
+}
+
+class AlertResolveAttempt {
+  const AlertResolveAttempt(this.outcome, {this.resolvedAt});
+
+  final AlertResolveOutcome outcome;
+
+  /// Quando o atendimento foi concluído; nulo em [AlertResolveOutcome.notFound]
+  /// e [AlertResolveOutcome.notAcknowledged].
+  final DateTime? resolvedAt;
+}
+
+/// Desfecho de [AlertStore.acknowledge] quando o alerta existe (#86).
+enum AlertAckOutcome {
+  /// `pending` (ou o `escalated` legado) → `acknowledged` agora.
+  acknowledged,
+
+  /// Já estava `acknowledged`: ACK repetido, nada muda.
+  alreadyAcknowledged,
+
+  /// Já estava `resolved` (outro aparelho concluiu, reentrega do MQTT): o
+  /// ACK não rebaixa a conclusão (#76) e a resposta diz `resolved`.
+  alreadyResolved,
+}
+
+/// O que [AlertStore.acknowledge] leu e gravou sob a trava da linha (#83).
+class AlertAckRecord {
+  const AlertAckRecord({
+    required this.outcome,
+    required this.triggeredAt,
+    required this.acknowledgedAt,
+    required this.firstAcknowledgement,
+  });
+
+  final AlertAckOutcome outcome;
+
+  /// O status da linha depois do ACK, que é o que o RPC devolve (#86).
+  AlertStatus get status => outcome == AlertAckOutcome.alreadyResolved
+      ? AlertStatus.resolved
+      : AlertStatus.acknowledged;
+
+  final DateTime triggeredAt;
+
+  /// O `acknowledgedAt` gravado: o do primeiro ACK, que a repetição preserva.
+  final DateTime acknowledgedAt;
+
+  /// Verdadeiro só quando a linha ainda não tinha `acknowledgedAt` antes deste
+  /// ACK; é o que faz `alert_received_acs` sair uma vez por alerta.
+  final bool firstAcknowledgement;
+}
+
 /// Status do alerta mais recente de um paciente, para RF05.
 ///
 /// Espelha os campos que `Alert` guarda além de [AlertDelivery] — `status` e
@@ -94,6 +180,7 @@ class AlertStatusSnapshot {
     required this.status,
     required this.triggeredAt,
     this.acknowledgedAt,
+    this.resolvedAt,
   });
 
   final String alertId;
@@ -101,6 +188,41 @@ class AlertStatusSnapshot {
   final AlertStatus status;
   final DateTime triggeredAt;
   final DateTime? acknowledgedAt;
+
+  /// Conclusão do atendimento pelo ACS (#76); nulo até lá.
+  final DateTime? resolvedAt;
+}
+
+/// Alerta aberto da microárea, para a reserva por HTTP do ACS (#80).
+///
+/// Mesmos campos de `AcsOpenAlert`: o envelope MQTT mais o estado persistido.
+class OpenAlertSnapshot {
+  const OpenAlertSnapshot({
+    required this.alertId,
+    required this.patientId,
+    required this.microAreaId,
+    required this.riskLevel,
+    required this.locationHash,
+    this.locationCell,
+    required this.triggeredAt,
+    required this.status,
+    this.acknowledgedAt,
+    required this.escalated,
+  });
+
+  final String alertId;
+  final String patientId;
+  final String microAreaId;
+  final RiskLevel riskLevel;
+  final String locationHash;
+  final String? locationCell;
+  final DateTime triggeredAt;
+  final AlertStatus status;
+  final DateTime? acknowledgedAt;
+
+  /// Reforçado pelo backoffice (#44): `escalatedAt` preenchido ou a linha
+  /// legada com `status: escalated`.
+  final bool escalated;
 }
 
 /// Formato produzido por `locationCellFrom()` (apps/patient/lib/core/privacy/location_cell.dart):
@@ -119,13 +241,18 @@ class RedAlertService {
     required AlertStore store,
     required AlertOutbox outbox,
     DateTime Function()? clock,
+    TelemetryService? telemetry,
   })  : _store = store,
         _outbox = outbox,
-        _clock = clock ?? DateTime.now;
+        _clock = clock ?? DateTime.now,
+        _telemetry = telemetry;
 
   final AlertStore _store;
   final AlertOutbox _outbox;
   final DateTime Function() _clock;
+
+  /// Telemetria do PRD §1.3 (#83); nula não emite nada.
+  final TelemetryService? _telemetry;
 
   Future<RedAlertRecord> create({
     required AuthenticatedUser user,
@@ -192,7 +319,10 @@ class RedAlertService {
   // vermelho nunca pode ser descartado por colisão de identificador (INV-03).
   String _newAlertId() => _uuid.v4();
 
-  Future<bool> acknowledge({required AuthenticatedUser user, required String alertId}) {
+  /// Status do alerta depois do ACK, lido sob a trava da linha: `resolved`
+  /// quando o atendimento já foi concluído (#86), `acknowledged` nos demais
+  /// casos; `null` quando o alerta não existe na microárea do ACS.
+  Future<AlertStatus?> acknowledge({required AuthenticatedUser user, required String alertId}) async {
     Authorization.require(
       user,
       roles: {UserRole.acs},
@@ -203,23 +333,110 @@ class RedAlertService {
       throw ArgumentError('O identificador do alerta é obrigatório.');
     }
     // Toda confirmação que encontra o alerta é auditada, inclusive a repetida
-    // do mesmo ACS: o log é append-only e registra cada ato (decisão #44).
-    // Sem identidade de paciente: só quem confirmou e qual alerta. O ACK por
-    // MQTT não é autenticado (a identidade vem do payload), então a trilha o
-    // marca `acknowledged_mqtt` em vez de atribuí-lo como um ACK do RPC.
+    // e a que chega depois da conclusão: o log é append-only e registra cada
+    // ato (decisão #44), mas só a que muda o status grava `acknowledged`
+    // (#86). Sem identidade de paciente: só quem confirmou e qual alerta. O
+    // ACK por MQTT não é autenticado (a identidade vem do payload), então a
+    // trilha o marca com `_mqtt` em vez de atribuí-lo como um ACK do RPC.
     final porMqtt = user.deviceId == mqttAckDeviceId;
-    return _store.acknowledge(
+    final ack = await _store.acknowledge(
       alertId: alertId,
       acsId: user.id,
       microAreaId: user.microAreaId!,
-      audit: AuditEvent(
+      auditFor: (outcome) {
+        final result = switch (outcome) {
+          AlertAckOutcome.acknowledged => 'acknowledged',
+          AlertAckOutcome.alreadyAcknowledged => 'ack_already_acknowledged',
+          AlertAckOutcome.alreadyResolved => 'ack_already_resolved',
+        };
+        return AuditEvent(
+          userId: user.id,
+          actionType: 'write',
+          resourceType: 'alert',
+          resourceId: alertId,
+          result: porMqtt ? '${result}_mqtt' : result,
+        );
+      },
+    );
+    if (ack == null) return null;
+    // Depois do commit da transação própria do store: nenhum caminho de
+    // produção chama `acknowledge` com transação externa (o único
+    // `serviceFor(session, transaction: …)` é o `createRedAlert`). Best-effort:
+    // `alertReceived` nunca lança, então o ACK não depende dela (INV-03).
+    final telemetry = _telemetry;
+    if (ack.firstAcknowledgement && telemetry != null) {
+      await telemetry.alertReceived(
+        alertId: alertId,
+        acsId: user.id,
+        triggeredAt: ack.triggeredAt,
+        acknowledgedAt: ack.acknowledgedAt,
+        channel: porMqtt ? 'mqtt' : 'rpc',
+      );
+    }
+    return ack.status;
+  }
+
+  /// Texto da recusa de concluir um alerta que ninguém confirmou (#76).
+  static const notAcknowledgedMessage =
+      'Confirme o recebimento antes de concluir o atendimento.';
+
+  /// Conclui o atendimento (#76, RF05): é a transição que faz o paciente ver
+  /// "Atendido". Só o ACS do território do alerta, e só depois do ACK.
+  /// Cada ato que encontra o alerta é auditado, inclusive a repetição e a
+  /// recusa por falta de ACK; a recusa vira [ArgumentError] DEPOIS de a
+  /// trilha gravar.
+  Future<AlertResolveAttempt> resolve({
+    required AuthenticatedUser user,
+    required String alertId,
+  }) async {
+    Authorization.require(
+      user,
+      roles: {UserRole.acs},
+      onDenied: () =>
+          StateError('Somente ACS territorializados podem concluir atendimentos.'),
+    );
+    if (alertId.trim().isEmpty) {
+      throw ArgumentError('O identificador do alerta é obrigatório.');
+    }
+    final attempt = await _store.resolve(
+      alertId: alertId,
+      microAreaId: user.microAreaId!,
+      now: _clock().toUtc(),
+      auditFor: (outcome) => AuditEvent(
         userId: user.id,
         actionType: 'write',
         resourceType: 'alert',
         resourceId: alertId,
-        result: porMqtt ? 'acknowledged_mqtt' : 'acknowledged',
+        result: switch (outcome) {
+          AlertResolveOutcome.resolved => 'resolved',
+          AlertResolveOutcome.alreadyResolved => 'already_resolved',
+          AlertResolveOutcome.notAcknowledged => 'denied_not_acknowledged',
+          // O store não grava este; o texto existe só para o switch ser total.
+          AlertResolveOutcome.notFound => 'denied_not_found',
+        },
       ),
     );
+    if (attempt.outcome == AlertResolveOutcome.notAcknowledged) {
+      throw ArgumentError(notAcknowledgedMessage);
+    }
+    return attempt;
+  }
+
+  /// Teto de [openForAcs]: muito acima do que uma microárea tem aberto ao
+  /// mesmo tempo, e os não confirmados vêm antes, então o corte nunca troca um
+  /// pendente por um confirmado.
+  static const int openAlertsLimit = 200;
+
+  /// Alertas abertos da microárea do ACS autenticado (#80, R2): a reserva por
+  /// HTTP quando o MQTT do aparelho não está conectado. A microárea vem do
+  /// token (INV-01), nunca de parâmetro.
+  Future<List<OpenAlertSnapshot>> openForAcs({required AuthenticatedUser user}) async {
+    Authorization.require(
+      user,
+      roles: {UserRole.acs},
+      onDenied: () => StateError('Somente ACS territorializados podem listar alertas.'),
+    );
+    return _store.openInMicroArea(user.microAreaId!, limit: openAlertsLimit);
   }
 
   /// Status do alerta mais recente do próprio paciente autenticado (RF05,

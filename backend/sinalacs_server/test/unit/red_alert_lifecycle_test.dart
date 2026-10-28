@@ -21,10 +21,15 @@ class RecordingStore implements AlertStore {
   Future<void> save(AlertDelivery alert, {required String deviceId}) async => saved.add(alert);
 
   @override
-  Future<bool> acknowledge({required String alertId, required String acsId, required String microAreaId, required AuditEvent audit}) async {
-    if (alertId.trim().isEmpty) return false;
-    acknowledgedAlertIds.add(alertId);
-    return true;
+  Future<AlertAckRecord?> acknowledge({required String alertId, required String acsId, required String microAreaId, required AuditEvent Function(AlertAckOutcome outcome) auditFor}) async {
+    if (alertId.trim().isEmpty) return null;
+    final now = DateTime.utc(2026, 9, 1, 12);
+    return AlertAckRecord(
+      outcome: AlertAckOutcome.acknowledged,
+      triggeredAt: now,
+      acknowledgedAt: now,
+      firstAcknowledgement: acknowledgedAlertIds.add(alertId),
+    );
   }
 
   // Deduplicação agora vive no armazenamento, então o fake a implementa em
@@ -41,6 +46,21 @@ class RecordingStore implements AlertStore {
 
   @override
   Future<AlertStatusSnapshot?> latestForPatient(String patientId) async {
+    throw UnimplementedError('não usado nos testes deste arquivo');
+  }
+
+  @override
+  Future<List<OpenAlertSnapshot>> openInMicroArea(String microAreaId, {required int limit}) async {
+    throw UnimplementedError('não usado nos testes deste arquivo');
+  }
+
+  @override
+  Future<AlertResolveAttempt> resolve({
+    required String alertId,
+    required String microAreaId,
+    required DateTime now,
+    required AuditEvent Function(AlertResolveOutcome outcome) auditFor,
+  }) async {
     throw UnimplementedError('não usado nos testes deste arquivo');
   }
 }
@@ -135,7 +155,7 @@ void main() {
       expect(publisher.published, hasLength(1));
 
       final acknowledged = await service.acknowledge(user: acs, alertId: created.delivery.alertId);
-      expect(acknowledged, isTrue);
+      expect(acknowledged, AlertStatus.acknowledged);
       expect(store.acknowledgedAlertIds, contains(created.delivery.alertId));
     });
   });

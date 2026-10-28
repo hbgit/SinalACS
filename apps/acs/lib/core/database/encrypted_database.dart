@@ -26,8 +26,11 @@ class EncryptedLocalDatabase {
   /// `micro_area_cache` e `micro_area_cache_meta`, o cache da microárea (RF08,
   /// `spec/lgpd_design.md` §5.11). v7 acrescenta `offline_visits.owner`, o dono
   /// da visita (id do ACS); nulo = visita legada em QUARENTENA, que nenhum dono
-  /// enxerga e que só sai pelo envio legado (`visits.syncLegacy`).
-  static const schemaVersion = 7;
+  /// enxerga e que só sai pelo envio legado (`visits.syncLegacy`). v8 acrescenta
+  /// `conflict_server_version`/`conflict_server_snapshot`: a visita em conflito
+  /// e a cópia do servidor ficam no aparelho até o ACS decidir (#79). v9
+  /// acrescenta `telemetry_events`, a fila local de telemetria por dono (#83).
+  static const schemaVersion = 9;
 
   /// Visitas registradas offline, aguardando sincronização.
   ///
@@ -47,7 +50,9 @@ CREATE TABLE IF NOT EXISTS offline_visits (
   created_at TEXT NOT NULL,
   version INTEGER NOT NULL,
   rejection_reason TEXT,
-  owner TEXT
+  owner TEXT,
+  conflict_server_version INTEGER,
+  conflict_server_snapshot TEXT
 )''';
 
   /// Índice por dono: toda leitura/escrita de visitas filtra por `owner`.
@@ -79,7 +84,22 @@ CREATE TABLE IF NOT EXISTS micro_area_cache_meta (
   value TEXT NOT NULL
 )''';
 
-  /// Migração v1 → v2, v2 → v3, v3 → v4, v4 → v5, v5 → v6 e v6 → v7.
+  /// Fila local de telemetria (#83, PRD §1.3), separada por dono (`owner`).
+  /// Sem PII: `payload` é JSON com contagens, durações e ids opacos. Não conta
+  /// como visita não enviada na limpeza do aparelho.
+  static const createTelemetryEvents = '''
+CREATE TABLE IF NOT EXISTS telemetry_events (
+  event_id TEXT PRIMARY KEY,
+  owner TEXT NOT NULL,
+  name TEXT NOT NULL,
+  occurred_at TEXT NOT NULL,
+  payload TEXT NOT NULL
+)''';
+
+  static const createTelemetryEventsOwnerIndex =
+      'CREATE INDEX IF NOT EXISTS telemetry_events_owner_idx ON telemetry_events(owner, occurred_at)';
+
+  /// Migração v1 → v2, v2 → v3, v3 → v4, v4 → v5, v5 → v6, v6 → v7, v7 → v8 e v8 → v9.
   ///
   /// Nenhuma das duas formas de v1 guarda o UUID do paciente: `patient_name`
   /// era `'Paciente ' + 8 dos 32 dígitos hex`, irreversível. Sem UUID,
@@ -150,6 +170,30 @@ CREATE TABLE IF NOT EXISTS micro_area_cache_meta (
       }
       await db.execute(createOfflineVisitsOwnerIndex);
     }
+
+    if (from < 8) {
+      // Aditiva: linhas existentes ficam com as duas colunas nulas = sem conflito.
+      final columns = await db.rawQuery(
+        "PRAGMA table_info('offline_visits')",
+      );
+      final nomes = {for (final column in columns) column['name']};
+      if (!nomes.contains('conflict_server_version')) {
+        await db.execute(
+          'ALTER TABLE offline_visits ADD COLUMN conflict_server_version INTEGER;',
+        );
+      }
+      if (!nomes.contains('conflict_server_snapshot')) {
+        await db.execute(
+          'ALTER TABLE offline_visits ADD COLUMN conflict_server_snapshot TEXT;',
+        );
+      }
+    }
+
+    if (from < 9) {
+      // Aditiva: tabela nova, `offline_visits` não é tocada.
+      await db.execute(createTelemetryEvents);
+      await db.execute(createTelemetryEventsOwnerIndex);
+    }
   }
 
   /// Caminho do arquivo do banco neste dispositivo.
@@ -205,6 +249,8 @@ CREATE TABLE IF NOT EXISTS micro_area_cache_meta (
           await db.execute(createSyncCursor);
           await db.execute(createMicroAreaCache);
           await db.execute(createMicroAreaCacheMeta);
+          await db.execute(createTelemetryEvents);
+          await db.execute(createTelemetryEventsOwnerIndex);
         },
         onUpgrade: _upgrade,
         // Um rollback de APK abriria um arquivo v2 pedindo v1 e lançaria,
@@ -225,6 +271,8 @@ CREATE TABLE IF NOT EXISTS micro_area_cache_meta (
           await db.execute(createSyncCursor);
           await db.execute(createMicroAreaCache);
           await db.execute(createMicroAreaCacheMeta);
+          await db.execute(createTelemetryEvents);
+          await db.execute(createTelemetryEventsOwnerIndex);
         },
         onUpgrade: _upgrade,
         onDowngrade: onDatabaseDowngradeDelete,

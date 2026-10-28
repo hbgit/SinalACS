@@ -9,9 +9,12 @@ import 'package:sinalacs_acs/core/network/backend_config.dart';
 import 'package:sinalacs_acs/core/security/auth_bound_session_token_store.dart';
 import 'package:sinalacs_acs/core/security/biometric_gate.dart';
 import 'package:sinalacs_acs/core/security/keystore_vault.dart';
+import 'package:sinalacs_acs/core/security/secure_device_certificate_store.dart';
 import 'package:sinalacs_acs/core/security/secure_session_token_store.dart';
 import 'package:sinalacs_acs/core/security/secure_upload_token_store.dart';
 import 'package:sinalacs_acs/core/services/micro_area_directory_factory.dart';
+import 'package:sinalacs_acs/core/services/remote_wipe.dart';
+import 'package:sinalacs_acs/core/telemetry/connectivity_network_probe.dart';
 
 /// Sobe o app do ACS.
 ///
@@ -79,9 +82,19 @@ Future<void> main({String? defaultHost}) async {
     // retomada e quando a rede volta (D8).
     uploadTokens: uploadTokens,
     deviceIds: deviceIds,
+    // Certificado MQTT deste aparelho (#94) e a chave privada dele, no
+    // Keystore: emitido pelo backend, nunca embutido no binário.
+    deviceCertificates: SecureStorageDeviceCertificateStore(),
     connectivityChanges: Connectivity()
         .onConnectivityChanged
         .map((results) => results.any((r) => r != ConnectivityResult.none)),
+    // Diário da limpeza remota (#81, D7) em `shared_preferences`: fora do
+    // banco e do Keystore, que são justamente o que a limpeza apaga.
+    wipeJournal: SharedPreferencesWipeJournal(),
+    // Telemetria (#83): store (SQLCipher das visitas) e transporte (o próprio
+    // `BackendClient`) são os padrões do app. Só a sonda de rede vem daqui:
+    // ela puxa o Flutter (`connectivity_plus`) e o gravador roda também na VM.
+    networkProbe: connectivityProbe(),
   ));
 }
 

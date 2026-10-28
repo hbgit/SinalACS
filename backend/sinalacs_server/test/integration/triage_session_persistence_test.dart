@@ -31,6 +31,7 @@ AppConfig _config() => AppConfig(
       // para montar a chave AES-256 (ver AppConfig).
       healthDataEncryptionKey: AppConfig.developmentHealthDataEncryptionKey,
       cpfHashPepper: AppConfig.developmentCpfHashPepper,
+      telemetryPseudonymKey: AppConfig.developmentTelemetryPseudonymKey,
       smsGateway: 'log',
       mqttUsername: null,
       mqttPassword: null,
@@ -124,8 +125,7 @@ void main() {
       final gravadas = await TriageSession.db.find(session);
       expect(gravadas, hasLength(1));
       expect(gravadas.single.patientId, UuidValue.fromString(_patientId));
-      expect(gravadas.single.resultRisk, RiskLevel.red);
-      expect(gravadas.single.resultDisplay, 'Vermelho');
+      expect(await decryptedTriageRisk(gravadas.single), RiskLevel.red);
       // A coluna guarda ciphertext (RNF03): as respostas só voltam a ser
       // legíveis passando pela cifra, e é isso que este bloco prova — que a
       // ida e volta pelo store preserva as seis respostas.
@@ -230,7 +230,7 @@ void main() {
 
       final gravadas = await TriageSession.db.find(session);
       expect(gravadas, hasLength(1));
-      expect(gravadas.single.resultRisk, RiskLevel.green);
+      expect(await decryptedTriageRisk(gravadas.single), RiskLevel.green);
     });
   });
 }

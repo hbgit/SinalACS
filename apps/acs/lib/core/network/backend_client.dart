@@ -1,10 +1,14 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:sinalacs_acs/core/network/auth_session.dart';
 import 'package:sinalacs_acs/core/network/backend_config.dart';
 import 'package:sinalacs_acs/core/security/session_token_store.dart';
 import 'package:sinalacs_acs/core/security/upload_token_store.dart';
+import 'package:sinalacs_acs/core/telemetry/app_version.dart';
+import 'package:sinalacs_acs/core/telemetry/telemetry_event.dart';
+import 'package:sinalacs_acs/core/telemetry/telemetry_uploader.dart';
 import 'package:sinalacs_client/sinalacs_client.dart';
 
 /// Falha já traduzida para a pessoa que está usando o app.
@@ -36,6 +40,44 @@ class BackendFailure implements Exception {
 /// outro. As visitas do dono continuam no aparelho.
 class UploadTokenRefused extends BackendFailure {
   const UploadTokenRefused() : super('Envio não autorizado. Entre novamente.', isRecoverable: false);
+}
+
+/// O servidor pediu a limpeza remota deste aparelho (#81) e recusou o login,
+/// a renovação ou o envio diferido com `DeviceWipeRequiredException`. Não
+/// recuperável: nada volta a funcionar com o id antigo da instalação. Quem
+/// apaga é o `RemoteWipeCoordinator`, avisado por
+/// [AcsBackend.onDeviceWipeRequired] — nunca por `onSessionExpired`.
+class DeviceWipeRequiredFailure extends BackendFailure {
+  const DeviceWipeRequiredFailure(this.orderId)
+      : super('Este aparelho precisa ser limpo a pedido da coordenação.', isRecoverable: false);
+
+  /// Identificador do pedido, a devolver em `devices.confirmWipe`.
+  final String orderId;
+}
+
+/// O servidor não emitiu o certificado do aparelho AGORA, mas pode emitir mais
+/// tarde sem intervenção (#94, I1/C2): limite de emissões por hora atingido,
+/// ou a microárea da sessão ficou para trás da conta (a próxima renovação do
+/// token a corrige). Recuperável: o feed tenta de novo e mostra "Tentar agora".
+class DeviceCertificateRetryLater extends BackendFailure {
+  const DeviceCertificateRetryLater(super.message);
+}
+
+/// Folha de cliente MQTT que o servidor assinou para este aparelho (#94).
+/// [serverNow] é o relógio do servidor no momento da emissão: a validade é
+/// comparada com ele, não só com o relógio do aparelho.
+class IssuedDeviceCertificate {
+  const IssuedDeviceCertificate({
+    required this.certificatePem,
+    required this.serial,
+    required this.notAfter,
+    required this.serverNow,
+  });
+
+  final String certificatePem;
+  final String serial;
+  final DateTime notAfter;
+  final DateTime serverNow;
 }
 
 /// O ACS tem MFA ativa e a senha conferiu: falta o código do autenticador.
@@ -87,6 +129,34 @@ abstract class AcsBackend {
   /// volta ao login.
   void Function()? onSessionExpired;
 
+  /// Chamado quando o servidor pede a limpeza remota deste aparelho (#81):
+  /// `login`, a renovação e o envio diferido recusam com
+  /// [DeviceWipeRequiredFailure] e passam o `orderId` aqui. É o gatilho do
+  /// `RemoteWipeCoordinator`; [onSessionExpired] não é chamado nesse caso.
+  void Function(String orderId)? onDeviceWipeRequired;
+
+  /// `devices.pendingWipe`: o `orderId` da limpeza pedida para [deviceId], ou
+  /// `null`. Sem token. Falha de rede: [BackendFailure] recuperável.
+  Future<String?> pendingDeviceWipe(String deviceId);
+
+  /// `devices.confirmWipe`: o aparelho avisa que apagou tudo. Sem token e sem
+  /// retorno; um par errado se comporta igual no servidor.
+  Future<void> confirmDeviceWipe(String deviceId, String orderId);
+
+  /// `devices.issueCertificate` (#94): o servidor assina o CSR do aparelho da
+  /// sessão (o `deviceId` vem do token) e devolve a folha de cliente MQTT.
+  /// Pedido de limpeza: [DeviceWipeRequiredFailure] (e [onDeviceWipeRequired]);
+  /// "tente mais tarde" do servidor: [DeviceCertificateRetryLater]
+  /// (recuperável); recusa: [BackendFailure] não recuperável; sem rede:
+  /// recuperável.
+  Future<IssuedDeviceCertificate> issueDeviceCertificate(String csrPem);
+
+  /// Esquece a sessão SÓ neste aparelho, sem rede: torna obsoleta a renovação
+  /// em voo, descarta a sessão em memória e apaga o refresh token. É o passo
+  /// de sessão da limpeza remota — o servidor já revogou a família no pedido,
+  /// então não há `logout` a chamar.
+  Future<void> forgetLocalSession();
+
   /// `true` se há um refresh token guardado no aparelho (a UI pode tentar
   /// [resumeSession] na partida).
   Future<bool> get hasStoredSession;
@@ -127,12 +197,31 @@ abstract class AcsBackend {
 
   Future<AlertAckResult> acknowledge({required String alertId});
 
+  /// `alerts.openForMicroArea` (#80, R2): alertas não concluídos da microárea
+  /// da sessão, a reserva por HTTP para quando o MQTT não está conectado.
+  Future<List<AcsOpenAlert>> openAlerts();
+
+  /// Conclui o atendimento de um alerta já confirmado (#76): o paciente passa
+  /// a ver "Atendido".
+  Future<AlertResolveResult> resolveAlert({required String alertId});
+
   /// [expectedUserId], quando presente, é o dono do lote: se a sessão que vai
   /// assinar a chamada — conferida DEPOIS de o token ser resolvido (talvez por
   /// renovação) e imediatamente antes da rede — não é dele, lança
   /// [sessionOwnerMismatch] sem enviar nada. O servidor atribui a visita ao ACS
   /// do token: o lote de A nunca pode sair com o token de B.
   Future<List<VisitSyncResult>> syncVisits(List<VisitSyncEntry> visits, {String? expectedUserId});
+
+  /// "Manter a minha versão" de uma visita em conflito (#79) por
+  /// `visits.resolveConflict`: compare-and-set sobre [expectedServerVersion],
+  /// a versão do servidor que o ACS viu. [expectedUserId] como em
+  /// [syncVisits]: sessão de outro dono lança [sessionOwnerMismatch] sem
+  /// enviar nada.
+  Future<VisitSyncResult> resolveVisitConflict(
+    VisitSyncEntry visit, {
+    required int expectedServerVersion,
+    String? expectedUserId,
+  });
 
   /// Envia visitas LEGADAS (sem dono, D4) por `visits.syncLegacy`. A sessão
   /// atual é só o transporte: o servidor grava autoria desconhecida e confere
@@ -211,6 +300,12 @@ class MisconfiguredBackend implements AcsBackend {
   set onSessionExpired(void Function()? _) {}
 
   @override
+  void Function(String orderId)? get onDeviceWipeRequired => null;
+
+  @override
+  set onDeviceWipeRequired(void Function(String orderId)? _) {}
+
+  @override
   AuthSession? get session => null;
 
   @override
@@ -227,6 +322,10 @@ class MisconfiguredBackend implements AcsBackend {
 
   @override
   Future<void> logout() async {}
+
+  /// Não há sessão nem token: nada a esquecer.
+  @override
+  Future<void> forgetLocalSession() async {}
 
   /// Recusa uma chamada. `Never` avisa o analisador de que nada abaixo disto
   /// executa, então cada método abaixo é uma linha só.
@@ -251,7 +350,20 @@ class MisconfiguredBackend implements AcsBackend {
   Future<AlertAckResult> acknowledge({required String alertId}) async => _recusar();
 
   @override
+  Future<List<AcsOpenAlert>> openAlerts() async => _recusar();
+  @override
+  Future<AlertResolveResult> resolveAlert({required String alertId}) async => _recusar();
+
+  @override
   Future<List<VisitSyncResult>> syncVisits(List<VisitSyncEntry> visits, {String? expectedUserId}) async =>
+      _recusar();
+
+  @override
+  Future<VisitSyncResult> resolveVisitConflict(
+    VisitSyncEntry visit, {
+    required int expectedServerVersion,
+    String? expectedUserId,
+  }) async =>
       _recusar();
 
   @override
@@ -268,6 +380,15 @@ class MisconfiguredBackend implements AcsBackend {
 
   @override
   Future<void> revokeUploadToken(String uploadToken) async => _recusar();
+
+  @override
+  Future<String?> pendingDeviceWipe(String deviceId) async => _recusar();
+
+  @override
+  Future<void> confirmDeviceWipe(String deviceId, String orderId) async => _recusar();
+
+  @override
+  Future<IssuedDeviceCertificate> issueDeviceCertificate(String csrPem) async => _recusar();
 
   @override
   Future<List<VisitSyncEntry>> pullVisits({required DateTime since}) async => _recusar();
@@ -296,7 +417,7 @@ class MisconfiguredBackend implements AcsBackend {
 }
 
 /// Fachada do backend para o app do ACS.
-class BackendClient implements AcsBackend {
+class BackendClient implements AcsBackend, TelemetryTransport {
   /// [trustedCaBytes] é a CA de desenvolvimento do RPC (RNF04). `null` faz o
   /// cliente usar o armazenamento de confiança do sistema — que **não** conhece
   /// a CA local, e por isso a conexão falha de forma explícita em vez de ser
@@ -360,6 +481,17 @@ class BackendClient implements AcsBackend {
   void Function()? onSessionExpired;
 
   @override
+  void Function(String orderId)? onDeviceWipeRequired;
+
+  /// Traduz o pedido de limpeza do servidor e avisa quem apaga. Chamado só
+  /// FORA de [_exclusive]: o aviso dispara a limpeza, que chama
+  /// [forgetLocalSession] — outra seção crítica.
+  DeviceWipeRequiredFailure _wipeRequired(DeviceWipeRequiredException error) {
+    onDeviceWipeRequired?.call(error.orderId);
+    return DeviceWipeRequiredFailure(error.orderId);
+  }
+
+  @override
   bool get isAuthenticated {
     final current = _session;
     return current != null && !current.isExpired();
@@ -396,15 +528,19 @@ class BackendClient implements AcsBackend {
     String? totpCode,
   }) async {
     final deviceId = await _storage(_deviceIds.readOrCreate);
-    final result = await _guard(
-      () => _client.auth.loginInstitutional(
-        matricula: matricula,
-        password: senha,
-        totpCode: totpCode,
-        // O servidor só emite refresh token a quem informa o aparelho.
-        deviceId: deviceId,
-      ),
-    );
+    final result = await _guard(() async {
+      try {
+        return await _client.auth.loginInstitutional(
+          matricula: matricula,
+          password: senha,
+          totpCode: totpCode,
+          // O servidor só emite refresh token a quem informa o aparelho.
+          deviceId: deviceId,
+        );
+      } on DeviceWipeRequiredException catch (error) {
+        throw _wipeRequired(error);
+      }
+    });
 
     final session = AuthSession.tryParse(result.accessToken, result.tokenType);
     if (session == null) {
@@ -549,6 +685,11 @@ class BackendClient implements AcsBackend {
         return await _client.auth.refreshSession(refreshToken: refreshToken, deviceId: deviceId);
       } on SessionExpiredException {
         return null;
+      } on DeviceWipeRequiredException catch (error) {
+        // Fora da seção crítica, como a rede. Não é sessão vencida: nada de
+        // `onSessionExpired` nem de apagar o token aqui — quem apaga tudo é a
+        // limpeza (que chama `forgetLocalSession`).
+        throw _wipeRequired(error);
       }
     });
     // Confirmação dentro da seção: a checagem de obsolescência é definitiva
@@ -680,6 +821,16 @@ class BackendClient implements AcsBackend {
     });
   }
 
+  /// Como a segunda seção do [logout], sem a chamada de rede: o servidor já
+  /// revogou a família no pedido de limpeza (#81). Só E/S local dentro da
+  /// seção crítica.
+  @override
+  Future<void> forgetLocalSession() => _exclusive(() async {
+        _invalidateRenewal();
+        _session = null;
+        await _storage(_tokenStore.clear);
+      });
+
   /// Login de desenvolvimento, para `tool/` e `integration_test/`.
   ///
   /// É a versão antiga de [login], preservada porque as ferramentas rodam
@@ -722,6 +873,26 @@ class BackendClient implements AcsBackend {
     );
   }
 
+  /// Alertas abertos da microárea pelo RPC (#80): a microárea vem do token.
+  @override
+  Future<List<AcsOpenAlert>> openAlerts() async {
+    final token = await _requireToken();
+    return _guard(
+      () => _client.alerts.openForMicroArea(accessToken: token),
+    );
+  }
+
+  /// Conclui o atendimento (#76). Alerta inexistente ou de outra microárea
+  /// volta `resolved: false`; alerta ainda não confirmado é recusado pelo
+  /// servidor com texto pronto, que o `_guard` repassa.
+  @override
+  Future<AlertResolveResult> resolveAlert({required String alertId}) async {
+    final token = await _requireToken();
+    return _guard(
+      () => _client.alerts.resolve(accessToken: token, alertId: alertId),
+    );
+  }
+
   /// Envia as visitas registradas offline.
   ///
   /// O lote inteiro roda em uma transação no servidor, e cada visita volta com
@@ -740,6 +911,28 @@ class BackendClient implements AcsBackend {
       // microárea" aqui manda o ACS procurar um problema que não existe.
       permissionMessage:
           'Sua sessão não autoriza sincronizar visitas. Entre novamente.',
+    );
+  }
+
+  /// Mesma renovação, checagem de dono e tradução de falhas de [syncVisits].
+  @override
+  Future<VisitSyncResult> resolveVisitConflict(
+    VisitSyncEntry visit, {
+    required int expectedServerVersion,
+    String? expectedUserId,
+  }) async {
+    final current = await _requireSession();
+    // Depois da resolução do token e imediatamente antes da rede, como em
+    // `syncVisits`: a decisão de A nunca sai com o token de B.
+    if (expectedUserId != null && current.userId != expectedUserId) throw sessionOwnerMismatch;
+    final token = current.accessToken;
+    return _guard(
+      () => _client.visits.resolveConflict(
+        accessToken: token,
+        visit: visit,
+        expectedServerVersion: expectedServerVersion,
+      ),
+      permissionMessage: 'Sua sessão não autoriza sincronizar visitas. Entre novamente.',
     );
   }
 
@@ -765,12 +958,87 @@ class BackendClient implements AcsBackend {
         } on SessionExpiredException {
           // A recusa única do servidor para o token de envio.
           throw const UploadTokenRefused();
+        } on DeviceWipeRequiredException catch (error) {
+          // O aparelho inteiro vai ser limpo: não é recusa do token deste
+          // dono, então NÃO vira [UploadTokenRefused] (que apagaria o token).
+          throw _wipeRequired(error);
         }
       });
 
   @override
   Future<void> revokeUploadToken(String uploadToken) =>
       _guard(() => _client.visits.revokeUploadToken(uploadToken: uploadToken));
+
+  @override
+  Future<String?> pendingDeviceWipe(String deviceId) => _guard(() => _client.devices.pendingWipe(deviceId));
+
+  @override
+  Future<void> confirmDeviceWipe(String deviceId, String orderId) =>
+      _guard(() => _client.devices.confirmWipe(deviceId, orderId));
+
+  @override
+  Future<IssuedDeviceCertificate> issueDeviceCertificate(String csrPem) async {
+    final token = await _requireToken();
+    final result = await _guard(
+      () async {
+        try {
+          return await _client.devices.issueCertificate(accessToken: token, csrPem: csrPem);
+        } on DeviceWipeRequiredException catch (error) {
+          throw _wipeRequired(error);
+        } on DeviceCertificateRetryLaterException catch (error) {
+          throw DeviceCertificateRetryLater(error.message);
+        }
+      },
+      // Papel, território, aparelho do token ou CA ausente no servidor: a
+      // mensagem padrão ("este alerta") não faria sentido aqui.
+      permissionMessage: 'O servidor recusou emitir o certificado deste aparelho. Procure a coordenação.',
+    );
+    return IssuedDeviceCertificate(
+      certificatePem: result.certificatePem,
+      serial: result.serial,
+      notAfter: result.notAfter.toUtc(),
+      serverNow: result.serverNow.toUtc(),
+    );
+  }
+
+  /// Envia um lote da fila de telemetria (#83) por `telemetry.ingest`.
+  ///
+  /// Mesma checagem de dono de [syncVisits], depois de resolvido o token e
+  /// antes da rede: eventos de A nunca sobem com a sessão de B. O autor vem do
+  /// token no servidor; o `owner` local não sai do aparelho. O `deviceId` é o
+  /// mesmo do login (o servidor só guarda o pseudônimo dele).
+  @override
+  Future<TelemetryIngestAck> ingestTelemetry(
+    List<TelemetryEventRecord> events, {
+    required String expectedUserId,
+  }) async {
+    final current = await _requireSession();
+    if (current.userId != expectedUserId) throw sessionOwnerMismatch;
+    final token = current.accessToken;
+    final deviceId = await _storage(_deviceIds.readOrCreate);
+    final result = await _guard(
+      () => _client.telemetry.ingest(
+        accessToken: token,
+        deviceId: deviceId,
+        sentAt: DateTime.now().toUtc(),
+        events: [
+          for (final e in events)
+            TelemetryEventInput(
+              eventId: e.eventId,
+              eventName: e.name,
+              occurredAt: e.occurredAt.toUtc(),
+              appVersion: acsAppVersion,
+              payloadJson: jsonEncode(e.payload),
+            ),
+        ],
+      ),
+      permissionMessage: 'Sua sessão não autoriza enviar telemetria. Entre novamente.',
+    );
+    return TelemetryIngestAck(
+      accepted: result.acceptedEventIds.toSet(),
+      rejected: result.rejectedEventIds.toSet(),
+    );
+  }
 
   /// Reconciliação central→dispositivo: visitas da microárea alteradas desde
   /// `since` (RF15, decisão §5). Espelha [syncVisits] na tradução de falhas.

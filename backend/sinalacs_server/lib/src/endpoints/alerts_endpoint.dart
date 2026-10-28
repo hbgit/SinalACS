@@ -1,4 +1,5 @@
 import 'package:serverpod/serverpod.dart';
+import 'package:sinalacs_server/src/application/alerts/red_alert_service.dart';
 import 'package:sinalacs_server/src/endpoints/authenticated_endpoint.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
 import 'package:sinalacs_server/src/runtime/alert_runtime.dart';
@@ -53,6 +54,12 @@ class AlertsEndpoint extends AuthenticatedEndpoint {
           .dispatcherFor(session)
           .publishNow(record.delivery.alertId);
 
+      // Telemetria fora da transação e depois da publicação: best-effort, não
+      // lança e nunca atrasa nem desfaz o alerta (INV-03). Replay idempotente.
+      await AlertRuntime.instance
+          .telemetryServiceFor(session)
+          .alertTriggered(alert: record.delivery, published: published);
+
       return RedAlertResult(
         alertId: record.delivery.alertId,
         status: AlertStatus.pending,
@@ -65,6 +72,10 @@ class AlertsEndpoint extends AuthenticatedEndpoint {
     }
   }
 
+  /// Confirma o recebimento. `status` é o da linha travada: um alerta já
+  /// concluído (outro aparelho, reentrega do MQTT) volta `resolved`, não
+  /// `acknowledged` (#86). Alerta inexistente ou de outra microárea devolve
+  /// `acknowledged: false` e `status` nulo.
   Future<AlertAckResult> acknowledge(
     Session session, {
     required String accessToken,
@@ -74,15 +85,77 @@ class AlertsEndpoint extends AuthenticatedEndpoint {
     final service = AlertRuntime.instance.serviceFor(session);
 
     try {
-      final acknowledged =
-          await service.acknowledge(user: user, alertId: alertId);
+      final status = await service.acknowledge(user: user, alertId: alertId);
       return AlertAckResult(
         alertId: alertId,
-        acknowledged: acknowledged,
-        status: acknowledged ? AlertStatus.acknowledged : null,
+        acknowledged: status != null,
+        status: status,
       );
     } on ArgumentError catch (error) {
       throw AlertValidationException(message: '${error.message}');
+    } on StateError catch (error) {
+      throw AlertPermissionException(message: error.message);
+    }
+  }
+
+  /// Conclui o atendimento de um alerta já confirmado (#76, RF05): é o que
+  /// faz o paciente ver "Atendido". Alerta inexistente ou de outra microárea
+  /// devolve `resolved: false`, como o ACK; alerta ainda não confirmado é
+  /// [AlertValidationException] com o texto de
+  /// `RedAlertService.notAcknowledgedMessage`.
+  Future<AlertResolveResult> resolve(
+    Session session, {
+    required String accessToken,
+    required String alertId,
+  }) async {
+    final user = authenticate(accessToken);
+    final service = AlertRuntime.instance.serviceFor(session);
+
+    try {
+      final attempt = await service.resolve(user: user, alertId: alertId);
+      final found = attempt.outcome != AlertResolveOutcome.notFound;
+      return AlertResolveResult(
+        alertId: alertId,
+        resolved: found,
+        status: found ? AlertStatus.resolved : null,
+        resolvedAt: attempt.resolvedAt,
+      );
+    } on ArgumentError catch (error) {
+      throw AlertValidationException(message: '${error.message}');
+    } on StateError catch (error) {
+      throw AlertPermissionException(message: error.message);
+    }
+  }
+
+  /// Alertas não concluídos da microárea do ACS (#80, R2): a reserva por HTTP
+  /// para quando o MQTT do aparelho não está conectado. A microárea vem do
+  /// token (INV-01). Não grava linha de auditoria de leitura: o app repete a
+  /// consulta a cada 30 s com o broker fora, e o mesmo conteúdo chega pelo
+  /// MQTT sem auditoria; ACK e conclusão seguem auditados.
+  Future<List<AcsOpenAlert>> openForMicroArea(
+    Session session, {
+    required String accessToken,
+  }) async {
+    final user = authenticate(accessToken);
+    final service = AlertRuntime.instance.serviceFor(session);
+
+    try {
+      final abertos = await service.openForAcs(user: user);
+      return [
+        for (final a in abertos)
+          AcsOpenAlert(
+            alertId: a.alertId,
+            patientId: a.patientId,
+            microAreaId: a.microAreaId,
+            riskLevel: a.riskLevel,
+            locationHash: a.locationHash,
+            locationCell: a.locationCell,
+            triggeredAt: a.triggeredAt,
+            status: a.status,
+            acknowledgedAt: a.acknowledgedAt,
+            escalated: a.escalated,
+          ),
+      ];
     } on StateError catch (error) {
       throw AlertPermissionException(message: error.message);
     }
@@ -108,6 +181,7 @@ class AlertsEndpoint extends AuthenticatedEndpoint {
         status: snapshot.status,
         triggeredAt: snapshot.triggeredAt,
         acknowledgedAt: snapshot.acknowledgedAt,
+        resolvedAt: snapshot.resolvedAt,
       );
     } on StateError catch (error) {
       throw AlertPermissionException(message: error.message);

@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:sinalacs_acs/app/acs_theme.dart';
 import 'package:sinalacs_acs/app/app.dart';
 import 'package:sinalacs_acs/app/mfa_enrollment_screen.dart';
+import 'package:sinalacs_acs/app/visit_conflict_screen.dart';
+import 'package:sinalacs_acs/core/services/offline_visit_queue.dart';
 
 import 'support/fakes.dart';
 import 'support/layout_harness.dart';
@@ -26,6 +29,62 @@ void main() {
       testWidgets('não estoura o layout com fonte a $rotulo em ${janela.key}', (tester) async {
         await abrirPainel(tester, tamanho: janela.value, escalaDeFonte: escala);
         await percorrerPainelInteiro(tester, 'fonte a $rotulo em ${janela.key}');
+      });
+    }
+  }
+
+  // Comparação do conflito de visita (#79): dois painéis, o formulário de
+  // edição e as três ações precisam caber; "Manter a minha versão" tem de ser
+  // alcançável por rolagem a 200%.
+  for (final janela in janelas.entries) {
+    for (final escala in const [1.3, 2.0]) {
+      final rotulo = '${(escala * 100).toInt()}%';
+      testWidgets('comparação do conflito não estoura com fonte a $rotulo em ${janela.key}', (tester) async {
+        redimensionar(tester, janela.value, escalaDeFonte: escala);
+        addTearDown(tester.view.reset);
+        addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+        final store = InMemoryVisitStore();
+        await store.save([
+          OfflineVisitRecord(
+            localId: 'conflito-escala',
+            patientId: syntheticPatientId(1),
+            risk: 'yellow',
+            status: 'PENDENTE',
+            outcome: 'Realizada com sucesso',
+            notes: 'Observação sintética de campo, longa o bastante para quebrar em mais de uma linha.',
+            conflictServerVersion: 3,
+            conflictServer: VisitConflictSnapshot(
+              version: 3,
+              status: 'Recusou atendimento',
+              notes: 'Outra observação sintética, registrada no servidor.',
+              completedAt: DateTime.utc(2026, 10, 10, 12),
+            ),
+          ),
+        ]);
+        final fila = OfflineVisitQueue(store: store, conflictResolver: FakeVisitConflictResolver());
+        await fila.restore();
+        await tester.pumpWidget(MaterialApp(
+          theme: buildAcsDarkTheme(),
+          home: VisitConflictCompareScreen(queue: fila, localId: 'conflito-escala'),
+        ));
+        await assentar(tester);
+        await percorrerTelaInteira(tester, 'comparação a $rotulo em ${janela.key}');
+
+        final manter = find.byKey(const Key('conflict_keep_local'));
+        await rolarAte(tester, manter);
+        expect(manter.hitTestable(), findsOneWidget);
+        expect(tester.getSize(manter).height, greaterThanOrEqualTo(48));
+
+        // O formulário de edição também cabe.
+        final editar = find.byKey(const Key('conflict_edit'));
+        await rolarAte(tester, editar);
+        await tester.tap(editar);
+        await assentar(tester);
+        await percorrerTelaInteira(tester, 'edição do conflito a $rotulo em ${janela.key}');
+        final enviar = find.byKey(const Key('conflict_send_edited'));
+        await rolarAte(tester, enviar);
+        expect(enviar.hitTestable(), findsOneWidget);
+        esperarSemEstouro(tester, 'enviar versão editada a $rotulo em ${janela.key}');
       });
     }
   }

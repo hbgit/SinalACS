@@ -1,5 +1,16 @@
+import 'dart:io';
+
 import 'package:sinalacs_server/src/application/audit/audit_chain.dart';
 import 'package:sinalacs_server/src/application/admin/admin_account_service.dart';
+import 'package:sinalacs_server/src/application/devices/device_certificate_service.dart';
+import 'package:sinalacs_server/src/application/devices/device_wipe_service.dart';
+import 'package:sinalacs_server/src/config/device_ca_config.dart';
+import 'package:sinalacs_server/src/generated/protocol.dart';
+import 'package:sinalacs_server/src/infrastructure/database/orm_device_certificate_store.dart';
+import 'package:sinalacs_server/src/infrastructure/mqtt/mqtt_session_kicker.dart';
+import 'package:sinalacs_server/src/infrastructure/pki/crl_reload_watcher.dart';
+import 'package:sinalacs_server/src/infrastructure/pki/device_crl_publisher.dart';
+import 'package:sinalacs_server/src/infrastructure/pki/openssl_device_ca.dart';
 import 'package:sinalacs_server/src/application/admin/admin_monitoring_service.dart';
 import 'package:sinalacs_server/src/application/admin/admin_read_service.dart';
 import 'package:sinalacs_server/src/application/admin/alert_escalation_service.dart';
@@ -8,6 +19,7 @@ import 'package:sinalacs_server/src/application/admin/audit_export_service.dart'
 import 'package:sinalacs_server/src/application/admin/data_subject_case_service.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_data_subject_case_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_admin_account_store.dart';
+import 'package:sinalacs_server/src/infrastructure/database/orm_device_wipe_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_admin_read_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_audit_checkpoint_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_audit_export_store.dart';
@@ -36,6 +48,9 @@ import 'package:sinalacs_server/src/application/patients/patient_directory_servi
 import 'package:sinalacs_server/src/application/triage/triage_session_service.dart';
 import 'package:sinalacs_server/src/application/ubs/ubs_contact_service.dart';
 import 'package:sinalacs_server/src/application/visits/visit_sync_service.dart';
+import 'package:sinalacs_server/src/application/telemetry/telemetry_pseudonymizer.dart';
+import 'package:sinalacs_server/src/application/telemetry/telemetry_service.dart';
+import 'package:sinalacs_server/src/infrastructure/database/orm_telemetry_store.dart';
 import 'package:sinalacs_server/src/config/app_config.dart';
 import 'package:sinalacs_server/src/infrastructure/crypto/argon2_password_hasher.dart';
 import 'package:sinalacs_server/src/infrastructure/crypto/health_cipher_totp_vault.dart';
@@ -217,6 +232,23 @@ class AlertRuntime {
           ).recordInTransaction,
         ),
         outbox: OrmAlertOutbox(session: () => session, transaction: transaction),
+        telemetry: telemetryServiceFor(session),
+      );
+
+  TelemetryStore? _telemetryStoreOverride;
+
+  /// Substitui o store da telemetria (#83) por um duplo de teste, p. ex. um que
+  /// lança, para provar que a telemetria não bloqueia o alerta. `null` restaura
+  /// o store ORM.
+  @visibleForTesting
+  void overrideTelemetryStore(TelemetryStore? store) =>
+      _telemetryStoreOverride = store;
+
+  /// Ingestão da telemetria do aparelho (#83), para uma requisição. O
+  /// pseudônimo usa `TELEMETRY_PSEUDONYM_KEY`, independente dos outros segredos.
+  TelemetryService telemetryServiceFor(Session session) => TelemetryService(
+        store: _telemetryStoreOverride ?? OrmTelemetryStore(session),
+        pseudonymizer: TelemetryPseudonymizer(config.telemetryPseudonymKey),
       );
 
   /// Constrói o serviço de sincronização de visitas para uma requisição.
@@ -342,6 +374,7 @@ class AlertRuntime {
           session,
           healthDataCipher,
           chainSecret: config.auditChainSecret,
+          pseudonymizer: TelemetryPseudonymizer(config.telemetryPseudonymKey),
           appendAudit: OrmAuditTrail(
             session: () => session,
             chainSecret: config.auditChainSecret,
@@ -361,6 +394,10 @@ class AlertRuntime {
   /// revoga as duas **dentro da transação do `OrmAdminAccountStore`**, para a
   /// flag e as revogações serem um só estado (ver `setAcsActive`), e as demais
   /// operações da #43 não tocam em token.
+  ///
+  /// Desde a #94 a desativação e a troca de microárea revogam também os
+  /// certificados dos aparelhos (na transação do store) e, depois do commit,
+  /// [deviceRevocationEffectsFor] audita, publica a CRL e derruba as sessões.
   AdminAccountService adminAccountServiceFor(Session session) {
     final credenciais = OrmAcsCredentialStore(session: () => session);
     return AdminAccountService(
@@ -370,6 +407,140 @@ class AlertRuntime {
       activationStore: OrmAcsCredentialStore(session: () => session, staff: true),
       hasher: passwordHasher,
       audit: auditTrailFor(session),
+      deviceRevocations: deviceRevocationEffectsFor(session),
+    );
+  }
+
+  /// Limpeza remota e aparelhos do ACS pelo backoffice (#81), para uma
+  /// requisição. O escopo e a existência do ACS vêm do mesmo store de contas da
+  /// #43; a trilha é a da requisição.
+  DeviceWipeService deviceWipeServiceFor(Session session) => DeviceWipeService(
+    store: OrmDeviceWipeStore(
+      session: () => session,
+      appendAudit: OrmAuditTrail(
+        session: () => session,
+        chainSecret: config.auditChainSecret,
+      ).recordInTransaction,
+    ),
+    accounts: OrmAdminAccountStore(session: () => session),
+    audit: auditTrailFor(session),
+    deviceRevocations: deviceRevocationEffectsFor(session),
+  );
+
+  // --- Certificado de cliente MQTT por aparelho (#94) -----------------------
+
+  DeviceCaConfig? _deviceCa;
+  bool _deviceCaLido = false;
+
+  /// A CA de aparelhos (`DEVICE_CA_*`), ou `null` num ambiente sem ela (o
+  /// Render): a emissão é recusada e não há CRL a publicar. Uma configuração
+  /// parcial lança aqui, no primeiro uso (o boot a lê em `server.dart`).
+  DeviceCaConfig? get deviceCaConfig {
+    if (!_deviceCaLido) {
+      _deviceCa = DeviceCaConfig.fromEnvironment(Platform.environment);
+      _deviceCaLido = true;
+    }
+    return _deviceCa;
+  }
+
+  /// Substitui a CA de aparelhos (`null` = ambiente sem CA). Existe para os
+  /// testes; [resetDeviceCa] volta a ler do ambiente.
+  @visibleForTesting
+  void overrideDeviceCa(DeviceCaConfig? value) {
+    _deviceCa = value;
+    _deviceCaLido = true;
+    _deviceCrlPublisher?.close();
+    _deviceCrlPublisher = null;
+  }
+
+  @visibleForTesting
+  void resetDeviceCa() {
+    _deviceCaLido = false;
+    _deviceCa = null;
+    _deviceCrlPublisher?.close();
+    _deviceCrlPublisher = null;
+  }
+
+  DeviceCrlPublisher? _deviceCrlPublisher;
+  CrlPublication? _crlOverride;
+  bool _crlOverridden = false;
+
+  /// O publicador da CRL do PROCESSO (single-flight e recuo valem para o
+  /// processo inteiro), ou `null` sem CA. Cada publicação abre a própria
+  /// `Session`: é chamado depois do commit das revogações, no boot e no timer
+  /// diário, fora de qualquer requisição.
+  DeviceCrlPublisher? get deviceCrlPublisher {
+    final cfg = deviceCaConfig;
+    if (cfg == null) return null;
+    return _deviceCrlPublisher ??= DeviceCrlPublisher(
+      config: cfg,
+      source: _CrlSourcePorSessao(),
+    );
+  }
+
+  /// A publicação da CRL que os serviços usam: [deviceCrlPublisher], ou o
+  /// duplo de [overrideDeviceCrlPublication].
+  CrlPublication? get deviceCrlPublication =>
+      _crlOverridden ? _crlOverride : deviceCrlPublisher;
+
+  /// Troca a publicação da CRL por um duplo de teste; `null` restaura.
+  @visibleForTesting
+  void overrideDeviceCrlPublication(CrlPublication? value) {
+    _crlOverride = value;
+    _crlOverridden = value != null;
+  }
+
+  SessionKicker? _kickerOverride;
+
+  /// A derrubada de sessão MQTT, com o mesmo broker e o mesmo contexto TLS do
+  /// despachante. Sem estado: uma conexão curta por derrubada.
+  SessionKicker get mqttSessionKicker =>
+      _kickerOverride ?? MqttSessionKicker(config: config);
+
+  /// Troca a derrubada de sessão por um duplo de teste; `null` restaura.
+  @visibleForTesting
+  void overrideSessionKicker(SessionKicker? value) => _kickerOverride = value;
+
+  /// O que vem depois do commit de uma revogação de certificado (#94): lê o
+  /// que a transação revogou, audita (quando pedido), publica a CRL e derruba
+  /// as sessões.
+  ///
+  /// A derrubada espera o sidecar do broker confirmar a recarga da CRL
+  /// (`crl.loaded`, ao lado da `crl.pem`) — só com a publicação real: um duplo
+  /// de [overrideDeviceCrlPublication] não grava CRL nenhuma.
+  DeviceRevocationEffects deviceRevocationEffectsFor(Session session) {
+    final cfg = deviceCaConfig;
+    return DeviceRevocationEffects(
+      store: OrmDeviceCertificateStore(session: () => session),
+      crl: deviceCrlPublication,
+      kicker: mqttSessionKicker,
+      crlReload: _crlOverridden || cfg == null
+          ? null
+          : CrlReloadWatcher(crlPath: cfg.crlPath),
+    );
+  }
+
+  /// Emissão do certificado do aparelho (#94), para uma requisição. A emissão
+  /// e as linhas `device_cert_*` gravam na mesma transação
+  /// (`recordInTransaction`); o aparelho com pedido de limpeza é recusado pela
+  /// mesma checagem do login (`ensureDeviceNotMarked`).
+  DeviceCertificateService deviceCertificateServiceFor(Session session) {
+    final cfg = deviceCaConfig;
+    return DeviceCertificateService(
+      store: OrmDeviceCertificateStore(
+        session: () => session,
+        appendAudit: OrmAuditTrail(
+          session: () => session,
+          chainSecret: config.auditChainSecret,
+        ).recordInTransaction,
+      ),
+      ca: cfg == null ? null : OpensslDeviceCa(cfg),
+      certDays: cfg?.certDays ?? 0,
+      ensureDeviceNotMarked: deviceWipeServiceFor(session).ensureDeviceNotMarked,
+      // A mesma releitura de conta do refresh (#94, C2): ativa e microárea
+      // vêm do banco, não do JWT.
+      findAccount: OrmRefreshTokenStore(session: () => session).findAccount,
+      crl: deviceCrlPublication,
     );
   }
 
@@ -611,4 +782,26 @@ class AlertRuntime {
         publisher: _publisher,
         clock: clock,
       );
+}
+
+/// A fonte da CRL do processo: cada leitura numa `Session` própria, aberta e
+/// fechada aqui, porque o publicador vive fora das requisições.
+class _CrlSourcePorSessao implements DeviceCrlSource {
+  Future<T> _comStore<T>(
+    Future<T> Function(OrmDeviceCertificateStore store) body,
+  ) async {
+    final session = await Serverpod.instance.createSession(enableLogging: false);
+    try {
+      return await body(OrmDeviceCertificateStore(session: () => session));
+    } finally {
+      await session.close();
+    }
+  }
+
+  @override
+  Future<List<DeviceCertificate>> revokedUnexpired(DateTime now) =>
+      _comStore((s) => s.revokedUnexpired(now));
+
+  @override
+  Future<BigInt> nextCrlNumber() => _comStore((s) => s.nextCrlNumber());
 }

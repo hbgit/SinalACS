@@ -13,6 +13,51 @@ void main() {
     expect(indicators.countsByRisk[RiskLevel.green], 2);
     expect(indicators.openRedAlerts, 1);
     expect(indicators.acknowledgedRedAlerts, 1);
+    expect(indicators.resolvedRedAlerts, 0, reason: 'nenhum vermelho concluído no seed do mock');
+    // INV-03 (#87): a partição fecha com o total de vermelhos.
+    expect(
+      indicators.countsByRisk[RiskLevel.red],
+      indicators.openRedAlerts + indicators.acknowledgedRedAlerts + indicators.resolvedRedAlerts,
+    );
+  });
+
+  test('o mock segue a partição do servidor: escalated legado conta em aberto e resolved em concluídos (#87)', () async {
+    AlertSummary vermelho(String id, AlertStatus status) => AlertSummary(
+          id: id,
+          patientLabel: 'Paciente #$id',
+          microAreaName: 'Microárea 12 — Zona Rural',
+          riskLevel: RiskLevel.red,
+          status: status,
+          triggeredAt: DateTime(2026, 9, 11, 8),
+          resolvedAt: status == AlertStatus.resolved ? DateTime(2026, 9, 11, 9) : null,
+        );
+    final dataSource = MockAdminDataSource(alertSeed: [
+      vermelho('p', AlertStatus.pending),
+      vermelho('e', AlertStatus.escalated),
+      vermelho('a', AlertStatus.acknowledged),
+      vermelho('r', AlertStatus.resolved),
+    ]);
+
+    final i = await dataSource.fetchDashboardIndicators();
+
+    expect(i.countsByRisk[RiskLevel.red], 4);
+    expect(i.openRedAlerts, 2, reason: 'pending e o escalated legado são abertos, como em RedAlertBucket');
+    expect(i.acknowledgedRedAlerts, 1);
+    expect(i.resolvedRedAlerts, 1);
+    expect(i.countsByRisk[RiskLevel.red], i.openRedAlerts + i.acknowledgedRedAlerts + i.resolvedRedAlerts);
+  });
+
+  test('alertas concluídos do mock trazem resolvedAt e movem o pulso (#87)', () async {
+    final dataSource = MockAdminDataSource();
+
+    final concluidos = await dataSource.fetchAlerts(status: AlertStatus.resolved);
+    expect(concluidos.map((a) => a.id), ['alert-4', 'alert-6']);
+    expect(concluidos.every((a) => a.resolvedAt != null), isTrue);
+    final maiorConclusao = concluidos.map((a) => a.resolvedAt!).reduce((a, b) => a.isAfter(b) ? a : b);
+
+    final pulso = await dataSource.alertsPulse();
+    expect(pulso.maxChangedAt, isNotNull);
+    expect(pulso.maxChangedAt!.isBefore(maiorConclusao), isFalse, reason: 'a conclusão move maxChangedAt, como no servidor');
   });
 
   test('deve filtrar alertas por microárea e status combinados', () async {

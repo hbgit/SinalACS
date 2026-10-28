@@ -1,0 +1,58 @@
+# Verificação inicial da #83 (Task 0)
+data UTC: 2026-10-25T21:13:14Z
+origin/develop: 00ad04d
+
+## git grep (origin/develop, backend apps, sem .md)
+origin/develop:apps/acs/tool/live_check.dart:219:      'alert_triggered',
+origin/develop:apps/acs/tool/live_check.dart:239:      'alert_received_acs',
+origin/develop:apps/acs/tool/live_check.dart:275:      'sync_attempt',
+origin/develop:apps/acs/tool/live_check.dart:281:      'sync_result',
+origin/develop:backend/sinalacs_client/lib/src/protocol/client.dart:88:import 'package:sinalacs_client/src/protocol/api/visit_sync_result.dart'
+origin/develop:backend/sinalacs_client/lib/src/protocol/protocol.dart:66:import 'api/visit_sync_result.dart' as _i53;
+origin/develop:backend/sinalacs_client/lib/src/protocol/protocol.dart:128:import 'package:sinalacs_client/src/protocol/api/visit_sync_result.dart'
+origin/develop:backend/sinalacs_client/lib/src/protocol/protocol.dart:183:export 'api/visit_sync_result.dart';
+origin/develop:backend/sinalacs_server/lib/src/generated/protocol.dart:67:import 'api/visit_sync_result.dart' as _i54;
+origin/develop:backend/sinalacs_server/lib/src/generated/protocol.dart:129:import 'package:sinalacs_server/src/generated/api/visit_sync_result.dart'
+origin/develop:backend/sinalacs_server/lib/src/generated/protocol.dart:184:export 'api/visit_sync_result.dart';
+origin/develop:backend/sinalacs_server/test/integration/test_tools/serverpod_test_tools.dart:92:import 'package:sinalacs_server/src/generated/api/visit_sync_result.dart'
+Resultado: só apps/acs/tool/live_check.dart (METRIC de stdout) e visit_sync_result em código gerado/teste; nenhuma emissão em lib/.
+
+## PRD linhas 57-87
+### 1.3 Métricas de Sucesso (North Star)
+
+**Métrica North Star:** **Tempo Médio de Resposta a Alerta Vermelho** (TMRAV) - intervalo entre o acionamento do botão de pânico pelo paciente e a confirmação de recebimento pelo ACS, com eventual registro de início de atendimento.
+
+**Métricas de Produto:**
+
+| Métrica | Descrição | Captura Técnica | Target (MVP) |
+|---------|-----------|-----------------|--------------|
+| **TMRAV** | Tempo entre alerta e resposta | Timestamp no publish MQTT vs. timestamp do ACK no app ACS | < 90 segundos |
+| **Taxa de Sincronização Offline** | % de registros offline que sincronizam com sucesso | Evento `sync_success` / `sync_attempts` | > 99.5% |
+| **Aderência à Classificação** | % de visitas onde a classificação do app foi mantida | Comparação classificação_app vs. classificação_médica | > 90% |
+| **Engajamento do ACS** | Número médio de visitas registradas por ACS/dia | Contagem de registros no `visits` table | ≥ 8 visitas/dia |
+| **Retenção de Pacientes** | % de pacientes ativos após 30 dias | Último login < 30 dias | > 70% |
+
+**Captura Técnica:**
+
+```yaml
+# Eventos de telemetria estruturados
+events:
+  - name: alert_triggered
+    fields: [patient_id, risk_level, timestamp, location_hash, mqtt_topic]
+  - name: alert_received_acs
+    fields: [acs_id, alert_id, timestamp, latency_ms]
+  - name: sync_attempt
+    fields: [device_id, records_count, timestamp, network_type]
+  - name: sync_result
+    fields: [device_id, success_count, failure_count, conflict_count]
+  - name: visit_registered
+    fields: [acs_id, patient_id, visit_type, offline_flag, sync_status]
+```
+
+
+## offline_burst_test
+flutter test test/offline_burst_test.dart: +3 All tests passed!
+
+## measure_latency --samples 10 --visit-count 100 (exit 0)
+}
+Resumo: sync success_rate 1.0 (10/10 lotes sem perda), sync p95 = 112 ms; alerta p95 = 216 ms; failures vazio.

@@ -22,7 +22,7 @@ Exibe a microárea, quantidade de pacientes e status do cache. A ação de atual
 
 ![Fila ordenada por risco clínico](screenshots/acs/02-dashboard.png)
 
-A fila apresenta os riscos vermelho, amarelo e verde com borda e ação contextual. A ordem mantém a prioridade clínica e a cor é reservada para a gravidade. Por isso avisos de infraestrutura — sem conexão com a central, visitas não sendo salvas — usam o azul de destaque, e não vermelho ou amarelo: um card vermelho de falha técnica competiria com o alerta vermelho de um paciente na mesma lista. Quando a falha de conexão é transitória, o card ainda ganha um botão "Tentar agora" — a reconexão automática já está tentando sozinha em segundo plano, mas quem vê o sinal voltar não precisa esperar o intervalo.
+A fila apresenta os riscos vermelho, amarelo e verde com borda e ação contextual. A ordem mantém a prioridade clínica e a cor é reservada para a gravidade. Por isso avisos de infraestrutura — sem conexão com a central, visitas não sendo salvas — usam o azul de destaque, e não vermelho ou amarelo: um card vermelho de falha técnica competiria com o alerta vermelho de um paciente na mesma lista. Quando a falha de conexão é transitória, o card ainda ganha um botão "Tentar agora" — a reconexão automática já está tentando sozinha em segundo plano, mas quem vê o sinal voltar não precisa esperar o intervalo. Desde a #94 o aparelho pede o próprio certificado de cliente à central depois do login; sem rede para pedi-lo, o card diz "Sem certificado deste aparelho para a central" / "Será emitido quando houver rede." e é transitório (mesmo "Tentar agora"); se a central recusar a emissão, o card diz "A central recusou o certificado deste aparelho." e não é retentado sozinho. Esses estados não têm captura de tela ainda.
 
 ## Mapa de pacientes
 
@@ -36,6 +36,12 @@ Mostra pinos sintéticos conforme o risco e uma ação de rota. Não usa Google 
 
 Permite escolher o desfecho, registrar observações e enfileirar a visita localmente. O registro usa a fila offline existente; sincronização central permanece pendente.
 
+### Visita em conflito (#79)
+
+Quando o servidor já tem outra versão da mesma visita, o contador "Em conflito" aparece na tela de visita e o botão `resolve_conflicts` abre a lista de conflitos. Cada item mostra, lado a lado, a versão do aparelho (`conflict_local`) e a do servidor (`conflict_server`), com o marcador "Diferente" (ícone + texto, não só cor) nos campos que divergem. Três saídas: "Manter a minha" (`conflict_keep_local`, envia por `visits.resolveConflict`), "Editar e enviar" (`conflict_edit` → `conflict_send_edited`) e "Manter a do servidor" (`conflict_keep_server`, com confirmação destrutiva; só apaga a cópia do aparelho). Se o servidor mudou de novo, a cópia exibida é trocada e a tela avisa; sem rede, a visita continua em conflito.
+
+Screenshots: **pendentes**. Não foram capturadas; devem sair de `./scripts/dev/run_acs.sh --build --captura` (a prova atual é o e2e no emulador, `docs/superpowers/plans/2026-10-16-issue-79-e2e.log`).
+
 ## Acionamento e escalonamento
 
 Resume paciente, risco e endereço para ações de SAMU ou UBS. Os botões comunicam explicitamente que discagem e encaminhamento reais ainda não foram integrados.
@@ -47,6 +53,12 @@ Exibe uma proximidade sintética e atalho para o formulário de visita. Rastream
 ## Avisos à comunidade
 
 Permite preparar público-alvo e mensagem comunitária. O envio depende da futura integração FCM/APNs e das regras de segmentação por microárea.
+
+## Aparelho limpo pela coordenação (issue #81)
+
+Quando a coordenação ordena a limpeza do aparelho, o app a aplica sozinho na partida, ao voltar do segundo plano, quando a rede volta ou na renovação da sessão. Se o ACS estava com o painel ou um formulário aberto, tudo some sem aviso prévio: a fila em memória é descartada sem gravar, o banco cifrado, a chave e os tokens de envio são apagados e aparece a tela **Aparelho limpo pela coordenação** (`device_wiped`), que explica que os dados foram apagados a pedido da coordenação da UBS, inclusive as visitas não enviadas, e que os alertas continuam com a equipe da UBS. Se a confirmação ao servidor ainda não saiu (sem rede), a tela mostra uma linha avisando que a confirmação está pendente. O botão **Entrar de novo** leva ao login, que funciona normalmente com uma identidade de aparelho nova. Na partida, o login espera até 5 s pela consulta quando o servidor não responde.
+
+**Capturas pendentes:** a tela `device_wiped` não foi capturada (a janela do ACS é `FLAG_SECURE`; ver "Captura de tela" abaixo).
 
 ## Referências
 

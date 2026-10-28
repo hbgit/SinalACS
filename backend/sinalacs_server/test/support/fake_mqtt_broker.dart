@@ -28,6 +28,14 @@ class FakeMqttBroker {
   /// Número de PUBACKs enviados.
   int pubackCount = 0;
 
+  /// Client id de cada conexão aberta. Um CONNECT com um id já em uso derruba
+  /// a conexão anterior (takeover do MQTT 3.1.1, §3.1.4-2), como o Mosquitto:
+  /// é o que a derrubada de sessão da #94 usa.
+  final _clientIds = <Socket, String>{};
+
+  /// Client ids cujas conexões foram derrubadas por takeover.
+  final takenOver = <String>[];
+
   int get port => _server.port;
 
   static Future<FakeMqttBroker> start({int port = 0}) async {
@@ -49,6 +57,7 @@ class FakeMqttBroker {
       onDone: () {
         _clients.remove(socket);
         _buffers.remove(socket);
+        _clientIds.remove(socket);
       },
       cancelOnError: true,
     );
@@ -88,6 +97,17 @@ class FakeMqttBroker {
     switch (header >> 4) {
       case 1: // CONNECT
         connectCount++;
+        final id = _clientIdOf(body);
+        if (id != null && id.isNotEmpty) {
+          for (final e in _clientIds.entries.toList()) {
+            if (e.value == id && e.key != socket) {
+              _clientIds.remove(e.key);
+              takenOver.add(id);
+              e.key.destroy();
+            }
+          }
+          _clientIds[socket] = id;
+        }
         socket.add([0x20, 0x02, 0x00, 0x00]);
       case 8: // SUBSCRIBE
         socket.add([0x90, 0x03, body[0], body[1], 0x01]);
@@ -106,6 +126,18 @@ class FakeMqttBroker {
           pubackCount++;
         }
     }
+  }
+
+  /// Client id do payload do CONNECT: nome do protocolo (2 + n bytes), nível,
+  /// flags e keepalive (4 bytes), e então o id (2 + n bytes).
+  static String? _clientIdOf(Uint8List body) {
+    if (body.length < 2) return null;
+    final nome = (body[0] << 8) | body[1];
+    final inicio = 2 + nome + 4;
+    if (body.length < inicio + 2) return null;
+    final n = (body[inicio] << 8) | body[inicio + 1];
+    if (body.length < inicio + 2 + n) return null;
+    return String.fromCharCodes(body, inicio + 2, inicio + 2 + n);
   }
 
   /// Fecha todas as conexões abertas, mas continua aceitando novas.

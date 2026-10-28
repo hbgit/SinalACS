@@ -28,8 +28,9 @@ source .env
 set +a
 
 ./scripts/qa/e2e.sh --emulator --keep
+# Sem senha do broker (#94): o measure_latency repassa ao live_check a folha
+# qa-tools da CA de aparelhos (infra/docker/mosquitto/runtime/devices/).
 dart run scripts/qa/measure_latency.dart \
-  --mqtt-password "$MQTT_ACS_PASSWORD" \
   --output build/qa/latency/metrics.json
 
 # Push e2e (Gorush e FCM reais) por ÚLTIMO: uma falha do FCM não pode esconder o resultado

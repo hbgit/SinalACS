@@ -24,6 +24,7 @@ abstract class AdminIndicators implements _i1.SerializableModel {
     required this.green,
     required this.openRedAlerts,
     required this.acknowledgedRedAlerts,
+    required this.resolvedRedAlerts,
     this.tmravSeconds,
   });
 
@@ -33,6 +34,7 @@ abstract class AdminIndicators implements _i1.SerializableModel {
     required int green,
     required int openRedAlerts,
     required int acknowledgedRedAlerts,
+    required int resolvedRedAlerts,
     int? tmravSeconds,
   }) = _AdminIndicatorsImpl;
 
@@ -43,6 +45,7 @@ abstract class AdminIndicators implements _i1.SerializableModel {
       green: jsonSerialization['green'] as int,
       openRedAlerts: jsonSerialization['openRedAlerts'] as int,
       acknowledgedRedAlerts: jsonSerialization['acknowledgedRedAlerts'] as int,
+      resolvedRedAlerts: jsonSerialization['resolvedRedAlerts'] as int,
       tmravSeconds: jsonSerialization['tmravSeconds'] as int?,
     );
   }
@@ -57,6 +60,11 @@ abstract class AdminIndicators implements _i1.SerializableModel {
 
   int acknowledgedRedAlerts;
 
+  /// Vermelhos concluídos pelo ACS (#87). Partição com `openRedAlerts`
+  /// (`pending` e o legado `escalated`) e `acknowledgedRedAlerts`
+  /// (`acknowledged`): `red` é sempre a soma dos três (INV-03).
+  int resolvedRedAlerts;
+
   int? tmravSeconds;
 
   /// Returns a shallow copy of this [AdminIndicators]
@@ -68,6 +76,7 @@ abstract class AdminIndicators implements _i1.SerializableModel {
     int? green,
     int? openRedAlerts,
     int? acknowledgedRedAlerts,
+    int? resolvedRedAlerts,
     int? tmravSeconds,
   });
   @override
@@ -79,6 +88,7 @@ abstract class AdminIndicators implements _i1.SerializableModel {
       'green': green,
       'openRedAlerts': openRedAlerts,
       'acknowledgedRedAlerts': acknowledgedRedAlerts,
+      'resolvedRedAlerts': resolvedRedAlerts,
       if (tmravSeconds != null) 'tmravSeconds': tmravSeconds,
     };
   }
@@ -98,6 +108,7 @@ class _AdminIndicatorsImpl extends AdminIndicators {
     required int green,
     required int openRedAlerts,
     required int acknowledgedRedAlerts,
+    required int resolvedRedAlerts,
     int? tmravSeconds,
   }) : super._(
          red: red,
@@ -105,6 +116,7 @@ class _AdminIndicatorsImpl extends AdminIndicators {
          green: green,
          openRedAlerts: openRedAlerts,
          acknowledgedRedAlerts: acknowledgedRedAlerts,
+         resolvedRedAlerts: resolvedRedAlerts,
          tmravSeconds: tmravSeconds,
        );
 
@@ -118,6 +130,7 @@ class _AdminIndicatorsImpl extends AdminIndicators {
     int? green,
     int? openRedAlerts,
     int? acknowledgedRedAlerts,
+    int? resolvedRedAlerts,
     Object? tmravSeconds = _Undefined,
   }) {
     return AdminIndicators(
@@ -127,6 +140,7 @@ class _AdminIndicatorsImpl extends AdminIndicators {
       openRedAlerts: openRedAlerts ?? this.openRedAlerts,
       acknowledgedRedAlerts:
           acknowledgedRedAlerts ?? this.acknowledgedRedAlerts,
+      resolvedRedAlerts: resolvedRedAlerts ?? this.resolvedRedAlerts,
       tmravSeconds: tmravSeconds is int? ? tmravSeconds : this.tmravSeconds,
     );
   }

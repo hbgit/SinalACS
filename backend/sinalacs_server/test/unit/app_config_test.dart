@@ -22,6 +22,7 @@ void main() {
     String? auditChainSecret,
     String? healthDataEncryptionKey,
     String? cpfHashPepper,
+    String? telemetryPseudonymKey,
     String? smsGateway,
   }) =>
       AppConfig.fromMap({
@@ -30,6 +31,7 @@ void main() {
         'AUDIT_CHAIN_SECRET': ?auditChainSecret,
         'HEALTH_DATA_ENCRYPTION_KEY': ?healthDataEncryptionKey,
         'CPF_HASH_PEPPER': ?cpfHashPepper,
+        'TELEMETRY_PSEUDONYM_KEY': ?telemetryPseudonymKey,
         'SMS_GATEWAY': ?smsGateway,
       });
 
@@ -334,6 +336,7 @@ void main() {
           auditChainSecret: 'b' * 64,
           healthDataEncryptionKey: 'c' * 64,
           cpfHashPepper: 'd' * 64,
+          telemetryPseudonymKey: 'e' * 64,
           smsGateway: 'log',
         ),
         throwsA(isA<StateError>().having(
@@ -353,6 +356,7 @@ void main() {
           auditChainSecret: 'b' * 64,
           healthDataEncryptionKey: 'c' * 64,
           cpfHashPepper: 'd' * 64,
+          telemetryPseudonymKey: 'e' * 64,
         ),
         throwsA(isA<StateError>().having(
           (error) => error.message,
@@ -370,6 +374,7 @@ void main() {
           'AUDIT_CHAIN_SECRET': 'b' * 64,
           'HEALTH_DATA_ENCRYPTION_KEY': 'c' * 64,
           'CPF_HASH_PEPPER': 'd' * 64,
+          'TELEMETRY_PSEUDONYM_KEY': 'e' * 64,
           'SMS_GATEWAY': 'log',
           if (tls) 'MQTT_USE_TLS': 'true',
           'MQTT_CLIENT_CERT_PATH': ?cert,
@@ -530,6 +535,80 @@ void main() {
             (error) => error.message,
             'message',
             contains('RETENTION_ALERT_DAYS inválido'),
+          )),
+        );
+      });
+    }
+  });
+
+  group('TELEMETRY_PSEUDONYM_KEY e RETENTION_TELEMETRY_DAYS (issue #83)', () {
+    // Os quatro segredos anteriores e o gateway válidos, para isolar a chave
+    // de telemetria como única causa da recusa.
+    Map<String, String> producao({String? chave}) => {
+          'APP_ENV': 'production',
+          'JWT_SECRET': 'a' * 64,
+          'AUDIT_CHAIN_SECRET': 'b' * 64,
+          'HEALTH_DATA_ENCRYPTION_KEY': 'c' * 64,
+          'CPF_HASH_PEPPER': 'd' * 64,
+          'SMS_GATEWAY': 'twilio',
+          'TELEMETRY_PSEUDONYM_KEY': ?chave,
+        };
+
+    for (final entrada in {
+      'ausente': null,
+      'vazia': '   ',
+      'o fallback de dev': AppConfig.developmentTelemetryPseudonymKey,
+    }.entries) {
+      test('telemetryPseudonymKey: fora de development recusa ${entrada.key}',
+          () {
+        expect(
+          () => AppConfig.fromMap(producao(chave: entrada.value)),
+          throwsA(isA<StateError>().having(
+            (error) => error.message,
+            'message',
+            contains('TELEMETRY_PSEUDONYM_KEY'),
+          )),
+        );
+      });
+    }
+
+    test('telemetryPseudonymKey: development sem valor usa o fallback', () {
+      expect(
+        AppConfig.fromMap(const {'APP_ENV': 'development'})
+            .telemetryPseudonymKey,
+        AppConfig.developmentTelemetryPseudonymKey,
+      );
+    });
+
+    test('telemetryPseudonymKey: valor próprio é aceito', () {
+      expect(
+        AppConfig.fromMap({
+          'APP_ENV': 'development',
+          'TELEMETRY_PSEUDONYM_KEY': 'e' * 64,
+        }).telemetryPseudonymKey,
+        'e' * 64,
+      );
+    });
+
+    AppConfig dev({String? dias}) => AppConfig.fromMap({
+          'APP_ENV': 'development',
+          'RETENTION_TELEMETRY_DAYS': ?dias,
+        });
+
+    test('retentionTelemetryDays: padrão 365 e valor próprio', () {
+      expect(dev().retentionTelemetryDays, 365);
+      expect(dev(dias: ' ').retentionTelemetryDays, 365);
+      expect(dev(dias: '90').retentionTelemetryDays, 90);
+    });
+
+    for (final invalido in ['0', 'abc', '1.5']) {
+      test('retentionTelemetryDays: "$invalido" é recusado', () {
+        expect(
+          () => dev(dias: invalido),
+          throwsA(isA<StateError>().having(
+            (error) => error.message,
+            'message',
+            contains('RETENTION_TELEMETRY_DAYS inválido'),
           )),
         );
       });

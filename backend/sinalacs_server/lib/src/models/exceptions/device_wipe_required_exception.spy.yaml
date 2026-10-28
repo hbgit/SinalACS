@@ -1,0 +1,7 @@
+### O aparelho tem um pedido de limpeza remota da coordenação (#81). Login,
+### renovação e envio diferido o recusam com isto, para o app distinguir "limpar
+### o aparelho" de "sessão expirada".
+exception: DeviceWipeRequiredException
+fields:
+  orderId: String
+  message: String

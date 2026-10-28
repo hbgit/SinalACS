@@ -1,0 +1,5 @@
+--------- beginning of main
+10-26 15:15:34.719  1385  5415 I AlarmManager: setExactAndAllowWhileIdle [name: GCM_HB_ALARM type: 2 triggerAtMillis: 866826]
+10-26 15:15:34.726  5150  5254 D FirebaseMessaging: service received new intent via bind strategy
+10-26 15:15:34.727  5150  5251 D FirebaseMessaging: Logging to scion event=_nr scionPayload=Bundle[{_nmc=display}]
+10-26 15:15:34.732  5150  5251 D FirebaseMessaging: Showing notification

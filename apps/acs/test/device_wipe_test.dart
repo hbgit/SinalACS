@@ -9,6 +9,7 @@ import 'package:sinalacs_acs/core/database/micro_area_cache_store.dart';
 import 'package:sinalacs_acs/core/database/sqlcipher_visit_store.dart';
 import 'package:sinalacs_acs/core/network/backend_client.dart';
 import 'package:sinalacs_acs/core/security/database_key_store.dart';
+import 'package:sinalacs_acs/core/security/device_certificate_store.dart';
 import 'package:sinalacs_acs/core/security/session_token_store.dart';
 import 'package:sinalacs_acs/core/security/upload_token_store.dart';
 import 'package:sinalacs_acs/core/services/micro_area_directory.dart';
@@ -78,6 +79,95 @@ void main() {
 
     setUp(() => EncryptedLocalDatabase.deleteDatabaseFile(dbName));
     tearDown(() => EncryptedLocalDatabase.deleteDatabaseFile(dbName));
+
+    test('destroy apaga o arquivo, a cópia recuperada e troca a chave', () async {
+      final chaveAntiga = 'a' * 64;
+      final keyStore = InMemoryDatabaseKeyStore(initialKey: chaveAntiga);
+      final storage = SqlCipherVisitStorage(keyStore: keyStore, databaseName: dbName, allowUnencryptedForTesting: true);
+      addTearDown(storage.close);
+      await gravarCursorECache(storage);
+      final caminho = await EncryptedLocalDatabase.pathFor(dbName);
+      final copia = File('$caminho${EncryptedLocalDatabase.recoverySuffix}')..writeAsStringSync('cifrado');
+      for (final sufixo in ['-wal', '-shm', '-journal']) {
+        File('$caminho$sufixo').writeAsStringSync('resto');
+      }
+      expect(File(caminho).existsSync(), isTrue);
+
+      await storage.destroyAll();
+
+      expect(File(caminho).existsSync(), isFalse);
+      for (final sufixo in ['-wal', '-shm', '-journal']) {
+        expect(File('$caminho$sufixo').existsSync(), isFalse);
+      }
+      expect(copia.existsSync(), isFalse);
+      expect(await keyStore.readOrCreate(), isNot(chaveAntiga));
+    });
+
+    test('open depois de destroy devolve banco vazio no schema atual', () async {
+      final keyStore = InMemoryDatabaseKeyStore(initialKey: 'a' * 64);
+      final storage = SqlCipherVisitStorage(keyStore: keyStore, databaseName: dbName, allowUnencryptedForTesting: true);
+      addTearDown(storage.close);
+      await gravarCursorECache(storage);
+
+      await storage.database.destroy();
+      final db = await storage.database.open();
+
+      expect((await db.rawQuery('PRAGMA user_version')).single['user_version'], EncryptedLocalDatabase.schemaVersion);
+      expect(await contarTabelas(storage), {for (final t in tabelas) t: 0});
+    });
+
+    test('destroy espera uma abertura em voo e deixa o objeto reutilizável', () async {
+      final keyStore = InMemoryDatabaseKeyStore(initialKey: 'a' * 64);
+      final storage = SqlCipherVisitStorage(keyStore: keyStore, databaseName: dbName, allowUnencryptedForTesting: true);
+      addTearDown(storage.close);
+
+      final abrindo = storage.database.open();
+      await storage.database.destroy();
+      await abrindo;
+
+      final caminho = await EncryptedLocalDatabase.pathFor(dbName);
+      expect(File(caminho).existsSync(), isFalse, reason: 'a abertura em voo não sobrevive ao destroy');
+      expect(await contarTabelas(storage), {for (final t in tabelas) t: 0});
+      expect(await keyStore.readOrCreate(), isNot('a' * 64));
+    });
+
+    test('open durante destroy espera o fim e abre com a chave NOVA', () async {
+      final chaveAntiga = 'a' * 64;
+      final portao = Completer<void>();
+      final keyStore = _ChaveComPortao(chaveAntiga, portao.future);
+      final usadas = <String>[];
+      final banco = VisitDatabase(
+        keyStore: keyStore,
+        databaseName: dbName,
+        allowUnencryptedForTesting: true,
+        opener: (nome, chave, claro) {
+          usadas.add(chave);
+          return EncryptedLocalDatabase.open(
+              databaseName: nome, passphrase: chave, allowUnencryptedForTesting: claro);
+        },
+      );
+      addTearDown(banco.close);
+      await banco.open();
+      usadas.clear();
+
+      final destruindo = banco.destroy();
+      var abriu = false;
+      final abrindo = banco.open().then((db) {
+        abriu = true;
+        return db;
+      });
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      expect(abriu, isFalse, reason: 'a abertura não pode furar o destroy');
+      expect(usadas, isEmpty);
+
+      portao.complete();
+      await destruindo;
+      await abrindo;
+
+      expect(usadas, hasLength(1));
+      expect(usadas.single, isNot(chaveAntiga));
+      expect(usadas.single, await keyStore.readOrCreate());
+    });
 
     test('recusa com visita de um dono e não apaga nada', () async {
       final storage = abrirBanco(dbName);
@@ -428,6 +518,149 @@ void main() {
       expect(fila.pendingCount, 1);
     });
 
+    testWidgets('conflito só na MEMÓRIA também bloqueia a limpeza (#79)', (tester) async {
+      await io(tester, () => gravarCursorECache(storage));
+      // O conflito saiu da retentativa (D3): não conta mais como pendente, e
+      // ainda assim é trabalho de campo que não subiu.
+      final fila = OfflineVisitQueue(
+        store: FailingVisitStore(failOnLoad: false),
+        synchronizer: FakeVisitSynchronizer(statusFor: (_) => 'conflict'),
+      );
+      await tester.pumpWidget(SinalAcsApp(
+        backend: backend,
+        visitStorage: storage,
+        visitQueue: fila,
+        uploadTokens: tokens,
+        deviceIds: MemoryDeviceIdStore('aparelho-sintetico'),
+        feedBuilder: (q) => FakeAlertFeed(q),
+      ));
+      await assentar(tester);
+      await entrarComo(tester, acsA);
+      final antes = await io(tester, () => contarTabelas(storage));
+      await ateAConfirmacao(tester);
+
+      await fila.add(pendente('conflito-na-ram'));
+      await tester.runAsync(fila.sync);
+      expect(fila.pendingCount, 0);
+      expect(fila.conflictCount, 1);
+      expect(fila.persistenceFailed, isTrue);
+      await tester.tap(find.byKey(const Key('wipe_confirm')));
+      await assentar(tester);
+
+      await esperarBloqueio(tester, visitas: 1, antes: antes);
+      expect(fila.conflictCount, 1);
+    });
+
+    testWidgets('conflito no DISCO do próprio ACS bloqueia pedindo revisão, não rede (#79)', (tester) async {
+      // O conflito depende da decisão do ACS dono, não de conexão: dizer
+      // "conecte e tente de novo" mandaria o ACS esperar algo que não vem.
+      await io(tester, () async {
+        await storage.forOwner(acsA).save([
+          pendente('a-conflito').copyWith(
+            conflictServerVersion: 3,
+            conflictServer: const VisitConflictSnapshot(version: 3, status: 'Paciente ausente', notes: ''),
+          ),
+        ]);
+        await gravarCursorECache(storage);
+      });
+      final antes = await io(tester, () => contarTabelas(storage));
+      await abrirApp(tester);
+      await entrarComo(tester, acsA);
+
+      await tocarEmLimpar(tester);
+
+      await esperarBloqueio(tester, visitas: 1, antes: antes, motivo: 'revisao');
+      expect((await io(tester, () => storage.forOwner(acsA).load())).single.inConflict, isTrue);
+    });
+
+    testWidgets('conflito só na MEMÓRIA entra na contagem antes da confirmação (#79)', (tester) async {
+      await io(tester, () => gravarCursorECache(storage));
+      final fila = OfflineVisitQueue(
+        store: FailingVisitStore(failOnLoad: false),
+        synchronizer: FakeVisitSynchronizer(statusFor: (_) => 'conflict'),
+      );
+      await tester.pumpWidget(SinalAcsApp(
+        backend: backend,
+        visitStorage: storage,
+        visitQueue: fila,
+        uploadTokens: tokens,
+        deviceIds: MemoryDeviceIdStore('aparelho-sintetico'),
+        feedBuilder: (q) => FakeAlertFeed(q),
+      ));
+      await assentar(tester);
+      await entrarComo(tester, acsA);
+      // Depois do login: o `restore` da fila do painel relê o disco (vazio).
+      await fila.add(pendente('conflito-na-ram'));
+      await tester.runAsync(fila.sync);
+      expect(fila.conflictCount, 1);
+      expect(fila.persistenceFailed, isTrue);
+      final antes = await io(tester, () => contarTabelas(storage));
+
+      await tocarEmLimpar(tester);
+
+      // Direto no bloqueio: a confirmação não chega a abrir.
+      await esperarBloqueio(tester, visitas: 1, antes: antes, motivo: 'revisao');
+      expect(fila.conflictCount, 1);
+    });
+
+    testWidgets('conflito só na MEMÓRIA de outro ACS aparece no "Sair" de quem entrou depois (#79)', (tester) async {
+      backend.syncResultFor = (entry) => VisitSyncResult(
+            localId: entry.localId,
+            syncStatus: SyncStatus.conflict,
+            serverVersion: 3,
+          );
+      backend.deferredFailure = semRede;
+      late FakeAlertFeed feed;
+      await tester.pumpWidget(SinalAcsApp(
+        backend: backend,
+        visitStorage: _GravacaoDeAFalha(storage),
+        uploadTokens: tokens,
+        deviceIds: MemoryDeviceIdStore('aparelho-sintetico'),
+        feedBuilder: (q) => feed = FakeAlertFeed(q),
+      ));
+      await assentar(tester);
+      await entrarComo(tester, acsA);
+
+      // A registra uma visita; a gravação falha e ela fica só na RAM. No
+      // "Sair", o envio devolve conflito: segue só na RAM, agora em conflito.
+      feed.deliver(testAlert(alertId: 'alerta-ram', riskLevel: 'yellow'));
+      await assentar(tester);
+      await tester.tap(find.text('Iniciar rota de visita'));
+      await assentar(tester);
+      await tester.tap(find.byKey(const Key('arrival_confirmation')));
+      await assentar(tester);
+      final salvar = find.byKey(const Key('save_visit'));
+      await tester.ensureVisible(salvar);
+      await tester.pump();
+      await tester.tap(salvar);
+      await assentar(tester);
+      await tester.pump(const Duration(seconds: 10));
+      await assentar(tester);
+
+      await irParaDoMais(tester, 'Preferências');
+      final sair = find.byKey(const Key('logout_button'));
+      await tester.ensureVisible(sair);
+      await tester.pump();
+      await tester.tap(sair);
+      await assentar(tester);
+      await tester.tap(find.byKey(const Key('logout_confirm')));
+      await assentar(tester);
+      await entrarComo(tester, acsB);
+
+      await irParaDoMais(tester, 'Preferências');
+      await tester.ensureVisible(sair);
+      await tester.pump();
+      await tester.tap(sair);
+      await assentar(tester);
+
+      expect(find.byKey(const Key('logout_all_sent')), findsNothing,
+          reason: 'o conflito de A só na RAM não pode sumir da contagem');
+      expect(find.byKey(const Key('logout_pending_visits')), findsOneWidget);
+      expect(find.textContaining('1 visita ainda não enviada'), findsOneWidget);
+      await tester.tap(find.text('Cancelar'));
+      await assentar(tester);
+    });
+
     testWidgets('visita que chega ao DISCO depois da confirmação aberta: a transação recusa e nada é apagado', (tester) async {
       await io(tester, () => gravarCursorECache(storage));
       await abrirApp(tester);
@@ -505,6 +738,42 @@ void main() {
           reason: 'nada do território é regravado depois de "dados apagados"');
     });
 
+    testWidgets('Limpar este aparelho sem visitas troca a chave', (tester) async {
+      final chaveAntiga = 'a' * 64;
+      final keyStore = InMemoryDatabaseKeyStore(initialKey: chaveAntiga);
+      final comChave = SqlCipherVisitStorage(keyStore: keyStore, databaseName: dbName, allowUnencryptedForTesting: true);
+      addTearDown(comChave.close);
+      await io(tester, () => gravarCursorECache(comChave));
+      await abrirApp(tester, visitStorage: comChave);
+      await entrarComo(tester, acsA);
+
+      await tocarEmLimpar(tester);
+      await tester.tap(find.byKey(const Key('wipe_confirm')));
+      await assentar(tester);
+      await assentar(tester);
+
+      expect(find.text('Os dados deste aparelho foram apagados.'), findsOneWidget);
+      expect(await io(tester, keyStore.readOrCreate), isNot(chaveAntiga));
+    });
+
+    testWidgets('Limpar este aparelho com visita recusa e mantém arquivo e chave', (tester) async {
+      final chaveAntiga = 'a' * 64;
+      final keyStore = InMemoryDatabaseKeyStore(initialKey: chaveAntiga);
+      final comChave = SqlCipherVisitStorage(keyStore: keyStore, databaseName: dbName, allowUnencryptedForTesting: true);
+      addTearDown(comChave.close);
+      await io(tester, () => comChave.forOwner(acsA).save([pendente('a-1')]));
+      final caminho = await io(tester, () => EncryptedLocalDatabase.pathFor(dbName));
+      backend.syncFailure = semRede;
+      await abrirApp(tester, visitStorage: comChave);
+      await entrarComo(tester, acsA);
+
+      await tocarEmLimpar(tester);
+
+      expect(find.byKey(const Key('wipe_blocked')), findsOneWidget);
+      expect(File(caminho).existsSync(), isTrue);
+      expect(await io(tester, keyStore.readOrCreate), chaveAntiga);
+    });
+
     testWidgets('com TUDO enviado: confirma, esvazia as tabelas e as chaves de envio, sai e volta ao login', (tester) async {
       await io(tester, () async {
         await storage.forOwner(acsA).save([pendente('a-1')]);
@@ -545,6 +814,48 @@ void main() {
       expect(find.text('Os dados deste aparelho foram apagados.'), findsOneWidget);
     });
   });
+
+  group('limpeza remota e o certificado do aparelho (#94)', () {
+    testWidgets('a limpeza apaga o certificado do deviceId antigo', (tester) async {
+      const idAntigo = '00000000-0000-4000-8000-0000000000d1';
+      final deviceIds = MemoryDeviceIdStore(idAntigo);
+      final backend = FakeAcsBackend()
+        ..deviceIds = deviceIds
+        ..pendingWipeOrderId = 'ordem-1';
+      final certificados = InMemoryDeviceCertificateStore();
+      StoredDeviceCertificate cert(String acsId, String deviceId) => StoredDeviceCertificate(
+            acsId: acsId,
+            deviceId: deviceId,
+            microAreaId: seedMicroAreaId,
+            serial: 'serial-$acsId',
+            certificatePem: 'CERT-SINTETICO',
+            privateKeyPem: 'CHAVE-SINTETICA',
+            notAfter: DateTime.utc(2026, 11, 26),
+          );
+      await certificados.write(cert(acsA, idAntigo));
+      await certificados.write(cert(acsB, idAntigo));
+      await certificados.write(cert(acsA, 'outro-aparelho'));
+
+      await tester.pumpWidget(SinalAcsApp(
+        backend: backend,
+        visitStorage: InMemoryVisitStorage(),
+        uploadTokens: MemoryUploadTokenStore(),
+        deviceIds: deviceIds,
+        deviceCertificates: certificados,
+        biometricGate: FakeBiometricGate(),
+        feedBuilder: (q) => FakeAlertFeed(q),
+      ));
+      await assentar(tester);
+
+      expect(find.byKey(const Key('device_wiped')), findsOneWidget);
+      expect(await certificados.read(acsId: acsA, deviceId: idAntigo), isNull);
+      expect(await certificados.read(acsId: acsB, deviceId: idAntigo), isNull);
+      expect(await certificados.read(acsId: acsA, deviceId: 'outro-aparelho'), isNotNull,
+          reason: 'só o aparelho limpo perde o certificado');
+      expect(await deviceIds.readOrCreate(), isNot(idAntigo));
+      expect(backend.confirmedWipes, [(deviceId: idAntigo, orderId: 'ordem-1')]);
+    });
+  });
 }
 
 /// Só a visão de `acs-a` recusa gravar: a visita de A fica só na RAM.
@@ -563,6 +874,23 @@ class _GravacaoDeAFalha implements VisitStorage {
   Future<void> wipeAllData() => _inner.wipeAllData();
 
   @override
+  Future<void> destroyAll() => _inner.destroyAll();
+
+  @override
   VisitStore forOwner(String ownerId) =>
       ownerId == 'acs-a' ? FailingVisitStore(failOnLoad: false) : _inner.forOwner(ownerId);
+}
+
+/// Chave cuja exclusão espera um portão: abre a janela em que um `open()`
+/// concorrente ao `destroy()` leria a chave velha.
+class _ChaveComPortao extends InMemoryDatabaseKeyStore {
+  _ChaveComPortao(String chave, this._portao) : super(initialKey: chave);
+
+  final Future<void> _portao;
+
+  @override
+  Future<void> delete() async {
+    await _portao;
+    await super.delete();
+  }
 }

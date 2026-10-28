@@ -53,14 +53,22 @@ Future<void> _alerta(
   String ma,
   RiskLevel risco,
   AlertStatus status,
-  Duration atras,
-) async {
+  Duration atras, {
+  /// Concluído (#87): reconhecido 1 min depois do disparo e concluído
+  /// [concluidoApos] depois dele.
+  Duration? concluidoApos,
+}) async {
+  final disparo = _agora.subtract(atras);
   await Alert.db.insertRow(
     s,
     Alert(
       patientId: UuidValue.fromString(_paciente),
       microAreaId: UuidValue.fromString(ma),
-      triggeredAt: _agora.subtract(atras),
+      triggeredAt: disparo,
+      acknowledgedAt: concluidoApos == null
+          ? null
+          : disparo.add(const Duration(minutes: 1)),
+      resolvedAt: concluidoApos == null ? null : disparo.add(concluidoApos),
       riskLevel: risco,
       locationHash: 'hash-sintetico',
       status: status,
@@ -168,6 +176,14 @@ Future<void> _seed(Session s) async {
     AlertStatus.pending,
     const Duration(minutes: 5),
   );
+  await _alerta(
+    s,
+    _maB,
+    RiskLevel.red,
+    AlertStatus.resolved,
+    const Duration(minutes: 60),
+    concluidoApos: const Duration(minutes: 15),
+  ); // concluído (#87): só o administrador e o coordenador da UBS B o contam
 }
 
 String _token(String id, UserRole role, {String? ma, DateTime? now}) =>
@@ -208,9 +224,10 @@ void main() {
           sessionBuilder,
           accessToken: t,
         );
-        expect(ind.red, 2);
+        expect(ind.red, 3);
         expect(ind.green, 1);
-        expect(ind.tmravSeconds, isNull);
+        expect(ind.resolvedRedAlerts, 1);
+        expect(ind.tmravSeconds, 60, reason: 'o concluído foi reconhecido 60 s após o disparo');
         expect(
           (await endpoints.admin.microAreas(
             sessionBuilder,
@@ -225,7 +242,7 @@ void main() {
             limit: 50,
             offset: 0,
           )).items,
-          hasLength(3),
+          hasLength(4),
         );
         await endpoints.admin.auditLogs(
           sessionBuilder,
@@ -240,12 +257,15 @@ void main() {
       'coordenador da UBS A não vê a UBS B (indicators, microAreas, alerts)',
       () async {
         final t = _token(_coordA, UserRole.coordinator);
+        final ind = await endpoints.admin.indicators(
+          sessionBuilder,
+          accessToken: t,
+        );
+        expect(ind.red, 1);
         expect(
-          (await endpoints.admin.indicators(
-            sessionBuilder,
-            accessToken: t,
-          )).red,
-          1,
+          ind.resolvedRedAlerts,
+          0,
+          reason: 'o concluído é da UBS B (#87)',
         );
         expect(
           (await endpoints.admin.microAreas(
@@ -276,6 +296,51 @@ void main() {
           isEmpty,
           reason: 'filtro de outra UBS não fura o escopo',
         );
+      },
+    );
+
+    test(
+      'coordenador da UBS B conta o concluído da própria UBS e a soma fecha em todo papel (#87)',
+      () async {
+        await _usuario(
+          session,
+          _coordB,
+          'Coord B Sintético',
+          UserRole.coordinator,
+        );
+        await StaffAccount.db.insertRow(
+          session,
+          StaffAccount(
+            id: UuidValue.fromString(_coordB),
+            enrollmentId: 'COO-EP-3',
+            active: true,
+            ubsId: UuidValue.fromString(_ubsB),
+          ),
+        );
+        final indB = await endpoints.admin.indicators(
+          sessionBuilder,
+          accessToken: _token(_coordB, UserRole.coordinator),
+        );
+        expect(indB.red, 2);
+        expect(indB.resolvedRedAlerts, 1);
+        expect(indB.openRedAlerts, 1);
+
+        // INV-03 no RPC: red é a soma dos três contadores para cada papel.
+        for (final (id, papel) in [
+          (_admin, UserRole.admin),
+          (_coordA, UserRole.coordinator),
+          (_coordB, UserRole.coordinator),
+        ]) {
+          final ind = await endpoints.admin.indicators(
+            sessionBuilder,
+            accessToken: _token(id, papel),
+          );
+          expect(
+            ind.red,
+            ind.openRedAlerts + ind.acknowledgedRedAlerts + ind.resolvedRedAlerts,
+            reason: papel.name,
+          );
+        }
       },
     );
 

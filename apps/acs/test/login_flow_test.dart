@@ -485,25 +485,30 @@ void main() {
       expect(sender.batches.single, hasLength(1));
     });
 
-    test('deve reencolar registros em conflito e reprocessar no retry', () async {
-      var firstPass = true;
-      final sender = FakeVisitSynchronizer(
-        statusFor: (_) => firstPass ? 'conflict' : 'synced',
-      );
-      final queue = OfflineVisitQueue(synchronizer: sender);
+    test('conflito sai da retentativa e é resolvido pela decisão do ACS', () async {
+      final sender = FakeVisitSynchronizer(statusFor: (_) => 'conflict');
+      final resolver = _ResolvedorQueSincroniza();
+      final queue = OfflineVisitQueue(synchronizer: sender, conflictResolver: resolver);
 
-      await queue.add(visit(syntheticPatientId(2)));
+      final registrada = visit(syntheticPatientId(2));
+      await queue.add(registrada);
 
       final conflict = await queue.sync();
       expect(conflict.kind, SyncOutcomeKind.conflict);
-      // Conflito volta para a fila: precisa de resolução, não de descarte.
-      expect(queue.pendingCount, 1);
-      expect(queue.conflictCount, 1);
-
-      firstPass = false;
-      final retried = await queue.sync();
-      expect(retried.kind, SyncOutcomeKind.synced);
+      // #79, D3: o conflito sai da retentativa e espera a decisão do ACS —
+      // não é descartado, e reenviar só devolveria o mesmo conflito.
       expect(queue.pendingCount, 0);
+      expect(queue.conflictCount, 1);
+      expect(queue.conflictVisits.single.conflictServerVersion, registrada.version + 1);
+
+      expect((await queue.sync()).kind, SyncOutcomeKind.empty, reason: 'não reenvia o conflito');
+      expect(sender.batches, hasLength(1));
+
+      final resolved = await queue.resolveKeepLocal(registrada.localId);
+      expect(resolved.kind, SyncOutcomeKind.synced);
+      expect(resolver.versoesVistas, [registrada.version + 1]);
+      expect(queue.pendingCount, 0);
+      expect(queue.conflictCount, 0);
       expect(queue.syncedCount, 1);
     });
 
@@ -587,8 +592,11 @@ void main() {
       final result = await queue.sync();
 
       expect(result.kind, SyncOutcomeKind.conflict);
-      // Nada saiu: as duas continuam no aparelho.
-      expect(queue.pendingCount, 2);
+      // Nada saiu do aparelho: a do erro continua pendente e retenta; a do
+      // conflito espera a decisão do ACS fora da retentativa (#79, D3).
+      expect(queue.pendingCount, 1);
+      expect(queue.conflictCount, 1);
+      expect(queue.pendingCount + queue.conflictCount, 2);
     });
 
     test('visita recusada em definitivo sai da fila e não é reenviada', () async {
@@ -630,8 +638,9 @@ void main() {
 
       expect(result.kind, SyncOutcomeKind.rejected);
       expect(queue.rejectedCount, 1);
-      // O conflito continua pendente para resolução — só a recusada saiu.
-      expect(queue.pendingCount, 1);
+      // As duas saem da retentativa (#79, D3): a recusada para as recusadas,
+      // o conflito para a decisão do ACS. Nenhuma some.
+      expect(queue.pendingCount, 0);
       expect(queue.conflictCount, 1);
     });
 
@@ -1169,24 +1178,24 @@ void main() {
       expect(find.byKey(const Key('storage_error')), findsOneWidget);
     });
 
-    testWidgets('sem senha compilada o painel diz que falta a senha, não que falta conexão', (tester) async {
+    testWidgets('sem certificado do aparelho o painel diz isso, não que falta conexão (#94)', (tester) async {
       await abrirPainel(
         tester,
         visitQueue: OfflineVisitQueue(),
         feedBuilder: (queue) => FakeAlertFeed(
           queue,
           failure: const AlertFeedFailure(
-            AlertFeedFailureKind.missingPassword,
-            title: 'Este aplicativo foi compilado sem a senha do broker de alertas.',
-            detail: 'Nenhum alerta será recebido até o aplicativo ser recompilado.',
+            AlertFeedFailureKind.certificateUnavailable,
+            title: 'Sem certificado deste aparelho para a central',
+            detail: 'Será emitido quando houver rede.',
+            transient: true,
           ),
         ),
       );
 
-      expect(
-        find.text('Este aplicativo foi compilado sem a senha do broker de alertas.'),
-        findsOneWidget,
-      );
+      expect(find.text('Sem certificado deste aparelho para a central'), findsOneWidget);
+      expect(find.textContaining('Será emitido quando houver rede.'), findsOneWidget);
+      expect(find.byKey(const Key('retry_feed')), findsOneWidget, reason: 'transitória: oferece nova tentativa');
       expect(find.text('Sem conexão com a central de alertas.'), findsNothing);
     });
 
@@ -1258,6 +1267,38 @@ void main() {
       expect(find.text('Nenhum alerta na sua microárea agora.'), findsNothing);
     });
 
+    testWidgets('falha depois do start (onFailure, #94) mostra o banner e reinicia o feed pelo backoff', (tester) async {
+      late FakeAlertFeed feed;
+
+      await abrirPainel(
+        tester,
+        visitQueue: OfflineVisitQueue(),
+        feedBuilder: (queue) => feed = FakeAlertFeed(queue),
+      );
+      expect(feed.startCount, 1);
+      expect(find.byKey(const Key('feed_error')), findsNothing);
+
+      // O broker recusou o certificado na reconexão automática.
+      feed.started = false;
+      feed.onConnectionChanged?.call(false);
+      feed.onFailure?.call(const AlertFeedFailure(
+        AlertFeedFailureKind.certificateUnavailable,
+        title: 'Sem certificado deste aparelho para a central',
+        detail: 'Será emitido quando houver rede.',
+        transient: true,
+      ));
+      await tester.pump();
+
+      expect(find.byKey(const Key('feed_error')), findsOneWidget);
+      expect(find.text('Sem certificado deste aparelho para a central'), findsOneWidget);
+
+      await tester.pump(const Duration(seconds: 2));
+      await tester.pumpAndSettle();
+
+      expect(feed.startCount, 2, reason: 'o ReconnectSchedule reinicia o feed, que reemite o certificado');
+      expect(find.byKey(const Key('feed_error')), findsNothing);
+    });
+
     testWidgets('o atraso entre tentativas dobra a cada falha', (tester) async {
       late FakeAlertFeed feed;
 
@@ -1296,7 +1337,7 @@ void main() {
       expect(find.text('Alertas em tempo real'), findsOneWidget);
     });
 
-    testWidgets('falta de senha não oferece nem agenda nova tentativa', (tester) async {
+    testWidgets('falta da CA da central não oferece nem agenda nova tentativa', (tester) async {
       late FakeAlertFeed feed;
 
       await abrirPainel(
@@ -1305,9 +1346,9 @@ void main() {
         feedBuilder: (queue) => feed = FakeAlertFeed(
           queue,
           failure: const AlertFeedFailure(
-            AlertFeedFailureKind.missingPassword,
-            title: 'Este aplicativo foi compilado sem a senha do broker de alertas.',
-            detail: 'Nenhum alerta será recebido até o aplicativo ser recompilado.',
+            AlertFeedFailureKind.missingCaAsset,
+            title: 'Falta o certificado da central neste aplicativo.',
+            detail: 'Sem ele a conexão segura não pode ser verificada.',
           ),
         ),
       );
@@ -1727,4 +1768,15 @@ void main() {
       expect(backend.listPatientsCount, 3);
     });
   });
+}
+
+/// Resolvedor de conflito que o servidor sempre aceita (#79).
+class _ResolvedorQueSincroniza implements VisitConflictResolver {
+  final List<int> versoesVistas = <int>[];
+
+  @override
+  Future<VisitSyncOutcome> resolve(OfflineVisitRecord visit, {required int expectedServerVersion}) async {
+    versoesVistas.add(expectedServerVersion);
+    return VisitSyncOutcome(localId: visit.localId, status: 'synced', serverVersion: expectedServerVersion + 1);
+  }
 }

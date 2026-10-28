@@ -1,53 +1,29 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:sinalacs_acs/core/network/backend_config.dart';
 import 'package:sinalacs_acs/core/services/alert_feed.dart';
-import 'package:sinalacs_acs/core/services/alert_queue.dart';
 
-/// Estes testes rodam **sem** `--dart-define`, que é exatamente a condição do
-/// app compilado à mão — o defeito que eles travam.
+/// O broker não tem mais senha para o ACS nem certificado compartilhado no
+/// binário (#94): o aparelho se autentica pelo certificado que o backend
+/// emite para ele. Os casos da emissão estão em
+/// `alert_feed_enrollment_test.dart`.
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  group('senha do broker', () {
-    test('não tem valor padrão embutido no binário', () {
-      // O default anterior ('development-acs-password') nunca bateu com o
-      // broker, que usa um segredo por máquina: ele só servia para transformar
-      // um erro de compilação em "sem conexão com a central".
-      expect(
-        BackendConfig.mqttPassword,
-        isEmpty,
-        reason: 'a suíte roda sem --dart-define; um valor aqui significa que '
-            'alguém reintroduziu o defaultValue',
-      );
-      expect(BackendConfig.mqttPasswordMissing, isTrue);
-    });
-
-    test('o feed falha antes de abrir qualquer socket quando falta a senha', () async {
-      // Se chegasse a tentar conectar, este teste gastaria o timeout do broker
-      // em vez de responder na hora.
-      final feed = MqttAlertFeed(queue: AlertQueue(microAreaId: 'micro-area'));
-
-      await expectLater(
-        feed.start(microAreaId: 'micro-area', acsId: 'acs'),
-        throwsA(isA<AlertFeedFailure>().having(
-          (failure) => failure.kind,
-          'kind',
-          AlertFeedFailureKind.missingPassword,
-        )),
-      );
-    });
+  test('não existem mais as falhas de senha nem de certificado compartilhado', () {
+    expect(
+      AlertFeedFailureKind.values.map((k) => k.name),
+      unorderedEquals(['missingCaAsset', 'certificateUnavailable', 'refused', 'unreachable']),
+    );
   });
 
-  group('certificado de cliente (mTLS)', () {
-    test('falta do certificado de cliente é uma falha própria e não transitória', () {
-      expect(AlertFeedFailureKind.values,
-          contains(AlertFeedFailureKind.missingClientCertificate));
-      const falha = AlertFeedFailure(
-        AlertFeedFailureKind.missingClientCertificate,
-        title: 'Falta o certificado de cliente da central neste aplicativo.',
-        detail: 'Sem ele o broker recusa a conexão.',
-      );
-      expect(falha.transient, isFalse);
-    });
+  test('sem id da instalação o feed falha na hora, sem socket e sem nova tentativa', () async {
+    final feed = UnconfiguredAlertFeed();
+
+    await expectLater(
+      feed.start(microAreaId: 'micro-area', acsId: 'acs'),
+      throwsA(isA<AlertFeedFailure>()
+          .having((f) => f.kind, 'kind', AlertFeedFailureKind.certificateUnavailable)
+          .having((f) => f.transient, 'transient', isFalse)),
+    );
+    expect(feed.isConnected, isFalse);
   });
 }

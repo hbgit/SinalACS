@@ -30,6 +30,13 @@
 /// então passa e as tabelas ficam vazias. A autoria no servidor (`acsId`,
 /// `authorship`, `originDeviceId`) e o `audit_logs` são conferidos pelo script.
 ///
+/// O teste do conflito de visita (#79), antes do da MFA, registra duas visitas
+/// com o envio fora do ar, leva as duas à v3 no servidor por um "outro
+/// aparelho" do mesmo ACS (o `BackendClient` real, fora do decorator) e, pela
+/// tela, mantém a do aparelho numa e a do servidor noutra. A v4 gravada, a v3
+/// intacta, a trilha (`conflict_resolved_local`, `visit_conflict`) e a cadeia
+/// de auditoria são conferidas pelo script (`E2E_CONFLITO`).
+///
 /// PRIVACIDADE: só fixtures sintéticas geradas na execução; nada de CPF em log.
 @Timeout(Duration(minutes: 4))
 library;
@@ -57,9 +64,11 @@ import 'package:sinalacs_acs/core/services/backend_visit_synchronizer.dart';
 import 'package:sinalacs_acs/core/services/micro_area_directory.dart';
 import 'package:sinalacs_acs/core/services/micro_area_directory_factory.dart';
 import 'package:sinalacs_acs/core/services/offline_visit_queue.dart';
+import 'package:sinalacs_acs/core/services/visit_queue_factory.dart';
 import 'package:sinalacs_client/sinalacs_client.dart' as api;
 
 import 'support/e2e_acs.dart';
+import 'support/envio_fora_do_ar.dart';
 import 'support/legacy_v6.dart';
 import 'support/totp.dart';
 
@@ -89,6 +98,15 @@ Future<void> _tocarEntrar(WidgetTester tester) async {
   await tester.tap(botao);
 }
 
+/// Rola até [alvo] ficar no MEIO da área visível e toca. O `ensureVisible`
+/// do tester encosta o alvo na borda de baixo, onde a barra de navegação ou
+/// um SnackBar podem cobri-lo (o toque cairia neles: "would not hit test").
+Future<void> _tocarNoMeio(WidgetTester tester, Finder alvo) async {
+  await Scrollable.ensureVisible(tester.element(alvo), alignment: 0.5);
+  await tester.pump(const Duration(milliseconds: 300));
+  await tester.tap(alvo);
+}
+
 /// Cliente com o refresh token e o id do aparelho no Keystore, como o `main.dart`.
 BackendClient _clienteComKeystore(List<int> ca) => BackendClient(
       trustedCaBytes: ca,
@@ -102,86 +120,6 @@ Uint8List? _mfaSegredo;
 int? _mfaUltimoPasso;
 
 int _passo(DateTime t) => t.toUtc().millisecondsSinceEpoch ~/ 1000 ~/ 30;
-
-/// Backend do app com o ENVIO de visitas (sync, legado, diferido, revogação do
-/// token de envio) "fora do ar" enquanto [offline]: falha recuperável, como a
-/// queda de rede. Login, lista da microárea e logout seguem o servidor real —
-/// é o que permite a A registrar e sair com a visita pendente, e a B entrar.
-/// Não é a rede do aparelho caindo: só os caminhos de envio de visita.
-class _EnvioDeVisitasForaDoAr implements AcsBackend {
-  _EnvioDeVisitasForaDoAr(this._inner);
-
-  final AcsBackend _inner;
-  bool offline = true;
-  int recusas = 0;
-
-  Future<T> _rede<T>(Future<T> Function() call) {
-    if (offline) {
-      recusas++;
-      return Future.error(const BackendFailure('Sem conexão (simulada no e2e).'));
-    }
-    return call();
-  }
-
-  @override
-  AuthSession? get session => _inner.session;
-  @override
-  bool get isAuthenticated => _inner.isAuthenticated;
-  @override
-  void Function()? get onSessionExpired => _inner.onSessionExpired;
-  @override
-  set onSessionExpired(void Function()? value) => _inner.onSessionExpired = value;
-  @override
-  Future<bool> get hasStoredSession => _inner.hasStoredSession;
-  @override
-  Future<SessionUnlock> unlockStoredSession({required String reason}) => _inner.unlockStoredSession(reason: reason);
-  @override
-  Future<AuthSession?> resumeSession() => _inner.resumeSession();
-  @override
-  Future<void> logout() => _inner.logout();
-  @override
-  Future<AuthSession> login({required String matricula, required String senha, String? totpCode}) =>
-      _inner.login(matricula: matricula, senha: senha, totpCode: totpCode);
-  @override
-  Future<api.TotpEnrollmentStart> beginTotpEnrollment({required String matricula, required String senha}) =>
-      _inner.beginTotpEnrollment(matricula: matricula, senha: senha);
-  @override
-  Future<void> confirmTotpEnrollment({required String matricula, required String senha, required String code}) =>
-      _inner.confirmTotpEnrollment(matricula: matricula, senha: senha, code: code);
-  @override
-  Future<AuthSession> developmentLogin({required String role}) => _inner.developmentLogin(role: role);
-  @override
-  Future<api.AlertAckResult> acknowledge({required String alertId}) => _inner.acknowledge(alertId: alertId);
-  @override
-  Future<List<api.VisitSyncResult>> syncVisits(List<api.VisitSyncEntry> visits, {String? expectedUserId}) =>
-      _rede(() => _inner.syncVisits(visits, expectedUserId: expectedUserId));
-  @override
-  Future<List<api.VisitSyncResult>> syncLegacyVisits(List<api.VisitSyncEntry> visits, {required String deviceId}) =>
-      _rede(() => _inner.syncLegacyVisits(visits, deviceId: deviceId));
-  @override
-  Future<List<api.VisitSyncResult>> syncDeferredVisits({
-    required String uploadToken,
-    required String deviceId,
-    required List<api.VisitSyncEntry> visits,
-  }) =>
-      _rede(() => _inner.syncDeferredVisits(uploadToken: uploadToken, deviceId: deviceId, visits: visits));
-  @override
-  Future<void> revokeUploadToken(String uploadToken) => _rede(() => _inner.revokeUploadToken(uploadToken));
-  @override
-  Future<List<api.VisitSyncEntry>> pullVisits({required DateTime since}) => _inner.pullVisits(since: since);
-  @override
-  Future<List<api.MicroAreaPatient>> listPatients() => _inner.listPatients();
-  @override
-  Future<api.UbsContact> ubsContact() => _inner.ubsContact();
-  @override
-  Future<api.EnrollmentTokenResult> generateInvite({required String patientId}) =>
-      _inner.generateInvite(patientId: patientId);
-  @override
-  Future<api.NoticeSendResult> sendNotice({required String title, required String message, required bool chronicOnly}) =>
-      _inner.sendNotice(title: title, message: message, chronicOnly: chronicOnly);
-  @override
-  void close() => _inner.close();
-}
 
 /// Espera o JWT vencer de verdade (15 min) em vez de forçar a renovação.
 const _esperarJwt = bool.fromEnvironment('E2E_ESPERAR_JWT');
@@ -353,6 +291,134 @@ void main() {
     await store.clear();
   });
 
+  // Antes do teste da MFA: depois dele o login da fixture passa a exigir TOTP.
+  testWidgets('conflito de visita: compara lado a lado, mantém a minha numa e a do servidor noutra (#79)',
+      (tester) async {
+    final ca = (await rootBundle.load(BackendConfig.rpcCaAsset)).buffer.asUint8List();
+    final real = _clienteComKeystore(ca);
+    addTearDown(real.close);
+    final backend = EnvioDeVisitasForaDoAr(real);
+    final cred = await acsCredentialFromRelay();
+    final main = e2ePatient('main');
+
+    // Base própria deste teste (SQLCipher real no aparelho), com a fila de
+    // produção (`buildVisitQueue`) exposta ao teste por um resolvedor de escopo.
+    const arquivo = 'conflito_e2e.db';
+    await EncryptedLocalDatabase.deleteDatabaseFile(arquivo);
+    final storage = SqlCipherVisitStorage(keyStore: SecureStorageDatabaseKeyStore(), databaseName: arquivo);
+    OfflineVisitQueue? fila;
+    final escopos = <String, OwnerVisitScope>{};
+    OwnerVisitScope resolver(AuthSession s) => escopos.putIfAbsent(visitCursorOwner(s), () {
+          fila ??= buildVisitQueue(backend: backend, store: storage.forOwner(s.userId), ownerId: s.userId);
+          return buildOwnerVisitScope(backend: backend, storage: storage, session: s, queue: fila);
+        });
+
+    await tester.pumpWidget(SinalAcsApp(
+      backend: backend,
+      biometricGate: _DesbloqueioDeTeste(),
+      syncInterval: const Duration(hours: 2),
+      visitScopeResolver: resolver,
+    ));
+
+    // 1) Login real; o envio de visitas fica fora do ar (decorator) e duas
+    //    visitas são registradas pela tela.
+    await tester.enterText(find.byKey(const Key('matricula_field')), cred.matricula);
+    await tester.enterText(find.byKey(const Key('senha_field')), cred.senha);
+    await _tocarEntrar(tester);
+    await _pumpUntil(tester, () => find.byKey(const Key('login_button')).evaluate().isEmpty);
+    final acsId = real.session!.userId;
+
+    await tester.tap(find.text('Visita'));
+    await _pumpUntil(tester, () => find.byKey(Key('patient_${main.id}')).evaluate().isNotEmpty);
+    await tester.tap(find.byKey(Key('patient_${main.id}')));
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('arrival_confirmation')));
+    await tester.pump();
+    await tester.enterText(find.widgetWithText(TextField, 'Observações de campo'), 'e2e conflito');
+    await tester.pump();
+    for (var n = 1; n <= 2; n++) {
+      final salvar = find.byKey(const Key('save_visit'));
+      await _tocarNoMeio(tester, salvar);
+      await _pumpUntil(tester, () => find.text('Pendentes de sincronização: $n').evaluate().isNotEmpty);
+    }
+    final pendentes = fila!.pendingVisits;
+    expect(pendentes, hasLength(2));
+    expect(pendentes.every((v) => v.outcome == 'Realizada com sucesso'), isTrue);
+    final manterMinha = pendentes[0];
+    final manterServidor = pendentes[1];
+
+    // 2) O "outro aparelho" do mesmo ACS, pela rede real (fora do decorator):
+    //    cria a v1 com outro status e a leva até a v3 no servidor.
+    for (final visita in [manterMinha, manterServidor]) {
+      final base = visitSyncEntryFor(visita).copyWith(status: 'Paciente ausente');
+      for (final (versao, esperada) in [(1, 1), (0, 2), (1, 3)]) {
+        final r = (await real.syncVisits([base.copyWith(version: versao)], expectedUserId: acsId)).single;
+        expect(r.syncStatus, api.SyncStatus.synced, reason: 'outro aparelho, envio com versão $versao: ${r.message}');
+        expect(r.serverVersion, esperada, reason: 'versão no servidor depois do envio com versão $versao');
+      }
+    }
+
+    // 3) A rede volta e o ACS sincroniza: as duas viram conflito, nenhuma pendente.
+    backend.offline = false;
+    final sincronizar = find.byKey(const Key('sync_visits'));
+    await _tocarNoMeio(tester, sincronizar);
+    await _pumpUntil(tester, () => find.text('Em conflito: 2').evaluate().isNotEmpty);
+    expect(find.text('Pendentes de sincronização: 0'), findsOneWidget);
+    expect(fila!.conflictCount, 2);
+    expect(fila!.pendingCount, 0);
+
+    // 4) Comparação da 1ª: aparelho x servidor (versão 3), diferença marcada; mantém a minha.
+    final resolver0 = find.byKey(const Key('resolve_conflicts'));
+    await _tocarNoMeio(tester, resolver0);
+    await _pumpUntil(tester, () => find.byKey(Key('conflict_item_${manterMinha.localId}')).evaluate().isNotEmpty);
+    await tester.tap(find.byKey(Key('conflict_item_${manterMinha.localId}')));
+    await _pumpUntil(tester, () => find.byKey(const Key('conflict_local')).evaluate().isNotEmpty);
+    final local = find.byKey(const Key('conflict_local'));
+    final servidor = find.byKey(const Key('conflict_server'));
+    expect(find.descendant(of: local, matching: find.text('Realizada com sucesso')), findsOneWidget);
+    expect(find.descendant(of: servidor, matching: find.text('Paciente ausente')), findsOneWidget);
+    expect(find.descendant(of: servidor, matching: find.textContaining('versão 3')), findsOneWidget);
+    expect(find.descendant(of: servidor, matching: find.text('Diferente')), findsWidgets);
+    final manter = find.byKey(const Key('conflict_keep_local'));
+    await _tocarNoMeio(tester, manter);
+    await _pumpUntil(tester,
+        () => find.byKey(Key('conflict_item_${manterServidor.localId}')).evaluate().isNotEmpty &&
+            find.byKey(Key('conflict_item_${manterMinha.localId}')).evaluate().isEmpty &&
+            // A rota da comparação só sai da árvore no fim da animação do pop:
+            // antes disso há duas telas de comparação e dois botões com a mesma chave.
+            find.byKey(const Key('conflict_keep_local')).evaluate().isEmpty);
+    expect(fila!.conflictCount, 1);
+    expect(find.text('Versão do aparelho enviada ao servidor.'), findsOneWidget);
+    // O SnackBar fica no rodapé por 4 s, por cima dos botões do fim da
+    // comparação da 2ª visita: some antes de seguir.
+    ScaffoldMessenger.of(tester.element(find.byKey(Key('conflict_item_${manterServidor.localId}'))))
+        .hideCurrentSnackBar();
+    await _pumpUntil(tester, () => find.byType(SnackBar).evaluate().isEmpty);
+
+    // 5) A 2ª: mantém a do servidor, atrás da confirmação destrutiva.
+    await tester.tap(find.byKey(Key('conflict_item_${manterServidor.localId}')));
+    await _pumpUntil(tester, () => find.byKey(const Key('conflict_keep_server')).evaluate().isNotEmpty);
+    final manterDoServidor = find.byKey(const Key('conflict_keep_server'));
+    await _tocarNoMeio(tester, manterDoServidor);
+    await _pumpUntil(tester, () => find.byKey(const Key('confirm_keep_server')).evaluate().isNotEmpty);
+    await tester.tap(find.byKey(const Key('confirm_keep_server')));
+    await _pumpUntil(tester, () =>
+        find.byKey(const Key('conflict_list_empty')).evaluate().isNotEmpty &&
+        find.byKey(const Key('conflict_keep_server')).evaluate().isEmpty);
+
+    // 6) Nada em conflito nem pendente, e nada no disco desta conta.
+    expect(fila!.conflictCount, 0);
+    expect(fila!.pendingCount, 0);
+    expect(await storage.forOwner(acsId).load(), isEmpty);
+    // ignore: avoid_print
+    print('E2E_CONFLITO manter_minha=${manterMinha.localId} manter_servidor=${manterServidor.localId} acs=$acsId');
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(seconds: 1));
+    await real.logout();
+    await EncryptedLocalDatabase.deleteDatabaseFile(arquivo);
+  });
+
   testWidgets('MFA: com a verificação ativa, o login pela tela pede e aceita o código; '
       'o refresh token renova sem reautenticação e retoma a sessão na partida', (tester) async {
     final ca = (await rootBundle.load(BackendConfig.rpcCaAsset)).buffer.asUint8List();
@@ -503,7 +569,7 @@ void main() {
       uploadTokens: uploadTokens,
     );
     addTearDown(real.close);
-    final backend = _EnvioDeVisitasForaDoAr(real);
+    final backend = EnvioDeVisitasForaDoAr(real);
 
     // 1) Banco v6 de uma versão anterior do app, com uma visita SEM dono, no
     //    arquivo e com a chave que o app usa (sinalacs_acs.db + Keystore).
@@ -623,8 +689,7 @@ void main() {
 
     // 5) "Limpar este aparelho" com A e o legado pendentes: recusado, nada apagado.
     await irPara('Preferências');
-    await tester.ensureVisible(find.byKey(const Key('wipe_button')));
-    await tester.tap(find.byKey(const Key('wipe_button')));
+    await _tocarNoMeio(tester, find.byKey(const Key('wipe_button')));
     await _pumpUntil(tester, () => find.byKey(const Key('wipe_blocked')).evaluate().isNotEmpty);
     expect(find.text('Desta conta: 0 visitas. De outras contas ou sem autor: 2 visitas.'), findsOneWidget);
     expect(find.text('Nada foi apagado.'), findsOneWidget);
@@ -645,14 +710,21 @@ void main() {
     print('E2E_FILA_POR_DONO visita_a=$visitaA legado=$legadoId acs_a=$idA acs_b=$idB');
 
     // 7) Tudo enviado: o wipe pede confirmação e apaga as quatro tabelas.
-    await tester.ensureVisible(find.byKey(const Key('wipe_button')));
-    await tester.tap(find.byKey(const Key('wipe_button')));
+    //    Desde a #81 (CRIPTO-APP-CACHE, D6) ele também fecha e apaga o arquivo
+    //    e troca a chave: a conexão `db` acima fica fechada, e a contagem é
+    //    feita num banco reaberto, que tem de nascer vazio com chave nova.
+    final chaveAntes = await chaves.readOrCreate();
+    await _tocarNoMeio(tester, find.byKey(const Key('wipe_button')));
     await _pumpUntil(tester, () => find.byKey(const Key('wipe_confirm')).evaluate().isNotEmpty);
     await tester.tap(find.byKey(const Key('wipe_confirm')));
     await _pumpUntil(tester, () => find.byKey(const Key('login_button')).evaluate().isNotEmpty);
     expect(find.text('Os dados deste aparelho foram apagados.'), findsOneWidget);
+    expect(db.isOpen, isFalse, reason: 'o wipe fecha a conexão antes de apagar o arquivo');
+    expect(await chaves.readOrCreate() == chaveAntes, isFalse, reason: 'o wipe troca a chave'); // sem imprimir a chave
+    final reaberto = await storage.database.open();
     for (final tabela in ['offline_visits', 'sync_cursor', 'micro_area_cache', 'micro_area_cache_meta']) {
-      expect(await linhas(tabela), 0, reason: '$tabela depois do wipe');
+      final n = (await reaberto.rawQuery('SELECT COUNT(*) AS n FROM $tabela')).single['n']! as int;
+      expect(n, 0, reason: '$tabela depois do wipe');
     }
     expect(await uploadTokens.owners(), isEmpty);
     expect(await uploadTokens.read(idB), isNull, reason: 'o wipe apaga o token de envio de B');

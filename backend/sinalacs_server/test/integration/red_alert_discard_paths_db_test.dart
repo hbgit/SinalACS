@@ -1,9 +1,12 @@
+import 'dart:convert';
+
 import 'package:serverpod/serverpod.dart';
 import 'package:sinalacs_server/src/application/admin/admin_scope.dart';
 import 'package:sinalacs_server/src/application/audit/audit_chain_verifier.dart';
 import 'package:sinalacs_server/src/application/audit/audit_trail.dart';
 import 'package:sinalacs_server/src/application/auth/development_auth_service.dart';
 import 'package:sinalacs_server/src/application/retention/expurge_service.dart';
+import 'package:sinalacs_server/src/application/telemetry/telemetry_pseudonymizer.dart';
 import 'package:sinalacs_server/src/config/app_config.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_alert_outbox.dart';
@@ -38,6 +41,7 @@ AppConfig _config() => AppConfig(
   auditChainSecret: 'test-audit-chain-secret',
   healthDataEncryptionKey: AppConfig.developmentHealthDataEncryptionKey,
   cpfHashPepper: AppConfig.developmentCpfHashPepper,
+  telemetryPseudonymKey: AppConfig.developmentTelemetryPseudonymKey,
   smsGateway: 'log',
   mqttUsername: null,
   mqttPassword: null,
@@ -180,7 +184,7 @@ void main() {
           alertId: alerta.id!.uuid,
           acsId: _acs,
           microAreaId: _ma,
-          audit: const AuditEvent(
+          auditFor: (_) => const AuditEvent(
             userId: _acs,
             actionType: 'write',
             resourceType: 'alert',
@@ -217,10 +221,20 @@ void main() {
               ),
               alertId: alerta.id!.uuid,
             );
-        expect(ok, isTrue);
+        expect(ok, AlertStatus.acknowledged);
         expect(
           (await Alert.db.findById(session, alerta.id!))!.status,
           AlertStatus.acknowledged,
+        );
+        // #83: o ACK por MQTT emite alert_received_acs sem mudar server.dart.
+        final tele = await session.db.unsafeQuery(
+          "SELECT payload FROM telemetry_events "
+          "WHERE \"eventName\" = 'alert_received_acs'",
+        );
+        expect(tele, hasLength(1));
+        expect(
+          jsonDecode(tele.single.toColumnMap()['payload'] as String)['channel'],
+          'mqtt',
         );
         expect(
           await _auditoriaDoAlerta(session, alerta.id!),
@@ -287,6 +301,7 @@ void main() {
           alerts: _agora.subtract(const Duration(days: 730)),
           visits: _agora.subtract(const Duration(days: 1825)),
           triageSessions: _agora.subtract(const Duration(days: 1825)),
+          telemetry: _agora.subtract(const Duration(days: 365)),
         );
 
         await OrmRetentionStore(session: () => session).purgeDue(cortes);
@@ -322,6 +337,7 @@ void main() {
           session,
           testHealthDataCipher(),
           chainSecret: 'segredo-sintetico',
+          pseudonymizer: TelemetryPseudonymizer('chave-sintetica-telemetria'),
           appendAudit: (s, t, e) async {},
         );
 

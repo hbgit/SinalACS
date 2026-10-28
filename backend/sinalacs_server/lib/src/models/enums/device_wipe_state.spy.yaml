@@ -1,0 +1,9 @@
+### Estado do pedido de limpeza de um aparelho (#81), derivado dos carimbos do
+### pedido: `pending` (pedido, aparelho ainda não mandado limpar), `delivered`
+### (ordem entregue ao aparelho) e `confirmed` (aparelho confirmou a limpeza).
+enum: DeviceWipeState
+serialized: byName
+values:
+  - pending
+  - delivered
+  - confirmed

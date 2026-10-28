@@ -34,7 +34,9 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sinalacs_acs/core/network/backend_config.dart';
 import 'package:sinalacs_acs/main.dart' as app;
 
@@ -67,6 +69,13 @@ void main() {
     });
   }
 
+  // O diário da limpeza remota (#81) e o id da instalação do `main.dart`
+  // real, sem pedido nenhum.
+  setUp(() {
+    SharedPreferences.setMockInitialValues(<String, Object>{});
+    FlutterSecureStorage.setMockInitialValues(<String, String>{});
+  });
+
   tearDown(() {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMessageHandler('flutter/assets', null);
@@ -90,7 +99,12 @@ void main() {
     };
     try {
       await app.main(defaultHost: defaultHost);
-      await tester.pump();
+      // O login só aparece depois do diário e da consulta da limpeza remota
+      // (#81): diário vazio e Keystore em memória (abaixo); a consulta falha
+      // sem servidor em poucos quadros, e o login abre.
+      for (var i = 0; i < 50 && find.byKey(const Key('matricula_field')).evaluate().isEmpty; i++) {
+        await tester.pump();
+      }
     } finally {
       debugPrint = originalDebugPrint;
     }

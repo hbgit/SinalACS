@@ -16,8 +16,13 @@ fields:
   startedAt: DateTime?
   completedAt: DateTime?
   status: String
-  riskLevelBefore: RiskLevel
-  riskLevelAfter: RiskLevel?
+  ### Risco antes e depois da visita, cifrados (INV-04, #75): nome do
+  ### RiskLevel com largura fixa, ver `encrypted_risk_level.dart`. O "depois"
+  ### ausente (visita não concluída) é cifrado também, com o mesmo tamanho.
+  riskLevelBeforeEncrypted: String, default=''
+  riskLevelBeforeKeyVersion: int, default=1
+  riskLevelAfterEncrypted: String, default=''
+  riskLevelAfterKeyVersion: int, default=1
   ### JSON de Map<String, String>, cifrado. Ver patient.spy.yaml para o padrão.
   notesEncrypted: String, default=''
   notesKeyVersion: int, default=1

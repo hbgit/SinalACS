@@ -20,6 +20,8 @@ admin:
   - resetAcsPassword:
   - resetAcsMfa:
   - resetStaffMfa:
+  - acsDevices:
+  - orderDeviceWipe:
   - escalateAlert:
   - scheduleNotice:
   - cancelScheduledNotice:
@@ -31,6 +33,8 @@ admin:
 alerts:
   - createRedAlert:
   - acknowledge:
+  - resolve:
+  - openForMicroArea:
   - statusFor:
 auth:
   - developmentLogin:
@@ -45,7 +49,10 @@ auth:
   - requestOtp:
   - verifyOtp:
 devices:
+  - issueCertificate:
   - registerPushToken:
+  - pendingWipe:
+  - confirmWipe:
 health:
   - check:
 notices:
@@ -65,12 +72,15 @@ patients:
   - termsChangeNotice:
   - requestDataDeletion:
   - requestDataCorrection:
+telemetry:
+  - ingest:
 triage:
   - evaluate:
 ubs:
   - myContact:
 visits:
   - sync:
+  - resolveConflict:
   - syncLegacy:
   - syncDeferred:
   - revokeUploadToken:

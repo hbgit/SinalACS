@@ -26,6 +26,16 @@ class _CustomAreaDataSource implements AdminDataSource {
   }) => throw UnimplementedError();
 
   @override
+  Future<List<AcsDevice>> fetchAcsDevices(String acsId) => throw UnimplementedError();
+
+  @override
+  Future<DeviceWipeOrderResult> orderDeviceWipe({
+    required String acsId,
+    required String deviceId,
+    required DeviceWipeReason reason,
+  }) => throw UnimplementedError();
+
+  @override
   Future<void> cancelScheduledNotice(String id) => throw UnimplementedError();
 
   @override
@@ -59,6 +69,7 @@ class _CustomAreaDataSource implements AdminDataSource {
         countsByRisk: {},
         openRedAlerts: 0,
         acknowledgedRedAlerts: 0,
+        resolvedRedAlerts: 0,
         tmravSeconds: 0,
       );
 

@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:sinalacs_acs/core/database/encrypted_database.dart';
 import 'package:sinalacs_acs/core/security/database_key_store.dart';
@@ -50,6 +52,7 @@ class VisitDatabase {
 
   Database? _database;
   Future<Database>? _opening;
+  Future<void>? _destroying;
 
   /// Abre preguiçosamente, na primeira leitura ou escrita.
   ///
@@ -60,6 +63,12 @@ class VisitDatabase {
   /// conexões ao mesmo arquivo, ou duas recuperações apagando o arquivo, são
   /// o que isto evita). Se a abertura falha, o próximo `open()` tenta de novo.
   Future<Database> open() {
+    // Durante um [destroy] nenhuma abertura começa: ela esperaria pelo fim e
+    // abriria com a chave NOVA. Sem isso, uma abertura no meio usaria a chave
+    // velha (ainda guardada) sobre um arquivo apagado ou recém-criado.
+    final destroying = _destroying;
+    if (destroying != null) return destroying.then((_) => open());
+
     final existing = _database;
     if (existing != null && existing.isOpen) return Future.value(existing);
 
@@ -131,7 +140,8 @@ class VisitDatabase {
   /// houver alguma, lança [WipeBlocked] sem apagar nada (toda linha de
   /// `offline_visits` é visita ainda não enviada: a confirmada pelo servidor
   /// sai do disco). Sem visita, apaga as linhas de `offline_visits`,
-  /// `sync_cursor`, `micro_area_cache` e `micro_area_cache_meta`.
+  /// `sync_cursor`, `micro_area_cache`, `micro_area_cache_meta` e
+  /// `telemetry_events` (esta última nunca bloqueia a limpeza).
   ///
   /// O arquivo e a chave do Keystore ficam: é limpeza de dados, não troca de
   /// chave. A cópia `<nome>.recuperado` de uma recuperação por chave errada,
@@ -146,10 +156,55 @@ class VisitDatabase {
       await transaction.delete('sync_cursor');
       await transaction.delete('micro_area_cache');
       await transaction.delete('micro_area_cache_meta');
+      // Telemetria nunca bloqueia a limpeza (só `offline_visits` conta acima).
+      await transaction.delete('telemetry_events');
     });
     // Fim da custódia: a cópia de uma recuperação antiga (ilegível ao app)
     // também sai.
     await EncryptedLocalDatabase.deleteRecoveryCopy(databaseName);
+  }
+
+  /// Destrói o banco e a chave (CRIPTO-APP-CACHE, D6): fecha a conexão, apaga o
+  /// arquivo com WAL/SHM/journal, apaga a cópia `<nome>.recuperado` e apaga a
+  /// chave do Keystore. O próximo [open] cria uma chave NOVA e um banco vazio
+  /// no schema atual: é assim que a chave é trocada, por evento (limpeza do
+  /// aparelho, limpeza remota), sem `PRAGMA rekey` sobre um arquivo com visitas
+  /// pendentes.
+  ///
+  /// Incondicional: NÃO confere visitas, isso é de quem chama
+  /// ([wipeAllData] recusa antes). Espera uma abertura em voo terminar para não
+  /// deixar uma conexão viva sobre o arquivo apagado. O objeto continua
+  /// reutilizável. A chave nunca é lida nem registrada aqui.
+  Future<void> destroy() {
+    // Exclusivo contra [open] e contra outro destroy: serializa na fila.
+    final previous = _destroying;
+    final run = Future<void>(() async {
+      if (previous != null) {
+        try {
+          await previous;
+        } catch (_) {}
+      }
+      await _destroyOnce();
+    });
+    _destroying = run;
+    return run.whenComplete(() {
+      if (identical(_destroying, run)) _destroying = null;
+    });
+  }
+
+  Future<void> _destroyOnce() async {
+    final inFlight = _opening;
+    if (inFlight != null) {
+      try {
+        await inFlight;
+      } catch (_) {
+        // Abertura que falhou não deixa conexão: o que importa é apagar.
+      }
+    }
+    await close();
+    await EncryptedLocalDatabase.deleteDatabaseFile(databaseName);
+    await EncryptedLocalDatabase.deleteRecoveryCopy(databaseName);
+    await _keyStore.delete();
   }
 }
 
@@ -181,7 +236,24 @@ OfflineVisitRecord _recordFrom(Map<String, Object?> row) => OfflineVisitRecord(
       localId: row['local_id']! as String,
       createdAt: DateTime.parse(row['created_at']! as String),
       version: row['version']! as int,
+      conflictServerVersion: row['conflict_server_version'] as int?,
+      conflictServer: _snapshotFrom(row['conflict_server_snapshot'] as String?),
     );
+
+/// Cópia do servidor ilegível vira `null`, nunca exceção: um `load()` que
+/// lançasse jogaria a fila inteira do dono só para a RAM por causa de uma
+/// coluna auxiliar. O conflito continua valendo pela `conflict_server_version`
+/// (a tela só não tem o que comparar).
+VisitConflictSnapshot? _snapshotFrom(String? raw) {
+  if (raw == null) return null;
+  try {
+    return VisitConflictSnapshot.fromJson(
+      Map<String, Object?>.from(jsonDecode(raw) as Map),
+    );
+  } catch (_) {
+    return null;
+  }
+}
 
 /// Armazenamento por dono sobre UM [VisitDatabase].
 class SqlCipherVisitStorage implements VisitStorage {
@@ -216,6 +288,9 @@ class SqlCipherVisitStorage implements VisitStorage {
 
   @override
   Future<void> wipeAllData() => database.wipeAllData();
+
+  @override
+  Future<void> destroyAll() => database.destroy();
 
   Future<void> close() => database.close();
 }
@@ -338,6 +413,10 @@ class SqlCipherVisitStore implements VisitStore {
           'version': visit.version,
           'rejection_reason': visit.rejectionReason,
           'owner': owner,
+          'conflict_server_version': visit.conflictServerVersion,
+          'conflict_server_snapshot': visit.conflictServer == null
+              ? null
+              : jsonEncode(visit.conflictServer!.toJson()),
         });
       }
     });

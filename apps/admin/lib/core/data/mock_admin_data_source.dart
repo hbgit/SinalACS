@@ -9,9 +9,16 @@ class MockAdminDataSource implements AdminDataSource {
   /// [auditSeed] semeia a trilha (#45) com linhas sintéticas e selos
   /// escolhidos pelo teste; [chainStatus] fixa o estado da cadeia. O mock só
   /// devolve o que foi semeado: nunca calcula integridade.
-  MockAdminDataSource({DateTime Function()? now, List<AuditLogEntry>? auditSeed, this.chainStatus})
-      : _microAreas = List.unmodifiable(_seedMicroAreas),
-        _alerts = List.unmodifiable(_seedAlerts),
+  /// [alertSeed] substitui os alertas do mock (por padrão, [_seedAlerts]):
+  /// para um teste montar um estado que o seed não tem, como um vermelho
+  /// `escalated` legado ou um vermelho concluído.
+  MockAdminDataSource({
+    DateTime Function()? now,
+    List<AuditLogEntry>? auditSeed,
+    List<AlertSummary>? alertSeed,
+    this.chainStatus,
+  })  : _microAreas = List.unmodifiable(_seedMicroAreas),
+        _alerts = List.unmodifiable(alertSeed ?? _seedAlerts),
         _acs = [..._seedAcs],
         _staff = [..._seedStaff],
         _now = now ?? DateTime.now {
@@ -74,6 +81,24 @@ class MockAdminDataSource implements AdminDataSource {
   final List<String> vinculados = [];
   final List<String> senhasRedefinidas = [];
   final List<String> mfasRedefinidas = [];
+
+  /// Pedidos de limpeza remota recebidos (#81): `acsId/deviceId` e o motivo.
+  final List<({String acsId, String deviceId, DeviceWipeReason reason})> limpezasPedidas = [];
+
+  /// Aparelhos sintéticos por ACS. `acs-1` tem um sem pedido e um já limpo.
+  final Map<String, List<AcsDevice>> _aparelhos = {
+    'acs-1': [
+      AcsDevice(deviceId: 'dev-aaaa1111', label: 'Aparelho dev-aaaa', lastSeenAt: DateTime.utc(2026, 10, 16, 14, 5)),
+      AcsDevice(
+        deviceId: 'dev-bbbb2222',
+        label: 'Aparelho dev-bbbb',
+        lastSeenAt: DateTime.utc(2026, 10, 10, 9, 30),
+        wipeState: DeviceWipeState.confirmed,
+        wipeRequestedAt: DateTime.utc(2026, 10, 10, 10, 0),
+        wipeConfirmedAt: DateTime.utc(2026, 10, 10, 10, 20),
+      ),
+    ],
+  };
 
   /// Credenciais determinísticas: o teste de tela procura por este texto.
   static const _senhaDeTeste = 'SENHA-INICIAL-DE-TESTE';
@@ -142,6 +167,7 @@ class MockAdminDataSource implements AdminDataSource {
       riskLevel: RiskLevel.green,
       status: AlertStatus.resolved,
       triggeredAt: DateTime(2026, 9, 10, 19, 5),
+      resolvedAt: DateTime(2026, 9, 10, 19, 40),
     ),
     AlertSummary(
       id: 'alert-5',
@@ -158,6 +184,7 @@ class MockAdminDataSource implements AdminDataSource {
       riskLevel: RiskLevel.green,
       status: AlertStatus.resolved,
       triggeredAt: DateTime(2026, 9, 9, 11, 2),
+      resolvedAt: DateTime(2026, 9, 9, 11, 30),
     ),
   ];
 
@@ -245,16 +272,24 @@ class MockAdminDataSource implements AdminDataSource {
       for (final level in RiskLevel.values)
         level: _alerts.where((alert) => alert.riskLevel == level).length,
     };
+    // A mesma partição do servidor (`RedAlertBucket`, #87): o `escalated`
+    // legado é um aberto sem confirmação.
     final openRed = _alerts
-        .where((alert) => alert.riskLevel == RiskLevel.red && alert.status == AlertStatus.pending)
+        .where((alert) =>
+            alert.riskLevel == RiskLevel.red &&
+            (alert.status == AlertStatus.pending || alert.status == AlertStatus.escalated))
         .length;
     final acknowledgedRed = _alerts
         .where((alert) => alert.riskLevel == RiskLevel.red && alert.status == AlertStatus.acknowledged)
+        .length;
+    final resolvedRed = _alerts
+        .where((alert) => alert.riskLevel == RiskLevel.red && alert.status == AlertStatus.resolved)
         .length;
     return DashboardIndicators(
       countsByRisk: counts,
       openRedAlerts: openRed,
       acknowledgedRedAlerts: acknowledgedRed,
+      resolvedRedAlerts: resolvedRed,
       tmravSeconds: 78,
     );
   }
@@ -292,6 +327,7 @@ class MockAdminDataSource implements AdminDataSource {
       status: a.status,
       triggeredAt: a.triggeredAt,
       escalatedAt: em,
+      resolvedAt: a.resolvedAt,
       overdue: em == null && a.riskLevel == RiskLevel.red && a.status == AlertStatus.pending && _venceu(a),
     );
   }
@@ -457,7 +493,8 @@ class MockAdminDataSource implements AdminDataSource {
     final lista = _alerts.map(_comEscalonamento).toList();
     DateTime? maior;
     for (final a in lista) {
-      for (final t in [a.triggeredAt, a.escalatedAt]) {
+      // A conclusão também move a marca, como no servidor (#76, `fa549b2`).
+      for (final t in [a.triggeredAt, a.escalatedAt, a.resolvedAt]) {
         if (t != null && (maior == null || t.isAfter(maior))) maior = t;
       }
     }
@@ -697,6 +734,41 @@ class MockAdminDataSource implements AdminDataSource {
     final i = _indiceAcs(acsId);
     _acs[i] = _comAcs(_acs[i], mfaActive: false);
     mfasRedefinidas.add(acsId);
+  }
+
+  @override
+  Future<List<AcsDevice>> fetchAcsDevices(String acsId) async {
+    _indiceAcs(acsId);
+    return List.of(_aparelhos[acsId] ?? const []);
+  }
+
+  @override
+  Future<DeviceWipeOrderResult> orderDeviceWipe({
+    required String acsId,
+    required String deviceId,
+    required DeviceWipeReason reason,
+  }) async {
+    final lista = _aparelhos[acsId] ?? const <AcsDevice>[];
+    final i = lista.indexWhere((d) => d.deviceId == deviceId);
+    if (i < 0) throw const AdminDataFailure('Aparelho não encontrado.');
+    final d = lista[i];
+    if (d.wipeState != null) {
+      return DeviceWipeOrderResult(
+        orderId: 'ord-$deviceId',
+        requestedAt: d.wipeRequestedAt!,
+        alreadyOrdered: true,
+      );
+    }
+    limpezasPedidas.add((acsId: acsId, deviceId: deviceId, reason: reason));
+    final agora = DateTime.now().toUtc();
+    lista[i] = AcsDevice(
+      deviceId: d.deviceId,
+      label: d.label,
+      lastSeenAt: d.lastSeenAt,
+      wipeState: DeviceWipeState.pending,
+      wipeRequestedAt: agora,
+    );
+    return DeviceWipeOrderResult(orderId: 'ord-$deviceId', requestedAt: agora, alreadyOrdered: false);
   }
 
   @override

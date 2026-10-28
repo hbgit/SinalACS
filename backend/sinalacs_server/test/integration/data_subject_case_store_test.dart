@@ -8,6 +8,8 @@ import 'package:sinalacs_server/src/application/auth/passwordless_auth_service.d
 import 'package:sinalacs_server/src/application/auth/sms_gateway.dart';
 import 'package:sinalacs_server/src/application/onboarding/consent_signature.dart';
 import 'package:sinalacs_server/src/application/patients/push_token_service.dart';
+import 'package:sinalacs_server/src/application/telemetry/telemetry_pseudonymizer.dart';
+import 'package:sinalacs_server/src/application/telemetry/telemetry_service.dart';
 import 'package:sinalacs_server/src/config/app_config.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
 import 'package:sinalacs_server/src/infrastructure/crypto/encrypted_json.dart';
@@ -16,6 +18,7 @@ import 'package:sinalacs_server/src/infrastructure/database/orm_audit_trail.dart
 import 'package:sinalacs_server/src/infrastructure/database/orm_data_subject_case_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_otp_challenge_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_push_token_store.dart';
+import 'package:sinalacs_server/src/infrastructure/database/orm_telemetry_store.dart';
 import 'package:test/test.dart';
 
 import '../support/health_data_fixtures.dart';
@@ -51,6 +54,7 @@ const _cpfSintetico = '52998224725';
 
 final _t = DateTime.utc(2026, 10, 8, 12);
 
+final _pseudonimizador = TelemetryPseudonymizer('chave-sintetica-telemetria');
 const _segredoConsentimento = 'segredo-consentimento-sintetico';
 
 final _hasher = HmacCpfHasher(pepper: AppConfig.developmentCpfHashPepper);
@@ -252,14 +256,15 @@ Future<void> _prontuarioA(Session s) async {
   final respostas = await testHealthDataCipher().encryptJson([
     TriageAnswer(question: 'fever', answer: 'sim').toJson(),
   ]);
+  final riscoTriagem = await encryptedRiskLevel(RiskLevel.yellow);
   await TriageSession.db.insertRow(
     s,
     TriageSession(
       patientId: a,
       answersEncrypted: respostas.ciphertextBase64,
       answersKeyVersion: respostas.keyVersion,
-      resultRisk: RiskLevel.yellow,
-      resultDisplay: 'Amarelo',
+      resultRiskEncrypted: riscoTriagem.ciphertextBase64,
+      resultRiskKeyVersion: riscoTriagem.keyVersion,
       createdAt: _t,
       deviceId: 'device-sintetico',
     ),
@@ -286,7 +291,6 @@ Future<void> _prontuarioA(Session s) async {
       acsId: UuidValue.fromString(_acsId),
       scheduledAt: _t,
       status: 'realizada',
-      riskLevelBefore: RiskLevel.green,
       syncStatus: SyncStatus.synced,
       localId: UuidValue.fromString('00000000-0000-4000-8000-000000004231'),
       version: 1,
@@ -333,6 +337,7 @@ void main() {
         session,
         testHealthDataCipher(),
         chainSecret: _segredoConsentimento,
+        pseudonymizer: _pseudonimizador,
         appendAudit: auditoria.call,
       );
     });
@@ -490,7 +495,7 @@ void main() {
         final triagens = await TriageSession.db.find(session, where: (t) => t.patientId.equals(a));
         expect(triagens, hasLength(1), reason: 'a sessão fica para estatística');
         expect(await decryptedTriageAnswers(triagens.single), isEmpty);
-        expect(triagens.single.resultRisk, RiskLevel.yellow);
+        expect(await decryptedTriageRisk(triagens.single), RiskLevel.yellow);
 
         expect(await Alert.db.count(session, where: (t) => t.patientId.equals(a)), 1);
         expect(await Visit.db.count(session, where: (t) => t.patientId.equals(a)), 1);
@@ -617,6 +622,37 @@ void main() {
       expect((await pedido(_pedA3)).decidedAt, isNull);
     });
 
+    test('a exclusão apaga os eventos com o pseudônimo do titular e mantém os de outro', () async {
+      final eventos = OrmTelemetryStore(session);
+      TelemetryRecord evento(String id, String? pseudonimo) => TelemetryRecord(
+        eventId: id,
+        eventName: 'visit_registered',
+        source: TelemetrySource.acsApp,
+        occurredAt: _t,
+        receivedAt: _t,
+        appVersion: '1.0.0',
+        patientPseudonym: pseudonimo,
+        payload: const {},
+      );
+      const e1 = '00000000-0000-4000-8000-00000000e001';
+      const e2 = '00000000-0000-4000-8000-00000000e002';
+      const e3 = '00000000-0000-4000-8000-00000000e003';
+      const e4 = '00000000-0000-4000-8000-00000000e004';
+      await eventos.insertIgnoringDuplicates([
+        evento(e1, _pseudonimizador.patient(_pacA)),
+        evento(e2, _pseudonimizador.patient(_pacA)),
+        evento(e3, _pseudonimizador.patient(_pacB)),
+        evento(e4, null),
+      ]);
+
+      expect(await excluir(_pedA1), isTrue);
+
+      final restantes = await session.db.unsafeQuery(
+        'SELECT "eventId"::text FROM telemetry_events ORDER BY "eventId"',
+      );
+      expect(restantes.map((r) => r.first), [e3, e4]);
+    });
+
     test('falha na auditoria desfaz a mudança de status (rollback)', () async {
       await _prontuarioA(session);
       final cpfAntes = (await usuario(_pacA)).cpfHash;
@@ -643,6 +679,7 @@ void main() {
         session,
         testHealthDataCipher(),
         chainSecret: _segredoConsentimento,
+        pseudonymizer: _pseudonimizador,
         appendAudit: trilha.recordInTransaction,
       );
       expect(await excluir(_pedA1, via: real), isTrue);
@@ -809,6 +846,7 @@ void main() {
               sessionBuilder.build(),
               testHealthDataCipher(),
               chainSecret: _segredoConsentimento,
+        pseudonymizer: _pseudonimizador,
               appendAudit: auditoria.call,
             ).decide(
               const AdminScope.system(),

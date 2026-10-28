@@ -103,68 +103,184 @@ class OrmAlertStore implements AlertStore {
   }
 
   @override
-  Future<bool> acknowledge({
+  Future<AlertAckRecord?> acknowledge({
     required String alertId,
     required String acsId,
     required String microAreaId,
-    required AuditEvent audit,
+    required AuditEvent Function(AlertAckOutcome outcome) auditFor,
   }) async {
     final session = _session();
-    final alertUuid = UuidValue.fromString(alertId);
-    final acsUuid = UuidValue.fromString(acsId);
-    final microAreaUuid = UuidValue.fromString(microAreaId);
 
-    Future<bool> run(Transaction transaction) async {
-      // O predicado de microárea é a barreira de territorialização: um ACS
-      // nunca confirma alerta fora do seu território (INV-01).
-      final alert = await Alert.db.findFirstRow(
-        session,
-        where: (t) =>
-            t.id.equals(alertUuid) & t.microAreaId.equals(microAreaUuid),
-        transaction: transaction,
-      );
-      if (alert == null) return false;
-
+    Future<AlertAckRecord?> run(Transaction transaction) async {
       final now = DateTime.now().toUtc();
-      await Alert.db.updateRow(
-        session,
-        alert.copyWith(
-          acsId: acsUuid,
-          receivedAt: alert.receivedAt ?? now,
-          acknowledgedAt: alert.acknowledgedAt ?? now,
-          status: AlertStatus.acknowledged,
-        ),
-        // Só as colunas do ACK: a linha foi lida sem lock, e um escalonamento
-        // (#44) gravado entre a leitura e esta escrita seria apagado por um
-        // UPDATE da linha inteira com os valores velhos.
-        columns: (t) => [t.acsId, t.receivedAt, t.acknowledgedAt, t.status],
+      // O desfecho é o resultado do UPDATE condicional, não de uma leitura
+      // anterior (#88): só pending/escalated viram acknowledged, e só esse
+      // primeiro ACK grava acsId/receivedAt/acknowledgedAt. Os desfechos
+      // repetidos nunca escrevem em alerts, então acsId é de quem confirmou
+      // primeiro. O predicado de microárea é a barreira de territorialização:
+      // um ACS nunca confirma alerta fora do seu território (INV-01).
+      final confirmado = await session.db.unsafeQuery(
+        '''
+        UPDATE alerts
+        SET status = @ack,
+            "acsId" = @acs::uuid,
+            "receivedAt" = COALESCE("receivedAt", @now::timestamp),
+            "acknowledgedAt" = COALESCE("acknowledgedAt", @now::timestamp)
+        WHERE id = @id::uuid AND "microAreaId" = @ma::uuid
+          AND status IN (@pending, @escalated)
+        RETURNING "triggeredAt", "acknowledgedAt"
+        ''',
+        parameters: QueryParameters.named({
+          'id': alertId,
+          'ma': microAreaId,
+          'acs': acsId,
+          'now': now,
+          'ack': AlertStatus.acknowledged.name,
+          'pending': AlertStatus.pending.name,
+          'escalated': AlertStatus.escalated.name,
+        }),
         transaction: transaction,
       );
 
-      // Reconfirmação pelo mesmo ACS não duplica a linha de entrega — o par
-      // (alertId, acsId) tem índice UNIQUE.
-      final already = await AlertDeliveryRecord.db.findFirstRow(
-        session,
-        where: (t) => t.alertId.equals(alertUuid) & t.acsId.equals(acsUuid),
-        transaction: transaction,
-      );
-      if (already == null) {
-        await AlertDeliveryRecord.db.insertRow(
-          session,
-          AlertDeliveryRecord(
-            alertId: alertUuid,
-            acsId: acsUuid,
-            acknowledgedAt: now,
-          ),
+      final AlertAckOutcome outcome;
+      final DateTime triggeredAt;
+      final DateTime acknowledgedAt;
+      if (confirmado.isNotEmpty) {
+        outcome = AlertAckOutcome.acknowledged;
+        triggeredAt = (confirmado.single[0] as DateTime).toUtc();
+        acknowledgedAt = (confirmado.single[1] as DateTime).toUtc();
+      } else {
+        // Sem efeito: ou o alerta não é deste território, ou já saiu de
+        // pending/escalated. O SELECT … FOR UPDATE serializa com `resolve` e
+        // com o escalonamento, que travam a mesma linha: um `resolve`
+        // concorrente que já gravou `resolved` é visto aqui (#76), e a ordem
+        // da trilha segue a ordem da trava (#86).
+        final linhas = await session.db.unsafeQuery(
+          '''
+          SELECT status, "triggeredAt", "acknowledgedAt" FROM alerts
+          WHERE id = @id::uuid AND "microAreaId" = @ma::uuid
+          FOR UPDATE
+          ''',
+          parameters: QueryParameters.named({'id': alertId, 'ma': microAreaId}),
           transaction: transaction,
         );
+        if (linhas.isEmpty) return null;
+        final status = linhas.single[0] as String;
+        if (status == AlertStatus.resolved.name) {
+          outcome = AlertAckOutcome.alreadyResolved;
+        } else if (status == AlertStatus.acknowledged.name) {
+          outcome = AlertAckOutcome.alreadyAcknowledged;
+        } else {
+          // Em READ COMMITTED o UPDATE acima teria visto a linha pendente.
+          throw StateError(
+            'alerta ainda pendente depois do UPDATE condicional sem efeito (#88)',
+          );
+        }
+        triggeredAt = (linhas.single[1] as DateTime).toUtc();
+        // Um alerta acknowledged/resolved sempre tem acknowledgedAt (é o
+        // primeiro ACK que o grava); `now` é só defesa para dados anteriores.
+        acknowledgedAt = (linhas.single[2] as DateTime?)?.toUtc() ?? now;
       }
+
+      // Reentrega é caso esperado: o índice único do par (alertId, acsId)
+      // decide, não uma leitura prévia (#88). A primeira entrega de cada ACS
+      // fica como está; `id` vem do DEFAULT da tabela.
+      await session.db.unsafeExecute(
+        '''
+        INSERT INTO alert_deliveries ("alertId", "acsId", "acknowledgedAt")
+        VALUES (@alert::uuid, @acs::uuid, @now::timestamp)
+        ON CONFLICT ("alertId", "acsId") DO NOTHING
+        ''',
+        parameters: QueryParameters.named({
+          'alert': alertId,
+          'acs': acsId,
+          'now': now,
+        }),
+        transaction: transaction,
+      );
 
       // Fail-closed: se a trilha falhar, a transação inteira (status incluso)
       // é desfeita. Roda por último, pois o lock da cadeia nunca precede outro.
-      await _appendAudit(session, transaction, audit);
+      await _appendAudit(session, transaction, auditFor(outcome));
 
-      return true;
+      return AlertAckRecord(
+        outcome: outcome,
+        triggeredAt: triggeredAt,
+        acknowledgedAt: acknowledgedAt,
+        // Só o primeiro ACK emite a telemetria `alert_received_acs` (#83).
+        firstAcknowledgement: outcome == AlertAckOutcome.acknowledged,
+      );
+    }
+
+    final existing = _transaction;
+    return existing != null ? run(existing) : session.db.transaction(run);
+  }
+
+  @override
+  Future<AlertResolveAttempt> resolve({
+    required String alertId,
+    required String microAreaId,
+    required DateTime now,
+    required AuditEvent Function(AlertResolveOutcome outcome) auditFor,
+  }) async {
+    // Id que não é UUID é "não existe", não erro de servidor: mesma resposta
+    // de um alerta de outra microárea.
+    if (!Uuid.isValidUUID(fromString: alertId) ||
+        !Uuid.isValidUUID(fromString: microAreaId)) {
+      return const AlertResolveAttempt(AlertResolveOutcome.notFound);
+    }
+    final session = _session();
+
+    Future<AlertResolveAttempt> run(Transaction transaction) async {
+      // Escopo e trava numa instrução. O predicado de microárea é a barreira
+      // de territorialização (INV-01); o FOR UPDATE serializa com o ACK e com
+      // o escalonamento, que releem o status sob a mesma trava.
+      final linhas = await session.db.unsafeQuery(
+        '''
+        SELECT status, "resolvedAt"
+        FROM alerts
+        WHERE id = @id::uuid AND "microAreaId" = @ma::uuid
+        FOR UPDATE
+        ''',
+        parameters: QueryParameters.named({'id': alertId, 'ma': microAreaId}),
+        transaction: transaction,
+      );
+      if (linhas.isEmpty) {
+        return const AlertResolveAttempt(AlertResolveOutcome.notFound);
+      }
+
+      final status = linhas.single[0] as String;
+      final AlertResolveAttempt attempt;
+      if (status == AlertStatus.resolved.name) {
+        attempt = AlertResolveAttempt(
+          AlertResolveOutcome.alreadyResolved,
+          resolvedAt: (linhas.single[1] as DateTime?)?.toUtc(),
+        );
+      } else if (status != AlertStatus.acknowledged.name) {
+        attempt = const AlertResolveAttempt(AlertResolveOutcome.notAcknowledged);
+      } else {
+        final agora = now.toUtc();
+        // Só status e resolvedAt: as colunas do ACK e do escalonamento ficam.
+        await session.db.unsafeExecute(
+          '''
+          UPDATE alerts
+          SET status = @resolvido, "resolvedAt" = @agora::timestamp
+          WHERE id = @id::uuid
+          ''',
+          parameters: QueryParameters.named({
+            'id': alertId,
+            'resolvido': AlertStatus.resolved.name,
+            'agora': agora,
+          }),
+          transaction: transaction,
+        );
+        attempt = AlertResolveAttempt(AlertResolveOutcome.resolved, resolvedAt: agora);
+      }
+
+      // Fail-closed e por último, como no ACK: a trava da cadeia nunca
+      // precede outra.
+      await _appendAudit(session, transaction, auditFor(attempt.outcome));
+      return attempt;
     }
 
     final existing = _transaction;
@@ -188,6 +304,52 @@ class OrmAlertStore implements AlertStore {
       status: row.status,
       triggeredAt: row.triggeredAt,
       acknowledgedAt: row.acknowledgedAt,
+      resolvedAt: row.resolvedAt,
     );
+  }
+
+  /// Duas consultas em vez de uma ordenação por status: os não confirmados
+  /// enchem o teto primeiro, e só o que sobra vai para os confirmados. Cada
+  /// grupo é lido do MAIS NOVO para trás e devolvido do mais antigo para a
+  /// frente: o corte cai sempre nos antigos, nunca num vermelho recém-chegado
+  /// a uma microárea com pendentes acumulados (INV-03).
+  @override
+  Future<List<OpenAlertSnapshot>> openInMicroArea(String microAreaId, {required int limit}) async {
+    final area = UuidValue.fromString(microAreaId);
+    final naoConfirmados = await Alert.db.find(
+      _session(),
+      where: (t) => t.microAreaId.equals(area) & t.status.inSet({AlertStatus.pending, AlertStatus.escalated}),
+      orderBy: (t) => t.triggeredAt,
+      orderDescending: true,
+      limit: limit,
+      transaction: _transaction,
+    );
+    final restante = limit - naoConfirmados.length;
+    final confirmados = restante <= 0
+        ? const <Alert>[]
+        : await Alert.db.find(
+            _session(),
+            where: (t) => t.microAreaId.equals(area) & t.status.equals(AlertStatus.acknowledged),
+            orderBy: (t) => t.triggeredAt,
+            orderDescending: true,
+            limit: restante,
+            transaction: _transaction,
+          );
+
+    return [
+      for (final row in [...naoConfirmados.reversed, ...confirmados.reversed])
+        OpenAlertSnapshot(
+          alertId: row.id!.uuid,
+          patientId: row.patientId.uuid,
+          microAreaId: microAreaId,
+          riskLevel: row.riskLevel,
+          locationHash: row.locationHash,
+          locationCell: row.locationCell,
+          triggeredAt: row.triggeredAt,
+          status: row.status,
+          acknowledgedAt: row.acknowledgedAt,
+          escalated: row.escalatedAt != null || row.status == AlertStatus.escalated,
+        ),
+    ];
   }
 }

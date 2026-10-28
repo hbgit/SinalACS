@@ -303,6 +303,44 @@ void main() {
       );
     });
 
+    test(
+      'deviceId fora do formato UUID é recusado com AlertValidationException '
+      'antes de olhar a senha (#94, C1)',
+      () async {
+        final session = sessionBuilder.build();
+        for (final malicioso in [
+          r'urn-${ENV::JWT_SECRET}',
+          r'$HOME',
+          'aparelho#1',
+          'acs-device-001',
+          '00000000-0000-4000-8000-0000000000D1',
+        ]) {
+          await expectLater(
+            endpoints.auth.loginInstitutional(
+              sessionBuilder,
+              matricula: _matricula,
+              password: _senha,
+              deviceId: malicioso,
+            ),
+            throwsA(isA<AlertValidationException>()),
+            reason: 'deviceId=$malicioso',
+          );
+        }
+        // Recusado antes da senha: nenhuma tentativa contada.
+        expect((await _credential(session))?.failedAttempts, 0);
+      },
+    );
+
+    test('deviceId UUID minúsculo é aceito', () async {
+      final result = await endpoints.auth.loginInstitutional(
+        sessionBuilder,
+        matricula: _matricula,
+        password: _senha,
+        deviceId: '00000000-0000-4000-8000-0000000000d1',
+      );
+      expect(result.accessToken, isNotEmpty);
+    });
+
     test('grava uma linha real em audit_logs', () async {
       final session = sessionBuilder.build();
 

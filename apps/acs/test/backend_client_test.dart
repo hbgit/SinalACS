@@ -1,7 +1,13 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sinalacs_acs/core/network/backend_client.dart';
 import 'package:sinalacs_acs/core/network/backend_config.dart';
 import 'package:sinalacs_acs/core/security/session_token_store.dart';
+import 'package:sinalacs_acs/core/services/backend_visit_synchronizer.dart';
+import 'package:sinalacs_acs/core/telemetry/app_version.dart';
+import 'package:sinalacs_acs/core/telemetry/telemetry_event.dart';
+import 'package:sinalacs_client/sinalacs_client.dart';
 
 import 'support/fake_rpc_server.dart';
 
@@ -136,6 +142,196 @@ void main() {
             .having((f) => f.isRecoverable, 'isRecoverable', isFalse),
       ),
     );
+  });
+
+  group('resolução de conflito de visita (#79)', () {
+    VisitSyncEntry entrada({Map<String, String> notes = const {'campo': 'obs editada'}}) => VisitSyncEntry(
+          localId: '00000000-0000-4000-8000-0000000000c1',
+          patientId: '00000000-0000-4000-8000-000000000001',
+          scheduledAt: DateTime.utc(2026, 10, 16, 9),
+          completedAt: DateTime.utc(2026, 10, 16, 9, 30),
+          status: 'Paciente ausente',
+          riskLevelBefore: RiskLevel.red,
+          notes: notes,
+          version: 1,
+          arrivalMethod: ArrivalMethod.manual,
+        );
+
+    test('resolveVisitConflict recusa sessão de outro dono', () async {
+      await backend.login(matricula: 'ACS-001', senha: 'senha-sintetica');
+
+      await expectLater(
+        backend.resolveVisitConflict(entrada(), expectedServerVersion: 3, expectedUserId: 'outro-acs'),
+        throwsA(same(sessionOwnerMismatch)),
+      );
+      expect(server.requests.where((r) => r.method == 'resolveConflict'), isEmpty,
+          reason: 'a decisão de um ACS nunca sai com o token de outro');
+    });
+
+    test('resolveVisitConflict envia a versão vista com a sessão do próprio dono', () async {
+      final sessao = await backend.login(matricula: 'ACS-001', senha: 'senha-sintetica');
+
+      final resultado = await backend.resolveVisitConflict(
+        entrada(),
+        expectedServerVersion: 3,
+        expectedUserId: sessao.userId,
+      );
+
+      expect(resultado.syncStatus, SyncStatus.synced);
+      expect(resultado.serverVersion, 4);
+      final pedido = server.requests.singleWhere((r) => r.method == 'resolveConflict');
+      expect(pedido.endpoint, 'visits');
+      expect(pedido.args['expectedServerVersion'], 3);
+      expect(pedido.args['accessToken'], isNotEmpty);
+    });
+
+    test('conflictSnapshotFor usa o campo das observações, ou une os valores sem ele', () {
+      final comCampo = conflictSnapshotFor(entrada(notes: {'campo': 'obs do servidor', 'outro': 'x'}));
+      expect(comCampo.notes, 'obs do servidor');
+      expect(comCampo.version, 1);
+      expect(comCampo.status, 'Paciente ausente');
+      expect(comCampo.completedAt, DateTime.utc(2026, 10, 16, 9, 30));
+
+      final semCampo = conflictSnapshotFor(entrada(notes: {'a': 'primeira', 'b': 'segunda'}));
+      expect(semCampo.notes, 'primeira\nsegunda');
+
+      expect(conflictSnapshotFor(entrada(notes: const {})).notes, '');
+    });
+  });
+
+  group('telemetria (#83)', () {
+    TelemetryEventRecord evento(String dono) => TelemetryEventRecord(
+          eventId: '0000000a-0000-4000-8000-0000000000e1',
+          owner: dono,
+          name: 'sync_attempt',
+          occurredAt: DateTime.utc(2026, 10, 25, 12),
+          payload: const {'records_count': 3, 'network_type': 'wifi', 'channel': 'sync'},
+        );
+
+    test('uploader recusa sessão de outro dono', () async {
+      await backend.login(matricula: 'ACS-001', senha: 'senha-sintetica');
+
+      await expectLater(
+        backend.ingestTelemetry([evento('outro-acs')], expectedUserId: 'outro-acs'),
+        throwsA(isA<BackendFailure>()),
+      );
+      expect(server.requests.where((r) => r.method == 'ingest'), isEmpty,
+          reason: 'eventos de A nunca sobem com o token de B');
+    });
+
+    test('ingestTelemetry envia o lote com deviceId, sentAt e versão do app', () async {
+      final sessao = await backend.login(matricula: 'ACS-001', senha: 'senha-sintetica');
+      final deviceIdDoLogin = server.requests.single.args['deviceId'];
+      final antes = DateTime.now().toUtc();
+
+      final ack = await backend.ingestTelemetry([evento(sessao.userId)], expectedUserId: sessao.userId);
+
+      expect(ack.accepted, {'0000000a-0000-4000-8000-0000000000e1'});
+      expect(ack.rejected, isEmpty);
+      final pedido = server.requests.singleWhere((r) => r.method == 'ingest');
+      expect(pedido.endpoint, 'telemetry');
+      expect(pedido.args['accessToken'], isNotEmpty);
+      expect(pedido.args['deviceId'], deviceIdDoLogin, reason: 'o mesmo DeviceIdStore do login');
+      final sentAt = DateTime.parse(pedido.args['sentAt'] as String);
+      expect(sentAt.isUtc, isTrue);
+      expect(sentAt.isBefore(antes.subtract(const Duration(seconds: 1))), isFalse);
+      final enviado = (pedido.args['events'] as List).single as Map<String, dynamic>;
+      expect(enviado['eventId'], '0000000a-0000-4000-8000-0000000000e1');
+      expect(enviado['eventName'], 'sync_attempt');
+      expect(enviado['appVersion'], acsAppVersion);
+      expect(jsonDecode(enviado['payloadJson'] as String),
+          {'records_count': 3, 'network_type': 'wifi', 'channel': 'sync'});
+      expect(enviado.containsKey('owner'), isFalse, reason: 'o autor vem do token');
+    });
+  });
+
+  group('certificado do aparelho (#94)', () {
+    test('issueDeviceCertificate envia o CSR com o token e devolve a folha', () async {
+      await backend.login(matricula: 'ACS-001', senha: 'senha-sintetica');
+
+      final emitido = await backend.issueDeviceCertificate('CSR-SINTETICO');
+
+      final pedido = server.requests.lastWhere((r) => r.method == 'issueCertificate');
+      expect(pedido.endpoint, 'devices');
+      expect(pedido.args['csrPem'], 'CSR-SINTETICO');
+      expect(pedido.args['accessToken'], backend.session!.accessToken);
+      expect(emitido.certificatePem, 'CERT-SINTETICO');
+      expect(emitido.serial, '0a1b');
+      expect(emitido.notAfter, DateTime.utc(2026, 11, 26, 12));
+      expect(emitido.serverNow, DateTime.utc(2026, 10, 27, 12));
+    });
+
+    test('DeviceWipeRequiredException vira DeviceWipeRequiredFailure e avisa onDeviceWipeRequired', () async {
+      await backend.login(matricula: 'ACS-001', senha: 'senha-sintetica');
+      final pedidos = <String>[];
+      backend.onDeviceWipeRequired = pedidos.add;
+      server.issueCertificateRefusal = {
+        'className': 'DeviceWipeRequiredException',
+        'data': {'orderId': 'ordem-1', 'message': 'Este aparelho precisa ser limpo.'},
+      };
+
+      await expectLater(
+        backend.issueDeviceCertificate('CSR-SINTETICO'),
+        throwsA(isA<DeviceWipeRequiredFailure>().having((f) => f.orderId, 'orderId', 'ordem-1')),
+      );
+      expect(pedidos, ['ordem-1']);
+    });
+
+    test('AlertValidationException vira BackendFailure não recuperável com o texto do servidor', () async {
+      await backend.login(matricula: 'ACS-001', senha: 'senha-sintetica');
+      server.issueCertificateRefusal = {
+        'className': 'AlertValidationException',
+        'data': {'message': 'CSR inválido.'},
+      };
+
+      await expectLater(
+        backend.issueDeviceCertificate('CSR-SINTETICO'),
+        throwsA(isA<BackendFailure>()
+            .having((f) => f, 'tipo', isNot(isA<DeviceWipeRequiredFailure>()))
+            .having((f) => f.message, 'message', 'CSR inválido.')
+            .having((f) => f.isRecoverable, 'isRecoverable', isFalse)),
+      );
+    });
+
+    test('DeviceCertificateRetryLaterException vira DeviceCertificateRetryLater recuperável (I1)', () async {
+      await backend.login(matricula: 'ACS-001', senha: 'senha-sintetica');
+      server.issueCertificateRefusal = {
+        'className': 'DeviceCertificateRetryLaterException',
+        'data': {'message': 'limite de emissões deste aparelho atingido; tente mais tarde'},
+      };
+
+      await expectLater(
+        backend.issueDeviceCertificate('CSR-SINTETICO'),
+        throwsA(isA<DeviceCertificateRetryLater>()
+            .having((f) => f.message, 'message', contains('limite'))
+            .having((f) => f.isRecoverable, 'isRecoverable', isTrue)),
+      );
+    });
+
+    test('AlertPermissionException vira BackendFailure não recuperável sem falar de alerta', () async {
+      await backend.login(matricula: 'ACS-001', senha: 'senha-sintetica');
+      server.issueCertificateRefusal = {
+        'className': 'AlertPermissionException',
+        'data': {'message': 'Recusado.'},
+      };
+
+      await expectLater(
+        backend.issueDeviceCertificate('CSR-SINTETICO'),
+        throwsA(isA<BackendFailure>()
+            .having((f) => f.message, 'message', isNot(contains('alerta')))
+            .having((f) => f.isRecoverable, 'isRecoverable', isFalse)),
+      );
+    });
+
+    test('sem servidor a emissão é falha recuperável', () async {
+      await backend.login(matricula: 'ACS-001', senha: 'senha-sintetica');
+      await server.stop();
+
+      await expectLater(
+        backend.issueDeviceCertificate('CSR-SINTETICO'),
+        throwsA(isA<BackendFailure>().having((f) => f.isRecoverable, 'isRecoverable', isTrue)),
+      );
+    });
   });
 
   group('host do RPC', () {

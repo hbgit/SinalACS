@@ -48,7 +48,8 @@ import 'support/totp.dart';
 
 /// Aparelho do login do ACS criado (D8 do plano 2026-10-03): com ele o login
 /// emite refresh token, e é o token de envio diferido que a desativação revoga.
-const _deviceId = 'e2e-dev-1';
+/// UUID minúsculo: desde a #94 o login recusa `deviceId` fora desse formato.
+const _deviceId = '00000000-0000-4000-8000-0000000e2ed1';
 
 int _passo(DateTime t) => t.toUtc().millisecondsSinceEpoch ~/ 1000 ~/ 30;
 

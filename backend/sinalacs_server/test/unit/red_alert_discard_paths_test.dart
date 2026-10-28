@@ -49,8 +49,10 @@ final _mutationPattern = RegExp(
 /// aqui (subconjunto).
 const _allowedWriters = <String, String>{
   'infrastructure/database/orm_alert_store.dart':
-      'save() insere o alerta como pending; acknowledge() leva a acknowledged '
-      '(única transição de status hoje)',
+      'save() insere o alerta como pending; acknowledge() leva '
+      'pending/escalated a acknowledged por UPDATE condicional e nunca '
+      'escreve alerts nos desfechos repetidos (#88); resolve() leva '
+      'acknowledged → resolved, sob trava e auditado na mesma transação (#76)',
   'infrastructure/database/orm_retention_store.dart':
       'expurgo LGPD: DELETE FROM alerts por triggeredAt — hoje SEM guarda de '
       'status/risco (buraco, corrigido na Task 4)',
@@ -98,15 +100,29 @@ class _MemoryStore implements AlertStore {
   }
 
   @override
-  Future<bool> acknowledge({
+  Future<AlertAckRecord?> acknowledge({
     required String alertId,
     required String acsId,
     required String microAreaId,
-    required AuditEvent audit,
+    required AuditEvent Function(AlertAckOutcome outcome) auditFor,
   }) async {
-    audits.add(audit);
-    status[alertId] = 'acknowledged';
-    return true;
+    final primeiro = status[alertId] == 'pending';
+    // Como o ORM sob a trava (#86): o desfecho sai do status lido, e o ACK
+    // nunca rebaixa `resolved`.
+    final outcome = switch (status[alertId]) {
+      'resolved' => AlertAckOutcome.alreadyResolved,
+      'acknowledged' => AlertAckOutcome.alreadyAcknowledged,
+      _ => AlertAckOutcome.acknowledged,
+    };
+    audits.add(auditFor(outcome));
+    if (outcome == AlertAckOutcome.acknowledged) status[alertId] = 'acknowledged';
+    final em = DateTime.utc(2026, 10, 25, 12);
+    return AlertAckRecord(
+      outcome: outcome,
+      triggeredAt: alerts[alertId]?.triggeredAt ?? em,
+      acknowledgedAt: em,
+      firstAcknowledgement: primeiro,
+    );
   }
 
   @override
@@ -118,6 +134,24 @@ class _MemoryStore implements AlertStore {
 
   @override
   Future<AlertStatusSnapshot?> latestForPatient(String patientId) async => null;
+
+  @override
+  Future<List<OpenAlertSnapshot>> openInMicroArea(String microAreaId, {required int limit}) async => [];
+
+  @override
+  Future<AlertResolveAttempt> resolve({
+    required String alertId,
+    required String microAreaId,
+    required DateTime now,
+    required AuditEvent Function(AlertResolveOutcome outcome) auditFor,
+  }) async {
+    if (status[alertId] != 'acknowledged') {
+      return const AlertResolveAttempt(AlertResolveOutcome.notAcknowledged);
+    }
+    audits.add(auditFor(AlertResolveOutcome.resolved));
+    status[alertId] = 'resolved';
+    return AlertResolveAttempt(AlertResolveOutcome.resolved, resolvedAt: now);
+  }
 }
 
 class _MemoryOutbox implements AlertOutbox {
@@ -230,6 +264,30 @@ void main() {
       );
       expect(adminWriters, isEmpty);
     });
+
+    test('INV-04 (#75): todo alerta gravado é vermelho — é o que justifica '
+        'alerts.riskLevel em claro (spec/lgpd_data_audit.md §2.3)', () {
+      // `(?<!\w)Alert\(` pega o construtor do modelo de tabela e deixa de fora
+      // AdminAlert/AlertStatusSnapshot; `copyWith` pega uma reclassificação.
+      final pattern = RegExp(
+        r'(?:(?<!\w)Alert\(|\.copyWith\()[^;]*?riskLevel:\s*([\w.]+)',
+        dotAll: true,
+      );
+      final valores = <String>{};
+      for (final entry in _grepSources(pattern).entries) {
+        for (final hit in entry.value) {
+          valores.add(pattern.firstMatch(hit)!.group(1)!);
+        }
+      }
+      expect(valores, isNotEmpty, reason: 'a varredura precisa achar o save() do OrmAlertStore');
+      expect(
+        valores,
+        {'RiskLevel.red'},
+        reason: 'Se um alerta amarelo/verde passou a ser gravado, alerts.riskLevel '
+            'deixou de ser igual à existência da linha: cifre a coluna ou '
+            'revise a decisão da #75 antes de mudar este teste.',
+      );
+    });
   });
 
   group('alerts.createRedAlert repetido (idempotência)', () {
@@ -297,7 +355,7 @@ void main() {
         alertId: 'alerta-1',
       );
 
-      expect(ok, isTrue);
+      expect(ok, AlertStatus.acknowledged);
       expect(store.status['alerta-1'], 'acknowledged');
       final e = store.audits.single;
       expect(e.actionType, 'write');

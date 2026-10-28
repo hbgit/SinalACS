@@ -35,6 +35,7 @@ AppConfig _config() => AppConfig(
       auditChainSecret: 'test-audit-chain-secret',
       healthDataEncryptionKey: AppConfig.developmentHealthDataEncryptionKey,
       cpfHashPepper: AppConfig.developmentCpfHashPepper,
+      telemetryPseudonymKey: AppConfig.developmentTelemetryPseudonymKey,
       smsGateway: 'log',
       mqttUsername: null,
       mqttPassword: null,
@@ -466,6 +467,7 @@ void main() {
       const localId = '00000000-0000-4000-8000-0000000001f1';
       // Visita com autor de um paciente da microárea vizinha, gravada direto.
       final notas = await encryptedVisitNotes(const {});
+      final riscoVerde = await encryptedRiskLevel(RiskLevel.green);
       await Visit.db.insertRow(
         session,
         Visit(
@@ -473,7 +475,8 @@ void main() {
           acsId: UuidValue.fromString(_acsId),
           scheduledAt: DateTime.utc(2026, 9, 12, 9),
           status: 'realizada',
-          riskLevelBefore: RiskLevel.green,
+          riskLevelBeforeEncrypted: riscoVerde.ciphertextBase64,
+          riskLevelBeforeKeyVersion: riscoVerde.keyVersion,
           notesEncrypted: notas.ciphertextBase64,
           notesKeyVersion: notas.keyVersion,
           syncStatus: SyncStatus.synced,

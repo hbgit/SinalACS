@@ -1,6 +1,6 @@
 # Telas do Backoffice Admin
 
-Documentação visual do protótipo Flutter do backoffice administrativo (`apps/admin`). Assim como `docs/telas-acs.md` e `docs/telas-paciente.md`, as imagens abaixo foram capturadas rodando o app com dados sintéticos: a 01 no emulador em 2026-10-06 e a 01b no Motorola edge 40 neo em 2026-10-07; as de 02 a 05 em 2026-10-07 no emulador `emulator-5554` (API 36, tema escuro, com a borda de 5 px recortada), com sessão real do administrador de teste e **dados do backend** (3 alertas semeados no banco de e2e, nenhum dado real); as de 06 a 08 em 2026-10-07 no Motorola edge 40 neo (Android 15), de uma rodada anterior, com o painel ainda sobre o mock (o layout é o mesmo, mas os números mostrados nelas não são os do backend). A gestão de contas da issue #43 **não tem capturas ainda** — o porquê está em "Capturas pendentes", na seção de Microáreas.
+Documentação visual do protótipo Flutter do backoffice administrativo (`apps/admin`). Assim como `docs/telas-acs.md` e `docs/telas-paciente.md`, as imagens abaixo foram capturadas rodando o app com dados sintéticos: a 01 no emulador em 2026-10-06 e a 01b no Motorola edge 40 neo em 2026-10-07; as de 03 a 05 em 2026-10-07 no emulador `emulator-5554` (API 36, tema escuro, com a borda de 5 px recortada), com sessão real do administrador de teste e **dados do backend** (3 alertas semeados no banco de e2e, nenhum dado real); a 02 refeita em 2026-10-27 no mesmo emulador, com sessão real do coordenador de teste, no fim da jornada de `scripts/qa/admin_concluidos_e2e.sh` (4 alertas semeados mais o concluído da jornada); as de 06 a 08 em 2026-10-07 no Motorola edge 40 neo (Android 15), de uma rodada anterior, com o painel ainda sobre o mock (o layout é o mesmo, mas os números mostrados nelas não são os do backend). A gestão de contas da issue #43 **não tem capturas ainda** — o porquê está em "Capturas pendentes", na seção de Microáreas.
 
 ## Navegação
 
@@ -27,9 +27,11 @@ O roteiro desse fluxo está escrito em `apps/admin/integration_test/admin_login_
 
 ![Painel de indicadores da UBS](screenshots/admin/02-indicadores.png)
 
-Contadores por `RiskLevel` (vermelho/amarelo/verde), alertas vermelhos abertos vs. reconhecidos e o TMRAV (Tempo Médio de Resposta a Alerta Vermelho, a métrica North Star do PRD). Desde a issue #40 os números vêm do backend (`admin.indicators`): contagens reais por risco e o TMRAV real, média de `acknowledgedAt − triggeredAt` dos alertas vermelhos dos últimos 30 dias. Sem alerta vermelho reconhecido na janela o TMRAV aparece como "—", nunca como "0s". Cor usada exclusivamente como sinal clínico.
+Contadores por `RiskLevel` (vermelho/amarelo/verde), alertas vermelhos abertos, reconhecidos e concluídos, e o TMRAV (Tempo Médio de Resposta a Alerta Vermelho, a métrica North Star do PRD). Desde a issue #40 os números vêm do backend (`admin.indicators`): contagens reais por risco e o TMRAV real, média de `acknowledgedAt − triggeredAt` dos alertas vermelhos dos últimos 30 dias. Sem alerta vermelho reconhecido na janela o TMRAV aparece como "—", nunca como "0s". Cor usada exclusivamente como sinal clínico.
 
 Desde a issue #44 o painel se atualiza sozinho, pelo pulso de 30 s (`admin.alertsPulse`, que já traz os indicadores); não há botão de recarregar. Se o último pulso bem-sucedido passa de 60 s, uma faixa com ícone e texto ("Dados de HH:MM:SS — sem atualização há N min") avisa que os números estão desatualizados, e some no próximo pulso que der certo. A permanência na tela é registrada na auditoria como uma sessão de monitoramento (início e fim), não uma linha por pulso. Ao lado do título, quando o último pulso conta algum, aparece "N vermelhos vencidos" (singular "1 vermelho vencido"; some com zero): ícone e texto em `redOnSurface`, anunciado ao leitor de tela, não é botão. É a mesma regra de vencido do servidor (`overdueRed` do pulso).
+
+Desde a issue #87 os vermelhos aparecem numa partição fechada por estado: "Abertos (pendentes)", "Reconhecidos (em atendimento)" e "Concluídos" (`resolvedRedAlerts`, mesmo escopo por papel e UBS). A soma das três linhas é sempre o cartão Vermelho (INV-03): um alerta que o ACS conclui sai de "Reconhecidos" e entra em "Concluídos", nunca some da coordenação. A linha nova se atualiza pelo mesmo pulso. A captura acima (2026-10-27, coordenador) mostra o estado final da jornada do e2e: Vermelho 3 = Abertos 0 + Reconhecidos 1 + Concluídos 2; o terceiro concluído do banco não tem microárea e, por isso, não entra no painel do coordenador.
 
 ## Microáreas, vínculo ACS e gestão de contas
 
@@ -54,11 +56,17 @@ A segunda seção lista as contas de coordenação e administração (matrícula
 
 **Capturas pendentes:** as imagens da gestão (seção de ACS com os cartões e as quatro ações, formulário de Novo ACS, diálogo de vínculo, confirmação destrutiva, credencial mostrada uma única vez e a seção Equipe) **não foram capturadas** — as capturas 03 a 08 acima são anteriores à #43. Elas exigem uma sessão real no emulador contra o banco de teste; até lá, o texto descreve o que a tela faz e nenhuma imagem foi inventada.
 
+### Aparelhos do ACS e limpeza remota (issue #81)
+
+Cada cartão de ACS tem o botão **Aparelhos**, que abre um diálogo com os aparelhos em que aquela conta entrou (rótulo curto, "Último acesso em DD/MM às HH:MM" e o estado: sem pedido, "Limpeza pedida", "Pedido entregue ao aparelho" ou "Aparelho limpo", com a hora quando existe). Sem aparelhos, o diálogo diz isso em texto. Cada aparelho sem pedido tem o botão **Limpar remotamente**: primeiro o motivo (**Perdido**, **Roubado** ou **Substituído**), depois uma confirmação destrutiva "Limpar aparelho" (vermelho `redOnSurface`) que avisa que o aparelho perde o acesso na hora e apaga os dados, inclusive **visitas ainda não enviadas**. Pedir de novo devolve o pedido original; fora da UBS (coordenador) ou aparelho que o ACS nunca usou dão a mesma recusa em texto fixo. Depois do pedido a lista é relida do servidor. "Aparelho limpo" é a confirmação enviada pelo próprio aparelho, não uma prova de que ele apagou (ver `PROGRESS.md`, seção #81).
+
+**Capturas pendentes:** a lista de aparelhos, a etapa do motivo e a confirmação destrutiva **não foram capturadas**; nenhuma imagem foi inventada.
+
 ## Alertas da UBS
 
 ![Consulta de alertas filtrável](screenshots/admin/04-alertas.png)
 
-Lista de alertas filtrável por microárea e status. Não há nenhum controle de reclassificação de risco — a classificação é determinística e não alterável por intervenção humana (INV-02 do PRD).
+Lista de alertas filtrável por microárea e status. Não há nenhum controle de reclassificação de risco — a classificação é determinística e não alterável por intervenção humana (INV-02 do PRD). Desde a issue #87 o alerta concluído pelo ACS aparece como "Status: Concluído" com o selo "Concluído às HH:MM" (ícone e texto, sem cor clínica; só quando o servidor mandou a hora) e o filtro de status oferece "Concluído".
 
 ## Logs de auditoria
 

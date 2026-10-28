@@ -1,4 +1,6 @@
 import 'dart:async';
+
+import 'package:basic_utils/basic_utils.dart' show CryptoUtils, ECPrivateKey, X509Utils;
 import 'package:sinalacs_acs/core/network/auth_session.dart';
 import 'package:sinalacs_acs/core/network/backend_client.dart';
 import 'package:sinalacs_acs/core/security/biometric_gate.dart';
@@ -41,6 +43,21 @@ class FakeAcsBackend implements AcsBackend {
   int listPatientsCount = 0;
 
   final List<String> acknowledgedAlertIds = <String>[];
+
+  /// `status` imposto à resposta do ACK (ex.: `resolved`, #86); nulo, a
+  /// resposta é a de sempre (`acknowledged` quando aceito).
+  AlertStatus? ackStatus;
+
+  /// Responde ao ACK como um servidor anterior à #86: `acknowledged: true`
+  /// sem `status`.
+  bool ackWithoutStatus = false;
+  final List<String> resolvedAlertIds = <String>[];
+
+  /// `false` simula alerta que a central não encontra na microárea.
+  bool resolved = true;
+
+  /// Quando presente, `resolveAlert` lança esta falha (ex.: alerta pending).
+  BackendFailure? resolveFailure;
   int loginCount = 0;
 
   AuthSession? _session;
@@ -137,6 +154,13 @@ class FakeAcsBackend implements AcsBackend {
   /// Quantas chamadas a [beginTotpEnrollment] ainda falham antes de funcionar.
   int enrollmentFailuresLeft = 0;
 
+  /// Id da instalação que o [login] lê, como o `BackendClient` real (#81).
+  /// `null`: o login não registra id nenhum.
+  DeviceIdStore? deviceIds;
+
+  /// `deviceId` lido a cada [login], na ordem.
+  final List<String> loginDeviceIds = <String>[];
+
   @override
   Future<AuthSession> login({
     required String matricula,
@@ -144,6 +168,8 @@ class FakeAcsBackend implements AcsBackend {
     String? totpCode,
   }) async {
     loginCount++;
+    final ids = deviceIds;
+    if (ids != null) loginDeviceIds.add(await ids.readOrCreate());
     lastCredentials = (matricula: matricula, senha: senha);
     lastTotpCode = totpCode;
     if (sessionExpired && expectedTotpCode != null && totpCode == null) throw const MfaCodeRequired();
@@ -194,6 +220,33 @@ class FakeAcsBackend implements AcsBackend {
     onSessionExpired?.call();
   }
 
+  /// O que `openAlerts()` devolve (#80).
+  List<AcsOpenAlert> openAlertsResult = const [];
+
+  /// Quando presente, `openAlerts()` lança esta falha.
+  Object? openAlertsFailure;
+
+  int openAlertsCalls = 0;
+
+  /// Se definido, `openAlerts()` espera por ele (consulta lenta).
+  Completer<void>? openAlertsGate;
+
+  @override
+  Future<List<AcsOpenAlert>> openAlerts() async {
+    openAlertsCalls++;
+    await openAlertsGate?.future;
+    if (sessionExpired) {
+      onSessionExpired?.call();
+      throw const BackendFailure(
+        'Sua sessão expirou. Entre novamente com o código do autenticador.',
+        isRecoverable: false,
+      );
+    }
+    final falha = openAlertsFailure;
+    if (falha != null) throw falha;
+    return openAlertsResult;
+  }
+
   @override
   Future<AlertAckResult> acknowledge({required String alertId}) async {
     if (sessionExpired) {
@@ -207,7 +260,20 @@ class FakeAcsBackend implements AcsBackend {
     return AlertAckResult(
       alertId: alertId,
       acknowledged: acknowledged,
-      status: acknowledged ? AlertStatus.acknowledged : null,
+      status: ackWithoutStatus ? null : ackStatus ?? (acknowledged ? AlertStatus.acknowledged : null),
+    );
+  }
+
+  @override
+  Future<AlertResolveResult> resolveAlert({required String alertId}) async {
+    final falha = resolveFailure;
+    if (falha != null) throw falha;
+    resolvedAlertIds.add(alertId);
+    return AlertResolveResult(
+      alertId: alertId,
+      resolved: resolved,
+      status: resolved ? AlertStatus.resolved : null,
+      resolvedAt: resolved ? DateTime.utc(2026, 10, 16, 14) : null,
     );
   }
 
@@ -243,6 +309,35 @@ class FakeAcsBackend implements AcsBackend {
           serverVersion: visit.version + 1,
         ),
     ];
+  }
+
+  /// Chamadas de `resolveVisitConflict` (#79), na ordem.
+  final List<({VisitSyncEntry visit, int expectedServerVersion})> resolveConflictCalls = [];
+
+  /// Falha da chamada de resolução, como uma queda de rede.
+  BackendFailure? resolveConflictFailure;
+
+  /// Resultado da resolução; ausente significa `synced` com a versão vista + 1.
+  VisitSyncResult Function(VisitSyncEntry entry, int expectedServerVersion)? resolveConflictResultFor;
+
+  @override
+  Future<VisitSyncResult> resolveVisitConflict(
+    VisitSyncEntry visit, {
+    required int expectedServerVersion,
+    String? expectedUserId,
+  }) async {
+    // Como o BackendClient: a conferência do dono vem antes de qualquer envio.
+    if (expectedUserId != null && _session?.userId != expectedUserId) throw sessionOwnerMismatch;
+    callLog.add('resolveConflict');
+    resolveConflictCalls.add((visit: visit, expectedServerVersion: expectedServerVersion));
+    final failure = resolveConflictFailure;
+    if (failure != null) throw failure;
+    return resolveConflictResultFor?.call(visit, expectedServerVersion) ??
+        VisitSyncResult(
+          localId: visit.localId,
+          syncStatus: SyncStatus.synced,
+          serverVersion: expectedServerVersion + 1,
+        );
   }
 
   /// Lotes de `syncLegacyVisits`, com o `userId` da sessão que transportou.
@@ -404,6 +499,61 @@ class FakeAcsBackend implements AcsBackend {
     return noticeResult;
   }
 
+  @override
+  void Function(String orderId)? onDeviceWipeRequired;
+
+  /// O que `pendingDeviceWipe` devolve (`null`: nenhum pedido de limpeza).
+  String? pendingWipeOrderId;
+
+  /// Falha de `pendingDeviceWipe`, como a queda de rede.
+  BackendFailure? pendingWipeFailure;
+
+  /// Se definido, `pendingDeviceWipe` espera por ele (consulta em voo).
+  Completer<void>? pendingWipeGate;
+
+  /// `deviceId` de cada consulta, na ordem.
+  final List<String> pendingWipeQueries = <String>[];
+
+  @override
+  Future<String?> pendingDeviceWipe(String deviceId) async {
+    pendingWipeQueries.add(deviceId);
+    await pendingWipeGate?.future;
+    final failure = pendingWipeFailure;
+    if (failure != null) throw failure;
+    return pendingWipeOrderId;
+  }
+
+  /// Falha de `confirmDeviceWipe` (sem rede).
+  BackendFailure? confirmWipeFailure;
+
+  /// Chamado a cada `confirmDeviceWipe`, antes da falha configurada.
+  void Function()? onConfirmDeviceWipe;
+
+  /// Confirmações que chegaram ao "servidor" (só as que não falharam).
+  final List<({String deviceId, String orderId})> confirmedWipes = <({String deviceId, String orderId})>[];
+
+  /// Se definido, `confirmDeviceWipe` espera por ele (servidor que aceita a
+  /// conexão e não responde).
+  Completer<void>? confirmWipeGate;
+
+  @override
+  Future<void> confirmDeviceWipe(String deviceId, String orderId) async {
+    onConfirmDeviceWipe?.call();
+    await confirmWipeGate?.future;
+    final failure = confirmWipeFailure;
+    if (failure != null) throw failure;
+    confirmedWipes.add((deviceId: deviceId, orderId: orderId));
+  }
+
+  int forgetLocalSessionCount = 0;
+
+  @override
+  Future<void> forgetLocalSession() async {
+    forgetLocalSessionCount++;
+    storedRefreshToken = null;
+    _session = null;
+  }
+
   /// Entradas que `pullVisits` devolve. Vazio por padrão.
   List<VisitSyncEntry> pullEntries = const [];
 
@@ -433,9 +583,63 @@ class FakeAcsBackend implements AcsBackend {
     return pullEntries;
   }
 
+  // ---------------------------------------------------------------------------
+  // Certificado MQTT do aparelho (#94).
+  // ---------------------------------------------------------------------------
+
+  /// Quantas vezes `issueDeviceCertificate` chegou ao "servidor" (inclusive as
+  /// que falharam).
+  int issueCertificateCount = 0;
+
+  /// CSRs recebidos, na ordem.
+  final List<String> issuedCsrs = <String>[];
+
+  /// Falha da emissão (ex.: sem rede, recuperável; ou pedido de limpeza).
+  BackendFailure? issueCertificateFailure;
+
+  /// Se definido, a emissão espera por ele (emissão em voo).
+  Completer<void>? issueCertificateGate;
+
+  /// Relógio do "servidor", devolvido como `serverNow`.
+  DateTime Function() serverClock = () => DateTime.now().toUtc();
+
+  /// Validade da folha emitida, a partir de [serverClock].
+  Duration certificateLifetime = const Duration(days: 30);
+
+  @override
+  Future<IssuedDeviceCertificate> issueDeviceCertificate(String csrPem) async {
+    issueCertificateCount++;
+    issuedCsrs.add(csrPem);
+    await issueCertificateGate?.future;
+    final failure = issueCertificateFailure;
+    if (failure != null) throw failure;
+    final now = serverClock();
+    final serial = 'serial-$issueCertificateCount';
+    return IssuedDeviceCertificate(
+      certificatePem: signDeviceCsrForTest(csrPem, serial: issueCertificateCount),
+      serial: serial,
+      notAfter: now.add(certificateLifetime),
+      serverNow: now,
+    );
+  }
+
   @override
   void close() {}
 }
+
+/// CA de teste (EC P-256), só em memória: assina o CSR do aparelho para que a
+/// folha devolvida tenha a chave PÚBLICA do aparelho de verdade — um
+/// `SecurityContext` montado com ela e a chave privada guardada só aceita o par
+/// se os dois casarem. Nada disto é a CA da stack.
+final _testCaKey = CryptoUtils.generateEcKeyPair(curve: 'prime256v1').privateKey as ECPrivateKey;
+
+String signDeviceCsrForTest(String csrPem, {int serial = 1}) => X509Utils.generateSelfSignedCertificate(
+      _testCaKey,
+      csrPem,
+      30,
+      serialNumber: '$serial',
+      issuer: {'CN': 'sinalacs-teste-ca'},
+    );
 
 /// Feed de alertas controlado pelo teste.
 ///
@@ -472,6 +676,9 @@ class FakeAlertFeed implements AlertFeed {
 
   @override
   void Function(bool connected)? onConnectionChanged;
+
+  @override
+  void Function(AlertFeedFailure failure)? onFailure;
 
   @override
   Future<void> start({required String microAreaId, required String acsId}) async {
@@ -555,6 +762,28 @@ class FakeVisitSynchronizer implements VisitSynchronizer {
           message: messageFor?.call(visit),
         ),
     ];
+  }
+}
+
+/// Resolvedor de conflito (#79) programado pelo teste: registra cada chamada
+/// e devolve [resposta]. Com [portao], espera por ele (chamada em voo).
+class FakeVisitConflictResolver implements VisitConflictResolver {
+  FakeVisitConflictResolver({this.resposta});
+
+  /// Resposta por chamada; ausente = `synced` com a versão vista + 1.
+  Future<VisitSyncOutcome> Function(OfflineVisitRecord visit, int expectedServerVersion)? resposta;
+
+  Completer<void>? portao;
+
+  final List<({OfflineVisitRecord visit, int expectedServerVersion})> chamadas = [];
+
+  @override
+  Future<VisitSyncOutcome> resolve(OfflineVisitRecord visit, {required int expectedServerVersion}) async {
+    chamadas.add((visit: visit, expectedServerVersion: expectedServerVersion));
+    await portao?.future;
+    final custom = resposta;
+    if (custom != null) return custom(visit, expectedServerVersion);
+    return VisitSyncOutcome(localId: visit.localId, status: 'synced', serverVersion: expectedServerVersion + 1);
   }
 }
 

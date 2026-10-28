@@ -20,20 +20,25 @@ import '../endpoints/health_endpoint.dart' as _i6;
 import '../endpoints/notices_endpoint.dart' as _i7;
 import '../endpoints/onboarding_endpoint.dart' as _i8;
 import '../endpoints/patients_endpoint.dart' as _i9;
-import '../endpoints/triage_endpoint.dart' as _i10;
-import '../endpoints/ubs_endpoint.dart' as _i11;
-import '../endpoints/visits_endpoint.dart' as _i12;
-import 'package:sinalacs_server/src/generated/enums/alert_status.dart' as _i13;
+import '../endpoints/telemetry_endpoint.dart' as _i10;
+import '../endpoints/triage_endpoint.dart' as _i11;
+import '../endpoints/ubs_endpoint.dart' as _i12;
+import '../endpoints/visits_endpoint.dart' as _i13;
+import 'package:sinalacs_server/src/generated/enums/alert_status.dart' as _i14;
 import 'package:sinalacs_server/src/generated/api/admin_audit_filter.dart'
-    as _i14;
-import 'package:sinalacs_server/src/generated/enums/data_subject_request_status.dart'
     as _i15;
-import 'package:sinalacs_server/src/generated/enums/escalation_reason.dart'
+import 'package:sinalacs_server/src/generated/enums/data_subject_request_status.dart'
     as _i16;
-import 'package:sinalacs_server/src/generated/enums/consent_purpose.dart'
+import 'package:sinalacs_server/src/generated/enums/device_wipe_reason.dart'
     as _i17;
-import 'package:sinalacs_server/src/generated/api/visit_sync_entry.dart'
+import 'package:sinalacs_server/src/generated/enums/escalation_reason.dart'
     as _i18;
+import 'package:sinalacs_server/src/generated/enums/consent_purpose.dart'
+    as _i19;
+import 'package:sinalacs_server/src/generated/api/telemetry_event_input.dart'
+    as _i20;
+import 'package:sinalacs_server/src/generated/api/visit_sync_entry.dart'
+    as _i21;
 
 class Endpoints extends _i1.EndpointDispatch {
   @override
@@ -87,19 +92,25 @@ class Endpoints extends _i1.EndpointDispatch {
           'patients',
           null,
         ),
-      'triage': _i10.TriageEndpoint()
+      'telemetry': _i10.TelemetryEndpoint()
+        ..initialize(
+          server,
+          'telemetry',
+          null,
+        ),
+      'triage': _i11.TriageEndpoint()
         ..initialize(
           server,
           'triage',
           null,
         ),
-      'ubs': _i11.UbsEndpoint()
+      'ubs': _i12.UbsEndpoint()
         ..initialize(
           server,
           'ubs',
           null,
         ),
-      'visits': _i12.VisitsEndpoint()
+      'visits': _i13.VisitsEndpoint()
         ..initialize(
           server,
           'visits',
@@ -161,7 +172,7 @@ class Endpoints extends _i1.EndpointDispatch {
             ),
             'status': _i1.ParameterDescription(
               name: 'status',
-              type: _i1.getType<_i13.AlertStatus?>(),
+              type: _i1.getType<_i14.AlertStatus?>(),
               nullable: true,
             ),
             'limit': _i1.ParameterDescription(
@@ -235,7 +246,7 @@ class Endpoints extends _i1.EndpointDispatch {
             ),
             'filter': _i1.ParameterDescription(
               name: 'filter',
-              type: _i1.getType<_i14.AdminAuditFilter?>(),
+              type: _i1.getType<_i15.AdminAuditFilter?>(),
               nullable: true,
             ),
             'limit': _i1.ParameterDescription(
@@ -290,7 +301,7 @@ class Endpoints extends _i1.EndpointDispatch {
             ),
             'filter': _i1.ParameterDescription(
               name: 'filter',
-              type: _i1.getType<_i14.AdminAuditFilter>(),
+              type: _i1.getType<_i15.AdminAuditFilter>(),
               nullable: false,
             ),
           },
@@ -315,7 +326,7 @@ class Endpoints extends _i1.EndpointDispatch {
             ),
             'status': _i1.ParameterDescription(
               name: 'status',
-              type: _i1.getType<_i15.DataSubjectRequestStatus?>(),
+              type: _i1.getType<_i16.DataSubjectRequestStatus?>(),
               nullable: true,
             ),
             'limit': _i1.ParameterDescription(
@@ -661,6 +672,67 @@ class Endpoints extends _i1.EndpointDispatch {
                     staffId: params['staffId'],
                   ),
         ),
+        'acsDevices': _i1.MethodConnector(
+          name: 'acsDevices',
+          params: {
+            'accessToken': _i1.ParameterDescription(
+              name: 'accessToken',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'acsId': _i1.ParameterDescription(
+              name: 'acsId',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async => (endpoints['admin'] as _i2.AdminEndpoint).acsDevices(
+                session,
+                accessToken: params['accessToken'],
+                acsId: params['acsId'],
+              ),
+        ),
+        'orderDeviceWipe': _i1.MethodConnector(
+          name: 'orderDeviceWipe',
+          params: {
+            'accessToken': _i1.ParameterDescription(
+              name: 'accessToken',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'acsId': _i1.ParameterDescription(
+              name: 'acsId',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'deviceId': _i1.ParameterDescription(
+              name: 'deviceId',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'reason': _i1.ParameterDescription(
+              name: 'reason',
+              type: _i1.getType<_i17.DeviceWipeReason>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async =>
+                  (endpoints['admin'] as _i2.AdminEndpoint).orderDeviceWipe(
+                    session,
+                    accessToken: params['accessToken'],
+                    acsId: params['acsId'],
+                    deviceId: params['deviceId'],
+                    reason: params['reason'],
+                  ),
+        ),
         'escalateAlert': _i1.MethodConnector(
           name: 'escalateAlert',
           params: {
@@ -676,7 +748,7 @@ class Endpoints extends _i1.EndpointDispatch {
             ),
             'reason': _i1.ParameterDescription(
               name: 'reason',
-              type: _i1.getType<_i16.EscalationReason>(),
+              type: _i1.getType<_i18.EscalationReason>(),
               nullable: false,
             ),
           },
@@ -975,6 +1047,49 @@ class Endpoints extends _i1.EndpointDispatch {
                     session,
                     accessToken: params['accessToken'],
                     alertId: params['alertId'],
+                  ),
+        ),
+        'resolve': _i1.MethodConnector(
+          name: 'resolve',
+          params: {
+            'accessToken': _i1.ParameterDescription(
+              name: 'accessToken',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'alertId': _i1.ParameterDescription(
+              name: 'alertId',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async => (endpoints['alerts'] as _i3.AlertsEndpoint).resolve(
+                session,
+                accessToken: params['accessToken'],
+                alertId: params['alertId'],
+              ),
+        ),
+        'openForMicroArea': _i1.MethodConnector(
+          name: 'openForMicroArea',
+          params: {
+            'accessToken': _i1.ParameterDescription(
+              name: 'accessToken',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async =>
+                  (endpoints['alerts'] as _i3.AlertsEndpoint).openForMicroArea(
+                    session,
+                    accessToken: params['accessToken'],
                   ),
         ),
         'statusFor': _i1.MethodConnector(
@@ -1313,6 +1428,31 @@ class Endpoints extends _i1.EndpointDispatch {
       name: 'devices',
       endpoint: endpoints['devices']!,
       methodConnectors: {
+        'issueCertificate': _i1.MethodConnector(
+          name: 'issueCertificate',
+          params: {
+            'accessToken': _i1.ParameterDescription(
+              name: 'accessToken',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'csrPem': _i1.ParameterDescription(
+              name: 'csrPem',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async => (endpoints['devices'] as _i5.DevicesEndpoint)
+                  .issueCertificate(
+                    session,
+                    accessToken: params['accessToken'],
+                    csrPem: params['csrPem'],
+                  ),
+        ),
         'registerPushToken': _i1.MethodConnector(
           name: 'registerPushToken',
           params: {
@@ -1342,6 +1482,50 @@ class Endpoints extends _i1.EndpointDispatch {
                     accessToken: params['accessToken'],
                     token: params['token'],
                     platform: params['platform'],
+                  ),
+        ),
+        'pendingWipe': _i1.MethodConnector(
+          name: 'pendingWipe',
+          params: {
+            'deviceId': _i1.ParameterDescription(
+              name: 'deviceId',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async =>
+                  (endpoints['devices'] as _i5.DevicesEndpoint).pendingWipe(
+                    session,
+                    params['deviceId'],
+                  ),
+        ),
+        'confirmWipe': _i1.MethodConnector(
+          name: 'confirmWipe',
+          params: {
+            'deviceId': _i1.ParameterDescription(
+              name: 'deviceId',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'orderId': _i1.ParameterDescription(
+              name: 'orderId',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async =>
+                  (endpoints['devices'] as _i5.DevicesEndpoint).confirmWipe(
+                    session,
+                    params['deviceId'],
+                    params['orderId'],
                   ),
         ),
       },
@@ -1574,7 +1758,7 @@ class Endpoints extends _i1.EndpointDispatch {
             ),
             'purpose': _i1.ParameterDescription(
               name: 'purpose',
-              type: _i1.getType<_i17.ConsentPurpose>(),
+              type: _i1.getType<_i19.ConsentPurpose>(),
               nullable: false,
             ),
             'granted': _i1.ParameterDescription(
@@ -1643,7 +1827,7 @@ class Endpoints extends _i1.EndpointDispatch {
             ),
             'purpose': _i1.ParameterDescription(
               name: 'purpose',
-              type: _i1.getType<_i17.ConsentPurpose>(),
+              type: _i1.getType<_i19.ConsentPurpose>(),
               nullable: false,
             ),
           },
@@ -1723,6 +1907,49 @@ class Endpoints extends _i1.EndpointDispatch {
         ),
       },
     );
+    connectors['telemetry'] = _i1.EndpointConnector(
+      name: 'telemetry',
+      endpoint: endpoints['telemetry']!,
+      methodConnectors: {
+        'ingest': _i1.MethodConnector(
+          name: 'ingest',
+          params: {
+            'accessToken': _i1.ParameterDescription(
+              name: 'accessToken',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'deviceId': _i1.ParameterDescription(
+              name: 'deviceId',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'sentAt': _i1.ParameterDescription(
+              name: 'sentAt',
+              type: _i1.getType<DateTime>(),
+              nullable: false,
+            ),
+            'events': _i1.ParameterDescription(
+              name: 'events',
+              type: _i1.getType<List<_i20.TelemetryEventInput>>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async =>
+                  (endpoints['telemetry'] as _i10.TelemetryEndpoint).ingest(
+                    session,
+                    accessToken: params['accessToken'],
+                    deviceId: params['deviceId'],
+                    sentAt: params['sentAt'],
+                    events: params['events'],
+                  ),
+        ),
+      },
+    );
     connectors['triage'] = _i1.EndpointConnector(
       name: 'triage',
       endpoint: endpoints['triage']!,
@@ -1770,7 +1997,7 @@ class Endpoints extends _i1.EndpointDispatch {
               (
                 _i1.Session session,
                 Map<String, dynamic> params,
-              ) async => (endpoints['triage'] as _i10.TriageEndpoint).evaluate(
+              ) async => (endpoints['triage'] as _i11.TriageEndpoint).evaluate(
                 session,
                 accessToken: params['accessToken'],
                 chestPain: params['chestPain'],
@@ -1800,7 +2027,7 @@ class Endpoints extends _i1.EndpointDispatch {
               (
                 _i1.Session session,
                 Map<String, dynamic> params,
-              ) async => (endpoints['ubs'] as _i11.UbsEndpoint).myContact(
+              ) async => (endpoints['ubs'] as _i12.UbsEndpoint).myContact(
                 session,
                 accessToken: params['accessToken'],
               ),
@@ -1821,7 +2048,7 @@ class Endpoints extends _i1.EndpointDispatch {
             ),
             'visits': _i1.ParameterDescription(
               name: 'visits',
-              type: _i1.getType<List<_i18.VisitSyncEntry>>(),
+              type: _i1.getType<List<_i21.VisitSyncEntry>>(),
               nullable: false,
             ),
           },
@@ -1829,11 +2056,42 @@ class Endpoints extends _i1.EndpointDispatch {
               (
                 _i1.Session session,
                 Map<String, dynamic> params,
-              ) async => (endpoints['visits'] as _i12.VisitsEndpoint).sync(
+              ) async => (endpoints['visits'] as _i13.VisitsEndpoint).sync(
                 session,
                 accessToken: params['accessToken'],
                 visits: params['visits'],
               ),
+        ),
+        'resolveConflict': _i1.MethodConnector(
+          name: 'resolveConflict',
+          params: {
+            'accessToken': _i1.ParameterDescription(
+              name: 'accessToken',
+              type: _i1.getType<String>(),
+              nullable: false,
+            ),
+            'visit': _i1.ParameterDescription(
+              name: 'visit',
+              type: _i1.getType<_i21.VisitSyncEntry>(),
+              nullable: false,
+            ),
+            'expectedServerVersion': _i1.ParameterDescription(
+              name: 'expectedServerVersion',
+              type: _i1.getType<int>(),
+              nullable: false,
+            ),
+          },
+          call:
+              (
+                _i1.Session session,
+                Map<String, dynamic> params,
+              ) async =>
+                  (endpoints['visits'] as _i13.VisitsEndpoint).resolveConflict(
+                    session,
+                    accessToken: params['accessToken'],
+                    visit: params['visit'],
+                    expectedServerVersion: params['expectedServerVersion'],
+                  ),
         ),
         'syncLegacy': _i1.MethodConnector(
           name: 'syncLegacy',
@@ -1850,7 +2108,7 @@ class Endpoints extends _i1.EndpointDispatch {
             ),
             'visits': _i1.ParameterDescription(
               name: 'visits',
-              type: _i1.getType<List<_i18.VisitSyncEntry>>(),
+              type: _i1.getType<List<_i21.VisitSyncEntry>>(),
               nullable: false,
             ),
           },
@@ -1859,7 +2117,7 @@ class Endpoints extends _i1.EndpointDispatch {
                 _i1.Session session,
                 Map<String, dynamic> params,
               ) async =>
-                  (endpoints['visits'] as _i12.VisitsEndpoint).syncLegacy(
+                  (endpoints['visits'] as _i13.VisitsEndpoint).syncLegacy(
                     session,
                     accessToken: params['accessToken'],
                     deviceId: params['deviceId'],
@@ -1881,7 +2139,7 @@ class Endpoints extends _i1.EndpointDispatch {
             ),
             'visits': _i1.ParameterDescription(
               name: 'visits',
-              type: _i1.getType<List<_i18.VisitSyncEntry>>(),
+              type: _i1.getType<List<_i21.VisitSyncEntry>>(),
               nullable: false,
             ),
           },
@@ -1890,7 +2148,7 @@ class Endpoints extends _i1.EndpointDispatch {
                 _i1.Session session,
                 Map<String, dynamic> params,
               ) async =>
-                  (endpoints['visits'] as _i12.VisitsEndpoint).syncDeferred(
+                  (endpoints['visits'] as _i13.VisitsEndpoint).syncDeferred(
                     session,
                     uploadToken: params['uploadToken'],
                     deviceId: params['deviceId'],
@@ -1910,7 +2168,7 @@ class Endpoints extends _i1.EndpointDispatch {
               (
                 _i1.Session session,
                 Map<String, dynamic> params,
-              ) async => (endpoints['visits'] as _i12.VisitsEndpoint)
+              ) async => (endpoints['visits'] as _i13.VisitsEndpoint)
                   .revokeUploadToken(
                     session,
                     uploadToken: params['uploadToken'],
@@ -1934,7 +2192,7 @@ class Endpoints extends _i1.EndpointDispatch {
               (
                 _i1.Session session,
                 Map<String, dynamic> params,
-              ) async => (endpoints['visits'] as _i12.VisitsEndpoint).pull(
+              ) async => (endpoints['visits'] as _i13.VisitsEndpoint).pull(
                 session,
                 accessToken: params['accessToken'],
                 since: params['since'],

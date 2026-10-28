@@ -550,6 +550,9 @@ class _GravacaoDeAFalha implements VisitStorage {
   Future<void> wipeAllData() => _inner.wipeAllData();
 
   @override
+  Future<void> destroyAll() => _inner.destroyAll();
+
+  @override
   VisitStore forOwner(String ownerId) =>
       ownerId == 'acs-a' ? FailingVisitStore(failOnLoad: false) : _inner.forOwner(ownerId);
 }

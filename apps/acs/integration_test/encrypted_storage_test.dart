@@ -264,7 +264,7 @@ void main() {
     await EncryptedLocalDatabase.deleteDatabaseFile(databaseName);
   });
 
-  test('banco v6 criado no aparelho migra para v7: as linhas vão para a QUARENTENA, cache e cursor ficam', () async {
+  test('banco v6 criado no aparelho migra para a versão atual: as linhas vão para a QUARENTENA, cache e cursor ficam', () async {
     final key = generateDatabaseKey();
     await createV6Database(
       databaseName: databaseName,
@@ -310,10 +310,10 @@ void main() {
     expect(await storage.legacy.load(), hasLength(2), reason: 'o save de um dono não apaga a quarentena');
     expect(await storage.countsByOwner(), isEmpty);
 
-    // O schema ficou na v7, com `owner` nulo nas linhas antigas; o resto da v6 intacto.
+    // O schema ficou na versão atual (v9, telemetria da #83), com `owner` nulo nas linhas antigas; o resto da v6 intacto.
     final db = await storage.database.open();
     expect(await db.getVersion(), EncryptedLocalDatabase.schemaVersion);
-    expect(EncryptedLocalDatabase.schemaVersion, 7);
+    expect(EncryptedLocalDatabase.schemaVersion, 9);
     final semDono = await db.rawQuery('SELECT COUNT(*) AS n FROM offline_visits WHERE owner IS NULL');
     expect(semDono.single['n'], 2);
     expect((await db.query('micro_area_cache')).single['patient_id'], seedPatientId);
@@ -389,6 +389,37 @@ void main() {
     expect(await a.load(), hasLength(1));
 
     await storage.close();
+    await EncryptedLocalDatabase.deleteDatabaseFile(databaseName);
+  });
+  test('destroy troca a chave no aparelho', () async {
+    final chaveAntiga = generateDatabaseKey();
+    final keyStore = InMemoryDatabaseKeyStore(initialKey: chaveAntiga);
+    final storage = SqlCipherVisitStorage(keyStore: keyStore, databaseName: databaseName);
+    await storage.forOwner('acs-teste').save([
+      OfflineVisitRecord(patientId: seedPatientId, risk: 'red', status: 'PENDENTE', outcome: marcador),
+    ]);
+
+    await storage.destroyAll();
+    expect(await keyStore.readOrCreate(), isNot(chaveAntiga), reason: 'a chave não foi trocada');
+
+    // Reabre com a chave nova: banco vazio.
+    expect(await storage.forOwner('acs-teste').load(), isEmpty);
+    await storage.forOwner('acs-teste').save([
+      OfflineVisitRecord(patientId: seedPatientId, risk: 'green', status: 'PENDENTE'),
+    ]);
+    await storage.close();
+
+    final bytes = await File(await EncryptedLocalDatabase.pathFor(databaseName)).readAsBytes();
+    final conteudo = String.fromCharCodes(bytes);
+    expect(conteudo.contains(marcador), isFalse, reason: 'a visita antiga sobrou no arquivo');
+    expect(String.fromCharCodes(bytes.take(15)), isNot('SQLite format 3'));
+
+    // A chave antiga não abre o arquivo novo.
+    expect(
+      () => EncryptedLocalDatabase.open(databaseName: databaseName, passphrase: chaveAntiga),
+      throwsA(anything),
+    );
+
     await EncryptedLocalDatabase.deleteDatabaseFile(databaseName);
   });
 }

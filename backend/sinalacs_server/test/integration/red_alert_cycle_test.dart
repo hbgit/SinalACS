@@ -1,6 +1,10 @@
+import 'dart:convert';
+
 import 'package:serverpod/serverpod.dart';
 import 'package:sinalacs_server/src/application/alerts/alert_outbox_dispatcher.dart';
 import 'package:sinalacs_server/src/application/alerts/red_alert_service.dart';
+import 'package:sinalacs_server/src/application/telemetry/telemetry_pseudonymizer.dart';
+import 'package:sinalacs_server/src/application/telemetry/telemetry_service.dart';
 import 'package:sinalacs_server/src/config/app_config.dart';
 import 'package:sinalacs_server/src/domain/entities/alert_delivery.dart';
 import 'package:sinalacs_server/src/endpoints/health_endpoint.dart';
@@ -20,6 +24,14 @@ import 'test_tools/serverpod_test_tools.dart';
 /// O harness do Serverpod sobe o servidor em processo e expõe os endpoints
 /// tipados, o que elimina a porta fixa, a espera por `/health` e o risco de
 /// reusar por engano um servidor já em execução.
+/// Store de telemetria que sempre falha, para provar a INV-03.
+class _ThrowingTelemetryStore implements TelemetryStore {
+  @override
+  Future<Set<String>> insertIgnoringDuplicates(
+    List<TelemetryRecord> records,
+  ) async => throw StateError('telemetria fora do ar');
+}
+
 class _RecordingPublisher implements AlertPublisher {
   final List<AlertDelivery> published = [];
 
@@ -48,6 +60,7 @@ AppConfig _config({required bool enableDevLogin}) => AppConfig(
       // para montar a chave AES-256 (ver AppConfig).
       healthDataEncryptionKey: AppConfig.developmentHealthDataEncryptionKey,
       cpfHashPepper: AppConfig.developmentCpfHashPepper,
+      telemetryPseudonymKey: AppConfig.developmentTelemetryPseudonymKey,
       smsGateway: 'log',
       mqttUsername: null,
       mqttPassword: null,
@@ -67,6 +80,7 @@ AppConfig _mqttConfig(int port) => AppConfig(
       auditChainSecret: 'test-audit-chain-secret',
       healthDataEncryptionKey: AppConfig.developmentHealthDataEncryptionKey,
       cpfHashPepper: AppConfig.developmentCpfHashPepper,
+      telemetryPseudonymKey: AppConfig.developmentTelemetryPseudonymKey,
       smsGateway: 'log',
       mqttUsername: null,
       mqttPassword: null,
@@ -186,6 +200,7 @@ void main() {
     tearDown(() {
       AlertRuntime.instance
         ..overridePublisher(null)
+        ..overrideTelemetryStore(null)
         ..overrideConfig(null);
     });
 
@@ -309,6 +324,148 @@ void main() {
       expect(await AlertDeliveryRecord.db.find(session), hasLength(1));
     });
 
+    group('telemetria alert_triggered (#83)', () {
+      Future<List<Map<String, dynamic>>> eventos(Session session) async {
+        final r = await session.db.unsafeQuery(
+          'SELECT "eventName", "source", "actorId", "patientPseudonym", '
+          '"alertId"::text AS "alertId", payload '
+          'FROM telemetry_events',
+        );
+        return [for (final row in r) row.toColumnMap()];
+      }
+
+      test(
+          'createRedAlert grava um alert_triggered com patientPseudonym e sem '
+          'UUID do paciente', () async {
+        final session = sessionBuilder.build();
+        await _seed(session);
+        final token = await endpoints.auth
+            .developmentLogin(sessionBuilder, role: 'patient');
+
+        final criado = await endpoints.alerts.createRedAlert(
+          sessionBuilder,
+          accessToken: token.accessToken,
+          idempotencyKey: 'tele-1',
+          locationHash: 'hash-sintetico',
+        );
+
+        final linhas = await eventos(session);
+        expect(linhas, hasLength(1));
+        final e = linhas.single;
+        expect(e['eventName'], 'alert_triggered');
+        expect(e['source'], 'backend');
+        expect(e['actorId'], isNull);
+        expect(e['alertId'], criado.alertId);
+        expect(
+          e['patientPseudonym'],
+          TelemetryPseudonymizer(
+            AppConfig.developmentTelemetryPseudonymKey,
+          ).patient(_patientId),
+        );
+        expect(e['payload'].toString(), isNot(contains(_patientId)));
+        expect(e['payload'].toString(), isNot(contains('hash-sintetico')));
+        expect(jsonDecode(e['payload'] as String), {
+          'risk_level': 'red',
+          'mqtt_topic': 'sinalacs/v1/microareas/$_microAreaId/alerts',
+          'location_known': true,
+          'published': true,
+        });
+      });
+
+      test('replay com a mesma idempotencyKey não duplica o evento', () async {
+        final session = sessionBuilder.build();
+        await _seed(session);
+        final token = await endpoints.auth
+            .developmentLogin(sessionBuilder, role: 'patient');
+
+        for (var i = 0; i < 2; i++) {
+          await endpoints.alerts.createRedAlert(
+            sessionBuilder,
+            accessToken: token.accessToken,
+            idempotencyKey: 'tele-2',
+            locationHash: 'hash-sintetico',
+          );
+        }
+
+        expect(await eventos(session), hasLength(1));
+      });
+
+      test('alert_triggered nunca bloqueia o alerta', () async {
+        final session = sessionBuilder.build();
+        await _seed(session);
+        AlertRuntime.instance.overrideTelemetryStore(_ThrowingTelemetryStore());
+        final token = await endpoints.auth
+            .developmentLogin(sessionBuilder, role: 'patient');
+
+        final criado = await endpoints.alerts.createRedAlert(
+          sessionBuilder,
+          accessToken: token.accessToken,
+          idempotencyKey: 'tele-3',
+          locationHash: 'hash-sintetico',
+        );
+
+        expect(criado.status, AlertStatus.pending);
+        expect(criado.published, isTrue);
+        expect(publisher.published, hasLength(1));
+        final alertas = await Alert.db.find(session);
+        expect(alertas, hasLength(1));
+        expect(alertas.single.id.toString(), criado.alertId);
+        expect(await eventos(session), isEmpty);
+      });
+    });
+
+    group('telemetria alert_received_acs (#83)', () {
+      test(
+          'ACK pelo RPC grava um evento com actorId do ACS e latency_ms = '
+          'acknowledgedAt − triggeredAt', () async {
+        final session = sessionBuilder.build();
+        await _seed(session);
+        final token = await endpoints.auth
+            .developmentLogin(sessionBuilder, role: 'patient');
+        final criado = await endpoints.alerts.createRedAlert(
+          sessionBuilder,
+          accessToken: token.accessToken,
+          idempotencyKey: 'tele-ack-1',
+          locationHash: 'hash-sintetico',
+        );
+        final tokenAcs =
+            await endpoints.auth.developmentLogin(sessionBuilder, role: 'acs');
+
+        // Dois ACKs: só o primeiro emite.
+        for (var i = 0; i < 2; i++) {
+          final ack = await endpoints.alerts.acknowledge(
+            sessionBuilder,
+            accessToken: tokenAcs.accessToken,
+            alertId: criado.alertId,
+          );
+          expect(ack.acknowledged, isTrue);
+        }
+
+        final alerta = (await Alert.db.find(session)).single;
+        final r = await session.db.unsafeQuery(
+          'SELECT "actorId"::text AS "actorId", "alertId"::text AS "alertId", '
+          '"occurredAt", source, payload FROM telemetry_events '
+          "WHERE \"eventName\" = 'alert_received_acs'",
+        );
+        expect(r, hasLength(1));
+        final e = r.single.toColumnMap();
+        expect(e['actorId'], _acsId);
+        expect(e['alertId'], criado.alertId);
+        expect(e['source'], 'backend');
+        expect(
+          (e['occurredAt'] as DateTime).toUtc(),
+          alerta.acknowledgedAt!.toUtc(),
+        );
+        final payload = jsonDecode(e['payload'] as String);
+        expect(payload, {
+          'latency_ms': alerta.acknowledgedAt!
+              .difference(alerta.triggeredAt)
+              .inMilliseconds,
+          'channel': 'rpc',
+        });
+      });
+    });
+
     test('confirmar um alerta inexistente devolve acknowledged false, sem erro',
         () async {
       await _seed(sessionBuilder.build());
@@ -362,6 +519,209 @@ void main() {
           await endpoints.alerts.statusFor(sessionBuilder, accessToken: token.accessToken);
       expect(statusDepoisDoAck.status, AlertStatus.acknowledged);
       expect(statusDepoisDoAck.acknowledgedAt, isNotNull);
+    });
+
+    group('concluir o atendimento (#76)', () {
+      Future<({String alertId, String acs})> alertaConfirmado() async {
+        await _seed(sessionBuilder.build());
+        final paciente =
+            await endpoints.auth.developmentLogin(sessionBuilder, role: 'patient');
+        final criado = await endpoints.alerts.createRedAlert(
+          sessionBuilder,
+          accessToken: paciente.accessToken,
+          idempotencyKey: 'resolve-${DateTime.now().microsecondsSinceEpoch}',
+          locationHash: 'hash-sintetico',
+        );
+        final acs = await endpoints.auth.developmentLogin(sessionBuilder, role: 'acs');
+        await endpoints.alerts.acknowledge(
+          sessionBuilder,
+          accessToken: acs.accessToken,
+          alertId: criado.alertId,
+        );
+        return (alertId: criado.alertId, acs: acs.accessToken);
+      }
+
+      Future<List<String>> resultadosDaTrilha(String alertId) async {
+        final linhas = await AuditLog.db.find(
+          sessionBuilder.build(),
+          where: (t) =>
+              t.resourceType.equals('alert') &
+              t.resourceId.equals(UuidValue.fromString(alertId)),
+          orderBy: (t) => t.sequence,
+        );
+        return linhas.map((l) => l.result).toList();
+      }
+
+      test('leva a resolved, o paciente vê e repetir preserva o resolvedAt', () async {
+        final (:alertId, :acs) = await alertaConfirmado();
+
+        final r = await endpoints.alerts.resolve(
+          sessionBuilder,
+          accessToken: acs,
+          alertId: alertId,
+        );
+        expect(r.resolved, isTrue);
+        expect(r.status, AlertStatus.resolved);
+        expect(r.resolvedAt, isNotNull);
+
+        final paciente =
+            await endpoints.auth.developmentLogin(sessionBuilder, role: 'patient');
+        final status = await endpoints.alerts.statusFor(
+          sessionBuilder,
+          accessToken: paciente.accessToken,
+        );
+        expect(status.status, AlertStatus.resolved);
+        expect(status.resolvedAt, r.resolvedAt);
+        expect(status.acknowledgedAt, isNotNull);
+
+        final deNovo = await endpoints.alerts.resolve(
+          sessionBuilder,
+          accessToken: acs,
+          alertId: alertId,
+        );
+        expect(deNovo.resolved, isTrue);
+        expect(deNovo.resolvedAt, r.resolvedAt);
+
+        expect(await resultadosDaTrilha(alertId),
+            ['acknowledged', 'resolved', 'already_resolved']);
+      });
+
+      test('alerta ainda pending é recusado e segue pending', () async {
+        await _seed(sessionBuilder.build());
+        final paciente =
+            await endpoints.auth.developmentLogin(sessionBuilder, role: 'patient');
+        final criado = await endpoints.alerts.createRedAlert(
+          sessionBuilder,
+          accessToken: paciente.accessToken,
+          idempotencyKey: 'resolve-pending',
+          locationHash: 'hash-sintetico',
+        );
+        final acs = await endpoints.auth.developmentLogin(sessionBuilder, role: 'acs');
+
+        await expectLater(
+          endpoints.alerts.resolve(
+            sessionBuilder,
+            accessToken: acs.accessToken,
+            alertId: criado.alertId,
+          ),
+          throwsA(isA<AlertValidationException>().having(
+            (e) => e.message,
+            'message',
+            RedAlertService.notAcknowledgedMessage,
+          )),
+        );
+
+        final linha = await Alert.db.findById(
+          sessionBuilder.build(),
+          UuidValue.fromString(criado.alertId),
+        );
+        expect(linha!.status, AlertStatus.pending);
+        expect(linha.resolvedAt, isNull);
+        expect(await resultadosDaTrilha(criado.alertId), ['denied_not_acknowledged']);
+      });
+
+      test('confirmar de novo depois de concluído não volta a acknowledged', () async {
+        final (:alertId, :acs) = await alertaConfirmado();
+        await endpoints.alerts.resolve(sessionBuilder, accessToken: acs, alertId: alertId);
+
+        final ack = await endpoints.alerts.acknowledge(
+          sessionBuilder,
+          accessToken: acs,
+          alertId: alertId,
+        );
+        expect(ack.acknowledged, isTrue);
+        // #86: a resposta diz o status da linha travada, não um palpite.
+        expect(ack.status, AlertStatus.resolved);
+        expect(
+          await resultadosDaTrilha(alertId),
+          ['acknowledged', 'resolved', 'ack_already_resolved'],
+        );
+
+        final linha = await Alert.db.findById(
+          sessionBuilder.build(),
+          UuidValue.fromString(alertId),
+        );
+        expect(linha!.status, AlertStatus.resolved);
+        expect(linha.resolvedAt, isNotNull);
+      });
+
+      test('ACK repetido de um alerta confirmado devolve acknowledged e audita ack_already_acknowledged', () async {
+        final (:alertId, :acs) = await alertaConfirmado();
+
+        final ack = await endpoints.alerts.acknowledge(
+          sessionBuilder,
+          accessToken: acs,
+          alertId: alertId,
+        );
+
+        expect(ack.acknowledged, isTrue);
+        expect(ack.status, AlertStatus.acknowledged);
+        expect(await resultadosDaTrilha(alertId), ['acknowledged', 'ack_already_acknowledged']);
+        final linha = await Alert.db.findById(sessionBuilder.build(), UuidValue.fromString(alertId));
+        expect(linha!.status, AlertStatus.acknowledged);
+      });
+
+      test('alerta de outra microárea: resolved false, nada muda nem é auditado', () async {
+        await _seed(sessionBuilder.build());
+        final session = sessionBuilder.build();
+        final outro = await Alert.db.insertRow(
+          session,
+          Alert(
+            patientId: UuidValue.fromString(_patientId),
+            microAreaId: UuidValue.fromString('00000000-0000-4000-8000-0000000076aa'),
+            triggeredAt: DateTime.now().toUtc(),
+            acknowledgedAt: DateTime.now().toUtc(),
+            riskLevel: RiskLevel.red,
+            locationHash: 'hash-sintetico',
+            status: AlertStatus.acknowledged,
+            mqttTopic: 'sinalacs/v1/microareas/outra/alerts',
+            deviceId: 'device-sintetico',
+            retryCount: 0,
+            version: 1,
+          ),
+        );
+        final acs = await endpoints.auth.developmentLogin(sessionBuilder, role: 'acs');
+
+        final r = await endpoints.alerts.resolve(
+          sessionBuilder,
+          accessToken: acs.accessToken,
+          alertId: outro.id!.uuid,
+        );
+
+        expect(r.resolved, isFalse);
+        expect(r.status, isNull);
+        expect((await Alert.db.findById(session, outro.id!))!.status,
+            AlertStatus.acknowledged);
+        expect(await resultadosDaTrilha(outro.id!.uuid), isEmpty);
+      });
+
+      test('identificador que não é UUID devolve resolved false', () async {
+        await _seed(sessionBuilder.build());
+        final acs = await endpoints.auth.developmentLogin(sessionBuilder, role: 'acs');
+
+        final r = await endpoints.alerts.resolve(
+          sessionBuilder,
+          accessToken: acs.accessToken,
+          alertId: 'nao-e-uuid',
+        );
+
+        expect(r.resolved, isFalse);
+      });
+
+      test('paciente não conclui atendimento', () async {
+        final (:alertId, acs: _) = await alertaConfirmado();
+        final paciente =
+            await endpoints.auth.developmentLogin(sessionBuilder, role: 'patient');
+
+        await expectLater(
+          endpoints.alerts.resolve(
+            sessionBuilder,
+            accessToken: paciente.accessToken,
+            alertId: alertId,
+          ),
+          throwsA(isA<AlertPermissionException>()),
+        );
+      });
     });
 
     test('um ACS não pode consultar alerts.statusFor', () async {

@@ -38,7 +38,7 @@
 # backend): o app chega ao backend por UM caminho só — `SINALACS_HOST=
 # https://localhost:8443/` no aparelho -> `adb reverse tcp:8443 tcp:443` -> :443
 # do host -> sinalacs-traefik (a única porta publicada do RPC; o 8080 do
-# backend não é publicado) -> serverpod:8080 na rede do Compose. `svc wifi
+# backend não é publicado) -> https://serverpod:8080 (TLS 1.3, #78) na rede do Compose. `svc wifi
 # disable` não derruba o canal do adb. Com o Traefik congelado a conexão TCP
 # ainda é aceita pelo docker-proxy, mas ninguém responde ao TLS: a chamada
 # fica pendurada até o prazo de 20 s do pulso, e o selo aparece. O backend não

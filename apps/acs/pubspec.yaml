@@ -38,6 +38,10 @@ dependencies:
   # não precisa do Keystore/Keychain do flutter_secure_storage.
   shared_preferences: ^2.3.2
   local_auth: ^3.0.2
+  # Par EC e CSR do aparelho (spec/stack.md, "Certificado de cliente por aparelho", #94);
+  # só par EC e CSR: não assina nem gera CRL. Gerador semeado com 32 bytes de
+  # Random.secure() (CryptoUtils.getSecureRandom, revisado na 5.8.2; reconferir a cada upgrade).
+  basic_utils: ^5.8.2
 
 
 dev_dependencies:

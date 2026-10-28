@@ -18,9 +18,14 @@ dependencies:
   # roda fora do processo do Serverpod e abre a própria conexão. Já vinha
   # resolvido como transitiva do serverpod, então não move o pubspec.lock.
   postgres: ^3.5.12
+  # Direta (já era transitiva do serverpod, 1.2.0; o lock não se move) porque
+  # lib/src/runtime/mtls_api_server.dart importa IOAdapter/Adapter (#90).
+  relic: ^1.2.0
   uuid: ^4.5.0
 
 dev_dependencies:
+  # Relógio e timers falsos do recuo do publicador da CRL (#94).
+  fake_async: ^1.3.3
   lints: '>=3.0.0 <7.0.0'
   serverpod_test: 3.4.13
   test: ^1.25.5

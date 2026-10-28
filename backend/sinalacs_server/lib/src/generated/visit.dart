@@ -14,8 +14,7 @@
 import 'package:serverpod/serverpod.dart' as _i1;
 import 'enums/visit_authorship.dart' as _i2;
 import 'enums/arrival_method.dart' as _i3;
-import 'enums/risk_level.dart' as _i4;
-import 'enums/sync_status.dart' as _i5;
+import 'enums/sync_status.dart' as _i4;
 
 /// Visita domiciliar. Registrada offline e sincronizada depois.
 abstract class Visit
@@ -30,8 +29,10 @@ abstract class Visit
     this.startedAt,
     this.completedAt,
     required this.status,
-    required this.riskLevelBefore,
-    this.riskLevelAfter,
+    String? riskLevelBeforeEncrypted,
+    int? riskLevelBeforeKeyVersion,
+    String? riskLevelAfterEncrypted,
+    int? riskLevelAfterKeyVersion,
     String? notesEncrypted,
     int? notesKeyVersion,
     required this.syncStatus,
@@ -40,6 +41,10 @@ abstract class Visit
     this.syncAt,
     required this.version,
   }) : authorship = authorship ?? _i2.VisitAuthorship.acs,
+       riskLevelBeforeEncrypted = riskLevelBeforeEncrypted ?? '',
+       riskLevelBeforeKeyVersion = riskLevelBeforeKeyVersion ?? 1,
+       riskLevelAfterEncrypted = riskLevelAfterEncrypted ?? '',
+       riskLevelAfterKeyVersion = riskLevelAfterKeyVersion ?? 1,
        notesEncrypted = notesEncrypted ?? '',
        notesKeyVersion = notesKeyVersion ?? 1,
        arrivalMethod = arrivalMethod ?? _i3.ArrivalMethod.manual;
@@ -54,11 +59,13 @@ abstract class Visit
     DateTime? startedAt,
     DateTime? completedAt,
     required String status,
-    required _i4.RiskLevel riskLevelBefore,
-    _i4.RiskLevel? riskLevelAfter,
+    String? riskLevelBeforeEncrypted,
+    int? riskLevelBeforeKeyVersion,
+    String? riskLevelAfterEncrypted,
+    int? riskLevelAfterKeyVersion,
     String? notesEncrypted,
     int? notesKeyVersion,
-    required _i5.SyncStatus syncStatus,
+    required _i4.SyncStatus syncStatus,
     _i3.ArrivalMethod? arrivalMethod,
     required _i1.UuidValue localId,
     DateTime? syncAt,
@@ -94,17 +101,17 @@ abstract class Visit
               jsonSerialization['completedAt'],
             ),
       status: jsonSerialization['status'] as String,
-      riskLevelBefore: _i4.RiskLevel.fromJson(
-        (jsonSerialization['riskLevelBefore'] as String),
-      ),
-      riskLevelAfter: jsonSerialization['riskLevelAfter'] == null
-          ? null
-          : _i4.RiskLevel.fromJson(
-              (jsonSerialization['riskLevelAfter'] as String),
-            ),
+      riskLevelBeforeEncrypted:
+          jsonSerialization['riskLevelBeforeEncrypted'] as String?,
+      riskLevelBeforeKeyVersion:
+          jsonSerialization['riskLevelBeforeKeyVersion'] as int?,
+      riskLevelAfterEncrypted:
+          jsonSerialization['riskLevelAfterEncrypted'] as String?,
+      riskLevelAfterKeyVersion:
+          jsonSerialization['riskLevelAfterKeyVersion'] as int?,
       notesEncrypted: jsonSerialization['notesEncrypted'] as String?,
       notesKeyVersion: jsonSerialization['notesKeyVersion'] as int?,
-      syncStatus: _i5.SyncStatus.fromJson(
+      syncStatus: _i4.SyncStatus.fromJson(
         (jsonSerialization['syncStatus'] as String),
       ),
       arrivalMethod: jsonSerialization['arrivalMethod'] == null
@@ -150,16 +157,23 @@ abstract class Visit
 
   String status;
 
-  _i4.RiskLevel riskLevelBefore;
+  /// Risco antes e depois da visita, cifrados (INV-04, #75): nome do
+  /// RiskLevel com largura fixa, ver `encrypted_risk_level.dart`. O "depois"
+  /// ausente (visita não concluída) é cifrado também, com o mesmo tamanho.
+  String riskLevelBeforeEncrypted;
 
-  _i4.RiskLevel? riskLevelAfter;
+  int riskLevelBeforeKeyVersion;
+
+  String riskLevelAfterEncrypted;
+
+  int riskLevelAfterKeyVersion;
 
   /// JSON de Map<String, String>, cifrado. Ver patient.spy.yaml para o padrão.
   String notesEncrypted;
 
   int notesKeyVersion;
 
-  _i5.SyncStatus syncStatus;
+  _i4.SyncStatus syncStatus;
 
   /// Como o check-in desta visita foi registrado (RF12, decisão §4). Default
   /// `manual` até a integração nativa de geofencing existir — hoje nenhum
@@ -189,11 +203,13 @@ abstract class Visit
     DateTime? startedAt,
     DateTime? completedAt,
     String? status,
-    _i4.RiskLevel? riskLevelBefore,
-    _i4.RiskLevel? riskLevelAfter,
+    String? riskLevelBeforeEncrypted,
+    int? riskLevelBeforeKeyVersion,
+    String? riskLevelAfterEncrypted,
+    int? riskLevelAfterKeyVersion,
     String? notesEncrypted,
     int? notesKeyVersion,
-    _i5.SyncStatus? syncStatus,
+    _i4.SyncStatus? syncStatus,
     _i3.ArrivalMethod? arrivalMethod,
     _i1.UuidValue? localId,
     DateTime? syncAt,
@@ -212,8 +228,10 @@ abstract class Visit
       if (startedAt != null) 'startedAt': startedAt?.toJson(),
       if (completedAt != null) 'completedAt': completedAt?.toJson(),
       'status': status,
-      'riskLevelBefore': riskLevelBefore.toJson(),
-      if (riskLevelAfter != null) 'riskLevelAfter': riskLevelAfter?.toJson(),
+      'riskLevelBeforeEncrypted': riskLevelBeforeEncrypted,
+      'riskLevelBeforeKeyVersion': riskLevelBeforeKeyVersion,
+      'riskLevelAfterEncrypted': riskLevelAfterEncrypted,
+      'riskLevelAfterKeyVersion': riskLevelAfterKeyVersion,
       'notesEncrypted': notesEncrypted,
       'notesKeyVersion': notesKeyVersion,
       'syncStatus': syncStatus.toJson(),
@@ -237,8 +255,10 @@ abstract class Visit
       if (startedAt != null) 'startedAt': startedAt?.toJson(),
       if (completedAt != null) 'completedAt': completedAt?.toJson(),
       'status': status,
-      'riskLevelBefore': riskLevelBefore.toJson(),
-      if (riskLevelAfter != null) 'riskLevelAfter': riskLevelAfter?.toJson(),
+      'riskLevelBeforeEncrypted': riskLevelBeforeEncrypted,
+      'riskLevelBeforeKeyVersion': riskLevelBeforeKeyVersion,
+      'riskLevelAfterEncrypted': riskLevelAfterEncrypted,
+      'riskLevelAfterKeyVersion': riskLevelAfterKeyVersion,
       'notesEncrypted': notesEncrypted,
       'notesKeyVersion': notesKeyVersion,
       'syncStatus': syncStatus.toJson(),
@@ -292,11 +312,13 @@ class _VisitImpl extends Visit {
     DateTime? startedAt,
     DateTime? completedAt,
     required String status,
-    required _i4.RiskLevel riskLevelBefore,
-    _i4.RiskLevel? riskLevelAfter,
+    String? riskLevelBeforeEncrypted,
+    int? riskLevelBeforeKeyVersion,
+    String? riskLevelAfterEncrypted,
+    int? riskLevelAfterKeyVersion,
     String? notesEncrypted,
     int? notesKeyVersion,
-    required _i5.SyncStatus syncStatus,
+    required _i4.SyncStatus syncStatus,
     _i3.ArrivalMethod? arrivalMethod,
     required _i1.UuidValue localId,
     DateTime? syncAt,
@@ -311,8 +333,10 @@ class _VisitImpl extends Visit {
          startedAt: startedAt,
          completedAt: completedAt,
          status: status,
-         riskLevelBefore: riskLevelBefore,
-         riskLevelAfter: riskLevelAfter,
+         riskLevelBeforeEncrypted: riskLevelBeforeEncrypted,
+         riskLevelBeforeKeyVersion: riskLevelBeforeKeyVersion,
+         riskLevelAfterEncrypted: riskLevelAfterEncrypted,
+         riskLevelAfterKeyVersion: riskLevelAfterKeyVersion,
          notesEncrypted: notesEncrypted,
          notesKeyVersion: notesKeyVersion,
          syncStatus: syncStatus,
@@ -336,11 +360,13 @@ class _VisitImpl extends Visit {
     Object? startedAt = _Undefined,
     Object? completedAt = _Undefined,
     String? status,
-    _i4.RiskLevel? riskLevelBefore,
-    Object? riskLevelAfter = _Undefined,
+    String? riskLevelBeforeEncrypted,
+    int? riskLevelBeforeKeyVersion,
+    String? riskLevelAfterEncrypted,
+    int? riskLevelAfterKeyVersion,
     String? notesEncrypted,
     int? notesKeyVersion,
-    _i5.SyncStatus? syncStatus,
+    _i4.SyncStatus? syncStatus,
     _i3.ArrivalMethod? arrivalMethod,
     _i1.UuidValue? localId,
     Object? syncAt = _Undefined,
@@ -358,10 +384,14 @@ class _VisitImpl extends Visit {
       startedAt: startedAt is DateTime? ? startedAt : this.startedAt,
       completedAt: completedAt is DateTime? ? completedAt : this.completedAt,
       status: status ?? this.status,
-      riskLevelBefore: riskLevelBefore ?? this.riskLevelBefore,
-      riskLevelAfter: riskLevelAfter is _i4.RiskLevel?
-          ? riskLevelAfter
-          : this.riskLevelAfter,
+      riskLevelBeforeEncrypted:
+          riskLevelBeforeEncrypted ?? this.riskLevelBeforeEncrypted,
+      riskLevelBeforeKeyVersion:
+          riskLevelBeforeKeyVersion ?? this.riskLevelBeforeKeyVersion,
+      riskLevelAfterEncrypted:
+          riskLevelAfterEncrypted ?? this.riskLevelAfterEncrypted,
+      riskLevelAfterKeyVersion:
+          riskLevelAfterKeyVersion ?? this.riskLevelAfterKeyVersion,
       notesEncrypted: notesEncrypted ?? this.notesEncrypted,
       notesKeyVersion: notesKeyVersion ?? this.notesKeyVersion,
       syncStatus: syncStatus ?? this.syncStatus,
@@ -425,19 +455,29 @@ class VisitUpdateTable extends _i1.UpdateTable<VisitTable> {
     value,
   );
 
-  _i1.ColumnValue<_i4.RiskLevel, _i4.RiskLevel> riskLevelBefore(
-    _i4.RiskLevel value,
-  ) => _i1.ColumnValue(
-    table.riskLevelBefore,
-    value,
-  );
+  _i1.ColumnValue<String, String> riskLevelBeforeEncrypted(String value) =>
+      _i1.ColumnValue(
+        table.riskLevelBeforeEncrypted,
+        value,
+      );
 
-  _i1.ColumnValue<_i4.RiskLevel, _i4.RiskLevel> riskLevelAfter(
-    _i4.RiskLevel? value,
-  ) => _i1.ColumnValue(
-    table.riskLevelAfter,
-    value,
-  );
+  _i1.ColumnValue<int, int> riskLevelBeforeKeyVersion(int value) =>
+      _i1.ColumnValue(
+        table.riskLevelBeforeKeyVersion,
+        value,
+      );
+
+  _i1.ColumnValue<String, String> riskLevelAfterEncrypted(String value) =>
+      _i1.ColumnValue(
+        table.riskLevelAfterEncrypted,
+        value,
+      );
+
+  _i1.ColumnValue<int, int> riskLevelAfterKeyVersion(int value) =>
+      _i1.ColumnValue(
+        table.riskLevelAfterKeyVersion,
+        value,
+      );
 
   _i1.ColumnValue<String, String> notesEncrypted(String value) =>
       _i1.ColumnValue(
@@ -450,8 +490,8 @@ class VisitUpdateTable extends _i1.UpdateTable<VisitTable> {
     value,
   );
 
-  _i1.ColumnValue<_i5.SyncStatus, _i5.SyncStatus> syncStatus(
-    _i5.SyncStatus value,
+  _i1.ColumnValue<_i4.SyncStatus, _i4.SyncStatus> syncStatus(
+    _i4.SyncStatus value,
   ) => _i1.ColumnValue(
     table.syncStatus,
     value,
@@ -519,15 +559,25 @@ class VisitTable extends _i1.Table<_i1.UuidValue?> {
       'status',
       this,
     );
-    riskLevelBefore = _i1.ColumnEnum(
-      'riskLevelBefore',
+    riskLevelBeforeEncrypted = _i1.ColumnString(
+      'riskLevelBeforeEncrypted',
       this,
-      _i1.EnumSerialization.byName,
+      hasDefault: true,
     );
-    riskLevelAfter = _i1.ColumnEnum(
-      'riskLevelAfter',
+    riskLevelBeforeKeyVersion = _i1.ColumnInt(
+      'riskLevelBeforeKeyVersion',
       this,
-      _i1.EnumSerialization.byName,
+      hasDefault: true,
+    );
+    riskLevelAfterEncrypted = _i1.ColumnString(
+      'riskLevelAfterEncrypted',
+      this,
+      hasDefault: true,
+    );
+    riskLevelAfterKeyVersion = _i1.ColumnInt(
+      'riskLevelAfterKeyVersion',
+      this,
+      hasDefault: true,
     );
     notesEncrypted = _i1.ColumnString(
       'notesEncrypted',
@@ -587,16 +637,23 @@ class VisitTable extends _i1.Table<_i1.UuidValue?> {
 
   late final _i1.ColumnString status;
 
-  late final _i1.ColumnEnum<_i4.RiskLevel> riskLevelBefore;
+  /// Risco antes e depois da visita, cifrados (INV-04, #75): nome do
+  /// RiskLevel com largura fixa, ver `encrypted_risk_level.dart`. O "depois"
+  /// ausente (visita não concluída) é cifrado também, com o mesmo tamanho.
+  late final _i1.ColumnString riskLevelBeforeEncrypted;
 
-  late final _i1.ColumnEnum<_i4.RiskLevel> riskLevelAfter;
+  late final _i1.ColumnInt riskLevelBeforeKeyVersion;
+
+  late final _i1.ColumnString riskLevelAfterEncrypted;
+
+  late final _i1.ColumnInt riskLevelAfterKeyVersion;
 
   /// JSON de Map<String, String>, cifrado. Ver patient.spy.yaml para o padrão.
   late final _i1.ColumnString notesEncrypted;
 
   late final _i1.ColumnInt notesKeyVersion;
 
-  late final _i1.ColumnEnum<_i5.SyncStatus> syncStatus;
+  late final _i1.ColumnEnum<_i4.SyncStatus> syncStatus;
 
   /// Como o check-in desta visita foi registrado (RF12, decisão §4). Default
   /// `manual` até a integração nativa de geofencing existir — hoje nenhum
@@ -621,8 +678,10 @@ class VisitTable extends _i1.Table<_i1.UuidValue?> {
     startedAt,
     completedAt,
     status,
-    riskLevelBefore,
-    riskLevelAfter,
+    riskLevelBeforeEncrypted,
+    riskLevelBeforeKeyVersion,
+    riskLevelAfterEncrypted,
+    riskLevelAfterKeyVersion,
     notesEncrypted,
     notesKeyVersion,
     syncStatus,

@@ -1,0 +1,9 @@
+### Quem emitiu um evento de telemetria (#83).
+###
+### `backend`: o próprio servidor, no ponto em que o fato acontece (alerta
+### disparado, alerta recebido). `acsApp`: o app do ACS, via `telemetry.ingest`.
+enum: TelemetrySource
+serialized: byName
+values:
+  - backend
+  - acsApp

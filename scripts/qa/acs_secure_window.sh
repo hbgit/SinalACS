@@ -18,7 +18,6 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$repo_root"
 export PATH="$PATH:$HOME/Android/Sdk/platform-tools:$HOME/flutter/bin"
 if [[ -f .env ]]; then set -a; source .env; set +a; fi
-: "${MQTT_ACS_PASSWORD:?exporte MQTT_ACS_PASSWORD ou rode ./scripts/dev/bootstrap_env.sh}"
 
 dev=emulator-5554
 pkg=br.com.prismrr.sinalacs.acs
@@ -50,8 +49,7 @@ trap limpar EXIT
 
 extra_gradle=()
 [[ "$captura" -eq 1 ]] && extra_gradle=(-Psinalacs.allowScreenCapture=true)
-if ! (cd apps/acs && flutter build apk --debug "${extra_gradle[@]}" \
-      --dart-define=SINALACS_MQTT_PASSWORD="$MQTT_ACS_PASSWORD" >"$log" 2>&1); then
+if ! (cd apps/acs && flutter build apk --debug "${extra_gradle[@]}" >"$log" 2>&1); then
   echo "erro: o build do APK falhou. Últimas linhas:" >&2
   tail -n 30 "$log" >&2
   exit 1

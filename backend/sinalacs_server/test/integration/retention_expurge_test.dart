@@ -1,7 +1,9 @@
 import 'package:serverpod/serverpod.dart';
 import 'package:sinalacs_server/src/application/retention/expurge_service.dart';
+import 'package:sinalacs_server/src/application/telemetry/telemetry_service.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_retention_store.dart';
+import 'package:sinalacs_server/src/infrastructure/database/orm_telemetry_store.dart';
 import 'package:test/test.dart';
 
 import '../support/health_data_fixtures.dart';
@@ -29,11 +31,13 @@ final _now = DateTime.utc(2026, 10, 7, 3, 30);
 final _cutoffAlerts = _now.subtract(const Duration(days: 730));
 final _cutoffVisits = _now.subtract(const Duration(days: 1825));
 final _cutoffTriage = _now.subtract(const Duration(days: 1825));
+final _cutoffTelemetry = _now.subtract(const Duration(days: 365));
 
 RetentionCutoffs get _cutoffs => RetentionCutoffs(
       alerts: _cutoffAlerts,
       visits: _cutoffVisits,
       triageSessions: _cutoffTriage,
+      telemetry: _cutoffTelemetry,
     );
 
 Future<void> _seed(Session session) async {
@@ -156,7 +160,6 @@ Future<void> _seed(Session session) async {
       patientId: UuidValue.fromString(_patientId),
       scheduledAt: _cutoffVisits.subtract(const Duration(days: 10)),
       status: 'agendada',
-      riskLevelBefore: RiskLevel.green,
       syncStatus: SyncStatus.synced,
       localId: UuidValue.fromString('00000000-0000-4000-8000-0000000000d1'),
       version: 1,
@@ -169,7 +172,6 @@ Future<void> _seed(Session session) async {
       scheduledAt: _now,
       completedAt: _now,
       status: 'realizada',
-      riskLevelBefore: RiskLevel.green,
       syncStatus: SyncStatus.synced,
       localId: UuidValue.fromString('00000000-0000-4000-8000-0000000000d2'),
       version: 1,
@@ -181,8 +183,6 @@ Future<void> _seed(Session session) async {
     session,
     TriageSession(
       patientId: UuidValue.fromString(_patientId),
-      resultRisk: RiskLevel.green,
-      resultDisplay: 'Verde',
       createdAt: _cutoffTriage.subtract(const Duration(days: 1)),
       deviceId: 'device-retencao',
     ),
@@ -191,8 +191,6 @@ Future<void> _seed(Session session) async {
     session,
     TriageSession(
       patientId: UuidValue.fromString(_patientId),
-      resultRisk: RiskLevel.yellow,
-      resultDisplay: 'Amarelo',
       createdAt: _now,
       deviceId: 'device-retencao',
     ),
@@ -232,6 +230,56 @@ void main() {
       expect(visita!.localId.uuid, '00000000-0000-4000-8000-0000000000d2');
     });
 
+    Future<void> gravarTelemetria(Session session) =>
+        OrmTelemetryStore(session).insertIgnoringDuplicates([
+          for (final (id, recebido) in [
+            ('00000000-0000-4000-8000-00000000f001',
+                _cutoffTelemetry.subtract(const Duration(days: 1))),
+            ('00000000-0000-4000-8000-00000000f002',
+                _cutoffTelemetry.add(const Duration(days: 1))),
+          ])
+            TelemetryRecord(
+              eventId: id,
+              eventName: 'sync_attempt',
+              source: TelemetrySource.acsApp,
+              occurredAt: recebido,
+              receivedAt: recebido,
+              appVersion: '1.0.0',
+              payload: const {},
+            ),
+        ]);
+
+    test('expurgo remove telemetria vencida e conta', () async {
+      final session = sessionBuilder.build();
+      await gravarTelemetria(session);
+
+      final counts = await OrmRetentionStore(session: () => session)
+          .purgeDue(_cutoffs);
+
+      expect(counts.telemetryEvents, 1);
+      final restantes = await session.db
+          .unsafeQuery('SELECT "eventId"::text FROM telemetry_events');
+      expect(restantes.single.first, '00000000-0000-4000-8000-00000000f002');
+    });
+
+    test('expurgo mantém telemetria no prazo', () async {
+      final session = sessionBuilder.build();
+      await gravarTelemetria(session);
+
+      final counts = await OrmRetentionStore(session: () => session)
+          .purgeDue(RetentionCutoffs(
+        alerts: _cutoffAlerts,
+        visits: _cutoffVisits,
+        triageSessions: _cutoffTriage,
+        telemetry: _now.subtract(const Duration(days: 36500)),
+      ));
+
+      expect(counts.telemetryEvents, 0);
+      final total = await session.db
+          .unsafeQuery('SELECT COUNT(*) FROM telemetry_events');
+      expect(total.single.first, 2);
+    });
+
     test('o corte sem nada vencido devolve contagens zeradas e não apaga nada',
         () async {
       final session = sessionBuilder.build();
@@ -241,6 +289,7 @@ void main() {
         alerts: _now.subtract(const Duration(days: 36500)),
         visits: _now.subtract(const Duration(days: 36500)),
         triageSessions: _now.subtract(const Duration(days: 36500)),
+        telemetry: _now.subtract(const Duration(days: 36500)),
       );
       final counts = await OrmRetentionStore(session: () => session)
           .purgeDue(futuro);

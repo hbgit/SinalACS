@@ -1,9 +1,12 @@
 import 'package:sinalacs_server/src/application/alerts/red_alert_service.dart';
 import 'package:sinalacs_server/src/application/audit/audit_trail.dart';
 import 'package:sinalacs_server/src/application/auth/development_auth_service.dart';
+import 'package:sinalacs_server/src/application/telemetry/telemetry_pseudonymizer.dart';
+import 'package:sinalacs_server/src/application/telemetry/telemetry_service.dart';
 import 'package:sinalacs_server/src/domain/entities/alert_delivery.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
 import 'package:test/test.dart';
+import 'package:uuid/uuid.dart';
 
 class FakeAlertPublisher implements AlertPublisher {
   final List<AlertDelivery> published = [];
@@ -18,10 +21,28 @@ class FakeAlertStore implements AlertStore {
   @override
   Future<void> save(AlertDelivery alert, {required String deviceId}) async => saved.add(alert);
 
+  /// Instantes que o fake devolve no ACK; o primeiro ACK de cada alerta vem
+  /// com `firstAcknowledgement`, os seguintes não (como o ORM sob a trava).
+  DateTime ackTriggeredAt = DateTime.utc(2026, 10, 25, 12);
+  DateTime ackAcknowledgedAt = DateTime.utc(2026, 10, 25, 12, 0, 4, 500);
+  final Set<String> acknowledged = {};
+
+  /// Desfecho imposto ao ACK (ex.: `alreadyResolved`, #86); nulo, o primeiro
+  /// ACK de cada alerta é `acknowledged` e os seguintes `alreadyAcknowledged`.
+  AlertAckOutcome? forcedOutcome;
+
   @override
-  Future<bool> acknowledge({required String alertId, required String acsId, required String microAreaId, required AuditEvent audit}) async {
-    audits.add(audit);
-    return true;
+  Future<AlertAckRecord?> acknowledge({required String alertId, required String acsId, required String microAreaId, required AuditEvent Function(AlertAckOutcome outcome) auditFor}) async {
+    final primeiro = acknowledged.add(alertId);
+    final outcome = forcedOutcome ??
+        (primeiro ? AlertAckOutcome.acknowledged : AlertAckOutcome.alreadyAcknowledged);
+    audits.add(auditFor(outcome));
+    return AlertAckRecord(
+      outcome: outcome,
+      triggeredAt: ackTriggeredAt,
+      acknowledgedAt: ackAcknowledgedAt,
+      firstAcknowledgement: primeiro,
+    );
   }
 
   final List<AuditEvent> audits = [];
@@ -40,9 +61,42 @@ class FakeAlertStore implements AlertStore {
 
   final Map<String, AlertStatusSnapshot> statusByPatient = {};
 
+  /// Última consulta de alertas abertos (#80): microárea e teto pedidos.
+  (String, int)? lastOpenQuery;
+  List<OpenAlertSnapshot> openAlerts = [];
+
+  @override
+  Future<List<OpenAlertSnapshot>> openInMicroArea(String microAreaId, {required int limit}) async {
+    lastOpenQuery = (microAreaId, limit);
+    return openAlerts;
+  }
+
   @override
   Future<AlertStatusSnapshot?> latestForPatient(String patientId) async =>
       statusByPatient[patientId];
+
+  /// Desfecho que o "banco" decide para o próximo `resolve` (#76).
+  AlertResolveOutcome resolveOutcome = AlertResolveOutcome.resolved;
+  final List<({String alertId, String microAreaId, DateTime now})> resolveCalls = [];
+
+  @override
+  Future<AlertResolveAttempt> resolve({
+    required String alertId,
+    required String microAreaId,
+    required DateTime now,
+    required AuditEvent Function(AlertResolveOutcome outcome) auditFor,
+  }) async {
+    resolveCalls.add((alertId: alertId, microAreaId: microAreaId, now: now));
+    // Mesma regra do store real: inexistente/fora do território não grava.
+    if (resolveOutcome != AlertResolveOutcome.notFound) {
+      audits.add(auditFor(resolveOutcome));
+    }
+    final carimbo = switch (resolveOutcome) {
+      AlertResolveOutcome.resolved || AlertResolveOutcome.alreadyResolved => now,
+      _ => null,
+    };
+    return AlertResolveAttempt(resolveOutcome, resolvedAt: carimbo);
+  }
 }
 
 
@@ -86,6 +140,25 @@ class FakeAlertOutbox implements AlertOutbox {
     DateTime nextAttemptAt,
   ) async =>
       failures[entryId] = error;
+}
+
+class _RecordingTelemetryStore implements TelemetryStore {
+  final List<TelemetryRecord> records = [];
+
+  @override
+  Future<Set<String>> insertIgnoringDuplicates(
+    List<TelemetryRecord> batch,
+  ) async {
+    records.addAll(batch);
+    return {for (final r in batch) r.eventId};
+  }
+}
+
+class _ThrowingTelemetryStore implements TelemetryStore {
+  @override
+  Future<Set<String>> insertIgnoringDuplicates(
+    List<TelemetryRecord> batch,
+  ) async => throw StateError('telemetria fora do ar');
 }
 
 void main() {
@@ -204,6 +277,114 @@ void main() {
     );
   });
 
+  group('resolve (#76)', () {
+    const acs = AuthenticatedUser(
+      id: 'acs-001',
+      role: UserRole.acs,
+      microAreaId: 'area-12',
+      deviceId: 'device-001',
+    );
+    final agora = DateTime.utc(2026, 10, 16, 14);
+
+    RedAlertService servico(FakeAlertStore store) => RedAlertService(
+          store: store,
+          outbox: FakeAlertOutbox(),
+          clock: () => agora,
+        );
+
+    test('conclui no território do token e audita resolved', () async {
+      final store = FakeAlertStore();
+
+      final r = await servico(store).resolve(user: acs, alertId: 'alerta-1');
+
+      expect(r.outcome, AlertResolveOutcome.resolved);
+      expect(r.resolvedAt, agora);
+      expect(store.resolveCalls.single.microAreaId, 'area-12');
+      expect(store.resolveCalls.single.now, agora);
+      final audit = store.audits.single;
+      expect(audit.userId, 'acs-001');
+      expect(audit.actionType, 'write');
+      expect(audit.resourceType, 'alert');
+      expect(audit.resourceId, 'alerta-1');
+      expect(audit.result, 'resolved');
+    });
+
+    test('repetir a conclusão é idempotente e audita already_resolved', () async {
+      final store = FakeAlertStore()..resolveOutcome = AlertResolveOutcome.alreadyResolved;
+
+      final r = await servico(store).resolve(user: acs, alertId: 'alerta-1');
+
+      expect(r.outcome, AlertResolveOutcome.alreadyResolved);
+      expect(store.audits.single.result, 'already_resolved');
+    });
+
+    test('alerta ainda pending é recusado com a mensagem e a recusa é auditada', () async {
+      final store = FakeAlertStore()..resolveOutcome = AlertResolveOutcome.notAcknowledged;
+
+      await expectLater(
+        servico(store).resolve(user: acs, alertId: 'alerta-1'),
+        throwsA(isA<ArgumentError>().having(
+          (e) => e.message,
+          'message',
+          RedAlertService.notAcknowledgedMessage,
+        )),
+      );
+      expect(store.audits.single.result, 'denied_not_acknowledged');
+    });
+
+    test('alerta inexistente ou de outra microárea devolve notFound sem auditar', () async {
+      final store = FakeAlertStore()..resolveOutcome = AlertResolveOutcome.notFound;
+
+      final r = await servico(store).resolve(user: acs, alertId: 'alerta-1');
+
+      expect(r.outcome, AlertResolveOutcome.notFound);
+      expect(r.resolvedAt, isNull);
+      expect(store.audits, isEmpty);
+    });
+
+    test('paciente não conclui atendimento', () async {
+      final store = FakeAlertStore();
+      const paciente = AuthenticatedUser(
+        id: 'paciente-1',
+        role: UserRole.patient,
+        microAreaId: 'area-12',
+        deviceId: 'device-1',
+      );
+
+      await expectLater(
+        servico(store).resolve(user: paciente, alertId: 'alerta-1'),
+        throwsA(isA<StateError>()),
+      );
+      expect(store.resolveCalls, isEmpty);
+    });
+
+    test('ACS sem microárea não conclui atendimento', () async {
+      final store = FakeAlertStore();
+      const semArea = AuthenticatedUser(
+        id: 'acs-002',
+        role: UserRole.acs,
+        microAreaId: null,
+        deviceId: 'device-2',
+      );
+
+      await expectLater(
+        servico(store).resolve(user: semArea, alertId: 'alerta-1'),
+        throwsA(isA<StateError>()),
+      );
+      expect(store.resolveCalls, isEmpty);
+    });
+
+    test('identificador vazio é recusado antes do store', () async {
+      final store = FakeAlertStore();
+
+      await expectLater(
+        servico(store).resolve(user: acs, alertId: '  '),
+        throwsA(isA<ArgumentError>()),
+      );
+      expect(store.resolveCalls, isEmpty);
+    });
+  });
+
   group('statusFor (RF05)', () {
     test('devolve o status guardado para o paciente do token, não por parâmetro', () async {
       final store = FakeAlertStore()
@@ -273,7 +454,7 @@ void main() {
         alertId: 'alerta-1',
       );
 
-      expect(ok, isTrue);
+      expect(ok, AlertStatus.acknowledged);
       final e = store.audits.single;
       expect(
         [e.userId, e.actionType, e.resourceType, e.resourceId, e.result],
@@ -298,7 +479,7 @@ void main() {
           alertId: 'alerta-1',
         );
 
-        expect(ok, isTrue);
+        expect(ok, AlertStatus.acknowledged);
         final e = store.audits.single;
         expect(
           [e.userId, e.actionType, e.resourceType, e.resourceId, e.result],
@@ -306,5 +487,226 @@ void main() {
         );
       },
     );
+
+    test('ACK sobre alerta concluído devolve resolved e audita ack_already_resolved (#86)', () async {
+      final store = FakeAlertStore()..forcedOutcome = AlertAckOutcome.alreadyResolved;
+      final service = RedAlertService(store: store, outbox: FakeAlertOutbox());
+
+      final status = await service.acknowledge(
+        user: const AuthenticatedUser(
+          id: 'acs-1',
+          role: UserRole.acs,
+          microAreaId: 'area-1',
+          deviceId: 'device-1',
+        ),
+        alertId: 'alerta-1',
+      );
+
+      expect(status, AlertStatus.resolved);
+      expect(store.audits.single.result, 'ack_already_resolved');
+    });
+
+    test('ACK de outro ACS sobre alerta já confirmado é idempotente e audita com o userId dele (#88)', () async {
+      final store = FakeAlertStore();
+      final service = RedAlertService(store: store, outbox: FakeAlertOutbox());
+      const a = AuthenticatedUser(id: 'acs-a', role: UserRole.acs, microAreaId: 'area-1', deviceId: 'd-a');
+      const b = AuthenticatedUser(id: 'acs-b', role: UserRole.acs, microAreaId: 'area-1', deviceId: 'd-b');
+
+      await service.acknowledge(user: a, alertId: 'alerta-1');
+      final status = await service.acknowledge(user: b, alertId: 'alerta-1');
+
+      expect(status, AlertStatus.acknowledged);
+      expect(
+        store.audits.map((e) => (e.userId, e.result)).toList(),
+        [('acs-a', 'acknowledged'), ('acs-b', 'ack_already_acknowledged')],
+      );
+    });
+
+    test('ACK por MQTT de alerta concluído audita ack_already_resolved_mqtt (#86)', () async {
+      final store = FakeAlertStore()..forcedOutcome = AlertAckOutcome.alreadyResolved;
+      final service = RedAlertService(store: store, outbox: FakeAlertOutbox());
+
+      final status = await service.acknowledge(
+        user: const AuthenticatedUser(
+          id: 'acs-1',
+          role: UserRole.acs,
+          microAreaId: 'area-1',
+          deviceId: RedAlertService.mqttAckDeviceId,
+        ),
+        alertId: 'alerta-1',
+      );
+
+      expect(status, AlertStatus.resolved);
+      expect(store.audits.single.result, 'ack_already_resolved_mqtt');
+    });
+
+    test('ACK repetido devolve acknowledged e audita ack_already_acknowledged (#86)', () async {
+      final store = FakeAlertStore();
+      final service = RedAlertService(store: store, outbox: FakeAlertOutbox());
+      const acs = AuthenticatedUser(id: 'acs-1', role: UserRole.acs, microAreaId: 'area-1', deviceId: 'device-1');
+
+      await service.acknowledge(user: acs, alertId: 'alerta-1');
+      final status = await service.acknowledge(user: acs, alertId: 'alerta-1');
+
+      expect(status, AlertStatus.acknowledged);
+      expect(store.audits.map((e) => e.result), ['acknowledged', 'ack_already_acknowledged']);
+    });
   });
+
+  group('openForAcs (#80)', () {
+    const acs = AuthenticatedUser(id: 'acs-001', role: UserRole.acs, microAreaId: 'area-12', deviceId: 'device-001');
+
+    test('lista pela microárea do token e com o teto de 200', () async {
+      final store = FakeAlertStore();
+      final aberto = OpenAlertSnapshot(
+        alertId: 'alerta-1',
+        patientId: 'patient-001',
+        microAreaId: 'area-12',
+        riskLevel: RiskLevel.red,
+        locationHash: '6gyf4bf',
+        triggeredAt: DateTime.utc(2026, 10, 17, 12),
+        status: AlertStatus.pending,
+        escalated: false,
+      );
+      store.openAlerts = [aberto];
+      final service = RedAlertService(store: store, outbox: FakeAlertOutbox());
+
+      final lista = await service.openForAcs(user: acs);
+
+      expect(store.lastOpenQuery, ('area-12', 200));
+      expect(RedAlertService.openAlertsLimit, 200);
+      expect(lista, [aberto]);
+    });
+
+    test('paciente não lista alertas da microárea', () async {
+      final store = FakeAlertStore();
+      final service = RedAlertService(store: store, outbox: FakeAlertOutbox());
+
+      expect(() => service.openForAcs(user: patient), throwsA(isA<StateError>()));
+      expect(store.lastOpenQuery, isNull);
+    });
+
+    test('ACS sem microárea é recusado', () async {
+      final store = FakeAlertStore();
+      final service = RedAlertService(store: store, outbox: FakeAlertOutbox());
+      const semArea = AuthenticatedUser(id: 'acs-002', role: UserRole.acs, microAreaId: null, deviceId: 'device-002');
+
+      expect(() => service.openForAcs(user: semArea), throwsA(isA<StateError>()));
+      expect(store.lastOpenQuery, isNull);
+    });
+  });
+  group('telemetria alert_received_acs (#83)', () {
+    const alertId = '00000000-0000-4000-8000-0000000000c1';
+    const acsId = '00000000-0000-4000-8000-0000000000c2';
+    final pseudonymizer = TelemetryPseudonymizer('chave-de-teste-do-pseudonimo');
+
+    AuthenticatedUser acsPor(String deviceId) => AuthenticatedUser(
+          id: acsId,
+          role: UserRole.acs,
+          microAreaId: 'area-1',
+          deviceId: deviceId,
+        );
+
+    late FakeAlertStore store;
+    late _RecordingTelemetryStore telemetria;
+    late RedAlertService service;
+
+    setUp(() {
+      store = FakeAlertStore();
+      telemetria = _RecordingTelemetryStore();
+      service = RedAlertService(
+        store: store,
+        outbox: FakeAlertOutbox(),
+        telemetry: TelemetryService(store: telemetria, pseudonymizer: pseudonymizer),
+      );
+    });
+
+    test('primeiro ACK emite alert_received_acs com latency_ms', () async {
+      final ok = await service.acknowledge(user: acsPor('device-1'), alertId: alertId);
+
+      expect(ok, AlertStatus.acknowledged);
+      final r = telemetria.records.single;
+      expect(r.eventName, 'alert_received_acs');
+      expect(
+        r.eventId,
+        const Uuid().v5(TelemetryService.telemetryNamespace, 'alert_received_acs:$alertId'),
+      );
+      expect(r.source, TelemetrySource.backend);
+      expect(r.occurredAt, store.ackAcknowledgedAt);
+      expect(r.actorId, acsId);
+      expect(r.alertId, alertId);
+      expect(r.patientPseudonym, isNull);
+      expect(r.appVersion, TelemetryService.backendVersion);
+      expect(r.payload, {'latency_ms': 4500, 'channel': 'rpc'});
+    });
+
+    test('ACK repetido não emite', () async {
+      await service.acknowledge(user: acsPor('device-1'), alertId: alertId);
+      await service.acknowledge(user: acsPor('device-1'), alertId: alertId);
+
+      expect(store.audits, hasLength(2));
+      expect(telemetria.records, hasLength(1));
+    });
+
+    test('ACK sobre concluído não emite alert_received_acs (#86)', () async {
+      await service.acknowledge(user: acsPor('device-1'), alertId: alertId);
+      store.forcedOutcome = AlertAckOutcome.alreadyResolved;
+
+      final status = await service.acknowledge(user: acsPor('device-1'), alertId: alertId);
+
+      expect(status, AlertStatus.resolved);
+      expect(telemetria.records, hasLength(1));
+    });
+
+    test('ACK por MQTT marca channel mqtt', () async {
+      await service.acknowledge(
+        user: acsPor(RedAlertService.mqttAckDeviceId),
+        alertId: alertId,
+      );
+
+      expect(telemetria.records.single.payload['channel'], 'mqtt');
+    });
+
+    test('latency_ms tem piso 0 com relógio adiantado no disparo', () async {
+      store.ackTriggeredAt = store.ackAcknowledgedAt.add(const Duration(seconds: 2));
+
+      await service.acknowledge(user: acsPor('device-1'), alertId: alertId);
+
+      expect(telemetria.records.single.payload['latency_ms'], 0);
+    });
+
+    test('ACK conclui com a telemetria fora', () async {
+      final quebrado = RedAlertService(
+        store: store,
+        outbox: FakeAlertOutbox(),
+        telemetry: TelemetryService(
+          store: _ThrowingTelemetryStore(),
+          pseudonymizer: pseudonymizer,
+        ),
+      );
+
+      expect(
+        await quebrado.acknowledge(user: acsPor('device-1'), alertId: alertId),
+        AlertStatus.acknowledged,
+      );
+    });
+
+    test('alerta não encontrado não emite', () async {
+      final vazio = _NotFoundAckStore();
+      final s = RedAlertService(
+        store: vazio,
+        outbox: FakeAlertOutbox(),
+        telemetry: TelemetryService(store: telemetria, pseudonymizer: pseudonymizer),
+      );
+
+      expect(await s.acknowledge(user: acsPor('device-1'), alertId: alertId), isNull);
+      expect(telemetria.records, isEmpty);
+    });
+  });
+}
+
+class _NotFoundAckStore extends FakeAlertStore {
+  @override
+  Future<AlertAckRecord?> acknowledge({required String alertId, required String acsId, required String microAreaId, required AuditEvent Function(AlertAckOutcome outcome) auditFor}) async =>
+      null;
 }

@@ -282,7 +282,7 @@ CREATE TABLE IF NOT EXISTS offline_visits (
       );
       expect(novas, hasLength(2));
       expect(await atual.query('offline_visits'), hasLength(1));
-      expect(EncryptedLocalDatabase.schemaVersion, 7);
+      expect(EncryptedLocalDatabase.schemaVersion, 9);
       await atual.close();
     });
 
@@ -402,12 +402,130 @@ CREATE TABLE offline_visits (
         passphrase: chave,
         allowUnencryptedForTesting: true,
       );
-      expect(EncryptedLocalDatabase.schemaVersion, 7);
+      expect(EncryptedLocalDatabase.schemaVersion, 9);
       final colunas = [
         for (final row in await atual.rawQuery('PRAGMA table_info(offline_visits)'))
           row['name']! as String,
       ];
       expect(colunas, contains('owner'));
+      await atual.close();
+    });
+
+    test('migração v7 → v8 preserva linhas e acrescenta as colunas de conflito', () async {
+      sqfliteFfiInit();
+      final legado = await databaseFactoryFfi.openDatabase(
+        await EncryptedLocalDatabase.pathFor(nome),
+        options: OpenDatabaseOptions(
+          version: 7,
+          onCreate: (db, version) async {
+            await db.execute('''
+CREATE TABLE offline_visits (
+  local_id TEXT PRIMARY KEY, patient_id TEXT NOT NULL, risk TEXT NOT NULL,
+  status TEXT NOT NULL, outcome TEXT NOT NULL, notes TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL, version INTEGER NOT NULL, rejection_reason TEXT,
+  owner TEXT
+)''');
+          },
+        ),
+      );
+      for (final (id, dono) in [('local-v7-dono', 'acs-a'), ('local-v7-legada', null)]) {
+        await legado.insert('offline_visits', {
+          'local_id': id,
+          'patient_id': seedPatientId,
+          'risk': 'red',
+          'status': 'PENDENTE',
+          'outcome': '',
+          'notes': 'obs $id',
+          'created_at': DateTime.utc(2026).toIso8601String(),
+          'version': 2,
+          'owner': dono,
+        });
+      }
+      await legado.close();
+
+      final atual = await EncryptedLocalDatabase.open(
+        databaseName: nome,
+        passphrase: chave,
+        allowUnencryptedForTesting: true,
+      );
+      final linhas = await atual.query('offline_visits', orderBy: 'local_id');
+      expect(linhas.map((l) => l['local_id']), ['local-v7-dono', 'local-v7-legada']);
+      expect(linhas.map((l) => l['owner']), ['acs-a', null]);
+      expect(linhas.map((l) => l['notes']), ['obs local-v7-dono', 'obs local-v7-legada']);
+      for (final linha in linhas) {
+        expect(linha['conflict_server_version'], isNull);
+        expect(linha['conflict_server_snapshot'], isNull);
+      }
+      await atual.close();
+    });
+
+    test('migração v8 → v9 preserva offline_visits e cria telemetry_events', () async {
+      sqfliteFfiInit();
+      final legado = await databaseFactoryFfi.openDatabase(
+        await EncryptedLocalDatabase.pathFor(nome),
+        options: OpenDatabaseOptions(
+          version: 8,
+          onCreate: (db, version) async {
+            await db.execute(EncryptedLocalDatabase.createOfflineVisits);
+          },
+        ),
+      );
+      await legado.insert('offline_visits', {
+        'local_id': 'local-v8',
+        'patient_id': seedPatientId,
+        'risk': 'red',
+        'status': 'PENDENTE',
+        'outcome': '',
+        'notes': 'obs v8',
+        'created_at': DateTime.utc(2026).toIso8601String(),
+        'version': 2,
+        'owner': 'acs-a',
+      });
+      await legado.close();
+
+      final atual = await EncryptedLocalDatabase.open(
+        databaseName: nome,
+        passphrase: chave,
+        allowUnencryptedForTesting: true,
+      );
+      final linhas = await atual.query('offline_visits');
+      expect(linhas.single['local_id'], 'local-v8');
+      expect(linhas.single['notes'], 'obs v8');
+      final colunas = [
+        for (final row in await atual.rawQuery('PRAGMA table_info(telemetry_events)')) row['name']! as String,
+      ];
+      expect(colunas, ['event_id', 'owner', 'name', 'occurred_at', 'payload']);
+      final indice = await atual.rawQuery(
+        "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'telemetry_events_owner_idx'",
+      );
+      expect(indice, hasLength(1));
+      await atual.close();
+    });
+
+    test('onCreate v9 tem telemetry_events e o índice por dono', () async {
+      final atual = await EncryptedLocalDatabase.open(
+        databaseName: nome,
+        passphrase: chave,
+        allowUnencryptedForTesting: true,
+      );
+      final achados = await atual.rawQuery(
+        "SELECT name FROM sqlite_master WHERE name IN ('telemetry_events','telemetry_events_owner_idx')",
+      );
+      expect(achados, hasLength(2));
+      await atual.close();
+    });
+
+    test('onCreate v8 tem as colunas de conflito', () async {
+      final atual = await EncryptedLocalDatabase.open(
+        databaseName: nome,
+        passphrase: chave,
+        allowUnencryptedForTesting: true,
+      );
+      final colunas = [
+        for (final row in await atual.rawQuery('PRAGMA table_info(offline_visits)'))
+          row['name']! as String,
+      ];
+      expect(colunas, containsAll(['conflict_server_version', 'conflict_server_snapshot']));
       await atual.close();
     });
   });

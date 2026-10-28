@@ -219,6 +219,34 @@ void main() {
       expect(report.remaining, 1);
     });
 
+    test('envio diferido não manda nem apaga visita em conflito', () async {
+      // #79, D6: só o dono, presente, decide o conflito.
+      final conflito = visita('a-conflito').copyWith(
+        conflictServerVersion: 3,
+        conflictServer: const VisitConflictSnapshot(version: 3, status: 'Paciente ausente', notes: ''),
+      );
+      await storage.forOwner(acsA).save([conflito, visita('a-1', n: 2)]);
+      await tokens.write(acsA, 'upload-a');
+
+      final report = await servico().flushAll();
+
+      expect([for (final e in backend.deferredBatches.single.visits) e.localId], ['a-1'],
+          reason: 'a visita em conflito não entra no lote');
+      final restantes = await storage.forOwner(acsA).load();
+      expect(ids(restantes), ['a-conflito']);
+      expect(restantes.single.conflictServerVersion, 3);
+      expect(restantes.single.conflictServer?.status, 'Paciente ausente');
+      expect(backend.revokedUploadTokens, isEmpty, reason: 'a linha em conflito mantém o token do dono vivo');
+      expect(await tokens.read(acsA), 'upload-a');
+      expect(report.sent, 1);
+      expect(report.remaining, 1);
+
+      // Segunda execução: o conflito continua sem sair.
+      await servico().flushAll();
+      expect(backend.deferredBatches, hasLength(1));
+      expect(ids(await storage.forOwner(acsA).load()), ['a-conflito']);
+    });
+
     test('erro de rede no meio: nada é apagado; o próximo flushAll reenvia o mesmo localId (idempotente)', () async {
       await storage.forOwner(acsA).save([visita('a-1'), visita('a-2')]);
       await tokens.write(acsA, 'upload-a');
@@ -465,6 +493,9 @@ class _RemocaoLegadaFalhaUmaVez implements VisitStorage {
 
   @override
   Future<void> wipeAllData() => _inner.wipeAllData();
+
+  @override
+  Future<void> destroyAll() => _inner.destroyAll();
 }
 
 class _LegadoFalha implements LegacyVisitStore {
@@ -505,6 +536,9 @@ class _GravacaoDoDonoFalhaUmaVez implements VisitStorage {
 
   @override
   Future<void> wipeAllData() => _inner.wipeAllData();
+
+  @override
+  Future<void> destroyAll() => _inner.destroyAll();
 }
 
 class _DonoFalha implements VisitStore {

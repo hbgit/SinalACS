@@ -12,9 +12,8 @@
 // ignore_for_file: no_leading_underscores_for_library_prefixes
 
 import 'package:serverpod/serverpod.dart' as _i1;
-import 'enums/risk_level.dart' as _i2;
 
-/// Sessão de triagem estruturada. resultRisk é produzido pelo TriageEngine
+/// Sessão de triagem estruturada. O risco é produzido pelo TriageEngine
 /// de forma determinística e não é editável (INV-02).
 abstract class TriageSession
     implements _i1.TableRow<_i1.UuidValue?>, _i1.ProtocolSerialization {
@@ -23,20 +22,22 @@ abstract class TriageSession
     required this.patientId,
     String? answersEncrypted,
     int? answersKeyVersion,
-    required this.resultRisk,
-    required this.resultDisplay,
+    String? resultRiskEncrypted,
+    int? resultRiskKeyVersion,
     required this.createdAt,
     required this.deviceId,
   }) : answersEncrypted = answersEncrypted ?? '',
-       answersKeyVersion = answersKeyVersion ?? 1;
+       answersKeyVersion = answersKeyVersion ?? 1,
+       resultRiskEncrypted = resultRiskEncrypted ?? '',
+       resultRiskKeyVersion = resultRiskKeyVersion ?? 1;
 
   factory TriageSession({
     _i1.UuidValue? id,
     required _i1.UuidValue patientId,
     String? answersEncrypted,
     int? answersKeyVersion,
-    required _i2.RiskLevel resultRisk,
-    required String resultDisplay,
+    String? resultRiskEncrypted,
+    int? resultRiskKeyVersion,
     required DateTime createdAt,
     required String deviceId,
   }) = _TriageSessionImpl;
@@ -51,10 +52,8 @@ abstract class TriageSession
       ),
       answersEncrypted: jsonSerialization['answersEncrypted'] as String?,
       answersKeyVersion: jsonSerialization['answersKeyVersion'] as int?,
-      resultRisk: _i2.RiskLevel.fromJson(
-        (jsonSerialization['resultRisk'] as String),
-      ),
-      resultDisplay: jsonSerialization['resultDisplay'] as String,
+      resultRiskEncrypted: jsonSerialization['resultRiskEncrypted'] as String?,
+      resultRiskKeyVersion: jsonSerialization['resultRiskKeyVersion'] as int?,
       createdAt: _i1.DateTimeJsonExtension.fromJson(
         jsonSerialization['createdAt'],
       ),
@@ -76,9 +75,12 @@ abstract class TriageSession
 
   int answersKeyVersion;
 
-  _i2.RiskLevel resultRisk;
+  /// Classificação do TriageEngine, cifrada (INV-04, #75): nome do RiskLevel
+  /// com largura fixa, ver `encrypted_risk_level.dart`. O rótulo de tela
+  /// (`resultDisplay`) deixou de ser persistido: era derivado do risco.
+  String resultRiskEncrypted;
 
-  String resultDisplay;
+  int resultRiskKeyVersion;
 
   DateTime createdAt;
 
@@ -95,8 +97,8 @@ abstract class TriageSession
     _i1.UuidValue? patientId,
     String? answersEncrypted,
     int? answersKeyVersion,
-    _i2.RiskLevel? resultRisk,
-    String? resultDisplay,
+    String? resultRiskEncrypted,
+    int? resultRiskKeyVersion,
     DateTime? createdAt,
     String? deviceId,
   });
@@ -108,8 +110,8 @@ abstract class TriageSession
       'patientId': patientId.toJson(),
       'answersEncrypted': answersEncrypted,
       'answersKeyVersion': answersKeyVersion,
-      'resultRisk': resultRisk.toJson(),
-      'resultDisplay': resultDisplay,
+      'resultRiskEncrypted': resultRiskEncrypted,
+      'resultRiskKeyVersion': resultRiskKeyVersion,
       'createdAt': createdAt.toJson(),
       'deviceId': deviceId,
     };
@@ -123,8 +125,8 @@ abstract class TriageSession
       'patientId': patientId.toJson(),
       'answersEncrypted': answersEncrypted,
       'answersKeyVersion': answersKeyVersion,
-      'resultRisk': resultRisk.toJson(),
-      'resultDisplay': resultDisplay,
+      'resultRiskEncrypted': resultRiskEncrypted,
+      'resultRiskKeyVersion': resultRiskKeyVersion,
       'createdAt': createdAt.toJson(),
       'deviceId': deviceId,
     };
@@ -168,8 +170,8 @@ class _TriageSessionImpl extends TriageSession {
     required _i1.UuidValue patientId,
     String? answersEncrypted,
     int? answersKeyVersion,
-    required _i2.RiskLevel resultRisk,
-    required String resultDisplay,
+    String? resultRiskEncrypted,
+    int? resultRiskKeyVersion,
     required DateTime createdAt,
     required String deviceId,
   }) : super._(
@@ -177,8 +179,8 @@ class _TriageSessionImpl extends TriageSession {
          patientId: patientId,
          answersEncrypted: answersEncrypted,
          answersKeyVersion: answersKeyVersion,
-         resultRisk: resultRisk,
-         resultDisplay: resultDisplay,
+         resultRiskEncrypted: resultRiskEncrypted,
+         resultRiskKeyVersion: resultRiskKeyVersion,
          createdAt: createdAt,
          deviceId: deviceId,
        );
@@ -192,8 +194,8 @@ class _TriageSessionImpl extends TriageSession {
     _i1.UuidValue? patientId,
     String? answersEncrypted,
     int? answersKeyVersion,
-    _i2.RiskLevel? resultRisk,
-    String? resultDisplay,
+    String? resultRiskEncrypted,
+    int? resultRiskKeyVersion,
     DateTime? createdAt,
     String? deviceId,
   }) {
@@ -202,8 +204,8 @@ class _TriageSessionImpl extends TriageSession {
       patientId: patientId ?? this.patientId,
       answersEncrypted: answersEncrypted ?? this.answersEncrypted,
       answersKeyVersion: answersKeyVersion ?? this.answersKeyVersion,
-      resultRisk: resultRisk ?? this.resultRisk,
-      resultDisplay: resultDisplay ?? this.resultDisplay,
+      resultRiskEncrypted: resultRiskEncrypted ?? this.resultRiskEncrypted,
+      resultRiskKeyVersion: resultRiskKeyVersion ?? this.resultRiskKeyVersion,
       createdAt: createdAt ?? this.createdAt,
       deviceId: deviceId ?? this.deviceId,
     );
@@ -231,18 +233,16 @@ class TriageSessionUpdateTable extends _i1.UpdateTable<TriageSessionTable> {
     value,
   );
 
-  _i1.ColumnValue<_i2.RiskLevel, _i2.RiskLevel> resultRisk(
-    _i2.RiskLevel value,
-  ) => _i1.ColumnValue(
-    table.resultRisk,
-    value,
-  );
-
-  _i1.ColumnValue<String, String> resultDisplay(String value) =>
+  _i1.ColumnValue<String, String> resultRiskEncrypted(String value) =>
       _i1.ColumnValue(
-        table.resultDisplay,
+        table.resultRiskEncrypted,
         value,
       );
+
+  _i1.ColumnValue<int, int> resultRiskKeyVersion(int value) => _i1.ColumnValue(
+    table.resultRiskKeyVersion,
+    value,
+  );
 
   _i1.ColumnValue<DateTime, DateTime> createdAt(DateTime value) =>
       _i1.ColumnValue(
@@ -274,14 +274,15 @@ class TriageSessionTable extends _i1.Table<_i1.UuidValue?> {
       this,
       hasDefault: true,
     );
-    resultRisk = _i1.ColumnEnum(
-      'resultRisk',
+    resultRiskEncrypted = _i1.ColumnString(
+      'resultRiskEncrypted',
       this,
-      _i1.EnumSerialization.byName,
+      hasDefault: true,
     );
-    resultDisplay = _i1.ColumnString(
-      'resultDisplay',
+    resultRiskKeyVersion = _i1.ColumnInt(
+      'resultRiskKeyVersion',
       this,
+      hasDefault: true,
     );
     createdAt = _i1.ColumnDateTime(
       'createdAt',
@@ -302,9 +303,12 @@ class TriageSessionTable extends _i1.Table<_i1.UuidValue?> {
 
   late final _i1.ColumnInt answersKeyVersion;
 
-  late final _i1.ColumnEnum<_i2.RiskLevel> resultRisk;
+  /// Classificação do TriageEngine, cifrada (INV-04, #75): nome do RiskLevel
+  /// com largura fixa, ver `encrypted_risk_level.dart`. O rótulo de tela
+  /// (`resultDisplay`) deixou de ser persistido: era derivado do risco.
+  late final _i1.ColumnString resultRiskEncrypted;
 
-  late final _i1.ColumnString resultDisplay;
+  late final _i1.ColumnInt resultRiskKeyVersion;
 
   late final _i1.ColumnDateTime createdAt;
 
@@ -316,8 +320,8 @@ class TriageSessionTable extends _i1.Table<_i1.UuidValue?> {
     patientId,
     answersEncrypted,
     answersKeyVersion,
-    resultRisk,
-    resultDisplay,
+    resultRiskEncrypted,
+    resultRiskKeyVersion,
     createdAt,
     deviceId,
   ];

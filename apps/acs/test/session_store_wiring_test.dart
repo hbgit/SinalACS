@@ -25,16 +25,101 @@ void main() {
     expect(fonte, contains('connectivityChanges: Connectivity()'));
   });
 
+  test('o main.dart liga a sonda de rede real da telemetria (#83)', () {
+    final fonte = File('lib/main.dart').readAsStringSync();
+    expect(fonte, contains('networkProbe: connectivityProbe()'));
+  });
+
+  test('o app liga a telemetria ao SQLCipher das visitas e ao BackendClient por padrão (#83)', () {
+    final fonte = File('lib/app/app.dart').readAsStringSync();
+    expect(fonte, contains('final SqlCipherVisitStorage sqlcipher => SqlCipherTelemetryStore(sqlcipher.database)'));
+    expect(fonte, contains('final TelemetryTransport transport => transport'));
+    expect(fonte, contains('if (telemetryStore is SqlCipherTelemetryStore) telemetryStore.seal();'));
+  });
+
+  test('o main.dart liga o diário da limpeza remota ao shared_preferences (#81)', () {
+    final fonte = File('lib/main.dart').readAsStringSync();
+    expect(fonte, contains('wipeJournal: SharedPreferencesWipeJournal()'));
+  });
+
+  test('main.dart liga SecureStorageDeviceCertificateStore; o enroller não importa dart:ui (#94)', () {
+    final fonte = File('lib/main.dart').readAsStringSync();
+    expect(fonte, contains('deviceCertificates: SecureStorageDeviceCertificateStore()'));
+    // O enroller fica na árvore do `backend_client.dart` (VM): nada de Flutter,
+    // nem a loja do Keystore, nem de forma transitiva.
+    const enroller = 'lib/core/services/device_certificate_enroller.dart';
+    expect(_importsProibidosAlcancaveis(enroller), isEmpty);
+    final imports = File(enroller).readAsLinesSync().where((l) => l.startsWith('import ')).join('\n');
+    expect(imports, isNot(contains('secure_device_certificate_store.dart')));
+    expect(_importsProibidosAlcancaveis('lib/core/security/device_certificate_store.dart'), isEmpty);
+  });
+
   test('o caminho importado pelo backend_client não puxa o Flutter', () {
     for (final arquivo in [
       'lib/core/security/session_token_store.dart',
       'lib/core/security/upload_token_store.dart',
       'lib/core/network/backend_client.dart',
+      // O envio da telemetria (#83) e o que ele importa.
+      'lib/core/telemetry/telemetry_uploader.dart',
+      'lib/core/telemetry/telemetry_store.dart',
+      'lib/core/telemetry/telemetry_event.dart',
+      'lib/core/telemetry/app_version.dart',
+      'lib/core/services/owner_id.dart',
     ]) {
       final imports = File(arquivo).readAsLinesSync().where((l) => l.startsWith('import ')).join('\n');
       expect(imports, isNot(contains('package:flutter')), reason: arquivo);
+      // A fila de visitas importa o gravador, e o gravador o connectivity_plus
+      // (Flutter): nenhum dos dois pode entrar por este caminho.
+      expect(imports, isNot(contains('offline_visit_queue.dart')), reason: arquivo);
+      expect(imports, isNot(contains('telemetry_recorder.dart')), reason: arquivo);
+      expect(imports, isNot(contains('network_probe.dart')), reason: arquivo);
+      expect(imports, isNot(contains('connectivity_plus')), reason: arquivo);
       expect(imports, isNot(contains('secure_session_token_store.dart')), reason: arquivo);
       expect(imports, isNot(contains('secure_upload_token_store.dart')), reason: arquivo);
     }
   });
+
+  // A fila de visitas importa o gravador da telemetria, e o `live_check` (VM,
+  // instrumento do RNF02) importa a fila. A sonda real (`connectivity_plus`)
+  // mora em `connectivity_network_probe.dart`, que só o app liga. A guarda
+  // segue os imports locais de forma transitiva: um import novo três arquivos
+  // abaixo já quebraria a compilação na VM.
+  test('a fila, o gravador e o live_check não alcançam o Flutter, nem de forma transitiva', () {
+    for (final raiz in [
+      'lib/core/services/offline_visit_queue.dart',
+      'lib/core/telemetry/telemetry_recorder.dart',
+      'tool/live_check.dart',
+    ]) {
+      final proibidos = _importsProibidosAlcancaveis(raiz);
+      expect(proibidos, isEmpty, reason: raiz);
+    }
+  });
+}
+
+final _diretiva = RegExp(r'''^\s*(?:import|export)\s+['"]([^'"]+)['"]''', multiLine: true);
+
+/// Percorre os imports/exports locais a partir de [raiz] e devolve, como
+/// `arquivo -> uri`, os que apontam para `package:flutter`, `dart:ui` ou
+/// `connectivity_plus`.
+List<String> _importsProibidosAlcancaveis(String raiz) {
+  final vistos = <String>{};
+  final pendentes = [File(raiz).absolute.path];
+  final achados = <String>[];
+  final lib = Directory('lib').absolute.path;
+  while (pendentes.isNotEmpty) {
+    final caminho = pendentes.removeLast();
+    if (!vistos.add(caminho)) continue;
+    final fonte = File(caminho).readAsStringSync();
+    for (final m in _diretiva.allMatches(fonte)) {
+      final uri = m.group(1)!;
+      if (uri.startsWith('package:flutter') || uri == 'dart:ui' || uri.startsWith('package:connectivity_plus')) {
+        achados.add('$caminho -> $uri');
+      } else if (uri.startsWith('package:sinalacs_acs/')) {
+        pendentes.add('$lib/${uri.substring('package:sinalacs_acs/'.length)}');
+      } else if (!uri.contains(':')) {
+        pendentes.add(File(caminho).parent.uri.resolve(uri).toFilePath());
+      }
+    }
+  }
+  return achados;
 }

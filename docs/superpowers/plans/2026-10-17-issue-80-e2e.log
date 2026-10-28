@@ -1,0 +1,101 @@
+== stack de e2e (banco de teste)
+aviso: o backend em execução (sinalacs-serverpod) será substituído pelo de e2e; ao final, rode `docker compose up -d` para voltar à stack de desenvolvimento.
+NOTICE:  database "sinalacs_e2e" does not exist, skipping
+Fixtures de e2e gravadas (5 pacientes, 2 ACS, 1 admin, 1 coordenador) em ../../.e2e/fixtures.json.
+== reserva por HTTP no emulador (intervalo de produção: 30 s)
+Resolving dependencies...
+Downloading packages...
+  async 2.11.0 (2.13.1 available)
+  boolean_selector 2.1.1 (2.1.2 available)
+  clock 1.1.2 (1.1.3 available)
+  connectivity_plus 7.3.1 (7.3.2 available)
+  dbus 0.7.12 (0.8.0 available)
+  ffi 2.1.3 (2.2.0 available)
+  flutter_lints 3.0.2 (6.0.0 available)
+  flutter_secure_storage 9.2.4 (11.2.0 available)
+  flutter_secure_storage_linux 1.2.3 (3.0.3 available)
+  flutter_secure_storage_macos 3.1.3 (4.0.0 available)
+  flutter_secure_storage_platform_interface 1.1.2 (2.1.1 available)
+  flutter_secure_storage_web 1.2.1 (2.1.1 available)
+  flutter_secure_storage_windows 3.1.2 (4.2.2 available)
+  geolocator 12.0.0 (14.1.1 available)
+  geolocator_android 4.6.2 (5.1.1+1 available)
+  geolocator_apple 2.3.14 (2.3.15 available)
+  geolocator_platform_interface 4.3.0 (4.4.0 available)
+  google_maps_flutter 2.18.0 (2.19.0 available)
+  google_maps_flutter_android 2.19.13 (2.21.0 available)
+  google_maps_flutter_ios 2.18.6 (2.18.7 available)
+  google_maps_flutter_platform_interface 2.16.1 (2.17.0 available)
+  google_maps_flutter_web 0.6.3+1 (0.6.4+1 available)
+  html 0.15.6 (0.15.7 available)
+  jni 1.0.3 (1.1.0 available)
+  jni_flutter 1.0.3 (1.0.4+1 available)
+  js 0.6.7 (0.7.2 available)
+  lints 3.0.0 (6.1.0 available)
+  local_auth_android 2.2.0 (2.3.0 available)
+  matcher 0.12.19 (0.12.20 available)
+  material_color_utilities 0.13.0 (0.13.1 available)
+  meta 1.18.0 (1.19.0 available)
+  mqtt_client 10.5.1 (10.12.0 available)
+  nm 0.5.0 (0.6.0 available)
+  path_provider_foundation 2.5.1 (2.6.0 available)
+  petitparser 6.0.2 (7.1.0 available)
+  platform 3.1.6 (3.2.0 available)
+  qr 3.0.2 (4.0.0 available)
+  serverpod_auth_core_client 3.4.13 (4.0.4 available)
+  serverpod_auth_idp_client 3.4.13 (4.0.4 available)
+  serverpod_client 3.4.13 (4.0.4 available)
+  serverpod_serialization 3.4.13 (4.0.4 available)
+  shared_preferences 2.5.5 (2.5.6 available)
+  shared_preferences_android 2.4.28 (2.5.0 available)
+  source_span 1.10.0 (1.10.2 available)
+  sqflite 2.4.1 (2.4.4+2 available)
+  sqflite_android 2.4.0 (2.4.4+1 available)
+  sqflite_common 2.5.4+6 (2.5.14 available)
+  sqflite_common_ffi 2.3.4+4 (2.4.4 available)
+  sqflite_darwin 2.4.1+1 (2.4.4+1 available)
+  sqflite_platform_interface 2.4.0 (2.4.2 available)
+  sqflite_sqlcipher 3.2.0 (3.4.1 available)
+  sqlite3 2.9.4 (3.7.1 available)
+  stack_trace 1.12.1 (1.12.2 available)
+  string_scanner 1.2.0 (1.4.1 available)
+  synchronized 3.3.0+3 (3.5.0 available)
+  term_glyph 1.2.1 (1.2.2 available)
+  test_api 0.7.11 (0.7.15 available)
+  universal_html 2.2.4 (2.3.0 available)
+  universal_io 2.2.2 (2.3.1 available)
+  url_launcher 6.3.2 (6.3.3 available)
+  vector_math 2.2.0 (2.4.3 available)
+  vm_service 14.2.5 (15.3.0 available)
+  win32 5.13.0 (6.4.0 available)
+  xml 6.5.0 (7.1.0 available)
+Got dependencies!
+64 packages have newer versions incompatible with dependency constraints.
+Try `flutter pub outdated` for more information.
+00:00 +0: loading /home/rock/Documents/Dev/APPs/SinalACS/apps/acs/integration_test/alert_http_fallback_e2e.dart
+Running Gradle task 'assembleDebug'...                          
+WARNING: A restricted method in java.lang.System has been called
+WARNING: java.lang.System::load has been called by net.rubygrapefruit.platform.internal.NativeLibraryLoader in an unnamed module (file:/home/rock/.gradle/wrapper/dists/gradle-9.1.0-all/7wzd0jkjit61aq2p43wpjgij9/gradle-9.1.0/lib/native-platform-0.22-milestone-28.jar)
+WARNING: Use --enable-native-access=ALL-UNNAMED to avoid a warning for callers in this module
+WARNING: Restricted methods will be blocked in a future release unless native access is enabled
+
+Running Gradle task 'assembleDebug'...                             13.1s
+✓ Built build/app/outputs/flutter-apk/app-debug.apk
+Installing build/app/outputs/flutter-apk/app-debug.apk...          581ms
+00:00 +0: com o MQTT fora, o alerta chega pela reserva HTTP e o ACK não é desfeito
+E2E_DISPARAR_ALERTA id=7298ae4a-9c51-440b-bd43-3433b1806889
+  [script] alerta 7298ae4a-9c51-440b-bd43-3433b1806889 inserido (09:53:30)
+E2E_ALERTA_VIA_HTTP atraso_ms=29633
+E2E_ACK_OK
+E2E_RESERVA_OK
+01:07 +1: (tearDownAll)
+01:07 +1: All tests passed!
+  atraso até o cartão: 29633 ms
+== reserva no banco de teste (alerta 7298ae4a-9c51-440b-bd43-3433b1806889)
+  alerta confirmado, com acknowledgedAt: true
+  uma linha acknowledged na trilha: 1
+  nenhuma leitura de alerta auditada (D2): 0
+  nada no alert_outbox: não veio pelo broker: 0
+OK: alerta recebido só pela reserva HTTP em 29633 ms e confirmado pela tela.
+A stack de desenvolvimento foi substituída pela de e2e: rode `docker compose up -d` para voltá-la.
+exit=0

@@ -1,5 +1,6 @@
 import 'package:sinalacs_acs/core/database/sync_cursor_store.dart';
 import 'package:sinalacs_acs/core/network/backend_client.dart';
+import 'package:sinalacs_acs/core/services/local_write_seal.dart';
 import 'package:sinalacs_acs/core/services/offline_visit_queue.dart';
 import 'package:sinalacs_client/sinalacs_client.dart';
 
@@ -41,6 +42,18 @@ class VisitPullService {
 
   List<VisitSyncEntry> _lastPulled = const [];
 
+  final LocalWriteSeal _seal = LocalWriteSeal();
+
+  /// Limpeza remota (#81): um pull em voo que volte da rede depois do
+  /// apagador não lê a fila nem grava o cursor — os dois reabririam o banco e
+  /// criariam uma chave nova num aparelho já limpo. Pulls novos não começam
+  /// até [unseal].
+  void seal() => _seal.seal();
+
+  /// O próximo login depois da limpeza (o gancho de teste usa o mesmo serviço
+  /// para qualquer dono; em produção cada dono ganha um novo).
+  void unseal() => _seal.unseal();
+
   /// Entradas do último [pullAndMerge] que não duplicam a fila offline local,
   /// na ordem em que o servidor as devolveu. Só para leitura pela UI — ver
   /// nota da classe.
@@ -65,9 +78,13 @@ class VisitPullService {
   /// e não arrisca pular nada — diferente de gravar "agora" sem ter recebido
   /// confirmação nenhuma do servidor sobre até onde a microárea foi varrida.
   Future<void> pullAndMerge() async {
+    final ticket = _seal.begin();
+    if (!_seal.admits(ticket)) return;
     final since = await _cursorStore.read() ?? epoch;
     final entries = await _backend.pullVisits(since: since);
 
+    // Cada acesso ao disco depois da rede confere o selo antes de começar.
+    if (!_seal.admits(ticket)) return;
     final existingLocalIds = {
       for (final visit in await _localVisits.load()) visit.localId,
     };
@@ -84,7 +101,7 @@ class VisitPullService {
           (latest, syncAt) =>
               latest == null || syncAt.isAfter(latest) ? syncAt : latest,
         );
-    if (latestSyncAt != null) {
+    if (latestSyncAt != null && _seal.admits(ticket)) {
       await _cursorStore.write(latestSyncAt);
     }
   }

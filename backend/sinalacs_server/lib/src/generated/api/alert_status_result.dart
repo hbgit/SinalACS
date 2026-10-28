@@ -29,6 +29,7 @@ abstract class AlertStatusResult
     this.status,
     this.triggeredAt,
     this.acknowledgedAt,
+    this.resolvedAt,
   });
 
   factory AlertStatusResult({
@@ -38,6 +39,7 @@ abstract class AlertStatusResult
     _i3.AlertStatus? status,
     DateTime? triggeredAt,
     DateTime? acknowledgedAt,
+    DateTime? resolvedAt,
   }) = _AlertStatusResultImpl;
 
   factory AlertStatusResult.fromJson(Map<String, dynamic> jsonSerialization) {
@@ -60,6 +62,9 @@ abstract class AlertStatusResult
           : _i1.DateTimeJsonExtension.fromJson(
               jsonSerialization['acknowledgedAt'],
             ),
+      resolvedAt: jsonSerialization['resolvedAt'] == null
+          ? null
+          : _i1.DateTimeJsonExtension.fromJson(jsonSerialization['resolvedAt']),
     );
   }
 
@@ -75,6 +80,8 @@ abstract class AlertStatusResult
 
   DateTime? acknowledgedAt;
 
+  DateTime? resolvedAt;
+
   /// Returns a shallow copy of this [AlertStatusResult]
   /// with some or all fields replaced by the given arguments.
   @_i1.useResult
@@ -85,6 +92,7 @@ abstract class AlertStatusResult
     _i3.AlertStatus? status,
     DateTime? triggeredAt,
     DateTime? acknowledgedAt,
+    DateTime? resolvedAt,
   });
   @override
   Map<String, dynamic> toJson() {
@@ -96,6 +104,7 @@ abstract class AlertStatusResult
       if (status != null) 'status': status?.toJson(),
       if (triggeredAt != null) 'triggeredAt': triggeredAt?.toJson(),
       if (acknowledgedAt != null) 'acknowledgedAt': acknowledgedAt?.toJson(),
+      if (resolvedAt != null) 'resolvedAt': resolvedAt?.toJson(),
     };
   }
 
@@ -109,6 +118,7 @@ abstract class AlertStatusResult
       if (status != null) 'status': status?.toJson(),
       if (triggeredAt != null) 'triggeredAt': triggeredAt?.toJson(),
       if (acknowledgedAt != null) 'acknowledgedAt': acknowledgedAt?.toJson(),
+      if (resolvedAt != null) 'resolvedAt': resolvedAt?.toJson(),
     };
   }
 
@@ -128,6 +138,7 @@ class _AlertStatusResultImpl extends AlertStatusResult {
     _i3.AlertStatus? status,
     DateTime? triggeredAt,
     DateTime? acknowledgedAt,
+    DateTime? resolvedAt,
   }) : super._(
          found: found,
          alertId: alertId,
@@ -135,6 +146,7 @@ class _AlertStatusResultImpl extends AlertStatusResult {
          status: status,
          triggeredAt: triggeredAt,
          acknowledgedAt: acknowledgedAt,
+         resolvedAt: resolvedAt,
        );
 
   /// Returns a shallow copy of this [AlertStatusResult]
@@ -148,6 +160,7 @@ class _AlertStatusResultImpl extends AlertStatusResult {
     Object? status = _Undefined,
     Object? triggeredAt = _Undefined,
     Object? acknowledgedAt = _Undefined,
+    Object? resolvedAt = _Undefined,
   }) {
     return AlertStatusResult(
       found: found ?? this.found,
@@ -158,6 +171,7 @@ class _AlertStatusResultImpl extends AlertStatusResult {
       acknowledgedAt: acknowledgedAt is DateTime?
           ? acknowledgedAt
           : this.acknowledgedAt,
+      resolvedAt: resolvedAt is DateTime? ? resolvedAt : this.resolvedAt,
     );
   }
 }

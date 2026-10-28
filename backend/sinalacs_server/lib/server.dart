@@ -8,17 +8,53 @@ import 'src/application/auth/development_auth_service.dart';
 import 'src/application/notices/notice_scheduling_service.dart';
 import 'src/application/retention/expurge_future_call.dart';
 import 'src/application/retention/expurge_service.dart';
+import 'src/config/api_tls_config.dart';
+import 'src/infrastructure/pki/device_crl_publisher.dart';
 import 'src/generated/endpoints.dart';
 import 'src/generated/protocol.dart';
 import 'src/runtime/alert_runtime.dart';
+import 'src/runtime/mtls_api_server.dart';
 import 'src/runtime/notice_dispatch_loop.dart';
 import 'src/web/routes/app_config_route.dart';
 import 'src/web/routes/root.dart';
 
 /// The starting point of the Serverpod server.
 void run(List<String> args) async {
+  // TLS 1.3 MÚTUO no apiServer quando API_TLS_* está definido (RNF04, #78 e
+  // #90): é o trecho Traefik → backend da stack local, e o backend exige o
+  // certificado de cliente assinado pela CA de API_TLS_CLIENT_CA_PATH. Sem as
+  // variáveis segue em HTTP, que é o caminho do Render (TLS na borda). Insights
+  // e webServer ficam em HTTP: nenhum dos dois é publicado nem roteado.
+  //
+  // `carregar` e não `fromMap`: `run` é `async void` dentro do `runZonedGuarded`
+  // da #56, e uma exceção que escapasse daqui viraria "erro sem dono" no log,
+  // sem a mensagem que nomeia as três variáveis — ou, para TlsException, um
+  // "processo mantido" que sai com código 0. Em falha de configuração o
+  // processo escreve o diagnóstico no stderr e sai com 78 (EX_CONFIG).
+  final apiTls = ApiTlsConfig.carregar(
+    Platform.environment,
+    log: stderr.writeln,
+    exitFn: exit,
+  );
+
   // Initialize Serverpod and connect it with your generated code.
-  final pod = Serverpod(args, Protocol(), Endpoints());
+  //
+  // O contexto TLS e a fábrica do adapter saem do MESMO `apiTls`, de propósito:
+  // o contexto sozinho subiria em TLS sem exigir o certificado (o estado que a
+  // #90 fechou), e a fábrica sozinha não tem com que ligar. `test/unit/
+  // server_wiring_test.dart` acusa se os dois forem separados. A fábrica
+  // (`mtls_api_server.dart`) liga o socket com `requireClientCertificate`, o
+  // que o Serverpod do pub.dev não permite — daí o fork pinado
+  // (`backend/patches/README.md`).
+  final pod = Serverpod(
+    args,
+    Protocol(),
+    Endpoints(),
+    securityContextConfig: apiTls.context == null
+        ? null
+        : SecurityContextConfig(apiServer: apiTls.context),
+    apiServerAdapterFactory: apiTls.context == null ? null : mtlsApiServerAdapter,
+  );
 
   // O módulo serverpod_auth_idp não é inicializado: o acesso hoje é o token
   // HMAC de DevelopmentAuthService, e o módulo trazia ~70 tabelas de identidade
@@ -83,6 +119,12 @@ void run(List<String> args) async {
   // Disparo dos avisos comunitários agendados (RF14, #46).
   _startNoticeDispatchLoop(pod);
 
+  // CRL dos aparelhos (#94): uma publicação no boot e outra a cada 24 h. A do
+  // `init.sh` nunca é renovada depois de existir; é esta que impede a CRL de
+  // vencer (o broker recusaria todo aparelho). Falha não derruba nada: o
+  // publicador tenta de novo com recuo até conseguir.
+  _startDeviceCrlRepublication();
+
   // Rotina de retenção (LGPD-RF07): registra o FutureCall de expurgo e agenda
   // a primeira janela diária (03:00 UTC). Depois do `start()`: o
   // FutureCallManager só existe a partir daí.
@@ -112,6 +154,26 @@ void _startOutboxSweeper(Serverpod pod) {
     } finally {
       await session.close();
     }
+  });
+}
+
+/// Intervalo da republicação da CRL dos aparelhos, bem abaixo do
+/// `DEVICE_CRL_DAYS` (30 dias por padrão) da validade de cada uma.
+const _deviceCrlRepublishInterval = Duration(hours: 24);
+
+void _startDeviceCrlRepublication() {
+  final DeviceCrlPublisher? publicador;
+  try {
+    publicador = AlertRuntime.instance.deviceCrlPublisher;
+  } on StateError catch (error) {
+    // `DEVICE_CA_*` parcial: o mesmo fail-fast de `ApiTlsConfig.carregar`.
+    stderr.writeln(error.message);
+    exit(78);
+  }
+  if (publicador == null) return;
+  unawaited(publicador.publish());
+  Timer.periodic(_deviceCrlRepublishInterval, (_) {
+    unawaited(publicador!.publish());
   });
 }
 
@@ -160,6 +222,7 @@ void _registerRetentionExpurge(Serverpod pod) {
         alertsDays: retentionConfig.retentionAlertDays,
         visitsDays: retentionConfig.retentionVisitDays,
         triageSessionsDays: retentionConfig.retentionTriageDays,
+        telemetryDays: retentionConfig.retentionTelemetryDays,
       ),
     ),
     retentionExpurgeFutureCallName,
@@ -190,7 +253,7 @@ Future<void> _connectAlertDispatcher(Serverpod pod) async {
     onAcknowledgement: (ack) async {
       final session = await pod.createSession(enableLogging: false);
       try {
-        final acknowledged = await runtime.serviceFor(session).acknowledge(
+        final status = await runtime.serviceFor(session).acknowledge(
               user: AuthenticatedUser(
                 id: ack.acsId,
                 role: UserRole.acs,
@@ -201,7 +264,7 @@ Future<void> _connectAlertDispatcher(Serverpod pod) async {
             );
         session.log(
           'ACK do alerta ${ack.alertId} pelo ACS ${ack.acsId}: '
-          '${acknowledged ? 'registrado' : 'sem correspondência na microárea'}',
+          '${status != null ? 'registrado (${status.name})' : 'sem correspondência na microárea'}',
         );
       } finally {
         await session.close();

@@ -150,4 +150,32 @@ void main() {
     conferirAlvo(tester, find.byKey(const Key('confirmar_acao')), 'confirmar_acao');
     conferirAlvo(tester, find.byKey(const Key('cancelar_acao')), 'cancelar_acao');
   });
+  testWidgets('alvos de toque 48x52 no diálogo de aparelhos', (tester) async {
+    await abrirMicroAreas(tester);
+
+    final abrir = find.byKey(const Key('acs_devices_acs-1'));
+    await rolarAte(tester, abrir);
+    conferirAlvo(tester, abrir, 'acs_devices_acs-1');
+    await tester.tap(abrir);
+    await tester.pumpAndSettle();
+
+    conferirAlvo(tester, find.byKey(const Key('fechar_aparelhos')), 'fechar_aparelhos');
+    final limpar = find.byKey(const Key('wipe_device_dev-aaaa1111'));
+    await rolarAte(tester, limpar);
+    conferirAlvo(tester, limpar, 'wipe_device_dev-aaaa1111');
+
+    await tester.tap(limpar);
+    await tester.pumpAndSettle();
+    conferirAlvo(tester, find.byKey(const Key('cancelar_motivo')), 'cancelar_motivo');
+    conferirAlvo(tester, find.byKey(const Key('continuar_motivo')), 'continuar_motivo');
+    await tester.tap(find.byKey(const Key('wipe_reason')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Perdido').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('continuar_motivo')));
+    await tester.pumpAndSettle();
+
+    conferirAlvo(tester, find.byKey(const Key('confirmar_acao')), 'confirmar_acao');
+    conferirAlvo(tester, find.byKey(const Key('cancelar_acao')), 'cancelar_acao');
+  });
 }

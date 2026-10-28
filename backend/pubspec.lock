@@ -129,6 +129,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.0.1"
+  fake_async:
+    dependency: transitive
+    description:
+      name: fake_async
+      sha256: "5368f224a74523e8d2e7399ea1638b37aecfca824a3cc4dfdf77bf1fa905ac44"
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.3.3"
   ffi:
     dependency: transitive
     description:
@@ -354,12 +362,13 @@ packages:
     source: hosted
     version: "3.1.2"
   serverpod:
-    dependency: transitive
+    dependency: "direct overridden"
     description:
-      name: serverpod
-      sha256: "2b7325b998d55bc185d1dc973dddb122ac2d519306ae2c1c71457578dab85ea4"
-      url: "https://pub.dev"
-    source: hosted
+      path: "packages/serverpod"
+      ref: "2a0b67e38532faff48f8f75b42b9f63e36a1cd82"
+      resolved-ref: "2a0b67e38532faff48f8f75b42b9f63e36a1cd82"
+      url: "https://github.com/hbgit/serverpod.git"
+    source: git
     version: "3.4.13"
   serverpod_auth_core_client:
     dependency: transitive

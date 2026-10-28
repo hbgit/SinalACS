@@ -1,6 +1,12 @@
-import 'package:flutter/services.dart' show ByteData, rootBundle;
+import 'dart:async';
+import 'dart:convert';
+
+import 'package:flutter/services.dart' show rootBundle;
+import 'package:sinalacs_acs/core/network/backend_client.dart';
 import 'package:sinalacs_acs/core/network/backend_config.dart';
+import 'package:sinalacs_acs/core/security/session_token_store.dart';
 import 'package:sinalacs_acs/core/services/alert_queue.dart';
+import 'package:sinalacs_acs/core/services/device_certificate_enroller.dart';
 import 'package:sinalacs_acs/core/services/mqtt_secure_client.dart';
 
 /// Liga o broker à [AlertQueue].
@@ -23,21 +29,26 @@ abstract class AlertFeed {
   /// (os `feedBuilder` de teste) não precisa mudar para o dono do widget
   /// poder assinar depois.
   abstract void Function(bool connected)? onConnectionChanged;
+
+  /// O feed caiu DEPOIS de [start] ter retornado e não vai voltar sozinho
+  /// (#94: o broker recusou o certificado na reconexão automática). Já
+  /// classificada como as falhas de [start]; o painel trata igual — banner e,
+  /// se transitória, a mesma retentativa.
+  abstract void Function(AlertFeedFailure failure)? onFailure;
 }
 
 /// Por que o ACS não está recebendo alertas.
 enum AlertFeedFailureKind {
-  /// O binário foi compilado sem `SINALACS_MQTT_PASSWORD`.
-  missingPassword,
-
   /// Falta o certificado da CA nos assets (`scripts/dev/sync_dev_ca.sh`).
   missingCaAsset,
 
-  /// Falta o certificado de cliente do ACS nos assets
-  /// (`scripts/dev/sync_dev_ca.sh`): sem ele o broker (mTLS) recusa.
-  missingClientCertificate,
+  /// Este aparelho ainda não tem certificado de cliente válido para o broker
+  /// (#94) e não deu para pedir um ao servidor (sem rede). Transitória: o
+  /// certificado é emitido na próxima tentativa com rede.
+  certificateUnavailable,
 
-  /// O broker respondeu e recusou (credencial, identificador, indisponível).
+  /// O broker respondeu e recusou (credencial, identificador, indisponível),
+  /// ou o servidor recusou emitir o certificado deste aparelho.
   refused,
 
   /// Não foi possível chegar ao broker.
@@ -50,8 +61,8 @@ enum AlertFeedFailureKind {
 /// para o log e **nunca** chega à tela. Nenhum dos três carrega credencial.
 ///
 /// Antes tudo isto virava a mesma frase — "Sem conexão com a central de
-/// alertas" —, então senha errada, certificado ausente e broker fora do ar
-/// eram indistinguíveis, inclusive para quem depura.
+/// alertas" —, então credencial recusada, certificado ausente e broker fora
+/// do ar eram indistinguíveis, inclusive para quem depura.
 class AlertFeedFailure implements Exception {
   const AlertFeedFailure(
     this.kind, {
@@ -68,28 +79,85 @@ class AlertFeedFailure implements Exception {
 
   /// Se vale a pena tentar de novo sozinho, sem intervenção humana.
   ///
-  /// `missingPassword`/`missingCaAsset`/`missingClientCertificate` exigem recompilar; `refused` herda o
-  /// veredito do CONNACK; `unreachable` é sempre transitória — falta de rede
-  /// é o caso comum de um ACS em campo.
+  /// `missingCaAsset` exige recompilar; `refused` herda o veredito do CONNACK
+  /// (ou é a recusa do servidor ao certificado); `certificateUnavailable` e
+  /// `unreachable` são transitórias — falta de rede é o caso comum de um ACS
+  /// em campo.
   final bool transient;
 
   @override
   String toString() => '${kind.name}: $title';
 }
 
-class MqttAlertFeed implements AlertFeed {
-  MqttAlertFeed({
-    required this.queue,
-    this.onConnectionChanged,
-  });
-
-  final AlertQueue queue;
+/// Feed sem certificado por aparelho montado (sem id da instalação para
+/// pedi-lo): o app foi montado sem `deviceIds`, como os testes de widget que
+/// não injetam um feed. Falha na hora, sem abrir socket, e não é retentada.
+class UnconfiguredAlertFeed implements AlertFeed {
+  UnconfiguredAlertFeed({this.onConnectionChanged});
 
   @override
   void Function(bool connected)? onConnectionChanged;
 
+  @override
+  void Function(AlertFeedFailure failure)? onFailure;
+
+  @override
+  bool get isConnected => false;
+
+  @override
+  Future<void> start({required String microAreaId, required String acsId}) async {
+    throw const AlertFeedFailure(
+      AlertFeedFailureKind.certificateUnavailable,
+      title: 'Sem certificado deste aparelho para a central',
+      detail: 'Este aplicativo foi montado sem o identificador do aparelho.',
+    );
+  }
+
+  @override
+  void stop() {}
+}
+
+class MqttAlertFeed implements AlertFeed {
+  MqttAlertFeed({
+    required this.queue,
+    required DeviceCertificateEnroller enroller,
+    required DeviceIdStore deviceIds,
+    this.onConnectionChanged,
+    void Function()? onDeviceWipeRequired,
+    Future<List<int>> Function()? loadCaCertificate,
+    MqttSecureClient Function(SecureMqttConfig config)? clientFactory,
+  })  : _enroller = enroller,
+        _deviceIds = deviceIds,
+        _onDeviceWipeRequired = onDeviceWipeRequired,
+        _loadCaCertificate = loadCaCertificate ?? _loadCaAsset,
+        _clientFactory = clientFactory ?? ((config) => MqttSecureClient(config: config));
+
+  final AlertQueue queue;
+  final DeviceCertificateEnroller _enroller;
+  final DeviceIdStore _deviceIds;
+
+  /// O servidor recusou a emissão com pedido de limpeza (#81): o app passa o
+  /// `RemoteWipeCoordinator.check` daqui, que pergunta pelo pedido e apaga.
+  final void Function()? _onDeviceWipeRequired;
+  final Future<List<int>> Function() _loadCaCertificate;
+  final MqttSecureClient Function(SecureMqttConfig config) _clientFactory;
+
+  /// A CA é asset gitignored, copiado por scripts/dev/sync_dev_ca.sh.
+  static Future<List<int>> _loadCaAsset() async =>
+      (await rootBundle.load(BackendConfig.mqttCaAsset)).buffer.asUint8List();
+
+  @override
+  void Function(bool connected)? onConnectionChanged;
+
+  @override
+  void Function(AlertFeedFailure failure)? onFailure;
+
   MqttSecureClient? _client;
   bool _connected = false;
+
+  /// Muda a cada [start] e [stop]: a queda de um cliente antigo (já parado ou
+  /// substituído) não chega ao painel.
+  int _generation = 0;
 
   @override
   bool get isConnected => _connected;
@@ -103,22 +171,11 @@ class MqttAlertFeed implements AlertFeed {
     // segunda chamada a start() (a nova retentativa) sobrescreveria _client e
     // deixaria o cliente antigo órfão, fora do alcance de stop()/dispose().
     stop();
+    final generation = _generation;
 
-    // Antes de abrir qualquer socket: este binário tem senha? Sem isto, um app
-    // compilado sem `--dart-define` gastava o timeout do broker para depois
-    // dizer "sem conexão", escondendo que o problema estava na compilação.
-    if (BackendConfig.mqttPasswordMissing) {
-      throw const AlertFeedFailure(
-        AlertFeedFailureKind.missingPassword,
-        title: 'Este aplicativo foi compilado sem a senha do broker de alertas.',
-        detail: 'Nenhum alerta será recebido até o aplicativo ser recompilado.',
-      );
-    }
-
-    // A CA é asset gitignored, copiado por scripts/dev/sync_dev_ca.sh.
-    final ByteData caCertificate;
+    final List<int> caCertificate;
     try {
-      caCertificate = await rootBundle.load(BackendConfig.mqttCaAsset);
+      caCertificate = await _loadCaCertificate();
     } catch (error) {
       throw AlertFeedFailure(
         AlertFeedFailureKind.missingCaAsset,
@@ -128,35 +185,69 @@ class MqttAlertFeed implements AlertFeed {
       );
     }
 
-    // Certificado e chave de CLIENTE (mTLS), também assets gitignorados.
-    final ByteData clientCertificate;
-    final ByteData clientPrivateKey;
+    // Certificado de CLIENTE por aparelho (#94): emitido pelo backend para o
+    // par gerado aqui, guardado no Keystore. Nenhuma senha nem certificado
+    // compartilhado viaja no binário.
+    final String deviceId;
+    final String certificatePem;
+    final String privateKeyPem;
     try {
-      clientCertificate = await rootBundle.load(BackendConfig.mqttClientCertAsset);
-      clientPrivateKey = await rootBundle.load(BackendConfig.mqttClientKeyAsset);
-    } catch (error) {
+      deviceId = await _deviceIds.readOrCreate();
+      final cert = await _enroller.ensure(acsId: acsId, deviceId: deviceId, microAreaId: microAreaId);
+      certificatePem = cert.certificatePem;
+      privateKeyPem = cert.privateKeyPem;
+    } on DeviceCertificateUnavailable catch (error) {
+      final motivo = error.retryLater;
       throw AlertFeedFailure(
-        AlertFeedFailureKind.missingClientCertificate,
-        title: 'Falta o certificado de cliente da central neste aplicativo.',
-        detail: 'Sem ele o broker recusa a conexão.',
+        AlertFeedFailureKind.certificateUnavailable,
+        title: 'Sem certificado deste aparelho para a central',
+        detail: motivo == null
+            ? 'Será emitido quando houver rede.'
+            : 'A central pediu para tentar mais tarde ($motivo).',
         cause: error,
+        transient: true,
+      );
+    } on DeviceWipeRequiredFailure catch (error) {
+      _onDeviceWipeRequired?.call();
+      throw AlertFeedFailure(
+        AlertFeedFailureKind.refused,
+        title: error.message,
+        detail: 'Nenhum alerta será recebido neste aparelho.',
+        cause: error,
+      );
+    } on BackendFailure catch (error) {
+      // Recusa do servidor (papel, território, CSR): insistir não muda nada.
+      throw AlertFeedFailure(
+        AlertFeedFailureKind.refused,
+        title: 'A central recusou o certificado deste aparelho.',
+        detail: error.message,
+        cause: error,
+      );
+    } catch (error) {
+      // Keystore indisponível ou falha local inesperada: tenta de novo. Não é
+      // falta de rede, e o texto não pode mandar procurar sinal (T5).
+      throw AlertFeedFailure(
+        AlertFeedFailureKind.certificateUnavailable,
+        title: 'Sem certificado deste aparelho para a central',
+        detail: 'O armazenamento seguro deste aparelho não respondeu.',
+        cause: error,
+        transient: true,
       );
     }
 
-    final client = MqttSecureClient(
-      config: SecureMqttConfig(
+    final client = _clientFactory(
+      SecureMqttConfig(
         brokerHost: BackendConfig.mqttHost,
         port: BackendConfig.mqttPort,
-        // Estável por ACS: é o que permite ao broker restaurar a sessão
-        // persistente e reentregar o que chegou enquanto o aparelho estava
-        // offline. Um id aleatório aqui descartaria esses alertas.
-        clientId: 'sinalacs-acs-$acsId',
+        // Estável por ACS e por aparelho: é o que permite ao broker restaurar
+        // a sessão persistente e reentregar o que chegou enquanto o aparelho
+        // estava offline, e ao servidor derrubar a sessão de um aparelho
+        // revogado. Um id aleatório aqui descartaria esses alertas.
+        clientId: deviceClientId(acsId: acsId, deviceId: deviceId),
         topic: alertTopicFor(microAreaId),
-        username: BackendConfig.mqttUsername,
-        password: BackendConfig.mqttPassword,
-        caCertificate: caCertificate.buffer.asUint8List(),
-        clientCertificate: clientCertificate.buffer.asUint8List(),
-        clientPrivateKey: clientPrivateKey.buffer.asUint8List(),
+        caCertificate: caCertificate,
+        clientCertificate: utf8.encode(certificatePem),
+        clientPrivateKey: utf8.encode(privateKeyPem),
       ),
     );
 
@@ -167,7 +258,11 @@ class MqttAlertFeed implements AlertFeed {
           _connected = connected;
           onConnectionChanged?.call(connected);
         },
+        onDrop: (reason) => unawaited(_dropped(generation, reason, acsId: acsId, deviceId: deviceId)),
       );
+    } on MqttTlsRefused catch (error) {
+      await _certificateRefused(acsId: acsId, deviceId: deviceId);
+      throw _certificateRefusedFailure(error);
     } on MqttConnectionRefused catch (error) {
       throw AlertFeedFailure(
         AlertFeedFailureKind.refused,
@@ -193,8 +288,63 @@ class MqttAlertFeed implements AlertFeed {
 
   @override
   void stop() {
+    _generation++;
     _client?.disconnect();
     _client = null;
     _connected = false;
   }
+
+  /// O cliente desistiu sozinho depois de conectar ([MqttSecureClient.connect]
+  /// já o desconectou e avisou `onConnectionChanged(false)`).
+  Future<void> _dropped(
+    int generation,
+    MqttDropReason reason, {
+    required String acsId,
+    required String deviceId,
+  }) async {
+    if (generation != _generation) return;
+    _client = null;
+    _connected = false;
+    final AlertFeedFailure failure;
+    if (reason == MqttDropReason.tlsRefused) {
+      // Descartar ANTES de avisar: a retentativa do painel chama `ensure`, que
+      // não pode devolver o certificado que o broker acabou de recusar.
+      await _certificateRefused(acsId: acsId, deviceId: deviceId);
+      failure = _certificateRefusedFailure(reason);
+    } else {
+      failure = AlertFeedFailure(
+        AlertFeedFailureKind.unreachable,
+        title: 'Sem conexão com a central de alertas.',
+        detail: 'Novos alertas podem não estar chegando.',
+        cause: reason,
+        transient: true,
+      );
+    }
+    if (generation != _generation) return;
+    onFailure?.call(failure);
+  }
+
+  /// O broker recusou o certificado deste aparelho (#94): revogado por troca
+  /// de microárea, desativação ou limpeza remota. Descarta o guardado (a
+  /// próxima tentativa reemite, e o servidor diz qual dos três foi) e já
+  /// dispara a consulta da limpeza remota da #81, sem esperar.
+  Future<void> _certificateRefused({required String acsId, required String deviceId}) async {
+    try {
+      await _enroller.discard(acsId: acsId, deviceId: deviceId);
+    } catch (_) {
+      // Keystore indisponível: a reemissão por microárea/validade segue valendo;
+      // o broker recusará de novo e o descarte será retentado.
+    }
+    _onDeviceWipeRequired?.call();
+  }
+
+  /// Transitória: o painel reinicia o feed e o enroller reemite. Se o
+  /// servidor recusar a emissão (desativado), aí sim a falha vira `refused`.
+  static AlertFeedFailure _certificateRefusedFailure(Object cause) => AlertFeedFailure(
+        AlertFeedFailureKind.certificateUnavailable,
+        title: 'Sem certificado deste aparelho para a central',
+        detail: 'Será emitido quando houver rede.',
+        cause: cause,
+        transient: true,
+      );
 }

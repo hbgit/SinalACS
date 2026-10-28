@@ -8,8 +8,10 @@
 
 # Configuration for the main API server.
 apiServer:
-  # O processo continua escutando 8080 em texto claro DENTRO do container —
-  # quem termina TLS é o Traefik, que é o único que publica porta. Estes campos
+  # O processo escuta 8080 DENTRO do container: em TLS 1.3 na stack local desde
+  # a #78 (API_TLS_CERT_PATH/API_TLS_KEY_PATH, ApiTlsConfig) e em texto claro
+  # sem elas (Render, TLS na borda). Quem termina o TLS do cliente é o Traefik,
+  # que é o único que publica porta. Estes campos
   # apontam para a URL cifrada, que é o endereço público real do RPC, e não para
   # a porta interna.
   #

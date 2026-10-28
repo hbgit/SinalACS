@@ -7,30 +7,40 @@ import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:sinalacs_acs/app/acs_theme.dart';
 import 'package:sinalacs_acs/app/app_lock_gate.dart';
+import 'package:sinalacs_acs/app/device_wiped_screen.dart';
 import 'package:sinalacs_acs/app/pending_alerts_banner.dart';
 import 'package:sinalacs_acs/app/invite_screen.dart';
 import 'package:sinalacs_acs/app/mfa_enrollment_screen.dart';
+import 'package:sinalacs_acs/app/visit_conflict_screen.dart';
 import 'package:sinalacs_acs/core/database/sqlcipher_visit_store.dart';
 import 'package:sinalacs_acs/core/geo/location_cell.dart';
 import 'package:sinalacs_acs/core/network/auth_session.dart';
 import 'package:sinalacs_acs/core/network/backend_client.dart';
 import 'package:sinalacs_acs/core/network/backend_scope.dart';
 import 'package:sinalacs_acs/core/security/biometric_gate.dart';
+import 'package:sinalacs_acs/core/security/device_certificate_store.dart';
 import 'package:sinalacs_acs/core/security/database_key_store.dart';
 import 'package:sinalacs_acs/core/security/session_token_store.dart';
 import 'package:sinalacs_acs/core/security/upload_token_store.dart';
 import 'package:sinalacs_acs/core/services/alert_feed.dart';
+import 'package:sinalacs_acs/core/services/alert_http_fallback.dart';
 import 'package:sinalacs_acs/core/services/alert_queue.dart';
 import 'package:sinalacs_acs/core/services/deferred_flush_service.dart';
+import 'package:sinalacs_acs/core/services/device_certificate_enroller.dart';
 import 'package:sinalacs_acs/core/services/emergency_dialer.dart';
 import 'package:sinalacs_acs/core/services/micro_area_directory.dart';
 import 'package:sinalacs_acs/core/services/offline_visit_queue.dart';
-import 'package:sinalacs_client/sinalacs_client.dart' show MicroAreaPatient;
+import 'package:sinalacs_client/sinalacs_client.dart' show AlertStatus, MicroAreaPatient;
 import 'package:sinalacs_acs/core/services/reconnect_schedule.dart';
+import 'package:sinalacs_acs/core/services/remote_wipe.dart';
 import 'package:sinalacs_acs/core/services/route_service.dart';
 import 'package:sinalacs_acs/core/services/theme_controller.dart';
 import 'package:sinalacs_acs/core/services/visit_pull_service.dart';
 import 'package:sinalacs_acs/core/services/visit_queue_factory.dart';
+import 'package:sinalacs_acs/core/database/sqlcipher_telemetry_store.dart';
+import 'package:sinalacs_acs/core/telemetry/network_probe.dart';
+import 'package:sinalacs_acs/core/telemetry/telemetry_store.dart';
+import 'package:sinalacs_acs/core/telemetry/telemetry_uploader.dart';
 
 class SinalAcsApp extends StatefulWidget {
   const SinalAcsApp({
@@ -46,14 +56,34 @@ class SinalAcsApp extends StatefulWidget {
     this.currentPosition,
     this.themeController,
     this.syncInterval,
+    this.alertFallbackInterval,
     this.biometricGate,
     this.navigatorKey,
     this.lockAfter,
     this.deferredFlush,
     this.uploadTokens,
     this.deviceIds,
+    this.deviceCertificates,
     this.connectivityChanges,
+    this.wipeJournal,
+    this.telemetryStore,
+    this.telemetryTransport,
+    this.networkProbe,
   });
+
+  /// Fila local da telemetria (#83). `null` usa o `SqlCipherTelemetryStore`
+  /// sobre o banco das visitas quando [visitStorage] é o SQLCipher do
+  /// aparelho; com outro armazenamento (os testes de widget), sem telemetria.
+  final TelemetryStore? telemetryStore;
+
+  /// Quem leva a telemetria ao servidor. `null` usa o [backend] quando ele é
+  /// um [TelemetryTransport] (o `BackendClient`); o `FakeAcsBackend` não é,
+  /// e os testes que não injetam um ficam sem telemetria.
+  final TelemetryTransport? telemetryTransport;
+
+  /// Sonda de rede dos eventos. O `main.dart` passa a do `connectivity_plus`;
+  /// `null` grava `network_type: unknown` (o canal não existe no `flutter test`).
+  final NetworkProbe? networkProbe;
 
   /// Envio diferido (D4/D7) já montado — gancho de teste. `null` monta um
   /// sobre o armazenamento de visitas do app quando [uploadTokens] e
@@ -68,10 +98,21 @@ class SinalAcsApp extends StatefulWidget {
   /// Id da instalação, a MESMA instância do `BackendClient`.
   final DeviceIdStore? deviceIds;
 
+  /// Certificado MQTT do aparelho (#94). Em produção, o `main.dart` passa o
+  /// `SecureStorageDeviceCertificateStore` (Keystore); `null` usa um só em
+  /// memória (reemitido a cada partida). Só vale com [deviceIds]: sem o id da
+  /// instalação não há para quem emitir, e o feed padrão falha na hora.
+  final DeviceCertificateStore? deviceCertificates;
+
   /// `true` quando há rede, `false` sem rede (o `main.dart` liga ao
   /// `connectivity_plus`). Passar a ter rede dispara o envio diferido. `null`:
   /// sem esse gatilho (o canal de plataforma não existe no `flutter test`).
   final Stream<bool>? connectivityChanges;
+
+  /// Diário da limpeza remota (#81, D7). Em produção, o `main.dart` passa o
+  /// `SharedPreferencesWipeJournal`; `null` usa um diário só em memória. A
+  /// limpeza remota só existe com [deviceIds] (o id que o servidor conhece).
+  final WipeJournal? wipeJournal;
 
   /// Desbloqueio local (digital/rosto ou bloqueio de tela). `null` usa
   /// [LocalAuthBiometricGate]; testes injetam um duplo.
@@ -126,6 +167,10 @@ class SinalAcsApp extends StatefulWidget {
   /// — testes passam um valor curto para não esperar 5 minutos reais.
   final Duration? syncInterval;
 
+  /// Intervalo da consulta de alertas por HTTP enquanto o MQTT está fora
+  /// (#80). `null` usa `AcsHomeShell.defaultAlertFallbackInterval`.
+  final Duration? alertFallbackInterval;
+
   @override
   State<SinalAcsApp> createState() => _SinalAcsAppState();
 }
@@ -138,6 +183,18 @@ const sessionEndSendTimeout = Duration(seconds: 20);
 /// Teto de cada revogação de token de envio no "Limpar este aparelho"
 /// (best-effort: o token apagado do aparelho já não serve a ninguém aqui).
 const wipeRevokeTimeout = Duration(seconds: 5);
+
+/// Teto da consulta de limpeza remota na partida (#81, D3): o login espera por
+/// ela para não abrir a sessão de um aparelho já mandado limpar, mas sem rede
+/// que responda ele segue — a consulta continua e, se trouxer pedido, a
+/// limpeza acontece por cima do login.
+const startupWipeCheckTimeout = Duration(seconds: 5);
+
+/// Teto de cada espera de quadro na desmontagem do painel antes da limpeza
+/// remota. Em segundo plano o Flutter não desenha quadros: sem teto, a
+/// limpeza ficaria parada até o app voltar. Com a fila já selada, apagar antes
+/// de o painel sair é seguro; ele sai no próximo quadro.
+const remoteWipeFrameWait = Duration(milliseconds: 500);
 
 /// O que o painel pede ao app ao encerrar o turno ou limpar o aparelho: o app
 /// é dono do armazenamento, das filas memoizadas e do envio diferido.
@@ -191,14 +248,38 @@ class _DeviceCareScope extends InheritedWidget {
 /// O que impede o "Limpar este aparelho", só em contagens. [own] + [elsewhere]
 /// é o total (desta conta / de outras contas e sem autor); [unsent] +
 /// [review] + [noToken] é o mesmo total, por motivo: ainda não enviadas
-/// (dependem de rede), recusadas ou em revisão (dependem do ACS dono), e de
+/// (dependem de rede), recusadas, em conflito (#79) ou em revisão (dependem
+/// do ACS dono), e de
 /// outro dono sem chave de envio neste aparelho (dependem de ele entrar).
 typedef UnsentOnDevice = ({int own, int elsewhere, int unsent, int review, int noToken});
 
+/// Visitas que a fila ainda guarda no aparelho: pendentes, em conflito (#79,
+/// fora da retentativa até o ACS decidir) e recusadas.
+/// Frase do "Sair" sobre as [ficam] visitas não enviadas. As [emConflito]
+/// contam no total, mas não no "sobem sozinhas": o envio diferido não as
+/// envia (#79, D6) — a linha `logout_conflict_visits` diz o que esperam.
+String _pendingVisitsOnLogout({required int ficam, required int emConflito}) {
+  if (emConflito == 0) {
+    return ficam == 1
+        ? '1 visita ainda não enviada continua neste aparelho. Ela segue protegida e sobe sozinha quando o aplicativo estiver aberto com conexão (em até 7 dias).'
+        : '$ficam visitas ainda não enviadas continuam neste aparelho. Elas seguem protegidas e sobem sozinhas quando o aplicativo estiver aberto com conexão (em até 7 dias).';
+  }
+  final total = ficam == 1
+      ? '1 visita ainda não enviada continua neste aparelho.'
+      : '$ficam visitas ainda não enviadas continuam neste aparelho.';
+  final sozinhas = ficam - emConflito;
+  if (sozinhas <= 0) return total;
+  return sozinhas == 1
+      ? '$total 1 delas segue protegida e sobe sozinha quando o aplicativo estiver aberto com conexão (em até 7 dias).'
+      : '$total $sozinhas delas seguem protegidas e sobem sozinhas quando o aplicativo estiver aberto com conexão (em até 7 dias).';
+}
+
+int _visitsOnDevice(OfflineVisitQueue queue) =>
+    queue.pendingCount + queue.conflictCount + queue.rejectedCount;
+
 /// Fila que não conseguiu gravar e ainda tem visita: essas visitas existem só
 /// em RAM, e descartá-la as perderia.
-bool _onlyInMemory(OfflineVisitQueue queue) =>
-    queue.persistenceFailed && (queue.pendingCount > 0 || queue.rejectedCount > 0);
+bool _onlyInMemory(OfflineVisitQueue queue) => queue.persistenceFailed && _visitsOnDevice(queue) > 0;
 
 /// Fila que não pode sair da memória: só em RAM, ou com um envio em voo
 /// (`isSyncing`). A segunda, descartada, faria o próximo login do dono montar
@@ -228,6 +309,42 @@ class _SinalAcsAppState extends State<SinalAcsApp> with WidgetsBindingObserver i
   /// volta, ou que se reautentica, reencontra o seu; outro ACS ganha o dele.
   final Map<String, OwnerVisitScope> _scopes = {};
 
+  /// Fila local da telemetria (#83): a injetada, ou a do banco SQLCipher das
+  /// visitas. Com outro armazenamento, sem telemetria. A limpeza remota a sela
+  /// ([_eraseDevice]) e o próximo login a reabre ([_scopeForShell]).
+  late final TelemetryStore? _telemetryStore = widget.telemetryStore ??
+      switch (_storage) {
+        final SqlCipherVisitStorage sqlcipher => SqlCipherTelemetryStore(sqlcipher.database),
+        _ => null,
+      };
+
+  late final TelemetryTransport? _telemetryTransport = widget.telemetryTransport ??
+      switch (widget.backend) {
+        final TelemetryTransport transport => transport,
+        _ => null,
+      };
+
+  /// Gravador e envio da telemetria por `userId`, criados junto com a fila do
+  /// dono e descartados com ela (RNF06): nunca um uploader novo por gatilho.
+  final Map<String, OwnerTelemetry> _telemetry = {};
+
+  /// A telemetria do dono, montada uma vez. `null` sem store ou transporte.
+  OwnerTelemetry? _telemetryFor(String owner) {
+    final store = _telemetryStore;
+    final transport = _telemetryTransport;
+    if (store == null || transport == null) return null;
+    return _telemetry.putIfAbsent(
+      owner,
+      () => buildOwnerTelemetry(
+        store: store,
+        transport: transport,
+        ownerId: owner,
+        backend: widget.backend,
+        probe: widget.networkProbe,
+      ),
+    );
+  }
+
   /// Fila e pull do dono de [session].
   ///
   /// Ordem: o resolvedor injetado; senão a fila/o pull injetados (gancho de
@@ -252,7 +369,12 @@ class _SinalAcsAppState extends State<SinalAcsApp> with WidgetsBindingObserver i
     // próximo login do dono precisa reencontrá-las.
     _queues.removeWhere((owner, queue) => owner != session.userId && !_mustKeep(queue));
     _scopes.removeWhere((key, scope) => !key.startsWith('${session.userId}|') && !_mustKeep(scope.queue));
+    // A telemetria acompanha a fila do dono: sai com ela (o gravador está
+    // dentro da fila mantida; o envio de quem saiu não dispara mais).
+    _telemetry.removeWhere((owner, _) => owner != session.userId && !_queues.containsKey(owner));
     return _scopes.putIfAbsent(visitCursorOwner(session), () {
+      // Fila injetada (gancho de teste): sem telemetria.
+      final telemetry = injectedQueue == null ? _telemetryFor(session.userId) : null;
       final built = buildOwnerVisitScope(
         backend: widget.backend,
         storage: _storage,
@@ -264,12 +386,15 @@ class _SinalAcsAppState extends State<SinalAcsApp> with WidgetsBindingObserver i
                 backend: widget.backend,
                 store: _storage.forOwner(session.userId),
                 ownerId: session.userId,
+                telemetry: telemetry?.recorder,
               ),
             ),
+        telemetryUploader: telemetry?.uploader,
       );
       return OwnerVisitScope(
         queue: built.queue,
         pullService: injectedPull ?? built.pullService,
+        telemetryUploader: built.telemetryUploader,
       );
     });
   }
@@ -307,9 +432,10 @@ class _SinalAcsAppState extends State<SinalAcsApp> with WidgetsBindingObserver i
     return total;
   }
 
-  /// Visitas de [queue] que não estão no disco de [owner].
+  /// Visitas de [queue] que não estão no disco de [owner]: pendentes, em
+  /// conflito (#79) e recusadas.
   Future<int> _onlyInRam(String owner, OfflineVisitQueue queue) async {
-    final inQueue = [...queue.pendingVisits, ...queue.rejectedVisits];
+    final inQueue = [...queue.pendingVisits, ...queue.conflictVisits, ...queue.rejectedVisits];
     if (inQueue.isEmpty) return 0;
     final onDisk = {for (final row in await _storage.forOwner(owner).load()) row.localId};
     return inQueue.where((visit) => !onDisk.contains(visit.localId)).length;
@@ -330,7 +456,9 @@ class _SinalAcsAppState extends State<SinalAcsApp> with WidgetsBindingObserver i
         } else {
           elsewhere++;
         }
-        if (visit.rejectionReason != null) {
+        // Recusada ou em conflito (#79): as duas dependem de uma decisão do
+        // ACS dono, não de conexão.
+        if (visit.rejectionReason != null || visit.inConflict) {
           review++;
         } else if (owner != null && owner != currentOwner && ownersWithoutToken.contains(owner)) {
           noToken++;
@@ -363,7 +491,7 @@ class _SinalAcsAppState extends State<SinalAcsApp> with WidgetsBindingObserver i
       // Memória: visitas de filas que não estão no disco do dono delas.
       final filas = <String, OfflineVisitQueue>{..._queues, currentOwner: current};
       for (final MapEntry(key: owner, value: queue) in filas.entries) {
-        final naFila = [...queue.pendingVisits, ...queue.rejectedVisits];
+        final naFila = [...queue.pendingVisits, ...queue.conflictVisits, ...queue.rejectedVisits];
         if (naFila.isEmpty) continue;
         final noDisco = disco[owner] ?? {for (final row in await _storage.forOwner(owner).load()) row.localId};
         for (final visit in naFila) {
@@ -392,11 +520,15 @@ class _SinalAcsAppState extends State<SinalAcsApp> with WidgetsBindingObserver i
   Future<void> wipe(String currentOwner, OfflineVisitQueue current) async {
     // A memória primeiro: o disco não enxerga a fila que não conseguiu gravar.
     final inMemory = {..._queues.values, current}
-        .fold<int>(0, (total, queue) => total + queue.pendingCount + queue.rejectedCount);
+        .fold<int>(0, (total, queue) => total + _visitsOnDevice(queue));
     if (inMemory > 0) throw WipeBlocked(inMemory);
 
     // Reconta e apaga numa transação; recusa sem apagar nada se sobrou visita.
     await _storage.wipeAllData();
+
+    // Só depois da recusa acima: sem visita nenhuma, o arquivo e a chave saem e
+    // o próximo uso abre um banco novo com chave nova (CRIPTO-APP-CACHE).
+    await _storage.destroyAll();
 
     final tokens = widget.uploadTokens;
     if (tokens != null) {
@@ -456,14 +588,324 @@ class _SinalAcsAppState extends State<SinalAcsApp> with WidgetsBindingObserver i
   /// nada (nem conteúdo clínico, nem erro) — `flushAll` não lança, é
   /// single-flight, e o que não subir fica para o próximo gatilho.
   void _triggerFlush() {
+    // Antes do diário da partida ou durante a limpeza remota, nada sai: o
+    // banco pode estar sendo apagado (#81).
+    if (!_wipeReady || _wiping) return;
     final flush = _flush;
     if (flush != null) unawaited(flush.flushAll());
+    _flushTelemetry();
   }
+
+  /// Envio da telemetria do dono da sessão aberta (#83), sem esperar: o
+  /// `flush` é single-flight por dono e nunca lança. Sem sessão, nada.
+  void _flushTelemetry() {
+    if (!_wipeReady || _wiping) return;
+    final owner = widget.backend.session?.userId;
+    final uploader = owner == null ? null : _telemetry[owner]?.uploader;
+    if (uploader != null) unawaited(uploader.flush());
+  }
+
+  // ---------------------------------------------------------------------------
+  // Limpeza remota pedida pela coordenação (#81).
+  //
+  // Ordem na partida: `resumePending()` (diário em `erasing` ou `erased`) ANTES
+  // de qualquer uso do banco e de ligar os outros gatilhos — o single-flight do
+  // coordenador ignora o `orderId`, e uma retomada correndo com um `apply`
+  // poderia perder um pedido. Depois, `check()` com teto, e só então o login.
+  // Retomada e volta da rede repetem `resumePending()` (reenvia a confirmação
+  // que ficou no diário, D7) e `check()`. INV-03: nada aqui reconhece nem
+  // conclui alerta; eles seguem `pending` no servidor.
+  // ---------------------------------------------------------------------------
+
+  late final WipeJournal _wipeJournal = widget.wipeJournal ?? MemoryWipeJournal();
+
+  // ---------------------------------------------------------------------------
+  // Certificado MQTT por aparelho (#94).
+  // ---------------------------------------------------------------------------
+
+  late final DeviceCertificateStore _deviceCertificates =
+      widget.deviceCertificates ?? InMemoryDeviceCertificateStore();
+
+  /// Um por app: o single-flight por `deviceId` vale entre os painéis.
+  late final DeviceCertificateEnroller _enroller =
+      DeviceCertificateEnroller(store: _deviceCertificates, backend: widget.backend);
+
+  /// O feed do painel. O injetado pelo teste ganha; senão, o MQTT com o
+  /// certificado deste aparelho, e sem [SinalAcsApp.deviceIds] um feed que
+  /// falha na hora (não há id para pedir o certificado).
+  late final AlertFeed Function(AlertQueue queue) _feedBuilder = widget.feedBuilder ??
+      (widget.deviceIds == null
+          ? (_) => UnconfiguredAlertFeed()
+          : (queue) => MqttAlertFeed(
+                queue: queue,
+                enroller: _enroller,
+                deviceIds: widget.deviceIds!,
+                // A emissão recusada com pedido de limpeza vira o fluxo da
+                // #81: pergunta pelo pedido e apaga.
+                onDeviceWipeRequired: () => unawaited(_checkRemoteWipe()),
+              ));
+
+  /// Sem [SinalAcsApp.deviceIds] não há id da instalação para perguntar ao
+  /// servidor: sem limpeza remota (o padrão dos testes de widget).
+  late final RemoteWipeCoordinator? _remoteWipe = widget.deviceIds == null
+      ? null
+      : RemoteWipeCoordinator(
+          backend: widget.backend,
+          deviceIds: widget.deviceIds!,
+          journal: _wipeJournal,
+          erase: _eraseDevice,
+          onWiped: _onDeviceWiped,
+        );
+
+  /// `false` até o diário e a consulta da partida terminarem: até lá a raiz
+  /// é uma espera neutra, e nem o login nem o envio diferido tocam no banco.
+  final ValueNotifier<bool> _wipeReadyNotifier = ValueNotifier<bool>(false);
+  bool get _wipeReady => _wipeReadyNotifier.value;
+
+  /// `true` do começo do apagador até `onWiped` (ou até a falha dele).
+  bool _wiping = false;
+
+  /// `true` com a tela `device_wiped` à vista: o [AppLockGate] sai de cima
+  /// dela (não há o que proteger, e não há sessão para desbloquear).
+  bool _showingWiped = false;
+
+  /// Diário em `erased`: o aparelho está limpo, mas a confirmação não chegou.
+  final ValueNotifier<bool> _wipePendingConfirm = ValueNotifier<bool>(false);
+
+  Future<void> _startRemoteWipe() async {
+    final wipe = _remoteWipe!;
+    try {
+      // A limpeza pendente termina aqui, sem teto, antes de qualquer uso do
+      // banco; só a confirmação tem teto (servidor mudo não segura o login).
+      await wipe.resumePending(confirmTimeout: startupWipeCheckTimeout);
+    } catch (_) {
+      // O apagador falhou: o diário segue em `erasing` e a próxima retomada,
+      // volta da rede ou partida tenta de novo. Nada do erro vai ao log.
+      developer.log('Limpeza remota pendente não terminou.', name: 'sinalacs.acs.remote_wipe');
+    }
+    if (!mounted) return;
+    widget.backend.onDeviceWipeRequired = _onDeviceWipeRequired;
+    await wipe.check().timeout(startupWipeCheckTimeout, onTimeout: () => false);
+    await _refreshWipePendingConfirm();
+    if (!mounted) return;
+    _wipeReadyNotifier.value = true;
+  }
+
+  /// Login, renovação ou envio diferido recusados com pedido de limpeza.
+  void _onDeviceWipeRequired(String orderId) {
+    final wipe = _remoteWipe;
+    if (wipe == null || !mounted) return;
+    unawaited(() async {
+      try {
+        await wipe.apply(orderId);
+      } catch (_) {
+        developer.log('Limpeza remota não terminou.', name: 'sinalacs.acs.remote_wipe');
+      }
+      await _refreshWipePendingConfirm();
+    }());
+  }
+
+  /// Retomada e volta da rede: reenvia a confirmação pendente e pergunta se
+  /// há pedido. `true` quando o aparelho foi limpo agora.
+  Future<bool> _checkRemoteWipe() async {
+    final wipe = _remoteWipe;
+    if (wipe == null || !_wipeReady) return false;
+    try {
+      await wipe.resumePending();
+    } catch (_) {
+      developer.log('Limpeza remota pendente não terminou.', name: 'sinalacs.acs.remote_wipe');
+    }
+    final wiped = await wipe.check();
+    await _refreshWipePendingConfirm();
+    return wiped;
+  }
+
+  /// Gatilho da retomada e da volta da rede: primeiro a limpeza, e o envio
+  /// diferido só se o aparelho não foi limpo.
+  void _onForegroundOrOnline() {
+    if (_remoteWipe == null) {
+      _triggerFlush();
+      return;
+    }
+    unawaited(() async {
+      final wiped = await _checkRemoteWipe();
+      if (!wiped && mounted) _triggerFlush();
+    }());
+  }
+
+  Future<void> _refreshWipePendingConfirm() async {
+    WipeJournalEntry? entry;
+    try {
+      entry = await _wipeJournal.read();
+    } catch (_) {
+      entry = null;
+    }
+    if (!mounted) return;
+    _wipePendingConfirm.value = entry?.phase == WipePhase.erased;
+  }
+
+  /// O apagador ([DeviceEraser]) do coordenador. Idempotente. Primeiro SELA
+  /// toda fila em memória ([OfflineVisitQueue.seal]): um envio em voo que
+  /// termine depois da destruição gravaria de novo, num banco recriado com
+  /// chave nova, as visitas que a coordenação mandou apagar. Depois desmonta o
+  /// painel (feed MQTT, reserva por HTTP, timers e formulários saem com ele;
+  /// em segundo plano, no próximo quadro), descarta as filas SEM gravar e
+  /// apaga, nesta ordem: a sessão local, o banco e a chave do SQLCipher, os
+  /// tokens de envio (sem revogar: o servidor já os revogou no pedido) e o id
+  /// da instalação. D2: ao contrário do "Limpar este aparelho", nada aqui
+  /// recusa por visita não enviada.
+  ///
+  /// Junto com as filas, SELA o pull de cada escopo e o cache da microárea
+  /// ([MicroAreaDirectory.seal]): a lista ou o pull que o painel pediu antes e
+  /// que só volte da rede depois da destruição reabriria o banco, criaria uma
+  /// chave nova e gravaria nomes e condições crônicas num aparelho que o
+  /// servidor registra como limpo. O selo do cache só abre no próximo login
+  /// ([_scopeForShell]).
+  Future<void> _eraseDevice() async {
+    _wiping = true;
+    try {
+      for (final queue in {..._queues.values, for (final scope in _scopes.values) scope.queue}) {
+        queue.seal();
+      }
+      for (final pull in {for (final scope in _scopes.values) scope.pullService, ?widget.visitPullService}) {
+        pull.seal();
+      }
+      // Telemetria (#83): um `append` ou um flush que chegue depois abriria de
+      // novo o banco destruído, com chave nova.
+      final telemetryStore = _telemetryStore;
+      if (telemetryStore is SqlCipherTelemetryStore) telemetryStore.seal();
+      final cacheSealed = widget.microAreaDirectory?.seal();
+      await _tearDownForWipe();
+      await cacheSealed;
+      final owners = <String>{..._queues.keys};
+      _queues.clear();
+      _scopes.clear();
+      _telemetry.clear();
+      await widget.backend.forgetLocalSession();
+      await _storage.destroyAll();
+      final tokens = widget.uploadTokens;
+      if (tokens != null) {
+        try {
+          owners.addAll(await tokens.owners());
+        } catch (_) {}
+        try {
+          await tokens.clearAll(alsoOwners: owners);
+        } catch (_) {
+          // Keystore falhou: sem banco, um token que sobrar não acha visita
+          // nenhuma, e o servidor já o revogou.
+        }
+      }
+      // O certificado MQTT emitido para o id antigo sai antes do id (#94): a
+      // chave privada dele não pode sobrar num aparelho limpo. O id antigo é
+      // o do diário (gravado antes de apagar), que vale também numa limpeza
+      // refeita depois de o id já ter sido trocado.
+      final oldDeviceId = (await _wipeJournal.read())?.deviceId ?? await widget.deviceIds!.readOrCreate();
+      await _deviceCertificates.delete(deviceId: oldDeviceId);
+      await widget.deviceIds!.delete();
+    } catch (_) {
+      // As filas já estão seladas: nenhuma serve ao próximo login, que relê o
+      // disco (o diário segue em `erasing` e a limpeza é refeita depois).
+      _queues.clear();
+      _scopes.clear();
+      _telemetry.clear();
+      _wiping = false;
+      if (mounted) _openFreshLogin();
+      rethrow;
+    }
+  }
+
+  /// Tira o painel (e tudo o mais) da pilha e espera, com teto, os quadros em
+  /// que os `State`s saem. Sem quadros (segundo plano), não espera: a fila já
+  /// está selada, e o painel sai no primeiro quadro da volta.
+  Future<void> _tearDownForWipe() async {
+    var nav = _navigatorKey.currentState;
+    if (nav == null) {
+      await _frame();
+      nav = _navigatorKey.currentState;
+    }
+    if (nav == null || !mounted) return;
+    nav.pushAndRemoveUntil(
+      PageRouteBuilder<void>(
+        transitionDuration: Duration.zero,
+        reverseTransitionDuration: Duration.zero,
+        pageBuilder: (_, __, ___) => const _WipeHold(),
+      ),
+      (_) => false,
+    );
+    await _frame();
+    await _frame();
+  }
+
+  Future<void> _frame() async {
+    final binding = WidgetsBinding.instance;
+    if (!binding.framesEnabled) return;
+    await binding.endOfFrame.timeout(remoteWipeFrameWait, onTimeout: () {});
+  }
+
+  /// `onWiped`: a pilha inteira vira a tela `device_wiped`, fora do bloqueio.
+  void _onDeviceWiped() {
+    _wiping = false;
+    if (!mounted) return;
+    setState(() => _showingWiped = true);
+    void show() => _navigatorKey.currentState?.pushAndRemoveUntil(
+          PageRouteBuilder<void>(
+            transitionDuration: Duration.zero,
+            reverseTransitionDuration: Duration.zero,
+            pageBuilder: (_, __, ___) => DeviceWipedScreen(
+              pendingConfirm: _wipePendingConfirm,
+              onLoginAgain: _loginAgainAfterWipe,
+            ),
+          ),
+          (_) => false,
+        );
+    if (_navigatorKey.currentState != null) {
+      show();
+    } else {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) show();
+      });
+    }
+  }
+
+  /// "Entrar de novo": login novo, com o bloqueio de volta. O id da instalação
+  /// já foi trocado pelo apagador; o próximo login gera e envia o novo.
+  void _loginAgainAfterWipe() {
+    if (!mounted) return;
+    setState(() => _showingWiped = false);
+    _openFreshLogin();
+  }
+
+  void _openFreshLogin() {
+    _navigatorKey.currentState?.pushAndRemoveUntil(
+      MaterialPageRoute<void>(builder: (_) => _loginScreen()),
+      (_) => false,
+    );
+  }
+
+  LoginScreen _loginScreen() => LoginScreen(
+        feedBuilder: _feedBuilder,
+        visitScopeFor: _scopeForShell,
+        directory: widget.microAreaDirectory,
+        initialAlert: widget.initialAlert,
+        initialPosition: widget.currentPosition,
+        themeController: _themeController,
+        syncInterval: widget.syncInterval,
+        alertFallbackInterval: widget.alertFallbackInterval,
+        biometricGate: _gate,
+      );
 
   /// Resolve o escopo do painel que vai abrir e dispara o envio diferido
   /// (gatilho "depois de abrir o painel"). Só `_openShell` chama o resolvedor.
   OwnerVisitScope _scopeForShell(AuthSession session) {
     final scope = _scopeFor(session);
+    // Login novo depois de uma limpeza remota: o cache e o pull voltam a
+    // gravar (o selo de [_eraseDevice] vale até aqui). Nunca no meio dela.
+    if (!_wiping) {
+      widget.microAreaDirectory?.unseal();
+      scope.pullService.unseal();
+      final telemetryStore = _telemetryStore;
+      if (telemetryStore is SqlCipherTelemetryStore) telemetryStore.unseal();
+    }
     _triggerFlush();
     return scope;
   }
@@ -476,19 +918,29 @@ class _SinalAcsAppState extends State<SinalAcsApp> with WidgetsBindingObserver i
     _connectivity = widget.connectivityChanges?.listen((online) {
       final was = _online;
       _online = online;
-      if (online && was != true) _triggerFlush();
+      if (online && was != true) _onForegroundOrOnline();
     });
+    if (_remoteWipe == null) {
+      _wipeReadyNotifier.value = true;
+    } else {
+      unawaited(_startRemoteWipe());
+    }
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) _triggerFlush();
+    if (state == AppLifecycleState.resumed) _onForegroundOrOnline();
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _connectivity?.cancel();
+    if (widget.backend.onDeviceWipeRequired == _onDeviceWipeRequired) {
+      widget.backend.onDeviceWipeRequired = null;
+    }
+    _wipeReadyNotifier.dispose();
+    _wipePendingConfirm.dispose();
     if (widget.themeController == null) _themeController.dispose();
     super.dispose();
   }
@@ -555,28 +1007,41 @@ class _SinalAcsAppState extends State<SinalAcsApp> with WidgetsBindingObserver i
               themeMode: mode,
               // No `builder`, ACIMA do Navigator: cobre também as rotas
               // empilhadas (formulário de visita, reautenticação).
-              builder: (context, child) => AppLockGate(
-                key: ValueKey<int>(_gateGeneration),
-                gate: _gate,
-                navigatorKey: _navigatorKey,
-                lockAfter: widget.lockAfter ?? const Duration(seconds: 30),
-                onUsePassword: _usePassword,
-                child: child!,
-              ),
-              home: LoginScreen(
-                feedBuilder: widget.feedBuilder,
-                visitScopeFor: _scopeForShell,
-                directory: widget.microAreaDirectory,
-                initialAlert: widget.initialAlert,
-                initialPosition: widget.currentPosition,
-                themeController: _themeController,
-                syncInterval: widget.syncInterval,
-                biometricGate: _gate,
+              // Com a tela `device_wiped` à vista, o gate sai (#81): o
+              // Navigator sobrevive à troca de pai pela `GlobalKey`, como na
+              // recriação do gate por "Entrar com senha".
+              builder: (context, child) => _showingWiped
+                  ? child!
+                  : AppLockGate(
+                      key: ValueKey<int>(_gateGeneration),
+                      gate: _gate,
+                      navigatorKey: _navigatorKey,
+                      lockAfter: widget.lockAfter ?? const Duration(seconds: 30),
+                      onUsePassword: _usePassword,
+                      child: child!,
+                    ),
+              // Até o diário da limpeza remota e a consulta da partida
+              // terminarem, uma espera neutra: o login (e a retomada da
+              // sessão) nunca abre antes de o aparelho saber se foi limpo.
+              home: ValueListenableBuilder<bool>(
+                valueListenable: _wipeReadyNotifier,
+                builder: (context, ready, _) => ready ? _loginScreen() : const _WipeHold(),
               ),
             ),
           ),
          ),
         ),
+      );
+}
+
+/// Espera neutra, sem texto nem dado: a partida antes do diário da limpeza
+/// remota e o intervalo em que o aparelho está sendo apagado (#81).
+class _WipeHold extends StatelessWidget {
+  const _WipeHold();
+
+  @override
+  Widget build(BuildContext context) => const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
       );
 }
 
@@ -615,6 +1080,7 @@ class LoginScreen extends StatefulWidget {
     this.initialAlert,
     this.initialPosition,
     this.syncInterval,
+    this.alertFallbackInterval,
     this.aviso,
     this.reauthUserId,
     this.biometricGate,
@@ -644,6 +1110,7 @@ class LoginScreen extends StatefulWidget {
   final LatLng? initialPosition;
   final ThemeController themeController;
   final Duration? syncInterval;
+  final Duration? alertFallbackInterval;
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
@@ -882,12 +1349,14 @@ class _LoginScreenState extends State<LoginScreen> {
         feedBuilder: widget.feedBuilder,
         visitQueue: scope.queue,
         visitPullService: scope.pullService,
+        telemetryUploader: scope.telemetryUploader,
         visitScopeFor: widget.visitScopeFor,
         directory: widget.directory,
         initialAlert: widget.initialAlert,
         initialPosition: widget.initialPosition,
         themeController: widget.themeController,
         syncInterval: widget.syncInterval,
+        alertFallbackInterval: widget.alertFallbackInterval,
       ),
     );
     if (widget.reauthUserId != null) {
@@ -1024,10 +1493,17 @@ class AcsHomeShell extends StatefulWidget {
     this.initialAlert,
     this.initialPosition,
     this.syncInterval,
+    this.alertFallbackInterval,
+    this.telemetryUploader,
   });
 
   final String microAreaId;
   final String acsId;
+
+  /// Envio da telemetria do dono deste painel (#83), o MESMO do escopo dele.
+  /// Disparado sem esperar depois de todo `visitQueue.sync()`. `null`: sem
+  /// telemetria (os testes que injetam a fila).
+  final TelemetryUploader? telemetryUploader;
   final AlertFeed Function(AlertQueue queue)? feedBuilder;
   final PrioritizedAlert? initialAlert;
   final LatLng? initialPosition;
@@ -1042,6 +1518,15 @@ class AcsHomeShell extends StatefulWidget {
   /// botão, uma visita registrada por outro colega — sem virar polling
   /// agressivo que gasta bateria/dados em campo.
   static const defaultSyncInterval = Duration(minutes: 5);
+
+  /// Consulta de alertas por HTTP (#80, R2) enquanto o broker está fora.
+  /// `null` usa [defaultAlertFallbackInterval].
+  final Duration? alertFallbackInterval;
+
+  /// 30 s: com a consulta no meio do intervalo, um alerta chega em ~15 s e,
+  /// no pior caso, em 30 s — dentro dos 90 s do TMRAV, sem virar polling que
+  /// gasta bateria e dados em 3G.
+  static const defaultAlertFallbackInterval = Duration(seconds: 30);
 
   /// Obrigatória: a tela de visita usava `widget.visitQueue ?? OfflineVisitQueue()`,
   /// e um dia em que o shell fosse construído sem fila voltaria a descartar a
@@ -1069,7 +1554,7 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
 
   late final AlertQueue _queue = AlertQueue(microAreaId: widget.microAreaId);
   late final AlertFeed _feed =
-      (widget.feedBuilder ?? (queue) => MqttAlertFeed(queue: queue))(_queue);
+      (widget.feedBuilder ?? (_) => UnconfiguredAlertFeed())(_queue);
 
   bool _brokerConnected = false;
   InfraNotice? _feedError;
@@ -1086,6 +1571,27 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
   /// `null` quando nenhum ciclo periódico está agendado (app em segundo
   /// plano, ou ainda não iniciado).
   Timer? _periodicSyncTimer;
+
+  /// Reserva por HTTP dos alertas (#80, R2). Criada com o backend, em
+  /// [didChangeDependencies].
+  AlertHttpFallback? _alertFallback;
+
+  /// Armado só enquanto o broker está fora e o app em primeiro plano; `null`
+  /// é "reserva desligada", e é isso que a linha de status do painel segue.
+  Timer? _alertFallbackTimer;
+
+  /// Uma consulta por vez: um tique que chega com outra em voo é descartado.
+  bool _pollingAlerts = false;
+
+  /// Hora da última resposta da reserva (sucesso ou falha); `null` antes da
+  /// primeira.
+  DateTime? _alertFallbackAt;
+  bool _alertFallbackFailed = false;
+
+  bool _inBackground = false;
+
+  Duration get _alertFallbackInterval =>
+      widget.alertFallbackInterval ?? AcsHomeShell.defaultAlertFallbackInterval;
 
   Duration get _syncInterval => widget.syncInterval ?? AcsHomeShell.defaultSyncInterval;
 
@@ -1141,6 +1647,7 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
     // sozinha, via autoReconnect do mqtt_client — é o que mantém o chip do
     // cabeçalho honesto sem o shell abrir um segundo laço de retentativa.
     _feed.onConnectionChanged = _onBrokerConnectionChanged;
+    _feed.onFailure = _onFeedFailure;
     _connectFeed();
     _restoreVisits();
     _pullVisits();
@@ -1171,6 +1678,11 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
       _backend!.onSessionExpired = _sessionExpired;
       _lockHooks = _AppLockScope.maybeOf(context)?..openPasswordReauth = _reauthForLock;
       _loadMicroAreaPatients();
+      // Sempre uma vez ao abrir, com ou sem MQTT: a fila em memória começa
+      // vazia, e o "Sair" anterior pode ter levado embora alertas que seguem
+      // pendentes no servidor (#80).
+      _alertFallback = AlertHttpFallback(backend: _backend!, queue: _queue);
+      _pollAlerts();
     }
   }
 
@@ -1227,6 +1739,7 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
                 initialAlert: widget.initialAlert,
                 initialPosition: widget.initialPosition,
                 syncInterval: widget.syncInterval,
+                alertFallbackInterval: widget.alertFallbackInterval,
                 aviso: aviso,
                 reauthUserId: widget.acsId,
               ),
@@ -1494,8 +2007,8 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
   /// Antes rodava só uma vez, no `initState`: se falhasse, o app nunca mais
   /// tentava, e reabrir era o único jeito de recuperar um alerta que o broker
   /// já estava guardando com QoS 1. Falhas transitórias agora são retentadas
-  /// sozinhas por [_scheduleReconnect]; falhas permanentes (senha ausente, CA
-  /// ausente, credencial recusada) não são — insistir nelas não muda nada e só
+  /// sozinhas por [_scheduleReconnect]; falhas permanentes (CA ausente, emissão do
+  /// certificado recusada, credencial recusada) não são — insistir nelas não muda nada e só
   /// gastaria bateria.
   Future<void> _connectFeed() async {
     try {
@@ -1509,25 +2022,9 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
         _feedError = null;
         _feedErrorIsTransient = false;
       });
+      _syncAlertFallbackTimer();
     } on AlertFeedFailure catch (failure, stackTrace) {
-      developer.log(
-        'não foi possível assinar o tópico de alertas',
-        name: 'sinalacs.acs.alert_feed',
-        error: failure.cause ?? failure,
-        stackTrace: stackTrace,
-      );
-      if (!mounted) return;
-      setState(() {
-        _brokerConnected = false;
-        _feedErrorIsTransient = failure.transient;
-        _feedError = (
-          title: failure.title,
-          detail: failure.transient
-              ? '${failure.detail} Tentando reconectar automaticamente.'
-              : failure.detail,
-        );
-      });
-      if (failure.transient) _scheduleReconnect();
+      _onFeedFailure(failure, stackTrace);
     } catch (error, stackTrace) {
       // Defesa: hoje só um AlertFeed de teste chega aqui. Logar em vez de
       // descartar — antes o erro era engolido e a tela dizia sempre o mesmo.
@@ -1549,8 +2046,34 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
               'Tentando reconectar automaticamente.',
         );
       });
+      _syncAlertFallbackTimer();
       _scheduleReconnect();
     }
+  }
+
+  /// Falha classificada do feed: a de `start()` e a que chega depois dele por
+  /// `AlertFeed.onFailure` (#94: certificado recusado na reconexão automática).
+  /// Transitória, entra na mesma retentativa com backoff.
+  void _onFeedFailure(AlertFeedFailure failure, [StackTrace? stackTrace]) {
+    developer.log(
+      'não foi possível assinar o tópico de alertas',
+      name: 'sinalacs.acs.alert_feed',
+      error: failure.cause ?? failure,
+      stackTrace: stackTrace,
+    );
+    if (!mounted) return;
+    setState(() {
+      _brokerConnected = false;
+      _feedErrorIsTransient = failure.transient;
+      _feedError = (
+        title: failure.title,
+        detail: failure.transient
+            ? '${failure.detail} Tentando reconectar automaticamente.'
+            : failure.detail,
+      );
+    });
+    _syncAlertFallbackTimer();
+    if (failure.transient) _scheduleReconnect();
   }
 
   /// Agenda a próxima tentativa, cancelando qualquer uma já pendente.
@@ -1580,6 +2103,53 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
   void _onBrokerConnectionChanged(bool connected) {
     if (!mounted) return;
     setState(() => _brokerConnected = connected);
+    _syncAlertFallbackTimer();
+  }
+
+  /// Liga a consulta periódica de alertas por HTTP enquanto o broker está
+  /// fora e o app em primeiro plano; desliga em qualquer outro caso (#80).
+  /// Intervalo fixo, sem backoff: 30 s já é o piso de custo, e uma falha só
+  /// aparece na linha de status.
+  void _syncAlertFallbackTimer() {
+    final wanted = mounted && !_brokerConnected && !_inBackground;
+    if (wanted == (_alertFallbackTimer != null)) return;
+    if (wanted) {
+      _alertFallbackTimer = Timer.periodic(_alertFallbackInterval, (_) => _pollAlerts());
+      // Consulta já, sem esperar um intervalo inteiro, e esquece a resposta
+      // anterior: ela é de quando o tempo real funcionava (ou de outra queda),
+      // e a linha de status diria uma hora velha como se fosse desta reserva.
+      _alertFallbackAt = null;
+      _alertFallbackFailed = false;
+      _pollAlerts();
+    } else {
+      _alertFallbackTimer?.cancel();
+      _alertFallbackTimer = null;
+    }
+    if (mounted) setState(() {});
+  }
+
+  /// Uma consulta à reserva. A sessão vencida segue o caminho de sempre
+  /// (`onSessionExpired` do backend abre a reautenticação); aqui só se marca
+  /// a falha para a linha de status.
+  Future<void> _pollAlerts() async {
+    final fallback = _alertFallback;
+    if (fallback == null || _pollingAlerts) return;
+    _pollingAlerts = true;
+    var failed = false;
+    try {
+      await fallback.poll();
+    } on BackendFailure catch (failure) {
+      // Só o texto já traduzido pelo `_guard`: nada do paciente vai ao log.
+      failed = true;
+      developer.log(failure.message, name: 'sinalacs.acs.alert_fallback');
+    } finally {
+      _pollingAlerts = false;
+    }
+    if (!mounted) return;
+    setState(() {
+      _alertFallbackAt = DateTime.now();
+      _alertFallbackFailed = failed;
+    });
   }
 
   @override
@@ -1591,7 +2161,12 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
       _reconnectTimer = null;
       _periodicSyncTimer?.cancel();
       _periodicSyncTimer = null;
+      _inBackground = true;
+      _syncAlertFallbackTimer();
     } else if (state == AppLifecycleState.resumed) {
+      _inBackground = false;
+      _pollAlerts();
+      _syncAlertFallbackTimer();
       if (_feedErrorIsTransient) {
         // O gatilho que mais importa na prática: o sinal costuma voltar com
         // a tela apagada, e o ACS tira o aparelho do bolso já esperando o
@@ -1615,6 +2190,13 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
       ..showSnackBar(SnackBar(content: Text(texto)));
     try {
       final result = await BackendScope.of(context).acknowledge(alertId: alert.alertId);
+      // Outro aparelho (ou uma reentrega) já concluiu o atendimento (#86):
+      // o cartão vai a concluído, sem oferecer "Concluir atendimento".
+      if (result.status == AlertStatus.resolved) {
+        if (mounted) _queue.markResolved(alert.alertId);
+        aviso('Este atendimento já foi concluído.');
+        return;
+      }
       if (result.acknowledged && mounted) _queue.markAcknowledged(alert.alertId);
       aviso(result.acknowledged
           ? 'Recebimento confirmado à central.'
@@ -1622,6 +2204,58 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
     } on BackendFailure catch (failure) {
       // Nunca engolir: o alerta segue na fila, sem confirmação, e a pessoa vê por quê.
       aviso(failure.message);
+    }
+  }
+
+  /// Alertas com a conclusão em voo. O diálogo modal já impede dois toques;
+  /// este conjunto impede uma segunda conclusão do mesmo alerta enquanto a
+  /// chamada ao servidor não volta (o servidor também é idempotente).
+  final Set<String> _concluindo = <String>{};
+
+  /// "Concluir atendimento" (#76): confirma com o ACS, porque o paciente passa
+  /// a ver "Atendido" e o servidor não volta atrás.
+  Future<void> _resolve(PrioritizedAlert alert) async {
+    if (_concluindo.contains(alert.alertId)) return;
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    void aviso(String texto) => messenger
+      ?..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(texto)));
+    final confirmou = await showDialog<bool>(
+      context: context,
+      builder: (dialog) => AlertDialog(
+        title: const Text('Concluir o atendimento?'),
+        content: const Text(
+          'O paciente verá "Atendido" no aplicativo. Conclua só depois de atender o paciente.',
+        ),
+        actions: [
+          TextButton(
+            key: const Key('cancelar_conclusao'),
+            onPressed: () => Navigator.of(dialog).pop(false),
+            style: TextButton.styleFrom(minimumSize: const Size(48, 52)),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            key: const Key('confirmar_conclusao'),
+            onPressed: () => Navigator.of(dialog).pop(true),
+            style: FilledButton.styleFrom(minimumSize: const Size(48, 52)),
+            child: const Text('Concluir'),
+          ),
+        ],
+      ),
+    );
+    if (confirmou != true || !mounted) return;
+    _concluindo.add(alert.alertId);
+    try {
+      final result = await BackendScope.of(context).resolveAlert(alertId: alert.alertId);
+      if (result.resolved && mounted) _queue.markResolved(alert.alertId);
+      aviso(result.resolved
+          ? 'Atendimento concluído. O paciente já vê "Atendido".'
+          : 'A central não reconheceu este alerta.');
+    } on BackendFailure catch (failure) {
+      // Nunca engolir: o alerta segue confirmado e por concluir.
+      aviso(failure.message);
+    } finally {
+      _concluindo.remove(alert.alertId);
     }
   }
 
@@ -1634,6 +2268,18 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
 
   _DeviceCare? get _care => _DeviceCareScope.maybeOf(context);
 
+  /// Todo `sync` da fila do painel passa por aqui: concluído, dispara o envio
+  /// da telemetria do dono sem esperar (#83). Os eventos do próprio sync
+  /// (`sync_attempt`/`sync_result`) já estão na fila local nesse ponto.
+  Future<SyncOutcome> _syncVisits() async {
+    try {
+      return await widget.visitQueue.sync();
+    } finally {
+      final uploader = widget.telemetryUploader;
+      if (uploader != null) unawaited(uploader.flush());
+    }
+  }
+
   /// Antes de sair ou limpar: (1) a fila do painel (o envio diferido pula o
   /// dono da sessão atual de propósito, para não haver dois `sync` sobre a
   /// mesma fila); (2) o envio diferido do legado e dos outros donos. Cada
@@ -1643,7 +2289,7 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
   Future<({bool settled, FlushReport? report})> _sendBeforeLeaving() async {
     var settled = true;
     try {
-      await widget.visitQueue.sync().timeout(sessionEndSendTimeout);
+      await _syncVisits().timeout(sessionEndSendTimeout);
     } on TimeoutException {
       settled = false;
     } catch (_) {
@@ -1675,7 +2321,11 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
     setState(() => _enviandoAntesDeSair = false);
     final fila = widget.visitQueue;
     final recusadas = fila.rejectedCount;
-    final proprias = fila.pendingCount + recusadas;
+    // Em conflito também ficam no aparelho, mas o envio diferido as pula (D6):
+    // só sobem depois da decisão do dono, nesta conta. Não entram no "sobem
+    // sozinhas".
+    final emConflito = fila.conflictCount;
+    final proprias = _visitsOnDevice(fila);
     final outras = await _care?.pendingElsewhere(widget.acsId) ?? 0;
     if (!mounted) return;
     setState(() => _saindo = false);
@@ -1702,9 +2352,7 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
               const Text('Tudo foi enviado. Nenhuma visita fica pendente neste aparelho.', key: Key('logout_all_sent'))
             else ...[
               Text(
-                ficam == 1
-                    ? '1 visita ainda não enviada continua neste aparelho. Ela segue protegida e sobe sozinha quando o aplicativo estiver aberto com conexão (em até 7 dias).'
-                    : '$ficam visitas ainda não enviadas continuam neste aparelho. Elas seguem protegidas e sobem sozinhas quando o aplicativo estiver aberto com conexão (em até 7 dias).',
+                _pendingVisitsOnLogout(ficam: ficam, emConflito: emConflito),
                 key: const Key('logout_pending_visits'),
               ),
               if (outras > 0 && proprias > 0) ...[
@@ -1721,6 +2369,15 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
                       ? '1 delas foi recusada pela central e aguarda revisão nesta conta.'
                       : '$recusadas delas foram recusadas pela central e aguardam revisão nesta conta.',
                   key: const Key('logout_rejected_visits'),
+                ),
+              ],
+              if (emConflito > 0) ...[
+                const SizedBox(height: 8),
+                Text(
+                  emConflito == 1
+                      ? '1 delas está em conflito com o servidor e aguarda a sua decisão nesta conta.'
+                      : '$emConflito delas estão em conflito com o servidor e aguardam a sua decisão nesta conta.',
+                  key: const Key('logout_conflict_visits'),
                 ),
               ],
             ],
@@ -1763,6 +2420,7 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
         initialAlert: widget.initialAlert,
         initialPosition: widget.initialPosition,
         syncInterval: widget.syncInterval,
+        alertFallbackInterval: widget.alertFallbackInterval,
         aviso: aviso,
       )),
       (_) => false,
@@ -1932,11 +2590,14 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
     if (_lockHooks?.openPasswordReauth == _reauthForLock) _lockHooks!.openPasswordReauth = null;
     _reconnectTimer?.cancel();
     _periodicSyncTimer?.cancel();
+    _alertFallbackTimer?.cancel();
+    _alertFallback?.close();
     WidgetsBinding.instance.removeObserver(this);
     // Solta o callback ANTES de parar: `stop()` desconecta o MQTT, que avisa
     // `onConnectionChanged(false)`, e `mounted` ainda é `true` durante o
     // `dispose` — o `setState` caía num elemento já defunct (assertion).
     _feed.onConnectionChanged = null;
+    _feed.onFailure = null;
     _feed.stop();
     _queue.dispose();
     super.dispose();
@@ -1962,8 +2623,12 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
           queue: _queue,
           feedError: _feedError,
           onRetryFeed: _feedErrorIsTransient ? _retryFeedNow : null,
+          alertFallback: _alertFallbackTimer == null
+              ? null
+              : (at: _alertFallbackAt, failed: _alertFallbackFailed, every: _alertFallbackInterval),
           storageError: _storageNotice,
           onAcknowledge: _acknowledge,
+          onResolve: _resolve,
           onEscalate: (alert) => setState(() { _selected = alert; destination = AcsDestination.escalation; }),
           onVisit: (alert) => setState(() { _selected = alert; destination = AcsDestination.visit; }),
         ),
@@ -1980,6 +2645,7 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
           directory: widget.directory,
           alert: _selected,
           queue: widget.visitQueue,
+          sync: _syncVisits,
           currentPosition: _currentPosition,
         ),
       AcsDestination.escalation => EscalationScreen(
@@ -2167,8 +2833,10 @@ class DashboardScreen extends StatelessWidget {
     super.key,
     this.feedError,
     this.onRetryFeed,
+    this.alertFallback,
     this.storageError,
     this.onAcknowledge,
+    this.onResolve,
     this.onEscalate,
     this.onVisit,
   });
@@ -2176,9 +2844,14 @@ class DashboardScreen extends StatelessWidget {
   final AlertQueue queue;
   final InfraNotice? feedError;
 
+  /// Reserva por HTTP ativa (#80): o broker está fora e o painel consulta o
+  /// servidor a cada [every]. `at` é a última resposta (nula antes da
+  /// primeira) e `failed` diz se ela falhou.
+  final ({DateTime? at, bool failed, Duration every})? alertFallback;
+
   /// Presente só quando [feedError] é uma falha transitória — dá ao ACS que já
   /// vê o sinal voltar a chance de não esperar o backoff automático. `null`
-  /// numa falha permanente (senha ausente, CA ausente) evita oferecer um botão
+  /// numa falha permanente (CA ausente, emissão do certificado recusada) evita oferecer um botão
   /// que nunca vai funcionar.
   final VoidCallback? onRetryFeed;
 
@@ -2189,6 +2862,7 @@ class DashboardScreen extends StatelessWidget {
   /// descobre sozinho — que as visitas do dia não estão sendo salvas.
   final InfraNotice? storageError;
   final void Function(PrioritizedAlert alert)? onAcknowledge;
+  final void Function(PrioritizedAlert alert)? onResolve;
   final void Function(PrioritizedAlert alert)? onEscalate;
   final void Function(PrioritizedAlert alert)? onVisit;
 
@@ -2207,6 +2881,10 @@ class DashboardScreen extends StatelessWidget {
               icon: Icons.cloud_off_outlined,
               notice: feedError!,
               onRetry: onRetryFeed,
+            ),
+            if (alertFallback != null) _AlertFallbackStatus(
+              key: const Key('alert_fallback_status'),
+              status: alertFallback!,
             ),
             if (storageError != null) _InfraBanner(
               key: const Key('storage_error'),
@@ -2229,6 +2907,7 @@ class DashboardScreen extends StatelessWidget {
               child: _AlertCard(
                 alert: alert,
                 onAcknowledge: onAcknowledge,
+                onResolve: onResolve,
                 onEscalate: onEscalate,
                 onVisit: onVisit,
               ),
@@ -2246,6 +2925,41 @@ class DashboardScreen extends StatelessWidget {
 ///
 /// A `Key` vem de fora e é o único identificador do aviso — pô-la também no
 /// `ListTile` faria `find.byKey` achar dois widgets.
+/// Linha da reserva por HTTP (#80): diz ao ACS que os alertas seguem
+/// chegando, pelo servidor e com atraso, enquanto o tempo real está fora.
+class _AlertFallbackStatus extends StatelessWidget {
+  const _AlertFallbackStatus({required this.status, super.key});
+
+  final ({DateTime? at, bool failed, Duration every}) status;
+
+  static String _hhmm(DateTime t) =>
+      '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
+
+  @override
+  Widget build(BuildContext context) {
+    final at = status.at;
+    final segundos = status.every.inSeconds;
+    final texto = at == null
+        ? 'Consultando alertas pelo servidor…'
+        : status.failed
+            ? 'A consulta de alertas pelo servidor também falhou às ${_hhmm(at)}. '
+                'Nova tentativa em $segundos s.'
+            : 'Recebendo alertas pelo servidor a cada $segundos s. '
+                'Última consulta às ${_hhmm(at)}.';
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Semantics(
+        liveRegion: true,
+        child: Row(children: [
+          Icon(status.failed ? Icons.sync_problem_outlined : Icons.sync_outlined, size: 18),
+          const SizedBox(width: 8),
+          Expanded(child: Text(texto)),
+        ]),
+      ),
+    );
+  }
+}
+
 class _InfraBanner extends StatelessWidget {
   const _InfraBanner({required this.icon, required this.notice, super.key, this.onRetry});
 
@@ -2282,10 +2996,11 @@ class _InfraBanner extends StatelessWidget {
 }
 
 class _AlertCard extends StatelessWidget {
-  const _AlertCard({required this.alert, this.onAcknowledge, this.onEscalate, this.onVisit});
+  const _AlertCard({required this.alert, this.onAcknowledge, this.onEscalate, this.onVisit, this.onResolve});
 
   final PrioritizedAlert alert;
   final void Function(PrioritizedAlert alert)? onAcknowledge;
+  final void Function(PrioritizedAlert alert)? onResolve;
   final void Function(PrioritizedAlert alert)? onEscalate;
   final void Function(PrioritizedAlert alert)? onVisit;
 
@@ -2326,7 +3041,8 @@ class _AlertCard extends StatelessWidget {
             container: true,
             label: 'Paciente ${alert.patientId.substring(0, 8)}, $label'
                 '${alert.escalated ? ', reforço da coordenação' : ''}'
-                '${alert.acknowledged ? ', recebimento confirmado' : ''}, '
+                '${alert.acknowledged ? ', recebimento confirmado' : ''}'
+                '${alert.resolved ? ', atendimento concluído' : ''}, '
                 'recebido às ${_time(alert.triggeredAt)}',
             excludeSemantics: true,
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -2349,7 +3065,16 @@ class _AlertCard extends StatelessWidget {
               ),
               const SizedBox(height: 6),
               Text('Recebido às ${_time(alert.triggeredAt)} • local ${alert.locationHash}'),
-              if (alert.acknowledged) Padding(
+              if (alert.resolved) Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Row(children: [
+                  Icon(Icons.task_alt, size: 16, color: context.acsRisk.greenOnSurface),
+                  const SizedBox(width: 6),
+                  Text('Atendimento concluído',
+                      key: Key('resolved_${alert.alertId}'),
+                      style: TextStyle(color: context.acsRisk.greenOnSurface)),
+                ]),
+              ) else if (alert.acknowledged) Padding(
                 padding: const EdgeInsets.only(top: 8),
                 child: Row(children: [
                   Icon(Icons.check_circle, size: 16, color: context.acsRisk.greenOnSurface),
@@ -2369,17 +3094,29 @@ class _AlertCard extends StatelessWidget {
               child: const Text('Confirmar recebimento'),
             ),
           ),
-          const SizedBox(height: 8),
-          SizedBox(
+          if (alert.acknowledged && !alert.resolved) SizedBox(
             width: double.infinity,
-            child: OutlinedButton(
-              onPressed: isRed
-                  ? (onEscalate == null ? null : () => onEscalate!(alert))
-                  : (onVisit == null ? null : () => onVisit!(alert)),
-              style: OutlinedButton.styleFrom(minimumSize: const Size(48, 52)),
-              child: Text(isRed ? 'Acionar SAMU / Atender' : 'Iniciar rota de visita'),
+            child: FilledButton.icon(
+              key: Key('resolve_${alert.alertId}'),
+              onPressed: onResolve == null ? null : () => onResolve!(alert),
+              style: FilledButton.styleFrom(minimumSize: const Size(48, 52)),
+              icon: const Icon(Icons.task_alt),
+              label: const Text('Concluir atendimento'),
             ),
           ),
+          if (!alert.resolved) ...[
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton(
+                onPressed: isRed
+                    ? (onEscalate == null ? null : () => onEscalate!(alert))
+                    : (onVisit == null ? null : () => onVisit!(alert)),
+                style: OutlinedButton.styleFrom(minimumSize: const Size(48, 52)),
+                child: Text(isRed ? 'Acionar SAMU / Atender' : 'Iniciar rota de visita'),
+              ),
+            ),
+          ],
         ]),
       ),
     );
@@ -2778,7 +3515,18 @@ Widget _cacheNotice(BuildContext context, Key key, DateTime fetchedAt) => Paddin
     );
 
 class VisitRegistrationScreen extends StatefulWidget {
-  const VisitRegistrationScreen({required this.queue, super.key, this.alert, this.currentPosition, this.directory});
+  const VisitRegistrationScreen({
+    required this.queue,
+    super.key,
+    this.alert,
+    this.currentPosition,
+    this.directory,
+    this.sync,
+  });
+
+  /// "Sincronizar agora". `null` chama `queue.sync()` direto; o painel passa
+  /// o dele, que dispara o envio da telemetria depois (#83).
+  final Future<SyncOutcome> Function()? sync;
 
   /// A fila é recebida pronta, não construída aqui: uma instância por gravação
   /// descartava a visita assim que o callback retornava.
@@ -2915,7 +3663,7 @@ class _VisitRegistrationScreenState extends State<VisitRegistrationScreen> {
       status: 'PENDENTE',
       outcome: outcome,
       notes: notes.text.trim(),
-    ));
+    ), alertId: widget.alert?.alertId);
     if (!mounted) return;
     setState(() {});
     _message(context, 'Visita salva e enfileirada localmente para sincronização.');
@@ -2926,7 +3674,7 @@ class _VisitRegistrationScreenState extends State<VisitRegistrationScreen> {
 
     final SyncOutcome result;
     try {
-      result = await widget.queue.sync();
+      result = await (widget.sync ?? widget.queue.sync)();
     } finally {
       // A fila já captura falha de rede, mas um erro inesperado aqui deixaria
       // o botão desabilitado para o resto da sessão.
@@ -2936,7 +3684,8 @@ class _VisitRegistrationScreenState extends State<VisitRegistrationScreen> {
 
     _message(context, switch (result.kind) {
       SyncOutcomeKind.synced => '${result.processed} visita(s) enviada(s) ao servidor.',
-      SyncOutcomeKind.conflict => '${result.processed} visita(s) em conflito. Continuam na fila para resolução.',
+      SyncOutcomeKind.conflict => '${result.processed} visita(s) em conflito com o servidor. '
+          'Toque em "Resolver conflito(s)" para comparar e escolher.',
       SyncOutcomeKind.empty => 'Não há visitas pendentes.',
       SyncOutcomeKind.error => result.message ??
           (widget.queue.persistenceFailed
@@ -2948,6 +3697,15 @@ class _VisitRegistrationScreenState extends State<VisitRegistrationScreen> {
           'servidor e não serão reenviadas. '
           '${result.message ?? 'Veja o motivo na lista abaixo.'}',
     });
+  }
+
+  /// Abre a lista de visitas em conflito (#79) e atualiza os contadores na volta.
+  Future<void> _openConflicts() async {
+    await Navigator.of(context).push<void>(MaterialPageRoute(
+      builder: (_) => VisitConflictListScreen(queue: widget.queue),
+    ));
+    if (!mounted) return;
+    setState(() {});
   }
 
   /// Descarta as visitas recusadas, com confirmação — o registro sai do
@@ -3108,7 +3866,7 @@ class _VisitRegistrationScreenState extends State<VisitRegistrationScreen> {
         contentPadding: EdgeInsets.zero,
       ),
       const SizedBox(height: 8),
-      DropdownButtonFormField<String>(isExpanded: true, initialValue: outcome, decoration: const InputDecoration(labelText: 'Status do atendimento'), items: const ['Realizada com sucesso', 'Paciente ausente', 'Recusou atendimento'].map((v) => DropdownMenuItem(value: v, child: Text(v))).toList(), onChanged: !hasPatient || !_arrivalConfirmed ? null : (v) => setState(() => outcome = v!)),
+      DropdownButtonFormField<String>(isExpanded: true, initialValue: outcome, decoration: const InputDecoration(labelText: 'Status do atendimento'), items: visitOutcomeOptions.map((v) => DropdownMenuItem(value: v, child: Text(v))).toList(), onChanged: !hasPatient || !_arrivalConfirmed ? null : (v) => setState(() => outcome = v!)),
       const SizedBox(height: 16),
       TextField(
         controller: notes,
@@ -3140,15 +3898,25 @@ class _VisitRegistrationScreenState extends State<VisitRegistrationScreen> {
         'Pendentes de sincronização: ${queue.pendingCount}'
         '${queue.persistenceFailed ? ' (em memória)' : ''}',
       ),
-      if (queue.conflictCount > 0) Padding(
-        padding: const EdgeInsets.only(top: 4),
-        child: Text(
-          key: const Key('conflict_visits_count'),
-          'Em conflito: ${queue.conflictCount}',
-          // Conflito de sincronização é operacional, não gravidade clínica.
-          style: TextStyle(color: context.acsRisk.accentOnSurface, fontWeight: FontWeight.bold),
+      if (queue.conflictCount > 0) ...[
+        Padding(
+          padding: const EdgeInsets.only(top: 4),
+          child: Text(
+            key: const Key('conflict_visits_count'),
+            'Em conflito: ${queue.conflictCount}',
+            // Conflito de sincronização é operacional, não gravidade clínica.
+            style: TextStyle(color: context.acsRisk.accentOnSurface, fontWeight: FontWeight.bold),
+          ),
         ),
-      ),
+        const SizedBox(height: 8),
+        OutlinedButton.icon(
+          key: const Key('resolve_conflicts'),
+          onPressed: _openConflicts,
+          style: OutlinedButton.styleFrom(minimumSize: const Size(48, 52)),
+          icon: const Icon(Icons.compare_arrows),
+          label: const Text('Resolver conflito(s)'),
+        ),
+      ],
       if (queue.rejectedCount > 0) ...[
         Padding(
           padding: const EdgeInsets.only(top: 4),

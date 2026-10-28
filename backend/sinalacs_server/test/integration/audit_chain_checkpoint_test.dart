@@ -12,6 +12,7 @@ import 'package:sinalacs_server/src/infrastructure/database/orm_audit_trail.dart
 import 'package:sinalacs_server/src/runtime/alert_runtime.dart';
 import 'package:test/test.dart';
 
+import 'support/privileged_tamper.dart';
 import 'test_tools/serverpod_test_tools.dart';
 
 /// Checkpoint de cauda da cadeia de `audit_logs` (#45, Task 7, D4) pelo
@@ -31,6 +32,7 @@ AppConfig _config() => AppConfig(
   auditChainSecret: _segredo,
   healthDataEncryptionKey: AppConfig.developmentHealthDataEncryptionKey,
   cpfHashPepper: AppConfig.developmentCpfHashPepper,
+  telemetryPseudonymKey: AppConfig.developmentTelemetryPseudonymKey,
   smsGateway: 'log',
   mqttUsername: null,
   mqttPassword: null,
@@ -150,7 +152,8 @@ void main() {
           ),
         );
         // O verificador sozinho não veria: o que sobra é contíguo.
-        await session.db.unsafeExecute(
+        await adulterarComoSuperusuario(
+          session,
           'DELETE FROM audit_logs WHERE sequence > @s',
           parameters: QueryParameters.named({'s': head - 3}),
         );
@@ -175,7 +178,8 @@ void main() {
         await linhas(5);
         expect((await verificar()).state, AuditIntegrityState.verified);
         final head = await cabeca();
-        await session.db.unsafeExecute(
+        await adulterarComoSuperusuario(
+          session,
           'DELETE FROM audit_logs WHERE sequence > @s',
           parameters: QueryParameters.named({'s': head - 3}),
         );
@@ -210,7 +214,8 @@ void main() {
       () async {
         await linhas(3);
         expect((await verificar()).state, AuditIntegrityState.verified);
-        await session.db.unsafeExecute(
+        await adulterarComoSuperusuario(
+          session,
           'UPDATE audit_chain_checkpoints SET signature = @sig',
           parameters: QueryParameters.named({'sig': 'f' * 64}),
         );
@@ -250,7 +255,7 @@ void main() {
           'INSERT INTO audit_logs SELECT * FROM bk_audit_logs',
           'INSERT INTO audit_chain_checkpoints SELECT * FROM bk_checkpoints',
         ]) {
-          await session.db.unsafeExecute(sql);
+          await adulterarComoSuperusuario(session, sql);
         }
 
         // A cauda perdida não é detectável: documentado em Pendências.
@@ -320,9 +325,16 @@ void main() {
         );
       }
 
-      Future<void> limpar(Session s) => AuditChainCheckpoint.db
-          .deleteWhere(s, where: (t) => t.sequence >= base)
-          .then((_) {});
+      // Apagar checkpoints é o que o trigger append-only recusa (#82): a
+      // limpeza deste grupo sem rollback passa pelo atalho do superusuário.
+      Future<void> limpar(Session s) => comoSuperusuario(
+        s,
+        (transaction) => AuditChainCheckpoint.db.deleteWhere(
+          s,
+          where: (t) => t.sequence >= base,
+          transaction: transaction,
+        ),
+      ).then((_) {});
 
       Future<List<int>> faixa(Session s) async => [
         for (final c in await AuditChainCheckpoint.db.find(

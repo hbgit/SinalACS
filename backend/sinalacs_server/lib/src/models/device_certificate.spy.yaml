@@ -1,0 +1,40 @@
+### Certificado de cliente MQTT emitido para um aparelho do ACS (#94). Em regra
+### um ativo por aparelho: a emissão nova revoga a anterior (`renewed`); duas
+### emissões concorrentes do mesmo aparelho podem coexistir, e a revogação por
+### aparelho revoga todas.
+###
+### Só identificadores técnicos, sem dado pessoal além do `userId` do ACS (o
+### profissional, não o titular): o `deviceId` é o UUID aleatório da
+### instalação, a `serial` são 128 bits com versão/variante de UUID v4 fixos
+### (122 aleatórios) em hex minúsculo com 32 dígitos, e a impressão digital é o SHA-256 do DER da folha. O certificado
+### em si não é guardado: a revogação só precisa da serial.
+###
+### Retenção: até `notAfter` + 30 dias (a CRL só lista as não vencidas);
+### o expurgo é pendência (`PROGRESS.md`).
+class: DeviceCertificate
+table: device_certificates
+fields:
+  id: UuidValue?, defaultPersist=random
+  ### O ACS da sessão que pediu a emissão.
+  userId: UuidValue, relation(parent=users)
+  ### Instalação que recebeu o certificado (o `deviceId` do token).
+  deviceId: String
+  ### A microárea da conta relida do banco na emissão (igual à do token, ou a
+  ### emissão é recusada); é o CN da folha.
+  microAreaId: UuidValue
+  serial: String
+  fingerprintSha256: String
+  notBefore: DateTime
+  notAfter: DateTime
+  issuedAt: DateTime
+  ### `null` = vigente.
+  revokedAt: DateTime?
+  revocationReason: DeviceCertRevocationReason?
+indexes:
+  device_certificates_device_idx:
+    fields: deviceId
+  device_certificates_user_idx:
+    fields: userId
+  device_certificates_serial_key:
+    fields: serial
+    unique: true

@@ -9,4 +9,8 @@ fields:
   green: int
   openRedAlerts: int
   acknowledgedRedAlerts: int
+  ### Vermelhos concluídos pelo ACS (#87). Partição com `openRedAlerts`
+  ### (`pending` e o legado `escalated`) e `acknowledgedRedAlerts`
+  ### (`acknowledged`): `red` é sempre a soma dos três (INV-03).
+  resolvedRedAlerts: int
   tmravSeconds: int?

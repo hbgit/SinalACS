@@ -51,7 +51,7 @@ O SinalACS transforma dados clínicos estruturados em ação imediata através d
 | **INV-01** | Um ACS **nunca** pode visualizar dados de pacientes fora de sua microárea | Verificação em todas as queries: `WHERE micro_area_id = user.micro_area_id` |
 | **INV-02** | A classificação de risco **nunca** pode ser alterada por um humano no momento da triagem | O cálculo é determinístico e imutável no frontend |
 | **INV-03** | Um alerta vermelho **nunca** pode ser perdido ou silenciosamente descartado | Confirmação de entrega (ACK) no MQTT com retry até confirmação |
-| **INV-04** | Dados de saúde sensíveis **nunca** podem ser persistidos em texto plano | Criptografia AES-256 em `sqflite` e PostgreSQL |
+| **INV-04** | Dados de saúde sensíveis **nunca** podem ser persistidos em texto plano | Criptografia AES-256 em `sqflite` e PostgreSQL. **Exceção registrada (#75, 2026-10-16):** `alerts.riskLevel` fica legível — todo alerta gravado é vermelho (a coluna não diz nada além da existência da linha) e ela sustenta os predicados SQL da INV-03; ver `spec/lgpd_data_audit.md` §2.3 |
 | **INV-05** | O paciente **nunca** pode acessar dados de outro paciente | Autenticação com segregação por `patient_id` |
 
 ### 1.3 Métricas de Sucesso (North Star)
@@ -84,6 +84,8 @@ events:
   - name: visit_registered
     fields: [acs_id, patient_id, visit_type, offline_flag, sync_status]
 ```
+
+> **Implementação (#83):** os eventos ficam em `telemetry_events` (`backend/`, ingestão `telemetry.ingest`). Desvio A1: `location_hash` do `alert_triggered` virou `location_known` (booleano), para não gravar localização derivada. O paciente aparece só como pseudônimo HMAC-SHA-256 (`TELEMETRY_PSEUDONYM_KEY`), nunca o UUID cru; os ids dos eventos emitidos pelo backend são determinísticos (UUID v5), o que torna a reemissão idempotente.
 
 ---
 
@@ -147,7 +149,7 @@ events:
 | **RF14** | Avisos Segmentados à Comunidade (Push) | ACS | M | Médio | Gorush (relé para FCM/APNs) |
 | **RF15** | Sincronização Bidirecional (Local ↔ Central) | Sistema | **L** | **Crítico** | Driver `postgres` no backend (sem ORM); ainda não conectado ao cliente |
 | **RF16** | Motor de Triagem Determinístico (Manchester) | Sistema | **L** | **Crítico** | Nenhuma (local) |
-| **RF17** | Logs de Auditoria e Conformidade (LGPD) | Sistema | M | Alto | PostgreSQL  **Estado (#45, 2026-10-14):** `audit_logs` encadeado por HMAC; o backoffice consulta com filtros combináveis e paginação estável, verifica a integridade no servidor (selo por linha, verificação global com checkpoint de cauda) e o **admin** exporta CSV de nove colunas sem dado pessoal direto, com a exportação registrada na mesma transação. Limites: a cadeia detecta, não impede (sem trigger/`REVOKE` append-only); `audit_exports` fica fora da cadeia; rotação de `AUDIT_CHAIN_SECRET` invalida a história; o escopo do coordenador é a UBS dele e ele não exporta. Detalhe em `PROGRESS.md` (#45). |
+| **RF17** | Logs de Auditoria e Conformidade (LGPD) | Sistema | M | Alto | PostgreSQL  **Estado (#45, 2026-10-14):** `audit_logs` encadeado por HMAC; o backoffice consulta com filtros combináveis e paginação estável, verifica a integridade no servidor (selo por linha, verificação global com checkpoint de cauda) e o **admin** exporta CSV de nove colunas sem dado pessoal direto, com a exportação registrada na mesma transação. **Append-only no banco (#82, 2026-10-25):** um trigger por comando recusa `UPDATE`/`DELETE`/`TRUNCATE` em `audit_logs`, `audit_exports` e `audit_chain_checkpoints` (`SQLSTATE 42501`, migração `20261025201950984`) e `PUBLIC` não tem esses privilégios. Limites: o superusuário/dono das tabelas — o usuário do backend hoje — ainda contorna o trigger (separação de papéis na #96), e contra ele a cadeia só detecta; `audit_exports` fica fora da cadeia; rotação de `AUDIT_CHAIN_SECRET` invalida a história; o escopo do coordenador é a UBS dele e ele não exporta. Detalhe em `PROGRESS.md` (#45). |
 | **RF18** | Dark Mode Nativo (Modo Escuro) | UI | S | Baixo | Tema Flutter |
 | **RF19 (PRD)** *(proposto, issue #44; não confundir com LGPD-RF19)* | Escalonamento de Alerta Vermelho sem Confirmação, ação da coordenação no backoffice — distinto do RF13 (SAMU/UBS, ação do ACS): passado o prazo (`RED_ALERT_ESCALATION_SECONDS`, padrão 300 s, configurável de 30 a 3600 s) sem ACK, coordenador (da UBS) ou administrador pode escalonar. O alerta **nunca** é encerrado, ocultado ou silenciado (segue `pending` até o ACS confirmar, INV-03); o reforço é reentregue à microárea; a ação tem motivo de conjunto fechado, é auditada na mesma transação e é idempotente | Backoffice | M | **Crítico** | `admin.escalateAlert`, outbox MQTT, polling `admin.alertsPulse` |
 | **RNF01** | Latência MQTT < 500ms (p95) | Sistema | - | Alto | Mosquitto, Traefik |
@@ -573,7 +575,7 @@ Cada registro possui um campo `version` (inteiro incremental). No momento da sin
 |--------|-----------|-----------|
 | **Spoofing** | Injeção de mensagens falsas no MQTT | Autenticação MQTT via certificados TLS; ACLs por tópico |
 | **Tampering** | Alteração de dados de triagem no dispositivo | Assinatura digital dos dados; integridade via hash SHA-256 |
-| **Repudiation** | ACS nega ter registrado visita | Logs imutáveis (append-only) com timestamp e assinatura |
+| **Repudiation** | ACS nega ter registrado visita | Logs imutáveis (append-only) com timestamp e assinatura — **parcial (#82):** cadeia HMAC + trigger append-only no banco; o superusuário ainda contorna (#96) |
 | **Information Disclosure** | Vazamento de PII no dispositivo | SQLCipher (AES-256) para `sqflite` |
 | **Denial of Service** | Ataque de inundação MQTT | Rate limiting no Mosquitto; firewall no Edge Gateway |
 | **Elevation of Privilege** | ACS acessa dados de outra microárea | RBAC rigoroso na camada de aplicação do backend; verificação em todas as queries |

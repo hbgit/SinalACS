@@ -16,12 +16,20 @@ class DashboardIndicators {
     required this.countsByRisk,
     required this.openRedAlerts,
     required this.acknowledgedRedAlerts,
+    required this.resolvedRedAlerts,
     required this.tmravSeconds,
   });
 
   final Map<RiskLevel, int> countsByRisk;
+
+  /// Partição dos vermelhos por estado (#87, INV-03): `pending` (e o legado
+  /// `escalated`) em [openRedAlerts], `acknowledged` em
+  /// [acknowledgedRedAlerts], `resolved` em [resolvedRedAlerts]. A soma dos
+  /// três é sempre o vermelho total de [countsByRisk]; o concluído sai de
+  /// "reconhecidos" e entra em "concluídos", nunca some.
   final int openRedAlerts;
   final int acknowledgedRedAlerts;
+  final int resolvedRedAlerts;
 
   /// Tempo Médio de Resposta a Alerta Vermelho (métrica North Star do PRD §1.3).
   /// `null` = nenhum alerta vermelho reconhecido na janela: sem amostra não há
@@ -60,6 +68,7 @@ class AlertSummary {
     required this.status,
     required this.triggeredAt,
     this.escalatedAt,
+    this.resolvedAt,
     this.overdue = false,
   });
 
@@ -73,6 +82,11 @@ class AlertSummary {
   /// Instante do escalonamento pelo backoffice (#44), se houve. O alerta segue
   /// `pending` e listado: escalonar não o confirma nem o tira da lista.
   final DateTime? escalatedAt;
+
+  /// Conclusão do atendimento pelo ACS (#76/#87), se houve. Nulo também numa
+  /// linha `resolved` concluída antes da coluna existir: a tela mostra o
+  /// estado sem a hora.
+  final DateTime? resolvedAt;
 
   /// Vencido: vermelho pendente, não escalonado e além do prazo. Vem do
   /// **servidor** (relógio dele); a tela nunca recalcula com o relógio do aparelho.
@@ -484,6 +498,56 @@ class StaffSummary {
   final bool mfaActive;
 }
 
+/// Espelha `DeviceWipeState` (#81). Traduzido **por nome**, nunca por índice.
+enum DeviceWipeState { pending, delivered, confirmed }
+
+/// Espelha `DeviceWipeReason` (#81): conjunto fechado, nunca texto livre.
+enum DeviceWipeReason {
+  lost('Perdido'),
+  stolen('Roubado'),
+  replaced('Substituído');
+
+  const DeviceWipeReason(this.label);
+
+  /// Texto da tela, em português.
+  final String label;
+}
+
+/// Espelha `AdminAcsDevice` (`admin_acs_device.spy.yaml`): um aparelho do ACS.
+/// [label] é derivado do `deviceId` pelo servidor; sem pedido de limpeza,
+/// [wipeState] é nulo.
+class AcsDevice {
+  const AcsDevice({
+    required this.deviceId,
+    required this.label,
+    required this.lastSeenAt,
+    this.wipeState,
+    this.wipeRequestedAt,
+    this.wipeConfirmedAt,
+  });
+
+  final String deviceId;
+  final String label;
+  final DateTime lastSeenAt;
+  final DeviceWipeState? wipeState;
+  final DateTime? wipeRequestedAt;
+  final DateTime? wipeConfirmedAt;
+}
+
+/// Espelha `AdminDeviceWipeResult`. Com [alreadyOrdered], [requestedAt] é o
+/// instante do pedido original.
+class DeviceWipeOrderResult {
+  const DeviceWipeOrderResult({
+    required this.orderId,
+    required this.requestedAt,
+    required this.alreadyOrdered,
+  });
+
+  final String orderId;
+  final DateTime requestedAt;
+  final bool alreadyOrdered;
+}
+
 /// Cadastro de ACS: a linha criada e a senha inicial, que **só** existe nesta
 /// resposta — o servidor guarda apenas o hash.
 class NewAcsCredential {
@@ -656,6 +720,18 @@ abstract interface class AdminDataSource {
 
   /// Apaga o segredo TOTP do ACS, para ele ativar de novo na próxima entrada.
   Future<void> resetAcsMfa({required String acsId});
+
+  /// Aparelhos com acesso registrado do ACS e o estado do pedido de limpeza
+  /// (#81). Recusa fora do escopo como o servidor: texto fixo.
+  Future<List<AcsDevice>> fetchAcsDevices(String acsId);
+
+  /// Pede a limpeza remota do aparelho (#81). Irreversível; repetir é
+  /// idempotente ([DeviceWipeOrderResult.alreadyOrdered]).
+  Future<DeviceWipeOrderResult> orderDeviceWipe({
+    required String acsId,
+    required String deviceId,
+    required DeviceWipeReason reason,
+  });
 
   /// Redefine a MFA de uma conta de equipe (só o administrador, nunca a própria
   /// conta) e devolve o código de ativação novo.

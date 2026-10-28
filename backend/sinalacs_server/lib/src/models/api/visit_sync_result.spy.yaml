@@ -12,3 +12,6 @@ fields:
   serverVersion: int?
   ### Preenchido apenas quando syncStatus é error.
   message: String?
+  ### Preenchido apenas em `conflict` do caminho com autor: a visita como está
+  ### no servidor, para o ACS comparar.
+  serverVisit: VisitSyncEntry?

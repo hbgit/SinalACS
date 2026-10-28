@@ -293,4 +293,75 @@ void main() {
       }
     });
   });
+
+  group('aparelhos e limpeza remota (#81)', () {
+    test('acsDevices manda token e acsId e traduz o estado por nome', () async {
+      final caller = FakeEndpointCaller(
+        result: [
+          api.AdminAcsDevice(
+            deviceId: 'dev-1',
+            label: 'Aparelho dev-1',
+            lastSeenAt: DateTime.utc(2026, 10, 16, 14, 5),
+          ),
+          api.AdminAcsDevice(
+            deviceId: 'dev-2',
+            label: 'Aparelho dev-2',
+            lastSeenAt: DateTime.utc(2026, 10, 15),
+            wipeState: api.DeviceWipeState.delivered,
+            wipeRequestedAt: DateTime.utc(2026, 10, 16),
+          ),
+        ],
+      );
+
+      final r = await _fonte(caller).fetchAcsDevices('acs-1');
+
+      expect(caller.lastArgs, {'accessToken': 'token-de-teste', 'acsId': 'acs-1'});
+      expect(r.first.wipeState, isNull);
+      expect(r.last.wipeState, DeviceWipeState.delivered);
+      expect(r.last.wipeRequestedAt, DateTime.utc(2026, 10, 16));
+    });
+
+    test('orderDeviceWipe traduz o motivo por nome', () async {
+      for (final motivo in DeviceWipeReason.values) {
+        final caller = FakeEndpointCaller(
+          result: api.AdminDeviceWipeResult(
+            orderId: 'ord-1',
+            requestedAt: DateTime.utc(2026, 10, 17),
+            alreadyOrdered: true,
+          ),
+        );
+
+        final r = await _fonte(caller).orderDeviceWipe(acsId: 'acs-1', deviceId: 'dev-1', reason: motivo);
+
+        expect(caller.lastArgs!['reason'], api.DeviceWipeReason.values.byName(motivo.name), reason: motivo.name);
+        expect(caller.lastArgs!['acsId'], 'acs-1');
+        expect(caller.lastArgs!['deviceId'], 'dev-1');
+        expect(caller.lastArgs!['accessToken'], 'token-de-teste');
+        expect(r.orderId, 'ord-1');
+        expect(r.alreadyOrdered, isTrue);
+      }
+    });
+
+    test('a recusa do servidor vira texto fixo, nunca o do servidor', () async {
+      final caller = FakeEndpointCaller(error: api.AdminInvalidRequestException(message: 'texto interno do servidor'));
+      await expectLater(
+        _fonte(caller).orderDeviceWipe(acsId: 'a', deviceId: 'd', reason: DeviceWipeReason.lost),
+        throwsA(isA<AdminDataFailure>().having((e) => e.message, 'message', 'Aparelho não encontrado.')),
+      );
+      await expectLater(
+        _fonte(caller).fetchAcsDevices('a'),
+        throwsA(isA<AdminDataFailure>().having((e) => e.message, 'message', 'Aparelho não encontrado.')),
+      );
+    });
+
+    test('token recusado depois do vencimento vira AdminSessionExpired', () async {
+      final caller = FakeEndpointCaller(error: api.AlertPermissionException(message: 'x'));
+      final fonte = _fonte(
+        caller,
+        expiresAt: DateTime.utc(2026, 10, 17, 10),
+        now: () => DateTime.utc(2026, 10, 17, 11),
+      );
+      await expectLater(fonte.fetchAcsDevices('a'), throwsA(isA<AdminSessionExpired>()));
+    });
+  });
 }

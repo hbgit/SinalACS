@@ -144,6 +144,7 @@ void main() {
 
     expect(results.single.syncStatus, SyncStatus.synced);
     expect(results.single.serverVersion, 1);
+    expect(results.single.serverVisit, isNull);
     expect(store.rows[_localId]?.status, 'realizada');
   });
 
@@ -197,6 +198,41 @@ void main() {
     expect(store.rows[_localId]?.status, 'realizada');
   });
 
+  test('conflito devolve a visita do servidor ao autor', () async {
+    await service.sync(user: _acs, entries: [entry()]);
+
+    final conflicted = await service.sync(
+      user: _acs,
+      entries: [entry(version: 7, status: 'recusou atendimento')],
+    );
+
+    expect(conflicted.single.syncStatus, SyncStatus.conflict);
+    expect(conflicted.single.serverVersion, 1);
+    final copia = conflicted.single.serverVisit!;
+    expect(copia.status, 'realizada');
+    expect(copia.version, 1);
+    expect(copia.localId, _localId);
+    expect(copia.notes, store.rows[_localId]!.notes);
+  });
+
+  test('conflito grava read/visit_conflict sem conteúdo', () async {
+    await service.sync(user: _acs, entries: [entry()]);
+    audit.events.clear();
+
+    await service.sync(
+      user: _acs,
+      entries: [entry(version: 7, status: 'recusou atendimento')],
+    );
+
+    final event = audit.events.single;
+    expect(event.actionType, 'read');
+    expect(event.resourceType, 'visit_conflict');
+    expect(event.resourceId, store.rows[_localId]!.id!.uuid);
+    expect(event.userId, _acsId);
+    expect(event.result, isNot(contains('sem intercorrências')));
+    expect(event.resourceId, isNot(contains('sem intercorrências')));
+  });
+
   test('recusa sincronizar visita registrada por outro agente', () async {
     await service.sync(user: _acs, entries: [entry()]);
 
@@ -210,6 +246,7 @@ void main() {
 
     // Terminal: o dono do registro não muda com uma próxima tentativa.
     expect(results.single.syncStatus, SyncStatus.rejected);
+    expect(results.single.serverVisit, isNull);
     expect(store.rows[_localId]?.acsId, UuidValue.fromString(_acsId));
   });
 
@@ -309,6 +346,7 @@ void main() {
       );
 
       expect(results.single.syncStatus, SyncStatus.error);
+      expect(results.single.serverVisit, isNull);
       // Não é necessariamente espionagem territorial — pode ser um localId
       // órfão de um seed antigo. Só a recusa POR TERRITÓRIO é auditada.
       expect(audit.events, isEmpty);
@@ -551,6 +589,8 @@ void main() {
       expect(conflicted.single.syncStatus, SyncStatus.conflict);
       expect(conflicted.single.serverVersion, 1);
       expect(store.rows[_localId]!.status, 'realizada');
+      // Legado não tem autor: a cópia do servidor não é devolvida.
+      expect(conflicted.single.serverVisit, isNull);
     });
 
     test('visita legada de OUTRO aparelho com o mesmo localId: rejected', () async {
@@ -899,6 +939,281 @@ void main() {
           transporter: _acs, deviceId: deviceId, entries: [e(_localId, version: 5)]);
 
       expect(results.single.message, 'paciente fora da sua microárea');
+    });
+  });
+
+  group('resolveConflict', () {
+    const outroAcs = AuthenticatedUser(
+      id: _otherAcsId,
+      role: UserRole.acs,
+      microAreaId: _microAreaId,
+      deviceId: 'acs-device-002',
+    );
+
+    setUp(() {
+      store = FakeVisitStore(microAreaByPatient: {
+        _patientId: _microAreaId,
+        _outroTerritorioPatientId: _otherMicroAreaId,
+      });
+      audit = FakeAuditTrail();
+      service = VisitSyncService(
+        store: store,
+        audit: audit,
+        clock: () => DateTime.utc(2026, 10, 16, 12),
+      );
+    });
+
+    /// Leva a visita a v3 no servidor pela regra atual do `sync`
+    /// (`entry.version == servidor - 1` atualiza).
+    Future<void> servidorEmV3() async {
+      await service.sync(user: _acs, entries: [entry()]);
+      await service.sync(user: _acs, entries: [entry(version: 0)]);
+      await service.sync(user: _acs, entries: [entry(version: 1)]);
+      expect(store.rows[_localId]!.version, 3);
+    }
+
+    test('grava o conteúdo do aparelho quando a versão esperada é a corrente', () async {
+      await servidorEmV3();
+      audit.events.clear();
+
+      final result = await service.resolveConflict(
+        user: _acs,
+        entry: entry(status: 'recusou atendimento'),
+        expectedServerVersion: 3,
+      );
+
+      expect(result.syncStatus, SyncStatus.synced);
+      expect(result.serverVersion, 4);
+      expect(result.serverVisit, isNull);
+      final row = store.rows[_localId]!;
+      expect(row.status, 'recusou atendimento');
+      expect(row.version, 4);
+      expect(row.acsId, UuidValue.fromString(_acsId));
+      final resolvidos =
+          audit.events.where((e) => e.result == 'conflict_resolved_local').toList();
+      expect(resolvidos, hasLength(1));
+      expect(resolvidos.single.actionType, 'write');
+      expect(resolvidos.single.resourceType, 'visit');
+      expect(resolvidos.single.resourceId, row.id!.uuid);
+      expect(resolvidos.single.userId, _acsId);
+    });
+
+    test('ignora entry.version: a referência é só a versão esperada', () async {
+      await servidorEmV3();
+
+      final result = await service.resolveConflict(
+        user: _acs,
+        entry: entry(version: 99, status: 'recusou atendimento'),
+        expectedServerVersion: 3,
+      );
+
+      expect(result.syncStatus, SyncStatus.synced);
+      expect(result.serverVersion, 4);
+      expect(store.rows[_localId]!.version, 4);
+    });
+
+    test('versão vencida devolve conflito novo sem gravar', () async {
+      await servidorEmV3();
+      final antes = store.rows[_localId]!;
+      audit.events.clear();
+
+      final result = await service.resolveConflict(
+        user: _acs,
+        entry: entry(status: 'recusou atendimento'),
+        expectedServerVersion: 2,
+      );
+
+      expect(result.syncStatus, SyncStatus.conflict);
+      expect(result.serverVersion, 3);
+      expect(result.serverVisit!.version, 3);
+      expect(result.serverVisit!.status, 'realizada');
+      expect(identical(store.rows[_localId], antes), isTrue);
+      expect(store.rows[_localId]!.status, 'realizada');
+      expect(audit.events.where((e) => e.result == 'conflict_resolved_local'), isEmpty);
+      // A cópia devolvida é uma leitura, auditada como no conflito do `sync`.
+      final leitura = audit.events.single;
+      expect(leitura.actionType, 'read');
+      expect(leitura.resourceType, 'visit_conflict');
+      expect(leitura.resourceId, antes.id!.uuid);
+    });
+
+    test('visita inexistente é criada', () async {
+      final result = await service.resolveConflict(
+        user: _acs,
+        entry: entry(status: 'recusou atendimento'),
+        expectedServerVersion: 3,
+      );
+
+      expect(result.syncStatus, SyncStatus.synced);
+      expect(result.serverVersion, 1);
+      final row = store.rows[_localId]!;
+      expect(row.status, 'recusou atendimento');
+      expect(row.acsId, UuidValue.fromString(_acsId));
+      expect(row.authorship, VisitAuthorship.acs);
+      final resolvidos =
+          audit.events.where((e) => e.result == 'conflict_resolved_local').toList();
+      expect(resolvidos, hasLength(1));
+      expect(resolvidos.single.resourceType, 'visit');
+      expect(resolvidos.single.resourceId, row.id!.uuid);
+    });
+
+    group('localId de outro paciente (ACS movido de microárea)', () {
+      /// O mesmo ACS, depois de `admin.setAcsMicroArea` levá-lo para a área do
+      /// `_outroTerritorioPatientId`.
+      const acsMovido = AuthenticatedUser(
+        id: _acsId,
+        role: UserRole.acs,
+        microAreaId: _otherMicroAreaId,
+        deviceId: 'acs-device-001',
+      );
+
+      /// Visita própria antiga, na área de origem, levada a v3.
+      Future<VisitRecord> visitaAntigaNaAreaDeOrigem() async {
+        await servidorEmV3();
+        audit.events.clear();
+        return store.rows[_localId]!;
+      }
+
+      void confereRecusa(VisitSyncResult result, VisitRecord antes) {
+        expect(result.syncStatus, SyncStatus.rejected);
+        expect(result.message, 'paciente fora da sua microárea');
+        expect(result.serverVisit, isNull);
+        expect(result.serverVersion, isNull);
+        expect(identical(store.rows[_localId], antes), isTrue);
+        expect(audit.events, hasLength(1));
+        final evento = audit.events.single;
+        expect(evento.result, 'denied_patient_mismatch');
+        expect(evento.actionType, 'write');
+        expect(evento.resourceType, 'visit');
+        expect(evento.resourceId, UuidValue.fromString(_outroTerritorioPatientId).uuid);
+        expect(evento.userId, _acsId);
+      }
+
+      test('sync com versão velha não devolve a cópia da área de origem', () async {
+        final antes = await visitaAntigaNaAreaDeOrigem();
+
+        final results = await service.sync(
+          user: acsMovido,
+          entries: [entry(version: 0, patientId: _outroTerritorioPatientId)],
+        );
+
+        confereRecusa(results.single, antes);
+      });
+
+      test('resolveConflict não sobrescreve a visita da área de origem', () async {
+        final antes = await visitaAntigaNaAreaDeOrigem();
+
+        final result = await service.resolveConflict(
+          user: acsMovido,
+          entry: entry(status: 'recusou atendimento', patientId: _outroTerritorioPatientId),
+          expectedServerVersion: 3,
+        );
+
+        confereRecusa(result, antes);
+        expect(store.rows[_localId]!.status, 'realizada');
+      });
+    });
+
+    group('recusas iguais às do sync', () {
+      /// Compara a recusa do `resolveConflict` com a do `sync` para a mesma
+      /// entrada e o mesmo usuário, e prova que nada foi gravado.
+      Future<VisitSyncResult> confere(
+        AuthenticatedUser user,
+        VisitSyncEntry e, {
+        required SyncStatus status,
+        required String message,
+      }) async {
+        final antes = Map.of(store.rows);
+        final resolvido = await service.resolveConflict(
+          user: user,
+          entry: e,
+          expectedServerVersion: 1,
+        );
+        final sincronizado = (await service.sync(user: user, entries: [e])).single;
+
+        expect(resolvido.syncStatus, status);
+        expect(resolvido.message, message);
+        expect(resolvido.syncStatus, sincronizado.syncStatus);
+        expect(resolvido.message, sincronizado.message);
+        expect(resolvido.serverVisit, isNull);
+        expect(resolvido.serverVersion, isNull);
+        expect(store.rows, antes);
+        expect(audit.events.where((ev) => ev.result == 'conflict_resolved_local'), isEmpty);
+        return resolvido;
+      }
+
+      test('ACS de outro território', () async {
+        const acsDeOutraArea = AuthenticatedUser(
+          id: _otherAcsId,
+          role: UserRole.acs,
+          microAreaId: _otherMicroAreaId,
+          deviceId: 'acs-device-y',
+        );
+        await service.sync(user: _acs, entries: [entry()]);
+        audit.events.clear();
+
+        await confere(acsDeOutraArea, entry(version: 1),
+            status: SyncStatus.rejected, message: 'paciente fora da sua microárea');
+
+        // Uma recusa auditada por chamada (resolveConflict + sync).
+        expect(audit.events.map((ev) => ev.result), ['denied_territory', 'denied_territory']);
+        expect(audit.events.first.resourceType, 'visit');
+        expect(audit.events.first.resourceId, UuidValue.fromString(_patientId).uuid);
+        expect(audit.events.first.userId, _otherAcsId);
+      });
+
+      test('outro agente', () async {
+        await service.sync(user: _acs, entries: [entry()]);
+
+        await confere(outroAcs, entry(version: 1),
+            status: SyncStatus.rejected, message: 'visita registrada por outro agente');
+        expect(store.rows[_localId]!.acsId, UuidValue.fromString(_acsId));
+      });
+
+      test('visita sem autor', () async {
+        await service.syncLegacy(
+            transporter: _acs, deviceId: 'aparelho-legado-01', entries: [entry()]);
+
+        await confere(_acs, entry(version: 1),
+            status: SyncStatus.rejected, message: 'visita sem autor registrado');
+        expect(store.rows[_localId]!.acsId, isNull);
+      });
+
+      test('localId malformado', () async {
+        await confere(_acs, entry().copyWith(localId: 'nao-e-uuid'),
+            status: SyncStatus.rejected, message: 'identificadores devem ser UUID');
+      });
+
+      test('patientId malformado', () async {
+        await confere(_acs, entry(patientId: 'nao-e-uuid'),
+            status: SyncStatus.rejected, message: 'identificadores devem ser UUID');
+      });
+
+      test('paciente inexistente', () async {
+        await confere(_acs, entry(patientId: '00000000-0000-4000-8000-00000000dead'),
+            status: SyncStatus.error, message: 'paciente não encontrado');
+        expect(audit.events, isEmpty);
+      });
+    });
+
+    test('expectedServerVersion menor que 1 é ArgumentError', () async {
+      await service.sync(user: _acs, entries: [entry()]);
+
+      for (final versao in [0, -1]) {
+        await expectLater(
+          service.resolveConflict(user: _acs, entry: entry(), expectedServerVersion: versao),
+          throwsA(isA<ArgumentError>()),
+        );
+      }
+      expect(store.rows[_localId]!.version, 1);
+    });
+
+    test('papel patient é StateError', () async {
+      await expectLater(
+        service.resolveConflict(user: _patient, entry: entry(), expectedServerVersion: 1),
+        throwsA(isA<StateError>()),
+      );
+      expect(store.rows, isEmpty);
     });
   });
 }

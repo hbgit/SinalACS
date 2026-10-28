@@ -36,12 +36,31 @@ case "${1:-}" in
     pg "create database $db" postgres >/dev/null
     # Só o backend e o relé; os seeds de desenvolvimento NÃO sobem (as fixtures vêm do `seed`).
     # Sem `--no-deps` o Compose sobe também o postgres de desenvolvimento; COM ele, os
-    # certificados do Traefik e o passwordfile do Mosquitto precisam existir de uma subida
+    # certificados do Traefik e os do Mosquitto (CA de aparelhos) precisam existir de uma subida
     # anterior da stack normal — a falta aparece aqui em vez de sumir.
     for f in infra/docker/traefik/runtime/certs/ca.crt; do
       [[ -f "$f" ]] || falhou "falta $f: suba a stack normal uma vez (docker compose up -d) para gerar os certificados"
     done
-    dc up -d --build --force-recreate --no-deps serverpod gorush traefik mosquitto >"$log" 2>&1 \
+    # A folha TLS da 8080 interna do backend (#78) vem do traefik-init, que o
+    # `--no-deps` abaixo não roda: num runtime/ anterior à #78 o Docker criaria
+    # runtime/backend/ vazio e o backend entraria em laço de restart. A CA já foi
+    # conferida acima, então o init só reaproveita a CA e regera as folhas.
+    dc up traefik-init >"$log" 2>&1 || falhou 'o traefik-init não gerou as folhas do RPC'
+    # Desde a #90 o init emite também as duas folhas de CLIENTE do mTLS da 8080:
+    # a do Traefik (runtime/certs/) e a do healthcheck (runtime/backend/). Sem a
+    # primeira o Traefik é recusado pelo backend (5xx em tudo); sem a segunda o
+    # container nunca fica healthy — e o laço de espera abaixo estouraria sem
+    # dizer por quê.
+    for f in infra/docker/traefik/runtime/backend/backend.crt infra/docker/traefik/runtime/backend/backend.key \
+             infra/docker/traefik/runtime/backend/healthcheck.crt infra/docker/traefik/runtime/backend/healthcheck.key \
+             infra/docker/traefik/runtime/certs/traefik-client.crt infra/docker/traefik/runtime/certs/traefik-client.key; do
+      [[ -f "$f" ]] || falhou "falta $f depois do traefik-init"
+    done
+    # O sidecar da CRL (#94) entra junto: ele vive no namespace de PID do
+    # container do broker (`pid: service:mosquitto`), e recriar só o broker o
+    # deixa parado ("failed to join PID namespace", medido) — com ele parado,
+    # nenhuma revogação chega ao broker.
+    dc up -d --build --force-recreate --no-deps serverpod gorush traefik mosquitto mosquitto-crl-reload >"$log" 2>&1 \
       || falhou 'a subida do backend falhou'
     for _ in $(seq 1 90); do
       [[ "$(docker inspect -f '{{.State.Health.Status}}' sinalacs-serverpod 2>/dev/null)" == healthy ]] && exit 0

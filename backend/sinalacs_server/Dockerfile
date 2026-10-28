@@ -11,17 +11,18 @@
 # falhava em `dart pub get` com "version solving failed".
 FROM dart:3.12.2 AS build
 
-# Workspace mínimo, preservando as versões travadas do pubspec.lock.
+# Workspace do backend, preservando as versões travadas do pubspec.lock. O
+# pubspec.yaml da raiz é COPIADO, não gerado: ele carrega o dependency_overrides
+# do fork pinado do Serverpod (#90, backend/patches/README.md), que um arquivo
+# gerado aqui perderia — e o `dart pub get` voltaria ao 3.4.13 do pub.dev, sem o
+# gancho que exige o certificado de cliente. O sinalacs_client não entra na
+# imagem, então sai da lista de membros do workspace. O fork é público e o
+# `dart pub get` o clona anônimo (a imagem dart:3.12.2 traz o git); este estágio
+# não recebe credencial nenhuma, de propósito.
 WORKDIR /app
-COPY pubspec.lock .
+COPY pubspec.yaml pubspec.lock .
 COPY sinalacs_server sinalacs_server
-RUN printf '%s\n' \
-  'name: _' \
-  'environment:' \
-  '  sdk: ^3.8.0' \
-  'workspace:' \
-  '  - sinalacs_server' \
-  > pubspec.yaml
+RUN sed -i '/^  - sinalacs_client$/d' pubspec.yaml
 RUN dart pub get
 
 # Compila o executável AOT.
@@ -46,8 +47,11 @@ FROM alpine:latest
 WORKDIR /app
 
 # curl é necessário para o HEALTHCHECK, que hosts free-tier usam para acordar o
-# serviço; ca-certificates para o TLS do broker e do Postgres gerenciado.
-RUN apk add --no-cache curl ca-certificates \
+# serviço; ca-certificates para o TLS do broker e do Postgres gerenciado;
+# openssl para a CA de aparelhos (#94), que assina folhas e gera a CRL pelo
+# binário (lib/src/infrastructure/pki/openssl_device_ca.dart) por `openssl ca
+# -startdate/-enddate`, que funciona do OpenSSL 3.0 em diante.
+RUN apk add --no-cache curl ca-certificates openssl \
     && adduser -D -h /app app
 
 ENV runmode=production
