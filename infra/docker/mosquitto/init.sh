@@ -186,7 +186,11 @@ fi
 # em 600 — só o backend (e este script, como root) a lê.
 chown "$app_uid" "$devices_dir" "$devices_dir/ca.key" "$devices_dir/crl.pem"
 chmod 755 "$devices_dir"
-chmod 644 "$devices_dir"/*.crt "$devices_dir"/*.key "$devices_dir/crl.pem" "$devices_dir/serial"
+# O glob de .key nunca inclui a ca.key: nem por um instante ela fica 644 (M1).
+for key in "$devices_dir"/*.key; do
+  [ "$key" = "$devices_dir/ca.key" ] || chmod 644 "$key"
+done
+chmod 644 "$devices_dir"/*.crt "$devices_dir/crl.pem" "$devices_dir/serial"
 chmod 600 "$devices_dir/ca.key"
 
 chmod 755 "$runtime_dir" "$certs_dir"

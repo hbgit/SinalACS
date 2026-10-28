@@ -13,8 +13,10 @@
 # válida de outra CA também é recusada) — e só então manda SIGHUP ao broker.
 # Inválida: loga e NÃO sinaliza; o broker segue com a CRL que já tinha.
 #
-# Depois do SIGHUP, grava atomicamente (temporário + mv, mesmo diretório)
-# `crl.loaded` com o sha256 da crl.pem que acabou de sinalizar (Task 7a). O
+# Depois do SIGHUP, espera 1 s (o Mosquitto trata o SIGHUP no laço principal,
+# de forma assíncrona: o `kill` volta antes de a CRL nova estar carregada) e
+# grava atomicamente (temporário + mv, mesmo diretório) `crl.loaded` com o
+# sha256 da crl.pem que acabou de sinalizar (Task 7a; M3 da revisão final). O
 # backend espera esse marcador antes de derrubar a sessão do aparelho revogado:
 # derrubada antes da recarga, o app reconecta em milissegundos e o broker,
 # ainda com a CRL velha, o aceita. CRL recusada não toca no marcador.
@@ -57,6 +59,9 @@ while :; do
       elif kill -HUP "$pid"; then
         echo "CRL recarregada ($(agora))"
         ultimo="$atual"
+        # O broker recarrega de forma assíncrona: o marcador não pode afirmar a
+        # recarga antes de ela ter tido tempo de acontecer.
+        sleep 1
         if [ "$(estado)" != "$atual" ]; then
           # Trocada no meio: a próxima volta sinaliza e marca a nova.
           echo "aviso: a crl.pem mudou durante a recarga ($(agora)); marcador não gravado."
