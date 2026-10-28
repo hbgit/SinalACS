@@ -3,7 +3,6 @@ set -eu
 
 runtime_dir=/mosquitto/runtime
 certs_dir="$runtime_dir/certs"
-password_file="$runtime_dir/passwordfile"
 
 mkdir -p "$certs_dir"
 
@@ -81,30 +80,15 @@ EOF
   rm -f "$ext_file" "$certs_dir/server.csr"
 fi
 
-client_days=397
-
-# Certificado de CLIENTE (mTLS): CN = o usuário MQTT, assinado pela mesma CA do
-# servidor, só para autenticação de cliente. Renova quando vence, quando a CA
-# mudou (o `verify` falha) ou quando não existe — mesma regra do servidor.
-issue_client() {
-  cn="$1"
-  if [ -f "$certs_dir/$cn.crt" ] && [ -f "$certs_dir/$cn.key" ] \
-     && openssl x509 -in "$certs_dir/$cn.crt" -noout -checkend 86400 >/dev/null 2>&1 \
-     && openssl verify -CAfile "$certs_dir/ca.crt" "$certs_dir/$cn.crt" >/dev/null 2>&1; then
-    return 0
-  fi
-  echo "Gerando certificado de cliente para $cn..."
-  printf 'basicConstraints=CA:FALSE\nkeyUsage=digitalSignature\nextendedKeyUsage=clientAuth\n' \
-    > "$certs_dir/$cn.ext"
-  openssl req -newkey rsa:2048 -nodes -keyout "$certs_dir/$cn.key" \
-    -out "$certs_dir/$cn.csr" -subj "/CN=$cn"
-  openssl x509 -req -days "$client_days" -in "$certs_dir/$cn.csr" \
-    -CA "$certs_dir/ca.crt" -CAkey "$certs_dir/ca.key" -CAcreateserial \
-    -extfile "$certs_dir/$cn.ext" -out "$certs_dir/$cn.crt"
-  rm -f "$certs_dir/$cn.csr" "$certs_dir/$cn.ext"
-}
-
-issue_client backend
+# Até a #94 este bloco emitia, pela CA do servidor, as folhas de cliente
+# `backend` e `acs-area-12` (esta compartilhada por todo aparelho) e o
+# passwordfile do broker. Desde a #94 a identidade MQTT é o certificado da CA
+# de aparelhos (bloco abaixo), sem senha: o broker não confia mais na CA do
+# servidor para cliente. Apaga o que sobrou de uma stack anterior, para nenhuma
+# ferramenta continuar lendo uma credencial que o broker já recusa.
+rm -f "$certs_dir/backend.crt" "$certs_dir/backend.key" \
+  "$certs_dir/acs-area-12.crt" "$certs_dir/acs-area-12.key" \
+  "$runtime_dir/passwordfile"
 
 # --- CA de aparelhos (#94) ----------------------------------------------------
 #
@@ -204,29 +188,10 @@ chown "$app_uid" "$devices_dir" "$devices_dir/ca.key" "$devices_dir/crl.pem"
 chmod 755 "$devices_dir"
 chmod 644 "$devices_dir"/*.crt "$devices_dir"/*.key "$devices_dir/crl.pem" "$devices_dir/serial"
 chmod 600 "$devices_dir/ca.key"
-issue_client acs-area-12
-
-# Regrava SEMPRE, em vez de só criar quando o arquivo falta.
-#
-# O arquivo é derivado das variáveis de ambiente, e recriá-lo é barato. Com o
-# guard anterior (`if [ ! -f ]`), trocar a senha no .env não tinha efeito algum:
-# o broker continuava aceitando apenas a senha antiga, e o backend e o app do
-# ACS passavam a falhar na autenticação sem nenhuma pista do motivo — só se
-# resolvia apagando runtime/ à mão, o que ninguém adivinha.
-#
-# O `:?` aborta se a variável faltar. Antes essa proteção era nominal, porque o
-# docker-compose.yml sempre injetava um default embutido; agora o compose exige
-# o valor do .env, então o guard passa a valer de verdade.
-# `mosquitto_passwd -c` no Mosquitto 2.1 RECUSA sobrescrever um arquivo
-# existente ("File exists"), então apagar antes é parte do "regravar sempre".
-rm -f "$password_file"
-mosquitto_passwd -b -c "$password_file" backend "${MQTT_BACKEND_PASSWORD:?MQTT_BACKEND_PASSWORD is required}"
-mosquitto_passwd -b "$password_file" acs-area-12 "${MQTT_ACS_PASSWORD:?MQTT_ACS_PASSWORD is required}"
 
 chmod 755 "$runtime_dir" "$certs_dir"
-chmod 644 "$password_file" "$certs_dir"/*.crt "$certs_dir"/*.key
+chmod 644 "$certs_dir"/*.crt "$certs_dir"/*.key
 # Exceção: a chave da CA só assina folhas, e quem a lê é este init.sh, como root.
-# As demais ficam em 644 porque são lidas por outro uid (o backend roda como uid
-# 1000 e lê backend.key; o sync_dev_ca.sh, como o usuário do host, lê
-# acs-area-12.key) — medido em 2026-10-05; ver PROGRESS.md.
+# A server.key fica em 644 porque o broker a lê com outro uid (mosquitto, 1883)
+# — regra medida em 2026-10-05; ver PROGRESS.md.
 chmod 600 "$certs_dir/ca.key"

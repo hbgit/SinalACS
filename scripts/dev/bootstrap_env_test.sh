@@ -51,4 +51,17 @@ antes="$(cat "$tmp/r/.env")"
 rodar
 [[ "$(cat "$tmp/r/.env")" == "$antes" ]] || falha 'TELEMETRY_PSEUDONYM_KEY existente foi alterada'
 
+# 5) .env novo (#94): sem senha MQTT nenhuma, com os demais segredos preenchidos.
+preparar ''
+rm -f "$tmp/r/.env"
+rodar
+! grep -qE '^MQTT_(BACKEND|ACS)_PASSWORD=' "$tmp/r/.env" || falha '.env novo ainda traz senha MQTT'
+grep -qE '^JWT_SECRET=[0-9a-f]{64}$' "$tmp/r/.env" || falha '.env novo sem JWT_SECRET'
+
+# 6) .env antigo com as senhas MQTT: preservado como está (nada mais as lê).
+preparar "$base\nMQTT_BACKEND_PASSWORD=m1\nMQTT_ACS_PASSWORD=m2\nDEV_ADMIN_PASSWORD=xyz\nTELEMETRY_PSEUDONYM_KEY=tt\n"
+antes="$(cat "$tmp/r/.env")"
+rodar
+[[ "$(cat "$tmp/r/.env")" == "$antes" ]] || falha '.env antigo com senhas MQTT foi alterado'
+
 echo 'ok: bootstrap_env_test.sh'

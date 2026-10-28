@@ -4,7 +4,8 @@
 # diagnóstico) atrás de --com-pausa-do-backend, recusa argumento desconhecido
 # com exit 2 antes de tocar no Docker, cria o alerta DURANTE a interrupção,
 # afirma RestartCount 0 + StartedAt, outbox publicado e entrega pelo broker,
-# sempre devolve a stack e não imprime coluna protegida nem senha no argv.
+# sempre devolve a stack e não imprime coluna protegida nem senha no argv (o broker
+# não tem senha desde a #94).
 # Sem Docker e sem aparelho: lê o texto do script (e executa só o parsing).
 set -euo pipefail
 cd "$(dirname "$0")/../.."
@@ -61,10 +62,10 @@ conferir '(c) o cleanup para o assinante e apaga o registro' "corpo cleanup | gr
 conferir 'publicado sem entrega é apontado como H5' "grep -qF 'lacuna H5' $s"
 conferir 'qualquer falha sai com código != 0' "grep -qF 'FALHOU: \${falhas[*]}' $s && grep -qxF '  exit 1' $s"
 
-# Privacidade: só contagens/booleanos do banco, senha fora do argv, log sanitizado.
+# Privacidade: só contagens/booleanos do banco, nenhuma senha, log sanitizado.
 conferir 'nenhuma coluna protegida no SQL' "! grep -E 'select[^\"]*(payload|lastError|patientId|locationHash|cpf)' $s"
-conferir 'a senha do broker vai por arquivo de opções, não por -P no argv' \
-  "grep -qF 'mosquitto_sub -o \"\$OPTS\"' $s && ! grep -qE 'mosquitto_sub[^|]* -P ' $s"
+conferir 'sem senha no broker (#94): folha backend da CA de aparelhos, nenhum -u/-P/-o' \
+  "grep -qF -- '--cert /mosquitto/devices/backend.crt' $s && ! grep -qE 'mosquitto_sub[^|]* -(P|u|o) ' $s && ! grep -qF 'MQTT_BACKEND_PASSWORD' $s"
 conferir 'o código OTP é tirado dos logs guardados' "grep -qF 'código de acesso: <otp>' $s"
 
 # Restauração: sempre, e sem destruir nada.

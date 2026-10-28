@@ -75,11 +75,12 @@ else
   fi
 
   # Preenche cada chave de segredo vazia do modelo; o resto passa intacto,
-  # para que comentários e defaults não-secretos continuem valendo.
+  # para que comentários e defaults não-secretos continuem valendo. Desde a #94
+  # não há senha MQTT (a identidade no broker é o certificado de cliente); um
+  # .env antigo com MQTT_BACKEND_PASSWORD/MQTT_ACS_PASSWORD segue válido, e o
+  # caminho de "preservar" acima não as remove.
   POSTGRES_PASSWORD="$(secret)" \
   TEST_DATABASE_PASSWORD="$(secret)" \
-  MQTT_BACKEND_PASSWORD="$(secret)" \
-  MQTT_ACS_PASSWORD="$(secret)" \
   JWT_SECRET="$(secret)" \
   AUDIT_CHAIN_SECRET="$(secret)" \
   HEALTH_DATA_ENCRYPTION_KEY="$(secret)" \
@@ -101,8 +102,7 @@ else
   ' "$env_example" > "$env_file"
 
   chmod 600 "$env_file"
-  echo "  .env gerado (POSTGRES_PASSWORD, TEST_DATABASE_PASSWORD,"
-  echo "               MQTT_BACKEND_PASSWORD, MQTT_ACS_PASSWORD, JWT_SECRET,"
+  echo "  .env gerado (POSTGRES_PASSWORD, TEST_DATABASE_PASSWORD, JWT_SECRET,"
   echo "               AUDIT_CHAIN_SECRET, HEALTH_DATA_ENCRYPTION_KEY,"
   echo "               CPF_HASH_PEPPER, DEV_ACS_PASSWORD,"
   echo "               DEV_ADMIN_PASSWORD, TELEMETRY_PSEUDONYM_KEY)"

@@ -69,20 +69,16 @@ Future<void> main(List<String> args) async {
   }
 
   final broker = _arg(args, 'broker', 'localhost');
-  final mqttPassword = _arg(
-    args,
-    'mqtt-password',
-    Platform.environment['MQTT_ACS_PASSWORD'] ?? '',
-  );
+  // Identidade no broker = certificado de cliente da CA de aparelhos (#94),
+  // sem senha. A folha qa-tools (CN = microárea do seed) é a das ferramentas de
+  // QA na máquina; o caminho é relativo a apps/acs, onde o live_check roda.
+  final clientCert = _arg(args, 'client-cert',
+      '../../infra/docker/mosquitto/runtime/devices/qa-tools.crt');
+  final clientKey = _arg(args, 'client-key',
+      '../../infra/docker/mosquitto/runtime/devices/qa-tools.key');
   final sampleCount = _intArg(args, 'samples', 5).clamp(1, 50);
   final visitCount = _intArg(args, 'visit-count', 100).clamp(1, 1000);
   final outputPath = _arg(args, 'output', '');
-
-  if (mqttPassword.isEmpty) {
-    stderr.writeln('erro: informe --mqtt-password ou exporte MQTT_ACS_PASSWORD.');
-    exitCode = 2;
-    return;
-  }
 
   final alertLatencies = <int>[];
   final syncLatencies = <int>[];
@@ -101,8 +97,10 @@ Future<void> main(List<String> args) async {
         host,
         '--broker',
         broker,
-        '--mqtt-password',
-        mqttPassword,
+        '--client-cert',
+        clientCert,
+        '--client-key',
+        clientKey,
         '--visit-count',
         '$visitCount',
         '--emit-metrics',

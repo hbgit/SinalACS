@@ -36,7 +36,7 @@ case "${1:-}" in
     pg "create database $db" postgres >/dev/null
     # Só o backend e o relé; os seeds de desenvolvimento NÃO sobem (as fixtures vêm do `seed`).
     # Sem `--no-deps` o Compose sobe também o postgres de desenvolvimento; COM ele, os
-    # certificados do Traefik e o passwordfile do Mosquitto precisam existir de uma subida
+    # certificados do Traefik e os do Mosquitto (CA de aparelhos) precisam existir de uma subida
     # anterior da stack normal — a falta aparece aqui em vez de sumir.
     for f in infra/docker/traefik/runtime/certs/ca.crt; do
       [[ -f "$f" ]] || falhou "falta $f: suba a stack normal uma vez (docker compose up -d) para gerar os certificados"

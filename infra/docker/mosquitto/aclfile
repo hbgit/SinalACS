@@ -1,12 +1,14 @@
+# A identidade é o CN do certificado de cliente (use_identity_as_username, #94):
+# não há senha nem usuário cadastrado. Tudo que não está liberado aqui é negado.
+
+# O servidor publica os alertas e lê os ACKs.
 user backend
 topic readwrite sinalacs/v1/#
 
-# O nome do usuário é histórico ("area-12"), mas o tópico precisa ser o UUID da
-# microárea do seed de desenvolvimento: o backend publica em
-# sinalacs/v1/microareas/<microAreaId>/alerts, e o microAreaId vem do token
-# emitido por auth.developmentLogin, que usa o UUID fixo do seed
-# (development.sql / auth_endpoint.dart). Com "area-12" aqui, o app do ACS era
-# negado pelo broker exatamente no tópico onde o alerta vermelho chega.
-user acs-area-12
-topic read sinalacs/v1/microareas/00000000-0000-4000-8000-000000000003/alerts
-topic write sinalacs/v1/alerts/+/acks
+# Cada aparelho do ACS tem CN = UUID da sua microárea (o backend só emite o
+# certificado com a microárea do ACS logado): lê os alertas da PRÓPRIA microárea
+# — o backend publica em sinalacs/v1/microareas/<microAreaId>/alerts — e
+# publica ACKs. Vale para qualquer microárea sem uma linha por ACS; a folha
+# qa-tools (CN = microárea do seed) cai na mesma regra.
+pattern read sinalacs/v1/microareas/%u/alerts
+pattern write sinalacs/v1/alerts/+/acks

@@ -318,17 +318,20 @@ echo '== Grupo F: o broker MQTT fala TLS 1.3, e só ele =='
 # O broker exige certificado de cliente (`require_certificate true`), então as
 # sondas apresentam o do backend: sem ele o handshake cai em QUALQUER versão, e a
 # recusa do 1.2 seria verdade por acidente. Mesmo desenho do Grupo B: o 1.3
-# completando é o controle positivo do 1.2 recusado.
+# completando é o controle positivo do 1.2 recusado. Desde a #94 a folha do
+# backend é a da CA de aparelhos (runtime/devices/); a CA que verifica o broker
+# continua a do servidor (runtime/certs/).
 mqtt_certs='infra/docker/mosquitto/runtime/certs'
+mqtt_devices='infra/docker/mosquitto/runtime/devices'
 mqtt_ok=1
-for f in ca.crt backend.crt backend.key; do
-  if [[ ! -f "$mqtt_certs/$f" ]]; then
-    falha "$mqtt_certs/$f não existe — o mosquitto-init não gerou os certificados do broker"
+for f in "$mqtt_certs/ca.crt" "$mqtt_devices/backend.crt" "$mqtt_devices/backend.key"; do
+  if [[ ! -f "$f" ]]; then
+    falha "$f não existe — o mosquitto-init não gerou os certificados do broker"
     mqtt_ok=0
   fi
 done
 if [[ "$mqtt_ok" -eq 1 ]]; then
-  mqtt_tls=(-connect localhost:8883 -CAfile "$mqtt_certs/ca.crt" -cert "$mqtt_certs/backend.crt" -key "$mqtt_certs/backend.key")
+  mqtt_tls=(-connect localhost:8883 -CAfile "$mqtt_certs/ca.crt" -cert "$mqtt_devices/backend.crt" -key "$mqtt_devices/backend.key")
   m13="$(openssl s_client -brief -tls1_3 "${mqtt_tls[@]}" </dev/null 2>&1)"
   if printf '%s' "$m13" | grep -q 'Protocol version: TLSv1.3' \
      && ! printf '%s' "$m13" | grep -q 'verify error'; then

@@ -2,9 +2,9 @@
 #
 # As chaves das CAs de desenvolvimento (ca.key) só são lidas pelos init.sh, que
 # rodam como root dentro do contêiner: ninguém mais precisa do bit de leitura.
-# As demais chaves (server.key, backend.key, acs-area-12.key) são lidas por outro
-# uid (o backend roda como uid 1000; o sync_dev_ca.sh, como o usuário do host) e
-# ficam em 644 — decisão e motivo em PROGRESS.md. A folha do backend (#78) também.
+# As demais chaves (server.key do broker; as folhas de cliente MQTT, que desde a
+# #94 moram em mosquitto/runtime/devices/) são lidas por outro uid e ficam em
+# 644 — decisão e motivo em PROGRESS.md. A folha do backend (#78) também.
 # Desde a #90 há duas folhas de CLIENTE: traefik-client.key (600, só o Traefik, que
 # roda como root) e healthcheck.key (644, lida pelo curl do healthcheck como uid
 # 1000) — e as duas têm de ter EKU clientAuth (ver o bloco no fim).
