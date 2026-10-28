@@ -2,6 +2,7 @@ import 'package:sinalacs_server/src/application/admin/admin_account_service.dart
 import 'package:sinalacs_server/src/application/audit/audit_trail.dart';
 import 'package:sinalacs_server/src/application/auth/development_auth_service.dart';
 import 'package:sinalacs_server/src/application/auth/institutional_auth_service.dart';
+import 'package:sinalacs_server/src/application/devices/device_certificate_service.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
 
 /// Pedidos de limpeza remota e aparelhos do ACS sobre o banco (issue #81).
@@ -22,7 +23,10 @@ abstract interface class DeviceWipeStore {
   /// transação**: insere (ou lê, se o índice único de `deviceId` já tem linha)
   /// o pedido e, só quando [created], carimba `revokedAt = at` em toda linha
   /// viva de `acs_refresh_tokens` e `acs_upload_tokens` com esse `deviceId` —
-  /// de todos os donos. Repetir não cria linha nem revoga de novo.
+  /// de todos os donos — e revoga o certificado MQTT vigente do aparelho como
+  /// `wipe` (#94), com uma linha `device_cert_revoked:wipe` por certificado
+  /// (ator = [requestedBy]) na mesma transação. Repetir não cria linha nem
+  /// revoga de novo.
   Future<({DeviceWipeOrder order, bool created})> orderWipe({
     required String deviceId,
     required String targetUserId,
@@ -72,6 +76,7 @@ class DeviceWipeService {
     required this.store,
     required this.accounts,
     required this.audit,
+    this.deviceRevocations,
     DateTime Function()? clock,
   }) : _clock = clock ?? DateTime.now;
 
@@ -81,6 +86,12 @@ class DeviceWipeService {
   final AdminAccountStore accounts;
 
   final AuditTrail audit;
+
+  /// Depois do commit de um pedido novo: CRL publicada e sessão MQTT do
+  /// aparelho derrubada (#94). `null` nos ambientes e testes sem certificado de
+  /// aparelho.
+  final DeviceRevocationEffects? deviceRevocations;
+
   final DateTime Function() _clock;
 
   late final AdminScopeResolver _resolver = AdminScopeResolver(
@@ -137,12 +148,13 @@ class DeviceWipeService {
       await _negar(user, recurso, actionType: 'write');
     }
 
+    final at = _clock().toUtc();
     final r = await store.orderWipe(
       deviceId: deviceId,
       targetUserId: acsId,
       requestedBy: user.id,
       reason: reason,
-      at: _clock().toUtc(),
+      at: at,
     );
     final orderId = r.order.id.toString();
     await audit.record(
@@ -154,6 +166,15 @@ class DeviceWipeService {
         result: r.created ? 'wipe_ordered' : 'already_ordered',
       ),
     );
+    if (r.created) {
+      // A revogação e a auditoria dela já foram na transação do pedido; aqui
+      // só a CRL e a derrubada da sessão, que não se desfazem.
+      await deviceRevocations?.afterCommit(
+        reason: DeviceCertRevocationReason.wipe,
+        at: at,
+        deviceId: deviceId,
+      );
+    }
     return AdminDeviceWipeResult(
       orderId: orderId,
       requestedAt: r.order.requestedAt,

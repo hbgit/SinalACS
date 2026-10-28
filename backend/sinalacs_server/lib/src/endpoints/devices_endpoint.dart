@@ -3,8 +3,33 @@ import 'package:sinalacs_server/src/endpoints/authenticated_endpoint.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
 import 'package:sinalacs_server/src/runtime/alert_runtime.dart';
 
-/// Aparelhos do paciente para avisos segmentados (RF14, decisão §3.2).
+/// Aparelhos: do paciente para avisos segmentados (RF14, decisão §3.2), a
+/// limpeza remota (#81) e o certificado de cliente MQTT do aparelho do ACS
+/// (#94).
 class DevicesEndpoint extends AuthenticatedEndpoint {
+  /// Assina o CSR do aparelho do ACS autenticado e devolve a folha de cliente
+  /// MQTT (#94). O aparelho é o `deviceId` do token, nunca um parâmetro; a
+  /// microárea do token é o CN. Regras de recusa em
+  /// `DeviceCertificateService.issue`: papel/território/aparelho/CA ausente →
+  /// [AlertPermissionException]; CSR inválido, chave fora de EC P-256, CN
+  /// divergente ou excesso de emissões → [AlertValidationException].
+  Future<DeviceCertificateIssueResult> issueCertificate(
+    Session session, {
+    required String accessToken,
+    required String csrPem,
+  }) async {
+    final user = authenticate(accessToken);
+    try {
+      return await AlertRuntime.instance
+          .deviceCertificateServiceFor(session)
+          .issue(user, csrPem);
+    } on ArgumentError catch (error) {
+      throw AlertValidationException(message: '${error.message}');
+    } on StateError catch (error) {
+      throw AlertPermissionException(message: error.message);
+    }
+  }
+
   /// Registra o token de push do aparelho do paciente autenticado. Só grava com
   /// o consentimento `segmentedPush` vigente; sem ele, [DataRightsException].
   Future<void> registerPushToken(

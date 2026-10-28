@@ -5,6 +5,7 @@ import 'package:sinalacs_server/src/application/auth/password_hasher.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_acs_credential_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_refresh_token_store.dart';
+import 'package:sinalacs_server/src/infrastructure/database/orm_device_certificate_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_upload_token_store.dart';
 
 /// Mesmo `Uuid` de `RedAlertService`: o sorteio da chave é o mesmo em todo o
@@ -298,6 +299,17 @@ class OrmAdminAccountStore implements AdminAccountStore {
       );
       if (alvo.isEmpty) return false;
 
+      // A microárea anterior, lida sob trava da linha: só uma troca de fato
+      // revoga os certificados dos aparelhos (#94), cujo CN é a microárea.
+      final anterior = await session.db.unsafeQuery(
+        'SELECT "microAreaId" FROM users WHERE id = @acs::uuid FOR UPDATE;',
+        parameters: QueryParameters.named({'acs': acsId}),
+        transaction: transaction,
+      );
+      final mudou = anterior.isEmpty ||
+          anterior.single[0]?.toString().toLowerCase() !=
+              microAreaId.toLowerCase();
+
       final usuarios = await session.db.unsafeExecute(
         'UPDATE users SET "microAreaId" = @ma::uuid, "updatedAt" = @at '
         'WHERE id = @acs::uuid;',
@@ -313,6 +325,14 @@ class OrmAdminAccountStore implements AdminAccountStore {
         // `users`); desfaz os dois UPDATEs em vez de confirmar meio vínculo.
         throw StateError(
           'acs sem linha em users: vínculo desfeito (dado inconsistente)',
+        );
+      }
+      if (mudou) {
+        await OrmDeviceCertificateStore(session: _session).revokeForUser(
+          userId: acsId,
+          reason: DeviceCertRevocationReason.microAreaChanged,
+          at: at,
+          transaction: transaction,
         );
       }
       return true;
@@ -374,6 +394,12 @@ class OrmAdminAccountStore implements AdminAccountStore {
         session: _session,
         transaction: transaction,
       ).revokeAllForUser(acsId, at);
+      await OrmDeviceCertificateStore(session: _session).revokeForUser(
+        userId: acsId,
+        reason: DeviceCertRevocationReason.deactivated,
+        at: at,
+        transaction: transaction,
+      );
       if (_debugFailAfterRevocations) {
         throw StateError('falha injetada depois das revogações (só em teste)');
       }

@@ -8,6 +8,7 @@ import 'package:mqtt_client/mqtt_server_client.dart';
 import 'package:sinalacs_server/src/application/alerts/red_alert_service.dart';
 import 'package:sinalacs_server/src/config/app_config.dart';
 import 'package:sinalacs_server/src/domain/entities/alert_delivery.dart';
+import 'package:sinalacs_server/src/infrastructure/mqtt/mqtt_connection_settings.dart';
 import 'package:sinalacs_server/src/runtime/uncaught_error_policy.dart';
 
 class MqttUnavailableException implements Exception {
@@ -128,7 +129,7 @@ class MqttAlertDispatcher implements AlertPublisher {
   }
 
   Future<void> _connectOnce() async {
-    final broker = _parseBroker(_config.mqttBroker);
+    final broker = parseMqttBroker(_config.mqttBroker);
     final clientId = 'sinalacs-backend-${DateTime.now().microsecondsSinceEpoch}';
     late final MqttServerClient client;
     client = MqttServerClient.withPort(broker.host, clientId, broker.port)
@@ -151,18 +152,8 @@ class MqttAlertDispatcher implements AlertPublisher {
           .withClientIdentifier(clientId)
           .withWillQos(MqttQos.atLeastOnce);
 
-    if (_config.mqttUseTls && _config.mqttCaCertificatePath != null) {
-      final contexto = SecurityContext(withTrustedRoots: false)
-        ..setTrustedCertificates(_config.mqttCaCertificatePath!);
-      final cert = _config.mqttClientCertificatePath;
-      final chave = _config.mqttClientKeyPath;
-      if (cert != null && chave != null) {
-        contexto
-          ..useCertificateChain(cert)
-          ..usePrivateKey(chave);
-      }
-      client.securityContext = contexto;
-    }
+    final contexto = mqttSecurityContext(_config);
+    if (contexto != null) client.securityContext = contexto;
 
     try {
       // O socket (e o timer do keepalive) nascem aqui: dentro da zona.
@@ -464,8 +455,4 @@ class MqttAlertDispatcher implements AlertPublisher {
 
   AlertDeliveryAck? _decodeAck(String body) => AlertDeliveryAck.tryParse(body);
 
-  ({String host, int port}) _parseBroker(String value) {
-    final uri = Uri.parse(value.contains('://') ? value : 'mqtt://$value');
-    return (host: uri.host, port: uri.hasPort ? uri.port : 1883);
-  }
 }

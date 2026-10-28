@@ -9,6 +9,7 @@ import 'src/application/notices/notice_scheduling_service.dart';
 import 'src/application/retention/expurge_future_call.dart';
 import 'src/application/retention/expurge_service.dart';
 import 'src/config/api_tls_config.dart';
+import 'src/infrastructure/pki/device_crl_publisher.dart';
 import 'src/generated/endpoints.dart';
 import 'src/generated/protocol.dart';
 import 'src/runtime/alert_runtime.dart';
@@ -118,6 +119,12 @@ void run(List<String> args) async {
   // Disparo dos avisos comunitários agendados (RF14, #46).
   _startNoticeDispatchLoop(pod);
 
+  // CRL dos aparelhos (#94): uma publicação no boot e outra a cada 24 h. A do
+  // `init.sh` nunca é renovada depois de existir; é esta que impede a CRL de
+  // vencer (o broker recusaria todo aparelho). Falha não derruba nada: o
+  // publicador tenta de novo com recuo até conseguir.
+  _startDeviceCrlRepublication();
+
   // Rotina de retenção (LGPD-RF07): registra o FutureCall de expurgo e agenda
   // a primeira janela diária (03:00 UTC). Depois do `start()`: o
   // FutureCallManager só existe a partir daí.
@@ -147,6 +154,26 @@ void _startOutboxSweeper(Serverpod pod) {
     } finally {
       await session.close();
     }
+  });
+}
+
+/// Intervalo da republicação da CRL dos aparelhos, bem abaixo do
+/// `DEVICE_CRL_DAYS` (30 dias por padrão) da validade de cada uma.
+const _deviceCrlRepublishInterval = Duration(hours: 24);
+
+void _startDeviceCrlRepublication() {
+  final DeviceCrlPublisher? publicador;
+  try {
+    publicador = AlertRuntime.instance.deviceCrlPublisher;
+  } on StateError catch (error) {
+    // `DEVICE_CA_*` parcial: o mesmo fail-fast de `ApiTlsConfig.carregar`.
+    stderr.writeln(error.message);
+    exit(78);
+  }
+  if (publicador == null) return;
+  unawaited(publicador.publish());
+  Timer.periodic(_deviceCrlRepublishInterval, (_) {
+    unawaited(publicador!.publish());
   });
 }
 

@@ -1,7 +1,9 @@
 import 'package:serverpod/serverpod.dart';
+import 'package:sinalacs_server/src/application/devices/device_certificate_service.dart';
 import 'package:sinalacs_server/src/application/devices/device_wipe_service.dart';
 import 'package:sinalacs_server/src/application/audit/audit_trail.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
+import 'package:sinalacs_server/src/infrastructure/database/orm_device_certificate_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_data_subject_case_store.dart'
     show AuditAppender;
 
@@ -120,6 +122,28 @@ class OrmDeviceWipeStore implements DeviceWipeStore {
             'WHERE "deviceId" = @d AND "revokedAt" IS NULL',
             parameters: QueryParameters.named({'at': at.toUtc(), 'd': deviceId}),
             transaction: transaction,
+          );
+        }
+        // O certificado MQTT do aparelho (#94) cai junto, na mesma transação,
+        // com uma linha `device_cert_revoked:wipe` por certificado revogado:
+        // a trilha falhou, o pedido e as revogações voltam juntos.
+        final revogados = await OrmDeviceCertificateStore(
+          session: _session,
+        ).revoke(
+          deviceId: deviceId,
+          reason: DeviceCertRevocationReason.wipe,
+          at: at,
+          transaction: transaction,
+        );
+        for (final c in revogados) {
+          await _appendAudit(
+            session,
+            transaction,
+            deviceCertAudit(
+              c,
+              actorId: requestedBy,
+              result: deviceCertRevokedResult(DeviceCertRevocationReason.wipe),
+            ),
           );
         }
       }

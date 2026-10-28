@@ -1728,6 +1728,7 @@ Backlog priorizado na seção final do relatório; conferência por `python3 scr
   - O JWT vivo vale até 15 min depois do pedido; a limpeza só chega na renovação seguinte ou numa consulta do app.
   - A partida do ACS com o servidor mudo espera até 5 s pela confirmação pendente do diário (`resumePending(confirmTimeout:)`; a limpeza em si não tem teto e termina antes de qualquer uso do banco) e mais até 5 s pela consulta `pendingWipe`, antes de mostrar o login: até ~10 s, no lugar dos ~25 s de antes (`remote_wipe_ui_test.dart`, "servidor mudo na confirmação da partida").
   - Certificado de cliente MQTT por aparelho (D8, STRIDE-S): issue #94.
+  - #94 (backend, Task 3): `device_certificates` não tem expurgo; a retenção pretendida é até `notAfter` + 30 dias (`spec/lgpd_data_audit.md`). Fora do escopo da #94.
   - R3 do PRD segue **parcial** (`docs/auditoria-prd`): faltam também a chave derivada de biometria que o PRD pede (a do SQLCipher fica no Keystore sem amarração, §5.1).
   - Prova só na API 36 do emulador; API 24–29 e aparelho físico sem prova.
   - `pendingWipe`/`confirmWipe` são públicos: quem tem o `deviceId` pode carimbar entregue/confirmado sem apagar nada (o acesso segue bloqueado, porque o id antigo fica marcado para sempre). "Aparelho limpo" no admin é a afirmação do aparelho, não prova.
