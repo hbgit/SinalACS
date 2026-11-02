@@ -63,7 +63,7 @@ alternativa gratuita.
 | **RNF07** | Implantável por terceiros com um `docker compose` **e** APK assinado publicado em GitHub Releases, custo mensal ≤ teto de P-08 | Essencial | Não | M-03. |
 | **RNF08** | Nenhum componente Essencial depende de serviço pago sem alternativa gratuita (SMS e Play Store incluídos) | Essencial | Não | — |
 | **RNF09** | Coleta mínima: nenhum dado pessoal para o pilar A; sem CPF e sem e-mail no piloto; dados da visita (microárea, endereço ou ponto de referência) só o necessário, conforme RF09/RF10 | Essencial | Não | Revisto se P-10 for rejeitada (ver topo). |
-| **RNF10** | Documentação em pt-BR e licença MIT | Essencial | Não | — |
+| **RNF10** | Documentação em pt-BR; licença MIT para o código; conteúdo educativo autoral sob CC BY 4.0 (P-07) | Essencial | Não | — |
 
 <a id="inv-03-no-piloto"></a>
 ## INV-03 no piloto
