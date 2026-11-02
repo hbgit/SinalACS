@@ -136,5 +136,5 @@ que guarda a justificativa de cada uma.
 | P-11 | Enquadramento regulatório | Autoavaliação como orientação educativa com três saídas, sem classificação de risco clínico; solicitar parecer jurídico (RDC Anvisa nº 657/2022) | Parecer jurídico: `[A DEFINIR]` | Sim | Proposta |
 
 Status possíveis: Proposta, Aprovada, Rejeitada, Substituída. Só a equipe do
-projeto muda o status. Pendências novas recebem o próximo número (P-12 em
-diante); nenhuma é renumerada.
+projeto muda o status. Pendências novas recebem o número
+seguinte ao da última; nenhuma é renumerada.

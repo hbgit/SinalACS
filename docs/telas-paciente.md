@@ -12,11 +12,11 @@ Os destinos principais são **Urgência**, **Triagem** e **Status**. O item **Ma
 
 ## Autenticação inclusiva
 
-A tela inicial pede CPF e data de nascimento e envia um código de uso único (OTP); não há senha. O primeiro acesso também pode vir de um convite em QR Code gerado pela equipe, que leva ao cadastro e ao aceite obrigatório dos Termos de Uso e da Política de Privacidade. Quem entra por OTP sem ter aceitado a versão vigente dos Termos recebe um aviso para aceitar — um aviso, não um bloqueio: o alerta de urgência nunca espera pelo aceite.
+A tela inicial pede CPF e data de nascimento e envia um código de uso único (OTP); não há senha. O primeiro acesso também pode vir de um convite em QR Code gerado pela equipe, que leva ao cadastro e ao aceite obrigatório dos Termos de Uso e da Política de Privacidade. Quem entra por OTP sem ter aceitado a versão vigente dos Termos recebe um aviso para aceitar — um aviso, não um bloqueio: o alerta de urgência (no piloto: pedido de contato com o agente participante, sem rótulo de urgência; o SinalACS não é serviço de emergência — ligue 192) nunca espera pelo aceite.
 
-## Alerta de urgência
+## Alerta de urgência (no piloto: pedido de contato com o agente participante, sem rótulo de urgência; o SinalACS não é serviço de emergência — ligue 192)
 
-![Estado inicial do alerta de urgência](screenshots/patient/01-emergencia.png)
+![Estado inicial do alerta de urgência (protótipo; emergência: ligue 192)](screenshots/patient/01-emergencia.png)
 
 O botão circular de emergência pede confirmação e então cria um alerta vermelho real no backend (`alerts.createRedAlert`), idempotente, publicado para o ACS da microárea. A localização, quando disponível, segue como hash (`locationHash`, para deduplicar) e como uma célula de baixa resolução (~1,1 km, `locationCell`), legível pelo servidor, para o mapa do ACS desenhar uma área de incerteza — nunca as coordenadas exatas. A confirmação de recebimento pela equipe aparece na aba Status.
 

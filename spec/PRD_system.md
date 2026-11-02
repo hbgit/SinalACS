@@ -667,7 +667,7 @@ Future<bool> canAccessPatient(Session session, String patientId) async {
 | **1.4.3 Contraste (Mínimo)** | Razão de contraste ≥ 4.5:1 | `flutter_test` com `accessibility_test` verifica contraste automático |
 | **1.4.11 Contraste Não Textual** | Elementos UI com contraste ≥ 3:1 | Validação visual nos Golden Tests |
 | **2.5.1 Gestos de Toque** | Botões mín. 44x44 dp | Alvos de toque ≥ 48x48 dp (WCAG recomenda 44x44) |
-| **2.5.6 Área de Clique** | Botão de pânico ≥ 60x60 dp | Área de toque ampliada (mínimo 60x60 para emergências) |
+| **2.5.6 Área de Clique** | Botão de pânico (no piloto: pedido de contato com o agente participante, sem rótulo de urgência; o SinalACS não é serviço de emergência — ligue 192) ≥ 60x60 dp | Área de toque ampliada (mínimo 60x60 para emergências) |
 | **2.4.7 Foco Visível** | Indicador de foco claro | `FocusNode` com outline personalizado |
 | **3.3.2 Rótulos/Instruções** | Campos com label associado | `Semantics` no Flutter para leitores de tela |
 

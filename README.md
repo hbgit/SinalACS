@@ -35,7 +35,7 @@ mudanças de código necessárias para o piloto educativo estão listadas em
 **App do paciente** (`apps/patient`)
 - Login sem senha: CPF + data de nascimento + código de uso único (OTP), e
   cadastro por convite em QR Code.
-- Alerta de urgência real (`alerts.createRedAlert`) com acompanhamento de
+- Alerta de urgência real (no piloto: pedido de contato com o agente participante, sem rótulo de urgência; o SinalACS não é serviço de emergência — ligue 192; `alerts.createRedAlert`) com acompanhamento de
   entrega, triagem estruturada determinística e status da solicitação.
 - "Meus Dados" (LGPD): exportação, histórico de consentimentos, revogação e
   pedidos de correção e exclusão; aceite dos Termos de Uso.
