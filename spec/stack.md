@@ -1,9 +1,42 @@
+## 0. Hospedagem e distribuição independentes e de baixo custo
+
+> Conteúdo educativo. Não substitui atendimento profissional. Emergência: ligue 192.
+
+Esta seção vale para o escopo atual do projeto ([`escopo_projeto.md`](escopo_projeto.md)): educação em saúde, código aberto, sem vínculo com unidades de saúde. As seções seguintes descrevem a stack implementada e as decisões de origem.
+
+**Princípio.** Qualquer pessoa replica o SinalACS com o repositório, um `docker compose` e o APK publicado. Nenhum componente obrigatório depende de infraestrutura, sistema ou dado de unidade de saúde, nem de serviço pago sem alternativa gratuita (RNF07, RNF08).
+
+**Perfis de implantação.**
+
+| Perfil | Para quê | Como |
+|---|---|---|
+| Local/demonstração | Desenvolvimento, aulas, avaliação do código | Stack atual do `docker-compose.yml`, custo zero |
+| Piloto | Piloto educativo ([`plano_piloto.md`](plano_piloto.md)) | Um host Docker em camada gratuita ou VPS mínima, Postgres no mesmo host, certificado Let's Encrypt pelo Traefik; roteiro em [`backend/DEPLOY.md`](../backend/DEPLOY.md) |
+| Futuro | Operação com instituição de saúde | Pulumi, redes privadas, PKI de produção (#118); ver [`trabalhos_futuros.md`](trabalhos_futuros.md) |
+
+**Componentes no piloto.**
+
+| Componente | Obrigatório no piloto? | Alternativa gratuita / observação |
+|---|---|---|
+| PostgreSQL | Sim | Imagem oficial no mesmo host |
+| Traefik | Sim | Let's Encrypt (ACME) gratuito |
+| Mosquitto | Só no pilar B com RF03 ativo | Imagem oficial no mesmo host |
+| Gorush + FCM | Não | FCM sem custo; o app funciona sem push |
+| Gateway SMS | Não usado (P-10: sem CPF e sem SMS) | **Limite atual:** fora de `development` o backend não sobe sem `SMS_GATEWAY`; retirar essa exigência é a mudança C-05, pré-requisito do piloto |
+| Play Store | Não (Futuro) | APK em GitHub Releases |
+
+**Distribuição (M-03).** O app é distribuído como APK assinado publicado em GitHub Releases, gratuito. A Play Store exige conta de desenvolvedor paga e fica como Futuro. A chave de assinatura de release ainda precisa ser provisionada (pendência já registrada no `CLAUDE.md`).
+
+**Custo.** Teto mensal proposto de R$ 50 (decisão proposta P-08, status: Proposta), revisto na data da contratação. Nenhum preço de provedor é fixado aqui: verificar na data da contratação.
+
+**Restrição.** Nenhum componente é hospedado em infraestrutura de unidade de saúde.
+
 ## 1. Stack Principal & Persistência
 
 * **Frontend & Backend (Isomorfismo Dart):** Flutter no client e Dart no backend. A decisão original era usar **Serverpod** no backend, com ORM e *endpoints* de cliente Dart gerados automaticamente. Essa decisão ficou por um tempo não implementada — o backend era um servidor `dart:io` puro, roteado manualmente — e foi executada depois: o backend real (`backend/`) é hoje um workspace Serverpod 3.4.13, com ORM, migrações geradas e o cliente Dart tipado em `sinalacs_client`. Ver [CLAUDE.md](../CLAUDE.md) para a arquitetura atual e a seção "Migração para Serverpod" do [PROGRESS.md](../PROGRESS.md) para o histórico.
 
 
-* **Persistência Relacional:** PostgreSQL acoplado ao `sqflite` local. A escolha relacional reflete a necessidade estruturada da matriz de triagem fechada inspirada no Protocolo de Manchester.
+* **Persistência Relacional:** PostgreSQL acoplado ao `sqflite` local. A escolha relacional reflete a necessidade estruturada da matriz de triagem fechada (árvore de decisão fechada).
 
 
 * **Mensageria IoT:** Eclipse Mosquitto (MQTT) atua como *broker* de mensagens leve e de baixo consumo. Isso garante a entrega do botão de alerta de urgência do paciente para o ACS mesmo sob redes instáveis.
@@ -15,7 +48,7 @@
 
 ## 2. DX, Autenticação & Infraestrutura
 
-* **IaC:** Pulumi (com TypeScript) para provisionar os containers em VPS robustas. Abstrai a infraestrutura como código com forte tipagem, sem o *vendor lock-in* do AWS CDK.
+* **IaC:** Pulumi (com TypeScript) para provisionar os containers em VPS robustas (Futuro — o piloto não usa IaC; ver §0). Abstrai a infraestrutura como código com forte tipagem, sem o *vendor lock-in* do AWS CDK.
 * **Autenticação na Borda:** Módulo de autenticação na camada de aplicação do backend acoplado ao **Traefik** como *Reverse Proxy/Edge Gateway*. O Traefik roteia tráfego REST e os WebSockets do MQTT. Ainda não implementado — hoje o backend só tem um endpoint de login de desenvolvimento, sem autenticação institucional real. **Atualização (2026-09-18):** a autenticação institucional existe (`auth.loginInstitutional`, RF07) — matrícula + senha com Argon2id contra `user_credentials`, bloqueio por tentativas e auditoria. O que segue não implementado é o desenho desta seção: a autenticação vive na camada de aplicação do backend, não acoplada ao Traefik, e o RPC segue sem TLS (L-08).
 * **Login Fricção Zero:** A entrada *passwordless* por OTP ou QR Code no app do paciente é delegada à camada de aplicação.
 

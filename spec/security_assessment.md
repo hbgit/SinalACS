@@ -121,7 +121,7 @@ pode se autenticar como paciente ou ACS". Isso já é conhecido e documentado
 pelo projeto — o achado aqui é formalizar a severidade e um caminho de saída.
 
 *Recomendação:* definir e priorizar a integração com identidade institucional
-real (ex.: e-SUS APS/CNS para profissionais de saúde, ou um IdP simples com
+real (ex.: e-SUS APS/CNS para profissionais de saúde — Futuro; no piloto, identidade própria do projeto, ou um IdP simples com
 OAuth2/OIDC para o escopo do TCC) antes de qualquer uso fora do ambiente de
 demonstração controlada. Enquanto isso persistir, manter `ENABLE_DEV_LOGIN`
 desligado por padrão em qualquer ambiente exposto publicamente (verificar

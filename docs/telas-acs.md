@@ -1,5 +1,9 @@
 # Telas do App ACS
 
+> Conteúdo educativo. Não substitui atendimento profissional. Emergência: ligue 192.
+>
+> As telas abaixo mostram o protótipo como está. Onde o app exibe "UBS" ou "coordenação da UBS", no piloto educativo isso representa um **grupo do piloto** e o **preceptor/coordenação do piloto** (ver [`spec/escopo_projeto.md`](../spec/escopo_projeto.md#papeis-no-piloto)); a troca dos textos é a mudança C-06 de [`docs/escopo/mudancas-de-codigo-recomendadas.md`](escopo/mudancas-de-codigo-recomendadas.md).
+
 Documentação visual do protótipo Flutter do Agente Comunitário de Saúde. As imagens foram capturadas no emulador Android `sdk gphone64 x86 64` usando dados sintéticos.
 
 ## Navegação
@@ -10,7 +14,7 @@ A barra inferior dá acesso a **Área**, **Fila**, **Mapa** e **Visita**. O item
 
 ![Login institucional do ACS](screenshots/acs/01-login.png)
 
-A tela de entrada contém matrícula/CNS e senha, com indicador de operação offline. A autenticação é demonstrativa e não possui integração Gov.br ou servidor de identidade nesta etapa.
+A tela de entrada contém o identificador do agente participante (no protótipo, rotulado "matrícula") e senha, com indicador de operação offline. A autenticação é demonstrativa e não possui integração Gov.br ou servidor de identidade (Futuro; ver [`spec/trabalhos_futuros.md`](../spec/trabalhos_futuros.md)).
 
 ## Territorialização
 
@@ -44,7 +48,7 @@ Screenshots: **pendentes**. Não foram capturadas; devem sair de `./scripts/dev/
 
 ## Acionamento e escalonamento
 
-Resume paciente, risco e endereço para ações de SAMU ou UBS. Os botões comunicam explicitamente que discagem e encaminhamento reais ainda não foram integrados.
+Resume paciente, risco e endereço para ações de SAMU ou UBS (no piloto fica só a discagem para 192; o botão "Ligar para a UBS" sai na mudança C-07). Os botões comunicam explicitamente que discagem e encaminhamento reais ainda não foram integrados.
 
 ## Geofencing
 
@@ -56,7 +60,7 @@ Permite preparar público-alvo e mensagem comunitária. O envio depende da futur
 
 ## Aparelho limpo pela coordenação (issue #81)
 
-Quando a coordenação ordena a limpeza do aparelho, o app a aplica sozinho na partida, ao voltar do segundo plano, quando a rede volta ou na renovação da sessão. Se o ACS estava com o painel ou um formulário aberto, tudo some sem aviso prévio: a fila em memória é descartada sem gravar, o banco cifrado, a chave e os tokens de envio são apagados e aparece a tela **Aparelho limpo pela coordenação** (`device_wiped`), que explica que os dados foram apagados a pedido da coordenação da UBS, inclusive as visitas não enviadas, e que os alertas continuam com a equipe da UBS. Se a confirmação ao servidor ainda não saiu (sem rede), a tela mostra uma linha avisando que a confirmação está pendente. O botão **Entrar de novo** leva ao login, que funciona normalmente com uma identidade de aparelho nova. Na partida, o login espera até 5 s pela consulta quando o servidor não responde.
+Quando a coordenação ordena a limpeza do aparelho, o app a aplica sozinho na partida, ao voltar do segundo plano, quando a rede volta ou na renovação da sessão. Se o ACS estava com o painel ou um formulário aberto, tudo some sem aviso prévio: a fila em memória é descartada sem gravar, o banco cifrado, a chave e os tokens de envio são apagados e aparece a tela **Aparelho limpo pela coordenação** (`device_wiped`), que explica que os dados foram apagados a pedido da coordenação da UBS (no piloto: preceptor/coordenação do piloto), inclusive as visitas não enviadas, e que os alertas continuam com a equipe da UBS. Se a confirmação ao servidor ainda não saiu (sem rede), a tela mostra uma linha avisando que a confirmação está pendente. O botão **Entrar de novo** leva ao login, que funciona normalmente com uma identidade de aparelho nova. Na partida, o login espera até 5 s pela consulta quando o servidor não responde.
 
 **Capturas pendentes:** a tela `device_wiped` não foi capturada (a janela do ACS é `FLAG_SECURE`; ver "Captura de tela" abaixo).
 

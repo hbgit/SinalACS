@@ -1,5 +1,7 @@
 # Roteiro de vídeo — apresentação do SinalACS ao sponsor
 
+> **Material de divulgação de origem.** O escopo atual (educação em saúde, sem vínculo com unidades de saúde) está em [`spec/escopo_projeto.md`](../spec/escopo_projeto.md); menções a e-SUS APS, SAMU e UBS descrevem o contexto de origem e são Futuro.
+
 **Público:** investidor / banca de edital de fomento
 **Duração alvo:** 180 segundos (3 min)
 **Orçamento de locução:** 419 palavras a ~145 palavras/min ≈ **173 s**, deixando ~7 s de folga para pausas e respiração
@@ -50,7 +52,7 @@
 ## Bloco 3 — Demo do app do paciente · 0:35 – 1:15
 
 > **Locução:**
-> Do lado do cidadão: acesso sem senha, com CPF e data de nascimento. Maria, 72 anos, abre a triagem. São três perguntas, com uma resposta por vez. Ela marca "falta de ar ou cansaço intenso". E aqui está o ponto: a classificação sai pronta. Risco vermelho. Não existe campo para editar, nem para o paciente, nem para o agente. A mesma resposta gera sempre a mesma cor, porque a regra é fechada e auditável — inspirada no Protocolo de Manchester. O paciente então acompanha o chamado como quem rastreia uma encomenda: enviado, visualizado, em análise, agendado.
+> Do lado do cidadão: acesso sem senha, com CPF e data de nascimento. Maria, 72 anos, abre a triagem. São três perguntas, com uma resposta por vez. Ela marca "falta de ar ou cansaço intenso". E aqui está o ponto: a classificação sai pronta. Risco vermelho. Não existe campo para editar, nem para o paciente, nem para o agente. A mesma resposta gera sempre a mesma cor, porque a regra é fechada e auditável — por árvore de decisão fechada. O paciente então acompanha o chamado como quem rastreia uma encomenda: enviado, visualizado, em análise, agendado.
 
 **Em tela — sequência exata a gravar** (`apps/patient/lib/app/app.dart`):
 

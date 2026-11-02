@@ -2,6 +2,8 @@
 
 ## Visão geral do projeto
 
+**Natureza do projeto.** Conteúdo educativo. Não substitui atendimento profissional. Emergência: ligue 192. O SinalACS é um projeto aberto de educação social em saúde (Grupo de Pesquisa PRISM/UFRR, em cooperação com o PET-Saúde: Inovação e Saúde Digital), sem vínculo com unidades de saúde. Leia primeiro [spec/escopo_projeto.md](spec/escopo_projeto.md) e [spec/requisitos_piloto.md](spec/requisitos_piloto.md). Regra: nenhuma contribuição pode tornar um requisito Essencial dependente de unidade de saúde, sistema oficial ou serviço pago sem alternativa gratuita (RNF07/RNF08). Não usar nome de protocolo clínico registrado como marca em texto de produto (M-05 em docs/escopo/decisoes-2026-11-01.md). Só dados sintéticos. O texto abaixo descreve o protótipo, concebido para a Atenção Primária.
+
 O SinalACS é uma plataforma para priorização de atendimentos na Atenção Primária à Saúde, transformando sinais clínicos estruturados em uma fila de trabalho para o ACS (Agente Comunitário de Saúde), ordenada por risco e preparada para operar em conectividade instável.
 
 O repositório já contém um protótipo funcional com:
@@ -91,7 +93,7 @@ Não violar estes pontos sob qualquer hipótese:
 ### 3) Preserve invariantes de negócio e segurança
 - Microárea deve restringir dados ao território do ACS.
 - Red alert não pode ser perdido em silêncio.
-- Triagem precisa ser determinística e consistente com o modelo do Protocolo de Manchester.
+- Triagem precisa ser determinística, por árvore de decisão fechada, nunca alterável manualmente.
 - Nenhum dado sensível de paciente deve entrar em logs, screenshots, testes, seeds ou configurações compartilhadas.
 
 ### 4) Ao criar ou alterar código

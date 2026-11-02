@@ -1,5 +1,7 @@
 # Auditoria de Dados e Conformidade LGPD - SinalACS
 
+> **Escopo do piloto (2026-11-01):** a classificação abaixo continua válida. No piloto educativo ([`escopo_projeto.md`](escopo_projeto.md)), os campos ligados a `ubs` e à coordenação representam **grupos do piloto e preceptores**, não unidades de saúde; `users.cpfHash` não é preenchido no piloto (decisão proposta P-10) — a coluna existe até a mudança C-05 ([`docs/escopo/mudancas-de-codigo-recomendadas.md`](../docs/escopo/mudancas-de-codigo-recomendadas.md)).
+
 ## 1. Inventário de Dados e Classificação de Sensibilidade
 
 A tabela abaixo consolida o mapeamento exaustivo de dados persistidos pelo backend do SinalACS, contemplando as tabelas de domínio do sistema, os modelos de transporte/persistência intermediária e as tabelas operacionais geradas pelo framework Serverpod. A classificação adota os parâmetros da LGPD (Lei nº 13.709/2018, Art. 5º, I e II), confrontando-os com as invariantes de negócio (INV-01 a INV-05) e os requisitos funcionais de privacidade (LGPD-RF01 a RF21).

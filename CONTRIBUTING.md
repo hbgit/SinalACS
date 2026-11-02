@@ -4,9 +4,24 @@ Obrigado por contribuir com o SinalACS. Este guia descreve como preparar o
 ambiente, validar mudanças e preservar os requisitos de segurança, privacidade
 e confiabilidade do projeto.
 
-O SinalACS é um protótipo funcional para priorização de atendimentos na Atenção
-Primária à Saúde. Ele não está pronto para produção e não deve ser usado com
-dados reais de pacientes.
+## Natureza do projeto
+
+> Conteúdo educativo. Não substitui atendimento profissional. Emergência: ligue 192.
+
+O SinalACS é um projeto aberto de educação social em saúde do Grupo de
+Pesquisa PRISM/UFRR, em cooperação com o PET-Saúde: Inovação e Saúde Digital,
+sem vínculo com unidades de saúde. Escopo, pilares e pendências estão em
+[spec/escopo_projeto.md](spec/escopo_projeto.md); prioridades do piloto em
+[spec/requisitos_piloto.md](spec/requisitos_piloto.md).
+
+Regras de escopo para toda contribuição:
+
+- Nenhuma contribuição pode tornar um requisito Essencial dependente de unidade de saúde, sistema oficial ou serviço pago sem alternativa gratuita (RNF07/RNF08).
+- Não usar nome de protocolo clínico registrado como marca em texto de produto (M-05 em docs/escopo/decisoes-2026-11-01.md); o motor é descrito como
+  "motor de autoavaliação determinístico por árvore de decisão fechada".
+- Usar só dados sintéticos: nunca dados reais de pacientes ou participantes.
+
+O código é um protótipo funcional; não está pronto para produção.
 
 ## Conduta, segurança e privacidade
 

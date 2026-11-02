@@ -1,9 +1,28 @@
 # SinalACS
 
-Plataforma para priorização de atendimentos na Atenção Primária à Saúde. O
-SinalACS transforma sinais clínicos estruturados em uma fila de trabalho para
-o Agente Comunitário de Saúde (ACS), priorizada por risco e preparada para
-operação em conectividade instável.
+Plataforma aberta de **educação social em saúde**, com apoio ao
+acompanhamento comunitário. O SinalACS é desenvolvido pelo Grupo de Pesquisa
+PRISM da Universidade Federal de Roraima (UFRR), em cooperação com o
+PET-Saúde: Inovação e Saúde Digital (Núcleo de Telessaúde da UFRR); o
+responsável é o Prof. Herbert Oliveira Rocha, líder do Grupo PRISM. O projeto
+tem dois pilares: (A) conteúdo educativo para a comunidade, sem cadastro, e
+(B) apoio ao acompanhamento por agentes participantes, como atividade de
+extensão do PET-Saúde. Não há vínculo com unidades de saúde: implantação,
+hospedagem e operação não dependem da infraestrutura, dos sistemas ou dos
+dados delas.
+
+> O SinalACS é uma ferramenta de educação em saúde, de código aberto, desenvolvida pelo Grupo de Pesquisa PRISM da Universidade Federal de Roraima (UFRR), em cooperação com o PET-Saúde: Inovação e Saúde Digital. O conteúdo e as orientações exibidos têm caráter educativo e não substituem consulta, diagnóstico ou tratamento por profissionais de saúde. O SinalACS não é um serviço de emergência: em caso de risco de vida, ligue 192 (SAMU).
+
+Documentos de escopo:
+[escopo do projeto](spec/escopo_projeto.md) ·
+[requisitos priorizados para o piloto](spec/requisitos_piloto.md) ·
+[plano de piloto](spec/plano_piloto.md) ·
+[trabalhos futuros](spec/trabalhos_futuros.md).
+
+O código ainda reflete a concepção original, voltada à Atenção Primária (fila
+de visitas priorizada por risco para o Agente Comunitário de Saúde). As
+mudanças de código necessárias para o piloto educativo estão listadas em
+[docs/escopo/mudancas-de-codigo-recomendadas.md](docs/escopo/mudancas-de-codigo-recomendadas.md).
 
 > **Estado atual:** protótipo funcional, validado localmente em stack Docker
 > (PostgreSQL, Mosquitto, backend Serverpod e Traefik) e em emulador Android.
@@ -16,7 +35,7 @@ operação em conectividade instável.
 **App do paciente** (`apps/patient`)
 - Login sem senha: CPF + data de nascimento + código de uso único (OTP), e
   cadastro por convite em QR Code.
-- Alerta de urgência real (`alerts.createRedAlert`) com acompanhamento de
+- Alerta de urgência real (no piloto: pedido de contato com o agente participante, sem rótulo de urgência; o SinalACS não é serviço de emergência — ligue 192; `alerts.createRedAlert`) com acompanhamento de
   entrega, triagem estruturada determinística e status da solicitação.
 - "Meus Dados" (LGPD): exportação, histórico de consentimentos, revogação e
   pedidos de correção e exclusão; aceite dos Termos de Uso.
@@ -314,7 +333,9 @@ documentado em [backend/DEPLOY.md](backend/DEPLOY.md). Esse caminho é
 propositalmente barato e simplificado para demonstração — ele não substitui
 nenhum dos requisitos de produção do PRD listados abaixo.
 
-O caminho previsto no PRD para produção inclui:
+O caminho previsto no PRD para uma produção institucional é **Futuro** (ver
+[spec/trabalhos_futuros.md](spec/trabalhos_futuros.md)); o piloto educativo
+segue [backend/DEPLOY.md](backend/DEPLOY.md) e [spec/stack.md](spec/stack.md) §0. O caminho de produção inclui:
 
 1. Provisionamento imutável com Pulumi.
 2. PostgreSQL, Mosquitto e Traefik com redes privadas, TLS 1.3 e segredos fora do repositório.
@@ -341,6 +362,13 @@ refresh token para o paciente, imposição de append-only da trilha de
 auditoria no banco e o deploy de produção — ver [PROGRESS.md](PROGRESS.md) e a
 [política de segurança](.github/SECURITY.md).
 
+## Instalação do app
+
+No piloto, os apps são distribuídos como APK assinado publicado em GitHub
+Releases (RNF07); a Play Store é Futuro. Ainda não há release publicado: a
+chave de assinatura de release está por provisionar. Para compilar localmente,
+ver [Build](#build).
+
 ## Licença
 
-Consulte [LICENSE](LICENSE).
+MIT — ver [LICENSE](LICENSE).

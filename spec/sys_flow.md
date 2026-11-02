@@ -1,5 +1,8 @@
 # Especificação Técnica de Arquitetura (SinalACS)
 
+> **Documento de concepção original.** O escopo atual do projeto — educação em saúde, código aberto, sem vínculo com unidades de saúde — está em [`escopo_projeto.md`](escopo_projeto.md). Itens marcados (Futuro) estão em [`trabalhos_futuros.md`](trabalhos_futuros.md).
+
+
 > **Nota de leitura — documento de design original, anterior à migração para
 > Serverpod.** Este documento descreve a arquitetura como planejada antes da
 > implementação (backend `dart:io` roteado à mão, sincronização client-side
@@ -13,7 +16,7 @@
 ## 1. Análise de Requisitos e Domínio
 
 **Resumo Executivo:**
-O SinalACS atua como uma plataforma bidirecional de triagem e otimização para a Atenção Primária à Saúde. A solução resolve a ineficiência do modelo de roteamento geográfico estático, substituindo-o por uma fila de trabalho dinâmica e orientada a risco clínico determinístico (inspirado no Protocolo de Manchester). O diferencial arquitetural (Moat) baseia-se em uma topologia *offline-first* com Dart no cliente e no backend, garantindo resiliência em zonas de sombra de rede.
+O SinalACS atua como uma plataforma bidirecional de triagem e otimização para a Atenção Primária à Saúde. A solução resolve a ineficiência do modelo de roteamento geográfico estático, substituindo-o por uma fila de trabalho dinâmica e orientada a risco clínico determinístico (por árvore de decisão fechada). O diferencial arquitetural (Moat) baseia-se em uma topologia *offline-first* com Dart no cliente e no backend, garantindo resiliência em zonas de sombra de rede.
 
 ### Matriz de Requisitos (RF e RNF)
 
@@ -210,7 +213,7 @@ stateDiagram-v2
 
 
 * **Mitigação (Circuit Breaker & Retry):** Transações `PostgreSQL` limitadas por *timeouts* estritos. Injeção de *Jitter* nos retentativas de sincronização dos clientes para evitar o *Thundering Herd Problem* (DDoS acidental quando todos os dispositivos ACS restabelecem o sinal de rede ao chegarem à UBS).
-* **Observabilidade:** Geração de *logs* estruturados no cliente para rastrear desvios da matriz do Protocolo de Manchester (auditoria clínica) e rastreamento de UUID das mensagens MQTT para garantir garantia *At-Least-Once* da entrega.
+* **Observabilidade:** Geração de *logs* estruturados no cliente para rastrear desvios da árvore de decisão fechada (auditoria clínica) e rastreamento de UUID das mensagens MQTT para garantir garantia *At-Least-Once* da entrega.
 
 ---
 

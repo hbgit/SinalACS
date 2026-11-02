@@ -1,5 +1,7 @@
 # Publicação na Google Play
 
+> **Futuro** — no piloto o app é distribuído por APK assinado em GitHub Releases (RNF07, [`spec/stack.md`](../spec/stack.md) §0); a Play Store exige conta paga e uso institucional.
+
 Guia de boas práticas e passo a passo para publicar um app do SinalACS na
 Google Play Store, do build assinado ao acompanhamento depois do lançamento.
 
@@ -697,8 +699,8 @@ política de saúde do Google. Passos no Play Console:
 enganosa ou prejudicial e exige comprovação regulatória ou aviso para apps
 com função médica. Orientações para o SinalACS:
 
-- A classificação de risco é determinística e segue o modelo do Protocolo de
-  Manchester, conforme o `CLAUDE.md`. A ficha e o app devem descrevê-la como
+- A classificação de risco é determinística, por árvore de decisão fechada,
+  conforme o `CLAUDE.md`. A ficha e o app devem descrevê-la como
   **apoio à priorização**, e não como diagnóstico.
 - Exibir, no app e na ficha, um aviso de que o app não substitui avaliação
   clínica nem o serviço de urgência (SAMU).

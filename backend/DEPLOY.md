@@ -1,11 +1,17 @@
 # Deploy do backend — piloto em serviços free-tier
 
-**Este é um caminho de demonstração/piloto gratuito, não um deploy de
-produção.** Ele não substitui os requisitos descritos em
-[spec/PRD_system.md](../spec/PRD_system.md) e [README.md](../README.md)
-(Pulumi, redes privadas, TLS 1.3, ACLs MQTT dinâmicas, autenticação
-institucional real, RBAC por microárea, observabilidade e revisão de LGPD).
-**Não use este ambiente com dados reais de pacientes.**
+> Conteúdo educativo. Não substitui atendimento profissional. Emergência: ligue 192.
+
+**Este é o caminho recomendado para o piloto educativo** (RNF07/RNF08 em
+[spec/requisitos_piloto.md](../spec/requisitos_piloto.md); perfis de
+implantação em [spec/stack.md](../spec/stack.md) §0). Ele não cobre a
+infraestrutura de produção institucional descrita em
+[spec/PRD_system.md](../spec/PRD_system.md) (Pulumi, redes privadas, ACLs MQTT
+dinâmicas, observabilidade), que é Futuro — ver
+[spec/trabalhos_futuros.md](../spec/trabalhos_futuros.md).
+**Não use este ambiente com dados reais de pacientes.** Dados de participantes
+do piloto só depois dos pré-requisitos de
+[spec/plano_piloto.md](../spec/plano_piloto.md).
 
 ## Por que este caminho existe
 

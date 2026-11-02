@@ -6,7 +6,7 @@ A arquitetura do SinalACS apresenta um desafio de engenharia fascinante: concili
 
 Para otimizar o *Lead Time* e erradicar testes *flaky*, a pirâmide de testes tradicional deve ser invertida e adaptada para uma topologia *offline-first*.
 
-* **Testes de Unidade (70%):** Foco implacável no Motor de Triagem e na Máquina de Estados (FSM) de sincronização. Como o algoritmo de Manchester é determinístico, ele deve ter 100% de cobertura (MCDC - *Modified Condition/Decision Coverage*).
+* **Testes de Unidade (70%):** Foco implacável no Motor de Triagem e na Máquina de Estados (FSM) de sincronização. Como o motor de autoavaliação é determinístico, ele deve ter 100% de cobertura (MCDC - *Modified Condition/Decision Coverage*).
 
 
 * **Testes de Integração Epêmeros (20%):** Validação do banco de dados local (`sqflite`) e da camada de persistência em PostgreSQL. Utilizaremos **Testcontainers** na esteira CI para provisionar instâncias efêmeras do PostgreSQL e do Mosquitto idênticas à produção.
@@ -130,7 +130,7 @@ jobs:
 ### Roadmap de Implementação
 
 * **Semana 1 (Crítico - Fundação DevSecOps):** Implementação da pipeline CI (Mermaid acima), configuração do analisador estático Dart, criptografia SQLCipher no cache local e *Golden Tests* para o *Dark Mode*.
-* **Mês 1 (Estrutural - Testes e Resiliência):** Setup do Testcontainers para validar integração do backend. Implementação de TDD cobrindo 100% das transições da FSM e do algoritmo de Manchester.
+* **Mês 1 (Estrutural - Testes e Resiliência):** Setup do Testcontainers para validar integração do backend. Implementação de TDD cobrindo 100% das transições da FSM e do motor de autoavaliação.
 * **Trimestre 1 (Otimização - IA e CRDTs):** Pesquisa e prototipação de migração da sincronização customizada para CRDTs (*Conflict-free Replicated Data Types*) em preparação para a v1.5. Deploy de ferramentas DAST (OWASP ZAP) e painéis de observabilidade baseados no OpenTelemetry.
 
 ---

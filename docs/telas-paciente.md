@@ -1,5 +1,9 @@
 # Telas do App Paciente
 
+> Conteúdo educativo. Não substitui atendimento profissional. Emergência: ligue 192.
+>
+> No piloto educativo, o alerta vira **pedido de contato com o agente participante**, sem rótulo de urgência, e a autoavaliação mostra três saídas em vez de classificação de risco (mudanças C-04 e C-08 de [`docs/escopo/mudancas-de-codigo-recomendadas.md`](escopo/mudancas-de-codigo-recomendadas.md)); as telas abaixo mostram o protótipo como está.
+
 Documentação visual do protótipo Flutter do paciente. As imagens foram capturadas no emulador Android `sdk gphone64 x86 64` usando somente dados sintéticos.
 
 ## Navegação
@@ -8,11 +12,11 @@ Os destinos principais são **Urgência**, **Triagem** e **Status**. O item **Ma
 
 ## Autenticação inclusiva
 
-A tela inicial pede CPF e data de nascimento e envia um código de uso único (OTP); não há senha. O primeiro acesso também pode vir de um convite em QR Code gerado pela equipe, que leva ao cadastro e ao aceite obrigatório dos Termos de Uso e da Política de Privacidade. Quem entra por OTP sem ter aceitado a versão vigente dos Termos recebe um aviso para aceitar — um aviso, não um bloqueio: o alerta de urgência nunca espera pelo aceite.
+A tela inicial pede CPF e data de nascimento e envia um código de uso único (OTP); não há senha. O primeiro acesso também pode vir de um convite em QR Code gerado pela equipe, que leva ao cadastro e ao aceite obrigatório dos Termos de Uso e da Política de Privacidade. Quem entra por OTP sem ter aceitado a versão vigente dos Termos recebe um aviso para aceitar — um aviso, não um bloqueio: o alerta de urgência (no piloto: pedido de contato com o agente participante, sem rótulo de urgência; o SinalACS não é serviço de emergência — ligue 192) nunca espera pelo aceite.
 
-## Alerta de urgência
+## Alerta de urgência (no piloto: pedido de contato com o agente participante, sem rótulo de urgência; o SinalACS não é serviço de emergência — ligue 192)
 
-![Estado inicial do alerta de urgência](screenshots/patient/01-emergencia.png)
+![Estado inicial do alerta de urgência (protótipo; emergência: ligue 192)](screenshots/patient/01-emergencia.png)
 
 O botão circular de emergência pede confirmação e então cria um alerta vermelho real no backend (`alerts.createRedAlert`), idempotente, publicado para o ACS da microárea. A localização, quando disponível, segue como hash (`locationHash`, para deduplicar) e como uma célula de baixa resolução (~1,1 km, `locationCell`), legível pelo servidor, para o mapa do ACS desenhar uma área de incerteza — nunca as coordenadas exatas. A confirmação de recebimento pela equipe aparece na aba Status.
 
