@@ -2,6 +2,8 @@
 
 Documento aprovado: `docs/escopo/classificacao-issues.md`, hash `0da96bf382263fd6b81637940a2582c47411c30d`.
 
+As duas linhas do lote `milestones` foram normalizadas à mão depois da execução: a saída da API (JSON da milestone criada) não cabia na tabela. O estado real das milestones foi conferido por `gh api` e bate com o registrado.
+
 | Data e hora | Lote | Comando | Resultado |
 |---|---|---|---|
 | 2026-11-02 11:55:33 | rotulos | `gh label create futuro --color BFD4F2 --description …` | ok |
