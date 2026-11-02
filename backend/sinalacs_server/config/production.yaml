@@ -1,3 +1,4 @@
+# Perfil de produção institucional — Futuro; o piloto segue backend/DEPLOY.md.
 # This is the configuration file for your production environment.
 # Typically, you will want to route the traffic through a load balancer
 # which adds SSL security through https. If you use Serverpod's standard
