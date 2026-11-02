@@ -2,6 +2,10 @@
 
 ## Reportar uma vulnerabilidade
 
+Dúvidas gerais e assuntos de conduta: GitHub Discussions do repositório.
+E-mail institucional: `[A DEFINIR]` (P-06 em
+[spec/escopo_projeto.md](../spec/escopo_projeto.md#pendencias)).
+
 Relate vulnerabilidades de forma privada pelo recurso **Private Vulnerability
 Reporting** deste repositório no GitHub. Não abra issues, pull requests ou
 discussões públicas antes da coordenação com os mantenedores.

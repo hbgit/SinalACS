@@ -17,6 +17,17 @@ Este documento consolida o que foi implementado no repositório em relação às
 > e em [CLAUDE.md](CLAUDE.md), que é a referência atualizada de arquitetura e
 > comandos.
 
+## Escopo educativo e aberto (2026-11-01)
+
+O projeto passou a ser descrito como ferramenta aberta de educação social em
+saúde (Grupo PRISM/UFRR + PET-Saúde), sem vínculo com unidades de saúde; o PRD
+e os demais documentos ganharam aviso de escopo. Pendências da equipe, com
+status: [spec/escopo_projeto.md#pendencias](spec/escopo_projeto.md#pendencias)
+(a tabela não é copiada aqui). Portão de código do piloto — segurança e legal:
+C-01/C-02/C-04/C-05/C-06/C-08/C-10; funcional: C-03 — em
+[docs/escopo/mudancas-de-codigo-recomendadas.md](docs/escopo/mudancas-de-codigo-recomendadas.md).
+Origem das decisões: [docs/escopo/decisoes-2026-11-01.md](docs/escopo/decisoes-2026-11-01.md).
+
 ## Resumo executivo
 
 A Fase 1 está concluída no código e validada por testes locais. A Fase 2 avançou além do MVP inicial: o backend já implementa e valida o ciclo crítico de alerta vermelho com autenticação, idempotência, publicação no broker e confirmação de recebimento pelo ACS em ambiente local com Docker Compose. Além das Fases 1 e 2, a seção ["Preparação de deploy — piloto em serviços free-tier (backend)"](#preparação-de-deploy--piloto-em-serviços-free-tier-backend) mais abaixo documenta um trabalho complementar de preparação do backend para hospedagem gratuita (fora da numeração M1.x/M2.x/M3.x do PRD).
