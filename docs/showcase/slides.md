@@ -34,8 +34,8 @@ simplesmente por morar no fim da rua.
 
 # Sinais clínicos estruturados → fila ranqueada por risco
 
-Uma triagem de três perguntas, com regra determinística inspirada no
-Protocolo de Manchester — sem inteligência artificial, sem campo editável.
+Uma triagem de três perguntas, com regra determinística por árvore
+de decisão fechada — sem inteligência artificial, sem campo editável.
 A mesma resposta produz sempre a mesma cor, de forma auditável.
 
 <div class="card-grid cols-3" style="margin-top: 32px;">

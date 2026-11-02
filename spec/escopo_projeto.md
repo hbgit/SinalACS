@@ -93,7 +93,7 @@ Cada item abaixo está detalhado em [`trabalhos_futuros.md`](trabalhos_futuros.m
 
 - Serviço de emergência ou promessa de atendimento.
 - Diagnóstico e classificação de risco clínico.
-- Integração com e-SUS APS, CNES, CNS/CADSUS, RNDS, Gov.br, SAMU, UBS ou
+- Integração (Futuro) com e-SUS APS, CNES, CNS/CADSUS, RNDS, Gov.br, SAMU, UBS ou
   Secretaria de Saúde.
 - Uso de dados ou de infraestrutura de unidades de saúde.
 - ACS em exercício da função atuando como agente do piloto.

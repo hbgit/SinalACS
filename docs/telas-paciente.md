@@ -1,5 +1,9 @@
 # Telas do App Paciente
 
+> Conteúdo educativo. Não substitui atendimento profissional. Emergência: ligue 192.
+>
+> No piloto educativo, o alerta vira **pedido de contato com o agente participante**, sem rótulo de urgência, e a autoavaliação mostra três saídas em vez de classificação de risco (mudanças C-04 e C-08 de [`docs/escopo/mudancas-de-codigo-recomendadas.md`](escopo/mudancas-de-codigo-recomendadas.md)); as telas abaixo mostram o protótipo como está.
+
 Documentação visual do protótipo Flutter do paciente. As imagens foram capturadas no emulador Android `sdk gphone64 x86 64` usando somente dados sintéticos.
 
 ## Navegação
