@@ -371,4 +371,5 @@ ver [Build](#build).
 
 ## Licença
 
-MIT — ver [LICENSE](LICENSE).
+- **Código:** MIT — ver [LICENSE](LICENSE). Titular dos direitos: decisão proposta P-01 (status: Proposta), em [spec/escopo_projeto.md](spec/escopo_projeto.md#pendencias).
+- **Conteúdo educativo autoral:** [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/deed.pt-br). Trechos de terceiros só entram com licença compatível ou em paráfrase com citação (decisão aprovada P-07).

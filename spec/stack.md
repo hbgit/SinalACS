@@ -25,9 +25,9 @@ Esta seção vale para o escopo atual do projeto ([`escopo_projeto.md`](escopo_p
 | Gateway SMS | Não usado (P-10: sem CPF e sem SMS) | **Limite atual:** fora de `development` o backend não sobe sem `SMS_GATEWAY`; retirar essa exigência é a mudança C-05, pré-requisito do piloto |
 | Play Store | Não (Futuro) | APK em GitHub Releases |
 
-**Distribuição (M-03).** O app é distribuído como APK assinado publicado em GitHub Releases, gratuito. A Play Store exige conta de desenvolvedor paga e fica como Futuro. A chave de assinatura de release ainda precisa ser provisionada (pendência já registrada no `CLAUDE.md`).
+**Distribuição (M-03).** O app é distribuído como APK assinado publicado em GitHub Releases, gratuito. A Play Store exige conta de desenvolvedor paga e fica como Futuro. A chave de assinatura de release ainda precisa ser provisionada (pendência já registrada no `CLAUDE.md`). Custódia do repositório e da chave de assinatura: decisão proposta P-13 (status: Proposta).
 
-**Custo.** Teto mensal proposto de R$ 50 (decisão proposta P-08, status: Proposta), revisto na data da contratação. Nenhum preço de provedor é fixado aqui: verificar na data da contratação.
+**Custo.** Teto mensal de R$ 50 (decisão aprovada P-08), revisto na data da contratação. Nenhum preço de provedor é fixado aqui: verificar na data da contratação.
 
 **Restrição.** Nenhum componente é hospedado em infraestrutura de unidade de saúde.
 
