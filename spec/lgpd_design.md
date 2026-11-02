@@ -14,12 +14,12 @@ A estratégia de conformidade adota os princípios de **Privacy by Design** e **
 
 Esta seção vale para o escopo atual do projeto ([`escopo_projeto.md`](escopo_projeto.md)) e prevalece sobre o restante do documento, escrito para operação dentro da Atenção Primária. Nenhum órgão de saúde é controlador no escopo atual.
 
-- **Controlador, encarregado e base legal — decisão proposta P-02 (status: Proposta):** controlador UFRR, por meio do projeto, com o líder do Grupo PRISM como pesquisador responsável; encarregado é o encarregado institucional da UFRR (nome e contato `[A DEFINIR]`); base legal art. 11, II, "c" da LGPD (estudo por órgão de pesquisa), com TCLE. Confirmação jurídica: `[A DEFINIR]`.
-- **Coleta mínima (RNF09):** o pilar A (conteúdo educativo, lembretes, autoavaliação) funciona sem cadastro e com dados só no aparelho. O pilar B usa identificador pseudônimo, sem CPF e sem SMS, com e-mail opcional (decisão proposta P-10).
+- **Controlador, encarregado e base legal — decisão aprovada P-02:** controlador UFRR, por meio do projeto, com o líder do Grupo PRISM como pesquisador responsável; encarregado é o encarregado institucional da UFRR (nome e contato `[A DEFINIR]`); base legal art. 11, II, "c" da LGPD (estudo por órgão de pesquisa); o TCLE é exigência ética (Res. CNS 466/2012 e 510/2016), não base legal. Confirmação jurídica: `[A DEFINIR]`.
+- **Coleta mínima (RNF09):** o pilar A (conteúdo educativo, lembretes, autoavaliação) funciona sem cadastro e com dados só no aparelho. O pilar B usa identificador pseudônimo, sem CPF, sem SMS e sem e-mail no login; recuperação de acesso por novo convite QR do agente participante, vinculado ao mesmo identificador e invalidando a sessão anterior (decisão aprovada P-10). Os dados da visita (microárea, endereço ou ponto de referência) seguem a minimização dos RF09/RF10.
 - **Dado de saúde é sempre sensível** (art. 11), inclusive as respostas da autoavaliação e o registro de que a pessoa recebeu a orientação "Ligar 192".
 - **Dados locais do pilar A** (eventos de auditoria do aparelho, lembretes, respostas da autoavaliação): ficam só no aparelho. Os eventos de auditoria e as respostas da autoavaliação **devem** ficar cifrados — meta, não estado atual: a trilha local de eventos ainda não existe (C-04) e hoje a autoavaliação é enviada ao servidor (C-11). Os lembretes ficam em SQLite sem cifra, por decisão registrada no código (`sqflite_reminder_store.dart`: horário e texto curto, não dado de saúde no mesmo grau); reavaliar se o texto passar a aceitar diagnóstico. Os eventos de auditoria expiram em 30 dias; o participante apaga tudo pela opção "Apagar meus dados" (C-10). O wipe remoto (#81) não alcança aparelhos sem cadastro.
 - **Compartilhamento:** nenhum compartilhamento com terceiros de saúde no piloto (SAMU, UBS, Secretaria são Futuro).
-- **Operadores:** se os questionários do piloto (RF23) usarem formulário externo, esse serviço é operador de dados pessoais (nome `[A DEFINIR]`) e consta aqui e no TCLE.
+- **Operadores:** se os questionários do piloto (RF23) usarem formulário externo, esse serviço é operador de dados pessoais (nome `[A DEFINIR]`) e consta aqui e no TCLE (instrumentos e serviço: decisão proposta P-12, status: Proposta).
 - **Encerramento e anonimização:** conforme [`plano_piloto.md`](plano_piloto.md) (M-04).
 
 ---
@@ -865,7 +865,7 @@ CPFs de documentação (como faz `seed_cpf_hashes.dart` para a stack de desenvol
 |-------|-------------|
 | **LGPD** | Lei Geral de Proteção de Dados Pessoais (Lei nº 13.709/2018) |
 | **Titular** | Pessoa natural a quem se referem os dados pessoais |
-| **Controlador** | Quem decide as finalidades do tratamento (ex.: no piloto, a UFRR — decisão proposta P-02) |
+| **Controlador** | Quem decide as finalidades do tratamento (ex.: no piloto, a UFRR — decisão aprovada P-02) |
 | **Operador** | Quem trata os dados em nome do controlador (ex: prestadores de serviço) |
 | **Encarregado/DPO** | Pessoa designada para atuar como canal entre controlador, titulares e ANPD |
 | **Dados Sensíveis** | Dados sobre origem racial, convicções religiosas, saúde, vida sexual, dados genéticos ou biométricos |

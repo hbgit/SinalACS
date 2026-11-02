@@ -42,7 +42,7 @@ RF16), com três saídas: "Cuidar-se em casa", "Procurar atendimento" e
 como atividade de extensão do PET-Saúde.** Convite por QR (RF02), acesso do
 participante sem CPF (RF24), pedido de contato com o agente participante
 (RF03), login do agente (RF07), território, fila e visita offline
-(RF08–RF11) e sincronização (RF15).
+(RF08–RF11) e sincronização (RF15), com auditoria (RF17).
 
 Se a equipe decidir pilotar só o pilar A, os requisitos do pilar B passam a
 Desejáveis e o piloto encurta.
@@ -67,7 +67,7 @@ documentação exibem uma das duas versões, copiada literalmente, sem paráfras
 - **Pessoas da comunidade** que buscam informação em saúde (pilar A) e, no
   piloto, participantes acompanhados por um agente (pilar B).
 - **Agentes participantes:** estudantes do PET-Saúde sob supervisão de
-  preceptor (decisão proposta P-03, status: Proposta).
+  preceptor (decisão aprovada P-03), com capacitação prévia e supervisão de preceptor profissional de saúde vinculado ao PET-Saúde.
 - **Preceptores e coordenação do PET-Saúde**, que supervisionam os agentes e
   revisam o conteúdo educativo.
 - **Desenvolvedores e pesquisadores** que reutilizam o código.
@@ -124,18 +124,42 @@ que guarda a justificativa de cada uma.
 
 | ID | Pendência | Decisão proposta | Ainda depende de | Bloqueia o piloto? | Status |
 |---|---|---|---|---|---|
-| P-01 | Titular dos direitos no `LICENSE` | "Copyright (c) 2026 Herbert Oliveira Rocha e contribuidores do SinalACS (Grupo de Pesquisa PRISM/UFRR)"; licença MIT mantida | Consulta ao NIT da UFRR: `[A DEFINIR]` | Não | Proposta |
-| P-02 | Controlador e encarregado de dados | Controlador: UFRR, por meio do projeto, com o líder do PRISM como pesquisador responsável; encarregado: o encarregado institucional da UFRR; base legal: art. 11, II, "c" da LGPD, com TCLE | Nome e contato do encarregado da UFRR: `[A DEFINIR]`; confirmação jurídica | **Sim** | Proposta |
-| P-03 | Quem exerce o papel de agente | Estudantes do PET-Saúde sob supervisão de preceptor; não usar ACS em exercício da função | Coordenação do PET-Saúde | **Sim** | Proposta |
-| P-04 | Comitê de Ética (CEP) e TCLE | Tratar como obrigatório e iniciar a submissão na Plataforma Brasil em paralelo à documentação | Parecer do CEP: `[A DEFINIR]` | **Sim** | Proposta |
-| P-05 | Número de participantes e local | 2 a 3 agentes; 15 a 30 participantes da comunidade; território definido pelo PET-Saúde | Território: `[A DEFINIR]` | Sim (local) | Proposta |
-| P-06 | Contato público (segurança e conduta) | Private Vulnerability Reporting e Discussions no GitHub; e-mail só quando houver endereço institucional. Passo manual do mantenedor: ativar os dois recursos nas configurações do repositório (agentes não alteram configurações do GitHub) | Endereço institucional: `[A DEFINIR]` | Não | Proposta |
-| P-07 | Fonte e revisão do conteúdo educativo | Materiais públicos do Ministério da Saúde e da BVS, sempre citados; revisão pelos preceptores do PET-Saúde antes de cada versão | Lista de temas e revisores: `[A DEFINIR]` | **Sim** (RF20) | Proposta |
-| P-08 | Orçamento mensal de hospedagem | Camada gratuita ou VPS mínima; teto de R$ 50/mês, revisto na data da contratação | Fonte de recurso, se houver custo: `[A DEFINIR]` | Não | Proposta |
-| P-09 | Alerta ao agente no piloto | Manter como "pedido de contato", sem rótulo de urgência; maior gravidade na autoavaliação mostra "Ligar 192", sem envio ao agente | — | Sim (C-04) | Proposta |
-| P-10 | Login do participante | Conteúdo e lembretes sem login; acompanhamento por convite QR do agente (RF02) + PIN local; identificador pseudônimo; sem CPF, sem SMS; e-mail opcional | — | Sim (C-05) | Proposta |
-| P-11 | Enquadramento regulatório | Autoavaliação como orientação educativa com três saídas, sem classificação de risco clínico; solicitar parecer jurídico (RDC Anvisa nº 657/2022) | Parecer jurídico: `[A DEFINIR]` | Sim | Proposta |
+| P-01 | Titular dos direitos no `LICENSE` | "Copyright (c) 2026 Universidade Federal de Roraima (UFRR) e contribuidores do SinalACS, sob confirmação do NIT (Lei 9.609/1998, art. 4º)" | Consulta ao NIT da UFRR: `[A DEFINIR]` | Não | Proposta |
+| P-02 | Controlador e encarregado de dados | Controlador: UFRR, por meio do projeto, com o líder do PRISM como pesquisador responsável; encarregado: o encarregado institucional da UFRR; base legal: art. 11, II, "c" da LGPD; TCLE como exigência ética (Res. CNS 466/2012 e 510/2016), não como base legal | Nome e contato do encarregado da UFRR: `[A DEFINIR]`; confirmação jurídica | **Sim** | Aprovada |
+| P-03 | Quem exerce o papel de agente | Estudantes do PET-Saúde sob supervisão de preceptor; não usar ACS em exercício da função; com capacitação prévia sobre o app, o aviso educativo e a conduta diante de relato de risco; preceptor profissional de saúde vinculado ao PET-Saúde | Coordenação do PET-Saúde | **Sim** | Aprovada |
+| P-04 | Comitê de Ética (CEP) e TCLE | Tratar como obrigatório e iniciar a submissão na Plataforma Brasil em paralelo à documentação | Parecer do CEP: `[A DEFINIR]` | **Sim** | Aprovada |
+| P-05 | Número de participantes e local | 2 a 3 agentes; 15 a 30 participantes da comunidade; território definido pelo PET-Saúde | Território: `[A DEFINIR]` | Sim (local) | Aprovada |
+| P-06 | Contato público (segurança e conduta) | Private Vulnerability Reporting e Discussions no GitHub; e-mail só quando houver endereço institucional. Passo manual do mantenedor: ativar os dois recursos nas configurações do repositório (agentes não alteram configurações do GitHub) | Endereço institucional: `[A DEFINIR]` | Não | Aprovada |
+| P-07 | Fonte e revisão do conteúdo educativo | Materiais públicos do Ministério da Saúde e da BVS, sempre citados; revisão pelos preceptores do PET-Saúde antes de cada versão; conteúdo autoral sob CC BY 4.0; trechos de terceiros só com licença compatível ou em paráfrase com citação | Lista de temas e revisores: `[A DEFINIR]` | **Sim** (RF20) | Aprovada |
+| P-08 | Orçamento mensal de hospedagem | Camada gratuita ou VPS mínima; teto de R$ 50/mês, revisto na data da contratação | Fonte de recurso, se houver custo: `[A DEFINIR]` | Não | Aprovada |
+| P-09 | Alerta ao agente no piloto | Manter como "pedido de contato", sem rótulo de urgência; maior gravidade na autoavaliação mostra "Ligar 192", sem envio ao agente | — | Sim (C-04) | Aprovada |
+| P-10 | Login do participante | Conteúdo e lembretes sem login; acompanhamento por convite QR do agente (RF02) + PIN local; identificador pseudônimo; sem CPF, sem SMS; sem e-mail; recuperação de acesso por novo convite QR do agente participante, vinculado ao mesmo identificador pseudônimo, após confirmação presencial pelo agente, invalidando a sessão do aparelho anterior | — | Sim (C-05) | Aprovada |
+| P-11 | Enquadramento regulatório | Autoavaliação como orientação educativa com três saídas, sem classificação de risco clínico; solicitar parecer jurídico (RDC Anvisa nº 657/2022) | Parecer jurídico (Procuradoria Federal junto à UFRR): `[A DEFINIR]` | Sim | Aprovada |
+| P-12 | Instrumentos e serviço dos questionários (RF23) | Questionário de conhecimento pré/pós, SUS e pergunta de reconhecimento do aviso; serviço de aplicação como operador de dados | Instrumento e serviço: `[A DEFINIR]` | Sim (alimenta P-04) | Proposta |
+| P-13 | Custódia institucional do repositório e da chave de assinatura do APK | Repositório em organização do PRISM no GitHub; responsável e backup da chave definidos | Responsável: `[A DEFINIR]` | Não | Proposta |
+
+'Aprovada' significa que a equipe adotou a decisão. O que ainda depende de terceiros permanece na coluna 'Ainda depende de' e, se marcado, continua bloqueando o piloto.
 
 Status possíveis: Proposta, Aprovada, Rejeitada, Substituída. Só a equipe do
 projeto muda o status. Pendências novas recebem o número
 seguinte ao da última; nenhuma é renumerada.
+
+<a id="acoes"></a>
+### Ações disparadas pelas decisões
+
+Aprovar uma decisão não basta: cada ação abaixo precisa de responsável para a
+pendência não ficar parada. Toda pendência que bloqueia o piloto aparece aqui.
+
+| Ação | Pendência | Responsável | Situação |
+|---|---|---|---|
+| Consulta ao NIT da UFRR sobre a titularidade | P-01 | `[A DEFINIR]` | A iniciar |
+| Contato com o encarregado de dados da UFRR | P-02 | `[A DEFINIR]` | A iniciar |
+| Confirmação com a coordenação do PET-Saúde (agentes, capacitação, preceptor) | P-03 | `[A DEFINIR]` | A iniciar |
+| Submissão na Plataforma Brasil | P-04 | `[A DEFINIR]` | A iniciar |
+| Definição do território com o PET-Saúde | P-05 | `[A DEFINIR]` | A iniciar |
+| Ativação do Private Vulnerability Reporting e das Discussions (passo manual do mantenedor) | P-06 | `[A DEFINIR]` | A iniciar |
+| Lista de temas e revisores do conteúdo educativo | P-07 | `[A DEFINIR]` | A iniciar |
+| Implementar C-04 | P-09 | `[A DEFINIR]` | A iniciar |
+| Implementar C-05 e C-12 | P-10 | `[A DEFINIR]` | A iniciar |
+| Pedido de parecer à Procuradoria Federal junto à UFRR | P-11 | `[A DEFINIR]` | A iniciar |
+| Instrumentos dos questionários e serviço de aplicação | P-12 | `[A DEFINIR]` | A iniciar |

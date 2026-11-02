@@ -4,9 +4,10 @@
 
 Plano do primeiro piloto, coerente com a natureza do projeto descrita em
 [`escopo_projeto.md`](escopo_projeto.md) e com as prioridades de
-[`requisitos_piloto.md`](requisitos_piloto.md). As decisões P-NN citadas aqui
-são **propostas** (status: Proposta) até a equipe mudar o status em
-[`escopo_projeto.md#pendencias`](escopo_projeto.md#pendencias).
+[`requisitos_piloto.md`](requisitos_piloto.md). Cada decisão P-NN citada aqui traz o status registrado em
+[`escopo_projeto.md#pendencias`](escopo_projeto.md#pendencias). 'Aprovada' não
+remove bloqueios: o que bloqueia o piloto é a coluna 'Ainda depende de' das
+linhas marcadas em 'Bloqueia o piloto?'.
 
 ## Objetivo
 
@@ -19,10 +20,12 @@ Avaliar se o SinalACS:
 
 ## Participantes
 
-Decisão proposta P-05 (status: Proposta):
+Decisão aprovada P-05:
 
 - **2 a 3 agentes participantes:** estudantes do PET-Saúde sob supervisão de
-  preceptor (decisão proposta P-03).
+  preceptor (decisão aprovada P-03), com capacitação prévia sobre o app, o
+  aviso educativo e a conduta diante de relato de risco, e preceptor
+  profissional de saúde vinculado ao PET-Saúde.
 - **15 a 30 participantes da comunidade.**
 - **Território:** `[A DEFINIR]`, definido pelo PET-Saúde.
 
@@ -52,6 +55,8 @@ O portão tem dois níveis.
 - **C-06:** a palavra "UBS" aparece hoje a participantes (app do paciente,
   texto legal, app do agente), logo entra no portão.
 - **C-08:** autoavaliação com três saídas (P-11).
+- **C-12:** recuperação de acesso que invalida no servidor a credencial do
+  aparelho anterior.
 - **C-11:** autoavaliação local no pilar A, sem sessão e sem registro no
   servidor (hoje `triage.evaluate` exige login e grava no servidor).
 - **C-10:** "Apagar meus dados" no app do paciente e retenção local de
@@ -67,12 +72,16 @@ O portão tem dois níveis.
 - **P-02:** confirmação jurídica do controlador e nome e contato do
   encarregado.
 - **P-03:** confirmação, pela coordenação do PET-Saúde, de quem exerce o
-  papel de agente.
+  papel de agente; capacitação dos agentes concluída.
 - **P-04:** parecer do CEP; a submissão na Plataforma Brasil começa em
   paralelo à documentação.
 - **P-05:** território.
 - **P-07:** lista de temas e revisores do conteúdo educativo.
 - **P-11:** parecer jurídico sobre o enquadramento regulatório.
+- **P-12:** instrumentos dos questionários e serviço de aplicação (alimenta a
+  submissão ao CEP, P-04).
+
+Ações e responsáveis: [`escopo_projeto.md#acoes`](escopo_projeto.md#acoes).
 
 ## Dados
 
@@ -89,8 +98,8 @@ O portão tem dois níveis.
 | Usabilidade (System Usability Scale, SUS) | Questionário pós (RF23) | ≥ 68 |
 | Primeiro uso concluído sem ajuda (herda H2 do PRD) | Observação na sessão de preparação | ≥ 80% |
 | Sincronização offline bem-sucedida (herda H4 do PRD) | `telemetry_events` (`sync_result`) | ≥ 99,5% |
-| Ganho de conhecimento | Questionário pré/pós; instrumento `[A DEFINIR]` (P-07) | Ganho positivo; meta `[A DEFINIR]` |
-| Custo mensal de hospedagem | Fatura do provedor | ≤ R$ 50 (teto proposto em P-08) |
+| Ganho de conhecimento | Questionário pré/pós; instrumento: decisão proposta P-12 (status: Proposta) | Ganho positivo; meta `[A DEFINIR]` |
+| Custo mensal de hospedagem | Fatura do provedor | ≤ R$ 50 (teto da decisão aprovada P-08) |
 | Sessões sem falha | Telemetria | ≥ 99% |
 | Reconhecimento do aviso educativo | Pergunta no questionário pós | ≥ 90% |
 
@@ -109,10 +118,10 @@ são atingidas **e** nenhum incidente de segurança ou de expectativa de socorro
 
 ## Ética, LGPD e encerramento
 
-Controlador, encarregado e base legal seguem a decisão proposta P-02 (status:
-Proposta): controlador UFRR, por meio do projeto, com o líder do PRISM como
+Controlador, encarregado e base legal seguem a decisão aprovada P-02: controlador UFRR, por meio do projeto, com o líder do PRISM como
 pesquisador responsável; encarregado institucional da UFRR (nome e contato
-`[A DEFINIR]`); base legal art. 11, II, "c" da LGPD, com TCLE. Nenhuma coleta
+`[A DEFINIR]`); base legal art. 11, II, "c" da LGPD; o TCLE é exigência ética (Res. CNS
+466/2012 e 510/2016), não base legal. Nenhuma coleta
 com participantes começa antes do parecer do CEP (P-04). Se RF23 usar
 formulário externo, o serviço consta como operador no TCLE.
 

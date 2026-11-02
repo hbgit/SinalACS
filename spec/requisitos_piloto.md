@@ -1,8 +1,8 @@
 # Requisitos priorizados para o piloto
 
-As prioridades abaixo assumem que as decisões propostas P-09, P-10 e P-11 ([`escopo_projeto.md#pendencias`](escopo_projeto.md#pendencias)) serão aprovadas. Se alguma for rejeitada:
+As prioridades abaixo seguem as decisões aprovadas P-09, P-10 e P-11 ([`escopo_projeto.md#pendencias`](escopo_projeto.md#pendencias)). Se alguma for revista e rejeitada:
 
-- **P-09 rejeitada:** RF03 volta ao texto original do PRD **e passa a Futuro** no piloto. Rejeitar P-09 **nunca** significa manter o alerta com rótulo de urgência no piloto: sem a reformulação como pedido de contato, a função simplesmente não entra.
+- **P-09 rejeitada:** RF03 volta ao texto original do PRD **e passa a Futuro** no piloto. Rejeitar P-09 **nunca** significa manter o alerta com rótulo de urgência no piloto: sem a reformulação como pedido de contato, a função simplesmente não entra. Rejeitar P-09 retira o RF03 do piloto; nunca reintroduz o rótulo de urgência.
 - **P-10 rejeitada:** RF24 sai do piloto e RF01 volta a Desejável, com a forma de login escolhida pela equipe. Se a escolha incluir CPF, **RNF09 é revisto** (deixa de dizer "sem CPF no piloto" e passa a exigir justificativa registrada da coleta) e C-05 é refeito para essa forma de login.
 - **P-11 rejeitada:** RF04 passa a **Futuro** até haver parecer jurídico — não Desejável, porque Desejável ainda permitiria levar ao piloto a autoavaliação com cores e classificação de risco, que é o que gera o risco de enquadramento como software dispositivo médico. C-08 sai do portão, e **C-04 é revisto**: sem as três saídas não existe a saída "Ligar 192", então o caminho que não envia nada perde a definição; o botão "Ligar 192" permanece como ação fixa antes de qualquer pedido de contato.
 
@@ -44,11 +44,11 @@ alternativa gratuita.
 | RF17 | Logs de auditoria (LGPD) | B | Essencial | Não | — |
 | RF18 | Modo escuro | — | Desejável | Não | — |
 | RF19 | Escalonamento de pedido sem confirmação | B | Desejável | Não | Para a coordenação do piloto, não para UBS. |
-| **RF20** | Conteúdo educativo offline (biblioteca de temas, sem cadastro) | A | Essencial | Não | Fontes: materiais públicos do Ministério da Saúde e da BVS, sempre citados; revisão por preceptores do PET-Saúde antes de cada versão (P-07). C-03. |
+| **RF20** | Conteúdo educativo offline (biblioteca de temas, sem cadastro) | A | Essencial | Não | Fontes: materiais públicos do Ministério da Saúde e da BVS, sempre citados; revisão por preceptores do PET-Saúde antes de cada versão (P-07); conteúdo autoral sob CC BY 4.0, trechos de terceiros só com licença compatível ou em paráfrase com citação. C-03. |
 | **RF21** | Aviso educativo na primeira abertura, em "Sobre" e no texto legal | A | Essencial | Não | Texto canônico de [`escopo_projeto.md#aviso-educativo`](escopo_projeto.md#aviso-educativo) (M-08). C-01, C-02. |
 | **RF22** | Uso sem cadastro (conteúdo e lembretes) | A | Essencial | Não | — |
-| **RF23** | Questionários do piloto (pré/pós, SUS, reconhecimento do aviso) | — | Desejável | Não | Pode ser formulário externo sem dado de saúde; nesse caso o serviço é **operador de dados pessoais** e precisa constar no TCLE (P-04) e na §0 de [`lgpd_design.md`](lgpd_design.md). Serviço `[A DEFINIR]`. |
-| **RF24** | Acesso do participante ao acompanhamento por convite QR + PIN local, identificador pseudônimo, e-mail opcional, sem CPF e sem SMS | B | Essencial | Não | P-10, C-05. |
+| **RF23** | Questionários do piloto (pré/pós, SUS, reconhecimento do aviso) | — | Desejável | Não | Pode ser formulário externo sem dado de saúde; nesse caso o serviço é **operador de dados pessoais** e precisa constar no TCLE (P-04) e na §0 de [`lgpd_design.md`](lgpd_design.md). Instrumentos e serviço: decisão proposta P-12 (status: Proposta). |
+| **RF24** | Acesso do participante ao acompanhamento por convite QR + PIN local, identificador pseudônimo, sem e-mail, sem CPF e sem SMS no login; recuperação de acesso por novo convite QR do agente participante, vinculado ao mesmo identificador pseudônimo, após confirmação presencial pelo agente, invalidando a sessão do aparelho anterior (C-12) | B | Essencial | Não | P-10, C-05. |
 
 ## Requisitos não funcionais
 
@@ -62,8 +62,8 @@ alternativa gratuita.
 | RNF06 | RBAC | Essencial | Não | — |
 | **RNF07** | Implantável por terceiros com um `docker compose` **e** APK assinado publicado em GitHub Releases, custo mensal ≤ teto de P-08 | Essencial | Não | M-03. |
 | **RNF08** | Nenhum componente Essencial depende de serviço pago sem alternativa gratuita (SMS e Play Store incluídos) | Essencial | Não | — |
-| **RNF09** | Coleta mínima: nenhum dado pessoal para o pilar A; sem CPF no piloto | Essencial | Não | Revisto se P-10 for rejeitada (ver topo). |
-| **RNF10** | Documentação em pt-BR e licença MIT | Essencial | Não | — |
+| **RNF09** | Coleta mínima: nenhum dado pessoal para o pilar A; sem CPF e sem e-mail no piloto; dados da visita (microárea, endereço ou ponto de referência) só o necessário, conforme RF09/RF10 | Essencial | Não | Revisto se P-10 for rejeitada (ver topo). |
+| **RNF10** | Documentação em pt-BR; licença MIT para o código; conteúdo educativo autoral sob CC BY 4.0 (P-07) | Essencial | Não | — |
 
 <a id="inv-03-no-piloto"></a>
 ## INV-03 no piloto
