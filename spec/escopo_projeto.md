@@ -136,7 +136,7 @@ que guarda a justificativa de cada uma.
 | P-10 | Login do participante | Conteúdo e lembretes sem login; acompanhamento por convite QR do agente (RF02) + PIN local; identificador pseudônimo; sem CPF, sem SMS; sem e-mail; recuperação de acesso por novo convite QR do agente participante, vinculado ao mesmo identificador pseudônimo, após confirmação presencial pelo agente, invalidando a sessão do aparelho anterior | — | Sim (C-05) | Aprovada |
 | P-11 | Enquadramento regulatório | Autoavaliação como orientação educativa com três saídas, sem classificação de risco clínico; solicitar parecer jurídico (RDC Anvisa nº 657/2022) | Parecer jurídico (Procuradoria Federal junto à UFRR): `[A DEFINIR]` | Sim | Aprovada |
 | P-12 | Instrumentos e serviço dos questionários (RF23) | Questionário de conhecimento pré/pós, SUS e pergunta de reconhecimento do aviso; serviço de aplicação como operador de dados | Instrumento e serviço: `[A DEFINIR]` | Sim (alimenta P-04) | Proposta |
-| P-13 | Custódia institucional do repositório e da chave de assinatura do APK | Repositório em organização do PRISM no GitHub; responsável e backup da chave definidos | Responsável: `[A DEFINIR]` | Não | Proposta |
+| P-13 | Custódia institucional do repositório e da chave de assinatura do APK | Repositório em organização do PRISM no GitHub; responsável e backup da chave definidos | Responsável: `[A DEFINIR]` | Sim (RNF07: sem chave de release não há APK) | Proposta |
 
 'Aprovada' significa que a equipe adotou a decisão. O que ainda depende de terceiros permanece na coluna 'Ainda depende de' e, se marcado, continua bloqueando o piloto.
 
@@ -163,3 +163,4 @@ pendência não ficar parada. Toda pendência que bloqueia o piloto aparece aqui
 | Implementar C-05 e C-12 | P-10 | `[A DEFINIR]` | A iniciar |
 | Pedido de parecer à Procuradoria Federal junto à UFRR | P-11 | `[A DEFINIR]` | A iniciar |
 | Instrumentos dos questionários e serviço de aplicação | P-12 | `[A DEFINIR]` | A iniciar |
+| Responsável e backup da chave de assinatura; custódia do repositório | P-13 | `[A DEFINIR]` | A iniciar |
