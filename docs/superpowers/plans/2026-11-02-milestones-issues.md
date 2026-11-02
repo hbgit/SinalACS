@@ -26,11 +26,13 @@
 - Texto em pt-BR, sem atribuição de IA em issue, comentário, commit ou PR.
 - **Portão de segurança e legal = C-01, C-02, C-04, C-05, C-06, C-08, C-10, C-11, C-12.** O pedido lista C-01–C-10, mas `spec/plano_piloto.md` já inclui C-11 (autoavaliação local, merged na #121) e C-12 (revogação na recuperação, na #122). Vale o plano do piloto; a divergência é registrada no documento de classificação.
 - **Precedência quando dois critérios batem:** `futuro` (está em `trabalhos_futuros.md`) > Pilot > v1.0, **exceto** controle de segurança ou integridade sobre dados reais de participantes que também atende requisito Essencial: esse conflito vira `a-decidir`, com as duas justificativas lado a lado, sem palpite (caso conhecido: #96, separação de papéis do Postgres × RF17). Issue já entregue em `develop` mas aberta (fecha no merge `develop → main`) recebe a milestone pelo requisito que atende, e a coluna "Situação" diz "entregue em develop (PR #NN)".
-- **Edição de issue com escopo antigo não apaga o original:** o corpo recebe um bloco no topo (`> **Escopo revisto (2026-11-02):** …`) e o texto antigo fica abaixo, intacto; o comentário registra o que mudou e por quê. Título só muda se contiver termo de escopo antigo.
+- **Edição de issue com escopo antigo não apaga o original:** o corpo recebe um bloco no topo (`> **Escopo revisto (2026-11-02):** …`) e o texto antigo fica abaixo, intacto; o comentário registra o que mudou e por quê. Título só muda se contiver termo de escopo antigo ou, em issue classificada como `futuro`, prefixo de prioridade `[P0]`–`[P3]` (que diria "prioridade alta" para algo fora do piloto).
 - **Comentários idempotentes:** todo comentário postado por este plano começa com o marcador oculto `<!-- escopo-2026-11-02 -->`; o gerador omite o comando quando a issue já tem um comentário com esse marcador.
 - **Aprovação amarrada ao conteúdo:** o gerador recebe o hash aprovado (`git hash-object docs/escopo/classificacao-issues.md`, registrado no ledger) e se recusa a rodar se o arquivo atual tiver outro hash.
 - **Comparação de corpos:** toda comparação de corpo de issue (guarda `--conferir-corpo`, checagem "já reescrita", verificação da Task 4) normaliza `\r\n` → `\n` e ignora espaços no fim, nos dois lados.
 - **Corpo atual × inventário:** antes de reescrever uma issue, o corpo atual no GitHub é comparado com o do inventário; se diferirem, o lote para naquela issue (alguém a editou depois do inventário) e a reescrita é refeita sobre o corpo atual, com nova aprovação daquela linha.
+- **Pendências só mudam depois da aprovação:** mudanças na tabela de pendências de `spec/escopo_projeto.md` (coluna "Bloqueia o piloto?", linhas novas como a P-14, linhas da tabela de ações) não entram no PR da Fase 1; ficam descritas no documento de classificação (seção Divergências) e são aplicadas na Task 4, Step 0. Aprovar o documento inclui aprovar essas mudanças.
+- **Corpos sem identificadores internos:** os corpos das issues novas não citam `N<k>`, que só existe no documento; dependências entre issues novas usam o ID externo (`[RNF03] …`, `[C-10]`). O verificador acusa `N[0-9]+` dentro de `<!-- corpo -->`.
 - **Fonte única das ações da equipe:** com as issues `[P-NN]` criadas, a issue passa a ser a fonte da situação; a tabela `escopo_projeto.md#acoes` troca a coluna "Situação" pela coluna "Issue" (número). Essa edição de documento é feita na Task 4, depois da criação.
 - Títulos das issues novas começam pelo ID principal: `[C-05] …`, `[RNF07] …`, `[P-04] …`.
 - Rótulos novos: só `futuro`, `a-decidir` e `acao-equipe` (este para as issues `[P-NN]`, ações da equipe que não são código). Rótulos existentes usados nas issues novas são conferidos contra `gh label list` (Task 2, Step 5). Milestones novas: só `Pilot` e `v1.0`, **sem `due_on`**, descrição com link para `spec/plano_piloto.md` (Pilot: "data depende do parecer do CEP, P-04").
@@ -106,7 +108,7 @@ As issues `[P-NN]` são ações da equipe, não de código. A Task 2 as lista nu
 | `docs/escopo/classificacao-issues.md` | Criar | Tabela para revisão, lacunas com corpo completo, reescritas, divergências |
 | `scripts/escopo/gerar_comandos_issues.py` | Criar | Lê a tabela aprovada e imprime os lotes de comandos `gh` (dry-run por padrão) |
 | `docs/escopo/log-aplicacao-issues.md` | Criar na Fase 2 | Registro de cada comando aplicado e do resultado |
-| `spec/escopo_projeto.md` | Modificar na Task 4 | Tabela `#acoes`: coluna "Situação" → "Issue" |
+| `spec/escopo_projeto.md` | Modificar na Task 4 | Step 0: P-13 bloqueante, P-14 nova, ações das duas; Step 2c: tabela `#acoes`, coluna "Situação" → "Issue" |
 
 ---
 
@@ -270,6 +272,13 @@ git commit -m "chore(escopo): gerador de comandos gh a partir da classificação
 ### Task 4: Aplicação em lotes com log
 
 **Files:** Create: `docs/escopo/log-aplicacao-issues.md`
+
+- [ ] **Step 0: Mudanças aprovadas na tabela de pendências**
+
+Aplicar em `spec/escopo_projeto.md` as mudanças que a seção Divergências do documento aprovado descreve (em 2026-11-02: P-13 "Bloqueia o piloto?" → "Sim (RNF07: sem chave de release não há APK)"; nova linha P-14 "O pilar B entra no piloto?", decisão proposta "pilares A e B", "Ainda depende de" equipe do projeto, "Sim (define o escopo do piloto)", Proposta; linhas da P-13 e da P-14 na tabela de ações). Commit e push no PR da Fase 1.
+
+Run: `grep -E '^\| P-1[34] ' spec/escopo_projeto.md | grep -c Sim; sed -n '/id="acoes"/,/^## /p' spec/escopo_projeto.md | grep -cE '\| P-1[34] \|'`
+Expected: `2`; `2`.
 
 - [ ] **Step 1: Lotes, nesta ordem, um por vez**
 

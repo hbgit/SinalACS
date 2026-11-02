@@ -52,14 +52,20 @@ existentes `privacy`, `security`, `enhancement`, `documentation`,
    (§ INV-03 no piloto) e em C-10 como "prazo proposto, ajustável no TCLE".
    A N8 cita essa origem; o prazo final depende do TCLE (P-04).
 8. **P-13 passa a bloquear o piloto.** Sem responsável pela chave de
-   assinatura não há APK de release (RNF07). Em `spec/escopo_projeto.md`, a
-   coluna "Bloqueia o piloto?" da P-13 passa de "Não" para "Sim (RNF07)" e a
-   tabela de ações ganha a linha da P-13; a ação vira a issue N25.
-9. **#111 e #117 em Pilot, condicionadas ao RF03 ativo.** RF03 é Desejável,
-   mas, com o pilar B no piloto e o pedido de contato existindo (C-04 está no
-   portão), a INV-03 vale para todo pedido enviado; um ACK atribuído ao agente
-   errado pode fazer um pedido parecer atendido. Se a equipe tirar o RF03 do
-   piloto, as duas voltam para v1.0.
+   assinatura não há APK de release (RNF07). Mudança proposta em
+   `spec/escopo_projeto.md`: a coluna "Bloqueia o piloto?" da P-13 passa de
+   "Não" para "Sim (RNF07)" e a tabela de ações ganha a linha da P-13; a ação
+   vira a issue N25. **A edição do arquivo é feita na Task 4, Step 0 do plano,
+   depois da aprovação; aprovar este documento inclui aprovar essa mudança na
+   tabela de pendências.**
+9. **#111 e #117 em Pilot, condicionadas ao pilar B no piloto (P-14).** O
+   pilar B inclui o pedido de contato (RF03); com ele no piloto, a INV-03 vale
+   para todo pedido enviado, e um ACK atribuído ao agente errado pode fazer um
+   pedido parecer atendido. A pergunta em aberto não é o RF03, é se o pilar B
+   entra no piloto — registrada como **P-14** (Proposta: pilares A e B), a
+   incluir em `spec/escopo_projeto.md` na Task 4, Step 0, com a mesma regra de
+   aprovação da divergência 8. A classificação atual supõe a resposta "sim";
+   o que muda se for "não" está em "Para a equipe decidir".
 10. **#100 e #101 em Pilot.** `telemetry_events` é a fonte da meta de
     sincronização (H4); eventos descartados ou perdidos sem aviso tornam a
     métrica não confiável. A #100 é a essencial; se a equipe preferir, a #101
@@ -75,10 +81,10 @@ existentes `privacy`, `security`, `enhancement`, `documentation`,
 | # | Título | Milestone | Rótulos a adicionar | Justificativa | Ação | Situação |
 |---|---|---|---|---|---|---|
 | 118 | [P1] PKI de produção da CA de aparelhos (escopo 5 da #94) | — | `futuro` | `spec/trabalhos_futuros.md` § Distribuição e infraestrutura de produção (#118); a CA do piloto tem dono na N12 | bloco de escopo | aberta |
-| 117 | [P2] ACK com identidade de aparelho | Pilot | — | INV-03 vale para todo pedido de contato enviado (C-04 no portão); condicionada ao RF03 ativo no piloto — se sair, volta para v1.0 | manter | aberta |
+| 117 | [P2] ACK com identidade de aparelho | Pilot | — | INV-03 vale para todo pedido de contato enviado (C-04 no portão); condicionada ao pilar B no piloto (P-14) — se sair, volta para v1.0 | manter | aberta |
 | 116 | [P3] Chave do certificado do aparelho no TEE | — | `futuro` | `spec/trabalhos_futuros.md` (#116) | rotular futuro | aberta |
 | 114 | acs_full_e2e.sh: primeiro teste falha no tap em sync_visits | Pilot | — | RF08 e RF11 Essenciais: e2e do fluxo do agente | manter | aberta |
-| 111 | ACK de um segundo ACS: avisar o app | Pilot | — | INV-03 vale para todo pedido de contato enviado (C-04 no portão); condicionada ao RF03 ativo no piloto — se sair, volta para v1.0 | manter | aberta |
+| 111 | ACK de um segundo ACS: avisar o app | Pilot | — | INV-03 vale para todo pedido de contato enviado (C-04 no portão); condicionada ao pilar B no piloto (P-14) — se sair, volta para v1.0 | manter | aberta |
 | 103 | android-e2e: notificação FCM não chega à bandeja | v1.0 | — | RF14 Desejável | manter | entregue em develop (PRs #105, #106); aceite pendente |
 | 102 | [P2] Métricas do §1.3 no backoffice | v1.0 | — | melhoria pós-piloto; as métricas do piloto vêm de `telemetry_events` e dos questionários (`spec/plano_piloto.md` § Métricas) | bloco de escopo | aberta |
 | 101 | [P3] Reemitir alert_triggered/alert_received_acs perdidos | Pilot | — | eventos perdidos tornam não confiável a métrica de sincronização (H4) do piloto; pode voltar para v1.0 se a equipe preferir (a #100 cobre o essencial) | manter | aberta |
@@ -95,14 +101,14 @@ existentes `privacy`, `security`, `enhancement`, `documentation`,
 | 77 | [P0] Envio do OTP por SMS real (RF01) | — | `futuro` | `spec/trabalhos_futuros.md` "RF01 com CPF e SMS"; P-10 aprovada (sem CPF, SMS ou e-mail) | bloco de escopo | aberta |
 | 15 | docs: guia para publicar app na Google Play Store | — | `futuro` | `spec/trabalhos_futuros.md` (Play Store); piloto usa APK em GitHub Releases (RNF07) | rotular futuro | aberta |
 
-Resumo: Pilot 9 (#117, #114, #111, #101, #100, #94, #90, #83, #81) · v1.0 6 (#103, #102, #99, #88, #87, #86) · `futuro` 4 (#118, #116, #77, #15) · `a-decidir` 1 (#96). Issues novas: 25 (N1–N25) — 22 em Pilot (14 de código ou documentação e 8 ações da equipe) e 3 em v1.0.
+Resumo: Pilot 9 (#117, #114, #111, #101, #100, #94, #90, #83, #81) · v1.0 6 (#103, #102, #99, #88, #87, #86) · `futuro` 4 (#118, #116, #77, #15) · `a-decidir` 1 (#96). Issues novas: 26 (N1–N26) — 23 em Pilot (14 de código ou documentação e 9 ações da equipe) e 3 em v1.0.
 
 ## Para a equipe decidir
 
 | # | Pergunta | Justificativa (a) | Justificativa (b) | Responsável |
 |---|---|---|---|---|
 | 96 | Pilot, v1.0 ou futuro? | está em `spec/trabalhos_futuros.md` | única pendência do RF17 (Essencial): sem ela o REVOKE da auditoria não vale | `[A DEFINIR]` |
-| 111, 117 | O RF03 (pedido de contato) fica ativo no piloto? | se sim, Pilot (INV-03 sobre todo pedido enviado) | se não, voltam para v1.0 | `[A DEFINIR]` |
+| P-14 | O pilar B entra no piloto? | sim (proposta; é o que os documentos supõem): a classificação atual vale | não: passam de Pilot para v1.0 #81, #111, #114, #117, N5 (C-05), N10 (C-12), N25 (P-13, chave do APK do agente; a do paciente continua), e saem do piloto RF02, RF03, RF07–RF11, RF15, RF24; #94, #90, #100, #101 e #83 só ficam em Pilot se o app do paciente usar o broker ou a telemetria; N13 fica só com o pilar A (Keystore) | `[A DEFINIR]` |
 | 101 | Pilot ou v1.0? | Pilot: eventos perdidos afetam a métrica H4 | v1.0: a #100 já cobre o essencial | `[A DEFINIR]` |
 
 ## Cobertura dos Essenciais
@@ -208,7 +214,7 @@ Transformar o alerta do paciente em pedido de contato com o agente participante,
 ## Referências
 IDs: C-04, RF03, RF05, P-09, INV-03
 Escopo: https://github.com/hbgit/SinalACS/blob/develop/spec/requisitos_piloto.md#inv-03-no-piloto
-Bloqueado por: N13 (cifra local do evento)
+Bloqueado por: [RNF03] Cifra local dos dados do app do paciente (cifra do evento)
 <!-- /corpo -->
 
 ### N5 — [C-05] Acesso do participante sem CPF, SMS ou e-mail (RF24)
@@ -274,6 +280,7 @@ Opção "Apagar meus dados", disponível sem cadastro, que apaga banco local, le
 
 ## Critério de aceite
 - [ ] Depois de "Apagar meus dados" não resta nenhum evento local.
+- [ ] "Apagar meus dados" também apaga a chave do banco local no Android Keystore, tornando ilegível qualquer resto do banco cifrado que tenha sobrado no armazenamento.
 - [ ] Evento com mais de 30 dias some na próxima abertura.
 - [ ] Com sessão do pilar B, a opção também encerra a sessão e abre o pedido de eliminação existente.
 
@@ -362,7 +369,7 @@ Milestone: Pilot
 Rótulos: `privacy`
 <!-- corpo -->
 ## Objetivo
-Cifrar em repouso os dados locais do app do paciente que sejam dado de saúde (autoavaliação, trilha local de eventos, dados do pilar B). Duas situações: no **pilar A** (sem cadastro, sem PIN), a chave fica no Android Keystore, presa ao aparelho, sem segredo do usuário; no **pilar B**, a chave é liberada pelo PIN local. Limite do pilar A: a cifra protege contra extrair o banco do aparelho, não contra alguém usando o celular desbloqueado — a mitigação é a expiração em 30 dias e o "Apagar meus dados" (N8). Hoje o app usa SQLite sem cifra (lembretes e consentimentos, por decisão registrada no código) e não tem PIN. Depois de C-12, a cifra local é a única proteção de um aparelho perdido que não volta a se conectar.
+Cifrar em repouso os dados locais do app do paciente que sejam dado de saúde (autoavaliação, trilha local de eventos, dados do pilar B). Duas situações: no **pilar A** (sem cadastro, sem PIN), a chave fica no Android Keystore, presa ao aparelho, sem segredo do usuário; no **pilar B**, a chave é liberada pelo PIN local. Limite do pilar A: a cifra protege contra extrair o banco do aparelho, não contra alguém usando o celular desbloqueado — a mitigação é a expiração em 30 dias e o "Apagar meus dados" ([C-10]). Hoje o app usa SQLite sem cifra (lembretes e consentimentos, por decisão registrada no código) e não tem PIN. Depois de C-12, a cifra local é a única proteção de um aparelho perdido que não volta a se conectar.
 
 ## Critério de aceite
 - [ ] Banco local com dado de saúde cifrado (AES-256): chave no Keystore no pilar A; chave liberada pelo PIN no pilar B.
@@ -579,6 +586,24 @@ Definir o responsável e o backup da chave de assinatura de release do APK e a c
 ## Referências
 IDs: P-13, RNF07
 Escopo: https://github.com/hbgit/SinalACS/blob/develop/spec/escopo_projeto.md#acoes
+Bloqueado por: —
+Responsável: `[A DEFINIR]`
+<!-- /corpo -->
+
+### N26 — [Ação P-14] Decidir se o pilar B entra no piloto
+Milestone: Pilot
+Rótulos: `acao-equipe`
+<!-- corpo -->
+## Objetivo
+Decidir se o pilar B (acompanhamento comunitário por agentes participantes) entra no piloto (decisão proposta P-14, status: Proposta: pilares A e B). A resposta define o escopo do piloto: se for "não", o login do participante sem CPF (C-05), a recuperação de acesso (C-12), o app do agente e os RF02, RF03, RF07–RF11, RF15 e RF24 saem do piloto e as issues correspondentes passam para v1.0.
+
+## Critério de aceite
+- [ ] Decisão registrada na tabela de pendências (status da P-14).
+- [ ] Milestones das issues afetadas revistas conforme a decisão.
+
+## Referências
+IDs: P-14, RF03, RF24
+Escopo: https://github.com/hbgit/SinalACS/blob/develop/spec/escopo_projeto.md#pilares
 Bloqueado por: —
 Responsável: `[A DEFINIR]`
 <!-- /corpo -->

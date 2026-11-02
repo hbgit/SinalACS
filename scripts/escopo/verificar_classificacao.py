@@ -55,6 +55,7 @@ def main(doc_path, inv_path, rotulos_path):
 
     corpos = re.findall(r'<!-- corpo -->(.*?)<!-- /corpo -->', doc, re.S)
     falhas['corpos sem link'] = [i for i, c in enumerate(corpos, 1) if LINK not in c]
+    falhas['corpos com N<k>'] = [i for i, c in enumerate(corpos, 1) if re.search(r'\bN\d+\b', c)]
 
     coms = re.findall(r'<!-- comentario -->\n?(.*?)<!-- /comentario -->', doc, re.S)
     falhas['comentarios sem marcador'] = [
