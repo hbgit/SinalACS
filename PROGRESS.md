@@ -24,7 +24,7 @@ saúde (Grupo PRISM/UFRR + PET-Saúde), sem vínculo com unidades de saúde; o P
 e os demais documentos ganharam aviso de escopo. Pendências da equipe, com
 status: [spec/escopo_projeto.md#pendencias](spec/escopo_projeto.md#pendencias)
 (a tabela não é copiada aqui). Portão de código do piloto — segurança e legal:
-C-01/C-02/C-04/C-05/C-06/C-08/C-10; funcional: C-03 — em
+C-01/C-02/C-04/C-05/C-06/C-08/C-10/C-11; funcional: C-03 — em
 [docs/escopo/mudancas-de-codigo-recomendadas.md](docs/escopo/mudancas-de-codigo-recomendadas.md).
 Origem das decisões: [docs/escopo/decisoes-2026-11-01.md](docs/escopo/decisoes-2026-11-01.md).
 

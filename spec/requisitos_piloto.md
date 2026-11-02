@@ -28,7 +28,7 @@ alternativa gratuita.
 | RF01 | Autenticação passwordless (CPF + data de nascimento + OTP) | — | Futuro | Sim (gateway SMS pago) | Sem CPF e sem SMS no piloto (P-10); substituído por RF24. |
 | RF02 | Onboarding por QR Code (agente gera, participante escaneia) | B | Essencial | Não | Convite emitido pelo agente participante; base do RF24. |
 | RF03 | Envio do participante ao agente (no PRD, "botão de alerta de urgência") | B | Desejável | Não | No piloto: **pedido de contato com o agente participante**, sem rótulo de urgência. Maior gravidade na autoavaliação → só "Ligar 192", sem envio (P-09, C-04). INV-03 vale para o pedido (ver [INV-03 no piloto](#inv-03-no-piloto)). |
-| RF04 | Formulário de autoavaliação estruturada (árvore de decisão) | A | Essencial **somente** com as três saídas de P-11; se P-11 for rejeitada, Futuro | Não | Orientação educativa com as saídas "Cuidar-se em casa", "Procurar atendimento" e "Ligar 192"; nunca "classificação de risco". |
+| RF04 | Formulário de autoavaliação estruturada (árvore de decisão) | A | Essencial **somente** com as três saídas de P-11; se P-11 for rejeitada, Futuro | Não | Orientação educativa com as saídas "Cuidar-se em casa", "Procurar atendimento" e "Ligar 192"; nunca "classificação de risco". No pilar A roda localmente, sem sessão e sem registro no servidor (C-11; hoje exige login). |
 | RF05 | Painel de status da solicitação | B | Desejável | Não | Estados descritivos do pedido de contato; sem "Atendido" como promessa. |
 | RF06 | Lembretes de saúde locais | A | Essencial | Não | Sem servidor. |
 | RF07 | Login do agente (identificador + senha + TOTP) | B | Essencial | Não | Identificador emitido pela equipe do projeto, não por Secretaria. |
@@ -69,7 +69,7 @@ alternativa gratuita.
 ## INV-03 no piloto
 
 1. INV-03 vale para todo pedido de contato com o agente participante: um pedido enviado nunca é descartado em silêncio (entrega com ACK, reserva HTTP, escalonamento RF19).
-2. A saída "Ligar 192" da autoavaliação **não gera pedido de contato** — é uma mudança de comportamento do sistema (C-04), não só de apresentação. Ela não é descarte silencioso porque: (a) a orientação "Ligar 192", com o botão de discagem, é exibida ao participante antes de qualquer outra ação e não pode ser fechada sem uma escolha explícita; (b) a exibição fica registrada localmente na trilha de auditoria do aparelho (evento com data, hora e versão do motor; sem respostas em texto claro).
+2. A saída "Ligar 192" da autoavaliação **não gera pedido de contato** — é uma mudança de comportamento do sistema (C-04), não só de apresentação. Ela não é descarte silencioso porque: (a) a orientação "Ligar 192", com o botão de discagem, é exibida ao participante antes de qualquer outra ação e não pode ser fechada sem uma escolha explícita; (b) a exibição fica registrada localmente na trilha de auditoria do aparelho — trilha local cifrada, a criar em C-04 (o app do paciente não tem trilha local hoje) — (evento com data, hora e versão do motor; sem respostas em texto claro).
 
    Esse evento é **dado de saúde** (revela que a pessoa recebeu a orientação de maior gravidade), mesmo sem as respostas. Fica só no aparelho, cifrado, é apagado automaticamente após **30 dias** (prazo proposto, ajustável no TCLE, P-04) e pode ser apagado a qualquer momento pela opção "Apagar meus dados" (C-10).
 3. Se o participante, depois de ver a orientação, quiser também falar com o agente, o pedido de contato é um ato separado e volta a estar sob INV-03.

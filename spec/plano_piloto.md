@@ -52,6 +52,8 @@ O portão tem dois níveis.
 - **C-06:** a palavra "UBS" aparece hoje a participantes (app do paciente,
   texto legal, app do agente), logo entra no portão.
 - **C-08:** autoavaliação com três saídas (P-11).
+- **C-11:** autoavaliação local no pilar A, sem sessão e sem registro no
+  servidor (hoje `triage.evaluate` exige login e grava no servidor).
 - **C-10:** "Apagar meus dados" no app do paciente e retenção local de
   30 dias dos eventos de auditoria do aparelho.
 

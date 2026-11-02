@@ -51,5 +51,5 @@ Não são integrações, mas ficam registrados aqui para não se perderem:
 1. **Material para o Comitê de Ética em Pesquisa:** minuta de TCLE e projeto
    para a Plataforma Brasil. É a pendência de maior prazo (P-04); o conteúdo
    institucional fica `[A DEFINIR]`.
-2. **Implementação do portão de código** C-01–C-08 e C-10
+2. **Implementação do portão de código** C-01–C-06, C-08, C-10 e C-11
    ([`docs/escopo/mudancas-de-codigo-recomendadas.md`](../docs/escopo/mudancas-de-codigo-recomendadas.md)).

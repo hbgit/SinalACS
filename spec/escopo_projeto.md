@@ -111,8 +111,9 @@ Cada item abaixo está detalhado em [`trabalhos_futuros.md`](trabalhos_futuros.m
 | `admin` | Administração técnica (equipe do PRISM) |
 
 A tabela `ubs` do modelo de dados (`ubs.spy.yaml`) representa, no piloto, um
-**grupo do piloto**, não uma unidade de saúde. A renomeação é a mudança C-06
-de [`docs/escopo/mudancas-de-codigo-recomendadas.md`](../docs/escopo/mudancas-de-codigo-recomendadas.md).
+**grupo do piloto**, não uma unidade de saúde. A troca dos textos "UBS" nos apps é a mudança C-06
+de [`docs/escopo/mudancas-de-codigo-recomendadas.md`](../docs/escopo/mudancas-de-codigo-recomendadas.md);
+renomear a tabela é dívida técnica separada, fora do portão.
 
 <a id="pendencias"></a>
 ## Pendências
