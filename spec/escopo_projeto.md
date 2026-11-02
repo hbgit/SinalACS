@@ -151,18 +151,20 @@ seguinte ao da última; nenhuma é renumerada.
 Aprovar uma decisão não basta: cada ação abaixo precisa de responsável para a
 pendência não ficar parada. Toda pendência que bloqueia o piloto aparece aqui.
 
-| Ação | Pendência | Responsável | Situação |
+| Ação | Pendência | Responsável | Issue |
 |---|---|---|---|
-| Consulta ao NIT da UFRR sobre a titularidade | P-01 | `[A DEFINIR]` | A iniciar |
-| Contato com o encarregado de dados da UFRR | P-02 | `[A DEFINIR]` | A iniciar |
-| Confirmação com a coordenação do PET-Saúde (agentes, capacitação, preceptor) | P-03 | `[A DEFINIR]` | A iniciar |
-| Submissão na Plataforma Brasil | P-04 | `[A DEFINIR]` | A iniciar |
-| Definição do território com o PET-Saúde | P-05 | `[A DEFINIR]` | A iniciar |
-| Ativação do Private Vulnerability Reporting e das Discussions (passo manual do mantenedor) | P-06 | `[A DEFINIR]` | A iniciar |
-| Lista de temas e revisores do conteúdo educativo | P-07 | `[A DEFINIR]` | A iniciar |
-| Implementar C-04 | P-09 | `[A DEFINIR]` | A iniciar |
-| Implementar C-05 e C-12 | P-10 | `[A DEFINIR]` | A iniciar |
-| Pedido de parecer à Procuradoria Federal junto à UFRR | P-11 | `[A DEFINIR]` | A iniciar |
-| Instrumentos dos questionários e serviço de aplicação | P-12 | `[A DEFINIR]` | A iniciar |
-| Responsável e backup da chave de assinatura; custódia do repositório | P-13 | `[A DEFINIR]` | A iniciar |
-| Decidir se o pilar B entra no piloto | P-14 | `[A DEFINIR]` | A iniciar |
+| Consulta ao NIT da UFRR sobre a titularidade | P-01 | `[A DEFINIR]` | — |
+| Contato com o encarregado de dados da UFRR | P-02 | `[A DEFINIR]` | #141 |
+| Confirmação com a coordenação do PET-Saúde (agentes, capacitação, preceptor) | P-03 | `[A DEFINIR]` | #142 |
+| Submissão na Plataforma Brasil | P-04 | `[A DEFINIR]` | #143 |
+| Definição do território com o PET-Saúde | P-05 | `[A DEFINIR]` | #144 |
+| Ativação do Private Vulnerability Reporting e das Discussions (passo manual do mantenedor) | P-06 | `[A DEFINIR]` | — |
+| Lista de temas e revisores do conteúdo educativo | P-07 | `[A DEFINIR]` | #145 |
+| Implementar C-04 | P-09 | `[A DEFINIR]` | #127 |
+| Implementar C-05 e C-12 | P-10 | `[A DEFINIR]` | #128, #133 |
+| Pedido de parecer à Procuradoria Federal junto à UFRR | P-11 | `[A DEFINIR]` | #146 |
+| Instrumentos dos questionários e serviço de aplicação | P-12 | `[A DEFINIR]` | #147 |
+| Responsável e backup da chave de assinatura; custódia do repositório | P-13 | `[A DEFINIR]` | #148 |
+| Decidir se o pilar B entra no piloto | P-14 | `[A DEFINIR]` | #149 |
+
+A situação de cada ação é acompanhada na issue. Ações sem issue própria (P-01, P-06) não bloqueiam o piloto.
