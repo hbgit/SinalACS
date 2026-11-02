@@ -1,5 +1,9 @@
 # PRD de Engenharia e Arquitetura de Produto - SinalACS
 
+> **Escopo atual (2026-11-01):** O SinalACS é uma ferramenta de educação em saúde, de código aberto, desenvolvida pelo Grupo de Pesquisa PRISM da Universidade Federal de Roraima (UFRR), em cooperação com o PET-Saúde: Inovação e Saúde Digital. O conteúdo e as orientações exibidos têm caráter educativo e não substituem consulta, diagnóstico ou tratamento por profissionais de saúde. O SinalACS não é um serviço de emergência: em caso de risco de vida, ligue 192 (SAMU).
+>
+> Este PRD foi escrito para operação dentro da Atenção Primária. Pilares, prioridades e piloto: [`escopo_projeto.md`](escopo_projeto.md), [`requisitos_piloto.md`](requisitos_piloto.md), [`plano_piloto.md`](plano_piloto.md); o que depende de unidade de saúde: [`trabalhos_futuros.md`](trabalhos_futuros.md). Onde este PRD divergir desses documentos, valem eles; os identificadores RF/RNF/INV daqui continuam válidos e não são renumerados.
+
 **Role:** Principal Product Architect & Staff Systems Engineer  
 **Versão:** 1.0  
 **Data:** 29/08/2026  
@@ -11,14 +15,17 @@
 
 ### 1.1 Resumo Executivo & JTBD
 
-**Problema Central:** O modelo atual de visitas domiciliares na Atenção Primária à Saúde opera de forma reativa e baseada em roteiros geográficos fixos, criando um desalinhamento crítico entre a urgência clínica do paciente e o momento em que ele efetivamente recebe atendimento. Sistemas existentes (como e-SUS APS) funcionam como registros passivos, enquanto ferramentas genéricas (WhatsApp) geram comunicação desestruturada que sobrecarrega o Agente Comunitário de Saúde (ACS).
+**Problema no escopo educativo:** falta acesso a informação em saúde confiável, compreensível e disponível offline para a comunidade (pilar A), e falta uma ferramenta aberta para organizar ações educativas e o acompanhamento comunitário feito por agentes participantes, como atividade de extensão do PET-Saúde (pilar B). O texto abaixo é o contexto de origem do projeto, escrito para operação dentro da Atenção Primária; ver [`escopo_projeto.md`](escopo_projeto.md).
+
+**Contexto de origem — Problema Central:** O modelo atual de visitas domiciliares na Atenção Primária à Saúde opera de forma reativa e baseada em roteiros geográficos fixos, criando um desalinhamento crítico entre a urgência clínica do paciente e o momento em que ele efetivamente recebe atendimento. Sistemas oficiais de registro (fora do escopo; ver [trabalhos futuros](trabalhos_futuros.md)) funcionam como registros passivos, enquanto ferramentas genéricas (WhatsApp) geram comunicação desestruturada que sobrecarrega o Agente Comunitário de Saúde (ACS).
 
 **Jobs-to-be-Done (JTBD):**
 
 | Job | Ator | Situação | Motivação | Resultado Esperado |
 |-----|------|----------|-----------|-------------------|
 | **Priorizar atendimento por risco clínico** | ACS | Recebe múltiplas solicitações simultâneas | Necessidade de alocar recursos escassos onde há maior impacto | Dashboard dinâmico ordenado por gravidade |
-| **Disparar alerta de urgência** | Paciente | Sente sintomas graves que requerem atenção imediata | Medo de não ser atendido a tempo | Alerta em tempo real com geolocalização para o ACS |
+| **Aprender sobre um tema de saúde sem cadastro** (RF20) | Pessoa da comunidade | Quer entender um sintoma, uma condição ou um cuidado | Informação confiável, com fonte, mesmo sem internet | Conteúdo educativo offline, sem login |
+| **Disparar alerta de urgência** (no piloto: pedido de contato com o agente participante, sem rótulo de urgência; o SinalACS não é serviço de emergência — ligue 192) | Paciente | Sente sintomas graves que requerem atenção imediata | Medo de não ser atendido a tempo | Alerta em tempo real com geolocalização para o ACS |
 | **Registrar visita offline** | ACS | Está em zona rural ou área sem cobertura de dados | Evitar retrabalho e perda de informação | Registro local com sincronização automática posterior |
 | **Territorializar microárea** | ACS | Necessita conhecer todos os pacientes sob sua responsabilidade | Planejar rotas e acompanhamento | Cache local dos dados da microárea |
 | **Autotriagem assistida** | Paciente | Dúvida se o sintoma justifica uma visita ou pode esperar | Evitar deslocamento desnecessário | Classificação de risco determinística (Verde/Amarelo/Vermelho) |
@@ -26,7 +33,7 @@
 **Proposta de Valor Técnica:**
 
 O SinalACS transforma dados clínicos estruturados em ação imediata através de:
-1. **Motor de Triagem Determinístico:** Algoritmo fechado inspirado no Protocolo de Manchester que calcula risco sem dependência de IA ou LLMs.
+1. **Motor de Autoavaliação Determinístico:** motor de autoavaliação determinístico por árvore de decisão fechada, sem IA ou LLMs. No piloto, o resultado é orientação educativa com três saídas ("Cuidar-se em casa", "Procurar atendimento", "Ligar 192"), nunca classificação de risco clínico (P-11).
 2. **Arquitetura Offline-First:** Resiliência em zonas de sombra de rede via cache territorial em `sqflite`.
 3. **Mensageria IoT de Baixa Latência:** Protocolo MQTT para entrega de alertas críticos mesmo em redes 3G instáveis.
 4. **Isomorfismo Dart:** Type-safety end-to-end entre Flutter e Serverpod, eliminando discrepâncias de contrato.
@@ -39,10 +46,12 @@ O SinalACS transforma dados clínicos estruturados em ação imediata através d
 
 | ID | Hipótese | Métrica de Validação | Critério de Sucesso |
 |----|----------|---------------------|---------------------|
-| H1 | ACS conseguem priorizar visitas mais rapidamente com o dashboard dinâmico | Tempo médio entre recebimento do alerta e início da visita | Redução ≥ 40% vs. modelo atual |
+| H1 | ACS conseguem priorizar visitas mais rapidamente com o dashboard dinâmico | Tempo médio entre recebimento do alerta e início da visita | Redução ≥ 40% vs. modelo atual — **Futuro** (exige operação em serviço de saúde; ver [`plano_piloto.md`](plano_piloto.md)) |
 | H2 | Pacientes com baixo letramento digital conseguem usar o app | Taxa de conclusão do onboarding sem assistência | ≥ 80% dos pacientes completam o fluxo |
-| H3 | A classificação de risco determina corretamente a urgência | Concordância entre classificação do app e avaliação médica posterior | ≥ 90% de concordância |
+| H3 | A classificação de risco determina corretamente a urgência | Concordância entre classificação do app e avaliação médica posterior | ≥ 90% de concordância — **Futuro** (exige operação em serviço de saúde; ver [`plano_piloto.md`](plano_piloto.md)) |
 | H4 | O registro offline não gera perda de dados | Taxa de sincronização bem-sucedida após restauração de rede | ≥ 99.5% dos registros sincronizam |
+
+> Hipóteses e métricas do piloto: [`plano_piloto.md`](plano_piloto.md). H2 e H4 seguem válidas e são medidas lá.
 
 **Invariantes de Negócio (Jamais podem ser violadas):**
 
@@ -56,16 +65,18 @@ O SinalACS transforma dados clínicos estruturados em ação imediata através d
 
 ### 1.3 Métricas de Sucesso (North Star)
 
-**Métrica North Star:** **Tempo Médio de Resposta a Alerta Vermelho** (TMRAV) - intervalo entre o acionamento do botão de pânico pelo paciente e a confirmação de recebimento pelo ACS, com eventual registro de início de atendimento.
+> **No escopo atual**, o TMRAV é uma **métrica técnica de latência de entrega do pedido de contato, sem compromisso de atendimento**. Aderência à classificação e visitas por ACS/dia passam a Futuro.
+
+**Métrica North Star:** **Tempo Médio de Resposta a Alerta Vermelho** (TMRAV) - intervalo entre o acionamento do botão de pânico (no piloto: pedido de contato com o agente participante, sem rótulo de urgência; o SinalACS não é serviço de emergência — ligue 192) pelo paciente e a confirmação de recebimento pelo ACS, com eventual registro de início de atendimento.
 
 **Métricas de Produto:**
 
 | Métrica | Descrição | Captura Técnica | Target (MVP) |
 |---------|-----------|-----------------|--------------|
-| **TMRAV** | Tempo entre alerta e resposta | Timestamp no publish MQTT vs. timestamp do ACK no app ACS | < 90 segundos |
+| **TMRAV** | Tempo entre alerta e resposta | Timestamp no publish MQTT vs. timestamp do ACK no app ACS | < 90 segundos — métrica técnica de latência, sem compromisso de atendimento |
 | **Taxa de Sincronização Offline** | % de registros offline que sincronizam com sucesso | Evento `sync_success` / `sync_attempts` | > 99.5% |
-| **Aderência à Classificação** | % de visitas onde a classificação do app foi mantida | Comparação classificação_app vs. classificação_médica | > 90% |
-| **Engajamento do ACS** | Número médio de visitas registradas por ACS/dia | Contagem de registros no `visits` table | ≥ 8 visitas/dia |
+| **Aderência à Classificação** | % de visitas onde a classificação do app foi mantida | Comparação classificação_app vs. classificação_médica | > 90% — **Futuro** (exige operação em serviço de saúde; ver [`plano_piloto.md`](plano_piloto.md)) |
+| **Engajamento do ACS** | Número médio de visitas registradas por ACS/dia | Contagem de registros no `visits` table | ≥ 8 visitas/dia — **Futuro** (exige operação em serviço de saúde; ver [`plano_piloto.md`](plano_piloto.md)) |
 | **Retenção de Pacientes** | % de pacientes ativos após 30 dias | Último login < 30 dias | > 70% |
 
 **Captura Técnica:**
@@ -103,7 +114,7 @@ events:
 │  ├───────────────────────┤  ├───────────────────────┤  ├───────────────────┤│
 │  │ Autenticação          │  │ Login Institucional   │  │ Gestão de UBS     ││
 │  │ Onboarding QR Code    │  │ Territorialização     │  │ Gestão de ACS     ││
-│  │ Alerta de Urgência    │  │ Dashboard Dinâmico    │  │ Relatórios        ││
+│  │ Pedido de Contato     │  │ Dashboard Dinâmico    │  │ Relatórios        ││
 │  │ Triagem Estruturada   │  │ Mapa Interativo       │  │ Auditoria         ││
 │  │ Mensageria (Tickets)  │  │ Registro de Visitas   │  │ Configurações     ││
 │  │ Perfil Clínico        │  │ Geofencing (Check-in) │  │                  ││
@@ -114,7 +125,7 @@ events:
 │  ┌───────────────────────────────────────────────────────────────────────┐  │
 │  │                    NÚCLEO COMPARTILHADO (CORE)                       │  │
 │  ├───────────────────────────────────────────────────────────────────────┤  │
-│  │  Motor de Triagem (Manchester)  │  Motor de Sincronização (FSM)      │  │
+│  │  Motor de Triagem (fechado)     │  Motor de Sincronização (FSM)      │  │
 │  │  Modelos de Dados (Patient, Visit, Alert)                           │  │
 │  │  Utilitários de Criptografia  │  Logging Estruturado                │  │
 │  └───────────────────────────────────────────────────────────────────────┘  │
@@ -131,24 +142,26 @@ events:
 
 ### 2.2 Matriz de Capacidades
 
+> **Prioridade no piloto:** ver [`requisitos_piloto.md`](requisitos_piloto.md). A tabela abaixo é a matriz original; os identificadores não mudam de significado.
+
 | ID | Requisito | Ator | Complexidade | Risco | Dependência |
 |----|-----------|------|--------------|-------|-------------|
-| **RF01** | Autenticação Passwordless (CPF + Data Nasc + OTP) | Paciente | M | Médio | SMS Gateway |
+| **RF01** | Autenticação Passwordless (CPF + Data Nasc + OTP) | Paciente | M | Médio | Gateway SMS — **Futuro no piloto** (sem CPF e sem SMS, P-10; ver [`requisitos_piloto.md`](requisitos_piloto.md)) |
 | **RF02** | Onboarding via QR Code (ACS gera, paciente escaneia) | Paciente | M | Médio | Câmera, `mobile_scanner` (paciente) e `qr_flutter` (ACS) |
-| **RF03** | Botão de Alerta de Urgência (MQTT) | Paciente | M | **Crítico** | Mosquitto, GPS |
+| **RF03** | Botão de Alerta de Urgência (MQTT) (no piloto: pedido de contato com o agente participante, sem rótulo de urgência; o SinalACS não é serviço de emergência — ligue 192) — no piloto, pedido de contato (P-09) | Paciente | M | **Crítico** | Mosquitto, GPS |
 | **RF04** | Formulário de Triagem Estruturada (árvore de decisão) | Paciente | S | Médio | Nenhuma (local) |
 | **RF05** | Painel de Status de Solicitação | Paciente | S | Baixo | API HTTP do backend |
 | **RF06** | Lembretes de Saúde (Local Notifications) | Paciente | S | Médio | `flutter_local_notifications` |
-| **RF07** | Login Institucional (Matrícula/Senha) | ACS | S | Médio | Auth própria no backend (`auth.loginInstitutional`); MFA por TOTP (2026-10-02) e refresh token rotativo com desbloqueio biométrico no app (2026-10-03) entregues — ver `PROGRESS.md` |
+| **RF07** | Login Institucional (Identificador/Senha; no piloto, identificador emitido pela equipe do projeto) | ACS | S | Médio | Auth própria no backend (`auth.loginInstitutional`); MFA por TOTP (2026-10-02) e refresh token rotativo com desbloqueio biométrico no app (2026-10-03) entregues — ver `PROGRESS.md` |
 | **RF08** | Territorialização (Download de Microárea para cache) | ACS | M | Médio | `sqflite`, API |
 | **RF09** | Dashboard de Priorização Dinâmica (FSM de fila) | ACS | M | Alto | Motor de Triagem |
 | **RF10** | Mapa Interativo (Google Maps) | ACS | M | Médio | `google_maps_flutter` |
 | **RF11** | Registro Rápido de Visitas (Offline-first) | ACS | M | **Crítico** | `sqflite`, `connectivity_plus` |
 | **RF12** | Geofencing (Check-in Passivo) | ACS | M | Médio | GPS em segundo plano |
-| **RF13** | Escalonamento para SAMU/UBS (`url_launcher`) | ACS | S | Baixo | `url_launcher` |
+| **RF13** | Escalonamento para SAMU/UBS (`url_launcher`) — **Futuro**; ver [trabalhos futuros](trabalhos_futuros.md) | ACS | S | Baixo | `url_launcher` |
 | **RF14** | Avisos Segmentados à Comunidade (Push) | ACS | M | Médio | Gorush (relé para FCM/APNs) |
 | **RF15** | Sincronização Bidirecional (Local ↔ Central) | Sistema | **L** | **Crítico** | Driver `postgres` no backend (sem ORM); ainda não conectado ao cliente |
-| **RF16** | Motor de Triagem Determinístico (Manchester) | Sistema | **L** | **Crítico** | Nenhuma (local) |
+| **RF16** | Motor de Triagem Determinístico (árvore de decisão fechada) | Sistema | **L** | **Crítico** | Nenhuma (local) |
 | **RF17** | Logs de Auditoria e Conformidade (LGPD) | Sistema | M | Alto | PostgreSQL  **Estado (#45, 2026-10-14):** `audit_logs` encadeado por HMAC; o backoffice consulta com filtros combináveis e paginação estável, verifica a integridade no servidor (selo por linha, verificação global com checkpoint de cauda) e o **admin** exporta CSV de nove colunas sem dado pessoal direto, com a exportação registrada na mesma transação. **Append-only no banco (#82, 2026-10-25):** um trigger por comando recusa `UPDATE`/`DELETE`/`TRUNCATE` em `audit_logs`, `audit_exports` e `audit_chain_checkpoints` (`SQLSTATE 42501`, migração `20261025201950984`) e `PUBLIC` não tem esses privilégios. Limites: o superusuário/dono das tabelas — o usuário do backend hoje — ainda contorna o trigger (separação de papéis na #96), e contra ele a cadeia só detecta; `audit_exports` fica fora da cadeia; rotação de `AUDIT_CHAIN_SECRET` invalida a história; o escopo do coordenador é a UBS dele e ele não exporta. Detalhe em `PROGRESS.md` (#45). |
 | **RF18** | Dark Mode Nativo (Modo Escuro) | UI | S | Baixo | Tema Flutter |
 | **RF19 (PRD)** *(proposto, issue #44; não confundir com LGPD-RF19)* | Escalonamento de Alerta Vermelho sem Confirmação, ação da coordenação no backoffice — distinto do RF13 (SAMU/UBS, ação do ACS): passado o prazo (`RED_ALERT_ESCALATION_SECONDS`, padrão 300 s, configurável de 30 a 3600 s) sem ACK, coordenador (da UBS) ou administrador pode escalonar. O alerta **nunca** é encerrado, ocultado ou silenciado (segue `pending` até o ACS confirmar, INV-03); o reforço é reentregue à microárea; a ação tem motivo de conjunto fechado, é auditada na mesma transação e é idempotente | Backoffice | M | **Crítico** | `admin.escalateAlert`, outbox MQTT, polling `admin.alertsPulse` |
@@ -192,7 +205,7 @@ fechou o débito L-06/RF08 (números reais na tela "Área" do ACS).
 
 ### 2.3 Modelagem de Fluxos Críticos como Máquinas de Estados (FSM)
 
-#### 2.3.1 FSM - Fluxo de Alerta de Urgência
+#### 2.3.1 FSM - Fluxo de Alerta de Urgência (no piloto: pedido de contato com o agente participante, sem rótulo de urgência; o SinalACS não é serviço de emergência — ligue 192)
 
 **Definição Formal:** $A_{Alert} = (Q, \Sigma, \delta, q_0, F)$
 
@@ -448,7 +461,7 @@ erDiagram
 
 **Justificativa da Escolha Relacional (PostgreSQL + SQLite):**
 
-1. **Estrutura de Triagem:** A matriz de triagem é fechada e estruturada (Manchester), adequada para schemas relacionais fixos.
+1. **Estrutura de Triagem:** A matriz de triagem é fechada e estruturada (árvore de decisão fechada), adequada para schemas relacionais fixos.
 2. **Integridade Referencial:** Necessidade crítica de FK entre `VISIT` ↔ `PATIENT` ↔ `ACS`.
 3. **Transações ACID:** Operações como "registrar visita + atualizar status do paciente" devem ser atômicas.
 4. **Queries Complexas:** O dashboard do ACS requer joins e ordenações complexas.
@@ -663,7 +676,7 @@ Future<bool> canAccessPatient(Session session, String patientId) async {
 | Métrica | Alvo | Critério |
 |---------|------|----------|
 | **LCP (Largest Contentful Paint)** | < 1.5s | Primeiro frame visível do dashboard |
-| **FID (First Input Delay)** | < 100ms | Resposta ao toque no botão de pânico |
+| **FID (First Input Delay)** | < 100ms | Resposta ao toque no botão de pânico (no piloto: pedido de contato com o agente participante, sem rótulo de urgência; o SinalACS não é serviço de emergência — ligue 192) |
 | **CLS (Cumulative Layout Shift)** | < 0.1 | Layout estável durante carregamento |
 
 ---
@@ -843,7 +856,7 @@ info:
 channels:
   /alerts/{micro_area_id}:
     subscribe:
-      summary: "Alerta de urgência enviado por paciente"
+      summary: "Alerta de urgência enviado por paciente (no piloto: pedido de contato com o agente participante, sem rótulo de urgência; o SinalACS não é serviço de emergência — ligue 192)"
       message:
         payload:
           type: object
@@ -973,7 +986,7 @@ void main() {
       ],
     );
     
-    // Ação: Acionar botão de pânico
+    // Ação: Acionar botão de pânico (no piloto: pedido de contato com o agente participante, sem rótulo de urgência; o SinalACS não é serviço de emergência — ligue 192)
     await tester.tap(find.byKey(Key('panic_button')));
     await tester.pumpAndSettle();
     
@@ -1003,12 +1016,14 @@ void main() {
 
 ### 6.1 Definição de MVP (v1.0)
 
+> **Roadmap original;** o piloto atual segue [`plano_piloto.md`](plano_piloto.md).
+
 **Núcleo Duro que Prova a Hipótese:**
 
 | Componente | Feature | Critério de Pronto |
 |------------|---------|--------------------|
 | **App Paciente** | Login Passwordless (CPF + SMS OTP) | 10 pacientes conseguem logar em < 60s |
-| **App Paciente** | Botão de Alerta de Urgência | Alerta chega ao ACS em < 2s (MQTT QoS 1) |
+| **App Paciente** | Botão de Alerta de Urgência | Alerta chega ao ACS em < 2s (MQTT QoS 1) (no piloto: pedido de contato com o agente participante, sem rótulo de urgência; o SinalACS não é serviço de emergência — ligue 192) |
 | **App Paciente** | Formulário de Triagem (3 perguntas) | Classificação determinística (Vermelho/Amarelo/Verde) |
 | **App Paciente** | Painel de Status | Paciente visualiza "Enviado → Visualizado → Atendido" |
 | **App ACS** | Login Institucional | ACS loga com matrícula e senha |
@@ -1162,6 +1177,8 @@ Impacto ↑
 
 ### T5: Pulumi vs Terraform (IaC)
 
+> **Futuro / referência** — não é pré-requisito do piloto; ver [`stack.md`](stack.md) §0.
+
 | Aspecto | Opção A: Pulumi (TypeScript) | Opção B: Terraform (HCL) | Decisão |
 |---------|------------------------------|---------------------------|---------|
 | **Curva de Aprendizado** | Baixa (TypeScript conhecido) | Média (HCL novo) | **A** - Time já conhece TS |
@@ -1178,6 +1195,8 @@ Impacto ↑
 ## 8. Anexos Técnicos
 
 ### A1. Docker-Compose de Produção (recorte)
+
+> **Futuro / referência** — não é pré-requisito do piloto; o piloto segue [`backend/DEPLOY.md`](../backend/DEPLOY.md).
 
 > Roadmap — nenhum ambiente de produção com esta topologia (Pulumi/VPS/redes privadas) existe hoje. O serviço abaixo chamado `serverpod` corresponde agora ao que de fato roda; a imagem é construída a partir de `backend/sinalacs_server/Dockerfile`, multi-stage com `dart compile exe`. Para um caminho de deploy documentado (piloto free-tier), ver [`backend/DEPLOY.md`](../backend/DEPLOY.md).
 >
@@ -1296,6 +1315,8 @@ class TestDataSeeder {
 ---
 
 ### A3. Configuração de Logs Estruturados (Fluentd)
+
+> **Futuro / referência** — não é pré-requisito do piloto.
 
 ```yaml
 # fluentd.conf
