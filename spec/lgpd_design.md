@@ -8,6 +8,22 @@ A estratégia de conformidade adota os princípios de **Privacy by Design** e **
 
 ---
 
+## 0. Escopo do piloto educativo
+
+> Conteúdo educativo. Não substitui atendimento profissional. Emergência: ligue 192.
+
+Esta seção vale para o escopo atual do projeto ([`escopo_projeto.md`](escopo_projeto.md)) e prevalece sobre o restante do documento, escrito para operação dentro da Atenção Primária. Nenhum órgão de saúde é controlador no escopo atual.
+
+- **Controlador, encarregado e base legal — decisão proposta P-02 (status: Proposta):** controlador UFRR, por meio do projeto, com o líder do Grupo PRISM como pesquisador responsável; encarregado é o encarregado institucional da UFRR (nome e contato `[A DEFINIR]`); base legal art. 11, II, "c" da LGPD (estudo por órgão de pesquisa), com TCLE. Confirmação jurídica: `[A DEFINIR]`.
+- **Coleta mínima (RNF09):** o pilar A (conteúdo educativo, lembretes, autoavaliação) funciona sem cadastro e com dados só no aparelho. O pilar B usa identificador pseudônimo, sem CPF e sem SMS, com e-mail opcional (decisão proposta P-10).
+- **Dado de saúde é sempre sensível** (art. 11), inclusive as respostas da autoavaliação e o registro de que a pessoa recebeu a orientação "Ligar 192".
+- **Dados locais do pilar A** (eventos de auditoria do aparelho, lembretes, respostas da autoavaliação): ficam só no aparelho, cifrados; os eventos de auditoria expiram em 30 dias; o participante apaga tudo pela opção "Apagar meus dados" (C-10). O wipe remoto (#81) não alcança aparelhos sem cadastro.
+- **Compartilhamento:** nenhum compartilhamento com terceiros de saúde no piloto (SAMU, UBS, Secretaria são Futuro).
+- **Operadores:** se os questionários do piloto (RF23) usarem formulário externo, esse serviço é operador de dados pessoais (nome `[A DEFINIR]`) e consta aqui e no TCLE.
+- **Encerramento e anonimização:** conforme [`plano_piloto.md`](plano_piloto.md) (M-04).
+
+---
+
 ## 1. Requisitos de Conformidade LGPD para o Sistema
 
 ### Implementação atual do hash de localização
@@ -129,7 +145,7 @@ também passa pelo FCM (Google): decisão de produto da §3.2, não tratada aqui
 | Propriedade | Descrição |
 |-------------|-----------|
 | **Nome** | Compartilhamento com Terceiros |
-| **Descrição** | O sistema deve documentar e comunicar todos os compartilhamentos de dados pessoais com terceiros (ex: SAMU, UBS, Secretaria de Saúde), incluindo finalidade, categorias de dados compartilhados, e medidas de proteção adotadas. |
+| **Descrição** | O sistema deve documentar e comunicar todos os compartilhamentos de dados pessoais com terceiros (ex: SAMU, UBS, Secretaria de Saúde) (Futuro — sem compartilhamento no piloto; ver [`trabalhos_futuros.md`](trabalhos_futuros.md)), incluindo finalidade, categorias de dados compartilhados, e medidas de proteção adotadas. |
 | **Objetivo** | Garantir transparência sobre o fluxo de dados e responsabilizar os operadores pelo tratamento adequado. |
 | **Base Legal** | Art. 7º, §1º; Art. 33; Art. 39 |
 | **Artigos LGPD** | 7º, §1º; 33; 39 |
@@ -256,7 +272,7 @@ também passa pelo FCM (Google): decisão de produto da §3.2, não tratada aqui
 | Propriedade | Descrição |
 |-------------|-----------|
 | **Nome** | Integração com APIs e Serviços Externos |
-| **Descrição** | Todas as integrações com APIs externas (ex: Gov.br, SAMU, sistemas da Secretaria de Saúde) devem ser documentadas, com cláusulas contratuais de proteção de dados (DPA) e avaliação de conformidade do parceiro. |
+| **Descrição** | Todas as integrações com APIs externas (ex: Gov.br, SAMU, sistemas da Secretaria de Saúde) (Futuro — sem compartilhamento no piloto; ver [`trabalhos_futuros.md`](trabalhos_futuros.md)) devem ser documentadas, com cláusulas contratuais de proteção de dados (DPA) e avaliação de conformidade do parceiro. |
 | **Objetivo** | Garantir que fornecedores externos também estejam em conformidade com a LGPD, estendendo a responsabilidade a toda a cadeia de tratamento. |
 | **Base Legal** | Art. 33, 34, 35, 36, 37, 38, 39 e 40 (Controlador e Operador) |
 | **Artigos LGPD** | 33, 34, 35, 36, 37, 38, 39 e 40 |
@@ -373,6 +389,8 @@ CPFs de documentação (como faz `seed_cpf_hashes.dart` para a stack de desenvol
 
 ### 3.6 Compartilhamento com Terceiros (SAMU, UBS, Secretaria)
 
+> **Futuro** — sem compartilhamento no piloto; ver [`trabalhos_futuros.md`](trabalhos_futuros.md).
+
 | Propriedade | Descrição |
 |-------------|-----------|
 | **Base Legal Recomendada** | Consentimento Específico (Art. 7º, I) ou Execução de Políticas Públicas (Art. 7º, V) |
@@ -433,7 +451,7 @@ CPFs de documentação (como faz `seed_cpf_hashes.dart` para a stack de desenvol
 | Aspecto | Descrição |
 |---------|-----------|
 | **Explicação Simples** | "Só coletamos dados que são realmente úteis para o que vamos fazer com eles." |
-| **Aplicação no Sistema** | Coleta apenas dados pertinentes: para triagem de urgência, coleta-se dor, localização e condições crônicas conhecidas; não se coleta religião, orientação sexual ou outros dados irrelevantes. O formulário de triagem tem perguntas fechadas e objetivas, alinhadas ao Protocolo de Manchester. |
+| **Aplicação no Sistema** | Coleta apenas dados pertinentes: para triagem de urgência, coleta-se dor, localização e condições crônicas conhecidas; não se coleta religião, orientação sexual ou outros dados irrelevantes. O formulário de triagem tem perguntas fechadas e objetivas, organizadas numa árvore de decisão fechada. |
 | **Exemplo Prático** | No formulário de triagem, as perguntas são específicas sobre sintomas e dor, sem perguntas sobre estilo de vida, renda ou preferências pessoais. |
 
 ### 4.3 Necessidade
@@ -498,7 +516,7 @@ CPFs de documentação (como faz `seed_cpf_hashes.dart` para a stack de desenvol
 |---------|-----------|
 | **Explicação Simples** | "Somos responsáveis pelo que fazemos com seus dados e prestamos contas a você e à lei." |
 | **Aplicação no Sistema** | O sistema mantém logs detalhados de todas as operações, possui um Encarregado (DPO) designado, e realiza auditorias regulares. Relatórios de privacidade são disponibilizados periodicamente. |
-| **Exemplo Prático** | A Secretaria de Saúde pode solicitar um relatório de acessos aos dados de um paciente; o sistema gera um log completo com quem acessou, quando, e para qual finalidade. |
+| **Exemplo Prático** | (Contexto de origem; Futuro.) A Secretaria de Saúde pode solicitar um relatório de acessos aos dados de um paciente; o sistema gera um log completo com quem acessou, quando, e para qual finalidade. |
 
 ---
 
@@ -847,7 +865,7 @@ CPFs de documentação (como faz `seed_cpf_hashes.dart` para a stack de desenvol
 |-------|-------------|
 | **LGPD** | Lei Geral de Proteção de Dados Pessoais (Lei nº 13.709/2018) |
 | **Titular** | Pessoa natural a quem se referem os dados pessoais |
-| **Controlador** | Quem decide as finalidades do tratamento (ex: Secretaria de Saúde) |
+| **Controlador** | Quem decide as finalidades do tratamento (ex.: no piloto, a UFRR — decisão proposta P-02) |
 | **Operador** | Quem trata os dados em nome do controlador (ex: prestadores de serviço) |
 | **Encarregado/DPO** | Pessoa designada para atuar como canal entre controlador, titulares e ANPD |
 | **Dados Sensíveis** | Dados sobre origem racial, convicções religiosas, saúde, vida sexual, dados genéticos ou biométricos |
