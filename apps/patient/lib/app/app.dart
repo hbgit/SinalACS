@@ -49,6 +49,7 @@ class SinalAcsApp extends StatefulWidget {
     required this.backend,
     this.locationReader,
     this.reminderStore,
+    @visibleForTesting this.localStores,
     this.reminderScheduler,
     this.consentPreferences,
     this.localDataControl,
@@ -77,6 +78,11 @@ class SinalAcsApp extends StatefulWidget {
   /// Injetável para teste. Em execução normal é o `SqfliteReminderStore`
   /// sobre o banco cifrado único (`PatientLocalStores`, #136).
   final ReminderStore? reminderStore;
+
+  /// Só para teste: lojas de produção (banco cifrado) já montadas, por exemplo
+  /// sobre um diretório temporário da VM. Quando vêm, valem no lugar das
+  /// construídas pelo app, e o aquecimento da partida roda sobre elas.
+  final PatientLocalStores? localStores;
 
   /// Injetável para teste. Em execução normal é o
   /// [LocalNotificationsReminderScheduler] real — o plugin precisa já ter
@@ -117,12 +123,13 @@ class _SinalAcsAppState extends State<SinalAcsApp> {
   late final ReminderScheduler _reminderScheduler =
       widget.reminderScheduler ?? LocalNotificationsReminderScheduler(FlutterLocalNotificationsPlugin());
   // Banco cifrado único (#136), só quando alguma loja não veio injetada.
-  // Construir não abre nada: o banco só abre quando uma tela lê as lojas, e o
-  // alerta de urgência nunca espera por ele.
-  late final PatientLocalStores? _localStores =
-      (widget.reminderStore == null || widget.consentPreferences == null)
+  // Construir não abre nada: o banco abre no aquecimento pós-primeiro-quadro
+  // (initState) ou quando uma tela lê as lojas; o alerta de urgência nunca
+  // espera por ele.
+  late final PatientLocalStores? _localStores = widget.localStores ??
+      ((widget.reminderStore == null || widget.consentPreferences == null)
           ? PatientLocalStores(keys: KeystoreDatabaseKeyProvider(), scheduler: _reminderScheduler)
-          : null;
+          : null);
   late final ReminderStore _reminderStore = widget.reminderStore ?? _localStores!.reminders;
   late final ConsentPreferences _consentPreferences =
       widget.consentPreferences ?? _localStores!.consent;
@@ -151,6 +158,17 @@ class _SinalAcsAppState extends State<SinalAcsApp> {
   void initState() {
     super.initState();
     _themeController.restore();
+    // R14: aquece o banco cifrado depois do primeiro quadro, para que quem
+    // atualizou o app e nunca abre Lembretes tenha o arquivo antigo em claro
+    // migrado/apagado e as notificações reagendadas. Nada espera por isto: nem
+    // a home, nem o alerta de urgência; a falha é engolida e o aviso de
+    // recuperação continua guardado para a tela de Lembretes.
+    final stores = _localStores;
+    if (stores != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        unawaited(stores.database.open().then((_) {}, onError: (_) {}));
+      });
+    }
   }
 
   @override
@@ -2766,13 +2784,16 @@ class _RemindersScreenState extends State<RemindersScreen> {
     if (confirmed != true || !mounted) return;
     setState(() => _localDataBusy = true);
     try {
-      await control.deleteEverything();
-      // Os lembretes sumiram junto com o banco; nenhuma notificação deles
-      // pode continuar agendada.
       try {
-        await scope.scheduler.cancelAll();
-      } catch (_) {
-        // O banco já foi apagado; a lista abaixo recarrega vazia.
+        await control.deleteEverything();
+      } finally {
+        // M1: mesmo que apagar falhe depois de o arquivo ter ido, nenhuma
+        // notificação dos lembretes pode continuar agendada.
+        try {
+          await scope.scheduler.cancelAll();
+        } catch (_) {
+          // O banco já foi apagado (ou a falha acima segue para a tela).
+        }
       }
       await _load();
     } on LocalDatabaseUnavailableException {

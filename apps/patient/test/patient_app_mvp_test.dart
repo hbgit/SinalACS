@@ -1129,6 +1129,29 @@ void main() {
         expect(find.textContaining('Pesagem'), findsOneWidget);
       });
 
+      testWidgets('M1: deleteEverything falha: cancelAll roda mesmo assim', (tester) async {
+        final data = _SwitchableLocalData();
+        final scheduler = _RecordingReminderScheduler();
+        final control = _FakeLocalDataControl()
+          ..onDelete = () => throw const LocalDatabaseUnavailableException();
+        await tester.pumpWidget(buildRemindersScreen(
+          data.store,
+          scheduler,
+          consentPreferences: data.preferences,
+          localData: control,
+        ));
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.byKey(const Key('local_db_reset')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const Key('local_db_reset_confirm')));
+        await tester.pumpAndSettle();
+
+        expect(control.deleteCalls, 1);
+        expect(scheduler.cancelAllCalls, 1);
+        expect(find.byKey(const Key('local_db_unavailable')), findsOneWidget);
+      });
+
       testWidgets('cancelar a confirmação não apaga nada', (tester) async {
         final data = _SwitchableLocalData();
         final scheduler = _RecordingReminderScheduler();

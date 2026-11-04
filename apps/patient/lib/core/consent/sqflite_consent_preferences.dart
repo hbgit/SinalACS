@@ -7,8 +7,8 @@ import 'consent_preferences.dart';
 /// Implementação de [ConsentPreferences] sobre o banco local do paciente,
 /// mesmo padrão de `SqfliteReminderStore`.
 ///
-/// Desde a #136, no banco cifrado: o rótulo é texto livre e pode citar
-/// medicamento (dado de saúde, art. 11); a C-10 apaga tudo num ponto só.
+/// Desde a #136, o consentimento local fica no mesmo banco cifrado dos
+/// lembretes; a C-10 apaga tudo num ponto só.
 ///
 /// Propaga `LocalDatabaseUnavailableException` quando o banco não abre.
 class SqfliteConsentPreferences implements ConsentPreferences {

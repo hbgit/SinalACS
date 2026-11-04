@@ -308,7 +308,9 @@ void main() {
         throwsA(isA<LocalDatabaseUnavailableException>()),
       );
       expect(keys.currentKey, isNull);
-      expect(lostCalls, 0);
+      // M1: o pendente sobe no início da recuperação; as notificações antigas
+      // são canceladas mesmo com a custódia falhando.
+      expect(lostCalls, 1);
     },
   );
 
@@ -444,6 +446,48 @@ void main() {
         isFalse,
       );
       expect(await (await db.open()).query('consent_preferences'), isEmpty);
+    },
+  );
+
+  test(
+    'I2: chave perdida apaga também os arquivos legados; consentimento antigo não volta e onLegacyMigrated não dispara',
+    () async {
+      final first = make();
+      await gravar(first, 'x');
+      await first.close();
+      await keys.destroy();
+      // Arquivo legado com consentimento concedido, sem marcador no banco.
+      final c = await databaseFactoryFfi.openDatabase(
+        '${dir.path}/sinalacs_patient_consent.db',
+      );
+      await c.execute(
+        'CREATE TABLE consent_preferences '
+        '(purpose TEXT PRIMARY KEY, granted INTEGER NOT NULL)',
+      );
+      await c.insert('consent_preferences', {
+        'purpose': 'localReminders',
+        'granted': 1,
+      });
+      await c.close();
+
+      var migrated = 0;
+      final db = PatientLocalDatabase(
+        keys: keys,
+        databaseName: name,
+        allowUnencryptedForTesting: true,
+        retryDelay: Duration.zero,
+        onKeyLost: () async => lostCalls++,
+        onLegacyMigrated: () async => migrated++,
+      );
+      made.add(db);
+      final conn = await db.open();
+      expect(await conn.query('consent_preferences'), isEmpty);
+      expect(
+        File('${dir.path}/sinalacs_patient_consent.db').existsSync(),
+        isFalse,
+      );
+      expect(migrated, 0);
+      expect(lostCalls, 1);
     },
   );
 }

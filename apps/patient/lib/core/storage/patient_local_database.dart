@@ -61,6 +61,7 @@ class PatientLocalDatabase implements LocalDataControl {
   Database? _database;
   Future<Database>? _inFlight;
   bool _recovered = false;
+  bool _recoveredInFlight = false;
 
   /// Portão de operações: abrir, fechar e apagar rodam uma de cada vez, na
   /// ordem de chegada. Assim `open()` nunca lê a chave velha entre o fechar e
@@ -111,9 +112,13 @@ class PatientLocalDatabase implements LocalDataControl {
     final flight = _serialize(() async {
       final current = _database;
       if (current != null && current.isOpen) return (current, false);
+      _recoveredInFlight = false;
       final db = await _openOnce();
       _database = db;
-      return (db, await migrateLegacyPlainDatabases(db));
+      // I2: um voo que recomeçou o banco não importa arquivo antigo nenhum.
+      final migrated =
+          _recoveredInFlight ? false : await migrateLegacyPlainDatabases(db);
+      return (db, migrated);
     });
     final shared = flight
         .then((r) => r.$1)
@@ -262,8 +267,21 @@ class PatientLocalDatabase implements LocalDataControl {
   }
 
   /// Recomeça o banco: só a partir de [KeyLost].
+  ///
+  /// O pendente de "chave perdida" sobe já no início (M1): mesmo que apagar
+  /// falhe adiante, as notificações antigas são canceladas por [onKeyLost].
+  /// Os arquivos legados em claro também caem (I2): o marcador da migração
+  /// mora no banco que se perde, e sem apagá-los a próxima abertura os
+  /// reimportaria, inclusive um consentimento antigo. Se não der para apagá-los,
+  /// a recuperação para (falha fechada).
   Future<LocalKeyState> _recover(String path) async {
+    _lostPending = true;
     await _deleteFiles(path);
+    try {
+      await deleteLegacyPlainFiles();
+    } catch (_) {
+      throw const LocalDatabaseUnavailableException();
+    }
     try {
       await keys.destroy();
     } catch (_) {
@@ -271,9 +289,9 @@ class PatientLocalDatabase implements LocalDataControl {
       // envelope não se cria chave nova.
       throw const LocalDatabaseUnavailableException();
     }
-    _lostPending = true;
     final state = await _obtain(false);
     _recovered = true;
+    _recoveredInFlight = true;
     _recoveryNoticePending = true;
     return state;
   }
