@@ -1,39 +1,25 @@
 import 'package:sinalacs_client/sinalacs_client.dart' show ConsentPurpose;
-import 'package:sqflite/sqflite.dart' hide databaseFactory;
-import 'package:sqflite_common_ffi/sqflite_ffi.dart' show databaseFactory;
+import 'package:sqflite_common_ffi/sqflite_ffi.dart' show ConflictAlgorithm;
 
+import '../storage/patient_local_database.dart';
 import 'consent_preferences.dart';
 
-/// Implementação de [ConsentPreferences] sobre SQLite comum (`sqflite`),
-/// mesmo padrão de `SqfliteReminderStore`: não é dado de saúde, não precisa
-/// de SQLCipher.
+/// Implementação de [ConsentPreferences] sobre o banco local do paciente,
+/// mesmo padrão de `SqfliteReminderStore`.
+///
+/// Desde a #136, o consentimento local fica no mesmo banco cifrado dos
+/// lembretes; a C-10 apaga tudo num ponto só.
+///
+/// Propaga `LocalDatabaseUnavailableException` quando o banco não abre.
 class SqfliteConsentPreferences implements ConsentPreferences {
-  SqfliteConsentPreferences({this.databaseName = 'sinalacs_patient_consent.db'});
+  SqfliteConsentPreferences(this._database);
 
   static const _table = 'consent_preferences';
-  final String databaseName;
-  Database? _database;
-
-  Future<Database> _open() async {
-    final existing = _database;
-    if (existing != null && existing.isOpen) return existing;
-
-    return _database = await databaseFactory.openDatabase(
-      databaseName,
-      options: OpenDatabaseOptions(
-        version: 1,
-        onCreate: (db, version) => db.execute('''
-CREATE TABLE $_table (
-  purpose TEXT PRIMARY KEY,
-  granted INTEGER NOT NULL
-)'''),
-      ),
-    );
-  }
+  final PatientLocalDatabase _database;
 
   @override
   Future<bool?> localRemindersGranted() async {
-    final db = await _open();
+    final db = await _database.open();
     final rows = await db.query(
       _table,
       where: 'purpose = ?',
@@ -45,7 +31,7 @@ CREATE TABLE $_table (
 
   @override
   Future<void> saveLocalRemindersConsent(bool granted) async {
-    final db = await _open();
+    final db = await _database.open();
     await db.insert(
       _table,
       {
@@ -54,10 +40,5 @@ CREATE TABLE $_table (
       },
       conflictAlgorithm: ConflictAlgorithm.replace,
     );
-  }
-
-  Future<void> close() async {
-    await _database?.close();
-    _database = null;
   }
 }

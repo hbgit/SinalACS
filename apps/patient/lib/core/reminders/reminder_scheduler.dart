@@ -9,7 +9,20 @@ import 'reminder.dart';
 abstract interface class ReminderScheduler {
   Future<void> schedule(Reminder reminder);
   Future<void> cancel(int reminderId);
+
+  /// Cancela toda notificação agendada pelo app. Usado quando os lembretes
+  /// deixam de existir sem que se saibam os ids (chave perdida, "Apagar e
+  /// recomeçar").
+  Future<void> cancelAll();
+
+  /// [cancelAll] e depois [schedule] de cada um de [active].
+  Future<void> rescheduleAll(List<Reminder> active);
 }
+
+/// Corpo de toda notificação de lembrete (D7, #136). O rótulo é texto livre e
+/// pode citar medicamento; a notificação aparece na tela bloqueada, então
+/// nunca o carrega.
+const reminderNotificationBody = 'Você tem um lembrete. Abra o SinalACS para ver.';
 
 /// Calcula, em hora local do aparelho, o próximo instante >= [now] em que
 /// [reminder] deve disparar — ou `null` quando [reminder] está inativo (não
@@ -80,6 +93,8 @@ abstract interface class NotificationChannel {
   });
 
   Future<void> cancel(int id);
+
+  Future<void> cancelAll();
 }
 
 /// [NotificationChannel] real sobre `flutter_local_notifications`.
@@ -128,6 +143,9 @@ class _PluginNotificationChannel implements NotificationChannel {
 
   @override
   Future<void> cancel(int id) => _plugin.cancel(id);
+
+  @override
+  Future<void> cancelAll() => _plugin.cancelAll();
 }
 
 /// Implementação de [ReminderScheduler] sobre `flutter_local_notifications`.
@@ -155,7 +173,7 @@ class LocalNotificationsReminderScheduler implements ReminderScheduler {
     await _channel.zonedSchedule(
       reminder.id,
       'Lembrete SinalACS',
-      reminder.label,
+      reminderNotificationBody,
       tz.TZDateTime.from(occurrence, deviceLocation(now)),
       matchDateTimeComponents: DateTimeComponents.time,
     );
@@ -163,4 +181,15 @@ class LocalNotificationsReminderScheduler implements ReminderScheduler {
 
   @override
   Future<void> cancel(int reminderId) => _channel.cancel(reminderId);
+
+  @override
+  Future<void> cancelAll() => _channel.cancelAll();
+
+  @override
+  Future<void> rescheduleAll(List<Reminder> active) async {
+    await cancelAll();
+    for (final reminder in active) {
+      await schedule(reminder);
+    }
+  }
 }

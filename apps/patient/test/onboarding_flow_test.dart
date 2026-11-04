@@ -25,6 +25,16 @@ class _RecordingConsentPreferences implements ConsentPreferences {
   Future<void> saveLocalRemindersConsent(bool granted) async => saved = granted;
 }
 
+/// Custódia do consentimento cuja gravação nunca termina (Keystore/SQLCipher
+/// travados): o cadastro não pode esperar por ela.
+class _NeverCompletingConsentPreferences implements ConsentPreferences {
+  @override
+  Future<bool?> localRemindersGranted() => Completer<bool?>().future;
+
+  @override
+  Future<void> saveLocalRemindersConsent(bool granted) => Completer<void>().future;
+}
+
 /// Abre a tela de onboarding a partir da tela de login, mesmo ponto de
 /// entrada que hoje mostra o snackbar placeholder do QR Code.
 Future<void> openOnboarding(WidgetTester tester) async {
@@ -199,6 +209,28 @@ void main() {
     await tapKey(tester, 'complete_enrollment_button');
 
     expect(consentPreferences.saved, isTrue);
+  });
+
+  testWidgets('gravação local que nunca termina não segura a tela principal (limite de 3 s)', (tester) async {
+    final backend = FakePatientBackend();
+    await tester.pumpWidget(SinalAcsApp(backend: backend, consentPreferences: _NeverCompletingConsentPreferences()));
+    await openOnboarding(tester);
+
+    await tester.enterText(find.byKey(const Key('onboarding_token_field')), 'convite-123');
+    await tapKey(tester, 'onboarding_consent_health');
+    await tapKey(tester, 'onboarding_terms_accept');
+    await tapKey(tester, 'onboarding_consent_reminders');
+    final finder = find.byKey(const Key('complete_enrollment_button'));
+    await tester.ensureVisible(finder);
+    await tester.pumpAndSettle();
+    await tester.tap(finder);
+    await tester.pump();
+    expect(find.text('Triagem rápida'), findsNothing);
+    await tester.pump(const Duration(seconds: 4));
+    await tester.pumpAndSettle();
+
+    expect(backend.enrollmentCalls, hasLength(1));
+    expect(find.text('Triagem rápida'), findsOneWidget);
   });
 
   testWidgets('concluir o cadastro com o consentimento de lembretes desmarcado grava a recusa localmente', (tester) async {

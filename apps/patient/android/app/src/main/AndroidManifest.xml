@@ -23,7 +23,10 @@
     <application
         android:label="sinalacs_patient"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
+        android:icon="@mipmap/ic_launcher"
+        android:allowBackup="false"
+        android:fullBackupContent="false"
+        android:dataExtractionRules="@xml/data_extraction_rules">
         <!-- Exigidos por `flutter_local_notifications` para que uma
              notificação agendada (`zonedSchedule`) realmente seja exibida
              quando o alarme dispara, e para que o agendamento sobreviva a

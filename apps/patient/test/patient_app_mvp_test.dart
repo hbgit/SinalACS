@@ -20,6 +20,8 @@ import 'package:sinalacs_client/sinalacs_client.dart'
         RiskLevel;
 import 'package:sinalacs_patient/app/app.dart';
 import 'package:sinalacs_patient/app/legal_screens.dart';
+import 'package:sinalacs_patient/app/local_protection_notice.dart';
+import 'package:sinalacs_patient/app/reminder_consent_card.dart';
 import 'package:sinalacs_patient/core/consent/consent_preferences.dart';
 import 'package:sinalacs_patient/core/network/backend_client.dart';
 import 'package:sinalacs_patient/core/push/push_token_source.dart';
@@ -29,6 +31,8 @@ import 'package:sinalacs_patient/core/services/theme_controller.dart';
 import 'package:sinalacs_patient/core/reminders/reminder.dart';
 import 'package:sinalacs_patient/core/reminders/reminder_scheduler.dart';
 import 'package:sinalacs_patient/core/reminders/reminder_store.dart';
+import 'package:sinalacs_patient/core/storage/local_data_control.dart';
+import 'package:sinalacs_patient/core/storage/local_database_key.dart';
 
 import 'support/fake_patient_backend.dart';
 import 'support/semantics_scan.dart';
@@ -90,6 +94,19 @@ class _RecordingReminderScheduler implements ReminderScheduler {
   Future<void> cancel(int reminderId) async {
     cancelled.add(reminderId);
   }
+
+  var cancelAllCalls = 0;
+
+  @override
+  Future<void> cancelAll() async => cancelAllCalls++;
+
+  @override
+  Future<void> rescheduleAll(List<Reminder> active) async {
+    await cancelAll();
+    for (final r in active) {
+      await schedule(r);
+    }
+  }
 }
 
 /// Duplo de [ReminderScheduler] que sempre lança — simula uma falha real do
@@ -102,6 +119,12 @@ class _ThrowingReminderScheduler implements ReminderScheduler {
 
   @override
   Future<void> cancel(int reminderId) => throw StateError('falha simulada do agendador');
+
+  @override
+  Future<void> cancelAll() => throw StateError('falha simulada do agendador');
+
+  @override
+  Future<void> rescheduleAll(List<Reminder> active) => throw StateError('falha simulada do agendador');
 }
 
 /// Duplo de [ReminderStore] que lê normalmente (delega a um
@@ -136,6 +159,115 @@ class _FixedConsentPreferences implements ConsentPreferences {
 
   @override
   Future<void> saveLocalRemindersConsent(bool value) async => granted = value;
+}
+
+/// [_FixedConsentPreferences] cuja gravação demora um pouco e conta as chamadas:
+/// deixa um segundo toque chegar enquanto a primeira decisão ainda está em curso.
+class _CountingSlowConsentPreferences extends _FixedConsentPreferences {
+  _CountingSlowConsentPreferences({super.granted});
+
+  int saveCalls = 0;
+
+  @override
+  Future<void> saveLocalRemindersConsent(bool value) async {
+    saveCalls++;
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+    granted = value;
+  }
+}
+
+/// Duplo de [LocalDataControl] (R12): a tela de lembretes depende só desta
+/// interface, nunca do `PatientLocalDatabase` concreto.
+class _FakeLocalDataControl implements LocalDataControl {
+  _FakeLocalDataControl({this.recovered = false});
+
+  bool recovered;
+  bool _noticePending = true;
+  int retryCalls = 0;
+  int deleteCalls = 0;
+
+  /// O que acontece no próximo `retryOpen`/`deleteEverything`.
+  void Function()? onRetry;
+  void Function()? onDelete;
+
+  @override
+  bool get recoveredFromLostKey => recovered;
+
+  @override
+  bool consumeRecoveryNotice() {
+    if (!recovered || !_noticePending) return false;
+    _noticePending = false;
+    return true;
+  }
+
+  @override
+  Future<void> retryOpen() async {
+    retryCalls++;
+    onRetry?.call();
+  }
+
+  @override
+  Future<void> deleteEverything() async {
+    deleteCalls++;
+    onDelete?.call();
+  }
+}
+
+/// Banco local que não abre enquanto [unavailable] for `true`: as duas lojas
+/// lançam [LocalDatabaseUnavailableException], como as reais.
+class _SwitchableLocalData {
+  bool unavailable = true;
+  final reminders = _InMemoryReminderStore();
+  final consent = _FixedConsentPreferences(granted: true);
+
+  ReminderStore get store => _GuardedReminderStore(this);
+  ConsentPreferences get preferences => _GuardedConsentPreferences(this);
+
+  void check() {
+    if (unavailable) throw const LocalDatabaseUnavailableException();
+  }
+}
+
+class _GuardedReminderStore implements ReminderStore {
+  _GuardedReminderStore(this._data);
+
+  final _SwitchableLocalData _data;
+
+  @override
+  Future<List<Reminder>> list() async {
+    _data.check();
+    return _data.reminders.list();
+  }
+
+  @override
+  Future<Reminder> save(Reminder reminder) async {
+    _data.check();
+    return _data.reminders.save(reminder);
+  }
+
+  @override
+  Future<void> delete(int id) async {
+    _data.check();
+    return _data.reminders.delete(id);
+  }
+}
+
+class _GuardedConsentPreferences implements ConsentPreferences {
+  _GuardedConsentPreferences(this._data);
+
+  final _SwitchableLocalData _data;
+
+  @override
+  Future<bool?> localRemindersGranted() async {
+    _data.check();
+    return _data.consent.localRemindersGranted();
+  }
+
+  @override
+  Future<void> saveLocalRemindersConsent(bool granted) async {
+    _data.check();
+    return _data.consent.saveLocalRemindersConsent(granted);
+  }
 }
 
 /// Duplo de [LocationReader] com leitura fixa, para testar como a tela reage
@@ -534,17 +666,21 @@ void main() {
       ReminderStore store,
       ReminderScheduler scheduler, {
       ConsentPreferences? consentPreferences,
+      LocalDataControl? localData,
+      PatientBackend? backend,
     }) {
-      return MaterialApp(
-        home: RemindersScope(
-          store: store,
-          scheduler: scheduler,
-          consentPreferences: consentPreferences ?? _FixedConsentPreferences(),
-          child: PatientHomeShell(
-            themeController: ThemeController(),
-            initialDestination: PatientDestination.reminders,
-          ),
+      final shell = RemindersScope(
+        store: store,
+        scheduler: scheduler,
+        consentPreferences: consentPreferences ?? _FixedConsentPreferences(),
+        localData: localData,
+        child: PatientHomeShell(
+          themeController: ThemeController(),
+          initialDestination: PatientDestination.reminders,
         ),
+      );
+      return MaterialApp(
+        home: backend == null ? shell : BackendScope(backend: backend, child: shell),
       );
     }
 
@@ -633,6 +769,12 @@ void main() {
         await tester.pumpWidget(buildRemindersScreen(store, _RecordingReminderScheduler()));
         await tester.pumpAndSettle();
 
+        // O aviso de proteção local empurra a lista para baixo, para fora da
+        // superfície padrão de 800x600: uma superfície mais alta a mantém visível.
+        tester.view.physicalSize = const Size(800, 1400);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.reset);
+        await tester.pumpAndSettle();
         await tester.tap(find.byKey(Key('reminder_switch_${seeded.id}')));
         await tester.pumpAndSettle();
 
@@ -715,6 +857,12 @@ void main() {
         ));
         await tester.pumpAndSettle();
 
+        // O aviso de proteção local empurra a lista para baixo, para fora da
+        // superfície padrão de 800x600: uma superfície mais alta a mantém visível.
+        tester.view.physicalSize = const Size(800, 1400);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.reset);
+        await tester.pumpAndSettle();
         await tester.tap(find.byKey(Key('reminder_switch_${seeded.id}')));
         await tester.pumpAndSettle();
 
@@ -748,21 +896,282 @@ void main() {
         expect(scheduler.scheduled, [saved.single.id]);
       });
 
-      testWidgets('sem registro local de consentimento, trata como recusa mas avisa para concluir o cadastro', (tester) async {
+      testWidgets('consentimento ausente mostra o cartão; Autorizo grava true e some', (tester) async {
         final store = _InMemoryReminderStore();
         final scheduler = _RecordingReminderScheduler();
+        final prefs = _FixedConsentPreferences(granted: null);
+        await tester.pumpWidget(buildRemindersScreen(store, scheduler, consentPreferences: prefs));
+        await tester.pumpAndSettle();
+
+        expect(find.byType(ReminderConsentCard), findsOneWidget);
+        expect(find.text('Autorizar lembretes neste aparelho?'), findsOneWidget);
+        expect(tester.widget<IconButton>(find.byKey(const Key('reminders_add_button'))).onPressed, isNull);
+        // Alvos de toque ≥ 48 dp (WCAG 2.5.5).
+        for (final key in ['reminder_consent_grant', 'reminder_consent_deny']) {
+          final size = tester.getSize(find.byKey(Key(key)));
+          expect(size.height, greaterThanOrEqualTo(48));
+          expect(size.width, greaterThanOrEqualTo(48));
+        }
+
+        await tester.tap(find.byKey(const Key('reminder_consent_grant')));
+        await tester.pumpAndSettle();
+
+        expect(prefs.granted, isTrue);
+        expect(find.byType(ReminderConsentCard), findsNothing);
+        expect(tester.widget<IconButton>(find.byKey(const Key('reminders_add_button'))).onPressed, isNotNull);
+        expect(scheduler.scheduled, isEmpty);
+      });
+
+      testWidgets('dois toques rápidos em "Autorizar lembretes" gravam uma vez e chamam updateConsent uma vez',
+          (tester) async {
+        final backend = FakePatientBackend();
+        await backend.verifyOtp(cpf: '12345678909', code: backend.validCode);
+        final prefs = _CountingSlowConsentPreferences(granted: false);
         await tester.pumpWidget(buildRemindersScreen(
-          store,
-          scheduler,
-          consentPreferences: _FixedConsentPreferences(granted: null),
+          _InMemoryReminderStore(),
+          _RecordingReminderScheduler(),
+          consentPreferences: prefs,
+          backend: backend,
         ));
         await tester.pumpAndSettle();
 
-        final addButton = tester.widget<IconButton>(find.byKey(const Key('reminders_add_button')));
-        expect(addButton.onPressed, isNull);
-        expect(find.textContaining('Não encontramos seu consentimento'), findsOneWidget);
-        expect(find.textContaining('Você recusou'), findsNothing);
+        final authorize = find.byKey(const Key('reminders_authorize'));
+        await tester.tap(authorize);
+        await tester.tap(authorize, warnIfMissed: false);
+        await tester.pump(const Duration(milliseconds: 100));
+        await tester.pumpAndSettle();
+
+        expect(prefs.saveCalls, 1);
+        expect(prefs.granted, isTrue);
+        expect(backend.updateConsentCalls, [(purpose: ConsentPurpose.localReminders, granted: true)]);
+      });
+
+      testWidgets('Não autorizo grava false e nenhum lembrete é agendado', (tester) async {
+        final store = _InMemoryReminderStore();
+        await store.save(const Reminder(id: 0, label: 'Metformina 850 mg', hour: 7, minute: 0, active: false));
+        final scheduler = _RecordingReminderScheduler();
+        final prefs = _FixedConsentPreferences(granted: null);
+        await tester.pumpWidget(buildRemindersScreen(store, scheduler, consentPreferences: prefs));
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.byKey(const Key('reminder_consent_deny')));
+        await tester.pumpAndSettle();
+
+        expect(prefs.granted, isFalse);
+        expect(find.byType(ReminderConsentCard), findsNothing);
+        expect(find.byKey(const Key('reminders_authorize')), findsOneWidget);
         expect(scheduler.scheduled, isEmpty);
+        expect(tester.widget<IconButton>(find.byKey(const Key('reminders_add_button'))).onPressed, isNull);
+      });
+
+      testWidgets('com recusa gravada, o cartão não aparece e "Autorizar lembretes" grava true', (tester) async {
+        final store = _InMemoryReminderStore();
+        final scheduler = _RecordingReminderScheduler();
+        final prefs = _FixedConsentPreferences(granted: false);
+        await tester.pumpWidget(buildRemindersScreen(store, scheduler, consentPreferences: prefs));
+        await tester.pumpAndSettle();
+
+        expect(find.byType(ReminderConsentCard), findsNothing);
+        expect(find.text('Autorizar lembretes'), findsOneWidget);
+        expect(tester.getSize(find.byKey(const Key('reminders_authorize'))).height, greaterThanOrEqualTo(48));
+
+        await tester.tap(find.byKey(const Key('reminders_authorize')));
+        await tester.pumpAndSettle();
+
+        expect(prefs.granted, isTrue);
+        expect(find.byKey(const Key('reminders_authorize')), findsNothing);
+        expect(find.byKey(const Key('reminders_consent_denied_banner')), findsNothing);
+        expect(tester.widget<IconButton>(find.byKey(const Key('reminders_add_button'))).onPressed, isNotNull);
+      });
+
+      testWidgets('sem sessão, a decisão do cartão fica só no aparelho', (tester) async {
+        final backend = FakePatientBackend();
+        final prefs = _FixedConsentPreferences(granted: null);
+        await tester.pumpWidget(buildRemindersScreen(
+          _InMemoryReminderStore(),
+          _RecordingReminderScheduler(),
+          consentPreferences: prefs,
+          backend: backend,
+        ));
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.byKey(const Key('reminder_consent_grant')));
+        await tester.pumpAndSettle();
+
+        expect(prefs.granted, isTrue);
+        expect(backend.updateConsentCalls, isEmpty);
+      });
+
+      testWidgets('com sessão, a decisão do cartão chama updateConsent(localReminders)', (tester) async {
+        final backend = FakePatientBackend();
+        await backend.verifyOtp(cpf: '12345678909', code: backend.validCode);
+        final prefs = _FixedConsentPreferences(granted: null);
+        await tester.pumpWidget(buildRemindersScreen(
+          _InMemoryReminderStore(),
+          _RecordingReminderScheduler(),
+          consentPreferences: prefs,
+          backend: backend,
+        ));
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.byKey(const Key('reminder_consent_deny')));
+        await tester.pumpAndSettle();
+        expect(backend.updateConsentCalls, [(purpose: ConsentPurpose.localReminders, granted: false)]);
+
+        await tester.tap(find.byKey(const Key('reminders_authorize')));
+        await tester.pumpAndSettle();
+        expect(backend.updateConsentCalls.last, (purpose: ConsentPurpose.localReminders, granted: true));
+        expect(prefs.granted, isTrue);
+      });
+
+      testWidgets('com sessão, falha no servidor não desfaz a decisão local', (tester) async {
+        final backend = FakePatientBackend()
+          ..updateConsentFailure = const BackendFailure('fora do ar', isRecoverable: true);
+        await backend.verifyOtp(cpf: '12345678909', code: backend.validCode);
+        final prefs = _FixedConsentPreferences(granted: null);
+        await tester.pumpWidget(buildRemindersScreen(
+          _InMemoryReminderStore(),
+          _RecordingReminderScheduler(),
+          consentPreferences: prefs,
+          backend: backend,
+        ));
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.byKey(const Key('reminder_consent_grant')));
+        await tester.pumpAndSettle();
+
+        expect(backend.updateConsentCalls, hasLength(1));
+        expect(prefs.granted, isTrue);
+        expect(find.byType(ReminderConsentCard), findsNothing);
+        expect(find.byKey(const Key('reminders_error')), findsNothing);
+      });
+
+      testWidgets('recuperação mostra a SnackBar que cita lembretes e autorização', (tester) async {
+        final control = _FakeLocalDataControl(recovered: true);
+        await tester.pumpWidget(buildRemindersScreen(
+          _InMemoryReminderStore(),
+          _RecordingReminderScheduler(),
+          consentPreferences: _FixedConsentPreferences(granted: null),
+          localData: control,
+        ));
+        await tester.pumpAndSettle();
+
+        const aviso = 'Os lembretes e a autorização de lembretes salvos neste aparelho não puderam ser '
+            'recuperados e foram apagados. Autorize de novo e cadastre seus lembretes.';
+        expect(find.widgetWithText(SnackBar, aviso), findsOneWidget);
+        // Uma vez só: a próxima consulta não mostra de novo.
+        expect(control.consumeRecoveryNotice(), isFalse);
+      });
+
+      testWidgets('banco indisponível: mensagem, Tentar de novo reabre; Apagar e recomeçar exige confirmação e chama deleteEverything', (tester) async {
+        final data = _SwitchableLocalData();
+        final scheduler = _RecordingReminderScheduler();
+        final control = _FakeLocalDataControl();
+        await tester.pumpWidget(buildRemindersScreen(
+          data.store,
+          scheduler,
+          consentPreferences: data.preferences,
+          localData: control,
+        ));
+        await tester.pumpAndSettle();
+
+        expect(find.text('Não foi possível abrir os dados deste aparelho agora. Tente de novo.'), findsOneWidget);
+        expect(find.text('Tentar de novo'), findsOneWidget);
+        expect(find.text('Apagar e recomeçar'), findsOneWidget);
+        expect(find.byKey(const Key('reminders_error')), findsNothing);
+        for (final key in ['local_db_retry', 'local_db_reset']) {
+          expect(tester.getSize(find.byKey(Key(key))).height, greaterThanOrEqualTo(48));
+        }
+
+        // Tentar de novo, ainda indisponível: continua na mesma mensagem.
+        await tester.tap(find.byKey(const Key('local_db_retry')));
+        await tester.pumpAndSettle();
+        expect(control.retryCalls, 1);
+        expect(find.byKey(const Key('local_db_unavailable')), findsOneWidget);
+
+        // Apagar e recomeçar pede confirmação antes de apagar.
+        control.onDelete = () {
+          data.unavailable = false;
+          data.consent.granted = null;
+        };
+        await tester.tap(find.byKey(const Key('local_db_reset')));
+        await tester.pumpAndSettle();
+        expect(
+          find.text('Isso apaga os lembretes e a autorização salvos neste aparelho. Não dá para desfazer.'),
+          findsOneWidget,
+        );
+        expect(control.deleteCalls, 0);
+        await tester.tap(find.byKey(const Key('local_db_reset_confirm')));
+        await tester.pumpAndSettle();
+
+        expect(control.deleteCalls, 1);
+        expect(scheduler.cancelAllCalls, 1);
+        expect(find.byKey(const Key('local_db_unavailable')), findsNothing);
+        expect(find.byType(ReminderConsentCard), findsOneWidget);
+      });
+
+      testWidgets('Tentar de novo com o banco de volta mostra a lista', (tester) async {
+        final data = _SwitchableLocalData();
+        await data.reminders.save(const Reminder(id: 0, label: 'Pesagem', hour: 9, minute: 0, active: false));
+        final control = _FakeLocalDataControl()..onRetry = () => data.unavailable = false;
+        await tester.pumpWidget(buildRemindersScreen(
+          data.store,
+          _RecordingReminderScheduler(),
+          consentPreferences: data.preferences,
+          localData: control,
+        ));
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.byKey(const Key('local_db_retry')));
+        await tester.pumpAndSettle();
+
+        expect(find.byKey(const Key('local_db_unavailable')), findsNothing);
+        expect(find.textContaining('Pesagem'), findsOneWidget);
+      });
+
+      testWidgets('M1: deleteEverything falha: cancelAll roda mesmo assim', (tester) async {
+        final data = _SwitchableLocalData();
+        final scheduler = _RecordingReminderScheduler();
+        final control = _FakeLocalDataControl()
+          ..onDelete = () => throw const LocalDatabaseUnavailableException();
+        await tester.pumpWidget(buildRemindersScreen(
+          data.store,
+          scheduler,
+          consentPreferences: data.preferences,
+          localData: control,
+        ));
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.byKey(const Key('local_db_reset')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const Key('local_db_reset_confirm')));
+        await tester.pumpAndSettle();
+
+        expect(control.deleteCalls, 1);
+        expect(scheduler.cancelAllCalls, 1);
+        expect(find.byKey(const Key('local_db_unavailable')), findsOneWidget);
+      });
+
+      testWidgets('cancelar a confirmação não apaga nada', (tester) async {
+        final data = _SwitchableLocalData();
+        final scheduler = _RecordingReminderScheduler();
+        final control = _FakeLocalDataControl();
+        await tester.pumpWidget(buildRemindersScreen(
+          data.store,
+          scheduler,
+          consentPreferences: data.preferences,
+          localData: control,
+        ));
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.byKey(const Key('local_db_reset')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const Key('local_db_reset_cancel')));
+        await tester.pumpAndSettle();
+
+        expect(control.deleteCalls, 0);
+        expect(scheduler.cancelAllCalls, 0);
+        expect(find.byKey(const Key('local_db_unavailable')), findsOneWidget);
       });
 
       testWidgets('carregar a tela sem consentimento cancela lembretes já ativos (revogação efetiva)', (tester) async {
@@ -916,6 +1325,14 @@ void main() {
 
     bool switchValue(WidgetTester tester, ConsentPurpose purpose) =>
         tester.widget<SwitchListTile>(find.byKey(Key('consent_switch_${purpose.name}'))).value;
+
+    testWidgets('MyDataScreen mostra o aviso de proteção local', (tester) async {
+      final backend = FakePatientBackend()..myDataResult = overview(consents: onboardingConsents());
+      await pumpMyData(tester, backend);
+
+      expect(find.byType(LocalProtectionNotice), findsOneWidget);
+      expect(find.text('Proteção dos dados neste aparelho.'), findsOneWidget);
+    });
 
     testWidgets('os interruptores mostram a decisão mais recente de cada finalidade', (tester) async {
       final backend = FakePatientBackend()

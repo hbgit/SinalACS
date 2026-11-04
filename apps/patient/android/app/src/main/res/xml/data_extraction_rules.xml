@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- #136: nada do aparelho vai para o backup na nuvem nem para a transferência
+     entre aparelhos. A chave do banco local mora no Keystore e não é
+     transferida; um banco restaurado sem ela ficaria ilegível. O pilar A não
+     precisa de backup. Vale a partir da API 31; antes dela,
+     `android:fullBackupContent="false"` e `android:allowBackup="false"`. -->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="root" path="." />
+        <exclude domain="file" path="." />
+        <exclude domain="database" path="." />
+        <exclude domain="sharedpref" path="." />
+        <exclude domain="external" path="." />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="root" path="." />
+        <exclude domain="file" path="." />
+        <exclude domain="database" path="." />
+        <exclude domain="sharedpref" path="." />
+        <exclude domain="external" path="." />
+    </device-transfer>
+</data-extraction-rules>

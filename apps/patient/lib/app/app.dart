@@ -18,13 +18,15 @@ import 'package:sinalacs_client/sinalacs_client.dart'
         TermsChangeNotice,
         RiskLevel;
 import 'package:sinalacs_patient/app/legal_screens.dart';
+import 'package:sinalacs_patient/app/local_protection_notice.dart';
 import 'package:sinalacs_patient/app/patient_theme.dart';
+import 'package:sinalacs_patient/app/patient_local_stores.dart';
 import 'package:sinalacs_patient/app/qr_scanner.dart';
+import 'package:sinalacs_patient/app/reminder_consent_card.dart';
 import 'package:sinalacs_patient/core/consent/consent_decisions.dart';
 import 'package:sinalacs_patient/core/legal/legal_documents.dart';
 import 'package:sinalacs_patient/core/legal/terms_change_notice_card.dart';
 import 'package:sinalacs_patient/core/consent/consent_preferences.dart';
-import 'package:sinalacs_patient/core/consent/sqflite_consent_preferences.dart';
 import 'package:sinalacs_patient/core/network/backend_client.dart';
 import 'package:sinalacs_patient/core/push/push_token_provider.dart';
 import 'package:sinalacs_patient/core/push/push_token_source.dart';
@@ -35,7 +37,10 @@ import 'package:sinalacs_patient/core/privacy/location_hash.dart';
 import 'package:sinalacs_patient/core/reminders/reminder.dart';
 import 'package:sinalacs_patient/core/reminders/reminder_scheduler.dart';
 import 'package:sinalacs_patient/core/reminders/reminder_store.dart';
-import 'package:sinalacs_patient/core/reminders/sqflite_reminder_store.dart';
+import 'package:sinalacs_patient/core/storage/keystore_key_provider.dart';
+import 'package:sinalacs_patient/core/storage/local_data_control.dart';
+import 'package:sinalacs_patient/core/storage/local_database_key.dart'
+    show LocalDatabaseUnavailableException;
 import 'package:sinalacs_patient/core/services/theme_controller.dart';
 
 class SinalAcsApp extends StatefulWidget {
@@ -44,8 +49,10 @@ class SinalAcsApp extends StatefulWidget {
     required this.backend,
     this.locationReader,
     this.reminderStore,
+    @visibleForTesting this.localStores,
     this.reminderScheduler,
     this.consentPreferences,
+    this.localDataControl,
     this.qrScanner,
     this.pushTokens,
     this.upcomingDocuments,
@@ -68,18 +75,29 @@ class SinalAcsApp extends StatefulWidget {
   /// real, que fala com o GPS do aparelho.
   final LocationReader? locationReader;
 
-  /// Injetável para teste. Em execução normal é o [SqfliteReminderStore]
-  /// real.
+  /// Injetável para teste. Em execução normal é o `SqfliteReminderStore`
+  /// sobre o banco cifrado único (`PatientLocalStores`, #136).
   final ReminderStore? reminderStore;
+
+  /// Só para teste: lojas de produção (banco cifrado) já montadas, por exemplo
+  /// sobre um diretório temporário da VM. Quando vêm, valem no lugar das
+  /// construídas pelo app, e o aquecimento da partida roda sobre elas.
+  final PatientLocalStores? localStores;
 
   /// Injetável para teste. Em execução normal é o
   /// [LocalNotificationsReminderScheduler] real — o plugin precisa já ter
   /// sido inicializado em `main.dart` antes de `runApp`.
   final ReminderScheduler? reminderScheduler;
 
-  /// Injetável para teste. Em execução normal é o [SqfliteConsentPreferences]
-  /// real.
+  /// Injetável para teste. Em execução normal é o
+  /// `SqfliteConsentPreferences` sobre o mesmo banco cifrado dos lembretes.
   final ConsentPreferences? consentPreferences;
+
+  /// Injetável para teste. Em execução normal é o próprio banco cifrado
+  /// (`PatientLocalDatabase`), quando o app o constrói; com as duas lojas
+  /// injetadas e sem este parâmetro, a tela de lembretes fica sem as ações de
+  /// banco ("Apagar e recomeçar").
+  final LocalDataControl? localDataControl;
 
   /// Injetável para teste. Em execução normal é [scanQrWithCamera], que abre
   /// a câmera do aparelho.
@@ -102,11 +120,20 @@ class SinalAcsApp extends StatefulWidget {
 class _SinalAcsAppState extends State<SinalAcsApp> {
   late final LocationReader _locationReader =
       widget.locationReader ?? const GeolocatorLocationReader();
-  late final ReminderStore _reminderStore = widget.reminderStore ?? SqfliteReminderStore();
   late final ReminderScheduler _reminderScheduler =
       widget.reminderScheduler ?? LocalNotificationsReminderScheduler(FlutterLocalNotificationsPlugin());
+  // Banco cifrado único (#136), só quando alguma loja não veio injetada.
+  // Construir não abre nada: o banco abre no aquecimento pós-primeiro-quadro
+  // (initState) ou quando uma tela lê as lojas; o alerta de urgência nunca
+  // espera por ele.
+  late final PatientLocalStores? _localStores = widget.localStores ??
+      ((widget.reminderStore == null || widget.consentPreferences == null)
+          ? PatientLocalStores(keys: KeystoreDatabaseKeyProvider(), scheduler: _reminderScheduler)
+          : null);
+  late final ReminderStore _reminderStore = widget.reminderStore ?? _localStores!.reminders;
   late final ConsentPreferences _consentPreferences =
-      widget.consentPreferences ?? SqfliteConsentPreferences();
+      widget.consentPreferences ?? _localStores!.consent;
+  late final LocalDataControl? _localDataControl = widget.localDataControl ?? _localStores?.database;
   late final QrScanner _qrScanner = widget.qrScanner ?? scanQrWithCamera;
   // O parâmetro (teste) tem precedência; senão, o provider Riverpod, se houver um
   // `ProviderScope` acima; senão, sem push. Lido em `didChangeDependencies`.
@@ -131,11 +158,24 @@ class _SinalAcsAppState extends State<SinalAcsApp> {
   void initState() {
     super.initState();
     _themeController.restore();
+    // R14: aquece o banco cifrado depois do primeiro quadro, para que quem
+    // atualizou o app e nunca abre Lembretes tenha o arquivo antigo em claro
+    // migrado/apagado e as notificações reagendadas. Nada espera por isto: nem
+    // a home, nem o alerta de urgência; a falha é engolida e o aviso de
+    // recuperação continua guardado para a tela de Lembretes.
+    final stores = _localStores;
+    if (stores != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        unawaited(stores.database.open().then((_) {}, onError: (_) {}));
+      });
+    }
   }
 
   @override
   void dispose() {
     if (widget.themeController == null) _themeController.dispose();
+    final stores = _localStores;
+    if (stores != null) unawaited(stores.database.close().catchError((_) {}));
     super.dispose();
   }
 
@@ -149,6 +189,7 @@ class _SinalAcsAppState extends State<SinalAcsApp> {
           store: _reminderStore,
           scheduler: _reminderScheduler,
           consentPreferences: _consentPreferences,
+          localData: _localDataControl,
           child: PushTokenScope(
             source: _pushTokens,
             child: UpcomingDocumentsScope(
@@ -225,6 +266,7 @@ class RemindersScope extends InheritedWidget {
     required this.store,
     required this.scheduler,
     required this.consentPreferences,
+    this.localData,
     required super.child,
     super.key,
   });
@@ -232,6 +274,10 @@ class RemindersScope extends InheritedWidget {
   final ReminderStore store;
   final ReminderScheduler scheduler;
   final ConsentPreferences consentPreferences;
+
+  /// Saúde do banco local (R12). `null` quando as lojas vieram prontas de
+  /// fora (teste): a tela então não oferece "Apagar e recomeçar".
+  final LocalDataControl? localData;
 
   static RemindersScope of(BuildContext context) {
     final scope = context.dependOnInheritedWidgetOfExactType<RemindersScope>();
@@ -243,7 +289,8 @@ class RemindersScope extends InheritedWidget {
   bool updateShouldNotify(RemindersScope oldWidget) =>
       store != oldWidget.store ||
       scheduler != oldWidget.scheduler ||
-      consentPreferences != oldWidget.consentPreferences;
+      consentPreferences != oldWidget.consentPreferences ||
+      localData != oldWidget.localData;
 }
 
 class PatientLoginScreen extends StatefulWidget {
@@ -833,7 +880,14 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       // recusado (fail closed) quando não há linha local, então uma falha
       // aqui nunca resulta em agendar sem consentimento.
       try {
-        await RemindersScope.of(context).consentPreferences.saveLocalRemindersConsent(_remindersConsent);
+        // Limite de 3 s: a escrita agora custa leitura do Keystore + abertura do
+        // SQLCipher + migração possível, e a tela inicial (e o alerta de
+        // emergência) não espera mais que isso. Estourou: segue sem a cópia
+        // local, que degrada para recusa (fail closed).
+        await RemindersScope.of(context)
+            .consentPreferences
+            .saveLocalRemindersConsent(_remindersConsent)
+            .timeout(const Duration(seconds: 3));
       } catch (_) {
         // Intencionalmente silencioso — ver comentário acima.
       }
@@ -2118,6 +2172,7 @@ class _MyDataScreenState extends State<MyDataScreen> {
           'pedidos de correção ou exclusão, e uma cópia para guardar.',
         ),
         const SizedBox(height: 16),
+        const Padding(padding: EdgeInsets.only(bottom: 16), child: LocalProtectionNotice()),
         if (_error != null)
           // SC 4.1.3, mesmo padrão das outras telas: sem `liveRegion` um
           // leitor de tela não saberia que carregar falhou.
@@ -2609,6 +2664,15 @@ class _RemindersScreenState extends State<RemindersScreen> {
   // bloqueiem o agendamento do mesmo jeito (ver `ConsentPreferences`).
   bool? _remindersConsentGranted;
 
+  /// O banco local não abriu (`LocalDatabaseUnavailableException`): a tela
+  /// mostra só a mensagem com "Tentar de novo" e "Apagar e recomeçar".
+  bool _localDataUnavailable = false;
+  bool _localDataBusy = false;
+
+  /// Uma decisão de consentimento em andamento: um segundo toque em
+  /// "Autorizar lembretes" não grava nem chama o servidor de novo.
+  bool _decidingConsent = false;
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
@@ -2640,10 +2704,150 @@ class _RemindersScreenState extends State<RemindersScreen> {
         _reminders = reminders;
         _remindersConsentGranted = consentGranted;
         _error = null;
+        _localDataUnavailable = false;
       });
+      _showRecoveryNoticeOnce(scope);
+    } on LocalDatabaseUnavailableException {
+      _markLocalDataUnavailable();
     } catch (_) {
       if (!mounted) return;
       setState(() => _error = 'Não foi possível carregar os lembretes.');
+    }
+  }
+
+  /// O banco recomeçou porque a chave se perdeu: avisa uma vez por execução.
+  /// Quem guarda o "uma vez" é o [LocalDataControl], não esta tela, para o
+  /// aviso não voltar a cada vez que "Lembretes" é aberta.
+  void _showRecoveryNoticeOnce(RemindersScope scope) {
+    final control = scope.localData;
+    if (control == null || !control.consumeRecoveryNotice()) return;
+    ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+      const SnackBar(
+        content: Text(
+          'Os lembretes e a autorização de lembretes salvos neste aparelho não puderam ser '
+          'recuperados e foram apagados. Autorize de novo e cadastre seus lembretes.',
+        ),
+        duration: Duration(seconds: 10),
+      ),
+    );
+  }
+
+  void _markLocalDataUnavailable() {
+    if (!mounted) return;
+    setState(() {
+      _localDataUnavailable = true;
+      _error = null;
+    });
+  }
+
+  Future<void> _retryLocalData() async {
+    if (_localDataBusy) return;
+    final control = RemindersScope.of(context).localData;
+    setState(() => _localDataBusy = true);
+    try {
+      await control?.retryOpen();
+    } catch (_) {
+      // `_load` abaixo tenta de novo e decide o que mostrar.
+    }
+    await _load();
+    if (mounted) setState(() => _localDataBusy = false);
+  }
+
+  Future<void> _resetLocalData() async {
+    if (_localDataBusy) return;
+    final scope = RemindersScope.of(context);
+    final control = scope.localData;
+    if (control == null) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Apagar e recomeçar?'),
+        content: const Text(
+          'Isso apaga os lembretes e a autorização salvos neste aparelho. Não dá para desfazer.',
+        ),
+        actions: [
+          TextButton(
+            key: const Key('local_db_reset_cancel'),
+            style: TextButton.styleFrom(minimumSize: const Size(64, 48)),
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            key: const Key('local_db_reset_confirm'),
+            style: FilledButton.styleFrom(minimumSize: const Size(64, 48)),
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Apagar'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() => _localDataBusy = true);
+    try {
+      try {
+        await control.deleteEverything();
+      } finally {
+        // M1: mesmo que apagar falhe depois de o arquivo ter ido, nenhuma
+        // notificação dos lembretes pode continuar agendada.
+        try {
+          await scope.scheduler.cancelAll();
+        } catch (_) {
+          // O banco já foi apagado (ou a falha acima segue para a tela).
+        }
+      }
+      await _load();
+    } on LocalDatabaseUnavailableException {
+      _markLocalDataUnavailable();
+    } catch (_) {
+      _markLocalDataUnavailable();
+    } finally {
+      if (mounted) setState(() => _localDataBusy = false);
+    }
+  }
+
+  /// Decisão do [ReminderConsentCard] ou de "Autorizar lembretes".
+  ///
+  /// Grava no aparelho primeiro. Com sessão, informa o servidor pelo mesmo
+  /// `updateConsent` de "Meus dados", sem esperar: uma falha lá não desfaz a
+  /// decisão local nem trava a tela, e "Meus dados" alinha o espelho depois
+  /// (`_alignLocalRemindersMirror`).
+  Future<void> _decideRemindersConsent(bool granted) async {
+    if (_decidingConsent) return;
+    _decidingConsent = true;
+    try {
+      await _applyRemindersConsent(granted);
+    } finally {
+      _decidingConsent = false;
+    }
+  }
+
+  Future<void> _applyRemindersConsent(bool granted) async {
+    final scope = RemindersScope.of(context);
+    // `getInheritedWidgetOfExactType`: a tela pode ser montada sem
+    // `BackendScope` (teste de Lembretes), e então não há sessão.
+    final backend = context.getInheritedWidgetOfExactType<BackendScope>()?.backend;
+    try {
+      await scope.consentPreferences.saveLocalRemindersConsent(granted);
+    } on LocalDatabaseUnavailableException {
+      _markLocalDataUnavailable();
+      return;
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _error = 'Não foi possível salvar sua escolha neste aparelho.');
+      return;
+    }
+    if (!mounted) return;
+    setState(() {
+      _remindersConsentGranted = granted;
+      _error = null;
+    });
+    final session = backend?.session;
+    if (backend != null && session != null && !session.isExpired()) {
+      unawaited(
+        backend
+            .updateConsent(purpose: ConsentPurpose.localReminders, granted: granted)
+            .then<void>((_) {}, onError: (_) {}),
+      );
     }
   }
 
@@ -2659,10 +2863,9 @@ class _RemindersScreenState extends State<RemindersScreen> {
   String _consentDeniedMessage(bool? granted) {
     if (granted == false) {
       return 'Você recusou ou revogou o consentimento para lembretes locais — '
-          'reative em "Meus dados" para agendar notificações.';
+          'toque em "Autorizar lembretes" para agendar notificações.';
     }
-    return 'Não encontramos seu consentimento para lembretes locais neste '
-        'aparelho — conclua o cadastro para ativar notificações.';
+    return 'Responda acima se autoriza lembretes neste aparelho para ativar notificações.';
   }
 
   Future<void> _toggleActive(Reminder reminder, bool active) async {
@@ -2684,6 +2887,8 @@ class _RemindersScreenState extends State<RemindersScreen> {
         _error = null;
         _reminders = [for (final r in _reminders ?? const <Reminder>[]) if (r.id == updated.id) updated else r];
       });
+    } on LocalDatabaseUnavailableException {
+      _markLocalDataUnavailable();
     } catch (_) {
       if (!mounted) return;
       setState(() => _error = 'Não foi possível atualizar o lembrete.');
@@ -2700,6 +2905,8 @@ class _RemindersScreenState extends State<RemindersScreen> {
         _error = null;
         _reminders = [for (final r in _reminders ?? const <Reminder>[]) if (r.id != reminder.id) r];
       });
+    } on LocalDatabaseUnavailableException {
+      _markLocalDataUnavailable();
     } catch (_) {
       if (!mounted) return;
       setState(() => _error = 'Não foi possível excluir o lembrete.');
@@ -2735,14 +2942,54 @@ class _RemindersScreenState extends State<RemindersScreen> {
             (a, b) => a.hour != b.hour ? a.hour - b.hour : a.minute - b.minute,
           );
       });
+    } on LocalDatabaseUnavailableException {
+      _markLocalDataUnavailable();
     } catch (_) {
       if (!mounted) return;
       setState(() => _error = 'Não foi possível salvar o lembrete.');
     }
   }
 
+  Widget _buildLocalDataUnavailable(BuildContext context) {
+    final canReset = RemindersScope.of(context).localData != null;
+    return ListView(
+      padding: const EdgeInsets.all(20),
+      children: [
+        Semantics(
+          liveRegion: true,
+          child: Text(
+            'Não foi possível abrir os dados deste aparelho agora. Tente de novo.',
+            key: const Key('local_db_unavailable'),
+            style: Theme.of(context).textTheme.bodyLarge,
+          ),
+        ),
+        const SizedBox(height: 16),
+        Wrap(
+          spacing: 12,
+          runSpacing: 8,
+          children: [
+            FilledButton(
+              key: const Key('local_db_retry'),
+              style: FilledButton.styleFrom(minimumSize: const Size(64, 48)),
+              onPressed: _localDataBusy ? null : _retryLocalData,
+              child: const Text('Tentar de novo'),
+            ),
+            if (canReset)
+              OutlinedButton(
+                key: const Key('local_db_reset'),
+                style: OutlinedButton.styleFrom(minimumSize: const Size(64, 48)),
+                onPressed: _localDataBusy ? null : _resetLocalData,
+                child: const Text('Apagar e recomeçar'),
+              ),
+          ],
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    if (_localDataUnavailable) return _buildLocalDataUnavailable(context);
     final reminders = _reminders;
     return ListView(
       padding: const EdgeInsets.all(20),
@@ -2750,7 +2997,9 @@ class _RemindersScreenState extends State<RemindersScreen> {
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            const Text('Alarmes e medicamentos', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+            const Expanded(
+              child: Text('Alarmes e medicamentos', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+            ),
             IconButton(
               key: const Key('reminders_add_button'),
               tooltip: 'Novo alarme',
@@ -2760,24 +3009,47 @@ class _RemindersScreenState extends State<RemindersScreen> {
           ],
         ),
         const SizedBox(height: 16),
-        if (reminders != null && _remindersConsentGranted != true)
+        // Sem decisão local: pergunta aqui mesmo (#136), em vez de mandar a
+        // pessoa refazer o cadastro.
+        if (reminders != null && _remindersConsentGranted == null)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 16),
+            child: ReminderConsentCard(onDecision: _decideRemindersConsent),
+          ),
+        // Limite da cifra local (#136): visível onde o usuário do pilar A chega.
+        const Padding(padding: EdgeInsets.only(bottom: 16), child: LocalProtectionNotice()),
+        if (reminders != null && _remindersConsentGranted == false)
           // SC 4.1.3, mesmo padrão do banner de erro logo abaixo: quem usa
           // leitor de tela precisa saber por que o botão "+" está desabilitado.
           Padding(
             padding: const EdgeInsets.only(bottom: 16),
-            child: Semantics(
-              liveRegion: true,
-              child: Container(
-                key: const Key('reminders_consent_denied_banner'),
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Text(
-                  _consentDeniedMessage(_remindersConsentGranted),
-                  style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
-                ),
+            child: Container(
+              key: const Key('reminders_consent_denied_banner'),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Semantics(
+                    liveRegion: true,
+                    child: Text(
+                      _consentDeniedMessage(_remindersConsentGranted),
+                      style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  // A recusa gravada se desfaz aqui, sem passar por "Meus
+                  // dados"; o cartão não volta a insistir a cada abertura.
+                  OutlinedButton(
+                    key: const Key('reminders_authorize'),
+                    style: OutlinedButton.styleFrom(minimumSize: const Size(64, 48)),
+                    onPressed: () => _decideRemindersConsent(true),
+                    child: const Text('Autorizar lembretes'),
+                  ),
+                ],
               ),
             ),
           ),
