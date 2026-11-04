@@ -20,6 +20,7 @@ import 'package:sinalacs_client/sinalacs_client.dart'
         RiskLevel;
 import 'package:sinalacs_patient/app/app.dart';
 import 'package:sinalacs_patient/app/legal_screens.dart';
+import 'package:sinalacs_patient/app/local_protection_notice.dart';
 import 'package:sinalacs_patient/app/reminder_consent_card.dart';
 import 'package:sinalacs_patient/core/consent/consent_preferences.dart';
 import 'package:sinalacs_patient/core/network/backend_client.dart';
@@ -158,6 +159,21 @@ class _FixedConsentPreferences implements ConsentPreferences {
 
   @override
   Future<void> saveLocalRemindersConsent(bool value) async => granted = value;
+}
+
+/// [_FixedConsentPreferences] cuja gravação demora um pouco e conta as chamadas:
+/// deixa um segundo toque chegar enquanto a primeira decisão ainda está em curso.
+class _CountingSlowConsentPreferences extends _FixedConsentPreferences {
+  _CountingSlowConsentPreferences({super.granted});
+
+  int saveCalls = 0;
+
+  @override
+  Future<void> saveLocalRemindersConsent(bool value) async {
+    saveCalls++;
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+    granted = value;
+  }
 }
 
 /// Duplo de [LocalDataControl] (R12): a tela de lembretes depende só desta
@@ -753,6 +769,12 @@ void main() {
         await tester.pumpWidget(buildRemindersScreen(store, _RecordingReminderScheduler()));
         await tester.pumpAndSettle();
 
+        // O aviso de proteção local empurra a lista para baixo, para fora da
+        // superfície padrão de 800x600: uma superfície mais alta a mantém visível.
+        tester.view.physicalSize = const Size(800, 1400);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.reset);
+        await tester.pumpAndSettle();
         await tester.tap(find.byKey(Key('reminder_switch_${seeded.id}')));
         await tester.pumpAndSettle();
 
@@ -835,6 +857,12 @@ void main() {
         ));
         await tester.pumpAndSettle();
 
+        // O aviso de proteção local empurra a lista para baixo, para fora da
+        // superfície padrão de 800x600: uma superfície mais alta a mantém visível.
+        tester.view.physicalSize = const Size(800, 1400);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.reset);
+        await tester.pumpAndSettle();
         await tester.tap(find.byKey(Key('reminder_switch_${seeded.id}')));
         await tester.pumpAndSettle();
 
@@ -892,6 +920,30 @@ void main() {
         expect(find.byType(ReminderConsentCard), findsNothing);
         expect(tester.widget<IconButton>(find.byKey(const Key('reminders_add_button'))).onPressed, isNotNull);
         expect(scheduler.scheduled, isEmpty);
+      });
+
+      testWidgets('dois toques rápidos em "Autorizar lembretes" gravam uma vez e chamam updateConsent uma vez',
+          (tester) async {
+        final backend = FakePatientBackend();
+        await backend.verifyOtp(cpf: '12345678909', code: backend.validCode);
+        final prefs = _CountingSlowConsentPreferences(granted: false);
+        await tester.pumpWidget(buildRemindersScreen(
+          _InMemoryReminderStore(),
+          _RecordingReminderScheduler(),
+          consentPreferences: prefs,
+          backend: backend,
+        ));
+        await tester.pumpAndSettle();
+
+        final authorize = find.byKey(const Key('reminders_authorize'));
+        await tester.tap(authorize);
+        await tester.tap(authorize, warnIfMissed: false);
+        await tester.pump(const Duration(milliseconds: 100));
+        await tester.pumpAndSettle();
+
+        expect(prefs.saveCalls, 1);
+        expect(prefs.granted, isTrue);
+        expect(backend.updateConsentCalls, [(purpose: ConsentPurpose.localReminders, granted: true)]);
       });
 
       testWidgets('Não autorizo grava false e nenhum lembrete é agendado', (tester) async {
@@ -1250,6 +1302,14 @@ void main() {
 
     bool switchValue(WidgetTester tester, ConsentPurpose purpose) =>
         tester.widget<SwitchListTile>(find.byKey(Key('consent_switch_${purpose.name}'))).value;
+
+    testWidgets('MyDataScreen mostra o aviso de proteção local', (tester) async {
+      final backend = FakePatientBackend()..myDataResult = overview(consents: onboardingConsents());
+      await pumpMyData(tester, backend);
+
+      expect(find.byType(LocalProtectionNotice), findsOneWidget);
+      expect(find.text('Proteção dos dados neste aparelho.'), findsOneWidget);
+    });
 
     testWidgets('os interruptores mostram a decisão mais recente de cada finalidade', (tester) async {
       final backend = FakePatientBackend()

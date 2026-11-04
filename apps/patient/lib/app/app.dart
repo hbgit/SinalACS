@@ -18,6 +18,7 @@ import 'package:sinalacs_client/sinalacs_client.dart'
         TermsChangeNotice,
         RiskLevel;
 import 'package:sinalacs_patient/app/legal_screens.dart';
+import 'package:sinalacs_patient/app/local_protection_notice.dart';
 import 'package:sinalacs_patient/app/patient_theme.dart';
 import 'package:sinalacs_patient/app/patient_local_stores.dart';
 import 'package:sinalacs_patient/app/qr_scanner.dart';
@@ -861,7 +862,14 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       // recusado (fail closed) quando não há linha local, então uma falha
       // aqui nunca resulta em agendar sem consentimento.
       try {
-        await RemindersScope.of(context).consentPreferences.saveLocalRemindersConsent(_remindersConsent);
+        // Limite de 3 s: a escrita agora custa leitura do Keystore + abertura do
+        // SQLCipher + migração possível, e a tela inicial (e o alerta de
+        // emergência) não espera mais que isso. Estourou: segue sem a cópia
+        // local, que degrada para recusa (fail closed).
+        await RemindersScope.of(context)
+            .consentPreferences
+            .saveLocalRemindersConsent(_remindersConsent)
+            .timeout(const Duration(seconds: 3));
       } catch (_) {
         // Intencionalmente silencioso — ver comentário acima.
       }
@@ -2146,6 +2154,7 @@ class _MyDataScreenState extends State<MyDataScreen> {
           'pedidos de correção ou exclusão, e uma cópia para guardar.',
         ),
         const SizedBox(height: 16),
+        const Padding(padding: EdgeInsets.only(bottom: 16), child: LocalProtectionNotice()),
         if (_error != null)
           // SC 4.1.3, mesmo padrão das outras telas: sem `liveRegion` um
           // leitor de tela não saberia que carregar falhou.
@@ -2642,6 +2651,10 @@ class _RemindersScreenState extends State<RemindersScreen> {
   bool _localDataUnavailable = false;
   bool _localDataBusy = false;
 
+  /// Uma decisão de consentimento em andamento: um segundo toque em
+  /// "Autorizar lembretes" não grava nem chama o servidor de novo.
+  bool _decidingConsent = false;
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
@@ -2778,6 +2791,16 @@ class _RemindersScreenState extends State<RemindersScreen> {
   /// decisão local nem trava a tela, e "Meus dados" alinha o espelho depois
   /// (`_alignLocalRemindersMirror`).
   Future<void> _decideRemindersConsent(bool granted) async {
+    if (_decidingConsent) return;
+    _decidingConsent = true;
+    try {
+      await _applyRemindersConsent(granted);
+    } finally {
+      _decidingConsent = false;
+    }
+  }
+
+  Future<void> _applyRemindersConsent(bool granted) async {
     final scope = RemindersScope.of(context);
     // `getInheritedWidgetOfExactType`: a tela pode ser montada sem
     // `BackendScope` (teste de Lembretes), e então não há sessão.
@@ -2953,7 +2976,9 @@ class _RemindersScreenState extends State<RemindersScreen> {
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            const Text('Alarmes e medicamentos', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+            const Expanded(
+              child: Text('Alarmes e medicamentos', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+            ),
             IconButton(
               key: const Key('reminders_add_button'),
               tooltip: 'Novo alarme',
@@ -2970,6 +2995,8 @@ class _RemindersScreenState extends State<RemindersScreen> {
             padding: const EdgeInsets.only(bottom: 16),
             child: ReminderConsentCard(onDecision: _decideRemindersConsent),
           ),
+        // Limite da cifra local (#136): visível onde o usuário do pilar A chega.
+        const Padding(padding: EdgeInsets.only(bottom: 16), child: LocalProtectionNotice()),
         if (reminders != null && _remindersConsentGranted == false)
           // SC 4.1.3, mesmo padrão do banner de erro logo abaixo: quem usa
           // leitor de tela precisa saber por que o botão "+" está desabilitado.

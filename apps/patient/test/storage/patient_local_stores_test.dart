@@ -81,11 +81,15 @@ void main() {
   test('chave perdida cancela todas as notificações agendadas', () async {
     final first = make(InMemoryDatabaseKeyProvider());
     await first.reminders.save(const Reminder(id: 0, label: 'x', hour: 8, minute: 0, active: true));
+    await first.consent.saveLocalRemindersConsent(true);
+    expect(await first.consent.localRemindersGranted(), isTrue);
     await first.database.close();
 
     // Mesmo arquivo, custódia sem chave: a chave se perdeu.
     final second = make(InMemoryDatabaseKeyProvider());
     expect(await second.reminders.list(), isEmpty);
+    // O consentimento de antes não sobrevive: banco recomeçado, sem decisão.
+    expect(await second.consent.localRemindersGranted(), isNull);
 
     expect(second.database.recoveredFromLostKey, isTrue);
     expect(scheduler.cancelAllCalls, 1);
