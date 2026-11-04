@@ -66,28 +66,30 @@ void main() {
   test('leitura que lança vira KeyUnavailable e não escreve nada', () async {
     final storage = _FalhaStorage(falhaLeitura: true);
     final provider = KeystoreDatabaseKeyProvider(storage: storage);
-    expect(await provider.obtain(databaseExists: false),
-        isA<KeyUnavailable>());
-    expect(await provider.obtain(databaseExists: true),
-        isA<KeyUnavailable>());
+    expect(await provider.obtain(databaseExists: false), isA<KeyUnavailable>());
+    expect(await provider.obtain(databaseExists: true), isA<KeyUnavailable>());
     expect(storage.escritas, 0);
   });
 
-  test('escrita que lança vira LocalDatabaseUnavailableException sem origem',
-      () async {
-    final provider =
-        KeystoreDatabaseKeyProvider(storage: _FalhaStorage(falhaEscrita: true));
-    try {
-      await provider.obtain(databaseExists: false);
-      fail('deveria lançar');
-    } on LocalDatabaseUnavailableException catch (e) {
-      expect(e.toString(), isNot(contains('chave-secreta-no-erro')));
-    }
-  });
+  test(
+    'escrita que lança vira LocalDatabaseUnavailableException sem origem',
+    () async {
+      final provider = KeystoreDatabaseKeyProvider(
+        storage: _FalhaStorage(falhaEscrita: true),
+      );
+      try {
+        await provider.obtain(databaseExists: false);
+        fail('deveria lançar');
+      } on LocalDatabaseUnavailableException catch (e) {
+        expect(e.toString(), isNot(contains('chave-secreta-no-erro')));
+      }
+    },
+  );
 
   test('toString não expõe a chave', () async {
-    final state = await KeystoreDatabaseKeyProvider()
-        .obtain(databaseExists: false) as KeyAvailable;
+    final state =
+        await KeystoreDatabaseKeyProvider().obtain(databaseExists: false)
+            as KeyAvailable;
     expect(state.toString(), isNot(contains(state.rawKey)));
     expect(state.toString(), isNot(contains(state.rawKey.substring(2, 10))));
   });

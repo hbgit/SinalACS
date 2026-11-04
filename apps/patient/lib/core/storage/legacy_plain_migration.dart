@@ -55,8 +55,9 @@ Future<bool> copyLegacyRows(
     if (hasConsent) {
       final legacy = await _openReadOnly(consentPath);
       try {
-        final rows = await legacy
-            .rawQuery('SELECT purpose, granted FROM consent_preferences');
+        final rows = await legacy.rawQuery(
+          'SELECT purpose, granted FROM consent_preferences',
+        );
         for (final row in rows) {
           await txn.rawInsert(
             'INSERT OR REPLACE INTO consent_preferences (purpose, granted) '

@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:sqflite_sqlcipher/sqflite.dart' as sqlcipher;
 
+import 'legacy_plain_migration.dart';
 import 'local_database_key.dart';
 
 export 'local_database_key.dart' show LocalDatabaseUnavailableException;
@@ -50,7 +51,8 @@ class PatientLocalDatabase {
   /// notificações). Falha nele é engolida: nunca impede abrir.
   final Future<void> Function()? onKeyLost;
 
-  // Guardado para a Task 4, que o chamará depois da migração legada.
+  /// Chamado uma vez quando a migração dos arquivos em claro copiou algo
+  /// (T5 reagenda as notificações). Falha nele é engolida.
   final Future<void> Function()? onLegacyMigrated;
 
   final Future<Database> Function(String path, String rawKey)? openOverride;
@@ -58,6 +60,23 @@ class PatientLocalDatabase {
   Database? _database;
   Future<Database>? _inFlight;
   bool _recovered = false;
+
+  /// Portão de operações: abrir, fechar e apagar rodam uma de cada vez, na
+  /// ordem de chegada. Assim `open()` nunca lê a chave velha entre o fechar e
+  /// o destruir de [deleteEverything], nem `close()` corre com uma abertura.
+  Future<void> _gate = Future<void>.value();
+
+  int _queued = 0;
+
+  Future<T> _serialize<T>(Future<T> Function() operation) {
+    _queued++;
+    final result = _gate.then((_) => operation());
+    // O portão avança mesmo se a operação falhar; o erro vai a quem pediu.
+    _gate = result
+        .then<void>((_) {}, onError: (_) {})
+        .whenComplete(() => _queued--);
+    return result;
+  }
 
   /// `true` se esta execução recomeçou o banco por chave perdida.
   bool get recoveredFromLostKey => _recovered;
@@ -68,30 +87,40 @@ class PatientLocalDatabase {
   /// falha não é memoizada.
   Future<Database> open() {
     final existing = _database;
-    if (existing != null && existing.isOpen) return Future.value(existing);
-    return _inFlight ??= _openOnce().then((db) {
+    // Atalho só com o portão ocioso: um apagar/fechar na fila vem antes.
+    if (_queued == 0 && existing != null && existing.isOpen) {
+      return Future.value(existing);
+    }
+    return _inFlight ??= _serialize(() async {
+      final current = _database;
+      if (current != null && current.isOpen) return current;
+      final db = await _openOnce();
       _database = db;
+      if (await migrateLegacyPlainDatabases(db)) {
+        final callback = onLegacyMigrated;
+        if (callback != null) {
+          try {
+            await callback();
+          } catch (_) {
+            // Reagendar nunca impede abrir.
+          }
+        }
+      }
       return db;
     }).whenComplete(() => _inFlight = null);
   }
 
-  Future<void> close() async {
-    final pending = _inFlight;
-    if (pending != null) {
-      try {
-        await pending;
-      } catch (_) {
-        // A falha da abertura em voo já chegou a quem a pediu.
-      }
-    }
+  Future<void> close() => _serialize(_closeNow);
+
+  Future<void> _closeNow() async {
     final db = _database;
     _database = null;
     if (db != null && db.isOpen) await db.close();
   }
 
   /// Fecha, apaga arquivo, laterais e chave. Usado por "Apagar e recomeçar".
-  Future<void> deleteEverything() async {
-    await close();
+  Future<void> deleteEverything() => _serialize(() async {
+    await _closeNow();
     await _deleteFiles(await _path());
     try {
       await keys.destroy();
@@ -99,7 +128,7 @@ class PatientLocalDatabase {
       throw const LocalDatabaseUnavailableException();
     }
     _recovered = false;
-  }
+  });
 
   Future<String> _path() async {
     if (_isMobile) {
@@ -109,10 +138,21 @@ class PatientLocalDatabase {
     return '${await databaseFactoryFfi.getDatabasesPath()}/$databaseName';
   }
 
+  /// Apaga pelo plugin e varre os laterais com dart:io. Qualquer erro
+  /// (inclusive de arquivo) vira [LocalDatabaseUnavailableException], sem causa.
   Future<void> _deleteFiles(String path) async {
-    for (final suffix in ['', ..._sidecars]) {
-      final file = File('$path$suffix');
-      if (file.existsSync()) await file.delete();
+    try {
+      if (_isMobile) {
+        await sqlcipher.deleteDatabase(path);
+      } else {
+        await databaseFactoryFfi.deleteDatabase(path);
+      }
+      for (final suffix in _sidecars) {
+        final file = File('$path$suffix');
+        if (file.existsSync()) await file.delete();
+      }
+    } catch (_) {
+      throw const LocalDatabaseUnavailableException();
     }
   }
 
@@ -125,7 +165,7 @@ class PatientLocalDatabase {
   }
 
   Future<Database> _openOnce() async {
-    if (!_isMobile && !allowUnencryptedForTesting && openOverride == null) {
+    if (!_isMobile && !allowUnencryptedForTesting) {
       throw UnsupportedError(
         'O SQLCipher só está disponível em Android/iOS. Abrir o banco aqui '
         'gravaria dados de saúde em texto plano, o que viola o INV-04 do PRD. '

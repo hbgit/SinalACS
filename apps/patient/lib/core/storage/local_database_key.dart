@@ -49,9 +49,10 @@ abstract interface class LocalDatabaseKeyProvider {
 /// Gera a chave raw do SQLCipher: `x'` + 64 hex de [Random.secure] + `'`.
 String generateRawDatabaseKey() {
   final random = Random.secure();
-  final hex = List<int>.generate(32, (_) => random.nextInt(256))
-      .map((byte) => byte.toRadixString(16).padLeft(2, '0'))
-      .join();
+  final hex = List<int>.generate(
+    32,
+    (_) => random.nextInt(256),
+  ).map((byte) => byte.toRadixString(16).padLeft(2, '0')).join();
   return "x'$hex'";
 }
 
@@ -70,6 +71,12 @@ class InMemoryDatabaseKeyProvider implements LocalDatabaseKeyProvider {
 
   int obtainCalls = 0;
 
+  /// Só para teste: faz [destroy] lançar (custódia que não apaga).
+  bool failDestroy = false;
+
+  /// A chave guardada, para os testes conferirem que não houve troca.
+  String? get currentKey => _key;
+
   /// Enfileira [states] para as próximas chamadas de [obtain].
   void forceNext(Iterable<LocalKeyState> states) => _forced.addAll(states);
 
@@ -84,5 +91,8 @@ class InMemoryDatabaseKeyProvider implements LocalDatabaseKeyProvider {
   }
 
   @override
-  Future<void> destroy() async => _key = null;
+  Future<void> destroy() async {
+    if (failDestroy) throw StateError('destroy falhou (teste)');
+    _key = null;
+  }
 }

@@ -9,16 +9,17 @@ import 'local_database_key.dart';
 /// sensível.
 class KeystoreDatabaseKeyProvider implements LocalDatabaseKeyProvider {
   KeystoreDatabaseKeyProvider({FlutterSecureStorage? storage})
-      : _storage = storage ??
-            const FlutterSecureStorage(
-              // Mesmas opções do app do ACS; minSdk 24 atende.
-              aOptions: AndroidOptions(encryptedSharedPreferences: true),
-              // `first_unlock_this_device` mantém a chave fora de backup em
-              // nuvem e ilegível antes do primeiro desbloqueio.
-              iOptions: IOSOptions(
-                accessibility: KeychainAccessibility.first_unlock_this_device,
-              ),
-            );
+    : _storage =
+          storage ??
+          const FlutterSecureStorage(
+            // Mesmas opções do app do ACS; minSdk 24 atende.
+            aOptions: AndroidOptions(encryptedSharedPreferences: true),
+            // `first_unlock_this_device` mantém a chave fora de backup em
+            // nuvem e ilegível antes do primeiro desbloqueio.
+            iOptions: IOSOptions(
+              accessibility: KeychainAccessibility.first_unlock_this_device,
+            ),
+          );
 
   static const _key = 'sinalacs.patient.local_database_key';
 
