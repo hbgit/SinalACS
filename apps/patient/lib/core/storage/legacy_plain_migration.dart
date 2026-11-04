@@ -19,20 +19,48 @@ Future<bool> migrateLegacyPlainDatabases(
   String remindersName = 'sinalacs_patient_reminders.db',
   String consentName = 'sinalacs_patient_consent.db',
 }) async {
+  var copiedNow = false;
   try {
-    final copied = await copyLegacyRows(
-      encrypted,
+    // R9: com o marcador, os arquivos antigos já foram copiados uma vez e o
+    // consentimento do banco cifrado manda; nunca copiar de novo, para não
+    // ressuscitar um consentimento revogado (LGPD).
+    final marked = await encrypted.rawQuery(
+      'SELECT 1 FROM local_meta WHERE key = ?',
+      [_marker],
+    );
+    if (marked.isEmpty) {
+      copiedNow = await copyLegacyRows(
+        encrypted,
+        remindersName: remindersName,
+        consentName: consentName,
+      );
+      if (!copiedNow) return false;
+    }
+  } catch (_) {
+    return false;
+  }
+  try {
+    // Só depois do commit: o que foi copiado já está no banco cifrado. Se
+    // apagar falhar, o marcador impede nova cópia e a próxima abertura limpa.
+    await deleteLegacyPlainFiles(
       remindersName: remindersName,
       consentName: consentName,
     );
-    if (!copied) return false;
-    // Só depois do commit: o que foi copiado já está no banco cifrado.
-    for (final name in [remindersName, consentName]) {
-      await _deleteLegacy(await _legacyPath(name));
-    }
-    return true;
   } catch (_) {
-    return false;
+    // Sem log: a próxima abertura repete.
+  }
+  return copiedNow;
+}
+
+const _marker = 'legacy_migrated';
+
+/// Apaga os dois arquivos antigos em claro e os laterais.
+Future<void> deleteLegacyPlainFiles({
+  String remindersName = 'sinalacs_patient_reminders.db',
+  String consentName = 'sinalacs_patient_consent.db',
+}) async {
+  for (final name in [remindersName, consentName]) {
+    await _deleteLegacy(await _legacyPath(name));
   }
 }
 
@@ -92,6 +120,11 @@ Future<bool> copyLegacyRows(
         await legacy.close();
       }
     }
+    // R9: o marcador entra na mesma transação da cópia.
+    await txn.rawInsert(
+      'INSERT OR REPLACE INTO local_meta (key, value) VALUES (?, ?)',
+      [_marker, '1'],
+    );
   });
   return true;
 }
@@ -99,8 +132,10 @@ Future<bool> copyLegacyRows(
 Future<String> _legacyPath(String name) async =>
     '${await databaseFactory.getDatabasesPath()}/$name';
 
-Future<Database> _openReadOnly(String path) =>
-    databaseFactory.openDatabase(path, options: OpenDatabaseOptions());
+Future<Database> _openReadOnly(String path) => databaseFactory.openDatabase(
+  path,
+  options: OpenDatabaseOptions(readOnly: true),
+);
 
 Future<void> _deleteLegacy(String path) async {
   await databaseFactory.deleteDatabase(path);

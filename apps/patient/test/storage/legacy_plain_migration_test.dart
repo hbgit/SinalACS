@@ -28,6 +28,9 @@ void main() {
             'CREATE TABLE consent_preferences '
             '(purpose TEXT PRIMARY KEY, granted INTEGER NOT NULL)',
           );
+          await db.execute(
+            'CREATE TABLE local_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)',
+          );
         },
       ),
     );
@@ -109,7 +112,9 @@ void main() {
     await semearAntigos();
     expect(await copyLegacyRows(encrypted), isTrue);
     expect(await copyLegacyRows(encrypted), isTrue);
-    expect(await encrypted.query('reminders'), hasLength(2));
+    final rows = await encrypted.query('reminders', orderBy: 'id');
+    expect([for (final r in rows) r['id']], [3, 7]);
+    expect(rows[1]['label'], 'b');
     expect(await encrypted.query('consent_preferences'), hasLength(1));
   });
 
@@ -132,4 +137,34 @@ void main() {
       isTrue,
     );
   });
+
+  test(
+    'marcador gravado na mesma transação da cópia; rollback não o deixa',
+    () async {
+      await semearAntigos();
+      await copyLegacyRows(encrypted);
+      expect(await encrypted.query('local_meta'), hasLength(1));
+    },
+  );
+
+  test('rollback não deixa marcador', () async {
+    await semearAntigos(divergente: true);
+    await migrateLegacyPlainDatabases(encrypted);
+    expect(await encrypted.query('local_meta'), isEmpty);
+  });
+
+  test(
+    'cópia feita, apagar falhou, consentimento mudou: não ressuscita',
+    () async {
+      await semearAntigos();
+      // Cópia commitada e arquivos antigos ainda presentes (apagar falhou).
+      await copyLegacyRows(encrypted);
+      await encrypted.update('consent_preferences', {'granted': 0});
+
+      expect(await migrateLegacyPlainDatabases(encrypted), isFalse);
+      final consent = await encrypted.query('consent_preferences');
+      expect(consent.single['granted'], 0);
+      expect(antigosExistem(), isFalse);
+    },
+  );
 }

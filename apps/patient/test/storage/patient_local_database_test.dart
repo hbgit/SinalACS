@@ -24,7 +24,10 @@ void main() {
   var opens = 0;
   const name = 'teste.db';
 
-  setUpAll(sqfliteFfiInit);
+  setUpAll(() {
+    sqfliteFfiInit();
+    databaseFactory = databaseFactoryFfi;
+  });
 
   setUp(() async {
     dir = await Directory.systemTemp.createTemp('patient_local_db');
@@ -364,4 +367,71 @@ void main() {
       expect(await conn.query('consent_preferences'), hasLength(1));
     },
   );
+
+  Future<void> semearConsentimentoAntigo() async {
+    final c = await databaseFactoryFfi.openDatabase(
+      '${dir.path}/sinalacs_patient_consent.db',
+    );
+    await c.execute(
+      'CREATE TABLE consent_preferences '
+      '(purpose TEXT PRIMARY KEY, granted INTEGER NOT NULL)',
+    );
+    await c.insert('consent_preferences', {'purpose': 'push', 'granted': 1});
+    await c.close();
+  }
+
+  test('onLegacyMigrated pode chamar open() sem travar (R8)', () async {
+    await semearConsentimentoAntigo();
+    late PatientLocalDatabase db;
+    var linhas = -1;
+    db = PatientLocalDatabase(
+      keys: keys,
+      databaseName: name,
+      allowUnencryptedForTesting: true,
+      retryDelay: Duration.zero,
+      onLegacyMigrated: () async {
+        linhas = (await (await db.open()).query('reminders')).length;
+      }.timeoutWrap,
+    );
+    made.add(db);
+    await db.open().timeout(const Duration(seconds: 5));
+    expect(linhas, 0);
+  });
+
+  test('onKeyLost pode chamar open() sem travar (R8)', () async {
+    final first = make();
+    await gravar(first, 'x');
+    await first.close();
+    await keys.destroy();
+
+    late PatientLocalDatabase db;
+    var chamado = 0;
+    db = make(
+      onKeyLost: () async {
+        chamado++;
+        await db.open();
+      }.timeoutWrap,
+    );
+    await db.open().timeout(const Duration(seconds: 5));
+    expect(chamado, 1);
+  });
+
+  test(
+    'deleteEverything apaga os arquivos legados; a próxima abertura não importa',
+    () async {
+      await semearConsentimentoAntigo();
+      final db = make();
+      await db.deleteEverything();
+      expect(
+        File('${dir.path}/sinalacs_patient_consent.db').existsSync(),
+        isFalse,
+      );
+      expect(await (await db.open()).query('consent_preferences'), isEmpty);
+    },
+  );
+}
+
+extension on Future<void> Function() {
+  Future<void> Function() get timeoutWrap =>
+      () => this().timeout(const Duration(seconds: 5));
 }
