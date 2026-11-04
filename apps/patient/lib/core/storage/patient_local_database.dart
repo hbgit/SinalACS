@@ -6,6 +6,7 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:sqflite_sqlcipher/sqflite.dart' as sqlcipher;
 
 import 'legacy_plain_migration.dart';
+import 'local_data_control.dart';
 import 'local_database_key.dart';
 
 export 'local_database_key.dart' show LocalDatabaseUnavailableException;
@@ -24,7 +25,7 @@ class LocalDatabaseLockedException implements Exception {
 /// caminho que apaga é a chave PROVADAMENTE perdida ([KeyLost]), e ele
 /// recomeça o banco vazio. Nada aqui registra em log nem interpola uma exceção
 /// capturada: a causa pode carregar material da custódia.
-class PatientLocalDatabase {
+class PatientLocalDatabase implements LocalDataControl {
   PatientLocalDatabase({
     required this.keys,
     this.databaseName = 'sinalacs_patient_local.db',
@@ -79,7 +80,20 @@ class PatientLocalDatabase {
   }
 
   /// `true` se esta execução recomeçou o banco por chave perdida.
+  @override
   bool get recoveredFromLostKey => _recovered;
+
+  bool _recoveryNoticePending = false;
+
+  @override
+  bool consumeRecoveryNotice() {
+    final pending = _recoveryNoticePending;
+    _recoveryNoticePending = false;
+    return pending;
+  }
+
+  @override
+  Future<void> retryOpen() => open();
 
   bool get _isMobile => Platform.isAndroid || Platform.isIOS;
 
@@ -164,6 +178,7 @@ class PatientLocalDatabase {
   /// Um apagar na fila atrás de uma abertura em voo fecha o handle que essa
   /// abertura devolveu (quem o segura vê `database_closed`); é aceito para
   /// "apagar".
+  @override
   Future<void> deleteEverything() => _serialize(() async {
     await _closeNow();
     await _deleteFiles(await _path());
@@ -178,6 +193,7 @@ class PatientLocalDatabase {
       throw const LocalDatabaseUnavailableException();
     }
     _recovered = false;
+    _recoveryNoticePending = false;
   });
 
   Future<String> _path() async {
@@ -258,6 +274,7 @@ class PatientLocalDatabase {
     _lostPending = true;
     final state = await _obtain(false);
     _recovered = true;
+    _recoveryNoticePending = true;
     return state;
   }
 

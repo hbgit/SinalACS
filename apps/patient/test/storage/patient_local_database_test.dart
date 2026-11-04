@@ -140,9 +140,26 @@ void main() {
       expect(await ler(db2), isEmpty);
       expect(db2.recoveredFromLostKey, isTrue);
       expect(lostCalls, 1);
+      // O aviso da recuperação sai uma vez só (T5).
+      expect(db2.consumeRecoveryNotice(), isTrue);
+      expect(db2.consumeRecoveryNotice(), isFalse);
       await db2.close();
     },
   );
+
+  test('sem recuperação, nenhum aviso; apagar tudo também descarta o aviso', () async {
+    final db = make();
+    await gravar(db, 'x');
+    expect(db.consumeRecoveryNotice(), isFalse);
+    await db.close();
+    await keys.destroy();
+
+    final db2 = make();
+    await ler(db2);
+    await db2.deleteEverything();
+    expect(db2.recoveredFromLostKey, isFalse);
+    expect(db2.consumeRecoveryNotice(), isFalse);
+  });
 
   test(
     'leitura da chave lança duas vezes: LocalDatabaseUnavailableException, arquivo e chave intactos',

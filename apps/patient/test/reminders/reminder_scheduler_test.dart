@@ -30,6 +30,10 @@ class _RecordedZonedSchedule {
 class FakeNotificationChannel implements NotificationChannel {
   final scheduled = <_RecordedZonedSchedule>[];
   final cancelled = <int>[];
+  var cancelAllCalls = 0;
+
+  /// Ordem das chamadas, para provar que `rescheduleAll` cancela antes.
+  final calls = <String>[];
 
   @override
   Future<void> zonedSchedule(
@@ -39,6 +43,7 @@ class FakeNotificationChannel implements NotificationChannel {
     tz.TZDateTime scheduledDate, {
     required DateTimeComponents matchDateTimeComponents,
   }) async {
+    calls.add('schedule:$id');
     scheduled.add(
       _RecordedZonedSchedule(id, title, body, scheduledDate, matchDateTimeComponents),
     );
@@ -46,7 +51,14 @@ class FakeNotificationChannel implements NotificationChannel {
 
   @override
   Future<void> cancel(int id) async {
+    calls.add('cancel:$id');
     cancelled.add(id);
+  }
+
+  @override
+  Future<void> cancelAll() async {
+    calls.add('cancelAll');
+    cancelAllCalls++;
   }
 }
 
@@ -103,7 +115,7 @@ void main() {
       expect(channel.scheduled, hasLength(1));
       final recorded = channel.scheduled.single;
       expect(recorded.id, 7);
-      expect(recorded.body, 'Losartana 50 mg');
+      expect(recorded.body, reminderNotificationBody);
       expect(recorded.matchDateTimeComponents, DateTimeComponents.time);
       expect(recorded.scheduledDate.hour, 8);
       expect(recorded.scheduledDate.minute, 0);
@@ -113,6 +125,35 @@ void main() {
       // próxima ocorrência só pode ser hoje ou amanhã no mesmo horário.
       expect(deltaMs, greaterThanOrEqualTo(0));
       expect(deltaMs, lessThan(const Duration(hours: 24, minutes: 1).inMilliseconds));
+    });
+
+    test('corpo da notificação é genérico e não contém o rótulo', () async {
+      // D7 (#136): o rótulo é texto livre e pode citar medicamento; a
+      // notificação aparece na tela bloqueada, então não o carrega.
+      const reminder = Reminder(id: 5, label: 'losartana 50 mg', hour: 8, minute: 0, active: true);
+
+      await scheduler.schedule(reminder);
+
+      final recorded = channel.scheduled.single;
+      expect(recorded.body, reminderNotificationBody);
+      expect(recorded.body, 'Você tem um lembrete. Abra o SinalACS para ver.');
+      expect(recorded.body.toLowerCase(), isNot(contains('losartana')));
+      expect(recorded.title.toLowerCase(), isNot(contains('losartana')));
+    });
+
+    test('cancelAll cancela todas as notificações no canal', () async {
+      await scheduler.cancelAll();
+      expect(channel.cancelAllCalls, 1);
+    });
+
+    test('rescheduleAll cancela tudo e agenda os ativos', () async {
+      await scheduler.rescheduleAll(const [
+        Reminder(id: 3, label: 'a', hour: 8, minute: 0, active: true),
+        Reminder(id: 9, label: 'b', hour: 21, minute: 30, active: true),
+      ]);
+
+      expect(channel.calls, ['cancelAll', 'schedule:3', 'schedule:9']);
+      expect(channel.scheduled.map((s) => s.body).toSet(), {reminderNotificationBody});
     });
 
     test('cancel chama o cancelamento pelo id correto', () async {

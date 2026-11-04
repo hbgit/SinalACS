@@ -1,6 +1,10 @@
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sinalacs_patient/core/reminders/reminder.dart';
 import 'package:sinalacs_patient/core/reminders/sqflite_reminder_store.dart';
+import 'package:sinalacs_patient/core/storage/local_database_key.dart';
+import 'package:sinalacs_patient/core/storage/patient_local_database.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 void main() {
@@ -9,14 +13,26 @@ void main() {
     databaseFactory = databaseFactoryFfi;
   });
 
+  late Directory dir;
+  late PatientLocalDatabase database;
   late SqfliteReminderStore store;
 
-  setUp(() {
-    // Banco em memória por teste — nome único evita colisão entre casos.
-    store = SqfliteReminderStore(databaseName: inMemoryDatabasePath);
+  setUp(() async {
+    // Banco único (#136) num diretório temporário por teste.
+    dir = await Directory.systemTemp.createTemp('patient_reminders');
+    databaseFactoryFfi.setDatabasesPath(dir.path);
+    database = PatientLocalDatabase(
+      keys: InMemoryDatabaseKeyProvider(),
+      allowUnencryptedForTesting: true,
+      retryDelay: Duration.zero,
+    );
+    store = SqfliteReminderStore(database);
   });
 
-  tearDown(() => store.close());
+  tearDown(() async {
+    await database.close();
+    await dir.delete(recursive: true);
+  });
 
   test('lista vazia quando não há lembretes', () async {
     expect(await store.list(), isEmpty);
@@ -50,5 +66,19 @@ void main() {
     ));
     await store.delete(saved.id);
     expect(await store.list(), isEmpty);
+  });
+
+  test('falha de abertura propaga LocalDatabaseUnavailableException', () async {
+    final failing = PatientLocalDatabase(
+      keys: InMemoryDatabaseKeyProvider(),
+      databaseName: 'falha.db',
+      allowUnencryptedForTesting: true,
+      retryDelay: Duration.zero,
+      openOverride: (_, _) async => throw StateError('disco'),
+    );
+    await expectLater(
+      SqfliteReminderStore(failing).list(),
+      throwsA(isA<LocalDatabaseUnavailableException>()),
+    );
   });
 }
