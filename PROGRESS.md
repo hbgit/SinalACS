@@ -1922,3 +1922,18 @@ Branch `feat/issue-136-cifra-local-paciente`. **Estado:** a Fase 1 (T1–T8) est
 - **ACS, mesma lacuna (issues separadas a abrir):** o `open_failed` ambíguo existe no `SqlCipherVisitStore` (põe a fila de lado e apaga a chave); e falta `dataExtractionRules` também no app do ACS.
 - **Dependência descontinuada:** `flutter_secure_storage` com `encryptedSharedPreferences` depende do `androidx.security:security-crypto`; migrar ACS e paciente juntos.
 - **#125 ("Sobre")** deve reaproveitar `LocalProtectionNotice`; a C-10 acrescenta a frase da mitigação.
+
+## Aviso educativo na primeira abertura e em "Sobre" (C-02, #125) — 2026-11-08
+
+Branch `feat/c-02-aviso-educativo`. RF21 nos apps do paciente e do agente.
+
+- **Texto canônico.** `lib/core/legal/educational_notice.dart` em cada app guarda as versões longa e curta copiadas de `spec/escopo_projeto.md#aviso-educativo`. Não há pacote compartilhado entre os apps, então são duas cópias; `test/educational_notice_test.dart` de cada app lê o escopo e reprova qualquer diferença, e o do ACS também compara as duas cópias.
+- **Primeira abertura.** `EducationalNoticeGate` fica no `home` do `MaterialApp`, antes do login (no ACS, antes também da retomada da sessão por biometria; a checagem da limpeza remota segue na raiz e não espera). Mostra a versão curta e só segue depois de "Entendi" (`educational_notice_confirm`); "Ler o aviso completo" abre "Sobre". A confirmação fica em `shared_preferences` (`aviso_educativo_confirmado`), com a versão do texto (`educationalNoticeVersion`): trocar o texto canônico exige trocar a versão, e o aviso volta para quem confirmou o antigo. Uma falha de leitura mostra o aviso; uma falha de gravação não prende a pessoa (o aviso volta na próxima abertura).
+- **"Sobre".** `AboutScreen` mostra a versão longa. No paciente, abre pelo menu "Mais" (`more_about`) e pelo login (`login_about_link`, sem sessão, pilar A), e reaproveita `LocalProtectionNotice` (#136) em vez de repetir o texto. No ACS, abre pelo menu "Mais" (`more_about`); o aviso da cifra local é do paciente e não entra.
+- **Testes.** Widget tests das duas telas nos dois apps: aviso antes do login, "Entendi" segue e grava, já confirmado abre direto no login, leitura que falha mostra o aviso, ida e volta para "Sobre", 200% de fonte sem estouro, loja de `shared_preferences` (versão diferente não vale). Os outros testes sobem o app como aparelho que já confirmou: `test/flutter_test_config.dart` e `integration_test/flutter_test_config.dart` trocam `educationalNoticeStoreFactory`; um teste confere na fonte que o padrão de produção é a loja persistente e que nada em `lib/` o troca. `integration_test/geofence_gps_e2e.dart` roda por `flutter drive`, que não aplica o `flutter_test_config.dart`, e injeta a loja confirmada.
+
+**Abertos e limites.**
+- Rodado em 2026-11-08 no Windows (Flutter 3.44.8): `flutter analyze` limpo nos dois apps; paciente 347/347; ACS 824 passam e 2 falham em `test/mqtt_tls_refused_test.dart` (a recusa TLS do servidor de teste chega ao cliente como `NoConnectionException` no Windows, não como erro de socket; a C-02 não toca no MQTT, e a CI roda em Linux).
+- Conferido no emulador (API 37, stack local): o aviso aparece antes do login nos dois apps, "Ler o aviso completo" abre "Sobre", "Entendi" segue e a reabertura vai direto ao login; "Mais › Sobre" abre nos dois apps depois do login real (OTP do paciente, matrícula e senha do ACS) e o link "Sobre o SinalACS" do login do paciente aparece.
+- A regra do escopo também pede o aviso em "toda tela inicial dos apps"; esta mudança cobre a primeira abertura e "Sobre", como pede a C-02. O texto legal é a C-01.
+- As licenças (MIT e CC BY 4.0) em "Sobre" são da C-03; "Apagar meus dados" em "Sobre" é da C-10.
