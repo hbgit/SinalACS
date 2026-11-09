@@ -17,6 +17,7 @@ import 'package:sinalacs_client/sinalacs_client.dart'
         PatientDataSubjectRequestRecord,
         TermsChangeNotice,
         RiskLevel;
+import 'package:sinalacs_patient/app/educational_library_screens.dart';
 import 'package:sinalacs_patient/app/educational_notice_screens.dart';
 import 'package:sinalacs_patient/app/legal_screens.dart';
 import 'package:sinalacs_patient/app/local_protection_notice.dart';
@@ -650,6 +651,20 @@ class _PatientLoginScreenState extends State<PatientLoginScreen> {
                               ),
                               icon: const Icon(Icons.qr_code_scanner_outlined),
                               label: const Text('Escanear QR Code do ACS'),
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          // RF20/RF22 (C-03): a biblioteca abre sem conta.
+                          SizedBox(
+                            width: double.infinity,
+                            child: OutlinedButton.icon(
+                              key: const Key('login_library_button'),
+                              style: OutlinedButton.styleFrom(minimumSize: const Size(48, 52)),
+                              onPressed: () => Navigator.of(context).push(
+                                MaterialPageRoute(builder: (_) => const EducationalLibraryScreen()),
+                              ),
+                              icon: const Icon(Icons.menu_book_outlined),
+                              label: const Text('Biblioteca de saúde (sem cadastro)'),
                             ),
                           ),
                           const SizedBox(height: 4),
@@ -3262,5 +3277,5 @@ class _PatientHeader extends StatelessWidget implements PreferredSizeWidget {
 }
 
 void _showMoreDestinations(BuildContext context, ValueChanged<PatientDestination> select) {
-  showModalBottomSheet<void>(context: context, builder: (sheetContext) => SafeArea(child: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [ListTile(leading: const Icon(Icons.person_outline), title: const Text('Perfil clínico'), onTap: () { Navigator.pop(sheetContext); select(PatientDestination.profile); }), ListTile(leading: const Icon(Icons.alarm_outlined), title: const Text('Lembretes'), onTap: () { Navigator.pop(sheetContext); select(PatientDestination.reminders); }), ListTile(leading: const Icon(Icons.privacy_tip_outlined), title: const Text('Meus dados'), onTap: () { Navigator.pop(sheetContext); select(PatientDestination.myData); }), ListTile(key: const Key('more_legal'), leading: const Icon(Icons.gavel_outlined), title: const Text('Privacidade e termos'), onTap: () { Navigator.pop(sheetContext); Navigator.of(context).push(MaterialPageRoute(builder: (_) => const LegalDocumentsScreen())); }), ListTile(leading: const Icon(Icons.tune_outlined), title: const Text('Preferências'), onTap: () { Navigator.pop(sheetContext); select(PatientDestination.settings); }), ListTile(key: const Key('more_about'), leading: const Icon(Icons.info_outline), title: const Text('Sobre'), onTap: () { Navigator.pop(sheetContext); Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AboutScreen())); })]))));
+  showModalBottomSheet<void>(context: context, builder: (sheetContext) => SafeArea(child: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [ListTile(leading: const Icon(Icons.person_outline), title: const Text('Perfil clínico'), onTap: () { Navigator.pop(sheetContext); select(PatientDestination.profile); }), ListTile(key: const Key('more_library'), leading: const Icon(Icons.menu_book_outlined), title: const Text('Biblioteca de saúde'), onTap: () { Navigator.pop(sheetContext); Navigator.of(context).push(MaterialPageRoute(builder: (_) => const EducationalLibraryScreen())); }), ListTile(leading: const Icon(Icons.alarm_outlined), title: const Text('Lembretes'), onTap: () { Navigator.pop(sheetContext); select(PatientDestination.reminders); }), ListTile(leading: const Icon(Icons.privacy_tip_outlined), title: const Text('Meus dados'), onTap: () { Navigator.pop(sheetContext); select(PatientDestination.myData); }), ListTile(key: const Key('more_legal'), leading: const Icon(Icons.gavel_outlined), title: const Text('Privacidade e termos'), onTap: () { Navigator.pop(sheetContext); Navigator.of(context).push(MaterialPageRoute(builder: (_) => const LegalDocumentsScreen())); }), ListTile(leading: const Icon(Icons.tune_outlined), title: const Text('Preferências'), onTap: () { Navigator.pop(sheetContext); select(PatientDestination.settings); }), ListTile(key: const Key('more_about'), leading: const Icon(Icons.info_outline), title: const Text('Sobre'), onTap: () { Navigator.pop(sheetContext); Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AboutScreen())); })]))));
 }

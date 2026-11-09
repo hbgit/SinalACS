@@ -1937,3 +1937,19 @@ Branch `feat/c-02-aviso-educativo`. RF21 nos apps do paciente e do agente.
 - Conferido no emulador (API 37, stack local): o aviso aparece antes do login nos dois apps, "Ler o aviso completo" abre "Sobre", "Entendi" segue e a reabertura vai direto ao login; "Mais › Sobre" abre nos dois apps depois do login real (OTP do paciente, matrícula e senha do ACS) e o link "Sobre o SinalACS" do login do paciente aparece.
 - A regra do escopo também pede o aviso em "toda tela inicial dos apps"; esta mudança cobre a primeira abertura e "Sobre", como pede a C-02. O texto legal é a C-01.
 - As licenças (MIT e CC BY 4.0) em "Sobre" são da C-03; "Apagar meus dados" em "Sobre" é da C-10.
+
+## Biblioteca de saúde offline (C-03, #126) — 2026-11-08
+
+Branch `feat/c-03-biblioteca-educativa`, empilhada sobre a C-02 (#125), porque a seção de licenças entra no "Sobre" que a C-02 criou. RF20 e RF22 no app do paciente.
+
+- **Conteúdo.** `apps/patient/assets/conteudo_educativo/temas.json` vai empacotado no APK. A biblioteca não usa rede nem sessão. Na mesma pasta, `LICENCA.md` traz a CC BY 4.0 com a atribuição, separa a licença do código (MIT) e diz que os textos são paráfrases com citação. O titular dos direitos depende da P-01.
+- **Regras da P-07 no parser.** `lib/core/education/educational_library.dart` recusa o arquivo inteiro se um tema não citar fonte, se a fonte não for do Ministério da Saúde nem da BVS, ou se o endereço não for `https` no domínio do órgão. Também recusa um tema "revisado" sem revisores ou sem data. Um tema em `rascunho` aparece com o selo "Rascunho — aguardando revisão".
+- **Telas.** `EducationalLibraryScreen` abre pelo login (`login_library_button`, "Biblioteca de saúde (sem cadastro)") e pelo menu "Mais" (`more_library`). `EducationalTopicScreen` mostra as seções e as fontes (órgão, título, endereço copiável, data da consulta), o aviso educativo curto e a licença. O app não tem `url_launcher`, então o endereço não abre o navegador. O "Sobre" ganhou a seção "Licenças": código MIT, conteúdo CC BY 4.0 e a atribuição.
+- **Temas-rascunho.** "Dengue" (MS, *Saúde de A a Z*, e BVS, *Dicas em Saúde* de 2007) e "Pressão alta" (MS). São paráfrases das páginas lidas em 2026-11-08, sem "UBS" e sem marca de protocolo. Nenhum dos dois foi revisado.
+- **Testes.** `test/educational_library_test.dart` tem 17 casos. Cobre o asset real (todo tema cita MS/BVS, nenhum se diz revisado enquanto a P-07 estiver aberta, sem "UBS"), a `LICENCA.md` (CC BY 4.0, link e a mesma atribuição do app), as recusas do parser, a abertura pelo login com um backend que recusa e registra qualquer chamada (nenhuma acontece), a abertura pelo "Mais", o tema revisado, a falha de leitura com "Tentar de novo" e as licenças no "Sobre". `integration_test/educational_library_test.dart` é hermético e prova no aparelho que o asset está no APK e que todos os temas mostram as fontes.
+
+**Abertos e limites.**
+- Rodado em 2026-11-08 no Windows: `flutter analyze` limpo; paciente 364/364; `integration_test/educational_library_test.dart` passou no `emulator-5554` (API 37).
+- Conferido no emulador com o **modo avião ligado** e o APK de debug normal: aviso da C-02 → login → "Biblioteca de saúde" → Dengue (selo, seções, duas fontes, licença) → Pressão alta → "Sobre" com as duas licenças. Também a 200% de fonte e no tema escuro, sem estouro.
+- **Critério "Temas e revisores conforme a P-07" aberto.** A lista de temas e revisores segue `[A DEFINIR]`. Para publicar a revisão, trocar `revisao` para `revisado`, com revisores e data, e atualizar o teste "nenhum tema se declara revisado".
+- O asset não tem idioma nem versão por tema, só a `versao` da biblioteca. Não há busca nem categorias; com poucos temas não fazem falta.
