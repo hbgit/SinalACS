@@ -418,7 +418,7 @@ class _CartaoAcs extends StatelessWidget {
             Text(acs.name, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
             const SizedBox(height: 4),
             Text('Matrícula: ${acs.enrollmentId}'),
-            Text('UBS: ${acs.ubsName}'),
+            Text('Grupo do piloto: ${acs.ubsName}'),
             // "Território" e não "Microárea: ${nome}": o nome já começa por
             // "Microárea NN —" e o rótulo repetido leria mal. O território é o
             // vocabulário da territorialização (INV-01) no produto.
@@ -504,7 +504,7 @@ class _CartaoStaff extends StatelessWidget {
             Text(conta.name, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
             const SizedBox(height: 4),
             Text('Matrícula: ${conta.enrollmentId} • ${_papelDoBackoffice(conta.role)}'),
-            Text(conta.ubsName == null ? 'Acesso ao sistema inteiro' : 'UBS: ${conta.ubsName}'),
+            Text(conta.ubsName == null ? 'Acesso ao sistema inteiro' : 'Grupo do piloto: ${conta.ubsName}'),
             const SizedBox(height: 10),
             Wrap(
               spacing: 8,
@@ -678,7 +678,7 @@ class _FormularioNovoAcsState extends State<_FormularioNovoAcs> {
               ),
               const Padding(
                 padding: EdgeInsets.only(top: 8),
-                child: Text('A UBS do ACS vem da microárea escolhida, nunca do formulário.'),
+                child: Text('O grupo do piloto do ACS vem da microárea escolhida, nunca do formulário.'),
               ),
               if (_erro != null)
                 Padding(

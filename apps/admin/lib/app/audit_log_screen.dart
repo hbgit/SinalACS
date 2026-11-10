@@ -495,7 +495,7 @@ class _AuditLogScreenState extends State<AuditLogScreen> {
         const Text('Logs de auditoria', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
         const SizedBox(height: 4),
         const Text(
-          'Somente leitura. O próprio acesso a esta tela também é auditado. A coordenação vê apenas os registros dos autores com microárea na sua UBS.',
+          'Somente leitura. O próprio acesso a esta tela também é auditado. A coordenação vê apenas os registros dos autores com microárea no seu grupo do piloto.',
         ),
         const SizedBox(height: 16),
         _PainelDaCadeia(
