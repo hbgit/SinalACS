@@ -207,7 +207,11 @@ class OpensslDeviceCa {
         '-startdate', _generalizedTime(notBefore),
         '-enddate', _generalizedTime(notAfter),
       ]);
-      return File(out).readAsString();
+      // Awaited antes do `finally`: o retorno sem await deixava a leitura
+      // do PEM correr DEPOIS de `dir.delete(recursive: true)` remover o
+      // arquivo (PathNotFoundException intermitente no CI; lint
+      // `unawaited_return_in_try_block` no SDK local).
+      return await File(out).readAsString();
     } finally {
       await dir.delete(recursive: true);
     }
@@ -254,7 +258,9 @@ class OpensslDeviceCa {
         '-crl_nextupdate', _generalizedTime(now.add(Duration(days: days))),
         '-out', out,
       ]);
-      return File(out).readAsString();
+      // Awaited antes do `finally` — mesma correção da emissão acima: sem o
+      // await, a leitura da CRL disputava com a remoção do diretório temp.
+      return await File(out).readAsString();
     } finally {
       await dir.delete(recursive: true);
     }

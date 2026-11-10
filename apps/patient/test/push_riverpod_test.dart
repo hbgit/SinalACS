@@ -7,6 +7,7 @@ import 'package:sinalacs_patient/core/push/native_push_token_source.dart';
 import 'package:sinalacs_patient/core/push/push_token_provider.dart';
 import 'package:sinalacs_patient/core/push/push_token_source.dart';
 
+import 'support/fake_device_credential_store.dart';
 import 'support/fake_patient_backend.dart';
 
 class _Fonte implements PushTokenSource {
@@ -18,14 +19,18 @@ class _Fonte implements PushTokenSource {
   Future<PushDevice?> currentDevice() async => device;
 }
 
-Future<void> login(WidgetTester tester) async {
-  await tester.enterText(find.byKey(const Key('cpf_field')), '123.456.789-09');
-  await tester.enterText(find.byKey(const Key('birth_date_field')), '01/01/1990');
-  await tester.tap(find.byKey(const Key('enter_button')));
-  await tester.pumpAndSettle();
+const _pinDeTeste = '284637';
 
-  await tester.enterText(find.byKey(const Key('otp_code_field')), '123456');
-  await tester.tap(find.byKey(const Key('verify_code_button')));
+FakeDeviceCredentialStore _storeComCredencial() => FakeDeviceCredentialStore()
+  ..enrollForTest(
+    deviceId: '0e5',
+    secret: 'segredo-sintetico-pushriv',
+    pin: _pinDeTeste,
+  );
+Future<void> login(WidgetTester tester) async {
+  await tester.pumpAndSettle();
+  await tester.enterText(find.byKey(const Key('pin_field')), '284637');
+  await tester.tap(find.byKey(const Key('pin_unlock_button')));
   await tester.pumpAndSettle();
 }
 
@@ -44,7 +49,7 @@ void main() {
         pushTokenSourceProvider
             .overrideWithValue(const _Fonte(PushDevice(token: 'tok-9', platform: 'android'))),
       ],
-      child: SinalAcsApp(backend: backend),
+      child: SinalAcsApp(backend: backend, deviceCredentials: _storeComCredencial()),
     ));
     await login(tester);
 
@@ -53,7 +58,7 @@ void main() {
 
   testWidgets('sem ProviderScope acima, o app ainda sobe e não registra', (tester) async {
     final backend = FakePatientBackend();
-    await tester.pumpWidget(SinalAcsApp(backend: backend));
+    await tester.pumpWidget(SinalAcsApp(backend: backend, deviceCredentials: _storeComCredencial()));
     await login(tester);
 
     expect(find.byType(PatientHomeShell), findsOneWidget);
@@ -69,6 +74,7 @@ void main() {
       ],
       child: SinalAcsApp(
         backend: backend,
+        deviceCredentials: _storeComCredencial(),
         pushTokens: const _Fonte(PushDevice(token: 'do-parametro', platform: 'android')),
       ),
     ));

@@ -26,6 +26,7 @@ library;
 
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show rootBundle;
@@ -121,33 +122,37 @@ Future<void> _entrar(WidgetTester tester, ({String matricula, String senha}) cre
   await _ate(tester, () => entrar.evaluate().isEmpty, teto: const Duration(seconds: 45), oQue: 'login');
 }
 
-/// GET no relé do OTP (relógio e código do HOST, nunca do aparelho).
-Future<String?> _rele(String path, {String query = ''}) async {
-  final client = HttpClient();
-  try {
-    final request = await client.getUrl(Uri.parse(relayBase).replace(path: path, query: query));
-    final response = await request.close();
-    final body = (await utf8.decodeStream(response)).trim();
-    return response.statusCode == 200 ? body : null;
-  } finally {
-    client.close(force: true);
-  }
+/// Base64url sem padding de 43 caracteres — o formato que o servidor exige do
+/// `deviceSecret` (32 bytes de `Random.secure()`, como o app do paciente
+/// sorteia). Existe só no processo do teste; nunca é impresso.
+String _segredoDeDispositivo() {
+  final random = Random.secure();
+  final bytes = List<int>.generate(32, (_) => random.nextInt(256));
+  return base64Url.encode(bytes).replaceAll('=', '');
 }
 
-/// O paciente `telemetry` entra pelo OTP real e dispara o alerta vermelho.
+/// Conclui o onboarding do paciente [fixture] com um convite do manifesto
+/// (RF24, C-05): `completeEnrollment` cria a credencial de dispositivo e
+/// devolve a sessão. O relé não serve mais código de OTP do paciente.
+Future<String> _entrarPeloConvite(api.Client paciente, E2ePatient fixture) async {
+  final result = await paciente.onboarding.completeEnrollment(
+    token: fixture.takeInviteToken(),
+    healthDataConsent: true,
+    remindersConsent: false,
+    pushConsent: false,
+    termsAccepted: true,
+    deviceId: generateDeviceId(),
+    deviceSecret: _segredoDeDispositivo(),
+  );
+  return result.accessToken;
+}
+
+/// O paciente `telemetry` entra pelo convite do manifesto e dispara o alerta
+/// vermelho. Cada execução consome UM convite de uso único.
 Future<String> _dispararAlerta(api.Client paciente, E2ePatient fixture) async {
-  final desde = await _rele('/now');
-  if (desde == null) throw StateError('o relé não respondeu /now');
-  await paciente.auth.requestOtp(cpf: fixture.cpf, birthDate: DateTime.parse(fixture.birthDate));
-  String? codigo;
-  for (var i = 0; i < 40 && codigo == null; i++) {
-    codigo = await _rele('/code', query: 'since=$desde');
-    if (codigo == null) await Future<void>.delayed(const Duration(milliseconds: 500));
-  }
-  if (codigo == null) throw StateError('o relé não devolveu o código do OTP');
-  final sessao = await paciente.auth.verifyOtp(cpf: fixture.cpf, code: codigo);
+  final accessToken = await _entrarPeloConvite(paciente, fixture);
   final criado = await paciente.alerts.createRedAlert(
-    accessToken: sessao.accessToken,
+    accessToken: accessToken,
     idempotencyKey: 'telemetria-e2e-${DateTime.now().millisecondsSinceEpoch}',
     locationHash: 'sem-local-00',
   );

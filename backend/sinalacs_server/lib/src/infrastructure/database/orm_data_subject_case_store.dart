@@ -421,6 +421,30 @@ class OrmDataSubjectCaseStore implements DataSubjectCaseStore {
       where: (t) => t.userId.equals(titular),
       transaction: transaction,
     );
+    // C-05 (#128) na fronteira da exclusão (#42): a credencial de dispositivo
+    // é o que liga aparelho/login ao titular. Sem a revogação, o titular
+    // anonimizado segue entrando por `auth.loginDevice`; `revokedAt` faz o
+    // login recusar com a MESMA DeviceCredentialException das outras
+    // recusas, e o filtro `revokedAt IS NULL` de `touchLastUsed` não a
+    // ressuscita. Uma instrução só, na mesma transação da decisão.
+    await session.db.unsafeExecute(
+      '''
+      UPDATE "patient_device_credentials"
+      SET "revokedAt" = @now
+      WHERE "patientId" = @id::uuid AND "revokedAt" IS NULL
+      ''',
+      parameters: QueryParameters.named({'now': now, 'id': titular.uuid}),
+      transaction: transaction,
+    );
+    // Convites pendentes do titular também morrem aqui: um convite ainda
+    // válido consumido depois da anonimização recriaria a credencial que a
+    // linha acima acabou de revogar. `consumedAt` marca o uso atômico; o
+    // delete é o mesmo tratamento de `OtpChallenge` e `UserCredential`.
+    await EnrollmentToken.db.deleteWhere(
+      session,
+      where: (t) => t.patientId.equals(titular),
+      transaction: transaction,
+    );
     // Outros pedidos de exclusão ainda abertos do mesmo titular perderam o
     // objeto: fecham juntos, com a mesma decisão. Correções ficam como estão.
     // Pelo ORM, e não em SQL, para `decidedAt` ser gravado como o resto da

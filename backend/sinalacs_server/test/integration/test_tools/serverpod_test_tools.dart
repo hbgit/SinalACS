@@ -1921,6 +1921,41 @@ class _AuthEndpoint {
     });
   }
 
+  _i3.Future<_i33.DevelopmentLoginResult> loginDevice(
+    _i1.TestSessionBuilder sessionBuilder, {
+    required String deviceId,
+    required String deviceSecret,
+  }) async {
+    return _i1.callAwaitableFunctionAndHandleExceptions(() async {
+      var _localUniqueSession =
+          (sessionBuilder as _i1.InternalTestSessionBuilder).internalBuild(
+            endpoint: 'auth',
+            method: 'loginDevice',
+          );
+      try {
+        var _localCallContext = await _endpointDispatch.getMethodCallContext(
+          createSessionCallback: (_) => _localUniqueSession,
+          endpointPath: 'auth',
+          methodName: 'loginDevice',
+          parameters: _i1.testObjectToJson({
+            'deviceId': deviceId,
+            'deviceSecret': deviceSecret,
+          }),
+          serializationManager: _serializationManager,
+        );
+        var _localReturnValue =
+            await (_localCallContext.method.call(
+                  _localUniqueSession,
+                  _localCallContext.arguments,
+                )
+                as _i3.Future<_i33.DevelopmentLoginResult>);
+        return _localReturnValue;
+      } finally {
+        await _localUniqueSession.close();
+      }
+    });
+  }
+
   _i3.Future<void> requestOtp(
     _i1.TestSessionBuilder sessionBuilder, {
     required String cpf,
@@ -2286,6 +2321,8 @@ class _OnboardingEndpoint {
     required bool remindersConsent,
     required bool pushConsent,
     required bool termsAccepted,
+    required String deviceId,
+    required String deviceSecret,
   }) async {
     return _i1.callAwaitableFunctionAndHandleExceptions(() async {
       var _localUniqueSession =
@@ -2304,6 +2341,8 @@ class _OnboardingEndpoint {
             'remindersConsent': remindersConsent,
             'pushConsent': pushConsent,
             'termsAccepted': termsAccepted,
+            'deviceId': deviceId,
+            'deviceSecret': deviceSecret,
           }),
           serializationManager: _serializationManager,
         );

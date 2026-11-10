@@ -19,7 +19,7 @@ abstract class User
     implements _i1.TableRow<_i1.UuidValue?>, _i1.ProtocolSerialization {
   User._({
     this.id,
-    required this.cpfHash,
+    this.cpfHash,
     required this.name,
     required this.birthDate,
     required this.role,
@@ -30,7 +30,7 @@ abstract class User
 
   factory User({
     _i1.UuidValue? id,
-    required String cpfHash,
+    String? cpfHash,
     required String name,
     required DateTime birthDate,
     required _i2.UserRole role,
@@ -44,7 +44,7 @@ abstract class User
       id: jsonSerialization['id'] == null
           ? null
           : _i1.UuidValueJsonExtension.fromJson(jsonSerialization['id']),
-      cpfHash: jsonSerialization['cpfHash'] as String,
+      cpfHash: jsonSerialization['cpfHash'] as String?,
       name: jsonSerialization['name'] as String,
       birthDate: _i1.DateTimeJsonExtension.fromJson(
         jsonSerialization['birthDate'],
@@ -71,7 +71,11 @@ abstract class User
   @override
   _i1.UuidValue? id;
 
-  String cpfHash;
+  /// Anulável desde a C-05 (P-10): no piloto o participante entra por convite
+  /// QR + PIN (RF24) e não informa CPF — a coluna existe só para o caminho
+  /// legado do RF01 (Futuro). O índice único ignora NULLs (semântica SQL
+  /// padrão), então vários participantes sem CPF convivem sem colisão.
+  String? cpfHash;
 
   String name;
 
@@ -115,7 +119,7 @@ abstract class User
     return {
       '__className__': 'User',
       if (id != null) 'id': id?.toJson(),
-      'cpfHash': cpfHash,
+      if (cpfHash != null) 'cpfHash': cpfHash,
       'name': name,
       'birthDate': birthDate.toJson(),
       'role': role.toJson(),
@@ -130,7 +134,7 @@ abstract class User
     return {
       '__className__': 'User',
       if (id != null) 'id': id?.toJson(),
-      'cpfHash': cpfHash,
+      if (cpfHash != null) 'cpfHash': cpfHash,
       'name': name,
       'birthDate': birthDate.toJson(),
       'role': role.toJson(),
@@ -175,7 +179,7 @@ class _Undefined {}
 class _UserImpl extends User {
   _UserImpl({
     _i1.UuidValue? id,
-    required String cpfHash,
+    String? cpfHash,
     required String name,
     required DateTime birthDate,
     required _i2.UserRole role,
@@ -199,7 +203,7 @@ class _UserImpl extends User {
   @override
   User copyWith({
     Object? id = _Undefined,
-    String? cpfHash,
+    Object? cpfHash = _Undefined,
     String? name,
     DateTime? birthDate,
     _i2.UserRole? role,
@@ -209,7 +213,7 @@ class _UserImpl extends User {
   }) {
     return User(
       id: id is _i1.UuidValue? ? id : this.id,
-      cpfHash: cpfHash ?? this.cpfHash,
+      cpfHash: cpfHash is String? ? cpfHash : this.cpfHash,
       name: name ?? this.name,
       birthDate: birthDate ?? this.birthDate,
       role: role ?? this.role,
@@ -225,7 +229,7 @@ class _UserImpl extends User {
 class UserUpdateTable extends _i1.UpdateTable<UserTable> {
   UserUpdateTable(super.table);
 
-  _i1.ColumnValue<String, String> cpfHash(String value) => _i1.ColumnValue(
+  _i1.ColumnValue<String, String> cpfHash(String? value) => _i1.ColumnValue(
     table.cpfHash,
     value,
   );
@@ -303,6 +307,10 @@ class UserTable extends _i1.Table<_i1.UuidValue?> {
 
   late final UserUpdateTable updateTable;
 
+  /// Anulável desde a C-05 (P-10): no piloto o participante entra por convite
+  /// QR + PIN (RF24) e não informa CPF — a coluna existe só para o caminho
+  /// legado do RF01 (Futuro). O índice único ignora NULLs (semântica SQL
+  /// padrão), então vários participantes sem CPF convivem sem colisão.
   late final _i1.ColumnString cpfHash;
 
   late final _i1.ColumnString name;

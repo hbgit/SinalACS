@@ -14,6 +14,7 @@ class E2ePatient {
     required this.cpf,
     required this.birthDate,
     required this.microAreaId,
+    required this.inviteTokens,
   });
   final String id;
   final String role;
@@ -21,6 +22,20 @@ class E2ePatient {
   final String cpf; // nunca em log
   final String birthDate; // AAAA-MM-DD
   final String microAreaId;
+
+  /// Convites de uso único do paciente (o seed grava seis por paciente) —
+  /// o login do app é convite QR + credencial de dispositivo (RF24, C-05).
+  final List<String> inviteTokens;
+
+  /// Consome o próximo convite do manifesto. Erro explícito quando o
+  /// manifesto não os trouxe: melhor que um convite vazio no servidor.
+  String takeInviteToken() {
+    if (inviteTokens.isEmpty) {
+      throw StateError('manifesto sem inviteTokens para o paciente $role');
+    }
+    return inviteTokens.removeAt(0);
+  }
+
   @override
   String toString() => 'E2ePatient($role)';
 }
@@ -39,6 +54,7 @@ List<E2ePatient> e2ePatients() {
         cpf: raw['cpf'] as String,
         birthDate: raw['birthDate'] as String,
         microAreaId: raw['microAreaId'] as String,
+        inviteTokens: ((raw['inviteTokens'] as List?) ?? const []).cast<String>(),
       ),
   ];
 }

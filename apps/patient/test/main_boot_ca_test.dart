@@ -39,6 +39,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:sinalacs_patient/core/network/backend_config.dart';
 import 'package:sinalacs_patient/main.dart' as app;
 
+import 'support/fake_device_credential_store.dart';
+
 /// Canal do `flutter_local_notifications` — o mesmo que o `main.dart` aciona
 /// para inicializar o plugin (RF06). No teste ele é respondido pelo `setUp`.
 const _canalDeNotificacoes =
@@ -105,6 +107,7 @@ void main() {
     WidgetTester tester, {
     String defaultHost = _hostSeguro,
   }) async {
+    final credentials = FakeDeviceCredentialStore();
     logs.clear();
     final originalDebugPrint = debugPrint;
     final originalPlatform = debugDefaultTargetPlatformOverride;
@@ -113,7 +116,7 @@ void main() {
     };
     debugDefaultTargetPlatformOverride = TargetPlatform.android;
     try {
-      await app.main(defaultHost: defaultHost);
+      await app.main(defaultHost: defaultHost, deviceCredentials: credentials);
       await tester.pump();
     } finally {
       debugPrint = originalDebugPrint;
@@ -151,8 +154,8 @@ void main() {
 
     await subirOFApp(tester);
 
-    expect(find.byKey(const Key('cpf_field')), findsOneWidget);
-    expect(find.byKey(const Key('enter_button')), findsOneWidget);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('start_onboarding_button')), findsOneWidget);
     esperaFalhaNaoFatal();
   });
 
@@ -161,7 +164,8 @@ void main() {
 
     await subirOFApp(tester);
 
-    expect(find.byKey(const Key('cpf_field')), findsOneWidget);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('start_onboarding_button')), findsOneWidget);
     esperaFalhaNaoFatal();
   });
 
@@ -170,7 +174,8 @@ void main() {
 
     await subirOFApp(tester);
 
-    expect(find.byKey(const Key('cpf_field')), findsOneWidget);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('start_onboarding_button')), findsOneWidget);
     esperaFalhaNaoFatal();
   });
 
@@ -181,7 +186,8 @@ void main() {
 
     // O defeito era aqui: o `main()` subia a `BackendFailure` antes do
     // `runApp`, e a tela não existia.
-    expect(find.byKey(const Key('cpf_field')), findsOneWidget);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('start_onboarding_button')), findsOneWidget);
 
     final sobreOHost = logs.where((linha) => linha.contains('não está em HTTPS'));
     expect(sobreOHost, isNotEmpty, reason: 'o log tem de dizer por que o host não serve');
@@ -201,8 +207,8 @@ void main() {
     await subirOFApp(tester, defaultHost: _hostSemHttps);
 
     // O onboarding e não o login: é o primeiro ponto do app que fala com o
-    // backend sem passar por CPF, data de nascimento ou código — o mesmo
-    // motivo pelo qual a resposta do backend não diz se o CPF existe.
+    // backend — o convite (C-05) não coleta CPF, data de nascimento, telefone
+    // nem e-mail.
     await tocar(tester, 'start_onboarding_button');
     await tester.enterText(
       find.byKey(const Key('onboarding_token_field')),
@@ -212,8 +218,13 @@ void main() {
     await tocar(tester, 'onboarding_consent_health');
     await tocar(tester, 'onboarding_terms_accept');
     await tocar(tester, 'complete_enrollment_button');
+    // Cria o PIN: a chamada ao servidor acontece no fim deste passo, e é ela
+    // que falha com o motivo do host.
+    await tester.enterText(find.byKey(const Key('pin_setup_field')), '284637');
+    await tester.enterText(find.byKey(const Key('pin_setup_confirm_field')), '284637');
+    await tocar(tester, 'pin_setup_confirm_button');
 
-    final erro = tester.widget<Text>(find.byKey(const Key('onboarding_error'))).data!;
+    final erro = tester.widget<Text>(find.byKey(const Key('pin_setup_error'))).data!;
     expect(erro, contains(_hostSemHttps));
     expect(erro, contains('não está em HTTPS'));
     expect(erro, isNot(contains('CA')));

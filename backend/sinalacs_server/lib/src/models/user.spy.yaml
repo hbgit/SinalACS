@@ -3,7 +3,11 @@ class: User
 table: users
 fields:
   id: UuidValue?, defaultPersist=random
-  cpfHash: String
+  ### Anulável desde a C-05 (P-10): no piloto o participante entra por convite
+  ### QR + PIN (RF24) e não informa CPF — a coluna existe só para o caminho
+  ### legado do RF01 (Futuro). O índice único ignora NULLs (semântica SQL
+  ### padrão), então vários participantes sem CPF convivem sem colisão.
+  cpfHash: String?
   name: String
   ### `spec/lgpd_data_audit.md` recomenda o tipo SQL `date` aqui, e a recomendação
   ### segue **em aberto**. Não é expressável no DSL do Serverpod (3.4.13): `type=` é

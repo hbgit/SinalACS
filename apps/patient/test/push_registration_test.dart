@@ -6,6 +6,7 @@ import 'package:sinalacs_patient/app/app.dart';
 import 'package:sinalacs_patient/core/network/backend_client.dart';
 import 'package:sinalacs_patient/core/push/push_token_source.dart';
 
+import 'support/fake_device_credential_store.dart';
 import 'support/fake_patient_backend.dart';
 
 class _FakeSource implements PushTokenSource {
@@ -19,21 +20,25 @@ class _FakeSource implements PushTokenSource {
 
 const _aparelho = PushDevice(token: 'tok-1', platform: 'android');
 
-Future<void> login(WidgetTester tester) async {
-  await tester.enterText(find.byKey(const Key('cpf_field')), '123.456.789-09');
-  await tester.enterText(find.byKey(const Key('birth_date_field')), '01/01/1990');
-  await tester.tap(find.byKey(const Key('enter_button')));
-  await tester.pumpAndSettle();
+const _pinDeTeste = '284637';
 
-  await tester.enterText(find.byKey(const Key('otp_code_field')), '123456');
-  await tester.tap(find.byKey(const Key('verify_code_button')));
+FakeDeviceCredentialStore _storeComCredencial() => FakeDeviceCredentialStore()
+  ..enrollForTest(
+    deviceId: '0e4',
+    secret: 'segredo-sintetico-pushreg',
+    pin: _pinDeTeste,
+  );
+Future<void> login(WidgetTester tester) async {
+  await tester.pumpAndSettle();
+  await tester.enterText(find.byKey(const Key('pin_field')), '284637');
+  await tester.tap(find.byKey(const Key('pin_unlock_button')));
   await tester.pumpAndSettle();
 }
 
 void main() {
   testWidgets('depois do login registra o token do aparelho', (tester) async {
     final backend = FakePatientBackend()..grantPushConsent();
-    await tester.pumpWidget(SinalAcsApp(backend: backend, pushTokens: const _FakeSource(_aparelho)));
+    await tester.pumpWidget(SinalAcsApp(backend: backend, deviceCredentials: _storeComCredencial(), pushTokens: const _FakeSource(_aparelho)));
     await login(tester);
 
     expect(backend.pushRegistrations, [('tok-1', 'android')]);
@@ -41,7 +46,7 @@ void main() {
 
   testWidgets('sem token (sem Firebase) não chama o servidor', (tester) async {
     final backend = FakePatientBackend();
-    await tester.pumpWidget(SinalAcsApp(backend: backend));
+    await tester.pumpWidget(SinalAcsApp(backend: backend, deviceCredentials: _storeComCredencial()));
     await login(tester);
 
     expect(backend.pushRegistrations, isEmpty);
@@ -52,7 +57,7 @@ void main() {
     final backend = FakePatientBackend()
       ..grantPushConsent()
       ..pushRegistrationFailure = const BackendFailure('sem consentimento');
-    await tester.pumpWidget(SinalAcsApp(backend: backend, pushTokens: const _FakeSource(_aparelho)));
+    await tester.pumpWidget(SinalAcsApp(backend: backend, deviceCredentials: _storeComCredencial(), pushTokens: const _FakeSource(_aparelho)));
     await login(tester);
 
     expect(backend.pushRegistrations, hasLength(1));
@@ -63,6 +68,7 @@ void main() {
   testWidgets('fonte que lança não afeta a home', (tester) async {
     await tester.pumpWidget(SinalAcsApp(
       backend: FakePatientBackend(),
+      deviceCredentials: _storeComCredencial(),
       pushTokens: _ThrowingSource(),
     ));
     await login(tester);
@@ -73,6 +79,7 @@ void main() {
   testWidgets('fonte de token que nunca completa não atrasa a home', (tester) async {
     await tester.pumpWidget(SinalAcsApp(
       backend: FakePatientBackend(),
+      deviceCredentials: _storeComCredencial(),
       pushTokens: _NeverSource(),
     ));
     await login(tester);
@@ -82,7 +89,7 @@ void main() {
   testWidgets('sem consentimento de avisos, nem pergunta o token ao provedor', (tester) async {
     final backend = FakePatientBackend();
     final source = _CountingSource();
-    await tester.pumpWidget(SinalAcsApp(backend: backend, pushTokens: source));
+    await tester.pumpWidget(SinalAcsApp(backend: backend, deviceCredentials: _storeComCredencial(), pushTokens: source));
     await login(tester);
 
     expect(source.calls, 0);
@@ -96,7 +103,7 @@ void main() {
       ..addConsentRecord('segmentedPush', 'granted', DateTime.utc(2026, 9, 1))
       ..addConsentRecord('segmentedPush', 'denied', DateTime.utc(2026, 9, 2));
     final source = _CountingSource();
-    await tester.pumpWidget(SinalAcsApp(backend: backend, pushTokens: source));
+    await tester.pumpWidget(SinalAcsApp(backend: backend, deviceCredentials: _storeComCredencial(), pushTokens: source));
     await login(tester);
 
     expect(source.calls, 0);
@@ -107,7 +114,7 @@ void main() {
       ..grantPushConsent()
       ..hasGrantedConsentFailure = const BackendFailure('falha');
     final source = _CountingSource();
-    await tester.pumpWidget(SinalAcsApp(backend: backend, pushTokens: source));
+    await tester.pumpWidget(SinalAcsApp(backend: backend, deviceCredentials: _storeComCredencial(), pushTokens: source));
     await login(tester);
 
     expect(source.calls, 0);
@@ -120,7 +127,7 @@ void main() {
     final gate = Completer<void>();
     backend.hasGrantedConsentGate = gate;
     final source = _CountingSource();
-    await tester.pumpWidget(SinalAcsApp(backend: backend, pushTokens: source));
+    await tester.pumpWidget(SinalAcsApp(backend: backend, deviceCredentials: _storeComCredencial(), pushTokens: source));
     await login(tester);
 
     expect(find.byType(PatientHomeShell), findsOneWidget);
@@ -133,7 +140,7 @@ void main() {
 
   testWidgets('o login não lê o painel "Meus dados" só para decidir o push', (tester) async {
     final backend = FakePatientBackend()..grantPushConsent();
-    await tester.pumpWidget(SinalAcsApp(backend: backend, pushTokens: _CountingSource()));
+    await tester.pumpWidget(SinalAcsApp(backend: backend, deviceCredentials: _storeComCredencial(), pushTokens: _CountingSource()));
     await login(tester);
 
     expect(backend.hasGrantedConsentCalls, 1);
@@ -143,7 +150,7 @@ void main() {
   testWidgets('com consentimento vigente, o login registra o token', (tester) async {
     final backend = FakePatientBackend()..grantPushConsent();
     final source = _CountingSource();
-    await tester.pumpWidget(SinalAcsApp(backend: backend, pushTokens: source));
+    await tester.pumpWidget(SinalAcsApp(backend: backend, deviceCredentials: _storeComCredencial(), pushTokens: source));
     await login(tester);
 
     expect(source.calls, 1);

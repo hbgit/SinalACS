@@ -169,7 +169,7 @@ class LegalDocumentScreen extends StatelessWidget {
 }
 
 /// Convite para aceitar o Termo de Uso e a Política de Privacidade vigentes,
-/// mostrado depois do login por OTP a quem ainda não aceitou a versão atual
+/// mostrado depois do login a quem ainda não aceitou a versão atual
 /// (LGPD-RF18).
 ///
 /// **Não é um portão.** "Agora não" segue para a tela inicial e o aviso volta

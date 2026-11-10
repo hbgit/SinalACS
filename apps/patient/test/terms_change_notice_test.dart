@@ -8,6 +8,7 @@ import 'package:sinalacs_patient/app/app.dart';
 import 'package:sinalacs_patient/core/legal/legal_documents.dart';
 import 'package:sinalacs_patient/core/network/backend_client.dart';
 
+import 'support/fake_device_credential_store.dart';
 import 'support/fake_patient_backend.dart';
 import 'support/semantics_scan.dart';
 
@@ -47,21 +48,26 @@ UpcomingLegalDocuments _textoNovoDe(String versao) => UpcomingLegalDocuments(
 
 final _textoNovo = _textoNovoDe('2026.2');
 
-Future<void> login(WidgetTester tester) async {
-  await tester.enterText(find.byKey(const Key('cpf_field')), '123.456.789-09');
-  await tester.enterText(find.byKey(const Key('birth_date_field')), '01/01/1990');
-  await tester.tap(find.byKey(const Key('enter_button')));
-  await tester.pumpAndSettle();
+const _pinDeTeste = '284637';
 
-  await tester.enterText(find.byKey(const Key('otp_code_field')), '123456');
-  await tester.tap(find.byKey(const Key('verify_code_button')));
+FakeDeviceCredentialStore _storeComCredencial() => FakeDeviceCredentialStore()
+  ..enrollForTest(
+    deviceId: '00000000-0000-4000-8000-0000000000e3',
+    secret: 'segredo-sintetico-notice',
+    pin: _pinDeTeste,
+  );
+
+Future<void> login(WidgetTester tester) async {
+  await tester.pumpAndSettle();
+  await tester.enterText(find.byKey(const Key('pin_field')), '284637');
+  await tester.tap(find.byKey(const Key('pin_unlock_button')));
   await tester.pumpAndSettle();
 }
 
 void main() {
   testWidgets('com aviso ativo, a home mostra o cartão com a data e o resumo', (tester) async {
     final backend = FakePatientBackend()..termsNotice = _aviso;
-    await tester.pumpWidget(SinalAcsApp(backend: backend));
+    await tester.pumpWidget(SinalAcsApp(backend: backend, deviceCredentials: _storeComCredencial()));
     await login(tester);
 
     expect(find.byKey(const Key('terms_change_notice_card')), findsOneWidget);
@@ -71,14 +77,14 @@ void main() {
   });
 
   testWidgets('sem aviso, não há cartão', (tester) async {
-    await tester.pumpWidget(SinalAcsApp(backend: FakePatientBackend()));
+    await tester.pumpWidget(SinalAcsApp(backend: FakePatientBackend(), deviceCredentials: _storeComCredencial()));
     await login(tester);
     expect(find.byKey(const Key('terms_change_notice_card')), findsNothing);
   });
 
   testWidgets('dispensar some com o cartão', (tester) async {
     final backend = FakePatientBackend()..termsNotice = _aviso;
-    await tester.pumpWidget(SinalAcsApp(backend: backend));
+    await tester.pumpWidget(SinalAcsApp(backend: backend, deviceCredentials: _storeComCredencial()));
     await login(tester);
     await tester.tap(find.byKey(const Key('terms_change_notice_dismiss')));
     await tester.pumpAndSettle();
@@ -87,7 +93,7 @@ void main() {
 
   testWidgets('"Ler os termos atuais" abre os documentos', (tester) async {
     final backend = FakePatientBackend()..termsNotice = _aviso;
-    await tester.pumpWidget(SinalAcsApp(backend: backend));
+    await tester.pumpWidget(SinalAcsApp(backend: backend, deviceCredentials: _storeComCredencial()));
     await login(tester);
     await tester.tap(find.byKey(const Key('terms_change_notice_read')));
     await tester.pumpAndSettle();
@@ -98,7 +104,7 @@ void main() {
     final backend = FakePatientBackend()
       ..termsNotice = _aviso
       ..termsNoticeFailure = const BackendFailure('sem rede');
-    await tester.pumpWidget(SinalAcsApp(backend: backend));
+    await tester.pumpWidget(SinalAcsApp(backend: backend, deviceCredentials: _storeComCredencial()));
     await login(tester);
     expect(find.byType(PatientHomeShell), findsOneWidget);
     expect(find.byKey(const Key('terms_change_notice_card')), findsNothing);
@@ -109,7 +115,7 @@ void main() {
     final backend = FakePatientBackend()
       ..termsNotice = _aviso
       ..termsNoticeGate = Completer<void>();
-    await tester.pumpWidget(SinalAcsApp(backend: backend));
+    await tester.pumpWidget(SinalAcsApp(backend: backend, deviceCredentials: _storeComCredencial()));
     await login(tester);
     expect(find.byType(PatientHomeShell), findsOneWidget);
     expect(find.byKey(const Key('terms_change_notice_card')), findsNothing);
@@ -134,7 +140,7 @@ void main() {
   testWidgets('o cartão não cria nó de botão inerte', (tester) async {
     final handle = tester.ensureSemantics();
     final backend = FakePatientBackend()..termsNotice = _aviso;
-    await tester.pumpWidget(SinalAcsApp(backend: backend));
+    await tester.pumpWidget(SinalAcsApp(backend: backend, deviceCredentials: _storeComCredencial()));
     await login(tester);
     expectNenhumBotaoInerte(tester);
     handle.dispose();
@@ -146,7 +152,7 @@ void main() {
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
     final backend = FakePatientBackend()..termsNotice = _aviso;
-    await tester.pumpWidget(SinalAcsApp(backend: backend));
+    await tester.pumpWidget(SinalAcsApp(backend: backend, deviceCredentials: _storeComCredencial()));
     await login(tester);
     expect(find.byKey(const Key('terms_change_notice_card')), findsOneWidget);
 
@@ -163,7 +169,7 @@ void main() {
 
   testWidgets('o cartão volta nas outras abas depois de passar pela urgência', (tester) async {
     final backend = FakePatientBackend()..termsNotice = _aviso;
-    await tester.pumpWidget(SinalAcsApp(backend: backend));
+    await tester.pumpWidget(SinalAcsApp(backend: backend, deviceCredentials: _storeComCredencial()));
     await login(tester);
     await tester.tap(find.text('Urgência'));
     await tester.pumpAndSettle();
@@ -174,7 +180,7 @@ void main() {
 
   testWidgets('com o texto novo embarcado na mesma versão do aviso, oferece "Ler o texto novo"', (tester) async {
     final backend = FakePatientBackend()..termsNotice = _aviso; // versão 2026.2
-    await tester.pumpWidget(SinalAcsApp(backend: backend, upcomingDocuments: _textoNovo));
+    await tester.pumpWidget(SinalAcsApp(backend: backend, deviceCredentials: _storeComCredencial(), upcomingDocuments: _textoNovo));
     await login(tester);
 
     await tester.tap(find.byKey(const Key('terms_change_notice_read_new')));
@@ -186,7 +192,7 @@ void main() {
 
   testWidgets('o detalhe do texto novo diz que ele AINDA NÃO vale, com a data', (tester) async {
     final backend = FakePatientBackend()..termsNotice = _aviso; // vigência 20/10/2026
-    await tester.pumpWidget(SinalAcsApp(backend: backend, upcomingDocuments: _textoNovo));
+    await tester.pumpWidget(SinalAcsApp(backend: backend, deviceCredentials: _storeComCredencial(), upcomingDocuments: _textoNovo));
     await login(tester);
     await tester.tap(find.byKey(const Key('terms_change_notice_read_new')));
     await tester.pumpAndSettle();
@@ -205,7 +211,7 @@ void main() {
 
   testWidgets('o detalhe do texto vigente continua dizendo "vigente desde"', (tester) async {
     final backend = FakePatientBackend()..termsNotice = _aviso;
-    await tester.pumpWidget(SinalAcsApp(backend: backend));
+    await tester.pumpWidget(SinalAcsApp(backend: backend, deviceCredentials: _storeComCredencial()));
     await login(tester);
     await tester.tap(find.byKey(const Key('terms_change_notice_read')));
     await tester.pumpAndSettle();
@@ -216,7 +222,7 @@ void main() {
 
   testWidgets('aviso de versão que o app não conhece: só o texto vigente, sem erro', (tester) async {
     final backend = FakePatientBackend()..termsNotice = _aviso;
-    await tester.pumpWidget(SinalAcsApp(backend: backend)); // sem texto novo embarcado
+    await tester.pumpWidget(SinalAcsApp(backend: backend, deviceCredentials: _storeComCredencial())); // sem texto novo embarcado
     await login(tester);
     expect(find.byKey(const Key('terms_change_notice_read_new')), findsNothing);
     expect(find.byKey(const Key('terms_change_notice_read')), findsOneWidget);
@@ -224,7 +230,7 @@ void main() {
 
   testWidgets('texto novo de OUTRA versão que a do aviso não é oferecido', (tester) async {
     final backend = FakePatientBackend()..termsNotice = _aviso; // 2026.2
-    await tester.pumpWidget(SinalAcsApp(backend: backend, upcomingDocuments: _textoNovoDe('2026.3')));
+    await tester.pumpWidget(SinalAcsApp(backend: backend, deviceCredentials: _storeComCredencial(), upcomingDocuments: _textoNovoDe('2026.3')));
     await login(tester);
     expect(find.byKey(const Key('terms_change_notice_read_new')), findsNothing);
   });
@@ -232,7 +238,7 @@ void main() {
   testWidgets('o título do cartão é um cabeçalho semântico', (tester) async {
     final handle = tester.ensureSemantics();
     final backend = FakePatientBackend()..termsNotice = _aviso;
-    await tester.pumpWidget(SinalAcsApp(backend: backend));
+    await tester.pumpWidget(SinalAcsApp(backend: backend, deviceCredentials: _storeComCredencial()));
     await login(tester);
     final data = tester.getSemantics(find.text('Os termos vão mudar')).getSemanticsData();
     expect(data.flagsCollection.isHeader, isTrue);

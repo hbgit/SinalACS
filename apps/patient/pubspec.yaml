@@ -19,6 +19,10 @@ dependencies:
   # Fixado na mesma versão que sinalacs_client declara; divergir quebra a resolução.
   serverpod_client: 3.4.13
   crypto: ^3.0.0
+  # Argon2id/AES-GCM do envelope do PIN e da credencial de dispositivo (C-05,
+  # RF24) — mesmo envelope que a Fase 2 da #136 reutiliza para a chave do
+  # banco local (D3 do plano 2026-11-03).
+  cryptography: ^2.7.0
   sqflite: ^2.3.0
   sqflite_common_ffi: ^2.3.0
   sqflite_sqlcipher: ^3.2.0
