@@ -22,7 +22,7 @@ Esta seção vale para o escopo atual do projeto ([`escopo_projeto.md`](escopo_p
 | Traefik | Sim | Let's Encrypt (ACME) gratuito |
 | Mosquitto | Só no pilar B com RF03 ativo | Imagem oficial no mesmo host |
 | Gorush + FCM | Não | FCM sem custo; o app funciona sem push |
-| Gateway SMS | Não usado (P-10: sem CPF e sem SMS) | **Limite atual:** fora de `development` o backend não sobe sem `SMS_GATEWAY`; retirar essa exigência é a mudança C-05, pré-requisito do piloto |
+| Gateway SMS | Não usado (P-10: sem CPF e sem SMS) | Entregue na C-05 (issue #128): fora de `development` a ausência de `SMS_GATEWAY` não é mais erro de boot — `auth.requestOtp` fica desligado e recusa explicitamente |
 | Play Store | Não (Futuro) | APK em GitHub Releases |
 
 **Distribuição (M-03).** O app é distribuído como APK assinado publicado em GitHub Releases, gratuito. A Play Store exige conta de desenvolvedor paga e fica como Futuro. A chave de assinatura de release ainda precisa ser provisionada (pendência já registrada no `CLAUDE.md`). Custódia do repositório e da chave de assinatura: decisão proposta P-13 (status: Proposta).

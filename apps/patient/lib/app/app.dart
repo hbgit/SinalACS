@@ -4,7 +4,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart' show ProviderScope;
 import 'package:flutter/services.dart'
-    show Clipboard, ClipboardData, TextEditingValue, TextInputFormatter, TextSelection;
+    show Clipboard, ClipboardData, FilteringTextInputFormatter;
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:sinalacs_client/sinalacs_client.dart'
     show
@@ -41,6 +41,10 @@ import 'package:sinalacs_patient/core/storage/keystore_key_provider.dart';
 import 'package:sinalacs_patient/core/storage/local_data_control.dart';
 import 'package:sinalacs_patient/core/storage/local_database_key.dart'
     show LocalDatabaseUnavailableException;
+import 'package:sinalacs_patient/core/security/device_credential_store.dart';
+import 'package:sinalacs_patient/core/security/device_identity.dart';
+import 'package:sinalacs_patient/core/security/pin_envelope.dart';
+import 'package:sinalacs_patient/core/security/pin_policy.dart';
 import 'package:sinalacs_patient/core/services/theme_controller.dart';
 
 class SinalAcsApp extends StatefulWidget {
@@ -57,6 +61,7 @@ class SinalAcsApp extends StatefulWidget {
     this.pushTokens,
     this.upcomingDocuments,
     this.themeController,
+    this.deviceCredentials,
   });
 
   /// Backend do app. **Obrigatório, e construído em `main.dart`.**
@@ -113,6 +118,11 @@ class SinalAcsApp extends StatefulWidget {
   final UpcomingLegalDocuments? upcomingDocuments;
   final ThemeController? themeController;
 
+  /// Injetável para teste. Em execução normal é o
+  /// [SecureStorageDeviceCredentialStore] real, sobre o Keystore/Keychain do
+  /// aparelho (C-05).
+  final DeviceCredentialStore? deviceCredentials;
+
   @override
   State<SinalAcsApp> createState() => _SinalAcsAppState();
 }
@@ -135,6 +145,8 @@ class _SinalAcsAppState extends State<SinalAcsApp> {
       widget.consentPreferences ?? _localStores!.consent;
   late final LocalDataControl? _localDataControl = widget.localDataControl ?? _localStores?.database;
   late final QrScanner _qrScanner = widget.qrScanner ?? scanQrWithCamera;
+  late final DeviceCredentialStore _deviceCredentials =
+      widget.deviceCredentials ?? SecureStorageDeviceCredentialStore();
   // O parâmetro (teste) tem precedência; senão, o provider Riverpod, se houver um
   // `ProviderScope` acima; senão, sem push. Lido em `didChangeDependencies`.
   PushTokenSource _pushTokens = const NoPushTokenSource();
@@ -196,15 +208,18 @@ class _SinalAcsAppState extends State<SinalAcsApp> {
               documents: widget.upcomingDocuments ?? upcomingLegalDocuments,
               child: QrScannerScope(
                 scanner: _qrScanner,
-                child: ValueListenableBuilder<ThemeMode>(
-                  valueListenable: _themeController,
-                  builder: (context, mode, _) => MaterialApp(
-                    title: 'SinalACS Paciente',
-                    debugShowCheckedModeBanner: false,
-                    theme: buildPatientLightTheme(),
-                    darkTheme: buildPatientDarkTheme(),
-                    themeMode: mode,
-                    home: PatientLoginScreen(themeController: _themeController),
+                child: DeviceCredentialScope(
+                  store: _deviceCredentials,
+                  child: ValueListenableBuilder<ThemeMode>(
+                    valueListenable: _themeController,
+                    builder: (context, mode, _) => MaterialApp(
+                      title: 'SinalACS Paciente',
+                      debugShowCheckedModeBanner: false,
+                      theme: buildPatientLightTheme(),
+                      darkTheme: buildPatientDarkTheme(),
+                      themeMode: mode,
+                      home: PatientLoginScreen(themeController: _themeController),
+                    ),
                   ),
                 ),
               ),
@@ -229,6 +244,25 @@ class UpcomingDocumentsScope extends InheritedWidget {
 
   @override
   bool updateShouldNotify(UpcomingDocumentsScope oldWidget) => documents != oldWidget.documents;
+}
+
+/// Disponibiliza a custódia da credencial de dispositivo (C-05) para a árvore
+/// de widgets. Mesmo padrão de `QrScannerScope`/`BackendScope`: a tela não
+/// constrói o próprio store, o que permite injetar um duplo em teste hermético
+/// sem tocar no Keystore.
+class DeviceCredentialScope extends InheritedWidget {
+  const DeviceCredentialScope({required this.store, required super.child, super.key});
+
+  final DeviceCredentialStore store;
+
+  static DeviceCredentialStore of(BuildContext context) {
+    final scope = context.dependOnInheritedWidgetOfExactType<DeviceCredentialScope>();
+    assert(scope != null, 'Nenhum DeviceCredentialScope acima deste widget.');
+    return scope!.store;
+  }
+
+  @override
+  bool updateShouldNotify(DeviceCredentialScope oldWidget) => store != oldWidget.store;
 }
 
 /// Disponibiliza o [LocationReader] para a árvore de widgets.
@@ -302,232 +336,118 @@ class PatientLoginScreen extends StatefulWidget {
   State<PatientLoginScreen> createState() => _PatientLoginScreenState();
 }
 
-/// Passo do acesso: as credenciais (CPF + nascimento) ou o código que chegou
-/// por SMS (RF01).
-enum _LoginStep { credenciais, codigo }
-
-/// Máscara de CPF do app: 11 dígitos exibidos como `000.000.000-00`.
-///
-/// O backend normaliza de qualquer forma (`Cpf.tryParse` aceita o texto cru),
-/// mas o app tem um formato de exibição próprio — e é esse formato que sai
-/// daqui: o que a tela mostra e o que vai para o servidor precisam ser a mesma
-/// coisa, senão dois lugares passam a discordar sobre o que é "o mesmo CPF".
-String _formatCpf(String input) {
-  final digits = input.replaceAll(RegExp(r'\D'), '');
-  final limited = digits.length > 11 ? digits.substring(0, 11) : digits;
-  final buffer = StringBuffer();
-  for (var index = 0; index < limited.length; index++) {
-    if (index == 3 || index == 6) buffer.write('.');
-    if (index == 9) buffer.write('-');
-    buffer.write(limited[index]);
-  }
-  return buffer.toString();
-}
-
-/// Aplica [_formatCpf] enquanto a pessoa digita.
-///
-/// O cursor é recolocado depois do mesmo número de dígitos, e não no fim do
-/// campo: sem isso, corrigir um dígito do meio jogaria o cursor para o final a
-/// cada tecla.
-class _CpfInputFormatter extends TextInputFormatter {
-  const _CpfInputFormatter();
-
-  @override
-  TextEditingValue formatEditUpdate(
-    TextEditingValue oldValue,
-    TextEditingValue newValue,
-  ) {
-    final formatted = _formatCpf(newValue.text);
-    if (!newValue.selection.isValid) {
-      return TextEditingValue(text: formatted);
-    }
-
-    final digitsBeforeCursor = RegExp(r'\d')
-        .allMatches(newValue.text.substring(0, newValue.selection.baseOffset))
-        .length;
-    var offset = 0;
-    var seen = 0;
-    while (offset < formatted.length && seen < digitsBeforeCursor) {
-      if (RegExp(r'\d').hasMatch(formatted[offset])) seen++;
-      offset++;
-    }
-
-    return TextEditingValue(
-      text: formatted,
-      selection: TextSelection.collapsed(offset: offset),
-    );
-  }
-}
-
 /// Quanto o login espera pela checagem do aceite do termo antes de entrar sem ela.
 const _termsCheckTimeout = Duration(seconds: 3);
 
+/// Acesso do participante (RF24, C-05).
+///
+/// Dois caminhos, decididos pela presença de uma credencial de dispositivo
+/// guardada neste aparelho (protegida pelo PIN local, nunca lida sem ele):
+///
+/// - **sem credencial:** a pessoa lê o convite QR do agente (a tela de
+///   onboarding, com consentimentos, termo e a criação do PIN);
+/// - **com credencial:** a pessoa digita o PIN, o segredo é liberado do
+///   envelope e `auth.loginDevice` emite a sessão de 1 hora.
+///
+/// O fluxo não tem campo de CPF, telefone nem e-mail — o login do piloto não
+/// coleta nenhum dos três (P-10, RNF09). Esqueceu o PIN: descarte a cópia
+/// local e peça um convite novo (a recuperação formal é a C-12).
 class _PatientLoginScreenState extends State<PatientLoginScreen> {
-  final _cpf = TextEditingController();
-  final _nascimento = TextEditingController();
-  final _codigo = TextEditingController();
+  final _pin = TextEditingController();
 
-  _LoginStep _step = _LoginStep.credenciais;
+  /// `false` enquanto a leitura da credencial guardada não terminou: a tela
+  /// mostra progresso, para nunca piscar o formulário de PIN para quem não o
+  /// tem (e vice-versa).
+  bool _loaded = false;
   bool _busy = false;
+  bool _storeChecked = false;
   String? _error;
+  String? _deviceId;
 
-  /// Intervalo mínimo entre dois pedidos de código para o mesmo CPF,
-  /// espelhando o que o servidor já impõe (`PasswordlessAuthService`) — o
-  /// servidor não envia um segundo SMS dentro da janela e não diz nada
-  /// diferente por design (fecha um oráculo de tempo), então só o app sabe
-  /// quando o último pedido saiu.
-  static const _otpResendCooldown = Duration(seconds: 60);
+  /// Bloqueio por tentativas de PIN: `null` = liberado.
+  Duration? _lockRemaining;
+  Timer? _lockTicker;
 
-  /// `null` até o primeiro `requestOtp` bem-sucedido desta sessão de tela.
-  DateTime? _ultimoPedidoEm;
-  Timer? _cooldownTicker;
-
-  /// CPF exatamente como foi enviado em [PatientBackend.requestOtp].
-  ///
-  /// [PatientBackend.verifyOtp] precisa do **mesmo** valor, e reler o campo do
-  /// formulário no segundo passo devolveria o que a pessoa deixou lá — que pode
-  /// ter mudado no meio do caminho.
-  String? _cpfDigitado;
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_storeChecked) return;
+    _storeChecked = true;
+    unawaited(_carregarCredencial());
+  }
 
   @override
   void dispose() {
-    _cpf.dispose();
-    _nascimento.dispose();
-    _codigo.dispose();
-    _cooldownTicker?.cancel();
+    _pin.dispose();
+    _lockTicker?.cancel();
     super.dispose();
   }
 
-  /// Quanto falta para liberar um novo pedido de código, ou [Duration.zero]
-  /// se já passou (ou nunca houve pedido).
-  Duration _cooldownRestante() {
-    final ultimo = _ultimoPedidoEm;
-    if (ultimo == null) return Duration.zero;
-    final decorrido = DateTime.now().difference(ultimo);
-    if (decorrido >= _otpResendCooldown) return Duration.zero;
-    return _otpResendCooldown - decorrido;
-  }
-
-  /// Reconstrói a tela a cada segundo enquanto o cooldown estiver ativo, só
-  /// para a contagem regressiva do aviso — sem depender de resposta nenhuma
-  /// do servidor, que não distingue mais os dois casos de propósito.
-  void _iniciarCooldownTicker() {
-    _cooldownTicker?.cancel();
-    _cooldownTicker = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (!mounted) {
-        timer.cancel();
-        return;
-      }
-      if (_cooldownRestante() == Duration.zero) {
-        timer.cancel();
-      }
-      setState(() {});
+  Future<void> _carregarCredencial() async {
+    final String? id;
+    try {
+      // Teto: um Keystore travado não pode deixar a tela presa no progresso
+      // para sempre. Estourou, falha fechado — sem credencial legível, a
+      // tela oferece o convite (entrar com um convite novo continua sendo
+      // possível; reabrir o acesso existente, não — melhor que travar o app).
+      id = await DeviceCredentialScope.of(context)
+          .deviceId()
+          .timeout(const Duration(seconds: 5));
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _loaded = true;
+        _deviceId = null;
+      });
+      return;
+    }
+    if (!mounted) return;
+    setState(() {
+      _loaded = true;
+      _deviceId = id;
     });
   }
 
-  /// Converte o que a pessoa digitou em data e pede o código (RF01).
-  ///
-  /// A data vem como `DD/MM/AAAA` da máscara do campo. Um valor que não
-  /// converte é erro de digitação — e a tela diz isso, em vez de mandar um
-  /// pedido que o servidor vai ignorar em silêncio (a resposta dele é a mesma
-  /// para "não existe" e "data errada", de propósito).
-  DateTime? _parseNascimento(String input) {
-    final partes = input.trim().split(RegExp(r'[/-]'));
-    if (partes.length != 3) return null;
-    final dia = int.tryParse(partes[0]);
-    final mes = int.tryParse(partes[1]);
-    final ano = int.tryParse(partes[2]);
-    if (dia == null || mes == null || ano == null) return null;
-    if (dia < 1 || dia > 31 || mes < 1 || mes > 12 || ano < 1900 || ano > 2100) {
-      return null;
+  /// Reconstrói a tela a cada segundo enquanto o bloqueio por tentativas
+  /// estiver ativo, só para a contagem regressiva do aviso.
+  Future<void> _refreshLockout() async {
+    final remaining = await DeviceCredentialScope.of(context).remainingLockout();
+    if (!mounted) return;
+    setState(() => _lockRemaining = remaining);
+    _lockTicker?.cancel();
+    if (remaining != null) {
+      _lockTicker = Timer.periodic(const Duration(seconds: 1), (_) {
+        if (!mounted) return;
+        unawaited(_refreshLockout());
+      });
     }
-    final data = DateTime.utc(ano, mes, dia);
-    // `DateTime.utc` normaliza dia inexistente em vez de recusá-lo: 31/02 vira
-    // 02/03. Sem esta checagem, o erro de digitação viraria uma data válida e
-    // diferente da cadastrada — e o servidor, de propósito, não diz nada sobre
-    // data errada. Por isso a conferência é contra o que foi digitado.
-    if (data.day != dia || data.month != mes || data.year != ano) return null;
-    return data;
   }
 
-  Future<void> _pedirCodigo() async {
-    final nascimento = _parseNascimento(_nascimento.text);
-    if (nascimento == null) {
-      setState(() => _error = 'Confira a data de nascimento (DD/MM/AAAA).');
+  /// Libera o segredo com o PIN e entra por `auth.loginDevice` (RF24).
+  Future<void> _entrarComPin() async {
+    final store = DeviceCredentialScope.of(context);
+    final backend = BackendScope.of(context);
+    if (await store.remainingLockout() != null) {
+      await _refreshLockout();
       return;
     }
 
-    final cpf = _formatCpf(_cpf.text);
     setState(() {
       _busy = true;
       _error = null;
     });
 
     try {
-      await BackendScope.of(context).requestOtp(
-        cpf: cpf,
-        birthDate: nascimento,
+      final credential = await store.unlock(_pin.text);
+      await backend.loginDevice(
+        deviceId: credential.deviceId,
+        deviceSecret: credential.secret,
       );
       if (!mounted) return;
-      setState(() {
-        _busy = false;
-        _cpfDigitado = cpf;
-        _codigo.clear();
-        _step = _LoginStep.codigo;
-        _ultimoPedidoEm = DateTime.now();
-      });
-      _iniciarCooldownTicker();
-    } on BackendFailure catch (failure) {
-      if (!mounted) return;
-      setState(() {
-        _busy = false;
-        _error = failure.message;
-      });
-    }
-  }
-
-  /// Quem entrou por OTP sem onboarding, ou com aceite de versão anterior,
-  /// recebe o convite ao aceite (LGPD-RF18). Falhou a leitura → entra direto:
-  /// o alerta de emergência não espera por um aceite.
-  Future<bool> _needsTerms() async {
-    try {
-      // Teto curto: a espera padrão do cliente é de 20 s, e esta checagem não
-      // pode ficar entre um login já verificado e o alerta de urgência.
-      final accepted =
-          await BackendScope.of(context).hasAcceptedCurrentTerms().timeout(_termsCheckTimeout);
-      return !accepted;
-    } on BackendFailure {
-      return false;
-    } on TimeoutException {
-      return false;
-    }
-  }
-
-  /// Verifica o código e só navega em caso de sucesso.
-  ///
-  /// Antes a tela navegava incondicionalmente, ignorando o que era digitado —
-  /// não havia como saber se o backend estava sequer alcançável.
-  Future<void> _entrar() async {
-    final cpf = _cpfDigitado;
-    // Inalcançável hoje: o passo do código só existe depois do sucesso de
-    // `_pedirCodigo`, que é quem guarda `_cpfDigitado`. O `assert` está aqui
-    // para que uma tela futura que torne o passo alcançável sem CPF falhe alto
-    // em desenvolvimento, em vez de deixar o CTA principal num no-op silencioso
-    // (o `return` abaixo continua sendo o comportamento de release).
-    assert(cpf != null, 'o passo do código exige o CPF guardado por _pedirCodigo');
-    if (cpf == null) return;
-
-    setState(() {
-      _busy = true;
-      _error = null;
-    });
-
-    try {
-      await BackendScope.of(context).verifyOtp(cpf: cpf, code: _codigo.text.trim());
-      if (!mounted) return;
-      unawaited(registerPushDevice(BackendScope.of(context), PushTokenScope.maybeOf(context)));
+      unawaited(registerPushDevice(backend, PushTokenScope.maybeOf(context)));
       final needsTerms = await _needsTerms();
       if (!mounted) return;
+      _pin.clear();
       MaterialPageRoute<void> home() => MaterialPageRoute<void>(
             builder: (_) => PatientHomeShell(
               initialDestination: PatientDestination.triage,
@@ -543,21 +463,85 @@ class _PatientLoginScreenState extends State<PatientLoginScreen> {
               )
             : home(),
       );
-    } on BackendFailure catch (failure) {
+    } on WrongPinException {
       if (!mounted) return;
       setState(() {
         _busy = false;
-        _error = failure.message;
+        _error = 'PIN incorreto. Tente de novo.';
       });
+      await _refreshLockout();
+    } on BackendFailure catch (failure) {
+      if (!mounted) return;
+      if (failure.credentialRefused) {
+        // Segredo errado, aparelho desconhecido ou credencial revogada: a
+        // cópia local nunca mais vai entrar. Descarta e volta ao convite.
+        await store.destroy();
+        if (!mounted) return;
+        setState(() {
+          _busy = false;
+          _deviceId = null;
+          _error = failure.message;
+        });
+      } else {
+        setState(() {
+          _busy = false;
+          _error = failure.message;
+        });
+      }
     }
   }
 
-  void _voltarParaCredenciais() {
+  /// Esqueceu o PIN: apaga a credencial local e devolve a tela ao convite.
+  /// O acesso do servidor continua valendo até a C-12 revogá-lo com um
+  /// convite novo — aqui só o aparelho deixa de conseguir entrar.
+  Future<void> _esqueciOPin() async {
+    final confirmou = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Esqueceu o PIN?'),
+        content: const Text(
+          'O acesso deste aparelho será removido. Para entrar de novo, peça '
+          'um novo convite ao agente de saúde.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            key: const Key('forgot_pin_confirm_button'),
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Remover acesso'),
+          ),
+        ],
+      ),
+    );
+    if (confirmou != true || !mounted) return;
+    await DeviceCredentialScope.of(context).destroy();
+    if (!mounted) return;
     setState(() {
-      _step = _LoginStep.credenciais;
-      _error = null;
-      _codigo.clear();
+      _deviceId = null;
+      _error = 'Acesso removido deste aparelho. Peça um novo convite ao agente.';
+      _pin.clear();
     });
+    await _refreshLockout();
+  }
+
+  /// Quem entrou sem onboarding, ou com aceite de versão anterior, recebe o
+  /// convite ao aceite (LGPD-RF18). Falhou a leitura → entra direto: o alerta
+  /// de emergência não espera por um aceite.
+  Future<bool> _needsTerms() async {
+    try {
+      // Teto curto: a espera padrão do cliente é de 20 s, e esta checagem não
+      // pode ficar entre um login já verificado e o alerta de urgência.
+      final accepted =
+          await BackendScope.of(context).hasAcceptedCurrentTerms().timeout(_termsCheckTimeout);
+      return !accepted;
+    } on BackendFailure {
+      return false;
+    } on TimeoutException {
+      return false;
+    }
   }
 
   @override
@@ -587,22 +571,36 @@ class _PatientLoginScreenState extends State<PatientLoginScreen> {
                         const SizedBox(height: 16),
                         const Text('SinalACS', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
                         const SizedBox(height: 8),
-                        Text(
-                          _step == _LoginStep.credenciais ? 'Acesso sem senha' : 'Código de acesso',
-                          style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                        const Text(
+                          'Acesso do participante',
+                          style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
                         ),
                         const SizedBox(height: 8),
                         Text(
-                          _step == _LoginStep.credenciais
-                              ? 'Use CPF e data de nascimento para receber o código de acesso.'
-                              // Nem "enviado para o seu celular": o app não sabe o
-                              // telefone cadastrado, e afirmar isso seria inventar.
-                              : 'Digite o código de 6 dígitos enviado pela sua unidade de saúde.',
+                          _deviceId == null
+                              ? 'Leia o convite QR mostrado pelo agente de saúde para '
+                                  'criar o acesso deste aparelho.'
+                              : 'Digite o PIN deste aparelho para entrar.',
                           textAlign: TextAlign.center,
                           style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
                         ),
                         const SizedBox(height: 24),
-                        if (_step == _LoginStep.credenciais) ..._camposDeCredenciais() else ..._camposDoCodigo(),
+                        if (!_loaded)
+                          // Estático de propósito: um indicador animado aqui
+                          // segura o `pumpAndSettle` dos testes e não agrega
+                          // nada — a leitura da credencial leva milissegundos.
+                          const Padding(
+                            padding: EdgeInsets.all(16),
+                            child: SizedBox(
+                              height: 48,
+                              width: 48,
+                              child: Icon(Icons.key_rounded, size: 32),
+                            ),
+                          )
+                        else if (_deviceId == null)
+                          ..._camposDoConvite()
+                        else
+                          ..._camposDoPin(),
                         if (_error != null)
                           Padding(
                             padding: const EdgeInsets.only(top: 16),
@@ -622,30 +620,6 @@ class _PatientLoginScreenState extends State<PatientLoginScreen> {
                               ),
                             ),
                           ),
-                        if (_step == _LoginStep.credenciais) ...[
-                          const SizedBox(height: 12),
-                          SizedBox(
-                            width: double.infinity,
-                            child: OutlinedButton.icon(
-                              key: const Key('start_onboarding_button'),
-                              onPressed: () => Navigator.of(context).push(
-                                MaterialPageRoute(
-                                  builder: (_) => OnboardingScreen(themeController: widget.themeController),
-                                ),
-                              ),
-                              icon: const Icon(Icons.qr_code_scanner_outlined),
-                              label: const Text('Escanear QR Code do ACS'),
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          TextButton(
-                            key: const Key('login_legal_link'),
-                            onPressed: () => Navigator.of(context).push(
-                              MaterialPageRoute(builder: (_) => const LegalDocumentsScreen()),
-                            ),
-                            child: const Text('Política de Privacidade e Termo de Uso'),
-                          ),
-                        ],
                       ],
                     ),
                   ),
@@ -658,82 +632,54 @@ class _PatientLoginScreenState extends State<PatientLoginScreen> {
     );
   }
 
-  List<Widget> _camposDeCredenciais() {
-    final restante = _cooldownRestante();
-    final emCooldown = restante > Duration.zero;
+  List<Widget> _camposDoConvite() => [
+        SizedBox(
+          width: double.infinity,
+          child: FilledButton.icon(
+            key: const Key('start_onboarding_button'),
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => OnboardingScreen(themeController: widget.themeController),
+              ),
+            ),
+            style: FilledButton.styleFrom(minimumSize: const Size(48, 52)),
+            icon: const Icon(Icons.qr_code_scanner_outlined),
+            label: const Text('Ler convite QR Code do agente'),
+          ),
+        ),
+        const SizedBox(height: 4),
+        TextButton(
+          key: const Key('login_legal_link'),
+          onPressed: () => Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const LegalDocumentsScreen()),
+          ),
+          child: const Text('Política de Privacidade e Termo de Uso'),
+        ),
+      ];
+
+  List<Widget> _camposDoPin() {
+    final bloqueado = _lockRemaining != null;
     return [
       TextField(
-        key: const Key('cpf_field'),
-        controller: _cpf,
+        key: const Key('pin_field'),
+        controller: _pin,
         keyboardType: TextInputType.number,
-        inputFormatters: const [_CpfInputFormatter()],
+        obscureText: true,
+        inputFormatters: [FilteringTextInputFormatter.digitsOnly],
         decoration: const InputDecoration(
-          labelText: 'CPF do paciente',
-          hintText: '000.000.000-00',
-        ),
-      ),
-      const SizedBox(height: 16),
-      TextField(
-        key: const Key('birth_date_field'),
-        controller: _nascimento,
-        keyboardType: TextInputType.datetime,
-        decoration: const InputDecoration(
-          labelText: 'Data de nascimento',
-          hintText: 'DD/MM/AAAA',
+          labelText: 'PIN de acesso',
+          hintText: '6 números ou mais',
         ),
       ),
       const SizedBox(height: 20),
       // Sem `Semantics` em volta: o `Text` do botão já é o nome acessível, o
-      // `FilledButton` já expõe papel e ação de toque. Um wrapper com outro
-      // `label` e `container: true` não funde com o botão — cria um nó
-      // próprio, **sem ação**, anunciado ANTES do botão real: nome que não
-      // contém o texto visível (WCAG 2.5.3, nível A) e nó inerte (WCAG 4.1.2).
+      // `FilledButton` já expõe papel e ação de toque (mesma correção WCAG
+      // 2.5.3/4.1.2 do botão de EMERGÊNCIA).
       SizedBox(
         width: double.infinity,
         child: FilledButton(
-          key: const Key('enter_button'),
-          onPressed: (_busy || emCooldown) ? null : _pedirCodigo,
-          style: FilledButton.styleFrom(minimumSize: const Size(48, 52)),
-          child: _busy
-              ? const SizedBox(
-                  height: 22,
-                  width: 22,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              : const Text('Entrar sem senha'),
-        ),
-      ),
-      if (emCooldown) ...[
-        const SizedBox(height: 8),
-        // SC 4.1.3: sem `liveRegion` quem usa leitor de tela não saberia por
-        // que o botão que acabou de usar ficou desativado.
-        Semantics(
-          liveRegion: true,
-          child: Text(
-            key: const Key('otp_cooldown_message'),
-            'Você pode pedir um novo código em ${restante.inSeconds}s.',
-            textAlign: TextAlign.center,
-            style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
-          ),
-        ),
-      ],
-    ];
-  }
-
-  List<Widget> _camposDoCodigo() => [
-        TextField(
-          key: const Key('otp_code_field'),
-          controller: _codigo,
-          keyboardType: TextInputType.number,
-          decoration: const InputDecoration(
-            labelText: 'Código de acesso',
-            hintText: '000000',
-          ),
-        ),
-        const SizedBox(height: 20),
-        FilledButton(
-          key: const Key('verify_code_button'),
-          onPressed: _busy ? null : _entrar,
+          key: const Key('pin_unlock_button'),
+          onPressed: (_busy || bloqueado) ? null : _entrarComPin,
           style: FilledButton.styleFrom(minimumSize: const Size(48, 52)),
           child: _busy
               ? const SizedBox(
@@ -743,25 +689,33 @@ class _PatientLoginScreenState extends State<PatientLoginScreen> {
                 )
               : const Text('Entrar'),
         ),
-        const SizedBox(height: 12),
-        // Não repete o pedido: dentro de um minuto o servidor **não envia** um
-        // segundo código para o mesmo CPF — e não responde nada de diferente,
-        // de propósito: um aviso de "aguarde um minuto" só seria alcançável por
-        // quem já acertou CPF e nascimento, ou seja, seria o verificador do par.
-        // Voltar ao passo anterior devolve o controle a quem está logando; o
-        // aviso de quanto falta é responsabilidade DESTE lado — é o app que
-        // sabe quando o pedido anterior saiu — e mora em `enter_button`, no
-        // passo de credenciais (`_camposDeCredenciais`, `_otpResendCooldown`).
-        SizedBox(
-          width: double.infinity,
-          child: OutlinedButton(
-            key: const Key('request_new_code_button'),
-            onPressed: _busy ? null : _voltarParaCredenciais,
-            style: OutlinedButton.styleFrom(minimumSize: const Size(48, 52)),
-            child: const Text('Pedir outro código'),
+      ),
+      if (bloqueado) ...[
+        const SizedBox(height: 8),
+        // SC 4.1.3: sem `liveRegion` quem usa leitor de tela não saberia por
+        // que o botão que acabou de usar ficou desativado.
+        Semantics(
+          liveRegion: true,
+          child: Text(
+            key: const Key('pin_lockout_message'),
+            'Muitas tentativas. Tente de novo em ${_lockRemaining!.inSeconds}s.',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
           ),
         ),
-      ];
+      ],
+      const SizedBox(height: 12),
+      SizedBox(
+        width: double.infinity,
+        child: TextButton(
+          key: const Key('forgot_pin_button'),
+          onPressed: _busy ? null : _esqueciOPin,
+          style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
+          child: const Text('Esqueceu o PIN? Peça um novo convite'),
+        ),
+      ),
+    ];
+  }
 }
 
 /// Tela de onboarding: consome o convite de uso único gerado pelo ACS e
@@ -856,66 +810,26 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       return;
     }
 
+    // O próximo passo cria o PIN local e a credencial de dispositivo (C-05):
+    // a conclusão no servidor (`completeEnrollment`) acontece LÁ, junto com a
+    // gravação do envelope do PIN — o token e as decisões de consentimento
+    // seguem com a tela.
     setState(() {
-      _busy = true;
+      _busy = false;
       _error = null;
     });
-
-    try {
-      await BackendScope.of(context).completeEnrollment(
-        token: token,
-        healthDataConsent: _healthDataConsent,
-        remindersConsent: _remindersConsent,
-        pushConsent: _pushConsent,
-        termsAccepted: _termsAccepted,
-      );
-      if (!mounted) return;
-      // Espelha localmente a resposta já enviada ao backend — é o único
-      // momento em que o app conhece essa decisão; `RemindersScreen` não
-      // tem outro jeito de saber se pode agendar notificações (RF06 é local
-      // ao aparelho, sem endpoint de consulta de consentimento no backend).
-      // Best-effort: o backend já gravou a decisão (fonte de verdade); se a
-      // cópia local falhar, o app não pode travar a conclusão do cadastro
-      // por causa disso — e `localRemindersGranted()` já degrada para
-      // recusado (fail closed) quando não há linha local, então uma falha
-      // aqui nunca resulta em agendar sem consentimento.
-      try {
-        // Limite de 3 s: a escrita agora custa leitura do Keystore + abertura do
-        // SQLCipher + migração possível, e a tela inicial (e o alerta de
-        // emergência) não espera mais que isso. Estourou: segue sem a cópia
-        // local, que degrada para recusa (fail closed).
-        await RemindersScope.of(context)
-            .consentPreferences
-            .saveLocalRemindersConsent(_remindersConsent)
-            .timeout(const Duration(seconds: 3));
-      } catch (_) {
-        // Intencionalmente silencioso — ver comentário acima.
-      }
-      if (!mounted) return;
-      // O cadastro acabou de gravar a decisão: sem consentimento, nem chega ao
-      // provedor; com ele, dispensa a consulta ao servidor.
-      if (_pushConsent) {
-        unawaited(registerPushDevice(BackendScope.of(context), PushTokenScope.maybeOf(context),
-            consentKnownGranted: true));
-      }
-      // Mesmo caminho que `_PatientLoginScreenState._enter()` já usa para
-      // entrar na navegação principal — a sessão já está em `BackendScope`,
-      // não há estado novo para duplicar aqui.
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(
-          builder: (_) => PatientHomeShell(
-            themeController: widget.themeController,
-            initialDestination: PatientDestination.triage,
-          ),
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => PinSetupScreen(
+          themeController: widget.themeController,
+          token: token,
+          healthDataConsent: _healthDataConsent,
+          remindersConsent: _remindersConsent,
+          pushConsent: _pushConsent,
+          termsAccepted: _termsAccepted,
         ),
-      );
-    } on BackendFailure catch (failure) {
-      if (!mounted) return;
-      setState(() {
-        _busy = false;
-        _error = failure.message;
-      });
-    }
+      ),
+    );
   }
 
   @override
@@ -1085,6 +999,234 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   }
 }
 
+/// Criação do PIN local e da credencial de dispositivo (C-05, RF24): o passo
+/// final do onboarding, aberto pela tela de convite depois dos consentimentos
+/// e do termo.
+///
+/// Ordem deliberada, falha-segura:
+/// 1. sorteia `deviceId` (UUID de instalação) + segredo e **grava o envelope
+///    do PIN** no Keystore (`DeviceCredentialStore.enroll`);
+/// 2. só então chama `completeEnrollment` no servidor — que consome o convite
+///    e cria a credencial na MESMA transação dos consentimentos;
+/// 3. se a chamada falhar, o envelope local é destruído: não fica credencial
+///    órfã para um convite que ainda não foi consumido (a pessoa lê o mesmo
+///    QR de novo).
+///
+/// Se o app morrer entre 1 e 2, a credencial local existe sem par no
+/// servidor; a próxima abertura recusa no login e oferece o convite de novo
+/// — desfecho documentado, sem perda de dados (tudo no servidor fica com o
+/// identificador pseudônimo).
+class PinSetupScreen extends StatefulWidget {
+  const PinSetupScreen({
+    required this.themeController,
+    required this.token,
+    required this.healthDataConsent,
+    required this.remindersConsent,
+    required this.pushConsent,
+    required this.termsAccepted,
+    super.key,
+  });
+
+  final ThemeController themeController;
+  final String token;
+  final bool healthDataConsent;
+  final bool remindersConsent;
+  final bool pushConsent;
+  final bool termsAccepted;
+
+  @override
+  State<PinSetupScreen> createState() => _PinSetupScreenState();
+}
+
+class _PinSetupScreenState extends State<PinSetupScreen> {
+  final _pin = TextEditingController();
+  final _confirm = TextEditingController();
+  bool _busy = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _pin.dispose();
+    _confirm.dispose();
+    super.dispose();
+  }
+
+  Future<void> _concluir() async {
+    final pin = _pin.text;
+    if (pin != _confirm.text) {
+      setState(() => _error = 'Os PINs digitados não são iguais.');
+      return;
+    }
+    final weakness = pinWeakness(pin);
+    if (weakness != null) {
+      setState(() => _error = weakness);
+      return;
+    }
+
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+
+    final store = DeviceCredentialScope.of(context);
+    final backend = BackendScope.of(context);
+    final deviceId = generateUuidV4();
+    final deviceSecret = generateDeviceSecret();
+    try {
+      // 1. Envelope local primeiro (ver doc da classe para o porquê).
+      await store.enroll(pin: pin, deviceId: deviceId, secret: deviceSecret);
+      try {
+        // 2. Servidor: convite + consentimentos + credencial numa transação.
+        await backend.completeEnrollment(
+          token: widget.token,
+          healthDataConsent: widget.healthDataConsent,
+          remindersConsent: widget.remindersConsent,
+          pushConsent: widget.pushConsent,
+          termsAccepted: widget.termsAccepted,
+          deviceId: deviceId,
+          deviceSecret: deviceSecret,
+        );
+      } catch (_) {
+        // 3. Falhou: desfaz o envelope para o convite não consumido poder ser
+        //    lido de novo do mesmo QR.
+        await store.destroy();
+        rethrow;
+      }
+      if (!mounted) return;
+
+      // Espelha localmente a decisão de lembretes já gravada no servidor —
+      // o mesmo código que a tela de onboarding fazia aqui (RF06 é local ao
+      // aparelho, sem endpoint de consulta). Best-effort, fail closed.
+      try {
+        await RemindersScope.of(context)
+            .consentPreferences
+            .saveLocalRemindersConsent(widget.remindersConsent)
+            .timeout(const Duration(seconds: 3));
+      } catch (_) {
+        // Intencionalmente silencioso — ver comentário herdado do onboarding.
+      }
+      if (!mounted) return;
+      if (widget.pushConsent) {
+        unawaited(registerPushDevice(BackendScope.of(context), PushTokenScope.maybeOf(context),
+            consentKnownGranted: true));
+      }
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(
+          builder: (_) => PatientHomeShell(
+            themeController: widget.themeController,
+            initialDestination: PatientDestination.triage,
+          ),
+        ),
+      );
+    } on BackendFailure catch (failure) {
+      if (!mounted) return;
+      setState(() {
+        _busy = false;
+        _error = failure.message;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: const _PatientHeader(
+        eyebrow: 'Convite do ACS',
+        title: 'Criar PIN de acesso',
+      ),
+      body: SafeArea(
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 420),
+            child: ListView(
+              padding: const EdgeInsets.all(24),
+              children: [
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Text(
+                          'Crie um PIN para proteger o acesso deste aparelho. '
+                          'Ele será pedido a cada vez que você entrar.',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+                        ),
+                        const SizedBox(height: 12),
+                        Text(
+                          'Use 6 números ou mais. Evite números repetidos, '
+                          'sequências como 123456 ou 987654 e alternâncias '
+                          'como 121212.',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: Theme.of(context).colorScheme.onSurfaceVariant,
+                            fontSize: 12,
+                          ),
+                        ),
+                        const SizedBox(height: 20),
+                        TextField(
+                          key: const Key('pin_setup_field'),
+                          controller: _pin,
+                          keyboardType: TextInputType.number,
+                          obscureText: true,
+                          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                          decoration: const InputDecoration(labelText: 'PIN de acesso'),
+                        ),
+                        const SizedBox(height: 16),
+                        TextField(
+                          key: const Key('pin_setup_confirm_field'),
+                          controller: _confirm,
+                          keyboardType: TextInputType.number,
+                          obscureText: true,
+                          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                          decoration: const InputDecoration(labelText: 'Repita o PIN'),
+                        ),
+                        const SizedBox(height: 20),
+                        SizedBox(
+                          width: double.infinity,
+                          child: FilledButton(
+                            key: const Key('pin_setup_confirm_button'),
+                            onPressed: _busy ? null : _concluir,
+                            style: FilledButton.styleFrom(minimumSize: const Size(48, 52)),
+                            child: _busy
+                                ? const SizedBox(
+                                    height: 22,
+                                    width: 22,
+                                    child: CircularProgressIndicator(strokeWidth: 2),
+                                  )
+                                : const Text('Concluir cadastro'),
+                          ),
+                        ),
+                        if (_error != null)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 16),
+                            child: Semantics(
+                              liveRegion: true,
+                              child: Text(
+                                key: const Key('pin_setup_error'),
+                                _error!,
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  color: context.patientRisk.dangerOnSurface,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 enum PatientDestination { emergency, triage, profile, status, reminders, myData, settings }
 
 class PatientHomeShell extends StatefulWidget {
@@ -1107,9 +1249,9 @@ class _PatientHomeShellState extends State<PatientHomeShell> {
   /// Sessão do paciente expirou com o app aberto.
   ///
   /// O paciente não tem renovação silenciosa (ver `BackendClient._requireToken`:
-  /// o código OTP é de uso único e não há credencial reutilizável), então a
-  /// única saída é entrar de novo — e é o app que precisa oferecer a porta, no
-  /// lugar onde a pessoa está, em vez de deixá-la presa numa tela que só
+  /// a credencial de dispositivo só reemite sessão com o PIN da pessoa), então
+  /// a única saída é entrar de novo — e é o app que precisa oferecer a porta,
+  /// no lugar onde a pessoa está, em vez de deixá-la presa numa tela que só
   /// devolve "sua sessão expirou".
   bool _sessionExpired = false;
 
@@ -1287,7 +1429,7 @@ class _SessionExpiredBanner extends StatelessWidget {
                 liveRegion: true,
                 child: Text(
                   key: const Key('session_expired_notice'),
-                  'Sua sessão expirou. Entre novamente com o código de acesso.',
+                  'Sua sessão expirou. Entre novamente com o PIN.',
                   textAlign: TextAlign.center,
                   style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
                 ),
@@ -1895,8 +2037,8 @@ class _MyDataScreenState extends State<MyDataScreen> {
   /// O servidor é a fonte da decisão de lembretes (`consent_logs`); o store
   /// local é só o espelho que `RemindersScreen` consulta (ver
   /// `ConsentPreferences`). Alinhar aqui cobre a revogação feita nesta tela e
-  /// também o aparelho que entrou pelo login OTP (RF01) sem passar pelo
-  /// onboarding, que nunca teve espelho. Sem decisão de lembretes no servidor,
+  /// também o aparelho que entrou por caminho que não passou pelo onboarding,
+  /// que nunca teve espelho. Sem decisão de lembretes no servidor,
   /// não mexe em nada.
   Future<void> _alignLocalRemindersMirror(RemindersScope scope, PatientDataOverview data) async {
     final granted = currentConsentDecisions(data.consents)[ConsentPurpose.localReminders];

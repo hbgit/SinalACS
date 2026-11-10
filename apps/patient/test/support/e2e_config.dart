@@ -3,13 +3,14 @@
 /// (`--dart-define=E2E_FIXTURES="$(cat .e2e/fixtures.json)"`) e às ferramentas do
 /// host pelo arquivo `.e2e/fixtures.json`. Não importar em código de produção.
 class E2ePatientFixture {
-  const E2ePatientFixture({
+  E2ePatientFixture({
     required this.role,
     required this.name,
     required this.cpf,
     required this.birthDate,
     required this.microAreaId,
-  });
+    required List<String> inviteTokens,
+  }) : _inviteTokens = [...inviteTokens];
 
   final String role;
   final String name;
@@ -18,6 +19,20 @@ class E2ePatientFixture {
   final String cpf;
   final DateTime birthDate;
   final String microAreaId;
+
+  /// Convites de uso único gerados pelo seed (C-05: o login do piloto é por
+  /// convite QR + PIN). Um por chamada de [takeInviteToken] — cada processo de
+  /// teste consome o seu, sem dividir o mesmo convite entre dois logins.
+  final List<String> _inviteTokens;
+
+  /// Pega um convite ainda não usado desta execução. O manifesto do aparelho
+  /// é imutável (define de compilação), então o "consumo" é só em memória.
+  String takeInviteToken() {
+    if (_inviteTokens.isEmpty) {
+      throw StateError('sem convites restantes para o paciente "$role" no manifesto');
+    }
+    return _inviteTokens.removeAt(0);
+  }
 
   @override
   String toString() => 'E2ePatientFixture($role)'; // sem CPF
@@ -56,6 +71,8 @@ class E2eConfig {
             cpf: raw['cpf'] as String,
             birthDate: DateTime.parse(raw['birthDate'] as String),
             microAreaId: raw['microAreaId'] as String,
+            inviteTokens: (raw['inviteTokens'] as List?)?.cast<String>() ??
+                const <String>[],
           ),
       ],
       microAreaId: map['microAreaId']! as String,

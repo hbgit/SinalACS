@@ -88,14 +88,19 @@ class AppConfig {
   /// fail-fast de [_resolveSecret].
   final String telemetryPseudonymKey;
 
-  /// Gateway de SMS do login passwordless (RF01).
+  /// Gateway de SMS do login passwordless (RF01, Futuro — ver C-05).
   ///
   /// `log` só é aceito em `development`: ele **não envia SMS**, escreve o
-  /// código no log do processo para o desenvolvedor conseguir entrar. Fora de
-  /// desenvolvimento, ausência ou valor desconhecido falha no boot — um
-  /// servidor que sobe sem conseguir enviar código deixa todo paciente sem
-  /// login, e falhar cedo é melhor que falhar no primeiro cadastro real.
-  final String smsGateway;
+  /// código no log do processo para o desenvolvedor conseguir entrar.
+  ///
+  /// Ausente, vale `log` em `development` (o desenvolvedor lê o código no log)
+  /// e `null` fora dele: o acesso do paciente do piloto é por convite QR + PIN
+  /// local (RF24, C-05) e **não depende de SMS**; quem chama `auth.requestOtp`
+  /// sem gateway recebe uma recusa explícita ("indisponível"), nunca um envio
+  /// silencioso para lugar nenhum. Valor desconhecido continua falhando no
+  /// boot — configurar um gateway que não existe é erro de operação, não
+  /// ausência.
+  final String? smsGateway;
 
   final String? mqttUsername;
   final String? mqttPassword;
@@ -186,8 +191,11 @@ class AppConfig {
 
   static const _knownSmsGateways = {'log'};
 
-  /// Aceita apenas os gateways implementados, e `log` apenas em `development`.
-  static String _resolveSmsGateway({
+  /// Aceita apenas os gateways implementados, `log` apenas em `development` e a
+  /// ausência em qualquer ambiente: sem gateway, `auth.requestOtp` é recusado
+  /// explicitamente (C-05 retirou a exigência de `SMS_GATEWAY` fora de
+  /// `development` — o login do piloto é por convite QR + PIN, RF24).
+  static String? _resolveSmsGateway({
     required String? value,
     required String appEnv,
   }) {
@@ -196,10 +204,10 @@ class AppConfig {
 
     if (gateway == null || gateway.isEmpty) {
       if (isDevelopment) return 'log';
-      throw StateError(
-        'SMS_GATEWAY é obrigatório quando APP_ENV=$appEnv: sem um gateway '
-        'configurado, nenhum paciente consegue receber o código de acesso.',
-      );
+      // Fora de development a ausência deixa de ser erro (C-05): o login do
+      // piloto é por convite QR + PIN (RF24) e não usa SMS. `null` desliga o
+      // caminho do OTP, e `auth.requestOtp` o recusa explicitamente.
+      return null;
     }
 
     if (!_knownSmsGateways.contains(gateway)) {
@@ -212,7 +220,8 @@ class AppConfig {
     if (gateway == 'log' && !isDevelopment) {
       throw StateError(
         'SMS_GATEWAY=log não envia SMS nenhum e por isso só vale em '
-        'development; APP_ENV=$appEnv. Configure um gateway real.',
+        'development; APP_ENV=$appEnv. Configure um gateway real ou remova a '
+        'variável (o login do piloto é por convite QR + PIN, sem SMS).',
       );
     }
 

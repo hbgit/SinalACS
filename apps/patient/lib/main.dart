@@ -7,6 +7,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:sinalacs_patient/app/app.dart';
 import 'package:sinalacs_patient/core/network/backend_client.dart';
 import 'package:sinalacs_patient/core/network/backend_config.dart';
+import 'package:sinalacs_patient/core/security/device_credential_store.dart';
 
 /// Sobe o app do paciente.
 ///
@@ -15,7 +16,11 @@ import 'package:sinalacs_patient/core/network/backend_config.dart';
 /// compilação não muda dentro de um `flutter test`: sem esta porta, o desfecho
 /// de um host sem https não teria como ficar vermelho num teste hermético.
 /// Mesmo motivo (e mesma forma) do `defaultHost` de [BackendClient.resolveHost].
-Future<void> main({String? defaultHost}) async {
+///
+/// [deviceCredentials] só existe para os testes que sobem o `main()` real: em
+/// execução normal o app constrói o [SecureStorageDeviceCredentialStore] (o
+/// Keystore não responde no `flutter test`).
+Future<void> main({String? defaultHost, DeviceCredentialStore? deviceCredentials}) async {
   WidgetsFlutterBinding.ensureInitialized();
 
   // Inicializa o plugin de notificações locais antes de `runApp`: é preciso
@@ -66,7 +71,9 @@ Future<void> main({String? defaultHost}) async {
   // O cliente é construído aqui, e não dentro de `SinalAcsApp`, porque só aqui
   // a CA já foi lida: `BackendConfig` não importa `rootBundle` de propósito —
   // `tool/live_check.dart` o importa fora do Flutter, onde `dart:ui` não existe.
-  runApp(ProviderScope(child: SinalAcsApp(backend: backend)));
+  runApp(ProviderScope(
+    child: SinalAcsApp(backend: backend, deviceCredentials: deviceCredentials),
+  ));
 }
 
 /// Os bytes da CA de desenvolvimento do RPC, ou `null` quando ela não pode ser

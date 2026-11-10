@@ -34,7 +34,8 @@ case "${1:-}" in
     dc stop serverpod >/dev/null 2>&1 || true
     pg "drop database if exists $db with (force)" postgres >/dev/null
     pg "create database $db" postgres >/dev/null
-    # Só o backend e o relé; os seeds de desenvolvimento NÃO sobem (as fixtures vêm do `seed`).
+    # Só o backend e o broker (mais gorush/traefik de suporte); os seeds de
+    # desenvolvimento NÃO sobem (as fixtures vêm do `seed`).
     # Sem `--no-deps` o Compose sobe também o postgres de desenvolvimento; COM ele, os
     # certificados do Traefik e os do Mosquitto (CA de aparelhos) precisam existir de uma subida
     # anterior da stack normal — a falta aparece aqui em vez de sumir.

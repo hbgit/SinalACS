@@ -14,10 +14,10 @@ O repositório já contém um protótipo funcional com:
 - fluxo de sincronização offline para visitas do ACS;
 - app administrativo (`apps/admin`) somente leitura, ainda sobre dados mock.
 
-Já entregue: login institucional do ACS (RF07, matrícula + senha com Argon2id), login passwordless do paciente (RF01, CPF + nascimento + OTP), RBAC por microárea (RNF06), TLS no RPC via Traefik (RNF04) e TLS no broker MQTT com senha e ACL, colunas clínicas cifradas (RNF03), painel "Meus Dados" (LGPD) no app do paciente.
+Já entregue: login institucional do ACS (RF07, matrícula + senha com Argon2id), login do participante por convite QR + PIN local com credencial de dispositivo (RF24, C-05 — o passwordless por CPF + OTP, RF01, virou Futuro), RBAC por microárea (RNF06), TLS no RPC via Traefik (RNF04) e TLS no broker MQTT com senha e ACL, colunas clínicas cifradas (RNF03), painel "Meus Dados" (LGPD) no app do paciente.
 
 Os dois fluxos centrais continuam sendo:
-- paciente: autenticação passwordless (OTP), alerta de urgência, triagem estruturada acompanhamento de status e "Meus Dados";
+- paciente: acesso por convite QR + PIN local, alerta de urgência, triagem estruturada acompanhamento de status e "Meus Dados";
 - ACS: priorização dinâmica, territorialização por microárea, registro offline e acompanhamento do território.
 
 ## Leitura obrigatória antes de implementar
@@ -57,11 +57,11 @@ Não violar estes pontos sob qualquer hipótese:
 ### Backend
 - O backend está em um workspace Dart em [backend/](backend), com os pacotes `sinalacs_server` e `sinalacs_client`.
 - A stack atual é Serverpod, não um servidor hand-rolled em `dart:io`.
-- O servidor usa PostgreSQL e MQTT. A autenticação real é `auth.loginInstitutional` (ACS) e `auth.requestOtp`/`auth.verifyOtp` (paciente); `auth.developmentLogin` só existe com `ENABLE_DEV_LOGIN` e não deve ser usado como caminho de produção.
+- O servidor usa PostgreSQL e MQTT. A autenticação real é `auth.loginInstitutional` (ACS) e `onboarding.completeEnrollment` + `auth.loginDevice` (paciente, convite QR + PIN local); `auth.developmentLogin` só existe com `ENABLE_DEV_LOGIN` e não deve ser usado como caminho de produção.
 - Colunas clínicas sensíveis (`patients.chronicConditions`, `triage_sessions.answers`, `visits.notes`) são cifradas com AES-256-GCM (pares `*Encrypted`/`*KeyVersion`, chave em `HEALTH_DATA_ENCRYPTION_KEY`).
 - A camada de domínio fica em `backend/sinalacs_server/lib/src/application/` e a infraestrutura em `.../infrastructure/`.
 - Os modelos e endpoints são definidos com Serverpod; não se deve editar manualmente arquivos gerados em `lib/src/generated/` ou migrações sem regenerar via `serverpod generate` e `serverpod create-migration`.
-- Endpoints principais: `auth` (`loginInstitutional`, `requestOtp`, `verifyOtp`, `developmentLogin`), `onboarding` (`generateEnrollmentToken`, `completeEnrollment`), `triage.evaluate`, `alerts` (`createRedAlert`, `acknowledge`, `statusFor`), `patients` (`listMicroArea`, `myData`, `myChronicConditions`, `updateChronicConditions`), `visits` (`sync`, `pull`) e `health.check`.
+- Endpoints principais: `auth` (`loginInstitutional`, `loginDevice`, `requestOtp`, `verifyOtp`, `developmentLogin`), `onboarding` (`generateEnrollmentToken`, `completeEnrollment`), `triage.evaluate`, `alerts` (`createRedAlert`, `acknowledge`, `statusFor`), `patients` (`listMicroArea`, `myData`, `myChronicConditions`, `updateChronicConditions`), `visits` (`sync`, `pull`) e `health.check`. Desde a C-05 (#128) o acesso do participante é por convite QR + PIN local (RF24): `completeEnrollment` cria a credencial de dispositivo (`patient_device_credentials`) e `auth.loginDevice` emite a sessão — o login passwordless (RF01) virou Futuro e, sem `SMS_GATEWAY`, `requestOtp` recusa explicitamente.
 - MQTT conecta em background após boot, com reconexão exponencial e sem bloquear a API.
 
 ### Apps Flutter

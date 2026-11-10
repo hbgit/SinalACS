@@ -37,7 +37,8 @@ conferir 'o parsing vem antes de subir a stack' \
 # O alerta nasce DURANTE a interrupção, pelo login real do paciente da fixture.
 conferir 'o alerta reaproveita o live_check do paciente com o manifesto' \
   "grep -qF 'E2E_FIXTURES_FILE=\"\$repo_root/.e2e/fixtures.json\" dart run tool/live_check.dart' $s"
-conferir 'respeita os 60 s entre OTPs do mesmo paciente' "grep -qxF 'INTERVALO_OTP=65' $s"
+conferir 'o login do paciente é por convite QR + PIN, sem intervalo de OTP' \
+  "grep -qF 'convite QR + PIN' $s && ! grep -qE 'INTERVALO_OTP|intervalo do OTP' $s"
 conferir 'B: alerta entre o stop e o start do broker' \
   "corpo cenario_B | awk '/docker stop/{a=NR} /criar_alerta B/{b=NR} /docker start/{c=NR} END{exit !(a && b && c && a<b && b<c)}'"
 conferir 'C: os dois alertas entre o disconnect e o connect' \
@@ -77,7 +78,8 @@ conferir 'o manifesto sai antes do down' \
   "corpo cleanup | awk '/rm -f .e2e.fixtures.json/{a=NR} /e2e_stack.sh down/{b=NR} END{exit !(a && b && a<b)}'"
 conferir 'trap no EXIT' "grep -qxF 'trap cleanup EXIT' $s"
 conferir 'nunca docker compose down nem apaga volume' "! grep -qE 'docker compose down|rm -rf pg_data|volume rm|down -v' $s"
-conferir 'recusa relé antigo na porta 8765' "grep -qF 'porta_ocupada 8765' $s"
+conferir 'o script não sobe relé (o login do paciente não usa mais OTP)' \
+  "! grep -qF 'otp_relay.py' $s && ! grep -qF 'porta_ocupada 8765' $s"
 
 # Fora da CI: não é job nem é chamado por outro runner.
 conferir 'a CI não roda o script' "! grep -q 'mqtt_resiliencia_e2e' .github/workflows/ci.yml"

@@ -688,8 +688,10 @@ class EndpointAlerts extends EndpointAuthenticated {
 }
 
 /// Autenticação. `developmentLogin` é acesso de desenvolvimento e **não** é
-/// autenticação institucional; `loginInstitutional` é o caminho real (RF07);
-/// `requestOtp`/`verifyOtp` são o login passwordless do paciente (RF01).
+/// autenticação institucional; `loginInstitutional` é o caminho real do ACS
+/// (RF07); `loginDevice` é o login do participante por credencial de
+/// dispositivo (RF24, C-05); `requestOtp`/`verifyOtp` são o login passwordless
+/// legado (RF01, Futuro — sem `SMS_GATEWAY` o pedido é recusado).
 ///
 /// `developmentLogin` substitui `POST /v1/auth/development/login`, preservando
 /// o gate do `ENABLE_DEV_LOGIN`: quando desligado, a chamada falha como se o
@@ -854,9 +856,31 @@ class EndpointAuth extends _i1.EndpointRef {
     },
   );
 
-  /// Pedido do código de acesso (RF01). Público por definição: quem chama
-  /// ainda não tem sessão. A resposta é sempre a mesma — não revela se o CPF
-  /// está cadastrado (ver `PasswordlessAuthService.requestOtp`).
+  /// Login do participante por credencial de dispositivo (RF24, C-05).
+  ///
+  /// Público por definição: quem chama ainda não tem sessão, e a credencial
+  /// (deviceId + segredo liberado pelo PIN local) É a prova. O PIN nunca
+  /// chega ao servidor. Emite o JWT de 1 h (`patientSessionLifetime`), como os
+  /// outros caminhos do paciente, com o `device_id` da credencial.
+  ///
+  /// Toda recusa chega ao app como `DeviceCredentialException`, com a mensagem
+  /// única do serviço: segredo errado, aparelho desconhecido e credencial
+  /// revogada (C-12) são indistinguíveis para quem sonda.
+  _i2.Future<_i32.DevelopmentLoginResult> loginDevice({
+    required String deviceId,
+    required String deviceSecret,
+  }) => caller.callServerEndpoint<_i32.DevelopmentLoginResult>(
+    'auth',
+    'loginDevice',
+    {
+      'deviceId': deviceId,
+      'deviceSecret': deviceSecret,
+    },
+  );
+
+  /// Pedido do código de acesso (RF01, Futuro). Público por definição: quem
+  /// chama ainda não tem sessão. A resposta é sempre a mesma — não revela se
+  /// o CPF está cadastrado (ver `PasswordlessAuthService.requestOtp`).
   ///
   /// "Sempre a mesma" inclui a **segunda** chamada dentro do intervalo mínimo
   /// de 60 s: ela também é um 200 sem corpo, e **não** uma recusa. Um "aguarde
@@ -1082,12 +1106,20 @@ class EndpointOnboarding extends _i1.EndpointRef {
 
   /// Chamado pelo app do paciente. Não exige sessão prévia — é a própria
   /// conclusão do onboarding que emite a primeira sessão.
+  ///
+  /// [deviceId]/[deviceSecret] são a credencial de dispositivo (C-05, RF24):
+  /// o app sorteia os dois, protege o segredo com o PIN local e reapresenta
+  /// o par em `auth.loginDevice` nos acessos seguintes. O `deviceId` precisa
+  /// ser um UUID minúsculo de instalação (mesma regra do ACS, #94 C1); fora
+  /// disso a chamada é recusada antes de consumir o convite.
   _i2.Future<_i38.EnrollmentResult> completeEnrollment({
     required String token,
     required bool healthDataConsent,
     required bool remindersConsent,
     required bool pushConsent,
     required bool termsAccepted,
+    required String deviceId,
+    required String deviceSecret,
   }) => caller.callServerEndpoint<_i38.EnrollmentResult>(
     'onboarding',
     'completeEnrollment',
@@ -1097,6 +1129,8 @@ class EndpointOnboarding extends _i1.EndpointRef {
       'remindersConsent': remindersConsent,
       'pushConsent': pushConsent,
       'termsAccepted': termsAccepted,
+      'deviceId': deviceId,
+      'deviceSecret': deviceSecret,
     },
   );
 }

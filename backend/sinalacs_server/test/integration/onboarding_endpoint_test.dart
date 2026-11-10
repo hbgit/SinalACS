@@ -1,5 +1,6 @@
 import 'package:serverpod/serverpod.dart';
 import 'package:sinalacs_server/src/application/auth/development_auth_service.dart';
+import 'package:sinalacs_server/src/application/auth/device_credential_service.dart';
 import 'package:sinalacs_server/src/config/app_config.dart';
 import 'package:sinalacs_server/src/endpoints/auth_endpoint.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
@@ -38,6 +39,13 @@ const _raceUbsId = '00000000-0000-4000-9000-000000000001';
 const _raceMicroAreaId = '00000000-0000-4000-9000-000000000002';
 const _raceAcsId = '00000000-0000-4000-9000-000000000003';
 const _racePatientId = '00000000-0000-4000-9000-000000000004';
+
+// Credencial de dispositivo sintética (C-05): deviceId é UUID de instalação,
+// e o segredo existe só nesta suíte — nunca em dado de produção.
+const _deviceId = '00000000-0000-4000-8000-0000000000a1';
+const _deviceSecret = 'segredo-sintetico-do-aparelho';
+const _raceDeviceId = '00000000-0000-4000-9000-0000000000a1';
+const _raceDeviceSecret = 'segredo-sintetico-do-aparelho-corrida';
 
 AppConfig _config() => AppConfig(
       mqttBroker: 'localhost:1883',
@@ -201,6 +209,10 @@ Future<void> _cleanupRace(Session session) async {
     session,
     where: (t) => t.userId.equals(UuidValue.fromString(_racePatientId)),
   );
+  await PatientDeviceCredential.db.deleteWhere(
+    session,
+    where: (t) => t.patientId.equals(UuidValue.fromString(_racePatientId)),
+  );
   await EnrollmentToken.db.deleteWhere(
     session,
     where: (t) => t.patientId.equals(UuidValue.fromString(_racePatientId)),
@@ -291,6 +303,8 @@ void main() {
         remindersConsent: false,
         pushConsent: true,
         termsAccepted: true,
+        deviceId: _deviceId,
+        deviceSecret: _deviceSecret,
       );
 
       final rows = await ConsentLog.db.find(
@@ -310,6 +324,22 @@ void main() {
       expect(user!.id, _patientId);
       expect(user.role, UserRole.patient);
       expect(user.microAreaId, _microAreaId);
+      // O JWT sai com o device_id da credencial recém-criada (C-05).
+      expect(user.deviceId, _deviceId);
+
+      // A credencial nasceu na MESMA transação do convite, com o HASH do
+      // segredo — nunca o segredo em claro.
+      final credential = await PatientDeviceCredential.db.findFirstRow(
+        session,
+        where: (t) => t.deviceId.equals(_deviceId),
+      );
+      expect(credential, isNotNull);
+      expect(credential!.patientId.uuid, _patientId);
+      expect(credential.credentialHash,
+          DeviceCredentialService.hashSecret(_deviceSecret));
+      expect(credential.credentialHash, isNot(contains(_deviceSecret)));
+      expect(credential.revokedAt, isNull);
+      expect(credential.lastUsedAt, isNull);
 
       // A sessão de onboarding precisa da mesma vida útil da de
       // `verifyOtp` (RF01): nenhum dos dois caminhos tem renovação
@@ -339,6 +369,8 @@ void main() {
         remindersConsent: true,
         pushConsent: true,
         termsAccepted: true,
+        deviceId: _deviceId,
+        deviceSecret: _deviceSecret,
       );
 
       await expectLater(
@@ -349,6 +381,8 @@ void main() {
           remindersConsent: true,
           pushConsent: true,
           termsAccepted: true,
+          deviceId: _deviceId,
+          deviceSecret: _deviceSecret,
         ),
         throwsA(isA<EnrollmentException>()),
       );
@@ -375,6 +409,8 @@ void main() {
           remindersConsent: true,
           pushConsent: true,
           termsAccepted: true,
+          deviceId: _deviceId,
+          deviceSecret: _deviceSecret,
         ),
         throwsA(isA<EnrollmentException>()),
       );
@@ -405,6 +441,8 @@ void main() {
           remindersConsent: true,
           pushConsent: true,
           termsAccepted: false,
+          deviceId: _deviceId,
+          deviceSecret: _deviceSecret,
         ),
         throwsA(isA<EnrollmentException>()),
       );
@@ -422,6 +460,8 @@ void main() {
         remindersConsent: true,
         pushConsent: true,
         termsAccepted: true,
+        deviceId: _deviceId,
+        deviceSecret: _deviceSecret,
       );
       expect(result.accessToken, isNotEmpty);
     });
@@ -483,6 +523,8 @@ void main() {
                 remindersConsent: true,
                 pushConsent: true,
                 termsAccepted: true,
+                deviceId: _raceDeviceId,
+                deviceSecret: _raceDeviceSecret,
               );
             } catch (error) {
               return error;
@@ -498,12 +540,20 @@ void main() {
           expect(failures, hasLength(1),
               reason: 'a outra deve falhar de forma auditável, não silenciosa');
 
-          // 4 linhas, não 8: a chamada perdedora nunca chega a gravar consentimento.
+          // 4 linhas, não 8: a chamada perdedora nunca chega a gravar
+          // consentimento — e UMA credencial, não duas (mesma transação).
           final rows = await ConsentLog.db.find(
             session,
             where: (t) => t.userId.equals(UuidValue.fromString(_racePatientId)),
           );
           expect(rows, hasLength(4));
+          final raceCredentials = await PatientDeviceCredential.db.find(
+            session,
+            where: (t) =>
+                t.patientId.equals(UuidValue.fromString(_racePatientId)),
+          );
+          expect(raceCredentials, hasLength(1));
+          expect(raceCredentials.single.deviceId, _raceDeviceId);
         } finally {
           // Sem rollback automático neste grupo: a limpeza é manual, e roda
           // mesmo se uma asserção acima falhar, para o teste ficar repetível.

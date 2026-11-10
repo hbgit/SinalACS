@@ -9,8 +9,8 @@
 #   DEVICE=0087014315 ./scripts/qa/acs_telemetria_e2e.sh   # aparelho físico
 #
 # Sobe a stack de e2e (e2e_stack.sh), semeia as fixtures sintéticas (com o
-# paciente `telemetry`, na microárea do ACS), sobe o relé (OTP + credencial do
-# ACS) e roda integration_test/telemetry_e2e.dart. O broker fica fora do
+# paciente `telemetry`, na microárea do ACS), sobe o relé (credencial do ACS)
+# e roda integration_test/telemetry_e2e.dart. O broker fica fora do
 # alcance do aparelho (o ACL não libera a microárea da fixture): o alerta chega
 # pela reserva HTTP. O teste fala com o script por linhas marcadoras:
 #   E2E_CORTAR_BACKEND    → `docker pause sinalacs-traefik` (a única rota do

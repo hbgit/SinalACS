@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Relé do código OTP do gateway `log` para o emulador (só desenvolvimento/e2e).
+"""Relé de credenciais sintéticas do e2e para o emulador (só desenvolvimento/e2e).
 
-O gateway de log escreve o código no stdout do servidor; o emulador não lê
-`docker logs`. Este servidor expõe só o código mais recente, sem destino nem CPF
-(o log não os tem). Escuta em 127.0.0.1; o emulador chega por `adb reverse`.
+O nome `otp_relay` é histórico: até a C-05 (#128) ele também entregava o código
+de acesso do gateway `log` para o app do paciente, que passou a entrar por
+convite QR + PIN e não usa mais o relé. Hoje o relé serve as credenciais
+SINTÉTICAS dos testes de tela:
 
 `/acs` (só com E2E_FIXTURES_FILE) entrega a matrícula e a senha SINTÉTICAS do ACS
 da execução, e `/acs-b` as do segundo ACS (bloco `acsB` do manifesto, mesma
@@ -13,36 +14,31 @@ backoffice (bloco `staff`, e2e do app admin) e `/coordenador` as do coordenador
 uma **uma única vez por processo**: qualquer app do emulador que alcance
 localhost:8765 (adb reverse) poderia lê-las, então depois do primeiro pedido bem
 sucedido — o do teste, no começo — a rota responde 404. O relé é por execução.
+
+`/now` devolve o epoch (ms) do relógio do host, que as ferramentas usam para
+cortar registros por tempo sem confiar no relógio do aparelho. Escuta em
+127.0.0.1; o emulador chega por `adb reverse`.
 """
-import json, os, re, subprocess, sys, time
+import json, os, sys, time
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from urllib.parse import urlparse, parse_qs
-
-PADRAO = re.compile(r"\[SMS-GATEWAY=log\] código de acesso: (\d{6}) ")
-
-def parse_latest_code(log_text):
-    achados = PADRAO.findall(log_text)
-    return achados[-1] if achados else None
+from urllib.parse import urlparse
 
 def host_permitido(host, porta):
     """Só `localhost:<porta>` ou `127.0.0.1:<porta>`: um navegador com DNS rebinding
     chega aqui com o `Host` do site malicioso e é recusado."""
     return (host or "").lower() in (f"localhost:{porta}", f"127.0.0.1:{porta}")
 
-# O relé se encerra sozinho: um runner morto por SIGKILL não deixa um leitor do
-# `docker logs` da stack de desenvolvimento ocupando a porta.
+# O relé se encerra sozinho: um runner morto por SIGKILL não deixa o relé
+# ocupando a porta.
 VIDA_MAXIMA_S = 45 * 60
-
-def count_codes(log_text):
-    return len(PADRAO.findall(log_text))
 
 def acs_do_manifesto(caminho, chave="acs"):
     """Matrícula e senha sintéticas da conta do manifesto de e2e (`chave` =
     "acs", "acsB", "staff" ou "coordinator"), ou None.
 
     Só existe para o e2e de TELA do ACS e do backoffice. Opt-in: sem
-    E2E_FIXTURES_FILE o relé não serve credencial nenhuma, e o e2e do paciente
-    segue exatamente como era."""
+    E2E_FIXTURES_FILE o relé não serve credencial nenhuma (o e2e do paciente
+    não usa o relé desde a C-05, #128)."""
     if not caminho:
         return None
     try:
@@ -58,7 +54,6 @@ def acs_do_manifesto(caminho, chave="acs"):
 
 class Handler(BaseHTTPRequestHandler):
     porta = 8765
-    container = "sinalacs-serverpod"
     acs_entregue = False
     acs_b_entregue = False
     admin_entregue = False
@@ -69,7 +64,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send_error(403); return
         url = urlparse(self.path)
         if url.path == "/now":
-            # Relógio do host: o corte do código usa ESTE, não o do aparelho.
+            # Relógio do host: as ferramentas cortam registros por tempo com
+            # ESTE relógio, e não com o do aparelho.
             self.send_response(200); self.send_header("Content-Type", "text/plain"); self.end_headers()
             self.wfile.write(str(int(time.time() * 1000)).encode())
             return
@@ -85,23 +81,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_response(200); self.send_header("Content-Type", "application/json"); self.end_headers()
             self.wfile.write(json.dumps(credencial).encode())
             return
-        if url.path not in ("/code", "/count"):
-            self.send_error(404); return
-        since_ms = int(parse_qs(url.query).get("since", ["0"])[0])
-        desde = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(since_ms / 1000))
-        saida = subprocess.run(["docker", "logs", "--since", desde, self.container],
-                               capture_output=True, text=True)
-        if url.path == "/count":
-            # Quantos códigos foram emitidos depois de `since`: prova que um erro de
-            # digitação não gastou outro pedido de SMS.
-            self.send_response(200); self.send_header("Content-Type", "text/plain"); self.end_headers()
-            self.wfile.write(str(count_codes(saida.stdout + saida.stderr)).encode())
-            return
-        code = parse_latest_code(saida.stdout + saida.stderr)
-        if code is None:
-            self.send_error(404); return
-        self.send_response(200); self.send_header("Content-Type", "text/plain"); self.end_headers()
-        self.wfile.write(code.encode())
+        self.send_error(404)
 
     def log_message(self, *a):  # silencioso: o código não vai para o terminal
         pass

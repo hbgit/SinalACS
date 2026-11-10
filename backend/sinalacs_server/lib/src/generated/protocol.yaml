@@ -46,6 +46,7 @@ auth:
   - logout:
   - beginTotpEnrollment:
   - confirmTotpEnrollment:
+  - loginDevice:
   - requestOtp:
   - verifyOtp:
 devices:
