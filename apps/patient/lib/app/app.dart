@@ -2887,6 +2887,7 @@ class _RemindersScreenState extends State<RemindersScreen> {
         _error = null;
         _reminders = [for (final r in _reminders ?? const <Reminder>[]) if (r.id == updated.id) updated else r];
       });
+      if (active) unawaited(scope.scheduler.requestPermission());
     } on LocalDatabaseUnavailableException {
       _markLocalDataUnavailable();
     } catch (_) {
@@ -2942,6 +2943,9 @@ class _RemindersScreenState extends State<RemindersScreen> {
             (a, b) => a.hour != b.hour ? a.hour - b.hour : a.minute - b.minute,
           );
       });
+      // Depois de salvo e agendado, sem `await`: a lista não espera o diálogo
+      // do sistema, e uma recusa não desfaz o lembrete (#153).
+      if (saved.active) unawaited(scope.scheduler.requestPermission());
     } on LocalDatabaseUnavailableException {
       _markLocalDataUnavailable();
     } catch (_) {

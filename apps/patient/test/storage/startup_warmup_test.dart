@@ -28,6 +28,11 @@ class _Scheduler implements ReminderScheduler {
   Future<void> rescheduleAll(List<Reminder> active) async {
     rescheduled.add([for (final r in active) r.id]);
   }
+
+  var permissionRequests = 0;
+
+  @override
+  Future<void> requestPermission() async => permissionRequests++;
 }
 
 /// I1 / R14: o banco cifrado é aquecido depois do primeiro quadro, sem
@@ -83,6 +88,9 @@ void main() {
     expect(scheduler.rescheduled, [
       [3],
     ]);
+    // #153: reagendar na partida nunca pede a permissão — o diálogo do
+    // sistema cobriria a tela de urgência sem a pessoa ter feito nada.
+    expect(scheduler.permissionRequests, 0);
     expect(File('${dir.path}/sinalacs_patient_reminders.db').existsSync(), isFalse);
     expect(File('${dir.path}/sinalacs_patient_consent.db').existsSync(), isFalse);
     // O aviso de recuperação não é consumido pelo aquecimento.
