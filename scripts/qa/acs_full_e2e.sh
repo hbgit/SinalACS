@@ -7,7 +7,7 @@
 #
 # Sobe a stack de e2e (e2e_stack.sh: banco sinalacs_e2e, sem login de
 # desenvolvimento), semeia fixtures sintéticas (UUIDs, CPFs e a senha do ACS
-# novos a cada execução), sobe o relé (OTP + credencial do ACS, opt-in) e roda
+# novos a cada execução), sobe o relé (credencial do ACS, entrega única) e roda
 # integration_test/full_journey_e2e.dart no emulador. Nada é escrito no banco
 # de desenvolvimento; o banco e o manifesto são apagados ao final.
 #

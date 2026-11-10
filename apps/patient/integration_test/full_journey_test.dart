@@ -1,16 +1,18 @@
 /// Jornada completa do paciente, pela TELA, contra a stack de e2e (banco de
-/// teste, sem login de desenvolvimento): OTP real, termos, triagem, alerta,
-/// status e "Meus dados" (o território do ACS é `tool/territory_check.dart`, no host). Só roda com as fixtures
+/// teste, sem login de desenvolvimento): convite QR + PIN (RF24, C-05), termos,
+/// triagem, alerta, status e "Meus dados" (o território do ACS é
+/// `tool/territory_check.dart`, no host). Só roda com as fixtures
 /// (`--dart-define=E2E_FIXTURES=...`, ver `scripts/qa/patient_full_e2e.sh`); sem
 /// elas o grupo é pulado, então `e2e.sh --full` não quebra.
 ///
-/// O servidor impõe 60 s entre dois pedidos de código do MESMO paciente, por
-/// isso cada teste usa o seu: `main` (código errado e certo), `chronic` (a
-/// jornada inteira). O GPS é um leitor fixo: o diálogo de permissão do sistema
-/// não é alcançável por `flutter test`, e o alerta tem de sair mesmo assim.
+/// O convite é de uso único, e errar o PIN não consome outro: a validação do
+/// PIN é local (a tela recusa antes de chamar o servidor), então o MESMO
+/// convite serve para a tentativa corrigida. O GPS é um leitor
+/// fixo: o diálogo de permissão do sistema não é alcançável por `flutter
+/// test`, e o alerta tem de sair mesmo assim.
 ///
-/// PRIVACIDADE: só dados sintéticos das fixtures; CPF, código e token nunca são
-/// impressos.
+/// PRIVACIDADE: só dados sintéticos das fixtures; convite, PIN e token nunca
+/// são impressos.
 library;
 
 import 'package:flutter/material.dart';
@@ -21,12 +23,9 @@ import 'package:sinalacs_patient/app/app.dart';
 import 'package:sinalacs_patient/core/network/backend_client.dart';
 import 'package:sinalacs_patient/core/network/backend_config.dart';
 import 'package:sinalacs_patient/core/privacy/location_hash.dart';
+import 'package:sinalacs_patient/core/security/device_credential_store.dart';
 
-import '../test/support/e2e_config.dart';
-import '../test/support/e2e_login_core.dart';
 import 'support/e2e_login.dart';
-
-const _relay = String.fromEnvironment('OTP_RELAY', defaultValue: 'http://localhost:8765/code');
 
 class _FixedLocation implements LocationReader {
   @override
@@ -54,9 +53,6 @@ Future<void> tapKey(WidgetTester tester, String key) async {
   await tester.pump(const Duration(milliseconds: 300));
 }
 
-String _ddmmyyyy(DateTime d) =>
-    '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}';
-
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
   final config = e2eConfig();
@@ -64,21 +60,6 @@ void main() {
   Future<BackendClient> backendReal() async {
     final ca = (await rootBundle.load(BackendConfig.rpcCaAsset)).buffer.asUint8List();
     return BackendClient(trustedCaBytes: ca);
-  }
-
-  /// Preenche CPF e data, pede o código e devolve o instante do pedido.
-  Future<int> pedirCodigo(WidgetTester tester, E2ePatientFixture p) async {
-    await tester.enterText(find.byKey(const Key('cpf_field')), p.cpf);
-    await tester.enterText(find.byKey(const Key('birth_date_field')), _ddmmyyyy(p.birthDate));
-    final pedidoEm = await relayNow(_relay);
-    await tapKey(tester, 'enter_button');
-    await pumpUntil(tester, find.byKey(const Key('otp_code_field')));
-    return pedidoEm;
-  }
-
-  Future<void> digitarCodigo(WidgetTester tester, String code) async {
-    await tester.enterText(find.byKey(const Key('otp_code_field')), code);
-    await tapKey(tester, 'verify_code_button');
   }
 
   /// Passa pelo convite de termos, se o paciente ainda não os aceitou.
@@ -101,23 +82,46 @@ void main() {
     'jornada do paciente contra o banco de teste',
     skip: config == null ? 'defina E2E_FIXTURES (scripts/qa/patient_full_e2e.sh)' : false,
     () {
-      testWidgets('código errado não entra; o certo, pedido uma única vez, entra', (tester) async {
+      setUp(() async {
+        // O APK persiste o Keystore entre execuções no mesmo emulador: sem
+        // esta limpeza, a segunda execução acharia uma credencial antiga e
+        // mostraria o PIN em vez do convite. A jornada começa sempre sem
+        // credencial — o convite é o ponto de partida do RF24.
+        await SecureStorageDeviceCredentialStore().destroy();
+      });
+
+      testWidgets('PIN fraco não entra; o forte conclui o cadastro com UM convite só', (tester) async {
         final backend = await backendReal();
         addTearDown(backend.close);
         await tester.pumpWidget(SinalAcsApp(backend: backend, locationReader: _FixedLocation()));
         final p = config!.patient('main');
+        final convite = p.takeInviteToken();
 
-        final pedidoEm = await pedirCodigo(tester, p);
-        await digitarCodigo(tester, '000000');
-        await pumpUntil(tester, find.byKey(const Key('login_error')));
-        expect(find.byKey(const Key('panic_button')), findsNothing, reason: 'código errado não abre a sessão');
+        await tester.tap(find.byKey(const Key('start_onboarding_button')));
+        await pumpUntil(tester, find.byKey(const Key('onboarding_token_field')));
+        await tester.enterText(find.byKey(const Key('onboarding_token_field')), convite);
+        await tester.tap(find.byKey(const Key('onboarding_consent_health')));
+        await tester.pump(const Duration(milliseconds: 200));
+        await tester.tap(find.byKey(const Key('onboarding_terms_accept')));
+        await tester.pump(const Duration(milliseconds: 200));
+        await tapKey(tester, 'complete_enrollment_button');
+        await pumpUntil(tester, find.byKey(const Key('pin_setup_field')));
 
-        // O código verdadeiro é o do PRIMEIRO pedido: errar não gasta outro SMS.
-        await digitarCodigo(tester, await codeFromRelay(_relay, pedidoEm));
+        // PIN da lista proibida (sequência crescente): recusa LOCAL, o
+        // convite não é consumido.
+        await tester.enterText(find.byKey(const Key('pin_setup_field')), '123456');
+        await tester.enterText(find.byKey(const Key('pin_setup_confirm_field')), '123456');
+        await tapKey(tester, 'pin_setup_confirm_button');
+        await pumpUntil(tester, find.byKey(const Key('pin_setup_error')));
+        expect(find.byKey(const Key('panic_button')), findsNothing,
+            reason: 'PIN fraco não conclui o cadastro');
+
+        // PIN forte, MESMO convite: a recusa local não gastou o de uso único.
+        await tester.enterText(find.byKey(const Key('pin_setup_field')), '284637');
+        await tester.enterText(find.byKey(const Key('pin_setup_confirm_field')), '284637');
+        await tapKey(tester, 'pin_setup_confirm_button');
         await aceitarTermosSePedido(tester);
         expect(find.text('Urgência'), findsOneWidget);
-        // E de fato foi UM pedido: errar o código não pode ter gasto outro SMS.
-        expect(await relayCount(_relay, pedidoEm), 1);
       });
 
       testWidgets('triagem vermelha, alerta, status e Meus dados do próprio paciente', (tester) async {
@@ -126,8 +130,20 @@ void main() {
         await tester.pumpWidget(SinalAcsApp(backend: backend, locationReader: _FixedLocation()));
         final p = config!.patient('chronic');
 
-        final pedidoEm = await pedirCodigo(tester, p);
-        await digitarCodigo(tester, await codeFromRelay(_relay, pedidoEm));
+        await tester.tap(find.byKey(const Key('start_onboarding_button')));
+        await pumpUntil(tester, find.byKey(const Key('onboarding_token_field')));
+        await tester.enterText(find.byKey(const Key('onboarding_token_field')), p.takeInviteToken());
+        await tester.tap(find.byKey(const Key('onboarding_consent_health')));
+        await tester.pump(const Duration(milliseconds: 200));
+        await tester.tap(find.byKey(const Key('onboarding_consent_reminders')));
+        await tester.pump(const Duration(milliseconds: 200));
+        await tester.tap(find.byKey(const Key('onboarding_terms_accept')));
+        await tester.pump(const Duration(milliseconds: 200));
+        await tapKey(tester, 'complete_enrollment_button');
+        await pumpUntil(tester, find.byKey(const Key('pin_setup_field')));
+        await tester.enterText(find.byKey(const Key('pin_setup_field')), '284637');
+        await tester.enterText(find.byKey(const Key('pin_setup_confirm_field')), '284637');
+        await tapKey(tester, 'pin_setup_confirm_button');
         await aceitarTermosSePedido(tester);
 
         // Triagem: dor no peito, "não" ao resto; quem classifica é o servidor.

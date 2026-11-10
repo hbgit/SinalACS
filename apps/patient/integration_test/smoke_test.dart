@@ -14,8 +14,9 @@
 ///
 /// Mesmos pré-requisitos e `--dart-define` de `backend_connection_test.dart`.
 ///
-/// Login: com `--dart-define=E2E_FIXTURES=...` entra pelo OTP real de uma fixture
-/// (ver `scripts/qa/patient_full_e2e.sh`); sem ele, pelo login de desenvolvimento.
+/// Login: com `--dart-define=E2E_FIXTURES=...` entra pelo convite QR + PIN real
+/// de uma fixture (ver `scripts/qa/patient_full_e2e.sh`); sem ele, pelo login
+/// de desenvolvimento.
 ///
 /// PRIVACIDADE: só dados sintéticos; o token nunca é impresso.
 library;

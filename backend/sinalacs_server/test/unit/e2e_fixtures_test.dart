@@ -52,6 +52,35 @@ void main() {
     expect(E2eFixtures.fromJson(f.toJson()).toJson(), f.toJson());
   });
 
+  test('cada paciente leva convites de uso único no formato do servidor (C-05)', () {
+    // 6 é o contrato do seed (`_convitesPorPaciente` em e2e_fixtures.dart): o
+    // mqtt_resiliencia loga até 5× como o paciente `main`.
+    const porPaciente = 6;
+    for (var seed = 0; seed < 50; seed++) {
+      final f = generateE2eFixtures(Random(seed));
+      for (final p in f.patients) {
+        expect(p.inviteTokens, hasLength(porPaciente), reason: 'seed $seed');
+        expect(p.inviteTokens.toSet(), hasLength(porPaciente),
+            reason: 'seed $seed: convite repetido em ${p.role}');
+        for (final token in p.inviteTokens) {
+          // 32 bytes em base64url sem padding: 43 caracteres, como o `_newToken`
+          // do OnboardingService.
+          expect(token, matches(RegExp(r'^[A-Za-z0-9_-]{43}$')), reason: 'seed $seed');
+        }
+      }
+    }
+  });
+
+  test('convites não se repetem entre pacientes nem vazam no toString', () {
+    final f = generateE2eFixtures(Random(128));
+    final todos = f.patients.expand((p) => p.inviteTokens).toList();
+    expect(todos.toSet(), hasLength(todos.length));
+    final texto = f.patients.map((p) => '$p').join(' ');
+    for (final token in todos) {
+      expect(texto.contains(token), isFalse);
+    }
+  });
+
   test('toString não vaza CPF nem senha', () {
     final f = generateE2eFixtures(Random(4));
     final texto = '$f ${f.patients.first} ${f.acs} ${f.secondAcs}';

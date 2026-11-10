@@ -15,7 +15,10 @@ void main() {
   setUp(() async {
     server = await FakeRpcServer.start();
     backend = BackendClient(host: server.host);
-    await backend.verifyOtp(cpf: '123.456.789-09', code: '123456');
+    await backend.loginDevice(
+      deviceId: '00000000-0000-4000-8000-0000000000c1',
+      deviceSecret: 'segredo-sintetico',
+    );
   });
 
   tearDown(() async {

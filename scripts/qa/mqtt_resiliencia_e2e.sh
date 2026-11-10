@@ -10,8 +10,9 @@
 # obrigatório). Não precisa de emulador.
 #
 # Cenários (cada um cria UM alerta vermelho pelo RPC do paciente da fixture,
-# login OTP real via relé, com `apps/patient/tool/live_check.dart` — o mesmo
-# caminho do `e2e.sh`/`patient_full_e2e.sh`, sem duplicar o login):
+# login por convite QR + PIN (C-05) com `apps/patient/tool/live_check.dart` —
+# cada execução consome UM convite de uso único do manifesto; o mesmo caminho
+# do `e2e.sh`/`patient_full_e2e.sh`, sem duplicar o login):
 #   base  sem interrupção: prova que o caminho (RPC -> outbox -> broker) funciona
 #         e aquece a compilação do `dart run`.
 #   B     reinício do Mosquitto: `docker stop` do broker, alerta criado com o
@@ -56,15 +57,14 @@
 # container sinalacs-serverpod é o mesmo) e mexe em sinalacs-mosquitto (stop,
 # desconexão da rede) e, com a flag, pausa sinalacs-serverpod. Não apaga
 # volumes. O `trap` sempre: despausa o backend, religa o broker à rede com os
-# aliases, garante o broker no ar, encerra o relé, apaga a sessão do assinante
-# e o manifesto, `e2e_stack.sh down` e `docker compose up -d` (stack de
-# desenvolvimento de volta, esperando o backend saudável).
+# aliases, garante o broker no ar, apaga a sessão do assinante e o manifesto,
+# `e2e_stack.sh down` e `docker compose up -d` (stack de desenvolvimento de
+# volta, esperando o backend saudável).
 #
 # Sem nenhuma coluna protegida na saída: do banco só contagens e booleanos; o
 # log do backend guardado em $ART é sanitizado (sem IP/host/porta nem código
-# OTP).
+# de acesso).
 set -euo pipefail
-source "$(dirname "${BASH_SOURCE[0]}")/lib_rele.sh"
 
 com_pausa_do_backend=false
 for arg in "$@"; do
@@ -86,14 +86,11 @@ ATRASO_C="${ATRASO_C:-5}"
 ESPERA_PUBLICACAO="${ESPERA_PUBLICACAO:-120}"
 ART="${ART:-$(mktemp -d "${TMPDIR:-/tmp}/mqtt_resiliencia.XXXXXX")}"
 mkdir -p "$ART"
-# Intervalo mínimo entre dois logins OTP do MESMO paciente (o servidor impõe 60 s).
-INTERVALO_OTP=65
 SUB_ID="qa-resiliencia-$$"
 SUB_SH=/tmp/qa-resiliencia-$$.sh   # laço do assinante (idem)
 SUB_LOG=/tmp/qa-resiliencia-$$.log # `hora alert_id` de cada entrega (idem)
 RESTAURADO_EM=0                    # epoch da restauração do cenário corrente
 
-relay_pid=""
 rede=""
 cleanup() {
   set +e
@@ -108,7 +105,6 @@ cleanup() {
     mqtt_sub -i "$SUB_ID" -t 'sinalacs/v1/qa/fim' -E >/dev/null 2>&1
     docker exec "$BROKER" rm -f "$SUB_SH" "$SUB_LOG" >/dev/null 2>&1
   fi
-  [[ -n "$relay_pid" ]] && kill "$relay_pid" 2>/dev/null
   rm -f .e2e/fixtures.json   # primeiro: tem as senhas sintéticas, mesmo se o down falhar
   ./scripts/qa/e2e_stack.sh down >/dev/null 2>&1 \
     || echo 'aviso: e2e_stack.sh down falhou; o banco sinalacs_e2e pode ter sobrado' >&2
@@ -123,25 +119,12 @@ cleanup() {
 }
 trap cleanup EXIT
 
-if porta_ocupada 8765; then
-  echo 'erro: a porta 8765 já está ocupada (relé antigo?). Encerre-o: pkill -f scripts/qa/otp_relay.py' >&2
-  exit 1
-fi
-
 echo "== stack de e2e (banco de teste)"
 ./scripts/qa/e2e_stack.sh up
 ./scripts/qa/e2e_stack.sh seed
 ./scripts/dev/sync_dev_ca.sh >/dev/null 2>&1 || true
 set -a; source .env; set +a
 rede=$(docker inspect -f '{{range $k,$v := .NetworkSettings.Networks}}{{$k}}{{end}}' "$BROKER")
-
-E2E_FIXTURES_FILE="$repo_root/.e2e/fixtures.json" python3 scripts/qa/otp_relay.py >/dev/null 2>&1 &
-relay_pid=$!
-for _ in $(seq 1 20); do
-  curl -fs http://127.0.0.1:8765/now >/dev/null 2>&1 && break
-  sleep 0.25
-done
-kill -0 "$relay_pid" 2>/dev/null || { echo 'erro: o relé não subiu' >&2; exit 1; }
 
 area_id="$(python3 -c "import json;print(json.load(open('.e2e/fixtures.json'))['microAreaId'])")"
 topico="sinalacs/v1/microareas/$area_id/alerts"
@@ -212,14 +195,11 @@ reconectou_em() {
   awk -v a="$ts" -v b="$t0" 'BEGIN{printf "%.1f", a-b}'
 }
 
-# Cria um alerta vermelho como o paciente `main` da fixture (login OTP real).
+# Cria um alerta vermelho como o paciente `main` da fixture (login por convite
+# QR + PIN; cada execução consome UM convite de uso único do manifesto).
 # Define ALERTA_ID e ALERTA_PUBLICADO (o `published` da resposta do RPC).
-ultimo_login=0
 criar_alerta() { # <rótulo>
-  local rotulo=$1 espera linha
-  espera=$(( ultimo_login + INTERVALO_OTP - $(date +%s) ))
-  if (( espera > 0 )); then echo "  [script] aguardando ${espera}s (intervalo do OTP)"; sleep "$espera"; fi
-  ultimo_login=$(date +%s)
+  local rotulo=$1 linha
   ALERTA_ID=""; ALERTA_PUBLICADO=""
   ( cd apps/patient && E2E_FIXTURES_FILE="$repo_root/.e2e/fixtures.json" dart run tool/live_check.dart ) \
     >"$ART/$rotulo.live.log" 2>&1 || true

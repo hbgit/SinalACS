@@ -1,25 +1,5 @@
 import unittest
-from otp_relay import parse_latest_code, host_permitido, count_codes
-
-class T(unittest.TestCase):
-    def test_sem_linha(self):
-        self.assertIsNone(parse_latest_code("nada aqui\n"))
-    def test_pega_a_mais_recente(self):
-        log = ("[SMS-GATEWAY=log] código de acesso: 111111 (gateway de desenvolvimento — nenhum SMS foi enviado)\n"
-               "ruído\n"
-               "[SMS-GATEWAY=log] código de acesso: 222222 (gateway de desenvolvimento — nenhum SMS foi enviado)\n")
-        self.assertEqual(parse_latest_code(log), "222222")
-    def test_ignora_seis_digitos_fora_da_linha_do_gateway(self):
-        self.assertIsNone(parse_latest_code("pedido 123456 recebido\n"))
-
-class ContagemTest(unittest.TestCase):
-    L = "[SMS-GATEWAY=log] código de acesso: %s (gateway de desenvolvimento — nenhum SMS foi enviado)\n"
-
-    def test_sem_linhas(self):
-        self.assertEqual(count_codes("nada\n"), 0)
-
-    def test_conta_uma_por_pedido_e_ignora_ruido(self):
-        self.assertEqual(count_codes(self.L % "111111" + "ruído 222222\n" + self.L % "333333"), 2)
+from otp_relay import host_permitido
 
 class HostTest(unittest.TestCase):
     def test_aceita_so_o_proprio_relé_em_loopback(self):

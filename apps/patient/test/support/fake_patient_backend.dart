@@ -14,8 +14,7 @@ import 'package:sinalacs_patient/core/network/backend_client.dart';
 class FakePatientBackend implements PatientBackend {
   FakePatientBackend({
     this.risk = RiskLevel.green,
-    this.requestOtpFailure,
-    this.verifyOtpFailure,
+    this.loginDeviceFailure,
     this.developmentLoginFailure,
     this.alertFailure,
     this.enrollmentFailure,
@@ -25,8 +24,7 @@ class FakePatientBackend implements PatientBackend {
   RiskLevel risk;
 
   /// Recusas injetáveis, uma por caminho. Espelham o que o backend real lança.
-  BackendFailure? requestOtpFailure;
-  BackendFailure? verifyOtpFailure;
+  BackendFailure? loginDeviceFailure;
   BackendFailure? developmentLoginFailure;
   BackendFailure? alertFailure;
   BackendFailure? enrollmentFailure;
@@ -171,13 +169,9 @@ class FakePatientBackend implements PatientBackend {
   /// observa a tela com o pedido ainda em voo.
   Completer<void>? dataRequestGate;
 
-  /// Código que o "servidor" aceita em [verifyOtp].
-  ///
-  /// O backend real nunca devolve o código ao app — ele sai por SMS, e o app
-  /// só digita o que a pessoa recebeu. O fake precisa de um valor conhecido
-  /// para o teste digitar.
-  String validCode = '123456';
-
+  /// Código que o "servidor" aceita em [loginDevice] — o par (deviceId,
+  /// segredo) que a credencial local guarda; o fake registra as chamadas para
+  /// as asserções.
   /// Argumentos recebidos, para as asserções.
   final List<Map<String, bool>> triageCalls = <Map<String, bool>>[];
   final List<String> idempotencyKeys = <String>[];
@@ -185,18 +179,9 @@ class FakePatientBackend implements PatientBackend {
   final List<String?> locationCells = <String?>[];
   final List<Map<String, Object>> enrollmentCalls = <Map<String, Object>>[];
 
-  /// Pedidos de código recebidos, na ordem em que chegaram.
-  final List<({String cpf, DateTime birthDate})> otpRequests =
-      <({String cpf, DateTime birthDate})>[];
-
-  /// Verificações de código recebidas, na ordem em que chegaram.
-  final List<({String cpf, String code})> otpVerifications =
-      <({String cpf, String code})>[];
-
-  /// Último pedido de código. `null` enquanto nenhum chegou — é o que prova
-  /// que a tela **não** chamou o backend.
-  ({String cpf, DateTime birthDate})? get lastOtpRequest =>
-      otpRequests.isEmpty ? null : otpRequests.last;
+  /// Logins por credencial de dispositivo recebidos, na ordem.
+  final List<({String deviceId, String deviceSecret})> deviceLogins =
+      <({String deviceId, String deviceSecret})>[];
 
   int developmentLoginCount = 0;
   bool closed = false;
@@ -216,37 +201,20 @@ class FakePatientBackend implements PatientBackend {
         dbConnected: true,
       );
 
-  /// Só registra o pedido: o backend real responde igual para CPF que existe e
-  /// para CPF que não existe, e é isso que o fake reproduz — nenhuma sessão,
-  /// nenhum código devolvido, nenhum erro.
+  /// Login por credencial de dispositivo (RF24): registra o par apresentado e
+  /// devolve a sessão de 1 h do paciente.
   @override
-  Future<void> requestOtp({
-    required String cpf,
-    required DateTime birthDate,
+  Future<AuthSession> loginDevice({
+    required String deviceId,
+    required String deviceSecret,
   }) async {
-    otpRequests.add((cpf: cpf, birthDate: birthDate));
-    final failure = requestOtpFailure;
+    deviceLogins.add((deviceId: deviceId, deviceSecret: deviceSecret));
+    final failure = loginDeviceFailure;
     if (failure != null) throw failure;
-  }
-
-  @override
-  Future<AuthSession> verifyOtp({
-    required String cpf,
-    required String code,
-  }) async {
-    otpVerifications.add((cpf: cpf, code: code));
-    final failure = verifyOtpFailure;
-    if (failure != null) throw failure;
-    if (code != validCode) {
-      throw const BackendFailure(
-        'Código inválido ou expirado. Peça um novo.',
-        isRecoverable: false,
-      );
-    }
 
     _session = _patientSession(
       userId: '00000000-0000-4000-8000-000000000001',
-      accessToken: 'token-de-otp',
+      accessToken: 'token-de-dispositivo',
       // 1 hora: o TTL do paciente (LGPD-RT06), como no servidor.
       lifetime: const Duration(hours: 1),
     );
@@ -298,6 +266,18 @@ class FakePatientBackend implements PatientBackend {
       microAreaId: current.microAreaId,
       expiresAt: DateTime.now().toUtc().subtract(const Duration(minutes: 1)),
     );
+  }
+
+  /// Atalho de teste: abre uma sessão direto, sem passar pela UI — para as
+  /// telas que só precisam de `session != null` (o login pela UI é coberto em
+  /// `test/device_login_test.dart`).
+  Future<AuthSession> seedSession() async {
+    _session = _patientSession(
+      userId: '00000000-0000-4000-8000-000000000001',
+      accessToken: 'token-semeado',
+      lifetime: const Duration(hours: 1),
+    );
+    return _session!;
   }
 
   @override
@@ -354,6 +334,8 @@ class FakePatientBackend implements PatientBackend {
     required bool remindersConsent,
     required bool pushConsent,
     required bool termsAccepted,
+    required String deviceId,
+    required String deviceSecret,
   }) async {
     enrollmentCalls.add(<String, Object>{
       'token': token,
@@ -361,6 +343,8 @@ class FakePatientBackend implements PatientBackend {
       'remindersConsent': remindersConsent,
       'pushConsent': pushConsent,
       'termsAccepted': termsAccepted,
+      'deviceId': deviceId,
+      'deviceSecret': deviceSecret,
     });
     final failure = enrollmentFailure;
     if (failure != null) throw failure;
@@ -371,7 +355,7 @@ class FakePatientBackend implements PatientBackend {
       userId: '00000000-0000-4000-8000-000000000002',
       role: 'patient',
       microAreaId: '00000000-0000-4000-8000-000000000003',
-      expiresAt: DateTime.now().toUtc().add(const Duration(minutes: 15)),
+      expiresAt: DateTime.now().toUtc().add(const Duration(hours: 1)),
     );
     _session = session;
     return session;

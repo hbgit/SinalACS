@@ -1922,3 +1922,66 @@ Branch `feat/issue-136-cifra-local-paciente`. **Estado:** a Fase 1 (T1–T8) est
 - **ACS, mesma lacuna (issues separadas a abrir):** o `open_failed` ambíguo existe no `SqlCipherVisitStore` (põe a fila de lado e apaga a chave); e falta `dataExtractionRules` também no app do ACS.
 - **Dependência descontinuada:** `flutter_secure_storage` com `encryptedSharedPreferences` depende do `androidx.security:security-crypto`; migrar ACS e paciente juntos.
 - **#125 ("Sobre")** deve reaproveitar `LocalProtectionNotice`; a C-10 acrescenta a frase da mitigação.
+
+## Login do participante por convite QR + PIN (C-05, #128) — 2026-11-10
+
+Branch `feat/issue-128-login-convite-pin`. **Estado:** implementado, testado e
+pronto para revisão/PR; nada commitado ainda (o usuário faz o commit manual).
+
+- **O que mudou.** O login do paciente deixou de usar OTP (e-mail/CPF/telefone)
+  e passou ao RF24: o agente gera o convite QR de uso único (`onboarding.
+  generateEnrollmentToken`, como antes), o participante conclui o onboarding no
+  próprio aparelho com o convite e escolhe um PIN local de 6+ dígitos. O app
+  sorteia `deviceId` + segredo, protege o segredo com um envelope derivado do
+  PIN (Argon2id 19 MiB/t2/p1 + AES-256-GCM) e só então chama
+  `onboarding.completeEnrollment`, que cria a credencial de dispositivo
+  (`patient_device_credentials`, tabela nova na migração `20261109144551146`,
+  audit append-only) **na mesma transação** do consumo do convite. Sessões
+  seguintes: `auth.loginDevice` (JWT de 1 h com `device_id`), reautenticado
+  pelo PIN. A tela de acesso mostra convite ou PIN conforme a credencial local
+  (fail-closed em 5 s se o Keystore não responder); erro de `credentialRefused`
+  descarta a credencial local (o servidor a recusou: revogada/inválida).
+- **Política do PIN.** Mínimo 6 dígitos; recusa dígito único repetido
+  (`000000`), sequências crescentes/decrescentes (`123456`, `987654`) e
+  alternância de dois dígitos (`121212`) — D3 do plano da #136. Bloqueio local
+  por tentativas erradas: 5 → 30 s, dobrando até 15 min, com relógio injetável.
+  A validação é local, então errar o PIN não consome o convite.
+- **`SMS_GATEWAY` opcional.** `AppConfig.smsGateway` virou `String?`: fora de
+  `development`, ausente = `null` (válido — é o perfil do piloto) e `'log'` ou
+  valor desconhecido = erro; em `development` ausente vira `'log'`.
+  `auth.requestOtp` recusa explicitamente (`EndpointDisabledException`) sem
+  gateway configurado; o RF01 segue como Futuro. `users.cpfHash` tornou-se
+  anulável (P-10): pacientes do piloto não têm CPF.
+- **Testes.** Backend: suíte completa `dart test` verde (1667 testes), com os
+  novos `device_credential_login_test.dart` (aceite: boot do perfil piloto sem
+  `SMS_GATEWAY` + `loginDevice`) e `onboarding_endpoint_test.dart` atualizado.
+  App: `flutter analyze` limpo; `flutter test` verde exceto o conjunto
+  **pré-existente** na `develop` (consent/storage/reminders sqflite — ambiente
+  SDK local, confirmado em worktree limpo de `origin/develop`). Novos
+  `pin_policy_test`, `pin_envelope_test`, `device_credential_store_test`,
+  `device_login_test` e `backend_client_device_login_test`.
+- **Fixtures e2e.** O seed grava agora 6 convites de uso único por paciente
+  (mesmo formato do servidor: 32 bytes base64url; só o sha256 vai ao banco) e o
+  manifesto ganha `patients[].inviteTokens`; o login de teste consome um por
+  chamada de `completeEnrollment`. O relé deixou de servir o OTP do paciente
+  (o `otp_relay.py` hoje só entrega credenciais de ACS/staff e `/now`), e o
+  `patient_full_e2e.sh`/`mqtt_resiliencia_e2e.sh` não sobem mais relé nem
+  esperam o intervalo de 60 s entre OTPs. Sem manifesto, o fallback
+  `developmentLogin` mantém o `android-e2e` da CI funcionando.
+- **Docs.** `spec/lgpd_data_audit.md` (nota + tabela de
+  `patient_device_credentials`), `spec/stack.md`, `inventario-vinculo-institucional.md`
+  (I-31), `backend/CLAUDE.md`, `AGENTS.md`, `.env.example` e a linha C-05 de
+  `docs/escopo/mudancas-de-codigo-recomendadas.md` (anotada como entregue).
+
+**Riscos residuais e limites.**
+- **Root em aparelho em funcionamento** pode ler o envelope cifrado e testar
+  PINs offline (o PIN é curto por usabilidade); a mitigação de evolução é
+  `setUserAuthenticationRequired` no Keystore, registrada como dívida.
+- **Recuperação de acesso** (aparelho perdido) segue em C-12 (#133): reemissão
+  do convite invalida a credencial anterior — o `revokedAt` da tabela já
+  existe para isso.
+- **Um convite consumido com PIN não definido** deixa o participante sem
+  credencial (o app destrói a credencial local se o `completeEnrollment`
+  falhar, mas o convite pode já ter sido consumido); reemissão pelo agente é o
+  caminho (C-12).
+

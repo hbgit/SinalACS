@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
+import 'package:crypto/crypto.dart';
 import 'package:postgres/postgres.dart';
 import 'package:sinalacs_server/src/application/audit/audit_chain.dart';
 import 'package:sinalacs_server/src/application/auth/cpf.dart';
@@ -117,6 +118,30 @@ Future<void> main(List<String> args) async {
             'parallelism': digest.parallelism,
           },
         );
+      }
+      // Convites do piloto (C-05, RF24): um lote de uso único por paciente,
+      // com o MESMO sha256 sem pepper do `OnboardingService` e o claro só no
+      // manifesto (0600). O e2e entra por `completeEnrollment` com um par
+      // deviceId/segredo sorteado na hora — sem OTP nem credencial pré-gravada.
+      //
+      // O seed grava direto no banco e não passa pela checagem de território
+      // do `generateToken` (fixture sintética): `createdByAcsId` é o ACS
+      // principal mesmo para o paciente `outsider`, que só existe para provar
+      // a barreira de microárea (INV-01) nos testes.
+      for (final p in fixtures.patients) {
+        for (final token in p.inviteTokens) {
+          await tx.execute(
+            Sql.named('INSERT INTO "enrollment_tokens" ("tokenHash","patientId","microAreaId","createdByAcsId","createdAt","expiresAt") '
+                "VALUES (@hash,@patient,@area,@acs,NOW(),NOW() + (@validade::int * interval '1 minute'))"),
+            parameters: {
+              'hash': sha256.convert(utf8.encode(token)).toString(),
+              'patient': p.id,
+              'area': p.microAreaId,
+              'acs': fixtures.acs.id,
+              'validade': _conviteE2eValidadeEmMinutos,
+            },
+          );
+        }
       }
       // Administrador do backoffice (RF07 para o staff): `users` com papel `admin`,
       // `staff_accounts` e credencial Argon2id, SEM TOTP (a MFA é ativada pela
@@ -286,7 +311,8 @@ Future<void> main(List<String> args) async {
   final manifesto = fixtures.toJson();
   if (trilha != null) manifesto['auditTrail'] = trilha;
   writeManifestPrivately(out, jsonEncode(manifesto));
-  stdout.writeln('Fixtures de e2e gravadas (${fixtures.patients.length} pacientes, 2 ACS, 1 admin, 1 coordenador) '
+  stdout.writeln('Fixtures de e2e gravadas (${fixtures.patients.length} pacientes × '
+      '${fixtures.patients.first.inviteTokens.length} convites, 2 ACS, 1 admin, 1 coordenador) '
       'em ${out.path}.');
 }
 
@@ -423,3 +449,8 @@ const _linhasDaTrilha = 60;
 
 /// Dentro do período do teste e de autoria do ACS (visível ao coordenador).
 const _sequenciaAdulterada = 50;
+
+/// Validade dos convites do piloto semeados para o e2e. O produto usa 15 min
+/// (`OnboardingService._tokenLifetime`); o dobro dá margem para o emulador
+/// subir, compilar e entrar pela tela sem queimar um convite por relógio.
+const _conviteE2eValidadeEmMinutos = 30;

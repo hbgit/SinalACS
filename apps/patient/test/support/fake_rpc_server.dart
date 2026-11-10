@@ -27,14 +27,14 @@ class RpcRequest {
 /// verdade — em vez de um mock do próprio objeto sob teste — é dar a ele um
 /// servidor que responda no protocolo que ele espera.
 ///
-/// Aqui ele existe pelo caminho do OTP (RF01), que nenhum teste durável
-/// atravessava: sem ele, apagar o `on OtpRequestException` do `_guard` deixaria
-/// o paciente vendo "Sem conexão com o servidor" no lugar de *"Código inválido
-/// ou expirado. Peça um novo."*, e nada ficava vermelho.
+/// Aqui ele existe pelo caminho do login por credencial de dispositivo
+/// (RF24, C-05): sem ele, apagar o `on DeviceCredentialException` do `_guard`
+/// deixaria a pessoa vendo "Sem conexão com o servidor" no lugar de
+/// *"Credencial inválida ou revogada."*, e nada ficava vermelho.
 ///
 /// Não é um servidor de verdade: não tem TLS, não autentica ninguém e só
-/// conhece os métodos que os testes pedem. Nenhum código OTP nem CPF real passa
-/// por aqui — o corpo dos pedidos é inspecionado, nunca ecoado no token.
+/// conhece os métodos que os testes pedem. Nenhum segredo real passa por
+/// aqui — o corpo dos pedidos é inspecionado, nunca ecoado no token.
 class FakeRpcServer {
   FakeRpcServer._(this._server);
 
@@ -43,22 +43,23 @@ class FakeRpcServer {
   /// Tudo o que chegou, na ordem. É o que os testes inspecionam.
   final List<RpcRequest> requests = <RpcRequest>[];
 
-  /// Vida útil do token emitido por `verifyOtp`. É o valor que o app lê do
-  /// `exp` do token — e é por isso que ele é configurável: com dois valores
-  /// diferentes, um teste distingue "o app leu o token" de "o app supôs 1
-  /// hora". Negativa produz uma sessão **já vencida**, sem esperar.
+  /// Vida útil do token emitido por `loginDevice`/`completeEnrollment`. É o
+  /// valor que o app lê do `exp` do token — e é por isso que ele é
+  /// configurável: com dois valores diferentes, um teste distingue "o app leu
+  /// o token" de "o app supôs 1 hora". Negativa produz uma sessão **já
+  /// vencida**, sem esperar.
   Duration tokenLifetime = const Duration(hours: 1);
 
   /// UUIDs sintéticos do seed, como no resto dos testes.
   String userId = '00000000-0000-4000-8000-000000000001';
   String microAreaId = '00000000-0000-4000-8000-000000000003';
 
-  /// Definida, faz `requestOtp` recusar com esta mensagem, no mesmo formato que
-  /// o backend real usa (`OtpRequestException`).
-  String? rejectOtpWith;
+  /// Definida, faz `loginDevice` recusar com esta mensagem, no mesmo formato
+  /// que o backend real usa (`DeviceCredentialException`).
+  String? rejectLoginDeviceWith;
 
-  /// Idem para `verifyOtp`.
-  String? rejectVerifyWith;
+  /// Idem para `completeEnrollment` (`EnrollmentException`).
+  String? rejectEnrollmentWith;
 
   /// Definida, faz `updateConsent`/`requestDataDeletion`/`requestDataCorrection`
   /// recusarem com esta mensagem, no formato de `DataRightsException`.
@@ -68,8 +69,8 @@ class FakeRpcServer {
   /// dois testes em paralelo não brigam por porta.
   String get host => 'http://127.0.0.1:${_server.port}/';
 
-  int get otpRequests =>
-      requests.where((r) => r.method == 'requestOtp').length;
+  int get deviceLogins =>
+      requests.where((r) => r.method == 'loginDevice').length;
 
   static Future<FakeRpcServer> start() async {
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
@@ -92,15 +93,32 @@ class FakeRpcServer {
       args: decoded,
     ));
 
-    final recusa = switch (method) {
-      'requestOtp' => rejectOtpWith,
-      'verifyOtp' => rejectVerifyWith,
+    final recusaLogin = switch (method) {
+      'loginDevice' => rejectLoginDeviceWith,
       _ => null,
     };
-    if (recusa != null) {
+    if (recusaLogin != null) {
       await _respond(request, HttpStatus.badRequest, {
-        'className': 'OtpRequestException',
-        'data': {'__className__': 'OtpRequestException', 'message': recusa},
+        'className': 'DeviceCredentialException',
+        'data': {
+          '__className__': 'DeviceCredentialException',
+          'message': recusaLogin,
+        },
+      });
+      return;
+    }
+
+    final recusaEnrollment = switch (method) {
+      'completeEnrollment' => rejectEnrollmentWith,
+      _ => null,
+    };
+    if (recusaEnrollment != null) {
+      await _respond(request, HttpStatus.badRequest, {
+        'className': 'EnrollmentException',
+        'data': {
+          '__className__': 'EnrollmentException',
+          'message': recusaEnrollment,
+        },
       });
       return;
     }
@@ -119,15 +137,7 @@ class FakeRpcServer {
     }
 
     final payload = switch (method) {
-      // `requestOtp` devolve `void`. Aqui o corpo é `{}`, e o servidor real
-      // devolve `null` — a diferença é inócua e conhecida: o cliente gerado
-      // chama `callServerEndpoint<void>`, que para `void` **não passa pelo
-      // `parseData`** e descarta o corpo inteiro
-      // (`serverpod_client_shared.dart:568-572`, na versão 3.4.13 deste
-      // workspace). Quem estender este fake para um método com retorno de
-      // verdade precisa do corpo real, não deste.
-      'requestOtp' => const <String, Object?>{},
-      'verifyOtp' => <String, Object?>{
+      'loginDevice' || 'completeEnrollment' => <String, Object?>{
           'accessToken': _token(),
           'tokenType': 'Bearer',
         },
