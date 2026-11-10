@@ -450,6 +450,11 @@ class OfflineVisitQueue {
   final List<OfflineVisitRecord> _rejected = <OfflineVisitRecord>[];
 
   bool _restored = false;
+
+  /// O [restore] falhou e o disco ainda não foi lido (#151). Enquanto for
+  /// `true`, gravar seria perigoso: o `save` substitui o conjunto do dono, e
+  /// apagaria do disco as visitas que nunca chegaram à RAM. Ver [_persist].
+  bool _diskUnread = false;
   bool _persistenceFailed = false;
   bool _sealed = false;
 
@@ -506,10 +511,49 @@ class OfflineVisitQueue {
       }
       _persistenceFailed = false;
     } catch (_) {
-      // Banco indisponível (chave perdida, plataforma sem SQLCipher). A fila
-      // segue em memória e o sinalizador acende.
+      // Banco indisponível (chave perdida, `open_failed` ambíguo, plataforma
+      // sem SQLCipher). A fila segue em memória e o sinalizador acende.
       _persistenceFailed = true;
+      _diskUnread = true;
     }
+  }
+
+  /// Lê o disco que o [restore] não conseguiu ler e junta com a RAM (#151).
+  ///
+  /// Por `localId`: o que já está na RAM vence (é mais novo), e o que esta
+  /// execução já enviou (`_synced`) não volta para a fila. O que só existia no
+  /// disco entra antes do que foi registrado nesta execução (é mais antigo).
+  /// Devolve `false` se o disco continua ilegível — e então ninguém grava.
+  Future<bool> _readUnreadDisk() async {
+    if (!_diskUnread) return true;
+    final List<OfflineVisitRecord> stored;
+    try {
+      stored = await _store.load();
+    } catch (_) {
+      return false;
+    }
+    if (!_diskUnread) return true; // outra gravação concorrente já juntou.
+    final known = {
+      for (final visit in [..._pending, ..._conflicts, ..._rejected, ..._synced]) visit.localId,
+    };
+    final pending = <OfflineVisitRecord>[];
+    final conflicts = <OfflineVisitRecord>[];
+    final rejected = <OfflineVisitRecord>[];
+    for (final visit in stored) {
+      if (known.contains(visit.localId)) continue;
+      if (visit.inConflict) {
+        conflicts.add(visit);
+      } else if (visit.rejectionReason != null) {
+        rejected.add(visit);
+      } else {
+        pending.add(visit);
+      }
+    }
+    _pending.insertAll(0, pending);
+    _conflicts.insertAll(0, conflicts);
+    _rejected.insertAll(0, rejected);
+    _diskUnread = false;
+    return true;
   }
 
   /// [alertId]: a visita nasceu de um alerta; só vai para a telemetria.
@@ -707,6 +751,14 @@ class OfflineVisitQueue {
   );
 
   Future<void> _persist() async {
+    if (_sealed) return;
+    // #151: nunca substituir o conjunto do dono sem tê-lo lido. Com o disco
+    // ainda ilegível, a fila fica em RAM e o disco intacto.
+    if (!await _readUnreadDisk()) {
+      _persistenceFailed = true;
+      return;
+    }
+    // A limpeza remota pode ter selado a fila durante a leitura acima.
     if (_sealed) return;
     try {
       await _store.save([..._pending, ..._conflicts, ..._rejected]);
