@@ -36,8 +36,9 @@ class PatientLocalDatabase implements LocalDataControl {
     @visibleForTesting this.openOverride,
   });
 
-  /// C-04 sobe para 2 com `local_events`.
-  static const schemaVersion = 1;
+  /// v2 (C-04, #127): tabela `local_events`, a trilha local de eventos do
+  /// aparelho. Migração aditiva: v1 → v2 só cria a tabela, nada é apagado.
+  static const schemaVersion = 2;
 
   static const _sidecars = ['-wal', '-shm', '-journal'];
 
@@ -321,6 +322,7 @@ class PatientLocalDatabase implements LocalDataControl {
         password: rawKey,
         version: schemaVersion,
         onCreate: (db, version) => _create(db),
+        onUpgrade: _upgrade,
         onDowngrade: onDatabaseDowngradeDelete,
       );
     }
@@ -329,6 +331,7 @@ class PatientLocalDatabase implements LocalDataControl {
       options: OpenDatabaseOptions(
         version: schemaVersion,
         onCreate: (db, version) => _create(db),
+        onUpgrade: _upgrade,
         onDowngrade: onDatabaseDowngradeDelete,
       ),
     );
@@ -350,6 +353,25 @@ CREATE TABLE reminders (
 CREATE TABLE consent_preferences (
   purpose TEXT PRIMARY KEY,
   granted INTEGER NOT NULL
+)''');
+    await _createLocalEvents(db);
+  }
+
+  /// Só migrações aditivas: o app já foi distribuído com a v1, e os lembretes
+  /// e o consentimento dela precisam sobreviver.
+  static Future<void> _upgrade(Database db, int oldVersion, int newVersion) async {
+    if (oldVersion < 2) await _createLocalEvents(db);
+  }
+
+  /// Trilha local de eventos (C-04): tipo, instante em UTC e versão do motor.
+  /// Nenhuma coluna para respostas da autoavaliação, de propósito.
+  static Future<void> _createLocalEvents(Database db) async {
+    await db.execute('''
+CREATE TABLE local_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  kind TEXT NOT NULL,
+  occurred_at TEXT NOT NULL,
+  engine_version TEXT NOT NULL
 )''');
   }
 }
