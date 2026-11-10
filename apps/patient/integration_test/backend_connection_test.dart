@@ -62,9 +62,10 @@ void main() {
 
   late BackendClient backend;
 
-  // Uma sessão para o arquivo inteiro: o servidor impõe 60 s entre dois pedidos de
-  // OTP do mesmo paciente, então logar de novo a cada teste só funciona com o
-  // login de desenvolvimento. O teste de sessão confere o que esta obteve.
+  // Uma sessão para o arquivo inteiro: cada login consome UM convite de uso
+  // único do manifesto (e cria uma credencial de dispositivo nova), então
+  // logar de novo a cada teste gastaria convites à toa. O teste de sessão
+  // confere o que esta obteve.
   setUpAll(() async {
     final caBytes = await _devRpcCaBytes();
     if (caBytes == null) {

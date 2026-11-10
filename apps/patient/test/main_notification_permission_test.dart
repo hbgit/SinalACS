@@ -18,7 +18,10 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:sinalacs_patient/app/app.dart' show PatientLoginScreen;
 import 'package:sinalacs_patient/main.dart' as app;
+
+import 'support/fake_device_credential_store.dart';
 
 const _canalDeNotificacoes = MethodChannel('dexterous.com/flutter/local_notifications');
 
@@ -59,13 +62,13 @@ void main() {
     debugPrint = (String? message, {int? wrapWidth}) {};
     try {
       var subiu = false;
-      unawaited(app.main(defaultHost: 'https://10.0.2.2/').then((_) => subiu = true));
+      unawaited(app.main(defaultHost: 'https://10.0.2.2/', deviceCredentials: FakeDeviceCredentialStore()).then((_) => subiu = true));
       for (var i = 0; i < 10 && !subiu; i++) {
         await tester.pump();
       }
 
       expect(subiu, isTrue, reason: 'o main() não pode esperar o diálogo de permissão');
-      expect(find.byKey(const Key('cpf_field')), findsOneWidget);
+      expect(find.byType(PatientLoginScreen), findsOneWidget);
       expect(chamadas, contains('initialize'));
       expect(
         chamadas,

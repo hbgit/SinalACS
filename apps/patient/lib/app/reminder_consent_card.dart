@@ -1,9 +1,8 @@
 import 'package:flutter/material.dart';
 
 /// Pergunta, no topo de "Lembretes", se a pessoa autoriza lembretes neste
-/// aparelho (#136). Aparece só quando não há decisão local gravada — aparelho
-/// que entrou pelo login OTP, banco recomeçado por chave perdida ou "Apagar e
-/// recomeçar".
+/// aparelho (#136). Aparece só quando não há decisão local gravada — banco
+/// local recomeçado por chave perdida ou "Apagar e recomeçar".
 ///
 /// Não há "Agora não": enquanto a pessoa não escolhe, nada é gravado e nenhum
 /// lembrete é agendado. Os textos usam as cores normais do tema; cor clínica

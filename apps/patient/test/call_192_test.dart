@@ -11,6 +11,7 @@ import 'package:sinalacs_patient/core/privacy/location_hash.dart';
 import 'package:sinalacs_patient/core/services/emergency_dialer.dart';
 import 'package:sinalacs_patient/core/triage/self_assessment.dart';
 
+import 'support/fake_device_credential_store.dart';
 import 'support/fake_patient_backend.dart';
 
 class _FakeDialer implements EmergencyDialer {
@@ -52,13 +53,7 @@ Future<void> _openContact(WidgetTester tester) async {
 }
 
 Future<void> _login(WidgetTester tester) async {
-  await tester.enterText(find.byKey(const Key('cpf_field')), '123.456.789-09');
-  await tester.enterText(find.byKey(const Key('birth_date_field')), '01/01/1990');
-  await tester.tap(find.byKey(const Key('enter_button')));
-  await tester.pumpAndSettle();
-  await tester.enterText(find.byKey(const Key('otp_code_field')), '123456');
-  await tester.tap(find.byKey(const Key('verify_code_button')));
-  await tester.pumpAndSettle();
+  await loginWithPin(tester);
 }
 
 /// Responde à autoavaliação com "sim" só para dor no peito (vermelho no motor).
@@ -79,7 +74,7 @@ void main() {
     testWidgets('mostra a orientação, grava o evento local e não chama createRedAlert', (tester) async {
       final backend = FakePatientBackend(risk: RiskLevel.red);
       final events = InMemoryLocalEventLog();
-      await tester.pumpWidget(SinalAcsApp(
+      await tester.pumpWidget(SinalAcsApp(deviceCredentials: enrolledCredentialStore(), 
         backend: backend,
         localEvents: events,
         emergencyDialer: _FakeDialer(),
@@ -106,7 +101,7 @@ void main() {
     testWidgets('não fecha pelo voltar do sistema; só pela escolha explícita', (tester) async {
       final backend = FakePatientBackend(risk: RiskLevel.red);
       final events = InMemoryLocalEventLog();
-      await tester.pumpWidget(SinalAcsApp(backend: backend, localEvents: events));
+      await tester.pumpWidget(SinalAcsApp(deviceCredentials: enrolledCredentialStore(), backend: backend, localEvents: events));
       await _login(tester);
       await _answerRed(tester);
 
@@ -131,7 +126,7 @@ void main() {
 
     testWidgets('"Ligar 192" abre o discador com 192, sem ligar sozinho', (tester) async {
       final dialer = _FakeDialer();
-      await tester.pumpWidget(SinalAcsApp(
+      await tester.pumpWidget(SinalAcsApp(deviceCredentials: enrolledCredentialStore(), 
         backend: FakePatientBackend(risk: RiskLevel.red),
         localEvents: InMemoryLocalEventLog(),
         emergencyDialer: dialer,
@@ -148,7 +143,7 @@ void main() {
     });
 
     testWidgets('sem discador no aparelho, diz para ligar 192 pelo telefone', (tester) async {
-      await tester.pumpWidget(SinalAcsApp(
+      await tester.pumpWidget(SinalAcsApp(deviceCredentials: enrolledCredentialStore(), 
         backend: FakePatientBackend(risk: RiskLevel.red),
         localEvents: InMemoryLocalEventLog(),
         emergencyDialer: _FakeDialer(opens: false),
@@ -164,7 +159,7 @@ void main() {
 
     testWidgets('com o banco local indisponível a orientação aparece e fecha igual', (tester) async {
       final events = _BrokenEventLog();
-      await tester.pumpWidget(SinalAcsApp(
+      await tester.pumpWidget(SinalAcsApp(deviceCredentials: enrolledCredentialStore(), 
         backend: FakePatientBackend(risk: RiskLevel.red),
         localEvents: events,
       ));
@@ -180,7 +175,7 @@ void main() {
 
     testWidgets('o título é cabeçalho e a tela passa nas diretrizes de alvo de toque', (tester) async {
       final handle = tester.ensureSemantics();
-      await tester.pumpWidget(SinalAcsApp(
+      await tester.pumpWidget(SinalAcsApp(deviceCredentials: enrolledCredentialStore(), 
         backend: FakePatientBackend(risk: RiskLevel.red),
         localEvents: InMemoryLocalEventLog(),
       ));
@@ -197,7 +192,7 @@ void main() {
 
     testWidgets('querer falar com o agente depois é um ato separado, na aba Contato', (tester) async {
       final backend = FakePatientBackend(risk: RiskLevel.red);
-      await tester.pumpWidget(SinalAcsApp(
+      await tester.pumpWidget(SinalAcsApp(deviceCredentials: enrolledCredentialStore(), 
         backend: backend,
         localEvents: InMemoryLocalEventLog(),
         locationReader: _NoLocation(),
@@ -224,7 +219,7 @@ void main() {
   group('aba Contato', () {
     testWidgets('"Ligar 192" aparece antes do pedido de contato', (tester) async {
       final dialer = _FakeDialer();
-      await tester.pumpWidget(SinalAcsApp(backend: FakePatientBackend(), emergencyDialer: dialer));
+      await tester.pumpWidget(SinalAcsApp(deviceCredentials: enrolledCredentialStore(), backend: FakePatientBackend(), emergencyDialer: dialer));
       await _login(tester);
       await _openContact(tester);
       expect(find.text('Pedido de contato'), findsOneWidget);
@@ -239,7 +234,7 @@ void main() {
     });
 
     testWidgets('nenhum rótulo de urgência nem promessa de atendimento na tela', (tester) async {
-      await tester.pumpWidget(SinalAcsApp(
+      await tester.pumpWidget(SinalAcsApp(deviceCredentials: enrolledCredentialStore(), 
         backend: FakePatientBackend(),
         locationReader: _NoLocation(),
       ));
@@ -260,7 +255,7 @@ void main() {
 
     testWidgets('o estado do pedido é anunciado ao leitor de tela', (tester) async {
       final handle = tester.ensureSemantics();
-      await tester.pumpWidget(SinalAcsApp(backend: FakePatientBackend(), locationReader: _NoLocation()));
+      await tester.pumpWidget(SinalAcsApp(deviceCredentials: enrolledCredentialStore(), backend: FakePatientBackend(), locationReader: _NoLocation()));
       await _login(tester);
       await _openContact(tester);
       await tester.tap(find.byKey(const Key('panic_button')));

@@ -4,6 +4,7 @@ import 'package:serverpod/serverpod.dart';
 import 'package:sinalacs_server/src/application/admin/admin_read_service.dart';
 import 'package:sinalacs_server/src/application/audit/audit_trail.dart';
 import 'package:sinalacs_server/src/application/auth/cpf.dart';
+import 'package:sinalacs_server/src/application/auth/device_credential_service.dart';
 import 'package:sinalacs_server/src/application/auth/passwordless_auth_service.dart';
 import 'package:sinalacs_server/src/application/auth/sms_gateway.dart';
 import 'package:sinalacs_server/src/application/onboarding/consent_signature.dart';
@@ -16,6 +17,8 @@ import 'package:sinalacs_server/src/infrastructure/crypto/encrypted_json.dart';
 import 'package:sinalacs_server/src/infrastructure/crypto/hmac_cpf_hasher.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_audit_trail.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_data_subject_case_store.dart';
+import 'package:sinalacs_server/src/infrastructure/database/orm_device_credential_store.dart';
+import 'package:sinalacs_server/src/infrastructure/database/orm_onboarding_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_otp_challenge_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_push_token_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_telemetry_store.dart';
@@ -579,6 +582,91 @@ void main() {
         0,
       );
     });
+
+    test(
+      'a exclusão revoga a credencial de dispositivo do titular e apaga os convites pendentes',
+      () async {
+        // C-05 (#128) na fronteira da #42: sem isso, o titular anonimizado
+        // continua entrando por `auth.loginDevice`, e um convite pendente
+        // recriaria a credencial depois da revogação.
+        const deviceId = '00000000-0000-4000-8000-0000000042a1';
+        const segredo = 'segredo-sintetico-do-dispositivo-42';
+        const tokenPendente = 'hash-convite-pendente-42';
+        final titular = UuidValue.fromString(_pacA);
+
+        final credenciais = OrmDeviceCredentialStore(session: () => session);
+        await credenciais.create(
+          StoredPatientDeviceCredential(
+            id: '00000000-0000-4000-8000-0000000042a2',
+            patientId: _pacA,
+            deviceId: deviceId,
+            credentialHash: DeviceCredentialService.hashSecret(segredo),
+            createdAt: _t,
+            microAreaId: _maA,
+          ),
+        );
+        await EnrollmentToken.db.insertRow(
+          session,
+          EnrollmentToken(
+            tokenHash: tokenPendente,
+            patientId: titular,
+            microAreaId: UuidValue.fromString(_maA),
+            createdByAcsId: UuidValue.fromString(_acsId),
+            createdAt: _t,
+            expiresAt: _t.add(const Duration(minutes: 30)),
+          ),
+        );
+        final login = DeviceCredentialService(
+          store: credenciais,
+          audit: _SemAuditoria(),
+        );
+
+        // Antes da exclusão, a credencial entra.
+        final antes = await login.login(deviceId: deviceId, secret: segredo);
+        expect(antes.id, _pacA);
+        expect(
+          await EnrollmentToken.db.count(
+            session,
+            where: (t) => t.patientId.equals(titular),
+          ),
+          1,
+        );
+
+        expect(await excluir(_pedA1), isTrue);
+
+        // 1) Mesma recusa uniforme das demais (DeviceCredentialException).
+        await expectLater(
+          login.login(deviceId: deviceId, secret: segredo),
+          throwsA(isA<DeviceCredentialException>()),
+        );
+        // 2) A revogação ficou registrada na linha, com o instante da decisão.
+        final linha = await PatientDeviceCredential.db.findFirstRow(
+          session,
+          where: (t) => t.deviceId.equals(deviceId),
+        );
+        expect(linha!.revokedAt, _t);
+        // 3) O convite pendente morreu junto e não é mais consumível — nem
+        // por `consumeIfValid` (o caminho do completeEnrollment).
+        expect(
+          await EnrollmentToken.db.count(
+            session,
+            where: (t) => t.patientId.equals(titular),
+          ),
+          0,
+        );
+        final onboarding = OrmOnboardingStore(
+          session: () => session,
+          chainSecret: _segredoConsentimento,
+        );
+        expect(
+          await onboarding.consumeIfValid(
+            tokenPendente,
+            _t.add(const Duration(minutes: 1)),
+          ),
+          isNull,
+        );
+      },
+    );
 
     test('decide em titular sem linha em patients não quebra', () async {
       const pedido42 = '00000000-0000-4000-8000-000000004226';

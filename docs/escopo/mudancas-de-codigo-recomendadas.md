@@ -23,6 +23,11 @@ Nenhuma coleta com participantes antes destas (M-01).
 | C-11 | `apps/patient/lib/core/network/backend_client.dart:450` (chamada a `triage.evaluate`) e `backend/sinalacs_server/lib/src/endpoints/triage_endpoint.dart` | No pilar A, a autoavaliação roda **localmente**, sem sessão e sem registro no servidor: o app executa a mesma árvore de decisão do `TriageEngine` no aparelho (mesma entrada, mesmo resultado — INV-02), sem `accessToken` e sem gravar em `triage_sessions`. Hoje `triage.evaluate` exige `accessToken` e grava a sessão no servidor, o que contradiz o pilar A "sem cadastro" e RNF09. A chamada remota fica só no pilar B, com sessão. Testes exigidos: sem login, a autoavaliação produz o mesmo resultado que o motor do backend para as 64 combinações de sinais e não faz nenhuma chamada de rede | RF04, RF16, RF22, RNF09 | P-11 |
 | C-12 | Backend (`auth`/`onboarding`) e app do paciente | Recuperação de acesso por novo convite QR do agente participante, **vinculado ao mesmo identificador pseudônimo** após confirmação presencial pelo agente. A reemissão do convite **invalida no servidor a credencial de dispositivo anterior** vinculada ao identificador; revogar o JWT é opcional, dado o prazo de 1 h. Essa invalidação **não existe hoje** no app do paciente; o wipe remoto (#81) cobre só o app do agente e serve de referência de desenho. Limpeza local quando o aparelho antigo voltar a falar com o servidor. **Limite:** um aparelho perdido que nunca mais se conecta não é alcançado; nele, o que protege os dados é a cifra local (RNF03) com o PIN. Testes exigidos: novo convite reusa o identificador e o histórico; a credencial do aparelho anterior é recusada pelo servidor logo após a reemissão | RF24, P-10 | C-05 |
 
+> ✅ **C-05 entregue** (issue #128, 2026-11): convite QR + PIN local, credencial
+> de dispositivo vinculada ao identificador pseudônimo, login sem e-mail/CPF/
+> telefone e `SMS_GATEWAY` opcional fora de `development`. A linha segue na
+> tabela para manter os IDs estáveis; a recuperação de acesso continua em C-12.
+
 ## Portão do piloto — funcional
 
 Obrigatório se o pilar A estiver no piloto.

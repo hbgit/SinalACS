@@ -34,6 +34,7 @@ import 'package:sinalacs_server/src/application/alerts/alert_outbox_dispatcher.d
 import 'package:sinalacs_server/src/application/alerts/red_alert_service.dart';
 import 'package:sinalacs_server/src/application/audit/audit_trail.dart';
 import 'package:sinalacs_server/src/application/auth/development_auth_service.dart';
+import 'package:sinalacs_server/src/application/auth/device_credential_service.dart';
 import 'package:sinalacs_server/src/application/auth/cpf_hasher.dart';
 import 'package:sinalacs_server/src/application/auth/institutional_auth_service.dart';
 import 'package:sinalacs_server/src/application/auth/refresh_token_service.dart';
@@ -65,6 +66,7 @@ import 'package:sinalacs_server/src/infrastructure/database/orm_audit_chain_read
 import 'package:sinalacs_server/src/infrastructure/database/orm_audit_trail.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_onboarding_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_otp_challenge_store.dart';
+import 'package:sinalacs_server/src/infrastructure/database/orm_device_credential_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_data_subject_rights_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_notice_recipient_store.dart';
 import 'package:sinalacs_server/src/infrastructure/database/orm_push_token_store.dart';
@@ -143,20 +145,24 @@ class AlertRuntime {
   @visibleForTesting
   CpfHasher get cpfHasherForTests => cpfHasher;
 
-  /// Gateway de SMS do login passwordless.
+  /// Gateway de SMS do login passwordless (RF01, Futuro).
   ///
-  /// Sem override, é o de `SMS_GATEWAY`; hoje só existe `log`, e `AppConfig`
-  /// já recusa esse valor fora de `APP_ENV=development` — a exceção aqui é a
-  /// segunda linha de defesa, para uma config construída fora do
-  /// `fromEnvironment` (os testes) apontar o gateway errado em produção.
-  SmsGateway get smsGateway =>
+  /// Sem override, vem de `SMS_GATEWAY`: `'log'` vira o gateway de
+  /// desenvolvimento; `null` (ausente fora de `development`, C-05) devolve
+  /// `null` — o caminho do OTP fica desligado e `auth.requestOtp` o recusa
+  /// explicitamente. Um valor que não seja `'log'` nem `null` é a segunda
+  /// linha de defesa, para uma config construída fora do `fromEnvironment`
+  /// (os testes) apontar um gateway que não existe.
+  SmsGateway? get smsGateway =>
       _smsGatewayOverride ??
-      (_smsGateway ??= config.smsGateway == 'log'
-          ? const LoggingSmsGateway()
-          : throw StateError(
-              'SMS_GATEWAY=${config.smsGateway} não tem implementação: só '
-              '"log" existe hoje. Implemente SmsGateway antes de configurá-lo.',
-            ));
+      (_smsGateway ??= switch (config.smsGateway) {
+        null => null,
+        'log' => const LoggingSmsGateway(),
+        final gateway => throw StateError(
+            'SMS_GATEWAY=$gateway não tem implementação: só '
+            '"log" existe hoje. Implemente SmsGateway antes de configurá-lo.',
+          ),
+      });
   SmsGateway? _smsGateway;
   SmsGateway? _smsGatewayOverride;
 
@@ -693,6 +699,10 @@ class AlertRuntime {
           chainSecret: config.auditChainSecret,
           transaction: transaction,
         ),
+        deviceCredentials: OrmDeviceCredentialStore(
+          session: () => session,
+          transaction: transaction,
+        ),
       );
 
   /// Refresh token do ACS (LGPD-RT06): store no ORM da sessão da chamada e a
@@ -754,7 +764,21 @@ class AlertRuntime {
       PasswordlessAuthService(
         store: OrmOtpChallengeStore(session: () => session),
         hasher: cpfHasher,
-        sms: smsGateway,
+        // Inalcançável: `auth.requestOtp` recusa antes de construir o serviço
+        // quando não há gateway (C-05). A guarda aqui é a segunda linha.
+        sms: smsGateway ??
+            (throw StateError(
+                'SMS_GATEWAY ausente: auth.requestOtp deve recusar antes de '
+                'construir o PasswordlessAuthService.')),
+        audit: auditTrailFor(session),
+      );
+
+  /// Login do participante por credencial de dispositivo (RF24, C-05).
+  /// A trilha é a da requisição, para cada desfecho (`granted`,
+  /// `denied_credential`) virar uma linha encadeada em `audit_logs`.
+  DeviceCredentialService deviceCredentialServiceFor(Session session) =>
+      DeviceCredentialService(
+        store: OrmDeviceCredentialStore(session: () => session),
         audit: auditTrailFor(session),
       );
 

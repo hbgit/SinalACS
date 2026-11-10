@@ -11,6 +11,7 @@ import 'package:sinalacs_patient/core/education/educational_library.dart';
 import 'package:sinalacs_patient/core/legal/educational_notice.dart';
 import 'package:sinalacs_patient/core/network/backend_client.dart';
 
+import 'support/fake_device_credential_store.dart';
 import 'support/fake_patient_backend.dart';
 
 /// Biblioteca de saúde (C-03, RF20, RF22). Critérios de aceite da #126:
@@ -217,7 +218,7 @@ void main() {
 
     testWidgets('abre pelo login, sem sessão e sem nenhuma chamada ao backend', (tester) async {
       final backend = _NoNetworkBackend();
-      await tester.pumpWidget(SinalAcsApp(
+      await tester.pumpWidget(SinalAcsApp(deviceCredentials: FakeDeviceCredentialStore(), 
         backend: backend,
         educationalNotice: MemoryEducationalNoticeStore(acknowledged: true),
       ));
@@ -278,16 +279,11 @@ void main() {
     testWidgets('abre pelo menu "Mais" com sessão', (tester) async {
       await tester.pumpWidget(SinalAcsApp(
         backend: FakePatientBackend(),
+        deviceCredentials: enrolledCredentialStore(),
         educationalNotice: MemoryEducationalNoticeStore(acknowledged: true),
       ));
       await tester.pumpAndSettle();
-      await tester.enterText(find.byKey(const Key('cpf_field')), '123.456.789-09');
-      await tester.enterText(find.byKey(const Key('birth_date_field')), '01/01/1990');
-      await tester.tap(find.byKey(const Key('enter_button')));
-      await tester.pumpAndSettle();
-      await tester.enterText(find.byKey(const Key('otp_code_field')), '123456');
-      await tester.tap(find.byKey(const Key('verify_code_button')));
-      await tester.pumpAndSettle();
+      await loginWithPin(tester);
 
       await tester.tap(find.descendant(of: find.byType(NavigationBar), matching: find.text('Mais')));
       await tester.pumpAndSettle();

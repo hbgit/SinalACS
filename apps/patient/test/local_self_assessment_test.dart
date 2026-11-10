@@ -15,6 +15,7 @@ import 'package:sinalacs_patient/core/events/local_event_log.dart';
 import 'package:sinalacs_patient/core/network/backend_client.dart';
 import 'package:sinalacs_patient/core/triage/self_assessment.dart';
 
+import 'support/fake_device_credential_store.dart';
 import 'support/fake_patient_backend.dart';
 
 /// Backend que registra TODA chamada, de qualquer método, e falha. É a rede do
@@ -50,7 +51,7 @@ Future<void> _answer(WidgetTester tester, Set<TriageSymptom> yesTo) async {
 void main() {
   testWidgets('sem login: a autoavaliação abre na entrada e não faz nenhuma chamada de rede', (tester) async {
     final backend = _NetworkSentinel();
-    await tester.pumpWidget(SinalAcsApp(backend: backend, localEvents: InMemoryLocalEventLog()));
+    await tester.pumpWidget(SinalAcsApp(deviceCredentials: FakeDeviceCredentialStore(), backend: backend, localEvents: InMemoryLocalEventLog()));
     await tester.pumpAndSettle();
     final antes = List.of(backend.calls);
 
@@ -62,7 +63,7 @@ void main() {
   });
 
   testWidgets('o resultado local não fala de solicitação nem de agente', (tester) async {
-    await tester.pumpWidget(SinalAcsApp(backend: _NetworkSentinel()));
+    await tester.pumpWidget(SinalAcsApp(deviceCredentials: FakeDeviceCredentialStore(), backend: _NetworkSentinel()));
     await tester.pumpAndSettle();
     await _openLocalSelfAssessment(tester);
 
@@ -76,13 +77,13 @@ void main() {
     // "Concluir" volta à entrada, ainda sem conta.
     await tester.tap(find.byKey(const Key('triage_continue')));
     await tester.pumpAndSettle();
-    expect(find.byKey(const Key('cpf_field')), findsOneWidget);
+    expect(find.byKey(const Key('start_onboarding_button')), findsOneWidget);
   });
 
   testWidgets('vermelho local: orientação "Ligar 192", evento local e nada enviado', (tester) async {
     final backend = _NetworkSentinel();
     final events = InMemoryLocalEventLog();
-    await tester.pumpWidget(SinalAcsApp(backend: backend, localEvents: events));
+    await tester.pumpWidget(SinalAcsApp(deviceCredentials: FakeDeviceCredentialStore(), backend: backend, localEvents: events));
     await tester.pumpAndSettle();
     final antes = List.of(backend.calls);
     await _openLocalSelfAssessment(tester);
@@ -120,7 +121,7 @@ void main() {
       );
       expect(rotulo, 'Risco: ${{'yellow': 'Amarelo', 'green': 'Verde'}[esperado.name]}');
 
-      await tester.pumpWidget(SinalAcsApp(backend: _NetworkSentinel()));
+      await tester.pumpWidget(SinalAcsApp(deviceCredentials: FakeDeviceCredentialStore(), backend: _NetworkSentinel()));
       await tester.pumpAndSettle();
       await _openLocalSelfAssessment(tester);
       await _answer(tester, sim);
@@ -131,14 +132,8 @@ void main() {
 
   testWidgets('com sessão (pilar B), a autoavaliação continua indo ao servidor', (tester) async {
     final backend = FakePatientBackend(risk: RiskLevel.yellow);
-    await tester.pumpWidget(SinalAcsApp(backend: backend));
-    await tester.enterText(find.byKey(const Key('cpf_field')), '123.456.789-09');
-    await tester.enterText(find.byKey(const Key('birth_date_field')), '01/01/1990');
-    await tester.tap(find.byKey(const Key('enter_button')));
-    await tester.pumpAndSettle();
-    await tester.enterText(find.byKey(const Key('otp_code_field')), '123456');
-    await tester.tap(find.byKey(const Key('verify_code_button')));
-    await tester.pumpAndSettle();
+    await tester.pumpWidget(SinalAcsApp(backend: backend, deviceCredentials: enrolledCredentialStore()));
+    await loginWithPin(tester);
 
     await _answer(tester, {TriageSymptom.fever});
 

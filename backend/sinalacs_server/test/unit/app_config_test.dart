@@ -9,12 +9,13 @@ import 'package:test/test.dart';
 /// `AUDIT_CHAIN_SECRET` segue exatamente a mesma regra, para a cadeia de hash
 /// de `audit_logs`. `CPF_HASH_PEPPER` entrou depois, com a mesma regra.
 ///
-/// Depois de `SMS_GATEWAY`, **nenhuma configuração fora de `development` pode
-/// ser construída**: o único gateway implementado é `log`, que só vale em
-/// desenvolvimento, e nenhum provedor real foi escolhido (`spec` do RF01). Por
-/// isso os casos de SUCESSO daqui montam em `development` — é o único ambiente
-/// em que existe configuração válida para os segredos serem observados. Os
-/// casos de recusa continuam cobrindo `production`.
+/// Depois de `SMS_GATEWAY`, **quase nenhuma configuração fora de
+/// `development` era construtível** — o único gateway implementado é `log`,
+/// que só vale em desenvolvimento. A C-05 (RF24, P-10) retirou a exigência:
+/// sem a variável, `smsGateway` é `null` e o caminho do OTP fica desligado.
+/// Os casos de SUCESSO daqui montam em `development` por conveniência (os
+/// segredos usam os fallbacks públicos), e os casos de recusa cobrem
+/// `production`.
 void main() {
   AppConfig build({
     required String appEnv,
@@ -326,8 +327,7 @@ void main() {
 
   group('SMS_GATEWAY', () {
     // `log` NÃO envia SMS: escreve o código no log do processo, e por isso só
-    // vale em desenvolvimento. Fora dele, subir assim deixa todo paciente sem
-    // receber o código de acesso — falha no boot, não no primeiro cadastro.
+    // vale em desenvolvimento.
     test('log fora de development não sobe', () {
       expect(
         () => build(
@@ -347,8 +347,26 @@ void main() {
       );
     });
 
-    test('ausente fora de development não sobe', () {
-      // Sem gateway nenhum o servidor sobe incapaz de enviar código.
+    test('ausente fora de development vale null (C-05: piloto sem SMS)', () {
+      // O acesso do piloto é por convite QR + PIN (RF24): a ausência deixa de
+      // ser erro de boot e o caminho do OTP fica desligado — `auth.requestOtp`
+      // o recusa explicitamente.
+      final config = build(
+        appEnv: 'production',
+        jwtSecret: 'a' * 64,
+        auditChainSecret: 'b' * 64,
+        healthDataEncryptionKey: 'c' * 64,
+        cpfHashPepper: 'd' * 64,
+        telemetryPseudonymKey: 'e' * 64,
+      );
+      expect(config.smsGateway, isNull);
+    });
+
+    test('ausente em development continua valendo log', () {
+      expect(build(appEnv: 'development').smsGateway, 'log');
+    });
+
+    test('valor desconhecido continua não subindo', () {
       expect(
         () => build(
           appEnv: 'production',
@@ -357,11 +375,12 @@ void main() {
           healthDataEncryptionKey: 'c' * 64,
           cpfHashPepper: 'd' * 64,
           telemetryPseudonymKey: 'e' * 64,
+          smsGateway: 'carrier-pigeon',
         ),
         throwsA(isA<StateError>().having(
           (error) => error.message,
           'message',
-          contains('SMS_GATEWAY é obrigatório'),
+          contains('não corresponde a nenhum gateway'),
         )),
       );
     });
@@ -375,7 +394,6 @@ void main() {
           'HEALTH_DATA_ENCRYPTION_KEY': 'c' * 64,
           'CPF_HASH_PEPPER': 'd' * 64,
           'TELEMETRY_PSEUDONYM_KEY': 'e' * 64,
-          'SMS_GATEWAY': 'log',
           if (tls) 'MQTT_USE_TLS': 'true',
           'MQTT_CLIENT_CERT_PATH': ?cert,
           'MQTT_CLIENT_KEY_PATH': ?key,
@@ -413,14 +431,13 @@ void main() {
     });
 
     test('nenhum em production sem TLS é aceito (broker de teste do CI)', () {
-      // Fora de development nenhuma configuração é construível hoje (o único
-      // SMS_GATEWAY implementado é `log`); o que importa aqui é que o erro,
-      // se houver, NÃO seja o do certificado de cliente.
-      expect(
-        () => AppConfig.fromMap(producao(tls: false)),
-        throwsA(isA<StateError>().having(
-          (e) => e.message, 'message', isNot(contains('MQTT_CLIENT_CERT_PATH')))),
-      );
+      // Desde a C-05 uma configuração fora de development SEM SMS_GATEWAY é
+      // construível (o acesso do piloto não usa SMS), e sem TLS o certificado
+      // de cliente não é exigido — o broker de teste do CI sobe assim.
+      final config = AppConfig.fromMap(producao(tls: false));
+      expect(config.mqttClientCertificatePath, isNull);
+      expect(config.mqttClientKeyPath, isNull);
+      expect(config.smsGateway, isNull);
     });
   });
 

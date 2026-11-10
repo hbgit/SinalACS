@@ -569,7 +569,7 @@ void main() {
         expect(usuario.cpfHash, 'acs-sem-cpf-${r.acs.id}');
         expect(usuario.birthDate, DateTime.utc(1900, 1, 1));
         expect(
-          RegExp(r'^[0-9a-f]{64}$').hasMatch(usuario.cpfHash),
+          RegExp(r'^[0-9a-f]{64}$').hasMatch(usuario.cpfHash!),
           isFalse,
           reason: 'o login procura por `hasher.hash(cpf)`, sempre 64 dígitos hexadecimais',
         );

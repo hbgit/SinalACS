@@ -4,6 +4,7 @@ import 'package:sinalacs_patient/app/app.dart';
 import 'package:sinalacs_patient/app/legal_screens.dart';
 import 'package:sinalacs_patient/core/legal/legal_documents.dart';
 
+import 'support/fake_device_credential_store.dart';
 import 'support/fake_patient_backend.dart';
 import 'support/contrast.dart';
 import 'support/semantics_scan.dart';
@@ -21,7 +22,13 @@ void main() {
     tester,
   ) async {
     // Ler antes de aceitar: os documentos têm de abrir sem sessão.
-    await tester.pumpWidget(SinalAcsApp(backend: FakePatientBackend()));
+    await tester.pumpWidget(SinalAcsApp(
+      backend: FakePatientBackend(),
+      deviceCredentials: FakeDeviceCredentialStore(),
+    ));
+    // A tela de acesso decide convite × PIN numa leitura assíncrona da
+    // credencial guardada — espera ela concluir antes de procurar o link.
+    await tester.pumpAndSettle();
     await tapKey(tester, 'login_legal_link');
 
     expect(find.byType(LegalDocumentsScreen), findsOneWidget);

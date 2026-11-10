@@ -57,6 +57,10 @@ const _publicMethodsByDesign = <String, String>{
       'login por desenho: quem pede o código ainda não tem sessão',
   'AuthEndpoint.verifyOtp':
       'login por desenho: é esta chamada que emite a sessão do paciente',
+  'AuthEndpoint.loginDevice':
+      'login por desenho: quem chama ainda não tem sessão — a credencial de '
+      'dispositivo liberada pelo PIN local (deviceId + segredo) É a prova; o '
+      'PIN nunca chega ao servidor',
   'AuthEndpoint.beginTotpEnrollment':
       'ativação da MFA (RF07) acontece ANTES do primeiro token: com '
       'REQUIRE_ACS_MFA o ACS sem MFA não recebe sessão — matrícula e senha SÃO '

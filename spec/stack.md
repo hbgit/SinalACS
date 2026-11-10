@@ -22,7 +22,7 @@ Esta seção vale para o escopo atual do projeto ([`escopo_projeto.md`](escopo_p
 | Traefik | Sim | Let's Encrypt (ACME) gratuito |
 | Mosquitto | Só no pilar B com RF03 ativo | Imagem oficial no mesmo host |
 | Gorush + FCM | Não | FCM sem custo; o app funciona sem push |
-| Gateway SMS | Não usado (P-10: sem CPF e sem SMS) | **Limite atual:** fora de `development` o backend não sobe sem `SMS_GATEWAY`; retirar essa exigência é a mudança C-05, pré-requisito do piloto |
+| Gateway SMS | Não usado (P-10: sem CPF e sem SMS) | Entregue na C-05 (issue #128): fora de `development` a ausência de `SMS_GATEWAY` não é mais erro de boot — `auth.requestOtp` fica desligado e recusa explicitamente |
 | Play Store | Não (Futuro) | APK em GitHub Releases |
 
 **Distribuição (M-03).** O app é distribuído como APK assinado publicado em GitHub Releases, gratuito. A Play Store exige conta de desenvolvedor paga e fica como Futuro. A chave de assinatura de release ainda precisa ser provisionada (pendência já registrada no `CLAUDE.md`). Custódia do repositório e da chave de assinatura: decisão proposta P-13 (status: Proposta).
@@ -89,7 +89,10 @@ implementados de ponta a ponta: push segmentado (§3.2, RF14 — provado no emul
   ambiente já usado para `JWT_SECRET`/`AUDIT_CHAIN_SECRET` — gerada por
   `scripts/dev/bootstrap_env.sh`, opcional em `development` (cai num valor
   público conhecido) e obrigatória fora dele —, sem introduzir um KMS externo
-  nesta fase.
+  nesta fase. O app do paciente usa o mesmo `package:cryptography` (^2.7.0)
+  para o envelope do PIN local da credencial de dispositivo (C-05, RF24): o
+  segredo do aparelho é cifrado com AES-256-GCM sob uma chave derivada do PIN
+  por Argon2id (19 MiB, t = 2, p = 1), conforme a decisão D3 do plano da #136.
 * **Push segmentado (RF14):** o envio é feito por **Gorush**, servidor de
   push open-source em Go, auto-hospedado no Docker Compose ao lado do backend
   (revisão de 2026-09-29, no lugar de integrar o Firebase). O app captura o

@@ -53,7 +53,7 @@ código recomendada, ver `docs/escopo/mudancas-de-codigo-recomendadas.md`).
 | I-28 | `spec/lgpd_design.md:132,259,374` | Compartilhamento com SAMU, UBS, Secretaria; integrações Gov.br | D6 | Futuro |
 | I-29 | `spec/lgpd_design.md:501,850` | Secretaria como controlador e como solicitante de relatórios | D6 | reescrever |
 | I-30 | `apps/patient/lib/core/legal/legal_documents.dart:113,126,131,145,185,216` | Controlador e DPO "da Secretaria", "sua UBS", SAMU | D6 | C-01 |
-| I-31 | `.env.example:212-216`, `docker-compose.e2e.yml:18`, `backend/sinalacs_server/lib/src/models/otp_challenge.spy.yaml:4` | `SMS_GATEWAY` obrigatório fora de development | D7 | comentário; C-05 |
+| I-31 | `.env.example:212-216`, `docker-compose.e2e.yml:18`, `backend/sinalacs_server/lib/src/models/otp_challenge.spy.yaml:4` | `SMS_GATEWAY` obrigatório fora de development | D7 | **C-05 (issue #128):** a exigência caiu — ausente fora de `development` vale desligado |
 | I-32 | `spec/idea.md:21`, `spec/sys_flow.md:22`, `docs/roteiro-video-sponsor.md:53` | Acesso por CPF + SMS | D7 | Futuro |
 | I-33 | `spec/PRD_system.md:1070,1082,1346` | Risco R6 dependência de SMS Gateway; custo de SMS | D7 | Futuro |
 | I-34 | `spec/stack.md:18`, `spec/sys_flow.md:29`, `README.md:319`, `spec/PRD_system.md:127,1055,1163-1174,1338` | Pulumi em "VPS robustas" | D8 | Futuro |

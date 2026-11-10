@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Teste hermético de scripts/qa/lib_rele.sh (porta_ocupada) e de que os três
+# Teste hermético de scripts/qa/lib_rele.sh (porta_ocupada) e de que os dois
 # runners do relé a usam. Não precisa de emulador nem de Docker.
 set -uo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/../.."
@@ -31,14 +31,16 @@ time.sleep(30)' "$endereco" "$porta" 2>/dev/null &
   for _ in $(seq 1 20); do porta_ocupada "$porta" || break; sleep 0.1; done
 done
 
-for f in acs_full_e2e.sh patient_full_e2e.sh push_e2e.sh; do
+# O relé (código de ativação do staff) é usado por acs_full_e2e.sh e push_e2e.sh;
+# o paciente não depende mais dele desde a C-05 (login por convite QR + PIN).
+for f in acs_full_e2e.sh push_e2e.sh; do
   nega grep -qF "grep -q '127.0.0.1:8765 '" "scripts/qa/$f"
   confere grep -q "porta_ocupada 8765" "scripts/qa/$f"
 done
 
 # `iniciar_rele` (onde existe) não pode chamar a si mesma e precisa ser chamada de fora:
 # no push_e2e.sh ela era recursiva e nunca rodava, então a checagem de porta nunca valia.
-for f in push_e2e.sh patient_full_e2e.sh; do
+for f in push_e2e.sh; do
   arq="scripts/qa/$f"
   corpo="$(awk '/^[[:space:]]*iniciar_rele\(\) \{/{d=1;next} d&&/^[[:space:]]*\}/{d=0} d' "$arq")"
   chamada='^[[:space:]]*iniciar_rele[[:space:]]*$'

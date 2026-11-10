@@ -8,6 +8,7 @@ import 'package:sinalacs_patient/core/consent/consent_preferences.dart';
 import 'package:sinalacs_patient/core/network/backend_client.dart';
 import 'package:sinalacs_patient/core/push/push_token_source.dart';
 
+import 'support/fake_device_credential_store.dart';
 import 'support/fake_patient_backend.dart';
 import 'support/semantics_scan.dart';
 
@@ -35,10 +36,32 @@ class _NeverCompletingConsentPreferences implements ConsentPreferences {
   Future<void> saveLocalRemindersConsent(bool granted) => Completer<void>().future;
 }
 
-/// Abre a tela de onboarding a partir da tela de login, mesmo ponto de
-/// entrada que hoje mostra o snackbar placeholder do QR Code.
+const _pinDeTeste = '284637';
+
+FakeDeviceCredentialStore _storeVazio() => FakeDeviceCredentialStore();
+
+/// Abre a tela de onboarding a partir da tela de acesso (C-05: o convite é o
+/// caminho de quem ainda não tem credencial neste aparelho).
 Future<void> openOnboarding(WidgetTester tester) async {
+  await tester.pumpAndSettle();
   await tapKey(tester, 'start_onboarding_button');
+}
+
+/// Cria o PIN e conclui o cadastro (o passo novo da C-05).
+Future<void> criarPin(WidgetTester tester, {String pin = _pinDeTeste}) async {
+  await pumpUntil(tester, find.byKey(const Key('pin_setup_field')));
+  await tester.enterText(find.byKey(const Key('pin_setup_field')), pin);
+  await tester.enterText(find.byKey(const Key('pin_setup_confirm_field')), pin);
+  await tapKey(tester, 'pin_setup_confirm_button');
+}
+
+Future<void> pumpUntil(WidgetTester tester, Finder finder) async {
+  final limit = DateTime.now().add(const Duration(seconds: 5));
+  while (DateTime.now().isBefore(limit)) {
+    await tester.pump(const Duration(milliseconds: 50));
+    if (finder.evaluate().isNotEmpty) return;
+  }
+  throw TestFailure('não apareceu: $finder');
 }
 
 /// Rola o widget para dentro da viewport antes de tocar — o `ListView` da
@@ -68,6 +91,7 @@ Future<void> concluirCadastro(WidgetTester tester, {required bool avisos}) async
   await tapKey(tester, 'onboarding_terms_accept');
   if (avisos) await tapKey(tester, 'onboarding_consent_push');
   await tapKey(tester, 'complete_enrollment_button');
+  await criarPin(tester);
 }
 
 /// Token sintético no formato real (43 caracteres base64url).
@@ -75,7 +99,10 @@ const _conviteSintetico = 'AbCdEfGhIjKlMnOpQrStUvWxYz0123456789-_AbCde';
 
 void main() {
   testWidgets('deve abrir com campo de token e os 3 consentimentos desmarcados', (tester) async {
-    await tester.pumpWidget(SinalAcsApp(backend: FakePatientBackend()));
+    await tester.pumpWidget(SinalAcsApp(
+      backend: FakePatientBackend(),
+      deviceCredentials: _storeVazio(),
+    ));
     await openOnboarding(tester);
 
     expect(find.byKey(const Key('onboarding_token_field')), findsOneWidget);
@@ -103,7 +130,10 @@ void main() {
   });
 
   testWidgets('botão de concluir cadastro fica desabilitado enquanto o token estiver vazio', (tester) async {
-    await tester.pumpWidget(SinalAcsApp(backend: FakePatientBackend()));
+    await tester.pumpWidget(SinalAcsApp(
+      backend: FakePatientBackend(),
+      deviceCredentials: _storeVazio(),
+    ));
     await openOnboarding(tester);
 
     final button = tester.widget<FilledButton>(
@@ -122,7 +152,7 @@ void main() {
 
   testWidgets('tentar concluir sem marcar o consentimento obrigatório mostra erro inline e não chama o backend', (tester) async {
     final backend = FakePatientBackend();
-    await tester.pumpWidget(SinalAcsApp(backend: backend));
+    await tester.pumpWidget(SinalAcsApp(backend: backend, deviceCredentials: _storeVazio()));
     await openOnboarding(tester);
 
     await tester.enterText(find.byKey(const Key('onboarding_token_field')), 'convite-123');
@@ -133,9 +163,9 @@ void main() {
     expect(backend.enrollmentCalls, isEmpty);
   });
 
-  testWidgets('marcar o obrigatório e concluir chama completeEnrollment e navega para a tela principal', (tester) async {
+  testWidgets('marcar o obrigatório e concluir cria o PIN, chama completeEnrollment e navega para a tela principal', (tester) async {
     final backend = FakePatientBackend();
-    await tester.pumpWidget(SinalAcsApp(backend: backend));
+    await tester.pumpWidget(SinalAcsApp(backend: backend, deviceCredentials: _storeVazio()));
     await openOnboarding(tester);
 
     await tester.enterText(find.byKey(const Key('onboarding_token_field')), 'convite-123');
@@ -143,6 +173,7 @@ void main() {
     await tapKey(tester, 'onboarding_terms_accept');
     await tapKey(tester, 'onboarding_consent_reminders');
     await tapKey(tester, 'complete_enrollment_button');
+    await criarPin(tester);
 
     expect(backend.enrollmentCalls, hasLength(1));
     expect(backend.enrollmentCalls.single, {
@@ -151,7 +182,34 @@ void main() {
       'remindersConsent': true,
       'pushConsent': false,
       'termsAccepted': true,
+      'deviceId': isA<String>(),
+      'deviceSecret': isA<String>(),
     });
+    expect(find.text('Triagem rápida'), findsOneWidget);
+  });
+
+  testWidgets('PIN fora da política é recusado LOCALMENTE e o convite não é consumido', (tester) async {
+    final backend = FakePatientBackend();
+    await tester.pumpWidget(SinalAcsApp(backend: backend, deviceCredentials: _storeVazio()));
+    await openOnboarding(tester);
+
+    await tester.enterText(find.byKey(const Key('onboarding_token_field')), 'convite-123');
+    await tapKey(tester, 'onboarding_consent_health');
+    await tapKey(tester, 'onboarding_terms_accept');
+    await tapKey(tester, 'complete_enrollment_button');
+
+    // Curto demais, sequência proibida, dígito repetido: nada chega ao servidor.
+    for (final fraco in ['12345', '123456', '000000']) {
+      await tester.enterText(find.byKey(const Key('pin_setup_field')), fraco);
+      await tester.enterText(find.byKey(const Key('pin_setup_confirm_field')), fraco);
+      await tapKey(tester, 'pin_setup_confirm_button');
+      expect(find.byKey(const Key('pin_setup_error')), findsOneWidget);
+    }
+    expect(backend.enrollmentCalls, isEmpty);
+
+    // O MESMO convite segue servindo: a recusa foi antes do consumo.
+    await criarPin(tester);
+    expect(backend.enrollmentCalls, hasLength(1));
     expect(find.text('Triagem rápida'), findsOneWidget);
   });
 
@@ -159,7 +217,11 @@ void main() {
       (tester) async {
     final backend = FakePatientBackend();
     final fonte = _FonteDeToken();
-    await tester.pumpWidget(SinalAcsApp(backend: backend, pushTokens: fonte));
+    await tester.pumpWidget(SinalAcsApp(
+      backend: backend,
+      deviceCredentials: _storeVazio(),
+      pushTokens: fonte,
+    ));
     await concluirCadastro(tester, avisos: true);
 
     expect(backend.pushRegistrations, [('tok-onb', 'android')]);
@@ -170,7 +232,11 @@ void main() {
   testWidgets('cadastro sem "Avisos da equipe": o aparelho nem é consultado', (tester) async {
     final backend = FakePatientBackend();
     final fonte = _FonteDeToken();
-    await tester.pumpWidget(SinalAcsApp(backend: backend, pushTokens: fonte));
+    await tester.pumpWidget(SinalAcsApp(
+      backend: backend,
+      deviceCredentials: _storeVazio(),
+      pushTokens: fonte,
+    ));
     await concluirCadastro(tester, avisos: false);
 
     expect(fonte.calls, 0);
@@ -179,27 +245,58 @@ void main() {
     expect(find.text('Triagem rápida'), findsOneWidget);
   });
 
-  testWidgets('falha do backend mostra a mensagem e mantém a tela de onboarding', (tester) async {
+  testWidgets('falha do backend mostra a mensagem, apaga a credencial local e deixa o convite utilizável', (tester) async {
     final backend = FakePatientBackend(
       enrollmentFailure: const BackendFailure('Convite inválido, expirado ou já utilizado.'),
     );
-    await tester.pumpWidget(SinalAcsApp(backend: backend));
+    final store = _storeVazio();
+    await tester.pumpWidget(SinalAcsApp(backend: backend, deviceCredentials: store));
     await openOnboarding(tester);
 
     await tester.enterText(find.byKey(const Key('onboarding_token_field')), 'convite-123');
     await tapKey(tester, 'onboarding_consent_health');
     await tapKey(tester, 'onboarding_terms_accept');
     await tapKey(tester, 'complete_enrollment_button');
+    await criarPin(tester);
 
     expect(find.text('Convite inválido, expirado ou já utilizado.'), findsOneWidget);
     expect(find.text('Triagem rápida'), findsNothing);
-    expect(find.byKey(const Key('onboarding_token_field')), findsOneWidget);
+    expect(find.byKey(const Key('pin_setup_field')), findsOneWidget);
+
+    // Falha-segura: o envelope local foi desfeito junto com a falha — não
+    // fica credencial órfã para um convite que não foi consumido.
+    expect(store.hasCredential(), completion(isFalse));
+  });
+
+  testWidgets('falha local do enroll mostra mensagem, destrava a tela e NÃO chama o servidor', (tester) async {
+    final backend = FakePatientBackend();
+    final store = _storeVazio()..failEnroll = true;
+    await tester.pumpWidget(SinalAcsApp(backend: backend, deviceCredentials: store));
+    await openOnboarding(tester);
+
+    await tester.enterText(find.byKey(const Key('onboarding_token_field')), 'convite-123');
+    await tapKey(tester, 'onboarding_consent_health');
+    await tapKey(tester, 'onboarding_terms_accept');
+    await tapKey(tester, 'complete_enrollment_button');
+    await criarPin(tester);
+
+    // Sem o catch-all, `_busy` ficava true: botão desabilitado com indicador,
+    // nenhuma mensagem, e a exceção do Keystore ia para o logcat.
+    expect(find.text('Não foi possível concluir o cadastro agora. Tente de novo.'), findsOneWidget);
+    final botao = tester.widget<FilledButton>(find.byKey(const Key('pin_setup_confirm_button')));
+    expect(botao.onPressed, isNotNull);
+    // O convite continua utilizável: a falha foi local, antes do servidor.
+    expect(backend.enrollmentCalls, isEmpty);
   });
 
   testWidgets('concluir o cadastro com o consentimento de lembretes marcado grava isso localmente', (tester) async {
     final backend = FakePatientBackend();
     final consentPreferences = _RecordingConsentPreferences();
-    await tester.pumpWidget(SinalAcsApp(backend: backend, consentPreferences: consentPreferences));
+    await tester.pumpWidget(SinalAcsApp(
+      backend: backend,
+      deviceCredentials: _storeVazio(),
+      consentPreferences: consentPreferences,
+    ));
     await openOnboarding(tester);
 
     await tester.enterText(find.byKey(const Key('onboarding_token_field')), 'convite-123');
@@ -207,20 +304,29 @@ void main() {
     await tapKey(tester, 'onboarding_terms_accept');
     await tapKey(tester, 'onboarding_consent_reminders');
     await tapKey(tester, 'complete_enrollment_button');
+    await criarPin(tester);
 
     expect(consentPreferences.saved, isTrue);
   });
 
   testWidgets('gravação local que nunca termina não segura a tela principal (limite de 3 s)', (tester) async {
     final backend = FakePatientBackend();
-    await tester.pumpWidget(SinalAcsApp(backend: backend, consentPreferences: _NeverCompletingConsentPreferences()));
+    await tester.pumpWidget(SinalAcsApp(
+      backend: backend,
+      deviceCredentials: _storeVazio(),
+      consentPreferences: _NeverCompletingConsentPreferences(),
+    ));
     await openOnboarding(tester);
 
     await tester.enterText(find.byKey(const Key('onboarding_token_field')), 'convite-123');
     await tapKey(tester, 'onboarding_consent_health');
     await tapKey(tester, 'onboarding_terms_accept');
     await tapKey(tester, 'onboarding_consent_reminders');
-    final finder = find.byKey(const Key('complete_enrollment_button'));
+    await tapKey(tester, 'complete_enrollment_button');
+    await pumpUntil(tester, find.byKey(const Key('pin_setup_field')));
+    await tester.enterText(find.byKey(const Key('pin_setup_field')), _pinDeTeste);
+    await tester.enterText(find.byKey(const Key('pin_setup_confirm_field')), _pinDeTeste);
+    final finder = find.byKey(const Key('pin_setup_confirm_button'));
     await tester.ensureVisible(finder);
     await tester.pumpAndSettle();
     await tester.tap(finder);
@@ -236,7 +342,11 @@ void main() {
   testWidgets('concluir o cadastro com o consentimento de lembretes desmarcado grava a recusa localmente', (tester) async {
     final backend = FakePatientBackend();
     final consentPreferences = _RecordingConsentPreferences();
-    await tester.pumpWidget(SinalAcsApp(backend: backend, consentPreferences: consentPreferences));
+    await tester.pumpWidget(SinalAcsApp(
+      backend: backend,
+      deviceCredentials: _storeVazio(),
+      consentPreferences: consentPreferences,
+    ));
     await openOnboarding(tester);
 
     await tester.enterText(find.byKey(const Key('onboarding_token_field')), 'convite-123');
@@ -244,6 +354,7 @@ void main() {
     await tapKey(tester, 'onboarding_terms_accept');
     // onboarding_consent_reminders permanece desmarcado.
     await tapKey(tester, 'complete_enrollment_button');
+    await criarPin(tester);
 
     expect(consentPreferences.saved, isFalse);
   });
@@ -255,7 +366,10 @@ void main() {
     // `ensureVisible` de `tapKey`/`openOnboarding` acima já rola até ele; esta
     // varredura precisa do mesmo antes de olhar a árvore.
     final handle = tester.ensureSemantics();
-    await tester.pumpWidget(SinalAcsApp(backend: FakePatientBackend()));
+    await tester.pumpWidget(SinalAcsApp(
+      backend: FakePatientBackend(),
+      deviceCredentials: _storeVazio(),
+    ));
     await openOnboarding(tester);
     await tester.ensureVisible(find.byKey(const Key('complete_enrollment_button')));
     await tester.pumpAndSettle();
@@ -270,7 +384,7 @@ void main() {
 
   testWidgets('sem aceitar o termo, concluir mostra o motivo e não chama o backend', (tester) async {
     final backend = FakePatientBackend();
-    await tester.pumpWidget(SinalAcsApp(backend: backend));
+    await tester.pumpWidget(SinalAcsApp(backend: backend, deviceCredentials: _storeVazio()));
     await openOnboarding(tester);
 
     await tester.enterText(find.byKey(const Key('onboarding_token_field')), 'convite-123');
@@ -282,7 +396,10 @@ void main() {
   });
 
   testWidgets('o onboarding abre o termo e a política antes do aceite', (tester) async {
-    await tester.pumpWidget(SinalAcsApp(backend: FakePatientBackend()));
+    await tester.pumpWidget(SinalAcsApp(
+      backend: FakePatientBackend(),
+      deviceCredentials: _storeVazio(),
+    ));
     await openOnboarding(tester);
 
     await tapKey(tester, 'onboarding_open_terms');
@@ -299,6 +416,7 @@ void main() {
     final backend = FakePatientBackend();
     await tester.pumpWidget(SinalAcsApp(
       backend: backend,
+      deviceCredentials: _storeVazio(),
       qrScanner: (_) async => _conviteSintetico,
     ));
     await openOnboarding(tester);
@@ -310,12 +428,14 @@ void main() {
     await tapKey(tester, 'onboarding_consent_health');
     await tapKey(tester, 'onboarding_terms_accept');
     await tapKey(tester, 'complete_enrollment_button');
+    await criarPin(tester);
     expect(backend.enrollmentCalls.single['token'], _conviteSintetico);
   });
 
   testWidgets('cancelar a leitura não muda o que já foi digitado', (tester) async {
     await tester.pumpWidget(SinalAcsApp(
       backend: FakePatientBackend(),
+      deviceCredentials: _storeVazio(),
       qrScanner: (_) async => null,
     ));
     await openOnboarding(tester);
@@ -331,6 +451,7 @@ void main() {
   testWidgets('QR que não é convite mostra aviso e não preenche o campo', (tester) async {
     await tester.pumpWidget(SinalAcsApp(
       backend: FakePatientBackend(),
+      deviceCredentials: _storeVazio(),
       qrScanner: (_) async => 'https://exemplo.invalid/pagina',
     ));
     await openOnboarding(tester);
@@ -347,6 +468,7 @@ void main() {
     final backend = FakePatientBackend();
     await tester.pumpWidget(SinalAcsApp(
       backend: backend,
+      deviceCredentials: _storeVazio(),
       qrScanner: (_) async => throw StateError('câmera indisponível'),
     ));
     await openOnboarding(tester);
@@ -358,6 +480,7 @@ void main() {
     await tapKey(tester, 'onboarding_consent_health');
     await tapKey(tester, 'onboarding_terms_accept');
     await tapKey(tester, 'complete_enrollment_button');
+    await criarPin(tester);
     expect(backend.enrollmentCalls, hasLength(1));
   });
 
@@ -366,6 +489,7 @@ void main() {
     var calls = 0;
     await tester.pumpWidget(SinalAcsApp(
       backend: FakePatientBackend(),
+      deviceCredentials: _storeVazio(),
       qrScanner: (_) {
         calls++;
         return gate.future;
@@ -389,6 +513,7 @@ void main() {
     var calls = 0;
     await tester.pumpWidget(SinalAcsApp(
       backend: FakePatientBackend(),
+      deviceCredentials: _storeVazio(),
       qrScanner: (_) async {
         calls++;
         if (calls == 1) throw StateError('câmera indisponível');
@@ -408,6 +533,7 @@ void main() {
   testWidgets('o aviso do QR some quando a pessoa volta a digitar', (tester) async {
     await tester.pumpWidget(SinalAcsApp(
       backend: FakePatientBackend(),
+      deviceCredentials: _storeVazio(),
       qrScanner: (_) async => 'https://exemplo.invalid/pagina',
     ));
     await openOnboarding(tester);

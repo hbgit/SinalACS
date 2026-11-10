@@ -35,6 +35,7 @@ import 'package:sinalacs_patient/core/storage/local_data_control.dart';
 import 'package:sinalacs_patient/core/storage/local_database_key.dart';
 
 import 'support/fake_patient_backend.dart';
+import 'support/fake_device_credential_store.dart';
 import 'support/semantics_scan.dart';
 
 /// Duplo de [ReminderStore] em memória — evita SQLite real no teste de
@@ -308,22 +309,23 @@ Future<void> answerTriage(
   }
 }
 
-/// Percorre o login passwordless inteiro (RF01): credenciais, pedido do código
-/// e verificação. É o mesmo ponto de entrada que os testes usavam quando a
-/// tela era um `developmentLogin` de um toque só.
-Future<void> login(
-  WidgetTester tester, {
-  String cpf = '123.456.789-09',
-  String nascimento = '01/01/1990',
-  String codigo = '123456',
-}) async {
-  await tester.enterText(find.byKey(const Key('cpf_field')), cpf);
-  await tester.enterText(find.byKey(const Key('birth_date_field')), nascimento);
-  await tester.tap(find.byKey(const Key('enter_button')));
-  await tester.pumpAndSettle();
+/// Percorre o acesso do participante (RF24): o PIN libera a credencial de
+/// dispositivo guardada pelo duplo de teste e `auth.loginDevice` abre a
+/// sessão. É o mesmo ponto de entrada que os testes usavam quando a tela era
+/// o login passwordless (RF01).
+const _pinDeTeste = '284637';
 
-  await tester.enterText(find.byKey(const Key('otp_code_field')), codigo);
-  await tester.tap(find.byKey(const Key('verify_code_button')));
+FakeDeviceCredentialStore _storeComCredencial() => FakeDeviceCredentialStore()
+  ..enrollForTest(
+    deviceId: '00000000-0000-4000-8000-0000000000e1',
+    secret: 'segredo-sintetico-mvp',
+    pin: _pinDeTeste,
+  );
+
+Future<void> login(WidgetTester tester) async {
+  await tester.pumpAndSettle();
+  await tester.enterText(find.byKey(const Key('pin_field')), _pinDeTeste);
+  await tester.tap(find.byKey(const Key('pin_unlock_button')));
   await tester.pumpAndSettle();
 }
 
@@ -357,26 +359,27 @@ void main() {
     final backend = FakePatientBackend();
     await tester.pumpWidget(SinalAcsApp(
       backend: backend,
+      deviceCredentials: _storeComCredencial(),
       locationReader: _FixedLocationReader(
         const LocationUnavailable(LocationUnavailableReason.unknown),
       ),
     ));
 
     expect(find.text('SinalACS'), findsOneWidget);
-    expect(find.text('Acesso sem senha'), findsOneWidget);
+    expect(find.text('Acesso do participante'), findsOneWidget);
 
     await login(tester);
 
-    expect(backend.otpVerifications, hasLength(1));
+    expect(backend.deviceLogins, hasLength(1));
     expect(find.text('Triagem rápida'), findsOneWidget);
   });
 
   testWidgets('não deve avançar quando a autenticação falha', (tester) async {
     final handle = tester.ensureSemantics();
     final backend = FakePatientBackend(
-      verifyOtpFailure: const BackendFailure('Sem conexão com o servidor.'),
+      loginDeviceFailure: const BackendFailure('Sem conexão com o servidor.'),
     );
-    await tester.pumpWidget(SinalAcsApp(backend: backend));
+    await tester.pumpWidget(SinalAcsApp(backend: backend, deviceCredentials: _storeComCredencial()));
 
     await login(tester);
 
@@ -396,7 +399,7 @@ void main() {
     // Amarelo, e não vermelho: desde a C-04 o vermelho vira a orientação
     // "Ligar 192" (provada em `call_192_test.dart`), sem cartão de risco.
     final backend = FakePatientBackend(risk: RiskLevel.yellow);
-    await tester.pumpWidget(SinalAcsApp(backend: backend));
+    await tester.pumpWidget(SinalAcsApp(backend: backend, deviceCredentials: _storeComCredencial()));
 
     await login(tester);
     await answerTriage(tester, yesTo: {TriageSymptom.chestPain});
@@ -418,7 +421,7 @@ void main() {
     // do servidor devolveu. Se a tela recalculasse localmente, este teste
     // mostraria "Vermelho" e falharia.
     final backend = FakePatientBackend(risk: RiskLevel.green);
-    await tester.pumpWidget(SinalAcsApp(backend: backend));
+    await tester.pumpWidget(SinalAcsApp(backend: backend, deviceCredentials: _storeComCredencial()));
 
     await login(tester);
     await answerTriage(tester, yesTo: {TriageSymptom.chestPain});
@@ -433,6 +436,7 @@ void main() {
     );
     await tester.pumpWidget(SinalAcsApp(
       backend: backend,
+      deviceCredentials: _storeComCredencial(),
       locationReader: _FixedLocationReader(
         const LocationUnavailable(LocationUnavailableReason.unknown),
       ),
@@ -461,7 +465,7 @@ void main() {
     final backend = FakePatientBackend();
     final locationReader =
         _FixedLocationReader(const LocationAvailable('abc123456789', '-2356:-4664'));
-    await tester.pumpWidget(SinalAcsApp(backend: backend, locationReader: locationReader));
+    await tester.pumpWidget(SinalAcsApp(backend: backend, deviceCredentials: _storeComCredencial(), locationReader: locationReader));
 
     await login(tester);
     await tester.tap(find.text('Contato'));
@@ -484,7 +488,7 @@ void main() {
       (tester) async {
         final backend = FakePatientBackend();
         final locationReader = _FixedLocationReader(LocationUnavailable(reason));
-        await tester.pumpWidget(SinalAcsApp(backend: backend, locationReader: locationReader));
+        await tester.pumpWidget(SinalAcsApp(backend: backend, deviceCredentials: _storeComCredencial(), locationReader: locationReader));
 
         await login(tester);
         await tester.tap(find.text('Contato'));
@@ -517,6 +521,7 @@ void main() {
     final handle = tester.ensureSemantics();
     await tester.pumpWidget(SinalAcsApp(
       backend: FakePatientBackend(),
+      deviceCredentials: _storeComCredencial(),
       locationReader: _FixedLocationReader(
         const LocationUnavailable(LocationUnavailableReason.unknown),
       ),
@@ -543,6 +548,7 @@ void main() {
     final handle = tester.ensureSemantics();
     await tester.pumpWidget(SinalAcsApp(
       backend: FakePatientBackend(),
+      deviceCredentials: _storeComCredencial(),
       locationReader: _FixedLocationReader(
         const LocationUnavailable(LocationUnavailableReason.unknown),
       ),
@@ -569,10 +575,11 @@ void main() {
   testWidgets('deve expor rótulo semântico e alvo de toque acessível no fluxo do paciente', (tester) async {
     // `getSemantics` abaixo só acha nó com a árvore semântica ligada.
     final handle = tester.ensureSemantics();
-    await tester.pumpWidget(SinalAcsApp(backend: FakePatientBackend()));
+    await tester.pumpWidget(SinalAcsApp(backend: FakePatientBackend(), deviceCredentials: _storeComCredencial()));
+    await tester.pumpAndSettle();
 
-    final enterButton = tester.widget<FilledButton>(find.byKey(const Key('enter_button')));
-    final minimumSize = enterButton.style?.minimumSize?.resolve({}) ?? const Size(0, 0);
+    final unlockButton = tester.widget<FilledButton>(find.byKey(const Key('pin_unlock_button')));
+    final minimumSize = unlockButton.style?.minimumSize?.resolve({}) ?? const Size(0, 0);
 
     // WCAG 2.5.3 (Label in Name, nível A): o nome acessível é o texto visível do
     // botão, exposto pelo próprio botão — o `Semantics` que existia aqui com o
@@ -582,10 +589,10 @@ void main() {
     // Com `String`, `bySemanticsLabel` casa por **igualdade exata**
     // (`finders.dart`: `pattern == propertyValue`), não por *contains*: igualdade
     // é mais forte do que contenção, então a asserção vale — mas quem
-    // acrescentar algo ao texto visível ("Entrar sem senha agora") vê esta linha
-    // falhar mesmo com o rótulo contendo o texto. Com `RegExp` o finder casa por
+    // acrescentar algo ao texto visível ("Entrar agora") vê esta linha falhar
+    // mesmo com o rótulo contendo o texto. Com `RegExp` o finder casa por
     // `hasMatch`.
-    expect(find.bySemanticsLabel('Entrar sem senha'), findsOneWidget);
+    expect(find.bySemanticsLabel('Entrar'), findsOneWidget);
     expect(find.bySemanticsLabel('Entrar na triagem do paciente'), findsNothing);
     // A varredura substitui a asserção de `tap` que ficava aqui. Aquela era
     // verde também com o defeito — nela, o nó que carrega o nome é justamente o
@@ -603,7 +610,7 @@ void main() {
     // Substitui a auditoria manual no WebAIM/TalkBack do relatório anterior
     // por uma verificação determinística que o CI roda sozinho.
     final handle = tester.ensureSemantics();
-    await tester.pumpWidget(SinalAcsApp(backend: FakePatientBackend()));
+    await tester.pumpWidget(SinalAcsApp(backend: FakePatientBackend(), deviceCredentials: _storeComCredencial()));
 
     await expectLater(tester, meetsGuideline(textContrastGuideline));
     await expectLater(tester, meetsGuideline(androidTapTargetGuideline));
@@ -932,7 +939,7 @@ void main() {
       testWidgets('dois toques rápidos em "Autorizar lembretes" gravam uma vez e chamam updateConsent uma vez',
           (tester) async {
         final backend = FakePatientBackend();
-        await backend.verifyOtp(cpf: '12345678909', code: backend.validCode);
+        await backend.seedSession();
         final prefs = _CountingSlowConsentPreferences(granted: false);
         await tester.pumpWidget(buildRemindersScreen(
           _InMemoryReminderStore(),
@@ -1011,7 +1018,7 @@ void main() {
 
       testWidgets('com sessão, a decisão do cartão chama updateConsent(localReminders)', (tester) async {
         final backend = FakePatientBackend();
-        await backend.verifyOtp(cpf: '12345678909', code: backend.validCode);
+        await backend.seedSession();
         final prefs = _FixedConsentPreferences(granted: null);
         await tester.pumpWidget(buildRemindersScreen(
           _InMemoryReminderStore(),
@@ -1034,7 +1041,7 @@ void main() {
       testWidgets('com sessão, falha no servidor não desfaz a decisão local', (tester) async {
         final backend = FakePatientBackend()
           ..updateConsentFailure = const BackendFailure('fora do ar', isRecoverable: true);
-        await backend.verifyOtp(cpf: '12345678909', code: backend.validCode);
+        await backend.seedSession();
         final prefs = _FixedConsentPreferences(granted: null);
         await tester.pumpWidget(buildRemindersScreen(
           _InMemoryReminderStore(),
@@ -1205,7 +1212,7 @@ void main() {
   group('Perfil clínico', () {
     testWidgets('carrega o estado salvo do servidor — marca só o que já está na lista', (tester) async {
       final backend = FakePatientBackend()..chronicConditions = ['hipertensão'];
-      await tester.pumpWidget(SinalAcsApp(backend: backend));
+      await tester.pumpWidget(SinalAcsApp(backend: backend, deviceCredentials: _storeComCredencial()));
       await login(tester);
       await openClinicalProfile(tester);
 
@@ -1222,7 +1229,7 @@ void main() {
 
     testWidgets('marcar uma condição e salvar envia só as marcadas, substituindo a lista', (tester) async {
       final backend = FakePatientBackend()..chronicConditions = ['hipertensão'];
-      await tester.pumpWidget(SinalAcsApp(backend: backend));
+      await tester.pumpWidget(SinalAcsApp(backend: backend, deviceCredentials: _storeComCredencial()));
       await login(tester);
       await openClinicalProfile(tester);
 
@@ -1245,7 +1252,7 @@ void main() {
       final handle = tester.ensureSemantics();
       final backend = FakePatientBackend()
         ..myChronicConditionsFailure = const BackendFailure('Sem conexão com o servidor.');
-      await tester.pumpWidget(SinalAcsApp(backend: backend));
+      await tester.pumpWidget(SinalAcsApp(backend: backend, deviceCredentials: _storeComCredencial()));
       await login(tester);
       await openClinicalProfile(tester);
 
@@ -1260,7 +1267,7 @@ void main() {
     testWidgets('falha ao salvar mostra erro inline e mantém a seleção na tela', (tester) async {
       final backend = FakePatientBackend()
         ..updateChronicConditionsFailure = const BackendFailure('Sem conexão com o servidor.');
-      await tester.pumpWidget(SinalAcsApp(backend: backend));
+      await tester.pumpWidget(SinalAcsApp(backend: backend, deviceCredentials: _storeComCredencial()));
       await login(tester);
       await openClinicalProfile(tester);
 
@@ -1314,6 +1321,7 @@ void main() {
     }) async {
       await tester.pumpWidget(SinalAcsApp(
         backend: backend,
+        deviceCredentials: _storeComCredencial(),
         reminderStore: store ?? _InMemoryReminderStore(),
         reminderScheduler: scheduler ?? _RecordingReminderScheduler(),
         consentPreferences: consentPreferences ?? _FixedConsentPreferences(),
@@ -1450,7 +1458,7 @@ void main() {
       handle.dispose();
     });
 
-    testWidgets('aparelho sem espelho local (login OTP) recebe a concessão do servidor ao abrir', (tester) async {
+    testWidgets('aparelho sem espelho local (entrada sem onboarding) recebe a concessão do servidor ao abrir', (tester) async {
       final prefs = _FixedConsentPreferences(granted: null);
       final backend = FakePatientBackend()..myDataResult = overview(consents: onboardingConsents());
       await pumpMyData(tester, backend, consentPreferences: prefs);
@@ -1480,6 +1488,7 @@ void main() {
       final backend = FakePatientBackend()..myDataResult = overview(consents: onboardingConsents());
       await tester.pumpWidget(SinalAcsApp(
         backend: backend,
+        deviceCredentials: _storeComCredencial(),
         reminderStore: _InMemoryReminderStore(),
         reminderScheduler: _RecordingReminderScheduler(),
         consentPreferences: _FixedConsentPreferences(),
@@ -1810,7 +1819,7 @@ void main() {
 
     testWidgets('mostra o cadastro e as condições crônicas devolvidas pelo servidor', (tester) async {
       final backend = FakePatientBackend()..myDataResult = overview();
-      await tester.pumpWidget(SinalAcsApp(backend: backend));
+      await tester.pumpWidget(SinalAcsApp(backend: backend, deviceCredentials: _storeComCredencial()));
       await login(tester);
       await openMyData(tester);
 
@@ -1840,7 +1849,7 @@ void main() {
             ),
           ],
         );
-      await tester.pumpWidget(SinalAcsApp(backend: backend));
+      await tester.pumpWidget(SinalAcsApp(backend: backend, deviceCredentials: _storeComCredencial()));
       await login(tester);
       await openMyData(tester);
 
@@ -1852,7 +1861,7 @@ void main() {
 
     testWidgets('sem consentimentos nem histórico, mostra os estados vazios (não listas fixas)', (tester) async {
       final backend = FakePatientBackend()..myDataResult = overview();
-      await tester.pumpWidget(SinalAcsApp(backend: backend));
+      await tester.pumpWidget(SinalAcsApp(backend: backend, deviceCredentials: _storeComCredencial()));
       await login(tester);
       await openMyData(tester);
 
@@ -1891,7 +1900,7 @@ void main() {
           ],
           requests: [openRequest(DataSubjectRequestType.deletion)],
         );
-      await tester.pumpWidget(SinalAcsApp(backend: backend));
+      await tester.pumpWidget(SinalAcsApp(backend: backend, deviceCredentials: _storeComCredencial()));
       await login(tester);
       await openMyData(tester);
 
@@ -1930,7 +1939,7 @@ void main() {
       final handle = tester.ensureSemantics();
       final backend = FakePatientBackend()
         ..myDataFailure = const BackendFailure('Sem conexão com o servidor.');
-      await tester.pumpWidget(SinalAcsApp(backend: backend));
+      await tester.pumpWidget(SinalAcsApp(backend: backend, deviceCredentials: _storeComCredencial()));
       await login(tester);
       await openMyData(tester);
 
@@ -1945,7 +1954,7 @@ void main() {
     testWidgets('o botão "Copiar meus dados" não é um nó de botão inerte', (tester) async {
       final handle = tester.ensureSemantics();
       final backend = FakePatientBackend()..myDataResult = overview();
-      await tester.pumpWidget(SinalAcsApp(backend: backend));
+      await tester.pumpWidget(SinalAcsApp(backend: backend, deviceCredentials: _storeComCredencial()));
       await login(tester);
       await openMyData(tester);
       await tester.ensureVisible(find.byKey(const Key('export_my_data_button')));
@@ -1959,7 +1968,7 @@ void main() {
   group('Status da solicitação (RF05)', () {
     testWidgets('sem alerta disparado, mostra que não há solicitação — não mais o ticket falso', (tester) async {
       final backend = FakePatientBackend();
-      await tester.pumpWidget(SinalAcsApp(backend: backend));
+      await tester.pumpWidget(SinalAcsApp(backend: backend, deviceCredentials: _storeComCredencial()));
       await login(tester);
 
       await tester.tap(find.text('Status'));
@@ -1981,7 +1990,7 @@ void main() {
           triggeredAt: DateTime.utc(2026, 9, 18, 9),
           acknowledgedAt: DateTime.utc(2026, 9, 18, 9, 5),
         );
-      await tester.pumpWidget(SinalAcsApp(backend: backend));
+      await tester.pumpWidget(SinalAcsApp(backend: backend, deviceCredentials: _storeComCredencial()));
       await login(tester);
 
       await tester.tap(find.text('Status'));
@@ -2005,7 +2014,7 @@ void main() {
           acknowledgedAt: DateTime.utc(2026, 9, 18, 9, 5),
           resolvedAt: DateTime.utc(2026, 9, 18, 10, 40),
         );
-      await tester.pumpWidget(SinalAcsApp(backend: backend));
+      await tester.pumpWidget(SinalAcsApp(backend: backend, deviceCredentials: _storeComCredencial()));
       await login(tester);
 
       await tester.tap(find.text('Status'));
@@ -2024,7 +2033,7 @@ void main() {
     testWidgets('uma falha ao consultar mostra o aviso, sem travar o botão de tentar de novo', (tester) async {
       final backend = FakePatientBackend()
         ..statusFailure = const BackendFailure('Sem conexão com o servidor.');
-      await tester.pumpWidget(SinalAcsApp(backend: backend));
+      await tester.pumpWidget(SinalAcsApp(backend: backend, deviceCredentials: _storeComCredencial()));
       await login(tester);
 
       await tester.tap(find.text('Status'));
@@ -2040,7 +2049,7 @@ void main() {
 
     testWidgets('"Verificar status agora" repete a consulta manualmente', (tester) async {
       final backend = FakePatientBackend();
-      await tester.pumpWidget(SinalAcsApp(backend: backend));
+      await tester.pumpWidget(SinalAcsApp(backend: backend, deviceCredentials: _storeComCredencial()));
       await login(tester);
       await tester.tap(find.text('Status'));
       await tester.pumpAndSettle();
@@ -2096,7 +2105,7 @@ void main() {
   });
 
   testWidgets('menu Mais abre Privacidade e termos', (tester) async {
-    await tester.pumpWidget(SinalAcsApp(backend: FakePatientBackend()));
+    await tester.pumpWidget(SinalAcsApp(backend: FakePatientBackend(), deviceCredentials: _storeComCredencial()));
     await login(tester);
     await tester.tap(find.text('Mais'));
     await tester.pumpAndSettle();
