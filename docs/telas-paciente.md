@@ -8,7 +8,7 @@ Documentação visual do protótipo Flutter do paciente. As imagens foram captur
 
 ## Navegação
 
-Os destinos principais são **Urgência**, **Triagem** e **Status**. O item **Mais** reúne **Perfil clínico**, **Lembretes** e **Meus dados** (o "Canal de dúvidas" foi removido em 2026-09-21 — contradizia a exclusão explícita de mensageria assíncrona do escopo MVP, `spec/PRD_system.md` §6.1).
+Os destinos principais são **Contato** (antes "Urgência"; renomeado na C-04), **Triagem** e **Status**. O item **Mais** reúne **Perfil clínico**, **Lembretes** e **Meus dados** (o "Canal de dúvidas" foi removido em 2026-09-21 — contradizia a exclusão explícita de mensageria assíncrona do escopo MVP, `spec/PRD_system.md` §6.1).
 
 ## Autenticação inclusiva
 
@@ -16,13 +16,15 @@ A tela inicial pede CPF e data de nascimento e envia um código de uso único (O
 
 ## Alerta de urgência (no piloto: pedido de contato com o agente participante, sem rótulo de urgência; o SinalACS não é serviço de emergência — ligue 192)
 
-![Estado inicial do alerta de urgência (protótipo; emergência: ligue 192)](screenshots/patient/01-emergencia.png)
+![Estado inicial do alerta de urgência (captura anterior à C-04; emergência: ligue 192)](screenshots/patient/01-emergencia.png)
 
-O botão circular de emergência pede confirmação e então cria um alerta vermelho real no backend (`alerts.createRedAlert`), idempotente, publicado para o ACS da microárea. A localização, quando disponível, segue como hash (`locationHash`, para deduplicar) e como uma célula de baixa resolução (~1,1 km, `locationCell`), legível pelo servidor, para o mapa do ACS desenhar uma área de incerteza — nunca as coordenadas exatas. A confirmação de recebimento pela equipe aparece na aba Status.
+> A captura acima é anterior à C-04 (#127) e ainda mostra o botão circular "EMERGÊNCIA"; falta refazê-la no aparelho.
+
+Desde a C-04 (#127) a aba se chama **Contato**. No topo, antes de qualquer pedido, um cartão diz "Em risco de vida, ligue 192 (SAMU). O SinalACS não é um serviço de emergência." com o botão **Ligar 192** (abre o discador com `tel:192`, nunca liga sozinho). Abaixo, **Pedir contato ao agente**, sem cor clínica nem rótulo de urgência, pede confirmação ("Enviar pedido") e então cria o pedido no backend pelo mesmo `alerts.createRedAlert` de antes, idempotente e publicado para o agente da microárea — é isso que mantém a INV-03 (o pedido nunca some em silêncio). O estado diz "Pedido enviado ao agente. Acompanhe a resposta na aba Status." (ou "Pedido registrado…" quando a publicação espera a rede), nunca que alguém já foi atendido. A localização, quando disponível, segue como hash (`locationHash`, para deduplicar) e como uma célula de baixa resolução (~1,1 km, `locationCell`), legível pelo servidor, para o mapa do ACS desenhar uma área de incerteza — nunca as coordenadas exatas. A confirmação de recebimento pela equipe aparece na aba Status.
 
 ## Triagem rápida
 
-Seis perguntas de sim ou não (dor no peito, falta de ar, sangramento, fraqueza intensa ou desmaio, febre, vômitos que não param), uma por etapa, com indicador de progresso. O risco é calculado pelo servidor (`triage.evaluate`), de forma determinística, e não pode ser editado pela pessoa usuária. Ao finalizar, encaminha para o acompanhamento da solicitação.
+Seis perguntas de sim ou não (dor no peito, falta de ar, sangramento, fraqueza intensa ou desmaio, febre, vômitos que não param), uma por etapa, com indicador de progresso. O risco é calculado pelo servidor (`triage.evaluate`), de forma determinística, e não pode ser editado pela pessoa usuária. Ao finalizar, encaminha para o acompanhamento da solicitação. Desde a C-04 (#127), a saída de maior gravidade não mostra cartão de risco: abre em tela cheia a orientação **"Ligue 192 (SAMU) agora"**, com o botão Ligar 192, que só fecha por "Fechar esta orientação" (o voltar do sistema não fecha). Ela **não envia nada ao agente** e grava um evento na trilha local cifrada do aparelho (tipo, instante e versão do motor, sem respostas); depois a autoavaliação recomeça do zero. As outras duas saídas ainda mostram o cartão de risco antigo, até a C-08 (#130).
 
 ## Perfil clínico
 
@@ -30,7 +32,7 @@ Permite marcar condições crônicas (diabetes, hipertensão, uso contínuo de i
 
 ## Acompanhamento de solicitação
 
-Mostra o último alerta da pessoa a partir do backend (`alerts.statusFor`): a classificação de risco e o estado — `Enviado — aguardando confirmação da equipe`, `Recebido pela equipe de saúde`, `Atendimento concluído` ou `Encaminhado para o SAMU` —, com os horários de disparo e de confirmação. Atualiza ao abrir a aba, a cada 5 minutos e pelo botão manual.
+Mostra o último pedido de contato da pessoa a partir do backend (`alerts.statusFor`), sem rótulo de risco nem de urgência (C-04, #127): `Enviado — aguardando o agente confirmar`, `Visto pelo agente participante`, `Encerrado pelo agente participante` (nunca "Atendido") ou `Repassado à coordenação do piloto`, com os horários de envio, de confirmação e de encerramento. Atualiza ao abrir a aba, a cada 5 minutos e pelo botão manual.
 
 ## Lembretes
 
