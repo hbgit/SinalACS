@@ -1922,3 +1922,12 @@ Branch `feat/issue-136-cifra-local-paciente`. **Estado:** a Fase 1 (T1–T8) est
 - **ACS, mesma lacuna (issues separadas a abrir):** o `open_failed` ambíguo existe no `SqlCipherVisitStore` (põe a fila de lado e apaga a chave); e falta `dataExtractionRules` também no app do ACS.
 - **Dependência descontinuada:** `flutter_secure_storage` com `encryptedSharedPreferences` depende do `androidx.security:security-crypto`; migrar ACS e paciente juntos.
 - **#125 ("Sobre")** deve reaproveitar `LocalProtectionNotice`; a C-10 acrescenta a frase da mitigação.
+
+## Primeira abertura sem esperar a permissão de notificações (#153) — 2026-11-10
+
+Branch `fix/issue-153-permissao-notificacao`. Achado da #136 (PR #150): no emulador API 36, numa instalação limpa, o app do paciente ficava atrás do `GrantPermissionsActivity`, porque `lib/main.dart` esperava `requestNotificationsPermission()` antes do `runApp`, e nenhuma tela era desenhada (urgência e "Ligar 192" incluídos) até a resposta.
+
+- **O que mudou.** O `main.dart` só inicializa o plugin; o pedido saiu da partida e passou a `ReminderScheduler.requestPermission()`, chamado pela tela de lembretes **depois** de salvar e agendar um lembrete ativo (criar, editar ou reativar), sem `await`: a lista não espera o diálogo, e recusa, adiamento ou falha do plugin não desfazem o lembrete (o método nunca lança). Pausar, excluir, abrir a tela e o reagendamento do aquecimento (`rescheduleAll`) não pedem.
+- **Por que no lembrete e não "depois do primeiro quadro".** As duas saídas cabem no aceite da issue, mas um diálogo logo depois do primeiro quadro ainda cobriria a home, e a tela de urgência, até a pessoa responder. No ato de criar um lembrete o pedido tem contexto e nunca aparece sobre a urgência.
+- **Provas (VM).** `test/main_notification_permission_test.dart` sobe o `main()` real com o canal do plugin deixando `requestNotificationsPermission` pendente para sempre: a tela de login é desenhada e o pedido não acontece na partida (reprovava com o `main.dart` anterior). Os testes de lembretes afirmam um pedido ao criar e ao reativar e nenhum ao pausar ou excluir; `startup_warmup_test.dart`, nenhum pedido no reagendamento da partida; `reminder_scheduler_test.dart`, que a falha do plugin não sobe.
+- **Limite.** Quem atualiza o app e já tem lembretes ativos sem nunca ter respondido ao diálogo só o verá ao criar, editar ou reativar um lembrete. Não foi refeito no emulador.
