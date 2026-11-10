@@ -80,6 +80,13 @@
 
          In particular, this is used by the Flutter engine in io.flutter.plugin.text.ProcessTextPlugin. -->
     <queries>
+        <!-- "Ligar 192" (C-04, #127): o discador precisa ser visível ao app no
+             Android 11+. Só ACTION_DIAL, nunca CALL_PHONE: a pessoa confirma a
+             ligação no discador. -->
+        <intent>
+            <action android:name="android.intent.action.DIAL"/>
+            <data android:scheme="tel"/>
+        </intent>
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>

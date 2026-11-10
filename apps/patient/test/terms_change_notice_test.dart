@@ -150,7 +150,7 @@ void main() {
     await login(tester);
     expect(find.byKey(const Key('terms_change_notice_card')), findsOneWidget);
 
-    await tester.tap(find.text('Urgência'));
+    await tester.tap(find.text('Contato'));
     await tester.pumpAndSettle();
 
     expect(find.byKey(const Key('terms_change_notice_card')), findsNothing);
@@ -165,7 +165,7 @@ void main() {
     final backend = FakePatientBackend()..termsNotice = _aviso;
     await tester.pumpWidget(SinalAcsApp(backend: backend));
     await login(tester);
-    await tester.tap(find.text('Urgência'));
+    await tester.tap(find.text('Contato'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Status'));
     await tester.pumpAndSettle();

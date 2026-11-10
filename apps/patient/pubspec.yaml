@@ -36,6 +36,9 @@ dependencies:
   # código do app importa `package:timezone/timezone.dart` diretamente.
   timezone: ^0.9.4
   mobile_scanner: ^7.0.0
+  # Discador do "Ligar 192" (C-04, #127): abre o discador com `tel:192`, nunca
+  # liga sozinho. Mesma versão e mesmo uso do app do ACS (`EmergencyDialer`).
+  url_launcher: ^6.3.0
   flutter_riverpod: ^3.4.3
 
 dev_dependencies:
