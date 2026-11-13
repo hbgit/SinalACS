@@ -125,8 +125,9 @@ Pontos a revisar antes de publicar:
   que precise acessar o backend precisa dela no manifest principal. Confirmar
   olhando o manifest mesclado do release (ver 2.6).
 - **`POST_NOTIFICATIONS`:** o Paciente depende de `flutter_local_notifications`
-  e chama `requestNotificationsPermission()` em `lib/main.dart`, mas o
-  manifest principal não a declara. Conferir no manifest mesclado.
+  e chama `requestNotificationsPermission()` ao criar ou ativar um lembrete
+  (desde a #153, não mais em `lib/main.dart`), mas o manifest principal não a
+  declara. Conferir no manifest mesclado.
 - **`RECEIVE_BOOT_COMPLETED`:** não é habitual num app de paciente. Descobrir
   de onde vem (possivelmente de um plugin) e remover se não for necessária.
 - **Localização:** o Paciente usa `geolocator` com leitura pontual em primeiro
@@ -519,7 +520,7 @@ urgência à posição do paciente) deve ser confirmada no fluxo do app antes de
 ser escrita na ficha.
 
 **Notificações (Paciente).** O app depende de `flutter_local_notifications` e
-chama `requestNotificationsPermission()`, mas o manifest principal não declara
+chama `requestNotificationsPermission()` (ao criar ou ativar um lembrete, #153), mas o manifest principal não declara
 `POST_NOTIFICATIONS`. Se o plugin não a adicionar ao manifest mesclado, em
 aparelhos com Android 13 ou superior as notificações não aparecem com
 `targetSdk = 36`. Conferir no manifest mesclado do release (seção 2.6) e, se

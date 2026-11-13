@@ -107,6 +107,11 @@ class _RecordingReminderScheduler implements ReminderScheduler {
       await schedule(r);
     }
   }
+
+  var permissionRequests = 0;
+
+  @override
+  Future<void> requestPermission() async => permissionRequests++;
 }
 
 /// Duplo de [ReminderScheduler] que sempre lança — simula uma falha real do
@@ -125,6 +130,10 @@ class _ThrowingReminderScheduler implements ReminderScheduler {
 
   @override
   Future<void> rescheduleAll(List<Reminder> active) => throw StateError('falha simulada do agendador');
+
+  // Nunca lança, como o real: a falha simulada é a do agendamento.
+  @override
+  Future<void> requestPermission() async {}
 }
 
 /// Duplo de [ReminderStore] que lê normalmente (delega a um
@@ -711,6 +720,9 @@ void main() {
       final saved = await store.list();
       expect(saved, hasLength(1));
       expect(scheduler.scheduled, [saved.single.id]);
+      // #153: a permissão de notificações é pedida aqui, no ato de criar um
+      // lembrete, e não na partida do app.
+      expect(scheduler.permissionRequests, 1);
     });
 
     testWidgets('alternar o switch active grava a mudança e agenda/cancela de acordo', (tester) async {
@@ -730,6 +742,8 @@ void main() {
 
       expect(find.text('Pausado'), findsOneWidget);
       expect(scheduler.cancelled, [seeded.id]);
+      // Abrir a tela e pausar não pedem a permissão (#153).
+      expect(scheduler.permissionRequests, 0);
       final afterToggleOff = await store.list();
       expect(afterToggleOff.single.active, isFalse);
 
@@ -738,6 +752,7 @@ void main() {
 
       expect(find.text('Ativo'), findsOneWidget);
       expect(scheduler.scheduled, [seeded.id]);
+      expect(scheduler.permissionRequests, 1);
       final afterToggleOn = await store.list();
       expect(afterToggleOn.single.active, isTrue);
     });
@@ -757,6 +772,7 @@ void main() {
       expect(find.byKey(const Key('reminders_empty_state')), findsOneWidget);
       expect(await store.list(), isEmpty);
       expect(scheduler.cancelled, [seeded.id]);
+      expect(scheduler.permissionRequests, 0);
     });
 
     group('tratamento de erro nas escritas', () {
