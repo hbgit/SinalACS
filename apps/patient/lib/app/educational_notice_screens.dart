@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:sinalacs_patient/app/local_protection_notice.dart';
+import 'package:sinalacs_patient/core/education/educational_library.dart';
 import 'package:sinalacs_patient/core/legal/educational_notice.dart';
 
 /// Primeira abertura (RF21, C-02): o aviso educativo curto, e o app só segue
@@ -154,6 +155,25 @@ class AboutScreen extends StatelessWidget {
             ),
             const SizedBox(height: 24),
             const LocalProtectionNotice(),
+            const SizedBox(height: 24),
+            // C-03, RNF10: as duas licenças, separadas.
+            Semantics(
+              header: true,
+              child: Text(
+                'Licenças',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: scheme.onSurface),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(codeLicenseLabel, key: const Key('about_code_license'), style: TextStyle(color: scheme.onSurface)),
+            const SizedBox(height: 4),
+            Text(
+              contentLicenseLabel,
+              key: const Key('about_content_license'),
+              style: TextStyle(color: scheme.onSurface),
+            ),
+            const SizedBox(height: 4),
+            Text('Atribuição: $contentAttribution', style: TextStyle(color: scheme.onSurfaceVariant)),
           ],
         ),
       ),
