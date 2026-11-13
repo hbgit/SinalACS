@@ -338,7 +338,7 @@ class _IndicatorsScreenState extends State<IndicatorsScreen> with MonitoredScree
             MonitoringStaleBadge(monitoring),
             TitleWithOverdueRed('Painel de Indicadores', monitoring),
             const SizedBox(height: 4),
-            const Text('Contadores por risco clínico da UBS'),
+            const Text('Contadores por risco clínico do grupo do piloto'),
             const SizedBox(height: 16),
             LayoutBuilder(
               builder: (context, constraints) {
@@ -713,7 +713,7 @@ class _AlertsListState extends State<_AlertsList> {
             padding: const EdgeInsets.all(20),
             children: [
               MonitoringStaleBadge(widget.monitoring),
-              TitleWithOverdueRed('Alertas da UBS', widget.monitoring),
+              TitleWithOverdueRed('Alertas do grupo do piloto', widget.monitoring),
               const SizedBox(height: 4),
               const Text('Consulta somente leitura — nenhuma reclassificação de risco é permitida aqui.'),
               const SizedBox(height: 16),
