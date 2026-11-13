@@ -1923,6 +1923,24 @@ Branch `feat/issue-136-cifra-local-paciente`. **Estado:** a Fase 1 (T1–T8) est
 - **Dependência descontinuada:** `flutter_secure_storage` com `encryptedSharedPreferences` depende do `androidx.security:security-crypto`; migrar ACS e paciente juntos.
 - **#125 ("Sobre")** deve reaproveitar `LocalProtectionNotice`; a C-10 acrescenta a frase da mitigação.
 
+## Pedido de contato e saída "Ligar 192" (C-04, #127) — 2026-11-10
+
+Branch `feat/issue-127-pedido-de-contato-192`. Pré-requisito do portão do piloto (M-01, P-09). Depende da Fase 1 da #136 (banco cifrado), já em `develop`.
+
+- **Pedido de contato.** A aba "Urgência" virou **Contato**: "Ligar 192" no topo, antes do pedido; o botão "Pedir contato ao agente" não tem cor clínica nem rótulo de urgência, e o estado diz que o pedido foi enviado ou registrado, nunca que alguém foi atendido. Por dentro é o mesmo `alerts.createRedAlert` (idempotência, localização), por isso os testes de INV-03 seguem verdes sem mudança de lógica.
+- **Saída "Ligar 192".** O vermelho da autoavaliação abre a orientação em tela cheia, que o voltar do sistema não fecha (só "Fechar esta orientação"), não chama o backend e grava um evento na trilha local cifrada.
+- **Trilha local cifrada.** Tabela `local_events` no banco SQLCipher do paciente (schema v1 → v2, migração aditiva que preserva lembretes e consentimento): tipo, instante em UTC e versão do motor (`selfAssessmentEngineVersion = 'arvore-v1'`, que não existia), sem respostas. A gravação nunca segura a tela: com o banco indisponível a orientação aparece igual, sem evento.
+- **Status.** Sem "Risco: …" e sem "Atendido": "Enviado — aguardando o agente confirmar", "Visto pelo agente participante", "Encerrado pelo agente participante", "Repassado à coordenação do piloto" (este sem escritor hoje; o rótulo antigo prometia o SAMU). Em "Meus dados", a origem `alert` aparece como "Pedido de contato".
+- **Dependência.** `url_launcher` ^6.3.0 no paciente (a mesma do ACS) e `<queries>` de `ACTION_DIAL tel` no manifesto; registro em `spec/stack.md`.
+- **Provas (VM).** `flutter analyze` sem avisos e 350 testes (eram 334). `test/call_192_test.dart`: orientação sem `createRedAlert`, com o evento e a versão do motor; voltar do sistema não fecha; discador chamado com 192; aviso quando o discador não abre; banco quebrado não impede a orientação; cabeçalho semântico e diretrizes de toque e contraste; pedido depois da orientação é ato separado; "Ligar 192" acima do pedido; nenhum rótulo de urgência na aba. `test/events/sqflite_local_event_log_test.dart`: colunas exatas, UTC, persistência, migração v1 → v2 com lembrete preservado, `deleteEverything()` leva a trilha.
+
+**Abertos e limites.**
+- **Não verificado no aparelho:** cifra do arquivo com a tabela nova (a mesma da #136, sem prova nova), `PopScope` com o gesto de voltar preditivo do Android 14+, discador real. `integration_test/full_journey_test.dart` foi ajustado aos textos novos, mas não foi rodado (exige a stack de e2e e o emulador).
+- **Amarelo e verde** ainda mostram "Risco: …" e prometem uma "solicitação" que não é enviada ("O agente de saúde entrará em contato", "Acompanhar solicitação"). É a C-08 (#130).
+- **Retenção de 30 dias e "Apagar meus dados"** da trilha: C-10 (#131). Hoje a trilha só some com "Apagar e recomeçar".
+- **Lado do agente e backend:** o ACS e o backoffice continuam chamando o pedido de alerta vermelho ("Risco: Vermelho"). A issue não pediu mudança lá; fica para decisão do dono.
+- **Captura de tela** `docs/screenshots/patient/01-emergencia.png` é anterior à C-04.
+
 ## Aviso educativo na primeira abertura e em "Sobre" (C-02, #125) — 2026-11-08
 
 Branch `feat/c-02-aviso-educativo`. RF21 nos apps do paciente e do agente.

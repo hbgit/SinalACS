@@ -17,6 +17,7 @@ import 'package:sinalacs_client/sinalacs_client.dart'
         PatientDataSubjectRequestRecord,
         TermsChangeNotice,
         RiskLevel;
+import 'package:sinalacs_patient/app/call_192.dart';
 import 'package:sinalacs_patient/app/educational_library_screens.dart';
 import 'package:sinalacs_patient/app/educational_notice_screens.dart';
 import 'package:sinalacs_patient/app/legal_screens.dart';
@@ -29,6 +30,7 @@ import 'package:sinalacs_patient/core/consent/consent_decisions.dart';
 import 'package:sinalacs_patient/core/legal/legal_documents.dart';
 import 'package:sinalacs_patient/core/legal/terms_change_notice_card.dart';
 import 'package:sinalacs_patient/core/consent/consent_preferences.dart';
+import 'package:sinalacs_patient/core/events/local_event_log.dart';
 import 'package:sinalacs_patient/core/legal/educational_notice.dart';
 import 'package:sinalacs_patient/core/network/backend_client.dart';
 import 'package:sinalacs_patient/core/push/push_token_provider.dart';
@@ -44,6 +46,7 @@ import 'package:sinalacs_patient/core/storage/keystore_key_provider.dart';
 import 'package:sinalacs_patient/core/storage/local_data_control.dart';
 import 'package:sinalacs_patient/core/storage/local_database_key.dart'
     show LocalDatabaseUnavailableException;
+import 'package:sinalacs_patient/core/services/emergency_dialer.dart';
 import 'package:sinalacs_patient/core/services/theme_controller.dart';
 
 class SinalAcsApp extends StatefulWidget {
@@ -60,6 +63,8 @@ class SinalAcsApp extends StatefulWidget {
     this.pushTokens,
     this.upcomingDocuments,
     this.themeController,
+    this.emergencyDialer,
+    this.localEvents,
     this.educationalNotice,
   });
 
@@ -117,6 +122,14 @@ class SinalAcsApp extends StatefulWidget {
   final UpcomingLegalDocuments? upcomingDocuments;
   final ThemeController? themeController;
 
+  /// Injetável para teste. Em execução normal é [UrlLauncherEmergencyDialer],
+  /// que abre o discador com `tel:192` (C-04).
+  final EmergencyDialer? emergencyDialer;
+
+  /// Injetável para teste. Em execução normal é a trilha local de eventos no
+  /// banco cifrado (`PatientLocalStores.events`, C-04); sem banco construído
+  /// pelo app e sem este parâmetro, a orientação "Ligar 192" não grava.
+  final LocalEventLog? localEvents;
   /// Confirmação do aviso educativo da primeira abertura (RF21, C-02).
   /// Injetável para teste; sem ela vale [educationalNoticeStoreFactory], que em
   /// produção é `shared_preferences`.
@@ -144,6 +157,9 @@ class _SinalAcsAppState extends State<SinalAcsApp> {
       widget.consentPreferences ?? _localStores!.consent;
   late final LocalDataControl? _localDataControl = widget.localDataControl ?? _localStores?.database;
   late final QrScanner _qrScanner = widget.qrScanner ?? scanQrWithCamera;
+  late final EmergencyDialer _emergencyDialer =
+      widget.emergencyDialer ?? const UrlLauncherEmergencyDialer();
+  late final LocalEventLog? _localEvents = widget.localEvents ?? _localStores?.events;
   // O parâmetro (teste) tem precedência; senão, o provider Riverpod, se houver um
   // `ProviderScope` acima; senão, sem push. Lido em `didChangeDependencies`.
   PushTokenSource _pushTokens = const NoPushTokenSource();
@@ -207,19 +223,23 @@ class _SinalAcsAppState extends State<SinalAcsApp> {
               documents: widget.upcomingDocuments ?? upcomingLegalDocuments,
               child: QrScannerScope(
                 scanner: _qrScanner,
-                child: ValueListenableBuilder<ThemeMode>(
-                  valueListenable: _themeController,
-                  builder: (context, mode, _) => MaterialApp(
-                    title: 'SinalACS Paciente',
-                    debugShowCheckedModeBanner: false,
-                    theme: buildPatientLightTheme(),
-                    darkTheme: buildPatientDarkTheme(),
-                    themeMode: mode,
-                    // Aviso educativo da primeira abertura (RF21) antes de
-                    // qualquer outra tela.
-                    home: EducationalNoticeGate(
-                      store: _educationalNotice,
-                      child: PatientLoginScreen(themeController: _themeController),
+                child: Call192Scope(
+                  dialer: _emergencyDialer,
+                  events: _localEvents,
+                  child: ValueListenableBuilder<ThemeMode>(
+                    valueListenable: _themeController,
+                    builder: (context, mode, _) => MaterialApp(
+                      title: 'SinalACS Paciente',
+                      debugShowCheckedModeBanner: false,
+                      theme: buildPatientLightTheme(),
+                      darkTheme: buildPatientDarkTheme(),
+                      themeMode: mode,
+                      // Aviso educativo da primeira abertura (RF21) antes de
+                      // qualquer outra tela.
+                      home: EducationalNoticeGate(
+                        store: _educationalNotice,
+                        child: PatientLoginScreen(themeController: _themeController),
+                      ),
                     ),
                   ),
                 ),
@@ -1224,7 +1244,7 @@ class _PatientHomeShellState extends State<PatientHomeShell> {
       PatientDestination.settings => ThemeSettingsScreen(controller: widget.themeController),
     };
     final title = switch (_destination) {
-      PatientDestination.emergency => 'Alerta de urgência',
+      PatientDestination.emergency => 'Pedido de contato',
       PatientDestination.triage => 'Triagem rápida',
       PatientDestination.profile => 'Perfil clínico',
       PatientDestination.myData => 'Meus dados',
@@ -1239,7 +1259,7 @@ class _PatientHomeShellState extends State<PatientHomeShell> {
         child: Column(
           children: [
             if (_sessionExpired) _SessionExpiredBanner(onReenter: _reenter),
-            // Nunca na aba de urgência: o cartão desce o botão de pânico (e um aviso que
+            // Nunca na aba Contato: o cartão desce o "Ligar 192" e o pedido (e um aviso que
             // chega de forma assíncrona o moveria sob o dedo). Volta nas outras abas.
             if (_notice != null && !_noticeDismissed && _destination != PatientDestination.emergency)
               Builder(builder: (context) {
@@ -1280,7 +1300,9 @@ class _PatientHomeShellState extends State<PatientHomeShell> {
           _select([PatientDestination.emergency, PatientDestination.triage, PatientDestination.status][index]);
         },
         destinations: const [
-          NavigationDestination(icon: Icon(Icons.warning_amber_outlined), selectedIcon: Icon(Icons.warning_amber), label: 'Urgência'),
+          // "Contato", não "Urgência": o pedido vai ao agente participante e não
+          // é serviço de emergência (P-09, C-04). A emergência é o "Ligar 192".
+          NavigationDestination(icon: Icon(Icons.support_agent_outlined), selectedIcon: Icon(Icons.support_agent), label: 'Contato'),
           NavigationDestination(icon: Icon(Icons.assignment_outlined), selectedIcon: Icon(Icons.assignment), label: 'Triagem'),
           NavigationDestination(icon: Icon(Icons.timeline_outlined), selectedIcon: Icon(Icons.timeline), label: 'Status'),
           NavigationDestination(icon: Icon(Icons.more_horiz), label: 'Mais'),
@@ -1355,15 +1377,22 @@ class EmergencyScreen extends StatefulWidget {
   State<EmergencyScreen> createState() => _EmergencyScreenState();
 }
 
+/// Pedido de contato com o agente participante (RF03 no piloto, C-04, P-09).
+///
+/// Por dentro continua o mesmo envio de antes (`alerts.createRedAlert`, com
+/// chave de idempotência e localização): é isso que mantém a INV-03 — o pedido
+/// enviado nunca é descartado em silêncio (ACK, reserva HTTP, escalonamento).
+/// O que muda é o que a pessoa vê: nenhum rótulo de urgência, nenhuma promessa
+/// de socorro, e o "Ligar 192" **antes** do pedido, no topo da tela.
 class _EmergencyScreenState extends State<EmergencyScreen> {
-  String _state = 'Pronto para enviar';
+  String _state = 'Nenhum pedido enviado agora.';
   bool _busy = false;
 
   /// Texto exibido no cartão de localização.
   ///
   /// Precisa dizer explicitamente quando a localização não pôde ser lida —
   /// nunca mascarar isso silenciosamente atrás de um hash inventado (L-02).
-  String _locationStatus = 'A localização disponível será anexada ao alerta.';
+  String _locationStatus = 'A localização aproximada disponível vai junto com o pedido.';
 
   /// Chave da tentativa corrente.
   ///
@@ -1377,11 +1406,19 @@ class _EmergencyScreenState extends State<EmergencyScreen> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Confirmar alerta de emergência?'),
-        content: const Text('O alerta será registrado com a localização disponível neste dispositivo.'),
+        title: const Text('Pedir contato ao agente?'),
+        content: const Text(
+          'O pedido vai ao agente participante que acompanha você, com a localização '
+          'aproximada disponível neste aparelho. Não é atendimento de emergência: '
+          'em risco de vida, ligue 192.',
+        ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancelar')),
-          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Confirmar alerta')),
+          FilledButton(
+            key: const Key('confirm_contact_request'),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Enviar pedido'),
+          ),
         ],
       ),
     );
@@ -1393,7 +1430,7 @@ class _EmergencyScreenState extends State<EmergencyScreen> {
 
     setState(() {
       _busy = true;
-      _state = 'Enviando alerta...';
+      _state = 'Enviando pedido...';
     });
 
     // Lida com o GPS antes de falar com o servidor: se demorar, é o timeout
@@ -1408,14 +1445,14 @@ class _EmergencyScreenState extends State<EmergencyScreen> {
       case LocationAvailable(:final hash, :final cell):
         locationHash = hash;
         locationCell = cell;
-        locationStatus = 'Localização anexada ao alerta.';
+        locationStatus = 'Localização anexada ao pedido.';
       case LocationUnavailable():
-        // Alerta vermelho nunca pode ser perdido em silêncio por falta de
-        // GPS — segue com o hash de fallback, mas avisa a pessoa disso.
+        // O pedido nunca pode ser perdido em silêncio por falta de GPS
+        // (INV-03) — segue com o hash de fallback, mas avisa a pessoa disso.
         locationHash = unknownLocationHash;
         locationCell = null;
         locationStatus =
-            'Localização indisponível — o alerta será enviado mesmo assim.';
+            'Localização indisponível — o pedido será enviado mesmo assim.';
     }
     setState(() => _locationStatus = locationStatus);
 
@@ -1429,8 +1466,12 @@ class _EmergencyScreenState extends State<EmergencyScreen> {
       setState(() {
         _busy = false;
         _attemptKey = null;
-        _state = 'Alerta recebido pela equipe'
-            '${result.published ? '' : ' — aguardando a rede para notificar'}';
+        // "Enviado", não "recebido": `published` diz que o servidor guardou e
+        // repassou o pedido, não que o agente o viu. Quem diz isso é o Status
+        // (ACK). Nenhuma promessa de atendimento (C-04).
+        _state = result.published
+            ? 'Pedido enviado ao agente. Acompanhe a resposta na aba Status.'
+            : 'Pedido registrado. O aviso ao agente sai assim que a rede permitir.';
       });
     } on BackendFailure catch (failure) {
       if (!mounted) return;
@@ -1445,53 +1486,62 @@ class _EmergencyScreenState extends State<EmergencyScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final muted = TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant);
     return ListView(
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.all(20),
       children: [
-        const Text('Em uma situação grave, envie um alerta imediato à sua equipe de saúde.', textAlign: TextAlign.center),
-        const SizedBox(height: 28),
-        Center(
-          // `MergeSemantics`, e não só o `Semantics`: em volta de um botão de
-          // verdade o `Semantics` **não funde** com ele — cria um nó próprio,
-          // com papel de botão e sem ação de toque (medido na árvore:
-          // `Rect.fromLTRB(0, 0, 752, 208)`, a largura toda), anunciado ANTES
-          // do botão real. No controle mais crítico do app o leitor de tela
-          // encontrava primeiro um "botão" que não faz nada (WCAG 4.1.2) e cujo
-          // nome não continha o texto visível (WCAG 2.5.3, nível A). Mesclado,
-          // sobra UM nó: nome "Enviar alerta de emergência\nEMERGÊNCIA", com a
-          // ação de toque, e a moldura volta a ser a do botão (208x208).
-          child: MergeSemantics(
-            child: Semantics(
-              label: 'Enviar alerta de emergência',
-              button: true,
-              child: SizedBox(
-                width: 208,
-                height: 208,
-                child: FilledButton(
-                  key: const Key('panic_button'),
-                  onPressed: _busy ? null : _sendAlert,
-                  style: FilledButton.styleFrom(
-                    backgroundColor: PatientColors.danger,
-                    shape: const CircleBorder(),
-                  ),
-                  child: const Column(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.warning_amber_rounded, size: 52), SizedBox(height: 8), Text('EMERGÊNCIA', style: TextStyle(fontWeight: FontWeight.bold))]),
+        // "Ligar 192" vem ANTES de qualquer pedido de contato (C-04, M-01).
+        const Card(
+          child: Padding(
+            padding: EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  key: Key('call_192_notice'),
+                  'Em risco de vida, ligue 192 (SAMU). O SinalACS não é um serviço de emergência.',
+                  textAlign: TextAlign.center,
                 ),
-              ),
+                SizedBox(height: 12),
+                Call192Button(),
+              ],
             ),
           ),
         ),
-        const SizedBox(height: 28),
+        const SizedBox(height: 24),
+        Text(
+          'Para falar com o agente participante que acompanha você, envie um pedido de contato.',
+          textAlign: TextAlign.center,
+          style: muted,
+        ),
+        const SizedBox(height: 12),
+        // A chave `panic_button` fica por compatibilidade com os testes de
+        // integração e scripts de e2e; o texto visível é o nome acessível
+        // (WCAG 2.5.3) e não há `Semantics` em volta, que criaria um segundo nó
+        // inerte (WCAG 4.1.2).
+        FilledButton.icon(
+          key: const Key('panic_button'),
+          onPressed: _busy ? null : _sendAlert,
+          style: FilledButton.styleFrom(minimumSize: const Size(48, 52)),
+          icon: const Icon(Icons.support_agent),
+          label: const Text('Pedir contato ao agente'),
+        ),
+        const SizedBox(height: 16),
         Card(child: Padding(padding: const EdgeInsets.all(16), child: Column(children: [
           const Icon(Icons.location_on_outlined),
           const SizedBox(height: 8),
           Text(_locationStatus, key: const Key('location_status'), textAlign: TextAlign.center),
           const SizedBox(height: 8),
-          // SC 4.1.3: é a confirmação de que o alerta de emergência chegou à
-          // equipe — o ponto mais crítico do app para um leitor de tela
-          // anunciar sem depender de a pessoa varrer a tela de novo.
+          // SC 4.1.3: é a confirmação de que o pedido saiu — um leitor de tela
+          // precisa anunciá-la sem depender de a pessoa varrer a tela de novo.
           Semantics(
             liveRegion: true,
-            child: Text(_state, style: TextStyle(color: context.patientRisk.accentOnSurface, fontWeight: FontWeight.bold)),
+            child: Text(
+              _state,
+              key: const Key('contact_request_state'),
+              textAlign: TextAlign.center,
+              style: TextStyle(color: context.patientRisk.accentOnSurface, fontWeight: FontWeight.bold),
+            ),
           ),
         ]))),
       ],
@@ -1571,6 +1621,10 @@ class _TriageScreenState extends State<TriageScreen> {
         severeWeakness: _answers[TriageSymptom.severeWeakness] ?? false,
       );
       if (!mounted) return;
+      if (risk == RiskLevel.red) {
+        await _showCall192();
+        return;
+      }
       setState(() {
         _busy = false;
         _risk = risk;
@@ -1583,6 +1637,24 @@ class _TriageScreenState extends State<TriageScreen> {
         _error = failure.message;
       });
     }
+  }
+
+  /// Saída de maior gravidade: só a orientação "Ligar 192" (P-09, C-04).
+  ///
+  /// **Nenhum pedido de contato sai daqui** — nada de `createRedAlert`; o
+  /// pedido ao agente é um ato separado, na aba Contato (§INV-03 no piloto,
+  /// item 3). A orientação cobre a tela inteira, grava o evento local e só
+  /// fecha pela escolha explícita da pessoa; depois a autoavaliação recomeça
+  /// do zero, sem guardar as respostas.
+  Future<void> _showCall192() async {
+    setState(() => _busy = false);
+    await showCall192Orientation(context);
+    if (!mounted) return;
+    setState(() {
+      _step = 0;
+      _answers.clear();
+      _risk = null;
+    });
   }
 
   @override
@@ -1672,11 +1744,13 @@ class _TriageResult extends StatelessWidget {
     // texto em ambos os temas (ver `PatientRiskColors` em `patient_theme.dart`).
     final riskColors = context.patientRisk;
     final (label, color, guidance) = switch (risk) {
+      // Não é alcançado: o vermelho vira a orientação "Ligar 192"
+      // (`_TriageScreenState._showCall192`, C-04). O ramo fica para o `switch`
+      // seguir exaustivo, sem a promessa antiga de que a equipe foi avisada.
       RiskLevel.red => (
           'Risco: Vermelho',
           riskColors.dangerOnSurface,
-          'Sua equipe de saúde foi avisada com prioridade máxima. '
-              'Se piorar, ligue para o SAMU (192).',
+          'Ligue 192 (SAMU).',
         ),
       RiskLevel.yellow => (
           'Risco: Amarelo',
@@ -2182,7 +2256,7 @@ class _MyDataScreenState extends State<MyDataScreen> {
       };
 
   String _sourceLabel(String source) => switch (source) {
-        'alert' => 'Alerta de urgência',
+        'alert' => 'Pedido de contato',
         'triage' => 'Triagem',
         _ => source,
       };
@@ -2556,12 +2630,12 @@ class _StatusScreenBodyState extends State<_StatusScreenBody> with WidgetsBindin
                 children: [
                   Text(
                     key: const Key('status_empty'),
-                    _loading ? 'Verificando...' : 'Nenhuma solicitação registrada ainda.',
+                    _loading ? 'Verificando...' : 'Nenhum pedido de contato registrado ainda.',
                     style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    'Um alerta de urgência ou uma triagem concluída aparece aqui assim que a equipe recebe.',
+                    'Um pedido de contato enviado ao agente aparece aqui, com a resposta dele.',
                     style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
                   ),
                 ],
@@ -2592,6 +2666,11 @@ class _StatusScreenBodyState extends State<_StatusScreenBody> with WidgetsBindin
   }
 }
 
+/// Estado do último pedido de contato (RF05 no piloto, C-04).
+///
+/// Estados descritivos do que aconteceu com o pedido, nunca uma promessa:
+/// sem rótulo de risco ou de urgência, e sem "Atendido". O servidor ainda
+/// devolve `riskLevel`, que esta tela deixa de mostrar de propósito.
 class _StatusCard extends StatelessWidget {
   const _StatusCard({required this.status});
 
@@ -2599,19 +2678,15 @@ class _StatusCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Mesma disciplina de cor de `_TriageResult`: `OnSurface` porque o tom
-    // aparece como texto sobre `Card`, não como preenchimento.
-    final (riskLabel, riskColor) = switch (status.riskLevel) {
-      RiskLevel.red => ('Vermelho', context.patientRisk.dangerOnSurface),
-      RiskLevel.yellow => ('Amarelo', const Color(0xFFE0A800)),
-      RiskLevel.green => ('Verde', context.patientRisk.accentOnSurface),
-      null => ('Não classificado', Theme.of(context).colorScheme.onSurfaceVariant),
-    };
     final statusLabel = switch (status.status) {
-      AlertStatus.pending => 'Enviado — aguardando confirmação da equipe',
-      AlertStatus.acknowledged => 'Recebido pela equipe de saúde',
-      AlertStatus.resolved => 'Atendido pela equipe de saúde',
-      AlertStatus.escalated => 'Encaminhado para o SAMU',
+      AlertStatus.pending => 'Enviado — aguardando o agente confirmar',
+      AlertStatus.acknowledged => 'Visto pelo agente participante',
+      // "Encerrado", não "Atendido": o agente fechou o pedido; o app não sabe,
+      // nem promete, que houve atendimento.
+      AlertStatus.resolved => 'Encerrado pelo agente participante',
+      // Sem escritor hoje (escalonar mantém `pending`, #44); o rótulo antigo
+      // prometia o SAMU. O escalonamento do piloto é para a coordenação (RF19).
+      AlertStatus.escalated => 'Repassado à coordenação do piloto',
       null => 'Sem status',
     };
     final triggeredAt = status.triggeredAt;
@@ -2624,14 +2699,14 @@ class _StatusCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              key: const Key('status_risk'),
-              'Risco: $riskLabel',
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: riskColor),
+            const Text(
+              key: Key('status_title'),
+              'Pedido de contato',
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
             ),
             if (triggeredAt != null) ...[
               const SizedBox(height: 8),
-              Text('Disparado às ${_formatTime(triggeredAt)}'),
+              Text('Enviado às ${_formatTime(triggeredAt)}'),
             ],
             const SizedBox(height: 16),
             Text(
@@ -2641,13 +2716,13 @@ class _StatusCard extends StatelessWidget {
             ),
             if (acknowledgedAt != null) ...[
               const SizedBox(height: 4),
-              Text('Confirmado pela equipe às ${_formatTime(acknowledgedAt)}'),
+              Text('Confirmado pelo agente às ${_formatTime(acknowledgedAt)}'),
             ],
             if (resolvedAt != null) ...[
               const SizedBox(height: 4),
               Text(
                 key: const Key('status_resolved_at'),
-                'Atendimento concluído às ${_formatTime(resolvedAt)}',
+                'Encerrado às ${_formatTime(resolvedAt)}',
               ),
             ],
           ],

@@ -1,10 +1,12 @@
 import 'package:sinalacs_patient/core/consent/sqflite_consent_preferences.dart';
+import 'package:sinalacs_patient/core/events/sqflite_local_event_log.dart';
 import 'package:sinalacs_patient/core/reminders/reminder_scheduler.dart';
 import 'package:sinalacs_patient/core/reminders/sqflite_reminder_store.dart';
 import 'package:sinalacs_patient/core/storage/local_database_key.dart';
 import 'package:sinalacs_patient/core/storage/patient_local_database.dart';
 
-/// Um único banco cifrado (#136) alimentando as duas lojas, com os dois
+/// Um único banco cifrado (#136) alimentando as lojas (e, desde a #127, a
+/// trilha local de eventos), com os dois
 /// eventos do banco ligados às notificações:
 ///
 /// - chave perdida: o banco recomeçou vazio e não se sabem mais os ids, então
@@ -36,14 +38,18 @@ class PatientLocalStores {
       database,
       SqfliteReminderStore(database),
       SqfliteConsentPreferences(database),
+      SqfliteLocalEventLog(database),
     );
   }
 
-  PatientLocalStores._(this.database, this.reminders, this.consent);
+  PatientLocalStores._(this.database, this.reminders, this.consent, this.events);
 
   final PatientLocalDatabase database;
   final SqfliteReminderStore reminders;
   final SqfliteConsentPreferences consent;
+
+  /// Trilha local de eventos (C-04, #127), no mesmo banco cifrado.
+  final SqfliteLocalEventLog events;
 
   static Future<void> _rescheduleAfterMigration(
     PatientLocalStores stores,

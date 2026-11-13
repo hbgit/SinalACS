@@ -393,7 +393,9 @@ void main() {
   });
 
   testWidgets('deve enviar os sintomas ao servidor e exibir o risco recebido', (tester) async {
-    final backend = FakePatientBackend(risk: RiskLevel.red);
+    // Amarelo, e não vermelho: desde a C-04 o vermelho vira a orientação
+    // "Ligar 192" (provada em `call_192_test.dart`), sem cartão de risco.
+    final backend = FakePatientBackend(risk: RiskLevel.yellow);
     await tester.pumpWidget(SinalAcsApp(backend: backend));
 
     await login(tester);
@@ -408,7 +410,7 @@ void main() {
       'bleeding': false,
       'severeWeakness': false,
     });
-    expect(find.text('Risco: Vermelho'), findsOneWidget);
+    expect(find.text('Risco: Amarelo'), findsOneWidget);
   });
 
   testWidgets('deve exibir o risco do servidor mesmo quando contraria o sintoma informado', (tester) async {
@@ -439,13 +441,13 @@ void main() {
     await login(tester);
 
     // Vai para a aba de urgência.
-    await tester.tap(find.text('Urgência'));
+    await tester.tap(find.text('Contato'));
     await tester.pumpAndSettle();
 
     for (var attempt = 0; attempt < 2; attempt++) {
       await tester.tap(find.byKey(const Key('panic_button')));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Confirmar alerta'));
+      await tester.tap(find.text('Enviar pedido'));
       await tester.pumpAndSettle();
     }
 
@@ -462,17 +464,17 @@ void main() {
     await tester.pumpWidget(SinalAcsApp(backend: backend, locationReader: locationReader));
 
     await login(tester);
-    await tester.tap(find.text('Urgência'));
+    await tester.tap(find.text('Contato'));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('panic_button')));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Confirmar alerta'));
+    await tester.tap(find.text('Enviar pedido'));
     await tester.pumpAndSettle();
 
     expect(locationReader.calls, 1);
     expect(backend.locationHashes.single, 'abc123456789');
     expect(backend.locationCells.single, '-2356:-4664');
-    expect(find.text('Localização anexada ao alerta.'), findsOneWidget);
+    expect(find.text('Localização anexada ao pedido.'), findsOneWidget);
   });
 
   for (final reason in LocationUnavailableReason.values) {
@@ -485,11 +487,11 @@ void main() {
         await tester.pumpWidget(SinalAcsApp(backend: backend, locationReader: locationReader));
 
         await login(tester);
-        await tester.tap(find.text('Urgência'));
+        await tester.tap(find.text('Contato'));
         await tester.pumpAndSettle();
         await tester.tap(find.byKey(const Key('panic_button')));
         await tester.pumpAndSettle();
-        await tester.tap(find.text('Confirmar alerta'));
+        await tester.tap(find.text('Enviar pedido'));
         await tester.pumpAndSettle();
 
         // Alerta vermelho nunca pode ser perdido em silêncio por falta de
@@ -497,11 +499,11 @@ void main() {
         expect(backend.locationHashes.single, unknownLocationHash);
         // Sem leitura de GPS não há célula para desenhar no mapa do ACS.
         expect(backend.locationCells.single, isNull);
-        expect(find.text('Alerta recebido pela equipe'), findsOneWidget);
+        expect(find.text('Pedido enviado ao agente. Acompanhe a resposta na aba Status.'), findsOneWidget);
         // A UI precisa dizer isso explicitamente — nunca mascarar como se
         // uma coordenada válida tivesse sido usada.
         expect(
-          find.text('Localização indisponível — o alerta será enviado mesmo assim.'),
+          find.text('Localização indisponível — o pedido será enviado mesmo assim.'),
           findsOneWidget,
         );
       },
@@ -521,25 +523,23 @@ void main() {
     ));
 
     await login(tester);
-    await tester.tap(find.text('Urgência'));
+    await tester.tap(find.text('Contato'));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('panic_button')));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Confirmar alerta'));
+    await tester.tap(find.text('Enviar pedido'));
     await tester.pumpAndSettle();
 
-    final semantics = tester.getSemantics(find.text('Alerta recebido pela equipe'));
+    final semantics = tester.getSemantics(find.text('Pedido enviado ao agente. Acompanhe a resposta na aba Status.'));
     expect(semantics.flagsCollection.isLiveRegion, isTrue);
     handle.dispose();
   });
 
-  testWidgets('o botão de EMERGÊNCIA é UM nó, com o texto visível e a ação de toque', (tester) async {
-    // WCAG 2.5.3 + 4.1.2 no controle mais crítico do app. Um `Semantics` em
-    // volta de um botão de verdade não funde com ele: cria um nó próprio, com
-    // papel de botão e sem ação, anunciado ANTES do botão real — o leitor de
-    // tela encontrava primeiro um "botão" que não faz nada, de largura total.
-    // `MergeSemantics` funde os dois: um nó só, com o texto visível dentro do
-    // nome acessível, e a ação de toque.
+  testWidgets('o botão do pedido de contato é UM nó, com o texto visível e a ação de toque', (tester) async {
+    // WCAG 2.5.3 + 4.1.2. Um `Semantics` em volta de um botão de verdade não
+    // funde com ele: cria um nó próprio, com papel de botão e sem ação,
+    // anunciado ANTES do botão real. Desde a C-04 o botão não tem `Semantics`
+    // em volta: o nome acessível é o texto visível.
     final handle = tester.ensureSemantics();
     await tester.pumpWidget(SinalAcsApp(
       backend: FakePatientBackend(),
@@ -549,29 +549,20 @@ void main() {
     ));
 
     await login(tester);
-    await tester.tap(find.text('Urgência'));
+    await tester.tap(find.text('Contato'));
     await tester.pumpAndSettle();
 
-    // A varredura vem primeiro de propósito: é ela que separa o defeito da
-    // correção. As três asserções abaixo descrevem a forma corrigida, mas são
-    // verdes com o defeito também (o nó do botão, sozinho, já responde ao toque
-    // e já carrega o texto visível) — quem acusa o nó inerte é a varredura.
+    // A varredura vem primeiro: é ela que acusa um nó inerte na árvore inteira.
     expectNenhumBotaoInerte(tester);
 
-    // `getSemantics` sobe enquanto o nó estiver mesclado, então com o
-    // `MergeSemantics` este é o nó fundido — o mesmo que o leitor de tela lê.
-    final noEmergencia = tester.getSemantics(find.byKey(const Key('panic_button')));
-    final emergencia = noEmergencia.getSemanticsData();
-    // Literalmente o texto visível, não uma variação de caixa: é o que o 2.5.3
-    // exige, por qualquer leitura, sem depender de comparação case-insensitive.
-    expect(emergencia.label, contains('EMERGÊNCIA'));
-    // A frase descritiva continua no nome acessível.
-    expect(emergencia.label, contains('Enviar alerta de emergência'));
-    expect(emergencia.hasAction(SemanticsAction.tap), isTrue);
-    // Um nó só, com a moldura do botão: com o defeito a moldura do nó sem ação
-    // era a área de largura total do wrapper (752 de largura, medidos pela
-    // varredura), e não os 208x208 do alvo de toque.
-    expect(noEmergencia.rect.size, const Size(208, 208));
+    final no = tester.getSemantics(find.byKey(const Key('panic_button')));
+    final dados = no.getSemanticsData();
+    expect(dados.label, contains('Pedir contato ao agente'));
+    // Nenhum rótulo de urgência no nome acessível (P-09).
+    expect(dados.label.toLowerCase(), isNot(contains('emergência')));
+    expect(dados.label.toLowerCase(), isNot(contains('alerta')));
+    expect(dados.hasAction(SemanticsAction.tap), isTrue);
+    expect(no.rect.height, greaterThanOrEqualTo(48));
     handle.dispose();
   });
 
@@ -1855,7 +1846,7 @@ void main() {
 
       expect(find.text('Tratamento de dados de saúde'), findsOneWidget);
       expect(find.textContaining('Concedido'), findsOneWidget);
-      expect(find.textContaining('Alerta de urgência'), findsOneWidget);
+      expect(find.textContaining('Pedido de contato'), findsOneWidget);
       expect(find.textContaining('Vermelho'), findsOneWidget);
     });
 
@@ -1976,7 +1967,7 @@ void main() {
 
       expect(backend.statusForCallCount, 1);
       expect(find.byKey(const Key('status_empty')), findsOneWidget);
-      expect(find.text('Nenhuma solicitação registrada ainda.'), findsOneWidget);
+      expect(find.text('Nenhum pedido de contato registrado ainda.'), findsOneWidget);
       expect(find.textContaining('Solicitação de visita #4082'), findsNothing);
     });
 
@@ -1996,11 +1987,14 @@ void main() {
       await tester.tap(find.text('Status'));
       await tester.pumpAndSettle();
 
-      expect(find.text('Risco: Vermelho'), findsOneWidget);
-      expect(find.text('Recebido pela equipe de saúde'), findsOneWidget);
+      expect(find.text('Pedido de contato'), findsWidgets);
+      expect(find.text('Visto pelo agente participante'), findsOneWidget);
+      // Sem rótulo de risco ou de urgência no pedido (C-04).
+      expect(find.textContaining('Risco'), findsNothing);
+      expect(find.textContaining('Vermelho'), findsNothing);
     });
 
-    testWidgets('alerta concluído pela equipe aparece como "Atendido" (#76)', (tester) async {
+    testWidgets('pedido concluído pelo agente aparece como "Encerrado", nunca "Atendido" (#76, C-04)', (tester) async {
       final backend = FakePatientBackend()
         ..statusResult = AlertStatusResult(
           found: true,
@@ -2017,11 +2011,14 @@ void main() {
       await tester.tap(find.text('Status'));
       await tester.pumpAndSettle();
 
-      expect(find.text('Atendido pela equipe de saúde'), findsOneWidget);
+      expect(find.text('Encerrado pelo agente participante'), findsOneWidget);
       expect(find.byKey(const Key('status_resolved_at')), findsOneWidget);
-      expect(find.textContaining('Atendimento concluído às'), findsOneWidget);
+      expect(find.textContaining('Encerrado às'), findsOneWidget);
+      // "Atendido" seria promessa de atendimento (C-04, RF05 no piloto).
+      expect(find.textContaining('Atendid'), findsNothing);
+      expect(find.textContaining('Atendimento'), findsNothing);
       // A confirmação continua visível: é a etapa "Visualizado" do PRD §6.1.
-      expect(find.textContaining('Confirmado pela equipe às'), findsOneWidget);
+      expect(find.textContaining('Confirmado pelo agente às'), findsOneWidget);
     });
 
     testWidgets('uma falha ao consultar mostra o aviso, sem travar o botão de tentar de novo', (tester) async {

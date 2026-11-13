@@ -84,7 +84,7 @@ void main() {
   /// Passa pelo convite de termos, se o paciente ainda não os aceitou.
   Future<void> aceitarTermosSePedido(WidgetTester tester) async {
     final termos = find.byKey(const Key('terms_gate_accept_button'));
-    final home = find.text('Urgência');
+    final home = find.text('Contato');
     final limit = DateTime.now().add(const Duration(seconds: 30));
     while (termos.evaluate().isEmpty && home.evaluate().isEmpty) {
       if (DateTime.now().isAfter(limit)) throw TestFailure('nem termos nem home após o login');
@@ -115,12 +115,12 @@ void main() {
         // O código verdadeiro é o do PRIMEIRO pedido: errar não gasta outro SMS.
         await digitarCodigo(tester, await codeFromRelay(_relay, pedidoEm));
         await aceitarTermosSePedido(tester);
-        expect(find.text('Urgência'), findsOneWidget);
+        expect(find.text('Contato'), findsOneWidget);
         // E de fato foi UM pedido: errar o código não pode ter gasto outro SMS.
         expect(await relayCount(_relay, pedidoEm), 1);
       });
 
-      testWidgets('triagem vermelha, alerta, status e Meus dados do próprio paciente', (tester) async {
+      testWidgets('triagem vermelha, "Ligar 192", pedido de contato, status e Meus dados do próprio paciente', (tester) async {
         final backend = await backendReal();
         addTearDown(backend.close);
         await tester.pumpWidget(SinalAcsApp(backend: backend, locationReader: _FixedLocation()));
@@ -138,18 +138,22 @@ void main() {
           await tester.tap(find.byKey(const Key('submit_triage')));
           await tester.pump(const Duration(milliseconds: 400));
         }
-        await pumpUntil(tester, find.text('Risco: Vermelho'));
+        // Vermelho no motor do servidor: só a orientação "Ligar 192", sem
+        // pedido de contato (C-04); fecha pela escolha explícita.
+        await pumpUntil(tester, find.byKey(const Key('call_192_title')));
+        await tapKey(tester, 'call_192_close');
+        await tester.pump(const Duration(milliseconds: 400));
 
-        // Alerta de urgência: sai mesmo sem o GPS do sistema.
-        await tester.tap(find.text('Urgência'));
+        // Pedido de contato, ato separado: sai mesmo sem o GPS do sistema.
+        await tester.tap(find.text('Contato'));
         await tester.pump(const Duration(milliseconds: 400));
         await tapKey(tester, 'panic_button');
-        await tester.tap(find.text('Confirmar alerta'));
-        await pumpUntil(tester, find.textContaining('Alerta recebido pela equipe'));
+        await tester.tap(find.text('Enviar pedido'));
+        await pumpUntil(tester, find.textContaining(RegExp('^Pedido (enviado|registrado)')));
 
         // Status real, não o vazio.
         await tester.tap(find.text('Status'));
-        await pumpUntil(tester, find.text('Enviado — aguardando confirmação da equipe'));
+        await pumpUntil(tester, find.text('Enviado — aguardando o agente confirmar'));
         expect(find.byKey(const Key('status_empty')), findsNothing);
 
         // Meus dados: o cadastro da fixture, a condição crônica decifrada, e só.
