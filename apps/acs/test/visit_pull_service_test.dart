@@ -175,13 +175,16 @@ void main() {
     late SqlCipherVisitStorage storage;
 
     setUp(() {
+      // Uma custódia só, como o Keystore do aparelho: com duas vazias, a
+      // segunda veria o arquivo da primeira sem chave e o poria de lado (#151).
+      final keyStore = InMemoryDatabaseKeyStore();
       db = VisitDatabase(
-        keyStore: InMemoryDatabaseKeyStore(),
+        keyStore: keyStore,
         databaseName: dbName,
         allowUnencryptedForTesting: true,
       );
       storage = SqlCipherVisitStorage(
-        keyStore: InMemoryDatabaseKeyStore(),
+        keyStore: keyStore,
         databaseName: dbName,
         allowUnencryptedForTesting: true,
       );

@@ -1565,6 +1565,9 @@ void main() {
           find.descendant(of: find.byType(AlertDialog), matching: find.textContaining(text));
       expect(inDialog('15 dias'), findsOneWidget);
       expect(inDialog('emergência'), findsOneWidget);
+      // C-06: quem analisa é a coordenação do piloto; "UBS" não aparece.
+      expect(inDialog('A coordenação do piloto analisa o pedido'), findsOneWidget);
+      expect(find.textContaining('UBS'), findsNothing);
       await tester.tap(find.byKey(const Key('deletion_request_confirm')));
       await tester.pumpAndSettle();
 

@@ -20,6 +20,11 @@ OfflineVisitRecord _visita(String localId, {bool rejeitada = false}) =>
       rejectionReason: rejeitada ? 'recusada' : null,
     );
 
+/// A chave do Keystore deste aparelho, presente. Na VM (FFI, sem SQLCipher) o
+/// valor não importa; a PRESENÇA importa: desde a #151, arquivo existente com
+/// a chave comprovadamente ausente é chave perdida, e o banco é posto de lado.
+final _chaveDoAparelho = 'd' * 64;
+
 Future<int> _contar(Database db, String where) async =>
     (await db.rawQuery('SELECT COUNT(*) AS n FROM offline_visits WHERE $where'))
         .single['n']! as int;
@@ -31,7 +36,7 @@ void main() {
   late SqlCipherVisitStorage storage;
 
   SqlCipherVisitStorage abrir() => SqlCipherVisitStorage(
-        keyStore: InMemoryDatabaseKeyStore(),
+        keyStore: InMemoryDatabaseKeyStore(initialKey: _chaveDoAparelho),
         databaseName: nome,
         allowUnencryptedForTesting: true,
       );
@@ -182,7 +187,7 @@ CREATE TABLE offline_visits (
     test('N open() concorrentes abrem UMA só conexão', () async {
       var aberturas = 0;
       final db = VisitDatabase(
-        keyStore: InMemoryDatabaseKeyStore(),
+        keyStore: InMemoryDatabaseKeyStore(initialKey: _chaveDoAparelho),
         databaseName: nome,
         allowUnencryptedForTesting: true,
         opener: (n, p, u) async {
@@ -211,14 +216,15 @@ CREATE TABLE offline_visits (
 
       var aberturas = 0;
       final db = VisitDatabase(
-        keyStore: InMemoryDatabaseKeyStore(),
+        keyStore: InMemoryDatabaseKeyStore(initialKey: _chaveDoAparelho),
         databaseName: nome,
         allowUnencryptedForTesting: true,
         retryDelay: Duration.zero,
         opener: (n, p, u) async {
           aberturas++;
           if (aberturas <= 2) {
-            throw _ErroDoBanco('open_failed /dados/$n'); // chave errada, como o Android relata
+            // Sinal inequívoco (iOS/FFI). O `open_failed` do Android não recupera (#151).
+            throw _ErroDoBanco('file is not a database (code 26)');
           }
           return EncryptedLocalDatabase.open(
             databaseName: n,
@@ -236,7 +242,7 @@ CREATE TABLE offline_visits (
     test('falha de abertura não fica memoizada: a próxima chamada tenta de novo', () async {
       var aberturas = 0;
       final db = VisitDatabase(
-        keyStore: InMemoryDatabaseKeyStore(),
+        keyStore: InMemoryDatabaseKeyStore(initialKey: _chaveDoAparelho),
         databaseName: nome,
         allowUnencryptedForTesting: true,
         opener: (n, p, u) async {
@@ -265,7 +271,7 @@ CREATE TABLE offline_visits (
       Future<void> Function(String databaseName)? moveAside,
     }) {
       return VisitDatabase(
-        keyStore: chaves ?? InMemoryDatabaseKeyStore(),
+        keyStore: chaves ?? InMemoryDatabaseKeyStore(initialKey: _chaveDoAparelho),
         databaseName: nome,
         allowUnencryptedForTesting: true,
         retryDelay: Duration.zero,
@@ -279,7 +285,7 @@ CREATE TABLE offline_visits (
     }
 
     Future<void> arquivoComUmaVisita() async {
-      final s = SqlCipherVisitStorage(keyStore: InMemoryDatabaseKeyStore(), databaseName: nome, allowUnencryptedForTesting: true);
+      final s = SqlCipherVisitStorage(keyStore: InMemoryDatabaseKeyStore(initialKey: _chaveDoAparelho), databaseName: nome, allowUnencryptedForTesting: true);
       await s.forOwner('acs-a').save([_visita('sobrevive')]);
       await s.close();
     }
@@ -288,10 +294,10 @@ CREATE TABLE offline_visits (
     Future<File> copia() async => File('${await caminho()}.recuperado');
 
     for (final (rotulo, erro) in <(String, Object)>[
-      ('open_failed (Android: SQLCipher sem a chave certa)', _ErroDoBanco('open_failed /dados/x.db')),
+      ('open_failed (Android: ambíguo)', _ErroDoBanco('open_failed /dados/x.db')),
       ('file is not a database (código 26)', _ErroDoBanco('file is not a database (code 26)')),
     ]) {
-      test('chave errada UMA vez ($rotulo) e a nova tentativa abre: NÃO recupera, nada muda', () async {
+      test('erro de abertura UMA vez ($rotulo) e a nova tentativa abre: NÃO recupera, nada muda', () async {
         await arquivoComUmaVisita();
         final chamadas = <String>[];
         final chaves = InMemoryDatabaseKeyStore(initialKey: 'c' * 64);
@@ -305,26 +311,27 @@ CREATE TABLE offline_visits (
         expect((await copia()).existsSync(), isFalse, reason: 'sem cópia de recuperação');
         await db.close();
       });
-
-      test('chave errada DUAS vezes ($rotulo): move o arquivo para .recuperado e recomeça', () async {
-        await arquivoComUmaVisita();
-        final bytesAntigos = await File(await caminho()).readAsBytes();
-        final chamadas = <String>[];
-        final chaves = InMemoryDatabaseKeyStore(initialKey: 'c' * 64);
-        final db = banco([erro, erro], chamadas: chamadas, chaves: chaves);
-
-        final aberto = await db.open();
-
-        expect(chamadas, ['abrir', 'abrir', 'abrir'], reason: 'falha + nova tentativa + recriação');
-        expect(await chaves.readOrCreate(), isNot('c' * 64), reason: 'a chave que não abria foi trocada');
-        expect(await aberto.query('offline_visits'), isEmpty, reason: 'banco novo, vazio');
-        expect(await (await copia()).readAsBytes(), bytesAntigos, reason: 'os bytes antigos ficam na cópia (artefato forense, ilegível sem a chave antiga)');
-        await db.close();
-      });
     }
 
+    test('chave errada inequívoca DUAS vezes (código 26): move o arquivo para .recuperado e recomeça', () async {
+      final erro = _ErroDoBanco('file is not a database (code 26)');
+      await arquivoComUmaVisita();
+      final bytesAntigos = await File(await caminho()).readAsBytes();
+      final chamadas = <String>[];
+      final chaves = InMemoryDatabaseKeyStore(initialKey: 'c' * 64);
+      final db = banco([erro, erro], chamadas: chamadas, chaves: chaves);
+
+      final aberto = await db.open();
+
+      expect(chamadas, ['abrir', 'abrir', 'abrir'], reason: 'falha + nova tentativa + recriação');
+      expect(await chaves.readOrCreate(), isNot('c' * 64), reason: 'a chave que não abria foi trocada');
+      expect(await aberto.query('offline_visits'), isEmpty, reason: 'banco novo, vazio');
+      expect(await (await copia()).readAsBytes(), bytesAntigos, reason: 'os bytes antigos ficam na cópia (artefato forense, ilegível sem a chave antiga)');
+      await db.close();
+    });
+
     test('uma segunda recuperação SOBRESCREVE a cópia anterior (só existe uma)', () async {
-      final chave = _ErroDoBanco('open_failed /dados/x.db');
+      final chave = _ErroDoBanco('file is not a database (code 26)');
       await arquivoComUmaVisita();
       final primeira = banco([chave, chave], chamadas: []);
       await primeira.open();
@@ -345,7 +352,7 @@ CREATE TABLE offline_visits (
     test('se mover o arquivo falha: o erro sobe, o arquivo e a chave ficam intactos', () async {
       await arquivoComUmaVisita();
       final bytesAntigos = await File(await caminho()).readAsBytes();
-      final chave = _ErroDoBanco('open_failed /dados/x.db');
+      final chave = _ErroDoBanco('file is not a database (code 26)');
       final chaves = InMemoryDatabaseKeyStore(initialKey: 'c' * 64);
       const falhaAoMover = FileSystemException('sem espaço para mover');
       final chamadas = <String>[];
@@ -365,7 +372,7 @@ CREATE TABLE offline_visits (
     });
 
     test('"Limpar este aparelho" apaga também a cópia .recuperado; bloqueado, não', () async {
-      final storage = SqlCipherVisitStorage(keyStore: InMemoryDatabaseKeyStore(), databaseName: nome, allowUnencryptedForTesting: true);
+      final storage = SqlCipherVisitStorage(keyStore: InMemoryDatabaseKeyStore(initialKey: _chaveDoAparelho), databaseName: nome, allowUnencryptedForTesting: true);
       await storage.forOwner('acs-a').save([_visita('pendente')]);
       final backup = await copia();
       await backup.writeAsBytes([1, 2, 3]);
@@ -397,7 +404,7 @@ CREATE TABLE offline_visits (
 
         expect(chamadas, ['abrir'], reason: 'sem segunda abertura');
         expect(await chaves.readOrCreate(), 'c' * 64, reason: 'a chave fica');
-        final depois = SqlCipherVisitStorage(keyStore: InMemoryDatabaseKeyStore(), databaseName: nome, allowUnencryptedForTesting: true);
+        final depois = SqlCipherVisitStorage(keyStore: InMemoryDatabaseKeyStore(initialKey: _chaveDoAparelho), databaseName: nome, allowUnencryptedForTesting: true);
         expect((await depois.forOwner('acs-a').load()).map((v) => v.localId), ['sobrevive'], reason: 'o arquivo fica');
         await depois.close();
       });
@@ -405,7 +412,7 @@ CREATE TABLE offline_visits (
 
     test('com o erro subindo, a fila segue na memória (persistenceFailed) e não perde nada', () async {
       await arquivoComUmaVisita();
-      final storage = SqlCipherVisitStorage(keyStore: InMemoryDatabaseKeyStore(), databaseName: nome, allowUnencryptedForTesting: true);
+      final storage = SqlCipherVisitStorage(keyStore: InMemoryDatabaseKeyStore(initialKey: _chaveDoAparelho), databaseName: nome, allowUnencryptedForTesting: true);
       await storage.close();
       final chamadas = <String>[];
       final db = banco([_ErroDoBanco('disk I/O error (code 10)')], chamadas: chamadas);
@@ -414,7 +421,12 @@ CREATE TABLE offline_visits (
       await fila.restore();
       expect(fila.persistenceFailed, isTrue);
       await fila.add(_visita('em-campo'));
-      expect(fila.pendingCount, 1);
+      // #151: a abertura voltou na gravação; antes, o `save` substituía o
+      // conjunto do dono pelo que estava na RAM e apagava `sobrevive` do disco.
+      expect(fila.persistenceFailed, isFalse);
+      expect(fila.pendingVisits.map((v) => v.localId), ['sobrevive', 'em-campo']);
+      final noDisco = await SqlCipherVisitStore.on(db, owner: 'acs-a').load();
+      expect(noDisco.map((v) => v.localId), ['sobrevive', 'em-campo']);
       await db.close();
     });
   });
@@ -425,7 +437,7 @@ CREATE TABLE offline_visits (
         expect(() => storage.forOwner(ruim), throwsArgumentError);
         expect(
           () => SqlCipherVisitStore(
-            keyStore: InMemoryDatabaseKeyStore(),
+            keyStore: InMemoryDatabaseKeyStore(initialKey: _chaveDoAparelho),
             owner: ruim,
             databaseName: nome,
             allowUnencryptedForTesting: true,

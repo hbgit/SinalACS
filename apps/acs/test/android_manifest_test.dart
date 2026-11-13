@@ -50,6 +50,41 @@ void main() {
     );
   });
 
+  // #152: com targetSdk 31+, `allowBackup="false"` não desliga a transferência
+  // entre aparelhos (Android 12+). Sem as regras abaixo, o banco SQLCipher da
+  // fila e as SharedPreferences (WipeJournal da #81, EncryptedSharedPreferences
+  // do flutter_secure_storage) iriam para o aparelho novo, sem a chave do
+  // Keystore. Mesma regra do paciente (#136, `android_backup_manifest_test`).
+  final application = RegExp(r'<application\b[^>]*>').firstMatch(manifest)?.group(0) ?? '';
+
+  test('fullBackupContent="false" no <application> (API < 31)', () {
+    expect(application.contains('android:fullBackupContent="false"'), isTrue);
+  });
+
+  test('dataExtractionRules aponta para @xml/data_extraction_rules (API 31+)', () {
+    expect(
+      application.contains('android:dataExtractionRules="@xml/data_extraction_rules"'),
+      isTrue,
+    );
+  });
+
+  test('regras excluem root, file, database, sharedpref e external em cloud-backup e device-transfer', () {
+    final rulesFile = File('android/app/src/main/res/xml/data_extraction_rules.xml');
+    expect(rulesFile.existsSync(), isTrue, reason: 'o recurso referenciado precisa existir');
+    final rules = rulesFile.readAsStringSync();
+    for (final section in ['cloud-backup', 'device-transfer']) {
+      final block = RegExp('<$section[^>]*>([\\s\\S]*?)</$section>').firstMatch(rules);
+      expect(block, isNotNull, reason: 'falta <$section>');
+      for (final domain in ['root', 'file', 'database', 'sharedpref', 'external']) {
+        final exclude = RegExp('<exclude\\s+domain="$domain"\\s+path="\\."\\s*/>');
+        expect(exclude.hasMatch(block!.group(1)!), isTrue,
+            reason: '$section deve excluir o domínio $domain');
+      }
+      expect(RegExp(r'<include\b').hasMatch(block!.group(1)!), isFalse,
+          reason: '$section não deve incluir nada');
+    }
+  });
+
   test('o nome na gaveta do aparelho é legível, não o identificador do pacote', () {
     expect(manifest, isNot(contains('android:label="sinalacs_acs"')));
     expect(manifest, contains('android:label="SinalACS ACS"'));

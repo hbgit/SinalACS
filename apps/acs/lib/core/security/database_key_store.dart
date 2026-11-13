@@ -18,6 +18,12 @@ abstract class DatabaseKeyStore {
   /// Devolve a chave do dispositivo, criando-a na primeira vez.
   Future<String> readOrCreate();
 
+  /// A chave guardada, ou `null` quando ela **comprovadamente** não existe
+  /// (#151). Não cria nada. Uma falha ao ler a custódia **lança** — nunca vira
+  /// `null` —, porque "ausente" autoriza pôr o banco de lado e "não consegui
+  /// ler" não.
+  Future<String?> read();
+
   /// Remove a chave. Torna o banco existente ilegível — só use ao descartar o
   /// banco junto.
   Future<void> delete();
@@ -67,6 +73,12 @@ class SecureStorageDatabaseKeyStore implements DatabaseKeyStore {
   }
 
   @override
+  Future<String?> read() async {
+    final existing = await _storage.read(key: _key);
+    return existing == null || existing.isEmpty ? null : existing;
+  }
+
+  @override
   Future<void> delete() => _storage.delete(key: _key);
 }
 
@@ -78,6 +90,9 @@ class InMemoryDatabaseKeyStore implements DatabaseKeyStore {
 
   @override
   Future<String> readOrCreate() async => _key ??= generateDatabaseKey();
+
+  @override
+  Future<String?> read() async => _key;
 
   @override
   Future<void> delete() async => _key = null;
