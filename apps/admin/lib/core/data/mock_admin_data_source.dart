@@ -109,7 +109,7 @@ class MockAdminDataSource implements AdminDataSource {
   static final _codigoExpiraEm = DateTime(2026, 10, 9, 12);
 
   /// UBS sintética das linhas criadas pelo mock (nenhuma UBS real).
-  static const _ubsSintetica = 'UBS Vila Nova';
+  static const _ubsSintetica = 'Grupo Vila Nova';
 
   static final _seedMicroAreas = [
     const MicroAreaSummary(

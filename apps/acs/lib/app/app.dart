@@ -4028,7 +4028,7 @@ class _EscalationScreenState extends State<EscalationScreen> {
     } on BackendFailure catch (falha) {
       aviso = falha.message;
     } catch (_) {
-      aviso = 'Não foi possível obter o contato da UBS.';
+      aviso = 'Não foi possível obter o contato da coordenação do piloto.';
     }
     if (!mounted) return;
     setState(() => _fetchingUbs = false);
@@ -4062,7 +4062,7 @@ class _EscalationScreenState extends State<EscalationScreen> {
         onPressed: _fetchingUbs ? null : _callUbs,
         style: OutlinedButton.styleFrom(minimumSize: const Size(48, 52)),
         icon: const Icon(Icons.local_hospital_outlined),
-        label: const Text('Ligar para a UBS'),
+        label: const Text('Ligar para a coordenação do piloto'),
       ),
       if (current != null) ...[
         const SizedBox(height: 12),

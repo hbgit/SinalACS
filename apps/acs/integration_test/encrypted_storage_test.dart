@@ -193,6 +193,48 @@ void main() {
     await EncryptedLocalDatabase.deleteDatabaseFile(databaseName);
   });
 
+  test('#151: arquivo sem permissão (open_failed ambíguo) com a chave presente não perde a fila', () async {
+    // No Android o plugin devolve o mesmo `open_failed` para chave errada e
+    // para arquivo inacessível. Com a chave presente, nada pode ser posto de
+    // lado nem apagado: a fila fica intacta e volta quando a permissão volta.
+    final key = generateDatabaseKey();
+    final keyStore = InMemoryDatabaseKeyStore(initialKey: key);
+    final storage = SqlCipherVisitStorage(keyStore: keyStore, databaseName: databaseName);
+    await storage.forOwner('acs-teste').save([
+      OfflineVisitRecord(patientId: seedPatientId, risk: 'red', status: 'PENDENTE', localId: 'nao-enviada-151'),
+    ]);
+    await storage.close();
+    final path = await EncryptedLocalDatabase.pathFor(databaseName);
+    final before = await File(path).readAsBytes();
+
+    ProcessResult r;
+    try {
+      r = await Process.run('chmod', ['000', path]);
+    } catch (e) {
+      markTestSkipped('chmod indisponível ($e)');
+      return;
+    }
+    if (r.exitCode != 0) {
+      markTestSkipped('chmod 000 recusado (exit ${r.exitCode})');
+      return;
+    }
+    final blocked = SqlCipherVisitStorage(keyStore: keyStore, databaseName: databaseName);
+    try {
+      await expectLater(blocked.database.open(), throwsA(isA<VisitDatabaseOpenFailed>()));
+      expect(await keyStore.read(), key, reason: 'a chave não é apagada');
+      final copia = File('$path${EncryptedLocalDatabase.recoverySuffix}');
+      expect(copia.existsSync(), isFalse, reason: 'a fila não é posta de lado');
+    } finally {
+      await Process.run('chmod', ['600', path]);
+    }
+
+    expect(await File(path).readAsBytes(), before);
+    final back = SqlCipherVisitStorage(keyStore: keyStore, databaseName: databaseName);
+    expect((await back.forOwner('acs-teste').load()).single.localId, 'nao-enviada-151');
+    await back.close();
+    await EncryptedLocalDatabase.deleteDatabaseFile(databaseName);
+  });
+
   // ---- Fila por dono (schema v7) no SQLCipher real -------------------------
   //
   // Mesma lógica de test/visit_storage_owner_test.dart, mas no caminho do

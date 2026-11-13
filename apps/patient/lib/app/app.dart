@@ -612,7 +612,7 @@ class _PatientLoginScreenState extends State<PatientLoginScreen> {
                               ? 'Use CPF e data de nascimento para receber o código de acesso.'
                               // Nem "enviado para o seu celular": o app não sabe o
                               // telefone cadastrado, e afirmar isso seria inventar.
-                              : 'Digite o código de 6 dígitos enviado pela sua unidade de saúde.',
+                              : 'Digite o código de 6 dígitos que você recebeu.',
                           textAlign: TextAlign.center,
                           style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
                         ),
@@ -2039,7 +2039,7 @@ class _MyDataScreenState extends State<MyDataScreen> {
       builder: (dialogContext) => AlertDialog(
         title: const Text('Solicitar exclusão dos seus dados?'),
         content: const Text(
-          'A equipe da UBS analisa o pedido em até 15 dias e a resposta aparece aqui. '
+          'A coordenação do piloto analisa o pedido em até 15 dias e a resposta aparece aqui. '
           'Registros de saúde (alertas, triagens e visitas) podem ser mantidos pelo prazo '
           'legal de 5 anos e anonimizados depois, em vez de apagados. Enquanto o pedido '
           'estiver em análise, o app continua funcionando — inclusive o botão de emergência.',
@@ -2108,7 +2108,7 @@ class _MyDataScreenState extends State<MyDataScreen> {
         ConsentPurpose.localReminders =>
           'Notificações de remédios e cuidados que você agenda em "Lembretes".',
         ConsentPurpose.segmentedPush =>
-          'Avisos da UBS para a sua microárea. Ainda não são enviados nesta versão.',
+          'Avisos da coordenação do piloto para a sua microárea. Ainda não são enviados nesta versão.',
         ConsentPurpose.healthDataProcessing => 'Obrigatório para usar o app.',
         ConsentPurpose.termsOfUse => 'Aceito no cadastro.',
       };
@@ -2909,6 +2909,7 @@ class _RemindersScreenState extends State<RemindersScreen> {
         _error = null;
         _reminders = [for (final r in _reminders ?? const <Reminder>[]) if (r.id == updated.id) updated else r];
       });
+      if (active) unawaited(scope.scheduler.requestPermission());
     } on LocalDatabaseUnavailableException {
       _markLocalDataUnavailable();
     } catch (_) {
@@ -2964,6 +2965,9 @@ class _RemindersScreenState extends State<RemindersScreen> {
             (a, b) => a.hour != b.hour ? a.hour - b.hour : a.minute - b.minute,
           );
       });
+      // Depois de salvo e agendado, sem `await`: a lista não espera o diálogo
+      // do sistema, e uma recusa não desfaz o lembrete (#153).
+      if (saved.active) unawaited(scope.scheduler.requestPermission());
     } on LocalDatabaseUnavailableException {
       _markLocalDataUnavailable();
     } catch (_) {

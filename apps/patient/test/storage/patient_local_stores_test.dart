@@ -26,6 +26,11 @@ class _RecordingScheduler implements ReminderScheduler {
   Future<void> rescheduleAll(List<Reminder> active) async {
     rescheduled.add([for (final r in active) r.id]);
   }
+
+  var permissionRequests = 0;
+
+  @override
+  Future<void> requestPermission() async => permissionRequests++;
 }
 
 void main() {

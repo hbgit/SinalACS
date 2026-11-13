@@ -43,8 +43,8 @@ class DeviceWipedScreen extends StatelessWidget {
                   Text('Aparelho limpo pela coordenação', style: theme.textTheme.headlineSmall),
                   const SizedBox(height: 12),
                   const Text(
-                    'Os dados do SinalACS deste aparelho foram apagados a pedido da coordenação da UBS, '
-                    'inclusive as visitas que ainda não tinham sido enviadas. Os alertas continuam com a equipe da UBS.',
+                    'Os dados do SinalACS deste aparelho foram apagados a pedido da coordenação do piloto, '
+                    'inclusive as visitas que ainda não tinham sido enviadas. Os alertas continuam com a coordenação do piloto.',
                   ),
                   ValueListenableBuilder<bool>(
                     valueListenable: pendingConfirm,
