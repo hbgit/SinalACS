@@ -8,12 +8,14 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:sinalacs_acs/app/acs_theme.dart';
 import 'package:sinalacs_acs/app/app_lock_gate.dart';
 import 'package:sinalacs_acs/app/device_wiped_screen.dart';
+import 'package:sinalacs_acs/app/educational_notice_screens.dart';
 import 'package:sinalacs_acs/app/pending_alerts_banner.dart';
 import 'package:sinalacs_acs/app/invite_screen.dart';
 import 'package:sinalacs_acs/app/mfa_enrollment_screen.dart';
 import 'package:sinalacs_acs/app/visit_conflict_screen.dart';
 import 'package:sinalacs_acs/core/database/sqlcipher_visit_store.dart';
 import 'package:sinalacs_acs/core/geo/location_cell.dart';
+import 'package:sinalacs_acs/core/legal/educational_notice.dart';
 import 'package:sinalacs_acs/core/network/auth_session.dart';
 import 'package:sinalacs_acs/core/network/backend_client.dart';
 import 'package:sinalacs_acs/core/network/backend_scope.dart';
@@ -69,7 +71,13 @@ class SinalAcsApp extends StatefulWidget {
     this.telemetryStore,
     this.telemetryTransport,
     this.networkProbe,
+    this.educationalNotice,
   });
+
+  /// Confirmação do aviso educativo da primeira abertura (RF21, C-02).
+  /// Injetável para teste; sem ela vale [educationalNoticeStoreFactory], que em
+  /// produção é `shared_preferences`.
+  final EducationalNoticeStore? educationalNotice;
 
   /// Fila local da telemetria (#83). `null` usa o `SqlCipherTelemetryStore`
   /// sobre o banco das visitas quando [visitStorage] é o SQLCipher do
@@ -558,6 +566,8 @@ class _SinalAcsAppState extends State<SinalAcsApp> with WidgetsBindingObserver i
   }
 
   late final ThemeController _themeController = widget.themeController ?? ThemeController();
+  late final EducationalNoticeStore _educationalNotice =
+      widget.educationalNotice ?? educationalNoticeStoreFactory();
 
   late final BiometricGate _gate = widget.biometricGate ?? LocalAuthBiometricGate();
   late final GlobalKey<NavigatorState> _navigatorKey = widget.navigatorKey ?? GlobalKey<NavigatorState>();
@@ -1025,7 +1035,10 @@ class _SinalAcsAppState extends State<SinalAcsApp> with WidgetsBindingObserver i
               // sessão) nunca abre antes de o aparelho saber se foi limpo.
               home: ValueListenableBuilder<bool>(
                 valueListenable: _wipeReadyNotifier,
-                builder: (context, ready, _) => ready ? _loginScreen() : const _WipeHold(),
+                // Aviso educativo da primeira abertura (RF21) antes do login.
+                builder: (context, ready, _) => ready
+                    ? EducationalNoticeGate(store: _educationalNotice, child: _loginScreen())
+                    : const _WipeHold(),
               ),
             ),
           ),
@@ -2686,6 +2699,7 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
     _moreItem(sheet, Icons.campaign_outlined, 'Avisos à comunidade', AcsDestination.notices),
     _moreItem(sheet, Icons.qr_code_2, 'Convidar paciente', AcsDestination.invite),
     _moreItem(sheet, Icons.tune_outlined, 'Preferências', AcsDestination.settings),
+    ListTile(key: const Key('more_about'), leading: const Icon(Icons.info_outline), title: const Text('Sobre'), onTap: () { Navigator.pop(sheet); Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const AboutScreen())); }),
   ]))));
   Widget _moreItem(BuildContext sheet, IconData icon, String label, AcsDestination value) => ListTile(leading: Icon(icon), title: Text(label), onTap: () { Navigator.pop(sheet); setState(() => destination = value); });
 }
@@ -4014,7 +4028,7 @@ class _EscalationScreenState extends State<EscalationScreen> {
     } on BackendFailure catch (falha) {
       aviso = falha.message;
     } catch (_) {
-      aviso = 'Não foi possível obter o contato da UBS.';
+      aviso = 'Não foi possível obter o contato da coordenação do piloto.';
     }
     if (!mounted) return;
     setState(() => _fetchingUbs = false);
@@ -4048,7 +4062,7 @@ class _EscalationScreenState extends State<EscalationScreen> {
         onPressed: _fetchingUbs ? null : _callUbs,
         style: OutlinedButton.styleFrom(minimumSize: const Size(48, 52)),
         icon: const Icon(Icons.local_hospital_outlined),
-        label: const Text('Ligar para a UBS'),
+        label: const Text('Ligar para a coordenação do piloto'),
       ),
       if (current != null) ...[
         const SizedBox(height: 12),

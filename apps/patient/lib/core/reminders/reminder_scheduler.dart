@@ -17,6 +17,17 @@ abstract interface class ReminderScheduler {
 
   /// [cancelAll] e depois [schedule] de cada um de [active].
   Future<void> rescheduleAll(List<Reminder> active);
+
+  /// Pede a permissão de notificações ao sistema (Android 13+, API 33) e
+  /// nunca lança: recusa, adiamento ou falha do plugin só fazem a notificação
+  /// não aparecer.
+  ///
+  /// Só é chamada por um ato da pessoa na tela de lembretes (criar, editar ou
+  /// ativar um lembrete), nunca na partida (#153): o diálogo do sistema cobre
+  /// o app inteiro enquanto não é respondido, e na partida isso escondia a
+  /// tela de urgência e o "Ligar 192" (INV-03). [rescheduleAll], que roda no
+  /// aquecimento do banco depois do primeiro quadro, também não a chama.
+  Future<void> requestPermission();
 }
 
 /// Corpo de toda notificação de lembrete (D7, #136). O rótulo é texto livre e
@@ -95,6 +106,9 @@ abstract interface class NotificationChannel {
   Future<void> cancel(int id);
 
   Future<void> cancelAll();
+
+  /// Pede a permissão de notificações; ver [ReminderScheduler.requestPermission].
+  Future<void> requestPermission();
 }
 
 /// [NotificationChannel] real sobre `flutter_local_notifications`.
@@ -146,6 +160,16 @@ class _PluginNotificationChannel implements NotificationChannel {
 
   @override
   Future<void> cancelAll() => _plugin.cancelAll();
+
+  // A partir do Android 13 (API 33) mostrar notificação exige permissão
+  // concedida em tempo de execução. `resolvePlatformSpecificImplementation`
+  // devolve `null` fora do Android (ex.: `flutter test`), daí o `?.`.
+  @override
+  Future<void> requestPermission() async {
+    await _plugin
+        .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
+        ?.requestNotificationsPermission();
+  }
 }
 
 /// Implementação de [ReminderScheduler] sobre `flutter_local_notifications`.
@@ -190,6 +214,16 @@ class LocalNotificationsReminderScheduler implements ReminderScheduler {
     await cancelAll();
     for (final reminder in active) {
       await schedule(reminder);
+    }
+  }
+
+  @override
+  Future<void> requestPermission() async {
+    try {
+      await _channel.requestPermission();
+    } catch (_) {
+      // Sem permissão o lembrete continua salvo e agendado; só a notificação
+      // não aparece. Nenhuma tela espera por isto.
     }
   }
 }

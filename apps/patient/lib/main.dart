@@ -29,13 +29,11 @@ Future<void> main({String? defaultHost}) async {
       android: AndroidInitializationSettings('@mipmap/ic_launcher'),
     ),
   );
-  // A partir do Android 13 (API 33) mostrar notificação exige permissão
-  // concedida em tempo de execução; sem pedir, os lembretes agendados nunca
-  // apareceriam nesses aparelhos. `resolvePlatformSpecificImplementation`
-  // retorna `null` fora do Android (ex.: `flutter test`), daí o `?.`.
-  await notifications
-      .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
-      ?.requestNotificationsPermission();
+  // A permissão de notificações (Android 13+) **não** é pedida aqui (#153):
+  // esperar o diálogo do sistema antes do `runApp` deixava a primeira abertura
+  // sem nenhuma tela desenhada — urgência e "Ligar 192" incluídos — até a
+  // pessoa responder. O pedido acontece na tela de lembretes, quando um
+  // lembrete é criado ou ativado (`ReminderScheduler.requestPermission`).
 
   final caBytes = await _rpcCaBytes();
 
