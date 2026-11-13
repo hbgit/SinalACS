@@ -60,6 +60,16 @@ class FakeNotificationChannel implements NotificationChannel {
     calls.add('cancelAll');
     cancelAllCalls++;
   }
+
+  /// Quando não nulo, [requestPermission] lança isto (falha do plugin).
+  Object? permissionError;
+
+  @override
+  Future<void> requestPermission() async {
+    calls.add('requestPermission');
+    final error = permissionError;
+    if (error != null) throw error;
+  }
 }
 
 void main() {
@@ -160,6 +170,15 @@ void main() {
       await scheduler.cancel(99);
       expect(channel.cancelled, [99]);
       expect(channel.scheduled, isEmpty);
+    });
+
+    test('requestPermission repassa ao canal e nunca lança (#153)', () async {
+      await scheduler.requestPermission();
+      expect(channel.calls, ['requestPermission']);
+
+      channel.permissionError = StateError('falha simulada do plugin');
+      await expectLater(scheduler.requestPermission(), completes);
+      expect(channel.calls, ['requestPermission', 'requestPermission']);
     });
   });
 }

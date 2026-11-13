@@ -13,7 +13,7 @@ void main() {
     await tester.tap(find.text('Alertas').last);
     await tester.pumpAndSettle();
 
-    expect(find.text('Alertas da UBS'), findsOneWidget);
+    expect(find.text('Alertas do grupo do piloto'), findsOneWidget);
     expect(find.byKey(const Key('alert_alert-1')), findsOneWidget);
     expect(find.byKey(const Key('alert_alert-3'), skipOffstage: false), findsOneWidget);
 

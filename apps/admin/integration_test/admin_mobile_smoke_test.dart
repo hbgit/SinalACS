@@ -48,7 +48,7 @@ void main() {
     await irPara(tester, 'Microáreas');
     expect(find.text('Microáreas e vínculo ACS'), findsOneWidget);
     await irPara(tester, 'Alertas');
-    expect(find.text('Alertas da UBS'), findsOneWidget);
+    expect(find.text('Alertas do grupo do piloto'), findsOneWidget);
     await irPara(tester, 'Auditoria');
     expect(find.text('Logs de auditoria'), findsOneWidget);
     await irPara(tester, 'Avisos');

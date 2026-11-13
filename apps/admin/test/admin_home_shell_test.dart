@@ -37,7 +37,7 @@ void main() {
 
     await tester.tap(find.text('Alertas').last);
     await tester.pumpAndSettle();
-    expect(find.text('Alertas da UBS'), findsOneWidget);
+    expect(find.text('Alertas do grupo do piloto'), findsOneWidget);
 
     await tester.tap(find.text('Auditoria').last);
     await tester.pumpAndSettle();
@@ -46,5 +46,19 @@ void main() {
     await tester.tap(find.text('Pedidos do titular').last);
     await tester.pumpAndSettle();
     expect(find.text('Pedidos do titular (LGPD)'), findsOneWidget);
+  });
+
+  // C-06: o piloto não tem vínculo com unidade de saúde; nenhum destino do
+  // backoffice mostra "UBS" (o modelo `ubs` só muda na C-06b).
+  testWidgets('nenhum destino do backoffice mostra "UBS"', (tester) async {
+    await _login(tester);
+
+    expect(find.text('Contadores por risco clínico do grupo do piloto'), findsOneWidget);
+    expect(find.textContaining('UBS'), findsNothing, reason: 'Indicadores');
+    for (final destino in ['Microáreas', 'Alertas', 'Auditoria', 'Pedidos do titular', 'Avisos']) {
+      await tester.tap(find.text(destino).last);
+      await tester.pumpAndSettle();
+      expect(find.textContaining('UBS'), findsNothing, reason: destino);
+    }
   });
 }
