@@ -17,6 +17,7 @@ import 'package:sinalacs_client/sinalacs_client.dart'
         PatientDataSubjectRequestRecord,
         TermsChangeNotice,
         RiskLevel;
+import 'package:sinalacs_patient/app/educational_notice_screens.dart';
 import 'package:sinalacs_patient/app/legal_screens.dart';
 import 'package:sinalacs_patient/app/local_protection_notice.dart';
 import 'package:sinalacs_patient/app/patient_theme.dart';
@@ -27,6 +28,7 @@ import 'package:sinalacs_patient/core/consent/consent_decisions.dart';
 import 'package:sinalacs_patient/core/legal/legal_documents.dart';
 import 'package:sinalacs_patient/core/legal/terms_change_notice_card.dart';
 import 'package:sinalacs_patient/core/consent/consent_preferences.dart';
+import 'package:sinalacs_patient/core/legal/educational_notice.dart';
 import 'package:sinalacs_patient/core/network/backend_client.dart';
 import 'package:sinalacs_patient/core/push/push_token_provider.dart';
 import 'package:sinalacs_patient/core/push/push_token_source.dart';
@@ -57,6 +59,7 @@ class SinalAcsApp extends StatefulWidget {
     this.pushTokens,
     this.upcomingDocuments,
     this.themeController,
+    this.educationalNotice,
   });
 
   /// Backend do app. **Obrigatório, e construído em `main.dart`.**
@@ -113,6 +116,11 @@ class SinalAcsApp extends StatefulWidget {
   final UpcomingLegalDocuments? upcomingDocuments;
   final ThemeController? themeController;
 
+  /// Confirmação do aviso educativo da primeira abertura (RF21, C-02).
+  /// Injetável para teste; sem ela vale [educationalNoticeStoreFactory], que em
+  /// produção é `shared_preferences`.
+  final EducationalNoticeStore? educationalNotice;
+
   @override
   State<SinalAcsApp> createState() => _SinalAcsAppState();
 }
@@ -153,6 +161,8 @@ class _SinalAcsAppState extends State<SinalAcsApp> {
     }
   }
   late final ThemeController _themeController = widget.themeController ?? ThemeController();
+  late final EducationalNoticeStore _educationalNotice =
+      widget.educationalNotice ?? educationalNoticeStoreFactory();
 
   @override
   void initState() {
@@ -204,7 +214,12 @@ class _SinalAcsAppState extends State<SinalAcsApp> {
                     theme: buildPatientLightTheme(),
                     darkTheme: buildPatientDarkTheme(),
                     themeMode: mode,
-                    home: PatientLoginScreen(themeController: _themeController),
+                    // Aviso educativo da primeira abertura (RF21) antes de
+                    // qualquer outra tela.
+                    home: EducationalNoticeGate(
+                      store: _educationalNotice,
+                      child: PatientLoginScreen(themeController: _themeController),
+                    ),
                   ),
                 ),
               ),
@@ -644,6 +659,13 @@ class _PatientLoginScreenState extends State<PatientLoginScreen> {
                               MaterialPageRoute(builder: (_) => const LegalDocumentsScreen()),
                             ),
                             child: const Text('Política de Privacidade e Termo de Uso'),
+                          ),
+                          TextButton(
+                            key: const Key('login_about_link'),
+                            onPressed: () => Navigator.of(context).push(
+                              MaterialPageRoute(builder: (_) => const AboutScreen()),
+                            ),
+                            child: const Text('Sobre o SinalACS'),
                           ),
                         ],
                       ],
@@ -3244,5 +3266,5 @@ class _PatientHeader extends StatelessWidget implements PreferredSizeWidget {
 }
 
 void _showMoreDestinations(BuildContext context, ValueChanged<PatientDestination> select) {
-  showModalBottomSheet<void>(context: context, builder: (sheetContext) => SafeArea(child: Column(mainAxisSize: MainAxisSize.min, children: [ListTile(leading: const Icon(Icons.person_outline), title: const Text('Perfil clínico'), onTap: () { Navigator.pop(sheetContext); select(PatientDestination.profile); }), ListTile(leading: const Icon(Icons.alarm_outlined), title: const Text('Lembretes'), onTap: () { Navigator.pop(sheetContext); select(PatientDestination.reminders); }), ListTile(leading: const Icon(Icons.privacy_tip_outlined), title: const Text('Meus dados'), onTap: () { Navigator.pop(sheetContext); select(PatientDestination.myData); }), ListTile(key: const Key('more_legal'), leading: const Icon(Icons.gavel_outlined), title: const Text('Privacidade e termos'), onTap: () { Navigator.pop(sheetContext); Navigator.of(context).push(MaterialPageRoute(builder: (_) => const LegalDocumentsScreen())); }), ListTile(leading: const Icon(Icons.tune_outlined), title: const Text('Preferências'), onTap: () { Navigator.pop(sheetContext); select(PatientDestination.settings); })])));
+  showModalBottomSheet<void>(context: context, builder: (sheetContext) => SafeArea(child: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [ListTile(leading: const Icon(Icons.person_outline), title: const Text('Perfil clínico'), onTap: () { Navigator.pop(sheetContext); select(PatientDestination.profile); }), ListTile(leading: const Icon(Icons.alarm_outlined), title: const Text('Lembretes'), onTap: () { Navigator.pop(sheetContext); select(PatientDestination.reminders); }), ListTile(leading: const Icon(Icons.privacy_tip_outlined), title: const Text('Meus dados'), onTap: () { Navigator.pop(sheetContext); select(PatientDestination.myData); }), ListTile(key: const Key('more_legal'), leading: const Icon(Icons.gavel_outlined), title: const Text('Privacidade e termos'), onTap: () { Navigator.pop(sheetContext); Navigator.of(context).push(MaterialPageRoute(builder: (_) => const LegalDocumentsScreen())); }), ListTile(leading: const Icon(Icons.tune_outlined), title: const Text('Preferências'), onTap: () { Navigator.pop(sheetContext); select(PatientDestination.settings); }), ListTile(key: const Key('more_about'), leading: const Icon(Icons.info_outline), title: const Text('Sobre'), onTap: () { Navigator.pop(sheetContext); Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AboutScreen())); })]))));
 }

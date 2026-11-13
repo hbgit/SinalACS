@@ -42,15 +42,22 @@ void main() {
     }
   });
 
-  test('shared_preferences só é importado por theme_controller.dart', () {
+  // `shared_preferences` grava em claro: só preferência de interface, sem dado
+  // da pessoa. O tema e a confirmação do aviso educativo (C-02, só a versão do
+  // texto confirmada) são as duas únicas.
+  test('shared_preferences só é importado pelo tema e pelo aviso educativo', () {
     final importers = Directory('lib')
         .listSync(recursive: true)
         .whereType<File>()
         .where((f) => f.path.endsWith('.dart'))
         .where((f) => f.readAsStringSync().contains('package:shared_preferences/'))
         .map((f) => f.path.replaceAll('\\', '/'))
-        .toList();
-    expect(importers, ['lib/core/services/theme_controller.dart']);
+        .toList()
+      ..sort();
+    expect(importers, [
+      'lib/core/legal/educational_notice.dart',
+      'lib/core/services/theme_controller.dart',
+    ]);
   });
 
   final storageFiles = Directory('lib/core/storage')
