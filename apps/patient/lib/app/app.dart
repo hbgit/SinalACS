@@ -18,6 +18,8 @@ import 'package:sinalacs_client/sinalacs_client.dart'
         TermsChangeNotice,
         RiskLevel;
 import 'package:sinalacs_patient/app/call_192.dart';
+import 'package:sinalacs_patient/app/educational_library_screens.dart';
+import 'package:sinalacs_patient/app/educational_notice_screens.dart';
 import 'package:sinalacs_patient/app/legal_screens.dart';
 import 'package:sinalacs_patient/app/local_protection_notice.dart';
 import 'package:sinalacs_patient/app/patient_theme.dart';
@@ -29,6 +31,7 @@ import 'package:sinalacs_patient/core/legal/legal_documents.dart';
 import 'package:sinalacs_patient/core/legal/terms_change_notice_card.dart';
 import 'package:sinalacs_patient/core/consent/consent_preferences.dart';
 import 'package:sinalacs_patient/core/events/local_event_log.dart';
+import 'package:sinalacs_patient/core/legal/educational_notice.dart';
 import 'package:sinalacs_patient/core/network/backend_client.dart';
 import 'package:sinalacs_patient/core/push/push_token_provider.dart';
 import 'package:sinalacs_patient/core/push/push_token_source.dart';
@@ -62,6 +65,7 @@ class SinalAcsApp extends StatefulWidget {
     this.themeController,
     this.emergencyDialer,
     this.localEvents,
+    this.educationalNotice,
   });
 
   /// Backend do app. **Obrigatório, e construído em `main.dart`.**
@@ -126,6 +130,10 @@ class SinalAcsApp extends StatefulWidget {
   /// banco cifrado (`PatientLocalStores.events`, C-04); sem banco construído
   /// pelo app e sem este parâmetro, a orientação "Ligar 192" não grava.
   final LocalEventLog? localEvents;
+  /// Confirmação do aviso educativo da primeira abertura (RF21, C-02).
+  /// Injetável para teste; sem ela vale [educationalNoticeStoreFactory], que em
+  /// produção é `shared_preferences`.
+  final EducationalNoticeStore? educationalNotice;
 
   @override
   State<SinalAcsApp> createState() => _SinalAcsAppState();
@@ -170,6 +178,8 @@ class _SinalAcsAppState extends State<SinalAcsApp> {
     }
   }
   late final ThemeController _themeController = widget.themeController ?? ThemeController();
+  late final EducationalNoticeStore _educationalNotice =
+      widget.educationalNotice ?? educationalNoticeStoreFactory();
 
   @override
   void initState() {
@@ -224,7 +234,12 @@ class _SinalAcsAppState extends State<SinalAcsApp> {
                       theme: buildPatientLightTheme(),
                       darkTheme: buildPatientDarkTheme(),
                       themeMode: mode,
-                      home: PatientLoginScreen(themeController: _themeController),
+                      // Aviso educativo da primeira abertura (RF21) antes de
+                      // qualquer outra tela.
+                      home: EducationalNoticeGate(
+                        store: _educationalNotice,
+                        child: PatientLoginScreen(themeController: _themeController),
+                      ),
                     ),
                   ),
                 ),
@@ -618,7 +633,7 @@ class _PatientLoginScreenState extends State<PatientLoginScreen> {
                               ? 'Use CPF e data de nascimento para receber o código de acesso.'
                               // Nem "enviado para o seu celular": o app não sabe o
                               // telefone cadastrado, e afirmar isso seria inventar.
-                              : 'Digite o código de 6 dígitos enviado pela sua unidade de saúde.',
+                              : 'Digite o código de 6 dígitos que você recebeu.',
                           textAlign: TextAlign.center,
                           style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
                         ),
@@ -658,6 +673,20 @@ class _PatientLoginScreenState extends State<PatientLoginScreen> {
                               label: const Text('Escanear QR Code do ACS'),
                             ),
                           ),
+                          const SizedBox(height: 12),
+                          // RF20/RF22 (C-03): a biblioteca abre sem conta.
+                          SizedBox(
+                            width: double.infinity,
+                            child: OutlinedButton.icon(
+                              key: const Key('login_library_button'),
+                              style: OutlinedButton.styleFrom(minimumSize: const Size(48, 52)),
+                              onPressed: () => Navigator.of(context).push(
+                                MaterialPageRoute(builder: (_) => const EducationalLibraryScreen()),
+                              ),
+                              icon: const Icon(Icons.menu_book_outlined),
+                              label: const Text('Biblioteca de saúde (sem cadastro)'),
+                            ),
+                          ),
                           const SizedBox(height: 4),
                           TextButton(
                             key: const Key('login_legal_link'),
@@ -665,6 +694,13 @@ class _PatientLoginScreenState extends State<PatientLoginScreen> {
                               MaterialPageRoute(builder: (_) => const LegalDocumentsScreen()),
                             ),
                             child: const Text('Política de Privacidade e Termo de Uso'),
+                          ),
+                          TextButton(
+                            key: const Key('login_about_link'),
+                            onPressed: () => Navigator.of(context).push(
+                              MaterialPageRoute(builder: (_) => const AboutScreen()),
+                            ),
+                            child: const Text('Sobre o SinalACS'),
                           ),
                         ],
                       ],
@@ -2092,7 +2128,7 @@ class _MyDataScreenState extends State<MyDataScreen> {
       builder: (dialogContext) => AlertDialog(
         title: const Text('Solicitar exclusão dos seus dados?'),
         content: const Text(
-          'A equipe da UBS analisa o pedido em até 15 dias e a resposta aparece aqui. '
+          'A coordenação do piloto analisa o pedido em até 15 dias e a resposta aparece aqui. '
           'Registros de saúde (alertas, triagens e visitas) podem ser mantidos pelo prazo '
           'legal de 5 anos e anonimizados depois, em vez de apagados. Enquanto o pedido '
           'estiver em análise, o app continua funcionando — inclusive o botão de emergência.',
@@ -2161,7 +2197,7 @@ class _MyDataScreenState extends State<MyDataScreen> {
         ConsentPurpose.localReminders =>
           'Notificações de remédios e cuidados que você agenda em "Lembretes".',
         ConsentPurpose.segmentedPush =>
-          'Avisos da UBS para a sua microárea. Ainda não são enviados nesta versão.',
+          'Avisos da coordenação do piloto para a sua microárea. Ainda não são enviados nesta versão.',
         ConsentPurpose.healthDataProcessing => 'Obrigatório para usar o app.',
         ConsentPurpose.termsOfUse => 'Aceito no cadastro.',
       };
@@ -2963,6 +2999,7 @@ class _RemindersScreenState extends State<RemindersScreen> {
         _error = null;
         _reminders = [for (final r in _reminders ?? const <Reminder>[]) if (r.id == updated.id) updated else r];
       });
+      if (active) unawaited(scope.scheduler.requestPermission());
     } on LocalDatabaseUnavailableException {
       _markLocalDataUnavailable();
     } catch (_) {
@@ -3018,6 +3055,9 @@ class _RemindersScreenState extends State<RemindersScreen> {
             (a, b) => a.hour != b.hour ? a.hour - b.hour : a.minute - b.minute,
           );
       });
+      // Depois de salvo e agendado, sem `await`: a lista não espera o diálogo
+      // do sistema, e uma recusa não desfaz o lembrete (#153).
+      if (saved.active) unawaited(scope.scheduler.requestPermission());
     } on LocalDatabaseUnavailableException {
       _markLocalDataUnavailable();
     } catch (_) {
@@ -3316,5 +3356,5 @@ class _PatientHeader extends StatelessWidget implements PreferredSizeWidget {
 }
 
 void _showMoreDestinations(BuildContext context, ValueChanged<PatientDestination> select) {
-  showModalBottomSheet<void>(context: context, builder: (sheetContext) => SafeArea(child: Column(mainAxisSize: MainAxisSize.min, children: [ListTile(leading: const Icon(Icons.person_outline), title: const Text('Perfil clínico'), onTap: () { Navigator.pop(sheetContext); select(PatientDestination.profile); }), ListTile(leading: const Icon(Icons.alarm_outlined), title: const Text('Lembretes'), onTap: () { Navigator.pop(sheetContext); select(PatientDestination.reminders); }), ListTile(leading: const Icon(Icons.privacy_tip_outlined), title: const Text('Meus dados'), onTap: () { Navigator.pop(sheetContext); select(PatientDestination.myData); }), ListTile(key: const Key('more_legal'), leading: const Icon(Icons.gavel_outlined), title: const Text('Privacidade e termos'), onTap: () { Navigator.pop(sheetContext); Navigator.of(context).push(MaterialPageRoute(builder: (_) => const LegalDocumentsScreen())); }), ListTile(leading: const Icon(Icons.tune_outlined), title: const Text('Preferências'), onTap: () { Navigator.pop(sheetContext); select(PatientDestination.settings); })])));
+  showModalBottomSheet<void>(context: context, builder: (sheetContext) => SafeArea(child: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [ListTile(leading: const Icon(Icons.person_outline), title: const Text('Perfil clínico'), onTap: () { Navigator.pop(sheetContext); select(PatientDestination.profile); }), ListTile(key: const Key('more_library'), leading: const Icon(Icons.menu_book_outlined), title: const Text('Biblioteca de saúde'), onTap: () { Navigator.pop(sheetContext); Navigator.of(context).push(MaterialPageRoute(builder: (_) => const EducationalLibraryScreen())); }), ListTile(leading: const Icon(Icons.alarm_outlined), title: const Text('Lembretes'), onTap: () { Navigator.pop(sheetContext); select(PatientDestination.reminders); }), ListTile(leading: const Icon(Icons.privacy_tip_outlined), title: const Text('Meus dados'), onTap: () { Navigator.pop(sheetContext); select(PatientDestination.myData); }), ListTile(key: const Key('more_legal'), leading: const Icon(Icons.gavel_outlined), title: const Text('Privacidade e termos'), onTap: () { Navigator.pop(sheetContext); Navigator.of(context).push(MaterialPageRoute(builder: (_) => const LegalDocumentsScreen())); }), ListTile(leading: const Icon(Icons.tune_outlined), title: const Text('Preferências'), onTap: () { Navigator.pop(sheetContext); select(PatientDestination.settings); }), ListTile(key: const Key('more_about'), leading: const Icon(Icons.info_outline), title: const Text('Sobre'), onTap: () { Navigator.pop(sheetContext); Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AboutScreen())); })]))));
 }

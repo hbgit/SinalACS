@@ -33,6 +33,13 @@ Future<void> _abrir(WidgetTester tester, FakeAcsBackend backend, _Dialer dialer)
     ));
 
 void main() {
+  testWidgets('C-06: o botão fala em coordenação do piloto, nunca em "UBS"', (tester) async {
+    await _abrir(tester, FakeAcsBackend(), _Dialer());
+
+    expect(find.text('Ligar para a coordenação do piloto'), findsOneWidget);
+    expect(find.textContaining('UBS'), findsNothing);
+  });
+
   testWidgets('o botão da UBS abre o discador com o telefone cadastrado, só dígitos e +', (tester) async {
     final backend = FakeAcsBackend();
     final dialer = _Dialer();

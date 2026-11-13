@@ -54,3 +54,5 @@ flutter:
     # CAs de desenvolvimento (broker MQTT e RPC), copiadas por
     # scripts/dev/sync_dev_ca.sh. Regeneráveis e fora do versionamento.
     - assets/certs/
+    # Biblioteca de saúde offline (RF20, C-03): temas e licença CC BY 4.0.
+    - assets/conteudo_educativo/

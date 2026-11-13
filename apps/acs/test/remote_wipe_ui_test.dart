@@ -113,9 +113,10 @@ void main() {
   void esperarTelaDeLimpeza() {
     expect(find.byKey(const Key('device_wiped')), findsOneWidget);
     expect(find.text('Aparelho limpo pela coordenação'), findsOneWidget);
+    expect(find.textContaining('UBS'), findsNothing);
     expect(
-      find.text('Os dados do SinalACS deste aparelho foram apagados a pedido da coordenação da UBS, '
-          'inclusive as visitas que ainda não tinham sido enviadas. Os alertas continuam com a equipe da UBS.'),
+      find.text('Os dados do SinalACS deste aparelho foram apagados a pedido da coordenação do piloto, '
+          'inclusive as visitas que ainda não tinham sido enviadas. Os alertas continuam com a coordenação do piloto.'),
       findsOneWidget,
     );
     expect(find.text('Painel operacional'), findsNothing);

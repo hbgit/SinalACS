@@ -20,6 +20,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:sinalacs_acs/app/app.dart';
+import 'package:sinalacs_acs/core/legal/educational_notice.dart';
 
 import '../test/support/fakes.dart';
 
@@ -58,6 +59,10 @@ void main() {
       },
       initialAlert: alert,
       // `currentPosition` AUSENTE de propósito: a posição tem de vir do Geolocator.
+      // Explícito porque este arquivo roda por `flutter drive`, que não aplica
+      // o `flutter_test_config.dart`: o aviso da primeira abertura não é o
+      // assunto deste teste.
+      educationalNotice: MemoryEducationalNoticeStore(acknowledged: true),
     ));
     await tester.enterText(find.byKey(const Key('matricula_field')), '123456');
     await tester.enterText(find.byKey(const Key('senha_field')), 'qualquer');

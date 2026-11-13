@@ -1,0 +1,125 @@
+{
+  "versao": "2026-11-08-rascunho",
+  "temas": [
+    {
+      "id": "dengue",
+      "titulo": "Dengue",
+      "resumo": "O que é, os sinais de alarme e como evitar o mosquito.",
+      "secoes": [
+        {
+          "titulo": "O que é",
+          "paragrafos": [
+            "A dengue é uma doença causada por um vírus e transmitida principalmente pela picada da fêmea do mosquito Aedes aegypti. Ela não passa de uma pessoa para outra pelo contato, nem pela água ou pelos alimentos.",
+            "A maioria das pessoas se recupera, mas uma parte pode ter a forma grave da doença."
+          ]
+        },
+        {
+          "titulo": "Sintomas",
+          "paragrafos": [
+            "O mais comum é febre alta, de 39 °C a 40 °C, que começa de repente, junto com pelo menos dois destes sinais: dor de cabeça, dor atrás dos olhos, dores no corpo ou nas articulações e moleza. Também podem aparecer enjoo e manchas vermelhas na pele.",
+            "Com febre alta e esses sintomas, procure um serviço de saúde."
+          ]
+        },
+        {
+          "titulo": "Sinais de alarme",
+          "paragrafos": [
+            "Os sinais de alarme costumam aparecer quando a febre baixa, entre o 3º e o 7º dia. São eles: dor forte na barriga; vômitos frequentes; tontura ou sensação de desmaio; dificuldade para respirar; sangramento no nariz, na gengiva ou nas fezes; cansaço ou irritação fora do comum.",
+            "Com qualquer um desses sinais, procure atendimento de urgência na hora. Em caso de risco de vida, ligue 192 (SAMU)."
+          ]
+        },
+        {
+          "titulo": "Quem precisa de mais atenção",
+          "paragrafos": [
+            "Gestantes, bebês e crianças de até 2 anos, pessoas com mais de 65 anos e pessoas que já têm outras doenças."
+          ]
+        },
+        {
+          "titulo": "Cuidados",
+          "paragrafos": [
+            "Não existe remédio específico contra o vírus da dengue. O cuidado é repouso e beber bastante líquido, conforme a orientação do profissional de saúde.",
+            "Não tome remédio por conta própria. Remédios com ácido acetilsalicílico (AAS, aspirina) e anti-inflamatórios aumentam o risco de sangramento."
+          ]
+        },
+        {
+          "titulo": "Como evitar",
+          "paragrafos": [
+            "O mosquito nasce em água parada. Tire a água de latas, pneus, vasos e outros recipientes, tampe a caixa d'água e mantenha calhas, lajes e ralos sem entupimento.",
+            "Telas nas janelas e repelente ajudam onde há transmissão. O risco é maior entre outubro e maio.",
+            "A vacina contra a dengue foi incorporada ao SUS em dezembro de 2023. Pergunte a um profissional de saúde quem pode tomar."
+          ]
+        }
+      ],
+      "fontes": [
+        {
+          "orgao": "Ministério da Saúde",
+          "titulo": "Dengue — Saúde de A a Z",
+          "url": "https://www.gov.br/saude/pt-br/assuntos/saude-de-a-a-z/d/dengue",
+          "consultadoEm": "2026-11-08"
+        },
+        {
+          "orgao": "Biblioteca Virtual em Saúde (BVS)",
+          "titulo": "Dengue — Dicas em Saúde (novembro de 2007)",
+          "url": "https://bvsms.saude.gov.br/dengue-16/",
+          "consultadoEm": "2026-11-08"
+        }
+      ],
+      "revisao": {
+        "situacao": "rascunho",
+        "revisores": [],
+        "data": null
+      }
+    },
+    {
+      "id": "pressao-alta",
+      "titulo": "Pressão alta (hipertensão)",
+      "resumo": "Por que medir a pressão e como mantê-la controlada.",
+      "secoes": [
+        {
+          "titulo": "O que é",
+          "paragrafos": [
+            "A hipertensão, ou pressão alta, é uma doença crônica em que a pressão do sangue nas artérias fica elevada. Considera-se pressão alta quando ela fica em 140/90 mmHg (14 por 9) ou mais.",
+            "A pressão alta aumenta o risco de AVC (derrame), infarto, aneurisma e problemas nos rins e no coração."
+          ]
+        },
+        {
+          "titulo": "Sintomas",
+          "paragrafos": [
+            "Na maioria das vezes a pressão alta não dá sintoma. Quando a pressão sobe muito, podem aparecer dor no peito, dor de cabeça, tontura, zumbido no ouvido, fraqueza, visão embaçada e sangramento no nariz.",
+            "Em caso de risco de vida, ligue 192 (SAMU)."
+          ]
+        },
+        {
+          "titulo": "Como saber se tenho",
+          "paragrafos": [
+            "Medir a pressão é a única forma de saber. A partir dos 20 anos, meça pelo menos uma vez por ano. Se há casos de pressão alta na família, meça pelo menos duas vezes por ano."
+          ]
+        },
+        {
+          "titulo": "Tratamento",
+          "paragrafos": [
+            "A pressão alta não tem cura, mas tem tratamento e pode ser controlada. O SUS oferece remédios gratuitos para pressão alta, inclusive pelo programa Farmácia Popular, com receita dentro da validade."
+          ]
+        },
+        {
+          "titulo": "Como prevenir e controlar",
+          "paragrafos": [
+            "Mantenha o peso adequado, use menos sal, faça atividade física, não fume, beba álcool com moderação, evite alimentos gordurosos e, se tiver diabetes, mantenha-o controlado."
+          ]
+        }
+      ],
+      "fontes": [
+        {
+          "orgao": "Ministério da Saúde",
+          "titulo": "Hipertensão (pressão alta) — Saúde de A a Z",
+          "url": "https://www.gov.br/saude/pt-br/assuntos/saude-de-a-a-z/h/hipertensao",
+          "consultadoEm": "2026-11-08"
+        }
+      ],
+      "revisao": {
+        "situacao": "rascunho",
+        "revisores": [],
+        "data": null
+      }
+    }
+  ]
+}

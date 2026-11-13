@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import 'dart:io' show File;
+
 import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:sinalacs_acs/core/database/encrypted_database.dart';
 import 'package:sinalacs_acs/core/security/database_key_store.dart';
@@ -25,8 +27,7 @@ class VisitDatabase {
         _moveAside = moveAside ?? EncryptedLocalDatabase.moveAside;
 
   /// Espera antes da segunda tentativa de abrir, quando a primeira falhou com
-  /// cara de chave errada: no Android esse erro (`open_failed`) é o mesmo de
-  /// uma falha passageira de abertura.
+  /// chave errada ou com o `open_failed` ambíguo do Android.
   final Duration _retryDelay;
 
   /// Põe o arquivo ilegível de lado (`EncryptedLocalDatabase.moveAside`).
@@ -83,7 +84,22 @@ class VisitDatabase {
   }
 
   Future<Database> _openOnce() async {
-    final passphrase = await _keyStore.readOrCreate();
+    // #151: só dois sinais autorizam pôr a fila de lado. O primeiro é este:
+    // arquivo presente e chave COMPROVADAMENTE ausente (reinstalação com
+    // restauração, transferência entre aparelhos) — nenhuma chave criada
+    // agora abriria um arquivo cifrado antes dela. Uma falha ao LER a custódia
+    // lança aqui e nada é tocado. O segundo, o `SQLITE_NOTADB` inequívoco,
+    // está no `catch` abaixo.
+    final stored = await _keyStore.read();
+    if (stored == null && File(await EncryptedLocalDatabase.pathFor(databaseName)).existsSync()) {
+      await _moveAside(databaseName);
+      return _database = await _opener(
+        databaseName,
+        await _keyStore.readOrCreate(),
+        allowUnencryptedForTesting,
+      );
+    }
+    final passphrase = stored ?? await _keyStore.readOrCreate();
 
     try {
       return _database =
@@ -93,32 +109,50 @@ class VisitDatabase {
       // banco em texto plano por baixo dos panos.
       rethrow;
     } catch (error) {
-      // SÓ a chave errada recomeça o arquivo. Qualquer outro erro (migração,
-      // E/S, canal da plataforma) sobe: apagar ali destruiria visitas legíveis
-      // por um problema passageiro. Quem chama segue em RAM
-      // (`persistenceFailed`) e tenta de novo na próxima abertura.
-      if (!isWrongDatabaseKeyError(error)) rethrow;
-      // No Android a chave errada chega como `open_failed`, o mesmo erro de uma
-      // falha passageira de abertura. Uma nova tentativa, com a MESMA chave,
-      // separa os dois: se abrir, nada é tocado.
+      final kind = classifyDatabaseOpenError(error);
+      // Erro que não é de abertura (migração, canal da plataforma, ...) sobe
+      // na hora: apagar ali destruiria visitas legíveis por um problema
+      // passageiro. Quem chama segue em RAM (`persistenceFailed`) e tenta de
+      // novo na próxima abertura.
+      if (kind == DatabaseOpenErrorKind.other) rethrow;
+      // Uma nova tentativa com a MESMA chave separa a falha passageira das
+      // outras: se abrir, nada é tocado.
       await Future<void>.delayed(_retryDelay);
+      Object second;
       try {
         return _database =
             await _opener(databaseName, passphrase, allowUnencryptedForTesting);
-      } catch (second) {
-        if (!isWrongDatabaseKeyError(second)) rethrow;
+      } catch (error) {
+        second = error;
       }
-      // A chave não abre este arquivo — tipicamente reinstalação ou restauração
-      // de backup, onde o banco veio e a chave do keystore não. Sem isso o app
-      // ficaria travado num estado irrecuperável a cada abertura. O arquivo
-      // NÃO é apagado: vai para `<nome>.recuperado` (uma cópia só, ainda
-      // cifrada; a chave dela some abaixo, então nem o app nem o suporte a
-      // leem — é só um artefato forense, caso a chave antiga um dia volte; as
-      // visitas pendentes dela ficam inacessíveis). No Android, uma falha real
-      // de abertura que persista nas duas tentativas termina assim também
-      // (`open_failed` é indistinguível). Se mover falhar, o erro sobe ANTES
-      // de apagar a chave: o
-      // arquivo fica e a fila segue em RAM (`persistenceFailed`).
+      final secondKind = classifyDatabaseOpenError(second);
+      if (kind != DatabaseOpenErrorKind.wrongKey ||
+          secondKind != DatabaseOpenErrorKind.wrongKey) {
+        // #151: o `open_failed` do Android NÃO é sinal de chave errada — o
+        // `sqflite_sqlcipher` 3.2.0 devolve o mesmo erro para chave errada,
+        // permissão negada, arquivo inacessível e E/S na abertura (provado no
+        // emulador pela #136). Com a chave presente, a fila nunca é posta de
+        // lado e a chave nunca é apagada por ele: falha fechada (a decisão
+        // D2d do app do paciente). O arquivo e a chave ficam intactos, a fila
+        // segue em RAM, e a próxima abertura tenta de novo. Uma chave de fato
+        // perdida sai pela limpeza remota (#81), que a coordenação pede e
+        // confirma, ou reinstalando o app.
+        if (secondKind == DatabaseOpenErrorKind.other) {
+          Error.throwWithStackTrace(second, StackTrace.current);
+        }
+        throw const VisitDatabaseOpenFailed();
+      }
+      // Sinal inequívoco (`SQLITE_NOTADB`, código 26, ou "file is not a
+      // database" na mensagem — iOS e FFI), nas duas tentativas: a chave não
+      // abre este arquivo, tipicamente reinstalação ou restauração de backup,
+      // onde o banco veio e a chave do keystore não. Sem isso o app ficaria
+      // travado num estado irrecuperável a cada abertura. O arquivo NÃO é
+      // apagado: vai para `<nome>.recuperado` (uma cópia só, ainda cifrada; a
+      // chave dela some abaixo, então nem o app nem o suporte a leem — é só um
+      // artefato forense, caso a chave antiga um dia volte; as visitas
+      // pendentes dela ficam inacessíveis). Se mover falhar, o erro sobe ANTES
+      // de apagar a chave: o arquivo fica e a fila segue em RAM
+      // (`persistenceFailed`).
       await _moveAside(databaseName);
       await _keyStore.delete();
 
@@ -208,23 +242,50 @@ class VisitDatabase {
   }
 }
 
-/// O erro que o SQLCipher dá quando a chave não abre o arquivo.
-///
-/// - `SQLITE_NOTADB` (código 26, "file is not a database"): iOS e FFI.
-/// - `open_failed <caminho>`: o `sqflite_sqlcipher` (3.2.0) no Android
-///   converte o "file is not a database" da abertura nisso
-///   (`SqfliteSqlCipherPlugin.handleException`), sem o código. A mesma
-///   tradução cobre "could not open database"; é o mais estreito que o plugin
-///   permite distinguir.
-///
-/// Erro de migração (SQL), de E/S, `PlatformException` ou qualquer outro tipo
-/// NÃO é chave errada.
-bool isWrongDatabaseKeyError(Object error) {
-  if (error is! DatabaseException) return false;
-  if (error.getResultCode() == 26) return true;
-  final message = error.toString().toLowerCase();
-  return message.contains('file is not a database') || error.isOpenFailedError();
+/// O banco não abriu por um erro que pode ser chave errada, mas pode ser E/S
+/// ou permissão (#151): nada foi movido nem apagado, e a chave continua no
+/// Keystore. A fila segue em RAM (`persistenceFailed`) e a próxima abertura
+/// tenta de novo. A causa original não é guardada: no Android ela já chega
+/// sem a mensagem do SQLite (`open_failed <caminho>`).
+class VisitDatabaseOpenFailed implements Exception {
+  const VisitDatabaseOpenFailed();
+
+  @override
+  String toString() => 'VisitDatabaseOpenFailed';
 }
+
+enum DatabaseOpenErrorKind {
+  /// Sinal inequívoco de chave errada: `SQLITE_NOTADB` (código 26, "file is
+  /// not a database"). Só chega assim no iOS e no FFI.
+  wrongKey,
+
+  /// `open_failed <caminho>` do `sqflite_sqlcipher` 3.2.0 no Android
+  /// (`SqfliteSqlCipherPlugin.handleException`). O plugin devolve esse mesmo
+  /// erro para chave errada, para qualquer `SQLiteCantOpenDatabaseException`
+  /// (permissão, arquivo inacessível, E/S na abertura), para "could not open
+  /// database" e para a falha ao criar o diretório; a mensagem original se
+  /// perde. **Não** é sinal de chave errada (#151).
+  ambiguousOpenFailure,
+
+  /// Qualquer outro: migração (SQL), E/S depois de aberto, `PlatformException`,
+  /// tipo que não seja `DatabaseException`.
+  other,
+}
+
+DatabaseOpenErrorKind classifyDatabaseOpenError(Object error) {
+  if (error is! DatabaseException) return DatabaseOpenErrorKind.other;
+  if (error.getResultCode() == 26) return DatabaseOpenErrorKind.wrongKey;
+  if (error.toString().toLowerCase().contains('file is not a database')) {
+    return DatabaseOpenErrorKind.wrongKey;
+  }
+  if (error.isOpenFailedError()) return DatabaseOpenErrorKind.ambiguousOpenFailure;
+  return DatabaseOpenErrorKind.other;
+}
+
+/// `true` só para o sinal inequívoco de chave errada (#151). O `open_failed`
+/// do Android não conta.
+bool isWrongDatabaseKeyError(Object error) =>
+    classifyDatabaseOpenError(error) == DatabaseOpenErrorKind.wrongKey;
 
 OfflineVisitRecord _recordFrom(Map<String, Object?> row) => OfflineVisitRecord(
       patientId: row['patient_id']! as String,

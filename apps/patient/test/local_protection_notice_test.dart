@@ -29,6 +29,8 @@ class _Scheduler implements ReminderScheduler {
   Future<void> cancelAll() async {}
   @override
   Future<void> rescheduleAll(List<Reminder> active) async {}
+  @override
+  Future<void> requestPermission() async {}
 }
 
 class _Prefs implements ConsentPreferences {
