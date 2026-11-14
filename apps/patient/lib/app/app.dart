@@ -47,6 +47,7 @@ import 'package:sinalacs_patient/core/storage/local_data_control.dart';
 import 'package:sinalacs_patient/core/storage/local_database_key.dart'
     show LocalDatabaseUnavailableException;
 import 'package:sinalacs_patient/core/services/emergency_dialer.dart';
+import 'package:sinalacs_patient/core/triage/self_assessment.dart';
 import 'package:sinalacs_patient/core/services/theme_controller.dart';
 
 class SinalAcsApp extends StatefulWidget {
@@ -685,6 +686,21 @@ class _PatientLoginScreenState extends State<PatientLoginScreen> {
                               ),
                               icon: const Icon(Icons.menu_book_outlined),
                               label: const Text('Biblioteca de saúde (sem cadastro)'),
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          // Pilar A (C-11, RF22): a autoavaliação roda no
+                          // aparelho, sem conta e sem rede.
+                          SizedBox(
+                            width: double.infinity,
+                            child: OutlinedButton.icon(
+                              key: const Key('login_self_assessment_button'),
+                              style: OutlinedButton.styleFrom(minimumSize: const Size(48, 52)),
+                              onPressed: () => Navigator.of(context).push(
+                                MaterialPageRoute(builder: (_) => const LocalSelfAssessmentScreen()),
+                              ),
+                              icon: const Icon(Icons.assignment_outlined),
+                              label: const Text('Autoavaliação (sem cadastro)'),
                             ),
                           ),
                           const SizedBox(height: 4),
@@ -1550,8 +1566,14 @@ class _EmergencyScreenState extends State<EmergencyScreen> {
 }
 
 class TriageScreen extends StatefulWidget {
-  const TriageScreen({super.key, this.onComplete, this.onFailure});
+  const TriageScreen({super.key, this.onComplete, this.onFailure, this.local = false});
   final VoidCallback? onComplete;
+
+  /// Pilar A (C-11, #132): `true` roda a árvore no aparelho
+  /// ([SelfAssessmentEngine]), sem `accessToken`, sem rede e sem gravar em
+  /// `triage_sessions`. `false` (pilar B, com sessão) chama `triage.evaluate`.
+  /// No modo local a tela nunca lê o `BackendScope`.
+  final bool local;
 
   /// Relata ao shell a falha capturada nesta tela. Ver
   /// `_PatientHomeShellState._reportFailure`.
@@ -1612,7 +1634,7 @@ class _TriageScreenState extends State<TriageScreen> {
     });
 
     try {
-      final risk = await BackendScope.of(context).evaluateTriage(
+      final risk = widget.local ? _evaluateOnDevice() : await BackendScope.of(context).evaluateTriage(
         chestPain: _answers[TriageSymptom.chestPain] ?? false,
         difficultyBreathing: _answers[TriageSymptom.difficultyBreathing] ?? false,
         fever: _answers[TriageSymptom.fever] ?? false,
@@ -1639,6 +1661,22 @@ class _TriageScreenState extends State<TriageScreen> {
     }
   }
 
+  /// Mesma árvore do `TriageEngine` do backend, no aparelho (C-11). A paridade
+  /// nas 64 combinações é provada por
+  /// `backend/sinalacs_server/test/unit/self_assessment_parity_test.dart`.
+  /// A tradução para [RiskLevel] é por **nome**, nunca por índice.
+  RiskLevel _evaluateOnDevice() {
+    final level = const SelfAssessmentEngine().evaluate(
+      chestPain: _answers[TriageSymptom.chestPain] ?? false,
+      difficultyBreathing: _answers[TriageSymptom.difficultyBreathing] ?? false,
+      fever: _answers[TriageSymptom.fever] ?? false,
+      persistentVomiting: _answers[TriageSymptom.persistentVomiting] ?? false,
+      bleeding: _answers[TriageSymptom.bleeding] ?? false,
+      severeWeakness: _answers[TriageSymptom.severeWeakness] ?? false,
+    );
+    return RiskLevel.values.byName(level.name);
+  }
+
   /// Saída de maior gravidade: só a orientação "Ligar 192" (P-09, C-04).
   ///
   /// **Nenhum pedido de contato sai daqui** — nada de `createRedAlert`; o
@@ -1660,7 +1698,9 @@ class _TriageScreenState extends State<TriageScreen> {
   @override
   Widget build(BuildContext context) {
     final risk = _risk;
-    if (risk != null) return _TriageResult(risk: risk, onContinue: widget.onComplete);
+    if (risk != null) {
+      return _TriageResult(risk: risk, onContinue: widget.onComplete, local: widget.local);
+    }
 
     final symptom = _symptoms[_step];
     final answer = _answers[symptom];
@@ -1731,10 +1771,15 @@ class _TriageScreenState extends State<TriageScreen> {
 /// A cor é sinal clínico, nunca decoração: vermelho/amarelo/verde mapeiam
 /// estritamente o [RiskLevel].
 class _TriageResult extends StatelessWidget {
-  const _TriageResult({required this.risk, this.onContinue});
+  const _TriageResult({required this.risk, this.onContinue, this.local = false});
 
   final RiskLevel risk;
   final VoidCallback? onContinue;
+
+  /// Resultado da autoavaliação local (C-11): nada foi enviado, então a tela
+  /// não pode falar de "solicitação" nem de agente que entrará em contato.
+  /// Os textos finais das três saídas são da C-08 (#130).
+  final bool local;
 
   @override
   Widget build(BuildContext context) {
@@ -1780,7 +1825,13 @@ class _TriageResult extends StatelessWidget {
                   style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: color),
                 ),
                 const SizedBox(height: 12),
-                Text(guidance, textAlign: TextAlign.center),
+                Text(
+                  local
+                      ? 'Esta autoavaliação ficou só neste aparelho: nada foi enviado ao agente nem ao servidor.'
+                      : guidance,
+                  key: const Key('triage_guidance'),
+                  textAlign: TextAlign.center,
+                ),
                 const SizedBox(height: 8),
                 Text(
                   'Classificação feita pelo protocolo da equipe de saúde.',
@@ -1796,9 +1847,29 @@ class _TriageResult extends StatelessWidget {
           key: const Key('triage_continue'),
           onPressed: onContinue,
           style: FilledButton.styleFrom(minimumSize: const Size(48, 52)),
-          child: const Text('Acompanhar solicitação'),
+          child: Text(local ? 'Concluir' : 'Acompanhar solicitação'),
         ),
       ],
+    );
+  }
+}
+
+/// Autoavaliação do pilar A, aberta pela tela de entrada sem conta (C-11, #132;
+/// RF04, RF22, RNF09): roda no aparelho, sem sessão, sem rede e sem registro no
+/// servidor. A saída de maior gravidade é a orientação "Ligar 192" (C-04).
+class LocalSelfAssessmentScreen extends StatelessWidget {
+  const LocalSelfAssessmentScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Autoavaliação')),
+      body: SafeArea(
+        child: TriageScreen(
+          local: true,
+          onComplete: () => Navigator.of(context).pop(),
+        ),
+      ),
     );
   }
 }

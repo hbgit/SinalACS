@@ -1941,6 +1941,15 @@ Branch `feat/issue-127-pedido-de-contato-192`. Pré-requisito do portão do pilo
 - **Lado do agente e backend:** o ACS e o backoffice continuam chamando o pedido de alerta vermelho ("Risco: Vermelho"). A issue não pediu mudança lá; fica para decisão do dono.
 - **Captura de tela** `docs/screenshots/patient/01-emergencia.png` é anterior à C-04.
 
+## Autoavaliação local no pilar A (C-11, #132) — 2026-11-10
+
+Branch `feat/issue-132-autoavaliacao-local`, **empilhada sobre a #127** (o vermelho local precisa da orientação "Ligar 192"; sem ela apareceria a promessa antiga "Sua equipe de saúde foi avisada").
+
+- **O que mudou.** A tela de entrada ganhou **Autoavaliação (sem cadastro)** (`LocalSelfAssessmentScreen`), que roda a árvore no aparelho por `SelfAssessmentEngine` (`apps/patient/lib/core/triage/self_assessment.dart`, Dart puro sem import): sem `accessToken`, sem rede, sem `triage_sessions`, sem gravar as respostas. O resultado local diz que nada foi enviado e troca "Acompanhar solicitação" por "Concluir"; o vermelho abre a orientação "Ligar 192" e grava o evento local (C-04). Com sessão (pilar B), nada muda: `triage.evaluate`. Backend sem mudança.
+- **Paridade (INV-02 com dois motores).** `backend/sinalacs_server/test/unit/self_assessment_parity_test.dart` importa o motor do app por caminho relativo e o compara com o `TriageEngine` nas 64 combinações, por nome do nível, e exige que as três saídas apareçam. Roda no `dart test` do job `serverpod-backend` (check obrigatório) em **todo** PR — o workflow não tem filtro de caminho, garantido por `ci_invariants.sh` —, seja qual for o motor alterado. Mutação conferida: tirar `bleeding` do vermelho do app reprova na combinação 16. Mover o arquivo do app quebra a compilação do teste, em vez de desligá-lo em silêncio.
+- **Provas.** Paciente: `flutter analyze` sem avisos, 355 testes. `test/local_self_assessment_test.dart` (5) usa um backend que registra **qualquer** método chamado: nenhum na autoavaliação local; forçar o modo remoto na tela reprova 4 dos 5. Backend: `dart analyze` sem issue nova; o teste de paridade e o `triage_engine_test.dart` verdes.
+- **Limites.** A regra de "mudou um motor, mude o outro e suba `selfAssessmentEngineVersion`" está documentada (`AGENTS.md`, `apps/CLAUDE.md`) e a paridade é testada, mas a versão não é: o backend não tem versão do motor. Os textos das três saídas seguem os antigos ("Risco: …") até a C-08 (#130). Não verificado no aparelho.
+
 ## Aviso educativo na primeira abertura e em "Sobre" (C-02, #125) — 2026-11-08
 
 Branch `feat/c-02-aviso-educativo`. RF21 nos apps do paciente e do agente.
