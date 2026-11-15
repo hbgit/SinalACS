@@ -410,7 +410,7 @@ void main() {
       'bleeding': false,
       'severeWeakness': false,
     });
-    expect(find.text('Risco: Amarelo'), findsOneWidget);
+    expect(find.text('Procurar atendimento'), findsOneWidget);
   });
 
   testWidgets('deve exibir o risco do servidor mesmo quando contraria o sintoma informado', (tester) async {
@@ -423,7 +423,7 @@ void main() {
     await login(tester);
     await answerTriage(tester, yesTo: {TriageSymptom.chestPain});
 
-    expect(find.text('Risco: Verde'), findsOneWidget);
+    expect(find.text('Cuidar-se em casa'), findsOneWidget);
     expect(find.text('Risco: Vermelho'), findsNothing);
   });
 
@@ -1847,7 +1847,7 @@ void main() {
       expect(find.text('Tratamento de dados de saúde'), findsOneWidget);
       expect(find.textContaining('Concedido'), findsOneWidget);
       expect(find.textContaining('Pedido de contato'), findsOneWidget);
-      expect(find.textContaining('Vermelho'), findsOneWidget);
+      expect(find.textContaining('· Ligar 192'), findsOneWidget);
     });
 
     testWidgets('sem consentimentos nem histórico, mostra os estados vazios (não listas fixas)', (tester) async {

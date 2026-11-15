@@ -1770,44 +1770,38 @@ class _TriageScreenState extends State<TriageScreen> {
 ///
 /// A cor é sinal clínico, nunca decoração: vermelho/amarelo/verde mapeiam
 /// estritamente o [RiskLevel].
+/// Saída da autoavaliação exibida ao participante (C-08, #130). O nível vem do
+/// motor e não muda (INV-02); aqui só se escolhe o texto, sem cor nem rótulo de
+/// risco clínico.
+String _outcomeLabel(RiskLevel risk) => switch (risk) {
+      RiskLevel.red => 'Ligar 192',
+      RiskLevel.yellow => 'Procurar atendimento',
+      RiskLevel.green => 'Cuidar-se em casa',
+    };
+
 class _TriageResult extends StatelessWidget {
   const _TriageResult({required this.risk, this.onContinue, this.local = false});
 
   final RiskLevel risk;
   final VoidCallback? onContinue;
 
-  /// Resultado da autoavaliação local (C-11): nada foi enviado, então a tela
-  /// não pode falar de "solicitação" nem de agente que entrará em contato.
-  /// Os textos finais das três saídas são da C-08 (#130).
+  /// Resultado da autoavaliação local (C-11): nada foi enviado ao agente nem ao
+  /// servidor, e a tela diz isso.
   final bool local;
 
   @override
   Widget build(BuildContext context) {
-    // `color` só é usada como texto/ícone sobre o card (nenhum botão herda
-    // este tom), por isso a variante `OnSurface` do tema ativo entra direto
-    // na tupla — o fill puro (`PatientColors.danger`/`accent`) falha como
-    // texto em ambos os temas (ver `PatientRiskColors` em `patient_theme.dart`).
-    final riskColors = context.patientRisk;
-    final (label, color, guidance) = switch (risk) {
-      // Não é alcançado: o vermelho vira a orientação "Ligar 192"
-      // (`_TriageScreenState._showCall192`, C-04). O ramo fica para o `switch`
-      // seguir exaustivo, sem a promessa antiga de que a equipe foi avisada.
-      RiskLevel.red => (
-          'Risco: Vermelho',
-          riskColors.dangerOnSurface,
-          'Ligue 192 (SAMU).',
-        ),
-      RiskLevel.yellow => (
-          'Risco: Amarelo',
-          riskColors.yellowOnSurface,
-          'Sua solicitação foi priorizada. O agente de saúde entrará em contato.',
-        ),
-      RiskLevel.green => (
-          'Risco: Verde',
-          riskColors.accentOnSurface,
-          'Sem sinais de urgência. Sua solicitação entrou na fila de rotina.',
-        ),
+    // C-08 (#130): uma de três saídas, sem cor clínica. Nenhuma das saídas
+    // envia pedido, então nenhum texto promete contato do agente. O vermelho
+    // não chega aqui (vira a orientação "Ligar 192" da C-04); o ramo fica para
+    // o `switch` seguir exaustivo.
+    final guidance = switch (risk) {
+      RiskLevel.red => 'Em risco de vida, ligue 192 (SAMU).',
+      RiskLevel.yellow => 'Procure uma unidade de saúde para ser avaliado.',
+      RiskLevel.green =>
+        'Cuide-se em casa e observe os sintomas. Se piorar, procure atendimento ou faça a autoavaliação de novo.',
     };
+    final neutral = Theme.of(context).colorScheme.onSurface;
 
     return ListView(
       padding: const EdgeInsets.all(20),
@@ -1817,24 +1811,31 @@ class _TriageResult extends StatelessWidget {
             padding: const EdgeInsets.all(24),
             child: Column(
               children: [
-                Icon(Icons.verified_outlined, size: 44, color: color),
+                Icon(Icons.assignment_turned_in_outlined, size: 44, color: neutral),
                 const SizedBox(height: 16),
                 Text(
                   key: const Key('triage_risk'),
-                  label,
-                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: color),
+                  _outcomeLabel(risk),
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: neutral),
                 ),
                 const SizedBox(height: 12),
                 Text(
-                  local
-                      ? 'Esta autoavaliação ficou só neste aparelho: nada foi enviado ao agente nem ao servidor.'
-                      : guidance,
+                  guidance,
                   key: const Key('triage_guidance'),
                   textAlign: TextAlign.center,
                 ),
+                if (local) ...[
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Esta autoavaliação ficou só neste aparelho: nada foi enviado ao agente nem ao servidor.',
+                    key: Key('triage_local_notice'),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
                 const SizedBox(height: 8),
                 Text(
-                  'Classificação feita pelo protocolo da equipe de saúde.',
+                  'Orientação gerada pelo protocolo da equipe de saúde.',
                   textAlign: TextAlign.center,
                   style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
                 ),
@@ -1847,7 +1848,7 @@ class _TriageResult extends StatelessWidget {
           key: const Key('triage_continue'),
           onPressed: onContinue,
           style: FilledButton.styleFrom(minimumSize: const Size(48, 52)),
-          child: Text(local ? 'Concluir' : 'Acompanhar solicitação'),
+          child: const Text('Concluir'),
         ),
       ],
     );
@@ -2320,12 +2321,6 @@ class _MyDataScreenState extends State<MyDataScreen> {
     setState(() => _confirmation = 'Dados copiados. Cole onde quiser salvar ou compartilhar.');
   }
 
-  String _riskLabel(RiskLevel risk) => switch (risk) {
-        RiskLevel.red => 'Vermelho',
-        RiskLevel.yellow => 'Amarelo',
-        RiskLevel.green => 'Verde',
-      };
-
   String _sourceLabel(String source) => switch (source) {
         'alert' => 'Pedido de contato',
         'triage' => 'Triagem',
@@ -2436,7 +2431,7 @@ class _MyDataScreenState extends State<MyDataScreen> {
               ),
             ),
           const SizedBox(height: 16),
-          const Text('Histórico de classificação de risco', style: TextStyle(fontWeight: FontWeight.bold)),
+          const Text('Histórico de autoavaliações', style: TextStyle(fontWeight: FontWeight.bold)),
           if (data.riskHistory.isEmpty)
             Padding(
               padding: const EdgeInsets.only(top: 8),
@@ -2447,7 +2442,7 @@ class _MyDataScreenState extends State<MyDataScreen> {
               (event) => ListTile(
                 dense: true,
                 contentPadding: EdgeInsets.zero,
-                title: Text('${_sourceLabel(event.source)} · Risco: ${_riskLabel(event.riskLevel)}'),
+                title: Text('${_sourceLabel(event.source)} · ${_outcomeLabel(event.riskLevel)}'),
                 subtitle: Text(event.recordedAt.toIso8601String().split('T').first),
               ),
             ),
