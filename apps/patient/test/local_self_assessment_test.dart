@@ -58,7 +58,7 @@ void main() {
     await _openLocalSelfAssessment(tester);
     await _answer(tester, {TriageSymptom.fever});
 
-    expect(find.text('Risco: Amarelo'), findsOneWidget);
+    expect(find.text('Procurar atendimento'), findsOneWidget);
     expect(backend.calls, antes, reason: 'nenhum método do backend pode ser chamado no pilar A');
   });
 
@@ -69,7 +69,7 @@ void main() {
 
     await _answer(tester, const {});
 
-    expect(find.text('Risco: Verde'), findsOneWidget);
+    expect(find.text('Cuidar-se em casa'), findsOneWidget);
     expect(find.textContaining('nada foi enviado'), findsOneWidget);
     expect(find.textContaining('solicitação'), findsNothing);
     expect(find.textContaining('entrará em contato'), findsNothing);
@@ -106,9 +106,9 @@ void main() {
     // comparadas com o backend no teste de paridade.
     const engine = SelfAssessmentEngine();
     final casos = <Set<TriageSymptom>, String>{
-      {TriageSymptom.persistentVomiting}: 'Risco: Amarelo',
-      {TriageSymptom.fever, TriageSymptom.persistentVomiting}: 'Risco: Amarelo',
-      const {}: 'Risco: Verde',
+      {TriageSymptom.persistentVomiting}: 'Procurar atendimento',
+      {TriageSymptom.fever, TriageSymptom.persistentVomiting}: 'Procurar atendimento',
+      const {}: 'Cuidar-se em casa',
     };
     for (final MapEntry(key: sim, value: rotulo) in casos.entries) {
       final esperado = engine.evaluate(
@@ -119,7 +119,7 @@ void main() {
         bleeding: sim.contains(TriageSymptom.bleeding),
         severeWeakness: sim.contains(TriageSymptom.severeWeakness),
       );
-      expect(rotulo, 'Risco: ${{'yellow': 'Amarelo', 'green': 'Verde'}[esperado.name]}');
+      expect(rotulo, {'yellow': 'Procurar atendimento', 'green': 'Cuidar-se em casa'}[esperado.name]);
 
       await tester.pumpWidget(SinalAcsApp(deviceCredentials: FakeDeviceCredentialStore(), backend: _NetworkSentinel()));
       await tester.pumpAndSettle();
@@ -138,7 +138,7 @@ void main() {
     await _answer(tester, {TriageSymptom.fever});
 
     expect(backend.triageCalls, hasLength(1));
-    expect(find.text('Risco: Amarelo'), findsOneWidget);
-    expect(find.text('Acompanhar solicitação'), findsOneWidget);
+    expect(find.text('Procurar atendimento'), findsOneWidget);
+    expect(find.text('Concluir'), findsOneWidget);
   });
 }
