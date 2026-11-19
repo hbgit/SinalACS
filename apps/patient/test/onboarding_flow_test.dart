@@ -247,7 +247,9 @@ void main() {
 
   testWidgets('falha do backend mostra a mensagem, apaga a credencial local e deixa o convite utilizável', (tester) async {
     final backend = FakePatientBackend(
-      enrollmentFailure: const BackendFailure('Convite inválido, expirado ou já utilizado.'),
+      // `isRecoverable: false`: é como o cliente real traduz a
+      // `EnrollmentException` (recusa definitiva do convite).
+      enrollmentFailure: const BackendFailure('Convite inválido, expirado ou já utilizado.', isRecoverable: false),
     );
     final store = _storeVazio();
     await tester.pumpWidget(SinalAcsApp(backend: backend, deviceCredentials: store));
@@ -266,6 +268,62 @@ void main() {
     // Falha-segura: o envelope local foi desfeito junto com a falha — não
     // fica credencial órfã para um convite que não foi consumido.
     expect(store.hasCredential(), completion(isFalse));
+  });
+
+  testWidgets('resposta perdida depois do commit: entra pelo mesmo par, sem apagar a credencial', (tester) async {
+    // O servidor gravou a credencial e a resposta se perdeu (rede): a falha é
+    // recuperável, e o `loginDevice` com o MESMO par entra.
+    final backend = FakePatientBackend(
+      enrollmentFailure: const BackendFailure('Sem conexão com o servidor. Verifique a rede e tente de novo.'),
+    );
+    final store = _storeVazio();
+    await tester.pumpWidget(SinalAcsApp(backend: backend, deviceCredentials: store));
+    await openOnboarding(tester);
+
+    await tester.enterText(find.byKey(const Key('onboarding_token_field')), 'convite-123');
+    await tapKey(tester, 'onboarding_consent_health');
+    await tapKey(tester, 'onboarding_terms_accept');
+    await tapKey(tester, 'complete_enrollment_button');
+    await criarPin(tester);
+
+    expect(find.text('Triagem rápida'), findsOneWidget);
+    expect(store.hasCredential(), completion(isTrue));
+    expect(backend.deviceLogins.single.deviceId, backend.enrollmentCalls.single['deviceId']);
+    expect(backend.deviceLogins.single.deviceSecret, backend.enrollmentCalls.single['deviceSecret']);
+  });
+
+  testWidgets('resultado desconhecido sem commit: guarda o par e a nova tentativa reapresenta o MESMO', (tester) async {
+    final backend = FakePatientBackend(
+      enrollmentFailure: const BackendFailure('Sem conexão com o servidor. Verifique a rede e tente de novo.'),
+      loginDeviceFailure: const BackendFailure(
+        'Credencial inválida ou revogada.',
+        isRecoverable: false,
+        credentialRefused: true,
+      ),
+    );
+    final store = _storeVazio();
+    await tester.pumpWidget(SinalAcsApp(backend: backend, deviceCredentials: store));
+    await openOnboarding(tester);
+
+    await tester.enterText(find.byKey(const Key('onboarding_token_field')), 'convite-123');
+    await tapKey(tester, 'onboarding_consent_health');
+    await tapKey(tester, 'onboarding_terms_accept');
+    await tapKey(tester, 'complete_enrollment_button');
+    await criarPin(tester);
+
+    expect(find.text('Sem conexão com o servidor. Verifique a rede e tente de novo.'), findsOneWidget);
+    // Não destrói: se o commit tivesse acontecido, este seria o único segredo.
+    expect(store.hasCredential(), completion(isTrue));
+
+    // A rede volta; a nova tentativa usa o mesmo par, não um sorteado de novo.
+    backend.enrollmentFailure = null;
+    await tapKey(tester, 'pin_setup_confirm_button');
+    await tester.pumpAndSettle();
+
+    expect(find.text('Triagem rápida'), findsOneWidget);
+    expect(backend.enrollmentCalls, hasLength(2));
+    expect(backend.enrollmentCalls[1]['deviceId'], backend.enrollmentCalls[0]['deviceId']);
+    expect(backend.enrollmentCalls[1]['deviceSecret'], backend.enrollmentCalls[0]['deviceSecret']);
   });
 
   testWidgets('falha local do enroll mostra mensagem, destrava a tela e NÃO chama o servidor', (tester) async {

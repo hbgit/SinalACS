@@ -2079,8 +2079,12 @@ Branch `feat/issue-128-login-convite-pin`. **Estado:** entregue na PR #157.
 - **Recuperação de acesso** (aparelho perdido) segue em C-12 (#133): reemissão
   do convite invalida a credencial anterior — o `revokedAt` da tabela já
   existe para isso.
-- **Um convite consumido com PIN não definido** deixa o participante sem
-  credencial (o app destrói a credencial local se o `completeEnrollment`
-  falhar, mas o convite pode já ter sido consumido); reemissão pelo agente é o
-  caminho (C-12).
+- **Resposta perdida do `completeEnrollment`** (o servidor fez o commit e a
+  rede caiu): o app só destrói a credencial local na recusa definitiva do
+  convite. Num resultado desconhecido (rede, timeout, 5xx) ele tenta
+  `auth.loginDevice` com o mesmo par; não entrando, guarda o par e o envelope,
+  e a próxima tentativa reapresenta o MESMO par (primeiro pelo login, depois
+  pelo convite). Se o app morrer nesse meio, a tela inicial abre no PIN, e o
+  login resolve sozinho: entra se o commit aconteceu, ou recusa, descarta e
+  volta ao convite (não consumido). Testes em `onboarding_flow_test.dart`.
 

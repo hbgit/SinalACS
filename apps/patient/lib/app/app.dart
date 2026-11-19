@@ -1097,9 +1097,15 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 ///    do PIN** no Keystore (`DeviceCredentialStore.enroll`);
 /// 2. só então chama `completeEnrollment` no servidor — que consome o convite
 ///    e cria a credencial na MESMA transação dos consentimentos;
-/// 3. se a chamada falhar, o envelope local é destruído: não fica credencial
-///    órfã para um convite que ainda não foi consumido (a pessoa lê o mesmo
-///    QR de novo).
+/// 3. se o servidor **recusar** (convite inválido, consumido, consentimento),
+///    o envelope local é destruído: não fica credencial órfã para um convite
+///    que ainda não foi consumido (a pessoa lê o mesmo QR de novo);
+/// 4. se o resultado for **desconhecido** (rede, timeout, 5xx), o servidor
+///    pode ter feito o commit e a resposta se perdido: destruir apagaria o
+///    único segredo de uma credencial já gravada, com o convite já gasto. O
+///    app tenta `loginDevice` com o mesmo par; não entrando, guarda o par e o
+///    envelope, e a próxima tentativa reapresenta o MESMO par (primeiro pelo
+///    login, depois pelo convite).
 ///
 /// Se o app morrer entre 1 e 2, a credencial local existe sem par no
 /// servidor; a próxima abertura recusa no login e oferece o convite de novo
@@ -1133,11 +1139,25 @@ class _PinSetupScreenState extends State<PinSetupScreen> {
   bool _busy = false;
   String? _error;
 
+  /// Par cujo `completeEnrollment` teve resultado desconhecido (item 4 da doc
+  /// da classe): reapresentado na próxima tentativa, nunca sorteado de novo.
+  ({String deviceId, String secret})? _pendente;
+
   @override
   void dispose() {
     _pin.dispose();
     _confirm.dispose();
     super.dispose();
+  }
+
+  /// `true` se o servidor já tem a credencial do par (a sessão fica aberta).
+  Future<bool> _jaCadastrado(PatientBackend backend, String deviceId, String secret) async {
+    try {
+      await backend.loginDevice(deviceId: deviceId, deviceSecret: secret);
+      return true;
+    } on BackendFailure {
+      return false;
+    }
   }
 
   Future<void> _concluir() async {
@@ -1159,25 +1179,44 @@ class _PinSetupScreenState extends State<PinSetupScreen> {
 
     final store = DeviceCredentialScope.of(context);
     final backend = BackendScope.of(context);
-    final deviceId = generateUuidV4();
-    final deviceSecret = generateDeviceSecret();
+    final deviceId = _pendente?.deviceId ?? generateUuidV4();
+    final deviceSecret = _pendente?.secret ?? generateDeviceSecret();
     try {
       // 1. Envelope local primeiro (ver doc da classe para o porquê).
       await store.enroll(pin: pin, deviceId: deviceId, secret: deviceSecret);
       try {
         // 2. Servidor: convite + consentimentos + credencial numa transação.
-        await backend.completeEnrollment(
-          token: widget.token,
-          healthDataConsent: widget.healthDataConsent,
-          remindersConsent: widget.remindersConsent,
-          pushConsent: widget.pushConsent,
-          termsAccepted: widget.termsAccepted,
-          deviceId: deviceId,
-          deviceSecret: deviceSecret,
-        );
+        //    Com um par pendente, primeiro confere se o commit já aconteceu.
+        if (_pendente == null || !await _jaCadastrado(backend, deviceId, deviceSecret)) {
+          await backend.completeEnrollment(
+            token: widget.token,
+            healthDataConsent: widget.healthDataConsent,
+            remindersConsent: widget.remindersConsent,
+            pushConsent: widget.pushConsent,
+            termsAccepted: widget.termsAccepted,
+            deviceId: deviceId,
+            deviceSecret: deviceSecret,
+          );
+        }
+        _pendente = null;
+      } on BackendFailure catch (failure) {
+        if (failure.isRecoverable) {
+          // 4. Resultado desconhecido: o servidor pode ter gravado.
+          if (await _jaCadastrado(backend, deviceId, deviceSecret)) {
+            _pendente = null;
+          } else {
+            _pendente = (deviceId: deviceId, secret: deviceSecret);
+            rethrow;
+          }
+        } else {
+          // 3. Recusa: desfaz o envelope para o convite não consumido poder
+          //    ser lido de novo do mesmo QR.
+          _pendente = null;
+          await store.destroy();
+          rethrow;
+        }
       } catch (_) {
-        // 3. Falhou: desfaz o envelope para o convite não consumido poder ser
-        //    lido de novo do mesmo QR.
+        _pendente = null;
         await store.destroy();
         rethrow;
       }
