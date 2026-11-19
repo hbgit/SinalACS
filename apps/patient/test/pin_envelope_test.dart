@@ -7,7 +7,28 @@ import 'package:sinalacs_patient/core/security/pin_envelope.dart';
 /// t=2, p=1) + AES-256-GCM. É o mesmo envelope que a Fase 2 da #136 reutiliza
 /// para a chave do banco local — os requisitos dele (PIN de 6+ dígitos e a
 /// lista proibida) são os desta issue.
+/// Envelope gravado pelo código da #157 (C-05), ANTES da #170 tirar a
+/// derivação da thread da UI. PIN e segredo sintéticos. Se m, t, p, o tamanho
+/// da saída ou o formato `{v, salt, nonce, ct, mac}` mudarem, a chave derivada
+/// muda e este envelope deixa de abrir: é a prova de que os parâmetros do
+/// Argon2id ficaram como estavam e de que quem já tem PIN continua entrando.
+const _envelopeDaC05 =
+    '{"v":1,"salt":"ASt0JqMY-c0vL_HdwFW_1Q==","nonce":"FBH_bPRgAruU9BxB",'
+    '"ct":"SmJeTVBpM1OFRauvyq3UG5-5GSaC2QW2sb58QueD","mac":"0VkjnQi6YOSKdX-pWlgB5Q=="}';
+
 void main() {
+  test('#170: envelope gravado antes da mudança continua abrindo', () async {
+    final envelope = PinEnvelope();
+    expect(
+      await envelope.decrypt(pin: '284637', envelopeJson: _envelopeDaC05),
+      'segredo-sintetico-da-issue-170',
+    );
+    await expectLater(
+      envelope.decrypt(pin: '284638', envelopeJson: _envelopeDaC05),
+      throwsA(isA<WrongPinException>()),
+    );
+  });
+
   test('fecha e abre com o mesmo PIN', () async {
     final envelope = PinEnvelope();
     final sealed = await envelope.encrypt(pin: '284637', plaintext: 'segredo');
