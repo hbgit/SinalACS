@@ -170,7 +170,7 @@ class _AppLockGateState extends State<AppLockGate> with WidgetsBindingObserver {
                 UnlockResult.unavailable =>
                   'Desbloqueio do aparelho indisponível. Entre com a senha.',
                 _ =>
-                  'Alertas continuam chegando; eles estarão no painel ao desbloquear.',
+                  'Pedidos de contato continuam chegando; eles estarão no painel ao desbloquear.',
               },
               canRetry: !blockedOut,
               onRetry: _prompt,

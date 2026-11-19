@@ -558,7 +558,7 @@ void main() {
       expect(find.text('1 visita ainda não enviada continua neste aparelho. Ela segue protegida e sobe sozinha quando o aplicativo estiver aberto com conexão (em até 7 dias).'),
           findsOneWidget);
       expect(
-        find.text('Há 2 alertas ainda não confirmados. Eles saem deste aparelho, mas continuam pendentes no servidor.'),
+        find.text('Há 2 pedidos de contato ainda não confirmados. Eles saem deste aparelho, mas continuam pendentes no servidor.'),
         findsOneWidget,
       );
       expect(find.descendant(of: find.byKey(const Key('logout_confirm')), matching: find.text('Sair mesmo assim')),
@@ -709,7 +709,7 @@ void main() {
       await abrirPainel(tester);
       await abrirSair(tester);
       expect(
-        find.text('Há 1 alerta ainda não confirmado. Ele sai deste aparelho, mas continua pendente no servidor.'),
+        find.text('Há 1 pedido de contato ainda não confirmado. Ele sai deste aparelho, mas continua pendente no servidor.'),
         findsOneWidget,
       );
     });

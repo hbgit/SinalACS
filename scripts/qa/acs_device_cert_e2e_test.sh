@@ -70,7 +70,7 @@ conferir 'acha o segundo aparelho pelo backoffice' "grep -qF 'admin.acsDevices('
 conferir 'pede as duas limpezas' "[[ \$(grep -cF 'orderDeviceWipe(' $t) -ge 1 ]]"
 conferir 'espera a tela device_wiped' "grep -qF \"Key('device_wiped')\" $t"
 conferir 'entra de novo pela tela' "grep -qF \"Key('device_wiped_login')\" $t"
-conferir 'espera o chip de tempo real' "grep -qF \"'Alertas em tempo real'\" $t"
+conferir 'espera o chip de tempo real' "grep -qF \"'Pedidos em tempo real'\" $t"
 
 # Sequência no script.
 conferir 'insere o alerta e a entrega no outbox' "grep -qiF 'insert into alerts' $s && grep -qiF 'insert into alert_outbox' $s"

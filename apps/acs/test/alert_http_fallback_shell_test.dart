@@ -16,8 +16,8 @@ const _intervalo = Duration(seconds: 1);
 
 const _brokerFora = AlertFeedFailure(
   AlertFeedFailureKind.unreachable,
-  title: 'Sem conexão com a central de alertas.',
-  detail: 'Novos alertas podem não estar chegando.',
+  title: 'Sem conexão com a central de pedidos.',
+  detail: 'Novos pedidos de contato podem não estar chegando.',
   transient: true,
 );
 
@@ -77,7 +77,7 @@ void main() {
 
     expect(find.byKey(const Key('alert_via-http')), findsOneWidget);
     expect(find.byKey(const Key('alert_fallback_status')), findsOneWidget);
-    expect(find.textContaining('Recebendo alertas pelo servidor a cada 1 s.'), findsOneWidget);
+    expect(find.textContaining('Recebendo pedidos de contato pelo servidor a cada 1 s.'), findsOneWidget);
   });
 
   testWidgets('queda depois de conectar liga a reserva', (tester) async {
@@ -104,11 +104,11 @@ void main() {
     await tester.pump();
 
     expect(backend.openAlertsCalls, 2, reason: 'sem esperar um intervalo inteiro');
-    expect(find.text('Consultando alertas pelo servidor…'), findsOneWidget);
+    expect(find.text('Consultando pedidos de contato pelo servidor…'), findsOneWidget);
     gate.complete();
     await tester.pump();
     await tester.pump();
-    expect(find.textContaining('Recebendo alertas pelo servidor'), findsOneWidget);
+    expect(find.textContaining('Recebendo pedidos de contato pelo servidor'), findsOneWidget);
   });
 
   testWidgets('broker volta: o tique para', (tester) async {
@@ -144,7 +144,7 @@ void main() {
     backend.openAlertsFailure = const BackendFailure('Sem conexão com o servidor.');
     await avancar(tester, 1);
 
-    expect(find.textContaining('A consulta de alertas pelo servidor também falhou'), findsOneWidget);
+    expect(find.textContaining('A consulta de pedidos de contato pelo servidor também falhou'), findsOneWidget);
     expect(find.byKey(const Key('alert_ja-na-fila')), findsOneWidget);
   });
 

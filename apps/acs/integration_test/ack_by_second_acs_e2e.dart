@@ -95,7 +95,7 @@ void main() {
     await tester.tap(confirmar);
 
     final confirmado = find.text('Recebimento confirmado à central.');
-    final naoReconhecido = find.text('A central não reconheceu este alerta.');
+    final naoReconhecido = find.text('A central não reconheceu este pedido.');
     final concluir = find.byKey(Key('resolve_$id'), skipOffstage: false);
     final concluido = find.byKey(Key('resolved_$id'), skipOffstage: false);
     await _ate(

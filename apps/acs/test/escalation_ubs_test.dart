@@ -33,6 +33,15 @@ Future<void> _abrir(WidgetTester tester, FakeAcsBackend backend, _Dialer dialer)
     ));
 
 void main() {
+  testWidgets('#167: a tela mostra o tipo "Pedido de contato", sem rótulo de risco', (tester) async {
+    await _abrir(tester, FakeAcsBackend(), _Dialer());
+
+    expect(find.text('Tipo'), findsOneWidget);
+    expect(find.text('Pedido de contato'), findsOneWidget);
+    expect(find.text('Risco'), findsNothing);
+    expect(find.textContaining('Vermelho'), findsNothing);
+  });
+
   testWidgets('C-06: o botão fala em coordenação do piloto, nunca em "UBS"', (tester) async {
     await _abrir(tester, FakeAcsBackend(), _Dialer());
 

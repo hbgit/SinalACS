@@ -139,7 +139,7 @@ void main() {
       );
       expect(
         mqttRefusalReason(MqttConnectReturnCode.brokerUnavailable),
-        'A central de alertas está indisponível.',
+        'A central de pedidos está indisponível.',
       );
     });
 

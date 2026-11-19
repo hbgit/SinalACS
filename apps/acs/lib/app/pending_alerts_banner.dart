@@ -18,8 +18,8 @@ class PendingAlertsBanner extends StatelessWidget {
           final n = count();
           if (n <= 0) return const SizedBox.shrink();
           final texto = n == 1
-              ? '1 alerta vermelho aguardando. Entre para ver.'
-              : '$n alertas vermelhos aguardando. Entre para ver.';
+              ? '1 pedido de contato aguardando. Entre para ver.'
+              : '$n pedidos de contato aguardando. Entre para ver.';
           return Material(
             key: const Key('reauth_pending_alerts'),
             // `cardTheme.color` (surfaceRaised), não `cardColor`: é a superfície onde

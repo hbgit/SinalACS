@@ -68,7 +68,7 @@ String? mqttRefusalReason(MqttConnectReturnCode? code) => switch (code) {
       MqttConnectReturnCode.identifierRejected =>
         'A central recusou o identificador deste aplicativo.',
       MqttConnectReturnCode.brokerUnavailable =>
-        'A central de alertas está indisponível.',
+        'A central de pedidos está indisponível.',
       MqttConnectReturnCode.unacceptedProtocolVersion =>
         'A central não aceita a versão de protocolo deste aplicativo.',
       _ => null,

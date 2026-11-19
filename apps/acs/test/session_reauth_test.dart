@@ -103,11 +103,11 @@ void main() {
     backend.expireSession();
     await assentar(tester);
     expect(find.byKey(const Key('login_button')), findsOneWidget);
-    expect(find.text('1 alerta vermelho aguardando. Entre para ver.'), findsOneWidget);
+    expect(find.text('1 pedido de contato aguardando. Entre para ver.'), findsOneWidget);
 
     feed.deliver(testAlert(alertId: 'segundo-alerta'));
     await assentar(tester);
-    expect(find.text('2 alertas vermelhos aguardando. Entre para ver.'), findsOneWidget);
+    expect(find.text('2 pedidos de contato aguardando. Entre para ver.'), findsOneWidget);
     // O aviso não cobre o formulário: o campo segue tocável.
     await tester.enterText(find.byKey(const Key('matricula_field')), 'ACS-001');
     expect(tester.widget<TextField>(find.byKey(const Key('matricula_field'))).controller!.text, 'ACS-001');

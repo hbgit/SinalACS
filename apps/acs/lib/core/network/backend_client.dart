@@ -1131,7 +1131,7 @@ class BackendClient implements AcsBackend, TelemetryTransport {
       // Acontece quando o alerta é de outra microárea. A territorialização é
       // invariante: o servidor recusa, e o app não deve tentar contornar.
       throw BackendFailure(
-        permissionMessage ?? 'Este alerta não pertence à sua microárea.',
+        permissionMessage ?? 'Este pedido de contato não pertence à sua microárea.',
         isRecoverable: false,
       );
     } on AlertValidationException catch (error) {

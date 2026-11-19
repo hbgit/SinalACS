@@ -122,7 +122,7 @@ void main() {
 
       expect(backend.resolvedAlertIds, ['alerta-1']);
       expect(find.byKey(const Key('resolved_alerta-1')), findsOneWidget);
-      expect(find.text('Atendimento concluído. O paciente já vê "Atendido".'), findsOneWidget);
+      expect(find.text('Atendimento concluído. O participante vê "Encerrado pelo agente participante".'), findsOneWidget);
     });
 
     testWidgets('cancelar o diálogo não chama o servidor', (tester) async {
@@ -165,7 +165,7 @@ void main() {
       await tester.tap(find.byKey(const Key('confirmar_conclusao')));
       await tester.pumpAndSettle();
 
-      expect(find.text('A central não reconheceu este alerta.'), findsOneWidget);
+      expect(find.text('A central não reconheceu este pedido.'), findsOneWidget);
       expect(find.byKey(const Key('resolved_alerta-1')), findsNothing);
     });
     testWidgets('ACK de alerta já concluído em outro aparelho marca concluído e não oferece "Concluir atendimento" (#86)', (tester) async {

@@ -109,13 +109,16 @@ void main() {
       await entrar(tester);
       await tester.pumpAndSettle();
 
-      expect(find.text('Nenhum alerta na sua microárea agora.'), findsOneWidget);
+      expect(find.text('Nenhum pedido de contato na sua microárea agora.'), findsOneWidget);
 
       feed.deliver(testAlert(alertId: 'alerta-1'));
       await tester.pumpAndSettle();
 
       expect(find.byKey(const Key('alert_alerta-1')), findsOneWidget);
-      expect(find.text('Risco: Vermelho'), findsOneWidget);
+      expect(find.text('Pedido de contato'), findsOneWidget);
+      // #167: o pedido do participante não aparece como alerta nem como risco.
+      expect(find.textContaining('Risco:'), findsNothing);
+      expect(find.textContaining(RegExp('[Aa]lerta|[Vv]ermelh')), findsNothing);
 
       await tester.tap(find.byKey(const Key('ack_alerta-1')));
       await tester.pumpAndSettle();
@@ -147,7 +150,7 @@ void main() {
       // informações — paciente, risco, confirmação e horário — cheguem como
       // UMA frase, não a hora exata.
       expect(
-        find.bySemanticsLabel(RegExp(r'Paciente .*, Risco: Vermelho, recebido às \d{2}:\d{2}')),
+        find.bySemanticsLabel(RegExp(r'Paciente .*, Pedido de contato, recebido às \d{2}:\d{2}')),
         findsOneWidget,
       );
       // Os botões continuam como nós próprios, não somem dentro do bloco
@@ -1125,7 +1128,7 @@ void main() {
       // mentir quando o aviso exibido era o de disco. A falha é transitória
       // (StateError genérico), por isso o aviso de tentativa automática.
       expect(
-        find.text('Novos alertas podem não estar chegando. Tentando reconectar automaticamente.'),
+        find.text('Novos pedidos de contato podem não estar chegando. Tentando reconectar automaticamente.'),
         findsOneWidget,
       );
       expect(
@@ -1196,7 +1199,7 @@ void main() {
       expect(find.text('Sem certificado deste aparelho para a central'), findsOneWidget);
       expect(find.textContaining('Será emitido quando houver rede.'), findsOneWidget);
       expect(find.byKey(const Key('retry_feed')), findsOneWidget, reason: 'transitória: oferece nova tentativa');
-      expect(find.text('Sem conexão com a central de alertas.'), findsNothing);
+      expect(find.text('Sem conexão com a central de pedidos.'), findsNothing);
     });
 
     testWidgets('credencial recusada não vira "sem conexão"', (tester) async {
@@ -1208,13 +1211,13 @@ void main() {
           failure: const AlertFeedFailure(
             AlertFeedFailureKind.refused,
             title: 'A central recusou as credenciais deste aplicativo.',
-            detail: 'Novos alertas não estão chegando.',
+            detail: 'Novos pedidos de contato não estão chegando.',
           ),
         ),
       );
 
       expect(find.text('A central recusou as credenciais deste aplicativo.'), findsOneWidget);
-      expect(find.text('Sem conexão com a central de alertas.'), findsNothing);
+      expect(find.text('Sem conexão com a central de pedidos.'), findsNothing);
     });
   });
 
@@ -1259,12 +1262,12 @@ void main() {
 
       expect(feed.startCount, 2);
       expect(find.byKey(const Key('feed_error')), findsNothing);
-      expect(find.text('Alertas em tempo real'), findsOneWidget);
+      expect(find.text('Pedidos em tempo real'), findsOneWidget);
 
       feed.deliver(testAlert(alertId: 'alerta-pos-reconexao'));
       await tester.pumpAndSettle();
       // A fila cresceu: o cartão de "nenhum alerta" precisa ter sumido.
-      expect(find.text('Nenhum alerta na sua microárea agora.'), findsNothing);
+      expect(find.text('Nenhum pedido de contato na sua microárea agora.'), findsNothing);
     });
 
     testWidgets('falha depois do start (onFailure, #94) mostra o banner e reinicia o feed pelo backoff', (tester) async {
@@ -1334,7 +1337,7 @@ void main() {
 
       expect(feed.startCount, 2);
       expect(find.byKey(const Key('feed_error')), findsNothing);
-      expect(find.text('Alertas em tempo real'), findsOneWidget);
+      expect(find.text('Pedidos em tempo real'), findsOneWidget);
     });
 
     testWidgets('falta da CA da central não oferece nem agenda nova tentativa', (tester) async {
@@ -1388,7 +1391,7 @@ void main() {
         visitQueue: OfflineVisitQueue(),
         feedBuilder: (queue) => feed = FakeAlertFeed(queue),
       );
-      expect(find.text('Alertas em tempo real'), findsOneWidget);
+      expect(find.text('Pedidos em tempo real'), findsOneWidget);
 
       // Simula o autoReconnect do mqtt_client notificando uma queda depois de
       // já ter conectado — o caso que o campo escrito uma única vez não via.

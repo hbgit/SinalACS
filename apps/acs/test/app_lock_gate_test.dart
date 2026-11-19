@@ -399,7 +399,7 @@ void main() {
         .toSet();
     expect(textos, {
       'Aplicativo bloqueado',
-      'Alertas continuam chegando; eles estarão no painel ao desbloquear.',
+      'Pedidos de contato continuam chegando; eles estarão no painel ao desbloquear.',
       'Desbloquear',
       'Entrar com senha',
     });

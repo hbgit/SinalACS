@@ -170,7 +170,7 @@ void main() {
       ),
     );
 
-    final emTempoReal = find.text('Alertas em tempo real');
+    final emTempoReal = find.text('Pedidos em tempo real');
     Future<void> entrar() async {
       await _ate(
         tester,

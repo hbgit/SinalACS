@@ -44,7 +44,7 @@ class DeviceWipedScreen extends StatelessWidget {
                   const SizedBox(height: 12),
                   const Text(
                     'Os dados do SinalACS deste aparelho foram apagados a pedido da coordenação do piloto, '
-                    'inclusive as visitas que ainda não tinham sido enviadas. Os alertas continuam com a coordenação do piloto.',
+                    'inclusive as visitas que ainda não tinham sido enviadas. Os pedidos de contato continuam com a coordenação do piloto.',
                   ),
                   ValueListenableBuilder<bool>(
                     valueListenable: pendingConfirm,
