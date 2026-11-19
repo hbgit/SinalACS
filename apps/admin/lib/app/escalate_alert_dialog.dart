@@ -77,8 +77,8 @@ class _EscalateAlertButtonState extends State<EscalateAlertButton> {
     final saida = resultado.outcome!;
     messenger?.showSnackBar(SnackBar(
       content: Text(saida.alreadyEscalated
-          ? 'Este alerta já havia sido escalonado às ${horaLocal(saida.escalatedAt)}.'
-          : 'Escalonamento registrado. O alerta segue pendente até a confirmação.'),
+          ? 'Este pedido já havia sido escalonado às ${horaLocal(saida.escalatedAt)}.'
+          : 'Escalonamento registrado. O pedido segue pendente até a confirmação.'),
     ));
     widget.onChanged();
   }
@@ -87,7 +87,7 @@ class _EscalateAlertButtonState extends State<EscalateAlertButton> {
   Widget build(BuildContext context) => Semantics(
         container: true,
         button: true,
-        label: 'Escalonar alerta ${_etiqueta(widget.alert.patientLabel)}',
+        label: 'Escalonar pedido ${_etiqueta(widget.alert.patientLabel)}',
         excludeSemantics: true,
         onTap: _abrir,
         child: OutlinedButton.icon(
@@ -145,14 +145,14 @@ class _EscalateDialogState extends State<_EscalateDialog> {
   Widget build(BuildContext context) => PopScope(
         canPop: !_enviando,
         child: AlertDialog(
-          title: Text('Escalonar alerta ${_etiqueta(widget.alert.patientLabel)}?'),
+          title: Text('Escalonar pedido de contato ${_etiqueta(widget.alert.patientLabel)}?'),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Text(
-                  'O alerta não será encerrado nem silenciado: continua pendente '
+                  'O pedido não será encerrado nem silenciado: continua pendente '
                   'até a confirmação real do ACS. O escalonamento só registra que a coordenação agiu.',
                 ),
                 const SizedBox(height: 12),

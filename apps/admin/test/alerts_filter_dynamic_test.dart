@@ -163,7 +163,7 @@ void main() {
     await tester.pumpWidget(SinalAdminApp(dataSource: _CustomAreaDataSource(), auth: FakeAdminAuth()));
     await entrarComCredenciais(tester);
 
-    await tester.tap(find.text('Alertas').last);
+    await tester.tap(find.text('Pedidos de contato').last);
     await tester.pumpAndSettle();
 
     await tester.tap(find.byKey(const Key('alerts_micro_area_filter')));

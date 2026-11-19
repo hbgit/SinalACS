@@ -114,7 +114,7 @@ void main() {
     // uma entrada própria via AdminDataSource.recordAccess (PRD §4.2.2).
     await tester.tap(find.text('Microáreas').last);
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Alertas').last);
+    await tester.tap(find.text('Pedidos de contato').last);
     await tester.pumpAndSettle();
     await tester.tap(find.text('Auditoria').last);
     await tester.pumpAndSettle();

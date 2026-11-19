@@ -172,7 +172,7 @@ void main() {
       ..falhaDasBuscas = StateError('recarga falhou');
     await ciclo(tester);
     expect(find.byKey(const Key('alert_alert-1')), findsOneWidget);
-    expect(find.text('Não foi possível carregar os alertas.'), findsNothing);
+    expect(find.text('Não foi possível carregar os pedidos de contato.'), findsNothing);
   });
 
   testWidgets('um único pulso por ciclo com as duas telas vivas', (tester) async {
@@ -204,7 +204,7 @@ void main() {
     await entrarComCredenciais(tester);
     expect(fonte.pulsos, 1);
 
-    await tester.tap(find.text('Alertas').last);
+    await tester.tap(find.text('Pedidos de contato').last);
     await tester.pumpAndSettle();
     expect(fonte.pulsos, 1, reason: 'a troca de aba não reinicia a sessão de monitoramento');
     expect(fonte.monitoringSessionEnds, 0);
@@ -311,7 +311,7 @@ void main() {
   testWidgets('recarga pelo pulso sem dado anterior busca também as microáreas', (tester) async {
     fonte.falhaDasBuscas = StateError('primeiro carregamento falhou');
     await montarAlertas(tester, controlador());
-    expect(find.text('Não foi possível carregar os alertas.'), findsOneWidget);
+    expect(find.text('Não foi possível carregar os pedidos de contato.'), findsOneWidget);
     expect(fonte.buscasDeMicroareas, 0);
 
     fonte

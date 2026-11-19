@@ -55,7 +55,7 @@ void main() {
       final m = await montar(tester, (m) => tela(fonte, m));
 
       expect(faixa, findsOneWidget);
-      expect(find.descendant(of: faixa, matching: find.text('2 vermelhos vencidos')), findsOneWidget);
+      expect(find.descendant(of: faixa, matching: find.text('2 pedidos de contato vencidos')), findsOneWidget);
       // Ícone + texto, não só cor (WCAG 1.4.1).
       expect(find.descendant(of: faixa, matching: find.byType(Icon)), findsOneWidget);
       // Não é botão: nada ali é tocável.
@@ -72,8 +72,8 @@ void main() {
     testWidgets('$nome: singular com 1', (tester) async {
       fonte.overdueRed = 1;
       final m = await montar(tester, (m) => tela(fonte, m));
-      expect(find.text('1 vermelho vencido'), findsOneWidget);
-      expect(find.text('1 vermelhos vencidos'), findsNothing);
+      expect(find.text('1 pedido de contato vencido'), findsOneWidget);
+      expect(find.text('1 pedidos de contato vencidos'), findsNothing);
       await encerrar(tester, m);
     });
   }
@@ -82,14 +82,14 @@ void main() {
     fonte.overdueRed = 3;
     final m = await montar(tester, (m) => IndicatorsScreen(dataSource: fonte, monitoring: m));
 
-    final texto = tester.widget<Text>(find.text('3 vermelhos vencidos'));
+    final texto = tester.widget<Text>(find.text('3 pedidos de contato vencidos'));
     expect(texto.style?.color, AdminColors.redOnSurface, reason: 'texto vermelho sobre card usa o token *OnSurface, nunca o fill');
     final icone = tester.widget<Icon>(find.descendant(of: faixa, matching: find.byType(Icon)));
     expect(icone.color, AdminColors.redOnSurface);
 
     final semantica = tester.getSemantics(faixa);
     expect(semantica.flagsCollection.isLiveRegion, isTrue);
-    expect(semantica.label, contains('3 vermelhos vencidos'));
+    expect(semantica.label, contains('3 pedidos de contato vencidos'));
     await encerrar(tester, m);
   });
 

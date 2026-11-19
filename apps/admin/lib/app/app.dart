@@ -60,7 +60,9 @@ extension on AdminDestination {
   String get label => switch (this) {
         AdminDestination.indicators => 'Indicadores',
         AdminDestination.microAreas => 'Microáreas',
-        AdminDestination.alerts => 'Alertas',
+        // #167: o pedido do participante (P-09) também é "pedido de contato"
+        // para a coordenação; o enum e a rota seguem `alerts`.
+        AdminDestination.alerts => 'Pedidos de contato',
         AdminDestination.auditLog => 'Auditoria',
         AdminDestination.dataRequests => 'Pedidos do titular',
         AdminDestination.notices => 'Avisos',
@@ -74,6 +76,8 @@ extension on AdminDestination {
   String get shortLabel => switch (this) {
         AdminDestination.indicators => 'Painel',
         AdminDestination.dataRequests => 'Pedidos',
+        // "Pedidos" já é o do titular; o de contato fica "Contato" no celular.
+        AdminDestination.alerts => 'Contato',
         // Com seis destinos (#46) "Microáreas" quebrava e era cortada em 320–360dp.
         AdminDestination.microAreas => 'Áreas',
         AdminDestination.auditLog => 'Trilha',
@@ -263,11 +267,19 @@ String adminRoleLabel(String role) => switch (role) {
       _ => 'Equipe',
     };
 
+/// Rótulo do nível de um alerta. #167: no piloto todo alerta vermelho é o
+/// pedido de contato do participante (P-09), e é assim que a coordenação o
+/// vê; amarelo e verde não têm escritor.
 String riskLabel(RiskLevel level) => switch (level) {
-      RiskLevel.red => 'Vermelho',
+      RiskLevel.red => 'Pedido de contato',
       RiskLevel.yellow => 'Amarelo',
       RiskLevel.green => 'Verde',
     };
+
+/// Linha da lista de pedidos: o vermelho diz o tipo ("Tipo: Pedido de
+/// contato", #167); amarelo e verde, sem escritor, seguem como risco.
+String alertKindLabel(RiskLevel level) =>
+    level == RiskLevel.red ? 'Tipo: ${riskLabel(level)}' : 'Risco: ${riskLabel(level)}';
 
 Color riskColor(RiskLevel level) => switch (level) {
       RiskLevel.red => AdminColors.red,
@@ -338,7 +350,7 @@ class _IndicatorsScreenState extends State<IndicatorsScreen> with MonitoredScree
             MonitoringStaleBadge(monitoring),
             TitleWithOverdueRed('Painel de Indicadores', monitoring),
             const SizedBox(height: 4),
-            const Text('Contadores por risco clínico do grupo do piloto'),
+            const Text('Contadores do grupo do piloto'),
             const SizedBox(height: 16),
             LayoutBuilder(
               builder: (context, constraints) {
@@ -370,11 +382,11 @@ class _IndicatorsScreenState extends State<IndicatorsScreen> with MonitoredScree
             const SizedBox(height: 20),
             const Divider(),
             const SizedBox(height: 12),
-            const Text('Alertas vermelhos', style: TextStyle(fontWeight: FontWeight.bold)),
+            const Text('Situação dos pedidos de contato', style: TextStyle(fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
             // Partição fechada dos vermelhos (#87, INV-03): pendente (e o legado
             // escalonado) em Abertos, reconhecido em Reconhecidos, concluído em
-            // Concluídos. A soma das três linhas é o cartão Vermelho: um alerta
+            // Concluídos. A soma das três linhas é o cartão "Pedido de contato": um alerta
             // concluído sai de Reconhecidos e entra em Concluídos, nunca some.
             _InfoRow('Abertos (pendentes)', '${data.openRedAlerts}'),
             _InfoRow('Reconhecidos (em atendimento)', '${data.acknowledgedRedAlerts}'),
@@ -705,7 +717,7 @@ class _AlertsListState extends State<_AlertsList> {
   Widget build(BuildContext context) => Builder(
         builder: (context) {
           if (_erro != null) {
-            return AdminAsyncError(error: _erro, fallback: 'Não foi possível carregar os alertas.', onRetry: _carregar);
+            return AdminAsyncError(error: _erro, fallback: 'Não foi possível carregar os pedidos de contato.', onRetry: _carregar);
           }
           final alerts = _dados?.alerts ?? const <AlertSummary>[];
           final microAreas = _dados?.microAreas ?? const <MicroAreaSummary>[];
@@ -713,7 +725,7 @@ class _AlertsListState extends State<_AlertsList> {
             padding: const EdgeInsets.all(20),
             children: [
               MonitoringStaleBadge(widget.monitoring),
-              TitleWithOverdueRed('Alertas do grupo do piloto', widget.monitoring),
+              TitleWithOverdueRed('Pedidos de contato do grupo do piloto', widget.monitoring),
               const SizedBox(height: 4),
               const Text('Consulta somente leitura — nenhuma reclassificação de risco é permitida aqui.'),
               const SizedBox(height: 16),
@@ -756,7 +768,7 @@ class _AlertsListState extends State<_AlertsList> {
               if (_carregando)
                 const Center(child: CircularProgressIndicator())
               else if (alerts.isEmpty)
-                const Padding(padding: EdgeInsets.only(top: 24), child: Text('Nenhum alerta para o filtro selecionado.'))
+                const Padding(padding: EdgeInsets.only(top: 24), child: Text('Nenhum pedido de contato para o filtro selecionado.'))
               else
                 for (final alert in alerts)
                   Card(
@@ -772,7 +784,7 @@ class _AlertsListState extends State<_AlertsList> {
                           const SizedBox(height: 4),
                           Text(alert.microAreaName),
                           const SizedBox(height: 6),
-                          Text('Risco: ${riskLabel(alert.riskLevel)}', style: TextStyle(color: adminOnSurface(riskColor(alert.riskLevel)), fontWeight: FontWeight.bold)),
+                          Text(alertKindLabel(alert.riskLevel), style: TextStyle(color: adminOnSurface(riskColor(alert.riskLevel)), fontWeight: FontWeight.bold)),
                           Text('Status: ${statusLabel(alert.status)}'),
                           if (alert.escalatedAt != null) ...[
                             const SizedBox(height: 6),

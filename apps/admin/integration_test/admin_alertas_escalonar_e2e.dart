@@ -297,7 +297,7 @@ void main() {
 
     // 2. Alertas, aberta agora (leitura nova). Daqui até o escalonamento a aba
     // fica parada e ninguém a recarrega à mão.
-    await _irPara(tester, const ['Alertas']);
+    await _irPara(tester, const ['Contato', 'Pedidos de contato']);
     await _pumpUntil(tester, () => _cartao(_alertaVencido).evaluate().isNotEmpty && _cartao(_alertaNovo).evaluate().isNotEmpty,
         motivo: 'os dois alertas na lista do coordenador');
     expect(_temBotaoEscalonar(_alertaVencido), isTrue, reason: 'o alerta de 10 min já venceu o prazo de 30 s');
@@ -357,7 +357,7 @@ void main() {
 
     // 7. Perda de conexão: o script pausa o Traefik (o backend fica no ar). O
     // selo aparece com o dado anterior na tela e some sozinho quando a rota volta.
-    await _irPara(tester, const ['Alertas']);
+    await _irPara(tester, const ['Contato', 'Pedidos de contato']);
     await _pumpUntil(tester, () => _temSeloEscalonado(_alertaNovo), motivo: 'a lista de volta, com o escalonado');
     expect(_existe('stale_badge'), isFalse, reason: 'com o backend no ar o dado está em dia');
     // ignore: avoid_print

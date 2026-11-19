@@ -168,7 +168,7 @@ void main() {
     await montar(tester, fonte);
     await abrirDialogo(tester);
 
-    expect(find.text('Escalonar alerta #A18F?'), findsOneWidget);
+    expect(find.text('Escalonar pedido de contato #A18F?'), findsOneWidget);
     expect(find.textContaining('não será encerrado'), findsOneWidget);
     for (final m in EscalationReasonCode.values) {
       expect(find.text(m.label), findsOneWidget);
@@ -191,7 +191,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(fonte.chamadas, isEmpty);
-    expect(find.text('Escalonar alerta #A18F?'), findsNothing);
+    expect(find.text('Escalonar pedido de contato #A18F?'), findsNothing);
     expect(botao, findsOneWidget);
     await encerrar(tester);
   });
@@ -219,7 +219,7 @@ void main() {
     await tester.tap(botao);
     await tester.tap(botao, warnIfMissed: false);
     await tester.pumpAndSettle();
-    expect(find.text('Escalonar alerta #A18F?'), findsOneWidget);
+    expect(find.text('Escalonar pedido de contato #A18F?'), findsOneWidget);
     await encerrar(tester);
   });
 
@@ -249,7 +249,7 @@ void main() {
     await tester.tap(confirmar);
     await tester.pumpAndSettle();
 
-    expect(find.text('Este alerta já havia sido escalonado às 08:47.'), findsOneWidget);
+    expect(find.text('Este pedido já havia sido escalonado às 08:47.'), findsOneWidget);
     expect(find.text('Escalonado às 08:47'), findsOneWidget);
     expect(botao, findsNothing);
     await encerrar(tester);
@@ -289,7 +289,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(sessaoVencida, isTrue);
-    expect(find.text('Escalonar alerta #A18F?'), findsNothing);
+    expect(find.text('Escalonar pedido de contato #A18F?'), findsNothing);
     await encerrar(tester);
   });
 
@@ -316,7 +316,7 @@ void main() {
     await montar(tester, _Fonte(now: () => agora));
     expect(tester.getSize(botao).height, greaterThanOrEqualTo(48));
     expect(tester.getSize(botao).width, greaterThanOrEqualTo(48));
-    expect(find.bySemanticsLabel('Escalonar alerta #A18F'), findsOneWidget);
+    expect(find.bySemanticsLabel('Escalonar pedido #A18F'), findsOneWidget);
 
     await abrirDialogo(tester);
     for (final f in [confirmar, find.widgetWithText(TextButton, 'Cancelar')]) {
