@@ -1938,7 +1938,7 @@ Branch `feat/issue-127-pedido-de-contato-192`. Pré-requisito do portão do pilo
 - **Não verificado no aparelho:** cifra do arquivo com a tabela nova (a mesma da #136, sem prova nova), `PopScope` com o gesto de voltar preditivo do Android 14+, discador real. `integration_test/full_journey_test.dart` foi ajustado aos textos novos, mas não foi rodado (exige a stack de e2e e o emulador).
 - **Amarelo e verde** ainda mostram "Risco: …" e prometem uma "solicitação" que não é enviada ("O agente de saúde entrará em contato", "Acompanhar solicitação"). É a C-08 (#130).
 - **Retenção de 30 dias e "Apagar meus dados"** da trilha: C-10 (#131). Hoje a trilha só some com "Apagar e recomeçar".
-- **Lado do agente e backend:** o ACS e o backoffice continuam chamando o pedido de alerta vermelho ("Risco: Vermelho"). A issue não pediu mudança lá; fica para decisão do dono.
+- **Lado do agente e backend:** o ACS e o backoffice continuam chamando o pedido de alerta vermelho ("Risco: Vermelho"). A issue não pediu mudança lá; fica para decisão do dono. **Resolvido na #167 (2026-11-19), ver a seção própria.**
 - **Captura de tela** `docs/screenshots/patient/01-emergencia.png` é anterior à C-04.
 
 ## Autoavaliação local no pilar A (C-11, #132) — 2026-11-10
@@ -2087,4 +2087,21 @@ Branch `feat/issue-128-login-convite-pin`. **Estado:** entregue na PR #157.
   pelo convite). Se o app morrer nesse meio, a tela inicial abre no PIN, e o
   login resolve sozinho: entra se o commit aconteceu, ou recusa, descarta e
   volta ao convite (não consumido). Testes em `onboarding_flow_test.dart`.
+
+## "Pedido de contato" no app do agente e no backoffice (#167) — 2026-11-19
+
+Branch `chore/167-pedido-de-contato-acs-backoffice`. Origem: revisão da PR #160 (C-04, #127). Decisão (renomear) em [`docs/escopo/decisao-2026-11-19-pedido-de-contato-agente.md`](docs/escopo/decisao-2026-11-19-pedido-de-contato-agente.md).
+
+- **ACS.** Cartão da fila "Pedido de contato" (antes "Risco: Vermelho"), linha "Tipo" no escalonamento e no check-in passivo, legenda e resumo do mapa, subtítulo "Fila ordenada por prioridade", aviso com o app bloqueado ("N pedidos de contato aguardando"), fila vazia, saída do turno, reserva HTTP, falhas de conexão ("central de pedidos") e chip "Pedidos em tempo real". O diálogo e o aviso de "Concluir atendimento" prometiam "Atendido", que o paciente não vê desde a C-04; agora dizem "Encerrado pelo agente participante".
+- **Backoffice.** Destino "Pedidos de contato" ("Contato" na barra do celular, porque "Pedidos" já é o do titular), tela "Pedidos de contato do grupo do piloto", cartão "Pedido de contato" e seção "Situação dos pedidos de contato" no Painel, "Tipo: Pedido de contato" na lista, faixa "N pedidos de contato vencidos" e diálogo/avisos de escalonar falando em pedido.
+- **Sem mudança de comportamento (INV-03).** `alerts.*`, `admin.*`, `AlertQueue`, `riskLevel`, ACK, reserva HTTP, escalonamento, reforço, ordem da fila, partição do Painel (#87), chaves de widget e mensagens do servidor ficam como estavam.
+- **Provas (VM).** ACS: `flutter analyze` sem avisos; os arquivos de teste alterados passam (219 e depois 87 na rodada das correções). Admin: `flutter analyze` sem avisos e 483 testes passando, mais a guarda nova de `admin_home_shell_test.dart`. Guardas novas: o cartão e a tela de escalonamento do ACS não mostram "Risco:", "alerta" nem "vermelho"; Painel e lista do admin também não; o diálogo de conclusão não promete "Atendido".
+- **Prova no emulador (API 37, stack local, 2026-11-19).** Dois pedidos sintéticos inseridos por SQL para pacientes do seed (um com 6 min, já vencido). ACS (`ACS-001`, build `--captura`): fila com dois cartões "Pedido de contato", chip "Pedidos em tempo real", escalonamento com "Tipo: Pedido de contato", ACK ("Recebimento confirmado à central."), conclusão com o diálogo e o aviso novos, legenda do mapa. Backoffice (`ADM-001`, MFA ativada com código emitido pela CLI): Painel com "1 pedido de contato vencido", cartão "Pedido de contato" = 2 e partição 1 aberto + 0 reconhecidos + 1 concluído; aba "Contato" com "Tipo: Pedido de contato", o concluído pelo ACS ("Concluído às 22:08") e o escalonamento do vencido (segue "Pendente", "Escalonado às 22:13", aviso "O pedido segue pendente até a confirmação."); de volta ao ACS, o cartão traz "Reforço da coordenação" e segue no topo.
+
+**Abertos e limites.**
+- **"Acionar SAMU / Atender"** continua sendo o botão do cartão do ACS. É ação, não rótulo do pedido; mudar o fluxo do agente diante de um pedido de contato é decisão de produto fora da #167.
+- **Mensagens do servidor** (por exemplo "Alerta já confirmado." ao escalonar) seguem dizendo "alerta": a #167 não mexe em `alerts.*`.
+- **Mapa com marcador selecionado:** o emulador não tem chave do Google Maps; o resumo "Selecionado: Paciente … • Pedido de contato" foi provado só pelo código e pelo teste de widget da legenda.
+- **Capturas** de `docs/telas-acs.md` e `docs/telas-admin.md` são anteriores à troca (marcado nos dois documentos).
+- **`scripts/qa/acs_device_cert_e2e_test.sh`** acusa 1 conferência (`grep ... 'insert into alerts'`) no Git Bash do Windows, antes e depois desta mudança; não roda assim na CI.
 

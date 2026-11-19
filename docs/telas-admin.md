@@ -4,6 +4,8 @@
 >
 > As telas abaixo mostram o protótipo como está. Onde o app exibe "UBS" ou "coordenação da UBS", no piloto educativo isso representa um **grupo do piloto** e o **preceptor/coordenação do piloto** (ver [`spec/escopo_projeto.md`](../spec/escopo_projeto.md#papeis-no-piloto)); a troca dos textos é a mudança C-06 de [`docs/escopo/mudancas-de-codigo-recomendadas.md`](escopo/mudancas-de-codigo-recomendadas.md).
 
+> Desde a #167 ([decisão](escopo/decisao-2026-11-19-pedido-de-contato-agente.md)) o app chama de **pedido de contato** o que antes aparecia como "alerta vermelho" / "Risco: Vermelho". As capturas abaixo são anteriores a essa troca.
+
 Documentação visual do protótipo Flutter do backoffice administrativo (`apps/admin`). Assim como `docs/telas-acs.md` e `docs/telas-paciente.md`, as imagens abaixo foram capturadas rodando o app com dados sintéticos: a 01 no emulador em 2026-10-06 e a 01b no Motorola edge 40 neo em 2026-10-07; as de 03 a 05 em 2026-10-07 no emulador `emulator-5554` (API 36, tema escuro, com a borda de 5 px recortada), com sessão real do administrador de teste e **dados do backend** (3 alertas semeados no banco de e2e, nenhum dado real); a 02 refeita em 2026-10-27 no mesmo emulador, com sessão real do coordenador de teste, no fim da jornada de `scripts/qa/admin_concluidos_e2e.sh` (4 alertas semeados mais o concluído da jornada); as de 06 a 08 em 2026-10-07 no Motorola edge 40 neo (Android 15), de uma rodada anterior, com o painel ainda sobre o mock (o layout é o mesmo, mas os números mostrados nelas não são os do backend). A gestão de contas da issue #43 **não tem capturas ainda** — o porquê está em "Capturas pendentes", na seção de Microáreas.
 
 ## Navegação
