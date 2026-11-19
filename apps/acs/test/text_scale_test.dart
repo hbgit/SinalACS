@@ -132,7 +132,7 @@ void main() {
         feed.onConnectionChanged?.call(true);
         await assentar(tester);
 
-        expect(tester.getSemantics(find.byKey(const Key('broker_status'))).label, contains('Alertas em tempo real'));
+        expect(tester.getSemantics(find.byKey(const Key('broker_status'))).label, contains('Pedidos em tempo real'));
         esperarSemEstouro(tester, 'chip conectado a 200%');
       } finally {
         semantica.dispose();

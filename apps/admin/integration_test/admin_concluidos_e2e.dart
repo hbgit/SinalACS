@@ -274,7 +274,7 @@ void main() {
     expect(_vermelhoNoPainel('3'), isTrue);
 
     // 5. Alertas (leitura nova): o cartão concluído com o estado e a hora.
-    await _irPara(tester, const ['Alertas']);
+    await _irPara(tester, const ['Contato', 'Pedidos de contato']);
     await _pumpUntil(tester, () => _cartao(_alertaReconhecido).evaluate().isNotEmpty, motivo: 'a lista de alertas');
     await tester.scrollUntilVisible(_cartao(_alertaReconhecido), 200, scrollable: find.byType(Scrollable).last, maxScrolls: 30);
     expect(_noCartao(_alertaReconhecido, find.text('Status: Concluído')), isTrue, reason: 'o cartão concluído mostra o estado');

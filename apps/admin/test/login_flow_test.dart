@@ -15,7 +15,8 @@ void main() {
     await entrarComCredenciais(tester);
 
     expect(find.text('Painel de Indicadores'), findsOneWidget);
-    expect(find.text('Vermelho'), findsOneWidget);
+    expect(find.text('Pedido de contato'), findsOneWidget);
+    expect(find.text('Vermelho'), findsNothing);
     expect(find.text('Amarelo'), findsOneWidget);
     expect(find.text('Verde'), findsOneWidget);
     expect(find.text('Abertos (pendentes)'), findsOneWidget);

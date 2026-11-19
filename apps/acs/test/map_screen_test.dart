@@ -23,7 +23,9 @@ void main() {
 
     expect(find.text('Mapa operacional'), findsOneWidget);
     expect(find.text('Localização atual'), findsOneWidget);
-    expect(find.textContaining('Vermelho'), findsOneWidget);
+    // #167: a legenda do vermelho é o pedido de contato, sem rótulo de risco.
+    expect(find.text('Pedido de contato'), findsOneWidget);
+    expect(find.textContaining('Vermelho'), findsNothing);
   });
 
   testWidgets('deve renderizar rota ativa quando há posição atual e alerta selecionado', (tester) async {

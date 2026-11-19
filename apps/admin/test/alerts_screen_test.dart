@@ -10,10 +10,10 @@ void main() {
     await tester.pumpWidget(SinalAdminApp(auth: FakeAdminAuth()));
     await entrarComCredenciais(tester);
 
-    await tester.tap(find.text('Alertas').last);
+    await tester.tap(find.text('Pedidos de contato').last);
     await tester.pumpAndSettle();
 
-    expect(find.text('Alertas do grupo do piloto'), findsOneWidget);
+    expect(find.text('Pedidos de contato do grupo do piloto'), findsOneWidget);
     expect(find.byKey(const Key('alert_alert-1')), findsOneWidget);
     expect(find.byKey(const Key('alert_alert-3'), skipOffstage: false), findsOneWidget);
 

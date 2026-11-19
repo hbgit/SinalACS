@@ -212,7 +212,7 @@ class MqttAlertFeed implements AlertFeed {
       throw AlertFeedFailure(
         AlertFeedFailureKind.refused,
         title: error.message,
-        detail: 'Nenhum alerta será recebido neste aparelho.',
+        detail: 'Nenhum pedido de contato será recebido neste aparelho.',
         cause: error,
       );
     } on BackendFailure catch (error) {
@@ -267,15 +267,15 @@ class MqttAlertFeed implements AlertFeed {
       throw AlertFeedFailure(
         AlertFeedFailureKind.refused,
         title: error.message,
-        detail: 'Novos alertas não estão chegando.',
+        detail: 'Novos pedidos de contato não estão chegando.',
         cause: error,
         transient: error.transient,
       );
     } catch (error) {
       throw AlertFeedFailure(
         AlertFeedFailureKind.unreachable,
-        title: 'Sem conexão com a central de alertas.',
-        detail: 'Novos alertas podem não estar chegando.',
+        title: 'Sem conexão com a central de pedidos.',
+        detail: 'Novos pedidos de contato podem não estar chegando.',
         cause: error,
         transient: true,
       );
@@ -314,8 +314,8 @@ class MqttAlertFeed implements AlertFeed {
     } else {
       failure = AlertFeedFailure(
         AlertFeedFailureKind.unreachable,
-        title: 'Sem conexão com a central de alertas.',
-        detail: 'Novos alertas podem não estar chegando.',
+        title: 'Sem conexão com a central de pedidos.',
+        detail: 'Novos pedidos de contato podem não estar chegando.',
         cause: reason,
         transient: true,
       );

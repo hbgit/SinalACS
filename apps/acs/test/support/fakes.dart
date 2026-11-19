@@ -686,8 +686,8 @@ class FakeAlertFeed implements AlertFeed {
     if (startCount <= failuresBeforeSuccess) {
       throw failure ?? const AlertFeedFailure(
         AlertFeedFailureKind.unreachable,
-        title: 'Sem conexão com a central de alertas.',
-        detail: 'Novos alertas podem não estar chegando.',
+        title: 'Sem conexão com a central de pedidos.',
+        detail: 'Novos pedidos de contato podem não estar chegando.',
         transient: true,
       );
     }

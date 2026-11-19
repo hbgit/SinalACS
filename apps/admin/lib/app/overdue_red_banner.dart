@@ -20,7 +20,7 @@ class OverdueRedBanner extends StatelessWidget {
 
   final MonitoringController monitoring;
 
-  static String text(int n) => n == 1 ? '1 vermelho vencido' : '$n vermelhos vencidos';
+  static String text(int n) => n == 1 ? '1 pedido de contato vencido' : '$n pedidos de contato vencidos';
 
   /// Quantos vencidos o último pulso contou (0 antes do primeiro).
   static int countOf(MonitoringController monitoring) => monitoring.lastPulse?.overdueRed ?? 0;

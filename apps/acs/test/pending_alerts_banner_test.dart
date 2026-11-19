@@ -19,11 +19,11 @@ void main() {
   testWidgets('mostra a contagem e acompanha as mudanças', (t) async {
     final n = ValueNotifier(1);
     await t.pumpWidget(host(n));
-    expect(find.text('1 alerta vermelho aguardando. Entre para ver.'), findsOneWidget);
+    expect(find.text('1 pedido de contato aguardando. Entre para ver.'), findsOneWidget);
 
     n.value = 3;
     await t.pump();
-    expect(find.text('3 alertas vermelhos aguardando. Entre para ver.'), findsOneWidget);
+    expect(find.text('3 pedidos de contato aguardando. Entre para ver.'), findsOneWidget);
 
     n.value = 0;
     await t.pump();
@@ -35,8 +35,8 @@ void main() {
     await t.pumpWidget(host(ValueNotifier(2)));
     // O nó de semântica é o do `Semantics` interno, não o do `Material` com a chave.
     expect(
-      t.getSemantics(find.bySemanticsLabel('2 alertas vermelhos aguardando. Entre para ver.')),
-      matchesSemantics(isLiveRegion: true, label: '2 alertas vermelhos aguardando. Entre para ver.'),
+      t.getSemantics(find.bySemanticsLabel('2 pedidos de contato aguardando. Entre para ver.')),
+      matchesSemantics(isLiveRegion: true, label: '2 pedidos de contato aguardando. Entre para ver.'),
     );
     h.dispose();
   });

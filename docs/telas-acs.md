@@ -4,6 +4,8 @@
 >
 > As telas abaixo mostram o protótipo como está. Onde o app exibe "UBS" ou "coordenação da UBS", no piloto educativo isso representa um **grupo do piloto** e o **preceptor/coordenação do piloto** (ver [`spec/escopo_projeto.md`](../spec/escopo_projeto.md#papeis-no-piloto)); a troca dos textos é a mudança C-06 de [`docs/escopo/mudancas-de-codigo-recomendadas.md`](escopo/mudancas-de-codigo-recomendadas.md).
 
+> Desde a #167 ([decisão](escopo/decisao-2026-11-19-pedido-de-contato-agente.md)) o app chama de **pedido de contato** o que antes aparecia como "alerta vermelho" / "Risco: Vermelho". As capturas abaixo são anteriores a essa troca.
+
 Documentação visual do protótipo Flutter do Agente Comunitário de Saúde. As imagens foram capturadas no emulador Android `sdk gphone64 x86 64` usando dados sintéticos.
 
 ## Navegação

@@ -2054,8 +2054,8 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
         _brokerConnected = false;
         _feedErrorIsTransient = true;
         _feedError = (
-          title: 'Sem conexão com a central de alertas.',
-          detail: 'Novos alertas podem não estar chegando. '
+          title: 'Sem conexão com a central de pedidos.',
+          detail: 'Novos pedidos de contato podem não estar chegando. '
               'Tentando reconectar automaticamente.',
         );
       });
@@ -2213,7 +2213,7 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
       if (result.acknowledged && mounted) _queue.markAcknowledged(alert.alertId);
       aviso(result.acknowledged
           ? 'Recebimento confirmado à central.'
-          : 'A central não reconheceu este alerta.');
+          : 'A central não reconheceu este pedido.');
     } on BackendFailure catch (failure) {
       // Nunca engolir: o alerta segue na fila, sem confirmação, e a pessoa vê por quê.
       aviso(failure.message);
@@ -2226,7 +2226,8 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
   final Set<String> _concluindo = <String>{};
 
   /// "Concluir atendimento" (#76): confirma com o ACS, porque o paciente passa
-  /// a ver "Atendido" e o servidor não volta atrás.
+  /// a ver "Encerrado pelo agente participante" (desde a C-04, #127; antes,
+  /// "Atendido") e o servidor não volta atrás.
   Future<void> _resolve(PrioritizedAlert alert) async {
     if (_concluindo.contains(alert.alertId)) return;
     final messenger = ScaffoldMessenger.maybeOf(context);
@@ -2238,7 +2239,8 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
       builder: (dialog) => AlertDialog(
         title: const Text('Concluir o atendimento?'),
         content: const Text(
-          'O paciente verá "Atendido" no aplicativo. Conclua só depois de atender o paciente.',
+          'O paciente verá "Encerrado pelo agente participante" no aplicativo. '
+          'Conclua só depois de atender o paciente.',
         ),
         actions: [
           TextButton(
@@ -2262,8 +2264,8 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
       final result = await BackendScope.of(context).resolveAlert(alertId: alert.alertId);
       if (result.resolved && mounted) _queue.markResolved(alert.alertId);
       aviso(result.resolved
-          ? 'Atendimento concluído. O paciente já vê "Atendido".'
-          : 'A central não reconheceu este alerta.');
+          ? 'Atendimento concluído. O paciente vê "Encerrado pelo agente participante".'
+          : 'A central não reconheceu este pedido.');
     } on BackendFailure catch (failure) {
       // Nunca engolir: o alerta segue confirmado e por concluir.
       aviso(failure.message);
@@ -2355,8 +2357,8 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
             if (pendentes > 0) ...[
               Text(
                 pendentes == 1
-                    ? 'Há 1 alerta ainda não confirmado. Ele sai deste aparelho, mas continua pendente no servidor.'
-                    : 'Há $pendentes alertas ainda não confirmados. Eles saem deste aparelho, mas continuam pendentes no servidor.',
+                    ? 'Há 1 pedido de contato ainda não confirmado. Ele sai deste aparelho, mas continua pendente no servidor.'
+                    : 'Há $pendentes pedidos de contato ainda não confirmados. Eles saem deste aparelho, mas continuam pendentes no servidor.',
                 key: const Key('logout_pending_alerts'),
               ),
               const SizedBox(height: 12),
@@ -2488,8 +2490,8 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
                 const SizedBox(height: 12),
                 Text(
                   alertas == 1
-                      ? 'Há 1 alerta ainda não confirmado. Ele sai deste aparelho, mas continua pendente no servidor.'
-                      : 'Há $alertas alertas ainda não confirmados. Eles saem deste aparelho, mas continuam pendentes no servidor.',
+                      ? 'Há 1 pedido de contato ainda não confirmado. Ele sai deste aparelho, mas continua pendente no servidor.'
+                      : 'Há $alertas pedidos de contato ainda não confirmados. Eles saem deste aparelho, mas continuam pendentes no servidor.',
                 ),
               ],
             ],
@@ -2888,7 +2890,7 @@ class DashboardScreen extends StatelessWidget {
           return ListView(padding: const EdgeInsets.all(20), children: [
             const Text('Painel de Priorização', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
             const SizedBox(height: 4),
-            const Text('Fila ordenada por risco clínico'),
+            const Text('Fila ordenada por prioridade'),
             // Alertas primeiro: é o aviso com risco de vida atrás.
             if (feedError != null) _InfraBanner(
               key: const Key('feed_error'),
@@ -2912,7 +2914,7 @@ class DashboardScreen extends StatelessWidget {
                 child: Column(children: [
                   Icon(Icons.inbox_outlined, size: 40),
                   SizedBox(height: 12),
-                  Text('Nenhum alerta na sua microárea agora.', textAlign: TextAlign.center),
+                  Text('Nenhum pedido de contato na sua microárea agora.', textAlign: TextAlign.center),
                 ]),
               ),
             ),
@@ -2954,11 +2956,11 @@ class _AlertFallbackStatus extends StatelessWidget {
     final at = status.at;
     final segundos = status.every.inSeconds;
     final texto = at == null
-        ? 'Consultando alertas pelo servidor…'
+        ? 'Consultando pedidos de contato pelo servidor…'
         : status.failed
-            ? 'A consulta de alertas pelo servidor também falhou às ${_hhmm(at)}. '
+            ? 'A consulta de pedidos de contato pelo servidor também falhou às ${_hhmm(at)}. '
                 'Nova tentativa em $segundos s.'
-            : 'Recebendo alertas pelo servidor a cada $segundos s. '
+            : 'Recebendo pedidos de contato pelo servidor a cada $segundos s. '
                 'Última consulta às ${_hhmm(at)}.';
     return Padding(
       padding: const EdgeInsets.only(top: 8),
@@ -3028,7 +3030,9 @@ class _AlertCard extends StatelessWidget {
   (Color, Color, String) _risk(BuildContext context) {
     final risk = context.acsRisk;
     return switch (alert.riskLevel.toLowerCase()) {
-      'red' || 'vermelho' => (AcsColors.red, risk.redOnSurface, 'Risco: Vermelho'),
+      // #167: no piloto todo alerta vermelho é um pedido de contato do
+      // participante (P-09); o rótulo não diz risco, a cor segue prioridade.
+      'red' || 'vermelho' => (AcsColors.red, risk.redOnSurface, 'Pedido de contato'),
       'yellow' || 'amarelo' => (AcsColors.yellow, risk.yellowOnSurface, 'Risco: Amarelo'),
       'green' || 'verde' => (AcsColors.green, risk.greenOnSurface, 'Risco: Verde'),
       _ => (AcsColors.accent, risk.accentOnSurface, 'Risco: não classificado'),
@@ -3177,7 +3181,7 @@ class _MapScreenState extends State<MapScreen> {
         _routePoints = const <LatLng>[];
         _routePlan = null;
       });
-      _message(context, 'Sem posição atual ou alerta disponível para traçar a rota.');
+      _message(context, 'Sem posição atual ou pedido de contato disponível para traçar a rota.');
       return;
     }
 
@@ -3321,7 +3325,7 @@ class _MapScreenState extends State<MapScreen> {
               spacing: 8,
               runSpacing: 8,
               children: [
-                _LegendChip(color: AcsColors.red, label: 'Vermelho'),
+                _LegendChip(color: AcsColors.red, label: 'Pedido de contato'),
                 _LegendChip(color: AcsColors.yellow, label: 'Amarelo'),
                 _LegendChip(color: AcsColors.green, label: 'Verde'),
               ],
@@ -3428,7 +3432,7 @@ class _MapScreenState extends State<MapScreen> {
       };
 
   String _riskLabel(String riskLevel) => switch (riskLevel.toLowerCase()) {
-        'red' || 'vermelho' => 'Vermelho',
+        'red' || 'vermelho' => 'Pedido de contato',
         'yellow' || 'amarelo' => 'Amarelo',
         'green' || 'verde' => 'Verde',
         _ => 'Não classificado',
@@ -3473,7 +3477,7 @@ class _AlertMapSummary extends StatelessWidget {
           const SizedBox(width: 8),
           Expanded(
             child: Text(
-              'Alerta selecionado: ${alert.patientId.substring(0, 8)} • ${switch (alert.riskLevel.toLowerCase()) { 'red' || 'vermelho' => 'Vermelho', 'yellow' || 'amarelo' => 'Amarelo', 'green' || 'verde' => 'Verde', _ => 'Não classificado' }}',
+              'Selecionado: Paciente ${alert.patientId.substring(0, 8)} • ${_riskLabelPt(alert.riskLevel)}',
             ),
           ),
         ],
@@ -3660,7 +3664,7 @@ class _VisitRegistrationScreenState extends State<VisitRegistrationScreen> {
     // exatamente o dado que spec/lgpd_design.md:364 autoriza para a visita de
     // rotina — "o ACS vê apenas o nome... cadastrado".
     if (selected != null) return selected.name;
-    return 'Visita sem alerta vinculado';
+    return 'Visita sem pedido de contato vinculado';
   }
 
   Future<void> _save() async {
@@ -3789,7 +3793,7 @@ class _VisitRegistrationScreenState extends State<VisitRegistrationScreen> {
           child: Text(
             key: const Key('visit_needs_alert'),
             'Nenhum paciente cadastrado na sua microárea ainda. Selecione um '
-            'alerta na fila para registrar a visita.',
+            'pedido de contato na fila para registrar a visita.',
             style: TextStyle(color: context.acsRisk.accentOnSurface),
           ),
         ),
@@ -4043,7 +4047,7 @@ class _EscalationScreenState extends State<EscalationScreen> {
       const Text('Escalonamento rápido', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
       const SizedBox(height: 16),
       _InfoRow('Paciente', current == null ? '—' : current.patientId.substring(0, 8)),
-      _InfoRow('Risco', current == null ? '—' : _riskLabelPt(current.riskLevel)),
+      _InfoRow('Tipo', current == null ? '—' : _riskLabelPt(current.riskLevel)),
       // O envelope MQTT não carrega endereço: só o hash da localização (LGPD).
       _InfoRow('Local (hash)', current?.locationHash ?? '—'),
       const SizedBox(height: 20),
@@ -4105,7 +4109,7 @@ class GeofencingScreen extends StatelessWidget {
               const SizedBox(height: 16),
               const Text('Check-in passivo', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
               const SizedBox(height: 8),
-              const Text('Nenhum alerta disponível para monitorar proximidade.'),
+              const Text('Nenhum pedido de contato disponível para monitorar proximidade.'),
             ]);
           }
 
@@ -4128,7 +4132,7 @@ class GeofencingScreen extends StatelessWidget {
             const Text('Check-in passivo', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
             const SizedBox(height: 12),
             _InfoRow('Paciente', 'Paciente ${alert.patientId.substring(0, 8)}'),
-            _InfoRow('Risco', _riskLabelPt(alert.riskLevel)),
+            _InfoRow('Tipo', _riskLabelPt(alert.riskLevel)),
             _InfoRow('Raio de chegada', '${(routeService.arrivalThresholdKm * 1000).round()} m'),
             const SizedBox(height: 12),
             Text(
@@ -4344,8 +4348,11 @@ Widget _page(List<Widget> children) => ListView(padding: const EdgeInsets.all(20
 /// Traduz o `riskLevel` cru do servidor (`"red"`) para o rótulo já usado no
 /// resto da tela (`"Vermelho"`) — [GeofencingScreen] exibia a string crua do
 /// backend, único ponto do app que não passava pelo mapeamento.
+///
+/// #167: o vermelho é o pedido de contato do participante (P-09), e é assim
+/// que o agente o vê; amarelo e verde não têm escritor.
 String _riskLabelPt(String riskLevel) => switch (riskLevel.toLowerCase()) {
-      'red' || 'vermelho' => 'Vermelho',
+      'red' || 'vermelho' => 'Pedido de contato',
       'yellow' || 'amarelo' => 'Amarelo',
       'green' || 'verde' => 'Verde',
       _ => 'Não classificado',
@@ -4399,7 +4406,7 @@ class _Header extends StatelessWidget implements PreferredSizeWidget {
             label: Text(
               switch (connected) {
                 null => 'Offline ready',
-                true => 'Alertas em tempo real',
+                true => 'Pedidos em tempo real',
                 false => 'Sem central',
               },
               overflow: TextOverflow.ellipsis,

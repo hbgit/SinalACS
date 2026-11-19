@@ -15,7 +15,7 @@ void main() {
 
   testWidgets('empilha os filtros de microárea e status abaixo de 480dp', (tester) async {
     await abrirBackoffice(tester, tamanho: const Size(360, 800));
-    await irPara(tester, 'Alertas');
+    await irPara(tester, 'Pedidos de contato');
 
     final microArea = posicaoDe(tester, 'alerts_micro_area_filter');
     final status = posicaoDe(tester, 'alerts_status_filter');
@@ -26,7 +26,7 @@ void main() {
 
   testWidgets('mantém os filtros lado a lado no layout largo', (tester) async {
     await abrirBackoffice(tester, tamanho: const Size(1024, 768));
-    await irPara(tester, 'Alertas');
+    await irPara(tester, 'Pedidos de contato');
 
     final microArea = posicaoDe(tester, 'alerts_micro_area_filter');
     final status = posicaoDe(tester, 'alerts_status_filter');

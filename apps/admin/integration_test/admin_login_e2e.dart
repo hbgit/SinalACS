@@ -234,7 +234,7 @@ void main() {
     // A lista é preguiçosa e, no celular, o 4º cartão fica além da dobra (a
     // faixa de vencidos e o selo da #87 empurram): os cartões são reunidos
     // rolando, pela chave `alert_<id>`, em vez de contados numa só tela.
-    await tester.tap(find.text('Alertas').last);
+    await tester.tap(find.text('Pedidos de contato').last);
     await tester.pump(const Duration(milliseconds: 300));
     final rotulo = RegExp(r'^Paciente #[0-9A-F]{4}$');
     await _pumpUntil(tester, () => _chavesDeCartao().isNotEmpty);
@@ -244,7 +244,7 @@ void main() {
       expect(textos.where(rotulo.hasMatch), hasLength(1), reason: 'cada cartão tem um rótulo minimizado');
       expect(textos.any((t) => t.contains('Paciente E2E')), isFalse, reason: 'nome de paciente nunca aparece');
     }
-    expect(cartoes.values.where((t) => t.contains('Risco: Vermelho')), hasLength(3));
+    expect(cartoes.values.where((t) => t.contains('Tipo: Pedido de contato')), hasLength(3));
     expect(cartoes.values.where((t) => t.contains('Risco: Verde')), hasLength(1));
     final concluidos = cartoes.values.where((t) => t.contains('Status: Concluído')).toList();
     expect(concluidos, hasLength(1), reason: 'o concluído mostra o estado (#87)');

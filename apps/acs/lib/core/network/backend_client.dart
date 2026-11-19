@@ -202,7 +202,7 @@ abstract class AcsBackend {
   Future<List<AcsOpenAlert>> openAlerts();
 
   /// Conclui o atendimento de um alerta já confirmado (#76): o paciente passa
-  /// a ver "Atendido".
+  /// a ver "Encerrado pelo agente participante" (C-04).
   Future<AlertResolveResult> resolveAlert({required String alertId});
 
   /// [expectedUserId], quando presente, é o dono do lote: se a sessão que vai
@@ -1131,7 +1131,7 @@ class BackendClient implements AcsBackend, TelemetryTransport {
       // Acontece quando o alerta é de outra microárea. A territorialização é
       // invariante: o servidor recusa, e o app não deve tentar contornar.
       throw BackendFailure(
-        permissionMessage ?? 'Este alerta não pertence à sua microárea.',
+        permissionMessage ?? 'Este pedido de contato não pertence à sua microárea.',
         isRecoverable: false,
       );
     } on AlertValidationException catch (error) {

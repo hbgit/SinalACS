@@ -100,10 +100,10 @@ void main() {
 
     testWidgets('Alertas: erro no carregamento não deve aparecer como "nenhum alerta"', (tester) async {
       final dataSource = FailingAdminDataSource(inner: MockAdminDataSource())..failNextAlerts = true;
-      await _loginTo(tester, dataSource, 'Alertas');
+      await _loginTo(tester, dataSource, 'Pedidos de contato');
 
-      expect(find.text('Não foi possível carregar os alertas.'), findsOneWidget);
-      expect(find.text('Nenhum alerta para o filtro selecionado.'), findsNothing);
+      expect(find.text('Não foi possível carregar os pedidos de contato.'), findsOneWidget);
+      expect(find.text('Nenhum pedido de contato para o filtro selecionado.'), findsNothing);
 
       await tester.tap(find.text('Tentar novamente'));
       await tester.pumpAndSettle();
@@ -137,7 +137,7 @@ void main() {
 
   testWidgets('filtros de Alertas mostram "Todas"/"Todos" fechados, não em branco (achado da revisão do PR)', (tester) async {
     final dataSource = FailingAdminDataSource(inner: MockAdminDataSource());
-    await _loginTo(tester, dataSource, 'Alertas');
+    await _loginTo(tester, dataSource, 'Pedidos de contato');
 
     expect(find.text('Todas'), findsOneWidget);
     expect(find.text('Todos'), findsOneWidget);
