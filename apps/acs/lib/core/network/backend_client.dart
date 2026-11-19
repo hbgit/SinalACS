@@ -202,7 +202,7 @@ abstract class AcsBackend {
   Future<List<AcsOpenAlert>> openAlerts();
 
   /// Conclui o atendimento de um alerta já confirmado (#76): o paciente passa
-  /// a ver "Atendido".
+  /// a ver "Encerrado pelo agente participante" (C-04).
   Future<AlertResolveResult> resolveAlert({required String alertId});
 
   /// [expectedUserId], quando presente, é o dono do lote: se a sessão que vai

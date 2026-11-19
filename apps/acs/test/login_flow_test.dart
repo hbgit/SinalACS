@@ -117,6 +117,7 @@ void main() {
       expect(find.byKey(const Key('alert_alerta-1')), findsOneWidget);
       expect(find.text('Pedido de contato'), findsOneWidget);
       // #167: o pedido do participante não aparece como alerta nem como risco.
+      expect(find.text('Fila ordenada por prioridade'), findsOneWidget);
       expect(find.textContaining('Risco:'), findsNothing);
       expect(find.textContaining(RegExp('[Aa]lerta|[Vv]ermelh')), findsNothing);
 

@@ -2226,7 +2226,8 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
   final Set<String> _concluindo = <String>{};
 
   /// "Concluir atendimento" (#76): confirma com o ACS, porque o paciente passa
-  /// a ver "Atendido" e o servidor não volta atrás.
+  /// a ver "Encerrado pelo agente participante" (desde a C-04, #127; antes,
+  /// "Atendido") e o servidor não volta atrás.
   Future<void> _resolve(PrioritizedAlert alert) async {
     if (_concluindo.contains(alert.alertId)) return;
     final messenger = ScaffoldMessenger.maybeOf(context);
@@ -2238,7 +2239,8 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
       builder: (dialog) => AlertDialog(
         title: const Text('Concluir o atendimento?'),
         content: const Text(
-          'O paciente verá "Atendido" no aplicativo. Conclua só depois de atender o paciente.',
+          'O paciente verá "Encerrado pelo agente participante" no aplicativo. '
+          'Conclua só depois de atender o paciente.',
         ),
         actions: [
           TextButton(
@@ -2262,7 +2264,7 @@ class _AcsHomeShellState extends State<AcsHomeShell> with WidgetsBindingObserver
       final result = await BackendScope.of(context).resolveAlert(alertId: alert.alertId);
       if (result.resolved && mounted) _queue.markResolved(alert.alertId);
       aviso(result.resolved
-          ? 'Atendimento concluído. O participante vê "Encerrado pelo agente participante".'
+          ? 'Atendimento concluído. O paciente vê "Encerrado pelo agente participante".'
           : 'A central não reconheceu este pedido.');
     } on BackendFailure catch (failure) {
       // Nunca engolir: o alerta segue confirmado e por concluir.
@@ -2888,7 +2890,7 @@ class DashboardScreen extends StatelessWidget {
           return ListView(padding: const EdgeInsets.all(20), children: [
             const Text('Painel de Priorização', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
             const SizedBox(height: 4),
-            const Text('Fila ordenada por risco clínico'),
+            const Text('Fila ordenada por prioridade'),
             // Alertas primeiro: é o aviso com risco de vida atrás.
             if (feedError != null) _InfraBanner(
               key: const Key('feed_error'),
