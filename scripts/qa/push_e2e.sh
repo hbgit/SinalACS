@@ -11,9 +11,9 @@
 #   ./scripts/qa/push_e2e.sh --e2e-db --negativos  # idem, contra o banco de TESTE (sinalacs_e2e)
 #
 # Com --e2e-db a stack sobe por scripts/qa/e2e_stack.sh (banco de teste efêmero, sem
-# login de desenvolvimento): o paciente entra por OTP real (relé local do código) e o
-# ACS por matrícula e senha, ambos de fixtures geradas na hora. Nada é escrito no
-# banco de desenvolvimento.
+# login de desenvolvimento): o paciente entra por convite QR + PIN (um convite do
+# manifesto) e o ACS por matrícula e senha (relé), ambos de fixtures geradas na
+# hora. Nada é escrito no banco de desenvolvimento.
 #
 # Pré-requisitos: emulador `emulator-5554` (com Play Services e internet: Google Play ou
 # `google_apis`), a chave da conta de serviço em
@@ -93,7 +93,8 @@ adb -s "$dev" get-state >/dev/null 2>&1 || { echo "emulador $dev não encontrado
 
 # -- stack -------------------------------------------------------------------
 relay_pid=""
-# O relé precisa ser ESTE processo: um relé antigo esquecido na porta responderia com código velho.
+# O relé precisa ser ESTE processo: um relé antigo esquecido na porta responderia
+# com a credencial de uma execução anterior.
 iniciar_rele() {
   if porta_ocupada 8765; then
     echo 'erro: a porta 8765 já está ocupada (relé antigo?). Encerre-o: pkill -f scripts/qa/otp_relay.py' >&2
@@ -105,7 +106,7 @@ iniciar_rele() {
     curl -fs http://127.0.0.1:8765/now >/dev/null 2>&1 && kill -0 "$relay_pid" 2>/dev/null && return 0
     sleep 0.25
   done
-  echo 'erro: o relé do OTP não subiu' >&2
+  echo 'erro: o relé não subiu' >&2
   exit 1
 }
 if [[ "$e2e_db" -eq 1 ]]; then

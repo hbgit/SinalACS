@@ -7,6 +7,7 @@ import 'package:sinalacs_patient/app/app.dart';
 import 'package:sinalacs_patient/app/educational_notice_screens.dart';
 import 'package:sinalacs_patient/core/legal/educational_notice.dart';
 
+import 'support/fake_device_credential_store.dart';
 import 'support/fake_patient_backend.dart';
 
 /// Loja cuja leitura falha: o aviso tem de aparecer mesmo assim.
@@ -52,7 +53,7 @@ void main() {
   group('primeira abertura', () {
     testWidgets('mostra o aviso curto e só segue para o login depois de "Entendi"', (tester) async {
       final store = MemoryEducationalNoticeStore();
-      await tester.pumpWidget(SinalAcsApp(backend: FakePatientBackend(), educationalNotice: store));
+      await tester.pumpWidget(SinalAcsApp(deviceCredentials: FakeDeviceCredentialStore(), backend: FakePatientBackend(), educationalNotice: store));
       await tester.pumpAndSettle();
 
       expect(find.byKey(const Key('first_open_notice')), findsOneWidget);
@@ -69,7 +70,7 @@ void main() {
     });
 
     testWidgets('já confirmado, abre direto no login', (tester) async {
-      await tester.pumpWidget(SinalAcsApp(
+      await tester.pumpWidget(SinalAcsApp(deviceCredentials: FakeDeviceCredentialStore(), 
         backend: FakePatientBackend(),
         educationalNotice: MemoryEducationalNoticeStore(acknowledged: true),
       ));
@@ -80,7 +81,7 @@ void main() {
     });
 
     testWidgets('leitura da confirmação falhou: o aviso aparece', (tester) async {
-      await tester.pumpWidget(SinalAcsApp(backend: FakePatientBackend(), educationalNotice: _FailingStore()));
+      await tester.pumpWidget(SinalAcsApp(deviceCredentials: FakeDeviceCredentialStore(), backend: FakePatientBackend(), educationalNotice: _FailingStore()));
       await tester.pumpAndSettle();
 
       expect(find.byKey(const Key('first_open_notice')), findsOneWidget);
@@ -90,7 +91,7 @@ void main() {
     });
 
     testWidgets('"Ler o aviso completo" abre "Sobre" e volta ao aviso', (tester) async {
-      await tester.pumpWidget(SinalAcsApp(
+      await tester.pumpWidget(SinalAcsApp(deviceCredentials: FakeDeviceCredentialStore(), 
         backend: FakePatientBackend(),
         educationalNotice: MemoryEducationalNoticeStore(),
       ));
@@ -112,7 +113,7 @@ void main() {
       addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
 
       final store = MemoryEducationalNoticeStore();
-      await tester.pumpWidget(SinalAcsApp(backend: FakePatientBackend(), educationalNotice: store));
+      await tester.pumpWidget(SinalAcsApp(deviceCredentials: FakeDeviceCredentialStore(), backend: FakePatientBackend(), educationalNotice: store));
       await tester.pumpAndSettle();
 
       expect(tester.takeException(), isNull);
@@ -130,7 +131,7 @@ void main() {
     });
 
     testWidgets('abre pelo login, sem sessão', (tester) async {
-      await tester.pumpWidget(SinalAcsApp(
+      await tester.pumpWidget(SinalAcsApp(deviceCredentials: FakeDeviceCredentialStore(), 
         backend: FakePatientBackend(),
         educationalNotice: MemoryEducationalNoticeStore(acknowledged: true),
       ));
@@ -144,17 +145,11 @@ void main() {
     testWidgets('abre pelo menu "Mais"', (tester) async {
       await tester.pumpWidget(SinalAcsApp(
         backend: FakePatientBackend(),
+        deviceCredentials: enrolledCredentialStore(),
         educationalNotice: MemoryEducationalNoticeStore(acknowledged: true),
       ));
       await tester.pumpAndSettle();
-      // Login passwordless contra o duplo (o mesmo de `patient_app_mvp_test`).
-      await tester.enterText(find.byKey(const Key('cpf_field')), '123.456.789-09');
-      await tester.enterText(find.byKey(const Key('birth_date_field')), '01/01/1990');
-      await tester.tap(find.byKey(const Key('enter_button')));
-      await tester.pumpAndSettle();
-      await tester.enterText(find.byKey(const Key('otp_code_field')), '123456');
-      await tester.tap(find.byKey(const Key('verify_code_button')));
-      await tester.pumpAndSettle();
+      await loginWithPin(tester);
 
       await tester.tap(find.descendant(of: find.byType(NavigationBar), matching: find.text('Mais')));
       await tester.pumpAndSettle();

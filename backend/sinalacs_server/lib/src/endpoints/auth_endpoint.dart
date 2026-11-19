@@ -3,12 +3,15 @@ import 'package:sinalacs_server/src/application/auth/cpf.dart';
 import 'package:sinalacs_server/src/application/auth/development_auth_service.dart';
 import 'package:sinalacs_server/src/application/auth/institutional_auth_service.dart';
 import 'package:sinalacs_server/src/application/devices/device_id_format.dart';
+import 'package:sinalacs_server/src/application/devices/device_secret_format.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
 import 'package:sinalacs_server/src/runtime/alert_runtime.dart';
 
 /// Autenticação. `developmentLogin` é acesso de desenvolvimento e **não** é
-/// autenticação institucional; `loginInstitutional` é o caminho real (RF07);
-/// `requestOtp`/`verifyOtp` são o login passwordless do paciente (RF01).
+/// autenticação institucional; `loginInstitutional` é o caminho real do ACS
+/// (RF07); `loginDevice` é o login do participante por credencial de
+/// dispositivo (RF24, C-05); `requestOtp`/`verifyOtp` são o login passwordless
+/// legado (RF01, Futuro — sem `SMS_GATEWAY` o pedido é recusado).
 ///
 /// `developmentLogin` substitui `POST /v1/auth/development/login`, preservando
 /// o gate do `ENABLE_DEV_LOGIN`: quando desligado, a chamada falha como se o
@@ -256,9 +259,49 @@ class AuthEndpoint extends Endpoint {
           .institutionalAuthServiceFor(session)
           .confirmTotpEnrollment(matricula: matricula, password: password, code: code);
 
-  /// Pedido do código de acesso (RF01). Público por definição: quem chama
-  /// ainda não tem sessão. A resposta é sempre a mesma — não revela se o CPF
-  /// está cadastrado (ver `PasswordlessAuthService.requestOtp`).
+  /// Login do participante por credencial de dispositivo (RF24, C-05).
+  ///
+  /// Público por definição: quem chama ainda não tem sessão, e a credencial
+  /// (deviceId + segredo liberado pelo PIN local) É a prova. O PIN nunca
+  /// chega ao servidor. Emite o JWT de 1 h (`patientSessionLifetime`), como os
+  /// outros caminhos do paciente, com o `device_id` da credencial.
+  ///
+  /// Toda recusa de credencial chega ao app como `DeviceCredentialException`,
+  /// com a mensagem única do serviço: segredo errado, aparelho desconhecido,
+  /// credencial revogada (C-12) e formato inválido são indistinguíveis para
+  /// quem sonda. A exceção é única **de formato** também: um
+  /// `deviceId`/`deviceSecret` fora do formato esperado recebe a mesma
+  /// mensagem, antes de qualquer consulta. Falta de microárea é a exceção
+  /// separada (`DeviceCredentialTerritoryException`), que não invalida a
+  /// credencial.
+  Future<DevelopmentLoginResult> loginDevice(
+    Session session, {
+    required String deviceId,
+    required String deviceSecret,
+  }) async {
+    if (!isDeviceIdFormat(deviceId) || !isDeviceSecretFormat(deviceSecret)) {
+      throw DeviceCredentialException(
+        message: 'Credencial inválida ou revogada.',
+      );
+    }
+
+    final runtime = AlertRuntime.instance;
+    final user = await runtime
+        .deviceCredentialServiceFor(session)
+        .login(deviceId: deviceId, secret: deviceSecret);
+
+    return DevelopmentLoginResult(
+      accessToken: runtime.auth.issueToken(
+        user,
+        lifetime: patientSessionLifetime,
+      ),
+      tokenType: 'Bearer',
+    );
+  }
+
+  /// Pedido do código de acesso (RF01, Futuro). Público por definição: quem
+  /// chama ainda não tem sessão. A resposta é sempre a mesma — não revela se
+  /// o CPF está cadastrado (ver `PasswordlessAuthService.requestOtp`).
   ///
   /// "Sempre a mesma" inclui a **segunda** chamada dentro do intervalo mínimo
   /// de 60 s: ela também é um 200 sem corpo, e **não** uma recusa. Um "aguarde
@@ -282,6 +325,15 @@ class AuthEndpoint extends Endpoint {
     required String cpf,
     required DateTime birthDate,
   }) async {
+    // C-05: o acesso do piloto é por convite QR + PIN (RF24), e o RF01 virou
+    // Futuro — sem gateway configurado o pedido é recusado explicitamente,
+    // nunca um envio silencioso para lugar nenhum.
+    if (AlertRuntime.instance.smsGateway == null) {
+      throw EndpointDisabledException(
+        message: 'O acesso por código de acesso não está disponível neste ambiente.',
+      );
+    }
+
     final parsed = Cpf.tryParse(cpf);
     if (parsed == null) {
       throw OtpRequestException(message: 'Confira os dados informados.');
@@ -300,12 +352,22 @@ class AuthEndpoint extends Endpoint {
   ///
   /// Toda recusa chega ao app como `OtpRequestException`, com a mensagem que o
   /// serviço escolheu: uma só, para não dizer se aquele CPF existe.
+  ///
+  /// Sem `SMS_GATEWAY` a chamada é recusada explicitamente, como [requestOtp]:
+  /// o RF01 é Futuro, e construir o serviço sem gateway derrubava a requisição
+  /// num `StateError` (500) — a sonda da revisão da C-05 viu esse defeito.
   Future<DevelopmentLoginResult> verifyOtp(
     Session session, {
     required String cpf,
     required String code,
     String? deviceId,
   }) async {
+    if (AlertRuntime.instance.smsGateway == null) {
+      throw EndpointDisabledException(
+        message: 'O acesso por código de acesso não está disponível neste ambiente.',
+      );
+    }
+
     final parsed = Cpf.tryParse(cpf);
     if (parsed == null) {
       throw OtpRequestException(

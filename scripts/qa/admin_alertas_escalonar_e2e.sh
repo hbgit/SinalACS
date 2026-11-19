@@ -136,9 +136,10 @@ novo_id="$(fx "d['escalationAlerts']['freshId']")"
   || { echo 'erro: o manifesto não tem o bloco escalationAlerts (seed antigo?)' >&2; exit 1; }
 
 # O alerta novo, sintético, do paciente `main` na microárea das fixtures,
-# inserido por SQL (não por `alerts.createRedAlert`, que exigiria login OTP do
-# paciente e o MQTT) e só quando o teste pede: um alerta semeado ou criado
-# "agora" antes do build e do login já estaria vencido quando a tela abrisse.
+# inserido por SQL (não por `alerts.createRedAlert`, que exigiria o login do
+# paciente por convite de uso único e o MQTT) e só quando o teste pede: um
+# alerta semeado ou criado "agora" antes do build e do login já estaria
+# vencido quando a tela abrisse.
 # O `triggeredAt` 20 s À FRENTE do relógio do banco (o `freshLead` de
 # `E2eEscalationAlerts`) faz a janela "no prazo" durar 50 s depois do INSERT
 # (I): o Painel o conta em ≤ I + 30 s (um pulso), a aba de Alertas abre em

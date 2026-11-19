@@ -10,13 +10,23 @@ import 'package:sinalacs_patient/core/network/backend_config.dart';
 /// `.spy.yaml` — não como código HTTP. Traduzir aqui mantém a UI livre de
 /// `try/catch` espalhado e garante mensagem em português.
 class BackendFailure implements Exception {
-  const BackendFailure(this.message, {this.isRecoverable = true});
+  const BackendFailure(
+    this.message, {
+    this.isRecoverable = true,
+    this.credentialRefused = false,
+  });
 
   final String message;
 
   /// `false` quando repetir a mesma ação não deve resolver (rota desligada,
   /// permissão negada).
   final bool isRecoverable;
+
+  /// `auth.loginDevice` recusou a credencial (segredo errado, aparelho
+  /// desconhecido, formato inválido ou credencial revogada — a mensagem é a
+  /// mesma de propósito): o app descarta a cópia local e oferece o convite de
+  /// novo, em vez de insistir num PIN que nunca mais vai entrar.
+  final bool credentialRefused;
 
   @override
   String toString() => message;
@@ -59,26 +69,21 @@ abstract class PatientBackend {
 
   Future<ServiceHealth> health();
 
-  /// Pede o código de acesso (RF01). A resposta não diz se o CPF existe.
-  Future<void> requestOtp({
-    required String cpf,
-    required DateTime birthDate,
-  });
-
-  /// Verifica o código e abre a sessão do paciente (RF01).
+  /// Login do participante por credencial de dispositivo (RF24, C-05):
+  /// `deviceId` + segredo liberado pelo PIN local. O PIN nunca sai do
+  /// aparelho — o servidor compara só o hash do segredo.
   ///
-  /// Diferente do ACS, **não há renovação silenciosa**: o código OTP é de uso
-  /// único e não existe credencial reutilizável. Quando a sessão de 1 hora
-  /// expira, o app manda a pessoa autenticar de novo — é a consequência
-  /// registrada de adiar o refresh token de LGPD-RT06.
-  Future<AuthSession> verifyOtp({
-    required String cpf,
-    required String code,
+  /// Diferente do ACS, **não há renovação silenciosa**: quando a sessão de
+  /// 1 hora expira, o app pede o PIN de novo — a credencial de dispositivo é
+  /// reapresentável, então entrar de novo não custa um convite novo.
+  Future<AuthSession> loginDevice({
+    required String deviceId,
+    required String deviceSecret,
   });
 
   /// Login de DESENVOLVIMENTO, para `tool/` e `integration_test/` contra a
   /// stack local. Exige `ENABLE_DEV_LOGIN=true`. **Não** é o caminho do
-  /// produto — RF01 é [requestOtp]/[verifyOtp].
+  /// produto — RF24 é [loginDevice].
   Future<AuthSession> developmentLogin({required String role});
 
   Future<RiskLevel> evaluateTriage({
@@ -102,13 +107,20 @@ abstract class PatientBackend {
 
   /// Conclui o onboarding a partir de um convite do ACS, gravando os 4
   /// registros de consentimento, incluindo o aceite do Termo de Uso
-  /// (LGPD-RF02/RF18), e ativando a sessão.
+  /// (LGPD-RF02/RF18), criando a credencial de dispositivo do participante
+  /// (RF24, C-05) e ativando a sessão.
+  ///
+  /// [deviceId] é um UUID de instalação sorteado pelo app; [deviceSecret] é o
+  /// segredo de 32 bytes que fica protegido pelo PIN local e reaparece em
+  /// [loginDevice]. Nenhum dos dois pode ser reutilizado em outro aparelho.
   Future<AuthSession> completeEnrollment({
     required String token,
     required bool healthDataConsent,
     required bool remindersConsent,
     required bool pushConsent,
     required bool termsAccepted,
+    required String deviceId,
+    required String deviceSecret,
   });
 
   /// Condições crônicas do próprio paciente autenticado (tela "Perfil
@@ -133,7 +145,7 @@ abstract class PatientBackend {
   });
 
   /// Aceita o Termo de Uso e a Política de Privacidade vigentes (LGPD-RF18),
-  /// para quem entrou por OTP sem passar pelo onboarding. O servidor grava uma
+  /// para quem entrou sem passar pelo onboarding. O servidor grava uma
   /// linha `termsOfUse` `granted` em `consent_logs` só se a versão vigente ainda
   /// não foi aceita; repetir devolve a existente.
   Future<PatientConsentRecord> acceptTermsOfUse();
@@ -147,7 +159,7 @@ abstract class PatientBackend {
   Future<TermsChangeNotice?> termsChangeNotice();
 
   /// Se o paciente já aceitou o Termo de Uso e a Política de Privacidade da
-  /// versão vigente (LGPD-RF18). O login por OTP consulta isto para decidir se
+  /// versão vigente (LGPD-RF18). O app consulta isto no login para decidir se
   /// mostra o convite ao aceite.
   Future<bool> hasAcceptedCurrentTerms();
 
@@ -202,11 +214,10 @@ class MisconfiguredBackend implements PatientBackend {
   Future<ServiceHealth> health() async => _recusar();
 
   @override
-  Future<void> requestOtp({required String cpf, required DateTime birthDate}) async =>
-      _recusar();
-
-  @override
-  Future<AuthSession> verifyOtp({required String cpf, required String code}) async =>
+  Future<AuthSession> loginDevice({
+    required String deviceId,
+    required String deviceSecret,
+  }) async =>
       _recusar();
 
   @override
@@ -241,6 +252,8 @@ class MisconfiguredBackend implements PatientBackend {
     required bool remindersConsent,
     required bool pushConsent,
     required bool termsAccepted,
+    required String deviceId,
+    required String deviceSecret,
   }) async =>
       _recusar();
 
@@ -343,17 +356,17 @@ class BackendClient implements PatientBackend {
 
   /// Token válido para as chamadas autenticadas.
   ///
-  /// Sem renovação automática (ver [verifyOtp]): se a sessão expirou, quem
-  /// chama recebe uma falha não recuperável e a tela precisa mandar a pessoa
-  /// entrar de novo. Inventar uma renovação aqui exigiria ou guardar a
-  /// credencial — que para o paciente não existe — ou um refresh token, que
-  /// LGPD-RT06 exige e este plano deliberadamente não implementa.
+  /// Sem renovação automática: se a sessão expirou, quem chama recebe uma
+  /// falha não recuperável e a tela manda a pessoa entrar de novo com o PIN.
+  /// A credencial de dispositivo (RF24) é reapresentável, então o reacesso
+  /// não custa um convite novo — mas renovar o JWT em silêncio exigiria
+  /// guardar o segredo fora do envelope do PIN, o que este desenho evita.
   Future<String> _requireToken() async {
     final current = _session;
     if (current != null && !current.isExpired()) return current.accessToken;
 
     throw const BackendFailure(
-      'Sua sessão expirou. Entre novamente com o código de acesso.',
+      'Sua sessão expirou. Entre novamente com o PIN.',
       isRecoverable: false,
     );
   }
@@ -363,42 +376,18 @@ class BackendClient implements PatientBackend {
     return _guard(() => _client.health.check());
   }
 
-  /// Pede o código de acesso (RF01).
-  ///
-  /// Devolve `void` porque a resposta **não** diz se o CPF existe: o servidor
-  /// trata "não encontrado", "data de nascimento errada" e "pedido repetido
-  /// dentro do intervalo mínimo" de forma idêntica e silenciosa
-  /// (anti-enumeração), e a tela avança para o passo do código nos três casos.
-  /// A única recusa que sobra é o dígito verificador inválido, que chega como
-  /// [BackendFailure] com a mensagem que o servidor escolheu.
-  ///
-  /// A repetição silenciosa tem uma consequência que é DESTE lado: o servidor
-  /// não diz mais "aguarde um minuto", porque esse aviso só é alcançável por
-  /// quem já acertou CPF e nascimento — ou seja, seria o próprio verificador
-  /// do par. Quem pedir de novo dentro do minuto só pode ser avisado aqui, que
-  /// é quem sabe quando o pedido anterior saiu (seguimento registrado no
-  /// `PROGRESS.md`, no que ficou de fora do RF01).
+  /// Login por credencial de dispositivo (RF24). A sessão emitida aqui é a
+  /// do produto — ver [_requireToken] para o que acontece quando ela expira.
   @override
-  Future<void> requestOtp({
-    required String cpf,
-    required DateTime birthDate,
-  }) {
-    return _guard(
-      () => _client.auth.requestOtp(cpf: cpf, birthDate: birthDate),
-    );
-  }
-
-  /// Verifica o código de uso único e abre a sessão do paciente (RF01).
-  ///
-  /// A sessão emitida aqui é a do produto — ver [_requireToken] para o que
-  /// acontece quando ela expira.
-  @override
-  Future<AuthSession> verifyOtp({
-    required String cpf,
-    required String code,
+  Future<AuthSession> loginDevice({
+    required String deviceId,
+    required String deviceSecret,
   }) async {
     final result = await _guard(
-      () => _client.auth.verifyOtp(cpf: cpf, code: code),
+      () => _client.auth.loginDevice(
+        deviceId: deviceId,
+        deviceSecret: deviceSecret,
+      ),
     );
 
     final session = AuthSession.tryParse(result.accessToken, result.tokenType);
@@ -494,7 +483,7 @@ class BackendClient implements PatientBackend {
   }
 
   /// Conclui o onboarding a partir de um convite do ACS. Ver ressalvas em
-  /// [AuthSession] — a sessão emitida aqui é a mesma forma de [verifyOtp].
+  /// [AuthSession] — a sessão emitida aqui é a mesma forma de [loginDevice].
   @override
   Future<AuthSession> completeEnrollment({
     required String token,
@@ -502,6 +491,8 @@ class BackendClient implements PatientBackend {
     required bool remindersConsent,
     required bool pushConsent,
     required bool termsAccepted,
+    required String deviceId,
+    required String deviceSecret,
   }) async {
     final result = await _guard(
       () => _client.onboarding.completeEnrollment(
@@ -510,6 +501,8 @@ class BackendClient implements PatientBackend {
         remindersConsent: remindersConsent,
         pushConsent: pushConsent,
         termsAccepted: termsAccepted,
+        deviceId: deviceId,
+        deviceSecret: deviceSecret,
       ),
     );
     final session = AuthSession.tryParse(result.accessToken, result.tokenType);
@@ -631,11 +624,21 @@ class BackendClient implements PatientBackend {
       // Token inválido/expirado/consumido ou consentimento obrigatório
       // recusado — nenhum caso é resolvido tentando de novo sem mudar nada.
       throw BackendFailure(error.message, isRecoverable: false);
-    } on OtpRequestException catch (error) {
-      // Recusa do login passwordless (RF01). A mensagem é a do servidor de
-      // propósito: ela já é única para todas as causas, para não dizer se
-      // aquele CPF está cadastrado.
-      throw BackendFailure(error.message, isRecoverable: false);
+    } on DeviceCredentialTerritoryException catch (error) {
+      // A credencial é válida; falta o território — estado administrativo do
+      // cadastro (e possivelmente transitório). Não é `credentialRefused`: o
+      // app mantém a cópia local e só mostra a mensagem.
+      throw BackendFailure(error.message);
+    } on DeviceCredentialException catch (error) {
+      // Recusa do login por credencial de dispositivo (RF24). A mensagem é
+      // única para todas as causas (segredo errado, aparelho desconhecido,
+      // credencial revogada, formato inválido) de propósito; o app trata a
+      // recusa descartando a credencial local e oferecendo o convite de novo.
+      throw BackendFailure(
+        error.message,
+        isRecoverable: false,
+        credentialRefused: true,
+      );
     } on DataRightsException catch (error) {
       // Recusa de negócio de um direito do titular (consentimento obrigatório,
       // texto de correção inválido). A mensagem é do servidor, pronta para a

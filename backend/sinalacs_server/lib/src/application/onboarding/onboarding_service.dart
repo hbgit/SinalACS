@@ -5,6 +5,7 @@ import 'package:crypto/crypto.dart';
 import 'package:sinalacs_server/src/application/auth/authorization.dart';
 import 'package:sinalacs_server/src/application/auth/development_auth_service.dart'
     show AuthenticatedUser;
+import 'package:sinalacs_server/src/application/auth/device_credential_service.dart';
 import 'package:sinalacs_server/src/generated/protocol.dart';
 
 /// Um convite de onboarding, do jeito que a store enxerga.
@@ -91,11 +92,14 @@ final _tokenRandom = Random.secure();
 class OnboardingService {
   OnboardingService({
     required OnboardingStore store,
+    required DeviceCredentialStore deviceCredentials,
     DateTime Function()? clock,
   })  : _store = store,
+        _deviceCredentials = deviceCredentials,
         _clock = clock ?? DateTime.now;
 
   final OnboardingStore _store;
+  final DeviceCredentialStore _deviceCredentials;
   final DateTime Function() _clock;
 
   /// Gera um convite de uso único para um paciente já cadastrado na
@@ -135,13 +139,21 @@ class OnboardingService {
   }
 
   /// Consome o convite, exige o consentimento obrigatório, grava as 4
-  /// finalidades em `consent_logs` (aceite ou recusa) e emite a sessão do
-  /// paciente. Tudo ou nada: se o consentimento obrigatório for recusado,
-  /// o token permanece válido (a pessoa pode tentar de novo lendo o mesmo
-  /// QR) e nenhuma linha é gravada.
+  /// finalidades em `consent_logs` (aceite ou recusa), cria a credencial de
+  /// dispositivo do participante (C-05, RF24) e devolve o usuário para o
+  /// endpoint emitir a sessão. Tudo ou nada: se o consentimento obrigatório
+  /// for recusado, o token permanece válido (a pessoa pode tentar de novo
+  /// lendo o mesmo QR) e nenhuma linha é gravada.
+  ///
+  /// [deviceId]/[deviceSecret] são a credencial de longa duração que o app
+  /// acabou de sortear e proteger com o PIN local: o servidor grava só o
+  /// hash do segredo, e o `deviceId` vira o `device_id` do JWT. O PIN nunca
+  /// chega aqui.
   Future<AuthenticatedUser> completeEnrollment({
     required String token,
     required Map<ConsentPurpose, bool> consents,
+    required String deviceId,
+    required String deviceSecret,
   }) async {
     final mandatory = consents[ConsentPurpose.healthDataProcessing];
     if (mandatory != true) {
@@ -182,11 +194,24 @@ class OnboardingService {
       ));
     }
 
+    // A credencial nasce na MESMA transação do consumo do convite (o endpoint
+    // abre uma e passa às duas stores): não existe instante observável com
+    // convite consumido e sem credencial. `deviceId` em formato inválido é
+    // recusado antes, pelo endpoint.
+    await _deviceCredentials.create(StoredPatientDeviceCredential(
+      id: '',
+      patientId: stored.patientId,
+      deviceId: deviceId,
+      credentialHash: DeviceCredentialService.hashSecret(deviceSecret),
+      createdAt: now,
+      microAreaId: stored.microAreaId,
+    ));
+
     return AuthenticatedUser(
       id: stored.patientId,
       role: UserRole.patient,
       microAreaId: stored.microAreaId,
-      deviceId: 'onboarding-${stored.patientId}',
+      deviceId: deviceId,
     );
   }
 

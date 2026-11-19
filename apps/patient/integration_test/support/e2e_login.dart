@@ -12,10 +12,6 @@ import '../../test/support/e2e_login_core.dart';
 const developmentMicroAreaId = '00000000-0000-4000-8000-000000000003';
 
 const _fixtures = String.fromEnvironment('E2E_FIXTURES');
-const _otpRelay = String.fromEnvironment(
-  'OTP_RELAY',
-  defaultValue: 'http://localhost:8765/code',
-);
 
 /// O manifesto de fixtures, ou `null` quando o teste roda contra a stack de
 /// desenvolvimento (sem `--dart-define=E2E_FIXTURES=...`).
@@ -31,9 +27,11 @@ String expectedMicroArea({String role = 'api'}) {
       : config.patient(role).microAreaId;
 }
 
-/// Entra como o paciente [role] da fixture (OTP real) ou, sem manifesto, pelo
-/// login de desenvolvimento. Ver [loginPatientWith].
+/// Entra como o paciente [role] da fixture (convite QR + credencial de
+/// dispositivo, RF24) ou, sem manifesto, pelo login de desenvolvimento. Ver
+/// [loginPatientWith].
 Future<AuthSession> loginPatient(
   BackendClient backend, {
   String role = 'api',
-}) => loginPatientWith(backend, e2eConfig(), relayUrl: _otpRelay, role: role);
+}) =>
+    loginPatientWith(backend, e2eConfig(), role: role);

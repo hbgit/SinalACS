@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 import 'package:sinalacs_server/src/application/auth/staff_activation_code.dart';
@@ -14,6 +15,7 @@ class E2ePatient {
     required this.birthDate,
     required this.chronic,
     required this.microAreaId,
+    required this.inviteTokens,
   });
 
   final String id;
@@ -32,6 +34,13 @@ class E2ePatient {
   final bool chronic;
   final String microAreaId;
 
+  /// Convites de uso único do piloto (C-05, RF24), no MESMO formato do
+  /// `OnboardingService._newToken` (32 bytes de `Random.secure()` em base64url
+  /// sem padding). O seed grava só o sha256 de cada um em `enrollment_tokens`;
+  /// o claro vai apenas para o manifesto 0600, de onde cada teste consome um
+  /// por login.
+  final List<String> inviteTokens;
+
   Map<String, Object?> toJson() => {
         'id': id,
         'role': role,
@@ -40,6 +49,7 @@ class E2ePatient {
         'birthDate': birthDate,
         'chronic': chronic,
         'microAreaId': microAreaId,
+        'inviteTokens': inviteTokens,
       };
 
   factory E2ePatient.fromJson(Map<String, Object?> j) => E2ePatient(
@@ -50,6 +60,7 @@ class E2ePatient {
         birthDate: j['birthDate']! as String,
         chronic: j['chronic']! as bool,
         microAreaId: j['microAreaId']! as String,
+        inviteTokens: (j['inviteTokens'] as List?)?.cast<String>() ?? const [],
       );
 
   @override
@@ -257,6 +268,22 @@ String _password(Random random) {
   return List.generate(20, (_) => alphabet[random.nextInt(alphabet.length)]).join();
 }
 
+/// Convite de uso único no MESMO formato do `OnboardingService._newToken`:
+/// 32 bytes aleatórios em base64url sem padding — 43 caracteres, nada a
+/// enumerar, mesmo argumento de segurança do token de produção.
+String _inviteToken(Random random) {
+  final bytes = List<int>.generate(32, (_) => random.nextInt(256));
+  return base64Url.encode(bytes).replaceAll('=', '');
+}
+
+/// Quantos convites cada paciente leva no manifesto. O `main` consome até dois
+/// num mesmo processo (jornada completa pela tela) e o
+/// `scripts/qa/mqtt_resiliencia_e2e.sh` loga até CINCO vezes como ele (cada
+/// `dart run tool/live_check.dart` consome um convite no servidor, de uso
+/// único); 6 cobre a margem. O custo é 43 caracteres a mais por convite no
+/// manifesto 0600.
+const _convitesPorPaciente = 6;
+
 E2eFixtures generateE2eFixtures(Random random) {
   final microAreaId = generateUuidV4(random);
   final otherMicroAreaId = generateUuidV4(random);
@@ -274,6 +301,7 @@ E2eFixtures generateE2eFixtures(Random random) {
       birthDate: _birthDate(random),
       chronic: chronic,
       microAreaId: microAreaId,
+      inviteTokens: [for (var i = 0; i < _convitesPorPaciente; i++) _inviteToken(random)],
     );
   }
 
@@ -318,8 +346,9 @@ E2eFixtures generateE2eFixtures(Random random) {
     patients: [
       patient('main', 'Paciente E2E Principal', chronic: false, microAreaId: microAreaId),
       patient('chronic', 'Paciente E2E Crônico', chronic: true, microAreaId: microAreaId),
-      // Um paciente por consumidor: o OTP impõe 60 s entre dois pedidos do MESMO
-      // paciente, então testes que rodam em sequência não podem dividir um.
+      // Um paciente por consumidor: o convite é de uso único (consumo atômico
+      // no servidor), então testes que logam mais de uma vez não podem dividir
+      // os mesmos convites; cada um leva [_convitesPorPaciente] no manifesto.
       patient('api', 'Paciente E2E API', chronic: false, microAreaId: microAreaId),
       patient('push', 'Paciente E2E Push', chronic: false, microAreaId: microAreaId),
       // Dispara o alerta do e2e da telemetria (#83); o script confere que o

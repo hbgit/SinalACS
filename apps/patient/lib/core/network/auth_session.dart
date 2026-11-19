@@ -2,10 +2,12 @@ import 'dart:convert';
 
 /// Sessão autenticada contra o backend.
 ///
-/// Vem do login do produto — `auth.verifyOtp`, o RF01 — ou, nas ferramentas de
-/// desenvolvimento (`tool/`, `integration_test/`), de `auth.developmentLogin`,
-/// que só existe com `ENABLE_DEV_LOGIN=true`. Os dois emitem o mesmo token; o
-/// que muda é o TTL (ver [isExpired]).
+/// Vem do login do produto — `onboarding.completeEnrollment` seguido de
+/// `auth.loginDevice` com a credencial de dispositivo protegida pelo PIN
+/// (RF24, C-05) — ou, nas ferramentas de desenvolvimento (`tool/`,
+/// `integration_test/`), de `auth.developmentLogin`, que só existe com
+/// `ENABLE_DEV_LOGIN=true`. Os dois emitem o mesmo token; o que muda é o TTL
+/// (ver [isExpired]).
 class AuthSession {
   const AuthSession({
     required this.accessToken,
@@ -73,10 +75,10 @@ class AuthSession {
   /// O token do paciente vive 1 hora (LGPD-RT06), decidido no servidor.
   ///
   /// São 60 minutos, e não os 15 do ACS, porque não existe renovação silenciosa
-  /// deste lado: nem o código OTP (`auth.verifyOtp`) nem o convite de uso único
-  /// (`onboarding.completeEnrollment`) se reapresentam como a senha do ACS, e
-  /// nenhum dos dois tem credencial reutilizável para reautenticar sem a
-  /// pessoa. Ao expirar, o app **não** se renova — pede que ela entre de novo.
+  /// deste lado: a credencial de dispositivo (RF24, C-05) só reemite sessão
+  /// mediante o PIN da pessoa — nunca sozinha — e o convite de uso único
+  /// (`onboarding.completeEnrollment`) não se reapresenta. Ao expirar, o app
+  /// **não** se renova — pede que a pessoa entre de novo com o PIN.
   ///
   /// Os dois caminhos de emissão do papel `patient` concordam nessa hora desde
   /// o fechamento do defeito de RF02 registrado no `PROGRESS.md` — o app lê a
