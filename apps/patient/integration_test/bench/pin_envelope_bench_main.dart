@@ -16,7 +16,20 @@
 //      (o `package:cryptography` 2.9.0 já preenche a memória num isolate dele);
 //   B  a mesma derivação inteira dentro de `Isolate.run` (a proposta da #170);
 //   C  `DartArgon2id(maxIsolates: 0)` na thread principal, sem isolate nenhum:
-//      o pior caso, só como referência do que a issue presumia.
+//      o pior caso, só como referência do que a issue presumia;
+//   D  `Isolate.run` com `DartArgon2id(maxIsolates: 0)` dentro: a derivação
+//      inteira fora da thread da UI sem o isolate extra da biblioteca;
+//   P1 `PinEnvelope.encrypt`, o código do app ao criar o PIN (derivação no
+//      `Isolate.run` da #170 + AES-GCM);
+//   P2 `PinEnvelope.decrypt`, o código do app ao entrar com o PIN;
+//   Z  linha de base: nenhuma derivação, só uma espera do tamanho da de A,
+//      para separar o atraso da derivação do ruído do relógio e dos quadros.
+//
+// Métricas por rodada: tempo total; maior atraso entre dois tiques de um
+// `Timer` de 8 ms (a thread da UI sem atender a fila de eventos); quadros
+// desenhados durante a derivação e o maior intervalo entre dois quadros
+// (`addPersistentFrameCallback`, com o `CircularProgressIndicator` girando:
+// é a prova de que o indicador anima).
 import 'dart:async';
 import 'dart:convert';
 import 'dart:isolate';
@@ -25,6 +38,7 @@ import 'package:cryptography/cryptography.dart';
 import 'package:cryptography/dart.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
+import 'package:sinalacs_patient/core/security/pin_envelope.dart';
 
 const _memory = 19456;
 const _iterations = 2;
@@ -53,6 +67,44 @@ Future<List<int>> _variantB() {
   return Isolate.run(() => _deriveInIsolate(pin, salt));
 }
 
+Future<List<int>> _deriveInIsolateNoInnerIsolate(List<int> pin, List<int> salt) async {
+  const kdf = DartArgon2id(
+    memory: _memory,
+    iterations: _iterations,
+    parallelism: _parallelism,
+    hashLength: _hashLength,
+    maxIsolates: 0,
+  );
+  final key = await kdf.deriveKey(secretKey: SecretKey(pin), nonce: salt);
+  return key.extractBytes();
+}
+
+Future<List<int>> _variantD() {
+  final pin = List<int>.of(_pin);
+  final salt = List<int>.of(_salt);
+  return Isolate.run(() => _deriveInIsolateNoInnerIsolate(pin, salt));
+}
+
+final _envelope = PinEnvelope();
+String? _sealed;
+
+Future<List<int>> _variantP1() async {
+  _sealed = await _envelope.encrypt(pin: '284637', plaintext: 'segredo-sintetico');
+  return const <int>[];
+}
+
+Future<List<int>> _variantP2() async {
+  await _envelope.decrypt(pin: '284637', envelopeJson: _sealed!);
+  return const <int>[];
+}
+
+int _baselineMs = 230;
+
+Future<List<int>> _variantZ() async {
+  await Future<void>.delayed(Duration(milliseconds: _baselineMs));
+  return const <int>[];
+}
+
 Future<List<int>> _variantC() async {
   const kdf = DartArgon2id(
     memory: _memory,
@@ -66,17 +118,43 @@ Future<List<int>> _variantC() async {
 }
 
 class _Result {
-  _Result(this.totalMs, this.maxGapMs, this.frames, this.maxBuildMs);
+  _Result(this.totalMs, this.maxGapMs, this.frames, this.maxFrameIntervalMs);
   final int totalMs;
   final int maxGapMs;
   final int frames;
-  final int maxBuildMs;
+  final int maxFrameIntervalMs;
+}
+
+/// Conta os quadros desenhados enquanto [_counting] está ligado e o maior
+/// intervalo entre dois deles. Registrado uma vez (o callback persistente não
+/// tem remoção).
+bool _counting = false;
+int _frames = 0;
+int _maxFrameInterval = 0;
+Duration? _lastFrame;
+bool _frameCallbackRegistered = false;
+
+void _ensureFrameCounter() {
+  if (_frameCallbackRegistered) return;
+  _frameCallbackRegistered = true;
+  SchedulerBinding.instance.addPersistentFrameCallback((timeStamp) {
+    if (!_counting) return;
+    final last = _lastFrame;
+    if (last != null) {
+      final interval = (timeStamp - last).inMilliseconds;
+      if (interval > _maxFrameInterval) _maxFrameInterval = interval;
+    }
+    _lastFrame = timeStamp;
+    _frames++;
+  });
 }
 
 Future<_Result> _measure(Future<List<int>> Function() derive) async {
-  final frames = <FrameTiming>[];
-  void onTimings(List<FrameTiming> t) => frames.addAll(t);
-  SchedulerBinding.instance.addTimingsCallback(onTimings);
+  _ensureFrameCounter();
+  _frames = 0;
+  _maxFrameInterval = 0;
+  _lastFrame = null;
+  _counting = true;
 
   var maxGap = 0;
   final tick = Stopwatch()..start();
@@ -91,17 +169,13 @@ Future<_Result> _measure(Future<List<int>> Function() derive) async {
   final total = Stopwatch()..start();
   await derive();
   total.stop();
+  _counting = false;
+  final frames = _frames;
+  final maxFrameInterval = _maxFrameInterval;
   // Um tique depois do fim, para o último bloqueio (se houver) entrar na conta.
   await Future<void>.delayed(const Duration(milliseconds: 50));
   timer.cancel();
-  SchedulerBinding.instance.removeTimingsCallback(onTimings);
-
-  var maxBuild = 0;
-  for (final f in frames) {
-    final b = f.buildDuration.inMilliseconds;
-    if (b > maxBuild) maxBuild = b;
-  }
-  return _Result(total.elapsedMilliseconds, maxGap, frames.length, maxBuild);
+  return _Result(total.elapsedMilliseconds, maxGap, frames, maxFrameInterval);
 }
 
 int _median(List<int> v) {
@@ -136,22 +210,38 @@ class _BenchAppState extends State<_BenchApp> {
   Future<void> _run() async {
     await Future<void>.delayed(const Duration(seconds: 2));
     final expected = await _variantA();
-    _log('BENCH inicio m=$_memory t=$_iterations p=$_parallelism saida=$_hashLength runs=$_runs');
-    for (final (nome, derive) in [('A', _variantA), ('B', _variantB), ('C', _variantC)]) {
+    final aquecimento = Stopwatch()..start();
+    await _variantA();
+    _baselineMs = aquecimento.elapsedMilliseconds;
+    _log('BENCH inicio m=$_memory t=$_iterations p=$_parallelism saida=$_hashLength runs=$_runs '
+        'base_ms=$_baselineMs');
+    for (final (nome, derive) in [
+      ('Z', _variantZ),
+      ('A', _variantA),
+      ('B', _variantB),
+      ('C', _variantC),
+      ('D', _variantD),
+      ('P1', _variantP1),
+      ('P2', _variantP2),
+    ]) {
       final check = await derive();
-      final mesma = check.length == expected.length &&
-          List.generate(check.length, (i) => check[i] == expected[i]).every((x) => x);
-      final totals = <int>[], gaps = <int>[];
+      final mesma = nome == 'Z' || nome.startsWith('P') ||
+          (check.length == expected.length &&
+              List.generate(check.length, (i) => check[i] == expected[i]).every((x) => x));
+      final totals = <int>[], gaps = <int>[], intervals = <int>[], fps = <int>[];
       for (var i = 0; i < _runs; i++) {
         final r = await _measure(derive);
         totals.add(r.totalMs);
         gaps.add(r.maxGapMs);
+        intervals.add(r.maxFrameIntervalMs);
+        fps.add(r.totalMs == 0 ? 0 : (r.frames * 1000 / r.totalMs).round());
         _log('BENCH variante=$nome run=$i total_ms=${r.totalMs} max_gap_ui_ms=${r.maxGapMs} '
-            'quadros=${r.frames} max_build_ms=${r.maxBuildMs}');
+            'quadros=${r.frames} max_intervalo_quadro_ms=${r.maxFrameIntervalMs}');
       }
+      int maior(List<int> v) => v.reduce((a, b) => a > b ? a : b);
       _log('BENCH resumo variante=$nome mesma_chave=$mesma mediana_total_ms=${_median(totals)} '
-          'max_total_ms=${totals.reduce((a, b) => a > b ? a : b)} '
-          'mediana_gap_ui_ms=${_median(gaps)} max_gap_ui_ms=${gaps.reduce((a, b) => a > b ? a : b)}');
+          'max_total_ms=${maior(totals)} mediana_gap_ui_ms=${_median(gaps)} max_gap_ui_ms=${maior(gaps)} '
+          'mediana_quadros_por_s=${_median(fps)} max_intervalo_quadro_ms=${maior(intervals)}');
     }
     _log('BENCH fim');
   }

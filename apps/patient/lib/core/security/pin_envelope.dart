@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:isolate';
 import 'dart:math';
 
 import 'package:cryptography/cryptography.dart';
@@ -27,18 +28,20 @@ class WrongPinException implements Exception {
 /// O PIN nunca sai do aparelho e nunca é gravado: só a derivação dele é usada
 /// para abrir o envelope. Erro de derivação e segredo corrompido produzem a
 /// MESMA [WrongPinException], para o tempo da falha não servir de oráculo.
+///
+/// A derivação roda inteira dentro de `Isolate.run` (#170), para a criação do
+/// PIN e o login nunca travarem a animação do indicador de progresso. Medido
+/// em build release num Galaxy A54 (Android 16): ~0,25 s por derivação e 119
+/// quadros/s durante ela; sem nenhum isolate, 39 quadros/s. O
+/// `package:cryptography` 2.9.0 já preenche a memória num isolate dele com
+/// estes parâmetros, mas por uma heurística interna que zera com outra
+/// memória ou outra versão do pacote; o `Isolate.run` torna a garantia nossa.
+/// Só o PIN e o salt vão para o isolate; o armazenamento seguro fica na
+/// thread principal.
 class PinEnvelope {
   PinEnvelope({Random? random}) : _random = random ?? Random.secure();
 
   static const version = 1;
-
-  /// Argon2id, m = 19 MiB (19456 KiB), t = 2, p = 1, saída 32 bytes (D3).
-  static final _kdf = Argon2id(
-    memory: 19456,
-    iterations: 2,
-    parallelism: 1,
-    hashLength: 32,
-  );
 
   final Random _random;
 
@@ -58,10 +61,7 @@ class PinEnvelope {
     }
 
     final salt = _randomBytes(16);
-    final secretKey = await _kdf.deriveKey(
-      secretKey: SecretKey(utf8.encode(pin)),
-      nonce: salt,
-    );
+    final secretKey = SecretKey(await _deriveInBackground(pin, salt));
     final nonce = _randomBytes(12);
     final aesGcm = AesGcm.with256bits();
     final sealed = await aesGcm.encrypt(
@@ -110,10 +110,7 @@ class PinEnvelope {
     }
 
     try {
-      final secretKey = await _kdf.deriveKey(
-        secretKey: SecretKey(utf8.encode(pin)),
-        nonce: salt,
-      );
+      final secretKey = SecretKey(await _deriveInBackground(pin, salt));
       final clear = await AesGcm.with256bits().decrypt(
         SecretBox(cipherText, nonce: nonce, mac: Mac(mac)),
         secretKey: secretKey,
@@ -136,4 +133,37 @@ class PinEnvelope {
 
   List<int> _randomBytes(int length) =>
       List<int>.generate(length, (_) => _random.nextInt(256));
+
+  /// Deriva a chave do envelope fora da thread da UI. Só tipos enviáveis
+  /// atravessam o isolate (os bytes do PIN e do salt, de ida; os 32 bytes da
+  /// chave, de volta): nada de `BuildContext`, plugin ou armazenamento.
+  static Future<List<int>> _deriveInBackground(String pin, List<int> salt) {
+    final pinBytes = utf8.encode(pin);
+    final saltBytes = List<int>.of(salt);
+    return Isolate.run(
+      () => _deriveKeyBytes(pinBytes, saltBytes),
+      debugName: 'pin-envelope-argon2id',
+    );
+  }
+}
+
+/// Argon2id, m = 19 MiB (19456 KiB), t = 2, p = 1, saída 32 bytes (D3). Os
+/// parâmetros não mudam com a #170: o envelope gravado pela C-05 continua
+/// abrindo (`test/pin_envelope_test.dart`, envelope de referência).
+const pinEnvelopeArgon2Memory = 19456;
+const pinEnvelopeArgon2Iterations = 2;
+const pinEnvelopeArgon2Parallelism = 1;
+const pinEnvelopeArgon2HashLength = 32;
+
+/// Roda dentro do isolate de [PinEnvelope._deriveInBackground]. Função de
+/// topo, sem capturar nada do envelope.
+Future<List<int>> _deriveKeyBytes(List<int> pin, List<int> salt) async {
+  final kdf = Argon2id(
+    memory: pinEnvelopeArgon2Memory,
+    iterations: pinEnvelopeArgon2Iterations,
+    parallelism: pinEnvelopeArgon2Parallelism,
+    hashLength: pinEnvelopeArgon2HashLength,
+  );
+  final key = await kdf.deriveKey(secretKey: SecretKey(pin), nonce: salt);
+  return key.extractBytes();
 }
