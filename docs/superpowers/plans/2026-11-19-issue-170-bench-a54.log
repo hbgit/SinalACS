@@ -1,0 +1,46 @@
+# Bancada da #170 — Galaxy A54 (SM-A546E), Android 16 (API 36), Exynos 1380, 8 GB, tela 120 Hz
+# build release, flutter build apk --release -t integration_test/bench/pin_envelope_bench_main.dart, 2026-11-19
+BENCH inicio m=19456 t=2 p=1 saida=32 runs=5 base_ms=194
+BENCH variante=Z run=0 total_ms=194 max_gap_ui_ms=14 quadros=23 max_intervalo_quadro_ms=8
+BENCH variante=Z run=1 total_ms=194 max_gap_ui_ms=9 quadros=24 max_intervalo_quadro_ms=8
+BENCH variante=Z run=2 total_ms=194 max_gap_ui_ms=12 quadros=23 max_intervalo_quadro_ms=8
+BENCH variante=Z run=3 total_ms=195 max_gap_ui_ms=9 quadros=24 max_intervalo_quadro_ms=8
+BENCH variante=Z run=4 total_ms=194 max_gap_ui_ms=9 quadros=23 max_intervalo_quadro_ms=8
+BENCH resumo variante=Z mesma_chave=true mediana_total_ms=194 max_total_ms=195 mediana_gap_ui_ms=9 max_gap_ui_ms=14 mediana_quadros_por_s=119 max_intervalo_quadro_ms=8
+BENCH variante=A run=0 total_ms=259 max_gap_ui_ms=13 quadros=31 max_intervalo_quadro_ms=8
+BENCH variante=A run=1 total_ms=247 max_gap_ui_ms=13 quadros=30 max_intervalo_quadro_ms=8
+BENCH variante=A run=2 total_ms=257 max_gap_ui_ms=13 quadros=31 max_intervalo_quadro_ms=8
+BENCH variante=A run=3 total_ms=241 max_gap_ui_ms=10 quadros=29 max_intervalo_quadro_ms=8
+BENCH variante=A run=4 total_ms=247 max_gap_ui_ms=15 quadros=30 max_intervalo_quadro_ms=8
+BENCH resumo variante=A mesma_chave=true mediana_total_ms=247 max_total_ms=259 mediana_gap_ui_ms=13 max_gap_ui_ms=15 mediana_quadros_por_s=121 max_intervalo_quadro_ms=8
+BENCH variante=B run=0 total_ms=245 max_gap_ui_ms=9 quadros=29 max_intervalo_quadro_ms=8
+BENCH variante=B run=1 total_ms=249 max_gap_ui_ms=15 quadros=30 max_intervalo_quadro_ms=8
+BENCH variante=B run=2 total_ms=247 max_gap_ui_ms=11 quadros=30 max_intervalo_quadro_ms=8
+BENCH variante=B run=3 total_ms=246 max_gap_ui_ms=9 quadros=30 max_intervalo_quadro_ms=8
+BENCH variante=B run=4 total_ms=251 max_gap_ui_ms=17 quadros=30 max_intervalo_quadro_ms=8
+BENCH resumo variante=B mesma_chave=true mediana_total_ms=247 max_total_ms=251 mediana_gap_ui_ms=11 max_gap_ui_ms=17 mediana_quadros_por_s=120 max_intervalo_quadro_ms=8
+BENCH variante=C run=0 total_ms=242 max_gap_ui_ms=13 quadros=7 max_intervalo_quadro_ms=41
+BENCH variante=C run=1 total_ms=248 max_gap_ui_ms=12 quadros=10 max_intervalo_quadro_ms=33
+BENCH variante=C run=2 total_ms=246 max_gap_ui_ms=14 quadros=10 max_intervalo_quadro_ms=33
+BENCH variante=C run=3 total_ms=265 max_gap_ui_ms=26 quadros=10 max_intervalo_quadro_ms=33
+BENCH variante=C run=4 total_ms=260 max_gap_ui_ms=23 quadros=10 max_intervalo_quadro_ms=33
+BENCH resumo variante=C mesma_chave=true mediana_total_ms=248 max_total_ms=265 mediana_gap_ui_ms=14 max_gap_ui_ms=26 mediana_quadros_por_s=38 max_intervalo_quadro_ms=41
+BENCH variante=D run=0 total_ms=270 max_gap_ui_ms=12 quadros=32 max_intervalo_quadro_ms=8
+BENCH variante=D run=1 total_ms=268 max_gap_ui_ms=14 quadros=31 max_intervalo_quadro_ms=16
+BENCH variante=D run=2 total_ms=256 max_gap_ui_ms=9 quadros=30 max_intervalo_quadro_ms=8
+BENCH variante=D run=3 total_ms=264 max_gap_ui_ms=24 quadros=29 max_intervalo_quadro_ms=25
+BENCH variante=D run=4 total_ms=269 max_gap_ui_ms=25 quadros=30 max_intervalo_quadro_ms=24
+BENCH resumo variante=D mesma_chave=true mediana_total_ms=268 max_total_ms=270 mediana_gap_ui_ms=14 max_gap_ui_ms=25 mediana_quadros_por_s=116 max_intervalo_quadro_ms=25
+BENCH variante=P1 run=0 total_ms=243 max_gap_ui_ms=12 quadros=29 max_intervalo_quadro_ms=8
+BENCH variante=P1 run=1 total_ms=243 max_gap_ui_ms=9 quadros=29 max_intervalo_quadro_ms=8
+BENCH variante=P1 run=2 total_ms=245 max_gap_ui_ms=21 quadros=29 max_intervalo_quadro_ms=8
+BENCH variante=P1 run=3 total_ms=249 max_gap_ui_ms=10 quadros=30 max_intervalo_quadro_ms=8
+BENCH variante=P1 run=4 total_ms=245 max_gap_ui_ms=9 quadros=30 max_intervalo_quadro_ms=8
+BENCH resumo variante=P1 mesma_chave=true mediana_total_ms=245 max_total_ms=249 mediana_gap_ui_ms=10 max_gap_ui_ms=21 mediana_quadros_por_s=119 max_intervalo_quadro_ms=8
+BENCH variante=P2 run=0 total_ms=269 max_gap_ui_ms=11 quadros=33 max_intervalo_quadro_ms=8
+BENCH variante=P2 run=1 total_ms=273 max_gap_ui_ms=9 quadros=33 max_intervalo_quadro_ms=8
+BENCH variante=P2 run=2 total_ms=280 max_gap_ui_ms=18 quadros=34 max_intervalo_quadro_ms=8
+BENCH variante=P2 run=3 total_ms=284 max_gap_ui_ms=18 quadros=34 max_intervalo_quadro_ms=8
+BENCH variante=P2 run=4 total_ms=274 max_gap_ui_ms=9 quadros=33 max_intervalo_quadro_ms=8
+BENCH resumo variante=P2 mesma_chave=true mediana_total_ms=274 max_total_ms=284 mediana_gap_ui_ms=11 max_gap_ui_ms=18 mediana_quadros_por_s=121 max_intervalo_quadro_ms=8
+BENCH fim
