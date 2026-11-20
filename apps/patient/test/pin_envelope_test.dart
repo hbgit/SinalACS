@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sinalacs_patient/core/security/pin_envelope.dart';
@@ -7,7 +8,53 @@ import 'package:sinalacs_patient/core/security/pin_envelope.dart';
 /// t=2, p=1) + AES-256-GCM. É o mesmo envelope que a Fase 2 da #136 reutiliza
 /// para a chave do banco local — os requisitos dele (PIN de 6+ dígitos e a
 /// lista proibida) são os desta issue.
+/// Envelope gravado pelo código da #157 (C-05), ANTES da #170 tirar a
+/// derivação da thread da UI. PIN e segredo sintéticos. Se m, t, p, o tamanho
+/// da saída ou o formato `{v, salt, nonce, ct, mac}` mudarem, a chave derivada
+/// muda e este envelope deixa de abrir: é a prova de que os parâmetros do
+/// Argon2id ficaram como estavam e de que quem já tem PIN continua entrando.
+const _envelopeDaC05 =
+    '{"v":1,"salt":"ASt0JqMY-c0vL_HdwFW_1Q==","nonce":"FBH_bPRgAruU9BxB",'
+    '"ct":"SmJeTVBpM1OFRauvyq3UG5-5GSaC2QW2sb58QueD","mac":"0VkjnQi6YOSKdX-pWlgB5Q=="}';
+
 void main() {
+  test('#170: os parâmetros do Argon2id continuam os da D3', () {
+    expect(pinEnvelopeArgon2Memory, 19456, reason: 'm = 19 MiB');
+    expect(pinEnvelopeArgon2Iterations, 2, reason: 't = 2');
+    expect(pinEnvelopeArgon2Parallelism, 1, reason: 'p = 1');
+    expect(pinEnvelopeArgon2HashLength, 32, reason: 'chave AES-256');
+  });
+
+  test('#170: a chave só é derivada dentro de Isolate.run, nunca na thread da UI', () {
+    // Lê o código-fonte, como `android_backup_manifest_test.dart`: o
+    // `flutter test` não tem como medir quadros perdidos, e a medida no
+    // aparelho (PROGRESS.md, #170) vale para este desenho. Se alguém voltar
+    // a chamar `deriveKey` direto em `encrypt`/`decrypt`, isto falha.
+    final src = File('lib/core/security/pin_envelope.dart').readAsStringSync();
+    expect(RegExp(r'Isolate\.run\(').allMatches(src), hasLength(1));
+    expect(RegExp(r'\.deriveKey\(').allMatches(src), hasLength(1),
+        reason: 'uma única derivação, a do isolate');
+    final derivacao = src.indexOf('.deriveKey(');
+    final funcaoDoIsolate = src.indexOf('Future<List<int>> _deriveKeyBytes(');
+    expect(funcaoDoIsolate, greaterThan(-1));
+    expect(derivacao, greaterThan(funcaoDoIsolate),
+        reason: 'deriveKey só dentro de _deriveKeyBytes, a função do isolate');
+    expect(RegExp(r'_deriveInBackground\(pin, salt\)').allMatches(src), hasLength(2),
+        reason: 'encrypt e decrypt passam pelo isolate');
+  });
+
+  test('#170: envelope gravado antes da mudança continua abrindo', () async {
+    final envelope = PinEnvelope();
+    expect(
+      await envelope.decrypt(pin: '284637', envelopeJson: _envelopeDaC05),
+      'segredo-sintetico-da-issue-170',
+    );
+    await expectLater(
+      envelope.decrypt(pin: '284638', envelopeJson: _envelopeDaC05),
+      throwsA(isA<WrongPinException>()),
+    );
+  });
+
   test('fecha e abre com o mesmo PIN', () async {
     final envelope = PinEnvelope();
     final sealed = await envelope.encrypt(pin: '284637', plaintext: 'segredo');

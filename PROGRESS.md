@@ -2088,3 +2088,29 @@ Branch `feat/issue-128-login-convite-pin`. **Estado:** entregue na PR #157.
   login resolve sozinho: entra se o commit aconteceu, ou recusa, descarta e
   volta ao convite (não consumido). Testes em `onboarding_flow_test.dart`.
 
+## Argon2id do envelope do PIN fora da thread da UI (#170) — 2026-11-19
+
+Branch `perf/argon2id-pin-isolate`. Origem: revisão da PR #157 (C-05, #128); envelope e parâmetros da decisão D3 do plano da #136. Evidência bruta: [`docs/superpowers/plans/2026-11-19-issue-170-bench-a54.log`](docs/superpowers/plans/2026-11-19-issue-170-bench-a54.log).
+
+- **Medição.** Aparelho **Samsung Galaxy A54 (SM-A546E), Android 16 (API 36), Exynos 1380, 8 GB, tela a 120 Hz**; **build release** (`flutter build apk --release -t integration_test/bench/pin_envelope_bench_main.dart`); mediana de 5 derivações por variante, m = 19 MiB, t = 2, p = 1, 32 bytes, mesma chave em todas.
+
+| Variante | Tempo | Quadros/s durante | Maior intervalo entre quadros |
+|---|---|---|---|
+| Linha de base (sem derivar) | — | 119 | 8 ms |
+| Código da C-05 (`Argon2id` chamado da thread principal) | 247 ms | 121 | 8 ms |
+| `Isolate.run` (o que entrou) | 247 ms | 120 | 8 ms |
+| Sem isolate nenhum (`DartArgon2id(maxIsolates: 0)`) | 248 ms | 38 | 41 ms |
+| `Isolate.run` + `maxIsolates: 0` | 268 ms | 116 | 25 ms |
+| **App: `PinEnvelope.encrypt` (criar o PIN)** | **245 ms** | **119** | **8 ms** |
+| **App: `PinEnvelope.decrypt` (entrar)** | **274 ms** | **121** | **8 ms** |
+
+- **O que a medição mostrou.** A premissa da issue ("na thread da UI") não valia por inteiro: com estes parâmetros o `package:cryptography` 2.9.0 já preenche a memória do Argon2id num isolate dele (`isolateCount` = 1), e o código da C-05 já animava a 121 quadros/s. A trava existe sem isolate (38 quadros/s), e a heurística da biblioteca a zera com outra memória (menos de 200 blocos por fatia) ou outra versão do pacote.
+- **O que mudou.** `PinEnvelope` deriva a chave inteira dentro de `Isolate.run` (`_deriveInBackground` → `_deriveKeyBytes`, função de topo): só os bytes do PIN e do salt vão, só os 32 bytes da chave voltam; AES-GCM e `flutter_secure_storage` ficam na thread principal. Mesmo custo da variante da C-05, e a garantia deixa de depender da biblioteca.
+- **`cryptography_flutter`.** Não adotado: 0,25 s está muito abaixo do limite de 2 s da D3. Os parâmetros não mudaram.
+- **Testes.** `test/pin_envelope_test.dart`: envelope de referência gravado pelo código da C-05 continua abrindo (prova os parâmetros e o formato), parâmetros iguais aos da D3, e guarda pelo código-fonte de que `deriveKey` só existe dentro da função do isolate (falha se `encrypt`/`decrypt` voltarem a derivar direto; provado com a regressão plantada). Suíte do paciente: 419 passando, `flutter analyze` sem avisos.
+
+**Abertos e limites.**
+- **Aparelho de entrada não medido.** O A54 é de gama intermediária. Um aparelho de entrada (2–3 GB, CPU mais lenta) deve levar algumas vezes mais; mesmo 4× (~1 s) fica abaixo dos 2 s, mas isso é estimativa, não medida.
+- **Telas reais não exercitadas no aparelho.** A bancada mede as mesmas chamadas (`PinEnvelope.encrypt`/`decrypt`) que a criação do PIN e o login aguardam, com um `CircularProgressIndicator` girando; as duas telas do app já mostram o indicador enquanto `_busy`. O fluxo completo de convite + PIN no aparelho não foi rodado (exige convite do ACS e o backend alcançável pelo celular).
+- **Emulador API 24.** Não havia imagem instalada; a medição foi no aparelho físico.
+
