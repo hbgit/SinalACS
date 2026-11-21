@@ -2088,3 +2088,11 @@ Branch `feat/issue-128-login-convite-pin`. **Estado:** entregue na PR #157.
   login resolve sozinho: entra se o commit aconteceu, ou recusa, descarta e
   volta ao convite (não consumido). Testes em `onboarding_flow_test.dart`.
 
+## `acs_full_e2e.sh`: tap em `sync_visits` coberto pela SnackBar (#114) — 2026-11-21
+
+Branch `fix/issue-114-acs-e2e-tap-sync-snackbar`. Achada na validação da #90 (PR #113): o primeiro teste de `integration_test/full_journey_e2e.dart` falhava de forma reproduzível no `tap` em `sync_visits` — "`would not hit test on the specified widget`" — e o `_pumpUntil` seguinte estourava em 30 s porque o toque nunca chegava ao botão.
+
+- **Causa.** A SnackBar "visita salva", disparada pelo `save_visit` logo antes, cobre o `sync_visits` por tempo suficiente para o toque seguinte cair nela em vez do botão. É uma falha local do teste, antes de qualquer rede — os outros cinco testes do arquivo (e os que sincronizam visitas pelo mesmo caminho) já tocam `sync_visits`/`save_visit` com o helper `_tocarNoMeio` (rola o alvo para o MEIO da área visível antes de tocar, em vez de só `ensureVisible`, que encosta o alvo na borda onde a SnackBar o cobre). O primeiro teste do arquivo era o único que ainda usava `tester.tap` direto nesses dois botões — por isso só ele, dos seis, falhava.
+- **Decisão.** Correção no **teste**, não no app: aplicados os mesmos `_tocarNoMeio` já usados no teste de conflito (linhas 340-364) às chamadas de `save_visit` e `sync_visits` do primeiro teste. `warnIfMissed` não foi silenciado em nenhum dos dois tapes — continua no padrão (`true`), que foi o que apontou a causa.
+- **Provas.** `flutter analyze` sem avisos novos. Não executado no emulador neste ambiente (sem `emulator-5554` disponível); quem revisar com acesso ao aparelho roda `./scripts/qa/acs_full_e2e.sh` para confirmar 6/6.
+

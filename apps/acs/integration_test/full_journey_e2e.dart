@@ -184,9 +184,14 @@ void main() {
     await tester.pump();
     await tester.tap(find.byKey(const Key('arrival_confirmation')));
     await tester.pump();
-    await tester.tap(find.byKey(const Key('save_visit')));
+    // #114: a SnackBar "visita salva" que o `save_visit` dispara cobre o
+    // `sync_visits` embaixo dela por tempo suficiente para o toque seguinte
+    // errar o hit test (avisado por `warnIfMissed`, não silenciado). Mesma
+    // correção já usada no teste de conflito abaixo: rolar o alvo para o
+    // meio da área visível antes de tocar.
+    await _tocarNoMeio(tester, find.byKey(const Key('save_visit')));
     await _pumpUntil(tester, () => find.text('Pendentes de sincronização: 1').evaluate().isNotEmpty);
-    await tester.tap(find.byKey(const Key('sync_visits')));
+    await _tocarNoMeio(tester, find.byKey(const Key('sync_visits')));
     await _pumpUntil(tester, () => find.text('Pendentes de sincronização: 0').evaluate().isNotEmpty);
 
     // A visita está NO SERVIDOR (conferida por um cliente separado, com login real).
