@@ -2088,3 +2088,12 @@ Branch `feat/issue-128-login-convite-pin`. **Estado:** entregue na PR #157.
   login resolve sozinho: entra se o commit aconteceu, ou recusa, descarta e
   volta ao convite (não consumido). Testes em `onboarding_flow_test.dart`.
 
+## Fila do ACS: `sync()` também lê o disco não lido (#165) — 2026-11-21
+
+Branch `fix/issue-165-sync-le-disco-nao-lido`. Continuação da #151 (PR #163): com o `restore()` falho, `OfflineVisitQueue._readUnreadDisk()` só era chamado de dentro de `_persist()` — ou seja, só numa próxima **gravação** (`add`, `discardRejected`, resolução de conflito). Se o ACS não registrava nem resolvia nenhuma visita depois do banco voltar a abrir, "Sincronizar agora" via `_syncOnce()` olhava só `_pending` (vazio) e devolvia `empty` com o aviso `storage_error` ainda aceso — orientações contraditórias, mesmo sem perda real (o disco não lido nunca era sobrescrito).
+
+- **Correção.** `_syncOnce()` agora chama `await _readUnreadDisk()` antes de checar `_pending.isEmpty` e montar o lote. `_readUnreadDisk` é só leitura (junta o disco na RAM por `localId`, sem gravar nada) e já era seguro chamar daqui: se o disco continuar ilegível, devolve `false` e nada muda. Quando a visita lida entra no lote e o envio termina, `_applyOutcomes` chama `_persist()`, que agora encontra o disco já lido e grava — apagando o aviso `storage_error`.
+- **Teste.** `test/open_failed_ambiguity_test.dart`: `restore()` falho com uma visita só no disco (nenhum `add`/`save` entre o `restore` e o `sync`), o "banco" volta a abrir na chamada seguinte, e `sync()` sem gravação anterior lê o disco, sincroniza a visita e apaga o aviso de armazenamento.
+- **Provas (VM).** `flutter analyze` sem avisos. `flutter test` verde, exceto os dois casos **pré-existentes** de `mqtt_tls_refused_test.dart` (confirmados no mesmo estado em worktree limpo de `origin/develop`, sem relação com esta mudança).
+- **Não verificado no aparelho**, como as demais entradas desta família: só prova de VM.
+
