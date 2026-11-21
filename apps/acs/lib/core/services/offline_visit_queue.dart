@@ -793,6 +793,13 @@ class OfflineVisitQueue {
   }
 
   Future<SyncOutcome> _syncOnce() async {
+    // #165: com o disco ainda não lido (`restore()` falho), uma visita que só
+    // existe lá nunca entra em `_pending` até a próxima gravação. Sem isto,
+    // "Sincronizar agora" aqui devolve `empty` mesmo depois de o banco voltar
+    // a abrir — e o aviso `storage_error` continua aceso, porque `_persist`
+    // só apaga num `save` bem-sucedido. Se o disco continuar ilegível,
+    // `_readUnreadDisk` não muda nada e o fluxo segue como antes.
+    await _readUnreadDisk();
     if (_pending.isEmpty) {
       return const SyncOutcome(kind: SyncOutcomeKind.empty, processed: 0);
     }

@@ -199,6 +199,30 @@ void main() {
       expect((await store.load()).map((v) => v.localId), ['depois']);
       await db.close();
     });
+
+    test('#165: sync() sem gravação anterior já lê o disco e envia a visita que só estava lá', () async {
+      final before = await fileWithPendingVisit();
+      final keys = InMemoryDatabaseKeyStore(initialKey: key);
+      // restore (2): o disco segue ilegível até o sync() tentar de novo.
+      final db = database([_openFailed(), _openFailed()], keys: keys);
+      final store = SqlCipherVisitStore.on(db, owner: 'acs-a');
+      final queue = OfflineVisitQueue(store: store, synchronizer: FakeVisitSynchronizer());
+
+      await queue.restore();
+      expect(queue.persistenceFailed, isTrue);
+      expect(queue.pendingVisits, isEmpty, reason: 'nada na RAM ainda: só o restore falhou');
+
+      // Nenhum add() nem save() entre o restore falho e o sync: antes desta
+      // correção, _pending continuava vazio e sync() devolvia `empty`.
+      final outcome = await queue.sync();
+
+      expect(outcome.kind, SyncOutcomeKind.synced);
+      expect(outcome.processed, 1);
+      expect(queue.syncedVisits.map((v) => v.localId), ['nao-enviada']);
+      expect(queue.persistenceFailed, isFalse, reason: 'o banco voltou a abrir; o aviso apaga');
+      expect(await File(await path()).readAsBytes(), isNot(before), reason: 'a visita enviada saiu do disco');
+      await db.close();
+    });
   });
 
   test('saída para uma chave de fato perdida: a limpeza remota (#81) apaga arquivo e chave', () async {
