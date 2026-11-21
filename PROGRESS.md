@@ -2088,3 +2088,15 @@ Branch `feat/issue-128-login-convite-pin`. **Estado:** entregue na PR #157.
   login resolve sozinho: entra se o commit aconteceu, ou recusa, descarta e
   volta ao convite (não consumido). Testes em `onboarding_flow_test.dart`.
 
+## e2e: reentrada pelo PIN contra o backend real (#171) — 2026-11-21
+
+Branch `fix/issue-171-e2e-reentrada-pin`. Origem: revisão da PR #157 (C-05, #128). `integration_test/full_journey_test.dart` cobria convite → PIN → painel, mas nenhum teste de integração exercitava `auth.loginDevice` a partir do app — o caminho diário do participante (reentrada depois da sessão de 1 h, oferecida pelo botão "Entrar novamente" quando ela expira).
+
+- **Teste novo.** `reentrar pelo PIN: reabertura usa a credencial salva, PIN errado não entra nem gasta convite`, em `full_journey_test.dart`: cadastra o paciente `main` da fixture pelo convite + PIN (mesmo caminho do primeiro teste do arquivo), depois reconstrói a árvore de widgets do zero com um `BackendClient` novo — simulando a reabertura do app, igual ao que "Entrar novamente" faz — e confere:
+  - a tela de reabertura pede o PIN (`pin_field`), não um convite novo, porque a credencial de dispositivo já está gravada;
+  - PIN errado (`000000`) não entra (`login_error` = "PIN incorreto. Tente de novo.", sem chegar em "Contato") — e não há como ter gasto outro convite, porque o caminho do PIN nem chama `onboarding`;
+  - o PIN certo entra por uma chamada real a `auth.loginDevice` e chega ao painel.
+- **Fixture.** Reusa o papel `main` do manifesto (`config.patient('main').takeInviteToken()`): cada paciente da fixture tem 6 convites de uso único (`_convitesPorPaciente`, backend), e o primeiro teste do arquivo consome só 1 ao reaproveitar o mesmo convite entre o PIN fraco e o forte — sobra convite de sobra para este teste.
+- **Provas.** `flutter analyze` sem avisos novos no app do paciente.
+- **Não roda aqui.** Como os demais testes de `full_journey_test.dart`, só roda com `--dart-define=E2E_FIXTURES=...` (`scripts/qa/patient_full_e2e.sh`), que exige `emulator-5554` e a stack de e2e; sem emulador disponível neste ambiente, não foi executado contra o aparelho — só `flutter analyze` confirma que compila e usa as chaves (`Key`) corretas contra o código atual de `app.dart`.
+

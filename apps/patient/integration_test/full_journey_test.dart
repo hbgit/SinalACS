@@ -124,6 +124,60 @@ void main() {
         expect(find.text('Contato'), findsOneWidget);
       });
 
+      // #171: nenhum teste de integração exercitava `auth.loginDevice` a
+      // partir do app — o caminho diário do participante (reentrada depois
+      // da sessão de 1 h). O teste abaixo refaz o caminho que a sessão
+      // expirada oferece ("Entrar novamente"): reabrir o app já com a
+      // credencial de dispositivo gravada, sem passar pelo convite de novo.
+      testWidgets('reentrar pelo PIN: reabertura usa a credencial salva, PIN errado não entra nem gasta convite',
+          (tester) async {
+        final backend1 = await backendReal();
+        addTearDown(backend1.close);
+        await tester.pumpWidget(SinalAcsApp(backend: backend1, locationReader: _FixedLocation()));
+        final p = config!.patient('main');
+        final convite = p.takeInviteToken();
+        const pin = '284637';
+
+        await tester.tap(find.byKey(const Key('start_onboarding_button')));
+        await pumpUntil(tester, find.byKey(const Key('onboarding_token_field')));
+        await tester.enterText(find.byKey(const Key('onboarding_token_field')), convite);
+        await tester.tap(find.byKey(const Key('onboarding_consent_health')));
+        await tester.pump(const Duration(milliseconds: 200));
+        await tester.tap(find.byKey(const Key('onboarding_terms_accept')));
+        await tester.pump(const Duration(milliseconds: 200));
+        await tapKey(tester, 'complete_enrollment_button');
+        await pumpUntil(tester, find.byKey(const Key('pin_setup_field')));
+        await tester.enterText(find.byKey(const Key('pin_setup_field')), pin);
+        await tester.enterText(find.byKey(const Key('pin_setup_confirm_field')), pin);
+        await tapKey(tester, 'pin_setup_confirm_button');
+        await aceitarTermosSePedido(tester);
+        expect(find.text('Contato'), findsOneWidget);
+
+        // Reabertura: árvore de widgets nova, backend novo (sessão em memória
+        // perdida), mas a credencial de dispositivo continua no Keystore.
+        final backend2 = await backendReal();
+        addTearDown(backend2.close);
+        await tester.pumpWidget(SinalAcsApp(backend: backend2, locationReader: _FixedLocation()));
+        await pumpUntil(tester, find.byKey(const Key('pin_field')));
+        expect(find.byKey(const Key('start_onboarding_button')), findsNothing,
+            reason: 'com credencial salva, a reabertura pede o PIN, não um convite novo');
+
+        // PIN errado: não entra, e não há como o app ter gasto outro convite
+        // (o caminho do PIN nem chama `onboarding`).
+        await tester.enterText(find.byKey(const Key('pin_field')), '000000');
+        await tapKey(tester, 'pin_unlock_button');
+        await pumpUntil(tester, find.byKey(const Key('login_error')));
+        expect(find.text('PIN incorreto. Tente de novo.'), findsOneWidget);
+        expect(find.text('Contato'), findsNothing);
+
+        // PIN certo, mesmo convite já consumido no cadastro: entra por
+        // auth.loginDevice de verdade e chega ao painel.
+        await tester.enterText(find.byKey(const Key('pin_field')), pin);
+        await tapKey(tester, 'pin_unlock_button');
+        await aceitarTermosSePedido(tester);
+        expect(find.text('Contato'), findsOneWidget);
+      });
+
       testWidgets('triagem vermelha, "Ligar 192", pedido de contato, status e Meus dados do próprio paciente', (tester) async {
         final backend = await backendReal();
         addTearDown(backend.close);
